@@ -39,6 +39,11 @@ export const promptOrderCreateSchema = z.object({
   // 平台选填，不指定为 undefined
   platform: z.enum(ORDER_PLATFORMS).optional(),
   uploadCount: z.number().int().min(1).max(50).default(1),
+  /**
+   * 覆盖已有订单 —— 传 existingId 时走 updateOrder 分支，保留 token/状态/上传内容。
+   * null/undefined 表示全新创建。
+   */
+  replaceOrderId: z.string().min(1).optional(),
 });
 
 /** 用户上传原图（dataUrl 数组） */

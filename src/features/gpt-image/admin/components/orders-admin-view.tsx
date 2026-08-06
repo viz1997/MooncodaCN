@@ -8,8 +8,11 @@ import {
   ExternalLink,
   Eye,
   Image as ImageIcon,
+  Pencil,
   Plus,
+  RefreshCw,
   Search,
+  Trash2,
   Upload,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -21,6 +24,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -40,6 +44,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useSessionContext } from "@/lib/auth/session-context";
+
+import {
+  deleteOrderAction,
+} from "@/features/gpt-image/actions/orders";
 
 import {
   ORDER_PLATFORM_LABELS,
@@ -53,14 +62,21 @@ import {
 } from "@/features/gpt-image/lib/types";
 
 import { OrderFormDialog } from "./order-form-dialog";
+import { OrderEditDialog } from "./order-edit-dialog";
 
 export function OrdersAdminView() {
+  const { user: currentUser } = useSessionContext();
+  const isAdmin = currentUser?.role === "admin";
   const [orders, setOrders] = useState<OrderView[]>([]);
   const [templates, setTemplates] = useState<PromptTemplateView[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [linkDialog, setLinkDialog] = useState<OrderView | null>(null);
   const [detailDialog, setDetailDialog] = useState<OrderView | null>(null);
+  const [editingOrder, setEditingOrder] = useState<OrderView | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [deletingOrder, setDeletingOrder] = useState<OrderView | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>("ALL");
   const [filterPlatform, setFilterPlatform] = useState<string>("ALL");
   const [search, setSearch] = useState("");
@@ -71,7 +87,7 @@ export function OrdersAdminView() {
     // 表格又变回 loading 态
     if (!opts.silent) setLoading(true);
     try {
-      const res = await fetch("/api/admin/orders");
+      const res = await fetch("/api/orders");
       const json = await res.json();
       if (json.success) setOrders(json.data as OrderView[]);
     } catch (e) {
@@ -82,8 +98,11 @@ export function OrdersAdminView() {
   };
 
   const fetchTemplates = async () => {
+    // 走 /api/templates 而不是 /api/admin/templates —— 后者 requireAdmin，
+    // 普通用户会拿到 403，导致 templates 永远空、"创建订单"按钮永远 disabled。
+    // /api/templates 任何登录用户都能用，且不返回 prompt（用户端不能看）。
     try {
-      const res = await fetch("/api/admin/templates");
+      const res = await fetch("/api/templates");
       const json = await res.json();
       if (json.success) setTemplates(json.data as PromptTemplateView[]);
     } catch (e) {
@@ -95,6 +114,66 @@ export function OrdersAdminView() {
     void fetchOrders();
     void fetchTemplates();
   }, []);
+
+  /**
+   * 手动刷新：使用 silent 模式避免把已显示的表格切回 loading 骨架，
+   * 仅在按钮上展示 spinner。
+   */
+  const handleRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await Promise.all([fetchOrders({ silent: true }), fetchTemplates()]);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  /**
+   * 打开编辑对话框
+   */
+  const openEditDialog = (o: OrderView) => {
+    setEditingOrder(o);
+    setEditOpen(true);
+  };
+
+  /**
+   * 编辑后乐观替换列表中的旧条目（保持 id 不变即可）
+   */
+  const handleOrderUpdated = (updated: OrderView) => {
+    setOrders((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
+  };
+
+  /**
+   * 打开删除确认对话框
+   */
+  const openDeleteDialog = (o: OrderView) => {
+    setDeletingOrder(o);
+  };
+
+  /**
+   * 执行删除 —— 乐观移除 + 服务端落地
+   */
+  const handleDelete = async () => {
+    if (!deletingOrder) return;
+    const targetId = deletingOrder.id;
+    setOrders((prev) => prev.filter((o) => o.id !== targetId));
+    const removed = deletingOrder;
+    setDeletingOrder(null);
+    try {
+      const res = await deleteOrderAction({ id: targetId });
+      if (!res?.data?.success) {
+        throw new Error("删除失败");
+      }
+      toast.success(`订单 ${removed.orderNo} 已删除`);
+    } catch (e) {
+      // 失败回滚
+      setOrders((prev) =>
+        prev.some((o) => o.id === targetId) ? prev : [removed, ...prev]
+      );
+      toast.error(e instanceof Error ? e.message : "删除失败");
+    }
+  };
 
   const filtered = orders.filter((o) => {
     if (filterStatus !== "ALL" && o.status !== filterStatus) return false;
@@ -144,9 +223,13 @@ export function OrdersAdminView() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 className="text-xl font-semibold">订单管理</h2>
+          <h2 className="text-xl font-semibold">
+            {isAdmin ? "订单管理" : "我的订单"}
+          </h2>
           <p className="text-sm text-muted-foreground">
-            为指定用户生成专属链接，用户通过链接提交生图请求。可查看用户上传的原图与最终选择。
+            {isAdmin
+              ? "查看全部用户创建的订单（管理员视图）。"
+              : "查看你创建的订单，把链接发给指定用户即可收集原图与选择。"}
           </p>
         </div>
         <Button
@@ -196,6 +279,19 @@ export function OrdersAdminView() {
                 ))}
               </SelectContent>
             </Select>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-9 w-9 shrink-0"
+              onClick={handleRefresh}
+              disabled={refreshing}
+              title="刷新列表"
+              aria-label="刷新列表"
+            >
+              <RefreshCw
+                className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+              />
+            </Button>
           </div>
 
           <div className="overflow-hidden rounded-md border">
@@ -328,6 +424,23 @@ export function OrdersAdminView() {
                           <Button
                             variant="ghost"
                             size="sm"
+                            onClick={() => openEditDialog(order)}
+                            title="编辑订单"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openDeleteDialog(order)}
+                            title="删除订单"
+                            className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={() => setLinkDialog(order)}
                           >
                             <Copy className="mr-1 h-3.5 w-3.5" /> 链接
@@ -365,6 +478,44 @@ export function OrdersAdminView() {
           void fetchOrders({ silent: true });
         }}
       />
+
+      <OrderEditDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        order={editingOrder}
+        onUpdated={(order) => {
+          handleOrderUpdated(order);
+          // 后台静默 refetch 兜底（比如 uploadedImages 等派生字段）
+          void fetchOrders({ silent: true });
+        }}
+      />
+
+      {/* 删除确认 */}
+      <Dialog
+        open={!!deletingOrder}
+        onOpenChange={(o) => !o && setDeletingOrder(null)}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>删除订单？</DialogTitle>
+            <DialogDescription>
+              将永久删除订单 {deletingOrder?.orderNo}。
+              已通过链接上传的图片与选择结果将一并清空，且无法撤销。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeletingOrder(null)}
+            >
+              取消
+            </Button>
+            <Button variant="destructive" onClick={handleDelete}>
+              确认删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* 链接对话框 */}
       <Dialog

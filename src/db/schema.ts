@@ -838,7 +838,7 @@ export const promptOrder = pgTable(
   "prompt_order",
   {
     id: text("id").primaryKey(),
-    orderNo: text("order_no").notNull().unique(),
+    orderNo: text("order_no").notNull(),
     templateId: text("template_id")
       .notNull()
       .references(() => promptTemplate.id, { onDelete: "restrict" }),
@@ -858,12 +858,21 @@ export const promptOrder = pgTable(
     generatedAt: timestamp("generated_at"),
     selectedAt: timestamp("selected_at"),
     cancelledAt: timestamp("cancelled_at"),
+    /**
+     * 订单创建者 —— 关联 user.id。
+     * 可空：迁移前的老订单没有归属记录，创建时由服务端从 session 写入。
+     * 列表接口按 createdBy 过滤，每个登录用户只能看到自己创建的订单。
+     */
+    createdBy: text("created_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
   (t) => ({
     templateIdx: index("prompt_order_template_idx").on(t.templateId),
     statusIdx: index("prompt_order_status_idx").on(t.status),
+    createdByIdx: index("prompt_order_created_by_idx").on(t.createdBy),
   })
 );
 

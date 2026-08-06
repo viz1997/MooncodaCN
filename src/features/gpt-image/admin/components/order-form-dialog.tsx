@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -21,7 +22,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-import { createOrderAction } from "@/features/gpt-image/actions/orders";
+import {
+  checkOrderNoConflictAction,
+  createOrderAction,
+} from "@/features/gpt-image/actions/orders";
+
 import {
   ORDER_PLATFORM_LABELS,
   ORDER_PLATFORMS,
@@ -38,6 +43,17 @@ interface OrderFormDialogProps {
   onCreated: (order: OrderView) => void;
 }
 
+/**
+ * 冲突的现有订单信息（来自 checkOrderNoConflictAction）
+ */
+interface ConflictOrder {
+  id: string;
+  orderNo: string;
+  recipientName: string;
+  templateName: string;
+  createdAt: string;
+}
+
 export function OrderFormDialog({
   open,
   onOpenChange,
@@ -50,6 +66,12 @@ export function OrderFormDialog({
   const [platform, setPlatform] = useState<OrderPlatform | "">("");
   const [uploadCount, setUploadCount] = useState(1);
   const [saving, setSaving] = useState(false);
+  /** 冲突确认弹窗的待覆盖订单 */
+  const [pendingConflict, setPendingConflict] = useState<ConflictOrder | null>(
+    null
+  );
+  /** 冲突检查的 loading，避免按钮闪烁 */
+  const [checkingConflict, setCheckingConflict] = useState(false);
 
   const selectedTemplate = templates.find((t) => t.id === templateId);
 
@@ -60,14 +82,14 @@ export function OrderFormDialog({
       setRecipientName("");
       setPlatform("");
       setUploadCount(1);
+      setPendingConflict(null);
     }
   }, [open, templates]);
 
-  const handleCreate = async () => {
-    if (!orderNo.trim() || !templateId) {
-      toast.error("请填写订单号并选择模板");
-      return;
-    }
+  /**
+   * 真正下单（覆盖分支复用此函数）
+   */
+  const submitCreate = async (replaceOrderId?: string) => {
     setSaving(true);
     try {
       const res = await createOrderAction({
@@ -76,10 +98,12 @@ export function OrderFormDialog({
         recipientName: recipientName.trim() || undefined,
         platform: platform || undefined,
         uploadCount,
+        ...(replaceOrderId ? { replaceOrderId } : {}),
       });
       if (!res?.data) throw new Error("创建失败");
-      toast.success("订单已创建，链接已生成");
-      // 乐观插入：父组件立即把新订单加到列表顶部，避免空白闪烁
+      toast.success(
+        replaceOrderId ? "已覆盖旧订单" : "订单已创建，链接已生成"
+      );
       onCreated(res.data.order);
       onOpenChange(false);
     } catch (e) {
@@ -87,6 +111,29 @@ export function OrderFormDialog({
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleCreate = async () => {
+    if (!orderNo.trim() || !templateId) {
+      toast.error("请填写订单号并选择模板");
+      return;
+    }
+    setCheckingConflict(true);
+    try {
+      const checkRes = await checkOrderNoConflictAction({
+        orderNo: orderNo.trim(),
+      });
+      if (checkRes?.data?.conflict && checkRes.data.existing) {
+        // 弹出冲突确认；用户点"覆盖"才真正下单
+        setPendingConflict(checkRes.data.existing);
+        return;
+      }
+    } catch (e) {
+      console.error("冲突检查失败，继续创建", e);
+    } finally {
+      setCheckingConflict(false);
+    }
+    await submitCreate();
   };
 
   const activeTemplates = templates.filter((t) => t.isActive);
@@ -110,7 +157,7 @@ export function OrderFormDialog({
               placeholder="如：ORD-20260803-001"
             />
             <p className="text-xs text-muted-foreground">
-              业务唯一标识，将作为链接的一部分发给用户
+              业务标识，作为链接的一部分发给用户。订单号不必唯一，多订单可复用。
             </p>
           </div>
 
@@ -254,10 +301,11 @@ export function OrderFormDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             <X className="mr-1 h-4 w-4" /> 取消
           </Button>
-          <Button onClick={handleCreate} disabled={saving}>
-            {saving ? (
+          <Button onClick={handleCreate} disabled={saving || checkingConflict}>
+            {saving || checkingConflict ? (
               <>
-                <Loader2 className="mr-1 h-4 w-4 animate-spin" /> 创建中…
+                <Loader2 className="mr-1 h-4 w-4 animate-spin" />{" "}
+                {checkingConflict ? "检查中…" : "创建中…"}
               </>
             ) : (
               "创建并生成链接"
@@ -265,6 +313,68 @@ export function OrderFormDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      {/* 订单号冲突确认 —— 询问是否覆盖旧订单 */}
+      <Dialog
+        open={!!pendingConflict}
+        onOpenChange={(o) => !o && setPendingConflict(null)}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>订单号已存在</DialogTitle>
+            <DialogDescription>
+              你已有一个名为 <span className="font-mono">{pendingConflict?.orderNo}</span> 的订单。
+              <br />
+              覆盖会用本次填写的收件人/平台/上传数量替换旧订单的业务字段，
+              模板、访问链接、状态、上传内容保持不变。
+            </DialogDescription>
+          </DialogHeader>
+          {pendingConflict && (
+            <div className="rounded-md border bg-slate-50 p-3 text-xs space-y-1">
+              <div>
+                <span className="text-muted-foreground">旧订单模板：</span>
+                {pendingConflict.templateName}
+              </div>
+              <div>
+                <span className="text-muted-foreground">旧收件人：</span>
+                {pendingConflict.recipientName || (
+                  <span className="italic text-zinc-400">未指定</span>
+                )}
+              </div>
+              <div>
+                <span className="text-muted-foreground">创建时间：</span>
+                {new Date(pendingConflict.createdAt).toLocaleString("zh-CN")}
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setPendingConflict(null)}
+              disabled={saving}
+            >
+              取消（回去改订单号）
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                const targetId = pendingConflict?.id;
+                setPendingConflict(null);
+                if (targetId) void submitCreate(targetId);
+              }}
+              disabled={saving || !pendingConflict}
+            >
+              {saving ? (
+                <>
+                  <Loader2 className="mr-1 h-4 w-4 animate-spin" /> 覆盖中…
+                </>
+              ) : (
+                "确认覆盖"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }

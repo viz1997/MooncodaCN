@@ -3,10 +3,13 @@ import { OrdersAdminView } from "@/features/gpt-image/admin/components/orders-ad
 export const dynamic = "force-dynamic";
 
 /**
- * 订单管理 - 所有登录用户可用
+ * 订单管理 - 仅展示当前登录用户自己创建的订单
  *
- * 模板管理仍走 /admin/prompt-templates（admin-only）；
- * 订单管理任何登录用户都能创建/查看/删除，因为订单是用户自己创建给匿名收件人用的。
+ * - 普通用户：只看到自己创建的订单（后端按 createdBy 过滤）
+ * - 管理员：可看全部订单（后端 role=admin 时跳过过滤）
+ *
+ * 模板管理仍走 /admin/prompt-templates（admin-only）。
+ * 订单访问（上传 / 选图 / 取消）走公开 token 链接，不受登录态限制。
  */
 export default function PromptOrdersPage() {
   return (

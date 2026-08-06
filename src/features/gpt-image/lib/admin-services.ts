@@ -54,6 +54,41 @@ export async function listTemplatesWithCounts() {
   }));
 }
 
+/**
+ * 列出所有 active 模板的最小字段（id/name/description/size/candidateCount/coverUrl/isActive）。
+ * 给任何登录用户调用（创建订单时填充模板下拉），**不返回 prompt**——提示词对用户隐藏。
+ * 列表本身不带 orderCount，避免把全表的订单计数暴露给普通用户。
+ */
+export async function listActiveTemplatesForOrderCreate() {
+  const rows = await db
+    .select({
+      id: promptTemplate.id,
+      name: promptTemplate.name,
+      description: promptTemplate.description,
+      size: promptTemplate.size,
+      candidateCount: promptTemplate.candidateCount,
+      coverUrl: promptTemplate.coverUrl,
+      isActive: promptTemplate.isActive,
+      createdAt: promptTemplate.createdAt,
+      updatedAt: promptTemplate.updatedAt,
+    })
+    .from(promptTemplate)
+    .where(eq(promptTemplate.isActive, true))
+    .orderBy(desc(promptTemplate.createdAt));
+
+  return rows.map((t) => ({
+    id: t.id,
+    name: t.name,
+    description: t.description,
+    size: t.size,
+    candidateCount: t.candidateCount,
+    coverUrl: t.coverUrl,
+    isActive: t.isActive,
+    createdAt: t.createdAt.toISOString(),
+    updatedAt: t.updatedAt.toISOString(),
+  }));
+}
+
 export async function createTemplate(input: {
   name: string;
   description: string;
@@ -138,28 +173,40 @@ export async function createOrder(input: {
   recipientName?: string | undefined;
   platform?: string | undefined;
   uploadCount: number;
+  /** 创建者用户 ID（由路由层从 session 注入） */
+  createdBy?: string | undefined;
+  /**
+   * 替换已有订单 —— 复用其 id/token/状态/上传内容等生命周期数据，
+   * 只覆盖 orderNo / recipientName / platform / uploadCount。
+   * 传 null/undefined 表示创建新订单。
+   */
+  replaceOrderId?: string | undefined;
 }) {
+  // 替换分支：用 updateOrder 同样的"业务字段"语义，只是不改 createdBy/templateId
+  if (input.replaceOrderId) {
+    return await updateOrder({
+      id: input.replaceOrderId,
+      orderNo: input.orderNo,
+      recipientName: input.recipientName ?? "",
+      platform: (input.platform as string | null) ?? null,
+      uploadCount: input.uploadCount,
+    });
+  }
+
   const token = generateOrderToken();
 
-  // 订单号唯一性 + 模板存在性检查并行（两次独立查询，无依赖）
-  const [exists, template] = await Promise.all([
-    db.query.promptOrder.findFirst({
-      where: eq(promptOrder.orderNo, input.orderNo),
-      columns: { id: true },
-    }),
-    db.query.promptTemplate.findFirst({
-      where: eq(promptTemplate.id, input.templateId),
-      columns: {
-        id: true,
-        isActive: true,
-        name: true,
-        description: true,
-        coverUrl: true,
-        candidateCount: true,
-      },
-    }),
-  ]);
-  if (exists) throw new Error("订单号已存在");
+  // 仅校验模板存在性；orderNo 不再做唯一性约束（同一用户可能复用）
+  const template = await db.query.promptTemplate.findFirst({
+    where: eq(promptTemplate.id, input.templateId),
+    columns: {
+      id: true,
+      isActive: true,
+      name: true,
+      description: true,
+      coverUrl: true,
+      candidateCount: true,
+    },
+  });
   if (!template) throw new Error("模板不存在");
 
   const [created] = await db
@@ -173,6 +220,7 @@ export async function createOrder(input: {
       token,
       status: "PENDING",
       uploadCount: input.uploadCount,
+      createdBy: input.createdBy ?? null,
     })
     .returning();
 
@@ -215,6 +263,13 @@ export async function createOrder(input: {
 export async function listOrders(filters: {
   status?: PromptOrderStatus | undefined;
   templateId?: string | undefined;
+  /**
+   * 限定只查某个用户创建的订单。
+   * 管理员可传 skipCreatorFilter=true 跳过此限制查看全部订单。
+   */
+  createdBy?: string | undefined;
+  /** 管理员特权：true 时忽略 createdBy 过滤 */
+  skipCreatorFilter?: boolean | undefined;
 }) {
   // 显式 LEFT JOIN 一次往返，比 query.findMany({with:{template:true}}) 的
   // 关系查询少一次网络往返（关系查询在 Drizzle 里会拆成 2 条串行 SQL）。
@@ -223,6 +278,10 @@ export async function listOrders(filters: {
   const templateId = filters.templateId;
   if (status) conditions.push(eq(promptOrder.status, status));
   if (templateId) conditions.push(eq(promptOrder.templateId, templateId));
+  // 非管理员必须按 createdBy 过滤；管理员显式传 skipCreatorFilter=true 才放行
+  if (!filters.skipCreatorFilter && filters.createdBy) {
+    conditions.push(eq(promptOrder.createdBy, filters.createdBy));
+  }
   const where = conditions.length > 0 ? and(...conditions) : undefined;
 
   const rows = await db
@@ -304,4 +363,120 @@ export async function deleteOrderById(id: string) {
     .returning();
   if (!deleted) throw new Error("订单不存在");
   return deleted;
+}
+
+/**
+ * 检测"同一创建者"的同 orderNo 冲突。
+ *
+ * 不强制 DB 唯一约束，但同一用户不应有重复订单号 —— 否则用户自己也分不清
+ * 哪个链接给哪个收件人。返回最小信息供前端做"覆盖/取消"提示。
+ */
+export async function findOrderByOrderNoForCreator(
+  orderNo: string,
+  creatorId: string
+): Promise<{
+  id: string;
+  orderNo: string;
+  recipientName: string;
+  templateName: string;
+  createdAt: string;
+} | null> {
+  const rows = await db
+    .select({
+      id: promptOrder.id,
+      orderNo: promptOrder.orderNo,
+      recipientName: promptOrder.recipientName,
+      createdAt: promptOrder.createdAt,
+      tName: promptTemplate.name,
+    })
+    .from(promptOrder)
+    .leftJoin(promptTemplate, eq(promptOrder.templateId, promptTemplate.id))
+    .where(
+      and(eq(promptOrder.orderNo, orderNo), eq(promptOrder.createdBy, creatorId))
+    )
+    .limit(1);
+  if (rows.length === 0) return null;
+  const r = rows[0]!;
+  return {
+    id: r.id,
+    orderNo: r.orderNo,
+    recipientName: r.recipientName,
+    templateName: r.tName ?? "（模板已删除）",
+    createdAt: r.createdAt.toISOString(),
+  };
+}
+
+/**
+ * 编辑订单 —— 仅允许修改业务字段（orderNo / recipientName / platform / uploadCount）。
+ * 模板、token、状态、已上传图片均锁定，订单生命周期数据不能被覆盖。
+ *
+ * 返回最新的 OrderView（与 listOrders 同形），便于客户端乐观更新。
+ */
+export async function updateOrder(input: {
+  id: string;
+  orderNo: string;
+  recipientName: string;
+  platform: string | null;
+  uploadCount: number;
+}) {
+  const [updated] = await db
+    .update(promptOrder)
+    .set({
+      orderNo: input.orderNo,
+      recipientName: input.recipientName,
+      platform: (input.platform as PromptOrderPlatform | null) ?? null,
+      uploadCount: input.uploadCount,
+      updatedAt: new Date(),
+    })
+    .where(eq(promptOrder.id, input.id))
+    .returning();
+  if (!updated) throw new Error("订单不存在");
+
+  // 重新拉模板信息，组装成 OrderView
+  const template = await db.query.promptTemplate.findFirst({
+    where: eq(promptTemplate.id, updated.templateId),
+    columns: {
+      id: true,
+      name: true,
+      description: true,
+      coverUrl: true,
+      candidateCount: true,
+    },
+  });
+
+  const uploaded = parseUploadedImages(updated.uploadedImages);
+  const candidates = parseCandidates(updated.candidates);
+  const selections = parseSelections(updated.selections);
+
+  return {
+    id: updated.id,
+    orderNo: updated.orderNo,
+    templateId: updated.templateId,
+    recipientName: updated.recipientName,
+    platform: (updated.platform ?? null) as PromptOrderPlatform | null,
+    token: updated.token,
+    status: updated.status,
+    uploadCount: updated.uploadCount,
+    selectedIndex: updated.selectedIndex,
+    errorMessage: updated.errorMessage,
+    uploadedAt: updated.uploadedAt?.toISOString() ?? null,
+    generatedAt: updated.generatedAt?.toISOString() ?? null,
+    selectedAt: updated.selectedAt?.toISOString() ?? null,
+    cancelledAt: updated.cancelledAt?.toISOString() ?? null,
+    createdAt: updated.createdAt.toISOString(),
+    updatedAt: updated.updatedAt.toISOString(),
+    hasUploadedImage: uploaded.length > 0,
+    uploadedImageCount: countUploadedImages(uploaded),
+    candidateCount: countCandidateGroups(candidates),
+    candidateGroups: countCandidateGroups(candidates),
+    selections,
+    selectionCount: countSelections(selections),
+    template: {
+      id: template?.id ?? updated.templateId,
+      name: template?.name ?? "（模板已删除）",
+      description: template?.description ?? "",
+      coverUrl: template?.coverUrl ?? null,
+      candidateCount: template?.candidateCount ?? 4,
+    },
+  };
 }

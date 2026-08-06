@@ -14,8 +14,10 @@ import { protectedAction } from "@/lib/safe-action";
 import {
   createOrder as createOrderSvc,
   deleteOrderById,
+  findOrderByOrderNoForCreator,
   listOrders as listOrdersSvc,
   listTemplatesWithCounts,
+  updateOrder as updateOrderSvc,
 } from "../lib/admin-services";
 import { promptOrderCreateSchema } from "../lib/validation";
 
@@ -25,12 +27,33 @@ const withOrderAction = (name: string) =>
 /** 创建订单 */
 export const createOrderAction = withOrderAction("create")
   .schema(promptOrderCreateSchema)
-  .action(async ({ parsedInput }) => {
-    // 注意：不调用 revalidatePath —— 管理端列表走的是客户端 fetch /api/admin/orders，
+  .action(async ({ parsedInput, ctx }) => {
+    // 注意：不调用 revalidatePath —— 管理端列表走的是客户端 fetch /api/orders，
     // revalidatePath 只清 RSC 缓存，对本列表无效。新订单通过客户端 onCreated 回调
     // 做乐观插入 + 后台 refetch 来更新。
-    const order = await createOrderSvc(parsedInput);
+    const order = await createOrderSvc({
+      ...parsedInput,
+      createdBy: ctx.userId,
+    });
     return { order };
+  });
+
+/**
+ * 检测"同一创建者"的同 orderNo 冲突。
+ *
+ * 不抛错 —— 返回 `{ conflict: true/false, existing }` 让客户端弹确认框。
+ */
+const checkConflictSchema = z.object({
+  orderNo: z.string().min(1).max(100),
+});
+export const checkOrderNoConflictAction = withOrderAction("checkConflict")
+  .schema(checkConflictSchema)
+  .action(async ({ parsedInput, ctx }) => {
+    const existing = await findOrderByOrderNoForCreator(
+      parsedInput.orderNo,
+      ctx.userId
+    );
+    return { conflict: !!existing, existing };
   });
 
 /** 列出订单（管理端） */
@@ -67,6 +90,29 @@ export const deleteOrderAction = withOrderAction("delete")
   .action(async ({ parsedInput }) => {
     await deleteOrderById(parsedInput.id);
     revalidatePath("/dashboard/prompt-orders");
-    revalidateTag("admin-orders", "max");
+    revalidateTag("orders", "max");
     return { success: true };
+  });
+
+/**
+ * 编辑订单
+ *
+ * 模板、token、状态、上传内容均锁定，仅允许改：
+ * - orderNo / recipientName / platform / uploadCount
+ */
+const updateOrderSchema = z.object({
+  id: z.string().min(1),
+  orderNo: z.string().min(1, "请输入订单号").max(100),
+  recipientName: z.string().max(100),
+  platform: z.string().nullable(),
+  uploadCount: z.number().int().min(1).max(50),
+});
+export const updateOrderAction = withOrderAction("update")
+  .schema(updateOrderSchema)
+  .action(async ({ parsedInput }) => {
+    const order = await updateOrderSvc(parsedInput);
+    // 与 create 一样：列表走客户端 fetch，revalidateTag 让缓存失效，
+    // onUpdated 回调做乐观更新
+    revalidateTag("orders", "max");
+    return { order };
   });

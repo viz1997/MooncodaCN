@@ -13,6 +13,11 @@ interface SessionUser {
   email: string;
   image?: string | null | undefined;
   emailVerified: boolean;
+  /**
+   * 角色（admin / user）。Better Auth 通过 additionalFields 暴露给客户端，
+   * 但 session-context 的窄类型不一定覆盖；如未来扩展更多字段，按需补充。
+   */
+  role?: string | null | undefined;
 }
 
 /**

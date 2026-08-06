@@ -32,6 +32,7 @@ export const createTemplateAction = withTemplateAction("create")
     });
     revalidatePath("/admin/prompt-templates");
     revalidateTag("admin-templates", "max");
+    revalidateTag("templates", "max");
     return { template };
   });
 
@@ -46,6 +47,7 @@ export const updateTemplateAction = withTemplateAction("update")
     const template = await updateTemplateSvc(parsedInput.id, parsedInput.data);
     revalidatePath("/admin/prompt-templates");
     revalidateTag("admin-templates", "max");
+    revalidateTag("templates", "max");
     return { template };
   });
 
@@ -63,6 +65,7 @@ export const toggleTemplateActiveAction = withTemplateAction("toggleActive")
     );
     revalidatePath("/admin/prompt-templates");
     revalidateTag("admin-templates", "max");
+    revalidateTag("templates", "max");
     return { template };
   });
 
@@ -74,5 +77,6 @@ export const deleteTemplateAction = withTemplateAction("delete")
     await deleteTemplateSvc(parsedInput.id);
     revalidatePath("/admin/prompt-templates");
     revalidateTag("admin-templates", "max");
+    revalidateTag("templates", "max");
     return { success: true };
   });
