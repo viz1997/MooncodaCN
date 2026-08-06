@@ -120,6 +120,8 @@ export function UserOrderView({ token }: UserOrderViewProps) {
                 readyGroups={readyGroups}
                 candidateCount={candidateCount}
                 uploadedAt={order.uploadedAt}
+                cancelling={actions.cancelling}
+                onCancelClick={() => setCancelOpen(true)}
               />
             )}
 
