@@ -95,10 +95,13 @@ interface AgentState {
   isThinking: boolean;
   // 当前的推荐上下文（用于预填到推荐表单）
   recommendContext: {
-    photoId?: string;
-    effectId?: string;
-    userDescription?: string;
-    budget?: number;
+    // 项目 tsconfig 启用了 exactOptionalPropertyTypes，可选字段要么省略要么
+    // 显式带 `| undefined`，否则 `setRecommendContext({ photoId: undefined })`
+    // 会被类型系统拒绝。
+    photoId?: string | undefined;
+    effectId?: string | undefined;
+    userDescription?: string | undefined;
+    budget?: number | undefined;
   };
   // 当前激活的快捷工作流
   activeWorkflow: QuickWorkflowType | null;
@@ -196,10 +199,12 @@ export async function callAgentChat(
 }
 
 export async function callRecommendMask(input: {
-  photoId?: string;
-  effectId?: string;
-  userDescription?: string;
-  budget?: number;
+  // 项目 tsconfig 启用了 exactOptionalPropertyTypes：可选参数要么不传，要么
+  // 显式允许 undefined，否则 `string | undefined` 实参会被类型系统拒绝。
+  photoId?: string | undefined;
+  effectId?: string | undefined;
+  userDescription?: string | undefined;
+  budget?: number | undefined;
 }): Promise<{
   success: boolean;
   data?: RecommendationResult;
