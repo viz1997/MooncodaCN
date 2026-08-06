@@ -123,7 +123,7 @@ interface AgentState {
 let msgIdCounter = 0;
 const genId = () => `msg_${Date.now()}_${++msgIdCounter}`;
 
-export const useAgentStore = create<AgentState>((set, get) => ({
+export const useAgentStore = create<AgentState>((set, _get) => ({
   isOpen: false,
   messages: [],
   isThinking: false,
@@ -179,8 +179,20 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 // ============ API 调用封装 ============
 export async function callAgentChat(
   messages: { role: "user" | "assistant"; content: string }[],
-  context?: { module?: string; currentRole?: string; itemId?: string }
-): Promise<{ success: boolean; response?: string; error?: string }> {
+  // 项目 tsconfig 启用了 exactOptionalPropertyTypes：可选参数要么不传，要么
+  // 显式允许 undefined，否则 `string | undefined` 实参会被类型系统拒绝。
+  context?: {
+    module?: string | undefined;
+    currentRole?: string | undefined;
+    itemId?: string | undefined;
+  }
+): Promise<{
+  success: boolean;
+  // 项目 tsconfig 启用了 exactOptionalPropertyTypes：可选字段要么省略，要么
+  // 显式带 `| undefined`，否则 `string | undefined` 实参会被类型系统拒绝。
+  response?: string | undefined;
+  error?: string | undefined;
+}> {
   try {
     const res = await fetch("/api/agent/chat", {
       method: "POST",
@@ -207,10 +219,12 @@ export async function callRecommendMask(input: {
   budget?: number | undefined;
 }): Promise<{
   success: boolean;
-  data?: RecommendationResult;
-  rawResponse?: string;
-  error?: string;
-  fallback?: boolean;
+  // 项目 tsconfig 启用了 exactOptionalPropertyTypes：可选字段要么省略，要么
+  // 显式带 `| undefined`，否则 `string | undefined` 实参会被类型系统拒绝。
+  data?: RecommendationResult | undefined;
+  rawResponse?: string | undefined;
+  error?: string | undefined;
+  fallback?: boolean | undefined;
 }> {
   try {
     const res = await fetch("/api/agent/recommend-3d-mask", {
@@ -239,11 +253,19 @@ export async function callRecommendMask(input: {
 
 export async function callAnalyzeWorkflow(input: {
   analysisType: string;
-  context?: { taskId?: string; orderId?: string; designerId?: string };
+  // 项目 tsconfig 启用了 exactOptionalPropertyTypes：可选参数要么不传，要么
+  // 显式允许 undefined，否则 `string | undefined` 实参会被类型系统拒绝。
+  context?: {
+    taskId?: string | undefined;
+    orderId?: string | undefined;
+    designerId?: string | undefined;
+  };
 }): Promise<{
   success: boolean;
-  data?: WorkflowAnalysisResult;
-  error?: string;
+  // 项目 tsconfig 启用了 exactOptionalPropertyTypes：可选字段要么省略，要么
+  // 显式带 `| undefined`，否则 `string | undefined` 实参会被类型系统拒绝。
+  data?: WorkflowAnalysisResult | undefined;
+  error?: string | undefined;
 }> {
   try {
     const res = await fetch("/api/agent/analyze-workflow", {

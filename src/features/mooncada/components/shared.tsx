@@ -6,29 +6,6 @@ import type { ReactNode } from "react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-// 通用状态徽章
-export function StatusBadge({
-  status,
-  label,
-  className,
-}: {
-  status: string;
-  label: string;
-  className?: string;
-}) {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium",
-        className
-      )}
-    >
-      <span className={cn("h-1.5 w-1.5 rounded-full", `bg-current`)} />
-      {label}
-    </span>
-  );
-}
-
 // 统计卡片
 export function StatCard({
   icon: Icon,

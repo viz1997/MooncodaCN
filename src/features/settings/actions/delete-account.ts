@@ -7,6 +7,7 @@
  */
 
 import { eq } from "drizzle-orm";
+import { z } from "zod";
 
 import { db } from "@/db";
 import { user } from "@/db/schema";
@@ -14,9 +15,11 @@ import { protectedAction } from "@/lib/safe-action";
 
 /**
  * 删除当前登录用户的账号
+ * 需传入 { confirm: true }，避免意外调用
  */
 export const deleteAccountAction = protectedAction
   .metadata({ action: "settings.deleteAccount" })
+  .schema(z.object({ confirm: z.literal(true) }))
   .action(async ({ ctx }) => {
     const result = await db
       .delete(user)

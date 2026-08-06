@@ -65,7 +65,7 @@ export function isKeyOwnedByUser(key: string, userId: string): boolean {
   if (parts[0] !== userId) return false;
   // 确保最后一段不是空文件名
   const lastPart = parts[parts.length - 1];
-  return lastPart.length > 0;
+  return lastPart !== undefined && lastPart.length > 0;
 }
 
 interface ValidateUploadRequestParams {

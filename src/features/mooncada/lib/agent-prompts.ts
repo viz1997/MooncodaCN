@@ -41,11 +41,13 @@ ${MOCK_PRODUCT_EFFECTS.map((m) => `- ${m.maskId} 「${m.name}」 | 分类: ${m.c
 如果用户的问题超出平台业务范围，礼貌引导回业务话题。`;
 
 // ============ 3D 模版推荐 Prompt 构造 ============
+// 项目 tsconfig 启用了 exactOptionalPropertyTypes：可选字段要么省略，要么
+// 显式带 `| undefined`，否则 `string | undefined` 实参会被类型系统拒绝。
 export interface MaskRecommendationInput {
-  photoId?: string;
-  effectId?: string;
-  userDescription?: string; // 用户描述想要的风格
-  budget?: number; // 预算上限
+  photoId?: string | undefined;
+  effectId?: string | undefined;
+  userDescription?: string | undefined; // 用户描述想要的风格
+  budget?: number | undefined; // 预算上限
 }
 
 export interface MaskRecommendation {
@@ -129,9 +131,9 @@ export interface WorkflowAnalysisInput {
     | "capacity_planning"
     | "workflow_optimization";
   context?: {
-    taskId?: string;
-    orderId?: string;
-    designerId?: string;
+    taskId?: string | undefined;
+    orderId?: string | undefined;
+    designerId?: string | undefined;
   };
 }
 

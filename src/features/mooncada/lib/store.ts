@@ -39,45 +39,11 @@ export const useMooncadaStore = create<MooncadaState>((set) => ({
 }));
 
 // 角色可见的模块映射
+// 2026-08-06 收紧：未启用的模块从 ROLE_MODULES 摘除，sidebar 自动隐藏
 export const ROLE_MODULES: Record<UserRole, ModuleKey[]> = {
-  admin: [
-    "dashboard",
-    "generate-workbench",
-    "photos",
-    "effects",
-    "models",
-    "orders",
-    "tasks",
-    "designer",
-    "agent",
-    "product-effects",
-    "product-lines",
-    "3d-providers",
-    "image-models",
-    "public-image-gen",
-    "platform-users",
-    "sys-logs",
-  ],
-  agent: ["dashboard", "orders", "agent", "product-lines"],
-  designer: [
-    "dashboard",
-    "generate-workbench",
-    "tasks",
-    "designer",
-    "models",
-    "3d-providers",
-    "product-lines",
-    "product-effects",
-    "image-models",
-  ],
-  operator: ["dashboard", "tasks", "models", "orders", "product-lines"],
-  user: [
-    "dashboard",
-    "generate-workbench",
-    "photos",
-    "effects",
-    "models",
-    "orders",
-    "product-lines",
-  ],
+  admin: ["orders", "product-effects"],
+  agent: ["orders"],
+  designer: ["product-effects"],
+  operator: ["orders"],
+  user: ["orders", "product-effects"],
 };
