@@ -8,6 +8,13 @@
  * - 未配置 LINGTING_API_KEY 或 Lingting 报错 → 直接抛错，绝不静默 fallback
  *
  * 整条链路 URL-only：原图用 https URL 给 Lingting，效果图也是 https URL 落库。
+ *
+ * 协作式取消（"停止生成"，**不是取消订单**）：
+ * - requestStopGeneration(orderId) 通过 AbortController 信号打断当前 in-flight 的
+ *   Lingting 请求和后续轮询；runGeneration 在循环顶部检查 signal.aborted，
+ *   一旦取消立刻 break 出循环。
+ * - 已完成的部分会保留在 DB（CANDIDATES_READY 局部成功）。**订单本身仍然是同一
+ *   个**，status 会按完成度落到 FAILED / CANDIDATES_READY，不会被标记 CANCELLED。
  */
 
 import { randomBytes } from "node:crypto";
@@ -23,9 +30,10 @@ const LINGTING_API_KEY = process.env.LINGTING_API_KEY;
 const LINGTING_BASE_URL = process.env.LINGTING_BASE_URL ?? "https://wellapi.ai";
 
 // ============================================
-// 单订单并发控制：inFlight Set 防重入
+// 单订单并发控制：inFlight Set 防重入 + AbortController 协作式取消
 // ============================================
 const inFlight = new Set<string>();
+const abortControllers = new Map<string, AbortController>();
 
 /**
  * 检查 Lingting API 是否已配置
@@ -49,7 +57,8 @@ async function callLingtingImage2Edit(
   prompt: string,
   size: string,
   imageIdx: number,
-  candIdx: number
+  candIdx: number,
+  signal?: AbortSignal
 ): Promise<string> {
   if (!LINGTING_API_KEY) {
     throw new Error("LINGTING_API_KEY 未配置");
@@ -59,9 +68,8 @@ async function callLingtingImage2Edit(
   let imageBuf: ArrayBuffer;
   let imageMime = "image/png";
   try {
-    const imgRes = await fetch(imageUrl, {
-      signal: AbortSignal.timeout(30_000),
-    });
+    const composed = composeSignal(30_000, signal);
+    const imgRes = await fetch(imageUrl, composed ? { signal: composed } : {});
     if (!imgRes.ok) {
       throw new Error(
         `下载原图失败：HTTP ${imgRes.status} ${imgRes.statusText}`
@@ -72,7 +80,11 @@ async function callLingtingImage2Edit(
     imageBuf = await imgRes.arrayBuffer();
   } catch (err) {
     const msg = err instanceof Error ? err.message : "未知错误";
-    throw new Error(`下载原图失败（${imageIdx + 1}）：${msg}`);
+    throw new Error(
+      isAbortError(err, signal)
+        ? `已停止生成（原图下载中断，第 ${imageIdx + 1} 张）`
+        : `下载原图失败（${imageIdx + 1}）：${msg}`
+    );
   }
 
   // 2. 构造 multipart/form-data
@@ -96,6 +108,7 @@ async function callLingtingImage2Edit(
       Authorization: `Bearer ${LINGTING_API_KEY}`,
     },
     body: form,
+    ...(signal ? { signal } : {}),
   });
 
   if (!submitRes.ok) {
@@ -128,12 +141,19 @@ async function callLingtingImage2Edit(
   const intervalMs = 2_000;
   const start = Date.now();
   while (Date.now() - start < maxWaitMs) {
+    if (signal?.aborted) {
+      throw new Error(`已停止生成（轮询中断，第 ${imageIdx + 1} 张）`);
+    }
     await new Promise((r) => setTimeout(r, intervalMs));
+    if (signal?.aborted) {
+      throw new Error(`已停止生成（轮询中断，第 ${imageIdx + 1} 张）`);
+    }
     const pollRes = await fetch(
       `${LINGTING_BASE_URL}/v1/images/tasks/${taskId}`,
       {
         method: "GET",
         headers: { Authorization: `Bearer ${LINGTING_API_KEY}` },
+        ...(signal ? { signal } : {}),
       }
     );
     if (!pollRes.ok) continue;
@@ -157,6 +177,30 @@ async function callLingtingImage2Edit(
     }
   }
   throw new Error(`Lingting 生成超时（${imageIdx + 1}-${candIdx + 1}）`);
+}
+
+/**
+ * 把超时信号和"停止生成"信号合并，任一触发都会 abort。
+ * 任一为 undefined 时退化为另一个。
+ */
+function composeSignal(
+  timeoutMs: number,
+  parent?: AbortSignal
+): AbortSignal | undefined {
+  if (!parent) return AbortSignal.timeout(timeoutMs);
+  if (parent.aborted) return parent;
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const composite = new AbortController();
+  const onAbort = () => composite.abort();
+  parent.addEventListener("abort", onAbort, { once: true });
+  timeout.addEventListener("abort", onAbort, { once: true });
+  return composite.signal;
+}
+
+/** 判断一个 fetch 抛出的错误是不是由外部 signal 触发的"停止生成"。 */
+function isAbortError(err: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return true;
+  return err instanceof Error && /aborted|abort/i.test(err.message);
 }
 
 /**
@@ -208,12 +252,20 @@ export async function generateCandidate(
   prompt: string,
   size: string,
   imageIdx: number,
-  candIdx: number
+  candIdx: number,
+  signal?: AbortSignal
 ): Promise<string> {
   if (!isLingtingConfigured()) {
     throw new Error("LINGTING_API_KEY 未配置，无法生成效果图");
   }
-  return callLingtingImage2Edit(imageUrl, prompt, size, imageIdx, candIdx);
+  return callLingtingImage2Edit(
+    imageUrl,
+    prompt,
+    size,
+    imageIdx,
+    candIdx,
+    signal
+  );
 }
 
 /**
@@ -232,7 +284,8 @@ async function runGeneration(
   orderId: string,
   fromIdx: number,
   total: number,
-  candidateCount: number
+  candidateCount: number,
+  signal: AbortSignal
 ): Promise<void> {
   // 读取订单拿到所有 uploadedImages + template
   const order = await db.query.promptOrder.findFirst({
@@ -250,8 +303,14 @@ async function runGeneration(
   const layout = buildGridLayout(candidateCount);
 
   const failures: string[] = [];
+  let aborted = false;
 
   for (let imageIdx = fromIdx; imageIdx < total; imageIdx++) {
+    // 协作式取消：循环顶部立刻检查 signal，已停止则跳出
+    if (signal.aborted) {
+      aborted = true;
+      break;
+    }
     const imageUrl = uploaded[imageIdx];
     if (!imageUrl) continue;
 
@@ -263,7 +322,8 @@ async function runGeneration(
         compositePrompt,
         size,
         imageIdx,
-        0
+        0,
+        signal
       );
       const group = [compositeUrl];
 
@@ -287,6 +347,11 @@ async function runGeneration(
         .set({ candidates: JSON.stringify(nested), templateId })
         .where(eq(promptOrder.id, orderId));
     } catch (err) {
+      // 取消信号触发的异常：标记 aborted 直接跳出，不再当成"部分失败"
+      if (signal.aborted) {
+        aborted = true;
+        break;
+      }
       const msg = err instanceof Error ? err.message : "未知错误";
       logger.warn({ err, orderIdx: imageIdx, orderId }, "原图生成失败，跳过");
       failures.push(`第 ${imageIdx + 1} 张：${msg}`);
@@ -304,6 +369,30 @@ async function runGeneration(
   const successCount = finalNested.filter(
     (g) => Array.isArray(g) && g.length > 0
   ).length;
+
+  if (aborted) {
+    // 协作式"停止生成"：保留已完成的成果，根据完成度落 FAILED 或 CANDIDATES_READY
+    // **不**改成 CANCELLED（那是订单级取消的语义，见 /api/orders/[token]/cancel）
+    if (successCount === 0) {
+      await db
+        .update(promptOrder)
+        .set({
+          status: "FAILED",
+          errorMessage: "已停止本次生成",
+        })
+        .where(eq(promptOrder.id, orderId));
+    } else {
+      await db
+        .update(promptOrder)
+        .set({
+          status: "CANDIDATES_READY",
+          generatedAt: new Date(),
+          errorMessage: "已停止本次生成（部分完成）",
+        })
+        .where(eq(promptOrder.id, orderId));
+    }
+    return;
+  }
 
   if (successCount === 0) {
     // 全部失败 → FAILED
@@ -332,6 +421,7 @@ async function runGeneration(
  * 异步触发订单效果图生成（fire-and-forget）
  *
  * 防重入：同一订单已有生成任务在跑则跳过。
+ * 协作式取消：通过 requestStopGeneration(orderId) 中断对应任务的 AbortController。
  */
 export function triggerGeneration(
   orderId: string,
@@ -343,9 +433,22 @@ export function triggerGeneration(
     logger.info({ orderId }, "订单已有生成任务在跑，跳过重入");
     return;
   }
+  const controller = new AbortController();
+  abortControllers.set(orderId, controller);
   inFlight.add(orderId);
-  void runGeneration(orderId, fromIdx, total, candidateCount)
+  void runGeneration(
+    orderId,
+    fromIdx,
+    total,
+    candidateCount,
+    controller.signal
+  )
     .catch(async (err) => {
+      // 主动取消不属于"生成失败"
+      if (controller.signal.aborted) {
+        logger.info({ orderId }, "效果图生成被用户停止");
+        return;
+      }
       logger.error({ err, orderId }, "效果图生成失败");
       await db
         .update(promptOrder)
@@ -358,7 +461,24 @@ export function triggerGeneration(
     })
     .finally(() => {
       inFlight.delete(orderId);
+      abortControllers.delete(orderId);
     });
+}
+
+/**
+ * 请求"停止生成"（**不是取消订单**）。
+ *
+ * 协作式：立刻 abort 当前 in-flight 的 fetch，并让 runGeneration 在下个迭代开头
+ * 检测到 signal.aborted 而 break。已经落库的部分候选图保留，订单 status 会由
+ * runGeneration 末尾按完成度写入 FAILED / CANDIDATES_READY，**不会变 CANCELLED**。
+ *
+ * 返回 true 表示有对应任务被中断；false 表示当前没有该订单的生成任务在跑。
+ */
+export function requestStopGeneration(orderId: string): boolean {
+  const ctrl = abortControllers.get(orderId);
+  if (!ctrl) return false;
+  ctrl.abort();
+  return true;
 }
 
 /**

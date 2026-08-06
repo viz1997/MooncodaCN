@@ -12,10 +12,10 @@ interface GeneratingStageProps {
   readyGroups: number;
   candidateCount: number;
   uploadedAt: string | null;
-  /** 取消中——禁用按钮防止重复点击 */
-  cancelling?: boolean;
-  /** 点击"停止生成"——由父级打开取消确认弹窗 */
-  onCancelClick?: () => void;
+  /** 停止中——禁用按钮防止重复点击（指停止当前一轮生成，不是取消订单） */
+  stopping?: boolean;
+  /** 点击"停止生成"——协作式打断当前生图任务，订单保留 */
+  onStopClick?: () => void;
 }
 
 /**
@@ -23,7 +23,11 @@ interface GeneratingStageProps {
  *
  * 视觉聚焦在"这张原图正在被处理"——中间一张原图卡片，
  * 上面叠加 shimmer 扫光 + 圆形进度。下方显示 N 张效果中已完成几组，
- * 并提供"停止生成"按钮，让用户随时可以中断流程。
+ * 并提供"停止生成"按钮，让用户随时可以中断**当前一轮**生成。
+ *
+ * 注意：这里的"停止"指协作式打断当前 in-flight 的生成任务（订单保留），
+ * 不等于"取消订单"——后者会置订单为 CANCELLED（终态），由 OrderHeader 上的
+ * 单独按钮触发。
  */
 export function GeneratingStage({
   token,
@@ -31,8 +35,8 @@ export function GeneratingStage({
   uploadedImageCount,
   readyGroups,
   candidateCount,
-  cancelling = false,
-  onCancelClick,
+  stopping = false,
+  onStopClick,
 }: GeneratingStageProps) {
   const done = Math.min(readyGroups, uploadedImageCount);
   const percent =
@@ -46,11 +50,11 @@ export function GeneratingStage({
           <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400 motion-reduce:animate-none" />
           <span className="font-medium">正在生成效果图</span>
         </div>
-        {onCancelClick && (
+        {onStopClick && (
           <button
             type="button"
-            onClick={onCancelClick}
-            disabled={cancelling}
+            onClick={onStopClick}
+            disabled={stopping}
             className="flex h-8 shrink-0 items-center gap-1 rounded-lg border border-zinc-200 bg-white px-2.5 text-xs text-zinc-700 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
           >
             <X className="h-3.5 w-3.5" />

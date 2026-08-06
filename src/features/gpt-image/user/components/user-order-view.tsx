@@ -120,8 +120,11 @@ export function UserOrderView({ token }: UserOrderViewProps) {
                 readyGroups={readyGroups}
                 candidateCount={candidateCount}
                 uploadedAt={order.uploadedAt}
-                cancelling={actions.cancelling}
-                onCancelClick={() => setCancelOpen(true)}
+                // 注意：生成阶段的"停止生成"是协作式打断当前 in-flight 的
+                // 生成任务，**不**等于取消订单。订单级取消仍走 OrderHeader 的
+                // AlertDialog，由 actions.cancel() 触发（终态 CANCELLED）。
+                stopping={actions.stopping}
+                onStopClick={() => void actions.stopGeneration()}
               />
             )}
 
