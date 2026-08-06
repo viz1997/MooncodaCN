@@ -14,10 +14,12 @@ import { toast as sonnerToast } from "sonner";
  */
 type ToastVariant = "default" | "destructive" | null | undefined;
 
+// 项目 tsconfig 启用了 exactOptionalPropertyTypes：可选字段要么省略，要么
+// 显式带 `| undefined`，否则 `string | undefined` 实参会被类型系统拒绝。
 interface ToastOptions {
-  title?: string;
-  description?: string;
-  variant?: ToastVariant;
+  title?: string | undefined;
+  description?: string | undefined;
+  variant?: ToastVariant | undefined;
 }
 
 function showToast({ title, description, variant }: ToastOptions) {
