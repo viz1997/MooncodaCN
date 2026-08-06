@@ -27,7 +27,6 @@ import { useMooncadaStore } from "@/features/mooncada/lib/store";
 import type { UserRole } from "@/features/mooncada/lib/types";
 import { ROLE_LABELS } from "@/features/mooncada/lib/types";
 import { signOut, useSession } from "@/lib/auth/client";
-import { formatDate } from "./shared";
 
 export function Header() {
   const { currentRole, setRole } = useMooncadaStore();
