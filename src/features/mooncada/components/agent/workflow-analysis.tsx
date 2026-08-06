@@ -4,7 +4,6 @@ import {
   AlertTriangle,
   FileText,
   Loader2,
-  RefreshCw,
   Route,
   Sparkles,
   TrendingUp,
@@ -183,12 +182,3 @@ export function AnalysisCard({
   );
 }
 
-// 重新分析按钮
-export function ReanalyzeButton({ analysisType }: { analysisType: string }) {
-  return (
-    <Button size="sm" variant="ghost" className="text-xs">
-      <RefreshCw className="h-3 w-3 mr-1" />
-      重新分析
-    </Button>
-  );
-}
