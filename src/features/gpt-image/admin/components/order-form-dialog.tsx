@@ -142,7 +142,8 @@ export function OrderFormDialog({
                 <span className="font-medium text-emerald-700">
                   {selectedTemplate.candidateCount} 种效果
                 </span>
-                ，拼接成 1 张图（{selectedTemplate.candidateCount === 1
+                ，拼接成 1 张图（
+                {selectedTemplate.candidateCount === 1
                   ? "整张图"
                   : selectedTemplate.candidateCount === 2
                     ? "1×2 横向"

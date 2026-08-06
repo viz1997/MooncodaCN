@@ -19,10 +19,7 @@ import * as dotenv from "dotenv";
 
 dotenv.config({ path: ".env.local", quiet: true });
 
-const ALLOWED_ORIGINS = [
-  "http://localhost:3000",
-  "http://127.0.0.1:3000",
-];
+const ALLOWED_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"];
 
 const corsConfig: CORSConfiguration = {
   CORSRules: [
@@ -43,7 +40,9 @@ async function main() {
   const bucket = process.env.R2_BUCKET ?? "mooncada-public";
 
   if (!accountId || !accessKeyId || !secretAccessKey) {
-    console.error("缺少 R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY");
+    console.error(
+      "缺少 R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY"
+    );
     process.exit(1);
   }
 

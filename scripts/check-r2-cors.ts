@@ -16,7 +16,9 @@ async function main() {
   const bucket = process.env.R2_BUCKET ?? "mooncada-public";
 
   if (!accountId || !accessKeyId || !secretAccessKey) {
-    console.error("缺少 R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY");
+    console.error(
+      "缺少 R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY"
+    );
     process.exit(1);
   }
 
@@ -27,9 +29,7 @@ async function main() {
   });
 
   try {
-    const out = await client.send(
-      new GetBucketCorsCommand({ Bucket: bucket })
-    );
+    const out = await client.send(new GetBucketCorsCommand({ Bucket: bucket }));
     console.log(`✅ bucket "${bucket}" 当前 CORS：`);
     console.log(JSON.stringify(out.CORSRules, null, 2));
   } catch (err) {

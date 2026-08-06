@@ -30,8 +30,7 @@ export function OrderHeader({
           </h1>
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-zinc-500">
             <span>
-              订单{" "}
-              <span className="font-mono text-zinc-700">{orderNo}</span>
+              订单 <span className="font-mono text-zinc-700">{orderNo}</span>
             </span>
             {hasNickname && (
               <>

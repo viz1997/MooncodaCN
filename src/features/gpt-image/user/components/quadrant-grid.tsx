@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Maximize2 } from "lucide-react";
+import { Maximize2 } from "lucide-react";
 import { useRef } from "react";
 
 import { candidateUrl } from "./image-urls";
@@ -135,7 +135,6 @@ export function QuadrantGrid({
                 <span className="pointer-events-none absolute top-2 left-2 flex items-center gap-1 rounded-md bg-black/55 px-1.5 py-0.5 text-xs font-medium text-white backdrop-blur-sm">
                   #{qIdx + 1}
                 </span>
-             
               </button>
             );
           })}

@@ -261,7 +261,9 @@ export function OrdersAdminView() {
                             {ORDER_PLATFORM_LABELS[order.platform]}
                           </Badge>
                         ) : (
-                          <span className="text-zinc-400 italic text-xs">未指定</span>
+                          <span className="text-zinc-400 italic text-xs">
+                            未指定
+                          </span>
                         )}
                       </TableCell>
                       <TableCell>
@@ -436,9 +438,7 @@ export function OrdersAdminView() {
               <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
                 <p className="mb-1 font-medium">提示</p>
                 <ul className="list-inside list-disc space-y-0.5">
-                  <li>
-                    用户通过此链接上传图片，每张原图独立生成一组效果图
-                  </li>
+                  <li>用户通过此链接上传图片，每张原图独立生成一组效果图</li>
                   <li>用户端不会看到提示词内容，只能看到模板描述</li>
                   <li>用户需为每张原图各选一张候选后提交，提交后只允许取消</li>
                   <li>链接中包含 token，请勿泄露给非指定用户</li>

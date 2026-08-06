@@ -69,34 +69,37 @@ export function GeneratingStage({
       {/* 原图主体 + shimmer */}
       <div className="mx-auto max-w-md px-4 pb-4 sm:px-5">
         <div className="relative aspect-square w-full overflow-hidden rounded-xl bg-zinc-50">
-        <img
-          src={originalUrl(token, 0, updatedAt)}
-          alt="正在处理第 1 张原图"
-          className="h-full w-full object-cover"
-        />
-        {/* 扫光动画层 */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0"
-          style={{
-            background:
-              "linear-gradient(110deg, transparent 30%, rgba(255,255,255,0.55) 50%, transparent 70%)",
-            backgroundSize: "200% 100%",
-            animation: "gpt-shimmer 2.4s linear infinite",
-          }}
-        />
-        {/* 角落小卡片：当前进度 */}
-        <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between gap-3">
-          <div className="rounded-lg bg-white/85 px-2.5 py-1.5 text-xs text-zinc-700 shadow-sm backdrop-blur-md">
-            <span className="font-medium tabular-nums">{done}</span>
-            <span className="text-zinc-400"> / {uploadedImageCount} 张完成</span>
-          </div>
-          {uploadedImageCount > 1 && (
-            <div className="rounded-lg bg-white/85 px-2.5 py-1.5 text-xs text-zinc-500 shadow-sm backdrop-blur-md">
-              {candidateCount} 宫格 × {uploadedImageCount} 张
+          <img
+            src={originalUrl(token, 0, updatedAt)}
+            alt="正在处理第 1 张原图"
+            className="h-full w-full object-cover"
+          />
+          {/* 扫光动画层 */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0"
+            style={{
+              background:
+                "linear-gradient(110deg, transparent 30%, rgba(255,255,255,0.55) 50%, transparent 70%)",
+              backgroundSize: "200% 100%",
+              animation: "gpt-shimmer 2.4s linear infinite",
+            }}
+          />
+          {/* 角落小卡片：当前进度 */}
+          <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between gap-3">
+            <div className="rounded-lg bg-white/85 px-2.5 py-1.5 text-xs text-zinc-700 shadow-sm backdrop-blur-md">
+              <span className="font-medium tabular-nums">{done}</span>
+              <span className="text-zinc-400">
+                {" "}
+                / {uploadedImageCount} 张完成
+              </span>
             </div>
-          )}
-        </div>
+            {uploadedImageCount > 1 && (
+              <div className="rounded-lg bg-white/85 px-2.5 py-1.5 text-xs text-zinc-500 shadow-sm backdrop-blur-md">
+                {candidateCount} 宫格 × {uploadedImageCount} 张
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

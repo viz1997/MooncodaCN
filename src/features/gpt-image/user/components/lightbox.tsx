@@ -169,8 +169,8 @@ export function Lightbox({
           className="fixed inset-0 z-50 flex flex-col bg-zinc-950 text-zinc-100 outline-none"
         >
           <DialogPrimitive.Title className="sr-only">
-            第 {imageIdx + 1} 张照片的效果图 {candIdx + 1}，共{" "}
-            {candidateCount} 张
+            第 {imageIdx + 1} 张照片的效果图 {candIdx + 1}，共 {candidateCount}{" "}
+            张
           </DialogPrimitive.Title>
           <p id="lightbox-hint" className="sr-only">
             左右方向键切换效果，上下方向键切换照片，空格键对比原图，回车选择，Esc

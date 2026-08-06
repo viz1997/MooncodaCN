@@ -40,6 +40,7 @@ export const userRoleEnum = pgEnum("user_role", ["user", "admin"]);
  * @field role - 用户角色 (user/admin)
  * @field banned - 是否被封禁
  * @field bannedReason - 封禁原因
+ * @field needsVerification - 是否需要邮箱验证（管理员手动创建时指定；无密码账户必须为 true）
  * @field customerId - 支付提供商客户 ID (Creem)
  * @field createdAt - 创建时间
  * @field updatedAt - 更新时间
@@ -53,6 +54,7 @@ export const user = pgTable("user", {
   role: userRoleEnum("role").notNull().default("user"),
   banned: boolean("banned").notNull().default(false),
   bannedReason: text("banned_reason"),
+  needsVerification: boolean("needs_verification").notNull().default(false),
   customerId: text("customer_id").unique(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -878,6 +880,46 @@ export type NewPromptOrder = typeof promptOrder.$inferInsert;
 /** 提示词订单状态类型 */
 export type PromptOrderStatus =
   (typeof promptOrderStatusEnum.enumValues)[number];
+
+// ============================================
+// Better Auth 关联关系（启用 experimental.joins 后必填）
+// ============================================
+//
+// 这些 relations 让 Better Auth 的 drizzle 适配器走
+// db.query.<model>.findFirst({ with: ... }) 路径，
+// 否则 findSession 等带 join 的查询会走"fallback join"二次查询，
+// 并把内部失败吞成日志噪音（Failed to query fallback join for model user）。
+
+export const userRelations = relations(user, ({ many }) => ({
+  sessions: many(session),
+  accounts: many(account),
+  subscriptions: many(subscription),
+  creditsBalances: many(creditsBalance),
+  creditsBatches: many(creditsBatch),
+  creditsTransactions: many(creditsTransaction),
+  photos: many(photo),
+  imageJobs: many(imageJob),
+  tickets: many(ticket),
+  ticketMessages: many(ticketMessage),
+}));
+
+export const sessionRelations = relations(session, ({ one }) => ({
+  user: one(user, {
+    fields: [session.userId],
+    references: [user.id],
+  }),
+}));
+
+export const accountRelations = relations(account, ({ one }) => ({
+  user: one(user, {
+    fields: [account.userId],
+    references: [user.id],
+  }),
+}));
+
+// verification 表没有 userId 外键；保留空 relations 让 Drizzle
+// 把 verification 注册到 db.query，避免 experimental.joins 报错。
+export const verificationRelations = relations(verification, () => ({}));
 
 // ============================================
 // GPT-Image 业务关联关系（用于 db.query 嵌套 with）

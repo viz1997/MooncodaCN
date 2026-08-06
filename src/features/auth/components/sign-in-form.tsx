@@ -10,12 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { GoogleIcon } from "@/features/shared/icons";
-import {
-  resendVerificationEmail,
-  signInWithEmail,
-  signInWithGoogle,
-} from "@/lib/auth/client";
+import { resendVerificationEmail, signInWithEmail } from "@/lib/auth/client";
 
 import { AuthErrorAlert } from "./auth-error-alert";
 import { AuthLogo } from "./auth-logo";
@@ -24,7 +19,6 @@ import { AuthLogo } from "./auth-logo";
  * 登录表单组件
  *
  * 功能:
- * - Google OAuth 登录
  * - 邮箱密码登录
  */
 export function SignInForm() {
@@ -60,21 +54,6 @@ export function SignInForm() {
       }, 1000);
     } catch {
       // 静默失败
-    }
-  };
-
-  /**
-   * 处理 Google 登录
-   */
-  const handleGoogleSignIn = async () => {
-    try {
-      setIsLoading(true);
-      setError(null);
-      await signInWithGoogle();
-    } catch {
-      setError(t("errors.google"));
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -140,19 +119,6 @@ export function SignInForm() {
             : t("resendVerification")}
         </Button>
       )}
-
-      {/* OAuth 登录按钮 */}
-      <div className="space-y-3">
-        <Button
-          variant="outline"
-          className="w-full"
-          onClick={handleGoogleSignIn}
-          disabled={isLoading}
-        >
-          <GoogleIcon className="mr-2 h-4 w-4" />
-          {tCommon("google")}
-        </Button>
-      </div>
 
       {/* 分隔线 */}
       <div className="relative">
@@ -225,17 +191,6 @@ export function SignInForm() {
           {isLoading ? t("loading") : t("submit")}
         </Button>
       </form>
-
-      {/* 注册链接 */}
-      <p className="text-center text-sm text-muted-foreground">
-        {t("noAccount")}{" "}
-        <Link
-          href="/sign-up"
-          className="font-medium text-foreground hover:underline"
-        >
-          {t("signUpLink")}
-        </Link>
-      </p>
     </div>
   );
 }

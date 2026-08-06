@@ -1,12 +1,13 @@
 "use client";
 
-import { Ban, Coins, Loader2, Search, UserCheck } from "lucide-react";
+import { Ban, Coins, Loader2, Pencil, Plus, Search, UserCheck } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -17,13 +18,22 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { useSessionContext } from "@/lib/auth/session-context";
 import {
   adminGrantCreditsAction,
   banUserAction,
+  createUserAction,
   getAllUsersAction,
 } from "@/features/support/actions";
-import { UserRoleSelect } from "@/features/support/components";
+import { UserEditDialog, UserRoleSelect } from "@/features/support/components";
 
 /**
  * 用户类型定义
@@ -37,6 +47,7 @@ interface UserWithDetails {
   banned: boolean;
   bannedReason: string | null;
   emailVerified: boolean;
+  needsVerification: boolean;
   createdAt: Date;
   credits: {
     balance: number;
@@ -63,6 +74,7 @@ interface UserWithDetails {
  * - 手动充值积分
  */
 export default function AdminUsersPage() {
+  const { user: currentUser } = useSessionContext();
   const [users, setUsers] = useState<UserWithDetails[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -81,6 +93,19 @@ export default function AdminUsersPage() {
   const [grantAmount, setGrantAmount] = useState("");
   const [grantReason, setGrantReason] = useState("");
   const [isGranting, setIsGranting] = useState(false);
+
+  // 新增用户对话框状态
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [createName, setCreateName] = useState("");
+  const [createEmail, setCreateEmail] = useState("");
+  const [createPassword, setCreatePassword] = useState("");
+  const [createRole, setCreateRole] = useState<"user" | "admin">("user");
+  const [createNeedsVerification, setCreateNeedsVerification] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+
+  // 编辑用户对话框状态
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<UserWithDetails | null>(null);
 
   /**
    * 加载用户列表
@@ -203,6 +228,70 @@ export default function AdminUsersPage() {
   };
 
   /**
+   * 打开新增用户对话框
+   */
+  const openCreateDialog = () => {
+    setCreateName("");
+    setCreateEmail("");
+    setCreatePassword("");
+    setCreateRole("user");
+    setCreateNeedsVerification(false);
+    setCreateDialogOpen(true);
+  };
+
+  /**
+   * 打开编辑用户对话框
+   */
+  const openEditDialog = (user: UserWithDetails) => {
+    setEditingUser(user);
+    setEditDialogOpen(true);
+  };
+
+  /**
+   * 处理新增用户
+   */
+  const handleCreateUser = async () => {
+    if (!createName.trim()) {
+      toast.error("请输入用户名");
+      return;
+    }
+
+    if (!createEmail.trim()) {
+      toast.error("请输入邮箱地址");
+      return;
+    }
+
+    if (createPassword && createPassword.length < 8) {
+      toast.error("密码至少需要8位");
+      return;
+    }
+
+    setIsCreating(true);
+    try {
+      const result = await createUserAction({
+        name: createName.trim(),
+        email: createEmail.trim(),
+        password: createPassword || undefined,
+        role: createRole,
+        needsVerification: createNeedsVerification,
+      });
+
+      if (result?.data) {
+        toast.success(result.data.message);
+        setCreateDialogOpen(false);
+        loadUsers(searchQuery);
+      } else if (result?.serverError) {
+        toast.error(result.serverError);
+      }
+    } catch (error) {
+      toast.error("创建用户失败");
+      console.error(error);
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  /**
    * 获取用户名首字母
    */
   const getInitials = (name: string) => {
@@ -257,9 +346,15 @@ export default function AdminUsersPage() {
   return (
     <div className="space-y-6">
       {/* 页面标题 */}
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight">用户管理</h2>
-        <p className="text-muted-foreground">查看和管理系统中的所有用户</p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight">用户管理</h2>
+          <p className="text-muted-foreground">查看和管理系统中的所有用户</p>
+        </div>
+        <Button onClick={openCreateDialog}>
+          <Plus className="mr-2 h-4 w-4" />
+          新增用户
+        </Button>
       </div>
 
       {/* 统计信息 */}
@@ -406,7 +501,7 @@ export default function AdminUsersPage() {
                               variant="secondary"
                               className="bg-yellow-100 text-yellow-800"
                             >
-                              未验证
+                              {u.needsVerification ? "需邮箱验证" : "未验证"}
                             </Badge>
                           )}
                         </div>
@@ -427,6 +522,14 @@ export default function AdminUsersPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => openEditDialog(u)}
+                            title="编辑用户"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
                           <Button
                             size="sm"
                             variant="outline"
@@ -550,6 +653,114 @@ export default function AdminUsersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 新增用户对话框 */}
+      <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>新增用户</DialogTitle>
+            <DialogDescription>
+              手动创建账户。支持设置初始密码和邮箱验证要求。
+              无密码账户将强制需要邮箱验证。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="createName">姓名 *</Label>
+              <Input
+                id="createName"
+                placeholder="请输入用户姓名"
+                value={createName}
+                onChange={(e) => setCreateName(e.target.value)}
+                maxLength={50}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="createEmail">邮箱 *</Label>
+              <Input
+                id="createEmail"
+                type="email"
+                placeholder="请输入邮箱地址"
+                value={createEmail}
+                onChange={(e) => setCreateEmail(e.target.value)}
+                autoComplete="email"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="createPassword">
+                密码
+                <span className="ml-1 text-xs text-muted-foreground">
+                  （留空则创建无密码账户）
+                </span>
+              </Label>
+              <Input
+                id="createPassword"
+                type="password"
+                placeholder="至少8位（可选）"
+                value={createPassword}
+                onChange={(e) => setCreatePassword(e.target.value)}
+                autoComplete="new-password"
+                minLength={8}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="createRole">角色</Label>
+              <Select
+                value={createRole}
+                onValueChange={(v) => setCreateRole(v as "user" | "admin")}
+              >
+                <SelectTrigger id="createRole">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="user">普通用户</SelectItem>
+                  <SelectItem value="admin">管理员</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="createNeedsVerification"
+                checked={createNeedsVerification}
+                onCheckedChange={(v) => setCreateNeedsVerification(!!v)}
+              />
+              <Label
+                htmlFor="createNeedsVerification"
+                className="text-sm leading-none"
+              >
+                需要邮箱验证
+                <span className="ml-1 text-xs text-muted-foreground">
+                  {createPassword
+                    ? "（用户需验证后登录）"
+                    : "（无密码账户，必填）"}
+                </span>
+              </Label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setCreateDialogOpen(false)}
+              disabled={isCreating}
+            >
+              取消
+            </Button>
+            <Button onClick={handleCreateUser} disabled={isCreating}>
+              {isCreating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              确认创建
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 编辑用户对话框 */}
+      <UserEditDialog
+        open={editDialogOpen}
+        onOpenChange={setEditDialogOpen}
+        user={editingUser}
+        currentUserId={currentUser?.id}
+        onUpdated={() => loadUsers(searchQuery)}
+      />
     </div>
   );
 }

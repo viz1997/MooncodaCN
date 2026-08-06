@@ -1,5 +1,6 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { admin } from "better-auth/plugins";
 
 import { db } from "@/db";
 import * as schema from "@/db/schema";
@@ -9,7 +10,7 @@ import {
 } from "@/features/mail/templates/primary-action-email";
 import { sendEmail } from "@/features/mail/utils";
 
-const isResendConfigured = Boolean(process.env.RESEND_API_KEY);
+export const isResendConfigured = Boolean(process.env.RESEND_API_KEY);
 
 /**
  * Better Auth 服务端配置
@@ -36,6 +37,11 @@ export const auth = betterAuth({
   /**
    * 数据库配置
    * 使用 Drizzle 适配器连接 PostgreSQL
+   *
+   * 启用 experimental.joins 后，Better Auth 会走
+   * db.query.<model>.findFirst({ with: ... }) 路径，
+   * 避免 fallback join（两次查询 + catch 后吞错日志）。
+   * 前提是 schema 里给 auth 表配好 relations() —— 见 src/db/schema.ts。
    */
   database: drizzleAdapter(db, {
     provider: "pg",
@@ -48,8 +54,20 @@ export const auth = betterAuth({
   }),
 
   /**
+   * 实验特性
+   *
+   * experimental.joins: true
+   * - findSession 等带 join 的查询改用 Drizzle relational query（单 SQL）
+   * - 替代 fallback join（双查询 + 静默吞错）
+   * - 需要 schema.ts 中已为 user/session/account/verification 声明 relations()
+   */
+  experimental: {
+    joins: true,
+  },
+
+  /**
    * 用户自定义字段配置
-   * 将 role, banned, bannedReason 字段包含在会话用户中
+   * 将 role, banned, bannedReason, needsVerification 字段包含在会话用户中
    */
   user: {
     additionalFields: {
@@ -69,6 +87,12 @@ export const auth = betterAuth({
         type: "string",
         required: false,
         input: false, // 用户不能通过注册/更新设置此字段
+      },
+      needsVerification: {
+        type: "boolean",
+        required: false,
+        defaultValue: false,
+        input: false, // 仅管理员创建时设置
       },
     },
   },
@@ -113,23 +137,28 @@ export const auth = betterAuth({
     : {}),
 
   /**
+   * 管理员插件
+   *
+   * 提供 admin 管理接口，允许管理员手动创建用户等操作
+   * - defaultRole: 新用户默认角色 "user"
+   * - adminRoles: 被视为管理员的角色
+   */
+  plugins: [
+    admin({
+      defaultRole: "user",
+      adminRoles: ["admin"],
+    }),
+  ],
+
+  /**
    * OAuth 社交登录提供商配置
-   * 需要在 .env 中配置相应的 Client ID 和 Secret
+   * 目前仅支持邮箱密码登录，Google 登录已禁用
    */
   socialProviders: {
-    /**
-     * GitHub OAuth 配置
-     * 获取凭证: https://github.com/settings/developers
-     */
     github: {
       clientId: process.env.GITHUB_CLIENT_ID || "",
       clientSecret: process.env.GITHUB_CLIENT_SECRET || "",
     },
-
-    /**
-     * Google OAuth 配置
-     * 获取凭证: https://console.cloud.google.com/apis/credentials
-     */
     google: {
       clientId: process.env.GOOGLE_CLIENT_ID || "",
       clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",

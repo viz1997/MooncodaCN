@@ -3,6 +3,8 @@
 import { RootProvider } from "fumadocs-ui/provider/next";
 import { ThemeProvider } from "next-themes";
 
+import { SessionProvider } from "@/lib/auth/session-context";
+
 /**
  * 全局 Providers 组件
  *
@@ -39,21 +41,23 @@ export function Providers({ children, locale = "en" }: ProvidersProps) {
   const docsLocale = locale === "zh" ? "zh" : "en";
 
   return (
-    <ThemeProvider
-      attribute="class"
-      defaultTheme="system"
-      enableSystem
-      disableTransitionOnChange
-    >
-      <RootProvider
-        i18n={{
-          locale: docsLocale,
-          locales: docsLocales,
-          ...(docsLocale === "zh" ? { translations: zhDocsTranslations } : {}),
-        }}
+    <SessionProvider>
+      <ThemeProvider
+        attribute="class"
+        defaultTheme="system"
+        enableSystem
+        disableTransitionOnChange
       >
-        {children}
-      </RootProvider>
-    </ThemeProvider>
+        <RootProvider
+          i18n={{
+            locale: docsLocale,
+            locales: docsLocales,
+            ...(docsLocale === "zh" ? { translations: zhDocsTranslations } : {}),
+          }}
+        >
+          {children}
+        </RootProvider>
+      </ThemeProvider>
+    </SessionProvider>
   );
 }
