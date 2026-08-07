@@ -854,6 +854,12 @@ export const promptOrder = pgTable(
     selectedIndex: integer("selected_index"),
     selections: text("selections"),
     errorMessage: text("error_message"),
+    /**
+     * 本轮生图的 Lingting 任务态（JSON，见 features/gpt-image/lib/generation-task.ts）。
+     * null = 无进行中任务。服务端只做 submit 拿 task_id 存这里，
+     * 轮询由前端调 /api/orders/[token]/poll 驱动（Serverless 无长时后台）。
+     */
+    generationTask: text("generation_task"),
     uploadedAt: timestamp("uploaded_at"),
     generatedAt: timestamp("generated_at"),
     selectedAt: timestamp("selected_at"),

@@ -3,18 +3,26 @@
  *
  * 策略：
  * - 唯一生成路径：Lingting (wellapi.ai) GPT-Image-2 异步接口
- *   - candidateCount ∈ {1, 2}：调 N 次，每次 n=1 返回 1 张独立候选
- *   - candidateCount ∈ {4, 9}（宫格模式）：调 1 次，prompt 追加"2x2 / 3x3 宫格"指令，返回 1 张拼接图
+ * - 全部走宫格模式：每张原图调 1 次，prompt 追加宫格指令，返回 1 张拼接图
  * - 未配置 LINGTING_API_KEY 或 Lingting 报错 → 直接抛错，绝不静默 fallback
  *
  * 整条链路 URL-only：原图用 https URL 给 Lingting，效果图也是 https URL 落库。
  *
- * 协作式取消（"停止生成"，**不是取消订单**）：
- * - requestStopGeneration(orderId) 通过 AbortController 信号打断当前 in-flight 的
- *   Lingting 请求和后续轮询；runGeneration 在循环顶部检查 signal.aborted，
- *   一旦取消立刻 break 出循环。
- * - 已完成的部分会保留在 DB（CANDIDATES_READY 局部成功）。**订单本身仍然是同一
- *   个**，status 会按完成度落到 FAILED / CANDIDATES_READY，不会被标记 CANCELLED。
+ * ## submit / poll 两段式（Serverless 适配）
+ *
+ * Lingting 是异步接口：POST /v1/images/edits 提交后立刻返回 task_id，
+ * 真正耗时的是之后的轮询。Serverless（Vercel）在 HTTP 响应后冻结 runtime，
+ * 任何 fire-and-forget 的后台轮询都会被静默杀掉（曾导致订单永久卡在
+ * GENERATING、上游零调用记录、errorMessage 为 null）。
+ *
+ * 因此职责拆成两半：
+ * - submitGeneration()：服务端在请求周期内同步完成 submit，把 task_id 落库
+ * - queryLingtingTask()：由 /api/orders/[token]/poll 驱动，前端轮询时各查一次
+ *
+ * 这样服务端永远没有长任务，不依赖 Inngest 等外部 worker。
+ *
+ * "停止生成"改为 DB 驱动（清空 generationTask + 置 FAILED），
+ * 不再有进程内 AbortController —— 它在多实例 Serverless 下本就不可靠。
  */
 
 import { randomBytes } from "node:crypto";
@@ -22,29 +30,14 @@ import { eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import { promptOrder } from "@/db/schema";
-import { inngest } from "@/inngest";
 import { logger } from "@/lib/logger";
 
+import type { GenerationTask } from "./generation-task";
+import { stringifyGenerationTask } from "./generation-task";
 import { parseCandidates, parseUploadedImages } from "./order-helpers";
 
 const LINGTING_API_KEY = process.env.LINGTING_API_KEY;
 const LINGTING_BASE_URL = process.env.LINGTING_BASE_URL ?? "https://wellapi.ai";
-
-/**
- * 是否走 Inngest 异步路径（生产环境 + Inngest 已配置时为 true）
- *
- * Vercel serverless 在 HTTP response 后会冻结 runtime，fire-and-forget 的
- * fetch 调用会被杀掉。Inngest worker 是独立进程，能跑完 90s 轮询周期。
- */
-function shouldUseInngest(): boolean {
-  return !!process.env.INNGEST_EVENT_KEY || process.env.INNGEST_DEV === "1";
-}
-
-// ============================================
-// 单订单并发控制：inFlight Set 防重入 + AbortController 协作式取消
-// ============================================
-const inFlight = new Set<string>();
-const abortControllers = new Map<string, AbortController>();
 
 /**
  * 检查 Lingting API 是否已配置
@@ -53,24 +46,31 @@ export function isLingtingConfigured(): boolean {
   return !!LINGTING_API_KEY;
 }
 
+/** submit 阶段结果：上游可能同步返回 url，也可能返回 task_id 待轮询 */
+export type SubmitResult =
+  | { kind: "url"; url: string }
+  | { kind: "task"; taskId: string };
+
+/** poll 阶段结果 */
+export type QueryResult =
+  | { state: "pending" }
+  | { state: "done"; url: string }
+  | { state: "failed"; error: string };
+
 /**
- * 调用 Lingting GPT-Image-2 异步生图接口
+ * 提交一张原图的生成任务（不轮询）。
  *
- * 输入：原图 https URL + 模板 prompt + 尺寸 + 索引
- * 输出：生成的图片 https URL（不含 dataUrl 前缀）
+ * Lingting 的 /v1/images/edits 要求 multipart/form-data，必须把原图作为
+ * 文件字段上传，不能用 JSON body + URL 引用，因此先下载原图拿 buffer。
  *
- * Lingting (wellapi.ai) 的 /v1/images/edits 端点要求 multipart/form-data，
- * 必须把原图作为文件字段上传，不能用 JSON body + URL 引用。
- * 因此先 fetch 原图拿 buffer，再构造 FormData。
+ * 失败直接抛错，由调用方决定如何落库。
  */
-async function callLingtingImage2Edit(
+export async function submitLingtingTask(
   imageUrl: string,
   prompt: string,
   size: string,
-  imageIdx: number,
-  candIdx: number,
-  signal?: AbortSignal
-): Promise<string> {
+  imageIdx: number
+): Promise<SubmitResult> {
   if (!LINGTING_API_KEY) {
     throw new Error("LINGTING_API_KEY 未配置");
   }
@@ -79,8 +79,9 @@ async function callLingtingImage2Edit(
   let imageBuf: ArrayBuffer;
   let imageMime = "image/png";
   try {
-    const composed = composeSignal(30_000, signal);
-    const imgRes = await fetch(imageUrl, composed ? { signal: composed } : {});
+    const imgRes = await fetch(imageUrl, {
+      signal: AbortSignal.timeout(30_000),
+    });
     if (!imgRes.ok) {
       throw new Error(
         `下载原图失败：HTTP ${imgRes.status} ${imgRes.statusText}`
@@ -91,11 +92,7 @@ async function callLingtingImage2Edit(
     imageBuf = await imgRes.arrayBuffer();
   } catch (err) {
     const msg = err instanceof Error ? err.message : "未知错误";
-    throw new Error(
-      isAbortError(err, signal)
-        ? `已停止生成（原图下载中断，第 ${imageIdx + 1} 张）`
-        : `下载原图失败（${imageIdx + 1}）：${msg}`
-    );
+    throw new Error(`下载原图失败（${imageIdx + 1}）：${msg}`);
   }
 
   // 2. 构造 multipart/form-data
@@ -112,14 +109,14 @@ async function callLingtingImage2Edit(
   form.append("size", size);
   form.append("response_format", "url");
 
-  // 3. 提交任务（异步）
+  // 3. 提交任务
   const submitRes = await fetch(`${LINGTING_BASE_URL}/v1/images/edits`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${LINGTING_API_KEY}`,
     },
     body: form,
-    ...(signal ? { signal } : {}),
+    signal: AbortSignal.timeout(60_000),
   });
 
   if (!submitRes.ok) {
@@ -135,83 +132,72 @@ async function callLingtingImage2Edit(
     task_id?: string;
   };
 
-  // 2a. 同步返回：直接拿到 url
-  const direct = submitJson.data?.[0]?.url;
-  if (direct) return direct;
+  // 3a. 同步返回：直接拿到 url，无需轮询
+  const direct = submitJson.data?.[0]?.url ?? submitJson.images?.[0]?.url;
+  if (direct) return { kind: "url", url: direct };
 
-  // 2b. 异步返回：需要轮询
+  // 3b. 异步返回：交给 /poll 轮询
   const taskId = submitJson.task_id;
   if (!taskId) {
     throw new Error(
       `Lingting 响应格式异常（无 task_id 也无 url）: ${JSON.stringify(submitJson).slice(0, 300)}`
     );
   }
-
-  // 轮询
-  const maxWaitMs = 90_000;
-  const intervalMs = 2_000;
-  const start = Date.now();
-  while (Date.now() - start < maxWaitMs) {
-    if (signal?.aborted) {
-      throw new Error(`已停止生成（轮询中断，第 ${imageIdx + 1} 张）`);
-    }
-    await new Promise((r) => setTimeout(r, intervalMs));
-    if (signal?.aborted) {
-      throw new Error(`已停止生成（轮询中断，第 ${imageIdx + 1} 张）`);
-    }
-    const pollRes = await fetch(
-      `${LINGTING_BASE_URL}/v1/images/tasks/${taskId}`,
-      {
-        method: "GET",
-        headers: { Authorization: `Bearer ${LINGTING_API_KEY}` },
-        ...(signal ? { signal } : {}),
-      }
-    );
-    if (!pollRes.ok) continue;
-    const pollJson = (await pollRes.json()) as {
-      status?: string;
-      data?: Array<{ url?: string }>;
-      images?: Array<{ url?: string }>;
-      error?: string;
-    };
-    const status = pollJson.status ?? "";
-    if (status === "failed" || status === "error") {
-      throw new Error(`Lingting 生成失败：${pollJson.error ?? "未知错误"}`);
-    }
-    if (
-      status === "succeeded" ||
-      status === "success" ||
-      status === "completed"
-    ) {
-      const url = pollJson.data?.[0]?.url ?? pollJson.images?.[0]?.url;
-      if (url) return url;
-    }
-  }
-  throw new Error(`Lingting 生成超时（${imageIdx + 1}-${candIdx + 1}）`);
+  return { kind: "task", taskId };
 }
 
 /**
- * 把超时信号和"停止生成"信号合并，任一触发都会 abort。
- * 任一为 undefined 时退化为另一个。
+ * 查询一次任务状态（单次 GET，不阻塞）。
+ *
+ * 网络抖动 / 上游 5xx 一律返回 pending —— 让前端下一轮再试，
+ * 由 /poll 的超时判定兜底，避免一次抖动就把订单判死。
  */
-function composeSignal(
-  timeoutMs: number,
-  parent?: AbortSignal
-): AbortSignal | undefined {
-  if (!parent) return AbortSignal.timeout(timeoutMs);
-  if (parent.aborted) return parent;
-  const timeout = AbortSignal.timeout(timeoutMs);
-  const composite = new AbortController();
-  const onAbort = () => composite.abort();
-  parent.addEventListener("abort", onAbort, { once: true });
-  timeout.addEventListener("abort", onAbort, { once: true });
-  return composite.signal;
-}
+export async function queryLingtingTask(taskId: string): Promise<QueryResult> {
+  if (!LINGTING_API_KEY) {
+    return { state: "failed", error: "LINGTING_API_KEY 未配置" };
+  }
 
-/** 判断一个 fetch 抛出的错误是不是由外部 signal 触发的"停止生成"。 */
-function isAbortError(err: unknown, signal?: AbortSignal): boolean {
-  if (signal?.aborted) return true;
-  return err instanceof Error && /aborted|abort/i.test(err.message);
+  let pollRes: Response;
+  try {
+    pollRes = await fetch(`${LINGTING_BASE_URL}/v1/images/tasks/${taskId}`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${LINGTING_API_KEY}` },
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch {
+    return { state: "pending" };
+  }
+
+  if (!pollRes.ok) return { state: "pending" };
+
+  let pollJson: {
+    status?: string;
+    data?: Array<{ url?: string }>;
+    images?: Array<{ url?: string }>;
+    error?: string;
+  };
+  try {
+    pollJson = await pollRes.json();
+  } catch {
+    return { state: "pending" };
+  }
+
+  const status = pollJson.status ?? "";
+  if (status === "failed" || status === "error") {
+    return {
+      state: "failed",
+      error: `Lingting 生成失败：${pollJson.error ?? "未知错误"}`,
+    };
+  }
+  if (
+    status === "succeeded" ||
+    status === "success" ||
+    status === "completed"
+  ) {
+    const url = pollJson.data?.[0]?.url ?? pollJson.images?.[0]?.url;
+    if (url) return { state: "done", url };
+  }
+  return { state: "pending" };
 }
 
 /**
@@ -254,51 +240,33 @@ function buildGridLayout(candidateCount: number): {
 }
 
 /**
- * 为指定原图生成一张效果图（返回 https URL）。
- *
- * 失败直接抛错，由调用方决定如何处理（不再 silent fallback 到占位图）。
+ * 把 candidates 的 [0, upTo) 区间稀疏槽补齐为 []，避免 JSON.stringify
+ * 把空洞序列化成 null（上一轮中途失败会留下空洞）。
  */
-export async function generateCandidate(
-  imageUrl: string,
-  prompt: string,
-  size: string,
-  imageIdx: number,
-  candIdx: number,
-  signal?: AbortSignal
-): Promise<string> {
-  if (!isLingtingConfigured()) {
-    throw new Error("LINGTING_API_KEY 未配置，无法生成效果图");
+function fillSparseSlots(nested: string[][], upTo: number): string[][] {
+  for (let i = 0; i < upTo; i++) {
+    if (!Array.isArray(nested[i])) nested[i] = [];
   }
-  return callLingtingImage2Edit(
-    imageUrl,
-    prompt,
-    size,
-    imageIdx,
-    candIdx,
-    signal
-  );
+  return nested;
 }
 
 /**
- * 为 [fromIdx, total) 区间内的每张新原图各生成一组效果图。
+ * 提交 [fromIdx, total) 区间内每张原图的生成任务。
  *
- * **全部走宫格模式**：每张原图调 1 次 Lingting，prompt 追加宫格指令（1/2/4/9
- * 分别对应 1x1 / 1x2 / 2x2 / 3x3 布局），返回 1 张拼接图。
- * candidates[imageIdx] = [compositeUrl]（数组始终长度 1，selection 存的是宫格索引）。
+ * **只做 submit，不轮询** —— 轮询由前端调 /api/orders/[token]/poll 驱动。
+ * 调用方（upload / regenerate 路由）应 await 本函数，它在请求周期内完成。
  *
- * 每完成一组立刻落库，前端轮询 candidateGroups 即可看到真实进度。
- *
- * 错误隔离：单张原图生成失败仅记日志、不影响其他原图继续生成；最终汇总错误到
- * errorMessage（仅在所有原图都失败时才把订单标 FAILED，否则仍是 CANDIDATES_READY）。
+ * 落库结果：
+ * - 有任务待轮询 → generationTask 写入 task 列表，status = GENERATING
+ * - 上游同步返回了全部 url → 直接 CANDIDATES_READY
+ * - 全部 submit 失败 → FAILED + errorMessage（用户能立刻看到真实原因）
  */
-export async function runGeneration(
+export async function submitGeneration(
   orderId: string,
   fromIdx: number,
   total: number,
-  candidateCount: number,
-  signal?: AbortSignal
+  candidateCount: number
 ): Promise<void> {
-  // 读取订单拿到所有 uploadedImages + template
   const order = await db.query.promptOrder.findFirst({
     where: eq(promptOrder.id, orderId),
     with: { template: true },
@@ -307,216 +275,116 @@ export async function runGeneration(
     logger.warn({ orderId }, "订单不存在，跳过生成");
     return;
   }
+
   const uploaded = parseUploadedImages(order.uploadedImages);
-  const prompt = order.template.prompt;
-  const size = order.template.size;
-  const templateId = order.templateId;
   const layout = buildGridLayout(candidateCount);
+  const compositePrompt = order.template.prompt + layout.suffix;
+  const size = order.template.size;
 
-  const failures: string[] = [];
-  let aborted = false;
-
+  // uploadCount 基本为 1；多图时并行 submit，避免串行放大请求耗时
+  const targets: number[] = [];
   for (let imageIdx = fromIdx; imageIdx < total; imageIdx++) {
-    // 协作式取消：循环顶部立刻检查 signal，已停止则跳出
-    if (signal?.aborted) {
-      aborted = true;
-      break;
+    if (uploaded[imageIdx]) targets.push(imageIdx);
+  }
+
+  const settled = await Promise.all(
+    targets.map(async (imageIdx) => {
+      try {
+        const imageUrl = uploaded[imageIdx] as string;
+        const result = await submitLingtingTask(
+          imageUrl,
+          compositePrompt,
+          size,
+          imageIdx
+        );
+        return { imageIdx, result };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "未知错误";
+        logger.warn({ err, orderId, imageIdx }, "提交生图任务失败");
+        return { imageIdx, error: `第 ${imageIdx + 1} 张：${msg}` };
+      }
+    })
+  );
+
+  // 汇总：同步拿到 url 的直接落 candidates，拿到 taskId 的进待轮询列表
+  const nested = fillSparseSlots(parseCandidates(order.candidates), total);
+  const tasks: GenerationTask[] = [];
+  const failures: string[] = [];
+  const now = Date.now();
+  let readyCount = 0;
+
+  for (const item of settled) {
+    if ("error" in item && item.error) {
+      failures.push(item.error);
+      continue;
     }
-    const imageUrl = uploaded[imageIdx];
-    if (!imageUrl) continue;
-
-    try {
-      // 全部走宫格模式：1 次 Lingting 返回 1 张拼接图
-      const compositePrompt = prompt + layout.suffix;
-      const compositeUrl = await generateCandidate(
-        imageUrl,
-        compositePrompt,
-        size,
-        imageIdx,
-        0,
-        signal
-      );
-      const group = [compositeUrl];
-
-      // 重新读取，避免覆盖并发写入
-      const current = await db.query.promptOrder.findFirst({
-        where: eq(promptOrder.id, orderId),
-        columns: { candidates: true, status: true },
+    const result = item.result;
+    if (!result) continue;
+    if (result.kind === "url") {
+      nested[item.imageIdx] = [result.url];
+      readyCount++;
+    } else {
+      tasks.push({
+        imageIdx: item.imageIdx,
+        taskId: result.taskId,
+        submittedAt: now,
       });
-      if (!current || current.status === "CANCELLED") return;
-
-      const nested = parseCandidates(current.candidates);
-      // 上一轮中途失败可能留下空洞；JSON.stringify 会把稀疏槽变成 null，
-      // 导致 candidateGroups 虚高。先补齐再写入。
-      for (let i = 0; i < imageIdx; i++) {
-        if (!Array.isArray(nested[i])) nested[i] = [];
-      }
-      nested[imageIdx] = group;
-
-      await db
-        .update(promptOrder)
-        .set({ candidates: JSON.stringify(nested), templateId })
-        .where(eq(promptOrder.id, orderId));
-    } catch (err) {
-      // 取消信号触发的异常：标记 aborted 直接跳出，不再当成"部分失败"
-      if (signal?.aborted) {
-        aborted = true;
-        break;
-      }
-      const msg = err instanceof Error ? err.message : "未知错误";
-      logger.warn({ err, orderIdx: imageIdx, orderId }, "原图生成失败，跳过");
-      failures.push(`第 ${imageIdx + 1} 张：${msg}`);
     }
   }
 
-  // 检查是否有任何原图成功
-  const finalState = await db.query.promptOrder.findFirst({
-    where: eq(promptOrder.id, orderId),
-    columns: { candidates: true, status: true },
-  });
-  if (!finalState || finalState.status === "CANCELLED") return;
-
-  const finalNested = parseCandidates(finalState.candidates);
-  const successCount = finalNested.filter(
-    (g) => Array.isArray(g) && g.length > 0
-  ).length;
-
-  if (aborted) {
-    // 协作式"停止生成"：保留已完成的成果，根据完成度落 FAILED 或 CANDIDATES_READY
-    // **不**改成 CANCELLED（那是订单级取消的语义，见 /api/orders/[token]/cancel）
-    if (successCount === 0) {
-      await db
-        .update(promptOrder)
-        .set({
-          status: "FAILED",
-          errorMessage: "已停止本次生成",
-        })
-        .where(eq(promptOrder.id, orderId));
-    } else {
-      await db
-        .update(promptOrder)
-        .set({
-          status: "CANDIDATES_READY",
-          generatedAt: new Date(),
-          errorMessage: "已停止本次生成（部分完成）",
-        })
-        .where(eq(promptOrder.id, orderId));
-    }
+  // 仍有待轮询任务 → 保持 GENERATING，交给 /poll 推进
+  if (tasks.length > 0) {
+    await db
+      .update(promptOrder)
+      .set({
+        candidates: JSON.stringify(nested),
+        generationTask: stringifyGenerationTask({ tasks, total }),
+        status: "GENERATING",
+        templateId: order.templateId,
+        errorMessage: failures.length > 0 ? failures.join("；") : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(promptOrder.id, orderId));
+    logger.info(
+      { orderId, taskCount: tasks.length, fromIdx, total },
+      "生图任务已提交，等待前端轮询推进"
+    );
     return;
   }
 
+  // 无待轮询任务：本轮当场出结果
+  const successCount = nested.filter(
+    (g) => Array.isArray(g) && g.length > 0
+  ).length;
+
   if (successCount === 0) {
-    // 全部失败 → FAILED
     await db
       .update(promptOrder)
       .set({
         status: "FAILED",
-        errorMessage: failures.join("；") || "未知错误",
+        generationTask: null,
+        errorMessage: failures.join("；") || "生图任务提交失败",
+        updatedAt: new Date(),
       })
       .where(eq(promptOrder.id, orderId));
-  } else {
-    // 至少一张成功 → CANDIDATES_READY，错误信息仅汇总
-    await db
-      .update(promptOrder)
-      .set({
-        status: "CANDIDATES_READY",
-        generatedAt: new Date(),
-        errorMessage:
-          failures.length > 0 ? `部分失败：${failures.join("；")}` : null,
-      })
-      .where(eq(promptOrder.id, orderId));
-  }
-}
-
-/**
- * 异步触发订单效果图生成
- *
- * - 生产（Inngest 已配置）：发送 `prompt-order/generate.requested` 事件，
- *   runGeneration 在 Inngest worker 上跑完整个轮询周期，
- *   不会被 Vercel serverless 冻结。
- * - 本地 / 无 Inngest：fire-and-forget + AbortController，
- *   支持 requestStopGeneration 协作式取消。
- *
- * 防重入：同一订单已有生成任务在跑则跳过（Inngest 路径靠事件去重）。
- */
-export async function triggerGeneration(
-  orderId: string,
-  fromIdx: number,
-  total: number,
-  candidateCount: number
-): Promise<void> {
-  if (inFlight.has(orderId)) {
-    logger.info({ orderId }, "订单已有生成任务在跑，跳过重入");
+    logger.error({ orderId, failures }, "生图任务全部提交失败");
     return;
   }
 
-  // 生产路径：交给 Inngest
-  if (shouldUseInngest()) {
-    try {
-      await inngest.send({
-        name: "prompt-order/generate.requested",
-        data: { orderId, fromIdx, total, candidateCount },
-      });
-      logger.info({ orderId, fromIdx, total }, "生图任务已派发给 Inngest");
-    } catch (err) {
-      // Inngest 派发失败也要把订单标 FAILED，否则订单永远卡在 GENERATING
-      logger.error({ err, orderId }, "Inngest 派发生图任务失败");
-      await db
-        .update(promptOrder)
-        .set({
-          status: "FAILED",
-          errorMessage:
-            err instanceof Error
-              ? `生图任务派发失败: ${err.message}`
-              : "生图任务派发失败",
-        })
-        .where(eq(promptOrder.id, orderId))
-        .catch(() => {});
-    }
-    return;
-  }
-
-  // 本地兜底：fire-and-forget + AbortController
-  const controller = new AbortController();
-  abortControllers.set(orderId, controller);
-  inFlight.add(orderId);
-  void runGeneration(orderId, fromIdx, total, candidateCount, controller.signal)
-    .catch(async (err) => {
-      // 主动取消不属于"生成失败"
-      if (controller.signal.aborted) {
-        logger.info({ orderId }, "效果图生成被用户停止");
-        return;
-      }
-      logger.error({ err, orderId }, "效果图生成失败");
-      await db
-        .update(promptOrder)
-        .set({
-          status: "FAILED",
-          errorMessage: err instanceof Error ? err.message : "未知错误",
-        })
-        .where(eq(promptOrder.id, orderId))
-        .catch(() => {});
+  await db
+    .update(promptOrder)
+    .set({
+      candidates: JSON.stringify(nested),
+      status: "CANDIDATES_READY",
+      generationTask: null,
+      generatedAt: new Date(),
+      templateId: order.templateId,
+      errorMessage:
+        failures.length > 0 ? `部分失败：${failures.join("；")}` : null,
+      updatedAt: new Date(),
     })
-    .finally(() => {
-      inFlight.delete(orderId);
-      abortControllers.delete(orderId);
-    });
-}
-
-/**
- * 请求"停止生成"（**不是取消订单**）。
- *
- * 协作式：立刻 abort 当前 in-flight 的 fetch，并让 runGeneration 在下个迭代开头
- * 检测到 signal.aborted 而 break。已经落库的部分候选图保留，订单 status 会由
- * runGeneration 末尾按完成度写入 FAILED / CANDIDATES_READY，**不会变 CANCELLED**。
- *
- * 返回 true 表示有对应任务被中断；false 表示当前没有该订单的生成任务在跑。
- */
-export function requestStopGeneration(orderId: string): boolean {
-  const ctrl = abortControllers.get(orderId);
-  if (!ctrl) return false;
-  ctrl.abort();
-  return true;
+    .where(eq(promptOrder.id, orderId));
+  logger.info({ orderId, readyCount }, "生图任务同步完成");
 }
 
 /**

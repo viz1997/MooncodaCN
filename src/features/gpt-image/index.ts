@@ -15,12 +15,13 @@ export {
   toggleTemplateActiveAction,
   updateTemplateAction,
 } from "./actions/templates";
-// 生图服务
+// 生图服务（submit/poll 两段式）
 export {
-  generateCandidate,
   generateOrderToken,
   isLingtingConfigured,
-  triggerGeneration,
+  queryLingtingTask,
+  submitGeneration,
+  submitLingtingTask,
 } from "./lib/generation-service";
 // 工具函数
 export {

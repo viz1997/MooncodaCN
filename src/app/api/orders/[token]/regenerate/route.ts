@@ -15,7 +15,7 @@ import { eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { promptOrder } from "@/db/schema";
-import { triggerGeneration } from "@/features/gpt-image/lib/generation-service";
+import { submitGeneration } from "@/features/gpt-image/lib/generation-service";
 import {
   parseCandidates,
   parseSelections,
@@ -136,15 +136,18 @@ async function postHandler(
           : {}),
         status: "GENERATING",
         errorMessage: null,
+        // 清掉上一轮遗留的任务态，避免 /poll 查到已废弃的 task_id
+        generationTask: null,
+        updatedAt: new Date(),
       })
       .where(eq(promptOrder.id, order.id));
 
     const candidateCount = order.template.candidateCount;
     logger.info(
       { orderId: order.id, fromIdx, toIdx, candidateCount },
-      isSingle ? "触发单图重新生成" : "触发批量重新生成"
+      isSingle ? "提交单图重新生成" : "提交批量重新生成"
     );
-    await triggerGeneration(order.id, fromIdx, toIdx, candidateCount);
+    await submitGeneration(order.id, fromIdx, toIdx, candidateCount);
 
     return NextResponse.json(
       {

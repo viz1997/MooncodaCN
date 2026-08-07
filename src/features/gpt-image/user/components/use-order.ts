@@ -98,7 +98,13 @@ export function useOrder(token: string): UseOrderResult {
       const snap = snapshotRef.current;
       if (!snap) return;
       try {
-        const res = await fetch(`/api/orders/${token}/status`);
+        // GENERATING 时打 /poll：服务端只在上传时提交任务拿 task_id，
+        // 真正的上游轮询由这里驱动（Serverless 跑不了长任务）。
+        // 其余状态下用只读的 /status。两者返回体同构。
+        const res =
+          snap.status === "GENERATING"
+            ? await fetch(`/api/orders/${token}/poll`, { method: "POST" })
+            : await fetch(`/api/orders/${token}/status`);
         const json = await res.json();
         if (!aliveRef.current) return;
 

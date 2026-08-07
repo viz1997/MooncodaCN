@@ -1,0 +1,166 @@
+/**
+ * 生图订单推进 Cron Job API
+ *
+ * 兜底用途：submit/poll 两段式下，轮询主要由用户页面上的前端驱动
+ * （POST /api/orders/[token]/poll）。用户关掉页面后就没人推进了，
+ * 订单会停在 GENERATING。本 job 定期扫描并推进这些订单。
+ *
+ * 处理两类订单：
+ * 1. 有在途任务（generationTask 非空）→ 查询上游并推进，复用
+ *    advanceOrderGeneration()，与前端 /poll 走同一份逻辑
+ * 2. 孤儿订单（generationTask 为空但状态仍是 GENERATING）→ 这类订单
+ *    没有任何任务句柄，永远不会自己恢复（改造前遗留的卡死订单即属此类）。
+ *    超过 ORPHAN_THRESHOLD_MS 未更新则判失败，提示用户重新生成。
+ *
+ * 需要通过 Bearer Token 认证（CRON_SECRET），与 /api/jobs/credits/expire 一致。
+ *
+ * 配置 Vercel Cron（见 vercel.json）：
+ *   { "path": "/api/jobs/orders/advance", "schedule": "* /5 * * * *" }
+ * 注意 Vercel Hobby 计划的 Cron 每天只触发一次；需要分钟级请用 Pro，
+ * 或改用外部 cron 服务（如 cron-job.org）带 Bearer token 调用本端点。
+ */
+
+import { and, eq, isNotNull, isNull, lt } from "drizzle-orm";
+import { headers } from "next/headers";
+import { NextResponse } from "next/server";
+
+import { db } from "@/db";
+import { promptOrder } from "@/db/schema";
+import { advanceOrderGeneration } from "@/features/gpt-image/lib/advance-generation";
+import { withApiLogging } from "@/lib/api-logger";
+import { logError, logWarn } from "@/lib/logger";
+
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
+/** 单次最多处理多少个订单，避免超出函数时长 */
+const BATCH_LIMIT = 30;
+
+/**
+ * 孤儿订单判定阈值：GENERATING 但无任务句柄，且超过这么久没更新。
+ * 取 10 分钟 —— 远大于 submit 阶段耗时，不会误伤正在提交中的订单。
+ */
+const ORPHAN_THRESHOLD_MS = 10 * 60 * 1000;
+
+/**
+ * 验证 Cron Job 请求的 Bearer Token
+ */
+function validateCronSecret(authHeader: string | null): boolean {
+  if (!authHeader) return false;
+
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret) {
+    logWarn("CRON_SECRET environment variable is not set");
+    return false;
+  }
+
+  const token = authHeader.startsWith("Bearer ")
+    ? authHeader.slice(7)
+    : authHeader;
+
+  return token === cronSecret;
+}
+
+/**
+ * POST /api/jobs/orders/advance
+ *
+ * 推进所有在途生图订单，并清理孤儿订单
+ */
+export const POST = withApiLogging(async () => {
+  const headersList = await headers();
+  const authHeader = headersList.get("authorization");
+
+  if (!validateCronSecret(authHeader)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    // 1. 推进有在途任务的订单
+    const inFlight = await db.query.promptOrder.findMany({
+      where: and(
+        eq(promptOrder.status, "GENERATING"),
+        isNotNull(promptOrder.generationTask)
+      ),
+      columns: { id: true },
+      limit: BATCH_LIMIT,
+    });
+
+    const advanced: Array<{
+      orderId: string;
+      status: string;
+      completed: number;
+    }> = [];
+
+    for (const order of inFlight) {
+      try {
+        const result = await advanceOrderGeneration(order.id);
+        if (result.changed) {
+          advanced.push({
+            orderId: order.id,
+            status: result.status,
+            completed: result.completed,
+          });
+        }
+      } catch (err) {
+        // 单个订单失败不影响整批
+        logError("Failed to advance order", {
+          orderId: order.id,
+          error: String(err),
+        });
+      }
+    }
+
+    // 2. 清理孤儿订单：GENERATING 但无任务句柄，且已停滞足够久
+    const orphanCutoff = new Date(Date.now() - ORPHAN_THRESHOLD_MS);
+    const orphans = await db
+      .update(promptOrder)
+      .set({
+        status: "FAILED",
+        errorMessage: "生成任务已丢失，请点击重新生成",
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(promptOrder.status, "GENERATING"),
+          isNull(promptOrder.generationTask),
+          lt(promptOrder.updatedAt, orphanCutoff)
+        )
+      )
+      .returning({ id: promptOrder.id });
+
+    return NextResponse.json({
+      success: true,
+      scanned: inFlight.length,
+      advanced: advanced.length,
+      orphansCleaned: orphans.length,
+      details: advanced,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    logError("Failed to advance generating orders", { error: String(error) });
+
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Failed to advance generating orders",
+        message: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 500 }
+    );
+  }
+});
+
+/**
+ * GET /api/jobs/orders/advance
+ *
+ * 健康检查端点，用于验证 Cron Job 配置是否正确
+ */
+export const GET = withApiLogging(async () => {
+  return NextResponse.json({
+    status: "ok",
+    endpoint: "/api/jobs/orders/advance",
+    method: "POST",
+    description: "Advance in-flight image generation orders and clean orphans",
+    authentication: "Bearer token required (CRON_SECRET)",
+  });
+});

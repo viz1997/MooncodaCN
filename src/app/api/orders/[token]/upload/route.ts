@@ -14,7 +14,7 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
 import { promptOrder } from "@/db/schema";
-import { triggerGeneration } from "@/features/gpt-image/lib/generation-service";
+import { submitGeneration } from "@/features/gpt-image/lib/generation-service";
 import {
   parseSelections,
   parseUploadedImages,
@@ -162,13 +162,13 @@ async function postHandler(
         status: "GENERATING",
         uploadedAt: order.uploadedAt ?? new Date(),
         errorMessage: null,
+        updatedAt: new Date(),
         ...(nextSelections !== null ? { selections: nextSelections } : {}),
       })
       .where(eq(promptOrder.id, order.id));
 
     const candidateCount = order.template.candidateCount;
 
-    // 立刻返回，生成在后台跑 —— 真实生图 30-90s，同步等会 HTTP 超时
     logger.info(
       {
         orderId: order.id,
@@ -176,11 +176,11 @@ async function postHandler(
         total: merged.length,
         candidateCount,
       },
-      "触发效果图生成"
+      "提交效果图生成任务"
     );
-    // triggerGeneration 在生产环境会把事件派发给 Inngest（不阻塞 HTTP 响应）；
-    // 在本地 dev 模式仍走 fire-and-forget + AbortController。
-    await triggerGeneration(
+    // 只做 submit（拿 task_id 落库），在本请求周期内完成，不留后台任务。
+    // 后续轮询由前端调 POST /api/orders/[token]/poll 驱动。
+    await submitGeneration(
       order.id,
       existing.length,
       merged.length,

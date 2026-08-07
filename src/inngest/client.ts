@@ -30,13 +30,4 @@ export type Events = {
       message: string;
     };
   };
-  /** GPT-Image 公共订单触发生成（Vercel 环境下用 Inngest 避免 serverless 冻结） */
-  "prompt-order/generate.requested": {
-    data: {
-      orderId: string;
-      fromIdx: number;
-      total: number;
-      candidateCount: number;
-    };
-  };
 };
