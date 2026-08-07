@@ -24,6 +24,30 @@
       "errors": "件起定 · 无最小量",
       "license": "一件发货 · 全程顺丰"
     },
+    "products": {
+      "label": "产品系列",
+      "allLink": "查看全部",
+      "keychain": {
+        "name": "钥匙扣",
+        "size": "40-60mm",
+        "price": "¥89 起"
+      },
+      "badge": {
+        "name": "宠物徽章",
+        "size": "30-50mm",
+        "price": "¥49 起"
+      },
+      "magnet": {
+        "name": "冰箱贴",
+        "size": "70-100mm",
+        "price": "¥89 起"
+      },
+      "figure": {
+        "name": "手办",
+        "size": "100-200mm",
+        "price": "¥299 起"
+      }
+    },
     "panel": {
       "title": "今日产线 · 实况",
       "region": "WJP 工业级 · 浙江 · in operation",

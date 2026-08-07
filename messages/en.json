@@ -24,6 +24,30 @@
       "errors": "min. 1 piece · no MOQ",
       "license": "single shipping · SF Express"
     },
+    "products": {
+      "label": "Product Lines",
+      "allLink": "View all",
+      "keychain": {
+        "name": "Keychain",
+        "size": "40-60mm",
+        "price": "from $13"
+      },
+      "badge": {
+        "name": "Pet Badge",
+        "size": "30-50mm",
+        "price": "from $7"
+      },
+      "magnet": {
+        "name": "Fridge Magnet",
+        "size": "70-100mm",
+        "price": "from $13"
+      },
+      "figure": {
+        "name": "Figure",
+        "size": "100-200mm",
+        "price": "from $43"
+      }
+    },
     "panel": {
       "title": "Today · production floor",
       "region": "WJP Industrial · Zhejiang · in operation",

@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Award, Box, KeyRound, Magnet } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useTheme } from "next-themes";
 import type { ReactNode } from "react";
@@ -100,12 +100,49 @@ export function HeroSection() {
 
           <motion.div
             variants={itemVariants}
-            className="mt-10 grid w-full max-w-lg grid-cols-2 gap-x-8 gap-y-5 border-t pt-7 sm:grid-cols-4"
+            className="mt-10 border-t pt-7"
           >
-            <Stat k="18" v={t("meta.modules")} />
-            <Stat k="256" v={t("meta.tests")} />
-            <Stat k="0" v={t("meta.errors")} />
-            <Stat k="MIT" v={t("meta.license")} />
+            <div className="mb-3 flex items-center justify-between">
+              <span className="font-mono text-[10px] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
+                {t("products.label")}
+              </span>
+              <Link
+                href="/products"
+                className="font-mono text-[10px] font-semibold tracking-[0.14em] text-muted-foreground uppercase hover:text-foreground"
+              >
+                {t("products.allLink")} →
+              </Link>
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <ProductCard
+                icon={KeyRound}
+                name={t("products.keychain.name")}
+                size={t("products.keychain.size")}
+                price={t("products.keychain.price")}
+                href="/products"
+              />
+              <ProductCard
+                icon={Award}
+                name={t("products.badge.name")}
+                size={t("products.badge.size")}
+                price={t("products.badge.price")}
+                href="/products"
+              />
+              <ProductCard
+                icon={Magnet}
+                name={t("products.magnet.name")}
+                size={t("products.magnet.size")}
+                price={t("products.magnet.price")}
+                href="/products"
+              />
+              <ProductCard
+                icon={Box}
+                name={t("products.figure.name")}
+                size={t("products.figure.size")}
+                price={t("products.figure.price")}
+                href="/products"
+              />
+            </div>
           </motion.div>
         </motion.div>
 
@@ -122,15 +159,38 @@ export function HeroSection() {
   );
 }
 
-/** 指标小卡（左侧大数字 + 标签） */
-function Stat({ k, v }: { k: string; v: string }) {
+/** 产品系列卡片（hero 左下角 4 张） */
+function ProductCard({
+  icon: Icon,
+  name,
+  size,
+  price,
+  href,
+}: {
+  icon: typeof Award;
+  name: string;
+  size: string;
+  price: string;
+  href: "/products" | `/${string}`;
+}) {
   return (
-    <div>
-      <div className="mono-data text-2xl font-bold tracking-tight text-foreground">
-        {k}
+    <Link
+      href={href}
+      className="group flex flex-col gap-2 rounded-lg border bg-card p-3.5 transition-colors hover:border-foreground/30 hover:bg-muted/40"
+    >
+      <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10 text-primary ring-1 ring-primary/20 transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
+        <Icon className="h-4 w-4" />
       </div>
-      <div className="mt-1 text-xs text-muted-foreground">{v}</div>
-    </div>
+      <div className="min-w-0">
+        <div className="truncate text-sm font-semibold tracking-tight">{name}</div>
+        <div className="mt-0.5 flex items-baseline justify-between gap-1 font-mono text-[10px] text-muted-foreground">
+          <span className="truncate">{size}</span>
+          <span className="shrink-0 font-semibold text-foreground tabular-nums">
+            {price}
+          </span>
+        </div>
+      </div>
+    </Link>
   );
 }
 
