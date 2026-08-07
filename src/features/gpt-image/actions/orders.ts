@@ -28,13 +28,15 @@ const withOrderAction = (name: string) =>
 export const createOrderAction = withOrderAction("create")
   .schema(promptOrderCreateSchema)
   .action(async ({ parsedInput, ctx }) => {
-    // 注意：不调用 revalidatePath —— 管理端列表走的是客户端 fetch /api/orders，
-    // revalidatePath 只清 RSC 缓存，对本列表无效。新订单通过客户端 onCreated 回调
-    // 做乐观插入 + 后台 refetch 来更新。
     const order = await createOrderSvc({
       ...parsedInput,
       createdBy: ctx.userId,
     });
+    // 必须失效 orders tag：管理端列表走客户端 fetch /api/orders，该接口用
+    // unstable_cache 缓存 60s。不失效的话 onCreated 里的后台 refetch 会拿到
+    // 不含新订单的旧快照，把乐观插入的新行覆盖掉，直到缓存自然过期才出现。
+    // （revalidatePath 对该接口确实无效，但 revalidateTag 有效。）
+    revalidateTag("orders", "max");
     return { order };
   });
 
