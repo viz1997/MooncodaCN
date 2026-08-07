@@ -1,29 +1,29 @@
 "use client";
 
 import {
-  Coins,
-  CreditCard,
-  Languages,
-  LayoutGrid,
-  ShieldCheck,
-  Zap,
+  Camera,
+  Gift,
+  Layers,
+  Palette,
+  Printer,
+  Wrench,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Reveal } from "@/components/motion/reveal";
 
 /**
- * 功能模块配置
- * - icon 与卡片内容匹配（认证/支付/积分/异步/国际化/管理后台）
- * - path 是展示用的"工程化"代码路径标签，不需要翻译
+ * 卖点配置 —— WJP 全彩 3D 打印业务
+ * - icon 与卡片内容匹配（全彩工艺 / 一件定制 / 一件发货 / 多材质 / 建模 / 包装）
+ * - path 是展示用的"工艺代号"风格标签，不需要翻译
  */
 const featureConfig = [
-  { key: "ai" as const, icon: ShieldCheck, path: "/auth" },
-  { key: "multiSource" as const, icon: CreditCard, path: "/payment" },
-  { key: "outline" as const, icon: Coins, path: "/credits" },
-  { key: "export" as const, icon: Zap, path: "/jobs" },
-  { key: "batch" as const, icon: Languages, path: "/i18n" },
-  { key: "multilingual" as const, icon: LayoutGrid, path: "/admin" },
+  { key: "ai" as const, icon: Palette, path: "WJP / full-color" },
+  { key: "multiSource" as const, icon: Camera, path: "1 piece MOQ" },
+  { key: "outline" as const, icon: Gift, path: "single shipping" },
+  { key: "export" as const, icon: Layers, path: "multi material" },
+  { key: "batch" as const, icon: Wrench, path: "pro modeling" },
+  { key: "multilingual" as const, icon: Printer, path: "gift pack" },
 ];
 
 export function FeatureGrid() {

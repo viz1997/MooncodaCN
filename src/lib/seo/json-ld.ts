@@ -186,3 +186,47 @@ export function generateSoftwareApplicationSchema(locale: LocaleType) {
     },
   };
 }
+
+/**
+ * Product Schema — for /products/[slug] pages
+ *
+ * 用于单件 / 小批量定制的实物商品（schema.org/Product）。
+ * 价格用 offers.price 表示单件起步价；availability 标注可订制。
+ */
+export interface ProductSchemaInput {
+  name: string;
+  description: string;
+  url: string;
+  image: string;
+  price: number;
+  currency: "CNY" | "USD";
+  sku?: string;
+}
+
+export function generateProductSchema(input: ProductSchemaInput) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: input.name,
+    description: input.description,
+    url: input.url,
+    image: input.image,
+    sku: input.sku,
+    brand: {
+      "@type": "Brand",
+      name: siteConfig.name,
+    },
+    offers: {
+      "@type": "Offer",
+      url: input.url,
+      price: input.price,
+      priceCurrency: input.currency,
+      availability: "https://schema.org/MadeToOrder",
+      itemCondition: "https://schema.org/NewCondition",
+      seller: {
+        "@type": "Organization",
+        name: siteConfig.name,
+      },
+    },
+  };
+}

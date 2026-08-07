@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { SiteJsonLd, SoftwareAppJsonLd } from "@/components/seo/json-ld";
 import { siteConfig } from "@/config";
 import {
   CTASection,
@@ -23,25 +22,24 @@ export async function generateMetadata({
   const { locale } = await params;
   const isZh = locale === "zh";
 
-  const title = isZh
-    ? "Mooncoda - 生产就绪的 Next.js SaaS 模板"
-    : "Mooncoda - Production-ready Next.js SaaS Template";
+  const title = isZh ? "Mooncoda" : "Mooncoda";
 
   const description = isZh
-    ? "生产就绪的 Next.js SaaS 模板，内置认证、支付、积分系统、后台任务、国际化与管理后台。克隆、定制、即可上线。"
-    : "Production-ready Next.js SaaS template with authentication, payments, a credits system, background jobs, i18n, and an admin panel. Clone, customize, and ship.";
+    ? "Mooncoda — WJP 全彩 3D 打印专家，宠物徽章 / 钥匙扣 / 冰箱贴 / 手办等一件定制、一件发货。"
+    : "Mooncoda — WJP full-color 3D printing. Pet badges, keychains, fridge magnets, figures. Single-piece customization & shipping.";
 
   return {
     title,
     description,
     keywords: [
-      "Next.js SaaS template",
-      "SaaS boilerplate",
-      "Next.js starter kit",
-      "Better Auth",
-      "Drizzle ORM",
-      "TypeScript SaaS",
-      ...(isZh ? ["Next.js SaaS 模板", "SaaS 脚手架", "SaaS 样板"] : []),
+      "WJP 全彩 3D 打印",
+      "宠物徽章",
+      "钥匙扣",
+      "冰箱贴",
+      "手办",
+      "一件定制",
+      "一件发货",
+      ...(isZh ? [] : ["WJP 3D printing", "full-color 3D print", "custom figurine"]),
     ],
     openGraph: {
       title,
@@ -72,15 +70,13 @@ export default async function HomePage({
 }: {
   params: Promise<{ locale: string }>;
 }) {
-  const { locale } = await params;
+  // 当前 body 不依赖 locale，但保留 params 形参以匹配 generateMetadata 的签名
+  // 并保证后续接入按地区分支的 JSON-LD 或内容块时不需要再改路由。
+  await params;
 
   return (
     <>
-      {/* JSON-LD Structured Data */}
-      <SiteJsonLd locale={locale as "en" | "zh"} />
-      <SoftwareAppJsonLd locale={locale as "en" | "zh"} />
-
-      {/* Page Sections */}
+      {/* JSON-LD Structured Data — TODO: 接入 LocalBusiness / Product schema */}
       <HeroSection />
       <FeatureGrid />
       <HowItWorks />

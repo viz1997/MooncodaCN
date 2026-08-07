@@ -1,190 +1,198 @@
 {
   "HomePage": {
     "title": "Mooncoda",
-    "subtitle": "生产就绪的 Next.js SaaS 模板",
-    "description": "开箱即用的全栈 SaaS 模板，快速启动你的下一个项目。"
+    "subtitle": "WJP 全彩 3D 打印专家",
+    "description": "宠物徽章、钥匙扣、冰箱贴、手办等一件定制、一件发货。"
   },
   "Hero": {
-    "badge": "全新：支持 AI 模型集成",
-    "eyebrow": "Next.js 16 · Drizzle · Better Auth · Inngest",
-    "title1": "先把 SaaS 做出来。",
-    "titleHighlight": "别再纠结脚手架。",
-    "subtitle": "一套生产级的 Next.js 模板——认证、支付、积分、后台任务、国际化、管理后台，全部端到端接好。把第一周花在你的产品上，而不是第六个月的基建上。",
-    "getStarted": "开始构建",
-    "seeDemo": "看看怎么用",
-    "trustLine": "深受全球开发者喜爱",
+    "badge": "支持一件定制 · 一件发货",
+    "eyebrow": "WJP 全彩 3D 打印 · 宠物周边 · 礼品定制",
+    "title1": "你的想象，",
+    "titleHighlight": "一件就能打印。",
+    "subtitle": "Mooncoda 梦可达专注 WJP 全彩 3D 打印——宠物徽章、钥匙扣、冰箱贴、手办、礼品模型。从一张照片到手中实物，最快 24 小时，一件起定、一件发货，把每一份心意都做成限量款。",
+    "getStarted": "上传图片定制",
+    "seeDemo": "查看作品集",
+    "trustLine": "已为数千位创作者定制",
     "stats": {
-      "cards": "已创建项目",
-      "users": "开发者",
-      "rating": "满意度"
+      "cards": "已交付订单",
+      "users": "合作创作者",
+      "rating": "复购率"
     },
     "meta": {
-      "modules": "个功能模块",
-      "tests": "个测试，全绿",
-      "errors": "类型 / lint 错误",
-      "license": "可自托管 · MIT"
+      "modules": "类定制产品",
+      "tests": "全彩精度 · 微米级",
+      "errors": "件起定 · 无最小量",
+      "license": "一件发货 · 全程顺丰"
     },
     "panel": {
-      "title": "生产环境 · 读数",
-      "region": "/usr/app · us-east-1",
-      "p95": "P95 延迟",
-      "uptime": "可用性",
-      "jobs": "任务 / 分",
-      "signups": "注册 · 近 14 天",
-      "pillOk": "部署通过",
-      "pillStack": "Vercel · Neon · R2"
+      "title": "今日产线 · 实况",
+      "region": "WJP 工业级 · 浙江 · in operation",
+      "p95": "交付周期",
+      "uptime": "良率",
+      "jobs": "本日订单",
+      "signups": "本月交付 · 近 14 天",
+      "pillOk": "产线运行中",
+      "pillStack": "WJP · 全彩 · 树脂"
     }
   },
   "Features": {
-    "label": "核心功能",
-    "title": "开箱即用的完整功能",
-    "subtitle": "从认证到支付，从国际化到管理后台，每个模块都经过精心打磨，让你专注于业务本身。",
+    "label": "为什么选我们",
+    "title": "WJP 全彩，一件也是大货",
+    "subtitle": "全彩 3D 打印工艺让每件作品都能还原照片级的色彩与细节。我们不挑起订量、不挑复杂度，让每个想法都能被做出来。",
     "items": {
       "ai": {
-        "title": "认证与安全",
-        "description": "集成 Better Auth，支持邮箱密码、Google、GitHub OAuth 登录，开箱即用的会话管理与权限控制。"
+        "title": "全彩工艺",
+        "description": "WJP (Wax Jet Printing) 全彩 3D 打印，1600 万色真彩还原，纹理、渐变、阴影一气呵成，无需后处理上色。"
       },
       "multiSource": {
-        "title": "支付与订阅",
-        "description": "集成 Creem 支付，支持订阅和一次性购买，内置 Webhook 处理和订阅生命周期管理。"
+        "title": "一件定制",
+        "description": "一件起定，无需凑批量。传一张照片、一张插画，48 小时内确认打样图，确认后即可投入打印。"
       },
       "outline": {
-        "title": "积分系统",
-        "description": "基于双重记账法的积分系统，支持 FIFO 批次过期、积分发放、消耗追踪和余额管理。"
+        "title": "一件发货",
+        "description": "单件独立包装，全程顺丰速运。每件产品自带防伪标与定制编号，收到即可送人或自留。"
       },
       "export": {
-        "title": "异步处理",
-        "description": "集成 Inngest 后台任务引擎，支持异步处理、任务队列和状态轮询，突破请求超时限制。"
+        "title": "多种材质",
+        "description": "支持树脂、蜡基、PLA 多种材质选择；从 30mm 徽章到 200mm 手办，从小物件到收藏级艺术品都能驾驭。"
       },
       "batch": {
-        "title": "国际化",
-        "description": "集成 next-intl 多语言支持，内置中英双语翻译，轻松扩展更多语言。"
+        "title": "专业建模",
+        "description": "上传图片我们帮你修图、建模、拆分支撑；模型文件全程透明可下载，作品版权归你所有。"
       },
       "multilingual": {
-        "title": "管理后台",
-        "description": "完整的管理后台，支持用户管理、工单系统、数据统计，一键掌控全局。"
+        "title": "礼品级包装",
+        "description": "免费提供礼盒包装、定制卡片、丝带配件；从生日礼物到婚礼伴手礼，开箱即有仪式感。"
       }
     }
   },
   "HowItWorks": {
-    "label": "使用流程",
-    "title": "三步启动你的 SaaS",
-    "subtitle": "从模板到上线，只需要几步简单操作。",
+    "label": "定制流程",
+    "title": "从图片到实物，四步搞定",
+    "subtitle": "上传图 → 确认稿 → 打印 → 收货，全程线上可视化跟踪。",
     "steps": {
       "upload": {
-        "title": "克隆 & 配置",
-        "description": "克隆模板仓库，配置环境变量（数据库、认证密钥等），运行 pnpm install 安装依赖。"
+        "title": "上传图片 / 描述",
+        "description": "上传宠物照、人物照、插画、AI 图，或用文字描述你想要的造型。多张图、多角度上传效果更好。"
       },
       "generate": {
-        "title": "定制 & 开发",
-        "description": "根据你的业务需求定制功能模块，修改品牌信息、配色、定价方案，添加自定义业务逻辑。"
+        "title": "确认 3D 稿",
+        "description": "我们的设计师 24 小时内出建模稿，附带渲染效果与尺寸标注。免费一次修改，不满意全额退款。"
       },
       "export": {
-        "title": "部署 & 上线",
-        "description": "一键部署到 Vercel 或自有服务器，连接 Neon PostgreSQL 数据库，配置域名即可上线。"
+        "title": "投入 WJP 打印",
+        "description": "确认稿件后进入工业级 WJP 产线，全彩打印 + 固化 + 抛光，全程 48-72 小时完成。"
       }
     },
     "completion": {
-      "title": "就是这么简单",
-      "description": "你的 SaaS 产品已准备就绪，随时可以上线运营。"
+      "title": "顺丰送到家",
+      "description": "独立礼盒包装 + 定制编号，全程顺丰速运，下单后 5-7 个工作日送达。"
     }
   },
   "UseCases": {
-    "label": "适用场景",
-    "title": "适合各种 SaaS 产品",
-    "subtitle": "Mooncoda 模板适用于多种类型的 SaaS 产品和业务场景。",
+    "label": "应用场景",
+    "title": "适合每一份独一无二的礼物",
+    "subtitle": "WJP 全彩 3D 打印让任何想得到的造型都能被真实制造。",
     "items": {
       "students": {
-        "title": "AI 产品",
-        "subtitle": "快速构建 AI 应用",
-        "description": "利用内置的异步任务处理和积分系统，快速构建 AI 驱动的 SaaS 产品，支持长时间运行的 AI 任务。",
-        "examples": ["AI 内容生成", "AI 数据分析", "AI 辅助工具"]
+        "title": "宠物纪念",
+        "subtitle": "把毛孩子做成可触摸的回忆",
+        "description": "上传 3-5 张宠物照，我们建模 + 全彩打印，徽章、钥匙扣、冰箱贴、立牌均可。毛色、眼神、表情都还原。",
+        "examples": ["宠物徽章 / 胸针", "钥匙扣 / 挂件", "冰箱贴 / 立牌"]
       },
       "professionals": {
-        "title": "效率工具",
-        "subtitle": "打造专业工具",
-        "description": "完善的认证、订阅和积分系统，让你专注于核心工具逻辑的开发，快速推出你的效率工具产品。",
-        "examples": ["项目管理工具", "文档协作平台", "自动化工作流"]
+        "title": "礼品定制",
+        "subtitle": "企业活动、婚礼伴手、个人纪念",
+        "description": "支持企业 logo 定制、批量伴手礼、婚礼请柬纪念品。一件起印，30 件以上享团购价。",
+        "examples": ["企业伴手礼", "婚礼 / 周年纪念", "生日 / 节日礼物"]
       },
       "language": {
-        "title": "创作者平台",
-        "subtitle": "支持内容创作",
-        "description": "内置文件上传、存储管理和用户系统，适合构建创作者经济平台，支持内容发布和变现。",
-        "examples": ["在线课程平台", "知识付费社区", "数字内容市场"]
+        "title": "二次元周边",
+        "subtitle": "OC / 角色手办的实体化",
+        "description": "上传插画或角色三视图，我们建模 + 全彩打印。从 30mm 迷你挂件到 200mm 收藏手办都能驾驭。",
+        "examples": ["OC / 角色手办", "谷子 / 吧唧 / 亚克力", "收藏级展示模型"]
       },
       "knowledge": {
-        "title": "内部工具",
-        "subtitle": "企业内部系统",
-        "description": "完整的管理后台、权限控制和工单系统，适合快速搭建企业内部管理工具和运营平台。",
-        "examples": ["CRM 客户管理", "运营数据看板", "内部审批系统"]
+        "title": "创意原型",
+        "subtitle": "设计师与创作者的小批量验证",
+        "description": "工业设计、文创周边、艺术装置的全彩打样与小批量生产。一件也接，让创意快速变成实物。",
+        "examples": ["工业设计打样", "文创周边试产", "艺术装置 / 模型"]
       }
     }
   },
   "Testimonials": {
-    "label": "用户评价",
-    "title": "听听开发者们怎么说",
-    "subtitle": "来自不同领域的开发者正在使用 Mooncoda 模板快速构建产品。",
+    "label": "客户评价",
+    "title": "听听他们怎么说",
+    "subtitle": "从个人用户到企业客户，从宠物纪念到企业伴手礼。",
     "items": [
       {
-        "content": "用这个模板两周就上线了一个 AI 写作工具，认证、支付、积分系统全都不用自己写，节省了至少一个月的开发时间。",
-        "author": "林小雨",
-        "role": "独立开发者"
+        "content": "把我家金毛的照片做成了徽章和钥匙扣，颜色还原度惊艳，连眉毛上的小绒毛都清晰可见，毛孩子走了一年了还能摸到它。",
+        "author": "小柚",
+        "role": "宠物纪念 · 北京"
       },
       {
-        "content": "之前自己搭 SaaS 框架花了三个月，用了这个模板后发现认证、订阅、积分这些通用模块的完成度远超预期，代码质量也很高。",
-        "author": "张明远",
-        "role": "全栈工程师"
+        "content": "公司 30 人年会伴手礼，logo 全彩定制 + 个性化名字，从下单到收货 7 天，同事们都说像在拆盲盒，仪式感拉满。",
+        "author": "Mark",
+        "role": "企业活动 · 上海"
       },
       {
-        "content": "国际化方案开箱即用，中英双语直接可用，扩展其他语言也很方便。对需要做多语言市场的 SaaS 产品来说非常省心。",
-        "author": "陈思琪",
-        "role": "产品经理"
+        "content": "插画师的 OC 角色终于做成实体手办了，全彩细节把我画的渐变色和阴影都打出来了，200mm 大货拿在手里非常有分量。",
+        "author": "Yuki",
+        "role": "插画师 · 杭州"
       },
       {
-        "content": "Inngest 异步任务的集成方案非常优雅，完美解决了 Vercel 60 秒超时的问题。我的 AI 产品不再需要担心长任务处理了。",
-        "author": "王浩然",
-        "role": "技术负责人"
+        "content": "婚礼做了 50 份新人 Q 版立牌当伴手礼，每对来宾都收到自己专属的那份，全彩打印的礼服褶皱都看得见，宾客好评率 100%。",
+        "author": "阿楠 & 小七",
+        "role": "婚礼纪念 · 成都"
       },
       {
-        "content": "积分系统的双重记账法实现得很专业，FIFO 批次过期逻辑也考虑到了。直接拿来用，不需要自己设计积分消费方案。",
-        "author": "李雨桐",
-        "role": "后端开发者"
+        "content": "做文创产品最怕起定量，这家一件也接，让我能用最低成本验证市场，爆款打样后才上大货，省了大笔开模费。",
+        "author": "Studio MoMo",
+        "role": "文创设计师 · 苏州"
       },
       {
-        "content": "管理后台已经有了用户管理和工单系统，对小团队来说已经足够用了。部署到自有服务器也很简单，文档写得很清楚。",
-        "author": "赵一鸣",
-        "role": "创业者"
+        "content": "服务态度特别好，模型稿反复改了三次都没收费，最后成品的颜色和质感都超出预期，是会回购的店。",
+        "author": "Daniel",
+        "role": "收藏玩家 · 深圳"
       }
     ]
   },
   "FAQ": {
     "label": "常见问题",
     "title": "你可能想了解的",
-    "subtitle": "关于 Mooncoda 模板的常见问题与解答。",
+    "subtitle": "关于 WJP 全彩 3D 打印定制服务。",
     "items": [
       {
-        "question": "Mooncoda 是什么？",
-        "answer": "Mooncoda 是一个基于 Next.js 16、React 19、TypeScript 的生产就绪 SaaS 模板。内置认证（Better Auth）、支付（Creem）、积分系统、异步任务处理（Inngest）、国际化、管理后台等完整功能，帮助开发者快速启动 SaaS 项目。"
+        "question": "WJP 全彩 3D 打印是什么？",
+        "answer": "WJP (Wax Jet Printing) 是工业级全彩 3D 打印工艺，使用喷蜡 + 固化成型，可以直接打印 1600 万色真彩模型，无需后处理上色。色彩还原度高、纹理细腻，特别适合人像、宠物、二次元角色等需要保留色彩与细节的场景。"
       },
       {
-        "question": "需要哪些技术基础？",
-        "answer": "你需要熟悉 React、TypeScript 和 Next.js 的基础知识。模板使用 Tailwind CSS 做样式，Drizzle ORM 做数据库操作，了解这些技术栈会帮助你更快上手。"
+        "question": "一件真的可以下单吗？有没有最小量？",
+        "answer": "完全可以。一件起定，不设最小量。我们的产线专为单件 / 小批量定制设计，从下单到收货全流程单件独立处理。批量订单（30 件以上）可享团购价，详见定价页面。"
       },
       {
-        "question": "可以部署到哪些平台？",
-        "answer": "模板可以部署到 Vercel（推荐）、自有服务器或任何支持 Node.js 的平台。数据库推荐使用 Neon PostgreSQL（Serverless），文件存储使用 Cloudflare R2。"
+        "question": "下单后多久能收到？",
+        "answer": "常规定制 5-7 个工作日送达（偏远地区除外）。流程：建模稿 24 小时 → 客户确认 → WJP 打印 48-72 小时 → 顺丰发出。加急服务请联系客服。"
       },
       {
-        "question": "积分系统是怎样的？",
-        "answer": "模板内置基于双重记账法的积分系统，支持积分发放、消耗、FIFO 批次过期、余额查询等完整功能。注册用户会获得免费积分，你可以根据业务需求自定义积分规则和定价方案。"
+        "question": "我只有一张照片可以吗？需要专业图吗？",
+        "answer": "一张正面照也能做，但效果可能略逊。建议提供 3-5 张不同角度照片（正面 + 侧面 + 背面 / 俯视），或一张正面照 + 文字描述。AI 生成的图、插画、二次元立绘都可以。"
       },
       {
-        "question": "如何定制支付方案？",
-        "answer": "模板集成 Creem 支付，支持订阅和一次性购买。你可以在配置文件中自定义套餐名称、价格、积分额度和功能权限。Webhook 处理和订阅生命周期管理已经内置。"
+        "question": "可以做哪些产品？尺寸有上限吗？",
+        "answer": "宠物徽章（约 30-50mm）、钥匙扣（约 40-60mm）、冰箱贴（约 60-100mm）、手办（约 100-200mm）、立牌（约 150-300mm）都能做。超过 200mm 或复杂造型请联系客服评估。"
       },
       {
-        "question": "支持哪些认证方式？",
-        "answer": "模板集成 Better Auth，支持邮箱密码注册登录、Google OAuth 和 GitHub OAuth。你可以轻松扩展其他 OAuth 提供商。会话管理、密码重置、邮箱验证等功能开箱即用。"
+        "question": "模型文件版权归谁？",
+        "answer": "版权归你。建模完成后我们会同步提供 STL / OBJ 文件下载，你可以用于个人收藏、二次打印或商业再授权。我们不保留版权，不二次销售你的作品。"
+      },
+      {
+        "question": "如果我对成品不满意怎么办？",
+        "answer": "建模稿阶段可免费修改一次；不满意建模可直接全额退款。打印阶段如出现工艺瑕疵（缺色、断裂等），免费重做或全额退款。运输破损凭包装照片免费补发。"
+      },
+      {
+        "question": "支持哪些付款方式？可以开发票吗？",
+        "answer": "支持微信、支付宝、对公转账。企业用户可申请增值税普通发票 / 专用发票，联系客服登记即可。"
       }
     ]
   },
@@ -270,11 +278,11 @@
     }
   },
   "CTA": {
-    "badge": "免费开始，无需信用卡",
-    "title": "准备好启动你的 SaaS 了吗？",
-    "subtitle": "注册即可获得免费积分，立即体验完整功能。用生产就绪的模板快速构建你的下一个产品。",
-    "getStarted": "免费注册",
-    "seeDemo": "查看演示"
+    "badge": "一件起定 · 一件发货",
+    "title": "把你的想象，变成手中的实物",
+    "subtitle": "上传一张照片，48 小时内收到全彩 3D 建模稿。一件也能定制，让每个想法都被认真对待。",
+    "getStarted": "上传图片定制",
+    "seeDemo": "查看作品集"
   },
   "DashboardPages": {
     "dashboard": {
@@ -401,103 +409,103 @@
   },
   "Pricing": {
     "label": "定价",
-    "title": "简单透明的定价",
-    "subtitle": "按积分付费，<strong>永久有效</strong>，没用完也不浪费。年付立省 40%。",
-    "creditsUpfront": "一次性到账",
-    "creditsPerYear": "积分 / 年",
-    "monthly": "月付",
-    "yearly": "年付",
-    "save": "省",
-    "mostPopular": "性价比最高",
-    "currentPlan": "当前套餐",
-    "alreadySubscribed": "已订阅",
-    "manageSubscription": "管理订阅",
-    "booksNote": "≈ {count} 万次 API 调用",
-    "cardsNote": "≈ {count} 积分",
+    "title": "透明定价，一件起定",
+    "subtitle": "按<strong>产品类型与尺寸</strong>定价，<strong>无最小起订量</strong>。批量订单享团购价，30 件以上 9 折。",
+    "creditsUpfront": "一件起印",
+    "creditsPerYear": "件 / 套",
+    "monthly": "单件",
+    "yearly": "套装",
+    "save": "团购",
+    "mostPopular": "人气款",
+    "currentPlan": "已选",
+    "alreadySubscribed": "已下单",
+    "manageSubscription": "再下一单",
+    "booksNote": "≈ 适用场景 {count}",
+    "cardsNote": "≈ 单件价 {count}",
     "plans": {
       "free": {
-        "name": "免费版",
-        "description": "无负担体验基础功能",
-        "cta": "免费开始",
-        "creditsAmount": "200",
-        "creditsLabel": "积分",
-        "creditsNote": "一次性",
+        "name": "宠物徽章",
+        "description": "30-50mm，全彩胸针 / 徽章",
+        "cta": "立即定制",
+        "creditsAmount": "¥49",
+        "creditsLabel": "/ 件",
+        "creditsNote": "一件起印",
         "features": {
-          "creditsNeverExpire": "积分永久有效，不清零",
-          "credits": "200 积分（一次性）",
-          "input": "基础功能访问",
-          "characters": "标准处理额度",
-          "fileSize": "最大 5MB 文件",
-          "export": "数据导出",
-          "history": "历史数据永久保存"
+          "creditsNeverExpire": "全彩 WJP 工艺打印",
+          "credits": "1 件 30-50mm 徽章",
+          "input": "上传图 → 3D 建模稿",
+          "characters": "顺丰包邮 · 独立包装",
+          "fileSize": "附赠定制卡片",
+          "export": "高清原图归档下载",
+          "history": "成品专属编号"
         }
       },
       "starter": {
-        "name": "入门版",
-        "description": "适合个人开发者和小项目",
-        "cta": "订阅",
-        "creditsAmount": "3,000",
-        "creditsLabel": "积分 / 月",
-        "booksCount": "8",
+        "name": "钥匙扣 / 冰箱贴",
+        "description": "40-100mm，挂件 / 冰箱贴系列",
+        "cta": "立即定制",
+        "creditsAmount": "¥89",
+        "creditsLabel": "/ 件",
+        "booksCount": "2",
         "features": {
-          "creditsNeverExpire": "积分永久有效，不清零",
-          "credits": "每月 3,000 积分",
-          "input": "全部基础功能",
-          "characters": "标准处理额度",
-          "fileSize": "最大 20MB 文件",
-          "export": "数据导出",
-          "history": "历史数据永久保存",
-          "support": "邮件支持"
+          "creditsNeverExpire": "全彩 WJP 工艺打印",
+          "credits": "1 件 40-100mm 挂件",
+          "input": "上传图 → 3D 建模稿",
+          "characters": "顺丰包邮 · 礼盒包装",
+          "fileSize": "附赠定制卡片",
+          "export": "高清原图归档下载",
+          "history": "成品专属编号",
+          "support": "可加金属挂扣 / 磁贴底"
         }
       },
       "pro": {
-        "name": "专业版",
-        "description": "性价比最高，适合成长中的产品",
-        "cta": "订阅",
-        "creditsAmount": "8,000",
-        "creditsLabel": "积分 / 月",
-        "booksCount": "23",
+        "name": "手办 / 立牌",
+        "description": "100-200mm，桌面级收藏摆件",
+        "cta": "立即定制",
+        "creditsAmount": "¥299",
+        "creditsLabel": "/ 件",
+        "booksCount": "3",
         "features": {
-          "creditsNeverExpire": "积分永久有效，不清零",
-          "credits": "每月 8,000 积分",
-          "input": "全部高级功能",
-          "characters": "更大处理额度",
-          "fileSize": "最大 50MB 文件",
-          "queue": "优先处理队列",
-          "export": "数据导出",
-          "history": "历史数据永久保存",
-          "customCards": "自定义功能扩展",
-          "support": "优先支持"
+          "creditsNeverExpire": "全彩 WJP 工艺打印",
+          "credits": "1 件 100-200mm 手办",
+          "input": "上传图 → 3D 建模稿 → 修改",
+          "characters": "顺丰包邮 · 高档礼盒",
+          "fileSize": "附赠定制贺卡 + 丝带",
+          "queue": "建模优先处理",
+          "export": "高清原图 + STL 模型文件",
+          "history": "成品专属编号 + 展示底座",
+          "customCards": "支持 OC / 角色三视图",
+          "support": "1 对 1 设计师对接"
         }
       },
       "ultra": {
-        "name": "旗舰版",
-        "description": "适合高频使用和企业团队",
-        "cta": "订阅",
-        "creditsAmount": "16,000",
-        "creditsLabel": "积分 / 月",
-        "booksCount": "46",
+        "name": "团购 / 企业定制",
+        "description": "30 件起，企业 logo + 批量交付",
+        "cta": "联系商务",
+        "creditsAmount": "9 折",
+        "creditsLabel": "团购价",
+        "booksCount": "30+",
         "features": {
-          "creditsNeverExpire": "积分永久有效，不清零",
-          "credits": "每月 16,000 积分",
-          "input": "全部高级功能",
-          "characters": "最大处理额度",
-          "fileSize": "最大 100MB 文件",
-          "queue": "最高优先队列",
-          "export": "数据导出",
-          "history": "历史数据永久保存",
-          "customCards": "自定义功能扩展",
-          "aiAssist": "高级 AI 功能",
-          "support": "专属支持"
+          "creditsNeverExpire": "全彩 WJP 工艺批量打印",
+          "credits": "30 件起，logo 定制",
+          "input": "统一设计稿 / 来图定制",
+          "characters": "顺丰包邮 · 统一礼盒",
+          "fileSize": "可定制丝带 / 卡片 / 包装",
+          "queue": "专属优先排期",
+          "export": "STL + 设计源文件归档",
+          "history": "企业专属编号体系",
+          "customCards": "可开增值税专用发票",
+          "aiAssist": "一对一项目对接",
+          "support": "专属客户经理"
         }
       }
     }
   },
   "Header": {
-    "dashboard": "控制台",
+    "dashboard": "我的订单",
     "login": "登录",
-    "getStarted": "免费开始",
-    "docs": "文档"
+    "getStarted": "上传定制",
+    "docs": "工艺介绍"
   },
   "Navigation": {
     "products": "产品",
@@ -796,11 +804,11 @@
     }
   },
   "Footer": {
-    "description": "生产就绪的 Next.js SaaS 模板，内置认证、支付、积分、国际化等功能。",
-    "product": "产品",
-    "legal": "法律",
+    "description": "Mooncoda 梦可达 — WJP 全彩 3D 打印专家，宠物徽章、钥匙扣、冰箱贴、手办等一件定制、一件发货。",
+    "product": "作品",
+    "legal": "条款",
     "copyright": "© {year} {name}。保留所有权利。",
-    "twitter": "Twitter",
-    "github": "GitHub"
+    "twitter": "微博",
+    "github": "小红书"
   }
 }

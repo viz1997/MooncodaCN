@@ -1,194 +1,198 @@
 {
   "HomePage": {
     "title": "Mooncoda",
-    "subtitle": "Production-Ready Next.js SaaS Template",
-    "description": "Ship your SaaS product faster with a production-ready full-stack template."
+    "subtitle": "WJP Full-Color 3D Printing Expert",
+    "description": "Pet badges, keychains, fridge magnets, figures — single-piece customization & shipping."
   },
   "Hero": {
-    "badge": "New: AI Model Integration",
-    "eyebrow": "Next.js 16 · Drizzle · Better Auth · Inngest",
-    "title1": "Ship the SaaS.",
-    "titleHighlight": "Not the scaffolding.",
-    "subtitle": "A production-grade Next.js template with auth, payments, credits, background jobs, i18n, and an admin panel — wired end-to-end. Spend week one on your product, not month six of plumbing.",
-    "getStarted": "Start building",
-    "seeDemo": "See how it works",
-    "trustLine": "Trusted by developers worldwide",
+    "badge": "Single-piece custom · Single-piece shipping",
+    "eyebrow": "WJP Full-Color 3D Printing · Pet Goods · Gift Customization",
+    "title1": "Your imagination,",
+    "titleHighlight": "printed one piece at a time.",
+    "subtitle": "Mooncoda specializes in WJP full-color 3D printing — pet badges, keychains, fridge magnets, figures, gift models. From a single photo to a tangible object in as little as 24 hours. One-piece minimums, single-piece shipping — every idea becomes a limited edition.",
+    "getStarted": "Upload to customize",
+    "seeDemo": "See the gallery",
+    "trustLine": "Trusted by thousands of creators",
     "stats": {
-      "cards": "Projects Built",
-      "users": "Developers",
-      "rating": "Satisfaction"
+      "cards": "Orders Delivered",
+      "users": "Creator Partners",
+      "rating": "Repeat Rate"
     },
     "meta": {
-      "modules": "feature modules",
-      "tests": "tests, all passing",
-      "errors": "type / lint errors",
-      "license": "self-hostable, MIT"
+      "modules": "product categories",
+      "tests": "full-color · micron-level",
+      "errors": "min. 1 piece · no MOQ",
+      "license": "single shipping · SF Express"
     },
     "panel": {
-      "title": "Production · readout",
-      "region": "/usr/app · us-east-1",
-      "p95": "P95 latency",
-      "uptime": "Uptime",
-      "jobs": "Jobs / min",
-      "signups": "Signups · last 14d",
-      "pillOk": "Deploy passing",
-      "pillStack": "Vercel · Neon · R2"
+      "title": "Today · production floor",
+      "region": "WJP Industrial · Zhejiang · in operation",
+      "p95": "Lead time",
+      "uptime": "Yield rate",
+      "jobs": "Today's orders",
+      "signups": "Delivered · last 14d",
+      "pillOk": "Line in operation",
+      "pillStack": "WJP · Full-color · Resin"
     }
   },
   "Features": {
-    "label": "Core Features",
-    "title": "Everything You Need to Launch",
-    "subtitle": "Every essential SaaS feature, pre-built and production-ready, so you can focus on what makes your product unique.",
+    "label": "Why Choose Us",
+    "title": "WJP Full-Color, One Piece is Big-Batch Quality",
+    "subtitle": "Full-color 3D printing technology faithfully reproduces photo-grade color and detail. No minimum order, no complexity threshold — every idea can be made real.",
     "items": {
       "ai": {
-        "title": "Auth & Security",
-        "description": "Better Auth with email/password, Google and GitHub OAuth, email verification, and role-based access control out of the box."
+        "title": "Full-Color Process",
+        "description": "WJP (Wax Jet Printing) full-color 3D printing, 16-million-color reproduction, textures, gradients, and shadows in one pass — no post-processing coloring needed."
       },
       "multiSource": {
-        "title": "Payment & Subscription",
-        "description": "Creem integration for subscriptions and one-time purchases. Four plan tiers with automatic billing cycle management."
+        "title": "One-Piece Custom",
+        "description": "One-piece minimums, no batch-up required. Send a photo or illustration; we deliver a 3D proof within 48 hours and start printing once you approve."
       },
       "outline": {
-        "title": "Credits System",
-        "description": "Double-entry bookkeeping with FIFO batch expiration. Grant, consume, and track credits with full transaction history."
+        "title": "One-Piece Shipping",
+        "description": "Each piece individually packaged via SF Express. Every product carries an authenticity tag and custom serial — ready to gift or keep."
       },
       "export": {
-        "title": "Async Processing",
-        "description": "Inngest-powered background jobs that bypass serverless timeouts. Built-in task queue with status polling and progress tracking."
+        "title": "Multiple Materials",
+        "description": "Choose from resin, wax-based, or PLA. From 30mm badges to 200mm figures — small keepsakes to collector-grade art pieces."
       },
       "batch": {
-        "title": "Internationalization",
-        "description": "Full i18n support via next-intl with locale-prefixed routes. Ship in multiple languages from day one."
+        "title": "Pro Modeling",
+        "description": "We handle image retouch, 3D modeling, and support splitting for you. Model files are transparently downloadable — copyright stays with you."
       },
       "multilingual": {
-        "title": "Admin Dashboard",
-        "description": "Built-in admin panel for user management, support tickets, and platform statistics. Role-based access with admin-only routes."
+        "title": "Gift-Grade Packaging",
+        "description": "Free gift box packaging, custom cards, ribbon accessories — birthday surprises to wedding favors, every unboxing has ceremony."
       }
     }
   },
   "HowItWorks": {
     "label": "How It Works",
-    "title": "From Zero to Production in Three Steps",
-    "subtitle": "Get your SaaS up and running in minutes, not months.",
+    "title": "From Photo to Object in Four Steps",
+    "subtitle": "Upload → proof → print → delivery, fully visualized online.",
     "steps": {
       "upload": {
-        "title": "Clone & Configure",
-        "description": "Clone the repository, install dependencies with pnpm, and set your environment variables. Database, auth, and payments are ready to connect."
+        "title": "Upload Photo / Description",
+        "description": "Send a pet photo, portrait, illustration, AI image, or describe what you want in text. Multiple angles work best."
       },
       "generate": {
-        "title": "Customize & Build",
-        "description": "Replace the example features with your own business logic. The modular architecture keeps everything organized by feature domain."
+        "title": "Confirm 3D Proof",
+        "description": "Our designers deliver a 3D model with rendered preview and size specs within 24 hours. One free revision; full refund if unsatisfied."
       },
       "export": {
-        "title": "Deploy & Launch",
-        "description": "Deploy to Vercel, your own server, or any Node.js host. Push your Drizzle schema, configure webhooks, and go live."
+        "title": "WJP Production",
+        "description": "After approval, your piece enters the industrial WJP line: full-color printing, curing, and polishing — all in 48-72 hours."
       }
     },
     "completion": {
-      "title": "That's it!",
-      "description": "Your SaaS is live. Focus on growing your product and acquiring customers."
+      "title": "SF Express to Your Door",
+      "description": "Individual gift box + custom serial number. SF Express shipping, 5-7 working days from order."
     }
   },
   "UseCases": {
     "label": "Use Cases",
-    "title": "Build Any SaaS Product",
-    "subtitle": "Mooncoda provides the foundation for a wide range of SaaS applications.",
+    "title": "For Every Unique Gift",
+    "subtitle": "WJP full-color 3D printing turns any conceivable shape into a real object.",
     "items": {
       "students": {
-        "title": "AI Products",
-        "subtitle": "AI-Powered Applications",
-        "description": "Build AI wrappers, content generators, or intelligent assistants. The credits system and async processing handle LLM calls and usage metering out of the box.",
-        "examples": [
-          "AI content tools",
-          "Chatbot platforms",
-          "Image generators"
-        ]
+        "title": "Pet Memorials",
+        "subtitle": "Make your furry friend a touchable keepsake",
+        "description": "Send 3-5 pet photos; we model + full-color print as badges, keychains, fridge magnets, standees. Faithful fur color, gaze, and expression.",
+        "examples": ["Pet badges / pins", "Keychains / charms", "Fridge magnets / standees"]
       },
       "professionals": {
-        "title": "Productivity Tools",
-        "subtitle": "Workflow & Collaboration",
-        "description": "Create project management, note-taking, or team collaboration tools. Auth, roles, and subscription tiers are already wired up.",
-        "examples": ["Task managers", "Document editors", "Scheduling apps"]
+        "title": "Gift Customization",
+        "subtitle": "Corporate events, wedding favors, personal keepsakes",
+        "description": "Custom logos, bulk wedding favors, anniversary keepsakes. Single-piece start, 30+ pieces enjoy group pricing.",
+        "examples": ["Corporate gifts", "Wedding / anniversary keepsakes", "Birthday / holiday gifts"]
       },
       "language": {
-        "title": "Creator Platforms",
-        "subtitle": "Content & Community",
-        "description": "Launch platforms for creators, educators, or communities. Payment processing, user dashboards, and file storage are ready to use.",
-        "examples": ["Course platforms", "Newsletter tools", "Membership sites"]
+        "title": "Anime & OC Merch",
+        "subtitle": "Bring your OC / character to life as a figure",
+        "description": "Send an illustration or character reference sheet; we model + full-color print. From 30mm mini charms to 200mm collector figures.",
+        "examples": ["OC / character figures", "Goods / badges / acrylics", "Collector display models"]
       },
       "knowledge": {
-        "title": "Internal Tools",
-        "subtitle": "Business Operations",
-        "description": "Build internal dashboards, admin panels, or data management tools. The admin module and role-based access provide a solid starting point.",
-        "examples": ["Admin dashboards", "CRM systems", "Reporting tools"]
+        "title": "Creative Prototyping",
+        "subtitle": "Small-batch validation for designers & creators",
+        "description": "Full-color proofing and small-batch production for industrial design, cultural goods, art installations. One piece welcome.",
+        "examples": ["Industrial design proofing", "Cultural goods trial", "Art installations / models"]
       }
     }
   },
   "Testimonials": {
     "label": "Testimonials",
-    "title": "What Developers Say",
-    "subtitle": "Developers around the world are using Mooncoda to ship their SaaS products faster.",
+    "title": "What Customers Say",
+    "subtitle": "From individuals to enterprises — pet memorials, corporate gifts, and more.",
     "items": [
       {
-        "content": "I went from idea to paying customers in under a week. The auth, payments, and credits system saved me at least a month of development time.",
-        "author": "Sarah Lin",
-        "role": "Indie Hacker · AI Tools"
+        "content": "I had my Golden Retriever's photo made into a badge and keychain. The color reproduction is stunning — even the fine hairs on the eyebrows are visible. My pup has been gone a year, but I can still touch them.",
+        "author": "Xiao You",
+        "role": "Pet Memorial · Beijing"
       },
       {
-        "content": "The Inngest integration for background jobs is a game-changer. I no longer worry about serverless timeouts when processing large tasks for my users.",
-        "author": "Michael Zhang",
-        "role": "Full-Stack Developer"
+        "content": "30-piece year-end corporate favors with custom logo and individual names. From order to delivery in 7 days — colleagues said it felt like unboxing a mystery gift. Maximum ceremony.",
+        "author": "Mark",
+        "role": "Corporate Event · Shanghai"
       },
       {
-        "content": "Having i18n baked in from the start made expanding to international markets seamless. We launched in English and Chinese simultaneously.",
-        "author": "Emily Chen",
-        "role": "Startup Founder"
+        "content": "My OC character is finally a real figure! The full-color detail preserved the gradients and shadows I drew. The 200mm piece has serious weight in hand.",
+        "author": "Yuki",
+        "role": "Illustrator · Hangzhou"
       },
       {
-        "content": "The credits system with double-entry bookkeeping is incredibly well-designed. It took me five minutes to wire up usage metering for my API product.",
-        "author": "David Wang",
-        "role": "Senior Engineer · API Platform"
+        "content": "We ordered 50 Q-version standees as wedding favors. Every guest received their own version. The full-color print even shows the folds of the dress — 100% approval from guests.",
+        "author": "Anan & Xiaoqi",
+        "role": "Wedding Memorial · Chengdu"
       },
       {
-        "content": "The modular feature architecture is exactly what I needed. Each domain is self-contained, so onboarding new developers to the codebase is effortless.",
-        "author": "Lisa Li",
-        "role": "Tech Lead · SaaS Startup"
+        "content": "The biggest fear with cultural products is MOQ. This shop takes one piece, letting me validate the market at minimum cost. The hot-seller is sampled first, then I scale up — saved a fortune on mold fees.",
+        "author": "Studio MoMo",
+        "role": "Cultural Goods Designer · Suzhou"
       },
       {
-        "content": "I've tried dozens of SaaS boilerplates. This one stands out because it doesn't cut corners — the admin panel, support tickets, and subscription management all work end-to-end.",
-        "author": "Kevin Zhao",
-        "role": "Solo Developer · Productivity Tools"
+        "content": "The customer service was great — they revised the 3D proof three times without charging. The final product's color and texture exceeded expectations. Will definitely reorder.",
+        "author": "Daniel",
+        "role": "Collector · Shenzhen"
       }
     ]
   },
   "FAQ": {
     "label": "FAQ",
     "title": "Questions You Might Have",
-    "subtitle": "Common questions and answers about Mooncoda.",
+    "subtitle": "About our WJP full-color 3D printing customization service.",
     "items": [
       {
-        "question": "What is Mooncoda?",
-        "answer": "Mooncoda is a production-ready Next.js SaaS starter template. It includes authentication, payment processing, a credits system, background job processing, internationalization, an admin dashboard, and more — everything you need to launch a SaaS product quickly."
+        "question": "What is WJP full-color 3D printing?",
+        "answer": "WJP (Wax Jet Printing) is an industrial-grade full-color 3D printing process using wax-jet + curing. It directly prints 16-million-color models with no post-processing coloring needed. High color fidelity and fine texture — perfect for portraits, pets, anime characters, and any scene that needs color and detail preserved."
       },
       {
-        "question": "What tech stack does it use?",
-        "answer": "Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS 4, Shadcn/UI, Drizzle ORM with PostgreSQL, Better Auth for authentication, Creem for payments, Inngest for async processing, next-intl for i18n, and Biome for linting and formatting."
+        "question": "Can I really order just one piece? Any minimum?",
+        "answer": "Absolutely. One-piece minimum, no MOQ. Our production line is purpose-built for single-piece / small-batch customization — every order handled individually from start to finish. Bulk orders (30+) enjoy group pricing — see the Pricing page."
       },
       {
-        "question": "How is the credits system designed?",
-        "answer": "The credits system uses double-entry bookkeeping with FIFO batch expiration. Every credit movement creates a transaction with debit and credit accounts. Credits can be granted via subscriptions, purchases, or admin actions, and consumed by any feature you build."
+        "question": "How long until I receive my order?",
+        "answer": "Standard orders deliver in 5-7 working days (excluding remote areas). Process: 24h 3D proof → customer approval → 48-72h WJP printing → SF Express dispatch. Rush service: contact customer support."
       },
       {
-        "question": "Can I customize the subscription plans?",
-        "answer": "Absolutely. The subscription plan configuration is centralized in a single config file. You can adjust plan names, pricing, credit allocations, feature limits, and billing cycles to match your product's needs."
+        "question": "Is one photo enough? Do I need professional images?",
+        "answer": "A single front photo works, but the result may be slightly less ideal. We recommend 3-5 photos from different angles (front + side + back / top). AI-generated images, illustrations, and anime reference sheets are all accepted."
       },
       {
-        "question": "Does it support background processing?",
-        "answer": "Yes. Inngest handles all background jobs, solving the serverless timeout problem. Tasks run asynchronously with status polling and progress tracking built in. You can easily add your own Inngest functions for any long-running work."
+        "question": "What products can I order? Any size limits?",
+        "answer": "Pet badges (~30-50mm), keychains (~40-60mm), fridge magnets (~60-100mm), figures (~100-200mm), standees (~150-300mm) all supported. For over 200mm or complex shapes, please contact customer support for evaluation."
       },
       {
-        "question": "Is it ready for production?",
-        "answer": "Yes. The template includes rate limiting, error monitoring (Sentry), structured logging (Pino + Axiom), secure file storage (Cloudflare R2), and graceful degradation for optional services. It's designed to run on a VPS or any Node.js hosting platform."
+        "question": "Who owns the 3D model files?",
+        "answer": "You do. After modeling is complete, we provide STL / OBJ files for download. You can use them for personal collection, re-printing, or commercial sublicensing. We retain no copyright and will not resell your work."
+      },
+      {
+        "question": "What if I'm not satisfied with the final product?",
+        "answer": "At the 3D proof stage, one free revision; full refund if you reject the proof entirely. At the printing stage, defects (color loss, breakage, etc.) are remade free or refunded in full. Shipping damage is replaced free with packaging photos."
+      },
+      {
+        "question": "Which payment methods are supported? Invoices available?",
+        "answer": "WeChat Pay, Alipay, and corporate bank transfer. Business customers can apply for VAT ordinary invoices or special invoices — contact customer support to register."
       }
     ]
   },
@@ -274,10 +278,10 @@
     }
   },
   "CTA": {
-    "badge": "Start free, no credit card required",
-    "title": "Ready to Launch Your SaaS?",
-    "subtitle": "Get started with a production-ready template and ship your product in days, not months. Everything you need is already built in.",
-    "getStarted": "Get Started Free",
+    "badge": "Single-piece custom · Single-piece shipping",
+    "title": "Turn Your Imagination into a Real Object",
+    "subtitle": "Upload one photo, get a full-color 3D proof within 48 hours. Customization with no minimum order — every idea is taken seriously.",
+    "getStarted": "Upload to customize",
     "seeDemo": "Live Demo"
   },
   "DashboardPages": {
@@ -342,10 +346,10 @@
     "anonymous_migration_bonus": "New user bonus: Saved {cardCount} items for free"
   },
   "Header": {
-    "dashboard": "Dashboard",
+    "dashboard": "My Orders",
     "login": "Login",
-    "getStarted": "Get Started",
-    "docs": "Docs"
+    "getStarted": "Upload to Customize",
+    "docs": "Process"
   },
   "Navigation": {
     "products": "Products",
@@ -449,94 +453,94 @@
   },
   "Pricing": {
     "label": "Pricing",
-    "title": "Simple, transparent pricing",
-    "subtitle": "Pay by credits — <strong>never expire</strong>, so unused credits aren't wasted. Use credits for any metered feature in your app. Save 40% with yearly billing.",
-    "creditsUpfront": "all at once",
-    "creditsPerYear": "credits / year",
-    "monthly": "Monthly",
-    "yearly": "Yearly",
-    "save": "Save",
-    "mostPopular": "Best Value",
-    "currentPlan": "Current Plan",
-    "alreadySubscribed": "Already Subscribed",
-    "manageSubscription": "Manage Subscription",
-    "booksNote": "≈ {count} units of usage",
-    "cardsNote": "≈ {count} operations",
+    "title": "Transparent pricing, single-piece start",
+    "subtitle": "Pricing by <strong>product type and size</strong>, <strong>no minimum order</strong>. Bulk orders enjoy group pricing — 10% off for 30+ pieces.",
+    "creditsUpfront": "1 piece min.",
+    "creditsPerYear": "pcs / set",
+    "monthly": "Single",
+    "yearly": "Bundle",
+    "save": "Bulk",
+    "mostPopular": "Most Popular",
+    "currentPlan": "Selected",
+    "alreadySubscribed": "Ordered",
+    "manageSubscription": "Order another",
+    "booksNote": "≈ {count} use cases",
+    "cardsNote": "≈ {count} / piece",
     "plans": {
       "free": {
-        "name": "Free",
-        "description": "Try the platform with no commitment",
-        "cta": "Get Started",
-        "creditsAmount": "200",
-        "creditsLabel": "credits",
-        "creditsNote": "one-time",
+        "name": "Pet Badge",
+        "description": "30-50mm full-color pin / badge",
+        "cta": "Customize Now",
+        "creditsAmount": "$7",
+        "creditsLabel": "/ piece",
+        "creditsNote": "1 piece min.",
         "features": {
-          "creditsNeverExpire": "Credits never expire",
-          "credits": "200 credits (one-time)",
-          "input": "Core features access",
-          "characters": "Standard usage limits",
-          "fileSize": "Max 5MB file size",
-          "export": "Data export",
-          "history": "History saved forever"
+          "creditsNeverExpire": "WJP full-color printing",
+          "credits": "1 piece 30-50mm badge",
+          "input": "Photo upload → 3D proof",
+          "characters": "SF Express · individual pack",
+          "fileSize": "Custom card included",
+          "export": "HD source archive",
+          "history": "Unique product serial"
         }
       },
       "starter": {
-        "name": "Starter",
-        "description": "Great for getting started",
-        "cta": "Subscribe",
-        "creditsAmount": "3,000",
-        "creditsLabel": "credits / month",
-        "booksCount": "8",
+        "name": "Keychain / Fridge Magnet",
+        "description": "40-100mm charms / fridge magnets",
+        "cta": "Customize Now",
+        "creditsAmount": "$13",
+        "creditsLabel": "/ piece",
+        "booksCount": "2",
         "features": {
-          "creditsNeverExpire": "Credits never expire",
-          "credits": "3,000 credits / month",
-          "input": "Core features access",
-          "characters": "Standard usage limits",
-          "fileSize": "Max 20MB file size",
-          "export": "Data export",
-          "history": "History saved forever",
-          "support": "Email support"
+          "creditsNeverExpire": "WJP full-color printing",
+          "credits": "1 piece 40-100mm charm",
+          "input": "Photo upload → 3D proof",
+          "characters": "SF Express · gift box pack",
+          "fileSize": "Custom card included",
+          "export": "HD source archive",
+          "history": "Unique product serial",
+          "support": "Optional metal hook / magnet base"
         }
       },
       "pro": {
-        "name": "Pro",
-        "description": "Best value for growing projects",
-        "cta": "Subscribe",
-        "creditsAmount": "8,000",
-        "creditsLabel": "credits / month",
-        "booksCount": "23",
+        "name": "Figure / Standee",
+        "description": "100-200mm desktop collectible",
+        "cta": "Customize Now",
+        "creditsAmount": "$43",
+        "creditsLabel": "/ piece",
+        "booksCount": "3",
         "features": {
-          "creditsNeverExpire": "Credits never expire",
-          "credits": "8,000 credits / month",
-          "input": "All features unlocked",
-          "characters": "Extended usage limits",
-          "fileSize": "Max 50MB file size",
-          "queue": "Priority processing queue",
-          "export": "Data export",
-          "history": "History saved forever",
-          "customCards": "Custom integrations (coming soon)",
-          "support": "Priority support"
+          "creditsNeverExpire": "WJP full-color printing",
+          "credits": "1 piece 100-200mm figure",
+          "input": "Photo → 3D proof → revision",
+          "characters": "SF Express · premium gift box",
+          "fileSize": "Custom card + ribbon included",
+          "queue": "Priority modeling",
+          "export": "HD source + STL files",
+          "history": "Unique serial + display base",
+          "customCards": "OC / character reference sheets",
+          "support": "1-on-1 designer pairing"
         }
       },
       "ultra": {
-        "name": "Ultra",
-        "description": "For power users and teams",
-        "cta": "Subscribe",
-        "creditsAmount": "16,000",
-        "creditsLabel": "credits / month",
-        "booksCount": "46",
+        "name": "Bulk / Enterprise",
+        "description": "30+ pieces, custom logo, bulk delivery",
+        "cta": "Contact Sales",
+        "creditsAmount": "10% off",
+        "creditsLabel": "bulk pricing",
+        "booksCount": "30+",
         "features": {
-          "creditsNeverExpire": "Credits never expire",
-          "credits": "16,000 credits / month",
-          "input": "All features unlocked",
-          "characters": "Maximum usage limits",
-          "fileSize": "Max 100MB file size",
-          "queue": "Highest priority queue",
-          "export": "Data export",
-          "history": "History saved forever",
-          "customCards": "Custom integrations (coming soon)",
-          "aiAssist": "Advanced API access (coming soon)",
-          "support": "Dedicated support"
+          "creditsNeverExpire": "WJP full-color batch printing",
+          "credits": "30+ pieces, logo customization",
+          "input": "Unified design / source image",
+          "characters": "SF Express · unified gift box",
+          "fileSize": "Custom ribbon / card / packaging",
+          "queue": "Dedicated priority schedule",
+          "export": "STL + design source archive",
+          "history": "Enterprise serial system",
+          "customCards": "VAT special invoice available",
+          "aiAssist": "1-on-1 project lead",
+          "support": "Dedicated account manager"
         }
       }
     }
@@ -800,11 +804,11 @@
     }
   },
   "Footer": {
-    "description": "Production-ready Next.js SaaS template with auth, payments, credits, i18n, and more.",
-    "product": "Product",
+    "description": "Mooncoda — WJP full-color 3D printing expert. Pet badges, keychains, fridge magnets, figures — single-piece customization & shipping.",
+    "product": "Gallery",
     "legal": "Legal",
     "copyright": "© {year} {name}. All rights reserved.",
-    "twitter": "Twitter",
-    "github": "GitHub"
+    "twitter": "Weibo",
+    "github": "Xiaohongshu"
   }
 }

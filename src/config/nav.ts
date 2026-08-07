@@ -149,9 +149,9 @@ export const productsNav: ProductNavGroup[] = [
  * 主导航链接 (Header)
  */
 export const mainNav: NavItem[] = [
+  { title: "Gallery", href: "/products" },
   { title: "Image Gen", href: "/image-gen" },
   { title: "Docs", href: "/docs" },
-  { title: "PSEO", href: "/pseo" },
   { title: "Pricing", href: "/#pricing" },
   { title: "Blog", href: "/blog" },
 ];
@@ -199,11 +199,8 @@ export const dashboardNav: NavGroup[] = [
         href: "/dashboard/generate",
         icon: Wand2,
       },
-      {
-        title: "Public Image Gen",
-        href: "/image-gen",
-        icon: Sparkles,
-      },
+      // 已隐藏：公开生图（与 /image-gen 公开页重复）
+      // { title: "Public Image Gen", href: "/image-gen", icon: Sparkles },
       {
         title: "Photos",
         href: "/dashboard/photos",
@@ -214,16 +211,10 @@ export const dashboardNav: NavGroup[] = [
         href: "/dashboard/effects",
         icon: Image,
       },
-      {
-        title: "Models",
-        href: "/dashboard/models",
-        icon: Image,
-      },
-      {
-        title: "Credits",
-        href: "/dashboard/credits",
-        icon: Coins,
-      },
+      // 已隐藏：3D 模型管理
+      // { title: "Models", href: "/dashboard/models", icon: Image },
+      // 已隐藏：积分页（积分功能未启用）
+      // { title: "Credits", href: "/dashboard/credits", icon: Coins },
       {
         title: "Orders",
         href: "/dashboard/prompt-orders",
@@ -265,11 +256,8 @@ export const adminNav: NavGroup[] = [
   {
     title: "管理中心",
     items: [
-      {
-        title: "控制面板",
-        href: "/admin",
-        icon: LayoutDashboard,
-      },
+      // 已隐藏：控制面板总览页
+      // { title: "控制面板", href: "/admin", icon: LayoutDashboard },
       {
         title: "用户管理",
         href: "/admin/users",

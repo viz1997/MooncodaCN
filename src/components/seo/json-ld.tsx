@@ -2,10 +2,12 @@ import {
   type ArticleSchemaInput,
   type BreadcrumbItem,
   type FAQItem,
+  type ProductSchemaInput,
   generateArticleSchema,
   generateBreadcrumbSchema,
   generateFAQSchema,
   generateOrganizationSchema,
+  generateProductSchema,
   generateSoftwareApplicationSchema,
   generateWebSiteSchema,
 } from "@/lib/seo/json-ld";
@@ -65,6 +67,13 @@ export function BreadcrumbJsonLd({ items }: { items: BreadcrumbItem[] }) {
  */
 export function SoftwareAppJsonLd({ locale }: { locale: LocaleType }) {
   return <JsonLdScript data={generateSoftwareApplicationSchema(locale)} />;
+}
+
+/**
+ * Product（作品集详情页）
+ */
+export function ProductJsonLd(props: ProductSchemaInput) {
+  return <JsonLdScript data={generateProductSchema(props)} />;
 }
 
 /**
