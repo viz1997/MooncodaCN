@@ -2,7 +2,10 @@
 
 import { BookOpen, Briefcase, GraduationCap, Languages } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { Reveal } from "@/components/motion/reveal";
 import { Card, CardContent } from "@/components/ui/card";
+
+import { Section, SectionHeader } from "./section";
 
 const useCaseConfig = [
   { key: "students" as const, icon: GraduationCap },
@@ -15,22 +18,16 @@ export function UseCasesSection() {
   const t = useTranslations("UseCases");
 
   return (
-    <section id="use-cases" className="container py-24">
-      <div className="mx-auto max-w-6xl">
-        {/* Header */}
-        <div className="mb-16 text-center">
-          <p className="mb-2 text-sm font-medium uppercase tracking-wider text-primary">
-            {t("label")}
-          </p>
-          <h2 className="mb-4 text-balance text-3xl font-bold tracking-tight md:text-4xl">
-            {t("title")}
-          </h2>
-          <p className="mx-auto max-w-2xl text-muted-foreground">
-            {t("subtitle")}
-          </p>
-        </div>
+    <Section id="use-cases">
+      <SectionHeader
+        eyebrow={t("label")}
+        title={t("title")}
+        subtitle={t("subtitle")}
+        align="center"
+      />
 
-        {/* Use Cases Grid */}
+      {/* Use Cases Grid */}
+      <Reveal delay={0.08}>
         <div className="grid gap-6 md:grid-cols-2">
           {useCaseConfig.map((uc) => {
             const Icon = uc.icon;
@@ -72,7 +69,7 @@ export function UseCasesSection() {
             );
           })}
         </div>
-      </div>
-    </section>
+      </Reveal>
+    </Section>
   );
 }

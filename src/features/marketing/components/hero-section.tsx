@@ -4,25 +4,17 @@ import { motion } from "framer-motion";
 import { ArrowRight, Award, Box, KeyRound, Magnet } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import {
+  heroContainerVariants,
+  heroItemVariants,
+} from "@/components/motion/variants";
 import { Button } from "@/components/ui/button";
 import { Link } from "@/i18n/routing";
 
 /**
- * 缓动曲线（全站统一）+ 入场动画变体
+ * 入场动画变体（与全站 Reveal 共享 EASE 曲线，见 src/components/motion/variants.ts）。
+ * Hero 用一次性 mount stagger（不依赖滚动），区别于 Reveal 的 useInView 触发。
  */
-const EASE: [number, number, number, number] = [0.22, 0.7, 0.16, 1];
-
-const containerVariants = {
-  hidden: {},
-  show: {
-    transition: { staggerChildren: 0.08, delayChildren: 0.04 },
-  },
-};
-
-const itemVariants = {
-  hidden: { opacity: 0, y: 16 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.6, ease: EASE } },
-};
 
 /**
  * Hero Section —— 工程图纸风首页主视觉
@@ -49,17 +41,17 @@ export function HeroSection() {
       <div className="container grid items-center gap-14 py-20 md:py-28">
         {/* 左列 */}
         <motion.div
-          variants={containerVariants}
+          variants={heroContainerVariants}
           initial="hidden"
           animate="show"
           className="flex flex-col items-start"
         >
-          <motion.span variants={itemVariants} className="eyebrow">
+          <motion.span variants={heroItemVariants} className="eyebrow">
             {t("eyebrow")}
           </motion.span>
 
           <motion.h1
-            variants={itemVariants}
+            variants={heroItemVariants}
             className="mt-6 text-4xl font-extrabold tracking-tight text-balance text-foreground text-[clamp(2.5rem,6vw,4.5rem)] leading-[1.02]"
           >
             <span className="block">{t("title1")}</span>
@@ -75,14 +67,14 @@ export function HeroSection() {
           </motion.h1>
 
           <motion.p
-            variants={itemVariants}
+            variants={heroItemVariants}
             className="mt-6 max-w-xl text-base leading-relaxed text-muted-foreground sm:text-lg"
           >
             {t("subtitle")}
           </motion.p>
 
           <motion.div
-            variants={itemVariants}
+            variants={heroItemVariants}
             className="mt-8 flex w-full flex-col gap-3 sm:w-auto sm:flex-row"
           >
             <Button size="lg" asChild className="group">
@@ -97,7 +89,7 @@ export function HeroSection() {
           </motion.div>
 
           <motion.div
-            variants={itemVariants}
+            variants={heroItemVariants}
             className="mt-10 border-t pt-7"
           >
             <div className="mb-3 flex items-center justify-between">
@@ -171,7 +163,9 @@ function ProductCard({
         <Icon className="h-4 w-4" />
       </div>
       <div className="min-w-0">
-        <div className="truncate text-sm font-semibold tracking-tight">{name}</div>
+        <div className="truncate text-sm font-semibold tracking-tight">
+          {name}
+        </div>
         <div className="mt-0.5 flex items-baseline justify-between gap-1 font-mono text-[10px] text-muted-foreground">
           <span className="truncate">{size}</span>
           <span className="shrink-0 font-semibold text-foreground tabular-nums">

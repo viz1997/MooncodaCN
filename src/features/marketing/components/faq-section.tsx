@@ -9,6 +9,7 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
+import { Section, SectionHeader } from "./section";
 
 export function FAQSection() {
   const t = useTranslations("FAQ");
@@ -29,31 +30,22 @@ export function FAQSection() {
   ];
 
   return (
-    <section className="border-t py-24">
-      <div className="container max-w-3xl">
-        <Reveal>
-          <div className="mb-12 text-center">
-            <span className="eyebrow justify-center">{t("label")}</span>
-            <h2 className="mt-4 text-balance text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">
-              {t("title")}
-            </h2>
-          </div>
-        </Reveal>
+    <Section container="narrow">
+      <SectionHeader eyebrow={t("label")} title={t("title")} align="center" />
 
-        <Reveal delay={0.08}>
-          <Accordion type="single" collapsible className="w-full">
-            {faqItems.map((faq, index) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: static FAQ list
-              <AccordionItem key={index} value={`item-${index}`}>
-                <AccordionTrigger className="text-left">
-                  {faq.question}
-                </AccordionTrigger>
-                <AccordionContent>{faq.answer}</AccordionContent>
-              </AccordionItem>
-            ))}
-          </Accordion>
-        </Reveal>
-      </div>
-    </section>
+      <Reveal delay={0.08}>
+        <Accordion type="single" collapsible className="w-full">
+          {faqItems.map((faq, index) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: static FAQ list
+            <AccordionItem key={index} value={`item-${index}`}>
+              <AccordionTrigger className="text-left">
+                {faq.question}
+              </AccordionTrigger>
+              <AccordionContent>{faq.answer}</AccordionContent>
+            </AccordionItem>
+          ))}
+        </Accordion>
+      </Reveal>
+    </Section>
   );
 }

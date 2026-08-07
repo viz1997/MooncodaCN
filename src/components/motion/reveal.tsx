@@ -4,6 +4,8 @@ import { motion, useInView } from "framer-motion";
 import type { ReactNode } from "react";
 import { useRef } from "react";
 
+import { EASE, ENTRANCE_DURATION } from "./variants";
+
 /**
  * Reveal — 滚动进入视口时淡入上浮的包裹组件
  *
@@ -40,9 +42,9 @@ export function Reveal({
       initial={{ opacity: 0, y: 16 }}
       animate={inView ? { opacity: 1, y: 0 } : { opacity: 0, y: 16 }}
       transition={{
-        duration: 0.5,
+        duration: ENTRANCE_DURATION,
         delay,
-        ease: [0.22, 1, 0.36, 1],
+        ease: EASE,
       }}
       className={className}
     >

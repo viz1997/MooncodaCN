@@ -11,4 +11,5 @@ export { HeroSection } from "./hero-section";
 export { HowItWorks } from "./how-it-works";
 export { PricingSection } from "./pricing-section";
 export { Testimonials } from "./testimonials";
+export { Section, SectionHeader } from "./section";
 export { UseCasesSection } from "./use-cases-section";
