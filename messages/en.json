@@ -288,17 +288,19 @@
       "cookies": "Cookie Settings"
     },
     "brand": {
-      "headline": "The head start your SaaS deserved.",
-      "sub": "Auth, payments, credits, background jobs, i18n, and an admin panel \u2014 wired end-to-end. You ship the product; the plumbing is done.",
+      "headline": "Turn your imagination into a real object.",
+      "sub": "Mooncoda specializes in WJP full-color 3D printing \u2014 pet badges, keychains, fridge magnets, figures, and more. One-piece custom, single-piece shipping.",
       "points": {
-        "ship": "Production-ready in days, not months",
-        "own": "MIT-licensed, self-hostable, no lock-in",
-        "stack": "Next.js 16 \u00b7 Drizzle \u00b7 Better Auth \u00b7 Inngest"
+        "onePiece": "1 piece MOQ \u00b7 single-piece shipping",
+        "fullColor": "WJP full-color \u00b7 16-million-color reproduction",
+        "shipping": "SF Express delivery \u00b7 individual gift box",
+        "copyright": "Copyright stays with you \u00b7 STL files downloadable"
       },
       "stat": {
-        "k": "18",
-        "v": "feature modules, wired end-to-end"
-      }
+        "k": "48h",
+        "v": "3D proof delivery"
+      },
+      "rights": "All rights reserved."
     }
   },
   "CTA": {
