@@ -1,7 +1,6 @@
 "use client";
 
-import { Clock, Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Loader2, X } from "lucide-react";
 
 import { originalUrl } from "./image-urls";
 
@@ -13,21 +12,10 @@ interface GeneratingStageProps {
   readyGroups: number;
   candidateCount: number;
   uploadedAt: string | null;
-}
-
-function useElapsed(since: string | null) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, []);
-  if (!since) return null;
-  const start = new Date(since).getTime();
-  if (Number.isNaN(start)) return null;
-  const secs = Math.max(0, Math.floor((now - start) / 1000));
-  const mm = String(Math.floor(secs / 60)).padStart(2, "0");
-  const ss = String(secs % 60).padStart(2, "0");
-  return `${mm}:${ss}`;
+  /** 停止中——禁用按钮防止重复点击（指停止当前一轮生成，不是取消订单） */
+  stopping?: boolean;
+  /** 点击"停止生成"——协作式打断当前生图任务，订单保留 */
+  onStopClick?: () => void;
 }
 
 /**
@@ -35,7 +23,11 @@ function useElapsed(since: string | null) {
  *
  * 视觉聚焦在"这张原图正在被处理"——中间一张原图卡片，
  * 上面叠加 shimmer 扫光 + 圆形进度。下方显示 N 张效果中已完成几组，
- * 角落显示已等待时间。
+ * 并提供"停止生成"按钮，让用户随时可以中断**当前一轮**生成。
+ *
+ * 注意：这里的"停止"指协作式打断当前 in-flight 的生成任务（订单保留），
+ * 不等于"取消订单"——后者会置订单为 CANCELLED（终态），由 OrderHeader 上的
+ * 单独按钮触发。
  */
 export function GeneratingStage({
   token,
@@ -43,9 +35,9 @@ export function GeneratingStage({
   uploadedImageCount,
   readyGroups,
   candidateCount,
-  uploadedAt,
+  stopping = false,
+  onStopClick,
 }: GeneratingStageProps) {
-  const elapsed = useElapsed(uploadedAt);
   const done = Math.min(readyGroups, uploadedImageCount);
   const percent =
     uploadedImageCount > 0 ? (done / uploadedImageCount) * 100 : 0;
@@ -58,11 +50,16 @@ export function GeneratingStage({
           <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400 motion-reduce:animate-none" />
           <span className="font-medium">正在生成效果图</span>
         </div>
-        {elapsed && (
-          <span className="flex items-center gap-1 font-mono text-xs tabular-nums text-zinc-400">
-            <Clock className="h-3 w-3" />
-            {elapsed}
-          </span>
+        {onStopClick && (
+          <button
+            type="button"
+            onClick={onStopClick}
+            disabled={stopping}
+            className="flex h-8 shrink-0 items-center gap-1 rounded-lg border border-zinc-200 bg-white px-2.5 text-xs text-zinc-700 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+          >
+            <X className="h-3.5 w-3.5" />
+            停止生成
+          </button>
         )}
       </div>
 

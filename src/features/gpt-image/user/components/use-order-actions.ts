@@ -13,13 +13,19 @@ interface ActionsOptions {
 export interface UseOrderActionsResult {
   uploading: boolean;
   submitting: boolean;
+  /** 正在取消整个订单（终态，不可恢复） */
   cancelling: boolean;
+  /** 正在停止当前一轮的生成（订单保留，已完成的候选图保留） */
+  stopping: boolean;
   regenerating: boolean;
   retryingAll: boolean;
   /** 把单个文件走 R2 预签名直传，然后 POST publicUrl 列表到 /upload */
   upload: (files: File[]) => Promise<boolean>;
   submit: (selections: number[]) => Promise<boolean>;
+  /** 取消整个订单 → 状态变成 CANCELLED，链接失效 */
   cancel: () => Promise<boolean>;
+  /** 停止生成 → 中断当前 in-flight 的生成任务，订单保留 */
+  stopGeneration: () => Promise<boolean>;
   regenerate: (imageIdx: number) => Promise<boolean>;
   /** 失败后一键重试：对所有已上传图重新跑生成 */
   retryAll: () => Promise<boolean>;
@@ -96,6 +102,7 @@ export function useOrderActions({
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [retryingAll, setRetryingAll] = useState(false);
 
@@ -179,6 +186,31 @@ export function useOrderActions({
     }
   }, [token, refresh]);
 
+  /**
+   * "停止生成"——**不是取消订单**。
+   *
+   * 协作式打断当前在跑的生成任务。订单保留、已完成的候选图保留；
+   * 状态机会落到 FAILED（完成度 0）或 CANDIDATES_READY（部分完成）。
+   * 走的是 /stop-generation 这条单独的路由，不会变 CANCELLED。
+   */
+  const stopGeneration = useCallback(async () => {
+    setStopping(true);
+    try {
+      const res = await fetch(`/api/orders/${token}/stop-generation`, {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error(await readError(res, "停止生成失败"));
+      toast.success("已停止本次生成");
+      await refresh();
+      return true;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "停止生成失败");
+      return false;
+    } finally {
+      setStopping(false);
+    }
+  }, [token, refresh]);
+
   const regenerate = useCallback(
     async (imageIdx: number) => {
       setRegenerating(true);
@@ -250,11 +282,13 @@ export function useOrderActions({
     uploading,
     submitting,
     cancelling,
+    stopping,
     regenerating,
     retryingAll,
     upload,
     submit,
     cancel,
+    stopGeneration,
     regenerate,
     retryAll,
     download,
