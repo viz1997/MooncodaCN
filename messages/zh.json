@@ -22,7 +22,7 @@
       "modules": "类定制产品",
       "tests": "全彩精度 · 微米级",
       "errors": "件起定 · 无最小量",
-      "license": "一件发货 · 全程顺丰"
+      "license": "一件发货 · 全程速运"
     },
     "products": {
       "label": "产品系列",
@@ -64,7 +64,7 @@
       },
       "outline": {
         "title": "一件发货",
-        "description": "单件独立包装，全程顺丰速运。每件产品自带防伪标与定制编号，收到即可送人或自留。"
+        "description": "单件独立包装，全程速运速运。每件产品自带防伪标与定制编号，收到即可送人或自留。"
       },
       "export": {
         "title": "全彩一体",
@@ -99,8 +99,8 @@
       }
     },
     "completion": {
-      "title": "顺丰送到家",
-      "description": "独立礼盒包装 + 定制编号，全程顺丰速运，下单后 5-7 个工作日送达。"
+      "title": "速送到家",
+      "description": "独立礼盒包装 + 定制编号，全程速运速运，下单后 5-7 个工作日送达。"
     }
   },
   "UseCases": {
@@ -186,7 +186,7 @@
       },
       {
         "question": "下单后多久能收到？",
-        "answer": "常规定制 5-7 个工作日送达（偏远地区除外）。流程：建模稿 24 小时 → 客户确认 → WJP 打印 48-72 小时 → 顺丰发出。加急服务请联系客服。"
+        "answer": "常规定制 5-7 个工作日送达（偏远地区除外）。流程：建模稿 24 小时 → 客户确认 → WJP 打印 48-72 小时 → 立即发出。加急服务请联系客服。"
       },
       {
         "question": "我只有一张照片可以吗？需要专业图吗？",
@@ -283,7 +283,7 @@
       "points": {
         "onePiece": "件起定 · 一件发货 · 无最小量",
         "fullColor": "WJP 全彩工艺 · 1600 万色还原",
-        "shipping": "全程顺丰 · 独立礼盒包装",
+        "shipping": "全程速运 · 独立礼盒包装",
         "copyright": "作品版权归你 · STL 文件可下载"
       },
       "stat": {
@@ -450,7 +450,7 @@
           "creditsNeverExpire": "全彩 WJP 工艺打印",
           "credits": "1 件 30-50mm 徽章",
           "input": "上传图 → 3D 建模稿",
-          "characters": "顺丰包邮 · 独立包装",
+          "characters": "全国包邮 · 独立包装",
           "fileSize": "附赠定制卡片",
           "export": "高清原图归档下载",
           "history": "成品专属编号"
@@ -467,7 +467,7 @@
           "creditsNeverExpire": "全彩 WJP 工艺打印",
           "credits": "1 件 40-100mm 挂件",
           "input": "上传图 → 3D 建模稿",
-          "characters": "顺丰包邮 · 礼盒包装",
+          "characters": "全国包邮 · 礼盒包装",
           "fileSize": "附赠定制卡片",
           "export": "高清原图归档下载",
           "history": "成品专属编号",
@@ -485,7 +485,7 @@
           "creditsNeverExpire": "全彩 WJP 工艺打印",
           "credits": "1 件 100-200mm 手办",
           "input": "上传图 → 3D 建模稿 → 修改",
-          "characters": "顺丰包邮 · 高档礼盒",
+          "characters": "全国包邮 · 高档礼盒",
           "fileSize": "附赠定制贺卡 + 丝带",
           "queue": "建模优先处理",
           "export": "高清原图 + STL 模型文件",
@@ -505,7 +505,7 @@
           "creditsNeverExpire": "全彩 WJP 工艺批量打印",
           "credits": "30 件起，logo 定制",
           "input": "统一设计稿 / 来图定制",
-          "characters": "顺丰包邮 · 统一礼盒",
+          "characters": "全国包邮 · 统一礼盒",
           "fileSize": "可定制丝带 / 卡片 / 包装",
           "queue": "专属优先排期",
           "export": "STL + 设计源文件归档",

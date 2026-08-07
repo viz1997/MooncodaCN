@@ -22,7 +22,7 @@
       "modules": "product categories",
       "tests": "full-color · micron-level",
       "errors": "min. 1 piece · no MOQ",
-      "license": "single shipping · SF Express"
+      "license": "single shipping · Express shipping"
     },
     "products": {
       "label": "Product Lines",
@@ -64,7 +64,7 @@
       },
       "outline": {
         "title": "One-Piece Shipping",
-        "description": "Each piece individually packaged via SF Express. Every product carries an authenticity tag and custom serial — ready to gift or keep."
+        "description": "Each piece individually packaged via Express shipping. Every product carries an authenticity tag and custom serial — ready to gift or keep."
       },
       "export": {
         "title": "One-Piece Full-Color",
@@ -99,8 +99,8 @@
       }
     },
     "completion": {
-      "title": "SF Express to Your Door",
-      "description": "Individual gift box + custom serial number. SF Express shipping, 5-7 working days from order."
+      "title": "Express shipping to Your Door",
+      "description": "Individual gift box + custom serial number. Express shipping shipping, 5-7 working days from order."
     }
   },
   "UseCases": {
@@ -186,7 +186,7 @@
       },
       {
         "question": "How long until I receive my order?",
-        "answer": "Standard orders deliver in 5-7 working days (excluding remote areas). Process: 24h 3D proof → customer approval → 48-72h WJP printing → SF Express dispatch. Rush service: contact customer support."
+        "answer": "Standard orders deliver in 5-7 working days (excluding remote areas). Process: 24h 3D proof → customer approval → 48-72h WJP printing → Express shipping dispatch. Rush service: contact customer support."
       },
       {
         "question": "Is one photo enough? Do I need professional images?",
@@ -283,7 +283,7 @@
       "points": {
         "onePiece": "1 piece MOQ \u00b7 single-piece shipping",
         "fullColor": "WJP full-color \u00b7 16-million-color reproduction",
-        "shipping": "SF Express delivery \u00b7 individual gift box",
+        "shipping": "Express shipping delivery \u00b7 individual gift box",
         "copyright": "Copyright stays with you \u00b7 STL files downloadable"
       },
       "stat": {
@@ -488,7 +488,7 @@
           "creditsNeverExpire": "WJP full-color printing",
           "credits": "1 piece 30-50mm badge",
           "input": "Photo upload → 3D proof",
-          "characters": "SF Express · individual pack",
+          "characters": "Express shipping · individual pack",
           "fileSize": "Custom card included",
           "export": "HD source archive",
           "history": "Unique product serial"
@@ -505,7 +505,7 @@
           "creditsNeverExpire": "WJP full-color printing",
           "credits": "1 piece 40-100mm charm",
           "input": "Photo upload → 3D proof",
-          "characters": "SF Express · gift box pack",
+          "characters": "Express shipping · gift box pack",
           "fileSize": "Custom card included",
           "export": "HD source archive",
           "history": "Unique product serial",
@@ -523,7 +523,7 @@
           "creditsNeverExpire": "WJP full-color printing",
           "credits": "1 piece 100-200mm figure",
           "input": "Photo → 3D proof → revision",
-          "characters": "SF Express · premium gift box",
+          "characters": "Express shipping · premium gift box",
           "fileSize": "Custom card + ribbon included",
           "queue": "Priority modeling",
           "export": "HD source + STL files",
@@ -543,7 +543,7 @@
           "creditsNeverExpire": "WJP full-color batch printing",
           "credits": "30+ pieces, logo customization",
           "input": "Unified design / source image",
-          "characters": "SF Express · unified gift box",
+          "characters": "Express shipping · unified gift box",
           "fileSize": "Custom ribbon / card / packaging",
           "queue": "Dedicated priority schedule",
           "export": "STL + design source archive",
