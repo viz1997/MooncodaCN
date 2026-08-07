@@ -178,7 +178,14 @@ async function postHandler(
       },
       "触发效果图生成"
     );
-    triggerGeneration(order.id, existing.length, merged.length, candidateCount);
+    // triggerGeneration 在生产环境会把事件派发给 Inngest（不阻塞 HTTP 响应）；
+    // 在本地 dev 模式仍走 fire-and-forget + AbortController。
+    await triggerGeneration(
+      order.id,
+      existing.length,
+      merged.length,
+      candidateCount
+    );
 
     return NextResponse.json(
       {

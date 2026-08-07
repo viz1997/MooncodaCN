@@ -22,12 +22,23 @@ import { eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import { promptOrder } from "@/db/schema";
+import { inngest } from "@/inngest";
 import { logger } from "@/lib/logger";
 
 import { parseCandidates, parseUploadedImages } from "./order-helpers";
 
 const LINGTING_API_KEY = process.env.LINGTING_API_KEY;
 const LINGTING_BASE_URL = process.env.LINGTING_BASE_URL ?? "https://wellapi.ai";
+
+/**
+ * 是否走 Inngest 异步路径（生产环境 + Inngest 已配置时为 true）
+ *
+ * Vercel serverless 在 HTTP response 后会冻结 runtime，fire-and-forget 的
+ * fetch 调用会被杀掉。Inngest worker 是独立进程，能跑完 90s 轮询周期。
+ */
+function shouldUseInngest(): boolean {
+  return !!process.env.INNGEST_EVENT_KEY || process.env.INNGEST_DEV === "1";
+}
 
 // ============================================
 // 单订单并发控制：inFlight Set 防重入 + AbortController 协作式取消
@@ -280,12 +291,12 @@ export async function generateCandidate(
  * 错误隔离：单张原图生成失败仅记日志、不影响其他原图继续生成；最终汇总错误到
  * errorMessage（仅在所有原图都失败时才把订单标 FAILED，否则仍是 CANDIDATES_READY）。
  */
-async function runGeneration(
+export async function runGeneration(
   orderId: string,
   fromIdx: number,
   total: number,
   candidateCount: number,
-  signal: AbortSignal
+  signal?: AbortSignal
 ): Promise<void> {
   // 读取订单拿到所有 uploadedImages + template
   const order = await db.query.promptOrder.findFirst({
@@ -307,7 +318,7 @@ async function runGeneration(
 
   for (let imageIdx = fromIdx; imageIdx < total; imageIdx++) {
     // 协作式取消：循环顶部立刻检查 signal，已停止则跳出
-    if (signal.aborted) {
+    if (signal?.aborted) {
       aborted = true;
       break;
     }
@@ -348,7 +359,7 @@ async function runGeneration(
         .where(eq(promptOrder.id, orderId));
     } catch (err) {
       // 取消信号触发的异常：标记 aborted 直接跳出，不再当成"部分失败"
-      if (signal.aborted) {
+      if (signal?.aborted) {
         aborted = true;
         break;
       }
@@ -418,31 +429,58 @@ async function runGeneration(
 }
 
 /**
- * 异步触发订单效果图生成（fire-and-forget）
+ * 异步触发订单效果图生成
  *
- * 防重入：同一订单已有生成任务在跑则跳过。
- * 协作式取消：通过 requestStopGeneration(orderId) 中断对应任务的 AbortController。
+ * - 生产（Inngest 已配置）：发送 `prompt-order/generate.requested` 事件，
+ *   runGeneration 在 Inngest worker 上跑完整个轮询周期，
+ *   不会被 Vercel serverless 冻结。
+ * - 本地 / 无 Inngest：fire-and-forget + AbortController，
+ *   支持 requestStopGeneration 协作式取消。
+ *
+ * 防重入：同一订单已有生成任务在跑则跳过（Inngest 路径靠事件去重）。
  */
-export function triggerGeneration(
+export async function triggerGeneration(
   orderId: string,
   fromIdx: number,
   total: number,
   candidateCount: number
-): void {
+): Promise<void> {
   if (inFlight.has(orderId)) {
     logger.info({ orderId }, "订单已有生成任务在跑，跳过重入");
     return;
   }
+
+  // 生产路径：交给 Inngest
+  if (shouldUseInngest()) {
+    try {
+      await inngest.send({
+        name: "prompt-order/generate.requested",
+        data: { orderId, fromIdx, total, candidateCount },
+      });
+      logger.info({ orderId, fromIdx, total }, "生图任务已派发给 Inngest");
+    } catch (err) {
+      // Inngest 派发失败也要把订单标 FAILED，否则订单永远卡在 GENERATING
+      logger.error({ err, orderId }, "Inngest 派发生图任务失败");
+      await db
+        .update(promptOrder)
+        .set({
+          status: "FAILED",
+          errorMessage:
+            err instanceof Error
+              ? `生图任务派发失败: ${err.message}`
+              : "生图任务派发失败",
+        })
+        .where(eq(promptOrder.id, orderId))
+        .catch(() => {});
+    }
+    return;
+  }
+
+  // 本地兜底：fire-and-forget + AbortController
   const controller = new AbortController();
   abortControllers.set(orderId, controller);
   inFlight.add(orderId);
-  void runGeneration(
-    orderId,
-    fromIdx,
-    total,
-    candidateCount,
-    controller.signal
-  )
+  void runGeneration(orderId, fromIdx, total, candidateCount, controller.signal)
     .catch(async (err) => {
       // 主动取消不属于"生成失败"
       if (controller.signal.aborted) {

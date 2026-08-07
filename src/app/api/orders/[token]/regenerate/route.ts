@@ -144,7 +144,7 @@ async function postHandler(
       { orderId: order.id, fromIdx, toIdx, candidateCount },
       isSingle ? "触发单图重新生成" : "触发批量重新生成"
     );
-    triggerGeneration(order.id, fromIdx, toIdx, candidateCount);
+    await triggerGeneration(order.id, fromIdx, toIdx, candidateCount);
 
     return NextResponse.json(
       {
