@@ -14,14 +14,14 @@ import { Reveal } from "@/components/motion/reveal";
 
 /**
  * 卖点配置 —— WJP 全彩 3D 打印业务
- * - icon 与卡片内容匹配（全彩工艺 / 一件定制 / 一件发货 / 多材质 / 建模 / 包装）
+ * - icon 与卡片内容匹配（全彩工艺 / 一件定制 / 一件发货 / 全彩一体 / 建模 / 包装）
  * - path 是展示用的"工艺代号"风格标签，不需要翻译
  */
 const featureConfig = [
   { key: "ai" as const, icon: Palette, path: "WJP / full-color" },
   { key: "multiSource" as const, icon: Camera, path: "1 piece MOQ" },
   { key: "outline" as const, icon: Gift, path: "single shipping" },
-  { key: "export" as const, icon: Layers, path: "multi material" },
+  { key: "export" as const, icon: Layers, path: "one-piece print" },
   { key: "batch" as const, icon: Wrench, path: "pro modeling" },
   { key: "multilingual" as const, icon: Printer, path: "gift pack" },
 ];

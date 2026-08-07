@@ -18,18 +18,15 @@ import { NavMenu } from "./nav-menu";
  * Products 下拉菜单翻译映射 key (移动端复用)
  */
 const productsTitleMap: Record<string, string> = {
-  Core: "productsMenu.core.title",
-  "DX Platform": "productsMenu.dx.title",
-  Infrastructure: "productsMenu.infra.title",
-  Authentication: "productsMenu.core.auth",
-  Payments: "productsMenu.core.payments",
-  Credits: "productsMenu.core.credits",
-  "Background Jobs": "productsMenu.dx.jobs",
-  Internationalization: "productsMenu.dx.i18n",
-  "AI Integration": "productsMenu.dx.ai",
-  "Admin Panel": "productsMenu.infra.admin",
-  "File Storage": "productsMenu.infra.storage",
-  Monitoring: "productsMenu.infra.monitoring",
+  Wearables: "productsMenu.wearables.title",
+  Desk: "productsMenu.desk.title",
+  Collectibles: "productsMenu.collectibles.title",
+  Keychain: "productsMenu.wearables.keychain",
+  Badge: "productsMenu.wearables.badge",
+  Magnet: "productsMenu.desk.magnet",
+  Standee: "productsMenu.desk.standee",
+  Figure: "productsMenu.collectibles.figure",
+  "Gift Set": "productsMenu.collectibles.gift",
 };
 
 /**

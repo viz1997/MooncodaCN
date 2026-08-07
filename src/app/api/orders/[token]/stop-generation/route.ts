@@ -49,12 +49,33 @@ async function postHandler(
     }
 
     const signalled = requestStopGeneration(order.id);
+
+    // 兜底：signalled === false 通常意味着进程重启 / HMR 导致 abortControllers
+    // 丢失了条目，DB 还卡在 GENERATING。前端 stop 按钮按完后状态永远不变。
+    // 此时 worker 已经死了（不在新进程内存里），我们直接把订单标 FAILED，
+    // 用户点"重新生成"就能复活。
+    if (!signalled) {
+      const fresh = await db.query.promptOrder.findFirst({
+        where: eq(promptOrder.id, order.id),
+        columns: { status: true },
+      });
+      if (fresh?.status === "GENERATING") {
+        await db
+          .update(promptOrder)
+          .set({
+            status: "FAILED",
+            errorMessage: "生成任务已丢失，请点击重新生成",
+          })
+          .where(eq(promptOrder.id, order.id));
+      }
+    }
+
     // 即便没有 in-flight 任务，也按"用户表达停止意图"成功返回：状态轮询会看到当前值
     return NextResponse.json({
       success: true,
       message: "已停止本次生成",
       data: {
-        signalled, // true = 真的有任务被中断；false = 没找到 in-flight（已被并发停止 / 已完成）
+        signalled, // true = 真的有任务被中断；false = 没找到 in-flight（已被并发停止 / 已完成 / 进程重启导致 Map 清空）
       },
     });
   } catch (err) {

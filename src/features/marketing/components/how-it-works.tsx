@@ -2,58 +2,22 @@
 
 import { Check } from "lucide-react";
 import { useTranslations } from "next-intl";
-import type { ReactNode } from "react";
 
 import { Reveal } from "@/components/motion/reveal";
 
 /**
- * HowItWorks —— 三步流程
+ * HowItWorks —— 三步定制流程
  *
- * 用编号 01/02/03 是因为内容本身就是有序流程（克隆 → 配置 → 上线），
+ * 用编号 01/02/03 是因为内容本身就是有序流程，
  * 编码承载信息，所以保留；非装饰性编号。
  */
 const steps: {
   key: "upload" | "generate" | "export";
   n: string;
-  code: ReactNode;
 }[] = [
-  {
-    key: "upload",
-    n: "01",
-    code: (
-      <code className="block">
-        <span className="text-muted-foreground/60">$</span> git clone
-        nextdev-tpl{"\n"}
-        <span className="text-muted-foreground/60">$</span> pnpm install
-      </code>
-    ),
-  },
-  {
-    key: "generate",
-    n: "02",
-    code: (
-      <code className="block">
-        <span className="text-muted-foreground/60">.env</span>
-        {"\n"}DATABASE_URL=
-        <span className="text-muted-foreground">postgres://…</span>
-        {"\n"}BETTER_AUTH_SECRET=
-        <span className="text-muted-foreground">…</span>
-        {"\n"}AI_PROVIDER=<span className="text-primary">"openai"</span>
-      </code>
-    ),
-  },
-  {
-    key: "export",
-    n: "03",
-    code: (
-      <code className="block">
-        <span className="text-muted-foreground/60">$</span> pnpm build{" "}
-        <span className="text-muted-foreground/60">&amp;&amp;</span> deploy
-        {"\n"}
-        <span className="text-muted-foreground/60">→</span> live in ~6 min
-      </code>
-    ),
-  },
+  { key: "upload", n: "01" },
+  { key: "generate", n: "02" },
+  { key: "export", n: "03" },
 ];
 
 export function HowItWorks() {
@@ -88,9 +52,6 @@ export function HowItWorks() {
                 <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
                   {t(`steps.${s.key}.description`)}
                 </p>
-                <pre className="mt-5 overflow-x-auto rounded-lg border bg-card p-4 font-mono text-xs leading-relaxed text-foreground">
-                  {s.code}
-                </pre>
               </div>
             ))}
           </div>

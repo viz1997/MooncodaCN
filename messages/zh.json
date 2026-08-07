@@ -47,16 +47,6 @@
         "size": "100-200mm",
         "price": "¥299 起"
       }
-    },
-    "panel": {
-      "title": "今日产线 · 实况",
-      "region": "WJP 工业级 · 浙江 · in operation",
-      "p95": "交付周期",
-      "uptime": "良率",
-      "jobs": "本日订单",
-      "signups": "本月交付 · 近 14 天",
-      "pillOk": "产线运行中",
-      "pillStack": "WJP · 全彩 · 树脂"
     }
   },
   "Features": {
@@ -77,8 +67,8 @@
         "description": "单件独立包装，全程顺丰速运。每件产品自带防伪标与定制编号，收到即可送人或自留。"
       },
       "export": {
-        "title": "多种材质",
-        "description": "支持树脂、蜡基、PLA 多种材质选择；从 30mm 徽章到 200mm 手办，从小物件到收藏级艺术品都能驾驭。"
+        "title": "全彩一体",
+        "description": "工业级 WJP 单件一次成型，1600 万色真实色彩 + 细腻纹理直接呈现，无需拼接、无需后处理上色；不切材质、不挑件。"
       },
       "batch": {
         "title": "专业建模",
@@ -542,32 +532,26 @@
     "blog": "博客",
     "about": "关于",
     "productsMenu": {
-      "core": {
-        "title": "核心功能",
-        "auth": "认证系统",
-        "authDesc": "多方式登录与会话管理",
-        "payments": "支付集成",
-        "paymentsDesc": "订阅和一次性支付",
-        "credits": "积分系统",
-        "creditsDesc": "双重记账法与 FIFO 批次过期"
+      "wearables": {
+        "title": "周边配饰",
+        "keychain": "钥匙扣",
+        "keychainDesc": "30-80mm 全彩挂件",
+        "badge": "徽章",
+        "badgeDesc": "30-50mm 胸针佩戴"
       },
-      "dx": {
-        "title": "开发体验",
-        "jobs": "异步处理",
-        "jobsDesc": "Inngest 后台任务引擎",
-        "i18n": "国际化",
-        "i18nDesc": "next-intl 多语言支持",
-        "ai": "AI 集成",
-        "aiDesc": "多模型 LLM 抽象层"
+      "desk": {
+        "title": "桌面展示",
+        "magnet": "冰箱贴",
+        "magnetDesc": "40-60mm 磁吸贴",
+        "standee": "立牌",
+        "standeeDesc": "80-150mm 桌面立牌"
       },
-      "infra": {
-        "title": "基础设施",
-        "admin": "管理后台",
-        "adminDesc": "用户与工单管理",
-        "storage": "文件存储",
-        "storageDesc": "S3/R2 云存储",
-        "monitoring": "监控日志",
-        "monitoringDesc": "日志与错误追踪"
+      "collectibles": {
+        "title": "收藏礼品",
+        "figure": "手办",
+        "figureDesc": "100-200mm 桌面摆件",
+        "gift": "礼品套装",
+        "giftDesc": "礼盒包装 + 定制卡片"
       }
     }
   },

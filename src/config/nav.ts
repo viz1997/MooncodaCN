@@ -1,27 +1,24 @@
 import {
-  Activity,
-  Bot,
-  Coins,
+  Award,
+  Box,
   Cpu,
-  CreditCard,
   Globe,
-  HardDrive,
   Headset,
   Image,
   Images,
+  KeyRound,
   LayoutDashboard,
   ListOrdered,
   type LucideIcon,
+  Magnet,
   Package,
   ScrollText,
   Settings,
   Shield,
   Sparkles,
   Ticket,
-  UserCog,
   Users,
   Wand2,
-  Zap,
 } from "lucide-react";
 
 /**
@@ -71,75 +68,61 @@ export interface ProductNavGroup {
 // ============================================
 
 /**
- * Products 下拉菜单内容
+ * Products 下拉菜单内容 —— WJP 全彩 3D 打印真实品类
+ *
+ * 3 列 × 2 项：周边配饰 / 桌面展示 / 收藏礼品，覆盖 src/features/products/lib/data.ts
+ * 里所有 ProductCategory（badge/keychain/fridge-magnet/figure/standee/gift）。
+ * 全部跳 /products 作品集页，由页内的 category chip 做进一步筛选。
  */
 export const productsNav: ProductNavGroup[] = [
   {
-    title: "Core",
+    title: "Wearables",
     items: [
       {
-        title: "Authentication",
-        href: "/#features",
-        description: "Multi-provider auth with session management",
-        icon: Shield,
+        title: "Keychain",
+        href: "/products",
+        description: "30-80mm 全彩挂件",
+        icon: KeyRound,
       },
       {
-        title: "Payments",
-        href: "/#features",
-        description: "Subscriptions and one-time purchases",
-        icon: CreditCard,
-      },
-      {
-        title: "Credits",
-        href: "/#features",
-        description: "Double-entry bookkeeping with FIFO expiration",
-        icon: Coins,
+        title: "Badge",
+        href: "/products",
+        description: "30-50mm 胸针佩戴",
+        icon: Award,
       },
     ],
   },
   {
-    title: "DX Platform",
+    title: "Desk",
     items: [
       {
-        title: "Background Jobs",
-        href: "/#features",
-        description: "Async processing with Inngest",
-        icon: Zap,
+        title: "Magnet",
+        href: "/products",
+        description: "40-60mm 磁吸贴",
+        icon: Magnet,
       },
       {
-        title: "Internationalization",
-        href: "/#features",
-        description: "Multi-language with next-intl",
-        icon: Globe,
-      },
-      {
-        title: "AI Integration",
-        href: "/#features",
-        description: "Multi-model LLM abstraction",
-        icon: Bot,
+        title: "Standee",
+        href: "/products",
+        description: "80-150mm 桌面立牌",
+        icon: Image,
       },
     ],
   },
   {
-    title: "Infrastructure",
+    title: "Collectibles",
     items: [
       {
-        title: "Admin Panel",
-        href: "/#features",
-        description: "User and ticket management",
-        icon: UserCog,
+        title: "Figure",
+        href: "/products",
+        description: "100-200mm 桌面摆件",
+        icon: Box,
       },
       {
-        title: "File Storage",
-        href: "/#features",
-        description: "S3/R2 cloud storage",
-        icon: HardDrive,
-      },
-      {
-        title: "Monitoring",
-        href: "/#features",
-        description: "Logging and error tracking",
-        icon: Activity,
+        title: "Gift Set",
+        href: "/products",
+        description: "礼盒包装 + 定制卡片",
+        icon: Package,
       },
     ],
   },

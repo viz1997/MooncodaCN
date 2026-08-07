@@ -21,30 +21,24 @@ import { cn } from "@/lib/utils";
  * 用 i18n key 映射标题和描述
  */
 const productsTitleMap: Record<string, string> = {
-  Core: "productsMenu.core.title",
-  "DX Platform": "productsMenu.dx.title",
-  Infrastructure: "productsMenu.infra.title",
-  Authentication: "productsMenu.core.auth",
-  Payments: "productsMenu.core.payments",
-  Credits: "productsMenu.core.credits",
-  "Background Jobs": "productsMenu.dx.jobs",
-  Internationalization: "productsMenu.dx.i18n",
-  "AI Integration": "productsMenu.dx.ai",
-  "Admin Panel": "productsMenu.infra.admin",
-  "File Storage": "productsMenu.infra.storage",
-  Monitoring: "productsMenu.infra.monitoring",
+  Wearables: "productsMenu.wearables.title",
+  Desk: "productsMenu.desk.title",
+  Collectibles: "productsMenu.collectibles.title",
+  Keychain: "productsMenu.wearables.keychain",
+  Badge: "productsMenu.wearables.badge",
+  Magnet: "productsMenu.desk.magnet",
+  Standee: "productsMenu.desk.standee",
+  Figure: "productsMenu.collectibles.figure",
+  "Gift Set": "productsMenu.collectibles.gift",
 };
 
 const productsDescMap: Record<string, string> = {
-  Authentication: "productsMenu.core.authDesc",
-  Payments: "productsMenu.core.paymentsDesc",
-  Credits: "productsMenu.core.creditsDesc",
-  "Background Jobs": "productsMenu.dx.jobsDesc",
-  Internationalization: "productsMenu.dx.i18nDesc",
-  "AI Integration": "productsMenu.dx.aiDesc",
-  "Admin Panel": "productsMenu.infra.adminDesc",
-  "File Storage": "productsMenu.infra.storageDesc",
-  Monitoring: "productsMenu.infra.monitoringDesc",
+  Keychain: "productsMenu.wearables.keychainDesc",
+  Badge: "productsMenu.wearables.badgeDesc",
+  Magnet: "productsMenu.desk.magnetDesc",
+  Standee: "productsMenu.desk.standeeDesc",
+  Figure: "productsMenu.collectibles.figureDesc",
+  "Gift Set": "productsMenu.collectibles.giftDesc",
 };
 
 /**

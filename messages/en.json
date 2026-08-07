@@ -47,16 +47,6 @@
         "size": "100-200mm",
         "price": "from $43"
       }
-    },
-    "panel": {
-      "title": "Today · production floor",
-      "region": "WJP Industrial · Zhejiang · in operation",
-      "p95": "Lead time",
-      "uptime": "Yield rate",
-      "jobs": "Today's orders",
-      "signups": "Delivered · last 14d",
-      "pillOk": "Line in operation",
-      "pillStack": "WJP · Full-color · Resin"
     }
   },
   "Features": {
@@ -77,8 +67,8 @@
         "description": "Each piece individually packaged via SF Express. Every product carries an authenticity tag and custom serial — ready to gift or keep."
       },
       "export": {
-        "title": "Multiple Materials",
-        "description": "Choose from resin, wax-based, or PLA. From 30mm badges to 200mm figures — small keepsakes to collector-grade art pieces."
+        "title": "One-Piece Full-Color",
+        "description": "Industrial-grade WJP prints 16 million colors and fine textures in a single piece. No assembly, no post-processing coloring, no material choice."
       },
       "batch": {
         "title": "Pro Modeling",
@@ -386,32 +376,26 @@
     "blog": "Blog",
     "about": "About",
     "productsMenu": {
-      "core": {
-        "title": "Core",
-        "auth": "Authentication",
-        "authDesc": "Multi-provider auth with session management",
-        "payments": "Payments",
-        "paymentsDesc": "Subscriptions and one-time purchases",
-        "credits": "Credits",
-        "creditsDesc": "Double-entry bookkeeping with FIFO expiration"
+      "wearables": {
+        "title": "Wearables",
+        "keychain": "Keychain",
+        "keychainDesc": "30-80mm full-color charm",
+        "badge": "Badge",
+        "badgeDesc": "30-50mm pin to wear"
       },
-      "dx": {
-        "title": "DX Platform",
-        "jobs": "Background Jobs",
-        "jobsDesc": "Async processing with Inngest",
-        "i18n": "Internationalization",
-        "i18nDesc": "Multi-language with next-intl",
-        "ai": "AI Integration",
-        "aiDesc": "Multi-model LLM abstraction"
+      "desk": {
+        "title": "Desk",
+        "magnet": "Fridge Magnet",
+        "magnetDesc": "40-60mm magnetic",
+        "standee": "Standee",
+        "standeeDesc": "80-150mm desk stand"
       },
-      "infra": {
-        "title": "Infrastructure",
-        "admin": "Admin Panel",
-        "adminDesc": "User and ticket management",
-        "storage": "File Storage",
-        "storageDesc": "S3/R2 cloud storage",
-        "monitoring": "Monitoring",
-        "monitoringDesc": "Logging and error tracking"
+      "collectibles": {
+        "title": "Collectibles",
+        "figure": "Figure",
+        "figureDesc": "100-200mm desk piece",
+        "gift": "Gift Set",
+        "giftDesc": "Gift box + custom card"
       }
     }
   },
