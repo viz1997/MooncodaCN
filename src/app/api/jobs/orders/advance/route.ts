@@ -14,10 +14,16 @@
  *
  * 需要通过 Bearer Token 认证（CRON_SECRET），与 /api/jobs/credits/expire 一致。
  *
- * 配置 Vercel Cron（见 vercel.json）：
- *   { "path": "/api/jobs/orders/advance", "schedule": "* /5 * * * *" }
- * 注意 Vercel Hobby 计划的 Cron 每天只触发一次；需要分钟级请用 Pro，
- * 或改用外部 cron 服务（如 cron-job.org）带 Bearer token 调用本端点。
+ * 配置 Vercel Cron（见 vercel.json）。
+ *
+ * 注意频率限制：Vercel Hobby 计划的 Cron **每天只能触发一次**，
+ * 配置更高频的 schedule 会导致整个部署失败。因此 vercel.json 中
+ * 默认用 "0 3 * * *"（每天一次），Hobby / Pro 都能正常部署。
+ *
+ * 想要分钟级兜底（推荐，能显著缩短用户关页面后的等待）：
+ * - Pro 计划：把 schedule 改成 "\*\/5 * * * *"
+ * - Hobby 计划：用外部 cron 服务（如 cron-job.org）定时 POST 本端点，
+ *   带上 Authorization: Bearer $CRON_SECRET 即可，与调用方无关。
  */
 
 import { and, eq, isNotNull, isNull, lt } from "drizzle-orm";
