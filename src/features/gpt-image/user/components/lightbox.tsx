@@ -152,6 +152,36 @@ export function Lightbox({
   const currentSrc = candidateUrl(token, imageIdx, candIdx, updatedAt);
   const originalSrc = originalUrl(token, imageIdx, updatedAt);
 
+  /**
+   * 把 candidateCount 映射成宫格布局，与 QuadrantGrid 一致。
+   * candidateCount=1 时返回 (1,1) —— 等价于直接显示，不需要裁剪（调用方判断）。
+   */
+  const layoutOf = (n: number): { cols: number; rows: number } => {
+    if (n === 1) return { cols: 1, rows: 1 };
+    if (n === 2) return { cols: 2, rows: 1 };
+    if (n === 4) return { cols: 2, rows: 2 };
+    return { cols: 3, rows: 3 };
+  };
+  const { cols, rows } = layoutOf(candidateCount);
+  const col = candIdx % cols;
+  const row = Math.floor(candIdx / cols);
+  /**
+   * 宫格模式下用 background-image 裁出对应格子，避免把整张拼接图等比缩小
+   * （拼接图是 1 张图，候选是其中一块，缩小后整图小到看不清细节）。
+   */
+  const candidateCropStyle: React.CSSProperties =
+    candidateCount > 1
+      ? {
+          backgroundImage: `url(${currentSrc})`,
+          backgroundSize: `${cols * 100}% ${rows * 100}%`,
+          backgroundRepeat: "no-repeat",
+          backgroundPosition:
+            cols > 1
+              ? `${(col / (cols - 1)) * 100}% ${row > 0 ? (row / (rows - 1)) * 100 : 0}%`
+              : "0 0",
+        }
+      : {};
+
   const fade = reduce
     ? {}
     : {
@@ -279,11 +309,22 @@ export function Lightbox({
                   </figcaption>
                 </figure>
                 <figure className="flex min-h-0 flex-col items-center justify-center gap-1.5">
-                  <img
-                    src={currentSrc}
-                    alt={`第 ${imageIdx + 1} 张照片的效果图 ${candIdx + 1}`}
-                    className="max-h-full min-h-0 w-auto max-w-full rounded-lg object-contain"
-                  />
+                  {candidateCount > 1 ? (
+                    <div
+                      aria-label={`第 ${imageIdx + 1} 张照片的效果图 ${candIdx + 1}`}
+                      className="max-h-full min-h-0 w-auto max-w-full rounded-lg"
+                      style={{
+                        aspectRatio: "1 / 1",
+                        ...candidateCropStyle,
+                      }}
+                    />
+                  ) : (
+                    <img
+                      src={currentSrc}
+                      alt={`第 ${imageIdx + 1} 张照片的效果图 ${candIdx + 1}`}
+                      className="max-h-full min-h-0 w-auto max-w-full rounded-lg object-contain"
+                    />
+                  )}
                   <figcaption className="text-xs text-emerald-400">
                     效果 #{candIdx + 1}
                   </figcaption>
@@ -292,19 +333,38 @@ export function Lightbox({
             ) : (
               <>
                 <AnimatePresence mode="wait" initial={false}>
-                  <motion.img
-                    key={`${imageIdx}-${candIdx}-${peeking ? "o" : "c"}`}
-                    {...fade}
-                    transition={{ duration: reduce ? 0 : 0.16 }}
-                    src={peeking ? originalSrc : currentSrc}
-                    alt={
-                      peeking
-                        ? `第 ${imageIdx + 1} 张原图`
-                        : `第 ${imageIdx + 1} 张照片的效果图 ${candIdx + 1}`
-                    }
-                    className="max-h-full max-w-full select-none rounded-lg object-contain"
-                    draggable={false}
-                  />
+                  {peeking || candidateCount === 1 ? (
+                    <motion.img
+                      key={`${imageIdx}-${candIdx}-${peeking ? "o" : "c"}`}
+                      {...fade}
+                      transition={{ duration: reduce ? 0 : 0.16 }}
+                      src={peeking ? originalSrc : currentSrc}
+                      alt={
+                        peeking
+                          ? `第 ${imageIdx + 1} 张原图`
+                          : `第 ${imageIdx + 1} 张照片的效果图 ${candIdx + 1}`
+                      }
+                      className="max-h-full max-w-full select-none rounded-lg object-contain"
+                      draggable={false}
+                    />
+                  ) : (
+                    <motion.div
+                      key={`${imageIdx}-${candIdx}-c-crop`}
+                      {...fade}
+                      transition={{ duration: reduce ? 0 : 0.16 }}
+                      aria-label={`第 ${imageIdx + 1} 张照片的效果图 ${candIdx + 1}`}
+                      className="max-h-full max-w-full select-none rounded-lg"
+                      draggable={false}
+                      style={{
+                        aspectRatio: "1 / 1",
+                        backgroundImage: candidateCropStyle.backgroundImage,
+                        backgroundSize: candidateCropStyle.backgroundSize,
+                        backgroundRepeat: candidateCropStyle.backgroundRepeat,
+                        backgroundPosition:
+                          candidateCropStyle.backgroundPosition,
+                      }}
+                    />
+                  )}
                 </AnimatePresence>
                 {peeking && (
                   <span className="pointer-events-none absolute bottom-3 rounded-lg bg-white/15 px-3 py-1 text-xs text-white backdrop-blur">

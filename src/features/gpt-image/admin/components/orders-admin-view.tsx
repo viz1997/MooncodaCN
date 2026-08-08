@@ -5,15 +5,18 @@ import {
   CheckCircle2,
   Clock,
   Copy,
+  Download,
   ExternalLink,
   Eye,
   Image as ImageIcon,
+  Maximize2,
   Pencil,
   Plus,
   RefreshCw,
   Search,
   Trash2,
   Upload,
+  X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -44,12 +47,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useSessionContext } from "@/lib/auth/session-context";
-
-import {
-  deleteOrderAction,
-} from "@/features/gpt-image/actions/orders";
-
+import { deleteOrderAction } from "@/features/gpt-image/actions/orders";
 import {
   ORDER_PLATFORM_LABELS,
   ORDER_PLATFORMS,
@@ -60,9 +58,9 @@ import {
   type OrderView,
   type PromptTemplateView,
 } from "@/features/gpt-image/lib/types";
-
-import { OrderFormDialog } from "./order-form-dialog";
+import { useSessionContext } from "@/lib/auth/session-context";
 import { OrderEditDialog } from "./order-edit-dialog";
+import { OrderFormDialog } from "./order-form-dialog";
 
 export function OrdersAdminView() {
   const { user: currentUser } = useSessionContext();
@@ -74,6 +72,13 @@ export function OrdersAdminView() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [linkDialog, setLinkDialog] = useState<OrderView | null>(null);
   const [detailDialog, setDetailDialog] = useState<OrderView | null>(null);
+  /** 管理端预览预览图：点原图/候选宫格图触发 */
+  const [lightbox, setLightbox] = useState<{
+    url: string;
+    title: string;
+    /** 触发下载时使用的默认文件名 */
+    filename: string;
+  } | null>(null);
   const [editingOrder, setEditingOrder] = useState<OrderView | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [deletingOrder, setDeletingOrder] = useState<OrderView | null>(null);
@@ -214,6 +219,28 @@ export function OrdersAdminView() {
   const handleOpenLink = (order: OrderView) => {
     const link = buildLink(order);
     window.open(link, "_blank");
+  };
+
+  /** 下载：通过 fetch 取二进制再触发 a[download]，避免被 R2 CORS / 浏览器导航行为干扰 */
+  const handleDownload = async (url: string, filename: string) => {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // 异步释放，给浏览器一帧时间消化下载
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } catch (err) {
+      toast.error(
+        `下载失败：${err instanceof Error ? err.message : "未知错误"}`
+      );
+    }
   };
 
   const canViewDetail = (order: OrderView) =>
@@ -504,10 +531,7 @@ export function OrdersAdminView() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDeletingOrder(null)}
-            >
+            <Button variant="outline" onClick={() => setDeletingOrder(null)}>
               取消
             </Button>
             <Button variant="destructive" onClick={handleDelete}>
@@ -698,7 +722,7 @@ export function OrdersAdminView() {
                       <h4 className="text-sm font-medium">
                         每张原图的效果图（{detailDialog.uploadedImageCount}{" "}
                         张原图，每张 {detailDialog.template.candidateCount}{" "}
-                        个候选）
+                        个候选，存为 1 张宫格图）
                       </h4>
                     </div>
                     <div className="space-y-3">
@@ -734,53 +758,156 @@ export function OrdersAdminView() {
                                 )}
                               </div>
                             </div>
-                            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
-                              <div className="relative aspect-square overflow-hidden rounded-md border border-emerald-200 bg-slate-100">
+                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                              <div className="group/preview relative aspect-square cursor-pointer overflow-hidden rounded-md border border-emerald-200 bg-slate-100">
                                 <img
                                   src={`/api/orders/${detailDialog.token}/image?index=${imgIdx}`}
                                   alt={`原图 ${imgIdx + 1}`}
-                                  className="h-full w-full object-cover"
+                                  className="h-full w-full object-cover transition-transform group-hover/preview:scale-105"
                                   loading="lazy"
+                                  onClick={() =>
+                                    setLightbox({
+                                      url: `/api/orders/${detailDialog.token}/image?index=${imgIdx}`,
+                                      title: `第 ${imgIdx + 1} 张原图`,
+                                      filename: `${detailDialog.orderNo ?? detailDialog.token}-original-${imgIdx + 1}.png`,
+                                    })
+                                  }
                                 />
                                 <div className="absolute top-1 left-1 rounded bg-emerald-600/90 px-1.5 py-0.5 text-[10px] text-white">
                                   原图
                                 </div>
+                                {/* hover 时显示放大 + 下载按钮 */}
+                                <div className="absolute inset-0 flex items-center justify-center gap-2 bg-black/0 opacity-0 transition-all group-hover/preview:bg-black/40 group-hover/preview:opacity-100">
+                                  <button
+                                    type="button"
+                                    className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/90 text-zinc-700 transition-colors hover:bg-white"
+                                    aria-label="放大查看原图"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setLightbox({
+                                        url: `/api/orders/${detailDialog.token}/image?index=${imgIdx}`,
+                                        title: `第 ${imgIdx + 1} 张原图`,
+                                        filename: `${detailDialog.orderNo ?? detailDialog.token}-original-${imgIdx + 1}.png`,
+                                      });
+                                    }}
+                                  >
+                                    <Maximize2 className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/90 text-zinc-700 transition-colors hover:bg-white"
+                                    aria-label="下载原图"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      void handleDownload(
+                                        `/api/orders/${detailDialog.token}/image?index=${imgIdx}`,
+                                        `${detailDialog.orderNo ?? detailDialog.token}-original-${imgIdx + 1}.png`
+                                      );
+                                    }}
+                                  >
+                                    <Download className="h-4 w-4" />
+                                  </button>
+                                </div>
                               </div>
-                              {Array.from({ length: candCount }).map(
-                                (_, cIdx) => {
-                                  const isSel = selIdx === cIdx;
-                                  return (
-                                    <div
-                                      key={cIdx}
-                                      className={`relative aspect-square overflow-hidden rounded-md border-2 bg-slate-100 transition-all ${
-                                        isSel
-                                          ? "border-emerald-500 ring-2 ring-emerald-200"
-                                          : "border-slate-200"
-                                      }`}
-                                    >
-                                      <img
-                                        src={`/api/orders/${detailDialog.token}/candidates/${imgIdx}/${cIdx}`}
-                                        alt={`第 ${imgIdx + 1} 张原图 - 候选 ${cIdx + 1}`}
-                                        className="h-full w-full object-cover"
-                                        loading="lazy"
-                                      />
-                                      <div className="absolute top-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white">
-                                        #{cIdx + 1}
+                              {/* 宫格模式：实际只存 1 张拼接图，candidates[imgIdx][0]，
+                                  用 CSS 网格叠层画格子分割 + 选中高亮，避免误以为是多张独立候选 */}
+                              {(() => {
+                                const cols =
+                                  candCount === 1
+                                    ? 1
+                                    : candCount === 2
+                                      ? 2
+                                      : candCount === 4
+                                        ? 2
+                                        : 3;
+                                const rows =
+                                  candCount === 1
+                                    ? 1
+                                    : candCount === 2
+                                      ? 1
+                                      : candCount === 4
+                                        ? 2
+                                        : 3;
+                                return (
+                                  <div className="group/preview relative aspect-square cursor-pointer overflow-hidden rounded-md border border-slate-200 bg-slate-100">
+                                    {selIdx !== null ? (
+                                      // 用户已选：显示该格子对应的高清裁剪图
+                                      (() => {
+                                        const col = selIdx % cols;
+                                        const row = Math.floor(selIdx / cols);
+                                        return (
+                                          <div
+                                            className="absolute inset-0 transition-transform group-hover/preview:scale-105"
+                                            style={{
+                                              backgroundImage: `url(/api/orders/${detailDialog.token}/candidates/${imgIdx}/0)`,
+                                              backgroundSize: `${cols * 100}% ${rows * 100}%`,
+                                              backgroundRepeat: "no-repeat",
+                                              backgroundPosition:
+                                                cols > 1
+                                                  ? `${(col / (cols - 1)) * 100}% ${row > 0 ? (row / (rows - 1)) * 100 : 0}%`
+                                                  : "0 0",
+                                            }}
+                                            onClick={() =>
+                                              setLightbox({
+                                                url: `/api/orders/${detailDialog.token}/candidates/${imgIdx}/0`,
+                                                title: `第 ${imgIdx + 1} 张原图 - 已选分镜 #${selIdx + 1}`,
+                                                filename: `${detailDialog.orderNo ?? detailDialog.token}-composite-${imgIdx + 1}-q${selIdx + 1}.png`,
+                                              })
+                                            }
+                                          >
+                                            <span className="pointer-events-none absolute top-1 left-1 rounded bg-emerald-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                                              分镜 #{selIdx + 1}
+                                            </span>
+                                            <span className="pointer-events-none absolute right-1 bottom-1 rounded bg-emerald-500 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                                              已选
+                                            </span>
+                                          </div>
+                                        );
+                                      })()
+                                    ) : (
+                                      // 用户未选：占位提示
+                                      <div className="flex h-full w-full flex-col items-center justify-center text-slate-400">
+                                        <Eye className="mb-1 h-6 w-6" />
+                                        <span className="text-xs">用户尚未选择</span>
                                       </div>
-                                      {isSel && (
-                                        <>
-                                          <div className="absolute top-1 right-1 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500">
-                                            <CheckCircle2 className="h-3 w-3 text-white" />
-                                          </div>
-                                          <div className="absolute inset-x-0 bottom-0 bg-emerald-500 py-0.5 text-center text-[10px] font-medium text-white">
-                                            已选
-                                          </div>
-                                        </>
-                                      )}
-                                    </div>
-                                  );
-                                }
-                              )}
+                                    )}
+                                    {/* hover 浮层：放大 / 下载按钮（仅已选时可用） */}
+                                    {selIdx !== null && (
+                                      <div className="absolute inset-0 z-20 flex items-center justify-center gap-2 bg-black/0 opacity-0 transition-all group-hover/preview:bg-black/40 group-hover/preview:opacity-100">
+                                        <button
+                                          type="button"
+                                          className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/90 text-zinc-700 transition-colors hover:bg-white"
+                                          aria-label="放大查看选中分镜"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setLightbox({
+                                              url: `/api/orders/${detailDialog.token}/candidates/${imgIdx}/0`,
+                                              title: `第 ${imgIdx + 1} 张原图 - 已选分镜 #${selIdx + 1}`,
+                                              filename: `${detailDialog.orderNo ?? detailDialog.token}-composite-${imgIdx + 1}-q${selIdx + 1}.png`,
+                                            });
+                                          }}
+                                        >
+                                          <Maximize2 className="h-4 w-4" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/90 text-zinc-700 transition-colors hover:bg-white"
+                                          aria-label="下载选中分镜"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            void handleDownload(
+                                              `/api/orders/${detailDialog.token}/candidates/${imgIdx}/0`,
+                                              `${detailDialog.orderNo ?? detailDialog.token}-composite-${imgIdx + 1}-q${selIdx + 1}.png`
+                                            );
+                                          }}
+                                        >
+                                          <Download className="h-4 w-4" />
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })()}
                             </div>
                           </div>
                         );
@@ -796,6 +923,52 @@ export function OrdersAdminView() {
               )}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* 图片放大预览（点击原图/候选宫格图触发） */}
+      <Dialog open={!!lightbox} onOpenChange={(o) => !o && setLightbox(null)}>
+        <DialogContent className="max-h-[95vh] max-w-[95vw] border-0 p-0 sm:max-w-[95vw]">
+          <div className="relative flex max-h-[95vh] flex-col bg-zinc-950">
+            <div className="flex items-center justify-between border-zinc-800 border-b px-4 py-3">
+              <span className="truncate font-medium text-sm text-white">
+                {lightbox?.title}
+              </span>
+              <div className="flex items-center gap-2">
+                {lightbox && (
+                  <button
+                    type="button"
+                    className="flex items-center gap-1.5 rounded-md bg-white/10 px-3 py-1.5 text-white text-xs transition-colors hover:bg-white/20"
+                    onClick={() =>
+                      void handleDownload(lightbox.url, lightbox.filename)
+                    }
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    下载
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="flex h-8 w-8 items-center justify-center rounded-md bg-white/10 text-white transition-colors hover:bg-white/20"
+                  aria-label="关闭"
+                  onClick={() => setLightbox(null)}
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+            {lightbox && (
+              <div className="flex flex-1 items-center justify-center overflow-auto p-4">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                {/* biome-ignore lint/performance/noImgElement: 外部 R2 公开域 */}
+                <img
+                  src={lightbox.url}
+                  alt={lightbox.title}
+                  className="max-h-[85vh] max-w-full object-contain"
+                />
+              </div>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>
