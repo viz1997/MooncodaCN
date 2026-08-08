@@ -88,7 +88,7 @@ export function QuadrantGrid({
           className="absolute inset-0 grid"
           style={{
             gridTemplateColumns: `repeat(${cols}, 1fr)`,
-            gridTemplateRows: `repeat(${cols}, 1fr)`,
+            gridTemplateRows: `repeat(${rows}, 1fr)`,
           }}
         >
           {cells.map((_cell, qIdx) => {
