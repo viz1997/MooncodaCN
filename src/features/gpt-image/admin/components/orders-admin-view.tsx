@@ -763,7 +763,7 @@ export function OrdersAdminView() {
                                 <img
                                   src={`/api/orders/${detailDialog.token}/image?index=${imgIdx}`}
                                   alt={`原图 ${imgIdx + 1}`}
-                                  className="h-full w-full object-cover transition-transform group-hover/preview:scale-105"
+                                  className="h-full w-full object-cover"
                                   loading="lazy"
                                   onClick={() =>
                                     setLightbox({
@@ -837,7 +837,7 @@ export function OrdersAdminView() {
                                         const row = Math.floor(selIdx / cols);
                                         return (
                                           <div
-                                            className="absolute inset-0 transition-transform group-hover/preview:scale-105"
+                                            className="absolute inset-0"
                                             style={{
                                               backgroundImage: `url(/api/orders/${detailDialog.token}/candidates/${imgIdx}/0)`,
                                               backgroundSize: `${cols * 100}% ${rows * 100}%`,
