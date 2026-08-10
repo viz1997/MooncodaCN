@@ -280,11 +280,6 @@ export function SelectStep({
           <h2 className="text-xl font-bold text-stone-900">
             {imageCount > 1 ? "选择效果图" : "挑一张你最喜欢的"}
           </h2>
-          <p className="mt-1 text-sm text-stone-400">
-            {candidateCount === 1
-              ? "下面是 1 张效果，点击确认即可"
-              : `下方拼接图含 ${candidateCount} 个效果，点击其中一张选中`}
-          </p>
         </div>
 
         {/* 进度小条（多图时） */}
