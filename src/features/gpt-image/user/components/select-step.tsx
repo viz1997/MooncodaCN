@@ -4,10 +4,8 @@ import {
   ArrowRight,
   Check,
   CheckCircle2,
-  Keyboard,
   Loader2,
   RefreshCw,
-  Undo2,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
