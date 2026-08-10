@@ -289,11 +289,11 @@ function UserOrderContent({
         )} */}
 
         {/* ── 品牌脚注 ── 放在 main 内，确保 SelectStep/ResultStep 的 fixed CTA 不会盖住它 */}
-        <p className="mt-12 pb-2 text-center">
+        <div className="mt-12 pb-2 text-center text-xs text-stone-400">
           <Link
             href="/"
             aria-label="Mooncoda 首页"
-            className="inline-flex items-center gap-1.5 text-xs text-stone-400 transition-colors hover:text-stone-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 rounded"
+            className="inline-flex items-center gap-1.5 transition-colors hover:text-stone-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 rounded"
           >
             <img
               src="/logo.svg"
@@ -302,7 +302,9 @@ function UserOrderContent({
             />
             <span className="tracking-tight">Mooncoda梦可达</span>
           </Link>
-        </p>
+          <span className="mx-1.5 text-stone-300">·</span>
+          <span>提供定制服务</span>
+        </div>
       </main>
 
       {/* ── 取消订单 AlertDialog ── */}

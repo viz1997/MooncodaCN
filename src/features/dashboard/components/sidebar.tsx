@@ -143,26 +143,11 @@ export function DashboardSidebar() {
               }
             }}
           >
-            {/* biome-ignore lint/a11y/noSvgWithoutTitle: decorative logo */}
-            <svg
-              className="h-6 w-6 shrink-0 text-primary"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2.4}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M3 17 L9 7 L13 14 L21 4" />
-              <circle cx="9" cy="7" r="1.4" fill="currentColor" stroke="none" />
-              <circle
-                cx="21"
-                cy="4"
-                r="1.4"
-                fill="currentColor"
-                stroke="none"
-              />
-            </svg>
+            <img
+              src="/logo.svg"
+              alt="Mooncoda"
+              className="h-6 w-6 shrink-0"
+            />
             <span
               className={cn(
                 "text-lg font-bold tracking-tight transition-opacity",
