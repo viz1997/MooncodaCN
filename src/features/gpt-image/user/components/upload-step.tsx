@@ -3,9 +3,7 @@
 import {
   ArrowRight,
   ImageIcon,
-  Sparkles,
   Trash2,
-  Upload,
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -136,15 +134,11 @@ export function UploadStep({
 
   return (
     <section className="flex flex-col items-center px-5 pt-6 pb-8 animate-[fadeIn_.3s_ease-out]">
-      {/* 第 1 步徽章 + 标题 */}
+      {/* 标题 */}
       <div className="mb-5 text-center">
-        <div className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-stone-100 px-3 py-1 text-[11px] font-medium text-stone-600">
-          <Upload className="h-3 w-3" strokeWidth={2.5} />第 1 步
-        </div>
         <h2 className="text-xl font-bold text-stone-900">{nextLabel}</h2>
         <p className="mt-1 text-sm text-stone-400">
-          {templateName} · 上传照片后 AI 将为你生成 {candidateCount}{" "}
-          种候选效果图
+          {templateName} · 上传照片后将生成 {candidateCount} 种候选效果图
         </p>
       </div>
 
@@ -230,8 +224,7 @@ export function UploadStep({
             </button>
 
             {!quotaFull && (
-              <p className="flex items-center justify-center gap-1.5 text-xs text-stone-500">
-                <Sparkles className="h-3.5 w-3.5 text-indigo-400" />
+              <p className="text-center text-xs text-stone-500">
                 本订单还差 {uploadCount - uploadedImageCount} 张未上传
               </p>
             )}

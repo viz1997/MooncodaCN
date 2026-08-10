@@ -60,16 +60,13 @@ export function ResultStep({
   return (
     <>
       <section className="mx-auto flex w-full max-w-md flex-col items-stretch px-5 pt-6 pb-10 animate-[fadeIn_.3s_ease-out]">
-        {/* 第 4 步徽章 + 大圆 + 标题 */}
+        {/* 大圆 + 标题 */}
         <div className="mb-6 text-center">
           <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50">
             <CheckCircle2
               className="h-7 w-7 text-emerald-500"
               strokeWidth={2}
             />
-          </div>
-          <div className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-medium text-emerald-600">
-            <CheckCircle2 className="h-3 w-3" />第 4 步
           </div>
           <h2 className="text-xl font-bold text-stone-900">全部完成！</h2>
           <p className="mt-1 text-sm text-stone-400">

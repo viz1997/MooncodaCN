@@ -275,11 +275,8 @@ export function SelectStep({
   return (
     <>
       <section className="mx-auto flex w-full max-w-md flex-col items-stretch px-5 pt-4 pb-32 animate-[fadeIn_.3s_ease-out]">
-        {/* 第 3 步徽章 + 标题 */}
+        {/* 标题 */}
         <div className="mb-4 text-center">
-          <div className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-3 py-1 text-[11px] font-medium text-indigo-600">
-            <Check className="h-3 w-3" />第 3 步
-          </div>
           <h2 className="text-xl font-bold text-stone-900">
             {imageCount > 1 ? "选择效果图" : "挑一张你最喜欢的"}
           </h2>

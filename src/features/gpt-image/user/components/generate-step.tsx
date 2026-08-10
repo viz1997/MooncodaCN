@@ -1,6 +1,6 @@
 "use client";
 
-import { Pause, Sparkles, StopCircle } from "lucide-react";
+import { ImageIcon, Pause, StopCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { originalUrl } from "./image-urls";
 import { formatEta } from "./order-lib";
@@ -80,14 +80,11 @@ export function GenerateStep({
 
   return (
     <section className="flex flex-col items-center px-5 pt-6 pb-8 animate-[fadeIn_.3s_ease-out]">
-      {/* 第 2 步徽章 + 标题 */}
+      {/* 标题 */}
       <div className="mb-6 text-center">
-        <div className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-[11px] font-medium text-amber-600">
-          <Sparkles className="h-3 w-3" />第 2 步
-        </div>
-        <h2 className="text-xl font-bold text-stone-900">AI 正在生成</h2>
+        <h2 className="text-xl font-bold text-stone-900">正在生成效果图</h2>
         <p className="mt-1 text-sm text-stone-400">
-          为第 {done + 1} 张原图生成候选效果图
+          第 {done + 1} 张原图
           {etaSec > 0 && (
             <span className="text-stone-300"> · {formatEta(etaSec)}</span>
           )}
@@ -105,7 +102,7 @@ export function GenerateStep({
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-stone-300">
-            <Sparkles className="h-8 w-8" />
+            <ImageIcon className="h-8 w-8" />
           </div>
         )}
       </div>
