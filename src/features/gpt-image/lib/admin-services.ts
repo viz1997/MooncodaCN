@@ -392,7 +392,10 @@ export async function findOrderByOrderNoForCreator(
     .from(promptOrder)
     .leftJoin(promptTemplate, eq(promptOrder.templateId, promptTemplate.id))
     .where(
-      and(eq(promptOrder.orderNo, orderNo), eq(promptOrder.createdBy, creatorId))
+      and(
+        eq(promptOrder.orderNo, orderNo),
+        eq(promptOrder.createdBy, creatorId)
+      )
     )
     .limit(1);
   if (rows.length === 0) return null;

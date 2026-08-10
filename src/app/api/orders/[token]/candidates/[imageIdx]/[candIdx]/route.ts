@@ -3,20 +3,23 @@
  * GET /api/orders/[token]/candidates/[imageIdx]/[candIdx]
  *
  * 直接 302 重定向到效果图 URL（Lingting 上游 URL 或 R2 占位图公开 URL）。
+ *
+ * 带 ?historyId=... 时：从指定历史快照的 candidates JSON 中读图。
+ * 校验 historyId 属于该 token 的订单，避免越权读到别人的快照。
  */
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
-import { promptOrder } from "@/db/schema";
+import { promptOrder, promptOrderHistory } from "@/db/schema";
 import { parseCandidates } from "@/features/gpt-image/lib/order-helpers";
 import { withApiLogging } from "@/lib/api-logger";
 
 export const runtime = "nodejs";
 
 async function getHandler(
-  _req: NextRequest,
+  req: NextRequest,
   ctx: { params: Promise<{ token: string; imageIdx: string; candIdx: string }> }
 ) {
   try {
@@ -34,9 +37,11 @@ async function getHandler(
         { status: 400 }
       );
     }
+    const historyId = req.nextUrl.searchParams.get("historyId");
+
     const order = await db.query.promptOrder.findFirst({
       where: eq(promptOrder.token, token),
-      columns: { candidates: true },
+      columns: { id: true, candidates: true },
     });
     if (!order) {
       return NextResponse.json(
@@ -44,6 +49,53 @@ async function getHandler(
         { status: 404 }
       );
     }
+
+    // 历史快照路径：historyId 必须属于该订单
+    if (historyId) {
+      const snap = await db
+        .select({ candidates: promptOrderHistory.candidates })
+        .from(promptOrderHistory)
+        .where(
+          and(
+            eq(promptOrderHistory.id, historyId),
+            eq(promptOrderHistory.orderId, order.id)
+          )
+        )
+        .limit(1);
+      const row = snap[0];
+      if (!row) {
+        return NextResponse.json(
+          { success: false, error: "历史快照不存在或不属于该订单" },
+          { status: 404 }
+        );
+      }
+      const nested = parseCandidates(row.candidates);
+      const group = nested[imageIdx];
+      const target = Array.isArray(group) ? group[candIdx] : undefined;
+      if (typeof target !== "string" || !target) {
+        return NextResponse.json(
+          { success: false, error: "历史快照的效果图不存在" },
+          { status: 404 }
+        );
+      }
+      if (!/^https?:\/\//i.test(target)) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "历史快照字段不是合法 URL",
+          },
+          { status: 500 }
+        );
+      }
+      return NextResponse.redirect(target, {
+        status: 302,
+        headers: {
+          "Cache-Control": "private, max-age=300",
+        },
+      });
+    }
+
+    // 正常路径
     const nested = parseCandidates(order.candidates as string | null);
     const group = nested[imageIdx];
     const target = Array.isArray(group) ? group[candIdx] : undefined;

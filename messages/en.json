@@ -13,6 +13,7 @@
     "subtitle": "Mooncoda specializes in WJP full-color 3D printing — pet badges, keychains, fridge magnets, figures, gift models. From a single photo to a tangible object in as little as 24 hours. One-piece minimums, single-piece shipping — every idea becomes a limited edition.",
     "getStarted": "Upload to customize",
     "seeDemo": "See the gallery",
+    "trustPromise": "1 piece min. · 7-day delivery · Free remake if unsatisfied",
     "trustLine": "Trusted by thousands of creators",
     "stats": {
       "cards": "Orders Delivered",
@@ -52,86 +53,103 @@
   },
   "Features": {
     "label": "Why Choose Us",
-    "title": "WJP Full-Color, One Piece is Big-Batch Quality",
-    "subtitle": "Full-color 3D printing technology faithfully reproduces photo-grade color and detail. No minimum order, no complexity threshold — every idea can be made real.",
+    "title": "Your Photo. A Real Object. In 7 Days.",
+    "subtitle": "Designed for individuals who want one-of-a-kind keepsakes. From upload to doorstep — every step is built around a single piece, not a factory batch.",
     "items": {
       "ai": {
-        "title": "Full-Color Process",
-        "description": "WJP (Wax Jet Printing) full-color 3D printing, 16-million-color reproduction, textures, gradients, and shadows in one pass — no post-processing coloring needed."
+        "title": "AI Auto 3D",
+        "description": "Upload any photo — pet, portrait, illustration — our AI turns it into a 3D model in minutes. No Blender, no modeling skills needed."
       },
       "multiSource": {
-        "title": "One-Piece Custom",
-        "description": "One-piece minimums, no batch-up required. Send a photo or illustration; we deliver a 3D proof within 48 hours and start printing once you approve."
+        "title": "Multi-View Preview",
+        "description": "Spin around your custom piece before printing — see every angle, every gradient, every texture before you say yes."
       },
       "outline": {
-        "title": "One-Piece Shipping",
-        "description": "Each piece individually packaged via Express shipping. Every product carries an authenticity tag and custom serial — ready to gift or keep."
+        "title": "Full-Color Detail",
+        "description": "WJP prints 16 million colors in a single piece. Fur, fabric, eyes, shadows — everything in your photo, faithfully reproduced."
       },
       "export": {
-        "title": "One-Piece Full-Color",
-        "description": "Industrial-grade WJP prints 16 million colors and fine textures in a single piece. No assembly, no post-processing coloring, no material choice."
+        "title": "One-Piece Start",
+        "description": "No MOQ, no batch-up. Want just one badge? Order one. Factory-grade quality whether you order 1 or 1,000."
       },
       "batch": {
-        "title": "Pro Modeling",
-        "description": "We handle image retouch, 3D modeling, and support splitting for you. Model files are transparently downloadable — copyright stays with you."
+        "title": "7-Day Delivery",
+        "description": "From upload to your doorstep in 7 days. Proof in 24h, print in 48-72h, Express ship the rest of the way."
       },
       "multilingual": {
-        "title": "Gift-Grade Packaging",
-        "description": "Free gift box packaging, custom cards, ribbon accessories — birthday surprises to wedding favors, every unboxing has ceremony."
+        "title": "Worldwide Shipping",
+        "description": "Express shipping to 100+ countries. Individual gift box, custom serial number, ready to gift on arrival."
       }
     }
   },
   "HowItWorks": {
     "label": "How It Works",
-    "title": "From Photo to Object in Four Steps",
-    "subtitle": "Upload → proof → print → delivery, fully visualized online.",
+    "title": "Three Steps. One Real Object.",
+    "subtitle": "From a single photo to your doorstep — no design skills needed.",
     "steps": {
       "upload": {
-        "title": "Upload Photo / Description",
-        "description": "Send a pet photo, portrait, illustration, AI image, or describe what you want in text. Multiple angles work best."
+        "title": "Pick a photo you love",
+        "description": "A pet portrait, your OC, a wedding photo — anything with clear features. One image is enough, more angles = better result."
       },
       "generate": {
-        "title": "Confirm 3D Proof",
-        "description": "Our designers deliver a 3D model with rendered preview and size specs within 24 hours. One free revision; full refund if unsatisfied."
+        "title": "Confirm your 3D preview",
+        "description": "We turn the photo into a 3D model and render every angle within 24 hours. One free revision. Full refund if you don't like it."
       },
       "export": {
-        "title": "WJP Production",
-        "description": "After approval, your piece enters the industrial WJP line: full-color printing, curing, and polishing — all in 48-72 hours."
+        "title": "We print and ship",
+        "description": "After approval, the piece enters our WJP line: full-color printing, curing, polishing — 48-72 hours."
       }
     },
     "completion": {
-      "title": "Express shipping to Your Door",
-      "description": "Individual gift box + custom serial number. Express shipping shipping, 5-7 working days from order."
+      "title": "On your desk in 7 days",
+      "description": "Individual gift box, custom serial, Express shipping worldwide. Most orders arrive within 5-7 working days."
+    }
+  },
+  "ImageToObject": {
+    "label": "From Photo · See the Magic",
+    "title": "One photo → one real object",
+    "subtitle": "AI handles the modeling, WJP handles the printing. From the moment you snap the photo to the moment you hold it — about the length of a movie.",
+    "photoLabel": "Your Photo",
+    "photoMeta": "JPG · 1080p",
+    "transformLabel": "AI Render",
+    "productBadge": "3D Real",
+    "productName": "Custom Pet Badge",
+    "productMeta": "WJP · Full Color",
+    "caption": "Same photo, two identities — left is what's on your phone, right is what you can hold in your hand.",
+    "steps": {
+      "s1": "Upload photo",
+      "s2": "AI auto-modeling",
+      "s3": "Full-color print & ship"
     }
   },
   "UseCases": {
-    "label": "Use Cases",
-    "title": "For Every Unique Gift",
-    "subtitle": "WJP full-color 3D printing turns any conceivable shape into a real object.",
+    "label": "Product Lines",
+    "title": "Four Ways to Make It Real",
+    "subtitle": "Pick your favorite format. Every line uses the same WJP full-color process — just different sizes and accessories.",
     "items": {
-      "students": {
-        "title": "Pet Memorials",
-        "subtitle": "Make your furry friend a touchable keepsake",
-        "description": "Send 3-5 pet photos; we model + full-color print as badges, keychains, fridge magnets, standees. Faithful fur color, gaze, and expression.",
-        "examples": ["Pet badges / pins", "Keychains / charms", "Fridge magnets / standees"]
+      "badge": {
+        "title": "Pet Badge",
+        "subtitle": "30-50mm wearable keepsake",
+        "description": "The most loved way to carry your pet, character, or memory. Pin it on a jacket, a bag, a hat — always close.",
+        "examples": ["Pet memorial", "Character pin", "Mini gift tag"]
       },
-      "professionals": {
-        "title": "Gift Customization",
-        "subtitle": "Corporate events, wedding favors, personal keepsakes",
-        "description": "Custom logos, bulk wedding favors, anniversary keepsakes. Single-piece start, 30+ pieces enjoy group pricing.",
-        "examples": ["Corporate gifts", "Wedding / anniversary keepsakes", "Birthday / holiday gifts"]
+      "keychain": {
+        "title": "Keychain / Magnet",
+        "subtitle": "40-100mm hanging or sticking",
+        "description": "Carry them on your keys, your fridge, your phone. Great gifts at a sweet price point — also a popular ToB merch format.",
+        "examples": ["Daily keychain", "Fridge magnet", "Phone charm"]
       },
-      "language": {
-        "title": "Anime & OC Merch",
-        "subtitle": "Bring your OC / character to life as a figure",
-        "description": "Send an illustration or character reference sheet; we model + full-color print. From 30mm mini charms to 200mm collector figures.",
-        "examples": ["OC / character figures", "Goods / badges / acrylics", "Collector display models"]
+      "figure": {
+        "title": "Figure / Standee",
+        "subtitle": "100-200mm desktop collectible",
+        "description": "Your OC, your wedding portrait, your brand mascot — as a full-color desktop piece. Comes with display base.",
+        "examples": ["OC / character figure", "Wedding standee", "Brand mascot"]
       },
-      "knowledge": {
-        "title": "Creative Prototyping",
-        "subtitle": "Small-batch validation for designers & creators",
-        "description": "Full-color proofing and small-batch production for industrial design, cultural goods, art installations. One piece welcome.",
-        "examples": ["Industrial design proofing", "Cultural goods trial", "Art installations / models"]
+      "gift": {
+        "title": "Gift Set",
+        "subtitle": "Premium gift box packaging",
+        "description": "A custom piece wrapped in a curated gift box — custom card, ribbon, optional engraving. Perfect for weddings, anniversaries, milestone birthdays.",
+        "examples": ["Wedding favors", "Anniversary gifts", "Milestone birthdays"]
       }
     }
   },
@@ -176,6 +194,7 @@
     "label": "FAQ",
     "title": "Questions You Might Have",
     "subtitle": "About our WJP full-color 3D printing customization service.",
+    "morePrompt": "Got other questions? Drop us a line →",
     "items": [
       {
         "question": "What is WJP full-color 3D printing?",
@@ -296,10 +315,85 @@
   },
   "CTA": {
     "badge": "Single-piece custom · Single-piece shipping",
-    "title": "Turn Your Imagination into a Real Object",
-    "subtitle": "Upload one photo, get a full-color 3D proof within 48 hours. Customization with no minimum order — every idea is taken seriously.",
-    "getStarted": "Upload to customize",
-    "seeDemo": "Live Demo"
+    "title": "Your One Photo. A Real Object on Your Desk.",
+    "subtitle": "No design skills, no MOQ, no waiting weeks. Upload a photo, get a full-color 3D proof in 24 hours, hold it in your hand in 7 days.",
+    "getStarted": "Upload my photo",
+    "seeDemo": "See what others made"
+  },
+  "Stats": {
+    "label": "Trust",
+    "title": "Built on Real Orders",
+    "subtitle": "Every number below is a real piece that went out the door — not a marketing claim.",
+    "items": {
+      "units": {
+        "value": "5,000+",
+        "label": "Pieces delivered"
+      },
+      "rating": {
+        "value": "4.9",
+        "suffix": "/5"
+      },
+      "shipping": {
+        "value": "7",
+        "suffix": "days",
+        "label": "Avg. delivery"
+      },
+      "countries": {
+        "value": "100+",
+        "label": "Countries served"
+      }
+    }
+  },
+  "LogoCloud": {
+    "label": "Where to Find Us",
+    "title": "Trusted Across China's Creator Platforms",
+    "subtitle": "We're where creators and gift-givers already are. Logo placeholders — swap in real partner brands anytime.",
+    "items": {
+      "taobao": { "name": "Taobao" },
+      "xiaohongshu": { "name": "Xiaohongshu" },
+      "douyin": { "name": "Douyin" },
+      "weibo": { "name": "Weibo" },
+      "bilibili": { "name": "Bilibili" },
+      "pdd": { "name": "PDD" },
+      "jd": { "name": "JD" },
+      "tmall": { "name": "Tmall" }
+    }
+  },
+  "Comparison": {
+    "label": "Comparison",
+    "title": "DIY vs. Mooncoda",
+    "subtitle": "Skip the modeling tools. Skip the factory MOQ. Skip the weeks of back-and-forth.",
+    "header": {
+      "diy": "DIY Yourself",
+      "us": "Mooncoda for You"
+    },
+    "rows": {
+      "modeling": {
+        "aspect": "3D Modeling",
+        "diy": "Weeks of self-taught Blender",
+        "us": "AI auto-generates from photo"
+      },
+      "color": {
+        "aspect": "Color",
+        "diy": "Hand-paint, hard to match",
+        "us": "WJP 16M-color direct print"
+      },
+      "moq": {
+        "aspect": "Minimum Order",
+        "diy": "Factories need 50+",
+        "us": "1 piece is enough"
+      },
+      "delivery": {
+        "aspect": "Delivery",
+        "diy": "2-4 weeks of sampling",
+        "us": "7 days, door to door"
+      },
+      "revision": {
+        "aspect": "Revision",
+        "diy": "Redo it yourself",
+        "us": "Free re-generation"
+      }
+    }
   },
   "DashboardPages": {
     "dashboard": {

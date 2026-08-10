@@ -14,6 +14,11 @@ export interface UseSelectionsResult {
   toggle: (imageIdx: number, candIdx: number) => void;
   /** 提交用：确认全选后的纯数字数组，未选满返回 null */
   toPayload: () => number[] | null;
+  /**
+   * 用服务端权威值替换本地草稿（如 restore 历史快照后调用）。
+   * 与轮询调和不同：调用一次就强制覆盖，而不是只在长度变化时增量补齐。
+   */
+  replaceFromServer: (values: (number | null)[] | null, length: number) => void;
 }
 
 interface DraftState {
@@ -86,6 +91,24 @@ export function useSelections(order: OrderView | null): UseSelectionsResult {
     });
   }, []);
 
+  /**
+   * 用服务端权威值强制覆盖本地草稿。
+   *
+   * 仅在 restore / 终态进入时显式调用 —— 平时轮询不应该触发它，
+   * 否则用户的未提交选择会被服务端旧值覆盖丢失。
+   */
+  const replaceFromServer = useCallback(
+    (values: (number | null)[] | null, length: number) => {
+      setDraft({
+        orderId: order?.id ?? "",
+        length,
+        final: order?.status === "SELECTED",
+        values: normalize(values, length),
+      });
+    },
+    [order?.id, order?.status]
+  );
+
   const effective = current.values.slice(0, uploadedCount);
   const selectedCount = effective.filter((v) => v !== null).length;
   const allSelected = uploadedCount > 0 && selectedCount === uploadedCount;
@@ -104,5 +127,6 @@ export function useSelections(order: OrderView | null): UseSelectionsResult {
     firstUnselectedIdx,
     toggle,
     toPayload,
+    replaceFromServer,
   };
 }

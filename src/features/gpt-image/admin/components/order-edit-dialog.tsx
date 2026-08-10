@@ -167,7 +167,9 @@ export function OrderEditDialog({
                   value={uploadCount}
                   onChange={(e) => {
                     const n = parseInt(e.target.value, 10);
-                    setUploadCount(Number.isNaN(n) ? 1 : Math.min(50, Math.max(1, n)));
+                    setUploadCount(
+                      Number.isNaN(n) ? 1 : Math.min(50, Math.max(1, n))
+                    );
                   }}
                   className="text-center"
                 />

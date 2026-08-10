@@ -1,67 +1,97 @@
 "use client";
 
-import { Camera, Gift, Layers, Palette, Printer, Wrench } from "lucide-react";
+import { Eye, Globe, Package, Palette, Truck, Wand2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Reveal } from "@/components/motion/reveal";
-import { Section, SectionHeader } from "./section";
+import { ConfettiDots, Sparkle } from "./decorations";
 
 /**
- * 卖点配置 —— WJP 全彩 3D 打印业务
- * - icon 与卡片内容匹配（全彩工艺 / 一件定制 / 一件发货 / 全彩一体 / 建模 / 包装）
- * - path 是展示用的"工艺代号"风格标签，不需要翻译
+ * FeatureGrid —— 6 项核心能力（手作卡片版）
+ *
+ * 视觉：
+ * - 不用 Section 框架，自己写
+ * - 6 张卡片 3 列布局，每张含 emoji + 暖色背景圆 + 大号 lucide icon + 标题 + 描述
+ * - 顶部小贴纸 "为什么选我们"
+ * - 卡片 hover 微微抬起 + 阴影加深
+ * - 散落装饰
  */
-const featureConfig = [
-  { key: "ai" as const, icon: Palette, path: "WJP / full-color" },
-  { key: "multiSource" as const, icon: Camera, path: "1 piece MOQ" },
-  { key: "outline" as const, icon: Gift, path: "single shipping" },
-  { key: "export" as const, icon: Layers, path: "one-piece print" },
-  { key: "batch" as const, icon: Wrench, path: "pro modeling" },
-  { key: "multilingual" as const, icon: Printer, path: "gift pack" },
+
+type FeatureItem = {
+  key: "ai" | "multiSource" | "outline" | "export" | "batch" | "multilingual";
+  icon: typeof Wand2;
+  emoji: string;
+  tone: string;
+};
+
+const FEATURES: FeatureItem[] = [
+  { key: "ai", icon: Wand2, emoji: "✨", tone: "bg-coral-soft" },
+  { key: "multiSource", icon: Eye, emoji: "👀", tone: "bg-amber-soft" },
+  { key: "outline", icon: Palette, emoji: "🎨", tone: "bg-blush-soft" },
+  { key: "export", icon: Package, emoji: "📦", tone: "bg-coral-soft" },
+  { key: "batch", icon: Truck, emoji: "🚚", tone: "bg-amber-soft" },
+  { key: "multilingual", icon: Globe, emoji: "🌏", tone: "bg-blush-soft" },
 ];
 
 export function FeatureGrid() {
   const t = useTranslations("Features");
 
   return (
-    <Section id="features">
-      <SectionHeader
-        eyebrow={t("label")}
-        title={t("title")}
-        subtitle={t("subtitle")}
-        split
+    <section id="features" className="relative py-20 md:py-28">
+      <ConfettiDots
+        items={[
+          { color: "var(--accent-coral)", top: "8%", left: "5%", size: 10 },
+          { color: "var(--accent-amber)", top: "12%", left: "92%", size: 8 },
+          { color: "var(--primary)", top: "78%", left: "8%", size: 10 },
+        ]}
       />
 
-      <Reveal delay={0.08}>
-        <div className="grid gap-px overflow-hidden rounded-xl border bg-border md:grid-cols-2 lg:grid-cols-3">
-          {featureConfig.map((feature) => {
-            const Icon = feature.icon;
+      <div className="container relative">
+        <Reveal>
+          <div className="mb-14 flex flex-col items-center gap-4 text-center md:items-start md:text-left">
+            <span className="inline-flex items-center gap-2 rounded-full bg-card px-4 py-1.5 shadow-sticker text-xs font-semibold">
+              <Sparkle size={12} className="text-coral" />
+              {t("label")}
+            </span>
+            <h2 className="text-balance text-3xl font-extrabold tracking-tight md:text-4xl">
+              {t("title")}
+            </h2>
+            <p className="max-w-xl text-sm text-muted-foreground md:text-base">
+              {t("subtitle")}
+            </p>
+          </div>
+        </Reveal>
+
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          {FEATURES.map((f, idx) => {
+            const Icon = f.icon;
             return (
-              <div
-                key={feature.key}
-                className="group relative bg-card p-7 transition-colors hover:bg-muted/40"
-              >
-                {/* 右上角代码路径索引 */}
-                <span className="absolute top-6 right-6 font-mono text-[10px] font-semibold tracking-[0.14em] text-muted-foreground/60 uppercase">
-                  {feature.path}
-                </span>
+              <Reveal key={f.key} delay={0.04 + idx * 0.06}>
+                <div className="bg-card shadow-sticker group relative overflow-hidden rounded-3xl border p-7 transition-all hover:-translate-y-1 hover:shadow-sticker-coral">
+                  {/* 顶部 emoji 圆 + lucide icon */}
+                  <div className="mb-5 flex items-center gap-3">
+                    <div
+                      className={`flex h-14 w-14 items-center justify-center rounded-2xl ${f.tone} text-2xl shadow-sticker`}
+                    >
+                      {f.emoji}
+                    </div>
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
+                      <Icon className="h-5 w-5" />
+                    </div>
+                  </div>
 
-                {/* 图标：hover 时反色填充 */}
-                <div className="mb-5 flex h-10 w-10 items-center justify-center rounded-md bg-primary/10 text-primary ring-1 ring-primary/20 transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
-                  <Icon className="h-5 w-5" />
+                  <h3 className="text-lg font-extrabold tracking-tight">
+                    {t(`items.${f.key}.title`)}
+                  </h3>
+                  <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                    {t(`items.${f.key}.description`)}
+                  </p>
                 </div>
-
-                <h3 className="mb-2 font-semibold tracking-tight">
-                  {t(`items.${feature.key}.title`)}
-                </h3>
-                <p className="text-sm leading-relaxed text-muted-foreground">
-                  {t(`items.${feature.key}.description`)}
-                </p>
-              </div>
+              </Reveal>
             );
           })}
         </div>
-      </Reveal>
-    </Section>
+      </div>
+    </section>
   );
 }

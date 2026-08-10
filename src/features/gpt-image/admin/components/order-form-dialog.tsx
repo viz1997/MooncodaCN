@@ -101,9 +101,7 @@ export function OrderFormDialog({
         ...(replaceOrderId ? { replaceOrderId } : {}),
       });
       if (!res?.data) throw new Error("创建失败");
-      toast.success(
-        replaceOrderId ? "已覆盖旧订单" : "订单已创建，链接已生成"
-      );
+      toast.success(replaceOrderId ? "已覆盖旧订单" : "订单已创建，链接已生成");
       onCreated(res.data.order);
       onOpenChange(false);
     } catch (e) {
@@ -323,7 +321,9 @@ export function OrderFormDialog({
           <DialogHeader>
             <DialogTitle>订单号已存在</DialogTitle>
             <DialogDescription>
-              你已有一个名为 <span className="font-mono">{pendingConflict?.orderNo}</span> 的订单。
+              你已有一个名为{" "}
+              <span className="font-mono">{pendingConflict?.orderNo}</span>{" "}
+              的订单。
               <br />
               覆盖会用本次填写的收件人/平台/上传数量替换旧订单的业务字段，
               模板、访问链接、状态、上传内容保持不变。

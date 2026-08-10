@@ -8,6 +8,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 /**
@@ -771,6 +772,20 @@ export const promptOrderStatusEnum = pgEnum("prompt_order_status", [
 ]);
 
 /**
+ * 效果图历史快照触发原因枚举
+ *
+ * 标识这一轮快照是因为什么 destructive 写入而创建的：
+ * - regenerate_single：单图"重新生成"前
+ * - regenerate_all：批量重跑 / FAILED 一键重试前
+ * - failed_reupload：FAILED 状态下重传图片前
+ * - restore：用户主动"恢复历史版本"前（先归档当前再恢复）
+ */
+export const promptOrderHistoryTriggerEnum = pgEnum(
+  "prompt_order_history_trigger",
+  ["regenerate_single", "regenerate_all", "failed_reupload", "restore"]
+);
+
+/**
  * 订单来源平台枚举
  *
  * 标识订单从哪个渠道分发（淘宝 / 抖音 / 小红书 / 红人 / 合作方），
@@ -897,6 +912,71 @@ export type PromptOrderStatus =
   (typeof promptOrderStatusEnum.enumValues)[number];
 
 // ============================================
+// 效果图历史快照表 (PromptOrderHistory)
+// ============================================
+/**
+ * 效果图历史快照 —— 每次 destructive 写入前自动归档
+ *
+ * 用户在右栏点缩略图就能恢复那一轮的"原图 + 候选集 + 已选候选"。
+ * 一次 destructive 写入 = 一条快照；round 每订单独立递增。
+ *
+ * @field id - 快照唯一标识符（nanoid）
+ * @field orderId - 关联订单（级联删除）
+ * @field round - 每订单递增 1..N；与 orderId 组成唯一索引
+ * @field trigger - 触发原因（regenerate_single/regenerate_all/failed_reupload/restore）
+ * @field imageIdx - 归档聚焦的原图索引（批量归档时取 0）
+ * @field candidateIdx - 归档时该原图已选候选；恢复时一并选中
+ * @field candidates - 不可变嵌套候选 URL 数组（与 promptOrder 同步语义）
+ * @field selections - 不可变选择数组（可能为 null 表示从未选过）
+ * @field uploadedImages - 不可变已上传原图 URL 数组
+ * @field templateId - 当时使用的模板 id（兼容性检查用）
+ * @field candidateCount - 当时每张原图的候选数（兼容性检查用）
+ * @field imageCount - 当时已上传原图张数（兼容性检查用）
+ * @field size - 当时使用的输出尺寸（兼容性检查用）
+ * @field generatedAt - 当时的生成时间戳（用于 restore 时回填）
+ * @field createdAt - 快照创建时间（默认 now）
+ */
+export const promptOrderHistory = pgTable(
+  "prompt_order_history",
+  {
+    id: text("id").primaryKey(),
+    orderId: text("order_id")
+      .notNull()
+      .references(() => promptOrder.id, { onDelete: "cascade" }),
+    round: integer("round").notNull(),
+    trigger: promptOrderHistoryTriggerEnum("trigger").notNull(),
+    imageIdx: integer("image_idx"),
+    candidateIdx: integer("candidate_idx").notNull().default(0),
+    candidates: text("candidates").notNull(),
+    selections: text("selections"),
+    uploadedImages: text("uploaded_images").notNull(),
+    templateId: text("template_id").notNull(),
+    candidateCount: integer("candidate_count").notNull(),
+    imageCount: integer("image_count").notNull(),
+    size: text("size").notNull(),
+    generatedAt: timestamp("generated_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    orderRoundUnique: uniqueIndex("poh_order_round_unique").on(
+      t.orderId,
+      t.round
+    ),
+    orderCreatedAtIdx: index("poh_order_created_at_idx").on(
+      t.orderId,
+      t.createdAt
+    ),
+  })
+);
+
+export type PromptOrderHistory = typeof promptOrderHistory.$inferSelect;
+export type NewPromptOrderHistory = typeof promptOrderHistory.$inferInsert;
+
+/** 效果图历史快照触发原因类型 */
+export type PromptOrderHistoryTrigger =
+  (typeof promptOrderHistoryTriggerEnum.enumValues)[number];
+
+// ============================================
 // Better Auth 关联关系（启用 experimental.joins 后必填）
 // ============================================
 //
@@ -947,9 +1027,20 @@ export const promptTemplateRelations = relations(
   })
 );
 
-export const promptOrderRelations = relations(promptOrder, ({ one }) => ({
+export const promptOrderRelations = relations(promptOrder, ({ one, many }) => ({
   template: one(promptTemplate, {
     fields: [promptOrder.templateId],
     references: [promptTemplate.id],
   }),
+  history: many(promptOrderHistory),
 }));
+
+export const promptOrderHistoryRelations = relations(
+  promptOrderHistory,
+  ({ one }) => ({
+    order: one(promptOrder, {
+      fields: [promptOrderHistory.orderId],
+      references: [promptOrder.id],
+    }),
+  })
+);

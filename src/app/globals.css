@@ -5,8 +5,9 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ============================================================
-   Mooncoda · "Engineered Spec-Sheet" 设计系统
-   色板：暖中性底（亮：冷 drafting paper / 暗：暖石墨）+ Spruce 主色
+   Mooncoda · "Warm Craft" 设计系统
+   色板：暖 cream paper 底（亮/暗均微暖）+ Spruce 主色（品牌保留）
+   圆角：14px 基准（温向消费品感，柔润）
    字体：Geist Sans（正文/展示）+ Geist Mono（点缀/数据）
    ============================================================ */
 
@@ -59,29 +60,29 @@
 }
 
 :root {
-  /* 圆角：偏克制的 10px 基准（lg=10 / md=8 / sm=6 / xl=14） */
-  --radius: 0.625rem;
+  /* 圆角：手作潮玩 — 更大基准到 20px（lg=20 / md=18 / sm=16 / xl=24 / 2xl=28） */
+  --radius: 1.25rem;
 
-  /* ── 亮色：冷 drafting paper 底 + 暖石墨墨色 ── */
-  --background: oklch(0.985 0.003 95);
-  --foreground: oklch(0.24 0.006 60);
+  /* ── 亮色：暖 cream paper 底 + 暖墨色 ── */
+  --background: oklch(0.985 0.012 85);
+  --foreground: oklch(0.26 0.012 60);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.24 0.006 60);
+  --card-foreground: oklch(0.26 0.012 60);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.24 0.006 60);
+  --popover-foreground: oklch(0.26 0.012 60);
 
-  /* 主色：Spruce 深云杉绿（品牌定） */
+  /* 主色：Spruce 深云杉绿（品牌定，保留不动） */
   --primary: oklch(0.40 0.072 184);
   --primary-foreground: oklch(0.99 0.005 95);
 
-  --secondary: oklch(0.965 0.005 95);
-  --secondary-foreground: oklch(0.24 0.006 60);
+  --secondary: oklch(0.965 0.008 90);
+  --secondary-foreground: oklch(0.26 0.012 60);
 
-  --muted: oklch(0.965 0.005 95);
-  --muted-foreground: oklch(0.50 0.008 60);
+  --muted: oklch(0.965 0.008 90);
+  --muted-foreground: oklch(0.50 0.012 65);
 
-  --accent: oklch(0.965 0.005 95);
-  --accent-foreground: oklch(0.24 0.006 60);
+  --accent: oklch(0.965 0.008 90);
+  --accent-foreground: oklch(0.26 0.012 60);
 
   /* 语义色 */
   --destructive: oklch(0.58 0.20 28);
@@ -89,14 +90,27 @@
   --warning: oklch(0.74 0.13 70);
 
   /* 发丝级边框：暖灰 */
-  --border: oklch(0.905 0.006 90);
-  --input: oklch(0.905 0.006 90);
+  --border: oklch(0.905 0.010 85);
+  --input: oklch(0.905 0.010 85);
   --ring: oklch(0.40 0.072 184);
 
-  /* 氛围层：极淡网格 + 双色光晕 */
-  --grid-line: oklch(0.24 0.006 60 / 0.045);
-  --glow-1: oklch(0.50 0.09 184 / 0.10);
-  --glow-2: oklch(0.45 0.06 250 / 0.05);
+  /* 温向色表面 — ToC 卡片 / 区段底 */
+  --surface-warm: oklch(0.97 0.020 75);
+  --surface-cream: oklch(0.955 0.028 80);
+
+  /* 手作风点缀色 — 与 Spruce 共存的暖色三件套 */
+  --accent-coral: oklch(0.74 0.14 25);
+  --accent-coral-soft: oklch(0.92 0.05 30);
+  --accent-amber: oklch(0.82 0.14 70);
+  --accent-amber-soft: oklch(0.94 0.06 75);
+  --accent-blush: oklch(0.90 0.06 35);
+  --accent-blush-soft: oklch(0.96 0.03 35);
+
+  /* 氛围层：暖琥珀光晕 + 粉调光晕 */
+  --grid-line: oklch(0.26 0.012 60 / 0.045);
+  --glow-1: oklch(0.62 0.13 30 / 0.16);
+  --glow-2: oklch(0.78 0.10 70 / 0.14);
+  --glow-3: oklch(0.85 0.07 35 / 0.18);
 
   /* 图表色（与主色成体系） */
   --chart-1: oklch(0.40 0.072 184);
@@ -117,37 +131,48 @@
 }
 
 .dark {
-  /* ── 暗色：暖石墨（非 zinc 冷灰）+ 更亮的 Spruce ── */
-  --background: oklch(0.165 0.004 60);
-  --foreground: oklch(0.93 0.004 90);
-  --card: oklch(0.205 0.005 60);
-  --card-foreground: oklch(0.93 0.004 90);
-  --popover: oklch(0.205 0.005 60);
-  --popover-foreground: oklch(0.93 0.004 90);
+  /* ── 暗色：暖石墨（稍亮更暖）+ 更亮的 Spruce ── */
+  --background: oklch(0.18 0.012 70);
+  --foreground: oklch(0.93 0.008 90);
+  --card: oklch(0.22 0.012 70);
+  --card-foreground: oklch(0.93 0.008 90);
+  --popover: oklch(0.22 0.012 70);
+  --popover-foreground: oklch(0.93 0.008 90);
 
   --primary: oklch(0.68 0.11 178);
-  --primary-foreground: oklch(0.165 0.004 60);
+  --primary-foreground: oklch(0.18 0.012 70);
 
-  --secondary: oklch(0.25 0.005 60);
-  --secondary-foreground: oklch(0.93 0.004 90);
+  --secondary: oklch(0.26 0.012 70);
+  --secondary-foreground: oklch(0.93 0.008 90);
 
-  --muted: oklch(0.23 0.005 60);
-  --muted-foreground: oklch(0.66 0.006 70);
+  --muted: oklch(0.24 0.012 70);
+  --muted-foreground: oklch(0.66 0.010 75);
 
-  --accent: oklch(0.25 0.005 60);
-  --accent-foreground: oklch(0.93 0.004 90);
+  --accent: oklch(0.26 0.012 70);
+  --accent-foreground: oklch(0.93 0.008 90);
 
   --destructive: oklch(0.62 0.19 28);
   --success: oklch(0.60 0.10 165);
   --warning: oklch(0.74 0.13 70);
 
-  --border: oklch(0.30 0.006 60);
-  --input: oklch(0.27 0.006 60);
+  --border: oklch(0.30 0.012 70);
+  --input: oklch(0.27 0.012 70);
   --ring: oklch(0.68 0.11 178);
 
-  --grid-line: oklch(0.93 0.004 90 / 0.04);
-  --glow-1: oklch(0.68 0.11 178 / 0.14);
-  --glow-2: oklch(0.50 0.12 295 / 0.08);
+  --surface-warm: oklch(0.23 0.014 72);
+  --surface-cream: oklch(0.25 0.020 75);
+
+  --accent-coral: oklch(0.74 0.16 25);
+  --accent-coral-soft: oklch(0.30 0.08 30);
+  --accent-amber: oklch(0.82 0.14 70);
+  --accent-amber-soft: oklch(0.32 0.08 70);
+  --accent-blush: oklch(0.70 0.10 35);
+  --accent-blush-soft: oklch(0.30 0.06 35);
+
+  --grid-line: oklch(0.93 0.008 90 / 0.04);
+  --glow-1: oklch(0.68 0.16 30 / 0.18);
+  --glow-2: oklch(0.78 0.13 70 / 0.16);
+  --glow-3: oklch(0.75 0.10 35 / 0.18);
 
   --chart-1: oklch(0.68 0.11 178);
   --chart-2: oklch(0.62 0.11 165);
@@ -305,6 +330,151 @@
     box-shadow: 0 1px 0 0 color-mix(in srgb, var(--foreground) 5%, transparent),
       0 30px 70px -30px color-mix(in srgb, var(--foreground) 22%, transparent);
   }
+
+  /* 温向消费品感：更柔更扩散的悬停 / 卡片阴影 */
+  .shadow-cushion {
+    box-shadow: 0 1px 0 0 color-mix(in srgb, var(--foreground) 3%, transparent),
+      0 2px 4px 0 color-mix(in srgb, var(--foreground) 5%, transparent),
+      0 22px 44px -22px color-mix(in srgb, var(--primary) 18%, transparent);
+  }
+
+  /* 温向表面色快捷类 */
+  .bg-warm {
+    background-color: var(--surface-warm);
+  }
+  .bg-cream {
+    background-color: var(--surface-cream);
+  }
+
+  /* ── 手作潮玩风点缀色 ── */
+  .bg-coral {
+    background-color: var(--accent-coral);
+  }
+  .bg-coral-soft {
+    background-color: var(--accent-coral-soft);
+  }
+  .bg-amber {
+    background-color: var(--accent-amber);
+  }
+  .bg-amber-soft {
+    background-color: var(--accent-amber-soft);
+  }
+  .bg-blush {
+    background-color: var(--accent-blush);
+  }
+  .bg-blush-soft {
+    background-color: var(--accent-blush-soft);
+  }
+  .text-coral {
+    color: var(--accent-coral);
+  }
+  .text-amber {
+    color: var(--accent-amber);
+  }
+  .text-blush {
+    color: var(--accent-blush);
+  }
+  .border-coral\/20 {
+    border-color: color-mix(in srgb, var(--accent-coral) 20%, transparent);
+  }
+  .border-coral\/30 {
+    border-color: color-mix(in srgb, var(--accent-coral) 30%, transparent);
+  }
+
+  /* ── Blob 形（不规则有机形状） ── */
+  .blob-1 {
+    border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%;
+  }
+  .blob-2 {
+    border-radius: 40% 60% 70% 30% / 40% 50% 60% 50%;
+  }
+  .blob-3 {
+    border-radius: 70% 30% 50% 50% / 35% 50% 50% 65%;
+  }
+  .blob-4 {
+    border-radius: 30% 70% 70% 30% / 50% 40% 60% 50%;
+  }
+
+  /* ── 贴纸阴影（手作风的核心） ── */
+  .shadow-sticker {
+    box-shadow: 0 2px 0 0 color-mix(in srgb, var(--foreground) 8%, transparent),
+      0 8px 16px -4px color-mix(in srgb, var(--foreground) 18%, transparent),
+      0 24px 48px -16px color-mix(in srgb, var(--primary) 24%, transparent);
+  }
+  .shadow-sticker-coral {
+    box-shadow: 0 2px 0 0 color-mix(in srgb, var(--accent-coral) 30%, transparent),
+      0 8px 16px -4px color-mix(in srgb, var(--accent-coral) 28%, transparent),
+      0 24px 48px -16px color-mix(in srgb, var(--accent-coral) 22%, transparent);
+  }
+  .shadow-sticker-amber {
+    box-shadow: 0 2px 0 0 color-mix(in srgb, var(--accent-amber) 30%, transparent),
+      0 8px 16px -4px color-mix(in srgb, var(--accent-amber) 28%, transparent),
+      0 24px 48px -16px color-mix(in srgb, var(--accent-amber) 22%, transparent);
+  }
+
+  /* ── 装饰元素类 ── */
+  .confetti-dot {
+    width: 0.4rem;
+    height: 0.4rem;
+    border-radius: 999px;
+    display: inline-block;
+  }
+
+  /* ── 渐变描边（手作卡片质感） ── */
+  .ring-gradient {
+    position: relative;
+  }
+  .ring-gradient::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      135deg,
+      var(--accent-coral-soft),
+      var(--accent-amber-soft),
+      var(--accent-blush-soft)
+    );
+    -webkit-mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  /* ── 旋转摆动入场 ── */
+  .animate-wobble {
+    animation: wobble 6s ease-in-out infinite;
+  }
+  .animate-float-slow {
+    animation: float-slow 5s ease-in-out infinite;
+  }
+  .animate-spin-slow {
+    animation: spin 20s linear infinite;
+  }
+  @keyframes wobble {
+    0%,
+    100% {
+      transform: rotate(-2deg);
+    }
+    50% {
+      transform: rotate(2deg);
+    }
+  }
+  @keyframes float-slow {
+    0%,
+    100% {
+      transform: translateY(0px);
+    }
+    50% {
+      transform: translateY(-10px);
+    }
+  }
 }
 
 /* ============================================================
@@ -359,7 +529,7 @@
   position: relative;
 }
 
-/* 尊重「减少动态」偏好 */
+/* 尊重「减少动态」偏好（保留环境性慢动作装饰） */
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
@@ -370,5 +540,10 @@
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+  }
+  .animate-wobble,
+  .animate-float-slow,
+  .animate-spin-slow {
+    animation: none !important;
   }
 }

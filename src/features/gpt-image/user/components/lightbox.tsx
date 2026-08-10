@@ -79,7 +79,9 @@ export function Lightbox({
       let nextCand = candIdx;
       if (dImage !== 0) {
         nextImage = (imageIdx + dImage + imageCount) % imageCount;
-        nextCand = 0;
+        // 切图时尽量保留同位次（不超过新图的候选数），
+        // 避免每次换图都跳回首张让用户在大图模式下翻页错乱。
+        nextCand = Math.min(candIdx, candidateCount - 1);
       } else {
         nextCand = (candIdx + dCand + candidateCount) % candidateCount;
       }
@@ -428,6 +430,9 @@ export function Lightbox({
                 )}
               </button>
             )}
+            <p className="text-center text-xs text-zinc-500 sm:hidden">
+              左右滑切换 · 长按看原图 · 双击选择
+            </p>
             <p className="hidden text-center text-xs text-zinc-500 sm:block">
               ← → 切换效果 · 空格并排对比 · 长按图片看原图 · Enter 选择 · Esc
               关闭

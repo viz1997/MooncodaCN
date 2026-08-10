@@ -63,6 +63,7 @@ export function OriginalStrip({
         const isCurrent = i === currentIdx;
         return (
           <button
+            // biome-ignore lint/suspicious/noArrayIndexKey: 顺序固定，与 imageIdx 一一对应
             key={i}
             id={`orig-tab-${i}`}
             type="button"
@@ -79,6 +80,7 @@ export function OriginalStrip({
                 : "border-zinc-200 opacity-70 hover:opacity-100",
             ].join(" ")}
           >
+            {/* biome-ignore lint/performance/noImgElement: R2 远程 URL，next/image 域名白名单外 */}
             <img
               src={originalUrl(token, i, updatedAt)}
               alt=""

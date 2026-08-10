@@ -20,6 +20,7 @@ import {
   parseCandidates,
   parseSelections,
 } from "@/features/gpt-image/lib/order-helpers";
+import { archiveOrderSnapshot } from "@/features/gpt-image/lib/order-history";
 import { withApiLogging } from "@/lib/api-logger";
 import { logger } from "@/lib/logger";
 
@@ -127,20 +128,30 @@ async function postHandler(
         ? null
         : prevSelections.map((v, i) => (i >= fromIdx && i < toIdx ? null : v));
 
-    await db
-      .update(promptOrder)
-      .set({
-        candidates: JSON.stringify(nested),
-        ...(nextSelections !== null
-          ? { selections: JSON.stringify(nextSelections) }
-          : {}),
-        status: "GENERATING",
-        errorMessage: null,
-        // 清掉上一轮遗留的任务态，避免 /poll 查到已废弃的 task_id
-        generationTask: null,
-        updatedAt: new Date(),
-      })
-      .where(eq(promptOrder.id, order.id));
+    // 归档 + 清空 必须同一个事务（避免半成品快照 + 竞态 round 冲突）。
+    // 事务外再调 submitGeneration()，它依赖请求周期内的 submit 上下文。
+    await db.transaction(async (tx) => {
+      await archiveOrderSnapshot(
+        order.id,
+        isSingle ? "regenerate_single" : "regenerate_all",
+        isSingle ? imageIdx : null,
+        { tx }
+      );
+      await tx
+        .update(promptOrder)
+        .set({
+          candidates: JSON.stringify(nested),
+          ...(nextSelections !== null
+            ? { selections: JSON.stringify(nextSelections) }
+            : {}),
+          status: "GENERATING",
+          errorMessage: null,
+          // 清掉上一轮遗留的任务态，避免 /poll 查到已废弃的 task_id
+          generationTask: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(promptOrder.id, order.id));
+    });
 
     const candidateCount = order.template.candidateCount;
     logger.info(

@@ -1,12 +1,15 @@
 import type { Metadata } from "next";
 import { siteConfig } from "@/config";
 import {
+  ComparisonSection,
   CTASection,
   FAQSection,
   FeatureGrid,
   HeroSection,
   HowItWorks,
-  PricingSection,
+  ImageToObjectSection,
+  LogoCloud,
+  StatsSection,
   Testimonials,
   UseCasesSection,
 } from "@/features/marketing/components";
@@ -78,11 +81,14 @@ export default async function HomePage({
     <>
       {/* JSON-LD Structured Data — TODO: 接入 LocalBusiness / Product schema */}
       <HeroSection />
-      <FeatureGrid />
+      <StatsSection />
       <HowItWorks />
+      <ImageToObjectSection />
       <UseCasesSection />
+      <FeatureGrid />
+      <ComparisonSection />
+      <LogoCloud />
       <Testimonials />
-      <PricingSection />
       <FAQSection />
       <CTASection />
     </>

@@ -6,6 +6,8 @@
  * - 与源项目 D:\gpt-image-2-source-2026-08-04 的 src/lib/types.ts 保持一致
  */
 
+import type { PromptOrderHistoryTrigger, PromptOrderStatus } from "@/db/schema";
+
 export type OrderStatus =
   | "PENDING" // 等待用户上传图片
   | "GENERATING" // 效果图生成中
@@ -126,3 +128,45 @@ export type CandidateCount = (typeof CANDIDATE_COUNTS)[number];
 
 /** 模板启用的最大候选数（与 schema 默认对齐） */
 export const MAX_CANDIDATE_COUNT = 9;
+
+// ============================================
+// 效果图历史快照（前端展示用）
+// ============================================
+
+/** 归档触发原因（与 DB schema 的 prompt_order_history_trigger 同步） */
+export type OrderHistoryTrigger = PromptOrderHistoryTrigger;
+export const HISTORY_TRIGGER_LABELS: Record<OrderHistoryTrigger, string> = {
+  regenerate_single: "重新生成第 {idx} 张前",
+  regenerate_all: "全部重新生成前",
+  failed_reupload: "失败后换图前",
+  restore: "恢复历史版本前",
+};
+
+export interface OrderHistorySnapshotView {
+  id: string;
+  round: number;
+  trigger: OrderHistoryTrigger;
+  imageIdx: number | null;
+  candidateIdx: number;
+  imageCount: number;
+  candidateCount: number;
+  size: string;
+  /** selections 中非 null 数量 */
+  selectionCount: number;
+  createdAt: string;
+  /** 走 /api/orders/[token]/candidates/[imageIdx]/0?historyId=... 拉缩略图 */
+  thumbnailUrl: string;
+  /** 当前订单 + 模板是否兼容（结构性 + 上传前缀 + 模板） */
+  restorable: boolean;
+  /** 不可恢复时的具体原因（前端 tooltip 用） */
+  incompatibilityReason: string | null;
+}
+
+export interface RestoreHistoryResponseData {
+  status: PromptOrderStatus;
+  restoredHistoryId: string;
+  round: number;
+  selections: (number | null)[];
+  uploadedImageCount: number;
+  updatedAt: string;
+}

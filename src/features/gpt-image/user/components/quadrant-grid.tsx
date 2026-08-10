@@ -141,14 +141,14 @@ export function QuadrantGrid({
         </div>
       </div>
 
-      {/* 放大查看按钮 */}
+      {/* 放大查看按钮（常驻可见，tap target 44px） */}
       <button
         type="button"
         onClick={onZoom}
         aria-label="放大查看拼接图"
-        className="absolute top-2 right-2 flex h-9 w-9 items-center justify-center rounded-lg bg-black/55 text-white backdrop-blur-sm transition-colors hover:bg-black/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+        className="absolute top-2 right-2 flex h-11 w-11 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm transition-colors hover:bg-black/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
       >
-        <Maximize2 className="h-4 w-4" />
+        <Maximize2 className="h-5 w-5" />
       </button>
     </div>
   );

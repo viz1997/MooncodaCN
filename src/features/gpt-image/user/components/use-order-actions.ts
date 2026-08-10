@@ -132,9 +132,21 @@ export function useOrderActions({
           }),
         });
         if (!res.ok) throw new Error(await readError(res, "提交失败"));
-        toast.success(`${files.length} 张图片已上传，正在生成效果图`);
+        // 后端会把"上传成功但生成启动失败"的情况以 success:false 回传，
+        // 此时 status=FAILED、data.errorMessage 是真实原因——直接展示给用户，
+        // 不再用"正在生成效果图"误导。
+        const json = (await res.json()) as {
+          success: boolean;
+          message?: string;
+          data?: { status?: string; errorMessage?: string | null };
+        };
+        if (json.success) {
+          toast.success(`${files.length} 张图片已上传，正在生成效果图`);
+        } else {
+          toast.error(json.message ?? "生图任务提交失败，请稍后重试");
+        }
         await refresh();
-        return true;
+        return json.success;
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "上传失败");
         return false;

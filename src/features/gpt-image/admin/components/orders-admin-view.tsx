@@ -868,7 +868,9 @@ export function OrdersAdminView() {
                                       // 用户未选：占位提示
                                       <div className="flex h-full w-full flex-col items-center justify-center text-slate-400">
                                         <Eye className="mb-1 h-6 w-6" />
-                                        <span className="text-xs">用户尚未选择</span>
+                                        <span className="text-xs">
+                                          用户尚未选择
+                                        </span>
                                       </div>
                                     )}
                                     {/* hover 浮层：放大 / 下载按钮（仅已选时可用） */}

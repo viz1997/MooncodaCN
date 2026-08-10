@@ -27,8 +27,9 @@ export const promptTemplateSchema = z.object({
 
 /** 订单来源平台（共享类型在 types.ts） */
 import { ORDER_PLATFORMS } from "./types";
-export { ORDER_PLATFORMS, ORDER_PLATFORM_LABELS } from "./types";
+
 export type { OrderPlatform } from "./types";
+export { ORDER_PLATFORM_LABELS, ORDER_PLATFORMS } from "./types";
 
 /** 创建订单 */
 export const promptOrderCreateSchema = z.object({

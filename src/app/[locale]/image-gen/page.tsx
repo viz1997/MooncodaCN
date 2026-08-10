@@ -1,9 +1,11 @@
 "use client";
 
+import { motion } from "framer-motion";
 import {
   AlertCircle,
   CheckCircle2,
   Download,
+  Heart,
   History,
   Image as ImageIcon,
   Loader2,
@@ -39,7 +41,7 @@ interface HistoryItem {
   maskId: string;
   maskName: string;
   modelName: string;
-  refPreviewUrl?: string | undefined; // 参考图缩略（本地 object URL，仅前会话有效；刷新后失效）
+  refPreviewUrl?: string | undefined;
   createdAt: string;
 }
 
@@ -103,9 +105,39 @@ function saveTask(t: PendingTask | null) {
   }
 }
 
+// ──────────────────────────────────────────────────────────
+// 视觉组件：手作风小图标（lucide + 暖色圆形背景）
+// ──────────────────────────────────────────────────────────
+function ChipIcon({
+  children,
+  tone = "coral",
+  className,
+}: {
+  children: React.ReactNode;
+  tone?: "coral" | "amber" | "blush" | "primary";
+  className?: string;
+}) {
+  const toneClass = {
+    coral: "bg-coral-soft text-coral",
+    amber: "bg-amber-soft text-amber",
+    blush: "bg-blush-soft text-coral",
+    primary: "bg-primary/10 text-primary",
+  }[tone];
+  return (
+    <span
+      className={cn(
+        "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-xl",
+        toneClass,
+        className
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
 export default function PublicImageGenPage() {
   const { toast } = useToast();
-  // 参考图：上传到 R2 后保存公共读 URL；R2 未配置时回退到 base64 data URI
   const [uploadedImage, setUploadedImage] = useState<{
     dataUrl?: string;
     publicUrl?: string;
@@ -116,19 +148,15 @@ export default function PublicImageGenPage() {
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 效果
   const [selectedMask, setSelectedMask] = useState<string>("");
   const [masks, setMasks] = useState<PublicMask[]>([]);
   const [loadingMasks, setLoadingMasks] = useState(true);
 
-  // 生成
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState<GeneratedResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // 本历史记录
   const [history, setHistory] = useState<HistoryItem[]>([]);
-  // 进行中任务：恢复时用于显示「AI 创作中」的模型名
   const [pendingModelName, setPendingModelName] = useState<string>("");
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -150,7 +178,6 @@ export default function PublicImageGenPage() {
     toast({ title: "历史已清空" });
   };
 
-  // 清理轮询定时器
   const clearPoll = () => {
     if (pollTimerRef.current) {
       clearTimeout(pollTimerRef.current);
@@ -158,7 +185,6 @@ export default function PublicImageGenPage() {
     }
   };
 
-  // 完成任务：入历史、清 task、停止轮询
   const finishTask = (task: PendingTask, url: string, duration?: number) => {
     saveTask(null);
     clearPoll();
@@ -181,7 +207,6 @@ export default function PublicImageGenPage() {
     });
   };
 
-  // 任务失败：错误提示、清 task、停止轮询
   const failTask = (msg: string) => {
     saveTask(null);
     clearPoll();
@@ -191,11 +216,9 @@ export default function PublicImageGenPage() {
     toast({ title: "生成失败", description: msg, variant: "destructive" });
   };
 
-  // 持续轮询进行中任务
   const pollTask = (task: PendingTask, immediate = false) => {
     const startedAt = new Date(task.startedAt).getTime();
     const tick = async () => {
-      // 超时
       if (Date.now() - startedAt > POLL_TIMEOUT) {
         failTask("生成超时，请重试");
         return;
@@ -216,19 +239,15 @@ export default function PublicImageGenPage() {
           failTask(data.error || "生成失败");
           return;
         }
-        // 仍在 processing → 继续轮询
         pollTimerRef.current = setTimeout(tick, POLL_INTERVAL);
       } catch {
-        // 网络瞬时错误 → 继续重试
         pollTimerRef.current = setTimeout(tick, POLL_INTERVAL);
       }
     };
     clearPoll();
-    // 首次：立即查询（恢复/刚发起时尽快拿结果）；之后间隔轮询
     pollTimerRef.current = setTimeout(tick, immediate ? 0 : POLL_INTERVAL);
   };
 
-  // 组件卸载清理
   useEffect(() => () => clearPoll(), []);
 
   useEffect(() => {
@@ -241,16 +260,13 @@ export default function PublicImageGenPage() {
       .finally(() => setLoadingMasks(false));
   }, []);
 
-  // 刷新恢复：masks 加载后，若存在进行中任务则恢复并续轮询
   useEffect(() => {
     if (!masks.length) return;
     const task = loadTask();
     if (!task) return;
-    // 回填 mask 选择
     if (masks.some((m) => m.maskId === task.maskId)) {
       setSelectedMask(task.maskId);
     }
-    // 超时则丢弃
     if (Date.now() - new Date(task.startedAt).getTime() > POLL_TIMEOUT) {
       saveTask(null);
       toast({
@@ -268,8 +284,6 @@ export default function PublicImageGenPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [masks]);
 
-  // 文件选择：优先走 R2 presigned 直传（图不经过服务器，避免 payload 限制）；
-  // R2 未配置或签名失败时回退 base64（仅小图可行，大图会被 413）。
   const handleFileSelect = async (file: File | undefined) => {
     if (!file) return;
     if (
@@ -296,11 +310,8 @@ export default function PublicImageGenPage() {
     const previewUrl = URL.createObjectURL(file);
     setUploading(true);
 
-    // Serverless Function 请求体上限约 4.5MB；base64 会再膨胀 ~33%，
-    // 因此过 3MB 的图必须走 R2 直传，否则 generate 会被 413。
     const BASE64_MAX_BYTES = 3 * 1024 * 1024;
 
-    // 先尝试 R2 直传
     try {
       const presignRes = await fetch("/api/public/upload", {
         method: "POST",
@@ -330,7 +341,6 @@ export default function PublicImageGenPage() {
         setError(null);
         return;
       }
-      // R2 未配置 → 仅当图足够小才回退 base64
       if (presign.code === "R2_NOT_CONFIGURED") {
         if (file.size > BASE64_MAX_BYTES) {
           throw new Error(
@@ -342,7 +352,6 @@ export default function PublicImageGenPage() {
         throw new Error(presign.error || "R2 签名失败");
       }
     } catch (err) {
-      // 大图无 R2 不可恢复，直接报错
       if (file.size > BASE64_MAX_BYTES) {
         setUploading(false);
         URL.revokeObjectURL(previewUrl);
@@ -358,7 +367,6 @@ export default function PublicImageGenPage() {
       console.warn("[upload] R2 直传失败，回退 base64:", err);
     }
 
-    // 回退：base64 data URI（仅小图）
     try {
       const dataUrl = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
@@ -397,7 +405,6 @@ export default function PublicImageGenPage() {
       toast({ title: "请先选择效果", variant: "destructive" });
       return;
     }
-    // 单任务约束：发起新任务前清掉旧进行中任务与轮询
     clearPoll();
     saveTask(null);
     setPendingModelName("");
@@ -410,7 +417,6 @@ export default function PublicImageGenPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          // 优先使用 R2 公共 URL；回退时用 base64 data URI
           imageUrl: uploadedImage?.publicUrl ?? uploadedImage?.dataUrl,
           maskId: selectedMask,
           size: "1024x1024",
@@ -421,7 +427,6 @@ export default function PublicImageGenPage() {
 
       const maskName = (data.maskName as string) || "AI 生图";
 
-      // 异步任务仍在进行：持久化并续轮询
       if (data.taskId && data.taskStatus === "processing") {
         const task: PendingTask = {
           taskId: data.taskId,
@@ -433,10 +438,9 @@ export default function PublicImageGenPage() {
         saveTask(task);
         setPendingModelName(maskName);
         pollTask(task);
-        return; // 保持 generating=true，不进入 finally 关闭
+        return;
       }
 
-      // 同步完成（或 poll 一次已出图）
       setGenerating(false);
       const url = (data.image?.url as string) ?? "";
       if (url) {
@@ -457,7 +461,6 @@ export default function PublicImageGenPage() {
         });
         toast({ title: "生成完成", description: maskName });
       } else {
-        // 既无图也无进行中任务 → 当作失败
         throw new Error(data.error || "生成失败");
       }
     } catch (err) {
@@ -482,78 +485,113 @@ export default function PublicImageGenPage() {
   const selectedMaskData = masks.find((m) => m.maskId === selectedMask);
 
   return (
-    <div className="h-screen flex flex-col bg-zinc-50 dark:bg-zinc-950 overflow-hidden">
-      {/* 顶部导航 */}
-      <header className="h-12 shrink-0 bg-white dark:bg-zinc-900 border-b flex items-center justify-between px-4">
-        <div className="flex items-center gap-2">
-          <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white">
-            <Sparkles className="h-3.5 w-3.5" />
+    <div className="bg-background text-foreground relative flex h-screen min-h-screen flex-col overflow-hidden">
+      {/* 装饰背景：暖色光晕 */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-50"
+        style={{
+          background:
+            "radial-gradient(40% 35% at 15% 20%, var(--accent-coral-soft), transparent 70%), radial-gradient(45% 40% at 85% 80%, var(--accent-amber-soft), transparent 72%)",
+        }}
+      />
+
+      {/* ═══════════ 顶部导航 ═══════════ */}
+      <header className="bg-card/80 relative z-10 flex h-14 shrink-0 items-center justify-between border-b-2 px-4 backdrop-blur md:px-6">
+        <div className="flex items-center gap-3">
+          {/* Logo */}
+          <div className="bg-coral shadow-sticker-coral flex h-9 w-9 rotate-[-4deg] items-center justify-center rounded-2xl">
+            <Sparkles size={18} className="text-white" />
           </div>
-          <span className="font-bold text-sm">AI 生图</span>
+          <div className="flex flex-col">
+            <span className="text-base font-extrabold tracking-tight">
+              AI 生图{" "}
+              <span className="bg-coral-soft text-coral ml-1 inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-bold tracking-wide uppercase">
+                免登录
+              </span>
+            </span>
+            <span className="text-muted-foreground text-[11px]">
+              3D 打印定制 · 一键生成预览
+            </span>
+          </div>
         </div>
-        <span className="text-[11px] text-muted-foreground">
-          3D打印定制 · 一键生成
-        </span>
+
+        <div className="hidden items-center gap-2 md:flex">
+          <span className="bg-amber-soft text-amber inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-bold">
+            ✦ 单图直传
+          </span>
+          <span className="bg-coral-soft text-coral inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-bold">
+            🐾 宠物友好
+          </span>
+        </div>
       </header>
 
-      {/* 主体：左输入 + 右结果 */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* ============ 左侧：输入面板 ============ */}
-        <aside className="w-[380px] shrink-0 bg-white dark:bg-zinc-900 border-r flex flex-col overflow-hidden">
-          <div className="flex-1 overflow-y-auto p-4 space-y-5">
+      {/* ═══════════ 主体 ═══════════ */}
+      <div className="relative z-10 flex flex-1 flex-col overflow-hidden md:flex-row">
+        {/* ───────── 左侧：输入面板 ───────── */}
+        <aside className="bg-card/60 flex w-full shrink-0 flex-col overflow-hidden border-b-2 backdrop-blur md:w-[400px] md:border-b-0 md:border-r">
+          <div className="flex-1 space-y-6 overflow-y-auto p-4 md:p-5">
             {/* 效果选择 */}
-            <section className="space-y-2">
-              <span className="text-xs font-semibold flex items-center gap-1">
-                <Sparkles className="h-3.5 w-3.5" />
-                选择效果
+            <section className="space-y-3">
+              <div className="flex items-center gap-2">
+                <ChipIcon tone="coral">
+                  <Sparkles size={14} />
+                </ChipIcon>
+                <h3 className="text-sm font-extrabold tracking-tight">
+                  选择效果
+                </h3>
                 {!loadingMasks && (
-                  <span className="text-[10px] text-muted-foreground font-normal">
-                    · {masks.length} 个
+                  <span className="bg-coral-soft text-coral rounded-full px-2 py-0.5 text-[10px] font-bold">
+                    {masks.length} 个
                   </span>
                 )}
-              </span>
+              </div>
               {loadingMasks ? (
                 <div className="flex gap-2 overflow-x-auto pb-2">
                   {Array.from({ length: 6 }).map((_, i) => (
                     <div
                       // biome-ignore lint/suspicious/noArrayIndexKey: 静态骨架屏，顺序固定无稳定 id
                       key={i}
-                      className="h-24 w-32 shrink-0 rounded-lg bg-muted animate-pulse"
+                      className="h-28 w-36 shrink-0 rounded-2xl bg-muted animate-pulse"
                     />
                   ))}
                 </div>
               ) : (
-                <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1 snap-x snap-mandatory">
+                <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto px-1 pb-2 -mx-1">
                   {masks.map((m) => (
                     <button
                       key={m.maskId}
                       type="button"
                       onClick={() => setSelectedMask(m.maskId)}
                       className={cn(
-                        "group relative h-24 w-32 shrink-0 rounded-lg overflow-hidden border-2 transition-all snap-start",
-                        "bg-gradient-to-br from-sky-100 to-indigo-100 dark:from-sky-950/40 dark:to-indigo-950/40",
+                        "group relative h-28 w-36 shrink-0 snap-start overflow-hidden rounded-2xl border-2 transition-all",
+                        "bg-warm",
                         selectedMask === m.maskId
-                          ? "border-violet-500 ring-1 ring-violet-500/30"
-                          : "border-transparent hover:border-violet-500/30"
+                          ? "border-coral shadow-sticker-coral scale-[1.02]"
+                          : "border-border hover:border-coral/40 hover:-translate-y-0.5 hover:shadow-sticker"
                       )}
                       title={m.name}
                     >
-                      <div className="absolute inset-0 flex items-center justify-center p-1.5">
+                      <div className="absolute inset-0 flex items-center justify-center p-2">
                         {/* biome-ignore lint/performance/noImgElement: 动态远程预览图，next/image 需预配置 remotePatterns */}
                         <img
                           src={m.previewUrl}
                           alt={m.name}
-                          className="w-full h-full object-contain"
+                          className="h-full w-full object-contain"
                         />
                       </div>
-                      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent pt-3 pb-1 px-1">
-                        <p className="text-white text-[10px] font-medium truncate text-center">
+                      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/65 to-transparent px-1.5 pt-4 pb-1">
+                        <p className="truncate text-center text-[11px] font-bold text-white">
                           {m.name}
                         </p>
                       </div>
                       {selectedMask === m.maskId && (
-                        <div className="absolute top-1 right-1 h-4 w-4 rounded-full bg-violet-500 flex items-center justify-center">
-                          <CheckCircle2 className="h-2.5 w-2.5 text-white" />
+                        <div className="bg-coral shadow-sticker-coral absolute top-1.5 right-1.5 flex h-5 w-5 items-center justify-center rounded-full">
+                          <CheckCircle2
+                            size={12}
+                            className="text-white"
+                            strokeWidth={3}
+                          />
                         </div>
                       )}
                     </button>
@@ -563,30 +601,34 @@ export default function PublicImageGenPage() {
             </section>
 
             {/* 参考图上传 */}
-            <section className="space-y-2">
-              <span className="text-xs font-semibold flex items-center gap-1">
-                <ImageIcon className="h-3.5 w-3.5" />
-                参考图片
-                <span className="text-[10px] text-muted-foreground font-normal">
-                  (可选)
+            <section className="space-y-3">
+              <div className="flex items-center gap-2">
+                <ChipIcon tone="amber">
+                  <ImageIcon size={14} />
+                </ChipIcon>
+                <h3 className="text-sm font-extrabold tracking-tight">
+                  参考图片
+                </h3>
+                <span className="bg-amber-soft text-amber rounded-full px-2 py-0.5 text-[10px] font-bold">
+                  可选
                 </span>
-              </span>
+              </div>
               {uploadedImage ? (
-                <div className="relative group">
+                <div className="bg-card shadow-sticker relative overflow-hidden rounded-2xl border-2">
                   {/* biome-ignore lint/performance/noImgElement: 本地 blob/data URI 参考图预览 */}
                   <img
                     src={uploadedImage.previewUrl}
                     alt="参考图"
-                    className="w-full aspect-square object-cover rounded-lg border"
+                    className="aspect-square w-full object-cover"
                   />
                   <button
                     type="button"
                     onClick={handleRemoveUpload}
-                    className="absolute top-2 right-2 p-1.5 rounded-full bg-rose-500 text-white shadow-md hover:scale-110 transition-transform"
+                    className="bg-coral shadow-sticker-coral absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-full text-white transition-transform hover:scale-110"
                   >
-                    <X className="h-3.5 w-3.5" />
+                    <X size={14} strokeWidth={3} />
                   </button>
-                  <div className="absolute bottom-2 left-2 right-2 bg-black/50 backdrop-blur text-white text-[10px] px-2 py-0.5 rounded truncate">
+                  <div className="bg-foreground/80 absolute bottom-2 left-2 right-2 truncate rounded-lg px-2 py-1 text-[11px] font-medium text-white backdrop-blur">
                     {uploadedImage.fileName}
                   </div>
                 </div>
@@ -613,10 +655,10 @@ export default function PublicImageGenPage() {
                     }
                   }}
                   className={cn(
-                    "border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-all",
+                    "group rounded-2xl border-2 border-dashed p-6 text-center transition-all cursor-pointer",
                     dragOver
-                      ? "border-violet-500 bg-violet-500/5"
-                      : "border-muted-foreground/25 hover:border-violet-500/50"
+                      ? "border-coral bg-coral-soft shadow-sticker-coral scale-[1.01]"
+                      : "border-coral/30 bg-coral-soft/30 hover:border-coral hover:bg-coral-soft/50"
                   )}
                 >
                   <input
@@ -626,179 +668,341 @@ export default function PublicImageGenPage() {
                     className="hidden"
                     onChange={(e) => handleFileSelect(e.target.files?.[0])}
                   />
-                  <Upload
-                    className={cn(
-                      "h-8 w-8 mx-auto mb-2",
-                      dragOver ? "text-violet-500" : "text-muted-foreground"
-                    )}
-                  />
-                  <p className="text-xs font-medium">
-                    {uploading
-                      ? "上传中..."
-                      : dragOver
-                        ? "释放即可上传"
-                        : "点击或拖拽图片"}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground mt-1">
-                    JPG / PNG / WEBP · ≤10MB
-                  </p>
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="bg-coral-soft group-hover:bg-coral-soft/80 flex h-12 w-12 items-center justify-center rounded-2xl transition-colors">
+                      <Upload
+                        size={22}
+                        className={cn(
+                          "transition-colors",
+                          dragOver
+                            ? "text-coral"
+                            : "text-coral/70 group-hover:text-coral"
+                        )}
+                        strokeWidth={2}
+                      />
+                    </div>
+                    <div>
+                      <p className="text-sm font-extrabold tracking-tight">
+                        {uploading
+                          ? "上传中..."
+                          : dragOver
+                            ? "释放即可上传"
+                            : "点击或拖拽图片"}
+                      </p>
+                      <p className="text-muted-foreground mt-1 text-[11px]">
+                        JPG / PNG / WEBP · ≤10MB
+                      </p>
+                    </div>
+                  </div>
                 </div>
               )}
             </section>
+
+            {/* 小提示 */}
+            <div className="bg-amber-soft border-coral/20 flex items-start gap-2.5 rounded-2xl border-2 border-dashed p-3">
+              <span className="text-xl">💡</span>
+              <div className="flex-1 text-[11px] leading-relaxed text-foreground/80">
+                <span className="font-bold">小贴士：</span>
+                不传参考图也能玩——AI 会按效果模板生成；上传宠物照片效果更佳 🐱🐶
+              </div>
+            </div>
           </div>
 
           {/* 底部生成按钮 */}
-          <div className="p-3 border-t bg-muted/30">
+          <div className="border-coral/20 border-t-2 bg-gradient-to-t from-coral-soft/40 to-transparent p-4">
             <Button
               type="button"
               onClick={handleGenerate}
               disabled={generating || !selectedMask}
-              className="w-full bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 rounded-full"
+              className={cn(
+                "h-13 w-full rounded-full text-base font-extrabold shadow-sticker-coral transition-all",
+                "bg-coral text-white hover:bg-coral/90 hover:-translate-y-0.5",
+                !generating && !!selectedMask && "animate-wobble",
+                generating && "bg-coral/70"
+              )}
+              style={{ height: "3.25rem" }}
             >
               {generating ? (
                 <>
-                  <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                  <Loader2 size={18} className="mr-2 animate-spin" />
                   生成中...
                 </>
               ) : (
                 <>
-                  <Wand2 className="h-4 w-4 mr-1.5" />
+                  <Wand2 size={18} className="mr-2" />
                   生成图片
                 </>
               )}
             </Button>
+            {selectedMaskData && !generating && (
+              <p className="text-muted-foreground mt-2 text-center text-[11px]">
+                已选{" "}
+                <span className="text-coral font-bold">
+                  {selectedMaskData.name}
+                </span>
+                {uploadedImage && " · 含参考图"}
+              </p>
+            )}
           </div>
         </aside>
 
-        {/* ============ 右侧：结果展示区 ============ */}
-        <main className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex-1 flex items-center justify-center p-6 overflow-auto relative">
+        {/* ───────── 中央：结果展示区 ───────── */}
+        <main className="relative flex flex-1 flex-col overflow-hidden">
+          <div className="relative flex flex-1 items-center justify-center overflow-auto p-4 md:p-8">
             {/* 空状态 */}
             {!generating && !result && !error && (
-              <div className="text-center text-muted-foreground">
-                <div className="h-20 w-20 rounded-2xl bg-muted flex items-center justify-center mx-auto mb-4">
-                  <Sparkles className="h-10 w-10 opacity-30" />
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4 }}
+                className="max-w-md text-center"
+              >
+                <div className="bg-coral-soft shadow-sticker-coral relative mx-auto flex h-32 w-32 items-center justify-center rounded-[2rem] blob-2">
+                  <span className="text-7xl">🎨</span>
+                  <span className="bg-amber absolute -top-2 -right-2 flex h-10 w-10 items-center justify-center rounded-full text-lg shadow-sticker-amber animate-wobble">
+                    ✨
+                  </span>
+                  <span className="bg-coral absolute -bottom-2 -left-2 flex h-9 w-9 items-center justify-center rounded-full text-base text-white shadow-sticker-coral">
+                    🐾
+                  </span>
                 </div>
-                <p className="text-sm font-medium">
-                  选择效果后点击「生成图片」
+                <h3 className="mt-6 text-xl font-extrabold tracking-tight">
+                  挑一个效果，点一下生成
+                </h3>
+                <p className="text-muted-foreground mt-2 text-sm leading-relaxed">
+                  AI 会按效果模板生成一张预览图，
+                  <br />
+                  喜欢的话就能直接拿去打印 🐶
                 </p>
-                <p className="text-xs mt-1">AI 将根据效果风格生成图片</p>
-              </div>
+                <div className="text-muted-foreground mt-5 flex flex-wrap items-center justify-center gap-2 text-xs">
+                  <span className="bg-card inline-flex items-center gap-1 rounded-full px-2.5 py-1 shadow-sticker">
+                    ✦ 5-15 秒出图
+                  </span>
+                  <span className="bg-card inline-flex items-center gap-1 rounded-full px-2.5 py-1 shadow-sticker">
+                    ✦ 历史自动保存
+                  </span>
+                  <span className="bg-card inline-flex items-center gap-1 rounded-full px-2.5 py-1 shadow-sticker">
+                    ✦ 一键下载
+                  </span>
+                </div>
+              </motion.div>
             )}
 
             {/* 生成中 */}
             {generating && (
-              <div className="text-center">
-                <div className="relative inline-block">
-                  <Loader2 className="h-16 w-16 text-sky-500 animate-spin" />
-                  <Sparkles className="h-6 w-6 text-violet-500 absolute top-5 left-5" />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.4 }}
+                className="text-center"
+              >
+                <div className="relative mx-auto inline-block">
+                  <motion.div
+                    animate={{ rotate: 360 }}
+                    transition={{
+                      duration: 6,
+                      repeat: Number.POSITIVE_INFINITY,
+                      ease: "linear",
+                    }}
+                    className="bg-coral-soft shadow-sticker-coral flex h-28 w-28 items-center justify-center rounded-full border-4 border-coral/30"
+                  >
+                    <Loader2 size={44} className="animate-spin text-coral" />
+                  </motion.div>
+                  <motion.span
+                    animate={{ y: [0, -6, 0] }}
+                    transition={{
+                      duration: 1.5,
+                      repeat: Number.POSITIVE_INFINITY,
+                    }}
+                    className="absolute -top-3 -right-3 flex h-10 w-10 items-center justify-center rounded-full bg-amber text-xl shadow-sticker-amber"
+                  >
+                    ✨
+                  </motion.span>
+                  <motion.span
+                    animate={{ y: [0, 6, 0] }}
+                    transition={{
+                      duration: 1.8,
+                      repeat: Number.POSITIVE_INFINITY,
+                    }}
+                    className="bg-primary absolute -bottom-2 -left-3 flex h-9 w-9 items-center justify-center rounded-full text-base text-primary-foreground shadow-sticker"
+                  >
+                    🐾
+                  </motion.span>
                 </div>
-                <p className="text-sm font-medium text-sky-700 dark:text-sky-400 mt-4">
+                <p className="mt-6 text-base font-extrabold text-coral">
                   AI 创作中...
                 </p>
-                <p className="text-xs text-muted-foreground mt-1">
+                <p className="text-muted-foreground mt-1 text-sm">
                   {pendingModelName || selectedMaskData?.name || "AI 生图"} ·
                   预计 5-15 秒
                 </p>
-              </div>
+              </motion.div>
             )}
 
             {/* 结果 */}
             {result && !generating && (
-              <div className="max-w-lg w-full space-y-4">
-                {/* 成功徽章 */}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                transition={{ type: "spring", stiffness: 200, damping: 20 }}
+                className="w-full max-w-xl space-y-5"
+              >
+                {/* 顶部装饰条 */}
                 <div className="flex items-center justify-center gap-2">
-                  <span className="inline-flex items-center gap-1 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-xs px-3 py-1 rounded-full border border-emerald-500/20">
-                    <CheckCircle2 className="h-3.5 w-3.5" />
+                  <span className="bg-coral-soft text-coral inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold shadow-sticker">
+                    <CheckCircle2 size={14} strokeWidth={3} />
                     生成完成
                   </span>
-                </div>
-                {/* 图片 */}
-                <div className="relative rounded-2xl overflow-hidden border-2 border-violet-500/20 shadow-xl">
-                  {/* biome-ignore lint/performance/noImgElement: 生图结果为动态 data URI/远程 URL，不宜走 next/image */}
-                  <img
-                    src={result.url}
-                    alt="生成结果"
-                    className="w-full object-cover"
-                  />
+                  <span className="bg-amber-soft text-amber inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-bold">
+                    ✦ {result.maskName}
+                  </span>
                 </div>
 
-                {/* 操作 */}
-                <div className="flex gap-2 justify-center">
+                {/* 图片（贴纸卡 + 全息光斑） */}
+                <div className="relative">
+                  {/* 周围漂浮贴纸 */}
+                  <motion.div
+                    animate={{ rotate: [0, 8, -4, 0] }}
+                    transition={{
+                      duration: 6,
+                      repeat: Number.POSITIVE_INFINITY,
+                    }}
+                    className="bg-coral shadow-sticker-coral absolute -top-3 -left-3 z-10 flex h-10 w-10 items-center justify-center rounded-2xl"
+                  >
+                    <span className="text-lg">🐾</span>
+                  </motion.div>
+                  <motion.div
+                    animate={{ rotate: [0, -10, 6, 0] }}
+                    transition={{
+                      duration: 7,
+                      repeat: Number.POSITIVE_INFINITY,
+                    }}
+                    className="bg-amber shadow-sticker-amber absolute -top-2 -right-4 z-10 flex h-9 w-9 items-center justify-center rounded-full"
+                  >
+                    <Sparkles size={16} className="text-white" />
+                  </motion.div>
+                  <motion.div
+                    animate={{ y: [0, -4, 0] }}
+                    transition={{
+                      duration: 2.5,
+                      repeat: Number.POSITIVE_INFINITY,
+                    }}
+                    className="bg-coral-soft absolute -bottom-2 -right-3 z-10 flex h-8 w-8 items-center justify-center rounded-full shadow-sticker"
+                  >
+                    <Heart
+                      size={14}
+                      className="text-coral"
+                      fill="currentColor"
+                    />
+                  </motion.div>
+
+                  <div className="bg-card shadow-sticker-coral relative overflow-hidden rounded-3xl border-2 border-coral/30">
+                    {/* biome-ignore lint/performance/noImgElement: 生图结果为动态 data URI/远程 URL，不宜走 next/image */}
+                    <img
+                      src={result.url}
+                      alt="生成结果"
+                      className="aspect-square w-full object-cover"
+                    />
+                    {/* 全息光斑 */}
+                    <div
+                      aria-hidden
+                      className="pointer-events-none absolute inset-0 rounded-3xl opacity-40 mix-blend-overlay"
+                      style={{
+                        background:
+                          "linear-gradient(115deg, transparent 30%, rgba(255,200,220,0.5) 45%, rgba(255,230,150,0.4) 55%, rgba(180,230,255,0.5) 65%, transparent 80%)",
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* 操作按钮 */}
+                <div className="flex flex-wrap items-center justify-center gap-3">
                   <Button
                     type="button"
                     onClick={handleDownload}
-                    className="bg-gradient-to-r from-violet-500 to-purple-600 rounded-full px-6"
+                    className="h-12 rounded-full bg-coral px-6 font-extrabold text-white shadow-sticker-coral hover:bg-coral/90 hover:-translate-y-0.5"
                   >
-                    <Download className="h-4 w-4 mr-1.5" />
+                    <Download size={16} className="mr-2" />
                     下载图片
                   </Button>
                   <Button
                     type="button"
                     variant="outline"
-                    className="rounded-full px-6"
+                    className="h-12 rounded-full border-2 px-6 font-bold hover:bg-coral-soft/50"
                     onClick={() => {
                       setResult(null);
                       handleGenerate();
                     }}
                   >
-                    <RefreshCw className="h-4 w-4 mr-1.5" />
+                    <RefreshCw size={16} className="mr-2" />
                     再生成一张
                   </Button>
                 </div>
-              </div>
+
+                {/* 收藏贴士 */}
+                <p className="text-muted-foreground text-center text-[11px]">
+                  喜欢这张？把它存进历史里，下次来还能找到 ✨
+                </p>
+              </motion.div>
             )}
 
             {/* 错误 */}
             {error && !generating && (
-              <div className="text-center max-w-sm">
-                <div className="h-16 w-16 rounded-2xl bg-rose-500/10 flex items-center justify-center mx-auto mb-3">
-                  <AlertCircle className="h-8 w-8 text-rose-500" />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="max-w-sm text-center"
+              >
+                <div className="bg-coral-soft shadow-sticker-coral mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-3xl">
+                  <AlertCircle size={36} className="text-coral" />
                 </div>
-                <p className="text-sm font-medium text-rose-700 dark:text-rose-400 mb-1">
+                <p className="text-base font-extrabold tracking-tight">
                   生成失败
                 </p>
-                <p className="text-xs text-muted-foreground mb-4">{error}</p>
+                <p className="text-muted-foreground mt-2 text-sm">{error}</p>
                 <Button
                   type="button"
-                  size="sm"
-                  variant="outline"
+                  className="mt-5 h-11 rounded-full bg-coral px-6 font-bold text-white shadow-sticker-coral hover:bg-coral/90"
                   onClick={handleGenerate}
                 >
-                  <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                  <RefreshCw size={14} className="mr-1.5" />
                   重试
                 </Button>
-              </div>
+              </motion.div>
             )}
           </div>
         </main>
 
-        {/* ============ 最右侧：本地历史记录栏（竖列） ============ */}
+        {/* ───────── 最右侧：本地历史记录栏 ───────── */}
         {history.length > 0 && (
-          <aside className="w-[180px] shrink-0 bg-white dark:bg-zinc-900 border-l flex flex-col overflow-hidden">
-            <div className="shrink-0 flex items-center justify-between px-3 py-2 border-b">
-              <span className="text-[11px] font-semibold flex items-center gap-1 text-muted-foreground">
-                <History className="h-3 w-3" />
-                历史
-                <span className="text-[9px] font-normal">
-                  ·{history.length}
+          <aside className="bg-card/60 hidden w-[200px] shrink-0 flex-col overflow-hidden border-l-2 backdrop-blur md:flex">
+            <div className="flex shrink-0 items-center justify-between border-b-2 px-3 py-2.5">
+              <div className="flex items-center gap-1.5">
+                <ChipIcon tone="blush" className="h-6 w-6">
+                  <History size={12} />
+                </ChipIcon>
+                <span className="text-xs font-extrabold tracking-tight">
+                  历史
                 </span>
-              </span>
+                <span className="bg-coral-soft text-coral rounded-full px-1.5 text-[10px] font-bold">
+                  {history.length}
+                </span>
+              </div>
               <button
                 type="button"
                 onClick={handleClearHistory}
-                className="text-[10px] text-muted-foreground hover:text-rose-600 flex items-center gap-0.5"
+                className="text-muted-foreground hover:text-coral flex items-center gap-0.5 rounded-full p-1 text-[10px] transition-colors"
                 title="清空历史"
               >
-                <Trash2 className="h-3 w-3" />
+                <Trash2 size={12} />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto p-2 space-y-2">
+            <div className="flex-1 space-y-2 overflow-y-auto p-2.5">
               {history.map((h) => (
                 <button
                   type="button"
                   key={h.id}
-                  className="group relative w-full aspect-square rounded-md overflow-hidden border bg-muted cursor-pointer hover:ring-2 hover:ring-violet-500/40 transition"
+                  className="group bg-card shadow-sticker relative aspect-square w-full cursor-pointer overflow-hidden rounded-xl border-2 transition-all hover:-translate-y-0.5 hover:shadow-sticker-coral"
                   title={`${h.maskName} · ${new Date(h.createdAt).toLocaleString("zh-CN")}`}
                   onClick={() => {
                     setResult({
@@ -813,14 +1017,14 @@ export default function PublicImageGenPage() {
                   <img
                     src={h.url}
                     alt={h.maskName}
-                    className="w-full h-full object-cover"
+                    className="h-full w-full object-cover"
                   />
-                  <div className="absolute inset-x-0 bottom-0 bg-black/55 text-white text-[9px] px-1 py-0.5 truncate text-center">
+                  <div className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent px-1 py-1 text-center text-[10px] font-bold text-white">
                     {h.maskName}
                   </div>
                 </button>
               ))}
-              <p className="text-center text-[9px] text-muted-foreground/70 pt-1">
+              <p className="text-muted-foreground/70 pt-1 text-center text-[10px]">
                 仅存于此浏览器
               </p>
             </div>
