@@ -15,6 +15,9 @@ import { resendVerificationEmail, signInWithEmail } from "@/lib/auth/client";
 import { AuthErrorAlert } from "./auth-error-alert";
 import { AuthLogo } from "./auth-logo";
 
+/** localStorage 键：上次成功登录的邮箱，下次自动填回输入框 */
+const LAST_SIGNIN_EMAIL_KEY = "auth:last-signin-email";
+
 /**
  * 登录表单组件
  *
@@ -26,7 +29,16 @@ export function SignInForm() {
   const tCommon = useTranslations("Auth.common");
 
   // 表单状态
-  const [email, setEmail] = useState("");
+  // 邮箱初始值从 localStorage 读上次成功登录的账号（仅客户端）。
+  // 失败登录不写入——避免把输错的邮箱也记下来。
+  const [email, setEmail] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    try {
+      return window.localStorage.getItem(LAST_SIGNIN_EMAIL_KEY) ?? "";
+    } catch {
+      return "";
+    }
+  });
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -85,7 +97,12 @@ export function SignInForm() {
         return;
       }
 
-      // 登录成功，提示并跳转
+      // 登录成功，记录本次邮箱到 localStorage（下次自动填回）
+      try {
+        window.localStorage.setItem(LAST_SIGNIN_EMAIL_KEY, email);
+      } catch {
+        // 隐私模式 / 配额满时静默忽略，不阻塞登录
+      }
       toast.success(t("success"));
       window.location.href = "/dashboard";
     } catch {
