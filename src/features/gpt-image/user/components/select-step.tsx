@@ -504,29 +504,6 @@ export function SelectStep({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      <AlertDialog open={helpOpen} onOpenChange={setHelpOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>键盘快捷键</AlertDialogTitle>
-            <AlertDialogDescription>
-              <div className="space-y-2 text-sm text-stone-600">
-                <Row k="1-9" v="选中第 N 个分镜" />
-                <Row k="← →" v="切换照片" />
-                <Row k="Z" v="撤销上一步" />
-                <Row k="R" v="重新生成当前" />
-                <Row k="Enter" v="提交（全部选完时）" />
-                <Row k="?" v="打开 / 关闭帮助" />
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction onClick={() => setHelpOpen(false)}>
-              知道了
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </>
   );
 }
