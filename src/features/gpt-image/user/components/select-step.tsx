@@ -296,30 +296,6 @@ export function SelectStep({
           />
         )}
 
-        {/* 顶部 toolbar：撤销 / 键盘提示 */}
-        <div className="mb-2 flex items-center justify-end gap-1.5">
-          {canUndo && (
-            <button
-              type="button"
-              onClick={handleUndo}
-              title="撤销上一张的选择（Z）"
-              aria-label="撤销上一张的选择"
-              className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs font-medium text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
-            >
-              <Undo2 className="h-3.5 w-3.5" />
-              撤销
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setHelpOpen(true)}
-            title="键盘快捷键（?）"
-            aria-label="查看键盘快捷键"
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
-          >
-            <Keyboard className="h-3.5 w-3.5" />
-          </button>
-        </div>
 
         {/* 原图缩略图横排（多图时） */}
         {imageCount > 1 && (
