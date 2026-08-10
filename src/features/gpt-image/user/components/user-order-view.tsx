@@ -24,7 +24,6 @@ import { GenerateStep } from "./generate-step";
 import { HistoryDrawer } from "./history-drawer";
 import { InvalidLinkScreen } from "./invalid-link-screen";
 import { LoadingScreen } from "./loading-screen";
-import { OrderTimeline } from "./order-timeline";
 import { ResultStep } from "./result-step";
 import { SelectStep } from "./select-step";
 import { UploadStep } from "./upload-step";
