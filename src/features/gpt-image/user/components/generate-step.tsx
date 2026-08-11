@@ -37,13 +37,21 @@ interface GenerateStepProps {
 const DEFAULT_PER_IMAGE_MS = 90_000;
 
 /**
- * 停滞提示阈值：5 分钟。
+ * 停滞自动停止阈值：2 分钟。
  *
- * 超过这个时间没收到服务端更新（updatedAt 与上次快照相同）→ 提示用户
- * 主动点「停止生成」，避免干等。仅展示提示，不改 status——状态收敛
- * 由 advance-generation.ts 的硬超时独占，避免用户还在等时被前端抢先判死。
+ * 超过这个时间没收到服务端更新（updatedAt 与上次快照相同）→ 客户端
+ * watchdog 自动调 stopGeneration，等价于"自动失败"：订单会被置
+ * FAILED，走 FailureNotice 的"重新生成全部"复活路径。
+ *
+ * 阈值与 ORDER_DEADLINE_MS（服务端硬超时）对齐——保证：
+ * - 客户端路径：watchdog 先到 2 分钟就停，用户感知 < 服务端最坏情况
+ * - 服务端路径：即便前端 watchdog 没跑起来（如浏览器崩溃、tab 冻），
+ *   下一次 /poll 进入 advance-generation.ts 也会被硬超时命中
+ *
+ * 不需要再加 STALL_HINT_MS 渐进提示——watchdog 本身就是动作，
+ * 不留"再等等自己可能好"的窗口。
  */
-const STALL_HINT_MS = 5 * 60_000;
+const STALL_HINT_MS = 2 * 60_000;
 
 /**
  * 「假进度」上限：95%。
@@ -196,20 +204,23 @@ export function GenerateStep({
     return () => cancelAnimationFrame(rafId);
   }, [isAllDone, done, realPercent, displayPercent, quietEndsAt]);
 
-  // 停滞提示：updatedAt 超过 STALL_HINT_MS 未刷新 + 还有未完成张图
-  // → amber 内联提示 + 一次性 toast.warning（latch 防重复弹）。
-  // 仅展示，不改 status：状态收敛由服务端前置硬超时独占。
+  // 停滞 watchdog：updatedAt 超过 STALL_HINT_MS 未刷新 + 还有未完成张图
+  // → 自动调 onStopClick()（= stopGeneration），把订单置 FAILED。
+  //
+  // 等价于"自动失败"：状态收敛到 FAILED 后，前端进入 FailureNotice，
+  // 用户点"重新生成全部"复活。不需要用户手动操作。
+  //
+  // latch 防止组件在多个 render 周期里重复触发 stopGeneration。
   const stalledMs = Date.now() - new Date(updatedAt).getTime();
   const stalled = remaining > 0 && stalledMs > STALL_HINT_MS;
-  const stalledToastShownRef = useRef(false);
+  const autoStopFiredRef = useRef(false);
   useEffect(() => {
-    if (!stalled || stalledToastShownRef.current) return;
-    stalledToastShownRef.current = true;
-    toast.warning(
-      "已等待较长时间。若长时间无进展，可点「停止生成」取消本次重试",
-      { duration: 6000 }
-    );
-  }, [stalled]);
+    if (!stalled || autoStopFiredRef.current) return;
+    if (!onStopClick) return;
+    autoStopFiredRef.current = true;
+    toast.warning("已超过 2 分钟无进展，自动停止本次生成", { duration: 5000 });
+    void onStopClick();
+  }, [stalled, onStopClick]);
 
   // 安静期内强制 indeterminate（滑光带），不显示任何百分比数字——
   // 上游此时还没真正跑，前端不该给"假数字"误导用户。
@@ -305,18 +316,22 @@ export function GenerateStep({
             <output className="mb-3 inline-flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-xs text-amber-700">
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <span>
-                已等待超过 5 分钟。如长时间无进展，可点「停止生成」取消本次重试
+                已超过 2 分钟无进展，正在自动停止本次生成…
               </span>
             </output>
           )}
           <button
             type="button"
             onClick={onStopClick}
-            disabled={stopping}
+            disabled={stopping || stalled}
             className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-4 text-xs font-medium text-stone-500 transition-colors hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 disabled:opacity-60"
           >
             <StopCircle className="h-3.5 w-3.5" />
-            {stopping ? "停止中…" : "停止生成"}
+            {stopping
+              ? "停止中…"
+              : stalled
+                ? "自动停止中…"
+                : "停止生成"}
           </button>
           <p className="mt-2 flex items-center gap-1 text-[10px] text-stone-400">
             <Pause className="h-2.5 w-2.5" />
