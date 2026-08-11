@@ -17,7 +17,7 @@ import type {
   OrderStatus,
   OrderView,
 } from "@/features/gpt-image/lib/types";
-
+import { Link } from "@/i18n/routing";
 import { CancelledPanel } from "./cancelled-panel";
 import { FailureNotice } from "./failure-notice";
 import { GenerateStep } from "./generate-step";
@@ -33,7 +33,6 @@ import { useOrderActions } from "./use-order-actions";
 import { useOrderHistory } from "./use-order-history";
 import type { UseSelectionsResult } from "./use-selections";
 import { useSelections } from "./use-selections";
-import { Link } from "@/i18n/routing";
 
 interface UserOrderViewProps {
   token: string;
@@ -239,7 +238,6 @@ function UserOrderContent({
                 selections={selection.selections}
                 selectedCount={selection.selectedCount}
                 allSelected={selection.allSelected}
-                firstUnselectedIdx={selection.firstUnselectedIdx}
                 submitting={actions.submitting}
                 regenerating={actions.regenerating}
                 onToggle={selection.toggle}
@@ -289,7 +287,7 @@ function UserOrderContent({
         )} */}
 
         {/* ── 品牌脚注 ── 放在 main 内，确保 SelectStep/ResultStep 的 fixed CTA 不会盖住它 */}
-        <div className="mt-12 pb-2 text-center text-xs text-stone-400">
+        <div className="mt-12 pb-2 text-center text-xs font-medium text-stone-400">
           <Link
             href="/"
             aria-label="Mooncoda 首页"
@@ -298,7 +296,7 @@ function UserOrderContent({
             <img
               src="/logo.svg"
               alt="Mooncoda"
-              className="h-3.5 w-3.5 shrink-0"
+              className="h-3.5 w-3.5 shrink-0 align-middle"
             />
             <span className="tracking-tight">Mooncoda梦可达</span>
           </Link>

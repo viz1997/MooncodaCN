@@ -207,7 +207,6 @@ function MockOrderContent({ order }: { order: OrderView }) {
                 selections={selection.selections}
                 selectedCount={selection.selectedCount}
                 allSelected={selection.allSelected}
-                firstUnselectedIdx={selection.firstUnselectedIdx}
                 submitting={false}
                 regenerating={false}
                 onToggle={selection.toggle}

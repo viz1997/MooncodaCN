@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  ArrowRight,
-  Check,
-  CheckCircle2,
-  Loader2,
-  RefreshCw,
-} from "lucide-react";
+import { Check, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertDialog,
@@ -33,8 +27,6 @@ interface SelectStepProps {
   selections: (number | null)[];
   selectedCount: number;
   allSelected: boolean;
-  /** 第一张未选原图下标，全选完则为 -1 */
-  firstUnselectedIdx: number;
   submitting: boolean;
   regenerating: boolean;
   onToggle: (imageIdx: number, candIdx: number) => void;
@@ -69,7 +61,6 @@ export function SelectStep({
   selections,
   selectedCount,
   allSelected,
-  firstUnselectedIdx,
   submitting,
   regenerating,
   onToggle,
@@ -151,10 +142,6 @@ export function SelectStep({
     const id = lastTriggerRef.current;
     lastTriggerRef.current = null;
     if (id) requestAnimationFrame(() => document.getElementById(id)?.focus());
-  };
-
-  const goToFirstUnselected = () => {
-    if (firstUnselectedIdx >= 0) setCurrentIdx(firstUnselectedIdx);
   };
 
   // ─── 键盘快捷键 ───
@@ -383,37 +370,28 @@ export function SelectStep({
             {imageCount > 1 ? `重新生成第 ${safeIdx + 1} 张` : "重新生成"}
           </button>
 
-          {/* 确认提交 / 去选下一张（主） */}
+          {/* 确认提交（主）—— 文案统一，全选前 disabled 置灰不可点击 */}
           <button
             type="button"
             onClick={() => {
               if (allSelected) setConfirmOpen(true);
-              else if (firstUnselectedIdx >= 0) goToFirstUnselected();
             }}
-            disabled={submitting}
+            disabled={submitting || !allSelected}
             className={[
-              "h-11 flex-1 rounded-xl text-sm font-medium transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 disabled:opacity-60",
+              "h-11 flex-1 rounded-xl text-sm font-medium transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 disabled:cursor-not-allowed",
               allSelected
                 ? "bg-gradient-to-r from-indigo-500 to-blue-500 text-white shadow-lg shadow-indigo-200/50 hover:shadow-indigo-300/50"
-                : "bg-stone-100 text-stone-700 hover:bg-stone-200",
+                : "bg-stone-200 text-stone-400 disabled:opacity-100",
             ].join(" ")}
           >
             {submitting ? (
               <span className="inline-flex items-center gap-1.5">
                 <Loader2 className="h-4 w-4 animate-spin" /> 提交中…
               </span>
-            ) : allSelected ? (
+            ) : (
               <span className="inline-flex items-center gap-1.5">
                 <CheckCircle2 className="h-4 w-4" /> 确认提交 {imageCount} 张
               </span>
-            ) : firstUnselectedIdx >= 0 ? (
-              <span className="inline-flex items-center gap-1.5">
-                还差 {imageCount - selectedCount} 张 · 去选第{" "}
-                {firstUnselectedIdx + 1} 张
-                <ArrowRight className="h-4 w-4" />
-              </span>
-            ) : (
-              "请先上传图片"
             )}
           </button>
         </div>
