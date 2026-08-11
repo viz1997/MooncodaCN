@@ -296,7 +296,7 @@ function UserOrderContent({
             <img
               src="/logo.svg"
               alt="Mooncoda"
-              className="h-3 w-3 shrink-0"
+              className="h-4 w-4 shrink-0"
             />
             <span className="tracking-tight">Mooncoda梦可达</span>
           </Link>
