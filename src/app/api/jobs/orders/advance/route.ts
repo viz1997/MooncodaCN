@@ -7,9 +7,9 @@
  *
  * 处理三类订单：
  * 1. **超时卡死订单**（status=GENERATING + generationTask 非空 + updatedAt 早于
- *    ORDER_DEADLINE_MS）→ 强制 FAILED。**不查上游**，单条 UPDATE 自带
- *    RETURNING。这是最关键的一类——前端开着时由 advanceOrderGeneration 的
- *    前置硬超时兜底；前端关掉时由本分支兜底。
+ *    ORDER_DEADLINE_MS，默认 2 分钟）→ 强制 FAILED。**不查上游**，单条
+ *    UPDATE 自带 RETURNING。这是最关键的一类——前端开着时由
+ *    advanceOrderGeneration 的前置硬超时兜底；前端关掉时由本分支兜底。
  * 2. 有在途任务（generationTask 非空）→ 查询上游并推进，复用
  *    advanceOrderGeneration()，与前端 /poll 走同一份逻辑
  * 3. 孤儿订单（generationTask 为空但状态仍是 GENERATING）→ 这类订单

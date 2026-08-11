@@ -20,6 +20,23 @@ const MAX_INTERVAL = 15_000;
  */
 const HIDDEN_INTERVAL = 15_000;
 
+/**
+ * GENERATING 起始「安静期」：30 秒。
+ *
+ * 任务刚 submit 到上游时不需要立即打 /poll——上游通常需要 30-60s
+ * 才有第一波回报，过早打只会增加 Lingting 负载 + 在前端多刷几帧空响应。
+ *
+ * 在此窗口内：
+ * - useOrder 跳过 /poll（只 schedule 后续 tick，不发请求）
+ * - GenerateStep 跑假进度 RAF，从 0 平滑推到 ~95% 等真实结果
+ *
+ * 窗口结束后恢复 BASE_INTERVAL 节奏。
+ *
+ * 选择 30s 而非更激进：上游 P50 ≈ 60s，30s 内的首次轮询大概率是 pending
+ * 白打。低于 30s 的窗口不划算，30s 已经是性价比拐点。
+ */
+const QUIET_AFTER_GENERATING_MS = 30_000;
+
 interface StatusSnapshot {
   status: OrderStatus;
   updatedAt: string;
@@ -33,18 +50,29 @@ export interface UseOrderResult {
   notFound: boolean;
   /** 强制重新拉取完整订单 */
   refresh: () => Promise<void>;
+  /**
+   * 当前 GENERATING 窗口的「安静期结束时刻」(ms epoch)。
+   * 暴露给 GenerateStep 用于对齐假进度起点：保证假进度和 /poll
+   * 用同一个时间源推算，避免视觉节奏与真实轮询错位。
+   * 非 GENERATING 状态返回 null。
+   */
+  quietEndsAt: number | null;
 }
 
 export function useOrder(token: string): UseOrderResult {
   const [order, setOrder] = useState<OrderView | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [quietEndsAt, setQuietEndsAt] = useState<number | null>(null);
 
   const snapshotRef = useRef<StatusSnapshot | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const aliveRef = useRef(true);
   const delayRef = useRef(BASE_INTERVAL);
   const ensurePollingRef = useRef<() => void>(() => {});
+  // 「刚进入 GENERATING」的时间戳：用于在 quiet 窗口内跳过 /poll。
+  // 进入时立即打点，不依赖 updatedAt，避免上游尚未刷新时被误算。
+  const quietStartRef = useRef<number | null>(null);
 
   const fetchOrder = useCallback(async (): Promise<void> => {
     try {
@@ -54,14 +82,28 @@ export function useOrder(token: string): UseOrderResult {
 
       if (json.success) {
         const data = json.data as OrderView;
+        const prevStatus = snapshotRef.current?.status ?? null;
+        const nextStatus = data.status as OrderStatus;
         setOrder(data);
         setNotFound(false);
         snapshotRef.current = {
-          status: data.status,
+          status: nextStatus,
           updatedAt: data.updatedAt,
           candidateGroups: data.candidateGroups ?? 0,
           uploadedImageCount: data.uploadedImageCount ?? 0,
         };
+        // 进入 GENERATING：打点 quietStart + 暴露 quietEndsAt 给 UI。
+        // 「刚切到 GENERATING」才算"任务开始"，停留中的订单不重置窗口。
+        if (nextStatus === "GENERATING" && prevStatus !== "GENERATING") {
+          const start = Date.now();
+          quietStartRef.current = start;
+          setQuietEndsAt(start + QUIET_AFTER_GENERATING_MS);
+        }
+        // 离开 GENERATING（SELECTED / FAILED / CANDIDATES_READY 等）→ 清窗口。
+        if (nextStatus !== "GENERATING" && prevStatus === "GENERATING") {
+          quietStartRef.current = null;
+          setQuietEndsAt(null);
+        }
       } else {
         setOrder(null);
         setNotFound(true);
@@ -107,6 +149,19 @@ export function useOrder(token: string): UseOrderResult {
       // GENERATING 状态必须照常打 /poll——否则上游轮询停摆，订单永远卡死。
       const isHidden = typeof document !== "undefined" && document.hidden;
       if (isHidden && snap.status !== "GENERATING") {
+        ensurePolling();
+        return;
+      }
+
+      // GENERATING 刚启 30s「安静期」：不打 /poll，只 schedule 下一 tick。
+      // 上游 P50 ≈ 60s，30s 内轮询大概率拿到 pending 白打，省一次负载 + 让
+      // 前端假进度完整跑一段给用户看。窗口结束后自动恢复 BASE_INTERVAL。
+      if (
+        snap.status === "GENERATING" &&
+        quietStartRef.current !== null &&
+        Date.now() - quietStartRef.current < QUIET_AFTER_GENERATING_MS
+      ) {
+        delayRef.current = BASE_INTERVAL;
         ensurePolling();
         return;
       }
@@ -174,5 +229,5 @@ export function useOrder(token: string): UseOrderResult {
     ensurePollingRef.current();
   }, [fetchOrder]);
 
-  return { order, loading, notFound, refresh };
+  return { order, loading, notFound, refresh, quietEndsAt };
 }

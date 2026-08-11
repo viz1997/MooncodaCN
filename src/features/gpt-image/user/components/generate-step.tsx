@@ -18,6 +18,13 @@ interface GenerateStepProps {
   stopping?: boolean;
   /** "停止生成"是协作式打断当前 in-flight 的生成任务，订单保留 */
   onStopClick?: () => void;
+  /**
+   * GENERATING 起始「安静期」结束时刻（ms epoch）。与 useOrder 共享同一时间源，
+   * 用于：(1) 让假进度 RAF 从一致的起点开始推；(2) 30s 内前端明确显示
+   * "假进度"，不做任何上游真实进度断言；(3) 窗口结束后由上层决定
+   * 是否轮询 /poll。null = 视作窗口已结束（mock / 旧订单回放）。
+   */
+  quietEndsAt: number | null;
 }
 
 /**
@@ -46,6 +53,18 @@ const STALL_HINT_MS = 5 * 60_000;
  * 这个上限就停住，剩下的 5% 等真实 done 比例拉到 100% 时直接 100%。
  */
 const FAKE_PROGRESS_CAP = 95;
+
+/**
+ * GENERATING 起始「安静期」长度：30 秒。
+ *
+ * 与 useOrder 的 QUIET_AFTER_GENERATING_MS 同值——必须保持一致，
+ * 否则假进度节奏会和 /poll 跳过窗口错位。镜像写一份避免引入跨模块
+ * 常量依赖（generate-step 不应反向依赖 use-order 的内部常量）。
+ *
+ * 期间 useOrder 不打 /poll，前端只播假进度（indeterminate 滑光带），
+ * 不显示任何数字进度，避免上游仍为 0 时给用户"假数字"误导。
+ */
+const QUIET_AFTER_GENERATING_MS = 30_000;
 
 /**
  * 估算剩余时间（秒）
@@ -91,12 +110,22 @@ export function GenerateStep({
   uploadedAt,
   stopping = false,
   onStopClick,
+  quietEndsAt,
 }: GenerateStepProps) {
   const done = Math.min(readyGroups, uploadedImageCount);
   const realPercent =
     uploadedImageCount > 0 ? (done / uploadedImageCount) * 100 : 0;
   const isAllDone = uploadedImageCount > 0 && done >= uploadedImageCount;
   const remaining = Math.max(0, uploadedImageCount - done);
+
+  /**
+   * 是否在 GENERATING 起始「安静期」内。
+   * 与 useOrder 的 30s 跳过 /poll 窗口共用同一时间源——前端在此期间
+   * 只播假进度，不显示任何"真实"进度（避免被服务端仍为 0/未刷新的
+   * readyGroups 误导）。窗口结束后恢复 determinate 行为。
+   */
+  const inQuietWindow =
+    !isAllDone && quietEndsAt !== null && Date.now() < quietEndsAt;
 
   // ETA 每秒刷新一次
   const [, forceTick] = useState(0);
@@ -142,8 +171,15 @@ export function GenerateStep({
     // 所以重跑只在用户手动切页面后从 0 重新开始，或 cap 之前短暂发生几次，
     // 不会出现循环风暴。
     if (fakeStartRef.current === null) {
+      // 起点优先对齐「安静期起点」（= quietEndsAt - 30s），保证假进度
+      // 节奏和上层 /poll 跳过窗口同步；上层未提供（mock / 老订单）时退化
+      // 为 performance.now()，表现与之前一致。
+      const quietStartMs =
+        quietEndsAt !== null ? quietEndsAt - QUIET_AFTER_GENERATING_MS : null;
       fakeStartRef.current =
-        performance.now() - (displayPercent / FAKE_PROGRESS_CAP) * 240_000;
+        quietStartMs !== null
+          ? quietStartMs
+          : performance.now() - (displayPercent / FAKE_PROGRESS_CAP) * 240_000;
     }
     let rafId = 0;
     const tick = (now: number) => {
@@ -158,7 +194,7 @@ export function GenerateStep({
     };
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [isAllDone, done, realPercent, displayPercent]);
+  }, [isAllDone, done, realPercent, displayPercent, quietEndsAt]);
 
   // 停滞提示：updatedAt 超过 STALL_HINT_MS 未刷新 + 还有未完成张图
   // → amber 内联提示 + 一次性 toast.warning（latch 防重复弹）。
@@ -175,7 +211,9 @@ export function GenerateStep({
     );
   }, [stalled]);
 
-  const showIndeterminate = done === 0 && !isAllDone;
+  // 安静期内强制 indeterminate（滑光带），不显示任何百分比数字——
+  // 上游此时还没真正跑，前端不该给"假数字"误导用户。
+  const showIndeterminate = inQuietWindow || (done === 0 && !isAllDone);
 
   return (
     <section className="flex flex-col items-center px-5 pt-6 pb-8 animate-[fadeIn_.3s_ease-out]">

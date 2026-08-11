@@ -39,7 +39,7 @@ interface UserOrderViewProps {
 }
 
 export function UserOrderView({ token }: UserOrderViewProps) {
-  const { order, loading, notFound, refresh } = useOrder(token);
+  const { order, loading, notFound, refresh, quietEndsAt } = useOrder(token);
   const actions = useOrderActions({ token, refresh });
   const selection = useSelections(order);
   const [cancelOpen, setCancelOpen] = useState(false);
@@ -56,6 +56,7 @@ export function UserOrderView({ token }: UserOrderViewProps) {
       cancelOpen={cancelOpen}
       setCancelOpen={setCancelOpen}
       refreshOrder={refresh}
+      quietEndsAt={quietEndsAt}
     />
   );
 }
@@ -72,6 +73,8 @@ interface UserOrderContentProps {
   cancelOpen: boolean;
   setCancelOpen: (v: boolean) => void;
   refreshOrder: () => Promise<void>;
+  /** GENERATING 起始「安静期」结束时刻（ms epoch），传给 GenerateStep 对齐假进度 */
+  quietEndsAt: number | null;
 }
 
 function UserOrderContent({
@@ -82,6 +85,7 @@ function UserOrderContent({
   cancelOpen,
   setCancelOpen,
   refreshOrder,
+  quietEndsAt,
 }: UserOrderContentProps) {
   const status = order.status;
   const history = useOrderHistory({
@@ -221,6 +225,9 @@ function UserOrderContent({
                 readyGroups={readyGroups}
                 candidateCount={candidateCount}
                 uploadedAt={order.uploadedAt}
+                // 共享给 useOrder 的同一时间源，让假进度 RAF 起点 = /poll
+                // 安静期起点；窗口内不打 /poll，只让假进度跑。
+                quietEndsAt={quietEndsAt}
                 // 注意：生成阶段的"停止生成"是协作式打断当前 in-flight 的
                 // 生成任务，**不**等于取消订单。订单级取消仍走 TopBar 的
                 // AlertDialog，由 actions.cancel() 触发（终态 CANCELLED）。
@@ -293,11 +300,7 @@ function UserOrderContent({
             aria-label="Mooncoda 首页"
             className="inline-flex items-center gap-1.5 transition-colors hover:text-stone-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 rounded"
           >
-            <img
-              src="/logo.svg"
-              alt="Mooncoda"
-              className="h-4 w-4 shrink-0"
-            />
+            <img src="/logo.svg" alt="Mooncoda" className="h-4 w-4 shrink-0" />
             <span className="tracking-tight">Mooncoda梦可达</span>
           </Link>
           <span className="text-stone-300">·</span>

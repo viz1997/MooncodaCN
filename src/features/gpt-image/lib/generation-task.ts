@@ -42,18 +42,26 @@ export interface GenerationTaskState {
 export const TASK_TIMEOUT_MS = 300_000;
 
 /**
- * 整单硬超时（不依赖上游可达）：10 分钟。
+ * 整单硬超时（不依赖上游可达）：2 分钟。
  *
  * 用途：上游挂死 / Lingting 任务彻底丢失时，保证订单不会无限期卡在
  * GENERATING。命中条件：`generationTask` 非空 + 最小 submittedAt
  * 已超过本阈值。判定写在 advance-generation.ts 的「前置」分支，
  * 见 isOrderPastDeadline。
  *
- * 实际触发靠两路：
- * 1. 前端 /poll 每次轮询时 advanceOrderGeneration 进入后立即检查
- * 2. cron /api/jobs/orders/advance 在 inFlight 循环之前扫表
+ * 2 分钟与上游 P99 持平：GPT-Image-2 单图 P99 约 60-180s，2 分钟已
+ * 足够覆盖正常慢任务（含网络抖动）。正常任务会在此阈值前完成或被
+ * 单任务软阈值（TASK_TIMEOUT_MS = 5min）兜底。
+ *
+ * 触发路径：
+ * 1. 前端 /poll 每次轮询时 advanceOrderGeneration 进入后立即检查（主路径）
+ * 2. cron /api/jobs/orders/advance 在 inFlight 循环之前扫表（关页面兜底）
+ *
+ * Vercel Hobby cron 只能 1 次/天，所以「关页面后」的兜底实际只有
+ * 第 1 条路径可靠；用户长时间关页面时需依靠下一次打开页面被自动推
+ * 进。本阈值收紧后，**主路径 2 分钟内必收敛**，不再依赖 cron 频率。
  */
-export const ORDER_DEADLINE_MS = 600_000;
+export const ORDER_DEADLINE_MS = 120_000;
 
 /** 解析 generationTask JSON；无任务 / 格式异常均返回 null */
 export function parseGenerationTask(
