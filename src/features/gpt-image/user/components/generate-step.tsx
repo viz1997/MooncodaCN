@@ -39,6 +39,15 @@ const DEFAULT_PER_IMAGE_MS = 90_000;
 const STALL_HINT_MS = 5 * 60_000;
 
 /**
+ * 「假进度」上限：95%。
+ *
+ * 业界主流做法：拿到首张真实结果前，UI 不能停在 0%，要"看起来在跑"；
+ * 但又不能假装跑到 100%，否则用户以为已结束。我们用 RAF 平滑推进到
+ * 这个上限就停住，剩下的 5% 等真实 done 比例拉到 100% 时直接 100%。
+ */
+const FAKE_PROGRESS_CAP = 95;
+
+/**
  * 估算剩余时间（秒）
  * 优先用真实数据：elapsed / readyGroups = 单张耗时均值；没有 readyGroups 时退到默认 30s/张。
  */
@@ -58,12 +67,15 @@ function estimateEtaSec(
 }
 
 /**
- * 生成步骤 —— mobile-first 单列布局 + 圆形进度环。
+ * 生成步骤 —— mobile-first 单列布局 + 横向进度条（业界主流"假进度"）。
  *
  * 设计参考 generate-step.tsx：
  * - 第 2 步徽章 + 标题 + ETA 副标题
  * - 原图缩略图（卡片圆角）
- * - SVG 圆形进度环（百分比）
+ * - 横向进度条：
+ *   - 未拿到 readyGroups 时显示 indeterminate 滑光带
+ *   - 拿到真实比例后用 ease-out 平滑推到 FAKE_PROGRESS_CAP 等真结果
+ *   - 真实完成（100%）时滑满
  * - 3 个跳动圆点
  * - "停止生成" outline 按钮
  *
@@ -81,8 +93,9 @@ export function GenerateStep({
   onStopClick,
 }: GenerateStepProps) {
   const done = Math.min(readyGroups, uploadedImageCount);
-  const percent =
+  const realPercent =
     uploadedImageCount > 0 ? (done / uploadedImageCount) * 100 : 0;
+  const isAllDone = uploadedImageCount > 0 && done >= uploadedImageCount;
   const remaining = Math.max(0, uploadedImageCount - done);
 
   // ETA 每秒刷新一次
@@ -94,6 +107,58 @@ export function GenerateStep({
   }, [remaining]);
 
   const etaSec = estimateEtaSec(uploadedAt, uploadedImageCount, readyGroups);
+
+  /**
+   * 假进度 RAF 循环。
+   *
+   * - mounted 后从 0 平滑 ease-out-cubic 推到 FAKE_PROGRESS_CAP
+   *   （约 4 分钟跑满——配合下游 P99 60-180s 单张，剩余张数会先到达 100%，
+   *    视觉节奏不显拖）。
+   * - 一旦拿到真实进度（done > 0 或 allDone），立刻锚定到真实比例——
+   *   若真实 < 当前假进度则保留假进度（不回弹），否则取 max 后 ease-out 推。
+   * - 全部完成（isAllDone）→ 直接 100%。
+   *
+   * 用 max 策略的核心原因：上游可能先回报 partial done，例如 done=1/4=25%，
+   * 此时 fake 已跑到 60%——立刻拉到 25% 会让用户觉得"退步了"。保留更大值，
+   * 等下一张 ready 时再被真实比例覆盖（用 ease-out 动画）。
+   */
+  const [displayPercent, setDisplayPercent] = useState(0);
+  const fakeStartRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (isAllDone) {
+      setDisplayPercent(100);
+      fakeStartRef.current = null;
+      return;
+    }
+    if (done > 0) {
+      // 真实进度锚定：取 max，防止回弹
+      setDisplayPercent((prev) => Math.max(prev, realPercent));
+      fakeStartRef.current = null;
+      return;
+    }
+    // done === 0：启动/重置 RAF 假进度。
+    // displayPercent 进入依赖后，每次 RAF 推进都会让 effect 重跑——但 RAF 内部
+    // 用函数式 setState 比较 next > prev 才写，已在极限（cap）下不会再增加，
+    // 所以重跑只在用户手动切页面后从 0 重新开始，或 cap 之前短暂发生几次，
+    // 不会出现循环风暴。
+    if (fakeStartRef.current === null) {
+      fakeStartRef.current =
+        performance.now() - (displayPercent / FAKE_PROGRESS_CAP) * 240_000;
+    }
+    let rafId = 0;
+    const tick = (now: number) => {
+      const start = fakeStartRef.current ?? now;
+      const elapsed = now - start;
+      // 240 秒跑到 FAKE_PROGRESS_CAP；ease-out-cubic 曲线，前快后慢
+      const t = Math.min(1, elapsed / 240_000);
+      const eased = 1 - (1 - t) ** 3;
+      const next = Math.min(FAKE_PROGRESS_CAP, eased * FAKE_PROGRESS_CAP);
+      setDisplayPercent((prev) => (next > prev ? next : prev));
+      if (t < 1) rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [isAllDone, done, realPercent, displayPercent]);
 
   // 停滞提示：updatedAt 超过 STALL_HINT_MS 未刷新 + 还有未完成张图
   // → amber 内联提示 + 一次性 toast.warning（latch 防重复弹）。
@@ -109,6 +174,8 @@ export function GenerateStep({
       { duration: 6000 }
     );
   }, [stalled]);
+
+  const showIndeterminate = done === 0 && !isAllDone;
 
   return (
     <section className="flex flex-col items-center px-5 pt-6 pb-8 animate-[fadeIn_.3s_ease-out]">
@@ -139,53 +206,45 @@ export function GenerateStep({
         )}
       </div>
 
-      {/* 圆形进度环 */}
-      <div className="relative mb-5 h-24 w-24">
-        <svg
-          className="-rotate-90 h-full w-full"
-          viewBox="0 0 100 100"
-          role="img"
-          aria-label={`生成进度 ${Math.round(percent)}%`}
-        >
-          <circle
-            cx="50"
-            cy="50"
-            r="42"
-            fill="none"
-            stroke="#f5f5f4"
-            strokeWidth={6}
-          />
-          <circle
-            cx="50"
-            cy="50"
-            r="42"
-            fill="none"
-            stroke="url(#gradient)"
-            strokeWidth={6}
-            strokeLinecap="round"
-            strokeDasharray={`${(percent / 100) * 264} 264`}
-            className="transition-all duration-500"
-          />
-          <defs>
-            <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor="#6366f1" />
-              <stop offset="100%" stopColor="#3b82f6" />
-            </linearGradient>
-          </defs>
-        </svg>
-        <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-lg font-bold tabular-nums text-stone-700">
-            {Math.round(percent)}%
+      {/* 横向进度条：indeterminate 滑光带 → determinate 平滑增长 */}
+      <div
+        className="mb-2 w-full max-w-[260px]"
+        role="progressbar"
+        aria-label="生成进度"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(displayPercent)}
+      >
+        <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-stone-100">
+          {showIndeterminate ? (
+            // 拿到首张真实结果前的滑光带：30% 宽渐变条循环扫过
+            <div
+              className="absolute inset-y-0 left-0 w-[30%] animate-indeterminate-progress bg-gradient-to-r from-transparent via-indigo-500 to-transparent"
+              style={{ willChange: "transform" }}
+            />
+          ) : (
+            <div
+              className="h-full animate-progress-ease rounded-full bg-gradient-to-r from-indigo-500 to-blue-500"
+              style={{ width: `${displayPercent}%` }}
+            />
+          )}
+        </div>
+        <div className="mt-1.5 flex items-center justify-between text-[11px] tabular-nums text-stone-400">
+          <span>
+            {showIndeterminate ? "正在处理…" : `${Math.round(displayPercent)}%`}
+          </span>
+          <span>
+            {done}/{uploadedImageCount}
           </span>
         </div>
       </div>
 
       {/* 跳动圆点 */}
-      <div className="mb-5 flex gap-1.5">
+      <div className="mt-3 mb-5 flex gap-1.5">
         {[0, 1, 2].map((i) => (
           <div
             key={i}
-            className="h-2 w-2 animate-bounce rounded-full bg-indigo-400"
+            className="h-1.5 w-1.5 animate-bounce rounded-full bg-indigo-400"
             style={{ animationDelay: `${i * 150}ms` }}
           />
         ))}
