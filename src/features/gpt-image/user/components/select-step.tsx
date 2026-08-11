@@ -382,7 +382,7 @@ export function SelectStep({
               </span>
             ) : (
               <span className="inline-flex items-center gap-1.5">
-                <CheckCircle2 className="h-4 w-4" /> 确认提交 {imageCount} 张
+                <CheckCircle2 className="h-4 w-4" /> 确认提交 
               </span>
             )}
           </button>
@@ -421,7 +421,7 @@ export function SelectStep({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              确认提交这 {imageCount} 张选择？
+              确认提交？
             </AlertDialogTitle>
             <AlertDialogDescription>
               提交后结果会被锁定，无法再更换效果图。如需重新挑选，请取消订单后联系服务方重新创建。
