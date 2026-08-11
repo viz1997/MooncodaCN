@@ -38,10 +38,7 @@ export function AuthBrandPanel() {
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
             {t("points.shipping")}
           </li>
-          <li className="flex items-center gap-2">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-            {t("points.copyright")}
-          </li>
+      
         </ul>
       </div>
 
@@ -49,11 +46,7 @@ export function AuthBrandPanel() {
         <span>
           © {new Date().getFullYear()} {siteConfig.name}. {t("rights")}
         </span>
-        <div className="font-mono text-[10px] tracking-widest">
-          <span className="font-semibold text-slate-300">{t("stat.k")}</span>
-          {" · "}
-          <span>{t("stat.v")}</span>
-        </div>
+       
       </div>
 
       {/* 装饰背景 */}

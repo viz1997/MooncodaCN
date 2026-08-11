@@ -301,14 +301,10 @@
       "headline": "把你的想象，变成手中的实物。",
       "sub": "Mooncoda 梦可达专注 WJP 全彩 3D 打印——宠物徽章、钥匙扣、冰箱贴、手办等，一件定制、一件发货。",
       "points": {
-        "onePiece": "件起定 · 一件发货 · 无最小量",
+        "onePiece": "一件定制 · 一件发货 · 无最小量",
         "fullColor": "WJP 全彩工艺 · 1600 万色还原",
         "shipping": "全程速运 · 独立礼盒包装",
-        "copyright": "作品版权归你 · STL 文件可下载"
-      },
-      "stat": {
-        "k": "48h",
-        "v": "3D 建模稿交付"
+        "copyright": ""
       },
       "rights": "保留所有权利。"
     }
