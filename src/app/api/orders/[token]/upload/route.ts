@@ -33,7 +33,11 @@ import { withApiLogging } from "@/lib/api-logger";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// 90s：覆盖 submitGeneration 内"下载原图 30s + Lingting 提交 60s"的最坏
+// 链路。Vercel 函数预算低于 90s 时会被砍，订单 status 被置 GENERATING 后
+// 半途退出 → generationTask 没写库 → 订单永远卡住。90s 留 5-10s 给 DB
+// 落库 + 响应序列化缓冲。
+export const maxDuration = 90;
 
 const UPLOADABLE = new Set(["PENDING", "CANDIDATES_READY", "FAILED"]);
 

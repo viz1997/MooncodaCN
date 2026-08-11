@@ -109,14 +109,16 @@ export async function submitLingtingTask(
   form.append("size", size);
   form.append("response_format", "url");
 
-  // 3. 提交任务
+  // 3. 提交任务。
+  // 超时 45s：与上游链路总时长 90s 函数预算对齐（下载 30s + Lingting 45s + 响应/DB 15s），
+  // 留缓冲防止在函数预算边界被砍。
   const submitRes = await fetch(`${LINGTING_BASE_URL}/v1/images/edits`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${LINGTING_API_KEY}`,
     },
     body: form,
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(45_000),
   });
 
   if (!submitRes.ok) {

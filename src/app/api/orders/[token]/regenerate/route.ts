@@ -25,7 +25,8 @@ import { withApiLogging } from "@/lib/api-logger";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// 90s：与 /upload 对齐。submitGeneration 同链路（下载 30s + Lingting 提交 60s）。
+export const maxDuration = 90;
 
 async function postHandler(
   req: NextRequest,
