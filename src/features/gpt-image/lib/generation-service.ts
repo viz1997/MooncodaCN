@@ -162,7 +162,12 @@ export async function queryLingtingTask(taskId: string): Promise<QueryResult> {
     pollRes = await fetch(`${LINGTING_BASE_URL}/v1/images/tasks/${taskId}`, {
       method: "GET",
       headers: { Authorization: `Bearer ${LINGTING_API_KEY}` },
-      signal: AbortSignal.timeout(20_000),
+      // 单次上游超时压缩到 8s：一次 /poll 必须在平台函数预算内
+      // 跑完（即使上游挂死），否则硬化超时判定永远没机会写库。
+      // 多任务走 Promise.all，墙钟仍 ≈8s，加 2-3 次 DB round-trip
+      // 可安全落进 10s。保留「网络抖动一律 pending」策略——
+      // 上面有 ORDER_DEADLINE_MS 真兜底，不再叠成死链。
+      signal: AbortSignal.timeout(8_000),
     });
   } catch {
     return { state: "pending" };

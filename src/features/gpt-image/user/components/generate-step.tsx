@@ -1,7 +1,8 @@
 "use client";
 
-import { ImageIcon, Pause, StopCircle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { AlertTriangle, ImageIcon, Pause, StopCircle } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { originalUrl } from "./image-urls";
 import { formatEta } from "./order-lib";
 
@@ -19,7 +20,23 @@ interface GenerateStepProps {
   onStopClick?: () => void;
 }
 
-const DEFAULT_PER_IMAGE_MS = 30_000;
+/**
+ * ETA fallback 单张耗时估值：90s。
+ *
+ * 旧值 30s/张在 GPT-Image-2 上游真实 60-180s 下会早早归零显示成 0，
+ * 与 ORDER_DEADLINE_MS 10min 配合后 ETA 会显示 "0s" 误导用户。
+ * 仅在没有任何 readyGroups 真实数据时作为兜底。
+ */
+const DEFAULT_PER_IMAGE_MS = 90_000;
+
+/**
+ * 停滞提示阈值：5 分钟。
+ *
+ * 超过这个时间没收到服务端更新（updatedAt 与上次快照相同）→ 提示用户
+ * 主动点「停止生成」，避免干等。仅展示提示，不改 status——状态收敛
+ * 由 advance-generation.ts 的硬超时独占，避免用户还在等时被前端抢先判死。
+ */
+const STALL_HINT_MS = 5 * 60_000;
 
 /**
  * 估算剩余时间（秒）
@@ -77,6 +94,21 @@ export function GenerateStep({
   }, [remaining]);
 
   const etaSec = estimateEtaSec(uploadedAt, uploadedImageCount, readyGroups);
+
+  // 停滞提示：updatedAt 超过 STALL_HINT_MS 未刷新 + 还有未完成张图
+  // → amber 内联提示 + 一次性 toast.warning（latch 防重复弹）。
+  // 仅展示，不改 status：状态收敛由服务端前置硬超时独占。
+  const stalledMs = Date.now() - new Date(updatedAt).getTime();
+  const stalled = remaining > 0 && stalledMs > STALL_HINT_MS;
+  const stalledToastShownRef = useRef(false);
+  useEffect(() => {
+    if (!stalled || stalledToastShownRef.current) return;
+    stalledToastShownRef.current = true;
+    toast.warning(
+      "已等待较长时间。若长时间无进展，可点「停止生成」取消本次重试",
+      { duration: 6000 }
+    );
+  }, [stalled]);
 
   return (
     <section className="flex flex-col items-center px-5 pt-6 pb-8 animate-[fadeIn_.3s_ease-out]">
@@ -172,6 +204,14 @@ export function GenerateStep({
       {/* 停止按钮 */}
       {onStopClick && (
         <>
+          {stalled && (
+            <output className="mb-3 inline-flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-xs text-amber-700">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                已等待超过 5 分钟。如长时间无进展，可点「停止生成」取消本次重试
+              </span>
+            </output>
+          )}
           <button
             type="button"
             onClick={onStopClick}

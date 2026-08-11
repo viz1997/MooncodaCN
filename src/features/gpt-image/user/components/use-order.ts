@@ -10,6 +10,16 @@ const LIVE_STATUSES = new Set<string>(["PENDING", "GENERATING"]);
 const BASE_INTERVAL = 3000;
 const MAX_INTERVAL = 15_000;
 
+/**
+ * 后台标签降频间隔：15s。
+ *
+ * 切到后台标签时不再「跳过」/poll，而是降频打——只有 /poll 才是上游轮询
+ * 的唯一驱动，跳过等于生成停摆。15s 是「意图」而非「保证」：Chrome 5min
+ * 后会节流 timer 至约 1 次/分钟。回前台时既有 `visibilitychange` 处理
+ * 立即降频回落 BASE_INTERVAL。
+ */
+const HIDDEN_INTERVAL = 15_000;
+
 interface StatusSnapshot {
   status: OrderStatus;
   updatedAt: string;
@@ -90,13 +100,17 @@ export function useOrder(token: string): UseOrderResult {
       timerRef.current = null;
       if (!aliveRef.current || !isLive()) return;
 
-      if (typeof document !== "undefined" && document.hidden) {
+      const snap = snapshotRef.current;
+      if (!snap) return;
+
+      // 后台标签降频：非 GENERATING 状态保持跳过（PENDING 没有要驱动的上游），
+      // GENERATING 状态必须照常打 /poll——否则上游轮询停摆，订单永远卡死。
+      const isHidden = typeof document !== "undefined" && document.hidden;
+      if (isHidden && snap.status !== "GENERATING") {
         ensurePolling();
         return;
       }
 
-      const snap = snapshotRef.current;
-      if (!snap) return;
       try {
         // GENERATING 时打 /poll：服务端只在上传时提交任务拿 task_id，
         // 真正的上游轮询由这里驱动（Serverless 跑不了长任务）。
@@ -109,7 +123,13 @@ export function useOrder(token: string): UseOrderResult {
         if (!aliveRef.current) return;
 
         if (json.success) {
-          delayRef.current = BASE_INTERVAL;
+          // 后台标签下若刚刚轮询过一圈，把节奏切到 HIDDEN_INTERVAL；
+          // 回前台时 onVisible 已把 delayRef 回落到 BASE_INTERVAL。
+          if (isHidden) {
+            delayRef.current = HIDDEN_INTERVAL;
+          } else {
+            delayRef.current = BASE_INTERVAL;
+          }
           const d = json.data;
           const changed =
             d.status !== snap.status ||

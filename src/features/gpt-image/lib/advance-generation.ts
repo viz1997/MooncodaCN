@@ -9,7 +9,7 @@
  * 写库前重新读取，避免覆盖并发写入（多标签页、cron 与前端同时推进）。
  */
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import { promptOrder } from "@/db/schema";
@@ -17,6 +17,7 @@ import { logger } from "@/lib/logger";
 
 import { queryLingtingTask } from "./generation-service";
 import {
+  isOrderPastDeadline,
   isTaskTimedOut,
   parseGenerationTask,
   stringifyGenerationTask,
@@ -63,6 +64,50 @@ export async function advanceOrderGeneration(
   // 无进行中任务 → 幂等返回
   if (order.status !== "GENERATING" || !state || state.tasks.length === 0) {
     return { changed: false, status: order.status, completed: 0, pending: 0 };
+  }
+
+  // ★ keystone: 前置硬超时
+  //
+  // 必须排在查 upstream 之前——这是绕开「上游挂死 → 永远 pending」的唯一办法。
+  // 即使 Lingting 完全失联，我们也不再尝试调它。
+  //
+  // 写入用 `WHERE status='GENERATING'` 原子化，副作用：
+  // 1. 顺手关掉原 :94-105 重读与 :117 写入之间的 TOCTOU 窗口
+  // 2. 与 stop-generation 路由并发写入时不互相覆盖（最终态必是其一）
+  //
+  // 跨过 ORDER_DEADLINE_MS 的订单在「下一次 /poll（≤3s）」内收敛，不需要 cron 参与。
+  if (isOrderPastDeadline(state, Date.now())) {
+    const failed = await db
+      .update(promptOrder)
+      .set({
+        status: "FAILED",
+        generationTask: null,
+        errorMessage: "生成超时，请重新生成",
+        updatedAt: new Date(),
+      })
+      .where(
+        and(eq(promptOrder.id, orderId), eq(promptOrder.status, "GENERATING"))
+      )
+      .returning({ id: promptOrder.id });
+    if (failed.length > 0) {
+      logger.warn(
+        { orderId, submittedAt: state.tasks[0]?.submittedAt },
+        "订单跨过硬超时，强制 FAILED（不查上游）"
+      );
+      return { changed: true, status: "FAILED", completed: 0, pending: 0 };
+    }
+    // 并发分支已经把订单掰到非 GENERATING（如 stop-generation / cancel），
+    // 不能误判成「硬超时命中」——重读一次按真实状态返回。
+    const after = await db.query.promptOrder.findFirst({
+      where: eq(promptOrder.id, orderId),
+      columns: { status: true },
+    });
+    return {
+      changed: false,
+      status: after?.status ?? "UNKNOWN",
+      completed: 0,
+      pending: 0,
+    };
   }
 
   // 查询上游（uploadCount 基本为 1，并行代价可忽略）
@@ -113,20 +158,31 @@ export async function advanceOrderGeneration(
   }
 
   // 仍有任务在跑 → 保持 GENERATING，写回剩余任务
+  //
+  // 「无进展不写库」：当前每 3s 都把 updatedAt 顶到当前时间，污染
+  // 「最后一次真实进展」语义——ORDER_DEADLINE_MS 扫描和前端停滞提示
+  // 的判据都建立在 updatedAt 是进展时钟之上。
+  // - 有 doneUrls 进来 → 必写（新增候选）
+  // - 有失败/超时切走（remaining 缩短） → 必写（兜底避免 stale tasks）
+  // - 都没发生（pending 仍全在 + 没人完成） → 跳过整个 UPDATE
+  const progressed =
+    doneUrls.length > 0 || remaining.length !== state.tasks.length;
   if (remaining.length > 0) {
-    await db
-      .update(promptOrder)
-      .set({
-        candidates: JSON.stringify(nested),
-        generationTask: stringifyGenerationTask({
-          tasks: remaining,
-          total: state.total,
-        }),
-        updatedAt: new Date(),
-      })
-      .where(eq(promptOrder.id, orderId));
+    if (progressed) {
+      await db
+        .update(promptOrder)
+        .set({
+          candidates: JSON.stringify(nested),
+          generationTask: stringifyGenerationTask({
+            tasks: remaining,
+            total: state.total,
+          }),
+          updatedAt: new Date(),
+        })
+        .where(eq(promptOrder.id, orderId));
+    }
     return {
-      changed: doneUrls.length > 0,
+      changed: progressed,
       status: "GENERATING",
       completed: doneUrls.length,
       pending: remaining.length,
