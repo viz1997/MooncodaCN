@@ -349,22 +349,17 @@ export function SelectStep({
           />
         </div>
 
-        {imageCount > 1 && (
-          <p className="mt-3 text-center text-xs text-stone-400">
-            移动端左右滑动切图 · 桌面端 ← → 切图
-          </p>
-        )}
-
-        <p aria-live="polite" className="sr-only">
-          已选 {selectedCount} 张，共 {imageCount} 张
+        {/* 提示文字（在按钮上方） */}
+        <p className="mt-3 text-center text-xs text-stone-400">
+          {imageCount > 1
+            ? "移动端左右滑动切图 · 桌面端 ← → 切图"
+            : "点击候选图后再点下方按钮"}
         </p>
-      </section>
 
-      {/* ─── 浮底 CTA：fixed bottom-0 全宽 ─── 两个按钮并列 */}
-      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-stone-100 bg-white/80 backdrop-blur-2xl">
-        <div className="mx-auto flex max-w-md items-center gap-2 px-5 py-3 pb-[max(env(safe-area-inset-bottom),0.75rem)]">
-          {/* 进度 */}
-          <div className="shrink-0 pr-1 text-sm">
+        {/* 操作按钮：重新生成（次级）+ 确认提交（主）并列 */}
+        <div className="mt-4 flex w-full items-stretch gap-2">
+          {/* 进度小字 */}
+          <div className="flex shrink-0 items-center pr-1 text-sm">
             <span className="font-semibold tabular-nums text-stone-900">
               {selectedCount}/{imageCount}
             </span>
@@ -373,22 +368,22 @@ export function SelectStep({
             </span>
           </div>
 
-          {/* 重新生成（次级按钮，与确认提交并列） */}
+          {/* 重新生成（次级） */}
           <button
             type="button"
             onClick={() => setRegenConfirmOpen(true)}
             disabled={regenerating}
-            className="inline-flex h-10 shrink-0 items-center justify-center gap-1 rounded-xl border border-stone-200 bg-white px-3 text-xs font-medium text-stone-600 transition-colors hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 disabled:opacity-60"
+            className="inline-flex h-11 shrink-0 items-center justify-center gap-1 rounded-xl border border-stone-200 bg-white px-3 text-sm font-medium text-stone-600 transition-colors hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 disabled:opacity-60"
           >
             {regenerating ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <RefreshCw className="h-3.5 w-3.5" />
+              <RefreshCw className="h-4 w-4" />
             )}
-            <span className="hidden sm:inline">重新生成</span>
+            {imageCount > 1 ? `重新生成第 ${safeIdx + 1} 张` : "重新生成"}
           </button>
 
-          {/* 确认提交 / 去选下一张（主按钮） */}
+          {/* 确认提交 / 去选下一张（主） */}
           <button
             type="button"
             onClick={() => {
@@ -397,7 +392,7 @@ export function SelectStep({
             }}
             disabled={submitting}
             className={[
-              "h-10 flex-1 rounded-xl text-sm font-medium transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 disabled:opacity-60",
+              "h-11 flex-1 rounded-xl text-sm font-medium transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 disabled:opacity-60",
               allSelected
                 ? "bg-gradient-to-r from-indigo-500 to-blue-500 text-white shadow-lg shadow-indigo-200/50 hover:shadow-indigo-300/50"
                 : "bg-stone-100 text-stone-700 hover:bg-stone-200",
@@ -422,11 +417,12 @@ export function SelectStep({
             )}
           </button>
         </div>
+
         {/* sr-only 状态说明，给屏幕阅读器 */}
         <span className="sr-only">
           {safeIdx >= imageCount - 1 ? "这是最后一张图" : "继续选择下一张图"}
         </span>
-      </div>
+      </section>
 
       {/* ─── Lightbox ─── */}
       {lightbox && (
