@@ -163,7 +163,8 @@ export function SelectStep({
     const isEditableTarget = (target: EventTarget | null) => {
       if (!(target instanceof HTMLElement)) return false;
       const tag = target.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT")
+        return true;
       return target.isContentEditable;
     };
 
@@ -264,12 +265,6 @@ export function SelectStep({
     };
   }, [imageCount]);
 
-  const canUndo = useMemo(() => {
-    if (lastSelectedIdx === null) return false;
-    const cur = selections[lastSelectedIdx];
-    return cur !== null && cur !== undefined;
-  }, [selections, lastSelectedIdx]);
-
   return (
     <>
       <section className="mx-auto flex w-full max-w-md flex-col items-stretch px-5 pt-4 pb-32 animate-[fadeIn_.3s_ease-out]">
@@ -288,7 +283,6 @@ export function SelectStep({
             done={selectedCount}
           />
         )}
-
 
         {/* 原图缩略图横排（多图时） */}
         {imageCount > 1 && (
@@ -391,9 +385,7 @@ export function SelectStep({
             ) : (
               <RefreshCw className="h-3.5 w-3.5" />
             )}
-            <span className="hidden sm:inline">
-              重新生成
-            </span>
+            <span className="hidden sm:inline">重新生成</span>
           </button>
 
           {/* 确认提交 / 去选下一张（主按钮） */}
@@ -504,14 +496,5 @@ export function SelectStep({
         </AlertDialogContent>
       </AlertDialog>
     </>
-  );
-}
-
-function Row({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <span className="font-mono text-xs font-medium text-stone-700">{k}</span>
-      <span className="text-xs text-stone-500">{v}</span>
-    </div>
   );
 }
