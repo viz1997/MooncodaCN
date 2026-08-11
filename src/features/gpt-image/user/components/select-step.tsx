@@ -345,15 +345,7 @@ export function SelectStep({
 
         {/* 操作按钮：重新生成（次级）+ 确认提交（主）并列 */}
         <div className="mt-4 flex w-full items-stretch gap-2">
-          {/* 进度小字 */}
-          <div className="flex shrink-0 items-center pr-1 text-sm">
-            <span className="font-semibold tabular-nums text-stone-900">
-              {selectedCount}/{imageCount}
-            </span>
-            <span className="ml-1 text-xs font-medium text-stone-500">
-              已选
-            </span>
-          </div>
+        
 
           {/* 重新生成（次级） */}
           <button

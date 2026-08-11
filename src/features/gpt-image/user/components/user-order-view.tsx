@@ -287,7 +287,7 @@ function UserOrderContent({
         )} */}
 
         {/* ── 品牌脚注 ── 放在 main 内，确保 SelectStep/ResultStep 的 fixed CTA 不会盖住它 */}
-        <div className="mt-12 pb-2 text-center text-xs font-medium text-stone-400">
+        <div className="mt-12 flex items-center justify-center gap-1.5 pb-2 text-center text-xs font-medium leading-none text-stone-400">
           <Link
             href="/"
             aria-label="Mooncoda 首页"
@@ -296,11 +296,11 @@ function UserOrderContent({
             <img
               src="/logo.svg"
               alt="Mooncoda"
-              className="h-3.5 w-3.5 shrink-0 align-middle"
+              className="h-3 w-3 shrink-0"
             />
             <span className="tracking-tight">Mooncoda梦可达</span>
           </Link>
-          <span className="mx-1.5 text-stone-300">·</span>
+          <span className="text-stone-300">·</span>
           <span>提供定制服务</span>
         </div>
       </main>
