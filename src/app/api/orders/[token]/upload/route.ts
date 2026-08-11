@@ -207,6 +207,30 @@ async function postHandler(
       }
     }
 
+    // Partial lock 后再上传新图：归档当前「已锁定 + N 张原图」状态。
+    // trigger 用 regenerate_single——复用现有 trigger 语义（"destructive
+    // 写入前的快照"），不引入新 trigger 类型以免污染 history 路由读侧。
+    // nextSelections 在 line 184-192 已天然保留锁定位 + 补 null（仅在追加
+    // 槽位时才补，不踩坏已有锁定值）。
+    const hasLocked =
+      order.status === "CANDIDATES_READY" &&
+      (parseSelections(order.selections as string | null) ?? []).some(
+        (v) => v !== null
+      );
+    if (!isRetryAfterFailure && hasLocked) {
+      const snap = await archiveOrderSnapshot(
+        order.id,
+        "regenerate_single",
+        null
+      );
+      if (snap) {
+        logger.info(
+          { orderId: order.id, round: snap.round },
+          "partial lock 后上传新图，已归档历史快照"
+        );
+      }
+    }
+
     await db
       .update(promptOrder)
       .set({

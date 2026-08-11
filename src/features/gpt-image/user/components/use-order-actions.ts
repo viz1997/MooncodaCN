@@ -21,7 +21,17 @@ export interface UseOrderActionsResult {
   retryingAll: boolean;
   /** 把单个文件走 R2 预签名直传，然后 POST publicUrl 列表到 /upload */
   upload: (files: File[]) => Promise<boolean>;
-  submit: (selections: number[]) => Promise<boolean>;
+  /**
+   * 提交选择（partial select 语义）：
+   * - 旧式：`number[]`（全量提交，长度对齐 uploadedImageCount）—— 兼容老调用
+   * - 新式：`Array<{ imageIdx: number; candIdx: number }>` —— 增量提交，
+   *   服务端按 imageIdx 合并；只锁定被列出的位。
+   *
+   * 服务端 `/api/orders/[token]/select` 自动判别两种格式（normalizeSelections）。
+   */
+  submit: (
+    payload: number[] | Array<{ imageIdx: number; candIdx: number }>
+  ) => Promise<boolean>;
   /** 取消整个订单 → 状态变成 CANCELLED，链接失效 */
   cancel: () => Promise<boolean>;
   /** 停止生成 → 中断当前 in-flight 的生成任务，订单保留 */
@@ -158,16 +168,24 @@ export function useOrderActions({
   );
 
   const submit = useCallback(
-    async (selections: number[]) => {
+    async (
+      payload: number[] | Array<{ imageIdx: number; candIdx: number }>
+    ) => {
       setSubmitting(true);
       try {
         const res = await fetch(`/api/orders/${token}/select`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ selections }),
+          body: JSON.stringify({ selections: payload }),
         });
+        const json = (await res.json().catch(() => null)) as {
+          success?: boolean;
+          message?: string;
+        } | null;
         if (!res.ok) throw new Error(await readError(res, "提交失败"));
-        toast.success("已提交，结果已锁定");
+        // partial submit 路由返回的 message 区分"已锁定 K/N"与"全部锁定"，
+        // 直接复用服务端文案——避免硬编码"已提交"误导用户以为全部完成。
+        toast.success(json?.message ?? "已提交");
         await refresh();
         return true;
       } catch (e) {

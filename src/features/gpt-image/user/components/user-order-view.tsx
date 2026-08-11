@@ -136,23 +136,26 @@ function UserOrderContent({
   // 表达成布尔 `allowReupload`，下面所有 stage 判断都从它派生，避免漏检。
   const allowReupload = !isSelected && !isCancelled && !isGenerating;
 
-  // 同一时刻只出现一个 stage：
+  // 同一时刻只出现一个 stage（partial select 语义）：
   // - PENDING / FAILED                       → UploadStep（首次上传 / 失败重传）
-  // - CANDIDATES_READY + 未选完              → SelectStep（继续选）
-  // - CANDIDATES_READY + 全部选完 + 还有余量  → UploadStep（传下一张）
-  // - CANDIDATES_READY + 全部选完 + 已满      → SelectStep（确认提交）
+  // - CANDIDATES_READY + 还有未锁定位         → SelectStep（继续选）
+  // - CANDIDATES_READY + 全锁定 + 还有余量    → UploadStep（传下一张）
+  // - CANDIDATES_READY + 全锁定 + 已满        → 不会有（直接转 SELECTED）
   // - SELECTED                               → ResultStep（终态，不再允许上传）
   // - CANCELLED                              → CancelledPanel（终态）
+  //
+  // pendingCount = uploadedCount - lockedCount：
+  // - pendingCount > 0 时 SelectStep 接管（用户可以锁定当前 / 跳到下一张）
+  // - pendingCount === 0 时如果还能上传更多 → UploadStep；否则已全锁定，
+  //   服务端会在最近一次 partial submit 时已经转 SELECTED（仅 1 张订单时）
+  //   或仍保持 CANDIDATES_READY 等待剩余原图上传（uploadCount > uploadedCount）
   const showSelectStep =
-    allowReupload &&
-    isReady &&
-    uploadedCount > 0 &&
-    (!selection.allSelected || uploadedCount >= uploadCount);
+    allowReupload && isReady && uploadedCount > 0 && selection.pendingCount > 0;
   const showUploadStep =
     allowReupload &&
     (isPending ||
       isFailed ||
-      (isReady && selection.allSelected && uploadedCount < uploadCount));
+      (isReady && selection.pendingCount === 0 && uploadedCount < uploadCount));
   const canCancel = !isCancelled && !isPending;
 
   const handleSubmit = () => {
@@ -244,7 +247,8 @@ function UserOrderContent({
                 candidateCount={candidateCount}
                 selections={selection.selections}
                 selectedCount={selection.selectedCount}
-                allSelected={selection.allSelected}
+                lockedCount={selection.lockedCount}
+                isLocked={selection.isLocked}
                 submitting={actions.submitting}
                 regenerating={actions.regenerating}
                 onToggle={selection.toggle}

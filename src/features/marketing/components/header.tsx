@@ -73,11 +73,7 @@ export function Header() {
         <div className="flex items-center gap-8">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2">
-            <img
-              src="/logo.svg"
-              alt="Mooncoda"
-              className="h-6 w-6 shrink-0"
-            />
+            <img src="/logo.svg" alt="Mooncoda" className="h-6 w-6 shrink-0" />
             <span className="text-xl font-bold tracking-tight">
               Moon<span className="text-muted-foreground">coda</span>
             </span>

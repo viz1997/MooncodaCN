@@ -1,6 +1,14 @@
 "use client";
 
-import { Ban, Coins, Loader2, Pencil, Plus, Search, UserCheck } from "lucide-react";
+import {
+  Ban,
+  Coins,
+  Loader2,
+  Pencil,
+  Plus,
+  Search,
+  UserCheck,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -26,7 +34,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { useSessionContext } from "@/lib/auth/session-context";
 import {
   adminGrantCreditsAction,
   banUserAction,
@@ -34,6 +41,7 @@ import {
   getAllUsersAction,
 } from "@/features/support/actions";
 import { UserEditDialog, UserRoleSelect } from "@/features/support/components";
+import { useSessionContext } from "@/lib/auth/session-context";
 
 /**
  * 用户类型定义

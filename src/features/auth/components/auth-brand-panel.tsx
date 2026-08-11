@@ -38,7 +38,6 @@ export function AuthBrandPanel() {
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
             {t("points.shipping")}
           </li>
-      
         </ul>
       </div>
 
@@ -46,7 +45,6 @@ export function AuthBrandPanel() {
         <span>
           © {new Date().getFullYear()} {siteConfig.name}. {t("rights")}
         </span>
-       
       </div>
 
       {/* 装饰背景 */}

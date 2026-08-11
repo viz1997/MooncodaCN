@@ -64,16 +64,19 @@ function MockOrderContent({ order }: { order: OrderView }) {
 
   const allowReupload = !isSelected && !isCancelled && !isGenerating;
 
+  // 同一时刻只出现一个 stage（partial select 语义，与生产 UserOrderView 对齐）：
+  // - CANDIDATES_READY + 还有未锁定位         → SelectStep
+  // - CANDIDATES_READY + 全锁定 + 还有余量    → UploadStep
+  // - PENDING / FAILED                       → UploadStep
+  // - SELECTED                               → ResultStep
+  // - CANCELLED                              → CancelledPanel
   const showSelectStep =
-    allowReupload &&
-    isReady &&
-    uploadedCount > 0 &&
-    (!selection.allSelected || uploadedCount >= uploadCount);
+    allowReupload && isReady && uploadedCount > 0 && selection.pendingCount > 0;
   const showUploadStep =
     allowReupload &&
     (isPending ||
       isFailed ||
-      (isReady && selection.allSelected && uploadedCount < uploadCount));
+      (isReady && selection.pendingCount === 0 && uploadedCount < uploadCount));
   const canCancel = !isCancelled && !isPending;
   const mainHasFixedCta = showSelectStep || isSelected;
 
@@ -86,7 +89,7 @@ function MockOrderContent({ order }: { order: OrderView }) {
     const payload = selection.toPayload();
     if (!payload) return;
     toast.info("[mock] submit", {
-      description: `将提交 ${payload.length} 张选择`,
+      description: `将提交 ${payload.length} 张增量锁定（partial select）`,
     });
   };
   const handleUpload = async (_files: File[]) => {
@@ -208,7 +211,8 @@ function MockOrderContent({ order }: { order: OrderView }) {
                 candidateCount={candidateCount}
                 selections={selection.selections}
                 selectedCount={selection.selectedCount}
-                allSelected={selection.allSelected}
+                lockedCount={selection.lockedCount}
+                isLocked={selection.isLocked}
                 submitting={false}
                 regenerating={false}
                 onToggle={selection.toggle}

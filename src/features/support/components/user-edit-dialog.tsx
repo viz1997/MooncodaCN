@@ -1,8 +1,7 @@
 "use client";
 
 import { Eye, EyeOff, Loader2, Pencil } from "lucide-react";
-import { useEffect } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -173,14 +172,15 @@ export function UserEditDialog({
           <div className="space-y-4">
             <div className="flex items-center gap-3">
               <Avatar className="h-12 w-12">
-                <AvatarImage src={image || user.image || undefined} alt={name} />
+                <AvatarImage
+                  src={image || user.image || undefined}
+                  alt={name}
+                />
                 <AvatarFallback className="bg-primary text-primary-foreground">
                   {getInitials(name || user.name)}
                 </AvatarFallback>
               </Avatar>
-              <div className="text-sm text-muted-foreground">
-                ID: {user.id}
-              </div>
+              <div className="text-sm text-muted-foreground">ID: {user.id}</div>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">

@@ -425,7 +425,8 @@ export const updateUserAction = withAdminUsersAction("updateUser")
       throw new Error("用户不存在");
     }
 
-    const emailChanged = existing[0]!.email.toLowerCase() !== data.email.toLowerCase();
+    const emailChanged =
+      existing[0]!.email.toLowerCase() !== data.email.toLowerCase();
 
     try {
       // 1) 更新基础信息 + 自定义字段（role/emailVerified/needsVerification）

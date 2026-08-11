@@ -4,15 +4,15 @@ import { BreadcrumbJsonLd, ProductJsonLd } from "@/components/seo/json-ld";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { Link } from "@/i18n/routing";
 import { siteConfig } from "@/config";
 import { ProductCard } from "@/features/products/components/product-card";
 import {
-  PRODUCT_CATEGORY_LABELS,
   getAllProductSlugs,
   getProductBySlug,
   getProductsByCategory,
+  PRODUCT_CATEGORY_LABELS,
 } from "@/features/products/lib/data";
+import { Link } from "@/i18n/routing";
 
 /**
  * SSG —— 静态化所有作品详情页
@@ -67,11 +67,11 @@ export default async function ProductDetailPage({
 
   const isZh = locale === "zh";
   const t = product.translations[isZh ? "zh" : "en"];
-  const categoryLabel = PRODUCT_CATEGORY_LABELS[product.category][isZh ? "zh" : "en"];
-  const priceDisplay =
-    isZh
-      ? `¥${product.basePriceCNY} / 件`
-      : `from $${Math.round(product.basePriceCNY / 7)} / piece`;
+  const categoryLabel =
+    PRODUCT_CATEGORY_LABELS[product.category][isZh ? "zh" : "en"];
+  const priceDisplay = isZh
+    ? `¥${product.basePriceCNY} / 件`
+    : `from $${Math.round(product.basePriceCNY / 7)} / piece`;
 
   // 同分类下其他作品（最多 3 个，去掉当前）
   const related = getProductsByCategory(product.category)
@@ -110,7 +110,8 @@ export default async function ProductDetailPage({
             <div className="relative aspect-[4/3] overflow-hidden rounded-2xl border bg-gradient-to-br from-zinc-100 to-zinc-200 dark:from-zinc-800 dark:to-zinc-900">
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center">
                 <span className="font-mono text-xs uppercase tracking-widest text-zinc-400">
-                  {product.dimensions.width}×{product.dimensions.depth}×{product.dimensions.height}mm
+                  {product.dimensions.width}×{product.dimensions.depth}×
+                  {product.dimensions.height}mm
                 </span>
                 <span className="text-xs text-zinc-500">
                   {isZh ? "图片占位 · 上传后展示" : "Image placeholder"}
@@ -133,7 +134,9 @@ export default async function ProductDetailPage({
           <div className="flex flex-col gap-6">
             <div className="flex items-center gap-2">
               <Badge variant="secondary">{categoryLabel}</Badge>
-              <span className="font-mono text-xs text-muted-foreground">{product.material}</span>
+              <span className="font-mono text-xs text-muted-foreground">
+                {product.material}
+              </span>
             </div>
 
             <div>
@@ -148,13 +151,19 @@ export default async function ProductDetailPage({
             <Separator />
 
             <div>
-              <p className="text-2xl font-semibold tabular-nums">{priceDisplay}</p>
+              <p className="text-2xl font-semibold tabular-nums">
+                {priceDisplay}
+              </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {isZh ? "一件起定 · 单件独立包装" : "Single-piece min. · Individual packaging"}
+                {isZh
+                  ? "一件起定 · 单件独立包装"
+                  : "Single-piece min. · Individual packaging"}
               </p>
             </div>
 
-            <p className="leading-relaxed text-muted-foreground">{t.description}</p>
+            <p className="leading-relaxed text-muted-foreground">
+              {t.description}
+            </p>
 
             {t.highlights && t.highlights.length > 0 && (
               <ul className="space-y-2 text-sm">
@@ -179,7 +188,9 @@ export default async function ProductDetailPage({
 
             <div className="flex flex-wrap gap-3 pt-2">
               <Button size="lg" asChild>
-                <Link href="/sign-up">{isZh ? "上传图片定制" : "Upload to customize"}</Link>
+                <Link href="/sign-up">
+                  {isZh ? "上传图片定制" : "Upload to customize"}
+                </Link>
               </Button>
               <Button size="lg" variant="outline" asChild>
                 <Link href="/products">{isZh ? "查看更多" : "See more"}</Link>
@@ -193,7 +204,8 @@ export default async function ProductDetailPage({
                   {isZh ? "尺寸" : "Dimensions"}
                 </dt>
                 <dd className="mt-1 font-mono tabular-nums">
-                  {product.dimensions.width} × {product.dimensions.depth} × {product.dimensions.height} mm
+                  {product.dimensions.width} × {product.dimensions.depth} ×{" "}
+                  {product.dimensions.height} mm
                 </dd>
               </div>
               <div>
@@ -234,7 +246,11 @@ export default async function ProductDetailPage({
             </div>
             <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
               {related.map((p) => (
-                <ProductCard key={p.slug} product={p} locale={isZh ? "zh" : "en"} />
+                <ProductCard
+                  key={p.slug}
+                  product={p}
+                  locale={isZh ? "zh" : "en"}
+                />
               ))}
             </div>
           </section>

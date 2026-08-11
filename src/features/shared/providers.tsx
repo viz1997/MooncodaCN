@@ -52,7 +52,9 @@ export function Providers({ children, locale = "en" }: ProvidersProps) {
           i18n={{
             locale: docsLocale,
             locales: docsLocales,
-            ...(docsLocale === "zh" ? { translations: zhDocsTranslations } : {}),
+            ...(docsLocale === "zh"
+              ? { translations: zhDocsTranslations }
+              : {}),
           }}
         >
           {children}

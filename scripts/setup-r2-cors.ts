@@ -10,10 +10,10 @@
  */
 
 import {
+  type CORSConfiguration,
   GetBucketCorsCommand,
   PutBucketCorsCommand,
   S3Client,
-  type CORSConfiguration,
 } from "@aws-sdk/client-s3";
 import * as dotenv from "dotenv";
 

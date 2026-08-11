@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  ArrowRight,
-  ImageIcon,
-  Trash2,
-  X,
-} from "lucide-react";
+import { ArrowRight, ImageIcon, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 

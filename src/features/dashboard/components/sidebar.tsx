@@ -143,11 +143,7 @@ export function DashboardSidebar() {
               }
             }}
           >
-            <img
-              src="/logo.svg"
-              alt="Mooncoda"
-              className="h-6 w-6 shrink-0"
-            />
+            <img src="/logo.svg" alt="Mooncoda" className="h-6 w-6 shrink-0" />
             <span
               className={cn(
                 "text-lg font-bold tracking-tight transition-opacity",

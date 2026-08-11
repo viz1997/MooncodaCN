@@ -42,7 +42,9 @@ export async function generateMetadata({
       "手办",
       "一件定制",
       "一件发货",
-      ...(isZh ? [] : ["WJP 3D printing", "full-color 3D print", "custom figurine"]),
+      ...(isZh
+        ? []
+        : ["WJP 3D printing", "full-color 3D print", "custom figurine"]),
     ],
     openGraph: {
       title,

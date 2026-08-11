@@ -4,9 +4,9 @@ import { Separator } from "@/components/ui/separator";
 import { siteConfig } from "@/config";
 import { ProductCard } from "@/features/products/components/product-card";
 import {
-  PRODUCTS,
-  PRODUCT_CATEGORY_LABELS,
   getFeaturedProducts,
+  PRODUCT_CATEGORY_LABELS,
+  PRODUCTS,
 } from "@/features/products/lib/data";
 
 /**
@@ -74,9 +74,7 @@ export default async function ProductsPage({
       <main className="container py-12 md:py-16">
         {/* 头部 */}
         <header className="mx-auto max-w-2xl text-center">
-          <span className="eyebrow">
-            {isZh ? "作品集" : "Gallery"}
-          </span>
+          <span className="eyebrow">{isZh ? "作品集" : "Gallery"}</span>
           <h1 className="mt-4 text-balance text-3xl font-extrabold tracking-tight md:text-4xl">
             {isZh
               ? "每一件，都是真实客户的定制"
@@ -127,9 +125,7 @@ export default async function ProductsPage({
         {/* 底部 CTA */}
         <section className="mt-16 rounded-2xl border bg-muted/30 px-6 py-12 text-center md:px-12">
           <h2 className="text-balance text-2xl font-semibold tracking-tight md:text-3xl">
-            {isZh
-              ? "想要一件属于自己的？"
-              : "Want one of your own?"}
+            {isZh ? "想要一件属于自己的？" : "Want one of your own?"}
           </h2>
           <p className="mx-auto mt-3 max-w-md text-sm text-muted-foreground md:text-base">
             {isZh

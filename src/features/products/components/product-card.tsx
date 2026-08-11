@@ -21,7 +21,9 @@ export function ProductCard({ product, locale, featured }: ProductCardProps) {
   const t = product.translations[locale];
   const categoryLabel = PRODUCT_CATEGORY_LABELS[product.category][locale];
   const priceDisplay =
-    locale === "zh" ? `¥${product.basePriceCNY}` : `from $${Math.round(product.basePriceCNY / 7)}`;
+    locale === "zh"
+      ? `¥${product.basePriceCNY}`
+      : `from $${Math.round(product.basePriceCNY / 7)}`;
 
   return (
     <Link
@@ -38,7 +40,8 @@ export function ProductCard({ product, locale, featured }: ProductCardProps) {
         */}
         <div className="absolute inset-0 flex items-center justify-center">
           <span className="font-mono text-xs uppercase tracking-widest text-zinc-400">
-            {product.dimensions.width}×{product.dimensions.depth}×{product.dimensions.height}mm
+            {product.dimensions.width}×{product.dimensions.depth}×
+            {product.dimensions.height}mm
           </span>
         </div>
         {featured && (
@@ -53,9 +56,7 @@ export function ProductCard({ product, locale, featured }: ProductCardProps) {
           <span>{categoryLabel}</span>
           <span className="font-mono tabular-nums">{priceDisplay}</span>
         </div>
-        <h3 className="text-balance font-semibold tracking-tight">
-          {t.name}
-        </h3>
+        <h3 className="text-balance font-semibold tracking-tight">{t.name}</h3>
         <p className="line-clamp-2 text-sm text-muted-foreground">
           {t.tagline}
         </p>

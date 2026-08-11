@@ -71,7 +71,14 @@ export interface OrderView {
   candidateCount: number;
   /** 已生成的候选组数（外层数组长度） */
   candidateGroups: number;
-  /** 用户每张原图选择的候选索引数组（长度 = uploadedImageCount，未选则为 null） */
+  /**
+   * 每张原图的候选选择（长度 = uploadedImageCount）。
+   * partial select 语义下：
+   * - **CANDIDATES_READY** 状态：非 null = 已提交锁定（不可改），null = 待选
+   * - **SELECTED** 终态：所有位都已锁定，整张订单确认完毕
+   * - **PENDING / GENERATING** 下：尚未生成候选，整段为 null 数组
+   * - **FAILED** 下：保留 FAILED 前最后一次 selections（用于恢复参考）
+   */
   selections: (number | null)[] | null;
   /** 已选择数量（管理端列表用，等于 selections 中非 null 的个数） */
   selectionCount?: number | undefined;

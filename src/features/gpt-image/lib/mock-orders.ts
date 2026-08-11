@@ -282,6 +282,49 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
       candidateCount: 4,
     },
   },
+
+  /**
+   * Partial lock：双图订单，第一张已锁定（partial submit），第二张待选。
+   *
+   * 用于预览 SelectStep 在 partial select 下的视觉：
+   * - 第 1 张角标 = "已锁定 #2" + Lock 图标（emerald-600）
+   * - OriginalStrip 第 1 张永久 emerald 边框
+   * - QuadrantGrid disabled
+   * - 底部"该张已提交"按钮 disabled，"重新生成第 1 张"按钮 disabled
+   * - 标题区"已锁定 1/2 张，剩余可继续上传或挑选"
+   * - 第 2 张可正常选 + 提交
+   */
+  partialLocked: {
+    id: "mock-9",
+    token: "mock-token",
+    orderNo: "ORD-009",
+    templateId: "t1",
+    recipientName: "冯十一",
+    platform: null,
+    status: "CANDIDATES_READY",
+    hasUploadedImage: true,
+    uploadedImageCount: 2,
+    uploadCount: 2,
+    candidateCount: 4,
+    candidateGroups: 2,
+    selections: [1, null],
+    selectionCount: 1,
+    selectedIndex: 1,
+    errorMessage: null,
+    uploadedAt: ago,
+    generatedAt: ago,
+    selectedAt: null,
+    cancelledAt: null,
+    createdAt: ago,
+    updatedAt: now,
+    template: {
+      id: "t1",
+      name: "双图定制",
+      description: "",
+      coverUrl: null,
+      candidateCount: 4,
+    },
+  },
 };
 
 export const MOCK_STATES: Array<{ key: string; label: string }> = [
@@ -290,6 +333,7 @@ export const MOCK_STATES: Array<{ key: string; label: string }> = [
   { key: "select1", label: "选图①" },
   { key: "upload2", label: "上传②" },
   { key: "selectSingle", label: "单图选" },
+  { key: "partialLocked", label: "部分锁定" },
   { key: "allDone", label: "完成" },
   { key: "failed", label: "失败" },
   { key: "cancelled", label: "取消" },

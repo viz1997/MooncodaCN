@@ -315,9 +315,7 @@ export function GenerateStep({
           {stalled && (
             <output className="mb-3 inline-flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-xs text-amber-700">
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span>
-                已超过 2 分钟无进展，正在自动停止本次生成…
-              </span>
+              <span>已超过 2 分钟无进展，正在自动停止本次生成…</span>
             </output>
           )}
           <button
@@ -327,11 +325,7 @@ export function GenerateStep({
             className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-4 text-xs font-medium text-stone-500 transition-colors hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 disabled:opacity-60"
           >
             <StopCircle className="h-3.5 w-3.5" />
-            {stopping
-              ? "停止中…"
-              : stalled
-                ? "自动停止中…"
-                : "停止生成"}
+            {stopping ? "停止中…" : stalled ? "自动停止中…" : "停止生成"}
           </button>
           <p className="mt-2 flex items-center gap-1 text-[10px] text-stone-400">
             <Pause className="h-2.5 w-2.5" />

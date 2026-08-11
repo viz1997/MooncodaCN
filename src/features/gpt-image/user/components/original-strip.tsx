@@ -1,6 +1,6 @@
 "use client";
 
-import { Check } from "lucide-react";
+import { Check, Lock } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import { originalUrl } from "./image-urls";
@@ -12,6 +12,11 @@ interface OriginalStripProps {
   currentIdx: number;
   selections: (number | null)[];
   onChange: (idx: number) => void;
+  /**
+   * 判定某 index 是否已服务端锁定（CANDIDATES_READY 下 partial submit
+   * 已写入）。已锁定位：永久 emerald 边框 + 锁定角标，仍可点击切换查看。
+   */
+  isLocked: (idx: number) => boolean;
 }
 
 export function OriginalStrip({
@@ -21,6 +26,7 @@ export function OriginalStrip({
   currentIdx,
   selections,
   onChange,
+  isLocked,
 }: OriginalStripProps) {
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -60,6 +66,7 @@ export function OriginalStrip({
     >
       {Array.from({ length: count }).map((_, i) => {
         const chosen = selections[i] !== null && selections[i] !== undefined;
+        const locked = isLocked(i);
         const isCurrent = i === currentIdx;
         return (
           <button
@@ -71,13 +78,21 @@ export function OriginalStrip({
             aria-selected={isCurrent}
             tabIndex={isCurrent ? 0 : -1}
             onClick={() => onChange(i)}
-            aria-label={`第 ${i + 1} 张照片${chosen ? "，已选好" : "，还没选"}`}
+            aria-label={
+              locked
+                ? `第 ${i + 1} 张照片，已提交锁定`
+                : chosen
+                  ? `第 ${i + 1} 张照片，已选好`
+                  : `第 ${i + 1} 张照片，还没选`
+            }
             className={[
               "relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border-2 transition-all sm:h-[72px] sm:w-[72px]",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2",
-              isCurrent
-                ? "border-emerald-500 ring-2 ring-emerald-500/20"
-                : "border-zinc-200 opacity-70 hover:opacity-100",
+              locked
+                ? "border-emerald-500 ring-2 ring-emerald-500/30"
+                : isCurrent
+                  ? "border-emerald-500 ring-2 ring-emerald-500/20"
+                  : "border-zinc-200 opacity-70 hover:opacity-100",
             ].join(" ")}
           >
             {/* biome-ignore lint/performance/noImgElement: R2 远程 URL，next/image 域名白名单外 */}
@@ -90,7 +105,11 @@ export function OriginalStrip({
             <span className="absolute top-1 left-1 rounded bg-black/55 px-1 text-xs text-white backdrop-blur-sm">
               {i + 1}
             </span>
-            {chosen ? (
+            {locked ? (
+              <span className="absolute right-1 bottom-1 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-600 text-white shadow-sm">
+                <Lock className="h-3 w-3" strokeWidth={3} />
+              </span>
+            ) : chosen ? (
               <span className="absolute right-1 bottom-1 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-white">
                 <Check className="h-3 w-3" />
               </span>

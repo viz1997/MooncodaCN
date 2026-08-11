@@ -9,6 +9,10 @@
  * 允许的状态：
  *   - CANDIDATES_READY：单图或批量重跑
  *   - FAILED：仅允许批量重跑（保证"链接不失效"，失败后可一键重试）
+ *
+ * 锁定限制：partial select 引入后，`selections[i] !== null` 表示"该张已
+ * 提交锁定，不可再生"。单图路径：若目标位已锁 → 409。批量路径：只要有任
+ * 一位已锁 → 409（不能批量重跑覆盖已提交位）。改主意只能 cancel 整单重开。
  */
 
 import { eq } from "drizzle-orm";
@@ -86,6 +90,37 @@ async function postHandler(
       );
     }
 
+    // 锁定短路：已提交锁定的位不可重新生成（partial select 不可逆）。
+    // 单图：imageIdx 位已锁 → 409
+    // 批量：任意一位已锁 → 409（不允许批量覆盖已提交）
+    const prevSelections = parseSelections(order.selections);
+    const lockedIndices: number[] = [];
+    if (prevSelections) {
+      for (let i = 0; i < prevSelections.length; i++) {
+        if (prevSelections[i] !== null) lockedIndices.push(i);
+      }
+    }
+    if (lockedIndices.length > 0) {
+      if (isSingle && lockedIndices.includes(imageIdx as number)) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `第 ${(imageIdx as number) + 1} 张已提交锁定，不可重新生成。如需更换效果请取消订单后联系服务方重新创建。`,
+          },
+          { status: 409 }
+        );
+      }
+      if (!isSingle) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `订单已有 ${lockedIndices.length} 张已锁定，无法批量重跑。请先取消订单后联系服务方重新创建。`,
+          },
+          { status: 409 }
+        );
+      }
+    }
+
     const uploadedCount = parseUploadedLength(order.uploadedImages);
     if (uploadedCount === 0) {
       return NextResponse.json(
@@ -117,17 +152,16 @@ async function postHandler(
 
     // 清空受影响槽位的 candidates + selections，状态置 GENERATING
     const nested = parseCandidates(order.candidates);
-    const prevSelections = parseSelections(order.selections);
     for (let i = 0; i < uploadedCount; i++) {
       if (!Array.isArray(nested[i])) nested[i] = [];
     }
     for (let i = fromIdx; i < toIdx; i++) {
       nested[i] = [];
     }
-    const nextSelections =
-      prevSelections === null
-        ? null
-        : prevSelections.map((v, i) => (i >= fromIdx && i < toIdx ? null : v));
+    // prevSelections 来自上方锁定短路检测；此处目标区间 [fromIdx, toIdx)
+    // 内的位已被保证为 null（409 已拦截 isSingle 命中锁定、!isSingle 任意
+    // 锁定），无需再 .map 清空。直接复用，让 locked 位的 selections 不被踩坏。
+    const nextSelections = prevSelections;
 
     // 归档 + 清空 必须同一个事务（避免半成品快照 + 竞态 round 冲突）。
     // 事务外再调 submitGeneration()，它依赖请求周期内的 submit 上下文。

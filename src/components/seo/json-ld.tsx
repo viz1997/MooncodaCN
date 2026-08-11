@@ -2,7 +2,6 @@ import {
   type ArticleSchemaInput,
   type BreadcrumbItem,
   type FAQItem,
-  type ProductSchemaInput,
   generateArticleSchema,
   generateBreadcrumbSchema,
   generateFAQSchema,
@@ -10,6 +9,7 @@ import {
   generateProductSchema,
   generateSoftwareApplicationSchema,
   generateWebSiteSchema,
+  type ProductSchemaInput,
 } from "@/lib/seo/json-ld";
 
 type LocaleType = "en" | "zh";

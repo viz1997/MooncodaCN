@@ -82,7 +82,11 @@ export const PRODUCTS: Product[] = [
           "This Golden Retriever is named Tangtang, 11 years with her human.",
           "The little curl on the left ear — their favorite scratch spot since puppyhood.",
         ],
-        highlights: ["30-50mm full-color pin", "Butterfly / safety clasp", "Custom card included"],
+        highlights: [
+          "30-50mm full-color pin",
+          "Butterfly / safety clasp",
+          "Custom card included",
+        ],
       },
     },
   },
@@ -101,14 +105,22 @@ export const PRODUCTS: Product[] = [
         tagline: "揣在口袋里的毛茸茸",
         description:
           "猫主子最爱趴窗台的那张侧脸，做成钥匙扣随身带。40-60mm 立体造型，配 304 不锈钢双环挂扣。",
-        highlights: ["40-60mm 立体造型", "304 不锈钢挂扣", "全彩细节还原虎斑纹"],
+        highlights: [
+          "40-60mm 立体造型",
+          "304 不锈钢挂扣",
+          "全彩细节还原虎斑纹",
+        ],
       },
       en: {
         name: "Keychain · Tabby Cat",
         tagline: "A purr in your pocket",
         description:
           "Your cat's favorite window-perching profile, made into a keychain. 40-60mm 3D form with 304 stainless steel ring.",
-        highlights: ["40-60mm 3D form", "304 stainless ring", "Faithful tabby markings"],
+        highlights: [
+          "40-60mm 3D form",
+          "304 stainless ring",
+          "Faithful tabby markings",
+        ],
       },
     },
   },
@@ -128,14 +140,22 @@ export const PRODUCTS: Product[] = [
         tagline: "每次开冰箱都被治愈一下",
         description:
           "柯基标志性的大屁股 + 小短腿，全彩打印磁贴底座，可吸附在任何金属表面。70-100mm 厚度仅 5mm，不占空间。",
-        highlights: ["70-100mm 薄片造型", "强磁底座可拆", "全彩还原柯基橘白毛色"],
+        highlights: [
+          "70-100mm 薄片造型",
+          "强磁底座可拆",
+          "全彩还原柯基橘白毛色",
+        ],
       },
       en: {
         name: "Fridge Magnet · Corgi",
         tagline: "Smile every time you open the fridge",
         description:
           "An iconic Corgi butt + tiny legs as a magnet, full-color printed with detachable magnetic base. Adheres to any metal surface.",
-        highlights: ["70-100mm slim form", "Detachable magnetic base", "Faithful orange-white coat"],
+        highlights: [
+          "70-100mm slim form",
+          "Detachable magnetic base",
+          "Faithful orange-white coat",
+        ],
       },
     },
   },
@@ -161,7 +181,11 @@ export const PRODUCTS: Product[] = [
           "插画师 Yuki 自用的 OC 角色，第一次变成实体。",
           "全彩工艺让她画的渐变色和阴影都能 1:1 还原。",
         ],
-        highlights: ["100-200mm 收藏级摆件", "渐变色 1:1 还原", "附透明展示底座"],
+        highlights: [
+          "100-200mm 收藏级摆件",
+          "渐变色 1:1 还原",
+          "附透明展示底座",
+        ],
       },
       en: {
         name: "OC Figure · Illustrator Commission",
@@ -172,7 +196,11 @@ export const PRODUCTS: Product[] = [
           "Illustrator Yuki's personal OC character, brought to life for the first time.",
           "The full-color process reproduces her painted gradients and shadows 1:1.",
         ],
-        highlights: ["100-200mm collectible figure", "1:1 gradient reproduction", "Clear display base included"],
+        highlights: [
+          "100-200mm collectible figure",
+          "1:1 gradient reproduction",
+          "Clear display base included",
+        ],
       },
     },
   },
@@ -198,7 +226,11 @@ export const PRODUCTS: Product[] = [
         tagline: "Every guest receives their own",
         description:
           "From couple photos, we Q-version and full-color print each guest's standee. Slight pose/expression variations per piece, premium gift box + ribbon + custom card.",
-        highlights: ["100-150mm Q-version standee", "Premium box + ribbon", "Custom card add-on"],
+        highlights: [
+          "100-150mm Q-version standee",
+          "Premium box + ribbon",
+          "Custom card add-on",
+        ],
       },
     },
   },
@@ -225,7 +257,11 @@ export const PRODUCTS: Product[] = [
         tagline: "Two pieces, one story",
         description:
           "Two photos become a pair of matching keychains. Gift box + custom card. Perfect for birthdays and anniversaries.",
-        highlights: ["Two-piece set", "Box + card", "Match / same-style-different-color"],
+        highlights: [
+          "Two-piece set",
+          "Box + card",
+          "Match / same-style-different-color",
+        ],
       },
     },
   },

@@ -149,7 +149,11 @@
         "title": "Gift Set",
         "subtitle": "Premium gift box packaging",
         "description": "A custom piece wrapped in a curated gift box — custom card, ribbon, optional engraving. Perfect for weddings, anniversaries, milestone birthdays.",
-        "examples": ["Wedding favors", "Anniversary gifts", "Milestone birthdays"]
+        "examples": [
+          "Wedding favors",
+          "Anniversary gifts",
+          "Milestone birthdays"
+        ]
       }
     }
   },

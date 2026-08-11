@@ -316,13 +316,21 @@ export function buildRestoredState(
       return typeof v === "number" ? v : null;
     }
   );
-  // 0..imageCount-1 用快照选择；超出保留当前
+  // 0..imageCount-1 用快照选择；超出保留当前。
+  // **已锁定位保持不动**（partial select 不可逆）：current[i] !== null 时
+  // 跳过覆盖，避免 restore 把用户精心"按图锁定"的状态一锅端。改主意
+  // 只能 cancel 整单重开（与 regenerate 锁定 409 一致）。
   for (let i = 0; i < snapshot.imageCount; i++) {
+    if (baseSelections[i] !== null) continue; // 已锁定 → 保留
     const v = snapSelections?.[i];
     baseSelections[i] = typeof v === "number" ? v : null;
   }
-  // 强制 focus 选中
-  if (focusIdx >= 0 && focusIdx < baseSelections.length) {
+  // 强制 focus 选中——但仅在 focus 位未锁定时（已锁定的话不能强行覆盖）
+  if (
+    focusIdx >= 0 &&
+    focusIdx < baseSelections.length &&
+    baseSelections[focusIdx] === null
+  ) {
     baseSelections[focusIdx] = safeFocusCandIdx;
   }
 
