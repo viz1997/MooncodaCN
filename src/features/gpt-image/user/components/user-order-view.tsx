@@ -130,17 +130,26 @@ function UserOrderContent({
   const isCancelled = status === "CANCELLED";
   const isFailed = status === "FAILED";
 
+  // 「正在重新生成」的合并视图：`actions.regenerating` 在用户点确认到
+  // /regenerate 返回 + refresh 写回 status=GENERATING 之间有 1-2s 窗口
+  // 为真。这期间如果只用 `isGenerating` 判断，会出现 SelectStep 仍在渲染
+  // （含"确认提交"按钮 + 旧候选图）+ GenerateStep 没切进去的卡顿窗口。
+  // 把 `actions.regenerating` 合并进来，regen 一开始就把 SelectStep 下线、
+  // 直接显示 GenerateStep 的进度条，"确认提交"按钮与旧候选 UI 一起被替换。
+  const effectiveGenerating = isGenerating || actions.regenerating;
+
   // 重新上传的允许范围：**只有 SELECTED / CANCELLED / GENERATING 之前的状态允许重新上传**。
   // 也就是说，用户一旦"选择提交效果图"（status = SELECTED）就进入终态，
   // 不能再补传新图——只能取消订单后联系服务方重开（CANCELLED 也是终态）。
   // 表达成布尔 `allowReupload`，下面所有 stage 判断都从它派生，避免漏检。
-  const allowReupload = !isSelected && !isCancelled && !isGenerating;
+  const allowReupload = !isSelected && !isCancelled && !effectiveGenerating;
 
   // 同一时刻只出现一个 stage（partial select 语义）：
   // - PENDING / FAILED                       → UploadStep（首次上传 / 失败重传）
   // - CANDIDATES_READY + 还有未锁定位         → SelectStep（继续选）
   // - CANDIDATES_READY + 全锁定 + 还有余量    → UploadStep（传下一张）
   // - CANDIDATES_READY + 全锁定 + 已满        → 不会有（直接转 SELECTED）
+  // - GENERATING / 正在重新生成              → GenerateStep（进度展示）
   // - SELECTED                               → ResultStep（终态，不再允许上传）
   // - CANCELLED                              → CancelledPanel（终态）
   //
@@ -220,7 +229,7 @@ function UserOrderContent({
               />
             )}
 
-            {isGenerating && (
+            {effectiveGenerating && (
               <GenerateStep
                 token={token}
                 updatedAt={order.updatedAt}

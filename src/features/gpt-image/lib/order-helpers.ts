@@ -50,9 +50,26 @@ export function parseSelections(
   }
 }
 
-/** 计算已生成的候选组数（外层数组长度） */
+/**
+ * 计算已生成的候选组数（外层数组里**非空**槽位的数量）。
+ *
+ * 历史背景：旧版直接 `candidates.length` 返回外层长度。这在「嵌套数组已
+ * fillSparseSlots 填到 total 长度」的写入路径下永远是 total，让前端进度
+ * 一进入 GENERATING 就 isAllDone=true、displayPercent=100%——但实际上
+ * 此时所有 nested[i] 还是 []，一张候选都没出来。
+ *
+ * 修正语义：candidates 是「稀疏」结构，外层长度是 `uploadedImageCount`
+ * 派生的槽位壳，**是否真的生成了**看 inner 数组 length。空 inner = 该图
+ * 还没就绪，非空 inner = 已就绪（含一张宫格拼接图）。这样前端可以
+ * 用真实完成度驱动 done / realPercent / isAllDone，假进度 RAF 才有跑
+ * 的机会（否则永远 isAllDone 短路）。
+ */
 export function countCandidateGroups(candidates: string[][]): number {
-  return candidates.length;
+  let n = 0;
+  for (const g of candidates) {
+    if (Array.isArray(g) && g.length > 0) n++;
+  }
+  return n;
 }
 
 /** 计算上传图片数 */

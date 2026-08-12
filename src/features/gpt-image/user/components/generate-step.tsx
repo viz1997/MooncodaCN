@@ -152,7 +152,12 @@ export function GenerateStep({
     let rafId = 0;
     const tick = (now: number) => {
       const start = fakeStartRef.current ?? now;
-      const elapsed = now - start;
+      // 防御 clock skew：quietStartMs 来自服务端 updatedAt，若服务端时钟
+      // 跑在客户端前面（哪怕只 5s），原始 elapsed 会是负值 → eased 变负
+      // → next 为负 → setDisplayPercent(max) 把 displayPercent 卡死在 0%。
+      // 客户端时钟对齐到 start = max(now, start)，让假进度从 0 起正常推进，
+      // 直到「客户端时间追平 start」后无缝接上原节奏。
+      const elapsed = Math.max(0, now - start);
       // 240 秒跑到 FAKE_PROGRESS_CAP；ease-out-cubic 曲线，前快后慢
       const t = Math.min(1, elapsed / 240_000);
       const eased = 1 - (1 - t) ** 3;
