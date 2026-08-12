@@ -1,11 +1,9 @@
 "use client";
 
 import {
-  Check,
   CheckCircle2,
   Loader2,
   Lock,
-  Maximize2,
   RefreshCw,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
