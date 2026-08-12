@@ -12,8 +12,10 @@
  *
  * - 允许只提交部分图（任意非空子集）。已锁定的位不能再改（前端按钮禁用，
  *   服务端此处做"以最后一条为准"的合并——客户端按 `isLocked` 不会再触达）。
- * - 全部图都锁定后，订单转入 SELECTED 终态；否则保留 CANDIDATES_READY
- *   （用户还可以继续上传下一张 / 选下一张候选）。
+ * - 上传槽位已满（`uploadedImageCount === uploadCount`）且全部图都锁定
+ *   后，订单转入 SELECTED 终态；否则保留 CANDIDATES_READY（用户还可以
+ *   继续上传下一张 / 选下一张候选）。仅"已上传的图全部锁定"不足以进
+ *   终态——剩余 uploadCount 余量必须填满。
  * - `selectedAt` 只在**第一次**进 SELECTED 时写入；partial submit
  *   期间不刷新 selectedAt，避免时间线反复抖动。
  *
@@ -181,7 +183,12 @@ async function postHandler(
     }
 
     const lockedCount = merged.filter((v) => v !== null).length;
-    const allLocked = lockedCount === uploadedImageCount;
+    // 终态条件：上传槽位已满（uploadedImageCount === uploadCount）且全部
+    // 已锁。只锁完已上传的图但还剩上传余量时，保持 CANDIDATES_READY，
+    // 让用户继续传下一张原图。否则会出现"2/3 张全部锁定就直接终态"的
+    // 体验断裂，用户被迫取消订单重开。
+    const slotsFull = uploadedImageCount === order.uploadCount;
+    const allLocked = slotsFull && lockedCount === uploadedImageCount;
     const nextStatus = allLocked ? "SELECTED" : "CANDIDATES_READY";
     // selectedAt 只在第一次进 SELECTED 时写入（partial submit 期间不刷新）。
     // 上面状态校验已保证 order.status === "CANDIDATES_READY"，因此进入此
@@ -209,7 +216,11 @@ async function postHandler(
 
     const message = allLocked
       ? `全部 ${uploadedImageCount} 张已锁定，订单已确认。结果不可修改，如需更改请取消订单。`
-      : `已锁定 ${lockedCount}/${uploadedImageCount} 张。剩余图可继续上传或挑选。`;
+      : slotsFull
+        ? `已锁定 ${lockedCount}/${uploadedImageCount} 张，订单已确认。`
+        : `已锁定 ${lockedCount}/${uploadedImageCount} 张。剩余 ${
+            order.uploadCount - uploadedImageCount
+          } 张可继续上传。`;
 
     return NextResponse.json({
       success: true,
