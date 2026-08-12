@@ -97,7 +97,14 @@ export function SelectStep({
   onSubmit,
   onRegenerate,
 }: SelectStepProps) {
-  const [currentIdx, setCurrentIdx] = useState(0);
+  const [currentIdx, setCurrentIdx] = useState(() => {
+    // 默认跳到第一张**未锁定**的位：批次模型下，选完第一张后再上传第
+    // 二张，新 SelectStep 实例挂载时 currentIdx 应聚焦用户能操作的那张
+    // ——已锁定位只是回看，没有交互。锁定全选完（找不到未锁定）则退回 0
+    // （虽然不会进入 SelectStep，防御性写法）。
+    const firstUnlocked = selections.findIndex((v) => v === null);
+    return firstUnlocked >= 0 ? firstUnlocked : 0;
+  });
   const [lightbox, setLightbox] = useState<LightboxTarget | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [regenConfirmOpen, setRegenConfirmOpen] = useState(false);
