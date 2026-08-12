@@ -6,7 +6,6 @@ import {
   ChevronRight,
   Download,
   Lock,
-  Maximize2,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { candidateUrl, originalUrl, preloadImages } from "./image-urls";
@@ -29,16 +28,13 @@ interface ResultStepProps {
 const SWIPE_THRESHOLD = 50; // px
 
 /**
- * 完成步骤 —— 卡片堆叠切换模式。
+ * 完成步骤 —— 单卡轮播切换模式。
  *
  * 设计要点（2026-08-12 重设计）：
  * - 一次只显示一张主卡（避免 9 张垂直堆叠导致页面 5000px+）
  * - 切图控件：左/右 chevron（sm+ 桌面端）、移动端左右滑动、键盘 ←/→、缩略图条
  * - 大图查看走 Lightbox（已实现，含 compare / 长按看原图）
  * - 单图订单时所有切图控件隐藏，仅展示主卡 + 下载
- * - 3D 卡片堆叠视觉（2026-08-12 二次迭代）：主卡后露出前/后卡片的边
- *   （-translate-x-[18%] / translate-x-[18%] + scale-90 + rotate-3 + opacity-40），
- *   切图时 transition-all 让卡片在 transform 间平滑滑动
  */
 export function ResultStep({
   token,
@@ -60,18 +56,6 @@ export function ResultStep({
   const hasNavigation = imageCount > 1;
   const isFirst = safeIdx === 0;
   const isLast = safeIdx === imageCount - 1;
-
-  // 3D 卡片堆叠用：前/后卡片的 URL（用于在主卡后面露出边缘）
-  const prevIdx = safeIdx - 1;
-  const nextIdx = safeIdx + 1;
-  const prevSrc =
-    prevIdx >= 0
-      ? candidateUrl(token, prevIdx, selections[prevIdx] ?? 0, updatedAt)
-      : null;
-  const nextSrc =
-    nextIdx < imageCount
-      ? candidateUrl(token, nextIdx, selections[nextIdx] ?? 0, updatedAt)
-      : null;
 
   const closeLightbox = () => setLightbox(null);
 
@@ -192,7 +176,7 @@ export function ResultStep({
       <section className="mx-auto flex w-full max-w-md flex-col items-stretch px-5 pt-8 pb-10 animate-[fadeIn_.3s_ease-out]">
         {/* ── Hero ── */}
         <div className="mb-5 flex flex-col items-center text-center">
-          <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 ring-4 ring-emerald-50/60">
+          
             <CheckCircle2
               className="h-8 w-8 text-emerald-500"
               strokeWidth={2}
@@ -242,35 +226,7 @@ export function ResultStep({
 
         {/* ── 主卡（包含触摸手势 + 左右 chevron） ── */}
         <div ref={swipeAreaRef} className="relative">
-          {/* ── 3D 卡片堆叠：前/后卡 peek（装饰性，pointer-events-none） ── */}
-          {hasNavigation && prevSrc && (
-            <div
-              aria-hidden
-              className="pointer-events-none absolute top-0 left-0 right-0 z-0 -translate-x-[18%] scale-[0.9] -rotate-[3deg] opacity-40 transition-all duration-300 ease-out"
-            >
-              {/* biome-ignore lint/performance/noImgElement: R2 远程 URL */}
-              <img
-                src={prevSrc}
-                alt=""
-                className="aspect-[3/4] w-full rounded-2xl border border-stone-100 object-cover shadow-md"
-              />
-            </div>
-          )}
-          {hasNavigation && nextSrc && (
-            <div
-              aria-hidden
-              className="pointer-events-none absolute top-0 left-0 right-0 z-0 translate-x-[18%] scale-[0.9] rotate-[3deg] opacity-40 transition-all duration-300 ease-out"
-            >
-              {/* biome-ignore lint/performance/noImgElement: R2 远程 URL */}
-              <img
-                src={nextSrc}
-                alt=""
-                className="aspect-[3/4] w-full rounded-2xl border border-stone-100 object-cover shadow-md"
-              />
-            </div>
-          )}
-
-          <article className="relative z-10 overflow-hidden rounded-2xl border border-stone-100 bg-white shadow-sm">
+          <article className="overflow-hidden rounded-2xl border border-stone-100 bg-white shadow-sm">
             {/* 上：成品大图区（chevron 也定位在这里） */}
             <div className="relative">
               <button
@@ -292,10 +248,6 @@ export function ResultStep({
                 <span className="absolute top-2.5 left-2.5 inline-flex items-center gap-1 rounded-full bg-emerald-500 px-2 py-1 text-[10px] font-semibold text-white shadow-sm backdrop-blur-sm">
                   <CheckCircle2 className="h-3 w-3" strokeWidth={3} />
                   选用 #{cand + 1}
-                </span>
-                {/* 放大按钮（右上，hover/focus 显形） */}
-                <span className="absolute top-2.5 right-2.5 flex h-8 w-8 items-center justify-center rounded-full bg-white/85 text-stone-700 opacity-0 shadow-sm backdrop-blur-sm transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-                  <Maximize2 className="h-4 w-4" strokeWidth={2.25} />
                 </span>
               </button>
 
