@@ -70,6 +70,21 @@ const FAKE_PROGRESS_CAP = 95;
 const QUIET_AFTER_GENERATING_MS = 30_000;
 
 /**
+ * 「起步偏移」：让 RAF 首帧就把 displayPercent 推到 ~3%，避免
+ * Math.round 把 ease-out-cubic 起步阶段（t≈0）的小增量一直卡在 "0%"。
+ *
+ * ease-out-cubic 曲线在 t=0 处的导数为 0——前 ~500ms next 都是亚百分点，
+ * Math.round 后还是 "0%"，让用户觉得"进度没动"。把 start 提前 2.5s 后，
+ * 首帧 elapsed=2500ms → t≈0.0104 → eased≈0.031 → next≈2.9%，立即显示
+ * "3%"，用户进入即看到数字跳变；后续 tick 顺着曲线继续往 95% 推。
+ *
+ * 仅在 quietStartMs 不可用时生效（brief regen window / mock / 老订单）。
+ * 正常 GENERATING 路径走 quietStartMs = updatedAt，不需要这个偏移——
+ * 因为 updatedAt 离 now 已经过了一段真实时间，elapsed 自然非 0。
+ */
+const INITIAL_FAKE_OFFSET_MS = 2_500;
+
+/**
  * 生成步骤 —— mobile-first 单列布局 + 横向进度条（业界主流"假进度"）。
  *
  * 设计要点：
@@ -140,14 +155,16 @@ export function GenerateStep({
     // 不会出现循环风暴。
     if (fakeStartRef.current === null) {
       // 起点优先对齐「安静期起点」（= quietEndsAt - 30s），保证假进度
-      // 节奏和上层 /poll 跳过窗口同步；上层未提供（mock / 老订单）时退化
-      // 为 performance.now()，表现与之前一致。
+      // 节奏和上层 /poll 跳过窗口同步；上层未提供（mock / 老订单 / brief
+      // regen window）时退化：把 start 提前 INITIAL_FAKE_OFFSET_MS，
+      // 让 RAF 首帧就把 displayPercent 推到 ~3%，避免 ease-out-cubic 起步
+      // 阶段被 Math.round 卡在 "0%" 一段时间看不到任何动静。
       const quietStartMs =
         quietEndsAt !== null ? quietEndsAt - QUIET_AFTER_GENERATING_MS : null;
       fakeStartRef.current =
         quietStartMs !== null
           ? quietStartMs
-          : performance.now() - (displayPercent / FAKE_PROGRESS_CAP) * 240_000;
+          : performance.now() - INITIAL_FAKE_OFFSET_MS;
     }
     let rafId = 0;
     const tick = (now: number) => {
