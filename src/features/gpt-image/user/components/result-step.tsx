@@ -67,14 +67,7 @@ export function ResultStep({
       urls.push(candidateUrl(token, safePhoto + 1, nextSel, updatedAt));
     }
     preloadImages(urls);
-  }, [
-    token,
-    updatedAt,
-    safePhoto,
-    imageCount,
-    candidateSrc,
-    selections,
-  ]);
+  }, [token, updatedAt, safePhoto, imageCount, candidateSrc, selections]);
 
   // 移动端横向滑动切照片
   const swipeAreaRef = useRef<HTMLDivElement>(null);
