@@ -1,10 +1,16 @@
 "use client";
 
-import { AlertTriangle, ImageIcon, Pause, StopCircle } from "lucide-react";
+import {
+  AlertTriangle,
+  ImageIcon,
+  Maximize2,
+  Pause,
+  StopCircle,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { originalUrl } from "./image-urls";
-import { formatEta } from "./order-lib";
+import { OriginalLightbox } from "./original-lightbox";
 
 interface GenerateStepProps {
   token: string;
@@ -13,28 +19,17 @@ interface GenerateStepProps {
   /** 服务端已写入的效果组数 —— 真实进度，不是估算 */
   readyGroups: number;
   candidateCount: number;
-  uploadedAt: string | null;
   /** 停止中——禁用按钮防止重复点击 */
   stopping?: boolean;
   /** "停止生成"是协作式打断当前 in-flight 的生成任务，订单保留 */
   onStopClick?: () => void;
   /**
    * GENERATING 起始「安静期」结束时刻（ms epoch）。与 useOrder 共享同一时间源，
-   * 用于：(1) 让假进度 RAF 从一致的起点开始推；(2) 30s 内前端明确显示
-   * "假进度"，不做任何上游真实进度断言；(3) 窗口结束后由上层决定
-   * 是否轮询 /poll。null = 视作窗口已结束（mock / 旧订单回放）。
+   * 用于让假进度 RAF 从一致的起点开始推（= quietEndsAt - QUIET_AFTER_GENERATING_MS）。
+   * null = 视作窗口已结束（mock / 旧订单回放）。
    */
   quietEndsAt: number | null;
 }
-
-/**
- * ETA fallback 单张耗时估值：90s。
- *
- * 旧值 30s/张在 GPT-Image-2 上游真实 60-180s 下会早早归零显示成 0，
- * 与 ORDER_DEADLINE_MS 10min 配合后 ETA 会显示 "0s" 误导用户。
- * 仅在没有任何 readyGroups 真实数据时作为兜底。
- */
-const DEFAULT_PER_IMAGE_MS = 90_000;
 
 /**
  * 停滞自动停止阈值：2 分钟。
@@ -69,42 +64,23 @@ const FAKE_PROGRESS_CAP = 95;
  * 否则假进度节奏会和 /poll 跳过窗口错位。镜像写一份避免引入跨模块
  * 常量依赖（generate-step 不应反向依赖 use-order 的内部常量）。
  *
- * 期间 useOrder 不打 /poll，前端只播假进度（indeterminate 滑光带），
- * 不显示任何数字进度，避免上游仍为 0 时给用户"假数字"误导。
+ * 此处仅用于把假进度起点对齐到安静期起点（= quietEndsAt - 30s），
+ * 保证用户中途切页 / 刷新后进度从一致位置继续。
  */
 const QUIET_AFTER_GENERATING_MS = 30_000;
 
 /**
- * 估算剩余时间（秒）
- * 优先用真实数据：elapsed / readyGroups = 单张耗时均值；没有 readyGroups 时退到默认 30s/张。
- */
-function estimateEtaSec(
-  uploadedAt: string | null,
-  uploadedImageCount: number,
-  readyGroups: number
-): number {
-  const remaining =
-    uploadedImageCount - Math.min(readyGroups, uploadedImageCount);
-  if (remaining <= 0) return 0;
-  const perImageMs =
-    uploadedAt && readyGroups > 0
-      ? (Date.now() - new Date(uploadedAt).getTime()) / readyGroups
-      : DEFAULT_PER_IMAGE_MS;
-  return Math.max(1, Math.ceil((remaining * perImageMs) / 1000));
-}
-
-/**
  * 生成步骤 —— mobile-first 单列布局 + 横向进度条（业界主流"假进度"）。
  *
- * 设计参考 generate-step.tsx：
- * - 第 2 步徽章 + 标题 + ETA 副标题
- * - 原图缩略图（卡片圆角）
- * - 横向进度条：
- *   - 未拿到 readyGroups 时显示 indeterminate 滑光带
- *   - 拿到真实比例后用 ease-out 平滑推到 FAKE_PROGRESS_CAP 等真结果
- *   - 真实完成（100%）时滑满
- * - 3 个跳动圆点
- * - "停止生成" outline 按钮
+ * 设计要点：
+ * - **从 t=0 起就显示假百分比数字**（不再用 indeterminate 滑光带）——
+ *   用户进入即看到进度增长，不用等到上游首张就绪。
+ * - **不向用户展示 ETA**：上游耗时 60-180s 波动大，给出"X 秒"会让用户
+ *   倒计时到 0 后怀疑系统卡住，索性不显示。
+ * - 进度条横向，ease-out 平滑增长：
+ *   - done === 0：RAF 假进度从 0 推到 FAKE_PROGRESS_CAP
+ *   - done > 0：取 max(fake, real)，不回弹（避免"退步"错觉）
+ *   - isAllDone：直接 100%
  *
  * 注意：这里的"停止"是协作式打断当前 in-flight 的生成任务，订单保留；
  * 不等于"取消订单"——后者会置订单为 CANCELLED（终态），由 TopBar 的取消按钮触发。
@@ -115,7 +91,6 @@ export function GenerateStep({
   uploadedImageCount,
   readyGroups,
   candidateCount,
-  uploadedAt,
   stopping = false,
   onStopClick,
   quietEndsAt,
@@ -126,24 +101,9 @@ export function GenerateStep({
   const isAllDone = uploadedImageCount > 0 && done >= uploadedImageCount;
   const remaining = Math.max(0, uploadedImageCount - done);
 
-  /**
-   * 是否在 GENERATING 起始「安静期」内。
-   * 与 useOrder 的 30s 跳过 /poll 窗口共用同一时间源——前端在此期间
-   * 只播假进度，不显示任何"真实"进度（避免被服务端仍为 0/未刷新的
-   * readyGroups 误导）。窗口结束后恢复 determinate 行为。
-   */
-  const inQuietWindow =
-    !isAllDone && quietEndsAt !== null && Date.now() < quietEndsAt;
-
-  // ETA 每秒刷新一次
-  const [, forceTick] = useState(0);
-  useEffect(() => {
-    if (remaining <= 0) return;
-    const id = setInterval(() => forceTick((n) => n + 1), 1000);
-    return () => clearInterval(id);
-  }, [remaining]);
-
-  const etaSec = estimateEtaSec(uploadedAt, uploadedImageCount, readyGroups);
+  // 原图预览灯箱：点击正在处理的缩略图打开，可左右翻看本批所有原图
+  const [originalPreviewOpen, setOriginalPreviewOpen] = useState(false);
+  const previewIdx = done;
 
   /**
    * 假进度 RAF 循环。
@@ -222,40 +182,47 @@ export function GenerateStep({
     void onStopClick();
   }, [stalled, onStopClick]);
 
-  // 安静期内强制 indeterminate（滑光带），不显示任何百分比数字——
-  // 上游此时还没真正跑，前端不该给"假数字"误导用户。
-  const showIndeterminate = inQuietWindow || (done === 0 && !isAllDone);
-
   return (
     <section className="flex flex-col items-center px-5 pt-6 pb-8 animate-[fadeIn_.3s_ease-out]">
       {/* 标题 */}
       <div className="mb-6 text-center">
         <h2 className="text-xl font-bold text-stone-900">正在生成效果图</h2>
-        <p className="mt-1 text-sm text-stone-400">
-          第 {done + 1} 张原图
-          {etaSec > 0 && (
-            <span className="text-stone-300"> · {formatEta(etaSec)}</span>
-          )}
-        </p>
+        <p className="mt-1 text-sm text-stone-400">第 {done + 1} 张原图</p>
       </div>
 
-      {/* 原图缩略图 */}
-      <div className="mb-6 h-28 w-28 overflow-hidden rounded-xl bg-stone-100 shadow-sm ring-2 ring-stone-200">
+      {/* 原图缩略图（点击放大预览） */}
+      <button
+        type="button"
+        onClick={() => uploadedImageCount > 0 && setOriginalPreviewOpen(true)}
+        disabled={uploadedImageCount === 0}
+        aria-label={
+          uploadedImageCount > 0
+            ? `放大查看第 ${done + 1} 张原图`
+            : "尚未上传原图"
+        }
+        className="group relative mb-6 h-28 w-28 overflow-hidden rounded-xl bg-stone-100 shadow-sm ring-2 ring-stone-200 transition-shadow hover:ring-indigo-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed"
+      >
         {uploadedImageCount > 0 ? (
-          /* biome-ignore lint/performance/noImgElement: R2 远程 URL */
-          <img
-            src={originalUrl(token, done, updatedAt)}
-            alt={`正在处理第 ${done + 1} 张原图`}
-            className="h-full w-full object-cover"
-          />
+          <>
+            {/* biome-ignore lint/performance/noImgElement: R2 远程 URL */}
+            <img
+              src={originalUrl(token, done, updatedAt)}
+              alt={`正在处理第 ${done + 1} 张原图`}
+              className="h-full w-full object-cover"
+            />
+            {/* hover 时浮出放大图标，明确可点击 */}
+            <span className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-colors group-hover:bg-black/30 group-focus-visible:bg-black/30 group-hover:opacity-100 group-focus-visible:opacity-100">
+              <Maximize2 className="h-5 w-5 text-white drop-shadow" />
+            </span>
+          </>
         ) : (
           <div className="flex h-full w-full items-center justify-center text-stone-300">
             <ImageIcon className="h-8 w-8" />
           </div>
         )}
-      </div>
+      </button>
 
-      {/* 横向进度条：indeterminate 滑光带 → determinate 平滑增长 */}
+      {/* 横向进度条：从 t=0 起就显示假百分比（不再用 indeterminate 滑光带） */}
       <div
         className="mb-2 w-full max-w-[260px]"
         role="progressbar"
@@ -265,23 +232,13 @@ export function GenerateStep({
         aria-valuenow={Math.round(displayPercent)}
       >
         <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-stone-100">
-          {showIndeterminate ? (
-            // 拿到首张真实结果前的滑光带：30% 宽渐变条循环扫过
-            <div
-              className="absolute inset-y-0 left-0 w-[30%] animate-indeterminate-progress bg-gradient-to-r from-transparent via-indigo-500 to-transparent"
-              style={{ willChange: "transform" }}
-            />
-          ) : (
-            <div
-              className="h-full animate-progress-ease rounded-full bg-gradient-to-r from-indigo-500 to-blue-500"
-              style={{ width: `${displayPercent}%` }}
-            />
-          )}
+          <div
+            className="h-full animate-progress-ease rounded-full bg-gradient-to-r from-indigo-500 to-blue-500"
+            style={{ width: `${displayPercent}%` }}
+          />
         </div>
         <div className="mt-1.5 flex items-center justify-between text-[11px] tabular-nums text-stone-400">
-          <span>
-            {showIndeterminate ? "正在处理…" : `${Math.round(displayPercent)}%`}
-          </span>
+          <span>{Math.round(displayPercent)}%</span>
           <span>
             {done}/{uploadedImageCount}
           </span>
@@ -337,6 +294,16 @@ export function GenerateStep({
       <p aria-live="polite" className="sr-only">
         已完成 {done} 张，共 {uploadedImageCount} 张
       </p>
+
+      {/* 原图预览灯箱 */}
+      <OriginalLightbox
+        open={originalPreviewOpen}
+        onClose={() => setOriginalPreviewOpen(false)}
+        token={token}
+        updatedAt={updatedAt}
+        imageIdx={previewIdx}
+        imageCount={uploadedImageCount}
+      />
     </section>
   );
 }

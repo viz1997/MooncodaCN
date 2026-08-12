@@ -1,6 +1,13 @@
 "use client";
 
-import { Check, CheckCircle2, Loader2, Lock, RefreshCw } from "lucide-react";
+import {
+  Check,
+  CheckCircle2,
+  Loader2,
+  Lock,
+  Maximize2,
+  RefreshCw,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertDialog,
@@ -14,6 +21,7 @@ import {
 import { ImageProgress } from "./image-progress";
 import { candidateUrl, originalUrl, preloadImages } from "./image-urls";
 import { Lightbox, type LightboxTarget } from "./lightbox";
+import { OriginalLightbox } from "./original-lightbox";
 import { OriginalStrip } from "./original-strip";
 import { QuadrantGrid } from "./quadrant-grid";
 
@@ -91,6 +99,7 @@ export function SelectStep({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [regenConfirmOpen, setRegenConfirmOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [originalPreviewOpen, setOriginalPreviewOpen] = useState(false);
   const advanceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTriggerRef = useRef<string | null>(null);
 
@@ -333,14 +342,23 @@ export function SelectStep({
 
         {/* 当前原图小卡 */}
         <div className="mb-4 flex items-center gap-3 rounded-xl bg-stone-50 p-2.5">
-          <div className="h-14 w-14 shrink-0 overflow-hidden rounded-md bg-white">
+          <button
+            type="button"
+            onClick={() => setOriginalPreviewOpen(true)}
+            aria-label={`放大查看第 ${safeIdx + 1} 张原图`}
+            className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-md bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+          >
             {/* biome-ignore lint/performance/noImgElement: R2 远程 URL */}
             <img
               src={originalUrl(token, safeIdx, updatedAt)}
               alt={`第 ${safeIdx + 1} 张原图`}
               className="h-full w-full object-cover"
             />
-          </div>
+            {/* hover 时浮出放大图标，明确可点击 */}
+            <span className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-colors group-hover:bg-black/30 group-focus-visible:bg-black/30 group-hover:opacity-100 group-focus-visible:opacity-100">
+              <Maximize2 className="h-4 w-4 text-white drop-shadow" />
+            </span>
+          </button>
           <div className="min-w-0 flex-1 text-xs text-stone-500">
             <p className="font-medium text-stone-700">
               {imageCount > 1
@@ -491,6 +509,17 @@ export function SelectStep({
           }}
         />
       )}
+
+      {/* ─── 原图预览灯箱 ─── */}
+      <OriginalLightbox
+        open={originalPreviewOpen}
+        onClose={() => setOriginalPreviewOpen(false)}
+        token={token}
+        updatedAt={updatedAt}
+        imageIdx={safeIdx}
+        imageCount={imageCount}
+        onChangeImage={(idx) => setCurrentIdx(idx)}
+      />
 
       {/* ─── 二次确认 dialogs ─── */}
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>

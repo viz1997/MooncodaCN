@@ -195,7 +195,6 @@ function MockOrderContent({ order }: { order: OrderView }) {
                 uploadedImageCount={uploadedCount}
                 readyGroups={readyGroups}
                 candidateCount={candidateCount}
-                uploadedAt={order.uploadedAt}
                 // mock 没有 useOrder，安静期视为已结束（直接显示真实节奏）
                 quietEndsAt={null}
                 stopping={false}

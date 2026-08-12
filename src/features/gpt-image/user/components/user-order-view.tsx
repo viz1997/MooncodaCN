@@ -227,7 +227,6 @@ function UserOrderContent({
                 uploadedImageCount={uploadedCount}
                 readyGroups={readyGroups}
                 candidateCount={candidateCount}
-                uploadedAt={order.uploadedAt}
                 // 共享给 useOrder 的同一时间源，让假进度 RAF 起点 = /poll
                 // 安静期起点；窗口内不打 /poll，只让假进度跑。
                 quietEndsAt={quietEndsAt}
