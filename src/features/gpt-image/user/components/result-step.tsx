@@ -176,7 +176,7 @@ export function ResultStep({
       <section className="mx-auto flex w-full max-w-md flex-col items-stretch px-5 pt-8 pb-10 animate-[fadeIn_.3s_ease-out]">
         {/* ── Hero ── */}
         <div className="mb-5 flex flex-col items-center text-center">
-          
+          <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 ring-4 ring-emerald-50/60">
             <CheckCircle2
               className="h-8 w-8 text-emerald-500"
               strokeWidth={2}
