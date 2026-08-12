@@ -115,17 +115,6 @@ export function ResultStep({
 
   return (
     <section className="mx-auto flex w-full max-w-md flex-col items-stretch px-5 pt-6 pb-8 animate-[fadeIn_.3s_ease-out]">
-      {/* ── 锁定提示条 ── */}
-      <div className="mb-4 flex items-center gap-2 rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2">
-        <Lock
-          className="h-3.5 w-3.5 shrink-0 text-amber-500"
-          strokeWidth={2.5}
-        />
-        <p className="text-xs leading-relaxed text-amber-700">
-          结果已锁定 · 如需调整请联系服务方重新开启
-        </p>
-      </div>
-
       {/* ── 位置显示 ── */}
       <div className="mb-3 text-center">
         <p className="text-2xl font-bold tracking-tight text-stone-900 tabular-nums">
@@ -177,12 +166,28 @@ export function ResultStep({
         </article>
       </div>
 
-      {/* ── 下载全部（多图时，放图像下方） ── */}
+      {/* ── 锁定提示条（下载按钮上方） ── */}
+      <div className="mt-4 flex items-center gap-2 rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2">
+        <Lock
+          className="h-3.5 w-3.5 shrink-0 text-amber-500"
+          strokeWidth={2.5}
+        />
+        <p className="text-xs leading-relaxed text-amber-700">
+          结果已锁定 · 如需调整请联系服务方重新开启
+        </p>
+      </div>
+
+      {/* ── 安排打印提示（下载按钮上方） ── */}
+      <div className="mt-2 flex items-center justify-center gap-2 rounded-xl bg-stone-50 px-4 py-3 text-xs text-stone-500">
+        <span>已收到你的选择 · 会尽快安排打印</span>
+      </div>
+
+      {/* ── 下载全部（多图时） ── */}
       {imageCount > 1 && (
         <button
           type="button"
           onClick={handleDownloadAll}
-          className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-500 to-blue-500 text-sm font-medium text-white shadow-lg shadow-indigo-200/50 transition-all hover:shadow-indigo-300/60 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+          className="mt-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-500 to-blue-500 text-sm font-medium text-white shadow-lg shadow-indigo-200/50 transition-all hover:shadow-indigo-300/60 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
         >
           <Download className="h-4 w-4" />
           下载全部 {imageCount} 张
