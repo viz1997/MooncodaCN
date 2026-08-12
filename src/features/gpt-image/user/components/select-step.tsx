@@ -336,46 +336,6 @@ export function SelectStep({
           </div>
         )}
 
-        {/* 当前原图小卡 */}
-        <div className="mb-4 flex items-center gap-3 rounded-xl bg-stone-50 p-2.5">
-          <button
-            type="button"
-            onClick={() => setOriginalPreviewOpen(true)}
-            aria-label={`放大查看第 ${safeIdx + 1} 张原图`}
-            className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-md bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-          >
-            {/* biome-ignore lint/performance/noImgElement: R2 远程 URL */}
-            <img
-              src={originalUrl(token, safeIdx, updatedAt)}
-              alt={`第 ${safeIdx + 1} 张原图`}
-              className="h-full w-full object-cover"
-            />
-            {/* hover 时浮出放大图标，明确可点击 */}
-            <span className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-colors group-hover:bg-black/30 group-focus-visible:bg-black/30 group-hover:opacity-100 group-focus-visible:opacity-100">
-              <Maximize2 className="h-4 w-4 text-white drop-shadow" />
-            </span>
-          </button>
-          {currentSelection !== null && (
-            <span
-              className={[
-                "inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium text-white",
-                isCurrentLocked ? "bg-emerald-600" : "bg-emerald-500",
-              ].join(" ")}
-            >
-              {isCurrentLocked ? (
-                <>
-                  <Lock className="h-3.5 w-3.5" strokeWidth={3} />
-                  已锁定 #{currentSelection + 1}
-                </>
-              ) : (
-                <>
-                  <Check className="h-3.5 w-3.5" strokeWidth={3} />#
-                  {currentSelection + 1}
-                </>
-              )}
-            </span>
-          )}
-        </div>
 
         {/* 宫格 / Lightbox 触发 */}
         <div ref={swipeAreaRef} className="relative">
