@@ -10,9 +10,13 @@
  *   - CANDIDATES_READY：单图或批量重跑
  *   - FAILED：仅允许批量重跑（保证"链接不失效"，失败后可一键重试）
  *
- * 锁定限制：partial select 引入后，`selections[i] !== null` 表示"该张已
- * 提交锁定，不可再生"。单图路径：若目标位已锁 → 409。批量路径：只要有任
- * 一位已锁 → 409（不能批量重跑覆盖已提交位）。改主意只能 cancel 整单重开。
+ * 锁定限制（2026-08 保留 partial select 不可逆语义）：`selections[i] !== null`
+ * 表示该张已提交，用户端不可重新生成。批次模型下用户每完成一次
+ * upload → generate → select → submit 后，那张图即被服务端"锁定"——要
+ * 重新生成必须服务端把该位置 selections[i] 置 null（解锁后用户才能在
+ * UI 上重新触发）。
+ * - 单图路径：若目标位已锁 → 409
+ * - 批量路径：只要有一位已锁 → 409（不能批量重跑覆盖已提交）
  */
 
 import { eq } from "drizzle-orm";

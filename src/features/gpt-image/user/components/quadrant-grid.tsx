@@ -1,6 +1,5 @@
 "use client";
 
-import { Maximize2 } from "lucide-react";
 import { useRef } from "react";
 
 import { candidateUrl } from "./image-urls";
@@ -17,7 +16,6 @@ interface QuadrantGridProps {
   selectedQuadrant: number | null;
   disabled?: boolean;
   onSelect: (qIdx: number) => void;
-  onZoom: () => void;
 }
 
 /** 根据 quadrantCount 计算 (cols, rows) */
@@ -42,7 +40,6 @@ export function QuadrantGrid({
   selectedQuadrant,
   disabled = false,
   onSelect,
-  onZoom,
 }: QuadrantGridProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const { cols, rows } = layoutOf(quadrantCount);
@@ -140,16 +137,6 @@ export function QuadrantGrid({
           })}
         </div>
       </div>
-
-      {/* 放大查看按钮（常驻可见，tap target 44px） */}
-      <button
-        type="button"
-        onClick={onZoom}
-        aria-label="放大查看拼接图"
-        className="absolute top-2 right-2 flex h-11 w-11 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm transition-colors hover:bg-black/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
-      >
-        <Maximize2 className="h-5 w-5" />
-      </button>
     </div>
   );
 }

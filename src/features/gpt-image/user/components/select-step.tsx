@@ -66,6 +66,11 @@ const SWIPE_THRESHOLD = 50; // px
  * - Enter 键 / 自动跳到下一张未选：当前张未锁定 + 选了候选 → 触发 confirm；
  *   当前张已锁定 → Enter 跳过（用户应继续选下一张）。
  *
+ * 锁定 = 不可重做（2026-08 批次模型保留 partial select 不可逆语义）：
+ * 提交后该张即被服务端锁定，UI 只读（视觉提示保留：emerald 边框 +
+ * Lock 角标）。要重新生成 / 重选只能服务端把 selections[i] 置 null 后
+ * 用户才能在 UI 上重新触发——这是有意识的，避免"锁了又解锁"状态混乱。
+ *
  * 布局（参考 select-step.tsx）：
  * 1. 顶部「第 3 步 · 选择效果图」徽章 + 标题
  * 2. 进度小条（多图时显示）
@@ -101,7 +106,6 @@ export function SelectStep({
   const [helpOpen, setHelpOpen] = useState(false);
   const [originalPreviewOpen, setOriginalPreviewOpen] = useState(false);
   const advanceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastTriggerRef = useRef<string | null>(null);
 
   const safeIdx = Math.min(currentIdx, Math.max(0, imageCount - 1));
   const currentSelection = selections[safeIdx] ?? null;
@@ -166,22 +170,14 @@ export function SelectStep({
     setCurrentIdx(lastSelectedIdx);
   }, [selections, onToggle, lastSelectedIdx, isLocked]);
 
-  const openLightbox = (imageIdx: number, candIdx: number) => {
-    lastTriggerRef.current = `cand-${imageIdx}-${candIdx}`;
-    setLightbox({ imageIdx, candIdx });
-  };
-
   const closeLightbox = () => {
     setLightbox(null);
-    const id = lastTriggerRef.current;
-    lastTriggerRef.current = null;
-    if (id) requestAnimationFrame(() => document.getElementById(id)?.focus());
   };
 
   /**
-   * 提交按钮启用条件（partial select 语义）：
+   * 提交按钮启用条件（partial select 语义，锁定 = 不可重做）：
    * - 当前张本地草稿非空（已有候选可锁定）
-   * - 当前张未服务端锁定（已锁定不可再提交）
+   * - 当前张未服务端锁定（已锁定不可再提交；要重做只能服务端解锁）
    *
    * 与原版"allSelected 才可点"差异：现在每张图独立锁定，不需要全选完。
    * confirmOpen 点击时调 onSubmit；onSubmit 内部用 use-selections 的
@@ -240,7 +236,7 @@ export function SelectStep({
         case "r":
         case "R":
           if (!(e.ctrlKey || e.metaKey)) {
-            // 已锁定位不可重新生成
+            // 已锁定位不可重新生成（要重做只能服务端解锁后用户重新触发）
             if (isCurrentLocked) return;
             e.preventDefault();
             setRegenConfirmOpen(true);
@@ -359,18 +355,6 @@ export function SelectStep({
               <Maximize2 className="h-4 w-4 text-white drop-shadow" />
             </span>
           </button>
-          <div className="min-w-0 flex-1 text-xs text-stone-500">
-            <p className="font-medium text-stone-700">
-              {imageCount > 1
-                ? `正在为第 ${safeIdx + 1} 张原图挑选`
-                : "你上传的原图"}
-            </p>
-            <p className="mt-0.5">
-              {candidateCount === 1
-                ? "下面这张由原图生成"
-                : `下面这张由原图生成（含 ${candidateCount} 种效果）`}
-            </p>
-          </div>
           {currentSelection !== null && (
             <span
               className={[
@@ -410,7 +394,6 @@ export function SelectStep({
             }
             selectedQuadrant={currentSelection}
             onSelect={(q) => handleToggle(safeIdx, q)}
-            onZoom={() => openLightbox(safeIdx, 0)}
             disabled={isCurrentLocked}
           />
         </div>
@@ -450,7 +433,7 @@ export function SelectStep({
                 : "重新生成"}
           </button>
 
-          {/* 确认提交（主）—— 当前张已锁定时禁用，文案区分 */}
+          {/* 确认提交（主）—— 已锁定位可再次点击以更新保存值（toPayload 会跳过无变化的位） */}
           <button
             type="button"
             onClick={() => {

@@ -73,14 +73,14 @@ function normalize(
 }
 
 /**
- * 本地选择草稿（partial select 感知）。
+ * 本地选择草稿（partial select 感知，批次模型锁定 = 不可重做）。
  *
  * 服务端 selections 有两类写入方：
  * - `/select` 路由（partial submit，按 imageIdx 增量合并）
  * - `/history/[id]/restore` 路由（快照恢复，可能不同步本地草稿）
  *
  * 服务端权威值 `order.selections` 的语义：
- * - 非 null = 已锁定（partial select 不可逆）
+ * - 非 null = 已锁定（批次模型下"提交即锁定"，要重做只能服务端解锁）
  * - null = 待用户选择
  *
  * 调和规则：
@@ -133,9 +133,8 @@ export function useSelections(order: OrderView | null): UseSelectionsResult {
 
   const toggle = useCallback(
     (imageIdx: number, candIdx: number) => {
-      // 已锁定位：本地点不动（与服务端锁定值保持一致；/select 路由
-      // 不会再被已锁定位触达——前端的 isLocked() 视觉禁用 + 服务端
-      // normalizeSelections 接受任意顺序）。
+      // 已锁定位：本地点不动（与服务端锁定值保持一致；批次模型下"提交即
+      // 锁定"，要重做只能服务端解锁后用户重新触发）。
       if (isLocked(imageIdx)) return;
       setDraft((prev) => {
         const values = [...prev.values];
