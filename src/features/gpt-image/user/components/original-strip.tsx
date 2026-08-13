@@ -88,16 +88,28 @@ export function OriginalStrip({
             className={[
               "relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border-2 transition-all sm:h-[72px] sm:w-[72px]",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2",
-              // emerald 边框 = "这张已选中"（locked 是 chosen 的终态）：
-              // 跟下面的 QuadrantGrid 高亮候选一一对应。
-              // 当前 tab 但未选 → 用 zinc 中性 ring，不冒充 emerald，
-              // 避免用户以为这张已经选了候选（实际上还没有）。
-              locked
-                ? "border-emerald-500 ring-2 ring-emerald-500/30"
-                : chosen
-                  ? "border-emerald-500 ring-2 ring-emerald-500/20"
-                  : isCurrent
-                    ? "border-zinc-300 ring-2 ring-zinc-300/40"
+              // 四档语义严格分离：
+              // - emerald-500 边框 = "选中"（current，正在浏览/选中原图切换显示
+              //   对应的效果图）——**用户原话："不是选过而是选中"**。这条绿框
+              //   跟着 currentIdx 走，跟下方 QuadrantGrid 展示哪张原图的候选
+              //   组是同一回事
+              // - emerald-300 边框 = "选过"（chosen，本地草稿已选候选但不是当前
+              //   tab）——和 current 用同色相但降饱和度，"以前选过"但现在没在
+              //   看。**用户原话："不是效果图选过"**——选过不要绿框（这里给
+              //   浅绿是给个"已选记录"提示，避免完全 zinc-200 让用户以为没选）
+              // - zinc-400 边框 = "已锁"（locked，partial submit 后不可改）——
+              //   **用户原话："锁住不需要绿框"**。颜色让出来给"选中"
+              // - zinc-200 边框 = plain
+              //
+              // 判断顺序：current > locked > chosen > plain。locked 和 chosen 都
+              // 是"过去时"，但 locked 是终态视觉更重，zinc-400 比 emerald-300
+              // 视觉上更"已结束"
+              isCurrent
+                ? "border-emerald-500 ring-2 ring-emerald-500/40"
+                : locked
+                  ? "border-zinc-400 ring-2 ring-zinc-400/30"
+                  : chosen
+                    ? "border-emerald-300 ring-2 ring-emerald-300/40"
                     : "border-zinc-200 opacity-70 hover:opacity-100",
             ].join(" ")}
           >
@@ -112,15 +124,16 @@ export function OriginalStrip({
               {i + 1}
             </span>
             {locked ? (
-              <span className="absolute right-1 bottom-1 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-600 text-white shadow-sm">
+              <span className="absolute right-1 bottom-1 flex h-5 w-5 items-center justify-center rounded-full bg-stone-700 text-white shadow-sm">
                 <Lock className="h-3 w-3" strokeWidth={3} />
               </span>
             ) : chosen ? (
-              <span className="absolute right-1 bottom-1 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-white">
-                <Check className="h-3 w-3" />
+              <span className="absolute right-1 bottom-1 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-400 text-white shadow-sm ring-2 ring-emerald-300/50">
+                <Check className="h-3 w-3" strokeWidth={3} />
               </span>
             ) : (
-              <span className="absolute right-1 bottom-1 h-5 w-5 rounded-full border-2 border-dashed border-white/80 bg-black/25" />
+              // current 但未选：右下小圆点用 emerald 跟边框同色，最简的"正在操作"指示
+              <span className="absolute right-1 bottom-1 h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-sm ring-2 ring-emerald-500/30" />
             )}
           </button>
         );
