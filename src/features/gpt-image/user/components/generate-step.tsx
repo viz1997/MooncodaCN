@@ -130,7 +130,11 @@ export function GenerateStep({
 
   // 原图预览灯箱：点击正在处理的缩略图打开，可左右翻看本批所有原图
   const [originalPreviewOpen, setOriginalPreviewOpen] = useState(false);
-  const previewIdx = done;
+  // done 计数到 uploadedImageCount 时越界（没有"第 uploadedCount+1 张"），
+  // 选最后一张原图作为成品预览图。clamp 到 [0, uploadedImageCount-1]。
+  const previewIdx = isAllDone
+    ? uploadedImageCount - 1
+    : Math.min(done, uploadedImageCount - 1);
 
   /**
    * 假进度 RAF 循环。
@@ -222,8 +226,14 @@ export function GenerateStep({
     <section className="flex flex-col items-center px-5 pt-6 pb-8 animate-[fadeIn_.3s_ease-out]">
       {/* 标题 */}
       <div className="mb-6 text-center">
-        <h2 className="text-xl font-bold text-stone-900">正在生成效果图</h2>
-        <p className="mt-1 text-sm text-stone-400">第 {done + 1} 张原图</p>
+        <h2 className="text-xl font-bold text-stone-900">
+          {isAllDone ? "生成完成" : "正在生成效果图"}
+        </h2>
+        <p className="mt-1 text-sm text-stone-400">
+          {isAllDone
+            ? `全部 ${uploadedImageCount} 张候选已就绪`
+            : `第 ${done + 1} 张原图`}
+        </p>
       </div>
 
       {/* 原图缩略图（点击放大预览） */}
@@ -233,7 +243,7 @@ export function GenerateStep({
         disabled={uploadedImageCount === 0}
         aria-label={
           uploadedImageCount > 0
-            ? `放大查看第 ${done + 1} 张原图`
+            ? `放大查看第 ${previewIdx + 1} 张原图`
             : "尚未上传原图"
         }
         className="group relative mb-6 h-28 w-28 overflow-hidden rounded-xl bg-stone-100 shadow-sm ring-2 ring-stone-200 transition-shadow hover:ring-indigo-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed"
@@ -242,8 +252,12 @@ export function GenerateStep({
           <>
             {/* biome-ignore lint/performance/noImgElement: R2 远程 URL */}
             <img
-              src={originalUrl(token, done, updatedAt)}
-              alt={`正在处理第 ${done + 1} 张原图`}
+              src={originalUrl(token, previewIdx, updatedAt)}
+              alt={
+                isAllDone
+                  ? `已生成 ${uploadedImageCount} 张候选`
+                  : `正在处理第 ${done + 1} 张原图`
+              }
               className="h-full w-full object-cover"
             />
             {/* hover 时浮出放大图标，明确可点击 */}
