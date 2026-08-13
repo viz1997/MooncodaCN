@@ -57,6 +57,30 @@ function getRedis(): Redis | null {
 const limiters = new Map<string, Ratelimit>();
 
 /**
+ * per-resource 短锁（SETNX + TTL）。
+ *
+ * 与 checkRateLimit 语义不同：rate limit 是「窗口内最多 N 次」，返回
+ * success=false 让调用方拒绝请求；短锁是「同一 key 在 TTL 内只能被
+ * acquire 一次」，返回 false 让调用方**走降级路径**（不做实际工作，
+ * 但仍返回 200 + 缓存数据）。
+ *
+ * 用于 gpt-image /poll 这种「同一资源高频轮询，重复工作无收益」
+ * 场景：3s 锁内同 token 重复请求直接返回当前状态，跳过 upstream
+ * Lingting 查询。未配 Redis 时返回 true（不锁）——让业务在无 Redis
+ * 环境下仍能跑通，靠上层限流兜底。
+ */
+export async function tryAcquireShortLock(
+  key: string,
+  ttlSeconds: number
+): Promise<boolean> {
+  const redisClient = getRedis();
+  if (!redisClient) return true;
+  // Upstash @upstash/redis 的 set(...).nx 选项：仅当 key 不存在时 set
+  const result = await redisClient.set(key, "1", { ex: ttlSeconds, nx: true });
+  return result === "OK";
+}
+
+/**
  * 预定义的限流配置
  */
 export const RateLimitConfig = {
@@ -70,6 +94,16 @@ export const RateLimitConfig = {
   payment: { requests: 10, window: "1m" as const },
   /** 上传 API 限流: 30 请求/分钟 */
   upload: { requests: 30, window: "1m" as const },
+  /**
+   * 轮询 API 限流: 60 请求/分钟。
+   *
+   * 比 upload 宽——轮询是合法的客户端行为（订单 GENERATING 时需要持续
+   * 拿结果），不能像 upload 那样严格。60/min ≈ 每秒 1 次，留 2x 余量
+   * 给「多 tab + visibility 切换 + retry」叠加。配合 /poll 路由内
+   * 3s per-order 短锁（tryAcquireShortLock），单订单最小间隔 3s，
+   * 多订单叠加不会撞 60/min 上限。
+   */
+  polling: { requests: 60, window: "1m" as const },
   /** 严格限流: 3 请求/分钟（用于敏感操作）*/
   strict: { requests: 3, window: "1m" as const },
 } as const;

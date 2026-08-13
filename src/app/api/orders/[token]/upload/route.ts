@@ -23,6 +23,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { promptOrder } from "@/db/schema";
 import { inngest } from "@/inngest";
+import { submitGeneration } from "@/features/gpt-image/lib/generation-service";
 import {
   parseSelections,
   parseUploadedImages,
@@ -33,13 +34,42 @@ import { withApiLogging } from "@/lib/api-logger";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
-// 30s：仅做 DB 读 + 校验 + 写 uploadedImages + 状态置 GENERATING +
-// send Inngest 事件。submitGeneration 链路（R2 120s + Lingting 120s）
-// 移到 Inngest 后台跑，不占本路由预算。
+// 300s（Vercel Pro 上限）：主路径是 Inngest 异步（路由 30s 内就返回 202），
+// 但 Inngest send 可能失败（未配 INNGEST_EVENT_KEY、未跑 dev server、
+// 网络抖动等）→ 降级同步 submitGeneration，需要 245s 墙钟预算。
 //
-// 早期版本 maxDuration=300 是因为同步在请求周期内调 submitGeneration，
-// 主流方案是 send 事件后立即返回 202——把 300s 预算降到 30s 即可。
-export const maxDuration = 30;
+// 详见下方 `triggerSubmit` 的 try/catch。
+export const maxDuration = 300;
+
+/**
+ * 触发 submitGeneration：优先 Inngest 异步 send，失败降级到同步调用。
+ *
+ * Inngest 没配（生产缺 INNGEST_EVENT_KEY / 本地未跑 inngest-cli dev）
+ * 时 send 会抛"找不到 event key"——直接降级同步，让用户至少能跑通。
+ * 降级路径仍走 /upload maxDuration=300s 预算（submitGeneration 245s
+ * 墙钟 + DB 5s）。
+ */
+async function triggerSubmit(
+  orderId: string,
+  fromIdx: number,
+  total: number,
+  candidateCount: number
+): Promise<{ mode: "ingest" | "sync" }> {
+  try {
+    await inngest.send({
+      name: "gpt-image/submit-generation",
+      data: { orderId, fromIdx, total, candidateCount },
+    });
+    return { mode: "ingest" };
+  } catch (err) {
+    logger.warn(
+      { err, orderId, fromIdx, total },
+      "Inngest send 失败，降级到同步 submitGeneration（未配 INNGEST_EVENT_KEY 或 dev server 未启动？）"
+    );
+    await submitGeneration(orderId, fromIdx, total, candidateCount);
+    return { mode: "sync" };
+  }
+}
 
 const UPLOADABLE = new Set(["PENDING", "CANDIDATES_READY", "FAILED"]);
 
@@ -265,25 +295,21 @@ async function postHandler(
         candidateCount,
         isRetryAfterFailure,
       },
-      "提交效果图生成任务（Inngest 异步触发）"
+      "提交效果图生成任务"
     );
 
-    // 主流方案：send Inngest 事件后立即返回 202。
-    // submitGeneration 链路（R2 下载 120s + Lingting POST 120s + sync URL
-    // 路径再叠加 persistCandidateToR2 65s）在 Inngest 后台跑，不再压本路由
-    // 函数预算。前端轮询 /status / /poll 拿真实状态——如果 Inngest 跑挂了
-    // 全部失败，submitGeneration 内部会把订单置 FAILED，前端 watch 看到。
+    // 主流方案：优先 Inngest 异步 send，让 submitGeneration 在后台跑；
+    // Inngest 不可用（未配 / dev server 未启）时降级到同步调用——让
+    // 路由永远不 502。同步路径需要 ~245s 墙钟，所以 maxDuration 仍
+    // 留 300s 预算。
     //
     // FAILED 替换场景：merged 是全新图片，从 0 开始重跑；否则只跑新增的。
-    await inngest.send({
-      name: "gpt-image/submit-generation",
-      data: {
-        orderId: order.id,
-        fromIdx,
-        total,
-        candidateCount,
-      },
-    });
+    const { mode } = await triggerSubmit(
+      order.id,
+      fromIdx,
+      total,
+      candidateCount
+    );
 
     return NextResponse.json(
       {
@@ -296,6 +322,10 @@ async function postHandler(
           uploadedImageCount: merged.length,
           newImageCount: accepted.length,
           errorMessage: null,
+          // 前端可据此决定是否提示"用 Inngest 后台模式 / 降级同步"。
+          // 同步模式下用户刷新页面就丢失 in-flight 提交，必须等
+          // submitGeneration 走完才能切页。
+          triggerMode: mode,
         },
       },
       { status: 202 }

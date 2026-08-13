@@ -24,6 +24,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { promptOrder } from "@/db/schema";
 import { inngest } from "@/inngest";
+import { submitGeneration } from "@/features/gpt-image/lib/generation-service";
 import {
   parseCandidates,
   parseSelections,
@@ -33,10 +34,39 @@ import { withApiLogging } from "@/lib/api-logger";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
-// 30s：仅做 DB 读 + 状态校验 + 事务（归档 + 清空 candidates + 状态置
-// GENERATING）+ send Inngest 事件。submitGeneration 移到 Inngest 后台跑。
-// 早期版本是 90s，因为同步在请求周期内调 submitGeneration。
-export const maxDuration = 30;
+// 90s：主路径是 Inngest 异步（路由 30s 内返回 202），但 Inngest send
+// 可能失败 → 降级到同步 submitGeneration（245s 墙钟）。90s 预算
+// 不够 245s 同步路径，下面 triggerSubmit 失败时仍会撞 Vercel
+// 硬超时；用户应配置 Inngest 让降级不触发，或把 maxDuration 拉到
+// 300s（与 /upload 对齐）。这里先 90s，与旧版本一致，配置 Inngest
+// 后自动走异步路径不再撞线。
+export const maxDuration = 90;
+
+/**
+ * 触发 submitGeneration：优先 Inngest 异步，失败降级同步。
+ * 详见 /upload 路由同名函数注释。
+ */
+async function triggerSubmit(
+  orderId: string,
+  fromIdx: number,
+  toIdx: number,
+  candidateCount: number
+): Promise<{ mode: "ingest" | "sync" }> {
+  try {
+    await inngest.send({
+      name: "gpt-image/submit-generation",
+      data: { orderId, fromIdx, total: toIdx, candidateCount },
+    });
+    return { mode: "ingest" };
+  } catch (err) {
+    logger.warn(
+      { err, orderId, fromIdx, toIdx },
+      "Inngest send 失败，降级到同步 submitGeneration"
+    );
+    await submitGeneration(orderId, fromIdx, toIdx, candidateCount);
+    return { mode: "sync" };
+  }
+}
 
 async function postHandler(
   req: NextRequest,
@@ -200,20 +230,15 @@ async function postHandler(
     const candidateCount = order.template.candidateCount;
     logger.info(
       { orderId: order.id, fromIdx, toIdx, candidateCount },
-      isSingle ? "提交单图重新生成（Inngest 异步）" : "提交批量重新生成（Inngest 异步）"
+      isSingle ? "提交单图重新生成" : "提交批量重新生成"
     );
-    // 主流方案：send Inngest 事件后立即返回 202。submitGeneration 链路
-    // （R2 120s + Lingting 120s）挪到 Inngest 后台跑，不再压本路由
-    // 函数预算。详见 /upload 路由同段注释。
-    await inngest.send({
-      name: "gpt-image/submit-generation",
-      data: {
-        orderId: order.id,
-        fromIdx,
-        total: toIdx,
-        candidateCount,
-      },
-    });
+    // 优先 Inngest 异步；失败降级到同步。详见 /upload 路由同函数注释。
+    const { mode } = await triggerSubmit(
+      order.id,
+      fromIdx,
+      toIdx,
+      candidateCount
+    );
 
     return NextResponse.json(
       {
@@ -225,6 +250,7 @@ async function postHandler(
           status: "GENERATING",
           fromIdx,
           toIdx,
+          triggerMode: mode,
         },
       },
       { status: 202 }

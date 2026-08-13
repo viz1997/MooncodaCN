@@ -151,12 +151,20 @@ export function useOrderActions({
         // /upload 现在固定返回 success:true（Inngest 事件 send 成功即
         // 视为成功），失败会在 Inngest 后台跑完时把订单置 FAILED，前端
         // 轮询 /status 或 /poll 拿真实状态——toast 仍按"上传成功"展示。
+        // triggerMode 标注本次走 Inngest 异步还是同步降级（未配 Inngest
+        // 时回退），未来可据此给同步模式用户提示"切页会丢失提交"。
         const json = (await res.json()) as {
           success: boolean;
           message?: string;
+          data?: { triggerMode?: "ingest" | "sync" };
         };
         if (json.success) {
-          toast.success(`${files.length} 张图片已上传，正在生成效果图`);
+          const isSync = json.data?.triggerMode === "sync";
+          toast.success(
+            isSync
+              ? `${files.length} 张图片已上传，正在生成效果图（请勿关闭页面）`
+              : `${files.length} 张图片已上传，正在生成效果图`
+          );
         } else {
           toast.error(json.message ?? "提交失败，请稍后重试");
         }
