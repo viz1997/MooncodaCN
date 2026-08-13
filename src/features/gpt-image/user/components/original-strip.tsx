@@ -131,10 +131,10 @@ export function OriginalStrip({
               <span className="absolute right-1 bottom-1 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-400 text-white shadow-sm ring-2 ring-emerald-300/50">
                 <Check className="h-3 w-3" strokeWidth={3} />
               </span>
-            ) : (
+            ) : isCurrent ? (
               // current 但未选：右下小圆点用 emerald 跟边框同色，最简的"正在操作"指示
               <span className="absolute right-1 bottom-1 h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-sm ring-2 ring-emerald-500/30" />
-            )}
+            ) : null}
           </button>
         );
       })}
