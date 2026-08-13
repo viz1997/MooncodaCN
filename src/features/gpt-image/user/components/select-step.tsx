@@ -363,12 +363,7 @@ export function SelectStep({
           />
         </div>
 
-        {/* 提示文字（在按钮上方） */}
-        <p className="mt-3 text-center text-xs text-stone-400">
-          {imageCount > 1
-            ? "移动端左右滑动切图 · 桌面端 ← → 切图"
-            : "点击候选图后再点下方按钮"}
-        </p>
+     
 
         {/* 操作按钮：重新生成（次级）+ 确认提交（主）并列 */}
         <div className="mt-4 flex w-full items-stretch gap-2">

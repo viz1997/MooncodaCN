@@ -1,5 +1,13 @@
 "use client";
 
+/**
+ * TODO (2026-08-13): 已从用户页面（user-order-view.tsx）隐藏，按用户反馈：
+ * "为什么乱加效果图历史在用户页面"。后续 admin 端做"订单历史/恢复"功能
+ * 时复用本 hook + history-drawer.tsx，不要重新写。
+ *
+ * 详见 [[user-page-no-complex-features]]。
+ */
+
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 

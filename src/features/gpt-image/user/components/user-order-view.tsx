@@ -1,7 +1,7 @@
 "use client";
 
 import { Ban, Loader2, X } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -12,16 +12,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import type {
-  OrderHistorySnapshotView,
-  OrderStatus,
-  OrderView,
-} from "@/features/gpt-image/lib/types";
+import type { OrderStatus, OrderView } from "@/features/gpt-image/lib/types";
 import { Link } from "@/i18n/routing";
 import { CancelledPanel } from "./cancelled-panel";
 import { FailureNotice } from "./failure-notice";
 import { GenerateStep } from "./generate-step";
-import { HistoryDrawer } from "./history-drawer";
 import { InvalidLinkScreen } from "./invalid-link-screen";
 import { LoadingScreen } from "./loading-screen";
 import { ResultStep } from "./result-step";
@@ -30,7 +25,6 @@ import { UploadStep } from "./upload-step";
 import { useOrder } from "./use-order";
 import type { UseOrderActionsResult } from "./use-order-actions";
 import { useOrderActions } from "./use-order-actions";
-import { useOrderHistory } from "./use-order-history";
 import type { UseSelectionsResult } from "./use-selections";
 import { useSelections } from "./use-selections";
 
@@ -88,35 +82,6 @@ function UserOrderContent({
   quietEndsAt,
 }: UserOrderContentProps) {
   const status = order.status;
-  const history = useOrderHistory({
-    token,
-    enabled: status !== "PENDING",
-  });
-
-  /**
-   * 合并刷新：regenerate / upload / restore 等 mutation 完成后，
-   * 既要刷新订单状态，也要刷新历史列表。
-   * useOrderActions 的 callback 不再使用各自的 refresh —— 全部走 refreshAll。
-   */
-  const refreshAll = useCallback(async () => {
-    await Promise.all([refreshOrder(), history.refreshHistory()]);
-  }, [refreshOrder, history]);
-
-  /**
-   * restore 后立刻：
-   * 1. 把服务端权威 selections 推给 use-selections（替换本地草稿）
-   * 2. 刷新订单 + 历史
-   */
-  const handleHistoryRestore = useCallback(
-    async (id: string) => {
-      const data = await history.restore(id);
-      if (data) {
-        selection.replaceFromServer(data.selections, data.uploadedImageCount);
-        await refreshAll();
-      }
-    },
-    [history, selection, refreshAll]
-  );
 
   const uploadedCount = order.uploadedImageCount ?? 0;
   const uploadCount = order.uploadCount ?? 1;
@@ -187,10 +152,6 @@ function UserOrderContent({
         canCancel={canCancel}
         cancelling={actions.cancelling}
         onCancelClick={() => setCancelOpen(true)}
-        history={history.history}
-        historyLoading={history.loading}
-        historyRestoringId={history.restoringId}
-        onHistoryRestore={(id) => void handleHistoryRestore(id)}
       />
 
       {/* ── 主内容 ── */}
@@ -208,7 +169,7 @@ function UserOrderContent({
               <FailureNotice
                 message={order.errorMessage}
                 canRetry={showUploadStep}
-                onRetryAll={() => void actions.retryAll().then(refreshAll)}
+                onRetryAll={() => void actions.retryAll().then(refreshOrder)}
                 retrying={actions.retryingAll}
               />
             )}
@@ -222,9 +183,8 @@ function UserOrderContent({
                 hasFailure={isFailed}
                 uploading={actions.uploading}
                 onUpload={async (files) => {
-                  const ok = await actions.upload(files);
-                  if (ok) await history.refreshHistory();
-                  return ok;
+                  await actions.upload(files);
+                  return true;
                 }}
               />
             )}
@@ -261,11 +221,7 @@ function UserOrderContent({
                 regenerating={actions.regenerating}
                 onToggle={selection.toggle}
                 onSubmit={handleSubmit}
-                onRegenerate={async (idx) => {
-                  const ok = await actions.regenerate(idx);
-                  if (ok) await history.refreshHistory();
-                  return ok;
-                }}
+                onRegenerate={actions.regenerate}
               />
             )}
 
@@ -372,10 +328,6 @@ interface TopBarProps {
   canCancel: boolean;
   cancelling: boolean;
   onCancelClick: () => void;
-  history: OrderHistorySnapshotView[];
-  historyLoading: boolean;
-  historyRestoringId: string | null;
-  onHistoryRestore: (id: string) => void;
 }
 
 const STATUS_PILL: Record<OrderStatus, { label: string; className: string }> = {
@@ -404,10 +356,6 @@ function TopBar({
   canCancel,
   cancelling,
   onCancelClick,
-  history,
-  historyLoading,
-  historyRestoringId,
-  onHistoryRestore,
 }: TopBarProps) {
   const pill = STATUS_PILL[status];
   return (
@@ -434,15 +382,8 @@ function TopBar({
           {pill.label}
         </span>
 
-        {/* 右：历史按钮 + 取消按钮 */}
+        {/* 右：取消按钮（效果图历史入口已从用户页面隐藏，admin 端需要时复用 history-drawer.tsx） */}
         <div className="flex shrink-0 items-center gap-1.5">
-          <HistoryDrawer
-            history={history}
-            loading={historyLoading}
-            status={status}
-            restoringId={historyRestoringId}
-            onRestore={onHistoryRestore}
-          />
           {canCancel && (
             <button
               type="button"

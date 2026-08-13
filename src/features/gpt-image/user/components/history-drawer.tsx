@@ -1,5 +1,15 @@
 "use client";
 
+/**
+ * TODO (2026-08-13): 已从用户页面（user-order-view.tsx）隐藏，按用户反馈：
+ * "为什么乱加效果图历史在用户页面"。免登录客户用不到快照/历史，TopBar
+ * 不要再展示入口。后续 admin 端要做"订单历史/恢复"功能时复用本组件，
+ * 不要重新写：服务端 lib/order-history.ts + /api/orders/[token]/history
+ * 都还在，hook 在 use-order-history.ts。
+ *
+ * 详见 [[user-page-no-complex-features]]。
+ */
+
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { ChevronDown, History, ImageIcon, Loader2, X } from "lucide-react";
 import { useState } from "react";
