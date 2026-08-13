@@ -126,25 +126,27 @@ export async function advanceOrderGeneration(
   const failures: string[] = [];
   const doneUrls: Array<{ imageIdx: number; url: string }> = [];
 
+  // done 的图片并行持久化到 R2：旧版 for 循环串行 await，多张图同轮 done
+  // 时墙钟叠加（每张 30s 下载 + 5s R2 PUT），容易撞穿 /poll 路由的
+  // maxDuration 预算。改成 Promise.all 后墙钟 ≈ 单张时长；下载各自的并发
+  // 对 R2 / Lingting CDN 都没压力。
+  const persistPromises: Array<Promise<{ imageIdx: number; url: string } | null>> = [];
   for (const { task, res } of results) {
     if (res.state === "done") {
-      // 拿到 Lingting URL → 立刻持久化到 R2。失败计入 failures，不算 done。
-      try {
-        const persistedUrl = await persistCandidateToR2(
-          res.url,
-          orderId,
-          task.imageIdx
-        );
-        doneUrls.push({ imageIdx: task.imageIdx, url: persistedUrl });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "未知错误";
-        logger.warn(
-          { err, orderId, imageIdx: task.imageIdx },
-          "效果图持久化到 R2 失败"
-        );
-        failures.push(`第 ${task.imageIdx + 1} 张：${msg}`);
-        // 不再 remaining，避免任务被反复查（已知的 broken 链接）
-      }
+      persistPromises.push(
+        persistCandidateToR2(res.url, orderId, task.imageIdx)
+          .then((url) => ({ imageIdx: task.imageIdx, url }))
+          .catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : "未知错误";
+            logger.warn(
+              { err, orderId, imageIdx: task.imageIdx },
+              "效果图持久化到 R2 失败"
+            );
+            failures.push(`第 ${task.imageIdx + 1} 张：${msg}`);
+            // 不再 remaining，避免任务被反复查（已知的 broken 链接）
+            return null;
+          })
+      );
     } else if (res.state === "failed") {
       failures.push(`第 ${task.imageIdx + 1} 张：${res.error}`);
     } else if (isTaskTimedOut(task, now)) {
@@ -152,6 +154,10 @@ export async function advanceOrderGeneration(
     } else {
       remaining.push(task);
     }
+  }
+  const persisted = await Promise.all(persistPromises);
+  for (const item of persisted) {
+    if (item) doneUrls.push(item);
   }
 
   // 重新读取再写，避免覆盖并发写入

@@ -30,8 +30,16 @@ import { withApiLogging } from "@/lib/api-logger";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
-// 只做少量上游 GET 查询，不做长轮询
-export const maxDuration = 30;
+// 90s：覆盖最坏链路——上游查询 8s（Promise.all 并行）+ 每张 persistCandidateToR2
+// 30s 下载 + R2 PUT 5s + DB 往返。早期版本用 30s 是误把这里当成"只做上游 GET
+// 查询"的纯查询接口，但实际上同时跑 persistCandidateToR2（见 advance-generation.ts
+// :132-148），多张图同轮 done 时持久化下载是串行叠加——单图就 ~48s 已超 30s，
+// 多图更久。30s 预算下 Vercel 会硬砍，订单 status 已 GENERATING 但 generationTask
+// 没机会写库 → 用户看到"生成超时"但任务其实没被推进。
+//
+// 注：与 /upload 路由的 maxDuration=90 对齐——两端都要走"submit 链路"，
+// 不能一个紧一个松。
+export const maxDuration = 90;
 
 async function postHandler(
   _req: NextRequest,

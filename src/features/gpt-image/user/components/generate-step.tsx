@@ -172,27 +172,32 @@ export function GenerateStep({
     if (fakeStartRef.current === null) {
       // 起点优先对齐「安静期起点」（= quietEndsAt - 30s），保证假进度
       // 节奏和上层 /poll 跳过窗口同步；上层未提供（mock / 老订单 / brief
-      // regen window）时退化到 performance.now()。
+      // regen window）时退化到 Date.now()。
       //
-      // ⚠️ 不论哪条路，**都**把 start 向前推 INITIAL_FAKE_OFFSET_MS：
+      // ⚠️ **两条路都用 Date.now()（epoch ms）**，不要用 performance.now()。
+      // useOrder 的 quietEndsAt 来自服务端 updatedAt 的 Date.now() 值（如
+      // 1755000000000），而 RAF 回调的 `now` 是 performance.now()（页内
+      // 相对 ms，如 5000）——两者**不在同一时间基**，now - start 会是巨大
+      // 负值，下面的 Math.max(0, ...) 把它钳到 0，导致假进度永远停在 0%
+      // （用户反馈"进度百分比还是 0%"）。统一用 Date.now() 后 start 与
+      // 当前时刻同时间基，elapsed 正常推进。
+      //
+      // 不论哪条路，**都**把 start 向前推 INITIAL_FAKE_OFFSET_MS：
       // ease-out-cubic 起步阶段（t≈0）的小增量会被 Math.round 卡在 0% 一段时间
       // 看不出动静。统一偏移保证首帧 elapsed=2.5s，next ≈ 7-8%（90s 窗口），
       // 用户进入即看到数字跳变。
       const quietStartMs =
         quietEndsAt !== null ? quietEndsAt - QUIET_AFTER_GENERATING_MS : null;
       const baseStartMs =
-        quietStartMs !== null ? quietStartMs : performance.now();
+        quietStartMs !== null ? quietStartMs : Date.now();
       fakeStartRef.current = baseStartMs - INITIAL_FAKE_OFFSET_MS;
     }
     let rafId = 0;
-    const tick = (now: number) => {
-      const start = fakeStartRef.current ?? now;
-      // 防御 clock skew：quietStartMs 来自服务端 updatedAt，若服务端时钟
-      // 跑在客户端前面（哪怕只 5s），原始 elapsed 会是负值 → eased 变负
-      // → next 为负 → setDisplayPercent(max) 把 displayPercent 卡死在 0%。
-      // 客户端时钟对齐到 start = max(now, start)，让假进度从 0 起正常推进，
-      // 直到「客户端时间追平 start」后无缝接上原节奏。
-      const elapsed = Math.max(0, now - start);
+    const tick = (_now: number) => {
+      // 同上：必须用 Date.now() 与 start 同时间基（epoch ms），不能用 RAF
+      // 传入的 performance.now()。
+      const start = fakeStartRef.current ?? Date.now();
+      const elapsed = Math.max(0, Date.now() - start);
       // 90 秒跑到 FAKE_PROGRESS_CAP；ease-out-cubic 曲线，前快后慢
       const t = Math.min(1, elapsed / FAKE_PROGRESS_WINDOW_MS);
       const eased = 1 - (1 - t) ** 3;
