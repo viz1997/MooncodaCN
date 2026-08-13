@@ -290,7 +290,7 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
    * - 第 1 张角标 = "已锁定 #2" + Lock 图标（emerald-600）
    * - OriginalStrip 第 1 张永久 emerald 边框
    * - QuadrantGrid disabled
-   * - 底部"该张已提交"按钮 disabled，"重新生成第 1 张"按钮 disabled
+   * - 底部"已提交 #N"按钮 disabled，"重新生成第 1 张"按钮 disabled
    * - 标题区"已锁定 1/2 张，剩余可继续上传或挑选"
    * - 第 2 张可正常选 + 提交
    */

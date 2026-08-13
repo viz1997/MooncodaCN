@@ -60,7 +60,7 @@ const SWIPE_THRESHOLD = 50; // px
  *   - QuadrantGrid disabled（不可点候选）
  *   - 当前原图小卡角标改 "已锁定 #N" + Lock 图标
  *   - "重新生成第 N 张"按钮 disabled
- *   - "确认提交第 N 张"按钮 disabled，文案改 "该张已提交"
+ *   - "确认提交第 N 张"按钮 disabled，文案改 "已提交 #N"
  * - Enter 键 / 自动跳到下一张未选：当前张未锁定 + 选了候选 → 触发 confirm；
  *   当前张已锁定 → Enter 跳过（用户应继续选下一张）。
  *
@@ -414,7 +414,10 @@ export function SelectStep({
               </span>
             ) : isCurrentLocked ? (
               <span className="inline-flex items-center gap-1.5">
-                <Lock className="h-4 w-4" /> 该张已提交
+                <Lock className="h-4 w-4" />
+                {currentSelection !== null
+                  ? `已提交 #${currentSelection + 1}`
+                  : "该张已提交"}
               </span>
             ) : (
               <span className="inline-flex items-center gap-1.5">
