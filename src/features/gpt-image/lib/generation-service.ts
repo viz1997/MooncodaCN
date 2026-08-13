@@ -153,19 +153,16 @@ export async function submitLingtingTask(
 
   // 1. 下载原图 buffer（imageUrl 通常是 R2 公开域 URL）
   //
-  // 超时 60s（与 persistCandidateToR2 的 Lingting CDN 下载对齐）：早期版本用 30s，
-  // 但 R2 跨区域回源（Vercel 函数区域到 R2 bucket 区域）+ 大图（>5MB）偶发会
-  // 撞线。AbortError 冒泡到 submitGeneration → 整个订单被标 FAILED（用户反馈：
-  // "第 1 张：The operation was aborted due to timeout"）。
-  //
-  // 60s 仍在 /upload maxDuration=90s 预算内（下载 60s + Lingting 60s + 响应 5s
-  // + DB 5s = 130s——略超；但只有 sync URL 路径会走完这段，async task_id 路径
-  // 5s 内返回 task_id 不消耗下载预算）。
+  // 超时 120s：旧 60s 在 Vercel 跨区域回源 R2 + 大图（>5MB）偶发撞线
+  // （用户反馈 "第 1 张：The operation was aborted due to timeout"）。
+  // 120s 给 R2 充足缓冲——async task_id 路径下这是阻塞点；sync URL 路径
+  // 还会走 persistCandidateToR2（60s），叠加 245s 仍在 /upload maxDuration=300s
+  // 预算内。
   let imageBuf: ArrayBuffer;
   let imageMime = "image/png";
   try {
     const imgRes = await fetch(imageUrl, {
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(120_000),
     });
     if (!imgRes.ok) {
       throw new Error(
@@ -195,18 +192,19 @@ export async function submitLingtingTask(
   form.append("response_format", "url");
 
   // 3. 提交任务。
-  // 超时 60s（与上面的 R2 下载对齐）：早期版本用 45s，但 Lingting 偶发 cold start
-  // / 模型队列积压会让 /v1/images/edits POST 卡到 40s+。AbortError 会让单图
-  // submit 失败，进而整个订单 FAILED（用户反馈："第 1 张：The operation was
-  // aborted due to timeout"）。60s 给 Lingting 充足缓冲，且仍在 /upload
-  // maxDuration=90s 预算内（async task_id 路径不持久化，墙钟 ≈ 60s）。
+  // 超时 120s：旧 60s 仍被 Lingting 偶发 cold start / 模型队列积压撞线
+  // （用户反馈 "第 1 张：The operation was aborted due to timeout"）。
+  // 120s 给 Lingting 充足缓冲；async task_id 路径下返回 task_id 即退出，
+  // 不会消费完整 120s——墙钟 ≈ R2 120s + Lingting ~5-10s + DB 5s = 130-140s
+  // ≤ /upload maxDuration=300s。sync URL 路径叠加 persist 65s 后 195s，
+  // 仍在预算内。
   const submitRes = await fetch(`${LINGTING_BASE_URL}/v1/images/edits`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${LINGTING_API_KEY}`,
     },
     body: form,
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(120_000),
   });
 
   if (!submitRes.ok) {

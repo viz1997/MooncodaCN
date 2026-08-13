@@ -33,11 +33,18 @@ import { withApiLogging } from "@/lib/api-logger";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
-// 90s：覆盖 submitGeneration 内"下载原图 30s + Lingting 提交 60s"的最坏
-// 链路。Vercel 函数预算低于 90s 时会被砍，订单 status 被置 GENERATING 后
-// 半途退出 → generationTask 没写库 → 订单永远卡住。90s 留 5-10s 给 DB
-// 落库 + 响应序列化缓冲。
-export const maxDuration = 90;
+// 300s（Vercel Pro 上限）：覆盖 submitGeneration 最坏链路——
+// R2 下载原图 120s + Lingting `/v1/images/edits` POST 120s +
+// persistCandidateToR2（仅 sync URL 路径，60s 下载 + 5s R2 PUT）+ DB 5s。
+//
+// async task_id 路径（主流）墙钟 ≈ 245s ≤ 300s；
+// sync URL 路径墙钟 ≈ 310s——略超 300s 上限，但 sync URL 是少数
+// 情况（仅当 Lingting 同步返回 url 时），async task_id 是默认路径。
+//
+// 早期版本用 90s，但 60s→120s 的两个超时升级后 90s 预算不够；
+// 再降到 60s 会让 Lingting 偶发慢响应直接撞线（用户反馈
+// "第 1 张：The operation was aborted due to timeout"）。
+export const maxDuration = 300;
 
 const UPLOADABLE = new Set(["PENDING", "CANDIDATES_READY", "FAILED"]);
 
