@@ -98,12 +98,16 @@ export function SelectStep({
   onRegenerate,
 }: SelectStepProps) {
   const [currentIdx, setCurrentIdx] = useState(() => {
-    // 默认跳到第一张**未锁定**的位：批次模型下，选完第一张后再上传第
-    // 二张，新 SelectStep 实例挂载时 currentIdx 应聚焦用户能操作的那张
-    // ——已锁定位只是回看，没有交互。锁定全选完（找不到未锁定）则退回 0
-    // （虽然不会进入 SelectStep，防御性写法）。
-    const firstUnlocked = selections.findIndex((v) => v === null);
-    return firstUnlocked >= 0 ? firstUnlocked : 0;
+    // 默认从第一张原图（imageIdx=0）开始：让 OriginalStrip 默认高亮的那张和
+    // QuadrantGrid 默认展示的候选组**对齐**，避免"strip 视觉默认第一张
+    // （emerald 边框=已锁）但下方 QuadrantGrid 跳到第二张未锁位"的错位感。
+    //
+    // 之前"first unlocked"逻辑会把 currentIdx 推到下一张未选位，但锁定位的
+    // emerald 边框视觉权重远高于当前但未选的 zinc-300 边框，用户看上去仍像
+    // "第一张是默认当前 tab"——与 QuadrantGrid 实际显示的位不一致。统一
+    // 默认从 0 起，用户需要看别的位时手动点 strip 切（或选完后 handleToggle
+    // 自动跳到下一未选位）。
+    return 0;
   });
   const [lightbox, setLightbox] = useState<LightboxTarget | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
