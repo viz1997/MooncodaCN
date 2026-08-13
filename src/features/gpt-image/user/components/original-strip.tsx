@@ -88,11 +88,17 @@ export function OriginalStrip({
             className={[
               "relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border-2 transition-all sm:h-[72px] sm:w-[72px]",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2",
+              // emerald 边框 = "这张已选中"（locked 是 chosen 的终态）：
+              // 跟下面的 QuadrantGrid 高亮候选一一对应。
+              // 当前 tab 但未选 → 用 zinc 中性 ring，不冒充 emerald，
+              // 避免用户以为这张已经选了候选（实际上还没有）。
               locked
                 ? "border-emerald-500 ring-2 ring-emerald-500/30"
-                : isCurrent
+                : chosen
                   ? "border-emerald-500 ring-2 ring-emerald-500/20"
-                  : "border-zinc-200 opacity-70 hover:opacity-100",
+                  : isCurrent
+                    ? "border-zinc-300 ring-2 ring-zinc-300/40"
+                    : "border-zinc-200 opacity-70 hover:opacity-100",
             ].join(" ")}
           >
             {/* biome-ignore lint/performance/noImgElement: R2 远程 URL，next/image 域名白名单外 */}
