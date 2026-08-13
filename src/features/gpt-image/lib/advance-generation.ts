@@ -15,7 +15,10 @@ import { db } from "@/db";
 import { promptOrder } from "@/db/schema";
 import { logger } from "@/lib/logger";
 
-import { queryLingtingTask } from "./generation-service";
+import {
+  persistCandidateToR2,
+  queryLingtingTask,
+} from "./generation-service";
 import {
   isOrderPastDeadline,
   isTaskTimedOut,
@@ -125,7 +128,23 @@ export async function advanceOrderGeneration(
 
   for (const { task, res } of results) {
     if (res.state === "done") {
-      doneUrls.push({ imageIdx: task.imageIdx, url: res.url });
+      // 拿到 Lingting URL → 立刻持久化到 R2。失败计入 failures，不算 done。
+      try {
+        const persistedUrl = await persistCandidateToR2(
+          res.url,
+          orderId,
+          task.imageIdx
+        );
+        doneUrls.push({ imageIdx: task.imageIdx, url: persistedUrl });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "未知错误";
+        logger.warn(
+          { err, orderId, imageIdx: task.imageIdx },
+          "效果图持久化到 R2 失败"
+        );
+        failures.push(`第 ${task.imageIdx + 1} 张：${msg}`);
+        // 不再 remaining，避免任务被反复查（已知的 broken 链接）
+      }
     } else if (res.state === "failed") {
       failures.push(`第 ${task.imageIdx + 1} 张：${res.error}`);
     } else if (isTaskTimedOut(task, now)) {

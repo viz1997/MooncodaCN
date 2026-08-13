@@ -30,6 +30,7 @@ import { eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import { promptOrder } from "@/db/schema";
+import { isR2Configured, putObject } from "@/features/image-gen/lib/r2";
 import { logger } from "@/lib/logger";
 
 import type { GenerationTask } from "./generation-task";
@@ -38,6 +39,70 @@ import { parseCandidates, parseUploadedImages } from "./order-helpers";
 
 const LINGTING_API_KEY = process.env.LINGTING_API_KEY;
 const LINGTING_BASE_URL = process.env.LINGTING_BASE_URL ?? "https://wellapi.ai";
+
+/**
+ * 把 Lingting 返回的临时效果图 URL 下载下来，重新上传到 R2，返回永久 R2 URL。
+ *
+ * 为什么不直接落库 upstream URL：wellapi.ai 的 URL 有 TTL（典型 1-24h，
+ * 部分账户更短），几天后必然过期。R2 是我们自己控制的 bucket，URL
+ * 永久有效。
+ *
+ * 失败抛错，由调用方决定是否计入 failures；不静默 fallback 回 upstream URL
+ * —— 否则等于这次修改白做。
+ */
+export async function persistCandidateToR2(
+  upstreamUrl: string,
+  orderId: string,
+  imageIdx: number
+): Promise<string> {
+  if (!isR2Configured()) {
+    throw new Error("R2 未配置：效果图无法持久化");
+  }
+
+  // 1. 下载上游
+  const res = await fetch(upstreamUrl, {
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) {
+    throw new Error(
+      `下载 Lingting 效果图失败：HTTP ${res.status} ${res.statusText}`
+    );
+  }
+  const contentType = res.headers.get("content-type") ?? "image/png";
+  const body = new Uint8Array(await res.arrayBuffer());
+  if (body.byteLength === 0) {
+    throw new Error("Lingting 返回空 body");
+  }
+
+  // 2. 推断扩展名（PNG/JPEG/WebP/GIF 都允许）
+  const ext =
+    contentType.includes("jpeg") || contentType.includes("jpg")
+      ? "jpg"
+      : contentType.includes("webp")
+        ? "webp"
+        : contentType.includes("gif")
+          ? "gif"
+          : "png";
+
+  // 3. 上传 R2：objectKey 模板带订单 + 图片 idx + 时间戳，避免重复生成覆盖
+  const objectKey = `gpt-image/results/${orderId}/${imageIdx}-${Date.now()}-${randomBytes(4).toString("hex")}.${ext}`;
+  const persistedUrl = await putObject({
+    objectKey,
+    body,
+    contentType,
+  });
+
+  logger.info(
+    {
+      orderId,
+      imageIdx,
+      bytes: body.byteLength,
+      objectKey,
+    },
+    "Lingting 效果图已转存 R2"
+  );
+  return persistedUrl;
+}
 
 /**
  * 检查 Lingting API 是否已配置
@@ -328,8 +393,23 @@ export async function submitGeneration(
     const result = item.result;
     if (!result) continue;
     if (result.kind === "url") {
-      nested[item.imageIdx] = [result.url];
-      readyCount++;
+      try {
+        // 同步拿到 URL → 立刻持久化到 R2，避免 Lingting URL 过期
+        const persistedUrl = await persistCandidateToR2(
+          result.url,
+          orderId,
+          item.imageIdx
+        );
+        nested[item.imageIdx] = [persistedUrl];
+        readyCount++;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "未知错误";
+        logger.warn(
+          { err, orderId, imageIdx: item.imageIdx },
+          "效果图持久化到 R2 失败"
+        );
+        failures.push(`第 ${item.imageIdx + 1} 张：${msg}`);
+      }
     } else {
       tasks.push({
         imageIdx: item.imageIdx,
