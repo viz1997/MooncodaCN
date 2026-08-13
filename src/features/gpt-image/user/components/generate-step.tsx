@@ -49,13 +49,27 @@ interface GenerateStepProps {
 const STALL_HINT_MS = 2 * 60_000;
 
 /**
- * 「假进度」上限：95%。
+ * 「假进度」上限：99%。
  *
  * 业界主流做法：拿到首张真实结果前，UI 不能停在 0%，要"看起来在跑"；
  * 但又不能假装跑到 100%，否则用户以为已结束。我们用 RAF 平滑推进到
- * 这个上限就停住，剩下的 5% 等真实 done 比例拉到 100% 时直接 100%。
+ * 这个上限就停住，剩下的 1% 等真实 done 比例拉到 100% 时直接 100%。
+ *
+ * 原版用 95%——用户反馈"卡在 95% 等真实进度"感觉像被卡住了，留 5% 给真实
+ * 比例太宽。99% 让假进度一路几乎跑到顶，最坏情况（极慢上游）下用户看到
+ * 99% 等真实 100%，视觉差只有 1%，体感上"假进度几乎完整跑完了，剩下的
+ * 是真实完成度接管"，不再有"卡住"的错觉。
  */
-const FAKE_PROGRESS_CAP = 95;
+const FAKE_PROGRESS_CAP = 99;
+
+/**
+ * 假进度爬升到 cap 所需的时间：90 秒。
+ *
+ * 原 240s 太长——单图 P50 ≈ 60s、P99 ≈ 180s，240s 窗口下前 30s 用户只
+ * 看到 0%→31%，节奏过慢容易让人误以为卡死。90s 让前 30s 推到 ~50%，
+ * 既给单图/多图并行都留足缓冲，又让用户在前 30s 内明显看到数字推进。
+ */
+const FAKE_PROGRESS_WINDOW_MS = 90_000;
 
 /**
  * GENERATING 起始「安静期」长度：30 秒。
@@ -70,17 +84,15 @@ const FAKE_PROGRESS_CAP = 95;
 const QUIET_AFTER_GENERATING_MS = 30_000;
 
 /**
- * 「起步偏移」：让 RAF 首帧就把 displayPercent 推到 ~3%，避免
- * Math.round 把 ease-out-cubic 起步阶段（t≈0）的小增量一直卡在 "0%"。
+ * 「起步偏移」：把 fakeStart 永远向前推 2.5s，让 RAF 首帧就把
+ * displayPercent 推到 ~3%，避免 ease-out-cubic 起步阶段（t≈0）的亚百分点
+ * 被 Math.round 卡在 "0%" 一段时间看不出动静。
  *
- * ease-out-cubic 曲线在 t=0 处的导数为 0——前 ~500ms next 都是亚百分点，
- * Math.round 后还是 "0%"，让用户觉得"进度没动"。把 start 提前 2.5s 后，
- * 首帧 elapsed=2500ms → t≈0.0104 → eased≈0.031 → next≈2.9%，立即显示
- * "3%"，用户进入即看到数字跳变；后续 tick 顺着曲线继续往 95% 推。
- *
- * 仅在 quietStartMs 不可用时生效（brief regen window / mock / 老订单）。
- * 正常 GENERATING 路径走 quietStartMs = updatedAt，不需要这个偏移——
- * 因为 updatedAt 离 now 已经过了一段真实时间，elapsed 自然非 0。
+ * 原版只对 fallback 路径（quietStartMs 不可用）应用偏移，但实测 normal 路径
+ * 里 quietStartMs ≈ updatedAt ≈ 服务端刚刚写的时刻，到客户端首帧之间只过
+ * 100ms-1s，elapsed 仍是亚百分点——进度条照样停在 0%。现在统一应用偏移，
+ * 首帧 elapsed=2500ms → t≈0.028 → eased≈0.082 → next≈7.8%（90s 窗口），
+ * 进入即显示 "8%"，用户立刻看到数字跳变。
  */
 const INITIAL_FAKE_OFFSET_MS = 2_500;
 
@@ -156,15 +168,17 @@ export function GenerateStep({
     if (fakeStartRef.current === null) {
       // 起点优先对齐「安静期起点」（= quietEndsAt - 30s），保证假进度
       // 节奏和上层 /poll 跳过窗口同步；上层未提供（mock / 老订单 / brief
-      // regen window）时退化：把 start 提前 INITIAL_FAKE_OFFSET_MS，
-      // 让 RAF 首帧就把 displayPercent 推到 ~3%，避免 ease-out-cubic 起步
-      // 阶段被 Math.round 卡在 "0%" 一段时间看不到任何动静。
+      // regen window）时退化到 performance.now()。
+      //
+      // ⚠️ 不论哪条路，**都**把 start 向前推 INITIAL_FAKE_OFFSET_MS：
+      // ease-out-cubic 起步阶段（t≈0）的小增量会被 Math.round 卡在 0% 一段时间
+      // 看不出动静。统一偏移保证首帧 elapsed=2.5s，next ≈ 7-8%（90s 窗口），
+      // 用户进入即看到数字跳变。
       const quietStartMs =
         quietEndsAt !== null ? quietEndsAt - QUIET_AFTER_GENERATING_MS : null;
-      fakeStartRef.current =
-        quietStartMs !== null
-          ? quietStartMs
-          : performance.now() - INITIAL_FAKE_OFFSET_MS;
+      const baseStartMs =
+        quietStartMs !== null ? quietStartMs : performance.now();
+      fakeStartRef.current = baseStartMs - INITIAL_FAKE_OFFSET_MS;
     }
     let rafId = 0;
     const tick = (now: number) => {
@@ -175,8 +189,8 @@ export function GenerateStep({
       // 客户端时钟对齐到 start = max(now, start)，让假进度从 0 起正常推进，
       // 直到「客户端时间追平 start」后无缝接上原节奏。
       const elapsed = Math.max(0, now - start);
-      // 240 秒跑到 FAKE_PROGRESS_CAP；ease-out-cubic 曲线，前快后慢
-      const t = Math.min(1, elapsed / 240_000);
+      // 90 秒跑到 FAKE_PROGRESS_CAP；ease-out-cubic 曲线，前快后慢
+      const t = Math.min(1, elapsed / FAKE_PROGRESS_WINDOW_MS);
       const eased = 1 - (1 - t) ** 3;
       const next = Math.min(FAKE_PROGRESS_CAP, eased * FAKE_PROGRESS_CAP);
       setDisplayPercent((prev) => (next > prev ? next : prev));
