@@ -60,8 +60,19 @@ export async function persistCandidateToR2(
   }
 
   // 1. 下载上游
+  //
+  // 超时 60s：早期版本用 30s——但 Lingting CDN 偶发慢响应（wellapi.ai 边缘节点
+  // 跨大洲回源 + 首次回源 cold cache），30s 在生产环境撞到过，AbortError
+  // 冒泡成 failures："第 N 张：The operation was aborted due to timeout"。
+  //
+  // 旧版会被 /poll maxDuration=30 误诊成"Vercel 砍函数"——其实真因是
+  // persistCandidateToR2 内部 download timeout。现在 /poll 调到 90s 后
+  // 真实根因暴露，把这里也升到 60s 给 CDN 2x 缓冲。
+  //
+  // 60s 仍在 /poll maxDuration=90 预算内（60s download + 5s R2 PUT + DB
+  // 往返 ~5s = 70s ≤ 90s）；多图走 Promise.all，墙钟 ≈ 单张时长。
   const res = await fetch(upstreamUrl, {
-    signal: AbortSignal.timeout(30_000),
+    signal: AbortSignal.timeout(60_000),
   });
   if (!res.ok) {
     throw new Error(

@@ -72,16 +72,19 @@ const FAKE_PROGRESS_CAP = 99;
 const FAKE_PROGRESS_WINDOW_MS = 90_000;
 
 /**
- * GENERATING 起始「安静期」长度：30 秒。
+ * GENERATING 起始「首轮真实查询时刻」相对 updatedAt 的偏移：15 秒。
  *
- * 与 useOrder 的 QUIET_AFTER_GENERATING_MS 同值——必须保持一致，
- * 否则假进度节奏会和 /poll 跳过窗口错位。镜像写一份避免引入跨模块
- * 常量依赖（generate-step 不应反向依赖 use-order 的内部常量）。
+ * 与 useOrder 的 POLL_SCHEDULE_MS[0] 同值（也镜像到 useOrder 的
+ * QUIET_AFTER_GENERATING_MS）——必须保持一致，否则假进度节奏会和
+ * /poll 调度表错位。
  *
- * 此处仅用于把假进度起点对齐到安静期起点（= quietEndsAt - 30s），
+ * 镜像写一份避免引入跨模块常量依赖（generate-step 不应反向依赖
+ * use-order 的内部常量）。
+ *
+ * 此处仅用于把假进度起点对齐到首轮查询起点（= quietEndsAt - 15s），
  * 保证用户中途切页 / 刷新后进度从一致位置继续。
  */
-const QUIET_AFTER_GENERATING_MS = 30_000;
+const QUIET_AFTER_GENERATING_MS = 15_000;
 
 /**
  * 「起步偏移」：把 fakeStart 永远向前推 2.5s，让 RAF 首帧就把
