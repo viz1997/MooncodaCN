@@ -23,7 +23,7 @@ import { eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { promptOrder } from "@/db/schema";
-import { submitGeneration } from "@/features/gpt-image/lib/generation-service";
+import { inngest } from "@/inngest";
 import {
   parseCandidates,
   parseSelections,
@@ -33,8 +33,10 @@ import { withApiLogging } from "@/lib/api-logger";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
-// 90s：与 /upload 对齐。submitGeneration 同链路（下载 30s + Lingting 提交 60s）。
-export const maxDuration = 90;
+// 30s：仅做 DB 读 + 状态校验 + 事务（归档 + 清空 candidates + 状态置
+// GENERATING）+ send Inngest 事件。submitGeneration 移到 Inngest 后台跑。
+// 早期版本是 90s，因为同步在请求周期内调 submitGeneration。
+export const maxDuration = 30;
 
 async function postHandler(
   req: NextRequest,
@@ -168,7 +170,10 @@ async function postHandler(
     const nextSelections = prevSelections;
 
     // 归档 + 清空 必须同一个事务（避免半成品快照 + 竞态 round 冲突）。
-    // 事务外再调 submitGeneration()，它依赖请求周期内的 submit 上下文。
+    // 事务外 send Inngest 事件触发 submitGeneration，让它在后台跑。
+    // Inngest 触发是事务外的副作用——即便 send 失败，DB 状态已被事务
+    // 正确置为 GENERATING；前端 stall watchdog 5 min 内可发现没真实
+    // 进度推进而置 FAILED，不会永久卡住。
     await db.transaction(async (tx) => {
       await archiveOrderSnapshot(
         order.id,
@@ -195,9 +200,20 @@ async function postHandler(
     const candidateCount = order.template.candidateCount;
     logger.info(
       { orderId: order.id, fromIdx, toIdx, candidateCount },
-      isSingle ? "提交单图重新生成" : "提交批量重新生成"
+      isSingle ? "提交单图重新生成（Inngest 异步）" : "提交批量重新生成（Inngest 异步）"
     );
-    await submitGeneration(order.id, fromIdx, toIdx, candidateCount);
+    // 主流方案：send Inngest 事件后立即返回 202。submitGeneration 链路
+    // （R2 120s + Lingting 120s）挪到 Inngest 后台跑，不再压本路由
+    // 函数预算。详见 /upload 路由同段注释。
+    await inngest.send({
+      name: "gpt-image/submit-generation",
+      data: {
+        orderId: order.id,
+        fromIdx,
+        total: toIdx,
+        candidateCount,
+      },
+    });
 
     return NextResponse.json(
       {

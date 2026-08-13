@@ -22,7 +22,7 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
 import { promptOrder } from "@/db/schema";
-import { submitGeneration } from "@/features/gpt-image/lib/generation-service";
+import { inngest } from "@/inngest";
 import {
   parseSelections,
   parseUploadedImages,
@@ -33,18 +33,13 @@ import { withApiLogging } from "@/lib/api-logger";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
-// 300s（Vercel Pro 上限）：覆盖 submitGeneration 最坏链路——
-// R2 下载原图 120s + Lingting `/v1/images/edits` POST 120s +
-// persistCandidateToR2（仅 sync URL 路径，60s 下载 + 5s R2 PUT）+ DB 5s。
+// 30s：仅做 DB 读 + 校验 + 写 uploadedImages + 状态置 GENERATING +
+// send Inngest 事件。submitGeneration 链路（R2 120s + Lingting 120s）
+// 移到 Inngest 后台跑，不占本路由预算。
 //
-// async task_id 路径（主流）墙钟 ≈ 245s ≤ 300s；
-// sync URL 路径墙钟 ≈ 310s——略超 300s 上限，但 sync URL 是少数
-// 情况（仅当 Lingting 同步返回 url 时），async task_id 是默认路径。
-//
-// 早期版本用 90s，但 60s→120s 的两个超时升级后 90s 预算不够；
-// 再降到 60s 会让 Lingting 偶发慢响应直接撞线（用户反馈
-// "第 1 张：The operation was aborted due to timeout"）。
-export const maxDuration = 300;
+// 早期版本 maxDuration=300 是因为同步在请求周期内调 submitGeneration，
+// 主流方案是 send 事件后立即返回 202——把 300s 预算降到 30s 即可。
+export const maxDuration = 30;
 
 const UPLOADABLE = new Set(["PENDING", "CANDIDATES_READY", "FAILED"]);
 
@@ -259,51 +254,48 @@ async function postHandler(
 
     const candidateCount = order.template.candidateCount;
 
+    const fromIdx = isRetryAfterFailure ? 0 : existing.length;
+    const total = merged.length;
+
     logger.info(
       {
         orderId: order.id,
-        fromIdx: isRetryAfterFailure ? 0 : existing.length,
-        total: merged.length,
+        fromIdx,
+        total,
         candidateCount,
         isRetryAfterFailure,
       },
-      "提交效果图生成任务"
-    );
-    // 只做 submit（拿 task_id 落库），在本请求周期内完成，不留后台任务。
-    // 后续轮询由前端调 POST /api/orders/[token]/poll 驱动。
-    // FAILED 替换场景：merged 是全新图片，从 0 开始重跑；否则只跑新增的。
-    await submitGeneration(
-      order.id,
-      isRetryAfterFailure ? 0 : existing.length,
-      merged.length,
-      candidateCount
+      "提交效果图生成任务（Inngest 异步触发）"
     );
 
-    // 关键：submitGeneration 内部可能把状态覆写回 FAILED（全部 submit 失败），
-    // 不能用硬编码的 "GENERATING" 回客户端——会出现"toast 说正在生成、徽章是失败"的错位。
-    // 重新读一次 DB 拿真实终态。
-    const finalOrder = await db.query.promptOrder.findFirst({
-      where: eq(promptOrder.id, order.id),
-      columns: { status: true, errorMessage: true },
+    // 主流方案：send Inngest 事件后立即返回 202。
+    // submitGeneration 链路（R2 下载 120s + Lingting POST 120s + sync URL
+    // 路径再叠加 persistCandidateToR2 65s）在 Inngest 后台跑，不再压本路由
+    // 函数预算。前端轮询 /status / /poll 拿真实状态——如果 Inngest 跑挂了
+    // 全部失败，submitGeneration 内部会把订单置 FAILED，前端 watch 看到。
+    //
+    // FAILED 替换场景：merged 是全新图片，从 0 开始重跑；否则只跑新增的。
+    await inngest.send({
+      name: "gpt-image/submit-generation",
+      data: {
+        orderId: order.id,
+        fromIdx,
+        total,
+        candidateCount,
+      },
     });
-    const finalStatus = finalOrder?.status ?? "GENERATING";
-    const finalError = finalOrder?.errorMessage ?? null;
-    const generationFailed = finalStatus === "FAILED";
 
     return NextResponse.json(
       {
-        // 上传本身成功；只有生成这一步可能失败。FAILED 时 success=false 让客户端走错误提示。
-        success: !generationFailed,
-        message: generationFailed
-          ? (finalError ?? "生图任务提交失败，请稍后重试")
-          : isRetryAfterFailure
-            ? `已替换为 ${accepted.length} 张图片，正在重新生成效果图`
-            : `${accepted.length} 张图片已上传，正在生成效果图`,
+        success: true,
+        message: isRetryAfterFailure
+          ? `已替换为 ${accepted.length} 张图片，正在重新生成效果图`
+          : `${accepted.length} 张图片已上传，正在生成效果图`,
         data: {
-          status: finalStatus,
+          status: "GENERATING",
           uploadedImageCount: merged.length,
           newImageCount: accepted.length,
-          errorMessage: finalError,
+          errorMessage: null,
         },
       },
       { status: 202 }

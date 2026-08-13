@@ -30,4 +30,22 @@ export type Events = {
       message: string;
     };
   };
+  /**
+   * gpt-image 提交生图任务
+   *
+   * 由 /api/orders/[token]/upload 与 /regenerate 触发，把 R2 URL 列表
+   * 落库后立即 send 返回 202，后台 Inngest 函数再去调 Lingting
+   * `submitGeneration`。这样 /upload 路由不再被 Lingting 的 120s R2
+   * 下载 + 120s Lingting POST 阻塞，maxDuration 也不用顶到 300s。
+   *
+   * retries: 0 因为 Lingting 不支持幂等键，重复提交会重复扣配额。
+   */
+  "gpt-image/submit-generation": {
+    data: {
+      orderId: string;
+      fromIdx: number;
+      total: number;
+      candidateCount: number;
+    };
+  };
 };

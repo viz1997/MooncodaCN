@@ -124,16 +124,22 @@ export function useOrderActions({
       }
       setUploading(true);
       try {
-        // 1) 对每张图串行：取预签名 → PUT 到 R2
-        const publicUrls: string[] = [];
-        for (const file of files) {
-          const { uploadUrl, publicUrl } = await presignOne(token, file);
-          // 注意：uploadUrl 是 S3 API endpoint 签名 URL（用于 PUT），
-          // publicUrl 是 r2.dev 公共域（用于读），二者不能混用。
-          await putToR2(uploadUrl, file, file.type);
-          publicUrls.push(publicUrl);
-        }
-        // 2) 把公开 URL 列表交给 /upload 落库 + 触发生成
+        // 1) 对每张图并行：取预签名 → PUT 到 R2。Promise.all 保持输出
+        // 顺序与 files 一致，公共 URL 列表无需额外排序。串行旧版每张
+        // 多图 2x wall-clock，并行后墙钟 ≈ 单张时长。
+        //
+        // 任意一张失败立即抛错（Promise.all reject 即终止），让用户
+        // 知道哪张坏了——比静默吞掉并假装上传成功更利于排错。
+        const publicUrls = await Promise.all(
+          files.map(async (file) => {
+            const { uploadUrl, publicUrl } = await presignOne(token, file);
+            // 注意：uploadUrl 是 S3 API endpoint 签名 URL（用于 PUT），
+            // publicUrl 是 r2.dev 公共域（用于读），二者不能混用。
+            await putToR2(uploadUrl, file, file.type);
+            return publicUrl;
+          })
+        );
+        // 2) 把公开 URL 列表交给 /upload 落库 + 触发 Inngest 异步生图
         const res = await fetch(`/api/orders/${token}/upload`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -142,18 +148,17 @@ export function useOrderActions({
           }),
         });
         if (!res.ok) throw new Error(await readError(res, "提交失败"));
-        // 后端会把"上传成功但生成启动失败"的情况以 success:false 回传，
-        // 此时 status=FAILED、data.errorMessage 是真实原因——直接展示给用户，
-        // 不再用"正在生成效果图"误导。
+        // /upload 现在固定返回 success:true（Inngest 事件 send 成功即
+        // 视为成功），失败会在 Inngest 后台跑完时把订单置 FAILED，前端
+        // 轮询 /status 或 /poll 拿真实状态——toast 仍按"上传成功"展示。
         const json = (await res.json()) as {
           success: boolean;
           message?: string;
-          data?: { status?: string; errorMessage?: string | null };
         };
         if (json.success) {
           toast.success(`${files.length} 张图片已上传，正在生成效果图`);
         } else {
-          toast.error(json.message ?? "生图任务提交失败，请稍后重试");
+          toast.error(json.message ?? "提交失败，请稍后重试");
         }
         await refresh();
         return json.success;
