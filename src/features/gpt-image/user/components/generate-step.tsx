@@ -32,21 +32,26 @@ interface GenerateStepProps {
 }
 
 /**
- * 停滞自动停止阈值：2 分钟。
+ * 停滞自动停止阈值：5 分钟。
  *
  * 超过这个时间没收到服务端更新（updatedAt 与上次快照相同）→ 客户端
  * watchdog 自动调 stopGeneration，等价于"自动失败"：订单会被置
  * FAILED，走 FailureNotice 的"重新生成全部"复活路径。
  *
- * 阈值与 ORDER_DEADLINE_MS（服务端硬超时）对齐——保证：
- * - 客户端路径：watchdog 先到 2 分钟就停，用户感知 < 服务端最坏情况
+ * 阈值与 ORDER_DEADLINE_MS（服务端硬超时 5 min）对齐——保证：
+ * - 客户端路径：watchdog 先到 5 分钟就停，用户感知 < 服务端最坏情况
  * - 服务端路径：即便前端 watchdog 没跑起来（如浏览器崩溃、tab 冻），
  *   下一次 /poll 进入 advance-generation.ts 也会被硬超时命中
  *
  * 不需要再加 STALL_HINT_MS 渐进提示——watchdog 本身就是动作，
  * 不留"再等等自己可能好"的窗口。
+ *
+ * 早期版本用 2 分钟，但 2026-08-13 把上传 / Lingting submit / Lingting
+ * CDN 下载三个超时统一升到 60s 后，最坏链路（R2 60s + Lingting 60s +
+ * Lingting P99 180s = 300s = 5 min）会让 2 min watchdog 误判——把
+ * 用户感知窗口扩到 5 min 与服务端 deadline 对齐。
  */
-const STALL_HINT_MS = 2 * 60_000;
+const STALL_HINT_MS = 5 * 60_000;
 
 /**
  * 「假进度」上限：99%。
