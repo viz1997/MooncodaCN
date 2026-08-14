@@ -1,11 +1,13 @@
 "use client";
 
 /**
- * TODO (2026-08-13): 已从用户页面（user-order-view.tsx）隐藏，按用户反馈：
- * "为什么乱加效果图历史在用户页面"。后续 admin 端做"订单历史/恢复"功能
- * 时复用本 hook + history-drawer.tsx，不要重新写。
+ * 用户端 - 效果图历史快照客户端 hook。
  *
- * 详见 [[user-page-no-complex-features]]。
+ * 2026-08-14：仍在用户页面使用——SelectStep 下的 `history-strip.tsx` 通过
+ * 本 hook 拉快照列表 + 触发 restore。admin 端后续做"订单历史/恢复"功能时
+ * 同样可复用本 hook + history-drawer.tsx。
+ *
+ * 详见 [[user-page-no-complex-features]] 的"水平列表例外"条款。
  */
 
 import { useCallback, useEffect, useState } from "react";

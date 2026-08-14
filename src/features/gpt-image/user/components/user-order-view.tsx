@@ -1,7 +1,7 @@
 "use client";
 
 import { Ban, Loader2, X } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,6 +25,7 @@ import { UploadStep } from "./upload-step";
 import { useOrder } from "./use-order";
 import type { UseOrderActionsResult } from "./use-order-actions";
 import { useOrderActions } from "./use-order-actions";
+import { useOrderHistory } from "./use-order-history";
 import type { UseSelectionsResult } from "./use-selections";
 import { useSelections } from "./use-selections";
 
@@ -82,6 +83,24 @@ function UserOrderContent({
   quietEndsAt,
 }: UserOrderContentProps) {
   const status = order.status;
+
+  // 效果图历史快照（用于 SelectStep 下的水平横滑条）。
+  // 仅 CANDIDATES_READY / FAILED 状态有意义；其它阶段服务端返回空数组。
+  // 等价地：useOrderHistory 内部 enabled 也按此判断。
+  const historyEnabled = status === "CANDIDATES_READY" || status === "FAILED";
+  const history = useOrderHistory({ token, enabled: historyEnabled });
+
+  // 包裹 restore：成功时刷新 order（candidates/selections 变了）
+  const handleRestore = useCallback(
+    async (id: string) => {
+      const result = await history.restore(id);
+      if (result) {
+        await refreshOrder();
+      }
+      return result;
+    },
+    [history, refreshOrder]
+  );
 
   const uploadedCount = order.uploadedImageCount ?? 0;
   const uploadCount = order.uploadCount ?? 1;
@@ -222,6 +241,10 @@ function UserOrderContent({
                 onToggle={selection.toggle}
                 onSubmit={handleSubmit}
                 onRegenerate={actions.regenerate}
+                historySnapshots={history.history}
+                historyLoading={history.loading}
+                restoringId={history.restoringId}
+                onRestore={handleRestore}
               />
             )}
 

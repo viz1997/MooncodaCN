@@ -23,13 +23,13 @@ import { eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { promptOrder } from "@/db/schema";
-import { inngest } from "@/inngest";
 import { submitGeneration } from "@/features/gpt-image/lib/generation-service";
 import {
   parseCandidates,
   parseSelections,
 } from "@/features/gpt-image/lib/order-helpers";
 import { archiveOrderSnapshot } from "@/features/gpt-image/lib/order-history";
+import { inngest } from "@/inngest";
 import { withApiLogging } from "@/lib/api-logger";
 import { logger } from "@/lib/logger";
 

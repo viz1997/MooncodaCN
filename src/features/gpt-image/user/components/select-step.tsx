@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  CheckCircle2,
-  Loader2,
-  Lock,
-  RefreshCw,
-} from "lucide-react";
+import { CheckCircle2, Loader2, Lock, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertDialog,
@@ -16,6 +11,11 @@ import {
   AlertDialogFooter,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import type {
+  OrderHistorySnapshotView,
+  RestoreHistoryResponseData,
+} from "@/features/gpt-image/lib/types";
+import { HistoryStrip } from "./history-strip";
 import { ImageProgress } from "./image-progress";
 import { candidateUrl, originalUrl, preloadImages } from "./image-urls";
 import { Lightbox, type LightboxTarget } from "./lightbox";
@@ -46,6 +46,14 @@ interface SelectStepProps {
   onSubmit: () => void;
   /** 重新生成当前原图（第 safeIdx 张） */
   onRegenerate: (imageIdx: number) => Promise<boolean>;
+  /** 历史效果图快照列表（按 round DESC 服务端排序，前端再按 imageIdx 过滤） */
+  historySnapshots: OrderHistorySnapshotView[];
+  /** 是否正在拉历史快照（首次加载 + regenerate 后刷新） */
+  historyLoading: boolean;
+  /** 当前正在恢复的快照 id（按钮 loading 态） */
+  restoringId: string | null;
+  /** 父组件接 id 后负责调 /restore + refresh；成功返回 data，失败返回 null */
+  onRestore: (id: string) => Promise<RestoreHistoryResponseData | null>;
 }
 
 const SWIPE_THRESHOLD = 50; // px
@@ -96,6 +104,10 @@ export function SelectStep({
   onToggle,
   onSubmit,
   onRegenerate,
+  historySnapshots,
+  historyLoading,
+  restoringId,
+  onRestore,
 }: SelectStepProps) {
   const [currentIdx, setCurrentIdx] = useState(() => {
     // 默认从第一张原图（imageIdx=0）开始：让 OriginalStrip 默认高亮的那张和
@@ -345,7 +357,6 @@ export function SelectStep({
           </div>
         )}
 
-
         {/* 宫格 / Lightbox 触发 */}
         <div ref={swipeAreaRef} className="relative">
           <QuadrantGrid
@@ -367,7 +378,16 @@ export function SelectStep({
           />
         </div>
 
-     
+        {/* 历史效果图横滑条 —— 每张原图各自的历史快照 */}
+        <HistoryStrip
+          token={token}
+          imageIdx={safeIdx}
+          snapshots={historySnapshots}
+          loading={historyLoading}
+          isCurrentLocked={isCurrentLocked}
+          restoringId={restoringId}
+          onRestore={onRestore}
+        />
 
         {/* 操作按钮：重新生成（次级）+ 确认提交（主）并列 */}
         <div className="mt-4 flex w-full items-stretch gap-2">

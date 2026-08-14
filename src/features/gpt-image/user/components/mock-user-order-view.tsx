@@ -217,6 +217,11 @@ function MockOrderContent({ order }: { order: OrderView }) {
                 onToggle={selection.toggle}
                 onSubmit={handleSubmit}
                 onRegenerate={handleRegenerate}
+                // mock 不接 useOrderHistory（不打 /history 接口），传空 stub
+                historySnapshots={[]}
+                historyLoading={false}
+                restoringId={null}
+                onRestore={async () => null}
               />
             )}
 

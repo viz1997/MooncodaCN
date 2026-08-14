@@ -90,7 +90,9 @@ export function useOrder(token: string): UseOrderResult {
   /** 下次 tick 的延迟 = POLL_SCHEDULE_MS[attempt]（末档后保持不变） */
   function getNextDelayMs(): number {
     const idx = Math.min(attemptRef.current, POLL_SCHEDULE_MS.length - 1);
-    return POLL_SCHEDULE_MS[idx] ?? POLL_SCHEDULE_MS[POLL_SCHEDULE_MS.length - 1]!;
+    return (
+      POLL_SCHEDULE_MS[idx] ?? POLL_SCHEDULE_MS[POLL_SCHEDULE_MS.length - 1]!
+    );
   }
 
   const fetchOrder = useCallback(async (): Promise<void> => {

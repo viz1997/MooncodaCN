@@ -15,10 +15,7 @@ import { db } from "@/db";
 import { promptOrder } from "@/db/schema";
 import { logger } from "@/lib/logger";
 
-import {
-  persistCandidateToR2,
-  queryLingtingTask,
-} from "./generation-service";
+import { persistCandidateToR2, queryLingtingTask } from "./generation-service";
 import {
   isOrderPastDeadline,
   isTaskTimedOut,
@@ -130,7 +127,9 @@ export async function advanceOrderGeneration(
   // 时墙钟叠加（每张 30s 下载 + 5s R2 PUT），容易撞穿 /poll 路由的
   // maxDuration 预算。改成 Promise.all 后墙钟 ≈ 单张时长；下载各自的并发
   // 对 R2 / Lingting CDN 都没压力。
-  const persistPromises: Array<Promise<{ imageIdx: number; url: string } | null>> = [];
+  const persistPromises: Array<
+    Promise<{ imageIdx: number; url: string } | null>
+  > = [];
   for (const { task, res } of results) {
     if (res.state === "done") {
       persistPromises.push(

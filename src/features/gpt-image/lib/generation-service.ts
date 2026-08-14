@@ -380,22 +380,52 @@ export async function submitGeneration(
     if (uploaded[imageIdx]) targets.push(imageIdx);
   }
 
+  // per-image retry：Lingting 偶发 cold start 120s 撞线（用户原话
+  // "第 1 张：The operation was aborted due to timeout"），单次提交失败
+  // 多半是上游排队瞬时拥堵，等 2s 再试一次大概率就过。**只重试单图**——
+  // 成功的图不重复提交，省 Lingting 配额（wellapi.ai 不支持幂等键）。
+  //
+  // 重试失败 = 计入 failures，不影响其他图（仍在 Promise.all 内并行）
+  const MAX_SUBMIT_ATTEMPTS = 2;
+  const SUBMIT_RETRY_DELAY_MS = 2_000;
+
   const settled = await Promise.all(
     targets.map(async (imageIdx) => {
-      try {
-        const imageUrl = uploaded[imageIdx] as string;
-        const result = await submitLingtingTask(
-          imageUrl,
-          compositePrompt,
-          size,
-          imageIdx
-        );
-        return { imageIdx, result };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "未知错误";
-        logger.warn({ err, orderId, imageIdx }, "提交生图任务失败");
-        return { imageIdx, error: `第 ${imageIdx + 1} 张：${msg}` };
+      let lastError: string | null = null;
+      for (let attempt = 1; attempt <= MAX_SUBMIT_ATTEMPTS; attempt++) {
+        try {
+          const imageUrl = uploaded[imageIdx] as string;
+          const result = await submitLingtingTask(
+            imageUrl,
+            compositePrompt,
+            size,
+            imageIdx
+          );
+          if (attempt > 1) {
+            logger.info({ orderId, imageIdx, attempt }, "提交生图任务重试成功");
+          }
+          return { imageIdx, result };
+        } catch (err) {
+          lastError = err instanceof Error ? err.message : "未知错误";
+          logger.warn(
+            {
+              err,
+              orderId,
+              imageIdx,
+              attempt,
+              maxAttempts: MAX_SUBMIT_ATTEMPTS,
+            },
+            "提交生图任务失败"
+          );
+          if (attempt < MAX_SUBMIT_ATTEMPTS) {
+            await new Promise((r) => setTimeout(r, SUBMIT_RETRY_DELAY_MS));
+          }
+        }
       }
+      return {
+        imageIdx,
+        error: `第 ${imageIdx + 1} 张：${lastError ?? "未知错误"}`,
+      };
     })
   );
 

@@ -53,9 +53,16 @@ interface HitRow {
 async function run(): Promise<void> {
   // 动态 import 避开静态导入 hoisting 问题（dotenv 必须先于 @/db 模块顶层检查）
   const { db } = (await import("@/db")) as { db: Db };
-  const { promptOrder } = (await import("@/db/schema")) as { promptOrder: Schema };
-  const { eq, inArray } = (await import("drizzle-orm")) as { eq: Drizzle; inArray: Drizzle };
-  const { getR2PublicHosts } = (await import("@/features/image-gen/lib/r2")) as {
+  const { promptOrder } = (await import("@/db/schema")) as {
+    promptOrder: Schema;
+  };
+  const { eq, inArray } = (await import("drizzle-orm")) as {
+    eq: Drizzle;
+    inArray: Drizzle;
+  };
+  const { getR2PublicHosts } = (await import(
+    "@/features/image-gen/lib/r2"
+  )) as {
     getR2PublicHosts: () => string[];
   };
   const { parseCandidates } = (await import(

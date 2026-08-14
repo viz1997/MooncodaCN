@@ -1,13 +1,15 @@
 "use client";
 
 /**
- * TODO (2026-08-13): 已从用户页面（user-order-view.tsx）隐藏，按用户反馈：
- * "为什么乱加效果图历史在用户页面"。免登录客户用不到快照/历史，TopBar
- * 不要再展示入口。后续 admin 端要做"订单历史/恢复"功能时复用本组件，
- * 不要重新写：服务端 lib/order-history.ts + /api/orders/[token]/history
- * 都还在，hook 在 use-order-history.ts。
+ * 用户端 - 效果图历史快照底部 sheet（保留备查，目前未在用户页面使用）。
  *
- * 详见 [[user-page-no-complex-features]]。
+ * 2026-08-14：用户页面改用 `history-strip.tsx`（SelectStep 内的水平横滑条
+ * + 轻量 Lightbox "用这一版"）。抽屉式入口（带 AlertDialog 二次确认 + 兼容
+ * 性解释）暂不再展示，但仍保留组件本体——admin 端做"订单历史/恢复"功能时
+ * 可直接复用本文件 + 服务端 lib/order-history.ts + /api/orders/[token]/history
+ * + useOrderHistory（use-order-history.ts），不要重新写。
+ *
+ * 详见 [[user-page-no-complex-features]] 的"水平列表例外"条款。
  */
 
 import * as DialogPrimitive from "@radix-ui/react-dialog";

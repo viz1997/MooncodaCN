@@ -196,8 +196,7 @@ export function GenerateStep({
       // 用户进入即看到数字跳变。
       const quietStartMs =
         quietEndsAt !== null ? quietEndsAt - QUIET_AFTER_GENERATING_MS : null;
-      const baseStartMs =
-        quietStartMs !== null ? quietStartMs : Date.now();
+      const baseStartMs = quietStartMs !== null ? quietStartMs : Date.now();
       fakeStartRef.current = baseStartMs - INITIAL_FAKE_OFFSET_MS;
     }
     let rafId = 0;
