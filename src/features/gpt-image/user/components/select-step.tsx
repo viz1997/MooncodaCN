@@ -426,7 +426,7 @@ export function SelectStep({
                 ? candidateCount
                 : 4) as 1 | 2 | 4 | 9
             }
-            selectedQuadrant={currentSelection}
+            selectedQuadrant={isViewingOldSnapshot ? null : currentSelection}
             onSelect={(q) => handleToggle(safeIdx, q)}
             disabled={isCurrentLocked}
           />
