@@ -69,8 +69,8 @@ const SWIPE_THRESHOLD = 50; // px
  *   - 当前原图小卡角标改 "已锁定 #N" + Lock 图标
  *   - "重新生成第 N 张"按钮 disabled
  *   - "确认提交第 N 张"按钮 disabled，文案改 "已提交 #N"
- * - Enter 键 / 自动跳到下一张未选：当前张未锁定 + 选了候选 → 触发 confirm；
- *   当前张已锁定 → Enter 跳过（用户应继续选下一张）。
+ * - Enter 键 / 触发 confirm dialog：当前张未锁定 + 选了候选 → 触发 confirm；
+ *   当前张已锁定 → Enter 无操作（用户应继续选下一张）。
  *
  * 锁定 = 不可重做（2026-08 批次模型保留 partial select 不可逆语义）：
  * 提交后该张即被服务端锁定，UI 只读（视觉提示保留：emerald 边框 +
@@ -88,7 +88,8 @@ const SWIPE_THRESHOLD = 50; // px
  * - 1-9 选、←→ 切图、Z 撤销、Enter 提交、R 重新生成、? 帮助
  * - Lightbox：点击放大 + 在大图模式下选
  * - AlertDialog：提交 / 重新生成 二次确认
- * - 选中后自动跳到下一张未选原图
+ * - 切图方式：点 OriginalStrip 缩略图、←/→ 箭头键、Lightbox 横向滑动。
+ *   2026-08-15 起移除"点击候选自动跳下一张"逻辑（用户反馈：不想被自动推进）。
  */
 export function SelectStep({
   token,
@@ -117,8 +118,7 @@ export function SelectStep({
     // 之前"first unlocked"逻辑会把 currentIdx 推到下一张未选位，但锁定位的
     // emerald 边框视觉权重远高于当前但未选的 zinc-300 边框，用户看上去仍像
     // "第一张是默认当前 tab"——与 QuadrantGrid 实际显示的位不一致。统一
-    // 默认从 0 起，用户需要看别的位时手动点 strip 切（或选完后 handleToggle
-    // 自动跳到下一未选位）。
+    // 默认从 0 起，用户需要看别的位时手动点 OriginalStrip 切或 ←/→。
     return 0;
   });
   const [lightbox, setLightbox] = useState<LightboxTarget | null>(null);
@@ -126,7 +126,6 @@ export function SelectStep({
   const [regenConfirmOpen, setRegenConfirmOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [originalPreviewOpen, setOriginalPreviewOpen] = useState(false);
-  const advanceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const safeIdx = Math.min(currentIdx, Math.max(0, imageCount - 1));
   const currentSelection = selections[safeIdx] ?? null;
@@ -141,13 +140,6 @@ export function SelectStep({
     }
     return last;
   }, [selections]);
-
-  useEffect(
-    () => () => {
-      if (advanceRef.current) clearTimeout(advanceRef.current);
-    },
-    []
-  );
 
   useEffect(() => {
     const urls: string[] = [
@@ -165,21 +157,13 @@ export function SelectStep({
       // 已锁定位：本地点不动（防御性，正常情况下 use-selections 的
       // toggle 已短路；这里再防一次 Lightbox / 外部直接触发）
       if (isLocked(imageIdx)) return;
-      const wasUnset = (selections[imageIdx] ?? null) === null;
-      const isCancelling = selections[imageIdx] === candIdx;
       onToggle(imageIdx, candIdx);
-
-      if (!wasUnset || isCancelling) return;
-      // 选完后自动跳到下一张未选原图（跳过已锁定位——它们的 selections[i]
-      // 已非 null，findIndex 的 null 条件天然不命中）。
-      const nextUnset = selections.findIndex(
-        (v, i) => i !== imageIdx && (v === null || v === undefined)
-      );
-      if (nextUnset === -1) return;
-      if (advanceRef.current) clearTimeout(advanceRef.current);
-      advanceRef.current = setTimeout(() => setCurrentIdx(nextUnset), 350);
+      // 注：原本在选完后会自动 setCurrentIdx 跳到下一张未选原图。
+      // 2026-08-15 用户反馈"为什么点了第一张的效果图会自动跳到第二张"——
+      // 决定去掉自动推进，保留在当前原图。用户需要切图时手动点 OriginalStrip
+      // 缩略图、或用 ←/→ 箭头键、或从候选 Lightbox 里左右滑。
     },
-    [selections, onToggle, isLocked]
+    [onToggle, isLocked]
   );
 
   const handleUndo = useCallback(() => {
