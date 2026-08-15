@@ -144,12 +144,12 @@ export function OrderFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>创建订单并生成链接</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
+        <div className="grid grid-cols-1 gap-x-4 gap-y-4 py-2 sm:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="ord-no">
               订单号 <span className="text-red-500">*</span>
