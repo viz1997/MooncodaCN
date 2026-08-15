@@ -1,6 +1,14 @@
 "use client";
 
-import { CheckCircle2, Loader2, Lock, RefreshCw } from "lucide-react";
+import {
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  History,
+  Loader2,
+  Lock,
+  RefreshCw,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertDialog,
@@ -11,11 +19,7 @@ import {
   AlertDialogFooter,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import type {
-  OrderHistorySnapshotView,
-  RestoreHistoryResponseData,
-} from "@/features/gpt-image/lib/types";
-import { HistoryStrip } from "./history-strip";
+import type { OrderHistorySnapshotView } from "@/features/gpt-image/lib/types";
 import { ImageProgress } from "./image-progress";
 import { candidateUrl, originalUrl, preloadImages } from "./image-urls";
 import { Lightbox, type LightboxTarget } from "./lightbox";
@@ -50,14 +54,12 @@ interface SelectStepProps {
   regenerateLimit: number;
   /** 已用重新生成次数（trigger=regenerate_single 的快照行数） */
   regenerateUsedCount: number;
-  /** 历史效果图快照列表（按 round DESC 服务端排序，前端再按 imageIdx 过滤） */
-  historySnapshots: OrderHistorySnapshotView[];
-  /** 是否正在拉历史快照（首次加载 + regenerate 后刷新） */
-  historyLoading: boolean;
-  /** 当前正在恢复的快照 id（按钮 loading 态） */
-  restoringId: string | null;
-  /** 父组件接 id 后负责调 /restore + refresh；成功返回 data，失败返回 null */
-  onRestore: (id: string) => Promise<RestoreHistoryResponseData | null>;
+  /**
+   * 当前订单的全部历史快照（round DESC）。前端再按 imageIdx 过滤：
+   * - 查看最新快照（index 0）：QuadrantGrid 用当前 candidates（可点选）
+   * - 查看旧快照：QuadrantGrid 用 snapshot.candidates[safeIdx][0] 作 compositeUrl（只读）
+   */
+  snapshots: OrderHistorySnapshotView[];
 }
 
 const SWIPE_THRESHOLD = 50; // px
@@ -111,10 +113,7 @@ export function SelectStep({
   onRegenerate,
   regenerateLimit,
   regenerateUsedCount,
-  historySnapshots,
-  historyLoading,
-  restoringId,
-  onRestore,
+  snapshots,
 }: SelectStepProps) {
   const [currentIdx, setCurrentIdx] = useState(() => {
     // 默认从第一张原图（imageIdx=0）开始：让 OriginalStrip 默认高亮的那张和
@@ -132,6 +131,15 @@ export function SelectStep({
   const [regenConfirmOpen, setRegenConfirmOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [originalPreviewOpen, setOriginalPreviewOpen] = useState(false);
+  /**
+   * 当前正在查看的快照索引（在 `imageSnapshots` 数组里的位置）。
+   * 默认 null = 看最新候选（compositeUrl = candidateUrl(...)，QuadrantGrid 可点选）。
+   * 非 null = 看历史快照（QuadrantGrid 只读，compositeUrl 走 historyId 通道）。
+   * imageIdx 切换或 regen 完成后重置为 null（看最新）。
+   */
+  const [viewingSnapshotIdx, setViewingSnapshotIdx] = useState<number | null>(
+    null
+  );
 
   const safeIdx = Math.min(currentIdx, Math.max(0, imageCount - 1));
   const currentSelection = selections[safeIdx] ?? null;
@@ -143,6 +151,40 @@ export function SelectStep({
     regenerateLimit - regenerateUsedCount
   );
   const canRegenerate = !isCurrentLocked && regenerateRemaining > 0;
+
+  // 当前原图下的所有历史快照（按 round DESC，与传入顺序一致）
+  const imageSnapshots = useMemo(
+    () => snapshots.filter((s) => s.imageCount > safeIdx),
+    [snapshots, safeIdx]
+  );
+
+  // 切原图或重新生成完成后，自动跳回最新候选（避免停在某个旧快照上状态错乱）
+  // biome-ignore lint/correctness/useExhaustiveDependencies: deps 是触发器，不是读取
+  useEffect(() => {
+    setViewingSnapshotIdx(null);
+  }, [safeIdx, regenerateUsedCount]);
+
+  const viewingSnapshot =
+    viewingSnapshotIdx !== null
+      ? (imageSnapshots[viewingSnapshotIdx] ?? null)
+      : null;
+  const isViewingOldSnapshot = viewingSnapshot !== null;
+  const safeSnapshotIdx =
+    viewingSnapshotIdx !== null && viewingSnapshotIdx < imageSnapshots.length
+      ? viewingSnapshotIdx
+      : null;
+  const canGoPrevSnapshot =
+    isViewingOldSnapshot &&
+    safeSnapshotIdx !== null &&
+    safeSnapshotIdx < imageSnapshots.length - 1;
+  const canGoNextSnapshot =
+    isViewingOldSnapshot && safeSnapshotIdx !== null && safeSnapshotIdx > 0;
+
+  // 旧快照的 compositeUrl：通过 /candidates/[imageIdx]/0?historyId=... 走历史通道
+  const viewingCompositeUrl =
+    viewingSnapshot !== null
+      ? `/api/orders/${token}/candidates/${safeIdx}/0?historyId=${viewingSnapshot.id}&t=${encodeURIComponent(viewingSnapshot.createdAt)}`
+      : null;
 
   // 最近一次"被赋值"的图片索引
   const lastSelectedIdx = useMemo(() => {
@@ -354,13 +396,15 @@ export function SelectStep({
           </div>
         )}
 
-        {/* 宫格 / Lightbox 触发 */}
+        {/* 宫格 / Lightbox 触发 —— 大图区叠加历史快照的左右切换箭头 */}
         <div ref={swipeAreaRef} className="relative">
           <QuadrantGrid
             token={token}
             updatedAt={updatedAt}
             imageIdx={safeIdx}
-            compositeUrl={candidateUrl(token, safeIdx, 0, updatedAt)}
+            compositeUrl={
+              viewingCompositeUrl ?? candidateUrl(token, safeIdx, 0, updatedAt)
+            }
             quadrantCount={
               (candidateCount === 1 ||
               candidateCount === 2 ||
@@ -371,20 +415,61 @@ export function SelectStep({
             }
             selectedQuadrant={currentSelection}
             onSelect={(q) => handleToggle(safeIdx, q)}
-            disabled={isCurrentLocked}
+            disabled={isCurrentLocked || isViewingOldSnapshot}
           />
-        </div>
 
-        {/* 历史效果图横滑条 —— 每张原图各自的历史快照 */}
-        <HistoryStrip
-          token={token}
-          imageIdx={safeIdx}
-          snapshots={historySnapshots}
-          loading={historyLoading}
-          isCurrentLocked={isCurrentLocked}
-          restoringId={restoringId}
-          onRestore={onRestore}
-        />
+          {/* 历史快照左右切换箭头 —— 仅当该原图有快照时叠加在大图两侧。
+              索引 0 = 最新候选；索引越大越旧。ChevronLeft = 往更旧跳、
+              ChevronRight = 往更新跳（与 OriginalStrip 的左旧右新一致）。 */}
+          {imageSnapshots.length > 0 && (
+            <div
+              aria-hidden={!isViewingOldSnapshot}
+              className="pointer-events-none absolute inset-y-0 -left-1 -right-1 z-10 flex items-center justify-between"
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  if (!canGoPrevSnapshot) return;
+                  setViewingSnapshotIdx((i) => (i === null ? 0 : i + 1));
+                }}
+                disabled={!canGoPrevSnapshot}
+                aria-label="查看更早的历史效果图"
+                className="pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-stone-700 shadow-md ring-1 ring-stone-200 backdrop-blur transition-all hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 disabled:cursor-default disabled:opacity-30"
+              >
+                <ChevronLeft className="h-5 w-5" strokeWidth={2.25} />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!canGoNextSnapshot) return;
+                  setViewingSnapshotIdx((i) => (i === null ? null : i - 1));
+                }}
+                disabled={!canGoNextSnapshot}
+                aria-label="查看更新的效果图"
+                className="pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-stone-700 shadow-md ring-1 ring-stone-200 backdrop-blur transition-all hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 disabled:cursor-default disabled:opacity-30"
+              >
+                <ChevronRight className="h-5 w-5" strokeWidth={2.25} />
+              </button>
+            </div>
+          )}
+
+          {/* 正在查看历史快照时，顶部叠加"第 N 轮 · 回到最新"胶囊。
+              点击立即清掉 viewingSnapshotIdx，回到当前候选组。 */}
+          {isViewingOldSnapshot && viewingSnapshot && (
+            <button
+              type="button"
+              onClick={() => setViewingSnapshotIdx(null)}
+              title={new Date(viewingSnapshot.createdAt).toLocaleString(
+                "zh-CN"
+              )}
+              className="absolute -top-2.5 left-1/2 z-20 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-stone-900/85 px-3 py-1 text-xs font-medium text-white shadow-md backdrop-blur transition-colors hover:bg-stone-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
+            >
+              <History className="h-3 w-3" />第 {viewingSnapshot.round} 轮历史
+              <span className="opacity-60">·</span>
+              <span className="underline underline-offset-2">回到最新</span>
+            </button>
+          )}
+        </div>
 
         {/* 操作按钮：重新生成（次级）+ 确认提交（主）并列 */}
         <div className="mt-4 flex w-full items-stretch gap-2">
@@ -446,9 +531,7 @@ export function SelectStep({
             ) : isCurrentLocked ? (
               <span className="inline-flex items-center gap-1.5">
                 <Lock className="h-4 w-4" />
-                {currentSelection !== null
-                  ? "已提交"
-                  : "该张已提交"}
+                {currentSelection !== null ? "已提交" : "该张已提交"}
               </span>
             ) : (
               <span className="inline-flex items-center gap-1.5">

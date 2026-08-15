@@ -316,9 +316,6 @@ export function GenerateStep({
         ))}
       </div>
 
-
-
-
       {/* 停止按钮 */}
       {onStopClick && (
         <>

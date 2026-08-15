@@ -252,18 +252,14 @@ export function OrderFormDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="ord-regenerate-limit">
-              用户重新生成次数上限
-            </Label>
+            <Label htmlFor="ord-regenerate-limit">用户重新生成次数上限</Label>
             <div className="flex items-stretch gap-2">
               <Button
                 type="button"
                 variant="outline"
                 size="icon"
                 className="h-9 w-9 shrink-0"
-                onClick={() =>
-                  setRegenerateLimit((n) => Math.max(0, n - 1))
-                }
+                onClick={() => setRegenerateLimit((n) => Math.max(0, n - 1))}
                 disabled={regenerateLimit <= 0}
                 aria-label="减少"
               >
@@ -288,9 +284,7 @@ export function OrderFormDialog({
                 variant="outline"
                 size="icon"
                 className="h-9 w-9 shrink-0"
-                onClick={() =>
-                  setRegenerateLimit((n) => Math.min(20, n + 1))
-                }
+                onClick={() => setRegenerateLimit((n) => Math.min(20, n + 1))}
                 disabled={regenerateLimit >= 20}
                 aria-label="增加"
               >
@@ -298,8 +292,8 @@ export function OrderFormDialog({
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              仅"重新生成第 N 张"（单图路径）计数；批量重跑 / FAILED 一键重试不计。
-              设为 0 表示禁止用户主动重新生成。
+              仅"重新生成第 N 张"（单图路径）计数；批量重跑 / FAILED
+              一键重试不计。 设为 0 表示禁止用户主动重新生成。
             </p>
           </div>
 

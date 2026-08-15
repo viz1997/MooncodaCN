@@ -219,10 +219,7 @@ function MockOrderContent({ order }: { order: OrderView }) {
                 regenerateLimit={order.regenerateLimit ?? 5}
                 regenerateUsedCount={order.regenerateUsedCount ?? 0}
                 // mock 不接 useOrderHistory（不打 /history 接口），传空 stub
-                historySnapshots={[]}
-                historyLoading={false}
-                restoringId={null}
-                onRestore={async () => null}
+                snapshots={mockHistory}
               />
             )}
 

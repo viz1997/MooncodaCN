@@ -203,9 +203,7 @@ export function OrderEditDialog({
                   variant="outline"
                   size="icon"
                   className="h-9 w-9 shrink-0"
-                  onClick={() =>
-                    setRegenerateLimit((n) => Math.max(0, n - 1))
-                  }
+                  onClick={() => setRegenerateLimit((n) => Math.max(0, n - 1))}
                   disabled={regenerateLimit <= 0}
                   aria-label="减少"
                 >
@@ -230,9 +228,7 @@ export function OrderEditDialog({
                   variant="outline"
                   size="icon"
                   className="h-9 w-9 shrink-0"
-                  onClick={() =>
-                    setRegenerateLimit((n) => Math.min(20, n + 1))
-                  }
+                  onClick={() => setRegenerateLimit((n) => Math.min(20, n + 1))}
                   disabled={regenerateLimit >= 20}
                   aria-label="增加"
                 >
@@ -240,7 +236,8 @@ export function OrderEditDialog({
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                仅"重新生成第 N 张"（单图路径）计数；批量重跑 / FAILED 一键重试不计。
+                仅"重新生成第 N 张"（单图路径）计数；批量重跑 / FAILED
+                一键重试不计。
               </p>
             </div>
 

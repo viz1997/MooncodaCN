@@ -1,7 +1,7 @@
 "use client";
 
 import { Ban, Loader2, X } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -84,23 +84,11 @@ function UserOrderContent({
 }: UserOrderContentProps) {
   const status = order.status;
 
-  // 效果图历史快照（用于 SelectStep 下的水平横滑条）。
+  // 效果图历史快照 —— 传给 SelectStep 用于大图两侧的左右切换箭头。
   // 仅 CANDIDATES_READY / FAILED 状态有意义；其它阶段服务端返回空数组。
   // 等价地：useOrderHistory 内部 enabled 也按此判断。
   const historyEnabled = status === "CANDIDATES_READY" || status === "FAILED";
   const history = useOrderHistory({ token, enabled: historyEnabled });
-
-  // 包裹 restore：成功时刷新 order（candidates/selections 变了）
-  const handleRestore = useCallback(
-    async (id: string) => {
-      const result = await history.restore(id);
-      if (result) {
-        await refreshOrder();
-      }
-      return result;
-    },
-    [history, refreshOrder]
-  );
 
   const uploadedCount = order.uploadedImageCount ?? 0;
   const uploadCount = order.uploadCount ?? 1;
@@ -242,10 +230,7 @@ function UserOrderContent({
                 onRegenerate={actions.regenerate}
                 regenerateLimit={order.regenerateLimit}
                 regenerateUsedCount={order.regenerateUsedCount ?? 0}
-                historySnapshots={history.history}
-                historyLoading={history.loading}
-                restoringId={history.restoringId}
-                onRestore={handleRestore}
+                snapshots={history.history}
               />
             )}
 
