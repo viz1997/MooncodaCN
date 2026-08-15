@@ -843,7 +843,8 @@ export const promptTemplate = pgTable("prompt_template", {
  * @field token - 访问令牌（防止 orderNo 被枚举；32 字符 hex）
  * @field status - 当前状态
  * @field uploadedImages - 已上传原图（dataUrl 字符串数组，JSON）
- * @field uploadCount - 用户需要上传的图片数量（1-50，默认 3）
+ * @field uploadCount - 用户可上传的批次次数（默认 1）。每批最多 imagesPerUpload 张参考图，总容量 = uploadCount × imagesPerUpload
+ * @field imagesPerUpload - 每批上传的原图参考图数量（1-3，默认 3）
  * @field regenerateLimit - 用户主动重新生成次数上限（默认 5；批量重跑 / FAILED 重试不计）
  * @field candidates - 效果图（嵌套数组 [[b64,...],[b64,...]]，外层索引 = 原图索引）
  * @field selectedIndex - 兼容字段（旧模型：取 selections[0]）
@@ -865,7 +866,14 @@ export const promptOrder = pgTable(
     token: text("token").notNull().unique(),
     status: promptOrderStatusEnum("status").notNull().default("PENDING"),
     uploadedImages: text("uploaded_images"),
-    uploadCount: integer("upload_count").notNull().default(3),
+    /** 用户可上传的批次次数（默认 1）。总容量 = uploadCount × imagesPerUpload */
+    uploadCount: integer("upload_count").notNull().default(1),
+    /**
+     * 每批上传的原图参考图数量（1-3，默认 3）。
+     * 一次上传会话内用户最多塞 imagesPerUpload 张参考图，全部塞进去
+     * 才算占满一批；总容量 = uploadCount × imagesPerUpload。
+     */
+    imagesPerUpload: integer("images_per_upload").notNull().default(3),
     /**
      * 用户主动"重新生成第 N 张"的次数上限。
      * 仅 imageIdx 传入的单图路径计数（trigger=regenerate_single）；

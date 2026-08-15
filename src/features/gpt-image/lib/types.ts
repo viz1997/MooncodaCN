@@ -65,8 +65,10 @@ export interface OrderView {
   hasUploadedImage: boolean;
   /** 实际已上传的图片数量（渐进式上传，可能 < uploadCount） */
   uploadedImageCount: number;
-  /** 用户需要上传的图片数量（1-50） */
+  /** 用户可上传的批次次数（默认 1）。总容量 = uploadCount × imagesPerUpload */
   uploadCount: number;
+  /** 每批上传的原图参考图数量（1-3，默认 3） */
+  imagesPerUpload: number;
   /** 每张原图对应的效果图数量（来自模板） */
   candidateCount: number;
   /** 已生成的候选组数（外层数组长度） */

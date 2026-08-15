@@ -74,6 +74,7 @@ async function getHandler(
         hasUploadedImage: uploaded.length > 0,
         uploadedImageCount: countUploadedImages(uploaded),
         uploadCount: order.uploadCount,
+        imagesPerUpload: order.imagesPerUpload,
         candidateCount: order.template.candidateCount,
         candidateGroups: countCandidateGroups(candidates),
         regenerateLimit: order.regenerateLimit,

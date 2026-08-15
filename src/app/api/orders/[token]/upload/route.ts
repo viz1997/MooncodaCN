@@ -174,37 +174,43 @@ async function postHandler(
     }
 
     const existing = parseUploadedImages(order.uploadedImages as string | null);
+    // 上限语义（2026-08-15 重构）：
+    // - 单批上限 = imagesPerUpload（每批最多塞多少张参考图）
+    // - 总容量 = uploadCount × imagesPerUpload（最多做多少批 × 每批多少张）
+    const perBatchLimit = order.imagesPerUpload;
+    const totalCapacity = order.uploadCount * order.imagesPerUpload;
+
     // FAILED 状态下，新上传的图片视为**替换**之前的图（不是追加）。
     // 否则用户卡在"已上传 N 张，本次最多再传 0 张"却无法换图，永远无法恢复。
     const isRetryAfterFailure = order.status === "FAILED";
     if (isRetryAfterFailure) {
-      // 只校验新增数量是否超过本订单上限；不与 existing 累加。
-      if (accepted.length > order.uploadCount) {
+      // 只校验新增数量是否超过单批上限；不与 existing 累加（按位置覆盖）。
+      if (accepted.length > perBatchLimit) {
         return NextResponse.json(
           {
             success: false,
-            error: `本订单最多 ${order.uploadCount} 张，本次最多上传 ${order.uploadCount} 张`,
+            error: `本订单每次最多上传 ${perBatchLimit} 张，本次最多上传 ${perBatchLimit} 张`,
           },
           { status: 400 }
         );
       }
-    } else if (existing.length + accepted.length > order.uploadCount) {
+    } else if (existing.length + accepted.length > totalCapacity) {
       return NextResponse.json(
         {
           success: false,
-          error: `本订单最多 ${order.uploadCount} 张，已上传 ${existing.length} 张，本次最多再传 ${
-            order.uploadCount - existing.length
+          error: `本订单最多 ${totalCapacity} 张（${order.uploadCount} 批 × ${perBatchLimit} 张/批），已上传 ${existing.length} 张，本次最多再传 ${
+            totalCapacity - existing.length
           } 张`,
         },
         { status: 400 }
       );
     }
 
-    // FAILED 替换（按位置覆盖）：accepted 按顺序填入槽位，多余的 existing 保留到 uploadCount 上限。
+    // FAILED 替换（按位置覆盖）：accepted 按顺序填入槽位，多余的 existing 保留到 totalCapacity 上限。
     // 单图模式（UI 一次只发 1 张）下，用户多次点击会逐槽位替换，不会丢掉没碰过的旧图。
     const merged = isRetryAfterFailure
       ? Array.from(
-          { length: order.uploadCount },
+          { length: totalCapacity },
           (_, i) => accepted[i] ?? existing[i]
         )
       : [...existing, ...accepted];

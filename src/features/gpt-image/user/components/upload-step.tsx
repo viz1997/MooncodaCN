@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, ImageIcon, Trash2, X } from "lucide-react";
+import { ArrowRight, ImageIcon, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -10,9 +10,11 @@ const ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
 interface UploadStepProps {
   /** 订单模板名（标题用） */
   templateName: string;
-  /** 用户需要上传的图片数量（1-50） */
+  /** 用户可上传的批次次数（默认 1） */
   uploadCount: number;
-  /** 已上传的图片张数（0..uploadCount） */
+  /** 每批上传的原图参考图数量（1-3，默认 3） */
+  imagesPerUpload: number;
+  /** 已上传的图片张数（0..uploadCount × imagesPerUpload） */
   uploadedImageCount: number;
   /** 单次生图候选数（"将生成 N 种效果的宫格图"） */
   candidateCount: number;
@@ -20,112 +22,158 @@ interface UploadStepProps {
   hasFailure?: boolean;
   /** 上传中——禁用按钮防止重复点击 */
   uploading: boolean;
-  /** 上传单张图片的回调（由父组件接 R2 预签名 + /upload API） */
+  /** 上传图片数组的回调（由父组件接 R2 预签名 + /upload API） */
   onUpload: (files: File[]) => Promise<boolean>;
 }
 
 /**
  * 上传步骤 —— mobile-first 单列布局。
  *
- * UI 借鉴参考 upload-step.tsx：
- * - 拖拽虚线框（hover 变 indigo）
- * - 选完显示预览 + X 移除
- * - "开始生成" indigo→blue 渐变按钮
+ * 上传上限语义（2026-08-15 重构）：
+ * - 单批最多塞 imagesPerUpload 张参考图
+ * - 总容量 = uploadCount × imagesPerUpload
  *
  * 保留原 upload-stage 的全部业务逻辑：
- * - 单图模式只取第一张
- * - 10MB 限制
+ * - 多文件上传（受 imagesPerUpload 限制）
+ * - 10MB 限制 / 张
  * - blob URL 预览（不用 FileReader，避免 base64）
  * - 父组件负责 R2 预签名 + PUT + /upload
  */
 export function UploadStep({
   templateName,
   uploadCount,
+  imagesPerUpload,
   uploadedImageCount,
   candidateCount,
   hasFailure = false,
   uploading,
   onUpload,
 }: UploadStepProps) {
+  const totalCapacity = uploadCount * imagesPerUpload;
   const [dragging, setDragging] = useState(false);
-  const [preview, setPreview] = useState<{
-    name: string;
-    size: number;
-    objectUrl: string;
-    file: File;
-  } | null>(null);
+  const [previews, setPreviews] = useState<
+    Array<{
+      id: string;
+      name: string;
+      size: number;
+      objectUrl: string;
+      file: File;
+    }>
+  >([]);
   const inputRef = useRef<HTMLInputElement>(null);
-  const previewRef = useRef<string | null>(null);
+  const previewRefs = useRef<Map<string, string>>(new Map());
 
-  const quotaFull = uploadedImageCount >= uploadCount;
-  // FAILED 重传会替换之前的图片（见 /upload API），所以"本次可传"按 uploadCount 上限算。
+  const quotaFull = uploadedImageCount >= totalCapacity;
+  // FAILED 重传会替换之前的图片（见 /upload API），所以"本次可传"按 totalCapacity 上限算。
   const remainingForThisRound = hasFailure
-    ? uploadCount
-    : Math.max(0, uploadCount - uploadedImageCount);
+    ? imagesPerUpload
+    : Math.max(0, totalCapacity - uploadedImageCount);
 
   // 头部标题：失败重试 vs 首次 / 续传
   let nextLabel: string;
   if (hasFailure) {
     nextLabel = "重新上传照片";
   } else if (uploadedImageCount > 0) {
-    nextLabel = "继续上传下一张";
+    nextLabel = "继续上传下一批";
   } else {
     nextLabel = "上传你的照片";
   }
 
-  const formatSize = (bytes: number) => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  };
-
-  // 卸载时回收最新一次 blob URL
+  // 卸载时回收全部 blob URL
   useEffect(() => {
-    const current = previewRef.current;
     return () => {
-      if (current) URL.revokeObjectURL(current);
+      for (const url of previewRefs.current.values()) {
+        URL.revokeObjectURL(url);
+      }
+      previewRefs.current.clear();
     };
   }, []);
-
-  const readFile = (file: File) => {
-    if (!file.type.startsWith("image/")) {
-      toast.error(`${file.name} 不是图片文件`);
-      return;
-    }
-    if (file.size > MAX_BYTES) {
-      toast.error(`${file.name} 超过 10MB`);
-      return;
-    }
-    const objectUrl = URL.createObjectURL(file);
-    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
-    previewRef.current = objectUrl;
-    setPreview({ name: file.name, size: file.size, objectUrl, file });
-  };
 
   const handleFiles = (files: FileList | File[] | null) => {
     if (!files) return;
     const list = Array.from(files as ArrayLike<File>);
     if (list.length === 0) return;
-    // 单图模式：只取第一张
-    readFile(list[0] as File);
+
+    // 校验：本批最多 imagesPerUpload 张
+    const slots = Math.max(0, remainingForThisRound);
+    const accepted = list.slice(0, Math.min(list.length, slots));
+    const rejected = list.slice(slots);
+
+    if (rejected.length > 0) {
+      toast.error(
+        rejected.length === 1
+          ? `本批最多 ${imagesPerUpload} 张，超出的图片已忽略`
+          : `本批最多 ${imagesPerUpload} 张，超出的 ${rejected.length} 张已忽略`
+      );
+    }
+    if (accepted.length === 0) return;
+
+    const valid: typeof previews = [];
+    for (const file of accepted) {
+      if (!file.type.startsWith("image/")) {
+        toast.error(`${file.name} 不是图片文件`);
+        continue;
+      }
+      if (file.size > MAX_BYTES) {
+        toast.error(`${file.name} 超过 10MB`);
+        continue;
+      }
+      const objectUrl = URL.createObjectURL(file);
+      const id = `${file.name}_${file.size}_${Date.now()}_${Math.random()}`;
+      previewRefs.current.set(id, objectUrl);
+      valid.push({
+        id,
+        name: file.name,
+        size: file.size,
+        objectUrl,
+        file,
+      });
+    }
+
+    if (valid.length === 0) return;
+    setPreviews((prev) => {
+      // 替换旧的预览（已上传完一批就清掉，准备下一批）
+      const prevIds = new Set(prev.map((p) => p.id));
+      for (const p of prev) {
+        if (!prevIds.has(p.id)) {
+          const url = previewRefs.current.get(p.id);
+          if (url) URL.revokeObjectURL(url);
+          previewRefs.current.delete(p.id);
+        }
+      }
+      return valid;
+    });
   };
 
-  const clearPreview = () => {
-    setPreview((prev) => {
-      if (prev) {
-        URL.revokeObjectURL(prev.objectUrl);
-        previewRef.current = null;
+  const clearPreviews = () => {
+    setPreviews((prev) => {
+      for (const p of prev) {
+        const url = previewRefs.current.get(p.id);
+        if (url) URL.revokeObjectURL(url);
+        previewRefs.current.delete(p.id);
       }
-      return null;
+      return [];
     });
     if (inputRef.current) inputRef.current.value = "";
   };
 
-  const handleConfirm = async () => {
-    if (!preview) return;
-    const ok = await onUpload([preview.file]);
-    if (ok) clearPreview();
+  const removeOne = (id: string) => {
+    setPreviews((prev) => {
+      const url = previewRefs.current.get(id);
+      if (url) URL.revokeObjectURL(url);
+      previewRefs.current.delete(id);
+      return prev.filter((p) => p.id !== id);
+    });
   };
+
+  const handleConfirm = async () => {
+    if (previews.length === 0) return;
+    const files = previews.map((p) => p.file);
+    const ok = await onUpload(files);
+    if (ok) clearPreviews();
+  };
+
+  const canAddMore = previews.length < imagesPerUpload && previews.length < remainingForThisRound;
 
   return (
     <section className="flex flex-col items-center px-5 pt-6 pb-8 animate-[fadeIn_.3s_ease-out]">
@@ -133,7 +181,10 @@ export function UploadStep({
       <div className="mb-5 text-center">
         <h2 className="text-xl font-bold text-stone-900">{nextLabel}</h2>
         <p className="mt-1 text-sm text-stone-400">
-          {templateName} · 上传照片后将生成 {candidateCount} 种候选效果图
+          {templateName} · 上传后将生成 {candidateCount} 种候选效果图
+        </p>
+        <p className="mt-1 text-xs text-stone-400">
+          本批最多 {imagesPerUpload} 张（订单共 {uploadCount} 批 × {imagesPerUpload} 张）
         </p>
       </div>
 
@@ -156,50 +207,59 @@ export function UploadStep({
         }}
         className={[
           "w-full max-w-xs rounded-2xl border-2 transition-all duration-300",
-          preview
+          previews.length > 0
             ? "border-solid border-stone-200 p-4"
             : dragging
               ? "scale-[1.02] border-indigo-400 bg-indigo-50/50"
               : "border-dashed border-stone-200 bg-stone-50/30 hover:border-indigo-300 hover:bg-indigo-50/30",
         ].join(" ")}
       >
-        {preview ? (
+        {previews.length > 0 ? (
           <div className="space-y-4">
-            <div className="relative aspect-[3/4] overflow-hidden rounded-xl bg-stone-100">
-              {/* biome-ignore lint/performance/noImgElement: blob URL 本地预览 */}
-              <img
-                src={preview.objectUrl}
-                alt={preview.name}
-                className="h-full w-full object-cover"
-              />
-              <button
-                type="button"
-                onClick={clearPreview}
-                aria-label="移除已选图片"
-                className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/40 text-white/90 backdrop-blur-sm transition-colors hover:bg-black/60"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="flex items-center gap-3 rounded-xl bg-stone-50 p-3">
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-stone-700">
-                  {preview.name}
-                </p>
-                <p className="mt-0.5 text-xs text-stone-500">
-                  {formatSize(preview.size)}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={clearPreview}
-                disabled={uploading}
-                aria-label="换一张"
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:opacity-60"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
+            {/* 多图预览网格（1/2/3 张自适应） */}
+            <div
+              className={[
+                "grid gap-2",
+                previews.length === 1 ? "grid-cols-1" : "grid-cols-3",
+              ].join(" ")}
+            >
+              {previews.map((p) => (
+                <div
+                  key={p.id}
+                  className="relative aspect-square overflow-hidden rounded-xl bg-stone-100"
+                >
+                  {/* biome-ignore lint/performance/noImgElement: blob URL 本地预览 */}
+                  <img
+                    src={p.objectUrl}
+                    alt={p.name}
+                    className="h-full w-full object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeOne(p.id)}
+                    aria-label="移除此图片"
+                    className="absolute top-1.5 right-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/40 text-white/90 backdrop-blur-sm transition-colors hover:bg-black/60"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+              {/* 占位：剩余可加的空位 */}
+              {Array.from({
+                length: Math.max(0, imagesPerUpload - previews.length),
+              }).map((_, i) => (
+                <button
+                  // biome-ignore lint/suspicious/noArrayIndexKey: 占位符无稳定 id
+                  key={`slot-${i}`}
+                  type="button"
+                  onClick={() => inputRef.current?.click()}
+                  disabled={!canAddMore || uploading}
+                  className="flex aspect-square items-center justify-center rounded-xl border-2 border-dashed border-stone-200 text-stone-400 transition-colors hover:border-indigo-300 hover:bg-indigo-50/30 hover:text-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  aria-label="添加更多图片"
+                >
+                  +
+                </button>
+              ))}
             </div>
 
             <button
@@ -212,7 +272,7 @@ export function UploadStep({
                 "上传中…"
               ) : (
                 <>
-                  开始生成
+                  上传 {previews.length} 张并生成
                   <ArrowRight className="h-4 w-4" />
                 </>
               )}
@@ -220,7 +280,7 @@ export function UploadStep({
 
             {!quotaFull && (
               <p className="text-center text-xs text-stone-500">
-                本订单还差 {uploadCount - uploadedImageCount} 张未上传
+                本订单还差 {totalCapacity - uploadedImageCount} 张未上传
               </p>
             )}
           </div>
@@ -245,7 +305,7 @@ export function UploadStep({
               </span>
             </p>
             <p className="mt-3 text-[11px] text-stone-300">
-              JPG / PNG / WebP · 最大 10MB
+              支持多选 · 本批最多 {imagesPerUpload} 张 · 单张 ≤ 10MB
             </p>
           </label>
         )}
@@ -255,6 +315,7 @@ export function UploadStep({
           ref={inputRef}
           type="file"
           accept={ACCEPT}
+          multiple
           disabled={uploading}
           className="sr-only"
           onChange={(e) => {
@@ -268,7 +329,7 @@ export function UploadStep({
       <div className="mt-5 w-full max-w-xs">
         <div className="mb-2 flex items-center justify-between text-xs">
           <span className="font-medium text-stone-500">
-            进度 {uploadedImageCount} / {uploadCount} 张
+            进度 {uploadedImageCount} / {totalCapacity} 张
           </span>
           <span
             className={[
@@ -292,8 +353,8 @@ export function UploadStep({
             className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-blue-500 transition-[width] duration-300 motion-reduce:transition-none"
             style={{
               width: `${
-                uploadCount > 0
-                  ? Math.min(100, (uploadedImageCount / uploadCount) * 100)
+                totalCapacity > 0
+                  ? Math.min(100, (uploadedImageCount / totalCapacity) * 100)
                   : 0
               }%`,
             }}

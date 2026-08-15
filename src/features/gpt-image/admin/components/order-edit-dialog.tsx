@@ -50,6 +50,7 @@ export function OrderEditDialog({
   const [recipientName, setRecipientName] = useState("");
   const [platform, setPlatform] = useState<OrderPlatform | "">("");
   const [uploadCount, setUploadCount] = useState(1);
+  const [imagesPerUpload, setImagesPerUpload] = useState(3);
   const [regenerateLimit, setRegenerateLimit] = useState(5);
   const [saving, setSaving] = useState(false);
 
@@ -60,6 +61,7 @@ export function OrderEditDialog({
     setRecipientName(order.recipientName ?? "");
     setPlatform((order.platform ?? "") as OrderPlatform | "");
     setUploadCount(order.uploadCount);
+    setImagesPerUpload(order.imagesPerUpload ?? 3);
     setRegenerateLimit(order.regenerateLimit ?? 5);
   }, [open, order]);
 
@@ -77,6 +79,7 @@ export function OrderEditDialog({
         recipientName: recipientName.trim(),
         platform: platform || null,
         uploadCount,
+        imagesPerUpload,
         regenerateLimit,
       });
       if (!res?.data) throw new Error("保存失败");
@@ -149,7 +152,7 @@ export function OrderEditDialog({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="edit-upload-count">用户上传图片数量</Label>
+              <Label htmlFor="edit-upload-count">用户上传批次（次数）</Label>
               <div className="flex items-stretch gap-2">
                 <Button
                   type="button"
@@ -166,12 +169,12 @@ export function OrderEditDialog({
                   id="edit-upload-count"
                   type="number"
                   min={1}
-                  max={50}
+                  max={10}
                   value={uploadCount}
                   onChange={(e) => {
                     const n = parseInt(e.target.value, 10);
                     setUploadCount(
-                      Number.isNaN(n) ? 1 : Math.min(50, Math.max(1, n))
+                      Number.isNaN(n) ? 1 : Math.min(10, Math.max(1, n))
                     );
                   }}
                   className="text-center"
@@ -181,15 +184,60 @@ export function OrderEditDialog({
                   variant="outline"
                   size="icon"
                   className="h-9 w-9 shrink-0"
-                  onClick={() => setUploadCount((n) => Math.min(50, n + 1))}
-                  disabled={uploadCount >= 50}
+                  onClick={() => setUploadCount((n) => Math.min(10, n + 1))}
+                  disabled={uploadCount >= 10}
                   aria-label="增加"
                 >
                   <Plus className="h-4 w-4" />
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                修改后用户可继续按新数量上传；超出原数量的部分也会被保留。
+                修改后用户可继续按新批次上传；总容量 = 批次 × 每批张数。
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-images-per-upload">每批上传原图数量</Label>
+              <div className="flex items-stretch gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 shrink-0"
+                  onClick={() => setImagesPerUpload((n) => Math.max(1, n - 1))}
+                  disabled={imagesPerUpload <= 1}
+                  aria-label="减少"
+                >
+                  <Minus className="h-4 w-4" />
+                </Button>
+                <Input
+                  id="edit-images-per-upload"
+                  type="number"
+                  min={1}
+                  max={3}
+                  value={imagesPerUpload}
+                  onChange={(e) => {
+                    const n = parseInt(e.target.value, 10);
+                    setImagesPerUpload(
+                      Number.isNaN(n) ? 1 : Math.min(3, Math.max(1, n))
+                    );
+                  }}
+                  className="text-center"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 shrink-0"
+                  onClick={() => setImagesPerUpload((n) => Math.min(3, n + 1))}
+                  disabled={imagesPerUpload >= 3}
+                  aria-label="增加"
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                用户每次上传会话最多塞几张参考图。范围 1-3。
               </p>
             </div>
 

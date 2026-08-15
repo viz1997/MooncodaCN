@@ -394,18 +394,21 @@ export function OrdersAdminView() {
                           {order.hasUploadedImage ? (
                             <span
                               className="inline-flex items-center gap-0.5 text-emerald-700"
-                              title={`用户已上传 ${order.uploadedImageCount ?? 0} / ${order.uploadCount} 张原图`}
+                              title={`用户已上传 ${order.uploadedImageCount ?? 0} / ${(order.uploadCount ?? 1) * (order.imagesPerUpload ?? 3)} 张原图（${order.uploadCount ?? 1} 批 × ${order.imagesPerUpload ?? 3} 张/批）`}
                             >
                               <Upload className="h-3 w-3" /> 原图×
                               {order.uploadedImageCount ?? 0}/
-                              {order.uploadCount}
+                              {(order.uploadCount ?? 1) *
+                                (order.imagesPerUpload ?? 3)}
                             </span>
                           ) : (
                             <span
                               className="text-muted-foreground"
-                              title={`待上传 ${order.uploadCount} 张`}
+                              title={`待上传 ${(order.uploadCount ?? 1) * (order.imagesPerUpload ?? 3)} 张（${order.uploadCount ?? 1} 批 × ${order.imagesPerUpload ?? 3} 张/批）`}
                             >
-                              待传{order.uploadCount}
+                              待传
+                              {(order.uploadCount ?? 1) *
+                                (order.imagesPerUpload ?? 3)}
                             </span>
                           )}
                           {order.selectionCount && order.selectionCount > 0 ? (
@@ -661,10 +664,14 @@ export function OrdersAdminView() {
                 <div>
                   <span className="text-muted-foreground">上传图片数量：</span>
                   {detailDialog.uploadedImageCount ?? 0} /{" "}
-                  {detailDialog.uploadCount} 张
+                  {(detailDialog.uploadCount ?? 1) *
+                    (detailDialog.imagesPerUpload ?? 3)}{" "}
+                  张（{detailDialog.uploadCount ?? 1} 批 ×{" "}
+                  {detailDialog.imagesPerUpload ?? 3} 张/批）
                   {(detailDialog.uploadedImageCount ?? 0) > 0 &&
                   (detailDialog.uploadedImageCount ?? 0) <
-                    detailDialog.uploadCount ? (
+                    (detailDialog.uploadCount ?? 1) *
+                      (detailDialog.imagesPerUpload ?? 3) ? (
                     <span className="ml-1 text-xs text-amber-600">
                       （渐进式上传，未满额）
                     </span>

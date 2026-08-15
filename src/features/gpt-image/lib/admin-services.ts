@@ -173,12 +173,13 @@ export async function createOrder(input: {
   recipientName?: string | undefined;
   platform?: string | undefined;
   uploadCount: number;
+  imagesPerUpload: number;
   regenerateLimit: number;
   /** 创建者用户 ID（由路由层从 session 注入） */
   createdBy?: string | undefined;
   /**
    * 替换已有订单 —— 复用其 id/token/状态/上传内容等生命周期数据，
-   * 只覆盖 orderNo / recipientName / platform / uploadCount / regenerateLimit。
+   * 只覆盖 orderNo / recipientName / platform / uploadCount / imagesPerUpload / regenerateLimit。
    * 传 null/undefined 表示创建新订单。
    */
   replaceOrderId?: string | undefined;
@@ -191,6 +192,7 @@ export async function createOrder(input: {
       recipientName: input.recipientName ?? "",
       platform: (input.platform as string | null) ?? null,
       uploadCount: input.uploadCount,
+      imagesPerUpload: input.imagesPerUpload,
       regenerateLimit: input.regenerateLimit,
     });
   }
@@ -222,6 +224,7 @@ export async function createOrder(input: {
       token,
       status: "PENDING",
       uploadCount: input.uploadCount,
+      imagesPerUpload: input.imagesPerUpload,
       regenerateLimit: input.regenerateLimit,
       createdBy: input.createdBy ?? null,
     })
@@ -239,6 +242,7 @@ export async function createOrder(input: {
     platform: (created.platform ?? null) as PromptOrderPlatform | null,
     status: created.status,
     uploadCount: created.uploadCount,
+    imagesPerUpload: created.imagesPerUpload,
     regenerateLimit: created.regenerateLimit,
     selectedIndex: created.selectedIndex,
     errorMessage: created.errorMessage,
@@ -299,6 +303,7 @@ export async function listOrders(filters: {
       token: promptOrder.token,
       status: promptOrder.status,
       uploadCount: promptOrder.uploadCount,
+      imagesPerUpload: promptOrder.imagesPerUpload,
       regenerateLimit: promptOrder.regenerateLimit,
       uploadedImages: promptOrder.uploadedImages,
       candidates: promptOrder.candidates,
@@ -337,6 +342,7 @@ export async function listOrders(filters: {
       token: o.token,
       status: o.status,
       uploadCount: o.uploadCount,
+      imagesPerUpload: o.imagesPerUpload,
       regenerateLimit: o.regenerateLimit,
       selectedIndex: o.selectedIndex,
       errorMessage: o.errorMessage,
@@ -416,7 +422,7 @@ export async function findOrderByOrderNoForCreator(
 }
 
 /**
- * 编辑订单 —— 仅允许修改业务字段（orderNo / recipientName / platform / uploadCount）。
+ * 编辑订单 —— 仅允许修改业务字段（orderNo / recipientName / platform / uploadCount / imagesPerUpload）。
  * 模板、token、状态、已上传图片均锁定，订单生命周期数据不能被覆盖。
  *
  * 返回最新的 OrderView（与 listOrders 同形），便于客户端乐观更新。
@@ -427,6 +433,7 @@ export async function updateOrder(input: {
   recipientName: string;
   platform: string | null;
   uploadCount: number;
+  imagesPerUpload: number;
   regenerateLimit: number;
 }) {
   const [updated] = await db
@@ -436,6 +443,7 @@ export async function updateOrder(input: {
       recipientName: input.recipientName,
       platform: (input.platform as PromptOrderPlatform | null) ?? null,
       uploadCount: input.uploadCount,
+      imagesPerUpload: input.imagesPerUpload,
       regenerateLimit: input.regenerateLimit,
       updatedAt: new Date(),
     })
@@ -468,6 +476,7 @@ export async function updateOrder(input: {
     token: updated.token,
     status: updated.status,
     uploadCount: updated.uploadCount,
+    imagesPerUpload: updated.imagesPerUpload,
     regenerateLimit: updated.regenerateLimit,
     selectedIndex: updated.selectedIndex,
     errorMessage: updated.errorMessage,

@@ -35,6 +35,8 @@ interface OrderTimelineProps {
   uploadedAt: string | null;
   uploadedImageCount: number;
   uploadCount: number;
+  /** 每批上传的原图参考图数量（1-3）；总容量 = uploadCount × imagesPerUpload */
+  imagesPerUpload: number;
   generatedAt: string | null;
   candidateGroups: number;
   candidateCount: number;
@@ -122,6 +124,7 @@ export function OrderTimeline({
   uploadedAt,
   uploadedImageCount,
   uploadCount,
+  imagesPerUpload,
   generatedAt,
   candidateGroups,
   candidateCount,
@@ -145,13 +148,14 @@ export function OrderTimeline({
     });
 
     if (uploadedAt) {
-      const remain = Math.max(0, uploadCount - uploadedImageCount);
+      const totalCapacity = uploadCount * imagesPerUpload;
+      const remain = Math.max(0, totalCapacity - uploadedImageCount);
       list.push({
         id: "uploaded",
         icon: Upload,
         title:
-          uploadedImageCount >= uploadCount
-            ? `已上传全部 ${uploadCount} 张原图`
+          uploadedImageCount >= totalCapacity
+            ? `已上传全部 ${totalCapacity} 张原图（${uploadCount} 批 × ${imagesPerUpload} 张/批）`
             : `已上传 ${uploadedImageCount} 张原图${remain > 0 ? `（还差 ${remain} 张）` : ""}`,
         at: uploadedAt,
         tone: "primary",

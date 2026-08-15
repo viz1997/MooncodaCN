@@ -39,7 +39,18 @@ export const promptOrderCreateSchema = z.object({
   recipientName: z.string().trim().max(64).optional().default(""),
   // 平台选填，不指定为 undefined
   platform: z.enum(ORDER_PLATFORMS).optional(),
-  uploadCount: z.number().int().min(1).max(50).default(3),
+  /**
+   * 用户可上传的批次次数（默认 1）。总容量 = uploadCount × imagesPerUpload。
+   * 历史遗留字段"上传图片数量"的实际语义是批次数，被误解为张数。
+   * 单批上传几张图见 imagesPerUpload。
+   */
+  uploadCount: z.number().int().min(1).max(50).default(1),
+  /**
+   * 每批上传的原图参考图数量（1-3，默认 3）。
+   * 用户一次"上传"操作可塞 imagesPerUpload 张图，全部塞进去算占满一批。
+   * 2026-08-15 起从隐式 1 放宽到 1-3，由用户/管理员每次下单时设置。
+   */
+  imagesPerUpload: z.number().int().min(1).max(3).default(3),
   /**
    * 用户主动重新生成次数上限（仅 imageIdx 单图路径计数）。
    * 批量重跑 / FAILED 一键重试不计。

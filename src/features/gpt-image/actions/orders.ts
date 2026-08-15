@@ -100,7 +100,7 @@ export const deleteOrderAction = withOrderAction("delete")
  * 编辑订单
  *
  * 模板、token、状态、上传内容均锁定，仅允许改：
- * - orderNo / recipientName / platform / uploadCount / regenerateLimit
+ * - orderNo / recipientName / platform / uploadCount / imagesPerUpload / regenerateLimit
  */
 const updateOrderSchema = z.object({
   id: z.string().min(1),
@@ -108,6 +108,7 @@ const updateOrderSchema = z.object({
   recipientName: z.string().max(100),
   platform: z.string().nullable(),
   uploadCount: z.number().int().min(1).max(50),
+  imagesPerUpload: z.number().int().min(1).max(3),
   regenerateLimit: z.number().int().min(0).max(20),
 });
 export const updateOrderAction = withOrderAction("update")

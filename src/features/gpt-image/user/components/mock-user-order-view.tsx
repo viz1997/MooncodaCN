@@ -51,6 +51,7 @@ function MockOrderContent({ order }: { order: OrderView }) {
 
   const uploadedCount = order.uploadedImageCount ?? 0;
   const uploadCount = order.uploadCount ?? 1;
+  const imagesPerUpload = order.imagesPerUpload ?? 3;
   const candidateCount = order.candidateCount ?? order.template.candidateCount;
   const readyGroups = order.candidateGroups ?? 0;
 
@@ -180,6 +181,7 @@ function MockOrderContent({ order }: { order: OrderView }) {
               <UploadStep
                 templateName={order.template.name}
                 uploadCount={uploadCount}
+                imagesPerUpload={imagesPerUpload}
                 uploadedImageCount={uploadedCount}
                 candidateCount={candidateCount}
                 hasFailure={isFailed}

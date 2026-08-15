@@ -64,7 +64,8 @@ export function OrderFormDialog({
   const [templateId, setTemplateId] = useState("");
   const [recipientName, setRecipientName] = useState("");
   const [platform, setPlatform] = useState<OrderPlatform | "">("");
-  const [uploadCount, setUploadCount] = useState(3);
+  const [uploadCount, setUploadCount] = useState(1);
+  const [imagesPerUpload, setImagesPerUpload] = useState(3);
   const [regenerateLimit, setRegenerateLimit] = useState(5);
   const [saving, setSaving] = useState(false);
   /** 冲突确认弹窗的待覆盖订单 */
@@ -82,7 +83,8 @@ export function OrderFormDialog({
       setTemplateId(templates[0]?.id || "");
       setRecipientName("");
       setPlatform("");
-      setUploadCount(3);
+      setUploadCount(1);
+      setImagesPerUpload(3);
       setRegenerateLimit(5);
       setPendingConflict(null);
     }
@@ -100,6 +102,7 @@ export function OrderFormDialog({
         recipientName: recipientName.trim() || undefined,
         platform: platform || undefined,
         uploadCount,
+        imagesPerUpload,
         regenerateLimit,
         ...(replaceOrderId ? { replaceOrderId } : {}),
       });
@@ -205,7 +208,7 @@ export function OrderFormDialog({
 
           <div className="space-y-2">
             <Label htmlFor="ord-upload-count">
-              用户上传图片数量 <span className="text-red-500">*</span>
+              用户上传批次（次数） <span className="text-red-500">*</span>
             </Label>
             <div className="flex items-stretch gap-2">
               <Button
@@ -223,12 +226,12 @@ export function OrderFormDialog({
                 id="ord-upload-count"
                 type="number"
                 min={1}
-                max={50}
+                max={10}
                 value={uploadCount}
                 onChange={(e) => {
                   const v = Number(e.target.value);
                   if (!Number.isFinite(v)) return;
-                  const clamped = Math.max(1, Math.min(50, Math.floor(v)));
+                  const clamped = Math.max(1, Math.min(10, Math.floor(v)));
                   setUploadCount(clamped);
                 }}
                 className="text-center font-medium [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
@@ -238,16 +241,64 @@ export function OrderFormDialog({
                 variant="outline"
                 size="icon"
                 className="h-9 w-9 shrink-0"
-                onClick={() => setUploadCount((n) => Math.min(50, n + 1))}
-                disabled={uploadCount >= 50}
+                onClick={() => setUploadCount((n) => Math.min(10, n + 1))}
+                disabled={uploadCount >= 10}
                 aria-label="增加"
               >
                 <Plus className="h-4 w-4" />
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              用户需上传此数量的图片才能触发生成。多张图将被融合为单次生图输入。建议
-              1-10 张，最多 50 张。
+              用户最多可分多少次上传原图（每次上传算 1 批）。默认 1 批，多张图
+              订单需要更多批次时可调高。建议 1-3 批，最多 10 批。
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="ord-images-per-upload">
+              每批上传原图数量 <span className="text-red-500">*</span>
+            </Label>
+            <div className="flex items-stretch gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 shrink-0"
+                onClick={() => setImagesPerUpload((n) => Math.max(1, n - 1))}
+                disabled={imagesPerUpload <= 1}
+                aria-label="减少"
+              >
+                <Minus className="h-4 w-4" />
+              </Button>
+              <Input
+                id="ord-images-per-upload"
+                type="number"
+                min={1}
+                max={3}
+                value={imagesPerUpload}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (!Number.isFinite(v)) return;
+                  const clamped = Math.max(1, Math.min(3, Math.floor(v)));
+                  setImagesPerUpload(clamped);
+                }}
+                className="text-center font-medium [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 shrink-0"
+                onClick={() => setImagesPerUpload((n) => Math.min(3, n + 1))}
+                disabled={imagesPerUpload >= 3}
+                aria-label="增加"
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              用户每次上传会话最多塞几张参考图。多张图被融合为单次生图输入。
+              默认 3 张，可选 1-3 张。订单总容量 = 批次 × 每批张数。
             </p>
           </div>
 
