@@ -21,7 +21,12 @@ import {
 } from "@/components/ui/alert-dialog";
 import type { OrderHistorySnapshotView } from "@/features/gpt-image/lib/types";
 import { ImageProgress } from "./image-progress";
-import { candidateUrl, originalUrl, preloadImages } from "./image-urls";
+import {
+  candidateUrl,
+  historyCandidateUrl,
+  originalUrl,
+  preloadImages,
+} from "./image-urls";
 import { Lightbox, type LightboxTarget } from "./lightbox";
 import { OriginalLightbox } from "./original-lightbox";
 import { OriginalStrip } from "./original-strip";
@@ -206,8 +211,14 @@ export function SelectStep({
     if (safeIdx + 1 < imageCount) {
       urls.push(candidateUrl(token, safeIdx + 1, 0, updatedAt));
     }
+    // 历史快照 URL：用户切"上一版/下一版"时立刻命中浏览器缓存，
+    // 不再空白等待服务端 roundtrip。把所有 imageSnapshots 都加进预热列表
+    // （数量有限，每张占一张宫格图，体积可控）。
+    for (const snap of imageSnapshots) {
+      urls.push(historyCandidateUrl(token, snap.id, safeIdx, snap.createdAt));
+    }
     preloadImages(urls);
-  }, [token, updatedAt, safeIdx, imageCount]);
+  }, [token, updatedAt, safeIdx, imageCount, imageSnapshots]);
 
   const handleToggle = useCallback(
     (imageIdx: number, candIdx: number) => {
@@ -467,8 +478,8 @@ export function SelectStep({
           </div>
         )}
 
-        {/* 操作按钮：重新生成（次级）+ 确认提交（主）并列 */}
-        <div className="mt-4 flex w-full items-stretch gap-2">
+        {/* 操作按钮：重新生成（次级）+ 确认提交（主）并列，居中显示 */}
+        <div className="mt-4 flex w-full items-stretch justify-center gap-2">
           {/* 重新生成（次级）—— 已锁定位 / 次数用尽时禁用 */}
           <button
             type="button"
@@ -514,7 +525,7 @@ export function SelectStep({
             }}
             disabled={submitting || !canConfirm}
             className={[
-              "h-11 flex-1 rounded-xl text-sm font-medium transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 disabled:cursor-not-allowed",
+              "h-11 shrink-0 rounded-xl px-4 text-sm font-medium transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 disabled:cursor-not-allowed",
               canConfirm
                 ? "bg-gradient-to-r from-indigo-500 to-blue-500 text-white shadow-lg shadow-indigo-200/50 hover:shadow-indigo-300/50"
                 : "bg-stone-200 text-stone-400 disabled:opacity-100",
