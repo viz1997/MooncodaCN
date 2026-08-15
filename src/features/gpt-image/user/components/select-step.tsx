@@ -428,7 +428,7 @@ export function SelectStep({
             }
             selectedQuadrant={currentSelection}
             onSelect={(q) => handleToggle(safeIdx, q)}
-            disabled={isCurrentLocked || isViewingOldSnapshot}
+            disabled={isCurrentLocked}
           />
         </div>
 
