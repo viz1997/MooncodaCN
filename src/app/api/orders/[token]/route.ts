@@ -3,8 +3,10 @@
  * GET /api/orders/[token]
  */
 
+import { and, count, eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
+import { promptOrderHistory } from "@/db/schema";
 import {
   countCandidateGroups,
   countUploadedImages,
@@ -49,6 +51,19 @@ async function getHandler(
     const uploaded = parseUploadedImages(order.uploadedImages as string | null);
     const selections = parseSelections(order.selections as string | null);
 
+    // 实际已用重新生成次数 = trigger='regenerate_single' 的快照行数
+    // （批量重跑 trigger='regenerate_all' / FAILED 重试同样走 regenerate_all，不计）
+    const usedRows = await db
+      .select({ used: count() })
+      .from(promptOrderHistory)
+      .where(
+        and(
+          eq(promptOrderHistory.orderId, order.id),
+          eq(promptOrderHistory.trigger, "regenerate_single")
+        )
+      );
+    const regenerateUsedCount = usedRows[0]?.used ?? 0;
+
     return NextResponse.json({
       success: true,
       data: {
@@ -61,6 +76,8 @@ async function getHandler(
         uploadCount: order.uploadCount,
         candidateCount: order.template.candidateCount,
         candidateGroups: countCandidateGroups(candidates),
+        regenerateLimit: order.regenerateLimit,
+        regenerateUsedCount,
         selections,
         selectedIndex: order.selectedIndex,
         errorMessage: order.errorMessage,

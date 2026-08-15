@@ -194,7 +194,6 @@ function MockOrderContent({ order }: { order: OrderView }) {
                 updatedAt={order.updatedAt}
                 uploadedImageCount={uploadedCount}
                 readyGroups={readyGroups}
-                candidateCount={candidateCount}
                 // mock 没有 useOrder，安静期视为已结束（直接显示真实节奏）
                 quietEndsAt={null}
                 stopping={false}
@@ -217,6 +216,8 @@ function MockOrderContent({ order }: { order: OrderView }) {
                 onToggle={selection.toggle}
                 onSubmit={handleSubmit}
                 onRegenerate={handleRegenerate}
+                regenerateLimit={order.regenerateLimit ?? 5}
+                regenerateUsedCount={order.regenerateUsedCount ?? 0}
                 // mock 不接 useOrderHistory（不打 /history 接口），传空 stub
                 historySnapshots={[]}
                 historyLoading={false}

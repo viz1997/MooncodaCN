@@ -843,7 +843,8 @@ export const promptTemplate = pgTable("prompt_template", {
  * @field token - 访问令牌（防止 orderNo 被枚举；32 字符 hex）
  * @field status - 当前状态
  * @field uploadedImages - 已上传原图（dataUrl 字符串数组，JSON）
- * @field uploadCount - 用户需要上传的图片数量（1-50）
+ * @field uploadCount - 用户需要上传的图片数量（1-50，默认 3）
+ * @field regenerateLimit - 用户主动重新生成次数上限（默认 5；批量重跑 / FAILED 重试不计）
  * @field candidates - 效果图（嵌套数组 [[b64,...],[b64,...]]，外层索引 = 原图索引）
  * @field selectedIndex - 兼容字段（旧模型：取 selections[0]）
  * @field selections - 每张原图的候选选择（长度 = uploadedImages.length，未选为 null）
@@ -864,7 +865,14 @@ export const promptOrder = pgTable(
     token: text("token").notNull().unique(),
     status: promptOrderStatusEnum("status").notNull().default("PENDING"),
     uploadedImages: text("uploaded_images"),
-    uploadCount: integer("upload_count").notNull().default(1),
+    uploadCount: integer("upload_count").notNull().default(3),
+    /**
+     * 用户主动"重新生成第 N 张"的次数上限。
+     * 仅 imageIdx 传入的单图路径计数（trigger=regenerate_single）；
+     * 批量重跑（regenerate_all / FAILED 重试）不消耗次数。
+     * 实际已用次数 = promptOrderHistory 中 trigger='regenerate_single' 的行数。
+     */
+    regenerateLimit: integer("regenerate_limit").notNull().default(5),
     candidates: text("candidates"),
     selectedIndex: integer("selected_index"),
     selections: text("selections"),

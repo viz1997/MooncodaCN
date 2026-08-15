@@ -50,6 +50,7 @@ export function OrderEditDialog({
   const [recipientName, setRecipientName] = useState("");
   const [platform, setPlatform] = useState<OrderPlatform | "">("");
   const [uploadCount, setUploadCount] = useState(1);
+  const [regenerateLimit, setRegenerateLimit] = useState(5);
   const [saving, setSaving] = useState(false);
 
   // 每次打开时用 order 字段填充表单
@@ -59,6 +60,7 @@ export function OrderEditDialog({
     setRecipientName(order.recipientName ?? "");
     setPlatform((order.platform ?? "") as OrderPlatform | "");
     setUploadCount(order.uploadCount);
+    setRegenerateLimit(order.regenerateLimit ?? 5);
   }, [open, order]);
 
   const handleSave = async () => {
@@ -75,6 +77,7 @@ export function OrderEditDialog({
         recipientName: recipientName.trim(),
         platform: platform || null,
         uploadCount,
+        regenerateLimit,
       });
       if (!res?.data) throw new Error("保存失败");
       toast.success("订单已更新");
@@ -93,7 +96,7 @@ export function OrderEditDialog({
         <DialogHeader>
           <DialogTitle>编辑订单</DialogTitle>
           <DialogDescription>
-            仅业务字段（订单号、收件人、平台、上传数量）可改；模板、访问链接、状态、上传内容保持不变。
+            仅业务字段（订单号、收件人、平台、上传数量、重新生成次数）可改；模板、访问链接、状态、上传内容保持不变。
           </DialogDescription>
         </DialogHeader>
 
@@ -187,6 +190,57 @@ export function OrderEditDialog({
               </div>
               <p className="text-xs text-muted-foreground">
                 修改后用户可继续按新数量上传；超出原数量的部分也会被保留。
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-regenerate-limit">
+                用户重新生成次数上限
+              </Label>
+              <div className="flex items-stretch gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 shrink-0"
+                  onClick={() =>
+                    setRegenerateLimit((n) => Math.max(0, n - 1))
+                  }
+                  disabled={regenerateLimit <= 0}
+                  aria-label="减少"
+                >
+                  <Minus className="h-4 w-4" />
+                </Button>
+                <Input
+                  id="edit-regenerate-limit"
+                  type="number"
+                  min={0}
+                  max={20}
+                  value={regenerateLimit}
+                  onChange={(e) => {
+                    const n = parseInt(e.target.value, 10);
+                    setRegenerateLimit(
+                      Number.isNaN(n) ? 0 : Math.min(20, Math.max(0, n))
+                    );
+                  }}
+                  className="text-center"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 shrink-0"
+                  onClick={() =>
+                    setRegenerateLimit((n) => Math.min(20, n + 1))
+                  }
+                  disabled={regenerateLimit >= 20}
+                  aria-label="增加"
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                仅"重新生成第 N 张"（单图路径）计数；批量重跑 / FAILED 一键重试不计。
               </p>
             </div>
 

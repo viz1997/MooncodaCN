@@ -128,10 +128,10 @@ export function QuadrantGrid({
                     className="pointer-events-none absolute inset-1 rounded-md ring-1 ring-transparent transition-colors group-hover/quad:ring-emerald-400/60"
                   />
                 )}
-                {/* 编号小标 + 已选标记 */}
-                <span className="pointer-events-none absolute top-2 left-2 flex items-center gap-1 rounded-md bg-black/55 px-1.5 py-0.5 text-xs font-medium text-white backdrop-blur-sm">
-                  #{qIdx + 1}
-                </span>
+                {/* 注：原本在左上角挂"#N"角标给用户看候选编号。
+                   2026-08-15 用户反馈"效果图不需要显示标识 #1/#2/#3/#4"——
+                   去掉角标；选中态用 emerald 实色边框已足够表达，
+                   键盘 1-9 选图保留（help dialog 仍说明）。 */}
               </button>
             );
           })}

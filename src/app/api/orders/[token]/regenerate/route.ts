@@ -19,10 +19,10 @@
  * - 批量路径：只要有一位已锁 → 409（不能批量重跑覆盖已提交）
  */
 
-import { eq } from "drizzle-orm";
+import { and, count, eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { promptOrder } from "@/db/schema";
+import { promptOrder, promptOrderHistory } from "@/db/schema";
 import { submitGeneration } from "@/features/gpt-image/lib/generation-service";
 import {
   parseCandidates,
@@ -103,6 +103,40 @@ async function postHandler(
 
     // 状态校验
     const isSingle = typeof imageIdx === "number";
+
+    // 单图重新生成次数上限校验（仅 imageIdx 路径计数；批量 / FAILED 重试不计）。
+    // 实际已用次数 = promptOrderHistory 中 trigger='regenerate_single' 的行数。
+    // regenerateLimit=0 意味着禁用用户主动重新生成。
+    if (isSingle && order.regenerateLimit <= 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "此订单已禁用主动重新生成功能",
+        },
+        { status: 403 }
+      );
+    }
+    if (isSingle) {
+      const usedRows = await db
+        .select({ used: count() })
+        .from(promptOrderHistory)
+        .where(
+          and(
+            eq(promptOrderHistory.orderId, order.id),
+            eq(promptOrderHistory.trigger, "regenerate_single")
+          )
+        );
+      const regenerateUsedCount = usedRows[0]?.used ?? 0;
+      if (regenerateUsedCount >= order.regenerateLimit) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `已达到本订单的重新生成次数上限（${order.regenerateLimit} 次）。如需继续，请联系服务方调整。`,
+          },
+          { status: 429 }
+        );
+      }
+    }
     if (isSingle && order.status !== "CANDIDATES_READY") {
       return NextResponse.json(
         {

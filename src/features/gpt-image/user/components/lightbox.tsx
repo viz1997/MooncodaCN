@@ -218,7 +218,7 @@ export function Lightbox({
                 aria-live="polite"
                 className="text-xs text-zinc-400 tabular-nums"
               >
-                效果 #{candIdx + 1} / 共 {candidateCount} 张
+                共 {candidateCount} 张可选
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -328,7 +328,7 @@ export function Lightbox({
                     />
                   )}
                   <figcaption className="text-xs text-emerald-400">
-                    效果 #{candIdx + 1}
+                    已选
                   </figcaption>
                 </figure>
               </div>

@@ -39,7 +39,12 @@ export const promptOrderCreateSchema = z.object({
   recipientName: z.string().trim().max(64).optional().default(""),
   // 平台选填，不指定为 undefined
   platform: z.enum(ORDER_PLATFORMS).optional(),
-  uploadCount: z.number().int().min(1).max(50).default(1),
+  uploadCount: z.number().int().min(1).max(50).default(3),
+  /**
+   * 用户主动重新生成次数上限（仅 imageIdx 单图路径计数）。
+   * 批量重跑 / FAILED 一键重试不计。
+   */
+  regenerateLimit: z.number().int().min(0).max(20).default(5),
   /**
    * 覆盖已有订单 —— 传 existingId 时走 updateOrder 分支，保留 token/状态/上传内容。
    * null/undefined 表示全新创建。

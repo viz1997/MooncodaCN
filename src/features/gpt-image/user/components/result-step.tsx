@@ -120,9 +120,7 @@ export function ResultStep({
         <p className="text-2xl font-bold tracking-tight text-stone-900 tabular-nums">
           照片 {safePhoto + 1} / {imageCount}
         </p>
-        <p className="mt-0.5 text-sm text-stone-500 tabular-nums">
-          已选 #{selectedCand + 1}
-        </p>
+        <p className="mt-0.5 text-sm text-stone-500">已选候选</p>
       </div>
 
       {/* ── 主卡（包含触摸手势 + 左右 chevron） ── */}
@@ -137,7 +135,7 @@ export function ResultStep({
               loading="lazy"
             />
             <span className="absolute top-2.5 left-2.5 inline-flex items-center gap-1 rounded-full bg-emerald-500 px-2 py-1 text-[10px] font-semibold text-white shadow-sm backdrop-blur-sm">
-              已选 #{selectedCand + 1}
+              已选
             </span>
 
             {hasNavigation && (

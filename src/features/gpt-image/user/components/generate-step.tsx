@@ -18,7 +18,6 @@ interface GenerateStepProps {
   uploadedImageCount: number;
   /** 服务端已写入的效果组数 —— 真实进度，不是估算 */
   readyGroups: number;
-  candidateCount: number;
   /** 停止中——禁用按钮防止重复点击 */
   stopping?: boolean;
   /** "停止生成"是协作式打断当前 in-flight 的生成任务，订单保留 */
@@ -125,7 +124,6 @@ export function GenerateStep({
   updatedAt,
   uploadedImageCount,
   readyGroups,
-  candidateCount,
   stopping = false,
   onStopClick,
   quietEndsAt,
@@ -318,15 +316,8 @@ export function GenerateStep({
         ))}
       </div>
 
-      {/* 进度明细 */}
-      <p className="mb-4 text-center text-xs text-stone-500 tabular-nums">
-        {done}/{uploadedImageCount} 张已完成
-        {uploadedImageCount > 1 && (
-          <span className="ml-1 text-stone-400">
-            · {candidateCount} 宫格 × {uploadedImageCount} 张
-          </span>
-        )}
-      </p>
+
+
 
       {/* 停止按钮 */}
       {onStopClick && (

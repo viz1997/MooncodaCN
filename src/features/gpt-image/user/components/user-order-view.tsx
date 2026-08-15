@@ -214,7 +214,6 @@ function UserOrderContent({
                 updatedAt={order.updatedAt}
                 uploadedImageCount={uploadedCount}
                 readyGroups={readyGroups}
-                candidateCount={candidateCount}
                 // 共享给 useOrder 的同一时间源，让假进度 RAF 起点 = /poll
                 // 安静期起点；窗口内不打 /poll，只让假进度跑。
                 quietEndsAt={quietEndsAt}
@@ -241,6 +240,8 @@ function UserOrderContent({
                 onToggle={selection.toggle}
                 onSubmit={handleSubmit}
                 onRegenerate={actions.regenerate}
+                regenerateLimit={order.regenerateLimit}
+                regenerateUsedCount={order.regenerateUsedCount ?? 0}
                 historySnapshots={history.history}
                 historyLoading={history.loading}
                 restoringId={history.restoringId}

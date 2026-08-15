@@ -64,7 +64,8 @@ export function OrderFormDialog({
   const [templateId, setTemplateId] = useState("");
   const [recipientName, setRecipientName] = useState("");
   const [platform, setPlatform] = useState<OrderPlatform | "">("");
-  const [uploadCount, setUploadCount] = useState(1);
+  const [uploadCount, setUploadCount] = useState(3);
+  const [regenerateLimit, setRegenerateLimit] = useState(5);
   const [saving, setSaving] = useState(false);
   /** 冲突确认弹窗的待覆盖订单 */
   const [pendingConflict, setPendingConflict] = useState<ConflictOrder | null>(
@@ -81,7 +82,8 @@ export function OrderFormDialog({
       setTemplateId(templates[0]?.id || "");
       setRecipientName("");
       setPlatform("");
-      setUploadCount(1);
+      setUploadCount(3);
+      setRegenerateLimit(5);
       setPendingConflict(null);
     }
   }, [open, templates]);
@@ -98,6 +100,7 @@ export function OrderFormDialog({
         recipientName: recipientName.trim() || undefined,
         platform: platform || undefined,
         uploadCount,
+        regenerateLimit,
         ...(replaceOrderId ? { replaceOrderId } : {}),
       });
       if (!res?.data) throw new Error("创建失败");
@@ -245,6 +248,58 @@ export function OrderFormDialog({
             <p className="text-xs text-muted-foreground">
               用户需上传此数量的图片才能触发生成。多张图将被融合为单次生图输入。建议
               1-10 张，最多 50 张。
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="ord-regenerate-limit">
+              用户重新生成次数上限
+            </Label>
+            <div className="flex items-stretch gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 shrink-0"
+                onClick={() =>
+                  setRegenerateLimit((n) => Math.max(0, n - 1))
+                }
+                disabled={regenerateLimit <= 0}
+                aria-label="减少"
+              >
+                <Minus className="h-4 w-4" />
+              </Button>
+              <Input
+                id="ord-regenerate-limit"
+                type="number"
+                min={0}
+                max={20}
+                value={regenerateLimit}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (!Number.isFinite(v)) return;
+                  const clamped = Math.max(0, Math.min(20, Math.floor(v)));
+                  setRegenerateLimit(clamped);
+                }}
+                className="text-center font-medium [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 shrink-0"
+                onClick={() =>
+                  setRegenerateLimit((n) => Math.min(20, n + 1))
+                }
+                disabled={regenerateLimit >= 20}
+                aria-label="增加"
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              仅"重新生成第 N 张"（单图路径）计数；批量重跑 / FAILED 一键重试不计。
+              设为 0 表示禁止用户主动重新生成。
             </p>
           </div>
 

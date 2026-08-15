@@ -46,6 +46,10 @@ interface SelectStepProps {
   onSubmit: () => void;
   /** 重新生成当前原图（第 safeIdx 张） */
   onRegenerate: (imageIdx: number) => Promise<boolean>;
+  /** 单图重新生成次数上限（来自订单 regenerateLimit） */
+  regenerateLimit: number;
+  /** 已用重新生成次数（trigger=regenerate_single 的快照行数） */
+  regenerateUsedCount: number;
   /** 历史效果图快照列表（按 round DESC 服务端排序，前端再按 imageIdx 过滤） */
   historySnapshots: OrderHistorySnapshotView[];
   /** 是否正在拉历史快照（首次加载 + regenerate 后刷新） */
@@ -105,6 +109,8 @@ export function SelectStep({
   onToggle,
   onSubmit,
   onRegenerate,
+  regenerateLimit,
+  regenerateUsedCount,
   historySnapshots,
   historyLoading,
   restoringId,
@@ -130,6 +136,13 @@ export function SelectStep({
   const safeIdx = Math.min(currentIdx, Math.max(0, imageCount - 1));
   const currentSelection = selections[safeIdx] ?? null;
   const isCurrentLocked = isLocked(safeIdx);
+  // 单图重新生成剩余次数（用户主动重生成第 N 张）。已锁定位不可改，
+  // 但剩余次数仍按订单级统计，不影响显示。regenerateLimit=0 表示禁用。
+  const regenerateRemaining = Math.max(
+    0,
+    regenerateLimit - regenerateUsedCount
+  );
+  const canRegenerate = !isCurrentLocked && regenerateRemaining > 0;
 
   // 最近一次"被赋值"的图片索引
   const lastSelectedIdx = useMemo(() => {
@@ -375,14 +388,19 @@ export function SelectStep({
 
         {/* 操作按钮：重新生成（次级）+ 确认提交（主）并列 */}
         <div className="mt-4 flex w-full items-stretch gap-2">
-          {/* 重新生成（次级）—— 已锁定位禁用 */}
+          {/* 重新生成（次级）—— 已锁定位 / 次数用尽时禁用 */}
           <button
             type="button"
             onClick={() => {
-              if (isCurrentLocked) return;
+              if (!canRegenerate) return;
               setRegenConfirmOpen(true);
             }}
-            disabled={regenerating || isCurrentLocked}
+            disabled={regenerating || !canRegenerate}
+            title={
+              !isCurrentLocked && regenerateRemaining === 0
+                ? "本订单的重新生成次数已用完"
+                : undefined
+            }
             className="inline-flex h-11 shrink-0 items-center justify-center gap-1 rounded-xl border border-stone-200 bg-white px-3 text-sm font-medium text-stone-600 transition-colors hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 disabled:opacity-60"
           >
             {regenerating ? (
@@ -399,6 +417,11 @@ export function SelectStep({
               : isCurrentLocked
                 ? "已锁定"
                 : "重新生成"}
+            {!isCurrentLocked && regenerateLimit > 0 && (
+              <span className="ml-0.5 rounded bg-stone-100 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-stone-500">
+                剩 {regenerateRemaining}
+              </span>
+            )}
           </button>
 
           {/* 确认提交（主）—— 已锁定位可再次点击以更新保存值（toPayload 会跳过无变化的位） */}
@@ -424,7 +447,7 @@ export function SelectStep({
               <span className="inline-flex items-center gap-1.5">
                 <Lock className="h-4 w-4" />
                 {currentSelection !== null
-                  ? `已提交 #${currentSelection + 1}`
+                  ? "已提交"
                   : "该张已提交"}
               </span>
             ) : (
