@@ -106,7 +106,29 @@ export function OrderFormDialog({
         regenerateLimit,
         ...(replaceOrderId ? { replaceOrderId } : {}),
       });
-      if (!res?.data) throw new Error("创建失败");
+      if (!res?.data) {
+        // 不吞错：把 next-safe-action 的真实 serverError / validationErrors 冒
+        // 到 toast，否则 DB 抖动、模板被删、session 过期、Zod 校验失败都会
+        // 被压成同一个"创建失败"，运维和用户都看不到根因。
+        const errorPayload = res as unknown as {
+          serverError?: string;
+          validationErrors?: Record<string, string[] | undefined>;
+        };
+        let detail = "创建失败";
+        if (errorPayload.serverError) {
+          detail = errorPayload.serverError;
+        } else if (errorPayload.validationErrors) {
+          const fields = Object.entries(errorPayload.validationErrors)
+            .map(
+              ([k, v]) =>
+                `${k}: ${Array.isArray(v) ? v.filter(Boolean).join(", ") : String(v ?? "")}`,
+            )
+            .filter(Boolean)
+            .join("；");
+          detail = fields || "参数校验失败";
+        }
+        throw new Error(detail);
+      }
       toast.success(replaceOrderId ? "已覆盖旧订单" : "订单已创建，链接已生成");
       onCreated(res.data.order);
       onOpenChange(false);
