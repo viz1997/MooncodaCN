@@ -435,46 +435,53 @@ export function SelectStep({
         {/* 历史快照切换 —— 放在大图下方，避开可点选区。
             仅当该原图存在快照时渲染；查看最新时不显示 "回到最新"。
             索引 0 = 最新候选快照；索引越大越旧。ChevronLeft = 往更旧跳、
-            ChevronRight = 往更新跳。viewingSnapshotIdx=null 表示正在看当前候选组。 */}
+            ChevronRight = 往更新跳。viewingSnapshotIdx=null 表示正在看当前候选组。
+            三列网格 [1fr | auto | 1fr]：左列留空、中列 chevron 永远居中、
+            右列 "回到最新" 右对齐，跟 chevron 共占一行但不抢居中位。 */}
         {imageSnapshots.length > 0 && (
-          <div className="mt-3 flex items-center justify-center gap-1.5 text-stone-500">
-            <button
-              type="button"
-              onClick={() => {
-                if (!canGoPrevSnapshot) return;
-                setViewingSnapshotIdx((i) => (i === null ? 0 : i + 1));
-              }}
-              disabled={!canGoPrevSnapshot}
-              aria-label="查看更早的历史效果图"
-              title="上一版"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-600 transition-colors hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 disabled:cursor-default disabled:opacity-30"
-            >
-              <ChevronLeft className="h-4 w-4" strokeWidth={2.25} />
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (!canGoNextSnapshot) return;
-                setViewingSnapshotIdx((i) => (i === null ? null : i - 1));
-              }}
-              disabled={!canGoNextSnapshot}
-              aria-label="查看更新的效果图"
-              title="下一版"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-600 transition-colors hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 disabled:cursor-default disabled:opacity-30"
-            >
-              <ChevronRight className="h-4 w-4" strokeWidth={2.25} />
-            </button>
-            {isViewingOldSnapshot && viewingSnapshot && (
+          <div className="mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-stone-500">
+            <div />
+            <div className="flex items-center justify-center gap-1.5">
               <button
                 type="button"
-                onClick={() => setViewingSnapshotIdx(null)}
-                title={`查看于 ${new Date(viewingSnapshot.createdAt).toLocaleString("zh-CN")}，点击回到最新候选`}
-                className="ml-2 inline-flex items-center gap-1 rounded-full bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-700 transition-colors hover:bg-stone-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
+                onClick={() => {
+                  if (!canGoPrevSnapshot) return;
+                  setViewingSnapshotIdx((i) => (i === null ? 0 : i + 1));
+                }}
+                disabled={!canGoPrevSnapshot}
+                aria-label="查看更早的历史效果图"
+                title="上一版"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-600 transition-colors hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 disabled:cursor-default disabled:opacity-30"
               >
-                <History className="h-3 w-3" />
-                回到最新
+                <ChevronLeft className="h-4 w-4" strokeWidth={2.25} />
               </button>
-            )}
+              <button
+                type="button"
+                onClick={() => {
+                  if (!canGoNextSnapshot) return;
+                  setViewingSnapshotIdx((i) => (i === null ? null : i - 1));
+                }}
+                disabled={!canGoNextSnapshot}
+                aria-label="查看更新的效果图"
+                title="下一版"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-600 transition-colors hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 disabled:cursor-default disabled:opacity-30"
+              >
+                <ChevronRight className="h-4 w-4" strokeWidth={2.25} />
+              </button>
+            </div>
+            <div className="flex justify-end">
+              {isViewingOldSnapshot && viewingSnapshot && (
+                <button
+                  type="button"
+                  onClick={() => setViewingSnapshotIdx(null)}
+                  title={`查看于 ${new Date(viewingSnapshot.createdAt).toLocaleString("zh-CN")}，点击回到最新候选`}
+                  className="inline-flex items-center gap-1 rounded-full bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-700 transition-colors hover:bg-stone-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
+                >
+                  <History className="h-3 w-3" />
+                  回到最新
+                </button>
+              )}
+            </div>
           </div>
         )}
 

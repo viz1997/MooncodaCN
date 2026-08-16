@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Minus, Plus, X } from "lucide-react";
+import { ChevronDown, HelpCircle, Loader2, Minus, Plus, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 import {
   checkOrderNoConflictAction,
@@ -67,6 +77,7 @@ export function OrderFormDialog({
   const [uploadCount, setUploadCount] = useState(1);
   const [imagesPerUpload, setImagesPerUpload] = useState(3);
   const [regenerateLimit, setRegenerateLimit] = useState(5);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [saving, setSaving] = useState(false);
   /** 冲突确认弹窗的待覆盖订单 */
   const [pendingConflict, setPendingConflict] = useState<ConflictOrder | null>(
@@ -74,8 +85,6 @@ export function OrderFormDialog({
   );
   /** 冲突检查的 loading，避免按钮闪烁 */
   const [checkingConflict, setCheckingConflict] = useState(false);
-
-  const selectedTemplate = templates.find((t) => t.id === templateId);
 
   useEffect(() => {
     if (open) {
@@ -171,23 +180,37 @@ export function OrderFormDialog({
           <DialogTitle>创建订单并生成链接</DialogTitle>
         </DialogHeader>
 
-        <div className="grid grid-cols-1 gap-x-4 gap-y-4 py-2 sm:grid-cols-2">
-          <div className="space-y-2">
-            <Label htmlFor="ord-no">
-              订单号 <span className="text-red-500">*</span>
-            </Label>
+        <div className="grid grid-cols-1 gap-x-3 gap-y-4 py-2">
+          {/* 横向 label-input 布局：每行 [140px label] [1fr control] */}
+          <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
+            <div className="flex items-center gap-1">
+              <Label htmlFor="ord-no">
+                订单号 <span className="text-red-500">*</span>
+              </Label>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="订单号说明"
+                    className="inline-flex h-4 w-4 items-center justify-center rounded-full text-stone-400 transition-colors hover:text-stone-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
+                  >
+                    <HelpCircle className="h-3.5 w-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs">
+                  业务标识，作为链接的一部分发给用户。订单号不必唯一，多订单可复用。
+                </TooltipContent>
+              </Tooltip>
+            </div>
             <Input
               id="ord-no"
               value={orderNo}
               onChange={(e) => setOrderNo(e.target.value)}
               placeholder="如：ORD-20260803-001"
             />
-            <p className="text-xs text-muted-foreground">
-              业务标识，作为链接的一部分发给用户。订单号不必唯一，多订单可复用。
-            </p>
           </div>
 
-          <div className="space-y-2">
+          <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
             <Label>
               关联模板 <span className="text-red-500">*</span>
             </Label>
@@ -209,29 +232,30 @@ export function OrderFormDialog({
                 )}
               </SelectContent>
             </Select>
-            {selectedTemplate && (
-              <p className="text-xs text-muted-foreground">
-                模型会生成{" "}
-                <span className="font-medium text-emerald-700">
-                  {selectedTemplate.candidateCount} 种效果
-                </span>
-                ，拼接成 1 张图（
-                {selectedTemplate.candidateCount === 1
-                  ? "整张图"
-                  : selectedTemplate.candidateCount === 2
-                    ? "1×2 横向"
-                    : selectedTemplate.candidateCount === 4
-                      ? "2×2"
-                      : "3×3"}{" "}
-                宫格），用户从中选喜欢的 1 个
-              </p>
-            )}
+          
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="ord-upload-count">
-              用户上传批次（次数） <span className="text-red-500">*</span>
-            </Label>
+          <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
+            <div className="flex items-center gap-1">
+              <Label htmlFor="ord-upload-count">
+                用户上传批次（次数） <span className="text-red-500">*</span>
+              </Label>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="用户上传批次说明"
+                    className="inline-flex h-4 w-4 items-center justify-center rounded-full text-stone-400 transition-colors hover:text-stone-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
+                  >
+                    <HelpCircle className="h-3.5 w-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs">
+                  用户最多可分多少次上传原图（每次上传算 1 批）。默认 1 批，多张图
+                  订单需要更多批次时可调高。建议 1-3 批，最多 10 批。
+                </TooltipContent>
+              </Tooltip>
+            </div>
             <div className="flex items-stretch gap-2">
               <Button
                 type="button"
@@ -270,131 +294,62 @@ export function OrderFormDialog({
                 <Plus className="h-4 w-4" />
               </Button>
             </div>
-            <p className="text-xs text-muted-foreground">
-              用户最多可分多少次上传原图（每次上传算 1 批）。默认 1 批，多张图
-              订单需要更多批次时可调高。建议 1-3 批，最多 10 批。
-            </p>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="ord-images-per-upload">
-              每批上传原图数量 <span className="text-red-500">*</span>
-            </Label>
-            <div className="flex items-stretch gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                className="h-9 w-9 shrink-0"
-                onClick={() => setImagesPerUpload((n) => Math.max(1, n - 1))}
-                disabled={imagesPerUpload <= 1}
-                aria-label="减少"
-              >
-                <Minus className="h-4 w-4" />
-              </Button>
-              <Input
-                id="ord-images-per-upload"
-                type="number"
-                min={1}
-                max={3}
-                value={imagesPerUpload}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  if (!Number.isFinite(v)) return;
-                  const clamped = Math.max(1, Math.min(3, Math.floor(v)));
-                  setImagesPerUpload(clamped);
-                }}
-                className="text-center font-medium [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                className="h-9 w-9 shrink-0"
-                onClick={() => setImagesPerUpload((n) => Math.min(3, n + 1))}
-                disabled={imagesPerUpload >= 3}
-                aria-label="增加"
-              >
-                <Plus className="h-4 w-4" />
-              </Button>
+          <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
+            <div className="flex items-center gap-1">
+              <Label htmlFor="ord-recipient">
+                用户昵称{" "}
+                <span className="text-xs font-normal text-zinc-400">
+                  （选填）
+                </span>
+              </Label>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="用户昵称说明"
+                    className="inline-flex h-4 w-4 items-center justify-center rounded-full text-stone-400 transition-colors hover:text-stone-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
+                  >
+                    <HelpCircle className="h-3.5 w-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs">
+                  留空时不会在任何页面显示昵称
+                </TooltipContent>
+              </Tooltip>
             </div>
-            <p className="text-xs text-muted-foreground">
-              用户每次上传会话最多塞几张参考图。多张图被融合为单次生图输入。
-              默认 3 张，可选 1-3 张。订单总容量 = 批次 × 每批张数。
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="ord-regenerate-limit">用户重新生成次数上限</Label>
-            <div className="flex items-stretch gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                className="h-9 w-9 shrink-0"
-                onClick={() => setRegenerateLimit((n) => Math.max(0, n - 1))}
-                disabled={regenerateLimit <= 0}
-                aria-label="减少"
-              >
-                <Minus className="h-4 w-4" />
-              </Button>
-              <Input
-                id="ord-regenerate-limit"
-                type="number"
-                min={0}
-                max={20}
-                value={regenerateLimit}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  if (!Number.isFinite(v)) return;
-                  const clamped = Math.max(0, Math.min(20, Math.floor(v)));
-                  setRegenerateLimit(clamped);
-                }}
-                className="text-center font-medium [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                className="h-9 w-9 shrink-0"
-                onClick={() => setRegenerateLimit((n) => Math.min(20, n + 1))}
-                disabled={regenerateLimit >= 20}
-                aria-label="增加"
-              >
-                <Plus className="h-4 w-4" />
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              仅"重新生成第 N 张"（单图路径）计数；批量重跑 / FAILED
-              一键重试不计。 设为 0 表示禁止用户主动重新生成。
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="ord-recipient">
-              用户昵称{" "}
-              <span className="text-xs font-normal text-zinc-400">
-                （选填）
-              </span>
-            </Label>
             <Input
               id="ord-recipient"
               value={recipientName}
               onChange={(e) => setRecipientName(e.target.value)}
               placeholder="如：张三 / user_001"
             />
-            <p className="text-xs text-muted-foreground">
-              留空时不会在任何页面显示昵称
-            </p>
           </div>
 
-          <div className="space-y-2">
-            <Label>
-              来源平台{" "}
-              <span className="text-xs font-normal text-zinc-400">
-                （选填）
-              </span>
-            </Label>
+          <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
+            <div className="flex items-center gap-1">
+              <Label>
+                来源平台{" "}
+                <span className="text-xs font-normal text-zinc-400">
+                  （选填）
+                </span>
+              </Label>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="来源平台说明"
+                    className="inline-flex h-4 w-4 items-center justify-center rounded-full text-stone-400 transition-colors hover:text-stone-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
+                  >
+                    <HelpCircle className="h-3.5 w-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs">
+                  标识此订单从哪个渠道分发，便于后续统计
+                </TooltipContent>
+              </Tooltip>
+            </div>
             <Select
               value={platform}
               onValueChange={(v) => setPlatform(v as OrderPlatform | "")}
@@ -411,10 +366,156 @@ export function OrderFormDialog({
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">
-              标识此订单从哪个渠道分发，便于后续统计
-            </p>
           </div>
+
+        {/* 高级设置 —— 不常用字段折叠起来，默认收起保持表单简洁 */}
+        <Collapsible
+          open={showAdvanced}
+          onOpenChange={setShowAdvanced}
+          className="rounded-lg border border-dashed border-stone-200 bg-stone-50/50 px-3"
+        >
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className="group flex w-full items-center justify-between py-2.5 text-left text-sm text-stone-600 transition-colors hover:text-stone-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
+            >
+              <span className="flex items-center gap-1.5">
+                <ChevronDown
+                  className={`h-3.5 w-3.5 transition-transform duration-200 ${showAdvanced ? "rotate-0" : "-rotate-90"}`}
+                />
+                更多设置
+              </span>
+              <span className="text-xs text-stone-400">
+                {showAdvanced ? "收起" : "每批张数 / 重新生成次数"}
+              </span>
+            </button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div className="grid grid-cols-1 gap-y-4 pb-3">
+              <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
+                <div className="flex items-center gap-1">
+                  <Label htmlFor="ord-images-per-upload">
+                    每批上传原图数量 <span className="text-red-500">*</span>
+                  </Label>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="每批上传原图数量说明"
+                        className="inline-flex h-4 w-4 items-center justify-center rounded-full text-stone-400 transition-colors hover:text-stone-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
+                      >
+                        <HelpCircle className="h-3.5 w-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-xs">
+                      用户每次上传会话最多塞几张参考图。多张图被融合为单次生图输入。
+                      默认 3 张，可选 1-3 张。订单总容量 = 批次 × 每批张数。
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <div className="flex items-stretch gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9 shrink-0"
+                    onClick={() => setImagesPerUpload((n) => Math.max(1, n - 1))}
+                    disabled={imagesPerUpload <= 1}
+                    aria-label="减少"
+                  >
+                    <Minus className="h-4 w-4" />
+                  </Button>
+                  <Input
+                    id="ord-images-per-upload"
+                    type="number"
+                    min={1}
+                    max={3}
+                    value={imagesPerUpload}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (!Number.isFinite(v)) return;
+                      const clamped = Math.max(1, Math.min(3, Math.floor(v)));
+                      setImagesPerUpload(clamped);
+                    }}
+                    className="text-center font-medium [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9 shrink-0"
+                    onClick={() => setImagesPerUpload((n) => Math.min(3, n + 1))}
+                    disabled={imagesPerUpload >= 3}
+                    aria-label="增加"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
+                <div className="flex items-center gap-1">
+                  <Label htmlFor="ord-regenerate-limit">
+                    用户重新生成次数上限
+                  </Label>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="重新生成次数上限说明"
+                        className="inline-flex h-4 w-4 items-center justify-center rounded-full text-stone-400 transition-colors hover:text-stone-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
+                      >
+                        <HelpCircle className="h-3.5 w-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-xs">
+                      仅"重新生成第 N 张"（单图路径）计数；批量重跑 / FAILED
+                      一键重试不计。设为 0 表示禁止用户主动重新生成。
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <div className="flex items-stretch gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9 shrink-0"
+                    onClick={() => setRegenerateLimit((n) => Math.max(0, n - 1))}
+                    disabled={regenerateLimit <= 0}
+                    aria-label="减少"
+                  >
+                    <Minus className="h-4 w-4" />
+                  </Button>
+                  <Input
+                    id="ord-regenerate-limit"
+                    type="number"
+                    min={0}
+                    max={20}
+                    value={regenerateLimit}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (!Number.isFinite(v)) return;
+                      const clamped = Math.max(0, Math.min(20, Math.floor(v)));
+                      setRegenerateLimit(clamped);
+                    }}
+                    className="text-center font-medium [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9 shrink-0"
+                    onClick={() => setRegenerateLimit((n) => Math.min(20, n + 1))}
+                    disabled={regenerateLimit >= 20}
+                    aria-label="增加"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
         </div>
 
         <DialogFooter>
