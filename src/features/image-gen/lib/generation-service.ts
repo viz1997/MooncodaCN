@@ -205,10 +205,22 @@ export async function createImageJob(options: {
   const jobId = crypto.randomUUID();
   const now = new Date();
 
+  // photoId 防御：image_job.photo_id 是 photo.id 的外键（onDelete: set null）。
+  // 上传模式曾误传 "LOCAL_UPLOAD" 哨兵导致 FK 违反（2026-08-17 生产事故）。
+  // photo.id 是 crypto.randomUUID() 生成的 UUID v4，严格匹配；其它
+  // （undefined、占位串、空串）一律写 null。
+  const photoId =
+    input.photoId &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      input.photoId
+    )
+      ? input.photoId
+      : null;
+
   await db.insert(imageJob).values({
     id: jobId,
     userId,
-    photoId: input.photoId ?? null,
+    photoId,
     maskId: input.maskId ?? null,
     model: input.model,
     mode: input.mode,

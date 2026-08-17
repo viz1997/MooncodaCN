@@ -658,8 +658,10 @@ export function GenerateWorkbenchView({
     const refImage =
       refMode === "upload" && uploadedImage
         ? {
+            // 上传模式：图片走 blob: URL 即可，不写 photoId —— 否则 DB FK
+            // 会拒绝（image_job.photo_id 是 photo.id 的外键）。imageUrl
+            // 自身已携带渲染所需信息。
             imageUrl: uploadedImage.previewUrl,
-            photoId: "LOCAL_UPLOAD",
           }
         : refMode === "library" && selectedPhoto
           ? {
