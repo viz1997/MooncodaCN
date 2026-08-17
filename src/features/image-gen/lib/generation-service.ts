@@ -14,9 +14,11 @@ import { checkFileSizePrivilege } from "@/features/subscription/services/user-pl
 import {
   buildResultFields,
   dispatchGenerateImage,
+  dispatchQueryImageTask,
   extractSubmitContext,
   IMAGE_MODELS,
   logImageGen,
+  parseTaskModel,
 } from "../";
 import { updateEffectUsageStats } from "./db-effects";
 import type {
@@ -99,12 +101,17 @@ export interface GenerateImageJobResult {
 }
 
 /**
- * 提交一次内部生图任务
+ * 提交一次内部生图任务（同步版本，向后兼容旧测试与既有调用方）
  *
- * 1. 检查文件大小权限（如有参考图 URL，尝试估算大小；实际生产建议在上传时记录）
+ * 流程：
+ * 1. 检查文件大小权限
  * 2. 计算积分并扣除
- * 3. 调用模型适配器
- * 4. 创建 imageJob 记录
+ * 3. 插入 imageJob (pending)
+ * 4. **同步**调 dispatchGenerateImage → 更新 imageJob 为终态
+ *
+ * 新版工作台（/p/[token] 架构）走 `createImageJob` + `triggerImageGenSubmit`
+ * 异步路径，不再用本函数。本函数保留只是为了让 src/test/image-gen/generate-api.test.ts
+ * 这类纯同步测试能继续验证积分扣除 / 行创建 / 结果同步逻辑。
  */
 export async function generateImageJob(
   options: GenerateImageJobOptions
@@ -123,7 +130,6 @@ export async function generateImageJob(
   }
 
   // Plan 文件大小权限检查（参考图场景）
-  // 由于前端上传后通常已知 fileSize，这里传 0 表示不检查；生产可要求前端/上传接口提供
   const fileSizeCheck = await checkFileSizePrivilege(userId, 0);
   if (!fileSizeCheck.allowed) {
     return {
@@ -137,7 +143,6 @@ export async function generateImageJob(
 
   const creditsConsumed = calculateCreditsCost(input.model, input.batchSize);
 
-  // 扣积分
   const consumeResult = await consumeCredits({
     userId,
     amount: creditsConsumed,
@@ -163,11 +168,43 @@ export async function generateImageJob(
     };
   }
 
-  const req = buildGenerateRequest(input);
+  // 拆出来的两步：先插入，再同步 dispatch
+  const createResult = await createImageJob({
+    userId,
+    input,
+    creditsConsumed,
+  });
+  if (!createResult.success) {
+    return createResult;
+  }
+  const dispatchResult = await dispatchImageGenerationJob({
+    jobId: createResult.jobId,
+    input,
+    ip,
+  });
+  return dispatchResult;
+}
+
+/**
+ * 仅创建 imageJob 行（status=pending），不调任何模型。
+ *
+ * 工作台新流程（/p/[token] 架构）：
+ *   action:  createImageJob → send Inngest → 立刻 200 给前端
+ *   Inngest: dispatchImageGenerationJob 在后台跑，DB 行推进到终态
+ *   前端:   轮询 /api/image-gen/jobs/[jobId]/poll
+ *
+ * 这样把"submit 撞 Vercel 函数预算"的风险从 HTTP 路径挪到 Inngest 云端，
+ * 与 gpt-image /upload 路由的 triggerSubmit 模式对齐。
+ */
+export async function createImageJob(options: {
+  userId: string;
+  input: InternalGenerateInput;
+  creditsConsumed: number;
+}): Promise<GenerateImageJobResult> {
+  const { userId, input, creditsConsumed } = options;
   const jobId = crypto.randomUUID();
   const now = new Date();
 
-  // 先创建 pending 记录
   await db.insert(imageJob).values({
     id: jobId,
     userId,
@@ -189,6 +226,32 @@ export async function generateImageJob(
     createdAt: now,
     completedAt: null,
   });
+
+  return {
+    success: true,
+    jobId,
+    status: "pending",
+    creditsConsumed,
+  };
+}
+
+/**
+ * 把 imageJob 行推进：调模型适配器，按返回结果写库。
+ *
+ * 被两处调用：
+ * 1. Inngest 函数 `submitImageGenJob` —— 异步主路径
+ * 2. `triggerImageGenSubmit` 的同步 fallback —— Inngest 不可用时降级
+ *
+ * 失败语义：dispatchGenerateImage 抛错 → imageJob 标 failed + 写 errorMsg，
+ * 然后**继续抛**让 Inngest 看到 throw（retries=0 不会重试，仅做记录）。
+ */
+export async function dispatchImageGenerationJob(options: {
+  jobId: string;
+  input: InternalGenerateInput;
+  ip?: string | undefined;
+}): Promise<GenerateImageJobResult> {
+  const { jobId, input, ip } = options;
+  const req = buildGenerateRequest(input);
 
   // 调用模型适配器
   let result: GenerateImageResult;
@@ -217,7 +280,7 @@ export async function generateImageJob(
       jobId,
       status: "failed",
       error: msg,
-      creditsConsumed,
+      creditsConsumed: 0,
     };
   }
 
@@ -265,7 +328,7 @@ export async function generateImageJob(
     status: result.status,
     images: result.images,
     error: result.error,
-    creditsConsumed,
+    creditsConsumed: 0,
   };
 }
 
@@ -333,4 +396,125 @@ export async function updateImageJobFromTaskResult(
       completedAt: isTerminal ? new Date() : job.completedAt,
     })
     .where(eq(imageJob.id, job.id));
+}
+
+/**
+ * 把 imageJob 往前推一步（轮询入口）。
+ *
+ * 流程（与 gpt-image 的 advanceOrderGeneration 同语义，但 imageJob 只有一个
+ * taskId 而不是 JSON 任务列表，更简单）：
+ * 1. 读 imageJob
+ * 2. 如果 status=processing 且有 taskId：
+ *    - parseTaskModel(taskId) 解析 model
+ *    - dispatchQueryImageTask 调上游一次
+ *    - updateImageJobFromTaskResult 把结果落库
+ * 3. 返回推进后的最新 job 行
+ *
+ * 无 taskId / 非 processing：直接返回原行（幂等）。
+ *
+ * 由 /api/image-gen/jobs/[jobId]/poll 路由调用 —— 与 /p/[token] 的
+ * /api/orders/[token]/poll 路由对称。
+ */
+export async function advanceImageGenJob(jobId: string): Promise<ImageJob> {
+  const job = await db.query.imageJob.findFirst({
+    where: eq(imageJob.id, jobId),
+  });
+
+  if (!job) {
+    throw new Error(`imageJob ${jobId} 不存在`);
+  }
+
+  // 只在 processing + 有 taskId 时才需要打上游
+  if (job.status === "processing" && job.taskId) {
+    const model = parseTaskModel(job.taskId);
+    if (model) {
+      try {
+        const upstream = await dispatchQueryImageTask(model, job.taskId);
+        await updateImageJobFromTaskResult(job.taskId, upstream);
+      } catch (err) {
+        // 单次查询失败不能让 /poll 整条挂掉 —— 下次再试
+        // eslint-disable-next-line no-console
+        console.warn("[advanceImageGenJob] query failed:", err);
+      }
+    }
+  }
+
+  // 再读一次拿最新状态
+  const updated = await db.query.imageJob.findFirst({
+    where: eq(imageJob.id, jobId),
+  });
+  if (!updated) {
+    throw new Error(`imageJob ${jobId} 推进后丢失`);
+  }
+  return updated;
+}
+
+/**
+ * 带校验的 imageJob 创建 —— 提交流程的"前半段"，被 generateImageAction 调用。
+ *
+ * 步骤：
+ * 1. 模型维护检查
+ * 2. Plan 文件大小权限
+ * 3. 计算并扣除积分
+ * 4. createImageJob 写库（status=pending）
+ *
+ * 与旧 generateImageJob 的区别：本函数只到"插入 pending 行"为止，
+ * 后续的 dispatch 由 triggerImageGenSubmit 异步触发。
+ */
+export async function createImageJobWithValidation(options: {
+  userId: string;
+  input: InternalGenerateInput;
+}): Promise<GenerateImageJobResult> {
+  const { userId, input } = options;
+
+  const modelConfig = IMAGE_MODELS[input.model];
+  if (modelConfig.status === "maintenance") {
+    return {
+      success: false,
+      jobId: "",
+      status: "failed",
+      error: "模型维护中，请稍后再试",
+      creditsConsumed: 0,
+    };
+  }
+
+  const fileSizeCheck = await checkFileSizePrivilege(userId, 0);
+  if (!fileSizeCheck.allowed) {
+    return {
+      success: false,
+      jobId: "",
+      status: "failed",
+      error: fileSizeCheck.errorMessage ?? "当前计划不支持此操作",
+      creditsConsumed: 0,
+    };
+  }
+
+  const creditsConsumed = calculateCreditsCost(input.model, input.batchSize);
+
+  const consumeResult = await consumeCredits({
+    userId,
+    amount: creditsConsumed,
+    serviceName: "image-generation",
+    description: `生图: ${modelConfig.name}`,
+    metadata: {
+      model: input.model,
+      mode: input.mode,
+      maskId: input.maskId,
+      photoId: input.photoId,
+      batchSize: input.batchSize,
+      size: input.size,
+    },
+  });
+
+  if (!consumeResult.success) {
+    return {
+      success: false,
+      jobId: "",
+      status: "failed",
+      error: "积分扣除失败",
+      creditsConsumed: 0,
+    };
+  }
+
+  return createImageJob({ userId, input, creditsConsumed });
 }

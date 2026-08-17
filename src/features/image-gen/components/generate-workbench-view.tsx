@@ -63,7 +63,6 @@ import {
   generateImageAction,
   listImageJobsAction,
   listPhotosAction,
-  pollImageJobAction,
 } from "@/features/image-gen/actions";
 import type {
   ImageModelId,
@@ -209,6 +208,29 @@ function mergeHydratedHistory(
   return Array.from(byId.values()).sort(
     (a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)
   );
+}
+
+/**
+ * 调服务端 /api/image-gen/jobs/[jobId]/poll 推进一次，返回最新 imageJob 行。
+ *
+ * 失败语义：
+ * - 网络/服务端 throw：让调用方决定如何处理（startPolling 是 warn-and-continue；
+ *   手动刷新按钮是 toast.error）
+ * - 路由返 { success: false } 但 200：当作 throw，错误信息从 error 字段取
+ */
+async function pollImageJob(jobId: string): Promise<ImageJob | null> {
+  const res = await fetch(`/api/image-gen/jobs/${jobId}/poll`, {
+    method: "POST",
+  });
+  const body = (await res.json()) as {
+    success: boolean;
+    data?: { job: ImageJob };
+    error?: string;
+  };
+  if (!res.ok || !body.success) {
+    throw new Error(body.error ?? `HTTP ${res.status}`);
+  }
+  return body.data?.job ?? null;
 }
 
 interface GenerateWorkbenchViewProps {
@@ -559,8 +581,7 @@ export function GenerateWorkbenchView({
       }
 
       try {
-        const res = await pollImageJobAction({ jobId });
-        const job = res?.data?.job;
+        const job = await pollImageJob(jobId);
         if (!job) {
           // poll 端没返 job：忽略，等下一轮
         } else if (job.status === "completed" || job.status === "failed") {
@@ -701,52 +722,30 @@ export function GenerateWorkbenchView({
         maskId: selectedMask || undefined,
         photoId: refImage?.photoId,
       });
-      const images = result?.data?.images ?? [];
       const creditsConsumed = result?.data?.creditsConsumed;
-      const returnedTaskId = result?.data?.taskId as string | undefined;
-      const returnedJobId = result?.data?.jobId as string | undefined;
+      const returnedJobId = result?.data?.jobId;
+      const triggerMode = result?.data?.triggerMode;
 
-      // 异步任务路径：拿 taskId 但没 images —— 启动前端轮询。
-      if (images.length === 0 && returnedTaskId && returnedJobId) {
-        const pending: WorkbenchEffect = {
-          ...newEffect,
-          jobId: returnedJobId,
-          taskId: returnedTaskId,
-        };
-        setHistory((prev) =>
-          prev.map((e) => (e.effectId === newEffect.effectId ? pending : e))
-        );
-        setSelectedEffect((prev) =>
-          prev?.effectId === newEffect.effectId ? pending : prev
-        );
-        startPolling(newEffect.effectId, returnedJobId);
-        toast.info(
-          `${modelConfig.name} 任务已提交，正在异步生成…${creditsConsumed ? `（消耗 ${creditsConsumed} 积分）` : ""}`
-        );
-        return;
+      // 新架构（/p/[token] 镜像）：action 永远是 202 异步 submit，立刻返 jobId。
+      // 真实的上游调用由 Inngest submitImageGenJob 函数在后台跑，
+      // 前端通过 startPolling 调 /api/image-gen/jobs/[jobId]/poll 拉进度。
+      if (!returnedJobId) {
+        throw new Error("提交失败：未返回 jobId");
       }
 
-      // 同步路径（直接返 images）：立刻完成。
-      const completed: WorkbenchEffect = {
+      const pending: WorkbenchEffect = {
         ...newEffect,
-        status: "completed",
-        resultUrls: images.map((img) => img.url),
-        ...(images[0]?.revisedPrompt
-          ? { revisedPrompt: images[0].revisedPrompt }
-          : {}),
-        ...(typeof images[0]?.seed === "number"
-          ? { seed: images[0].seed }
-          : {}),
-        ...(returnedTaskId && returnedJobId
-          ? { taskId: returnedTaskId, jobId: returnedJobId }
-          : { duration: 0 }),
+        jobId: returnedJobId,
       };
       setHistory((prev) =>
-        prev.map((e) => (e.effectId === newEffect.effectId ? completed : e))
+        prev.map((e) => (e.effectId === newEffect.effectId ? pending : e))
       );
-      setSelectedEffect(completed);
-      toast.success(
-        `${modelConfig.name} 生成完成${creditsConsumed ? ` · 消耗 ${creditsConsumed} 积分` : ""}`
+      setSelectedEffect((prev) =>
+        prev?.effectId === newEffect.effectId ? pending : prev
+      );
+      startPolling(newEffect.effectId, returnedJobId);
+      toast.info(
+        `${modelConfig.name} 任务已提交${triggerMode === "sync" ? "（同步模式）" : ""}…${creditsConsumed ? `（消耗 ${creditsConsumed} 积分）` : ""}`
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : "未知错误";
@@ -1646,10 +1645,7 @@ export function GenerateWorkbenchView({
                           if (!selectedEffect.jobId) return;
                           setRefreshing(true);
                           try {
-                            const res = await pollImageJobAction({
-                              jobId: selectedEffect.jobId,
-                            });
-                            const job = res?.data?.job;
+                            const job = await pollImageJob(selectedEffect.jobId);
                             if (job) {
                               applyJobUpdate(selectedEffect.effectId, job);
                             }
@@ -1785,61 +1781,6 @@ export function GenerateWorkbenchView({
                   </p>
                 </div>
               )}
-
-              {/* Prompt 信息 */}
-              <div className="bg-muted/30 rounded-lg p-3 space-y-2">
-                <div>
-                  <p className="text-[10px] text-muted-foreground mb-0.5">
-                    提示词
-                  </p>
-                  <p className="text-xs font-mono whitespace-pre-wrap">
-                    {selectedEffect.prompt}
-                  </p>
-                </div>
-                {selectedEffect.revisedPrompt && (
-                  <div>
-                    <p className="text-[10px] text-muted-foreground mb-0.5">
-                      模型重写
-                    </p>
-                    <p className="text-xs text-violet-700 dark:text-violet-400 italic">
-                      {selectedEffect.revisedPrompt}
-                    </p>
-                  </div>
-                )}
-                <div className="grid grid-cols-4 gap-2 pt-1 border-t text-[10px]">
-                  {selectedEffect.duration !== undefined && (
-                    <div>
-                      <span className="text-muted-foreground">耗时:</span>{" "}
-                      <span className="font-mono">
-                        {(selectedEffect.duration / 1000).toFixed(1)}s
-                      </span>
-                    </div>
-                  )}
-                  {selectedEffect.cost !== undefined && (
-                    <div>
-                      <span className="text-muted-foreground">成本:</span>{" "}
-                      <span className="font-mono">
-                        {selectedEffect.currency === "CNY" ? "¥" : "$"}
-                        {selectedEffect.cost}
-                      </span>
-                    </div>
-                  )}
-                  {selectedEffect.seed !== undefined && (
-                    <div>
-                      <span className="text-muted-foreground">种子:</span>{" "}
-                      <span className="font-mono">{selectedEffect.seed}</span>
-                    </div>
-                  )}
-                  <div>
-                    <span className="text-muted-foreground">模式:</span>{" "}
-                    <span className="font-mono">
-                      {selectedEffect.mode === "text_to_image"
-                        ? "文生图"
-                        : "图生图"}
-                    </span>
-                  </div>
-                </div>
-              </div>
             </div>
           ) : (
             <div className="h-full flex flex-col items-center justify-center text-center">

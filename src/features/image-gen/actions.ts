@@ -15,23 +15,34 @@ import { photo } from "@/db/schema";
 import { protectedAction } from "@/lib/safe-action";
 
 import {
-  generateImageJob,
+  createImageJobWithValidation,
   getImageJob,
   listImageJobs,
   updateImageJobFromTaskResult,
 } from "./lib/generation-service";
+import { triggerImageGenSubmit } from "./lib/submit";
 import { createPhotoSchema, internalGenerateSchema } from "./lib/validation";
 
 const withImageGenAction = (name: string) =>
   protectedAction.metadata({ action: `imageGen.${name}` });
 
 /**
- * 提交生图任务
+ * 提交生图任务（/p/[token] 架构版）
+ *
+ * 链路：
+ *   1. 同步校验：模型维护 / 文件大小 / 积分扣除
+ *   2. createImageJob 写 imageJob (pending) 行
+ *   3. triggerImageGenSubmit  → inngest.send（或同步 fallback）
+ *   4. 立刻返 jobId 给前端 —— 此时 imageJob 状态还是 pending，submit
+ *      在 Inngest cloud 异步跑 / 在 dev 同步 fallback 跑
+ *
+ * 与旧 `generateImageJob`（含同步 dispatch）的区别：HTTP 路径不再等
+ * dispatchGenerateImage。submit 撞 Vercel 函数预算的风险移到 Inngest。
  */
 export const generateImageAction = withImageGenAction("generate")
   .schema(internalGenerateSchema)
   .action(async ({ parsedInput, ctx }) => {
-    const result = await generateImageJob({
+    const result = await createImageJobWithValidation({
       userId: ctx.userId,
       input: parsedInput,
     });
@@ -40,14 +51,19 @@ export const generateImageAction = withImageGenAction("generate")
       throw new Error(result.error ?? "生成失败");
     }
 
+    // 触发 Inngest submit（开发环境无 Inngest 时降级为同步 dispatch）
+    const { mode: triggerMode } = await triggerImageGenSubmit(
+      result.jobId,
+      parsedInput
+    );
+
     revalidatePath("/dashboard/effects");
 
     return {
       jobId: result.jobId,
-      taskId: result.taskId,
-      status: result.status,
-      images: result.images,
+      status: "pending" as const,
       creditsConsumed: result.creditsConsumed,
+      triggerMode,
     };
   });
 

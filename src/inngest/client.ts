@@ -1,3 +1,5 @@
+import type { InternalGenerateInput } from "@/features/image-gen/lib/validation";
+
 import { Inngest } from "inngest";
 
 /**
@@ -46,6 +48,24 @@ export type Events = {
       fromIdx: number;
       total: number;
       candidateCount: number;
+    };
+  };
+  /**
+   * image-gen 工作台提交生图任务
+   *
+   * 由 generateImageAction Server Action 在 createImageJob（落 imageJob
+   * 行为 pending）后立即 send。前端拿到 jobId 就走，不再被 dispatchGenerateImage
+   * 同步阻塞 —— 这是 /p/[token] 异步 submit 模式在工作台的镜像。
+   *
+   * payload 必须带原始 input（不只是 jobId），因为 imageJob 行没存
+   * enableSafetyCheck / watermark 等字段，重建 GenerateImageRequest 会丢信息。
+   * retries: 0 与 gpt-image 一致 —— Lingting 等上游没有幂等键，重复提交
+   * 会重复扣配额。
+   */
+  "image-gen/submit-job": {
+    data: {
+      jobId: string;
+      input: InternalGenerateInput;
     };
   };
 };

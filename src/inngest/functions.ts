@@ -2,7 +2,10 @@ import { and, eq, isNotNull, lt } from "drizzle-orm";
 
 import { db } from "@/db";
 import { imageJob } from "@/db/schema";
-import { updateImageJobFromTaskResult } from "@/features/image-gen/lib/generation-service";
+import {
+  dispatchImageGenerationJob,
+  updateImageJobFromTaskResult,
+} from "@/features/image-gen/lib/generation-service";
 import { submitGeneration } from "@/features/gpt-image/lib/generation-service";
 import { logger } from "@/lib/logger";
 
@@ -155,6 +158,47 @@ export const reconcileStaleJobs = inngest.createFunction(
 );
 
 /**
+ * image-gen 工作台 —— 异步 submit 入口（/p/[token] 架构镜像）。
+ *
+ * 调用链路：
+ *   generateImageAction Server Action
+ *     → createImageJob（写 imageJob pending 行）
+ *     → triggerImageGenSubmit（inngest.send + 同步 fallback）
+ *   ↑↑↑ HTTP 路径到此结束，立刻返 jobId
+ *
+ *   Inngest 云端：
+ *     submitImageGenJob → dispatchImageGenerationJob
+ *     → dispatchGenerateImage → 更新 imageJob 到 processing/completed/failed
+ *
+ * 与 gpt-image submitGenerationJob 同语义：把"submit 撞 Vercel 函数预算"的
+ * 风险从 HTTP 路径挪到 Inngest cloud。
+ *
+ * retries: 0 与 gpt-image 一致 —— Lingting 没有幂等键，重试会重复扣配额。
+ */
+export const submitImageGenJob = inngest.createFunction(
+  {
+    id: "image-gen-submit-job",
+    retries: 0,
+  },
+  { event: "image-gen/submit-job" },
+  async ({ event, step }) => {
+    const { jobId, input } = event.data;
+    await step.run("dispatch", async () => {
+      logger.info({ jobId }, "Inngest: 开始 dispatchImageGenerationJob");
+      const result = await dispatchImageGenerationJob({ jobId, input });
+      logger.info(
+        {
+          jobId,
+          status: result.status,
+          taskId: result.taskId,
+        },
+        "Inngest: dispatchImageGenerationJob 完成"
+      );
+    });
+  }
+);
+
+/**
  * 导出所有 Inngest 函数
  * 在 src/app/api/inngest/route.ts 中注册
  *
@@ -169,5 +213,14 @@ export const reconcileStaleJobs = inngest.createFunction(
  * 2026-08-17 引入 reconcileStaleJobs：image-gen 工作台没有 gpt-image 的
  * 服务端 /poll 路由，前端 setTimeout 链断了 DB 行就永远卡 processing。
  * 5 分钟 cron 兜底 reconcile。
+ *
+ * 2026-08-17 引入 submitImageGenJob：把工作台的 generateImageAction 也
+ * 改成 Inngest send → 202 异步 submit，与 /p/[token] /upload 路由的
+ * triggerSubmit 模式对齐。
  */
-export const functions = [helloWorld, submitGenerationJob, reconcileStaleJobs];
+export const functions = [
+  helloWorld,
+  submitGenerationJob,
+  reconcileStaleJobs,
+  submitImageGenJob,
+];
