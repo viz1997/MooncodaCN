@@ -722,9 +722,24 @@ export function GenerateWorkbenchView({
         maskId: selectedMask || undefined,
         photoId: refImage?.photoId,
       });
-      const creditsConsumed = result?.data?.creditsConsumed;
-      const returnedJobId = result?.data?.jobId;
-      const triggerMode = result?.data?.triggerMode;
+
+      // safe-action 错误结果处理（与 src/features/support/components/
+      // ticket-message-form.tsx 一致的 pattern）：
+      //   校验失败 → result.validationErrors
+      //   服务端 throw → result.serverError
+      //   成功 → result.data
+      if (!result?.data) {
+        if (result?.serverError) {
+          throw new Error(result.serverError);
+        }
+        if (result?.validationErrors) {
+          throw new Error("参数校验失败");
+        }
+        throw new Error("提交失败：未知错误");
+      }
+
+      const returnedJobId = result.data.jobId;
+      const triggerMode = result.data.triggerMode;
 
       // 新架构（/p/[token] 镜像）：action 永远是 202 异步 submit，立刻返 jobId。
       // 真实的上游调用由 Inngest submitImageGenJob 函数在后台跑，
@@ -745,7 +760,7 @@ export function GenerateWorkbenchView({
       );
       startPolling(newEffect.effectId, returnedJobId);
       toast.info(
-        `${modelConfig.name} 任务已提交${triggerMode === "sync" ? "（同步模式）" : ""}…${creditsConsumed ? `（消耗 ${creditsConsumed} 积分）` : ""}`
+        `${modelConfig.name} 任务已提交${triggerMode === "sync" ? "（同步模式）" : ""}…`
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : "未知错误";
@@ -770,7 +785,6 @@ export function GenerateWorkbenchView({
 
   // 模板可用尺寸（与模型能力交集）
   const availableSizes: ImageSize[] = modelConfig.capabilities.sizes;
-  const estimatedCost = modelConfig.currency === "CNY" ? "¥" : "$";
 
   // 抑制未使用变量告警
   void legacyToast;
@@ -1532,15 +1546,8 @@ export function GenerateWorkbenchView({
           </section>
         </div>
 
-        {/* 底部：成本 + 生成按钮 */}
+        {/* 底部：生成按钮（工作台不扣积分，去掉"预计成本"行） */}
         <div className="p-3 border-t bg-muted/30 space-y-2">
-          <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-            <span>预计成本</span>
-            <span className="font-mono font-semibold text-foreground">
-              {estimatedCost}
-              {(modelConfig.pricePerImage * batchSize).toFixed(2)}
-            </span>
-          </div>
           <Button
             onClick={handleGenerate}
             disabled={generating}

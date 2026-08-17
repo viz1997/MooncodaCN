@@ -122,17 +122,14 @@ export const reconcileStaleJobs = inngest.createFunction(
       const taskId = job.taskId as string;
       await step.run(`reconcile-${job.id}`, async () => {
         try {
-          const { dispatchQueryImageTask, parseTaskModel } = await import(
+          const { dispatchQueryImageTask } = await import(
             "@/features/image-gen/lib/image-models/adapters"
           );
-          const model = parseTaskModel(taskId);
-          if (!model) {
-            logger.warn(
-              { jobId: job.id, taskId },
-              "reconcile: 无法解析 model，跳过"
-            );
-            return;
-          }
+          // 直接用 job.model 列（DB 已经存了），不从 taskId 反推 —— gpt_image_2
+          // 等真实模型的 taskId 是 Lingting/Gemini 的 id，parseTaskModel 拿不到。
+          const model = job.model as Parameters<
+            typeof dispatchQueryImageTask
+          >[0];
           const result = await dispatchQueryImageTask(model, taskId);
           await updateImageJobFromTaskResult(taskId, result);
           logger.info(

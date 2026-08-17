@@ -32,8 +32,15 @@ const genTaskId = (model: string) =>
   `imgtask_${model}_${Date.now().toString(36)}_${Math.floor(seededRandom() * 1e6).toString(36)}`;
 
 // 从 taskId 解析模型 id（轮询端点用，避免客户端传 model 暴露内部模型）
+//
+// taskId 格式：`imgtask_<model>_<base36_ts>_<base36_rand>`
+//   - <base36_ts> 与 <base36_rand> 都是 `[0-9a-z]+`
+//   - <model> 可以包含下划线（gpt_image_2、nano_banana_pro、nano_banana2）
+//
+// 实现：从 `imgtask_` 后开始，贪心匹配到倒数第二个 `_\w+` 之前的所有字符
+// 作为 model（最末两段是 ts + rand）。
 export function parseTaskModel(taskId: string): ImageModelId | null {
-  const match = taskId.match(/^imgtask_([a-z0-9_]+?)_/);
+  const match = taskId.match(/^imgtask_(.+)_\w+_\w+$/);
   if (!match?.[1]) return null;
   return (match[1] as ImageModelId) in IMAGE_ADAPTERS
     ? (match[1] as ImageModelId)

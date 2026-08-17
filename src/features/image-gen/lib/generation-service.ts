@@ -16,9 +16,9 @@ import {
   dispatchGenerateImage,
   dispatchQueryImageTask,
   extractSubmitContext,
+  IMAGE_ADAPTERS,
   IMAGE_MODELS,
   logImageGen,
-  parseTaskModel,
 } from "../";
 import { updateEffectUsageStats } from "./db-effects";
 import type {
@@ -405,7 +405,7 @@ export async function updateImageJobFromTaskResult(
  * taskId 而不是 JSON 任务列表，更简单）：
  * 1. 读 imageJob
  * 2. 如果 status=processing 且有 taskId：
- *    - parseTaskModel(taskId) 解析 model
+ *    - 直接用 job.model 列决定走哪个 adapter（DB 已经存了，不从 taskId 反推）
  *    - dispatchQueryImageTask 调上游一次
  *    - updateImageJobFromTaskResult 把结果落库
  * 3. 返回推进后的最新 job 行
@@ -414,6 +414,13 @@ export async function updateImageJobFromTaskResult(
  *
  * 由 /api/image-gen/jobs/[jobId]/poll 路由调用 —— 与 /p/[token] 的
  * /api/orders/[token]/poll 路由对称。
+ *
+ * 为什么不从 taskId 反推 model：gpt_image_2 的 taskId 是 wellapi/Lingting
+ * 真实任务 id（不是 imgtask_xxx 格式），parseTaskModel 永远返 null，
+ * 那条 if 分支会被静默跳过 —— imageJob 永远卡 processing。这就是
+ * 「image-gen 工作台卡住而 /p/[token] 正常」的根因。/p/[token] 走
+ * promptOrder.generationTask 列表 + Lingting 自己的 task_id，根本不依赖
+ * parseTaskModel。
  */
 export async function advanceImageGenJob(jobId: string): Promise<ImageJob> {
   const job = await db.query.imageJob.findFirst({
@@ -426,8 +433,9 @@ export async function advanceImageGenJob(jobId: string): Promise<ImageJob> {
 
   // 只在 processing + 有 taskId 时才需要打上游
   if (job.status === "processing" && job.taskId) {
-    const model = parseTaskModel(job.taskId);
-    if (model) {
+    // imageJob.model 列已经存了创建时的 model id —— 直接用，不从 taskId 反推。
+    const model = job.model as ImageModelId;
+    if (model in IMAGE_ADAPTERS) {
       try {
         const upstream = await dispatchQueryImageTask(model, job.taskId);
         await updateImageJobFromTaskResult(job.taskId, upstream);
@@ -455,11 +463,13 @@ export async function advanceImageGenJob(jobId: string): Promise<ImageJob> {
  * 步骤：
  * 1. 模型维护检查
  * 2. Plan 文件大小权限
- * 3. 计算并扣除积分
- * 4. createImageJob 写库（status=pending）
+ * 3. createImageJob 写库（status=pending, creditsConsumed=0）
  *
  * 与旧 generateImageJob 的区别：本函数只到"插入 pending 行"为止，
  * 后续的 dispatch 由 triggerImageGenSubmit 异步触发。
+ *
+ * 注意：此路径不扣积分（2026-08-17 应用户要求去除）。
+ * 积分系统仍由 gpt-image 链路消费，本工作台按"免费内部工具"对待。
  */
 export async function createImageJobWithValidation(options: {
   userId: string;
@@ -489,32 +499,6 @@ export async function createImageJobWithValidation(options: {
     };
   }
 
-  const creditsConsumed = calculateCreditsCost(input.model, input.batchSize);
-
-  const consumeResult = await consumeCredits({
-    userId,
-    amount: creditsConsumed,
-    serviceName: "image-generation",
-    description: `生图: ${modelConfig.name}`,
-    metadata: {
-      model: input.model,
-      mode: input.mode,
-      maskId: input.maskId,
-      photoId: input.photoId,
-      batchSize: input.batchSize,
-      size: input.size,
-    },
-  });
-
-  if (!consumeResult.success) {
-    return {
-      success: false,
-      jobId: "",
-      status: "failed",
-      error: "积分扣除失败",
-      creditsConsumed: 0,
-    };
-  }
-
-  return createImageJob({ userId, input, creditsConsumed });
+  // 工作台不扣积分 —— 内部工具性质，不走计费
+  return createImageJob({ userId, input, creditsConsumed: 0 });
 }
