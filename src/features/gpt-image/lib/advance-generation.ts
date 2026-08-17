@@ -121,24 +121,13 @@ export async function advanceOrderGeneration(
 
   const remaining: typeof state.tasks = [];
   const failures: string[] = [];
-  const doneUrls: Array<{ imageIdx: number; url: string }> = [];
+  const doneUrls: Array<{ imageIdx: number; urls: string[] }> = [];
 
   // done 的图：queryLingtingTask 内部已经 R2 持久化（url/b64 两路都覆盖），
-  // 这里直接收 doneUrls。注意：R2 失败应在 queryLingtingTask 内抛错被
-  // catch 成 pending —— 但目前实现是 throw 后穿透；为安全起见保留下面
-  // .catch 兜底。
-  const persistPromises: Array<
-    Promise<{ imageIdx: number; url: string } | null>
-  > = [];
+  // urls 元素直接是永久 URL。多图（wellapi 偶尔返多张）按顺序落入同一槽位。
   for (const { task, res } of results) {
     if (res.state === "done") {
-      // queryLingtingTask 已落 R2，这里直接收 url
-      persistPromises.push(
-        Promise.resolve(res.url).then((url) => ({
-          imageIdx: task.imageIdx,
-          url,
-        }))
-      );
+      doneUrls.push({ imageIdx: task.imageIdx, urls: res.urls });
     } else if (res.state === "failed") {
       failures.push(`第 ${task.imageIdx + 1} 张：${res.error}`);
     } else if (isTaskTimedOut(task, now)) {
@@ -146,10 +135,6 @@ export async function advanceOrderGeneration(
     } else {
       remaining.push(task);
     }
-  }
-  const persisted = await Promise.all(persistPromises);
-  for (const item of persisted) {
-    if (item) doneUrls.push(item);
   }
 
   // 重新读取再写，避免覆盖并发写入
@@ -170,8 +155,8 @@ export async function advanceOrderGeneration(
   for (let i = 0; i < state.total; i++) {
     if (!Array.isArray(nested[i])) nested[i] = [];
   }
-  for (const { imageIdx, url } of doneUrls) {
-    nested[imageIdx] = [url];
+  for (const { imageIdx, urls } of doneUrls) {
+    nested[imageIdx] = urls;
   }
 
   // 仍有任务在跑 → 保持 GENERATING，写回剩余任务
@@ -201,7 +186,7 @@ export async function advanceOrderGeneration(
     return {
       changed: progressed,
       status: "GENERATING",
-      completed: doneUrls.length,
+      completed: doneUrls.reduce((n, d) => n + d.urls.length, 0),
       pending: remaining.length,
     };
   }
@@ -242,7 +227,7 @@ export async function advanceOrderGeneration(
   return {
     changed: true,
     status: "CANDIDATES_READY",
-    completed: doneUrls.length,
+    completed: doneUrls.reduce((n, d) => n + d.urls.length, 0),
     pending: 0,
   };
 }

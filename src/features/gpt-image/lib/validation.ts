@@ -16,7 +16,7 @@ export const promptVariableSchema = z.object({
       "变量名仅允许字母/数字/下划线且不能以数字开头"
     ),
   label: z.string().trim().min(1, "变量显示名不能为空").max(64),
-  defaultValue: z.string().max(4000).default(""),
+  defaultValue: z.string().max(32000).default(""),
   required: z.boolean().default(false),
   description: z.string().max(500).optional(),
   options: z.array(z.string().min(1)).max(50).optional(),
@@ -26,7 +26,7 @@ export const promptVariableSchema = z.object({
 export const promptTemplateSchema = z.object({
   name: z.string().trim().min(1, "模板名称不能为空").max(100),
   description: z.string().trim().min(1, "描述不能为空").max(500),
-  prompt: z.string().trim().min(1, "提示词不能为空").max(4000),
+  prompt: z.string().trim().min(1, "提示词不能为空").max(32000),
   size: z
     .enum([
       "1024x1024",

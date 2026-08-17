@@ -693,13 +693,14 @@ export const gptImage2Adapter: ImageModelAdapter = {
         );
 
         if (submit.kind === "url") {
-          // sync 路径：submitLingtingTask 内部已落 R2（url 或 b64 两路）。
-          // 这里直接用拿到的 url，无需再 persistCandidateToR2。
+          // sync 路径：submitLingtingTask 内部已落 R2（url 或 b64 两路），
+          // 这里直接用拿到的 urls。多图时 workbench 期望单图结果（image-gen
+          // 用 prompt 后缀做宫格，不靠多张独立候选），取 urls[0]。
           return {
             success: true,
             model: "gpt_image_2",
             status: "completed",
-            images: [{ url: submit.url }],
+            images: [{ url: submit.urls[0] ?? "" }],
             cost: 0.04,
             currency: "USD",
           };
@@ -751,13 +752,13 @@ export const gptImage2Adapter: ImageModelAdapter = {
         error: q.error,
       };
     }
-    // done：queryLingtingTask 已落 R2，直接用 url
+    // done：queryLingtingTask 已落 R2，直接用 urls[0]（workbench 期望单图）
     return {
       success: true,
       model: "gpt_image_2",
       taskId,
       status: "completed",
-      images: [{ url: q.url }],
+      images: [{ url: q.urls[0] ?? "" }],
       cost: 0.04,
       currency: "USD",
     };

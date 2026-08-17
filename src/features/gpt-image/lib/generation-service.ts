@@ -177,21 +177,56 @@ export function isLingtingConfigured(): boolean {
   return !!LINGTING_API_KEY;
 }
 
-/** submit 阶段结果：上游可能同步返回 url，也可能返回 task_id 待轮询
+/** submit 阶段结果：上游可能同步返回 1..N 张 url，也可能返回 task_id 待轮询
  *
- * 注：内部 "url" 永远指 R2 永久 URL。如果上游同步返 b64_json（wellapi
- * gpt-image 系列固定行为），我们在内部 persistBase64ToR2 后再以 url
- * 形式返给调用方——调用方无感。
+ * urls 元素永远指 R2 永久 URL（b64_json 路径已在内部走 persistBase64ToR2）。
+ * 调用方拿到的 urls 即为可直接落库的成品。
  */
 export type SubmitResult =
-  | { kind: "url"; url: string }
+  | { kind: "url"; urls: string[] }
   | { kind: "task"; taskId: string };
 
 /** poll 阶段结果 */
 export type QueryResult =
   | { state: "pending" }
-  | { state: "done"; url: string }
+  | { state: "done"; urls: string[] }
   | { state: "failed"; error: string };
+
+/**
+ * 把 wellapi 返回的 data/images 数组逐条落 R2，返回永久 URL 数组。
+ *
+ * wellapi gpt-image-2 可能同步返回多张图（n 参数或多图规则触发），
+ * 也可能单张；本 helper 统一处理两种形态，url 与 b64_json 混合也能识别。
+ * 持久化走 Promise.all 并行，多张同轮 done 时墙钟 ≈ 单张时长。
+ *
+ * 单条失败抛错，由调用方决定整批放弃 / 部分落库。当前实现是 fail-fast：
+ * 一张失败整批 reject —— wellapi 多图同轮失败几乎不会发生，全军覆没概率
+ * 极低，简化逻辑优先。
+ */
+async function persistWellapiDataToR2(
+  items: Array<{ url?: string; b64_json?: string }>,
+  orderId: string,
+  imageIdx: number
+): Promise<string[]> {
+  const valid = items.filter(
+    (it): it is { url: string } | { b64_json: string } =>
+      typeof it.url === "string" || typeof it.b64_json === "string"
+  );
+  if (valid.length === 0) return [];
+
+  const persisted = await Promise.all(
+    valid.map((it) => {
+      if ("url" in it) return persistCandidateToR2(it.url, orderId, imageIdx);
+      return persistBase64ToR2(
+        it.b64_json as string,
+        "image/png",
+        orderId,
+        imageIdx
+      );
+    })
+  );
+  return persisted;
+}
 
 /**
  * 提交一张原图的生成任务（不轮询）。
@@ -288,32 +323,18 @@ export async function submitLingtingTask(
     task_id?: string;
   };
 
-  // 3a. 同步返回 url（部分账户 / dall-e-2 路径）：拿到 R2 持久化后返
-  const directUrl = submitJson.data?.[0]?.url ?? submitJson.images?.[0]?.url;
-  if (directUrl) {
-    const persistedUrl = await persistCandidateToR2(
-      directUrl,
-      orderId,
-      imageIdx
-    );
-    return { kind: "url", url: persistedUrl };
+  // 3a. 同步返回 url 或 b64_json（可能 1..N 张）：全部并行落 R2 后返
+  const directItems = submitJson.data ?? submitJson.images ?? [];
+  const persistedUrls = await persistWellapiDataToR2(
+    directItems,
+    orderId,
+    imageIdx
+  );
+  if (persistedUrls.length > 0) {
+    return { kind: "url", urls: persistedUrls };
   }
 
-  // 3b. 同步返回 b64_json（wellapi gpt-image 系列固定行为）：落 R2 后以
-  // url 形式返给调用方，对调用方无感
-  const directB64 =
-    submitJson.data?.[0]?.b64_json ?? submitJson.images?.[0]?.b64_json;
-  if (directB64) {
-    const persistedUrl = await persistBase64ToR2(
-      directB64,
-      "image/png",
-      orderId,
-      imageIdx
-    );
-    return { kind: "url", url: persistedUrl };
-  }
-
-  // 3c. 异步返回：交给 /poll 轮询
+  // 3b. 异步返回：交给 /poll 轮询
   const taskId = submitJson.task_id;
   if (!taskId) {
     throw new Error(
@@ -380,26 +401,15 @@ export async function queryLingtingTask(
     status === "success" ||
     status === "completed"
   ) {
-    // poll 路径同样可能返 b64_json 或 url，落地 R2 后返 url
-    const directUrl = pollJson.data?.[0]?.url ?? pollJson.images?.[0]?.url;
-    if (directUrl) {
-      const persistedUrl = await persistCandidateToR2(
-        directUrl,
-        orderId,
-        imageIdx
-      );
-      return { state: "done", url: persistedUrl };
-    }
-    const directB64 =
-      pollJson.data?.[0]?.b64_json ?? pollJson.images?.[0]?.b64_json;
-    if (directB64) {
-      const persistedUrl = await persistBase64ToR2(
-        directB64,
-        "image/png",
-        orderId,
-        imageIdx
-      );
-      return { state: "done", url: persistedUrl };
+    // poll 路径同样可能返 b64_json 或 url（1..N 张），全部并行落 R2
+    const items = pollJson.data ?? pollJson.images ?? [];
+    const persistedUrls = await persistWellapiDataToR2(
+      items,
+      orderId,
+      imageIdx
+    );
+    if (persistedUrls.length > 0) {
+      return { state: "done", urls: persistedUrls };
     }
   }
   return { state: "pending" };
@@ -557,23 +567,11 @@ export async function submitGeneration(
     const result = item.result;
     if (!result) continue;
     if (result.kind === "url") {
-      try {
-        // 同步拿到 URL → 立刻持久化到 R2，避免 Lingting URL 过期
-        const persistedUrl = await persistCandidateToR2(
-          result.url,
-          orderId,
-          item.imageIdx
-        );
-        nested[item.imageIdx] = [persistedUrl];
-        readyCount++;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "未知错误";
-        logger.warn(
-          { err, orderId, imageIdx: item.imageIdx },
-          "效果图持久化到 R2 失败"
-        );
-        failures.push(`第 ${item.imageIdx + 1} 张：${msg}`);
-      }
+      // submitLingtingTask 已经把每张图（url 或 b64）都落 R2 了，urls
+      // 元素直接是永久 URL，可直接放 candidates。多图（wellapi 偶尔
+      // 返多张）会按顺序落入同一个 imageIdx 的槽位。
+      nested[item.imageIdx] = result.urls;
+      readyCount += result.urls.length;
     } else {
       tasks.push({
         imageIdx: item.imageIdx,
