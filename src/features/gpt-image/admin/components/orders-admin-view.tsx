@@ -67,6 +67,8 @@ export function OrdersAdminView() {
   const isAdmin = currentUser?.role === "admin";
   const [orders, setOrders] = useState<OrderView[]>([]);
   const [templates, setTemplates] = useState<PromptTemplateView[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(true);
+  const [templatesError, setTemplatesError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -102,16 +104,42 @@ export function OrdersAdminView() {
     }
   };
 
-  const fetchTemplates = async () => {
+  const fetchTemplates = async (opts: { silent?: boolean } = {}) => {
     // 走 /api/templates 而不是 /api/admin/templates —— 后者 requireAdmin，
     // 普通用户会拿到 403，导致 templates 永远空、"创建订单"按钮永远 disabled。
     // /api/templates 任何登录用户都能用，且不返回 prompt（用户端不能看）。
+    //
+    // 错误必须可见：早期版本 try/catch 把所有错误吞了，UI 上 templates 永远 []
+    // 但用户不知道为什么 —— 401/500/JSON 解析失败都长一个样。这次把每个分支
+    // 都写到 state + toast，让 OrderFormDialog 区分 loading / error / empty。
+    if (!opts.silent) setTemplatesLoading(true);
+    setTemplatesError(null);
     try {
-      const res = await fetch("/api/templates");
-      const json = await res.json();
-      if (json.success) setTemplates(json.data as PromptTemplateView[]);
+      const res = await fetch("/api/templates", { credentials: "include" });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(
+          `HTTP ${res.status} ${res.statusText}${text ? ` · ${text.slice(0, 120)}` : ""}`
+        );
+      }
+      const json = (await res.json()) as {
+        success?: boolean;
+        data?: PromptTemplateView[];
+        error?: string;
+      };
+      if (!json.success || !Array.isArray(json.data)) {
+        throw new Error(json.error ?? "返回数据格式异常");
+      }
+      setTemplates(json.data);
     } catch (e) {
-      console.error(e);
+      const msg = e instanceof Error ? e.message : "未知错误";
+      setTemplatesError(msg);
+      console.error("[OrdersAdminView] fetchTemplates 失败:", msg);
+      if (!opts.silent) {
+        toast.error(`模板加载失败：${msg}`);
+      }
+    } finally {
+      if (!opts.silent) setTemplatesLoading(false);
     }
   };
 
@@ -128,7 +156,10 @@ export function OrdersAdminView() {
     if (refreshing) return;
     setRefreshing(true);
     try {
-      await Promise.all([fetchOrders({ silent: true }), fetchTemplates()]);
+      await Promise.all([
+        fetchOrders({ silent: true }),
+        fetchTemplates({ silent: true }),
+      ]);
     } finally {
       setRefreshing(false);
     }
@@ -499,6 +530,9 @@ export function OrdersAdminView() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         templates={templates}
+        templatesLoading={templatesLoading}
+        templatesError={templatesError}
+        onRetryTemplates={() => void fetchTemplates()}
         onCreated={(order) => {
           // 乐观插入：立即把新订单放在列表顶部，同时后台静默 refetch 兜底
           setOrders((prev) => {

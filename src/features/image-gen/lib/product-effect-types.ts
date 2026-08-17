@@ -1,15 +1,12 @@
 // 产品效果 / 模版 类型定义
 // 产品效果 = AI效果定义 + 自带提示词（支持变量）+ 关联生图模型
+//
+// Phase A 起 PromptVariable 已迁到 @/db/image-gen-types 作为跨模块共享类型，
+// 这里仅 re-export 保留向后兼容，Phase D 删除本文件时一并清理。
 
-// 提示词变量定义
-export interface PromptVariable {
-  key: string; // 变量名，如 photo_style
-  label: string; // 显示名，如 照片风格
-  defaultValue: string;
-  required: boolean;
-  description?: string | undefined;
-  options?: string[] | undefined; // 候选取值；有则渲染下拉，无则渲染文本框
-}
+import type { PromptVariable } from "@/db/image-gen-types";
+
+export type { PromptVariable };
 
 // 提示词版本历史
 export interface PromptVersion {

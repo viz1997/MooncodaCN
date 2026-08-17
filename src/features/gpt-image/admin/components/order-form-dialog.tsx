@@ -1,9 +1,22 @@
 "use client";
 
-import { ChevronDown, HelpCircle, Loader2, Minus, Plus, X } from "lucide-react";
+import {
+  ChevronDown,
+  HelpCircle,
+  Loader2,
+  Minus,
+  Plus,
+  RefreshCw,
+  X,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   Dialog,
   DialogContent,
@@ -21,11 +34,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
 import {
   Tooltip,
   TooltipContent,
@@ -49,6 +57,12 @@ interface OrderFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   templates: PromptTemplateView[];
+  /** 模板是否仍在加载（区分"还在拉"与"拉完但没有"） */
+  templatesLoading?: boolean | undefined;
+  /** 模板加载失败的错误信息；非空时显示红色提示 + 重新加载按钮 */
+  templatesError?: string | null | undefined;
+  /** 触发父组件重新调用 fetchTemplates */
+  onRetryTemplates?: () => void;
   /** 创建成功回调，传入完整 OrderView（用于乐观插入列表） */
   onCreated: (order: OrderView) => void;
 }
@@ -68,6 +82,9 @@ export function OrderFormDialog({
   open,
   onOpenChange,
   templates,
+  templatesLoading = false,
+  templatesError = null,
+  onRetryTemplates,
   onCreated,
 }: OrderFormDialogProps) {
   const [orderNo, setOrderNo] = useState("");
@@ -130,7 +147,7 @@ export function OrderFormDialog({
           const fields = Object.entries(errorPayload.validationErrors)
             .map(
               ([k, v]) =>
-                `${k}: ${Array.isArray(v) ? v.filter(Boolean).join(", ") : String(v ?? "")}`,
+                `${k}: ${Array.isArray(v) ? v.filter(Boolean).join(", ") : String(v ?? "")}`
             )
             .filter(Boolean)
             .join("；");
@@ -210,29 +227,108 @@ export function OrderFormDialog({
             />
           </div>
 
-          <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
-            <Label>
+          <div className="grid grid-cols-[140px_1fr] items-start gap-x-3">
+            <Label className="pt-2">
               关联模板 <span className="text-red-500">*</span>
             </Label>
-            <Select value={templateId} onValueChange={setTemplateId}>
-              <SelectTrigger>
-                <SelectValue placeholder="选择模板" />
-              </SelectTrigger>
-              <SelectContent>
-                {activeTemplates.length === 0 ? (
-                  <SelectItem value="_none" disabled>
-                    无可用模板
-                  </SelectItem>
-                ) : (
-                  activeTemplates.map((t) => (
-                    <SelectItem key={t.id} value={t.id}>
-                      {t.name}
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
-          
+            <div className="space-y-1.5">
+              {templatesLoading ? (
+                <>
+                  <Select value="" disabled>
+                    <SelectTrigger className="opacity-60">
+                      <SelectValue placeholder="加载模板中…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="_loading" disabled>
+                        加载模板中…
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    正在从 /api/templates 拉取可用模板…
+                  </p>
+                </>
+              ) : templatesError ? (
+                <>
+                  <Select value="" disabled>
+                    <SelectTrigger className="opacity-60">
+                      <SelectValue placeholder="模板加载失败" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="_error" disabled>
+                        模板加载失败
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <div className="bg-rose-500/5 border border-rose-500/20 rounded-lg p-2.5 space-y-1.5">
+                    <p className="text-[10px] text-rose-700 dark:text-rose-400 font-medium">
+                      模板加载失败
+                    </p>
+                    <p className="text-[10px] text-muted-foreground font-mono break-all">
+                      {templatesError}
+                    </p>
+                    {onRetryTemplates && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs"
+                        onClick={onRetryTemplates}
+                      >
+                        <RefreshCw className="mr-1 h-3 w-3" />
+                        重新加载
+                      </Button>
+                    )}
+                  </div>
+                </>
+              ) : activeTemplates.length === 0 ? (
+                <>
+                  <Select value="" disabled>
+                    <SelectTrigger className="opacity-60">
+                      <SelectValue placeholder="暂无启用的模板" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="_empty" disabled>
+                        暂无启用的模板
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-2.5 space-y-1">
+                    <p className="text-[10px] text-amber-700 dark:text-amber-400 font-medium">
+                      还没有可用的提示词模板
+                    </p>
+                    <p className="text-[10px] text-muted-foreground leading-relaxed">
+                      请先在
+                      <a
+                        href="/admin/prompt-templates"
+                        className="text-violet-600 hover:underline mx-0.5"
+                      >
+                        提示词模板管理
+                      </a>
+                      新建并启用模板后再来创建订单。模板里
+                      <code className="mx-0.5 px-1 py-0.5 rounded bg-muted text-[9px] font-mono">
+                        isActive=false
+                      </code>
+                      的不会出现在此下拉里。
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <Select value={templateId} onValueChange={setTemplateId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择模板" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activeTemplates.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
@@ -251,8 +347,8 @@ export function OrderFormDialog({
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="top" className="max-w-xs">
-                  用户最多可分多少次上传原图（每次上传算 1 批）。默认 1 批，多张图
-                  订单需要更多批次时可调高。建议 1-3 批，最多 10 批。
+                  用户最多可分多少次上传原图（每次上传算 1 批）。默认 1
+                  批，多张图 订单需要更多批次时可调高。建议 1-3 批，最多 10 批。
                 </TooltipContent>
               </Tooltip>
             </div>
@@ -368,154 +464,165 @@ export function OrderFormDialog({
             </Select>
           </div>
 
-        {/* 高级设置 —— 不常用字段折叠起来，默认收起保持表单简洁 */}
-        <Collapsible
-          open={showAdvanced}
-          onOpenChange={setShowAdvanced}
-          className="rounded-lg border border-dashed border-stone-200 bg-stone-50/50 px-3"
-        >
-          <CollapsibleTrigger asChild>
-            <button
-              type="button"
-              className="group flex w-full items-center justify-between py-2.5 text-left text-sm text-stone-600 transition-colors hover:text-stone-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
-            >
-              <span className="flex items-center gap-1.5">
-                <ChevronDown
-                  className={`h-3.5 w-3.5 transition-transform duration-200 ${showAdvanced ? "rotate-0" : "-rotate-90"}`}
-                />
-                更多设置
-              </span>
-              <span className="text-xs text-stone-400">
-                {showAdvanced ? "收起" : "每批张数 / 重新生成次数"}
-              </span>
-            </button>
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <div className="grid grid-cols-1 gap-y-4 pb-3">
-              <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
-                <div className="flex items-center gap-1">
-                  <Label htmlFor="ord-images-per-upload">
-                    每批上传原图数量 <span className="text-red-500">*</span>
-                  </Label>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        aria-label="每批上传原图数量说明"
-                        className="inline-flex h-4 w-4 items-center justify-center rounded-full text-stone-400 transition-colors hover:text-stone-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
-                      >
-                        <HelpCircle className="h-3.5 w-3.5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top" className="max-w-xs">
-                      用户每次上传会话最多塞几张参考图。多张图被融合为单次生图输入。
-                      默认 3 张，可选 1-3 张。订单总容量 = 批次 × 每批张数。
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-                <div className="flex items-stretch gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className="h-9 w-9 shrink-0"
-                    onClick={() => setImagesPerUpload((n) => Math.max(1, n - 1))}
-                    disabled={imagesPerUpload <= 1}
-                    aria-label="减少"
-                  >
-                    <Minus className="h-4 w-4" />
-                  </Button>
-                  <Input
-                    id="ord-images-per-upload"
-                    type="number"
-                    min={1}
-                    max={3}
-                    value={imagesPerUpload}
-                    onChange={(e) => {
-                      const v = Number(e.target.value);
-                      if (!Number.isFinite(v)) return;
-                      const clamped = Math.max(1, Math.min(3, Math.floor(v)));
-                      setImagesPerUpload(clamped);
-                    }}
-                    className="text-center font-medium [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+          {/* 高级设置 —— 不常用字段折叠起来，默认收起保持表单简洁 */}
+          <Collapsible
+            open={showAdvanced}
+            onOpenChange={setShowAdvanced}
+            className="rounded-lg border border-dashed border-stone-200 bg-stone-50/50 px-3"
+          >
+            <CollapsibleTrigger asChild>
+              <button
+                type="button"
+                className="group flex w-full items-center justify-between py-2.5 text-left text-sm text-stone-600 transition-colors hover:text-stone-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
+              >
+                <span className="flex items-center gap-1.5">
+                  <ChevronDown
+                    className={`h-3.5 w-3.5 transition-transform duration-200 ${showAdvanced ? "rotate-0" : "-rotate-90"}`}
                   />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className="h-9 w-9 shrink-0"
-                    onClick={() => setImagesPerUpload((n) => Math.min(3, n + 1))}
-                    disabled={imagesPerUpload >= 3}
-                    aria-label="增加"
-                  >
-                    <Plus className="h-4 w-4" />
-                  </Button>
+                  更多设置
+                </span>
+                <span className="text-xs text-stone-400">
+                  {showAdvanced ? "收起" : "每批张数 / 重新生成次数"}
+                </span>
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="grid grid-cols-1 gap-y-4 pb-3">
+                <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
+                  <div className="flex items-center gap-1">
+                    <Label htmlFor="ord-images-per-upload">
+                      每批上传原图数量 <span className="text-red-500">*</span>
+                    </Label>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label="每批上传原图数量说明"
+                          className="inline-flex h-4 w-4 items-center justify-center rounded-full text-stone-400 transition-colors hover:text-stone-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
+                        >
+                          <HelpCircle className="h-3.5 w-3.5" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-xs">
+                        用户每次上传会话最多塞几张参考图。多张图被融合为单次生图输入。
+                        默认 3 张，可选 1-3 张。订单总容量 = 批次 × 每批张数。
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                  <div className="flex items-stretch gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="h-9 w-9 shrink-0"
+                      onClick={() =>
+                        setImagesPerUpload((n) => Math.max(1, n - 1))
+                      }
+                      disabled={imagesPerUpload <= 1}
+                      aria-label="减少"
+                    >
+                      <Minus className="h-4 w-4" />
+                    </Button>
+                    <Input
+                      id="ord-images-per-upload"
+                      type="number"
+                      min={1}
+                      max={3}
+                      value={imagesPerUpload}
+                      onChange={(e) => {
+                        const v = Number(e.target.value);
+                        if (!Number.isFinite(v)) return;
+                        const clamped = Math.max(1, Math.min(3, Math.floor(v)));
+                        setImagesPerUpload(clamped);
+                      }}
+                      className="text-center font-medium [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="h-9 w-9 shrink-0"
+                      onClick={() =>
+                        setImagesPerUpload((n) => Math.min(3, n + 1))
+                      }
+                      disabled={imagesPerUpload >= 3}
+                      aria-label="增加"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
-                <div className="flex items-center gap-1">
-                  <Label htmlFor="ord-regenerate-limit">
-                    用户重新生成次数上限
-                  </Label>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        aria-label="重新生成次数上限说明"
-                        className="inline-flex h-4 w-4 items-center justify-center rounded-full text-stone-400 transition-colors hover:text-stone-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
-                      >
-                        <HelpCircle className="h-3.5 w-3.5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top" className="max-w-xs">
-                      仅"重新生成第 N 张"（单图路径）计数；批量重跑 / FAILED
-                      一键重试不计。设为 0 表示禁止用户主动重新生成。
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-                <div className="flex items-stretch gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className="h-9 w-9 shrink-0"
-                    onClick={() => setRegenerateLimit((n) => Math.max(0, n - 1))}
-                    disabled={regenerateLimit <= 0}
-                    aria-label="减少"
-                  >
-                    <Minus className="h-4 w-4" />
-                  </Button>
-                  <Input
-                    id="ord-regenerate-limit"
-                    type="number"
-                    min={0}
-                    max={20}
-                    value={regenerateLimit}
-                    onChange={(e) => {
-                      const v = Number(e.target.value);
-                      if (!Number.isFinite(v)) return;
-                      const clamped = Math.max(0, Math.min(20, Math.floor(v)));
-                      setRegenerateLimit(clamped);
-                    }}
-                    className="text-center font-medium [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className="h-9 w-9 shrink-0"
-                    onClick={() => setRegenerateLimit((n) => Math.min(20, n + 1))}
-                    disabled={regenerateLimit >= 20}
-                    aria-label="增加"
-                  >
-                    <Plus className="h-4 w-4" />
-                  </Button>
+                <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
+                  <div className="flex items-center gap-1">
+                    <Label htmlFor="ord-regenerate-limit">
+                      用户重新生成次数上限
+                    </Label>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label="重新生成次数上限说明"
+                          className="inline-flex h-4 w-4 items-center justify-center rounded-full text-stone-400 transition-colors hover:text-stone-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
+                        >
+                          <HelpCircle className="h-3.5 w-3.5" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-xs">
+                        仅"重新生成第 N 张"（单图路径）计数；批量重跑 / FAILED
+                        一键重试不计。设为 0 表示禁止用户主动重新生成。
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                  <div className="flex items-stretch gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="h-9 w-9 shrink-0"
+                      onClick={() =>
+                        setRegenerateLimit((n) => Math.max(0, n - 1))
+                      }
+                      disabled={regenerateLimit <= 0}
+                      aria-label="减少"
+                    >
+                      <Minus className="h-4 w-4" />
+                    </Button>
+                    <Input
+                      id="ord-regenerate-limit"
+                      type="number"
+                      min={0}
+                      max={20}
+                      value={regenerateLimit}
+                      onChange={(e) => {
+                        const v = Number(e.target.value);
+                        if (!Number.isFinite(v)) return;
+                        const clamped = Math.max(
+                          0,
+                          Math.min(20, Math.floor(v))
+                        );
+                        setRegenerateLimit(clamped);
+                      }}
+                      className="text-center font-medium [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="h-9 w-9 shrink-0"
+                      onClick={() =>
+                        setRegenerateLimit((n) => Math.min(20, n + 1))
+                      }
+                      disabled={regenerateLimit >= 20}
+                      aria-label="增加"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               </div>
-            </div>
-          </CollapsibleContent>
-        </Collapsible>
+            </CollapsibleContent>
+          </Collapsible>
         </div>
 
         <DialogFooter>

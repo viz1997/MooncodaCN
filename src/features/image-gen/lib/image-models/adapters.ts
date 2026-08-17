@@ -3,6 +3,13 @@
 // 当前为 Mock 实现，结构已就绪，部署时填充 fetch 调用即可
 // Gemini 两个模型走真实 generateContent 接口（需配置 LINGTING_API_KEY）
 
+// Phase 起：gpt_image_2 适配器直接跨 feature 复用 gpt-image 的 wellapi 调用。
+// 不抽 shared —— 同项目的 PromptTemplateView 也是从 gpt-image/lib/types 导的，
+// 跨 feature import 在这个仓库已经是有先例的模式。
+import {
+  queryLingtingTask,
+  submitLingtingTask,
+} from "@/features/gpt-image/lib/generation-service";
 import { seededRandom } from "../providers/random";
 import { GEMINI_CONFIG } from "./gemini-config";
 import {
@@ -622,7 +629,25 @@ function openAIImageToUrl(item: OpenAIImageData): string {
   throw new Error("OpenAI 响应中缺少图片数据");
 }
 
-// ============ 9. OpenAI GPT-Image-2 适配器 ============
+// ============ 9. GPT-Image-2 适配器（via WellAPI） ============
+// 直接复用 gpt-image 的 submitLingtingTask / queryLingtingTask /
+// persistCandidateToR2，与 /p/[token] 走完全一致的 wellapi 调用路径、R2
+// 持久化、超时与轮询策略。
+//
+// 与 gpt-image submitGeneration 对齐的三个关键点：
+// - per-image retry：2 次 × 2s（wellapi 偶发 cold start 撞超时，重试大概率过）
+// - R2 持久化：sync url 与 queryTask 拿到 url 都立即 persistCandidateToR2，
+//   避免 wellapi URL TTL 过期（实测 1-24h）破图
+// - 异步轮询：submit 返回 task_id 后立即结束；前端 workbench 启 setInterval
+//   调 /api/image-gen/poll，由 poll 路由转调 queryLingtingTask + 持久化 R2 +
+//   写回 imageJob.resultUrls。这样服务端永远不阻塞到 Vercel 60s/300s 上限。
+//
+// 限制：
+// - 单图所以 imageIdx 写 0；size 规范化 "auto" → "1024x1024"
+// - wellapi /v1/images/edits 必须带 image，所以 gpt_image_2 仅支持 image_*
+//   模式（text_to_image 已在 types.ts capabilities 里移除）
+// - 宫格拼接（candidateCount=4/9）：workbench 在调用前已把 prompt 加拼接后缀
+//   并 batchSize=1，本适配器无感；拿到 1 张拼接图直接返
 export const gptImage2Adapter: ImageModelAdapter = {
   config: IMAGE_MODELS.gpt_image_2,
   validate(req) {
@@ -633,102 +658,109 @@ export const gptImage2Adapter: ImageModelAdapter = {
       return "局部重绘需要 maskUrl";
     if (req.batchSize && req.batchSize > 4) return "GPT-Image-2 单次最多 4 张";
     if (req.negativePrompt) return "GPT-Image-2 不支持反向提示词";
+    if (!GEMINI_CONFIG.apiKey) return "LINGTING_API_KEY 未配置";
     return null;
   },
   async generate(req) {
-    const startTime = Date.now();
-    const batchSize = Math.min(req.batchSize ?? 1, 4);
-    const isEdit =
-      req.mode === "image_to_image" ||
-      req.mode === "image_editing" ||
-      req.mode === "inpainting";
-
-    try {
-      let response: OpenAIImagesResponse;
-
-      if (isEdit) {
-        if (!req.imageUrl) {
-          return {
-            success: false,
-            model: "gpt_image_2",
-            status: "failed",
-            error: "图生图模式需要 imageUrl",
-          };
-        }
-
-        const { buffer } = await resolveReferenceImage(req.imageUrl);
-        const formData = new FormData();
-        formData.append(
-          "image",
-          new Blob([new Uint8Array(buffer)], { type: "image/png" })
-        );
-        formData.append("prompt", req.prompt);
-        formData.append("n", String(batchSize));
-        formData.append("size", req.size === "auto" ? "1024x1024" : req.size);
-        formData.append("model", OPENAI_IMAGE_CONFIG.model);
-
-        if (req.maskUrl) {
-          const { buffer: maskBuffer } = await resolveReferenceImage(
-            req.maskUrl
-          );
-          formData.append(
-            "mask",
-            new Blob([new Uint8Array(maskBuffer)], { type: "image/png" })
-          );
-        }
-
-        response = await callOpenAIImagesApi({
-          endpoint: "edits",
-          formData,
-        });
-      } else {
-        response = await callOpenAIImagesApi({
-          endpoint: "generations",
-          jsonBody: {
-            model: OPENAI_IMAGE_CONFIG.model,
-            prompt: req.prompt,
-            n: batchSize,
-            size: req.size === "auto" ? "1024x1024" : req.size,
-            quality: "medium",
-            output_format: "png",
-            response_format: "url",
-          },
-        });
-      }
-
-      const images =
-        response.data?.map((item) => ({
-          url: openAIImageToUrl(item),
-          revisedPrompt: item.revised_prompt,
-        })) ?? [];
-
-      if (images.length === 0) {
-        return {
-          success: false,
-          model: "gpt_image_2",
-          status: "failed",
-          error: "OpenAI 未返回图片",
-        };
-      }
-
-      return {
-        success: true,
-        model: "gpt_image_2",
-        status: "completed",
-        images,
-        duration: Date.now() - startTime,
-        cost: 0.04 * batchSize,
-        currency: "USD",
-      };
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : "未知错误";
+    if (!req.imageUrl) {
       return {
         success: false,
         model: "gpt_image_2",
         status: "failed",
-        error: `GPT-Image 调用失败: ${msg}`,
+        error: "GPT-Image-2 (via WellAPI) 仅支持图生图模式，请先上传或选参考图",
       };
     }
+
+    const size = req.size === "auto" ? "1024x1024" : req.size;
+
+    // per-image retry：Lingting 偶发 cold start 120s 撞线，单次失败多半是
+    // 上游瞬时排队拥堵，等 2s 再试一次大概率过（与 gpt-image submitGeneration 同策略）。
+    const MAX_SUBMIT_ATTEMPTS = 2;
+    const SUBMIT_RETRY_DELAY_MS = 2_000;
+    let lastError: string | null = null;
+
+    for (let attempt = 1; attempt <= MAX_SUBMIT_ATTEMPTS; attempt++) {
+      try {
+        // 复用 gpt-image 的提交流程：下载 imageUrl → multipart 上传 →
+        // 拿 R2 持久化 url 或 task_id。b64_json 路径在 submitLingtingTask
+        // 内部已经走 persistBase64ToR2，调用方拿到的永远是 R2 永久 URL。
+        const submit = await submitLingtingTask(
+          "_wbl",
+          req.imageUrl,
+          req.prompt,
+          size,
+          0
+        );
+
+        if (submit.kind === "url") {
+          // sync 路径：submitLingtingTask 内部已落 R2（url 或 b64 两路）。
+          // 这里直接用拿到的 url，无需再 persistCandidateToR2。
+          return {
+            success: true,
+            model: "gpt_image_2",
+            status: "completed",
+            images: [{ url: submit.url }],
+            cost: 0.04,
+            currency: "USD",
+          };
+        }
+        // 提交失败兜底：旧版本会在这里 try/persistCandidateToR2 二次保底
+        // —— 现在 submitLingtingTask 已内部持久化，去掉冗余 catch。
+        // task 路径交给前端轮询
+        return {
+          success: true,
+          model: "gpt_image_2",
+          taskId: submit.taskId,
+          status: "processing",
+        };
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : "未知错误";
+        if (attempt < MAX_SUBMIT_ATTEMPTS) {
+          await new Promise((r) => setTimeout(r, SUBMIT_RETRY_DELAY_MS));
+        }
+      }
+    }
+    return {
+      success: false,
+      model: "gpt_image_2",
+      status: "failed",
+      error: lastError ?? "提交失败",
+    };
+  },
+  /**
+   * 异步任务轮询：完全转调 gpt-image 的 queryLingtingTask，
+   * 拿到 url 后立即持久化 R2（关键：与 gpt-image submitGeneration 同语义）。
+   */
+  async queryTask(taskId) {
+    const q = await queryLingtingTask("_wbl", taskId, 0);
+
+    if (q.state === "pending") {
+      return {
+        success: true,
+        model: "gpt_image_2",
+        taskId,
+        status: "processing",
+      };
+    }
+    if (q.state === "failed") {
+      return {
+        success: false,
+        model: "gpt_image_2",
+        taskId,
+        status: "failed",
+        error: q.error,
+      };
+    }
+    // done：queryLingtingTask 已落 R2，直接用 url
+    return {
+      success: true,
+      model: "gpt_image_2",
+      taskId,
+      status: "completed",
+      images: [{ url: q.url }],
+      cost: 0.04,
+      currency: "USD",
+    };
   },
 };
 

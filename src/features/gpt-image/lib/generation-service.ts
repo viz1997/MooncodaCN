@@ -116,13 +116,73 @@ export async function persistCandidateToR2(
 }
 
 /**
+ * 把 Lingting 返回的 base64 编码效果图直接上传到 R2，返回永久 R2 URL。
+ *
+ * 为什么有这个 helper：wellapi gpt-image 系列同步调用固定返 b64_json（与
+ * OpenAI 一致，response_format 参数对 gpt-image 系列无效），不走 URL。
+ * 这条路径不需要再走"下载 URL → 上传 R2"两步，省一道网络往返。
+ *
+ * 失败抛错。b64 输入合法性由调用方保证；非合法 base64 会在这里 decode 阶段
+ * 抛错被调用方 catch。
+ */
+export async function persistBase64ToR2(
+  b64: string,
+  contentType: string,
+  orderId: string,
+  imageIdx: number
+): Promise<string> {
+  if (!isR2Configured()) {
+    throw new Error("R2 未配置：效果图无法持久化");
+  }
+
+  const cleanB64 = b64.replace(/\s+/g, "");
+  const body = new Uint8Array(Buffer.from(cleanB64, "base64"));
+  if (body.byteLength === 0) {
+    throw new Error("Lingting 返回空 b64 body");
+  }
+
+  const ext =
+    contentType.includes("jpeg") || contentType.includes("jpg")
+      ? "jpg"
+      : contentType.includes("webp")
+        ? "webp"
+        : contentType.includes("gif")
+          ? "gif"
+          : "png";
+
+  const objectKey = `gpt-image/results/${orderId}/${imageIdx}-${Date.now()}-${randomBytes(4).toString("hex")}.${ext}`;
+  const persistedUrl = await putObject({
+    objectKey,
+    body,
+    contentType,
+  });
+
+  logger.info(
+    {
+      orderId,
+      imageIdx,
+      bytes: body.byteLength,
+      objectKey,
+      source: "b64",
+    },
+    "Lingting 效果图（b64）已转存 R2"
+  );
+  return persistedUrl;
+}
+
+/**
  * 检查 Lingting API 是否已配置
  */
 export function isLingtingConfigured(): boolean {
   return !!LINGTING_API_KEY;
 }
 
-/** submit 阶段结果：上游可能同步返回 url，也可能返回 task_id 待轮询 */
+/** submit 阶段结果：上游可能同步返回 url，也可能返回 task_id 待轮询
+ *
+ * 注：内部 "url" 永远指 R2 永久 URL。如果上游同步返 b64_json（wellapi
+ * gpt-image 系列固定行为），我们在内部 persistBase64ToR2 后再以 url
+ * 形式返给调用方——调用方无感。
+ */
 export type SubmitResult =
   | { kind: "url"; url: string }
   | { kind: "task"; taskId: string };
@@ -139,9 +199,15 @@ export type QueryResult =
  * Lingting 的 /v1/images/edits 要求 multipart/form-data，必须把原图作为
  * 文件字段上传，不能用 JSON body + URL 引用，因此先下载原图拿 buffer。
  *
+ * 关于 response_format：gpt-image 系列固定忽略此参数，sync 调用永远返
+ * b64_json（参见 wellapi/OpenAI 文档）。我们不再发这个字段，由本函数内
+ * 部检测 url/b64 两种返回形态，b64 路径走 persistBase64ToR2 落库后
+ * 透明返 { kind: "url", url }。
+ *
  * 失败直接抛错，由调用方决定如何落库。
  */
 export async function submitLingtingTask(
+  orderId: string,
   imageUrl: string,
   prompt: string,
   size: string,
@@ -189,7 +255,9 @@ export async function submitLingtingTask(
   form.append("prompt", prompt);
   form.append("n", "1");
   form.append("size", size);
-  form.append("response_format", "url");
+  // 注意：gpt-image 系列固定返 b64_json，response_format 参数无效。
+  // 部分账户在 dall-e-2 模型上仍接受此参数，但 gpt-image-2 路径会被忽略，
+  // 显式发出只会增加请求体大小，不再传。
 
   // 3. 提交任务。
   // 超时 120s：旧 60s 仍被 Lingting 偶发 cold start / 模型队列积压撞线
@@ -215,20 +283,41 @@ export async function submitLingtingTask(
   }
 
   const submitJson = (await submitRes.json()) as {
-    data?: Array<{ url?: string }>;
-    images?: Array<{ url?: string }>;
+    data?: Array<{ url?: string; b64_json?: string }>;
+    images?: Array<{ url?: string; b64_json?: string }>;
     task_id?: string;
   };
 
-  // 3a. 同步返回：直接拿到 url，无需轮询
-  const direct = submitJson.data?.[0]?.url ?? submitJson.images?.[0]?.url;
-  if (direct) return { kind: "url", url: direct };
+  // 3a. 同步返回 url（部分账户 / dall-e-2 路径）：拿到 R2 持久化后返
+  const directUrl = submitJson.data?.[0]?.url ?? submitJson.images?.[0]?.url;
+  if (directUrl) {
+    const persistedUrl = await persistCandidateToR2(
+      directUrl,
+      orderId,
+      imageIdx
+    );
+    return { kind: "url", url: persistedUrl };
+  }
 
-  // 3b. 异步返回：交给 /poll 轮询
+  // 3b. 同步返回 b64_json（wellapi gpt-image 系列固定行为）：落 R2 后以
+  // url 形式返给调用方，对调用方无感
+  const directB64 =
+    submitJson.data?.[0]?.b64_json ?? submitJson.images?.[0]?.b64_json;
+  if (directB64) {
+    const persistedUrl = await persistBase64ToR2(
+      directB64,
+      "image/png",
+      orderId,
+      imageIdx
+    );
+    return { kind: "url", url: persistedUrl };
+  }
+
+  // 3c. 异步返回：交给 /poll 轮询
   const taskId = submitJson.task_id;
   if (!taskId) {
     throw new Error(
-      `Lingting 响应格式异常（无 task_id 也无 url）: ${JSON.stringify(submitJson).slice(0, 300)}`
+      `Lingting 响应格式异常（无 task_id 也无 url/b64）: ${JSON.stringify(submitJson).slice(0, 300)}`
     );
   }
   return { kind: "task", taskId };
@@ -240,7 +329,11 @@ export async function submitLingtingTask(
  * 网络抖动 / 上游 5xx 一律返回 pending —— 让前端下一轮再试，
  * 由 /poll 的超时判定兜底，避免一次抖动就把订单判死。
  */
-export async function queryLingtingTask(taskId: string): Promise<QueryResult> {
+export async function queryLingtingTask(
+  orderId: string,
+  taskId: string,
+  imageIdx: number
+): Promise<QueryResult> {
   if (!LINGTING_API_KEY) {
     return { state: "failed", error: "LINGTING_API_KEY 未配置" };
   }
@@ -265,8 +358,8 @@ export async function queryLingtingTask(taskId: string): Promise<QueryResult> {
 
   let pollJson: {
     status?: string;
-    data?: Array<{ url?: string }>;
-    images?: Array<{ url?: string }>;
+    data?: Array<{ url?: string; b64_json?: string }>;
+    images?: Array<{ url?: string; b64_json?: string }>;
     error?: string;
   };
   try {
@@ -287,8 +380,27 @@ export async function queryLingtingTask(taskId: string): Promise<QueryResult> {
     status === "success" ||
     status === "completed"
   ) {
-    const url = pollJson.data?.[0]?.url ?? pollJson.images?.[0]?.url;
-    if (url) return { state: "done", url };
+    // poll 路径同样可能返 b64_json 或 url，落地 R2 后返 url
+    const directUrl = pollJson.data?.[0]?.url ?? pollJson.images?.[0]?.url;
+    if (directUrl) {
+      const persistedUrl = await persistCandidateToR2(
+        directUrl,
+        orderId,
+        imageIdx
+      );
+      return { state: "done", url: persistedUrl };
+    }
+    const directB64 =
+      pollJson.data?.[0]?.b64_json ?? pollJson.images?.[0]?.b64_json;
+    if (directB64) {
+      const persistedUrl = await persistBase64ToR2(
+        directB64,
+        "image/png",
+        orderId,
+        imageIdx
+      );
+      return { state: "done", url: persistedUrl };
+    }
   }
   return { state: "pending" };
 }
@@ -396,6 +508,7 @@ export async function submitGeneration(
         try {
           const imageUrl = uploaded[imageIdx] as string;
           const result = await submitLingtingTask(
+            orderId,
             imageUrl,
             compositePrompt,
             size,

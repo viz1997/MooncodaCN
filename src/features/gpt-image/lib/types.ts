@@ -16,22 +16,44 @@ export type OrderStatus =
   | "CANCELLED" // 已取消
   | "FAILED"; // 生成失败
 
-/** 模板在前端的展示结构（不含 prompt） */
+/** 模板在前端的展示结构 */
 export interface PromptTemplateView {
   id: string;
   name: string;
   description: string;
-  /** 仅管理端可见的提示词内容 */
-  prompt: string;
+  /**
+   * 提示词内容。管理端（/admin/prompt-templates）始终返回；
+   * 公开 API（/api/templates，给登录用户创建订单时下拉用）刻意不返回，避免提示词泄漏给非管理员。
+   * image-gen 工作台是 RSC 直接读 DB，能拿到 prompt —— 见 prompt-template-source.ts 的注释。
+   */
+  prompt?: string;
   size: string;
   candidateCount: number;
   coverUrl: string | null;
   isActive: boolean;
+  /**
+   * 提示词变量定义（Phase A 起 image-gen 工作台与 gpt-image 共用 promptTemplate 表后新增）。
+   * 让管理员能配置 {{变量}} 模板，工作台用户在生成前填值替换。
+   * gpt-image 用户端无消费但仍保留字段以保持 admin UI 一致。
+   */
+  variables?: PromptVariable[];
+  /**
+   * 推荐生图模型 id。image-gen 工作台选中模板时会锁定该模型；
+   * gpt-image 用户端无消费。null/undefined = 用户在 UI 自由选。
+   */
+  model?: string | null;
+  /**
+   * 模板价格（元，整数）。image-gen 工作台 Select item 末尾展示 `· ¥{price}`；
+   * gpt-image 用户端无消费。0 = 免费。
+   */
+  price?: number;
   createdAt: string;
   updatedAt: string;
   /** 关联订单数（管理端列表用） */
   orderCount?: number | undefined;
 }
+
+import type { PromptVariable } from "@/db/image-gen-types";
 
 /** 订单来源平台：与 DB schema 枚举保持一致 */
 export const ORDER_PLATFORMS = [

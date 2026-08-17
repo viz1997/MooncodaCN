@@ -546,8 +546,12 @@ export const generationModeEnum = pgEnum("generation_mode", [
   "upscaling",
 ]);
 
+// ============================================
+// 照片表 (Photo)
+// ============================================
+
 /**
- * 产品效果状态枚举
+ * 产品效果状态枚举（保留：/admin/product-effects 与 productEffect 表未退役，作为 image-gen 工作台的旧数据源回退）
  */
 export const productEffectStatusEnum = pgEnum("product_effect_status", [
   "active",
@@ -555,7 +559,7 @@ export const productEffectStatusEnum = pgEnum("product_effect_status", [
 ]);
 
 /**
- * 提示词场景枚举
+ * 提示词场景枚举（保留：productEffect.scene 字段依赖）
  */
 export const promptSceneEnum = pgEnum("prompt_scene", [
   "generate_2d",
@@ -566,9 +570,6 @@ export const promptSceneEnum = pgEnum("prompt_scene", [
   "custom",
 ]);
 
-// ============================================
-// 照片表 (Photo)
-// ============================================
 /**
  * 照片表 - 用户上传的参考图
  *
@@ -671,6 +672,10 @@ export const imageJob = pgTable("image_job", {
 // ============================================
 /**
  * 产品效果表 - AI 效果模版（提示词 + 变量 + 关联生图模型）
+ *
+ * Phase C 起 image-gen 工作台主数据源已切到 promptTemplate 表；本表保留作为
+ * legacy —— /admin/product-effects 仍可访问，generateImageJob.imageJob.maskId
+ * 列仍接受两种来源的 id。
  *
  * @field id - 效果唯一标识符（maskId，如 MASK_001）
  * @field name - 效果名称
@@ -822,6 +827,24 @@ export const promptTemplate = pgTable("prompt_template", {
   name: text("name").notNull(),
   description: text("description").notNull(),
   prompt: text("prompt").notNull(),
+  /**
+   * 提示词变量定义（JSON）。
+   * 支持模板里 {{key}} 占位符 —— 与 image-gen 工作台共用同一份 schema，
+   * 让 image-gen 和 gpt-image 都消费同一张表，不再维护两份模板。
+   */
+  variables: json("variables")
+    .$type<import("./image-gen-types").PromptVariable[]>()
+    .notNull()
+    .default([]),
+  /**
+   * 推荐生图模型 id（如 doubao / nano_banana2）。
+   * image-gen 工作台选中模板时会锁定这个模型；为空时允许用户在 UI 里手动选。
+   */
+  model: text("model").default("doubao"),
+  /**
+   * 模板价格（分）。仅作展示用，单位元，0 = 免费。
+   */
+  price: integer("price").notNull().default(0),
   size: text("size").notNull().default("1024x1024"),
   candidateCount: integer("candidate_count").notNull().default(4),
   coverUrl: text("cover_url"),

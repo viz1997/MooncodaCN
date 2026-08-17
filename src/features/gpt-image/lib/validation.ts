@@ -4,6 +4,24 @@
 
 import { z } from "zod";
 
+/** 单个提示词变量结构（Phase A 起 image-gen 工作台复用） */
+export const promptVariableSchema = z.object({
+  key: z
+    .string()
+    .trim()
+    .min(1, "变量名不能为空")
+    .max(64, "变量名过长")
+    .regex(
+      /^[a-zA-Z_][a-zA-Z0-9_]*$/,
+      "变量名仅允许字母/数字/下划线且不能以数字开头"
+    ),
+  label: z.string().trim().min(1, "变量显示名不能为空").max(64),
+  defaultValue: z.string().max(4000).default(""),
+  required: z.boolean().default(false),
+  description: z.string().max(500).optional(),
+  options: z.array(z.string().min(1)).max(50).optional(),
+});
+
 /** 创建/更新提示词模板 */
 export const promptTemplateSchema = z.object({
   name: z.string().trim().min(1, "模板名称不能为空").max(100),
@@ -23,6 +41,17 @@ export const promptTemplateSchema = z.object({
   candidateCount: z.number().int().min(1).max(9).default(4),
   coverUrl: z.string().url().nullable().optional(),
   isActive: z.boolean().default(true),
+  // Phase A 起新增：image-gen 工作台复用 —— {{变量}} 替换 + 按效果锁模型 + 价格
+  variables: z.array(promptVariableSchema).max(20).default([]),
+  model: z
+    .string()
+    .trim()
+    .min(1)
+    .max(64)
+    .nullable()
+    .optional()
+    .transform((v) => v || "doubao"),
+  price: z.number().int().min(0).max(9999).default(0),
 });
 
 /** 订单来源平台（共享类型在 types.ts） */

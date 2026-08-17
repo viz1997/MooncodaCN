@@ -183,7 +183,8 @@ export function SelectStep({
   const canGoPrevSnapshot =
     imageSnapshots.length > 0 &&
     (viewingSnapshotIdx === null ||
-      (safeSnapshotIdx !== null && safeSnapshotIdx < imageSnapshots.length - 1));
+      (safeSnapshotIdx !== null &&
+        safeSnapshotIdx < imageSnapshots.length - 1));
   const canGoNextSnapshot =
     isViewingOldSnapshot && safeSnapshotIdx !== null && safeSnapshotIdx > 0;
 

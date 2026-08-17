@@ -133,6 +133,14 @@ export interface ImageModelConfig {
   successRate: number;
   // 是否国产（合规要求）
   isDomestic: boolean;
+  /**
+   * 是否真正接入可调用的 API。
+   * false = 占位实现（simulateLatency + picsum 占位图），生产环境选了会失败；
+   * 留给前端工作台下拉里 disabled + 「即将上线」标记，避免用户选了踩坑。
+   * Phase 起（gpt-image workbench 共用）：dalle3 / gpt_image_2 / nano_banana_pro / nano_banana2 = true，
+   * 其他 sd3/flux1/midjourney/doubao/wanx/ernie/cogview 仍为 false。
+   */
+  isAvailable: boolean;
 }
 
 // ============ 模型配置 ============
@@ -175,6 +183,7 @@ export const IMAGE_MODELS: Record<ImageModelId, ImageModelConfig> = {
     totalGenerated: 18650,
     successRate: 98,
     isDomestic: false,
+    isAvailable: true,
   },
 
   // 2. Stable Diffusion 3
@@ -215,6 +224,7 @@ export const IMAGE_MODELS: Record<ImageModelId, ImageModelConfig> = {
     totalGenerated: 32480,
     successRate: 94,
     isDomestic: false,
+    isAvailable: false,
   },
 
   // 3. Flux.1
@@ -256,6 +266,7 @@ export const IMAGE_MODELS: Record<ImageModelId, ImageModelConfig> = {
     totalGenerated: 12860,
     successRate: 95,
     isDomestic: false,
+    isAvailable: false,
   },
 
   // 4. Midjourney
@@ -296,6 +307,7 @@ export const IMAGE_MODELS: Record<ImageModelId, ImageModelConfig> = {
     totalGenerated: 8920,
     successRate: 89,
     isDomestic: false,
+    isAvailable: false,
   },
 
   // 5. 即梦/豆包 (字节)
@@ -336,6 +348,7 @@ export const IMAGE_MODELS: Record<ImageModelId, ImageModelConfig> = {
     totalGenerated: 45820,
     successRate: 96,
     isDomestic: true,
+    isAvailable: false,
   },
 
   // 6. 通义万相 (阿里)
@@ -377,6 +390,7 @@ export const IMAGE_MODELS: Record<ImageModelId, ImageModelConfig> = {
     totalGenerated: 22180,
     successRate: 95,
     isDomestic: true,
+    isAvailable: false,
   },
 
   // 7. 文心一格 (百度)
@@ -417,6 +431,7 @@ export const IMAGE_MODELS: Record<ImageModelId, ImageModelConfig> = {
     totalGenerated: 15680,
     successRate: 92,
     isDomestic: true,
+    isAvailable: false,
   },
 
   // 8. CogView (智谱)
@@ -457,25 +472,34 @@ export const IMAGE_MODELS: Record<ImageModelId, ImageModelConfig> = {
     totalGenerated: 9820,
     successRate: 94,
     isDomestic: true,
+    isAvailable: false,
   },
 
-  // 9. OpenAI GPT-Image-2
+  // 9. OpenAI GPT-Image-2 (via WellAPI)
+  // Phase 起：image-gen 工作台的 gpt_image_2 与 gpt-image 模块统一走 wellapi.ai，
+  // 共用 LINGTING_API_KEY / LINGTING_BASE_URL；不再依赖 OPENAI_API_KEY。
+  // 原因：gpt-image 已经验证 wellapi 链路稳定，OpenAI 直接调用常被跨境访问拦，
+  // 且 lingting 异步任务模式 + R2 持久化路径已稳定复用。
   gpt_image_2: {
     id: "gpt_image_2",
-    name: "GPT-Image-2",
-    fullName: "OpenAI GPT-Image-2",
-    vendor: "OpenAI",
+    name: "GPT-Image-2 (via WellAPI)",
+    fullName: "OpenAI GPT-Image-2 via WellAPI",
+    vendor: "WellAPI",
     vendorUrl: "https://platform.openai.com/docs/guides/image-generation",
     color: "#10a37f",
     gradient: "from-emerald-500 to-teal-600",
-    apiEndpoint: "https://api.openai.com/v1/images/edits",
-    apiKeyEnv: "OPENAI_API_KEY",
+    apiEndpoint: "https://wellapi.ai/v1/images/edits",
+    apiKeyEnv: "LINGTING_API_KEY",
     authType: "bearer",
-    asyncMode: false,
-    pollingInterval: 0,
-    maxPollingTime: 0,
+    asyncMode: true,
+    pollingInterval: 3000,
+    maxPollingTime: 120000,
     capabilities: {
-      modes: ["text_to_image", "image_to_image", "image_editing", "inpainting"],
+      // Phase 起：去掉 text_to_image。
+      // 原因：gpt_image_2 via WellAPI 走的是 gpt-image 同款 submitLingtingTask，
+      // 而后者依赖 /v1/images/edits 接口，必须带 image 字段 —— 无图调用
+      // 会被 wellapi 返 500（实测）。文生图需求请选 nano_banana2 / dalle3。
+      modes: ["image_to_image", "image_editing", "inpainting"],
       sizes: ["1024x1024", "1024x1536", "1536x1024", "auto"],
       maxBatchSize: 4,
       supportsNegativePrompt: false,
@@ -493,11 +517,12 @@ export const IMAGE_MODELS: Record<ImageModelId, ImageModelConfig> = {
     freeQuota: 0,
     status: "active",
     description:
-      "OpenAI 新一代 GPT-Image-2，基于 GPT-4o 视觉理解，文字渲染业界最强，支持高质量图像编辑与局部重绘",
+      "GPT-Image-2 通过 WellAPI 网关调用，与 gpt-image 业务模块共用同一供应商（LINGTING_API_KEY）；文字渲染业界最强，支持图像编辑与局部重绘",
     bestFor: ["文字渲染", "图像编辑", "局部重绘", "高质量海报", "电商主图"],
     totalGenerated: 15620,
     successRate: 97,
     isDomestic: false,
+    isAvailable: true,
   },
 
   // 10. Google Nano Banana Pro (gemini-3-pro-image-preview)
@@ -540,6 +565,7 @@ export const IMAGE_MODELS: Record<ImageModelId, ImageModelConfig> = {
     totalGenerated: 3200,
     successRate: 94,
     isDomestic: false,
+    isAvailable: true,
   },
 
   // 11. Google Nano Banana 2 (gemini-3.1-flash-image-preview)
@@ -582,6 +608,7 @@ export const IMAGE_MODELS: Record<ImageModelId, ImageModelConfig> = {
     totalGenerated: 6850,
     successRate: 95,
     isDomestic: false,
+    isAvailable: true,
   },
 };
 

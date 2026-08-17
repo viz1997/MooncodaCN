@@ -48,6 +48,10 @@ export async function listTemplatesWithCounts() {
     candidateCount: t.candidateCount,
     coverUrl: t.coverUrl,
     isActive: t.isActive,
+    // Phase A 起新增：image-gen 工作台与 gpt-image 共用表所需字段
+    variables: t.variables,
+    model: t.model,
+    price: t.price,
     createdAt: t.createdAt.toISOString(),
     updatedAt: t.updatedAt.toISOString(),
     orderCount: countMap.get(t.id) ?? 0,
@@ -58,6 +62,9 @@ export async function listTemplatesWithCounts() {
  * 列出所有 active 模板的最小字段（id/name/description/size/candidateCount/coverUrl/isActive）。
  * 给任何登录用户调用（创建订单时填充模板下拉），**不返回 prompt**——提示词对用户隐藏。
  * 列表本身不带 orderCount，避免把全表的订单计数暴露给普通用户。
+ *
+ * Phase A 起：同时返回 image-gen 工作台所需的 variables / model / price（不含 prompt 字段），
+ * 让 image-gen 工作台也能从同一个查询复用模板数据。
  */
 export async function listActiveTemplatesForOrderCreate() {
   const rows = await db
@@ -69,6 +76,10 @@ export async function listActiveTemplatesForOrderCreate() {
       candidateCount: promptTemplate.candidateCount,
       coverUrl: promptTemplate.coverUrl,
       isActive: promptTemplate.isActive,
+      // Phase A 起新增：image-gen 工作台复用
+      variables: promptTemplate.variables,
+      model: promptTemplate.model,
+      price: promptTemplate.price,
       createdAt: promptTemplate.createdAt,
       updatedAt: promptTemplate.updatedAt,
     })
@@ -84,6 +95,54 @@ export async function listActiveTemplatesForOrderCreate() {
     candidateCount: t.candidateCount,
     coverUrl: t.coverUrl,
     isActive: t.isActive,
+    // Phase A 起新增
+    variables: t.variables,
+    model: t.model,
+    price: t.price,
+    createdAt: t.createdAt.toISOString(),
+    updatedAt: t.updatedAt.toISOString(),
+  }));
+}
+
+/**
+ * 列出所有 active 模板，**包含 prompt + image-gen 工作台全部元数据**。
+ * 供 image-gen RSC（/dashboard/generate）使用 —— 该页面要求登录但不限管理员角色，
+ * 用户在前端已经能选模板触发生图，必然能拿到 prompt，否则变量替换无意义。
+ * 与 listActiveTemplatesForOrderCreate 的区别仅在于多返回 prompt 字段。
+ */
+export async function listActivePromptTemplatesForWorkbench() {
+  const rows = await db
+    .select({
+      id: promptTemplate.id,
+      name: promptTemplate.name,
+      description: promptTemplate.description,
+      prompt: promptTemplate.prompt,
+      size: promptTemplate.size,
+      candidateCount: promptTemplate.candidateCount,
+      coverUrl: promptTemplate.coverUrl,
+      isActive: promptTemplate.isActive,
+      variables: promptTemplate.variables,
+      model: promptTemplate.model,
+      price: promptTemplate.price,
+      createdAt: promptTemplate.createdAt,
+      updatedAt: promptTemplate.updatedAt,
+    })
+    .from(promptTemplate)
+    .where(eq(promptTemplate.isActive, true))
+    .orderBy(desc(promptTemplate.createdAt));
+
+  return rows.map((t) => ({
+    id: t.id,
+    name: t.name,
+    description: t.description,
+    prompt: t.prompt,
+    size: t.size,
+    candidateCount: t.candidateCount,
+    coverUrl: t.coverUrl,
+    isActive: t.isActive,
+    variables: t.variables,
+    model: t.model,
+    price: t.price,
     createdAt: t.createdAt.toISOString(),
     updatedAt: t.updatedAt.toISOString(),
   }));
@@ -97,6 +156,10 @@ export async function createTemplate(input: {
   candidateCount: number;
   coverUrl: string | null;
   isActive: boolean;
+  // Phase A 起新增：image-gen 工作台复用
+  variables?: import("@/db/image-gen-types").PromptVariable[];
+  model?: string | null;
+  price?: number;
 }) {
   const [created] = await db
     .insert(promptTemplate)
@@ -109,6 +172,9 @@ export async function createTemplate(input: {
       candidateCount: input.candidateCount,
       coverUrl: input.coverUrl,
       isActive: input.isActive,
+      variables: input.variables ?? [],
+      model: input.model ?? "doubao",
+      price: input.price ?? 0,
     })
     .returning();
 
@@ -126,6 +192,10 @@ export async function updateTemplate(
     candidateCount: number | undefined;
     coverUrl: string | null | undefined;
     isActive: boolean | undefined;
+    // Phase A 起新增：image-gen 工作台复用
+    variables?: import("@/db/image-gen-types").PromptVariable[] | undefined;
+    model?: string | null | undefined;
+    price?: number | undefined;
   }>
 ) {
   if (Object.keys(data).length === 0) throw new Error("无字段需要更新");

@@ -173,7 +173,9 @@ export function UploadStep({
     if (ok) clearPreviews();
   };
 
-  const canAddMore = previews.length < imagesPerUpload && previews.length < remainingForThisRound;
+  const canAddMore =
+    previews.length < imagesPerUpload &&
+    previews.length < remainingForThisRound;
 
   return (
     <section className="flex flex-col items-center px-5 pt-6 pb-8 animate-[fadeIn_.3s_ease-out]">
@@ -184,7 +186,8 @@ export function UploadStep({
           {templateName} · 上传后将生成 {candidateCount} 种候选效果图
         </p>
         <p className="mt-1 text-xs text-stone-400">
-          本批最多 {imagesPerUpload} 张（订单共 {uploadCount} 批 × {imagesPerUpload} 张）
+          本批最多 {imagesPerUpload} 张（订单共 {uploadCount} 批 ×{" "}
+          {imagesPerUpload} 张）
         </p>
       </div>
 

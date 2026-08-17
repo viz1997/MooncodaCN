@@ -15,7 +15,7 @@ import { db } from "@/db";
 import { promptOrder } from "@/db/schema";
 import { logger } from "@/lib/logger";
 
-import { persistCandidateToR2, queryLingtingTask } from "./generation-service";
+import { queryLingtingTask } from "./generation-service";
 import {
   isOrderPastDeadline,
   isTaskTimedOut,
@@ -115,7 +115,7 @@ export async function advanceOrderGeneration(
   const results = await Promise.all(
     state.tasks.map(async (task) => ({
       task,
-      res: await queryLingtingTask(task.taskId),
+      res: await queryLingtingTask(orderId, task.taskId, task.imageIdx),
     }))
   );
 
@@ -123,28 +123,21 @@ export async function advanceOrderGeneration(
   const failures: string[] = [];
   const doneUrls: Array<{ imageIdx: number; url: string }> = [];
 
-  // done 的图片并行持久化到 R2：旧版 for 循环串行 await，多张图同轮 done
-  // 时墙钟叠加（每张 30s 下载 + 5s R2 PUT），容易撞穿 /poll 路由的
-  // maxDuration 预算。改成 Promise.all 后墙钟 ≈ 单张时长；下载各自的并发
-  // 对 R2 / Lingting CDN 都没压力。
+  // done 的图：queryLingtingTask 内部已经 R2 持久化（url/b64 两路都覆盖），
+  // 这里直接收 doneUrls。注意：R2 失败应在 queryLingtingTask 内抛错被
+  // catch 成 pending —— 但目前实现是 throw 后穿透；为安全起见保留下面
+  // .catch 兜底。
   const persistPromises: Array<
     Promise<{ imageIdx: number; url: string } | null>
   > = [];
   for (const { task, res } of results) {
     if (res.state === "done") {
+      // queryLingtingTask 已落 R2，这里直接收 url
       persistPromises.push(
-        persistCandidateToR2(res.url, orderId, task.imageIdx)
-          .then((url) => ({ imageIdx: task.imageIdx, url }))
-          .catch((err: unknown) => {
-            const msg = err instanceof Error ? err.message : "未知错误";
-            logger.warn(
-              { err, orderId, imageIdx: task.imageIdx },
-              "效果图持久化到 R2 失败"
-            );
-            failures.push(`第 ${task.imageIdx + 1} 张：${msg}`);
-            // 不再 remaining，避免任务被反复查（已知的 broken 链接）
-            return null;
-          })
+        Promise.resolve(res.url).then((url) => ({
+          imageIdx: task.imageIdx,
+          url,
+        }))
       );
     } else if (res.state === "failed") {
       failures.push(`第 ${task.imageIdx + 1} 张：${res.error}`);

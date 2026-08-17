@@ -5,10 +5,13 @@
  *
  * 双栏布局：
  * - 左侧 380px 参数面板：参考图 / 模板开关 / 提示词 / 反向提示词 / 生图模型 /
- *   产品效果模版 / 模板参数 / 输出尺寸 / 批量数量 / 高级参数 / 生成按钮 + 预计成本
+ *   提示词模板 / 模板参数 / 输出尺寸 / 批量数量 / 高级参数 / 生成按钮 + 预计成本
  * - 右侧主区：状态徽章 + 结果网格 + 元数据 + 历史缩略图条
  *
  * 数据走真实 action（generateImageAction），历史为前端 state。
+ *
+ * Phase C：模板数据源从 productEffect 表迁移到 promptTemplate 表（与 gpt-image 共用），
+ * 所以 props 类型是 PromptTemplateView[]，不再依赖 ProductEffect 类型。
  */
 
 import {
@@ -20,9 +23,12 @@ import {
   Heart,
   History,
   Image as ImageIcon,
+  Library,
   Loader2,
   Maximize2,
   RefreshCw,
+  RotateCcw,
+  Search,
   Send,
   Settings2,
   Share2,
@@ -50,7 +56,14 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { generateImageAction } from "@/features/image-gen/actions";
+import type { PromptVariable } from "@/db/image-gen-types";
+import type { Photo } from "@/db/schema";
+import type { PromptTemplateView } from "@/features/gpt-image/lib/types";
+import {
+  generateImageAction,
+  listPhotosAction,
+  pollImageJobAction,
+} from "@/features/image-gen/actions";
 import type {
   ImageModelId,
   ImageSize,
@@ -59,10 +72,6 @@ import {
   IMAGE_MODEL_LIST,
   IMAGE_MODELS,
 } from "@/features/image-gen/lib/image-models/types";
-import type {
-  ProductEffect,
-  PromptVariable,
-} from "@/features/image-gen/lib/product-effect-types";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
@@ -79,7 +88,21 @@ type EffectStatus = "pending" | "processing" | "completed" | "failed";
 
 interface WorkbenchEffect {
   effectId: string;
+  /**
+   * imageJob 表 id（用于后续 pollImageJobAction 轮询异步任务）。
+   * 同步任务（直接返 images）此字段为空；异步任务（taskId 路径）必填。
+   */
+  jobId?: string;
+  /**
+   * 上游 task_id（仅当模型走异步提交时才存在，用于诊断 / 排查）。
+   * 与 jobId 不同：jobId 是我们这层的记录 id，taskId 是上游模型给的。
+   */
+  taskId?: string;
   prompt: string;
+  /**
+   * 模板 id（Phase C 起指向 promptTemplate.id，原 productEffect.maskId 字段）。
+   * 字段名保留 `maskId` 以兼容 imageJob.maskId 列（DB schema 没改）。
+   */
   maskId: string;
   maskName: string;
   status: EffectStatus;
@@ -94,6 +117,11 @@ interface WorkbenchEffect {
   imageModelName: string;
   createdAt: string;
   errorMsg?: string;
+  /**
+   * 是否为宫格拼接模式（candidateCount=4/9 时一张大图含 N 个候选）。
+   * 仅展示层用：标题 / 单图布局 / 下载行为。
+   */
+  isGridComposite?: boolean;
 }
 
 const STATUS_CONFIG: Record<
@@ -133,11 +161,13 @@ const REF_MODE_LABELS: Record<RefMode, string> = {
 };
 
 interface GenerateWorkbenchViewProps {
-  effects: ProductEffect[];
-  userId: string;
+  /** 启用的提示词模板列表（来自 promptTemplate 表，与 gpt-image 共用同一数据源） */
+  templates: PromptTemplateView[];
 }
 
-export function GenerateWorkbenchView({ effects }: GenerateWorkbenchViewProps) {
+export function GenerateWorkbenchView({
+  templates,
+}: GenerateWorkbenchViewProps) {
   const { toast: legacyToast } = useToast();
 
   // 历史记录（最新在前）
@@ -155,17 +185,30 @@ export function GenerateWorkbenchView({ effects }: GenerateWorkbenchViewProps) {
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // 图库模式：当前用户的照片列表 + 选中项 + 搜索
+  const [libraryPhotos, setLibraryPhotos] = useState<Photo[]>([]);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [libraryError, setLibraryError] = useState<string | null>(null);
+  const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
+  const [librarySearch, setLibrarySearch] = useState("");
+  // 防止 React 18 严格模式下 useEffect 重复拉取
+  const libraryFetchedRef = useRef(false);
+
   // 提示词
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
   // 提示词模板开关
   const [useTemplate, setUseTemplate] = useState(true);
 
-  // 模型与产品效果
-  const [selectedModel, setSelectedModel] = useState<ImageModelId>("doubao");
-  const activeEffects = effects.filter((e) => e.status === "active");
+  // 模型与提示词模板（Phase C：mask → template 语义重命名，但 selectedMask 状态名保留
+  // 以兼容 WorkbenchEffect.maskId 字段与 generateImageAction({ maskId }) 调用）
+  // Phase 起：默认模型从 doubao 改为 nano_banana2 —— doubao 仍是占位实现，
+  // 默认值会让用户在没选模板时撞墙。
+  const [selectedModel, setSelectedModel] =
+    useState<ImageModelId>("nano_banana2");
+  const activeTemplates = templates.filter((t) => t.isActive);
   const [selectedMask, setSelectedMask] = useState<string>(
-    activeEffects[0]?.maskId ?? ""
+    activeTemplates[0]?.id ?? ""
   );
   // 模板变量取值
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
@@ -183,16 +226,45 @@ export function GenerateWorkbenchView({ effects }: GenerateWorkbenchViewProps) {
 
   const [generating, setGenerating] = useState(false);
   const modelConfig = IMAGE_MODELS[selectedModel];
-  const selectedMaskData = activeEffects.find((e) => e.maskId === selectedMask);
+  const selectedTemplate = activeTemplates.find((t) => t.id === selectedMask);
+  /**
+   * 当前模板推荐的模型 id（Phase：模板 model 字段允许为空，模板可选 doubao 等
+   * 占位但未实现的模型当默认；空或占位时不强制锁，仍按模板 model 字段填）。
+   * 用 derived state 替代 useState，避免模板切换时双源不一致。
+   */
+  const templateDefaultModel = (selectedTemplate?.model ??
+    null) as ImageModelId | null;
+  /**
+   * 用户是否覆盖了模板默认模型：
+   * - 没选模板：不显示"已覆盖"提示
+   * - 选了模板且 selectedModel ≠ 模板默认：显示覆盖徽章 + 还原按钮
+   */
+  const isModelOverridden =
+    templateDefaultModel !== null && selectedModel !== templateDefaultModel;
+  const handleRestoreTemplateModel = () => {
+    if (templateDefaultModel) setSelectedModel(templateDefaultModel);
+  };
 
-  // 选择产品效果时初始化变量默认值 + 切到指定模型
-  const handleSelectMask = (maskId: string) => {
-    setSelectedMask(maskId);
-    const mask = activeEffects.find((m) => m.maskId === maskId);
-    if (!mask) return;
-    if (mask.model) setSelectedModel(mask.model as ImageModelId);
+  // 选择提示词模板时初始化变量默认值 + 切到指定模型
+  const handleSelectMask = (templateId: string) => {
+    setSelectedMask(templateId);
+    const tpl = activeTemplates.find((t) => t.id === templateId);
+    if (!tpl) return;
+    if (tpl.model) {
+      // 模板指定的 model 若已下线（isAvailable=false），自动回退到第一个可用模型，
+      // 避免用户一进工作台就撞到「暂未上线」toast。模板默认仍写库不修改；
+      // UI 上的「已覆盖」徽章会提示用户实际生效的是回退模型。
+      const tplModelConfig = IMAGE_MODELS[tpl.model as ImageModelId];
+      if (tplModelConfig?.isAvailable) {
+        setSelectedModel(tpl.model as ImageModelId);
+      } else {
+        const fallback =
+          IMAGE_MODEL_LIST.find((m) => m.isAvailable)?.id ?? null;
+        if (fallback) setSelectedModel(fallback);
+      }
+    }
     const init: Record<string, string> = {};
-    mask.variables.forEach((v) => {
+    (tpl.variables ?? []).forEach((v) => {
       init[v.key] = v.defaultValue;
     });
     setParamValues(init);
@@ -201,14 +273,34 @@ export function GenerateWorkbenchView({ effects }: GenerateWorkbenchViewProps) {
   // 首次加载按默认选中模板填充参数
   // biome-ignore lint/correctness/useExhaustiveDependencies: 仅首次加载执行
   useEffect(() => {
-    if (selectedMaskData) {
+    if (selectedTemplate) {
       const init: Record<string, string> = {};
-      selectedMaskData.variables.forEach((v: PromptVariable) => {
+      (selectedTemplate.variables ?? []).forEach((v: PromptVariable) => {
         init[v.key] = v.defaultValue;
       });
       setParamValues(init);
     }
   }, []);
+
+  // 进入图库模式时拉取当前用户照片；refMode 切走不重拉，组件卸载才重置 fetched 标志
+  useEffect(() => {
+    if (refMode !== "library" || libraryFetchedRef.current) return;
+    libraryFetchedRef.current = true;
+    setLibraryLoading(true);
+    setLibraryError(null);
+    listPhotosAction({ limit: 100 })
+      .then((res) => {
+        if (res?.data?.photos) {
+          setLibraryPhotos(res.data.photos);
+        }
+      })
+      .catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : "图库加载失败";
+        setLibraryError(msg);
+        libraryFetchedRef.current = false; // 失败时允许下次重试
+      })
+      .finally(() => setLibraryLoading(false));
+  }, [refMode]);
 
   // ============ 文件处理 ============
   const handleFileSelect = (file: File | undefined) => {
@@ -240,15 +332,21 @@ export function GenerateWorkbenchView({ effects }: GenerateWorkbenchViewProps) {
   };
 
   const handleModeChange = (mode: RefMode) => {
+    // 离开 upload 模式：释放本地预览 URL，避免 blob 内存泄漏
     if (mode !== "upload" && uploadedImage) handleRemoveUpload();
+    // 离开 library 模式：清空已选照片 + 搜索词，避免切回 upload/none 还带着旧 photoId
+    if (mode !== "library") {
+      setSelectedPhoto(null);
+      setLibrarySearch("");
+    }
     setRefMode(mode);
   };
 
   // 渲染模板 prompt：替换 {{变量}}
-  const renderTemplatePrompt = (mask = selectedMaskData) => {
-    if (!mask) return "";
-    let rendered = mask.prompt;
-    mask.variables.forEach((v: PromptVariable) => {
+  const renderTemplatePrompt = (tpl = selectedTemplate) => {
+    if (!tpl) return "";
+    let rendered = tpl.prompt ?? "";
+    (tpl.variables ?? []).forEach((v: PromptVariable) => {
       const val = paramValues[v.key] || v.defaultValue;
       rendered = rendered.replace(new RegExp(`\\{\\{${v.key}\\}\\}`, "g"), val);
     });
@@ -256,14 +354,133 @@ export function GenerateWorkbenchView({ effects }: GenerateWorkbenchViewProps) {
   };
 
   // ============ 生成 ============
+  // 递减轮询间隔（秒）：与 gpt-image /api/orders/[token]/poll 一致。
+  // cold start 时上游还没真正开始算，给足余量；越接近完成越短，避免空转。
+  // total ≈ 3+3+4+5+6+8+10+12+15 = 66s，覆盖大多数异步任务。
+  const POLL_INTERVALS_SEC = [3, 3, 4, 5, 6, 8, 10, 12, 15];
+  const POLL_TIMEOUT_MS = 180_000;
+
+  // 引用最新的 history 以便 setInterval 闭包始终读到新值
+  const historyRef = useRef<WorkbenchEffect[]>([]);
+  // 当前正在轮询的 effectId（防止重复启动轮询）
+  const pollingRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    historyRef.current = history;
+  }, [history]);
+
+  /**
+   * 启动一个异步任务的轮询循环。
+   * 通过历史 ref + pollingRef 保证组件卸载时也能正常清理；
+   * 每个 effect 单独跑 setTimeout 链，避免多个 effect 互相干扰。
+   */
+  const startPolling = (effectId: string, jobId: string) => {
+    if (pollingRef.current.has(effectId)) return;
+    pollingRef.current.add(effectId);
+
+    const startedAt = Date.now();
+    let attempt = 0;
+
+    const tick = async () => {
+      // 组件卸载 / 用户切走就停（history 已被删也停）
+      if (!pollingRef.current.has(effectId)) return;
+      const eff = historyRef.current.find((e) => e.effectId === effectId);
+      if (!eff || eff.status !== "processing") {
+        pollingRef.current.delete(effectId);
+        return;
+      }
+      if (Date.now() - startedAt > POLL_TIMEOUT_MS) {
+        pollingRef.current.delete(effectId);
+        const failed: WorkbenchEffect = {
+          ...eff,
+          status: "failed",
+          errorMsg: "轮询超时（180s），请重试",
+        };
+        setHistory((prev) =>
+          prev.map((e) => (e.effectId === effectId ? failed : e))
+        );
+        setSelectedEffect((prev) =>
+          prev?.effectId === effectId ? failed : prev
+        );
+        toast.error("生成超时");
+        return;
+      }
+
+      try {
+        const res = await pollImageJobAction({ jobId });
+        const job = res?.data?.job;
+        if (!job) {
+          // poll 端没返 job：忽略，等下一轮
+        } else if (job.status === "completed") {
+          pollingRef.current.delete(effectId);
+          const resultUrls = (job.resultUrls ?? []) as string[];
+          const completed: WorkbenchEffect = {
+            ...eff,
+            status: "completed",
+            resultUrls,
+            ...(job.generateDuration
+              ? { duration: job.generateDuration as number }
+              : {}),
+            ...(job.cost && job.currency
+              ? {
+                  cost: (job.cost as number) / 1000,
+                  currency: job.currency as string,
+                }
+              : {}),
+          };
+          setHistory((prev) =>
+            prev.map((e) => (e.effectId === effectId ? completed : e))
+          );
+          setSelectedEffect((prev) =>
+            prev?.effectId === effectId ? completed : prev
+          );
+          toast.success(`${eff.imageModelName} 生成完成`);
+          return;
+        } else if (job.status === "failed") {
+          pollingRef.current.delete(effectId);
+          const failed: WorkbenchEffect = {
+            ...eff,
+            status: "failed",
+            errorMsg: (job.errorMsg as string) ?? "生成失败",
+          };
+          setHistory((prev) =>
+            prev.map((e) => (e.effectId === effectId ? failed : e))
+          );
+          setSelectedEffect((prev) =>
+            prev?.effectId === effectId ? failed : prev
+          );
+          toast.error(`生成失败：${failed.errorMsg}`);
+          return;
+        }
+      } catch (err) {
+        // 单次 poll 失败不打断整体链路，等下一轮
+        // eslint-disable-next-line no-console
+        console.warn("[workbench poll] failed:", err);
+      }
+
+      const delaySec =
+        POLL_INTERVALS_SEC[Math.min(attempt, POLL_INTERVALS_SEC.length - 1)] ??
+        10;
+      attempt += 1;
+      setTimeout(tick, delaySec * 1000);
+    };
+
+    setTimeout(tick, POLL_INTERVALS_SEC[0]! * 1000);
+  };
+
   const handleGenerate = async () => {
-    const effectivePrompt = useTemplate ? renderTemplatePrompt() : prompt;
-    if (!effectivePrompt.trim()) {
-      toast.error(useTemplate ? "请选择效果模版" : "请输入提示词");
+    // useTemplate 开着但 DB 没模板 —— 即使用户关掉 Switch 想手输也该先提醒，
+    // 否则容易在切换中误触。直接拦在最前。
+    if (useTemplate && activeTemplates.length === 0) {
+      toast.error("暂无提示词模板，请联系管理员添加或关闭模板开关");
       return;
     }
-    if (useTemplate && selectedMaskData) {
-      const missing = selectedMaskData.variables.find(
+    const effectivePrompt = useTemplate ? renderTemplatePrompt() : prompt;
+    if (!effectivePrompt.trim()) {
+      toast.error(useTemplate ? "请选择提示词模板" : "请输入提示词");
+      return;
+    }
+    if (useTemplate && selectedTemplate) {
+      const missing = (selectedTemplate.variables ?? []).find(
         (v) => v.required && !(paramValues[v.key] || v.defaultValue)
       );
       if (missing) {
@@ -275,11 +492,25 @@ export function GenerateWorkbenchView({ effects }: GenerateWorkbenchViewProps) {
       toast.error(`${modelConfig.name} 当前维护中`);
       return;
     }
+    if (!modelConfig.isAvailable) {
+      toast.error(`${modelConfig.name} 暂未上线，请选择其他模型`);
+      return;
+    }
     if (negativePrompt && !modelConfig.capabilities.supportsNegativePrompt) {
       toast.error(`${modelConfig.name} 不支持反向提示词`);
       return;
     }
-    if (batchSize > modelConfig.capabilities.maxBatchSize) {
+
+    // 宫格拼接：模板 candidateCount=4/9 时，单次提交一张拼接大图
+    // （用户不再选 batchSize，UI 会禁用 batchSize slider）。
+    // batchSize 强制 1：避免一次扣 4 张积分；模型返 1 张大图就是全部 4 个候选。
+    const tplCandidateCount = useTemplate
+      ? (selectedTemplate?.candidateCount ?? 1)
+      : 1;
+    const isGridComposite = tplCandidateCount === 4 || tplCandidateCount === 9;
+    const effectiveBatchSize = isGridComposite ? 1 : batchSize;
+
+    if (effectiveBatchSize > modelConfig.capabilities.maxBatchSize) {
       toast.error(
         `${modelConfig.name} 单次最多 ${modelConfig.capabilities.maxBatchSize} 张`
       );
@@ -292,24 +523,44 @@ export function GenerateWorkbenchView({ effects }: GenerateWorkbenchViewProps) {
             imageUrl: uploadedImage.previewUrl,
             photoId: "LOCAL_UPLOAD",
           }
-        : null;
+        : refMode === "library" && selectedPhoto
+          ? {
+              imageUrl: selectedPhoto.fileUrl,
+              photoId: selectedPhoto.id,
+            }
+          : null;
     const generationMode: "text_to_image" | "image_to_image" = refImage
       ? "image_to_image"
       : "text_to_image";
+
+    // 宫格拼接：给 prompt 加 2x2/3x3 后缀，让模型直接出拼接大图。
+    // 与 gpt-image submitGeneration buildGridLayout 一致；这里只追加中文化版本，
+    // 因为 gpt-image 那个是英文 promptTemplate 数据源，不复用。
+    let finalPrompt = effectivePrompt;
+    if (isGridComposite) {
+      const gridSuffix =
+        tplCandidateCount === 4
+          ? "，以 2×2 四宫格布局，单张图内含 4 个候选方案（每格独立构图、风格一致、互不重叠）"
+          : "，以 3×3 九宫格布局，单张图内含 9 个候选方案（每格独立构图、风格一致、互不重叠）";
+      finalPrompt = `${effectivePrompt}${gridSuffix}`;
+    }
 
     setGenerating(true);
 
     const newEffect: WorkbenchEffect = {
       effectId: `EF_${String(Date.now()).slice(-6)}`,
-      prompt: effectivePrompt,
+      prompt: finalPrompt,
+      // maskId 字段名保留以兼容 generateImageAction / imageJob.maskId 列；
+      // 实际值是 promptTemplate.id。
       maskId: selectedMask || "CUSTOM",
-      maskName: selectedMaskData?.name ?? "自定义",
+      maskName: selectedTemplate?.name ?? "自定义",
       status: "processing",
       resultUrls: [],
       mode: generationMode,
       imageModel: selectedModel,
       imageModelName: modelConfig.name,
       createdAt: new Date().toISOString(),
+      isGridComposite,
     };
     setHistory((prev) => [newEffect, ...prev]);
     setSelectedEffect(newEffect);
@@ -318,11 +569,11 @@ export function GenerateWorkbenchView({ effects }: GenerateWorkbenchViewProps) {
       const result = await generateImageAction({
         model: selectedModel,
         mode: generationMode,
-        prompt: effectivePrompt,
+        prompt: finalPrompt,
         negativePrompt: negativePrompt || undefined,
         imageUrl: refImage?.imageUrl,
         size,
-        batchSize,
+        batchSize: effectiveBatchSize,
         seed: seed === "" ? undefined : seed,
         guidanceScale: modelConfig.capabilities.supportsGuidance
           ? guidanceScale
@@ -335,6 +586,30 @@ export function GenerateWorkbenchView({ effects }: GenerateWorkbenchViewProps) {
       });
       const images = result?.data?.images ?? [];
       const creditsConsumed = result?.data?.creditsConsumed;
+      const returnedTaskId = result?.data?.taskId as string | undefined;
+      const returnedJobId = result?.data?.jobId as string | undefined;
+
+      // 异步任务路径：拿 taskId 但没 images —— 启动前端轮询。
+      if (images.length === 0 && returnedTaskId && returnedJobId) {
+        const pending: WorkbenchEffect = {
+          ...newEffect,
+          jobId: returnedJobId,
+          taskId: returnedTaskId,
+        };
+        setHistory((prev) =>
+          prev.map((e) => (e.effectId === newEffect.effectId ? pending : e))
+        );
+        setSelectedEffect((prev) =>
+          prev?.effectId === newEffect.effectId ? pending : prev
+        );
+        startPolling(newEffect.effectId, returnedJobId);
+        toast.info(
+          `${modelConfig.name} 任务已提交，正在异步生成…${creditsConsumed ? `（消耗 ${creditsConsumed} 积分）` : ""}`
+        );
+        return;
+      }
+
+      // 同步路径（直接返 images）：立刻完成。
       const completed: WorkbenchEffect = {
         ...newEffect,
         status: "completed",
@@ -345,7 +620,9 @@ export function GenerateWorkbenchView({ effects }: GenerateWorkbenchViewProps) {
         ...(typeof images[0]?.seed === "number"
           ? { seed: images[0].seed }
           : {}),
-        ...(result?.data?.taskId ? {} : { duration: 0 }),
+        ...(returnedTaskId && returnedJobId
+          ? { taskId: returnedTaskId, jobId: returnedJobId }
+          : { duration: 0 }),
       };
       setHistory((prev) =>
         prev.map((e) => (e.effectId === newEffect.effectId ? completed : e))
@@ -489,13 +766,142 @@ export function GenerateWorkbenchView({ effects }: GenerateWorkbenchViewProps) {
               ))}
 
             {refMode === "library" && (
-              <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3 text-center">
-                <Type className="h-5 w-5 text-amber-600 mx-auto mb-1" />
-                <p className="text-xs text-amber-700 dark:text-amber-400 font-medium">
-                  图库模式
-                </p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">
-                  暂未接入图库选择器，可改用上传模式
+              <div className="space-y-2">
+                {/* 已选预览 */}
+                {selectedPhoto && (
+                  <div className="relative group">
+                    {/* biome-ignore lint/performance/noImgElement: R2 动态 URL 用原生 img */}
+                    <img
+                      src={selectedPhoto.thumbnailUrl ?? selectedPhoto.fileUrl}
+                      alt={selectedPhoto.fileName}
+                      className="w-full aspect-square object-cover rounded-lg border border-violet-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setSelectedPhoto(null)}
+                      className="absolute top-2 right-2 p-1 rounded-full bg-rose-500 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                      aria-label="移除已选"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                    <div className="absolute bottom-2 left-2 right-2 bg-black/60 text-white text-[10px] px-2 py-1 rounded truncate flex items-center gap-1">
+                      <Badge
+                        variant="outline"
+                        className="text-[9px] py-0 h-3.5 bg-violet-500/30 border-violet-400/50 text-white uppercase shrink-0"
+                      >
+                        {selectedPhoto.format ?? "img"}
+                      </Badge>
+                      <span className="truncate">{selectedPhoto.fileName}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* 搜索 */}
+                <div className="relative">
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                  <input
+                    value={librarySearch}
+                    onChange={(e) => setLibrarySearch(e.target.value)}
+                    placeholder="搜索图库..."
+                    className="w-full h-8 pl-7 pr-2 text-xs rounded border bg-background focus:outline-none focus:ring-2 focus:ring-violet-500/30"
+                  />
+                </div>
+
+                {/* 列表 / 状态 */}
+                <div className="max-h-[280px] overflow-y-auto rounded-lg border bg-muted/20">
+                  {libraryLoading ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-muted-foreground gap-2">
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                      <span className="text-[10px]">加载图库中...</span>
+                    </div>
+                  ) : libraryError ? (
+                    <div className="p-3 text-center">
+                      <XCircle className="h-5 w-5 text-rose-500 mx-auto mb-1" />
+                      <p className="text-[10px] text-rose-600 dark:text-rose-400">
+                        {libraryError}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          libraryFetchedRef.current = false;
+                          // 触发重新拉取：直接把 refMode 设为自身会触发上面的 effect
+                          setRefMode("none");
+                          setTimeout(() => setRefMode("library"), 0);
+                        }}
+                        className="text-[10px] text-violet-600 hover:underline mt-1.5 inline-flex items-center gap-1"
+                      >
+                        <RefreshCw className="h-3 w-3" /> 重试
+                      </button>
+                    </div>
+                  ) : libraryPhotos.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground gap-1.5">
+                      <Library className="h-6 w-6" />
+                      <p className="text-xs font-medium">图库为空</p>
+                      <p className="text-[10px]">先去照片管理上传图片</p>
+                      <a
+                        href="/dashboard/photos"
+                        className="text-[10px] text-violet-600 hover:underline mt-0.5"
+                      >
+                        前往图库管理 →
+                      </a>
+                    </div>
+                  ) : (
+                    (() => {
+                      const filtered = libraryPhotos.filter((p) =>
+                        p.fileName
+                          .toLowerCase()
+                          .includes(librarySearch.trim().toLowerCase())
+                      );
+                      if (filtered.length === 0) {
+                        return (
+                          <div className="py-6 text-center text-[10px] text-muted-foreground">
+                            没有匹配 “{librarySearch}” 的图片
+                          </div>
+                        );
+                      }
+                      return (
+                        <div className="grid grid-cols-3 gap-1 p-1">
+                          {filtered.map((p) => {
+                            const selected = selectedPhoto?.id === p.id;
+                            return (
+                              <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => setSelectedPhoto(p)}
+                                className={cn(
+                                  "relative aspect-square rounded overflow-hidden border-2 transition-all",
+                                  selected
+                                    ? "border-violet-500 ring-1 ring-violet-500/30"
+                                    : "border-transparent hover:border-violet-500/50"
+                                )}
+                                title={p.fileName}
+                                aria-label={`选择 ${p.fileName}`}
+                              >
+                                {/* biome-ignore lint/performance/noImgElement: R2 动态 URL 用原生 img */}
+                                <img
+                                  src={p.thumbnailUrl ?? p.fileUrl}
+                                  alt={p.fileName}
+                                  className="w-full h-full object-cover"
+                                  loading="lazy"
+                                />
+                                {selected && (
+                                  <div className="absolute inset-0 bg-violet-500/20 flex items-center justify-center">
+                                    <CheckCircle2 className="h-5 w-5 text-white drop-shadow" />
+                                  </div>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()
+                  )}
+                </div>
+
+                <p className="text-[10px] text-muted-foreground text-center">
+                  {libraryPhotos.length > 0 && !libraryLoading
+                    ? `共 ${libraryPhotos.length} 张 · 点选即用`
+                    : ""}
                 </p>
               </div>
             )}
@@ -576,22 +982,45 @@ export function GenerateWorkbenchView({ effects }: GenerateWorkbenchViewProps) {
 
           {/* 生图模型 */}
           <section className="space-y-2">
-            <Label className="text-xs font-semibold flex items-center gap-1">
-              <Sparkles className="h-3.5 w-3.5" />
-              生图模型
-              {useTemplate && selectedMaskData?.model && (
-                <Badge
-                  variant="outline"
-                  className="text-[9px] py-0 h-3.5 bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/30"
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-semibold flex items-center gap-1">
+                <Sparkles className="h-3.5 w-3.5" />
+                生图模型
+                {isModelOverridden ? (
+                  <Badge
+                    variant="outline"
+                    className="text-[9px] py-0 h-3.5 bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30"
+                  >
+                    已覆盖「
+                    {selectedTemplate?.name}」模板默认
+                  </Badge>
+                ) : (
+                  useTemplate &&
+                  templateDefaultModel && (
+                    <Badge
+                      variant="outline"
+                      className="text-[9px] py-0 h-3.5 bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/30"
+                    >
+                      由模板指定
+                    </Badge>
+                  )
+                )}
+              </Label>
+              {isModelOverridden && (
+                <button
+                  type="button"
+                  onClick={handleRestoreTemplateModel}
+                  className="text-[10px] text-violet-600 hover:text-violet-700 dark:text-violet-400 flex items-center gap-1"
+                  title="还原为「{selectedTemplate?.name}」模板默认"
                 >
-                  由效果指定
-                </Badge>
+                  <RotateCcw className="h-3 w-3" />
+                  还原默认
+                </button>
               )}
-            </Label>
+            </div>
             <Select
               value={selectedModel}
               onValueChange={(v) => setSelectedModel(v as ImageModelId)}
-              disabled={Boolean(useTemplate && selectedMaskData?.model)}
             >
               <SelectTrigger className="h-9 text-xs">
                 <SelectValue />
@@ -599,7 +1028,14 @@ export function GenerateWorkbenchView({ effects }: GenerateWorkbenchViewProps) {
               <SelectContent>
                 {IMAGE_MODEL_LIST.filter((m) => m.status === "active").map(
                   (m) => (
-                    <SelectItem key={m.id} value={m.id} className="text-xs">
+                    <SelectItem
+                      key={m.id}
+                      value={m.id}
+                      // Phase：isAvailable=false 的模型在 API 层是占位 stub（simulateLatency +
+                      // picsum），不能让用户选了不报错 —— UI 层直接禁用并加「即将上线」标记。
+                      disabled={!m.isAvailable}
+                      className="text-xs"
+                    >
                       <span className="flex items-center gap-2">
                         <span
                           className="h-2 w-2 rounded-full"
@@ -619,17 +1055,33 @@ export function GenerateWorkbenchView({ effects }: GenerateWorkbenchViewProps) {
                             国产
                           </Badge>
                         )}
+                        {!m.isAvailable && (
+                          <Badge
+                            variant="outline"
+                            className="text-[9px] py-0 h-3.5 bg-zinc-500/10 text-zinc-500 border-zinc-500/30"
+                          >
+                            即将上线
+                          </Badge>
+                        )}
                       </span>
                     </SelectItem>
                   )
                 )}
               </SelectContent>
             </Select>
-            {useTemplate && selectedMaskData?.model ? (
+            {isModelOverridden ? (
+              <p className="text-[10px] text-amber-700 dark:text-amber-400 bg-amber-500/5 border border-amber-500/20 rounded p-1.5 flex items-center gap-1">
+                <Sparkles className="h-3 w-3 shrink-0" />
+                已覆盖「{selectedTemplate?.name}」模板默认（
+                {templateDefaultModel &&
+                  IMAGE_MODELS[templateDefaultModel]?.name}
+                ），点上方「还原默认」可恢复
+              </p>
+            ) : useTemplate && templateDefaultModel ? (
               <p className="text-[10px] text-violet-700 dark:text-violet-400 bg-violet-500/5 border border-violet-500/20 rounded p-1.5 flex items-center gap-1">
                 <Sparkles className="h-3 w-3 shrink-0" />
-                模型由「{selectedMaskData.name}」效果指定为 {modelConfig.name}
-                ，关闭模板可手动切换
+                模型由「{selectedTemplate?.name}」模板指定为 {modelConfig.name}
+                ，可手动切换到其他模型
               </p>
             ) : (
               <p className="text-[10px] text-muted-foreground bg-muted/30 rounded p-1.5">
@@ -651,38 +1103,75 @@ export function GenerateWorkbenchView({ effects }: GenerateWorkbenchViewProps) {
                 </Badge>
               )}
             </Label>
-            <Select value={selectedMask} onValueChange={handleSelectMask}>
-              <SelectTrigger className="h-9 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {!useTemplate && (
-                  <SelectItem value="none" className="text-xs">
-                    不使用模版（自定义）
-                  </SelectItem>
+            {activeTemplates.length === 0 ? (
+              <>
+                <Select value="" disabled>
+                  <SelectTrigger className="h-9 text-xs opacity-60">
+                    <SelectValue placeholder="暂无提示词模板" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_empty" disabled className="text-xs">
+                      暂无提示词模板
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-2.5 space-y-1">
+                  <p className="text-[10px] text-amber-700 dark:text-amber-400 font-medium flex items-center gap-1">
+                    <Sparkles className="h-3 w-3" />
+                    还没有可用的提示词模板
+                  </p>
+                  <p className="text-[10px] text-muted-foreground leading-relaxed">
+                    请联系管理员在
+                    <a
+                      href="/admin/prompt-templates"
+                      className="text-violet-600 hover:underline mx-0.5"
+                    >
+                      提示词模板管理
+                    </a>
+                    新建并启用模板。模板里
+                    <code className="mx-0.5 px-1 py-0.5 rounded bg-muted text-[9px] font-mono">
+                      isActive=false
+                    </code>
+                    的不会出现在此下拉里。
+                  </p>
+                </div>
+              </>
+            ) : (
+              <>
+                <Select value={selectedMask} onValueChange={handleSelectMask}>
+                  <SelectTrigger className="h-9 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {!useTemplate && (
+                      <SelectItem value="none" className="text-xs">
+                        不使用模版（自定义）
+                      </SelectItem>
+                    )}
+                    {activeTemplates.map((tpl) => (
+                      <SelectItem
+                        key={tpl.id}
+                        value={tpl.id}
+                        className="text-xs"
+                      >
+                        {tpl.name} · ¥{tpl.price ?? 0}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {useTemplate && selectedTemplate && (
+                  <p className="text-[10px] text-muted-foreground bg-violet-500/5 border border-violet-500/20 rounded p-1.5">
+                    {selectedTemplate.description}
+                  </p>
                 )}
-                {activeEffects.map((m) => (
-                  <SelectItem
-                    key={m.maskId}
-                    value={m.maskId}
-                    className="text-xs"
-                  >
-                    {m.name} · ¥{m.price}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {useTemplate && selectedMaskData && (
-              <p className="text-[10px] text-muted-foreground bg-violet-500/5 border border-violet-500/20 rounded p-1.5">
-                {selectedMaskData.description}
-              </p>
+              </>
             )}
           </section>
 
           {/* 模板参数 */}
           {useTemplate &&
-            selectedMaskData &&
-            selectedMaskData.variables.length > 0 && (
+            selectedTemplate &&
+            (selectedTemplate.variables ?? []).length > 0 && (
               <section className="space-y-2">
                 <div className="flex items-center justify-between">
                   <Label className="text-xs font-semibold flex items-center gap-1">
@@ -690,11 +1179,11 @@ export function GenerateWorkbenchView({ effects }: GenerateWorkbenchViewProps) {
                     模参数
                   </Label>
                   <span className="text-[10px] text-muted-foreground">
-                    共 {selectedMaskData.variables.length} 项
+                    共 {(selectedTemplate.variables ?? []).length} 项
                   </span>
                 </div>
                 <div className="space-y-2">
-                  {selectedMaskData.variables.map((v) => (
+                  {(selectedTemplate.variables ?? []).map((v) => (
                     <div key={v.key} className="space-y-1">
                       <Label className="text-[11px] flex items-center gap-1">
                         <span className="font-mono text-violet-700 dark:text-violet-400">
@@ -790,12 +1279,34 @@ export function GenerateWorkbenchView({ effects }: GenerateWorkbenchViewProps) {
                 max={modelConfig.capabilities.maxBatchSize}
                 value={batchSize}
                 onChange={(e) => setBatchSize(Number(e.target.value))}
-                className="w-full accent-violet-500"
+                disabled={(() => {
+                  const tplCandidateCount = useTemplate
+                    ? (selectedTemplate?.candidateCount ?? 1)
+                    : 1;
+                  return tplCandidateCount === 4 || tplCandidateCount === 9;
+                })()}
+                className="w-full accent-violet-500 disabled:opacity-50"
               />
               <div className="flex justify-between text-[9px] text-muted-foreground">
                 <span>1</span>
                 <span>最多 {modelConfig.capabilities.maxBatchSize}</span>
               </div>
+              {(() => {
+                const tplCandidateCount = useTemplate
+                  ? (selectedTemplate?.candidateCount ?? 1)
+                  : 1;
+                if (tplCandidateCount === 4 || tplCandidateCount === 9) {
+                  return (
+                    <p className="text-[10px] text-violet-700 dark:text-violet-400 bg-violet-500/5 border border-violet-500/20 rounded p-1.5 mt-1">
+                      当前模板为
+                      {tplCandidateCount === 4 ? "2×2" : "3×3"}
+                      宫格拼接，将返回 1
+                      张含全部候选的拼接大图，批量数量已自动锁定
+                    </p>
+                  );
+                }
+                return null;
+              })()}
             </div>
           </section>
 
@@ -927,7 +1438,15 @@ export function GenerateWorkbenchView({ effects }: GenerateWorkbenchViewProps) {
             ) : (
               <>
                 <Send className="h-4 w-4 mr-2" />
-                生成 {batchSize} 张
+                生成 {(() => {
+                  const tplCandidateCount = useTemplate
+                    ? (selectedTemplate?.candidateCount ?? 1)
+                    : 1;
+                  if (tplCandidateCount === 4 || tplCandidateCount === 9) {
+                    return `1 张拼接图`;
+                  }
+                  return `${batchSize} 张`;
+                })()}
               </>
             )}
           </Button>
@@ -1068,12 +1587,25 @@ export function GenerateWorkbenchView({ effects }: GenerateWorkbenchViewProps) {
               ) : selectedEffect.status === "processing" ? (
                 <div className="aspect-video rounded-lg border-2 border-dashed border-sky-500/30 bg-sky-500/5 flex flex-col items-center justify-center gap-3">
                   <Loader2 className="h-10 w-10 text-sky-500 animate-spin" />
-                  <p className="text-sm font-medium text-sky-700 dark:text-sky-400">
-                    AI 正在生成中...
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    预计 {(modelConfig.avgDuration / 1000).toFixed(1)}s 完成
-                  </p>
+                  {selectedEffect.taskId ? (
+                    <>
+                      <p className="text-sm font-medium text-sky-700 dark:text-sky-400">
+                        任务已提交，正在异步生成…
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        上游排队中，最长约 180s
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-sm font-medium text-sky-700 dark:text-sky-400">
+                        AI 正在生成中...
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        预计 {(modelConfig.avgDuration / 1000).toFixed(1)}s 完成
+                      </p>
+                    </>
+                  )}
                 </div>
               ) : selectedEffect.status === "failed" ? (
                 <div className="aspect-video rounded-lg border-2 border-dashed border-rose-500/30 bg-rose-500/5 flex flex-col items-center justify-center gap-3">
