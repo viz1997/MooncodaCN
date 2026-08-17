@@ -57,10 +57,11 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import type { PromptVariable } from "@/db/image-gen-types";
-import type { Photo } from "@/db/schema";
+import type { ImageJob, Photo } from "@/db/schema";
 import type { PromptTemplateView } from "@/features/gpt-image/lib/types";
 import {
   generateImageAction,
+  listImageJobsAction,
   listPhotosAction,
   pollImageJobAction,
 } from "@/features/image-gen/actions";
@@ -160,6 +161,56 @@ const REF_MODE_LABELS: Record<RefMode, string> = {
   none: "无",
 };
 
+/**
+ * 把 imageJob（DB 行）映射成客户端 WorkbenchEffect。
+ *
+ * effectId 用 `job_${id.slice(0, 8)}` 前缀 —— 避免和新建时用的
+ * `EF_${Date.now().slice(-6)}` 撞 key，也方便一眼分辨"从 DB 恢复"
+ * vs"刚生成"。modelName 失败时退回 job.model 原值，至少不会显示空白。
+ */
+function toWorkbenchEffect(job: ImageJob): WorkbenchEffect {
+  const modelConfig = IMAGE_MODELS[job.model as ImageModelId];
+  return {
+    effectId: `job_${job.id.slice(0, 8)}`,
+    jobId: job.id,
+    // exactOptionalPropertyTypes 下不能写 `key: undefined`，要么省略要么改类型
+    ...(job.taskId ? { taskId: job.taskId } : {}),
+    prompt: job.prompt,
+    maskId: job.maskId ?? "CUSTOM",
+    maskName: job.maskId ?? "自定义",
+    status: job.status,
+    resultUrls: (job.resultUrls as string[]) ?? [],
+    mode: job.mode as "text_to_image" | "image_to_image",
+    imageModel: job.model as ImageModelId,
+    imageModelName: modelConfig?.name ?? job.model,
+    createdAt: job.createdAt.toISOString(),
+    ...(job.errorMsg ? { errorMsg: job.errorMsg } : {}),
+  };
+}
+
+/**
+ * 把 DB 数据并入客户端 history：
+ * - DB 里的同 effectId 条目覆盖客户端的（更权威）
+ * - 客户端刚生成还没入库的（EF_ 前缀）保留
+ * - 最终按 createdAt 倒序
+ *
+ * 不直接 setHistory(jobs) 是因为：handleGenerate 设入 history 后如果立即
+ * 触发 mount effect（比如 React 18 严格模式双调用），会丢刚生成的条目。
+ */
+function mergeHydratedHistory(
+  client: WorkbenchEffect[],
+  fromDb: WorkbenchEffect[]
+): WorkbenchEffect[] {
+  const byId = new Map<string, WorkbenchEffect>();
+  for (const e of fromDb) byId.set(e.effectId, e);
+  for (const e of client) {
+    if (!byId.has(e.effectId)) byId.set(e.effectId, e);
+  }
+  return Array.from(byId.values()).sort(
+    (a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)
+  );
+}
+
 interface GenerateWorkbenchViewProps {
   /** 启用的提示词模板列表（来自 promptTemplate 表，与 gpt-image 共用同一数据源） */
   templates: PromptTemplateView[];
@@ -225,6 +276,8 @@ export function GenerateWorkbenchView({
   const [safetyCheck, setSafetyCheck] = useState(true);
 
   const [generating, setGenerating] = useState(false);
+  // 手动「刷新状态」按钮的去抖锁：避免用户连点导致同 jobId 重复打 /poll
+  const [refreshing, setRefreshing] = useState(false);
   const modelConfig = IMAGE_MODELS[selectedModel];
   const selectedTemplate = activeTemplates.find((t) => t.id === selectedMask);
   /**
@@ -302,6 +355,45 @@ export function GenerateWorkbenchView({
       .finally(() => setLibraryLoading(false));
   }, [refMode]);
 
+  /**
+   * 挂载时从 DB 拉最近 20 条 imageJob 灌进 history，
+   * 让"刷新页面 / 切设备 / 重开浏览器"不再丢进度。
+   *
+   * 关键：对 status === "processing" 的 job 调用 startPolling(effectId, jobId)
+   * 续上 setTimeout 链 —— 否则即便 history 回来了，前端也不会主动推
+   * 状态，必须等下一次 5 分钟 cron 兜底。这条直接消除"看着 stuck 但啥
+   * 也不动"的体验。
+   *
+   * 注意：必须放在 startPolling 闭包可用的位置（见下方 startPolling 定义）。
+   * 这里用宽松的 [] deps —— mount 时一次性加载；客户端 handleGenerate 推入
+   * history 后会保留（mergeHydratedHistory 的逻辑），不会丢新生成的条目。
+   */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 仅首次加载执行
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await listImageJobsAction({ limit: 20 });
+        if (cancelled) return;
+        const jobs = res?.data?.jobs ?? [];
+        const hydrated: WorkbenchEffect[] = jobs.map(toWorkbenchEffect);
+        setHistory((prev) => mergeHydratedHistory(prev, hydrated));
+        // 给残留的 processing job 续轮询
+        for (const eff of hydrated) {
+          if (eff.status === "processing" && eff.jobId) {
+            startPolling(eff.effectId, eff.jobId);
+          }
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn("[workbench hydrate] failed:", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // ============ 文件处理 ============
   const handleFileSelect = (file: File | undefined) => {
     if (!file) return;
@@ -369,6 +461,67 @@ export function GenerateWorkbenchView({
   }, [history]);
 
   /**
+   * 把 DB imageJob 的状态映射回客户端 WorkbenchEffect。
+   *
+   * 被两处共用：
+   * 1. startPolling 的 setTimeout tick —— 拉一次 /poll 后应用结果
+   * 2. 手动「刷新状态」按钮 —— 用户主动 retry 一次
+   *
+   * 关键副作用：终态（completed/failed）会把 effectId 从 pollingRef 摘掉，
+   * 调用方据此判断"轮询是否该停了"。
+   *
+   * 不处理 pending/processing —— 此时不动 state，让 setTimeout tick 自然
+   * 落到下一轮。
+   */
+  const applyJobUpdate = (effectId: string, job: ImageJob) => {
+    const eff = historyRef.current.find((e) => e.effectId === effectId);
+    if (!eff) return;
+
+    if (job.status === "completed") {
+      pollingRef.current.delete(effectId);
+      const resultUrls = (job.resultUrls as string[]) ?? [];
+      const completed: WorkbenchEffect = {
+        ...eff,
+        status: "completed",
+        resultUrls,
+        ...(job.generateDuration
+          ? { duration: job.generateDuration as number }
+          : {}),
+        ...(job.cost && job.currency
+          ? {
+              cost: (job.cost as number) / 1000,
+              currency: job.currency as string,
+            }
+          : {}),
+      };
+      setHistory((prev) =>
+        prev.map((e) => (e.effectId === effectId ? completed : e))
+      );
+      setSelectedEffect((prev) =>
+        prev?.effectId === effectId ? completed : prev
+      );
+      toast.success(`${eff.imageModelName} 生成完成`);
+      return;
+    }
+
+    if (job.status === "failed") {
+      pollingRef.current.delete(effectId);
+      const failed: WorkbenchEffect = {
+        ...eff,
+        status: "failed",
+        errorMsg: job.errorMsg ?? "生成失败",
+      };
+      setHistory((prev) =>
+        prev.map((e) => (e.effectId === effectId ? failed : e))
+      );
+      setSelectedEffect((prev) =>
+        prev?.effectId === effectId ? failed : prev
+      );
+      toast.error(`生成失败：${failed.errorMsg}`);
+    }
+  };
+
+  /**
    * 启动一个异步任务的轮询循环。
    * 通过历史 ref + pollingRef 保证组件卸载时也能正常清理；
    * 每个 effect 单独跑 setTimeout 链，避免多个 effect 互相干扰。
@@ -410,47 +563,11 @@ export function GenerateWorkbenchView({
         const job = res?.data?.job;
         if (!job) {
           // poll 端没返 job：忽略，等下一轮
-        } else if (job.status === "completed") {
-          pollingRef.current.delete(effectId);
-          const resultUrls = (job.resultUrls ?? []) as string[];
-          const completed: WorkbenchEffect = {
-            ...eff,
-            status: "completed",
-            resultUrls,
-            ...(job.generateDuration
-              ? { duration: job.generateDuration as number }
-              : {}),
-            ...(job.cost && job.currency
-              ? {
-                  cost: (job.cost as number) / 1000,
-                  currency: job.currency as string,
-                }
-              : {}),
-          };
-          setHistory((prev) =>
-            prev.map((e) => (e.effectId === effectId ? completed : e))
-          );
-          setSelectedEffect((prev) =>
-            prev?.effectId === effectId ? completed : prev
-          );
-          toast.success(`${eff.imageModelName} 生成完成`);
-          return;
-        } else if (job.status === "failed") {
-          pollingRef.current.delete(effectId);
-          const failed: WorkbenchEffect = {
-            ...eff,
-            status: "failed",
-            errorMsg: (job.errorMsg as string) ?? "生成失败",
-          };
-          setHistory((prev) =>
-            prev.map((e) => (e.effectId === effectId ? failed : e))
-          );
-          setSelectedEffect((prev) =>
-            prev?.effectId === effectId ? failed : prev
-          );
-          toast.error(`生成失败：${failed.errorMsg}`);
-          return;
+        } else if (job.status === "completed" || job.status === "failed") {
+          applyJobUpdate(effectId, job);
+          return; // 终态：停 setTimeout 链
         }
+        // pending / processing：不动 state，等下一轮
       } catch (err) {
         // 单次 poll 失败不打断整体链路，等下一轮
         // eslint-disable-next-line no-console
@@ -1514,9 +1631,48 @@ export function GenerateWorkbenchView({
                       : "图生图"}
                   </span>
                 </div>
-                <span className="text-[10px] text-muted-foreground">
-                  {new Date(selectedEffect.createdAt).toLocaleString("zh-CN")}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-muted-foreground">
+                    {new Date(selectedEffect.createdAt).toLocaleString("zh-CN")}
+                  </span>
+                  {selectedEffect.status === "processing" &&
+                    selectedEffect.jobId && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-6 px-2 text-[10px]"
+                        disabled={refreshing}
+                        onClick={async () => {
+                          if (!selectedEffect.jobId) return;
+                          setRefreshing(true);
+                          try {
+                            const res = await pollImageJobAction({
+                              jobId: selectedEffect.jobId,
+                            });
+                            const job = res?.data?.job;
+                            if (job) {
+                              applyJobUpdate(selectedEffect.effectId, job);
+                            }
+                          } catch (err) {
+                            toast.error(
+                              err instanceof Error
+                                ? err.message
+                                : "刷新失败"
+                            );
+                          } finally {
+                            setRefreshing(false);
+                          }
+                        }}
+                      >
+                        {refreshing ? (
+                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-3 w-3 mr-1" />
+                        )}
+                        刷新状态
+                      </Button>
+                    )}
+                </div>
               </div>
 
               {/* 结果图片网格 */}
