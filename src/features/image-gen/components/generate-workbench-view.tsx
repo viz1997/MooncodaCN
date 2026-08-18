@@ -19,7 +19,6 @@ import {
   Clock,
   Download,
   Heart,
-  History,
   Image as ImageIcon,
   Library,
   Loader2,
@@ -28,15 +27,12 @@ import {
   RectangleHorizontal,
   RectangleVertical,
   RefreshCw,
-  RotateCcw,
   Search,
   Send,
   Settings2,
   Share2,
   Sparkles,
   Square,
-  Trash2,
-  Type,
   Upload,
   Wand2,
   X,
@@ -56,6 +52,11 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -152,8 +153,8 @@ const STATUS_CONFIG: Record<
   draft: {
     label: "新会话",
     icon: Sparkles,
-    color: "text-teal-600",
-    bg: "bg-teal-500/10 border-teal-500/20",
+    color: "text-primary",
+    bg: "bg-primary/10 border-primary/20",
   },
   pending: {
     label: "排队中",
@@ -164,14 +165,14 @@ const STATUS_CONFIG: Record<
   processing: {
     label: "生成中",
     icon: Loader2,
-    color: "text-sky-600",
-    bg: "bg-sky-500/10 border-sky-500/20",
+    color: "text-primary",
+    bg: "bg-primary/10 border-primary/20",
   },
   completed: {
     label: "已完成",
     icon: CheckCircle2,
-    color: "text-emerald-600",
-    bg: "bg-emerald-500/10 border-emerald-500/20",
+    color: "text-primary",
+    bg: "bg-primary/10 border-primary/20",
   },
   failed: {
     label: "失败",
@@ -505,6 +506,11 @@ export function GenerateWorkbenchView({
   const handleRestoreTemplateModel = () => {
     if (templateDefaultModel) setSelectedModel(templateDefaultModel);
   };
+  // 上面两个变量暂未在精简面板里挂回（高级参数收纳到齿轮 Popover 后
+  // 原本的"已覆盖/还原"链路变成死代码）。留着等未来"模型选择 / 模板默认
+  // 不一致"提示重新引入时复用，避免重新推导 templateDefaultModel。
+  void isModelOverridden;
+  void handleRestoreTemplateModel;
 
   // 选择提示词模板时初始化变量默认值 + 切到指定模型
   const handleSelectMask = (templateId: string) => {
@@ -1064,7 +1070,7 @@ export function GenerateWorkbenchView({
         <aside className="w-[380px] shrink-0 flex flex-col bg-card border rounded-lg overflow-hidden">
           <div className="p-3 border-b bg-muted/30">
             <h2 className="text-sm font-bold flex items-center gap-2">
-              <Wand2 className="h-4 w-4 text-teal-600" />
+              <Wand2 className="h-4 w-4 text-primary" />
               生图工作台
             </h2>
             <p className="text-[10px] text-muted-foreground mt-0.5">
@@ -1073,40 +1079,33 @@ export function GenerateWorkbenchView({
           </div>
 
           {/*
-            Lovart 风格分栏：5 个可折叠分区（Accordion）取代平铺的 9 个 section。
-            - 参考图 / 提示词模板 / 生图模型 / 输出参数：默认展开
-            - 高级参数：默认折叠（用 showAdvanced 状态兜底，避免被外部控制冲突）
-            每个 Trigger 右侧带状态 chip，折叠后也能看到当前选了啥。
+            精简布局 —— Kimi/DeepSeek/GPT 式：
+            - 三个 Accordion：参考图 / 提示词 / 输出
+            - 高级参数折叠到一个右上角「⚙️」按钮弹出的 Popover
+            - 标签去 chip / 去「必选」「已覆盖」冗余 badge
+            - Accordion trigger 用最小化样式（无 hover background、无图标旋转动画）
           */}
           <Accordion
             type="multiple"
-            defaultValue={["ref", "prompt", "model", "output"]}
-            className="flex-1 overflow-y-auto"
+            defaultValue={["ref", "prompt", "output"]}
+            className="flex-1 overflow-y-auto px-3"
           >
-            {/* ============ ① 参考图 ============ */}
-            <AccordionItem value="ref" className="border-b-0 px-3">
-              <AccordionTrigger className="hover:no-underline py-2.5 px-2 -mx-2 rounded-md data-[state=open]:bg-muted/30 hover:bg-muted/40 transition-colors [&[data-state=open]>svg]:-rotate-90">
-                <span className="flex items-center gap-2 text-xs font-semibold">
-                  <ImageIcon className="h-3.5 w-3.5 text-teal-600" />
+            {/* ============ 参考图 ============ */}
+            <AccordionItem value="ref" className="border-b border-border/40">
+              <AccordionTrigger className="hover:no-underline py-2.5 text-xs font-medium [&[data-state=open]>svg]:hidden">
+                <span className="flex items-center gap-2">
+                  <ImageIcon className="h-3.5 w-3.5 text-primary" />
                   参考图
                 </span>
-                <span className="flex items-center gap-1.5 ml-auto mr-2">
-                  <Badge
-                    variant="secondary"
-                    className="text-[9px] h-4 px-1.5 font-normal"
-                  >
-                    {REF_MODE_LABELS[refMode]}
-                  </Badge>
+                <span className="ml-auto text-[11px] text-muted-foreground font-normal">
+                  {REF_MODE_LABELS[refMode]}
                   {(refMode === "upload" && uploadedImage) ||
-                  (refMode === "library" && selectedPhoto) ? (
-                    <span
-                      className="h-1.5 w-1.5 rounded-full bg-teal-500"
-                      title="已选"
-                    />
-                  ) : null}
+                  (refMode === "library" && selectedPhoto)
+                    ? " · 已选"
+                    : ""}
                 </span>
               </AccordionTrigger>
-              <AccordionContent className="pt-2 pb-3">
+              <AccordionContent className="pb-3">
                 <div className="space-y-2">
                   <div className="flex gap-0.5 bg-muted rounded p-0.5 w-fit">
                     {(["upload", "library", "none"] as RefMode[]).map((m) => (
@@ -1151,11 +1150,6 @@ export function GenerateWorkbenchView({
                         >
                           <X className="h-3.5 w-3.5" />
                         </button>
-                        <div className="absolute bottom-2 left-2 right-2 bg-black/60 text-white text-[10px] px-2 py-1 rounded truncate">
-                          {uploadedImage.fileName} ·{" "}
-                          {(uploadedImage.fileSize / 1024).toFixed(1)}KB
-                          {uploadedImage.uploading !== null && " · 上传中…"}
-                        </div>
                       </div>
                     ) : (
                       <button
@@ -1172,10 +1166,10 @@ export function GenerateWorkbenchView({
                         }}
                         onClick={() => fileInputRef.current?.click()}
                         className={cn(
-                          "w-full border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors",
+                          "w-full border border-dashed rounded-lg p-5 text-center cursor-pointer transition-colors",
                           dragOver
-                            ? "border-teal-500 bg-teal-500/5"
-                            : "border-muted-foreground/30 hover:border-teal-500/50 hover:bg-muted/30"
+                            ? "border-primary bg-primary/5"
+                            : "border-border hover:border-primary/40 hover:bg-muted/30"
                         )}
                       >
                         <input
@@ -1189,17 +1183,14 @@ export function GenerateWorkbenchView({
                         />
                         <Upload
                           className={cn(
-                            "h-8 w-8 mx-auto mb-2",
+                            "h-5 w-5 mx-auto mb-1.5",
                             dragOver
-                              ? "text-teal-500"
+                              ? "text-primary"
                               : "text-muted-foreground"
                           )}
                         />
-                        <p className="text-xs font-medium">
+                        <p className="text-xs">
                           {dragOver ? "释放即可上传" : "点击或拖拽图片"}
-                        </p>
-                        <p className="text-[10px] text-muted-foreground mt-1">
-                          JPG/PNG/WEBP · ≤10MB
                         </p>
                       </button>
                     ))}
@@ -1207,7 +1198,7 @@ export function GenerateWorkbenchView({
                   {refMode === "library" && (
                     <div className="space-y-2">
                       {selectedPhoto && (
-                        <div className="relative group">
+                        <div className="relative">
                           {/* biome-ignore lint/performance/noImgElement: R2 动态 URL 用原生 img */}
                           <img
                             src={
@@ -1215,27 +1206,16 @@ export function GenerateWorkbenchView({
                               selectedPhoto.fileUrl
                             }
                             alt={selectedPhoto.fileName}
-                            className="w-full aspect-square object-cover rounded-lg border border-teal-500"
+                            className="w-full aspect-square object-cover rounded-lg border border-primary"
                           />
                           <button
                             type="button"
                             onClick={() => setSelectedPhoto(null)}
-                            className="absolute top-2 right-2 p-1 rounded-full bg-rose-500 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                            className="absolute top-2 right-2 p-1 rounded-full bg-rose-500 text-white"
                             aria-label="移除已选"
                           >
                             <X className="h-3.5 w-3.5" />
                           </button>
-                          <div className="absolute bottom-2 left-2 right-2 bg-black/60 text-white text-[10px] px-2 py-1 rounded truncate flex items-center gap-1">
-                            <Badge
-                              variant="outline"
-                              className="text-[9px] py-0 h-3.5 bg-teal-500/30 border-teal-400/50 text-white uppercase shrink-0"
-                            >
-                              {selectedPhoto.format ?? "img"}
-                            </Badge>
-                            <span className="truncate">
-                              {selectedPhoto.fileName}
-                            </span>
-                          </div>
                         </div>
                       )}
 
@@ -1245,19 +1225,17 @@ export function GenerateWorkbenchView({
                           value={librarySearch}
                           onChange={(e) => setLibrarySearch(e.target.value)}
                           placeholder="搜索图库..."
-                          className="w-full h-8 pl-7 pr-2 text-xs rounded border bg-background focus:outline-none focus:ring-2 focus:ring-teal-500/30"
+                          className="w-full h-8 pl-7 pr-2 text-xs rounded border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
                         />
                       </div>
 
                       <div className="max-h-[280px] overflow-y-auto rounded-lg border bg-muted/20">
                         {libraryLoading ? (
-                          <div className="flex flex-col items-center justify-center py-8 text-muted-foreground gap-2">
-                            <Loader2 className="h-5 w-5 animate-spin" />
-                            <span className="text-[10px]">加载图库中...</span>
+                          <div className="flex items-center justify-center py-6 text-muted-foreground gap-2">
+                            <Loader2 className="h-4 w-4 animate-spin" />
                           </div>
                         ) : libraryError ? (
                           <div className="p-3 text-center">
-                            <XCircle className="h-5 w-5 text-rose-500 mx-auto mb-1" />
                             <p className="text-[10px] text-rose-600 dark:text-rose-400">
                               {libraryError}
                             </p>
@@ -1268,21 +1246,20 @@ export function GenerateWorkbenchView({
                                 setRefMode("none");
                                 setTimeout(() => setRefMode("library"), 0);
                               }}
-                              className="text-[10px] text-teal-600 hover:underline mt-1.5 inline-flex items-center gap-1"
+                              className="text-[10px] text-primary hover:underline mt-1.5"
                             >
-                              <RefreshCw className="h-3 w-3" /> 重试
+                              重试
                             </button>
                           </div>
                         ) : libraryPhotos.length === 0 ? (
-                          <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground gap-1.5">
-                            <Library className="h-6 w-6" />
-                            <p className="text-xs font-medium">图库为空</p>
-                            <p className="text-[10px]">先去照片管理上传图片</p>
+                          <div className="flex flex-col items-center justify-center py-6 text-muted-foreground gap-1">
+                            <Library className="h-5 w-5" />
+                            <p className="text-[10px]">图库为空</p>
                             <a
                               href="/dashboard/photos"
-                              className="text-[10px] text-teal-600 hover:underline mt-0.5"
+                              className="text-[10px] text-primary hover:underline"
                             >
-                              前往图库管理 →
+                              去上传
                             </a>
                           </div>
                         ) : (
@@ -1294,8 +1271,8 @@ export function GenerateWorkbenchView({
                             );
                             if (filtered.length === 0) {
                               return (
-                                <div className="py-6 text-center text-[10px] text-muted-foreground">
-                                  没有匹配 “{librarySearch}” 的图片
+                                <div className="py-4 text-center text-[10px] text-muted-foreground">
+                                  没有匹配的图片
                                 </div>
                               );
                             }
@@ -1311,11 +1288,10 @@ export function GenerateWorkbenchView({
                                       className={cn(
                                         "relative aspect-square rounded overflow-hidden border-2 transition-all",
                                         selected
-                                          ? "border-teal-500 ring-1 ring-teal-500/30"
-                                          : "border-transparent hover:border-teal-500/50"
+                                          ? "border-primary"
+                                          : "border-transparent hover:border-primary/40"
                                       )}
                                       title={p.fileName}
-                                      aria-label={`选择 ${p.fileName}`}
                                     >
                                       {/* biome-ignore lint/performance/noImgElement: R2 动态 URL 用原生 img */}
                                       <img
@@ -1325,8 +1301,8 @@ export function GenerateWorkbenchView({
                                         loading="lazy"
                                       />
                                       {selected && (
-                                        <div className="absolute inset-0 bg-teal-500/20 flex items-center justify-center">
-                                          <CheckCircle2 className="h-5 w-5 text-white drop-shadow" />
+                                        <div className="absolute inset-0 bg-primary/30 flex items-center justify-center">
+                                          <CheckCircle2 className="h-4 w-4 text-white" />
                                         </div>
                                       )}
                                     </button>
@@ -1337,108 +1313,64 @@ export function GenerateWorkbenchView({
                           })()
                         )}
                       </div>
-
-                      <p className="text-[10px] text-muted-foreground text-center">
-                        {libraryPhotos.length > 0 && !libraryLoading
-                          ? `共 ${libraryPhotos.length} 张 · 点选即用`
-                          : ""}
-                      </p>
-                    </div>
-                  )}
-
-                  {refMode === "none" && (
-                    <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3 text-center">
-                      <Type className="h-5 w-5 text-amber-600 mx-auto mb-1" />
-                      <p className="text-xs text-amber-700 dark:text-amber-400 font-medium">
-                        纯文生图模式
-                      </p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">
-                        仅根据提示词生成
-                      </p>
                     </div>
                   )}
                 </div>
               </AccordionContent>
             </AccordionItem>
 
-            {/* ============ ② 提示词 / 模板 ============ */}
-            <AccordionItem value="prompt" className="border-b-0 px-3">
-              <AccordionTrigger className="hover:no-underline py-2.5 px-2 -mx-2 rounded-md data-[state=open]:bg-muted/30 hover:bg-muted/40 transition-colors [&[data-state=open]>svg]:-rotate-90">
-                <span className="flex items-center gap-2 text-xs font-semibold">
-                  <Sparkles className="h-3.5 w-3.5 text-teal-600" />
-                  提示词 / 模板
+            {/* ============ 提示词 ============ */}
+            <AccordionItem value="prompt" className="border-b border-border/40">
+              <AccordionTrigger className="hover:no-underline py-2.5 text-xs font-medium [&[data-state=open]>svg]:hidden">
+                <span className="flex items-center gap-2">
+                  <Sparkles className="h-3.5 w-3.5 text-primary" />
+                  提示词
                 </span>
-                <span className="flex items-center gap-1.5 ml-auto mr-2">
-                  <Badge
-                    variant="secondary"
-                    className="text-[9px] h-4 px-1.5 font-normal"
-                  >
-                    {useTemplate ? (selectedTemplate?.name ?? "模板") : "手动"}
-                  </Badge>
-                  {useTemplate &&
-                    (selectedTemplate?.variables ?? []).length > 0 && (
-                      <Badge
-                        variant="outline"
-                        className="text-[9px] h-4 px-1.5 font-normal text-teal-700 dark:text-teal-400 border-teal-500/30"
-                      >
-                        {selectedTemplate?.variables?.length} 项
-                      </Badge>
-                    )}
+                <span className="ml-auto text-[11px] text-muted-foreground font-normal">
+                  {useTemplate ? selectedTemplate?.name ?? "模板" : "手动"}
                 </span>
               </AccordionTrigger>
-              <AccordionContent className="pt-2 pb-3">
-                <div className="space-y-3">
-                  {/* 模板开关 */}
-                  <div className="flex items-center justify-between p-2 rounded-lg bg-muted/30">
-                    <div>
-                      <p className="text-xs font-medium flex items-center gap-1">
-                        <Sparkles className="h-3 w-3 text-teal-600" />
-                        使用模板
-                      </p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">
-                        {useTemplate
-                          ? "从效果模板生成提示词"
-                          : "手动输入提示词"}
-                      </p>
-                    </div>
-                    <Switch
-                      checked={useTemplate}
-                      onCheckedChange={setUseTemplate}
-                    />
+              <AccordionContent className="pb-3">
+                <div className="space-y-2">
+                  {/* 模板/手动 toggle */}
+                  <div className="flex gap-0.5 bg-muted rounded p-0.5 w-fit">
+                    {([
+                      { v: true, label: "模板" },
+                      { v: false, label: "手动" },
+                    ] as const).map((opt) => (
+                      <button
+                        key={String(opt.v)}
+                        type="button"
+                        onClick={() => setUseTemplate(opt.v)}
+                        className={cn(
+                          "text-[10px] px-2 py-1 rounded transition-colors",
+                          useTemplate === opt.v
+                            ? "bg-background shadow-sm font-medium"
+                            : "text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
                   </div>
 
-                  {/* 模板卡片 */}
+                  {/* 模板模式 */}
                   {useTemplate && (
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-semibold flex items-center gap-1">
-                        效果模版
-                        <Badge
-                          variant="outline"
-                          className="text-[9px] py-0 h-3.5 text-teal-700 dark:text-teal-400 border-teal-500/30"
-                        >
-                          必选
-                        </Badge>
-                      </Label>
+                    <div className="space-y-2">
                       {activeTemplates.length === 0 ? (
-                        <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-2.5 space-y-1">
-                          <p className="text-[10px] text-amber-700 dark:text-amber-400 font-medium flex items-center gap-1">
-                            <Sparkles className="h-3 w-3" />
-                            还没有可用的提示词模板
-                          </p>
-                          <p className="text-[10px] text-muted-foreground leading-relaxed">
-                            请联系管理员在
-                            <a
-                              href="/admin/prompt-templates"
-                              className="text-teal-600 hover:underline mx-0.5"
-                            >
-                              提示词模板管理
-                            </a>
-                            新建并启用模板。
-                          </p>
-                        </div>
+                        <p className="text-[10px] text-muted-foreground bg-muted/30 rounded px-2.5 py-2">
+                          暂无模板，去
+                          <a
+                            href="/admin/prompt-templates"
+                            className="text-primary hover:underline mx-0.5"
+                          >
+                            模板管理
+                          </a>
+                          新建。
+                        </p>
                       ) : (
                         <>
-                          <div className="-mx-1 px-1 flex gap-2 overflow-x-auto pb-1 snap-x snap-mandatory">
+                          <div className="-mx-1 px-1 flex gap-1.5 overflow-x-auto pb-1 snap-x">
                             {activeTemplates.map((tpl) => {
                               const selected = tpl.id === selectedMask;
                               return (
@@ -1447,12 +1379,12 @@ export function GenerateWorkbenchView({
                                   type="button"
                                   onClick={() => handleSelectMask(tpl.id)}
                                   className={cn(
-                                    "snap-start shrink-0 w-36 h-20 rounded-lg border-2 overflow-hidden text-left transition-all relative group",
+                                    "snap-start shrink-0 w-24 h-14 rounded-md overflow-hidden text-left transition-all relative",
                                     selected
-                                      ? "border-teal-500 ring-2 ring-teal-500/30 shadow-md"
-                                      : "border-transparent hover:border-muted-foreground/30 bg-muted/40 hover:bg-muted/60"
+                                      ? "ring-2 ring-primary ring-offset-1 ring-offset-card"
+                                      : "ring-1 ring-border hover:ring-muted-foreground/40"
                                   )}
-                                  title={tpl.description}
+                                  title={tpl.description ?? tpl.name}
                                 >
                                   {tpl.coverUrl ? (
                                     // biome-ignore lint/performance/noImgElement: 模板封面用原生 img
@@ -1463,229 +1395,144 @@ export function GenerateWorkbenchView({
                                       loading="lazy"
                                     />
                                   ) : (
-                                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-teal-500/10 to-teal-500/10">
-                                      <Sparkles className="h-5 w-5 text-teal-600/60" />
+                                    <div className="w-full h-full flex items-center justify-center bg-muted">
+                                      <Sparkles className="h-4 w-4 text-muted-foreground/60" />
                                     </div>
                                   )}
-                                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-2 py-1.5">
-                                    <div className="flex items-end justify-between gap-1">
-                                      <span className="text-[10px] font-medium text-white truncate flex-1">
-                                        {tpl.name}
-                                      </span>
-                                      <span className="text-[9px] font-mono text-white/80 shrink-0">
-                                        ¥{tpl.price ?? 0}
-                                      </span>
-                                    </div>
+                                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-1.5 py-1">
+                                    <span className="text-[10px] font-medium text-white truncate block">
+                                      {tpl.name}
+                                    </span>
                                   </div>
-                                  {selected && (
-                                    <div className="absolute top-1 right-1 h-4 w-4 rounded-full bg-teal-500 flex items-center justify-center">
-                                      <CheckCircle2 className="h-3 w-3 text-white" />
-                                    </div>
-                                  )}
                                 </button>
                               );
                             })}
                           </div>
-                          {selectedTemplate && (
-                            <p className="text-[10px] text-muted-foreground bg-teal-500/5 border border-teal-500/20 rounded p-1.5 leading-relaxed">
-                              {selectedTemplate.description}
-                            </p>
-                          )}
+
+                          {/* 模板参数 inline */}
+                          {selectedTemplate &&
+                            (selectedTemplate.variables ?? []).length > 0 && (
+                              <div className="space-y-1.5">
+                                {(selectedTemplate.variables ?? []).map(
+                                  (v) => (
+                                    <div
+                                      key={v.key}
+                                      className="flex items-center gap-2"
+                                    >
+                                      <Label className="text-[11px] text-muted-foreground shrink-0 w-20 truncate">
+                                        {v.label}
+                                      </Label>
+                                      {v.options && v.options.length > 0 ? (
+                                        <Select
+                                          value={
+                                            paramValues[v.key] ??
+                                            v.defaultValue
+                                          }
+                                          onValueChange={(val) =>
+                                            setParamValues((p) => ({
+                                              ...p,
+                                              [v.key]: val,
+                                            }))
+                                          }
+                                        >
+                                          <SelectTrigger className="h-7 text-xs flex-1">
+                                            <SelectValue />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {v.options.map((opt) => (
+                                              <SelectItem
+                                                key={opt}
+                                                value={opt}
+                                                className="text-xs"
+                                              >
+                                                {opt}
+                                              </SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                      ) : (
+                                        <Input
+                                          value={paramValues[v.key] ?? ""}
+                                          onChange={(e) =>
+                                            setParamValues((p) => ({
+                                              ...p,
+                                              [v.key]: e.target.value,
+                                            }))
+                                          }
+                                          placeholder={
+                                            v.defaultValue || `请输入${v.label}`
+                                          }
+                                          className="h-7 text-xs flex-1"
+                                        />
+                                      )}
+                                    </div>
+                                  )
+                                )}
+                              </div>
+                            )}
                         </>
                       )}
                     </div>
                   )}
 
-                  {/* 模板参数 */}
-                  {useTemplate &&
-                    selectedTemplate &&
-                    (selectedTemplate.variables ?? []).length > 0 && (
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-xs font-semibold flex items-center gap-1">
-                            <Sparkles className="h-3 w-3 text-teal-600" />
-                            模板参数
-                          </Label>
-                          <span className="text-[10px] text-muted-foreground">
-                            共 {(selectedTemplate.variables ?? []).length} 项
-                          </span>
-                        </div>
-                        <div className="space-y-2">
-                          {(selectedTemplate.variables ?? []).map((v) => (
-                            <div key={v.key} className="space-y-1">
-                              <Label className="text-[11px] flex items-center gap-1">
-                                <span className="font-mono text-teal-700 dark:text-teal-400">
-                                  {`{{${v.key}}}`}
-                                </span>
-                                <span className="text-muted-foreground">
-                                  {v.label}
-                                </span>
-                                {v.required && (
-                                  <span className="text-rose-600 text-[10px]">
-                                    *
-                                  </span>
-                                )}
-                              </Label>
-                              {v.options && v.options.length > 0 ? (
-                                <Select
-                                  value={paramValues[v.key] ?? v.defaultValue}
-                                  onValueChange={(val) =>
-                                    setParamValues((p) => ({
-                                      ...p,
-                                      [v.key]: val,
-                                    }))
-                                  }
-                                >
-                                  <SelectTrigger className="h-8 text-xs">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {v.options.map((opt) => (
-                                      <SelectItem
-                                        key={opt}
-                                        value={opt}
-                                        className="text-xs"
-                                      >
-                                        {opt}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              ) : (
-                                <Input
-                                  value={paramValues[v.key] ?? ""}
-                                  onChange={(e) =>
-                                    setParamValues((p) => ({
-                                      ...p,
-                                      [v.key]: e.target.value,
-                                    }))
-                                  }
-                                  placeholder={
-                                    v.defaultValue || `请输入${v.label}`
-                                  }
-                                  className="h-8 text-xs"
-                                />
-                              )}
-                              {v.description && (
-                                <p className="text-[10px] text-muted-foreground">
-                                  {v.description}
-                                </p>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                  {/* 手动 prompt */}
+                  {/* 手动模式 */}
                   {!useTemplate && (
-                    <>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs font-semibold flex items-center gap-1">
-                          <Type className="h-3.5 w-3.5" />
-                          提示词
-                        </Label>
+                    <div className="space-y-1.5">
+                      <Textarea
+                        value={prompt}
+                        onChange={(e) => setPrompt(e.target.value)}
+                        placeholder="描述你想要的图像效果..."
+                        rows={4}
+                        className="text-xs resize-none"
+                      />
+                      {modelConfig.capabilities.supportsNegativePrompt && (
                         <Textarea
-                          value={prompt}
-                          onChange={(e) => setPrompt(e.target.value)}
-                          placeholder="描述你想要的图像效果..."
-                          rows={5}
+                          value={negativePrompt}
+                          onChange={(e) => setNegativePrompt(e.target.value)}
+                          placeholder="反向提示词（可选）"
+                          rows={2}
                           className="text-xs resize-none"
                         />
-                        <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                          <span>{prompt.length} 字符</span>
-                          <button
-                            type="button"
-                            onClick={() => setPrompt("")}
-                            className="hover:text-foreground inline-flex items-center gap-0.5"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                            清空
-                          </button>
-                        </div>
-                      </div>
-
-                      {modelConfig.capabilities.supportsNegativePrompt && (
-                        <div className="space-y-1.5">
-                          <Label className="text-xs font-semibold">
-                            反向提示词{" "}
-                            <span className="text-[10px] text-muted-foreground font-normal">
-                              (可选)
-                            </span>
-                          </Label>
-                          <Textarea
-                            value={negativePrompt}
-                            onChange={(e) => setNegativePrompt(e.target.value)}
-                            placeholder="不希望出现的内容..."
-                            rows={2}
-                            className="text-xs resize-none"
-                          />
-                        </div>
                       )}
-                    </>
+                    </div>
                   )}
                 </div>
               </AccordionContent>
             </AccordionItem>
 
-            {/* ============ ③ 生图模型 ============ */}
-            <AccordionItem value="model" className="border-b-0 px-3">
-              <AccordionTrigger className="hover:no-underline py-2.5 px-2 -mx-2 rounded-md data-[state=open]:bg-muted/30 hover:bg-muted/40 transition-colors [&[data-state=open]>svg]:-rotate-90">
-                <span className="flex items-center gap-2 text-xs font-semibold">
-                  <Sparkles className="h-3.5 w-3.5 text-teal-600" />
-                  生图模型
+            {/* ============ 输出参数（合并模型 + 尺寸 + 数量）============ */}
+            <AccordionItem value="output" className="border-b-0">
+              <AccordionTrigger className="hover:no-underline py-2.5 text-xs font-medium [&[data-state=open]>svg]:hidden">
+                <span className="flex items-center gap-2">
+                  <Settings2 className="h-3.5 w-3.5 text-primary" />
+                  输出
                 </span>
-                <span className="flex items-center gap-1.5 ml-auto mr-2">
-                  <span
-                    className="h-1.5 w-1.5 rounded-full"
-                    style={{ backgroundColor: modelConfig.color }}
-                  />
-                  <Badge
-                    variant="secondary"
-                    className="text-[9px] h-4 px-1.5 font-normal"
-                  >
-                    {modelConfig.name}
-                  </Badge>
+                <span className="ml-auto text-[11px] text-muted-foreground font-normal font-mono">
+                  {(() => {
+                    const [w, h] = parseImageSize(size);
+                    return `${w === h ? "1:1" : `${w}:${h}`} · ${(() => {
+                      const tplCandidateCount = useTemplate
+                        ? (selectedTemplate?.candidateCount ?? 1)
+                        : 1;
+                      if (
+                        tplCandidateCount === 4 ||
+                        tplCandidateCount === 9
+                      ) {
+                        return "1 张拼接";
+                      }
+                      return `${batchSize} 张`;
+                    })()}`;
+                  })()}
                 </span>
               </AccordionTrigger>
-              <AccordionContent className="pt-2 pb-3">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    {isModelOverridden ? (
-                      <Badge
-                        variant="outline"
-                        className="text-[9px] py-0 h-4 bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30"
-                      >
-                        已覆盖模板默认
-                      </Badge>
-                    ) : useTemplate && templateDefaultModel ? (
-                      <Badge
-                        variant="outline"
-                        className="text-[9px] py-0 h-4 bg-teal-500/10 text-teal-700 dark:text-teal-400 border-teal-500/30"
-                      >
-                        模板默认
-                      </Badge>
-                    ) : (
-                      <span />
-                    )}
-                    {isModelOverridden && (
-                      <button
-                        type="button"
-                        onClick={handleRestoreTemplateModel}
-                        className="text-[10px] text-teal-600 hover:text-teal-700 dark:text-teal-400 flex items-center gap-1"
-                        title={`还原为「${selectedTemplate?.name}」模板默认`}
-                      >
-                        <RotateCcw className="h-3 w-3" />
-                        还原
-                      </button>
-                    )}
-                  </div>
-
+              <AccordionContent className="pb-3">
+                <div className="space-y-3">
+                  {/* 模型 */}
                   <Select
                     value={selectedModel}
                     onValueChange={(v) => setSelectedModel(v as ImageModelId)}
                   >
-                    <SelectTrigger className="h-9 text-xs">
+                    <SelectTrigger className="h-8 text-xs">
                       <SelectValue placeholder="选择模型" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1711,11 +1558,6 @@ export function GenerateWorkbenchView({
                               }}
                             />
                             <span>{m.name}</span>
-                            {!m.isAvailable && (
-                              <span className="text-[10px] text-muted-foreground">
-                                即将上线
-                              </span>
-                            )}
                             <span className="text-[10px] text-muted-foreground ml-auto">
                               {m.currency === "CNY" ? "¥" : "$"}
                               {m.pricePerImage}
@@ -1726,66 +1568,9 @@ export function GenerateWorkbenchView({
                     </SelectContent>
                   </Select>
 
-                  {isModelOverridden ? (
-                    <p className="text-[10px] text-amber-700 dark:text-amber-400 bg-amber-500/5 border border-amber-500/20 rounded p-1.5 flex items-center gap-1">
-                      <Sparkles className="h-3 w-3 shrink-0" />
-                      已覆盖「{selectedTemplate?.name}」模板默认（
-                      {templateDefaultModel &&
-                        IMAGE_MODELS[templateDefaultModel]?.name}
-                      ）
-                    </p>
-                  ) : useTemplate && templateDefaultModel ? (
-                    <p className="text-[10px] text-teal-700 dark:text-teal-400 bg-teal-500/5 border border-teal-500/20 rounded p-1.5 flex items-center gap-1">
-                      <Sparkles className="h-3 w-3 shrink-0" />
-                      模板推荐「{modelConfig.name}」，可点击切换
-                    </p>
-                  ) : (
-                    <p className="text-[10px] text-muted-foreground bg-muted/30 rounded p-1.5">
-                      {modelConfig.description}
-                    </p>
-                  )}
-                </div>
-              </AccordionContent>
-            </AccordionItem>
-
-            {/* ============ ④ 输出参数 ============ */}
-            <AccordionItem value="output" className="border-b-0 px-3">
-              <AccordionTrigger className="hover:no-underline py-2.5 px-2 -mx-2 rounded-md data-[state=open]:bg-muted/30 hover:bg-muted/40 transition-colors [&[data-state=open]>svg]:-rotate-90">
-                <span className="flex items-center gap-2 text-xs font-semibold">
-                  <Settings2 className="h-3.5 w-3.5 text-teal-600" />
-                  输出参数
-                </span>
-                <span className="flex items-center gap-1.5 ml-auto mr-2">
-                  <Badge
-                    variant="secondary"
-                    className="text-[9px] h-4 px-1.5 font-normal font-mono"
-                  >
-                    {(() => {
-                      const [w, h] = parseImageSize(size);
-                      return w === h ? "1:1" : `${w}:${h}`;
-                    })()}
-                  </Badge>
-                  <Badge
-                    variant="secondary"
-                    className="text-[9px] h-4 px-1.5 font-normal"
-                  >
-                    {(() => {
-                      const tplCandidateCount = useTemplate
-                        ? (selectedTemplate?.candidateCount ?? 1)
-                        : 1;
-                      if (tplCandidateCount === 4 || tplCandidateCount === 9) {
-                        return `1 张拼接`;
-                      }
-                      return `${batchSize} 张`;
-                    })()}
-                  </Badge>
-                </span>
-              </AccordionTrigger>
-              <AccordionContent className="pt-2 pb-3">
-                <div className="space-y-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold">输出尺寸</Label>
-                    <div className="grid grid-cols-4 gap-1.5">
+                  {/* 尺寸 + 数量 横向 */}
+                  <div className="flex gap-1.5">
+                    <div className="grid grid-cols-4 gap-1 flex-1">
                       {availableSizes.slice(0, 4).map((s) => {
                         const selected = size === s;
                         const [w, h] = parseImageSize(s);
@@ -1797,17 +1582,17 @@ export function GenerateWorkbenchView({
                             onClick={() => setSize(s)}
                             title={`${s} (${w}:${h})`}
                             className={cn(
-                              "flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border-2 transition-all",
+                              "flex items-center justify-center gap-1 py-1.5 rounded border transition-all text-[10px]",
                               selected
-                                ? "border-teal-500 bg-teal-500/10 text-teal-700 dark:text-teal-400 shadow-sm"
-                                : "border-transparent bg-muted/30 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                                ? "border-primary bg-primary/10 text-primary"
+                                : "border-border text-muted-foreground hover:border-muted-foreground/50"
                             )}
                           >
                             <AspectIcon
-                              className="h-4 w-4"
-                              strokeWidth={1.75}
+                              className="h-3 w-3"
+                              strokeWidth={2}
                             />
-                            <span className="text-[9px] font-mono leading-none">
+                            <span className="font-mono">
                               {w === h ? "1:1" : `${w}:${h}`}
                             </span>
                           </button>
@@ -1816,13 +1601,11 @@ export function GenerateWorkbenchView({
                     </div>
                   </div>
 
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-xs font-semibold">生成数量</Label>
-                      <span className="text-xs font-mono text-teal-600">
-                        {batchSize} 张
-                      </span>
-                    </div>
+                  {/* 数量 slider */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-muted-foreground shrink-0">
+                      数量
+                    </span>
                     <input
                       type="range"
                       min={1}
@@ -1837,146 +1620,30 @@ export function GenerateWorkbenchView({
                           tplCandidateCount === 4 || tplCandidateCount === 9
                         );
                       })()}
-                      className="w-full accent-teal-500 disabled:opacity-50"
+                      className="flex-1 accent-primary disabled:opacity-50 h-1"
                     />
-                    <div className="flex justify-between text-[9px] text-muted-foreground">
-                      <span>1</span>
-                      <span>最多 {modelConfig.capabilities.maxBatchSize}</span>
-                    </div>
-                    {(() => {
-                      const tplCandidateCount = useTemplate
-                        ? (selectedTemplate?.candidateCount ?? 1)
-                        : 1;
-                      if (tplCandidateCount === 4 || tplCandidateCount === 9) {
-                        return (
-                          <p className="text-[10px] text-teal-700 dark:text-teal-400 bg-teal-500/5 border border-teal-500/20 rounded p-1.5 mt-1">
-                            当前模板为
-                            {tplCandidateCount === 4 ? "2×2" : "3×3"}
-                            宫格拼接，将返回 1
-                            张含全部候选的拼接大图，批量数量已自动锁定
-                          </p>
-                        );
-                      }
-                      return null;
-                    })()}
-                  </div>
-                </div>
-              </AccordionContent>
-            </AccordionItem>
-
-            {/* ============ ⑤ 高级参数（默认折叠）============ */}
-            <AccordionItem value="advanced" className="border-b-0 px-3">
-              <AccordionTrigger className="hover:no-underline py-2.5 px-2 -mx-2 rounded-md data-[state=open]:bg-muted/30 hover:bg-muted/40 transition-colors [&[data-state=open]>svg]:-rotate-90">
-                <span className="flex items-center gap-2 text-xs font-semibold">
-                  <Settings2 className="h-3.5 w-3.5 text-teal-600" />
-                  高级参数
-                </span>
-                <span className="flex items-center gap-1.5 ml-auto mr-2">
-                  {(guidanceScale !== 7 ||
-                    steps !== 30 ||
-                    seed !== "" ||
-                    !safetyCheck) && (
-                    <span
-                      className="h-1.5 w-1.5 rounded-full bg-amber-500"
-                      title="已修改默认"
-                    />
-                  )}
-                </span>
-              </AccordionTrigger>
-              <AccordionContent className="pt-2 pb-3">
-                <div className="space-y-3">
-                  {modelConfig.capabilities.supportsGuidance && (
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] text-muted-foreground">
-                          引导系数 (CFG)
-                        </span>
-                        <span className="text-[11px] font-mono">
-                          {guidanceScale}
-                        </span>
-                      </div>
-                      <input
-                        type="range"
-                        min={1}
-                        max={20}
-                        step={0.5}
-                        value={guidanceScale}
-                        onChange={(e) =>
-                          setGuidanceScale(Number(e.target.value))
+                    <span className="text-xs font-mono text-primary w-8 text-right">
+                      {(() => {
+                        const tplCandidateCount = useTemplate
+                          ? (selectedTemplate?.candidateCount ?? 1)
+                          : 1;
+                        if (
+                          tplCandidateCount === 4 ||
+                          tplCandidateCount === 9
+                        ) {
+                          return "1";
                         }
-                        className="w-full accent-teal-500"
-                      />
-                    </div>
-                  )}
-
-                  {modelConfig.capabilities.maxInferenceSteps > 0 && (
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] text-muted-foreground">
-                          推理步数
-                        </span>
-                        <span className="text-[11px] font-mono">{steps}</span>
-                      </div>
-                      <input
-                        type="range"
-                        min={10}
-                        max={modelConfig.capabilities.maxInferenceSteps}
-                        value={steps}
-                        onChange={(e) => setSteps(Number(e.target.value))}
-                        className="w-full accent-teal-500"
-                      />
-                    </div>
-                  )}
-
-                  {modelConfig.capabilities.supportsSeed && (
-                    <div className="space-y-1">
-                      <span className="text-[11px] text-muted-foreground">
-                        随机种子
-                      </span>
-                      <div className="flex gap-1">
-                        <input
-                          type="number"
-                          value={seed}
-                          onChange={(e) =>
-                            setSeed(
-                              e.target.value === ""
-                                ? ""
-                                : Number(e.target.value)
-                            )
-                          }
-                          placeholder="随机"
-                          className="flex-1 h-8 text-xs rounded border bg-background px-2"
-                        />
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-8 px-2"
-                          onClick={handleRandomSeed}
-                        >
-                          <RefreshCw className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {modelConfig.capabilities.supportsSafetyCheck && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] text-muted-foreground">
-                        安全检查
-                      </span>
-                      <Switch
-                        checked={safetyCheck}
-                        onCheckedChange={setSafetyCheck}
-                      />
-                    </div>
-                  )}
+                        return batchSize;
+                      })()}
+                    </span>
+                  </div>
                 </div>
               </AccordionContent>
             </AccordionItem>
           </Accordion>
 
-          {/* 底部：生成按钮（工作台不扣积分，去掉"预计成本"行） */}
-          <div className="p-3 border-t bg-muted/30 space-y-2">
+          {/* 底部：生成按钮 + 高级齿轮入口（工作台不扣积分） */}
+          <div className="p-3 border-t bg-muted/30 flex items-center gap-2">
             <Button
               onClick={handleGenerate}
               disabled={
@@ -1987,7 +1654,7 @@ export function GenerateWorkbenchView({
                   (uploadedImage.uploading !== null ||
                     !uploadedImage.publicUrl))
               }
-              className="w-full bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700"
+              className="flex-1 bg-gradient-to-r from-primary to-primary/80 hover:from-primary hover:to-primary/70 shadow-lg shadow-primary/20"
             >
               {generating ? (
                 <>
@@ -2016,6 +1683,109 @@ export function GenerateWorkbenchView({
                 </>
               )}
             </Button>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  className="h-9 w-9 shrink-0 relative"
+                  title="高级参数"
+                >
+                  <Settings2 className="h-4 w-4" />
+                  {(guidanceScale !== 7 ||
+                    steps !== 30 ||
+                    seed !== "" ||
+                    !safetyCheck) && (
+                    <span
+                      className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-amber-500"
+                      title="已修改默认"
+                    />
+                  )}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="end"
+                side="top"
+                className="w-72 space-y-3"
+              >
+                <p className="text-xs font-semibold">高级参数</p>
+                {modelConfig.capabilities.supportsGuidance && (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-muted-foreground">CFG</span>
+                      <span className="font-mono">{guidanceScale}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={1}
+                      max={20}
+                      step={0.5}
+                      value={guidanceScale}
+                      onChange={(e) =>
+                        setGuidanceScale(Number(e.target.value))
+                      }
+                      className="w-full accent-primary h-1"
+                    />
+                  </div>
+                )}
+                {modelConfig.capabilities.maxInferenceSteps > 0 && (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-muted-foreground">推理步数</span>
+                      <span className="font-mono">{steps}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={10}
+                      max={modelConfig.capabilities.maxInferenceSteps}
+                      value={steps}
+                      onChange={(e) => setSteps(Number(e.target.value))}
+                      className="w-full accent-primary h-1"
+                    />
+                  </div>
+                )}
+                {modelConfig.capabilities.supportsSeed && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] text-muted-foreground shrink-0">
+                      种子
+                    </span>
+                    <input
+                      type="number"
+                      value={seed}
+                      onChange={(e) =>
+                        setSeed(
+                          e.target.value === ""
+                            ? ""
+                            : Number(e.target.value)
+                        )
+                      }
+                      placeholder="随机"
+                      className="flex-1 h-7 text-xs rounded border bg-background px-2"
+                    />
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2"
+                      onClick={handleRandomSeed}
+                      title="随机种子"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                    </Button>
+                  </div>
+                )}
+                {modelConfig.capabilities.supportsSafetyCheck && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-muted-foreground">
+                      安全检查
+                    </span>
+                    <Switch
+                      checked={safetyCheck}
+                      onCheckedChange={setSafetyCheck}
+                    />
+                  </div>
+                )}
+              </PopoverContent>
+            </Popover>
           </div>
         </aside>
 
@@ -2023,7 +1793,7 @@ export function GenerateWorkbenchView({
         <main className="flex-1 flex flex-col bg-card border rounded-lg overflow-hidden min-w-0">
           <div className="px-4 py-2.5 border-b bg-muted/30 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-teal-600" />
+              <Sparkles className="h-4 w-4 text-primary" />
               <h2 className="text-sm font-bold">生成结果</h2>
               {selectedEffect && (
                 <Badge variant="outline" className="text-[10px] font-mono">
@@ -2032,9 +1802,15 @@ export function GenerateWorkbenchView({
               )}
             </div>
             <div className="flex items-center gap-1">
-              <Button size="sm" variant="ghost" className="h-7 text-xs">
-                <History className="h-3.5 w-3.5 mr-1" />
-                历史 ({history.length})
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                onClick={handleNewSession}
+                title="新建会话"
+              >
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                新建会话
               </Button>
             </div>
           </div>
@@ -2045,10 +1821,10 @@ export function GenerateWorkbenchView({
                 /* 新会话草稿：还没生成过，仅给一个简短的开始提示 + 当前模型 */
                 <div className="h-full flex flex-col items-center justify-center text-center px-6 relative overflow-hidden">
                   <div className="absolute inset-0 flex items-center justify-center opacity-50 pointer-events-none">
-                    <div className="h-72 w-72 rounded-full bg-gradient-to-br from-teal-500/15 via-emerald-500/15 to-sky-500/15 blur-3xl" />
+                    <div className="h-72 w-72 rounded-full bg-gradient-to-br from-primary/25 via-primary/10 to-primary/5 blur-3xl" />
                   </div>
                   <div className="relative flex flex-col items-center gap-4">
-                    <div className="h-24 w-24 rounded-3xl bg-gradient-to-br from-teal-500 to-emerald-600 flex items-center justify-center shadow-2xl shadow-teal-500/20">
+                    <div className="h-24 w-24 rounded-3xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-2xl shadow-primary/20">
                       <Plus className="h-12 w-12 text-white" />
                     </div>
                     <div className="space-y-2">
@@ -2163,7 +1939,7 @@ export function GenerateWorkbenchView({
                   <div className="space-y-2">
                     {/* 宫格拼接模式提示：服务端返的是 1 张 2×2/3×3 大图，不是多张独立图 */}
                     {selectedEffect.isGridComposite && (
-                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-teal-500/5 border border-teal-500/20 text-[11px] text-teal-700 dark:text-teal-400">
+                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary/5 border border-primary/20 text-[11px] text-primary">
                         <Sparkles className="h-3 w-3 shrink-0" />
                         <span>
                           {(() => {
@@ -2195,7 +1971,7 @@ export function GenerateWorkbenchView({
                           <div
                             // biome-ignore lint/suspicious/noArrayIndexKey: 结果图按生成顺序展示
                             key={i}
-                            className="group relative rounded-xl overflow-hidden border-2 border-transparent hover:border-teal-500/40 bg-muted transition-colors duration-200"
+                            className="group relative rounded-xl overflow-hidden border-2 border-transparent hover:border-primary/40 bg-muted transition-colors duration-200"
                             style={{ aspectRatio: `${tileW} / ${tileH}` }}
                           >
                             {/* biome-ignore lint/performance/noImgElement: 生成结果用原生 img 性能更佳 */}
@@ -2326,14 +2102,14 @@ export function GenerateWorkbenchView({
                     </div>
                   </div>
                 ) : selectedEffect.status === "processing" ? (
-                  <div className="aspect-video rounded-2xl border-2 border-dashed border-teal-500/30 bg-gradient-to-br from-teal-500/5 via-sky-500/5 to-teal-500/5 flex flex-col items-center justify-center gap-4 overflow-hidden relative">
+                  <div className="aspect-video rounded-2xl border-2 border-dashed border-primary/30 bg-gradient-to-br from-primary/10 via-primary/5 to-primary/10 flex flex-col items-center justify-center gap-4 overflow-hidden relative">
                     {/* 背景的扩散光晕 —— Lovart 风的"还在动"暗示 */}
                     <div className="absolute inset-0 flex items-center justify-center opacity-30 pointer-events-none">
-                      <div className="h-32 w-32 rounded-full bg-teal-500/30 blur-3xl animate-pulse" />
+                      <div className="h-32 w-32 rounded-full bg-primary/30 blur-3xl animate-pulse" />
                     </div>
                     <div className="relative flex flex-col items-center gap-4">
                       <div className="relative h-16 w-16 rounded-full bg-background shadow-lg flex items-center justify-center">
-                        <Loader2 className="h-7 w-7 text-teal-600 animate-spin" />
+                        <Loader2 className="h-7 w-7 text-primary animate-spin" />
                       </div>
                       {selectedEffect.taskId ? (
                         <div className="space-y-1 text-center">
@@ -2356,8 +2132,8 @@ export function GenerateWorkbenchView({
                         </div>
                       )}
                       {/* 进度 chip：让用户感知"还在动" */}
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-teal-500/10 border border-teal-500/20 px-2.5 py-1 text-[10px] font-medium text-teal-700 dark:text-teal-400">
-                        <span className="h-1.5 w-1.5 rounded-full bg-teal-500 animate-pulse" />
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 border border-primary/20 px-2.5 py-1 text-[10px] font-medium text-primary">
+                        <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
                         实时同步中
                       </span>
                     </div>
@@ -2406,10 +2182,10 @@ export function GenerateWorkbenchView({
               <div className="h-full flex flex-col items-center justify-center text-center px-6 relative overflow-hidden">
                 {/* Lovart 风：背景渐变光晕 + 居中大图标 */}
                 <div className="absolute inset-0 flex items-center justify-center opacity-50 pointer-events-none">
-                  <div className="h-72 w-72 rounded-full bg-gradient-to-br from-teal-500/15 via-teal-500/15 to-sky-500/15 blur-3xl" />
+                  <div className="h-72 w-72 rounded-full bg-gradient-to-br from-primary/25 via-primary/10 to-primary/5 blur-3xl" />
                 </div>
                 <div className="relative flex flex-col items-center gap-4">
-                  <div className="h-24 w-24 rounded-3xl bg-gradient-to-br from-teal-500 to-teal-600 flex items-center justify-center shadow-2xl shadow-teal-500/20">
+                  <div className="h-24 w-24 rounded-3xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-2xl shadow-primary/20">
                     <Sparkles className="h-12 w-12 text-white" />
                   </div>
                   <div className="space-y-2">
@@ -2438,90 +2214,100 @@ export function GenerateWorkbenchView({
               </div>
             )}
           </div>
+        </main>
 
-          {/* 历史缩略图条 —— Lovart 风：精致 pill 风选中态 + 状态点 */}
-          {history.length > 0 && (
-            <div className="border-t bg-gradient-to-r from-muted/30 via-muted/10 to-muted/30 px-3 py-2.5">
-              <div className="flex items-center gap-2.5">
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <History className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="text-[11px] font-medium text-muted-foreground">
-                    历史
-                  </span>
-                  <Badge
-                    variant="secondary"
-                    className="h-4 px-1.5 text-[9px] font-mono"
-                  >
-                    {history.length}
-                  </Badge>
-                </div>
-                <div className="flex gap-2 overflow-x-auto pb-1 flex-1">
-                  {/* 「+」新建会话 tile —— 始终排在最前，让用户随时开新对话 */}
-                  <button
-                    type="button"
-                    onClick={handleNewSession}
-                    className="relative h-14 w-14 rounded-xl border-2 border-dashed border-muted-foreground/30 bg-muted/30 hover:bg-muted/60 hover:border-teal-500/60 shrink-0 flex items-center justify-center transition-all duration-200 hover:scale-105 group"
-                    title="新建会话"
-                    aria-label="新建会话"
-                  >
-                    <Plus className="h-5 w-5 text-muted-foreground group-hover:text-teal-600 transition-colors" />
-                  </button>
-                  {history.slice(0, 19).map((eff) => {
-                    const Icon = STATUS_CONFIG[eff.status].icon;
-                    const isSelected =
-                      selectedEffect?.effectId === eff.effectId;
-                    return (
-                      <button
-                        key={eff.effectId}
-                        type="button"
-                        onClick={() => setSelectedEffect(eff)}
-                        className={cn(
-                          "relative h-14 w-14 rounded-xl overflow-hidden shrink-0 transition-all duration-200",
-                          isSelected
-                            ? "ring-2 ring-teal-500 ring-offset-2 ring-offset-background shadow-md scale-105"
-                            : "ring-1 ring-border hover:ring-muted-foreground/40 hover:scale-105"
-                        )}
-                      >
-                        {eff.resultUrls[0] ? (
-                          // biome-ignore lint/performance/noImgElement: 缩略图用原生 img
-                          <img
-                            src={eff.resultUrls[0]}
-                            alt={eff.effectId}
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center bg-muted">
-                            <Icon
-                              className={cn(
-                                "h-4 w-4",
-                                STATUS_CONFIG[eff.status].color,
-                                eff.status === "processing" && "animate-spin"
-                              )}
-                            />
-                          </div>
-                        )}
-                        {/* 状态点：右上角小圆点（仅非 completed 才显示） */}
-                        {eff.status !== "completed" && (
-                          <span
-                            className={cn(
-                              "absolute top-1 right-1 h-2 w-2 rounded-full ring-2 ring-background",
-                              eff.status === "processing" &&
-                                "bg-sky-500 animate-pulse",
-                              eff.status === "failed" && "bg-rose-500",
-                              eff.status === "pending" && "bg-amber-500",
-                              eff.status === "draft" && "bg-teal-500"
-                            )}
-                            title={STATUS_CONFIG[eff.status].label}
-                          />
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
+        {/* ============ 右侧：会话历史 rail（Lovart 风）============
+         * 垂直窄列：顶部「+」新建会话按钮 + 下方可滚动的会话缩略图列表。
+         * 历史从主画布底部挪到这里 —— 新会话里就不会再出现旧会话的缩略图，
+         * 点哪个会话就进入哪个，符合 Lovart 的"会话即工作流"心智。
+         */}
+        <aside className="w-[88px] shrink-0 flex flex-col bg-card border rounded-lg overflow-hidden">
+          <div className="p-2 border-b bg-muted/30 flex flex-col items-center gap-1">
+            <span className="text-[10px] font-medium text-muted-foreground tracking-wide">
+              会话
+            </span>
+            <button
+              type="button"
+              onClick={handleNewSession}
+              className="h-12 w-12 rounded-xl border-2 border-dashed border-muted-foreground/30 bg-muted/30 hover:bg-muted/60 hover:border-primary/60 flex items-center justify-center transition-all duration-200 hover:scale-105 group"
+              title="新建会话"
+              aria-label="新建会话"
+            >
+              <Plus className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-2">
+            {history.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center text-[10px] text-muted-foreground/60 text-center px-1 leading-relaxed">
+                点击「+」开始第一次生图
               </div>
+            ) : (
+              history.map((eff) => {
+                const Icon = STATUS_CONFIG[eff.status].icon;
+                const isSelected =
+                  selectedEffect?.effectId === eff.effectId;
+                return (
+                  <button
+                    key={eff.effectId}
+                    type="button"
+                    onClick={() => setSelectedEffect(eff)}
+                    className={cn(
+                      "relative h-12 w-12 rounded-xl overflow-hidden transition-all duration-200 group/sess",
+                      isSelected
+                        ? "ring-2 ring-primary ring-offset-2 ring-offset-card shadow-md scale-105"
+                        : "ring-1 ring-border hover:ring-muted-foreground/40 hover:scale-105"
+                    )}
+                    title={
+                      eff.maskName +
+                      (eff.status === "draft"
+                        ? ""
+                        : ` · ${STATUS_CONFIG[eff.status].label}`)
+                    }
+                  >
+                    {eff.resultUrls[0] ? (
+                      // biome-ignore lint/performance/noImgElement: 缩略图用原生 img
+                      <img
+                        src={eff.resultUrls[0]}
+                        alt={eff.maskName}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center bg-muted">
+                        <Icon
+                          className={cn(
+                            "h-4 w-4",
+                            STATUS_CONFIG[eff.status].color,
+                            eff.status === "processing" && "animate-spin"
+                          )}
+                        />
+                      </div>
+                    )}
+                    {/* 状态点：右上角小圆点（仅非 completed 才显示） */}
+                    {eff.status !== "completed" && (
+                      <span
+                        className={cn(
+                          "absolute top-0.5 right-0.5 h-2 w-2 rounded-full ring-2 ring-card",
+                          eff.status === "processing" &&
+                            "bg-primary animate-pulse",
+                          eff.status === "failed" && "bg-rose-500",
+                          eff.status === "pending" && "bg-amber-500",
+                          eff.status === "draft" && "bg-primary"
+                        )}
+                      />
+                    )}
+                  </button>
+                );
+              })
+            )}
+          </div>
+          {history.length > 0 && (
+            <div className="p-2 border-t bg-muted/30 flex justify-center">
+              <Badge variant="secondary" className="h-4 px-1.5 text-[9px] font-mono">
+                {history.length}
+              </Badge>
             </div>
           )}
-        </main>
+        </aside>
       </div>
 
       {/* ============ Lightbox 放大查看 ============
