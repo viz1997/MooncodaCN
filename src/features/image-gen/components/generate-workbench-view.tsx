@@ -18,7 +18,6 @@ import {
   CheckCircle2,
   Clock,
   Download,
-  Heart,
   Image as ImageIcon,
   Library,
   Loader2,
@@ -491,20 +490,6 @@ export function GenerateWorkbenchView({
   } | null>(null);
   // 每张结果图的下载/分享去抖锁：避免 hover 按钮连点导致重复 fetch
   const [busyKey, setBusyKey] = useState<string | null>(null);
-  /**
-   * 时间轴选中索引：决定大图预览区显示哪张。
-   * 切会话时重置（避免上个会话选到 #5，新会话只有 2 张却还指向 #5）。
-   * 钳到 resultUrls.length-1 而非 0：用户之前可能选了 #3，新会话生成后
-   * 想立刻看新结果而不是默认回 #1（per-step-all-done 已记录此偏好）。
-   */
-  const [previewIdx, setPreviewIdx] = useState(0);
-  useEffect(() => {
-    setPreviewIdx((idx) => {
-      const len = selectedEffect?.resultUrls.length ?? 0;
-      if (len === 0) return 0;
-      return Math.min(idx, len - 1);
-    });
-  }, [selectedEffect?.effectId, selectedEffect?.resultUrls.length]);
   const modelConfig = IMAGE_MODELS[selectedModel];
   const selectedTemplate = activeTemplates.find((t) => t.id === selectedMask);
   /**
@@ -1964,203 +1949,70 @@ export function GenerateWorkbenchView({
                     )}
                 </div>
 
-                {/* 结果展示：时间轴小图 + 单大图预览（主流生图平台范式） */}
+                {/* 结果展示：水平时间轴小图条（主流生图平台范式） */}
                 {selectedEffect.status === "completed" &&
                 selectedEffect.resultUrls.length > 0 &&
                 selectedEffect ? (
-                  (() => {
-                    const urls = selectedEffect.resultUrls;
-                    const safeIdx = Math.min(previewIdx, urls.length - 1);
-                    const previewUrl = urls[safeIdx]!;
-                    return (
-                      <div className="space-y-3">
-                        {/* 宫格拼接模式提示 */}
-                        {selectedEffect.isGridComposite && (
-                          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary/5 border border-primary/20 text-[11px] text-primary">
-                            <Sparkles className="h-3 w-3 shrink-0" />
-                            <span>
-                              {(() => {
-                                const tplCandidateCount =
-                                  selectedTemplate?.candidateCount ?? 1;
-                                const layout =
-                                  tplCandidateCount === 4 ? "2×2" : "3×3";
-                                return `宫格拼接（${layout} · ${tplCandidateCount} 个候选已合成 1 张大图）`;
-                              })()}
-                            </span>
-                          </div>
-                        )}
-
-                        {/* 单大图预览区 */}
-                        <div
-                          className="relative rounded-xl overflow-hidden bg-muted border"
-                          style={{
-                            aspectRatio: (() => {
-                              const [w, h] = parseImageSize(size);
-                              return `${w} / ${h}`;
-                            })(),
-                          }}
-                        >
-                          {/* biome-ignore lint/performance/noImgElement: 预览用原生 img */}
-                          <img
-                            src={previewUrl}
-                            alt={`结果 ${safeIdx + 1}`}
-                            className="w-full h-full object-contain"
-                          />
-                          {/* 编号 chip（左上） */}
-                          <div className="absolute top-3 left-3 bg-black/55 backdrop-blur-sm text-white text-[11px] px-2 py-1 rounded-md font-mono">
-                            #{safeIdx + 1} / {urls.length}
-                          </div>
-                          {/* 快捷操作（右上） */}
-                          <div className="absolute top-3 right-3 flex gap-1.5">
-                            <Button
-                              size="icon"
-                              variant="secondary"
-                              className="h-8 w-8 rounded-full bg-white/90 hover:bg-white text-foreground shadow-lg"
-                              disabled={
-                                busyKey ===
-                                `dl-${selectedEffect.effectId}-${safeIdx}`
-                              }
-                              onClick={async () => {
-                                const key = `dl-${selectedEffect.effectId}-${safeIdx}`;
-                                setBusyKey(key);
-                                try {
-                                  await downloadImage(
-                                    previewUrl,
-                                    buildDownloadFilename(
-                                      selectedEffect,
-                                      previewUrl,
-                                      safeIdx
-                                    )
-                                  );
-                                  toast.success("已下载");
-                                } catch (err) {
-                                  toast.error(
-                                    err instanceof Error
-                                      ? err.message
-                                      : "下载失败"
-                                  );
-                                } finally {
-                                  setBusyKey(null);
-                                }
-                              }}
-                              title="下载"
-                            >
-                              {busyKey ===
-                              `dl-${selectedEffect.effectId}-${safeIdx}` ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <Download className="h-3.5 w-3.5" />
-                              )}
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="secondary"
-                              className="h-8 w-8 rounded-full bg-white/90 hover:bg-white text-foreground shadow-lg"
-                              onClick={() => toast.success("已收藏")}
-                              title="收藏"
-                            >
-                              <Heart className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="secondary"
-                              className="h-8 w-8 rounded-full bg-white/90 hover:bg-white text-foreground shadow-lg"
-                              disabled={
-                                busyKey ===
-                                `share-${selectedEffect.effectId}-${safeIdx}`
-                              }
-                              onClick={async () => {
-                                const key = `share-${selectedEffect.effectId}-${safeIdx}`;
-                                setBusyKey(key);
-                                try {
-                                  if (
-                                    !navigator.clipboard ||
-                                    !navigator.clipboard.writeText
-                                  ) {
-                                    throw new Error(
-                                      "当前浏览器不支持剪贴板 API"
-                                    );
-                                  }
-                                  await navigator.clipboard.writeText(
-                                    previewUrl
-                                  );
-                                  toast.success("链接已复制");
-                                } catch (err) {
-                                  toast.error(
-                                    err instanceof Error
-                                      ? err.message
-                                      : "复制失败"
-                                  );
-                                } finally {
-                                  setBusyKey(null);
-                                }
-                              }}
-                              title="复制链接"
-                            >
-                              {busyKey ===
-                              `share-${selectedEffect.effectId}-${safeIdx}` ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <Share2 className="h-3.5 w-3.5" />
-                              )}
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="secondary"
-                              className="h-8 w-8 rounded-full bg-white/90 hover:bg-white text-foreground shadow-lg"
-                              onClick={() =>
-                                setLightbox({
-                                  url: previewUrl,
-                                  effectId: selectedEffect.effectId,
-                                  index: safeIdx,
-                                })
-                              }
-                              title="放大查看"
-                            >
-                              <Maximize2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        </div>
-
-                        {/* 时间轴小图条 */}
-                        {urls.length > 1 && (
-                          <div className="flex gap-2 overflow-x-auto pb-1">
-                            {urls.map((url, i) => (
-                              <button
-                                // biome-ignore lint/suspicious/noArrayIndexKey: 时间轴按生成顺序展示
-                                key={i}
-                                type="button"
-                                onClick={() => setPreviewIdx(i)}
-                                className={cn(
-                                  "relative shrink-0 h-16 w-16 rounded-lg overflow-hidden border-2 transition-all",
-                                  i === safeIdx
-                                    ? "border-primary ring-2 ring-primary/30 shadow-md"
-                                    : "border-transparent hover:border-muted-foreground/40 opacity-70 hover:opacity-100"
-                                )}
-                                title={`第 ${i + 1} 张`}
-                              >
-                                {/* biome-ignore lint/performance/noImgElement: 时间轴缩略图 */}
-                                <img
-                                  src={url}
-                                  alt={`#${i + 1}`}
-                                  className="w-full h-full object-cover"
-                                  loading="lazy"
-                                />
-                                <div
-                                  className={cn(
-                                    "absolute bottom-0.5 left-0.5 bg-black/60 text-white text-[9px] px-1 rounded font-mono leading-tight",
-                                    i === safeIdx && "bg-primary"
-                                  )}
-                                >
-                                  {i + 1}
-                                </div>
-                              </button>
-                            ))}
-                          </div>
-                        )}
+                  <div className="space-y-3">
+                    {/* 宫格拼接模式提示 */}
+                    {selectedEffect.isGridComposite && (
+                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary/5 border border-primary/20 text-[11px] text-primary">
+                        <Sparkles className="h-3 w-3 shrink-0" />
+                        <span>
+                          {(() => {
+                            const tplCandidateCount =
+                              selectedTemplate?.candidateCount ?? 1;
+                            const layout =
+                              tplCandidateCount === 4 ? "2×2" : "3×3";
+                            return `宫格拼接（${layout} · ${tplCandidateCount} 个候选已合成 1 张大图）`;
+                          })()}
+                        </span>
                       </div>
-                    );
-                  })()
+                    )}
+
+                    {/* 顶部小信息条：数量 + 提示点击查看大图 */}
+                    <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                      <span>
+                        共 {selectedEffect.resultUrls.length} 张 · 点击查看大图
+                      </span>
+                    </div>
+
+                    {/* 水平时间轴：固定高度小图，超出横滚 */}
+                    <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1 snap-x snap-mandatory">
+                      {selectedEffect.resultUrls.map((url, i) => (
+                        <button
+                          // biome-ignore lint/suspicious/noArrayIndexKey: 时间轴按生成顺序展示
+                          key={i}
+                          type="button"
+                          onClick={() =>
+                            setLightbox({
+                              url,
+                              effectId: selectedEffect.effectId,
+                              index: i,
+                            })
+                          }
+                          className="group relative shrink-0 h-28 w-28 rounded-lg overflow-hidden border bg-muted hover:border-primary/60 transition-all snap-start"
+                          title={`第 ${i + 1} 张 · 点击查看大图`}
+                        >
+                          {/* biome-ignore lint/performance/noImgElement: 时间轴缩略图 */}
+                          <img
+                            src={url}
+                            alt={`结果 ${i + 1}`}
+                            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.05]"
+                            loading="lazy"
+                          />
+                          {/* 编号 chip：始终可见 */}
+                          <div className="absolute top-1 left-1 bg-black/55 backdrop-blur-sm text-white text-[9px] px-1 py-0.5 rounded font-mono leading-none">
+                            #{i + 1}
+                          </div>
+                          {/* hover：放大图标 + 黑色蒙层 */}
+                          <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <Maximize2 className="h-4 w-4 text-white drop-shadow" />
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 ) : selectedEffect.status === "processing" ? (
                   <div className="aspect-video rounded-2xl border-2 border-dashed border-primary/30 bg-gradient-to-br from-primary/10 via-primary/5 to-primary/10 flex flex-col items-center justify-center gap-4 overflow-hidden relative">
                     {/* 背景的扩散光晕 —— Lovart 风的"还在动"暗示 */}
