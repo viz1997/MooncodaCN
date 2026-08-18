@@ -24,6 +24,7 @@ import {
   Library,
   Loader2,
   Maximize2,
+  Plus,
   RectangleHorizontal,
   RectangleVertical,
   RefreshCw,
@@ -104,7 +105,7 @@ interface UploadedImage {
 }
 
 type RefMode = "upload" | "library" | "none";
-type EffectStatus = "pending" | "processing" | "completed" | "failed";
+type EffectStatus = "draft" | "pending" | "processing" | "completed" | "failed";
 
 interface WorkbenchEffect {
   effectId: string;
@@ -148,6 +149,12 @@ const STATUS_CONFIG: Record<
   EffectStatus,
   { label: string; icon: typeof Clock; color: string; bg: string }
 > = {
+  draft: {
+    label: "新会话",
+    icon: Sparkles,
+    color: "text-teal-600",
+    bg: "bg-teal-500/10 border-teal-500/20",
+  },
   pending: {
     label: "排队中",
     icon: Clock,
@@ -446,10 +453,9 @@ export function GenerateWorkbenchView({
 
   // 模型与提示词模板（Phase C：mask → template 语义重命名，但 selectedMask 状态名保留
   // 以兼容 WorkbenchEffect.maskId 字段与 generateImageAction({ maskId }) 调用）
-  // Phase 起：默认模型从 doubao 改为 nano_banana2 —— doubao 仍是占位实现，
-  // 默认值会让用户在没选模板时撞墙。
+  // 默认 gpt_image_2：唯一支持 batchSize>1 的真实接入模型，工作台主推。
   const [selectedModel, setSelectedModel] =
-    useState<ImageModelId>("nano_banana2");
+    useState<ImageModelId>("gpt_image_2");
   const activeTemplates = templates.filter((t) => t.isActive);
   const [selectedMask, setSelectedMask] = useState<string>(
     activeTemplates[0]?.id ?? ""
@@ -1021,6 +1027,30 @@ export function GenerateWorkbenchView({
 
   const handleRandomSeed = () => setSeed(Math.floor(Math.random() * 1e9));
 
+  /**
+   * 新建空会话：往历史插一个 status=draft 的占位 effect，让右侧回到「开始创作」
+   * 空状态，但不丢之前的生成记录。与 ChatGPT 「+ New chat」是同种 UX。
+   *
+   * effectId 用 `draft_<ts.slice(-6)>` —— 跟 `EF_` 前缀区分，避免和真生成撞 key
+   * 触发 startPolling 时找不到对应历史条目。
+   */
+  const handleNewSession = () => {
+    const draft: WorkbenchEffect = {
+      effectId: `draft_${String(Date.now()).slice(-6)}`,
+      prompt: "",
+      maskId: "",
+      maskName: "新会话",
+      status: "draft",
+      resultUrls: [],
+      mode: refMode === "none" ? "text_to_image" : "image_to_image",
+      imageModel: selectedModel,
+      imageModelName: modelConfig.name,
+      createdAt: new Date().toISOString(),
+    };
+    setHistory((prev) => [draft, ...prev]);
+    setSelectedEffect(draft);
+  };
+
   // 模板可用尺寸（与模型能力交集）
   const availableSizes: ImageSize[] = modelConfig.capabilities.sizes;
 
@@ -1034,7 +1064,7 @@ export function GenerateWorkbenchView({
         <aside className="w-[380px] shrink-0 flex flex-col bg-card border rounded-lg overflow-hidden">
           <div className="p-3 border-b bg-muted/30">
             <h2 className="text-sm font-bold flex items-center gap-2">
-              <Wand2 className="h-4 w-4 text-violet-600" />
+              <Wand2 className="h-4 w-4 text-teal-600" />
               生图工作台
             </h2>
             <p className="text-[10px] text-muted-foreground mt-0.5">
@@ -1057,7 +1087,7 @@ export function GenerateWorkbenchView({
             <AccordionItem value="ref" className="border-b-0 px-3">
               <AccordionTrigger className="hover:no-underline py-2.5 px-2 -mx-2 rounded-md data-[state=open]:bg-muted/30 hover:bg-muted/40 transition-colors [&[data-state=open]>svg]:-rotate-90">
                 <span className="flex items-center gap-2 text-xs font-semibold">
-                  <ImageIcon className="h-3.5 w-3.5 text-violet-600" />
+                  <ImageIcon className="h-3.5 w-3.5 text-teal-600" />
                   参考图
                 </span>
                 <span className="flex items-center gap-1.5 ml-auto mr-2">
@@ -1070,7 +1100,7 @@ export function GenerateWorkbenchView({
                   {(refMode === "upload" && uploadedImage) ||
                   (refMode === "library" && selectedPhoto) ? (
                     <span
-                      className="h-1.5 w-1.5 rounded-full bg-violet-500"
+                      className="h-1.5 w-1.5 rounded-full bg-teal-500"
                       title="已选"
                     />
                   ) : null}
@@ -1144,8 +1174,8 @@ export function GenerateWorkbenchView({
                         className={cn(
                           "w-full border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors",
                           dragOver
-                            ? "border-violet-500 bg-violet-500/5"
-                            : "border-muted-foreground/30 hover:border-violet-500/50 hover:bg-muted/30"
+                            ? "border-teal-500 bg-teal-500/5"
+                            : "border-muted-foreground/30 hover:border-teal-500/50 hover:bg-muted/30"
                         )}
                       >
                         <input
@@ -1161,7 +1191,7 @@ export function GenerateWorkbenchView({
                           className={cn(
                             "h-8 w-8 mx-auto mb-2",
                             dragOver
-                              ? "text-violet-500"
+                              ? "text-teal-500"
                               : "text-muted-foreground"
                           )}
                         />
@@ -1185,7 +1215,7 @@ export function GenerateWorkbenchView({
                               selectedPhoto.fileUrl
                             }
                             alt={selectedPhoto.fileName}
-                            className="w-full aspect-square object-cover rounded-lg border border-violet-500"
+                            className="w-full aspect-square object-cover rounded-lg border border-teal-500"
                           />
                           <button
                             type="button"
@@ -1198,7 +1228,7 @@ export function GenerateWorkbenchView({
                           <div className="absolute bottom-2 left-2 right-2 bg-black/60 text-white text-[10px] px-2 py-1 rounded truncate flex items-center gap-1">
                             <Badge
                               variant="outline"
-                              className="text-[9px] py-0 h-3.5 bg-violet-500/30 border-violet-400/50 text-white uppercase shrink-0"
+                              className="text-[9px] py-0 h-3.5 bg-teal-500/30 border-teal-400/50 text-white uppercase shrink-0"
                             >
                               {selectedPhoto.format ?? "img"}
                             </Badge>
@@ -1215,7 +1245,7 @@ export function GenerateWorkbenchView({
                           value={librarySearch}
                           onChange={(e) => setLibrarySearch(e.target.value)}
                           placeholder="搜索图库..."
-                          className="w-full h-8 pl-7 pr-2 text-xs rounded border bg-background focus:outline-none focus:ring-2 focus:ring-violet-500/30"
+                          className="w-full h-8 pl-7 pr-2 text-xs rounded border bg-background focus:outline-none focus:ring-2 focus:ring-teal-500/30"
                         />
                       </div>
 
@@ -1238,7 +1268,7 @@ export function GenerateWorkbenchView({
                                 setRefMode("none");
                                 setTimeout(() => setRefMode("library"), 0);
                               }}
-                              className="text-[10px] text-violet-600 hover:underline mt-1.5 inline-flex items-center gap-1"
+                              className="text-[10px] text-teal-600 hover:underline mt-1.5 inline-flex items-center gap-1"
                             >
                               <RefreshCw className="h-3 w-3" /> 重试
                             </button>
@@ -1250,7 +1280,7 @@ export function GenerateWorkbenchView({
                             <p className="text-[10px]">先去照片管理上传图片</p>
                             <a
                               href="/dashboard/photos"
-                              className="text-[10px] text-violet-600 hover:underline mt-0.5"
+                              className="text-[10px] text-teal-600 hover:underline mt-0.5"
                             >
                               前往图库管理 →
                             </a>
@@ -1281,8 +1311,8 @@ export function GenerateWorkbenchView({
                                       className={cn(
                                         "relative aspect-square rounded overflow-hidden border-2 transition-all",
                                         selected
-                                          ? "border-violet-500 ring-1 ring-violet-500/30"
-                                          : "border-transparent hover:border-violet-500/50"
+                                          ? "border-teal-500 ring-1 ring-teal-500/30"
+                                          : "border-transparent hover:border-teal-500/50"
                                       )}
                                       title={p.fileName}
                                       aria-label={`选择 ${p.fileName}`}
@@ -1295,7 +1325,7 @@ export function GenerateWorkbenchView({
                                         loading="lazy"
                                       />
                                       {selected && (
-                                        <div className="absolute inset-0 bg-violet-500/20 flex items-center justify-center">
+                                        <div className="absolute inset-0 bg-teal-500/20 flex items-center justify-center">
                                           <CheckCircle2 className="h-5 w-5 text-white drop-shadow" />
                                         </div>
                                       )}
@@ -1335,7 +1365,7 @@ export function GenerateWorkbenchView({
             <AccordionItem value="prompt" className="border-b-0 px-3">
               <AccordionTrigger className="hover:no-underline py-2.5 px-2 -mx-2 rounded-md data-[state=open]:bg-muted/30 hover:bg-muted/40 transition-colors [&[data-state=open]>svg]:-rotate-90">
                 <span className="flex items-center gap-2 text-xs font-semibold">
-                  <Sparkles className="h-3.5 w-3.5 text-violet-600" />
+                  <Sparkles className="h-3.5 w-3.5 text-teal-600" />
                   提示词 / 模板
                 </span>
                 <span className="flex items-center gap-1.5 ml-auto mr-2">
@@ -1349,7 +1379,7 @@ export function GenerateWorkbenchView({
                     (selectedTemplate?.variables ?? []).length > 0 && (
                       <Badge
                         variant="outline"
-                        className="text-[9px] h-4 px-1.5 font-normal text-violet-700 dark:text-violet-400 border-violet-500/30"
+                        className="text-[9px] h-4 px-1.5 font-normal text-teal-700 dark:text-teal-400 border-teal-500/30"
                       >
                         {selectedTemplate?.variables?.length} 项
                       </Badge>
@@ -1362,7 +1392,7 @@ export function GenerateWorkbenchView({
                   <div className="flex items-center justify-between p-2 rounded-lg bg-muted/30">
                     <div>
                       <p className="text-xs font-medium flex items-center gap-1">
-                        <Sparkles className="h-3 w-3 text-violet-600" />
+                        <Sparkles className="h-3 w-3 text-teal-600" />
                         使用模板
                       </p>
                       <p className="text-[10px] text-muted-foreground mt-0.5">
@@ -1384,7 +1414,7 @@ export function GenerateWorkbenchView({
                         效果模版
                         <Badge
                           variant="outline"
-                          className="text-[9px] py-0 h-3.5 text-violet-700 dark:text-violet-400 border-violet-500/30"
+                          className="text-[9px] py-0 h-3.5 text-teal-700 dark:text-teal-400 border-teal-500/30"
                         >
                           必选
                         </Badge>
@@ -1399,7 +1429,7 @@ export function GenerateWorkbenchView({
                             请联系管理员在
                             <a
                               href="/admin/prompt-templates"
-                              className="text-violet-600 hover:underline mx-0.5"
+                              className="text-teal-600 hover:underline mx-0.5"
                             >
                               提示词模板管理
                             </a>
@@ -1419,7 +1449,7 @@ export function GenerateWorkbenchView({
                                   className={cn(
                                     "snap-start shrink-0 w-36 h-20 rounded-lg border-2 overflow-hidden text-left transition-all relative group",
                                     selected
-                                      ? "border-violet-500 ring-2 ring-violet-500/30 shadow-md"
+                                      ? "border-teal-500 ring-2 ring-teal-500/30 shadow-md"
                                       : "border-transparent hover:border-muted-foreground/30 bg-muted/40 hover:bg-muted/60"
                                   )}
                                   title={tpl.description}
@@ -1433,8 +1463,8 @@ export function GenerateWorkbenchView({
                                       loading="lazy"
                                     />
                                   ) : (
-                                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-violet-500/10 to-purple-500/10">
-                                      <Sparkles className="h-5 w-5 text-violet-600/60" />
+                                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-teal-500/10 to-teal-500/10">
+                                      <Sparkles className="h-5 w-5 text-teal-600/60" />
                                     </div>
                                   )}
                                   <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-2 py-1.5">
@@ -1448,7 +1478,7 @@ export function GenerateWorkbenchView({
                                     </div>
                                   </div>
                                   {selected && (
-                                    <div className="absolute top-1 right-1 h-4 w-4 rounded-full bg-violet-500 flex items-center justify-center">
+                                    <div className="absolute top-1 right-1 h-4 w-4 rounded-full bg-teal-500 flex items-center justify-center">
                                       <CheckCircle2 className="h-3 w-3 text-white" />
                                     </div>
                                   )}
@@ -1457,7 +1487,7 @@ export function GenerateWorkbenchView({
                             })}
                           </div>
                           {selectedTemplate && (
-                            <p className="text-[10px] text-muted-foreground bg-violet-500/5 border border-violet-500/20 rounded p-1.5 leading-relaxed">
+                            <p className="text-[10px] text-muted-foreground bg-teal-500/5 border border-teal-500/20 rounded p-1.5 leading-relaxed">
                               {selectedTemplate.description}
                             </p>
                           )}
@@ -1473,7 +1503,7 @@ export function GenerateWorkbenchView({
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
                           <Label className="text-xs font-semibold flex items-center gap-1">
-                            <Sparkles className="h-3 w-3 text-violet-600" />
+                            <Sparkles className="h-3 w-3 text-teal-600" />
                             模板参数
                           </Label>
                           <span className="text-[10px] text-muted-foreground">
@@ -1484,7 +1514,7 @@ export function GenerateWorkbenchView({
                           {(selectedTemplate.variables ?? []).map((v) => (
                             <div key={v.key} className="space-y-1">
                               <Label className="text-[11px] flex items-center gap-1">
-                                <span className="font-mono text-violet-700 dark:text-violet-400">
+                                <span className="font-mono text-teal-700 dark:text-teal-400">
                                   {`{{${v.key}}}`}
                                 </span>
                                 <span className="text-muted-foreground">
@@ -1602,7 +1632,7 @@ export function GenerateWorkbenchView({
             <AccordionItem value="model" className="border-b-0 px-3">
               <AccordionTrigger className="hover:no-underline py-2.5 px-2 -mx-2 rounded-md data-[state=open]:bg-muted/30 hover:bg-muted/40 transition-colors [&[data-state=open]>svg]:-rotate-90">
                 <span className="flex items-center gap-2 text-xs font-semibold">
-                  <Sparkles className="h-3.5 w-3.5 text-violet-600" />
+                  <Sparkles className="h-3.5 w-3.5 text-teal-600" />
                   生图模型
                 </span>
                 <span className="flex items-center gap-1.5 ml-auto mr-2">
@@ -1631,7 +1661,7 @@ export function GenerateWorkbenchView({
                     ) : useTemplate && templateDefaultModel ? (
                       <Badge
                         variant="outline"
-                        className="text-[9px] py-0 h-4 bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/30"
+                        className="text-[9px] py-0 h-4 bg-teal-500/10 text-teal-700 dark:text-teal-400 border-teal-500/30"
                       >
                         模板默认
                       </Badge>
@@ -1642,7 +1672,7 @@ export function GenerateWorkbenchView({
                       <button
                         type="button"
                         onClick={handleRestoreTemplateModel}
-                        className="text-[10px] text-violet-600 hover:text-violet-700 dark:text-violet-400 flex items-center gap-1"
+                        className="text-[10px] text-teal-600 hover:text-teal-700 dark:text-teal-400 flex items-center gap-1"
                         title={`还原为「${selectedTemplate?.name}」模板默认`}
                       >
                         <RotateCcw className="h-3 w-3" />
@@ -1651,43 +1681,26 @@ export function GenerateWorkbenchView({
                     )}
                   </div>
 
-                  <div className="-mx-1 px-1 flex gap-1.5 overflow-x-auto pb-1 snap-x snap-mandatory">
-                    {IMAGE_MODEL_LIST.filter((m) => m.status === "active").map(
-                      (m) => {
-                        const selected = m.id === selectedModel;
-                        return (
-                          <button
-                            key={m.id}
-                            type="button"
-                            disabled={!m.isAvailable}
-                            onClick={() => setSelectedModel(m.id)}
-                            className={cn(
-                              "snap-start shrink-0 flex items-center gap-1.5 pl-1.5 pr-2.5 py-1.5 rounded-full border text-[11px] font-medium transition-all",
-                              selected
-                                ? "border-transparent text-white shadow-sm"
-                                : !m.isAvailable
-                                  ? "border-dashed border-muted-foreground/30 text-muted-foreground/60 cursor-not-allowed"
-                                  : "border-border bg-background hover:border-muted-foreground/40 hover:bg-muted/40"
-                            )}
-                            style={
-                              selected
-                                ? {
-                                    backgroundColor: m.color,
-                                    boxShadow: `0 2px 8px ${m.color}33`,
-                                  }
-                                : undefined
-                            }
-                            title={
-                              !m.isAvailable
-                                ? `${m.name} 即将上线`
-                                : `${m.name} · ${m.currency === "CNY" ? "¥" : "$"}${m.pricePerImage} · ${(m.avgDuration / 1000).toFixed(1)}s`
-                            }
-                          >
+                  <Select
+                    value={selectedModel}
+                    onValueChange={(v) => setSelectedModel(v as ImageModelId)}
+                  >
+                    <SelectTrigger className="h-9 text-xs">
+                      <SelectValue placeholder="选择模型" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {IMAGE_MODEL_LIST.filter(
+                        (m) => m.status === "active"
+                      ).map((m) => (
+                        <SelectItem
+                          key={m.id}
+                          value={m.id}
+                          disabled={!m.isAvailable}
+                          className="text-xs"
+                        >
+                          <span className="flex items-center gap-2">
                             <span
-                              className={cn(
-                                "h-2 w-2 rounded-full shrink-0",
-                                !selected && "ring-2 ring-background"
-                              )}
+                              className="h-2 w-2 rounded-full shrink-0"
                               style={{
                                 backgroundColor: m.isAvailable
                                   ? m.color
@@ -1699,15 +1712,19 @@ export function GenerateWorkbenchView({
                             />
                             <span>{m.name}</span>
                             {!m.isAvailable && (
-                              <span className="text-[9px] opacity-70">
+                              <span className="text-[10px] text-muted-foreground">
                                 即将上线
                               </span>
                             )}
-                          </button>
-                        );
-                      }
-                    )}
-                  </div>
+                            <span className="text-[10px] text-muted-foreground ml-auto">
+                              {m.currency === "CNY" ? "¥" : "$"}
+                              {m.pricePerImage}
+                            </span>
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
 
                   {isModelOverridden ? (
                     <p className="text-[10px] text-amber-700 dark:text-amber-400 bg-amber-500/5 border border-amber-500/20 rounded p-1.5 flex items-center gap-1">
@@ -1718,7 +1735,7 @@ export function GenerateWorkbenchView({
                       ）
                     </p>
                   ) : useTemplate && templateDefaultModel ? (
-                    <p className="text-[10px] text-violet-700 dark:text-violet-400 bg-violet-500/5 border border-violet-500/20 rounded p-1.5 flex items-center gap-1">
+                    <p className="text-[10px] text-teal-700 dark:text-teal-400 bg-teal-500/5 border border-teal-500/20 rounded p-1.5 flex items-center gap-1">
                       <Sparkles className="h-3 w-3 shrink-0" />
                       模板推荐「{modelConfig.name}」，可点击切换
                     </p>
@@ -1735,7 +1752,7 @@ export function GenerateWorkbenchView({
             <AccordionItem value="output" className="border-b-0 px-3">
               <AccordionTrigger className="hover:no-underline py-2.5 px-2 -mx-2 rounded-md data-[state=open]:bg-muted/30 hover:bg-muted/40 transition-colors [&[data-state=open]>svg]:-rotate-90">
                 <span className="flex items-center gap-2 text-xs font-semibold">
-                  <Settings2 className="h-3.5 w-3.5 text-violet-600" />
+                  <Settings2 className="h-3.5 w-3.5 text-teal-600" />
                   输出参数
                 </span>
                 <span className="flex items-center gap-1.5 ml-auto mr-2">
@@ -1782,7 +1799,7 @@ export function GenerateWorkbenchView({
                             className={cn(
                               "flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border-2 transition-all",
                               selected
-                                ? "border-violet-500 bg-violet-500/10 text-violet-700 dark:text-violet-400 shadow-sm"
+                                ? "border-teal-500 bg-teal-500/10 text-teal-700 dark:text-teal-400 shadow-sm"
                                 : "border-transparent bg-muted/30 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
                             )}
                           >
@@ -1802,7 +1819,7 @@ export function GenerateWorkbenchView({
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <Label className="text-xs font-semibold">生成数量</Label>
-                      <span className="text-xs font-mono text-violet-600">
+                      <span className="text-xs font-mono text-teal-600">
                         {batchSize} 张
                       </span>
                     </div>
@@ -1820,7 +1837,7 @@ export function GenerateWorkbenchView({
                           tplCandidateCount === 4 || tplCandidateCount === 9
                         );
                       })()}
-                      className="w-full accent-violet-500 disabled:opacity-50"
+                      className="w-full accent-teal-500 disabled:opacity-50"
                     />
                     <div className="flex justify-between text-[9px] text-muted-foreground">
                       <span>1</span>
@@ -1832,7 +1849,7 @@ export function GenerateWorkbenchView({
                         : 1;
                       if (tplCandidateCount === 4 || tplCandidateCount === 9) {
                         return (
-                          <p className="text-[10px] text-violet-700 dark:text-violet-400 bg-violet-500/5 border border-violet-500/20 rounded p-1.5 mt-1">
+                          <p className="text-[10px] text-teal-700 dark:text-teal-400 bg-teal-500/5 border border-teal-500/20 rounded p-1.5 mt-1">
                             当前模板为
                             {tplCandidateCount === 4 ? "2×2" : "3×3"}
                             宫格拼接，将返回 1
@@ -1851,7 +1868,7 @@ export function GenerateWorkbenchView({
             <AccordionItem value="advanced" className="border-b-0 px-3">
               <AccordionTrigger className="hover:no-underline py-2.5 px-2 -mx-2 rounded-md data-[state=open]:bg-muted/30 hover:bg-muted/40 transition-colors [&[data-state=open]>svg]:-rotate-90">
                 <span className="flex items-center gap-2 text-xs font-semibold">
-                  <Settings2 className="h-3.5 w-3.5 text-violet-600" />
+                  <Settings2 className="h-3.5 w-3.5 text-teal-600" />
                   高级参数
                 </span>
                 <span className="flex items-center gap-1.5 ml-auto mr-2">
@@ -1887,7 +1904,7 @@ export function GenerateWorkbenchView({
                         onChange={(e) =>
                           setGuidanceScale(Number(e.target.value))
                         }
-                        className="w-full accent-violet-500"
+                        className="w-full accent-teal-500"
                       />
                     </div>
                   )}
@@ -1906,7 +1923,7 @@ export function GenerateWorkbenchView({
                         max={modelConfig.capabilities.maxInferenceSteps}
                         value={steps}
                         onChange={(e) => setSteps(Number(e.target.value))}
-                        className="w-full accent-violet-500"
+                        className="w-full accent-teal-500"
                       />
                     </div>
                   )}
@@ -1970,7 +1987,7 @@ export function GenerateWorkbenchView({
                   (uploadedImage.uploading !== null ||
                     !uploadedImage.publicUrl))
               }
-              className="w-full bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700"
+              className="w-full bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700"
             >
               {generating ? (
                 <>
@@ -2006,7 +2023,7 @@ export function GenerateWorkbenchView({
         <main className="flex-1 flex flex-col bg-card border rounded-lg overflow-hidden min-w-0">
           <div className="px-4 py-2.5 border-b bg-muted/30 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-violet-600" />
+              <Sparkles className="h-4 w-4 text-teal-600" />
               <h2 className="text-sm font-bold">生成结果</h2>
               {selectedEffect && (
                 <Badge variant="outline" className="text-[10px] font-mono">
@@ -2024,6 +2041,32 @@ export function GenerateWorkbenchView({
 
           <div className="flex-1 overflow-y-auto p-4">
             {selectedEffect ? (
+              selectedEffect.status === "draft" ? (
+                /* 新会话草稿：还没生成过，仅给一个简短的开始提示 + 当前模型 */
+                <div className="h-full flex flex-col items-center justify-center text-center px-6 relative overflow-hidden">
+                  <div className="absolute inset-0 flex items-center justify-center opacity-50 pointer-events-none">
+                    <div className="h-72 w-72 rounded-full bg-gradient-to-br from-teal-500/15 via-emerald-500/15 to-sky-500/15 blur-3xl" />
+                  </div>
+                  <div className="relative flex flex-col items-center gap-4">
+                    <div className="h-24 w-24 rounded-3xl bg-gradient-to-br from-teal-500 to-emerald-600 flex items-center justify-center shadow-2xl shadow-teal-500/20">
+                      <Plus className="h-12 w-12 text-white" />
+                    </div>
+                    <div className="space-y-2">
+                      <h3 className="text-xl font-bold">新会话</h3>
+                      <p className="text-sm text-muted-foreground max-w-sm leading-relaxed">
+                        在左侧配置参数，然后点击「生成」按钮开始创作
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                      <span
+                        className="h-1.5 w-1.5 rounded-full"
+                        style={{ backgroundColor: modelConfig.color }}
+                      />
+                      当前模型：{modelConfig.name}
+                    </div>
+                  </div>
+                </div>
+              ) : (
               <div className="space-y-4">
                 {/* 状态栏 —— Lovart 风：单个统一 pill + 右上角刷新 */}
                 <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -2120,7 +2163,7 @@ export function GenerateWorkbenchView({
                   <div className="space-y-2">
                     {/* 宫格拼接模式提示：服务端返的是 1 张 2×2/3×3 大图，不是多张独立图 */}
                     {selectedEffect.isGridComposite && (
-                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-violet-500/5 border border-violet-500/20 text-[11px] text-violet-700 dark:text-violet-400">
+                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-teal-500/5 border border-teal-500/20 text-[11px] text-teal-700 dark:text-teal-400">
                         <Sparkles className="h-3 w-3 shrink-0" />
                         <span>
                           {(() => {
@@ -2152,7 +2195,7 @@ export function GenerateWorkbenchView({
                           <div
                             // biome-ignore lint/suspicious/noArrayIndexKey: 结果图按生成顺序展示
                             key={i}
-                            className="group relative rounded-xl overflow-hidden border-2 border-transparent hover:border-violet-500/40 bg-muted transition-colors duration-200"
+                            className="group relative rounded-xl overflow-hidden border-2 border-transparent hover:border-teal-500/40 bg-muted transition-colors duration-200"
                             style={{ aspectRatio: `${tileW} / ${tileH}` }}
                           >
                             {/* biome-ignore lint/performance/noImgElement: 生成结果用原生 img 性能更佳 */}
@@ -2283,14 +2326,14 @@ export function GenerateWorkbenchView({
                     </div>
                   </div>
                 ) : selectedEffect.status === "processing" ? (
-                  <div className="aspect-video rounded-2xl border-2 border-dashed border-violet-500/30 bg-gradient-to-br from-violet-500/5 via-sky-500/5 to-purple-500/5 flex flex-col items-center justify-center gap-4 overflow-hidden relative">
+                  <div className="aspect-video rounded-2xl border-2 border-dashed border-teal-500/30 bg-gradient-to-br from-teal-500/5 via-sky-500/5 to-teal-500/5 flex flex-col items-center justify-center gap-4 overflow-hidden relative">
                     {/* 背景的扩散光晕 —— Lovart 风的"还在动"暗示 */}
                     <div className="absolute inset-0 flex items-center justify-center opacity-30 pointer-events-none">
-                      <div className="h-32 w-32 rounded-full bg-violet-500/30 blur-3xl animate-pulse" />
+                      <div className="h-32 w-32 rounded-full bg-teal-500/30 blur-3xl animate-pulse" />
                     </div>
                     <div className="relative flex flex-col items-center gap-4">
                       <div className="relative h-16 w-16 rounded-full bg-background shadow-lg flex items-center justify-center">
-                        <Loader2 className="h-7 w-7 text-violet-600 animate-spin" />
+                        <Loader2 className="h-7 w-7 text-teal-600 animate-spin" />
                       </div>
                       {selectedEffect.taskId ? (
                         <div className="space-y-1 text-center">
@@ -2313,8 +2356,8 @@ export function GenerateWorkbenchView({
                         </div>
                       )}
                       {/* 进度 chip：让用户感知"还在动" */}
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-500/10 border border-violet-500/20 px-2.5 py-1 text-[10px] font-medium text-violet-700 dark:text-violet-400">
-                        <span className="h-1.5 w-1.5 rounded-full bg-violet-500 animate-pulse" />
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-teal-500/10 border border-teal-500/20 px-2.5 py-1 text-[10px] font-medium text-teal-700 dark:text-teal-400">
+                        <span className="h-1.5 w-1.5 rounded-full bg-teal-500 animate-pulse" />
                         实时同步中
                       </span>
                     </div>
@@ -2358,14 +2401,15 @@ export function GenerateWorkbenchView({
                   </div>
                 )}
               </div>
+              )
             ) : (
               <div className="h-full flex flex-col items-center justify-center text-center px-6 relative overflow-hidden">
                 {/* Lovart 风：背景渐变光晕 + 居中大图标 */}
                 <div className="absolute inset-0 flex items-center justify-center opacity-50 pointer-events-none">
-                  <div className="h-72 w-72 rounded-full bg-gradient-to-br from-violet-500/15 via-purple-500/15 to-sky-500/15 blur-3xl" />
+                  <div className="h-72 w-72 rounded-full bg-gradient-to-br from-teal-500/15 via-teal-500/15 to-sky-500/15 blur-3xl" />
                 </div>
                 <div className="relative flex flex-col items-center gap-4">
-                  <div className="h-24 w-24 rounded-3xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-2xl shadow-violet-500/20">
+                  <div className="h-24 w-24 rounded-3xl bg-gradient-to-br from-teal-500 to-teal-600 flex items-center justify-center shadow-2xl shadow-teal-500/20">
                     <Sparkles className="h-12 w-12 text-white" />
                   </div>
                   <div className="space-y-2">
@@ -2412,7 +2456,17 @@ export function GenerateWorkbenchView({
                   </Badge>
                 </div>
                 <div className="flex gap-2 overflow-x-auto pb-1 flex-1">
-                  {history.slice(0, 20).map((eff) => {
+                  {/* 「+」新建会话 tile —— 始终排在最前，让用户随时开新对话 */}
+                  <button
+                    type="button"
+                    onClick={handleNewSession}
+                    className="relative h-14 w-14 rounded-xl border-2 border-dashed border-muted-foreground/30 bg-muted/30 hover:bg-muted/60 hover:border-teal-500/60 shrink-0 flex items-center justify-center transition-all duration-200 hover:scale-105 group"
+                    title="新建会话"
+                    aria-label="新建会话"
+                  >
+                    <Plus className="h-5 w-5 text-muted-foreground group-hover:text-teal-600 transition-colors" />
+                  </button>
+                  {history.slice(0, 19).map((eff) => {
                     const Icon = STATUS_CONFIG[eff.status].icon;
                     const isSelected =
                       selectedEffect?.effectId === eff.effectId;
@@ -2424,7 +2478,7 @@ export function GenerateWorkbenchView({
                         className={cn(
                           "relative h-14 w-14 rounded-xl overflow-hidden shrink-0 transition-all duration-200",
                           isSelected
-                            ? "ring-2 ring-violet-500 ring-offset-2 ring-offset-background shadow-md scale-105"
+                            ? "ring-2 ring-teal-500 ring-offset-2 ring-offset-background shadow-md scale-105"
                             : "ring-1 ring-border hover:ring-muted-foreground/40 hover:scale-105"
                         )}
                       >
@@ -2454,7 +2508,8 @@ export function GenerateWorkbenchView({
                               eff.status === "processing" &&
                                 "bg-sky-500 animate-pulse",
                               eff.status === "failed" && "bg-rose-500",
-                              eff.status === "pending" && "bg-amber-500"
+                              eff.status === "pending" && "bg-amber-500",
+                              eff.status === "draft" && "bg-teal-500"
                             )}
                             title={STATUS_CONFIG[eff.status].label}
                           />

@@ -679,60 +679,73 @@ export const gptImage2Adapter: ImageModelAdapter = {
     }
 
     const size = req.size === "auto" ? "1024x1024" : req.size;
+    // batchSize > 1：wellapi 一次只返 1 张，需要循环调 batchSize 次收集多张候选。
+    // 每张独立走 submitLingtingTask（含 R2 下载 + multipart 上传），并行触发避免
+    // 串行等待；任一张抛错就让整批失败（与 gpt-image submitGeneration 的语义一致）。
+    const batchSize = Math.min(req.batchSize ?? 1, 4);
 
-    // per-image retry：Lingting 偶发 cold start 120s 撞线，单次失败多半是
-    // 上游瞬时排队拥堵，等 2s 再试一次大概率过（与 gpt-image submitGeneration 同策略）。
-    const MAX_SUBMIT_ATTEMPTS = 2;
-    const SUBMIT_RETRY_DELAY_MS = 2_000;
-    let lastError: string | null = null;
+    const tasks = await Promise.allSettled(
+      Array.from({ length: batchSize }, (_, i) =>
+        submitLingtingTask("_wbl", req.imageUrl!, req.prompt, size, i)
+      )
+    );
 
-    for (let attempt = 1; attempt <= MAX_SUBMIT_ATTEMPTS; attempt++) {
-      try {
-        // 复用 gpt-image 的提交流程：下载 imageUrl → multipart 上传 →
-        // 拿 R2 持久化 url 或 task_id。b64_json 路径在 submitLingtingTask
-        // 内部已经走 persistBase64ToR2，调用方拿到的永远是 R2 永久 URL。
-        const submit = await submitLingtingTask(
-          "_wbl",
-          req.imageUrl,
-          req.prompt,
-          size,
-          0
-        );
+    // 任一失败 → 整批 failed（避免部分成功导致 UI 显示不全）
+    const failures = tasks
+      .map((t, i) => ({ t, i }))
+      .filter((x) => x.t.status === "rejected");
+    if (failures.length > 0) {
+      const msgs = failures
+        .map((x) =>
+          x.t.status === "rejected" ? (x.t.reason?.message ?? "未知错误") : ""
+        )
+        .join("；");
+      return {
+        success: false,
+        model: "gpt_image_2",
+        status: "failed",
+        error: `第 ${failures.map((x) => x.i + 1).join("/")} 张失败：${msgs}`,
+      };
+    }
 
-        if (submit.kind === "url") {
-          // sync 路径：submitLingtingTask 内部已落 R2（url 或 b64 两路），
-          // 这里直接用拿到的 urls。多图时 workbench 期望单图结果（image-gen
-          // 用 prompt 后缀做宫格，不靠多张独立候选），取 urls[0]。
-          return {
-            success: true,
-            model: "gpt_image_2",
-            status: "completed",
-            images: [{ url: submit.urls[0] ?? "" }],
-            cost: 0.04,
-            currency: "USD",
-          };
-        }
-        // 提交失败兜底：旧版本会在这里 try/persistCandidateToR2 二次保底
-        // —— 现在 submitLingtingTask 已内部持久化，去掉冗余 catch。
-        // task 路径交给前端轮询
+    // 全部成功：收集所有 url（已落 R2 永久 URL）。
+    // submitLingtingTask 可能返 sync {kind:"url"} 或 async {kind:"task"}，
+    // batchSize>1 时任一是 task 形态就走混合流程——这里只把 url 形态的
+    // 收集成 images 立即返回，task 形态目前不接受（workbench UI 也不
+    // 支持多 taskId 聚合），单 task 兜底返第一张。
+    const urls: string[] = [];
+    for (const t of tasks) {
+      if (t.status === "fulfilled" && t.value.kind === "url") {
+        urls.push(...t.value.urls);
+      }
+    }
+    if (urls.length === 0) {
+      // 全部是 async task（少见）：拿第一个 taskId 走原有轮询路径，
+      // imageJob.resultUrls 暂时是空，等 queryTask 拿 url 后填。
+      const firstTask = tasks.find(
+        (t) => t.status === "fulfilled" && t.value.kind === "task"
+      );
+      if (
+        firstTask &&
+        firstTask.status === "fulfilled" &&
+        firstTask.value.kind === "task"
+      ) {
         return {
           success: true,
           model: "gpt_image_2",
-          taskId: submit.taskId,
+          taskId: firstTask.value.taskId,
           status: "processing",
         };
-      } catch (error) {
-        lastError = error instanceof Error ? error.message : "未知错误";
-        if (attempt < MAX_SUBMIT_ATTEMPTS) {
-          await new Promise((r) => setTimeout(r, SUBMIT_RETRY_DELAY_MS));
-        }
       }
     }
+
     return {
-      success: false,
+      success: true,
       model: "gpt_image_2",
-      status: "failed",
-      error: lastError ?? "提交失败",
+      status: "completed",
+      images: urls.map((u) => ({ url: u })),
+      cost: 0.04 * batchSize,
+      currency: "USD",
     };
   },
   /**
