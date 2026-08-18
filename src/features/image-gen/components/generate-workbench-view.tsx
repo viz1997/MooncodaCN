@@ -79,6 +79,18 @@ import { cn } from "@/lib/utils";
 interface UploadedImage {
   file: File;
   previewUrl: string;
+  /**
+   * R2 公共域 URL：把 blob 上传到 R2 后服务端可访问的 URL。
+   * handleGenerate 时作为 imageUrl 传给服务端 —— 直接用 blob URL 会让
+   * 服务端 fetch 拿到 ENOENT（blob 只存在于创建它的浏览器）。
+   * null 表示仍在上传/上传失败。
+   */
+  publicUrl: string | null;
+  /**
+   * 上传进度（0-1）：仅作 UI 反馈，0.5 半透明蒙层即可，不展开进度条。
+   * null 表示不在上传中。
+   */
+  uploading: number | null;
   fileName: string;
   fileSize: number;
 }
@@ -231,6 +243,59 @@ async function pollImageJob(jobId: string): Promise<ImageJob | null> {
     throw new Error(body.error ?? `HTTP ${res.status}`);
   }
   return body.data?.job ?? null;
+}
+
+/**
+ * 把用户上传的图片走 R2 预签名直传，返回可在服务端 fetch 的 publicUrl。
+ *
+ * 流程（与 gpt-image /p/[token] 的 use-order-actions presignOne + putToR2 同形态）：
+ *   1. POST /api/image/upload 拿 { uploadUrl, publicUrl }
+ *   2. PUT 文件到 uploadUrl（直传 R2，不经过我们的 server）
+ *   3. 返 publicUrl
+ *
+ * 为什么不能直接把 blob URL 传给服务端：blob URL 只存在于创建它的浏览器，
+ * 服务端 fetch 会拿到 ENOENT —— 之前生产事故「下载原图失败（1）：fetch failed」
+ * 就是这个原因（2026-08-18）。
+ */
+async function uploadFileToR2(file: File): Promise<string> {
+  // 1) 拿预签名
+  const presignRes = await fetch("/api/image/upload", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contentType: file.type,
+      size: file.size,
+      ext: file.name.split(".").pop()?.toLowerCase(),
+    }),
+  });
+  if (!presignRes.ok) {
+    throw new Error(`获取上传地址失败：HTTP ${presignRes.status}`);
+  }
+  const presignJson = (await presignRes.json()) as {
+    success: boolean;
+    uploadUrl?: string;
+    publicUrl?: string;
+    error?: string;
+  };
+  if (
+    !presignJson.success ||
+    !presignJson.uploadUrl ||
+    !presignJson.publicUrl
+  ) {
+    throw new Error(presignJson.error ?? "获取上传地址失败");
+  }
+
+  // 2) PUT 到 R2（直传，不经过我们 server）
+  const putRes = await fetch(presignJson.uploadUrl, {
+    method: "PUT",
+    headers: { "Content-Type": file.type },
+    body: file,
+  });
+  if (!putRes.ok) {
+    throw new Error(`上传到存储失败：HTTP ${putRes.status}`);
+  }
+
+  return presignJson.publicUrl;
 }
 
 interface GenerateWorkbenchViewProps {
@@ -432,12 +497,41 @@ export function GenerateWorkbenchView({
       return;
     }
     const previewUrl = URL.createObjectURL(file);
+    // uploading=null 表示「上传中或未上传」；publicUrl=null 表示没有可用的
+    // 服务端 URL。handleGenerate 看到这两个都是 null 就拒绝提交，避免把
+    // blob URL 当成 imageUrl 传给服务端踩 ENOENT 坑。
     setUploadedImage({
       file,
       previewUrl,
+      publicUrl: null,
+      uploading: 0,
       fileName: file.name,
       fileSize: file.size,
     });
+
+    // 异步上传到 R2 —— 拿到 publicUrl 才能让 submitLingtingTask 在服务端 fetch。
+    // 失败时 publicUrl 保持 null，handleGenerate 会拒绝提交并 toast 报错。
+    void uploadFileToR2(file)
+      .then((publicUrl) => {
+        setUploadedImage((prev) =>
+          prev && prev.file === file
+            ? { ...prev, publicUrl, uploading: null }
+            : prev
+        );
+        if (!publicUrl) {
+          toast.error("参考图上传失败，请重试");
+        }
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn("[workbench] upload to R2 failed:", err);
+        setUploadedImage((prev) =>
+          prev && prev.file === file
+            ? { ...prev, uploading: null }
+            : prev
+        );
+        toast.error(err instanceof Error ? err.message : "上传失败");
+      });
   };
 
   const handleRemoveUpload = () => {
@@ -655,21 +749,50 @@ export function GenerateWorkbenchView({
       return;
     }
 
-    const refImage =
+    // refImage 三种形态：abort 标记 / 上传模式（无 photoId） / 图库模式（有 photoId）
+    type RefImage =
+      | { __abort: string }
+      | { imageUrl: string }
+      | { imageUrl: string; photoId: string }
+      | null;
+
+    const refImage: RefImage =
       refMode === "upload" && uploadedImage
-        ? {
-            // 上传模式：图片走 blob: URL 即可，不写 photoId —— 否则 DB FK
-            // 会拒绝（image_job.photo_id 是 photo.id 的外键）。imageUrl
-            // 自身已携带渲染所需信息。
-            imageUrl: uploadedImage.previewUrl,
-          }
+        ? (() => {
+            // 上传模式：必须用 R2 publicUrl（服务端可 fetch），blob URL 仅供
+            // 本地预览。如果还在上传或上传失败，用一个标记值让外层 abort。
+            if (uploadedImage.uploading !== null) {
+              return { __abort: "参考图还在上传中，请稍候" };
+            }
+            if (!uploadedImage.publicUrl) {
+              return { __abort: "参考图上传失败，请重新选择" };
+            }
+            return {
+              // publicUrl 是 R2 公共域 URL（持久、可服务端 fetch）。
+              // photoId 不写 —— image_job.photo_id 是 photo.id 外键，本地上传
+              // 没经过 createPhotoAction，没有对应 photo 行；createImageJob
+              // 内部还有一道 UUID 正则兜底把非 UUID 字符串过滤成 null。
+              imageUrl: uploadedImage.publicUrl,
+            };
+          })()
         : refMode === "library" && selectedPhoto
           ? {
               imageUrl: selectedPhoto.fileUrl,
               photoId: selectedPhoto.id,
             }
           : null;
-    const generationMode: "text_to_image" | "image_to_image" = refImage
+
+    // 上传模式 abort 路径：IIFE 返的 __abort 标记
+    if (refImage && "__abort" in refImage) {
+      toast.error(refImage.__abort);
+      return;
+    }
+    // 窄化为正常 refImage 形态（去掉 __abort 分支）
+    const safeRefImage: { imageUrl: string; photoId?: string } | null =
+      refImage && !("__abort" in refImage)
+        ? (refImage as { imageUrl: string; photoId?: string })
+        : null;
+    const generationMode: "text_to_image" | "image_to_image" = safeRefImage
       ? "image_to_image"
       : "text_to_image";
 
@@ -711,7 +834,7 @@ export function GenerateWorkbenchView({
         mode: generationMode,
         prompt: finalPrompt,
         negativePrompt: negativePrompt || undefined,
-        imageUrl: refImage?.imageUrl,
+        imageUrl: safeRefImage?.imageUrl,
         size,
         batchSize: effectiveBatchSize,
         seed: seed === "" ? undefined : seed,
@@ -722,7 +845,7 @@ export function GenerateWorkbenchView({
           modelConfig.capabilities.maxInferenceSteps > 0 ? steps : undefined,
         enableSafetyCheck: safetyCheck,
         maskId: selectedMask || undefined,
-        photoId: refImage?.photoId,
+        photoId: safeRefImage?.photoId,
       });
 
       // safe-action 错误结果处理（与 src/features/support/components/
@@ -839,8 +962,16 @@ export function GenerateWorkbenchView({
                   <img
                     src={uploadedImage.previewUrl}
                     alt={uploadedImage.fileName}
-                    className="w-full aspect-square object-cover rounded-lg border"
+                    className={cn(
+                      "w-full aspect-square object-cover rounded-lg border",
+                      uploadedImage.uploading !== null && "opacity-60"
+                    )}
                   />
+                  {uploadedImage.uploading !== null && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded-lg">
+                      <Loader2 className="h-5 w-5 text-white animate-spin" />
+                    </div>
+                  )}
                   <button
                     type="button"
                     onClick={handleRemoveUpload}
@@ -852,6 +983,7 @@ export function GenerateWorkbenchView({
                   <div className="absolute bottom-2 left-2 right-2 bg-black/60 text-white text-[10px] px-2 py-1 rounded truncate">
                     {uploadedImage.fileName} ·{" "}
                     {(uploadedImage.fileSize / 1024).toFixed(1)}KB
+                    {uploadedImage.uploading !== null && " · 上传中…"}
                   </div>
                 </div>
               ) : (
@@ -1552,13 +1684,26 @@ export function GenerateWorkbenchView({
         <div className="p-3 border-t bg-muted/30 space-y-2">
           <Button
             onClick={handleGenerate}
-            disabled={generating}
+            disabled={
+              generating ||
+              // 上传模式 + 还在上传/上传失败：禁用按钮，避免把 blob URL 提交给服务端
+              (refMode === "upload" &&
+                uploadedImage !== null &&
+                (uploadedImage.uploading !== null || !uploadedImage.publicUrl))
+            }
             className="w-full bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700"
           >
             {generating ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 生成中...
+              </>
+            ) : refMode === "upload" &&
+              uploadedImage !== null &&
+              uploadedImage.uploading !== null ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                上传参考图中…
               </>
             ) : (
               <>
