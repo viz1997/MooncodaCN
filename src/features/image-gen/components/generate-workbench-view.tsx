@@ -81,6 +81,7 @@ import {
   IMAGE_MODEL_LIST,
   IMAGE_MODELS,
 } from "@/features/image-gen/lib/image-models/types";
+import { ExternalImageGenCard } from "@/features/image-gen/components/external-image-gen-card";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
@@ -2043,6 +2044,10 @@ export function GenerateWorkbenchView({
               )}
             </div>
             <div className="flex items-center gap-1">
+              {/* 外部生图入口：放在结果区头部 action 区，hover 弹 Popover 显示
+               * 完整链接 / 复制按钮。不再横在页面顶部 —— 它是边缘功能，
+               * 不该跟工作台主功能抢纵向空间。 */}
+              <ExternalImageGenCard />
               <Button
                 size="sm"
                 variant="outline"
