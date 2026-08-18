@@ -501,7 +501,9 @@ export const IMAGE_MODELS: Record<ImageModelId, ImageModelConfig> = {
       // 会被 wellapi 返 500（实测）。文生图需求请选 nano_banana2 / dalle3。
       modes: ["image_to_image", "image_editing", "inpainting"],
       sizes: ["1024x1024", "1024x1536", "1536x1024", "auto"],
-      maxBatchSize: 4,
+      // 2026-08-18：用户希望工作台支持一次最多 10 张（适配器 + wellapi
+      // 异步任务链路可承载，循环 submitLingtingTask N 次不会破幂等）。
+      maxBatchSize: 10,
       supportsNegativePrompt: false,
       supportsSeed: false,
       supportsGuidance: false,

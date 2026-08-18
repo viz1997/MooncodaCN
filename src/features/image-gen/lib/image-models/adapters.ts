@@ -663,7 +663,7 @@ export const gptImage2Adapter: ImageModelAdapter = {
       return "图生图模式需要 imageUrl";
     if (req.mode === "inpainting" && !req.maskUrl)
       return "局部重绘需要 maskUrl";
-    if (req.batchSize && req.batchSize > 4) return "GPT-Image-2 单次最多 4 张";
+    if (req.batchSize && req.batchSize > 10) return "GPT-Image-2 单次最多 10 张";
     if (req.negativePrompt) return "GPT-Image-2 不支持反向提示词";
     if (!GEMINI_CONFIG.apiKey) return "LINGTING_API_KEY 未配置";
     return null;
@@ -682,7 +682,8 @@ export const gptImage2Adapter: ImageModelAdapter = {
     // batchSize > 1：wellapi 一次只返 1 张，需要循环调 batchSize 次收集多张候选。
     // 每张独立走 submitLingtingTask（含 R2 下载 + multipart 上传），并行触发避免
     // 串行等待；任一张抛错就让整批失败（与 gpt-image submitGeneration 的语义一致）。
-    const batchSize = Math.min(req.batchSize ?? 1, 4);
+    // 2026-08-18：上限从 4 提到 10，与 IMAGE_MODELS.gpt_image_2.maxBatchSize 保持一致。
+    const batchSize = Math.min(req.batchSize ?? 1, 10);
 
     const tasks = await Promise.allSettled(
       Array.from({ length: batchSize }, (_, i) =>

@@ -23,6 +23,7 @@ import {
   Library,
   Loader2,
   Maximize2,
+  Minus,
   Plus,
   RectangleHorizontal,
   RectangleVertical,
@@ -430,7 +431,10 @@ export function GenerateWorkbenchView({
   );
 
   // 参考图模式 + 数据
-  const [refMode, setRefMode] = useState<RefMode>("none");
+  // 2026-08-18：默认从 "none" 改为 "upload"。
+  // 原因：默认模型 gpt_image_2 只支持图生图（无 imageUrl 会直接失败），
+  // 默认进入上传区更顺手，也避免再点一次 toggle。
+  const [refMode, setRefMode] = useState<RefMode>("upload");
   const [uploadedImage, setUploadedImage] = useState<UploadedImage | null>(
     null
   );
@@ -487,6 +491,20 @@ export function GenerateWorkbenchView({
   } | null>(null);
   // 每张结果图的下载/分享去抖锁：避免 hover 按钮连点导致重复 fetch
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  /**
+   * 时间轴选中索引：决定大图预览区显示哪张。
+   * 切会话时重置（避免上个会话选到 #5，新会话只有 2 张却还指向 #5）。
+   * 钳到 resultUrls.length-1 而非 0：用户之前可能选了 #3，新会话生成后
+   * 想立刻看新结果而不是默认回 #1（per-step-all-done 已记录此偏好）。
+   */
+  const [previewIdx, setPreviewIdx] = useState(0);
+  useEffect(() => {
+    setPreviewIdx((idx) => {
+      const len = selectedEffect?.resultUrls.length ?? 0;
+      if (len === 0) return 0;
+      return Math.min(idx, len - 1);
+    });
+  }, [selectedEffect?.effectId, selectedEffect?.resultUrls.length]);
   const modelConfig = IMAGE_MODELS[selectedModel];
   const selectedTemplate = activeTemplates.find((t) => t.id === selectedMask);
   /**
@@ -1601,41 +1619,54 @@ export function GenerateWorkbenchView({
                     </div>
                   </div>
 
-                  {/* 数量 slider */}
+                  {/* 数量 stepper（Lovart/GPT 风：- 数字 +） */}
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] text-muted-foreground shrink-0">
                       数量
                     </span>
-                    <input
-                      type="range"
-                      min={1}
-                      max={modelConfig.capabilities.maxBatchSize}
-                      value={batchSize}
-                      onChange={(e) => setBatchSize(Number(e.target.value))}
-                      disabled={(() => {
-                        const tplCandidateCount = useTemplate
-                          ? (selectedTemplate?.candidateCount ?? 1)
-                          : 1;
-                        return (
-                          tplCandidateCount === 4 || tplCandidateCount === 9
-                        );
-                      })()}
-                      className="flex-1 accent-primary disabled:opacity-50 h-1"
-                    />
-                    <span className="text-xs font-mono text-primary w-8 text-right">
-                      {(() => {
-                        const tplCandidateCount = useTemplate
-                          ? (selectedTemplate?.candidateCount ?? 1)
-                          : 1;
-                        if (
-                          tplCandidateCount === 4 ||
-                          tplCandidateCount === 9
-                        ) {
-                          return "1";
-                        }
-                        return batchSize;
-                      })()}
-                    </span>
+                    {(() => {
+                      const tplCandidateCount = useTemplate
+                        ? (selectedTemplate?.candidateCount ?? 1)
+                        : 1;
+                      const isLocked =
+                        tplCandidateCount === 4 || tplCandidateCount === 9;
+                      const max = modelConfig.capabilities.maxBatchSize;
+                      const display = isLocked ? 1 : batchSize;
+                      return (
+                        <>
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="outline"
+                            className="h-7 w-7"
+                            disabled={isLocked || display <= 1}
+                            onClick={() => setBatchSize(Math.max(1, display - 1))}
+                            aria-label="减少数量"
+                          >
+                            <Minus className="h-3 w-3" />
+                          </Button>
+                          <span className="text-sm font-mono w-8 text-center tabular-nums">
+                            {display}
+                          </span>
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="outline"
+                            className="h-7 w-7"
+                            disabled={isLocked || display >= max}
+                            onClick={() =>
+                              setBatchSize(Math.min(max, display + 1))
+                            }
+                            aria-label="增加数量"
+                          >
+                            <Plus className="h-3 w-3" />
+                          </Button>
+                          <span className="text-[10px] text-muted-foreground ml-auto">
+                            {isLocked ? "宫格拼接已锁定" : `最多 ${max} 张`}
+                          </span>
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
               </AccordionContent>
@@ -1933,174 +1964,203 @@ export function GenerateWorkbenchView({
                     )}
                 </div>
 
-                {/* 结果图片网格 */}
+                {/* 结果展示：时间轴小图 + 单大图预览（主流生图平台范式） */}
                 {selectedEffect.status === "completed" &&
-                selectedEffect.resultUrls.length > 0 ? (
-                  <div className="space-y-2">
-                    {/* 宫格拼接模式提示：服务端返的是 1 张 2×2/3×3 大图，不是多张独立图 */}
-                    {selectedEffect.isGridComposite && (
-                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary/5 border border-primary/20 text-[11px] text-primary">
-                        <Sparkles className="h-3 w-3 shrink-0" />
-                        <span>
-                          {(() => {
-                            const tplCandidateCount =
-                              selectedTemplate?.candidateCount ?? 1;
-                            const layout =
-                              tplCandidateCount === 4 ? "2×2" : "3×3";
-                            return `宫格拼接（${layout} · ${tplCandidateCount} 个候选已合成 1 张大图）`;
-                          })()}
-                        </span>
-                      </div>
-                    )}
-                    <div
-                      className={cn(
-                        "grid gap-3",
-                        // 1 张时全宽；2 张平分；≥3 张响应式
-                        selectedEffect.resultUrls.length === 1 &&
-                          !selectedEffect.isGridComposite
-                          ? "grid-cols-1"
-                          : selectedEffect.resultUrls.length === 2
-                            ? "grid-cols-2"
-                            : "grid-cols-2 md:grid-cols-3 lg:grid-cols-4"
-                      )}
-                    >
-                      {selectedEffect.resultUrls.map((url, i) => {
-                        // 用 size 状态算出实际宽高比，避免裁切非 1:1 输出
-                        const [tileW, tileH] = parseImageSize(size);
-                        return (
-                          <div
-                            // biome-ignore lint/suspicious/noArrayIndexKey: 结果图按生成顺序展示
-                            key={i}
-                            className="group relative rounded-xl overflow-hidden border-2 border-transparent hover:border-primary/40 bg-muted transition-colors duration-200"
-                            style={{ aspectRatio: `${tileW} / ${tileH}` }}
-                          >
-                            {/* biome-ignore lint/performance/noImgElement: 生成结果用原生 img 性能更佳 */}
-                            <img
-                              src={url}
-                              alt={`结果 ${i + 1}`}
-                              className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-[1.02]"
-                            />
-                            {/* Lovart 风格：底部渐变蒙层，hover 时滑入 */}
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
-                            {/* 左上角编号 chip：始终可见 */}
-                            <div className="absolute top-2 left-2 bg-black/55 backdrop-blur-sm text-white text-[10px] px-2 py-0.5 rounded-md font-mono tracking-tight">
-                              #{i + 1}
-                            </div>
-                            {/* 右上角快捷操作：hover 才显示，避免遮挡结果 */}
-                            <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200 translate-y-[-4px] group-hover:translate-y-0">
-                              <Button
-                                size="icon"
-                                variant="secondary"
-                                className="h-8 w-8 rounded-full bg-white/90 hover:bg-white text-foreground shadow-lg"
-                                disabled={
-                                  busyKey ===
-                                  `dl-${selectedEffect.effectId}-${i}`
+                selectedEffect.resultUrls.length > 0 &&
+                selectedEffect ? (
+                  (() => {
+                    const urls = selectedEffect.resultUrls;
+                    const safeIdx = Math.min(previewIdx, urls.length - 1);
+                    const previewUrl = urls[safeIdx]!;
+                    return (
+                      <div className="space-y-3">
+                        {/* 宫格拼接模式提示 */}
+                        {selectedEffect.isGridComposite && (
+                          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary/5 border border-primary/20 text-[11px] text-primary">
+                            <Sparkles className="h-3 w-3 shrink-0" />
+                            <span>
+                              {(() => {
+                                const tplCandidateCount =
+                                  selectedTemplate?.candidateCount ?? 1;
+                                const layout =
+                                  tplCandidateCount === 4 ? "2×2" : "3×3";
+                                return `宫格拼接（${layout} · ${tplCandidateCount} 个候选已合成 1 张大图）`;
+                              })()}
+                            </span>
+                          </div>
+                        )}
+
+                        {/* 单大图预览区 */}
+                        <div
+                          className="relative rounded-xl overflow-hidden bg-muted border"
+                          style={{
+                            aspectRatio: (() => {
+                              const [w, h] = parseImageSize(size);
+                              return `${w} / ${h}`;
+                            })(),
+                          }}
+                        >
+                          {/* biome-ignore lint/performance/noImgElement: 预览用原生 img */}
+                          <img
+                            src={previewUrl}
+                            alt={`结果 ${safeIdx + 1}`}
+                            className="w-full h-full object-contain"
+                          />
+                          {/* 编号 chip（左上） */}
+                          <div className="absolute top-3 left-3 bg-black/55 backdrop-blur-sm text-white text-[11px] px-2 py-1 rounded-md font-mono">
+                            #{safeIdx + 1} / {urls.length}
+                          </div>
+                          {/* 快捷操作（右上） */}
+                          <div className="absolute top-3 right-3 flex gap-1.5">
+                            <Button
+                              size="icon"
+                              variant="secondary"
+                              className="h-8 w-8 rounded-full bg-white/90 hover:bg-white text-foreground shadow-lg"
+                              disabled={
+                                busyKey ===
+                                `dl-${selectedEffect.effectId}-${safeIdx}`
+                              }
+                              onClick={async () => {
+                                const key = `dl-${selectedEffect.effectId}-${safeIdx}`;
+                                setBusyKey(key);
+                                try {
+                                  await downloadImage(
+                                    previewUrl,
+                                    buildDownloadFilename(
+                                      selectedEffect,
+                                      previewUrl,
+                                      safeIdx
+                                    )
+                                  );
+                                  toast.success("已下载");
+                                } catch (err) {
+                                  toast.error(
+                                    err instanceof Error
+                                      ? err.message
+                                      : "下载失败"
+                                  );
+                                } finally {
+                                  setBusyKey(null);
                                 }
-                                onClick={async () => {
-                                  const key = `dl-${selectedEffect.effectId}-${i}`;
-                                  setBusyKey(key);
-                                  try {
-                                    await downloadImage(
-                                      url,
-                                      buildDownloadFilename(
-                                        selectedEffect,
-                                        url,
-                                        i
-                                      )
+                              }}
+                              title="下载"
+                            >
+                              {busyKey ===
+                              `dl-${selectedEffect.effectId}-${safeIdx}` ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Download className="h-3.5 w-3.5" />
+                              )}
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="secondary"
+                              className="h-8 w-8 rounded-full bg-white/90 hover:bg-white text-foreground shadow-lg"
+                              onClick={() => toast.success("已收藏")}
+                              title="收藏"
+                            >
+                              <Heart className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="secondary"
+                              className="h-8 w-8 rounded-full bg-white/90 hover:bg-white text-foreground shadow-lg"
+                              disabled={
+                                busyKey ===
+                                `share-${selectedEffect.effectId}-${safeIdx}`
+                              }
+                              onClick={async () => {
+                                const key = `share-${selectedEffect.effectId}-${safeIdx}`;
+                                setBusyKey(key);
+                                try {
+                                  if (
+                                    !navigator.clipboard ||
+                                    !navigator.clipboard.writeText
+                                  ) {
+                                    throw new Error(
+                                      "当前浏览器不支持剪贴板 API"
                                     );
-                                    toast.success("已下载");
-                                  } catch (err) {
-                                    toast.error(
-                                      err instanceof Error
-                                        ? err.message
-                                        : "下载失败"
-                                    );
-                                  } finally {
-                                    setBusyKey(null);
                                   }
-                                }}
-                                title="下载"
-                              >
-                                {busyKey ===
-                                `dl-${selectedEffect.effectId}-${i}` ? (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                ) : (
-                                  <Download className="h-3.5 w-3.5" />
-                                )}
-                              </Button>
-                              <Button
-                                size="icon"
-                                variant="secondary"
-                                className="h-8 w-8 rounded-full bg-white/90 hover:bg-white text-foreground shadow-lg"
-                                onClick={() => toast.success("已收藏")}
-                                title="收藏"
-                              >
-                                <Heart className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button
-                                size="icon"
-                                variant="secondary"
-                                className="h-8 w-8 rounded-full bg-white/90 hover:bg-white text-foreground shadow-lg"
-                                disabled={
-                                  busyKey ===
-                                  `share-${selectedEffect.effectId}-${i}`
+                                  await navigator.clipboard.writeText(
+                                    previewUrl
+                                  );
+                                  toast.success("链接已复制");
+                                } catch (err) {
+                                  toast.error(
+                                    err instanceof Error
+                                      ? err.message
+                                      : "复制失败"
+                                  );
+                                } finally {
+                                  setBusyKey(null);
                                 }
-                                onClick={async () => {
-                                  const key = `share-${selectedEffect.effectId}-${i}`;
-                                  setBusyKey(key);
-                                  try {
-                                    if (
-                                      !navigator.clipboard ||
-                                      !navigator.clipboard.writeText
-                                    ) {
-                                      throw new Error(
-                                        "当前浏览器不支持剪贴板 API"
-                                      );
-                                    }
-                                    await navigator.clipboard.writeText(url);
-                                    toast.success("链接已复制");
-                                  } catch (err) {
-                                    toast.error(
-                                      err instanceof Error
-                                        ? err.message
-                                        : "复制失败"
-                                    );
-                                  } finally {
-                                    setBusyKey(null);
-                                  }
-                                }}
-                                title="复制链接"
-                              >
-                                {busyKey ===
-                                `share-${selectedEffect.effectId}-${i}` ? (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                ) : (
-                                  <Share2 className="h-3.5 w-3.5" />
-                                )}
-                              </Button>
-                            </div>
-                            {/* 底部居中：放大查看 pill —— 主要 CTA */}
-                            <button
-                              type="button"
+                              }}
+                              title="复制链接"
+                            >
+                              {busyKey ===
+                              `share-${selectedEffect.effectId}-${safeIdx}` ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Share2 className="h-3.5 w-3.5" />
+                              )}
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="secondary"
+                              className="h-8 w-8 rounded-full bg-white/90 hover:bg-white text-foreground shadow-lg"
                               onClick={() =>
                                 setLightbox({
-                                  url,
+                                  url: previewUrl,
                                   effectId: selectedEffect.effectId,
-                                  index: i,
+                                  index: safeIdx,
                                 })
                               }
-                              className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-3.5 h-9 rounded-full bg-white text-foreground text-xs font-medium shadow-xl opacity-0 group-hover:opacity-100 transition-all duration-200 translate-y-2 group-hover:translate-y-0 hover:bg-white/95 active:scale-95"
                               title="放大查看"
-                              aria-label={`放大查看第 ${i + 1} 张`}
                             >
                               <Maximize2 className="h-3.5 w-3.5" />
-                              查看大图
-                            </button>
+                            </Button>
                           </div>
-                        );
-                      })}
-                    </div>
-                  </div>
+                        </div>
+
+                        {/* 时间轴小图条 */}
+                        {urls.length > 1 && (
+                          <div className="flex gap-2 overflow-x-auto pb-1">
+                            {urls.map((url, i) => (
+                              <button
+                                // biome-ignore lint/suspicious/noArrayIndexKey: 时间轴按生成顺序展示
+                                key={i}
+                                type="button"
+                                onClick={() => setPreviewIdx(i)}
+                                className={cn(
+                                  "relative shrink-0 h-16 w-16 rounded-lg overflow-hidden border-2 transition-all",
+                                  i === safeIdx
+                                    ? "border-primary ring-2 ring-primary/30 shadow-md"
+                                    : "border-transparent hover:border-muted-foreground/40 opacity-70 hover:opacity-100"
+                                )}
+                                title={`第 ${i + 1} 张`}
+                              >
+                                {/* biome-ignore lint/performance/noImgElement: 时间轴缩略图 */}
+                                <img
+                                  src={url}
+                                  alt={`#${i + 1}`}
+                                  className="w-full h-full object-cover"
+                                  loading="lazy"
+                                />
+                                <div
+                                  className={cn(
+                                    "absolute bottom-0.5 left-0.5 bg-black/60 text-white text-[9px] px-1 rounded font-mono leading-tight",
+                                    i === safeIdx && "bg-primary"
+                                  )}
+                                >
+                                  {i + 1}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()
                 ) : selectedEffect.status === "processing" ? (
                   <div className="aspect-video rounded-2xl border-2 border-dashed border-primary/30 bg-gradient-to-br from-primary/10 via-primary/5 to-primary/10 flex flex-col items-center justify-center gap-4 overflow-hidden relative">
                     {/* 背景的扩散光晕 —— Lovart 风的"还在动"暗示 */}
