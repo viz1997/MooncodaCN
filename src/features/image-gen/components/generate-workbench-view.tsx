@@ -107,11 +107,34 @@ interface UploadedImage {
 type RefMode = "upload" | "library" | "none";
 type EffectStatus = "draft" | "pending" | "processing" | "completed" | "failed";
 
+interface WorkbenchSubmission {
+  /** 单次提交的本地 id（同一 effect 内唯一），key 用这个 */
+  submissionId: string;
+  /** 该次提交的 jobId（异步任务才存在；同步返图也填一个临时 id 用于诊断） */
+  jobId?: string;
+  taskId?: string;
+  /** 该次提交返的 url 列表（按模型顺序） */
+  resultUrls: string[];
+  status: EffectStatus;
+  createdAt: string;
+  /** failed 时填的错误信息 */
+  errorMsg?: string;
+  /** 是否为宫格拼接模式（candidateCount=4/9 一张大图） */
+  isGridComposite?: boolean;
+  /** 该次提交的 prompt（与 effect 主 prompt 可能不同 —— 用户连续微调时） */
+  prompt: string;
+}
+
 interface WorkbenchEffect {
   effectId: string;
   /**
    * imageJob 表 id（用于后续 pollImageJobAction 轮询异步任务）。
    * 同步任务（直接返 images）此字段为空；异步任务（taskId 路径）必填。
+   *
+   * 历史遗留：早期实现把"每次提交"当独立 effect。后来改成 ChatGPT 风格：
+   * 同一 model/mode/mask 下多次提交 = 同一个 effect（共享 effectId），
+   * submissions 数组按提交顺序累加。本次重构后这个字段基本只用于 hydrate
+   * 路径（DB 里 imageJob 一行 = 一个 submission）。
    */
   jobId?: string;
   /**
@@ -143,6 +166,12 @@ interface WorkbenchEffect {
    * 仅展示层用：标题 / 单图布局 / 下载行为。
    */
   isGridComposite?: boolean;
+  /**
+   * 提交记录列表（每次 handleGenerate push 一条）。时间轴按 submissions
+   * 顺序渲染 —— 这就是 ChatGPT 风格"消息气泡按时间顺序堆积"。
+   * 之前已完成的 submission 不会因为新提交进入 processing 而被替换。
+   */
+  submissions?: WorkbenchSubmission[];
 }
 
 const STATUS_CONFIG: Record<
@@ -742,28 +771,56 @@ export function GenerateWorkbenchView({
     const eff = historyRef.current.find((e) => e.effectId === effectId);
     if (!eff) return;
 
+    // 关键：现在 effect 是"会话级容器"，里面多个 submission 各管各的。
+    // pollImageJob 只能拿到本次提交的 jobId 对应的行 → 只更新对应 submission，
+    // 不要把整个 effect 标 completed。其它 submission 保持原样。
+    //
+    // 怎么找对应 submission：传进来的 jobId === submission.jobId（handleGenerate
+    // 里 pending 时塞的），相等就是它。
+    const matchJobId = job.id;
+    const targetSubmissionIdx = (eff.submissions ?? []).findIndex(
+      (s) => s.jobId === matchJobId
+    );
+
     if (job.status === "completed") {
       pollingRef.current.delete(effectId);
       const resultUrls = (job.resultUrls as string[]) ?? [];
-      const completed: WorkbenchEffect = {
-        ...eff,
-        status: "completed",
-        resultUrls,
-        ...(job.generateDuration
-          ? { duration: job.generateDuration as number }
-          : {}),
-        ...(job.cost && job.currency
+      const cost =
+        job.cost && job.currency
           ? {
               cost: (job.cost as number) / 1000,
               currency: job.currency as string,
             }
-          : {}),
+          : {};
+      const duration = job.generateDuration
+        ? { duration: job.generateDuration as number }
+        : {};
+
+      const next: WorkbenchEffect = {
+        ...eff,
+        // 仅在 effect 主 effect 是 processing 时一起刷成 completed（最后一条
+        // submission 完成 → effect 也算完成）。如果有 pending submission 保持 processing。
+        status: hasUnfinishedSubmission(eff)
+          ? "processing"
+          : "completed",
+        resultUrls,
+        ...duration,
+        ...cost,
+        submissions: (eff.submissions ?? []).map((s, i) =>
+          i === targetSubmissionIdx
+            ? {
+                ...s,
+                status: "completed",
+                resultUrls,
+              }
+            : s
+        ),
       };
       setHistory((prev) =>
-        prev.map((e) => (e.effectId === effectId ? completed : e))
+        prev.map((e) => (e.effectId === effectId ? next : e))
       );
       setSelectedEffect((prev) =>
-        prev?.effectId === effectId ? completed : prev
+        prev?.effectId === effectId ? next : prev
       );
       toast.success(`${eff.imageModelName} 生成完成`);
       return;
@@ -773,8 +830,19 @@ export function GenerateWorkbenchView({
       pollingRef.current.delete(effectId);
       const failed: WorkbenchEffect = {
         ...eff,
-        status: "failed",
+        status: hasUnfinishedSubmissionExcept(eff, targetSubmissionIdx)
+          ? "processing"
+          : "failed",
         errorMsg: job.errorMsg ?? "生成失败",
+        submissions: (eff.submissions ?? []).map((s, i) =>
+          i === targetSubmissionIdx
+            ? {
+                ...s,
+                status: "failed",
+                errorMsg: job.errorMsg ?? "生成失败",
+              }
+            : s
+        ),
       };
       setHistory((prev) =>
         prev.map((e) => (e.effectId === effectId ? failed : e))
@@ -787,12 +855,32 @@ export function GenerateWorkbenchView({
   };
 
   /**
+   * effect 是否还有未结束的 submission（用于决定 effect 自身 status）
+   */
+  function hasUnfinishedSubmission(eff: WorkbenchEffect): boolean {
+    return (eff.submissions ?? []).some(
+      (s) => s.status === "processing" || s.status === "pending"
+    );
+  }
+  function hasUnfinishedSubmissionExcept(
+    eff: WorkbenchEffect,
+    exceptIdx: number
+  ): boolean {
+    return (eff.submissions ?? []).some(
+      (s, i) =>
+        i !== exceptIdx && (s.status === "processing" || s.status === "pending")
+    );
+  }
+
+  /**
    * 启动一个异步任务的轮询循环。
    * 通过历史 ref + pollingRef 保证组件卸载时也能正常清理；
    * 每个 effect 单独跑 setTimeout 链，避免多个 effect 互相干扰。
    */
   const startPolling = (effectId: string, jobId: string) => {
-    if (pollingRef.current.has(effectId)) return;
+    // 同 effectId 已存在旧轮询（用户在同一会话内连续生成） → 先清掉，避免两套
+    // setTimeout 链各自拉各自的 jobId，结果错乱覆盖。
+    pollingRef.current.delete(effectId);
     pollingRef.current.add(effectId);
 
     const startedAt = Date.now();
@@ -959,22 +1047,68 @@ export function GenerateWorkbenchView({
 
     setGenerating(true);
 
-    const newEffect: WorkbenchEffect = {
-      effectId: `EF_${String(Date.now()).slice(-6)}`,
-      prompt: finalPrompt,
-      // maskId 字段名保留以兼容 generateImageAction / imageJob.maskId 列；
-      // 实际值是 promptTemplate.id。
-      maskId: selectedMask || "CUSTOM",
-      maskName: selectedTemplate?.name ?? "自定义",
-      status: "processing",
+    // 决定会话归属：复用还是新建。
+    //
+    // 复用条件：当前选中的是 processing/completed/failed 真实会话（非 draft），
+    // 且 model / mode / mask（模板）全部一致。draft / 不一致 / 没有当前会话 →
+    // 新建会话。ChatGPT 风格 —— 同一对话内连续提问不强制开新 chat。
+    //
+    // 为什么不强制每次新建：用户连续"再来一张""微调 prompt 再试"时，强行
+    // 开新会话会把历史时间轴撑得很乱，与主流生图平台 UX 不符。
+    const canAppendToCurrent =
+      selectedEffect &&
+      selectedEffect.status !== "draft" &&
+      selectedEffect.imageModel === selectedModel &&
+      selectedEffect.mode === generationMode &&
+      (selectedEffect.maskId || "CUSTOM") === (selectedMask || "CUSTOM");
+
+    const submissionTs = new Date().toISOString();
+    const submissionId = `sub_${String(Date.now()).slice(-6)}`;
+    const newSubmission: WorkbenchSubmission = {
+      submissionId,
       resultUrls: [],
-      mode: generationMode,
-      imageModel: selectedModel,
-      imageModelName: modelConfig.name,
-      createdAt: new Date().toISOString(),
+      status: "processing",
+      createdAt: submissionTs,
       isGridComposite,
+      prompt: finalPrompt,
     };
-    setHistory((prev) => [newEffect, ...prev]);
+
+    let newEffect: WorkbenchEffect;
+    if (canAppendToCurrent && selectedEffect) {
+      // 复用：保留 effect 主结构，把新 submission 追加到 submissions 列表
+      // 时间戳刷成最新，effect 自身 status 保持上一次的状态（不影响旧结果展示）
+      const existingSubs = selectedEffect.submissions ?? [];
+      newEffect = {
+        ...selectedEffect,
+        createdAt: submissionTs,
+        status: "processing", // effect 状态跟随最新提交
+        prompt: finalPrompt, // prompt 用最新的
+        submissions: [...existingSubs, newSubmission],
+      };
+      setHistory((prev) =>
+        prev.map((e) =>
+          e.effectId === selectedEffect.effectId ? newEffect : e
+        )
+      );
+    } else {
+      newEffect = {
+        effectId: `EF_${String(Date.now()).slice(-6)}`,
+        prompt: finalPrompt,
+        // maskId 字段名保留以兼容 generateImageAction / imageJob.maskId 列；
+        // 实际值是 promptTemplate.id。
+        maskId: selectedMask || "CUSTOM",
+        maskName: selectedTemplate?.name ?? "自定义",
+        status: "processing",
+        resultUrls: [],
+        mode: generationMode,
+        imageModel: selectedModel,
+        imageModelName: modelConfig.name,
+        createdAt: submissionTs,
+        isGridComposite,
+        submissions: [newSubmission],
+      };
+      setHistory((prev) => [newEffect, ...prev]);
+    }
     setSelectedEffect(newEffect);
 
     try {
@@ -1025,6 +1159,12 @@ export function GenerateWorkbenchView({
       const pending: WorkbenchEffect = {
         ...newEffect,
         jobId: returnedJobId,
+        submissions: (newEffect.submissions ?? []).map((s, i) => {
+          // 找到 handleGenerate 刚 push 的那一条 submission，给它赋 jobId
+          const isLatest =
+            i === (newEffect.submissions ?? []).length - 1;
+          return isLatest ? { ...s, jobId: returnedJobId } : s;
+        }),
       };
       setHistory((prev) =>
         prev.map((e) => (e.effectId === newEffect.effectId ? pending : e))
@@ -1038,10 +1178,17 @@ export function GenerateWorkbenchView({
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : "未知错误";
+      // 同步失败（action 抛错）→ 直接把刚 push 的最新 submission 标 failed，
+      // 不要把整个 effect 也标 failed（其它 submission 还可能正常）。
       const failed: WorkbenchEffect = {
         ...newEffect,
         status: "failed",
         errorMsg: msg,
+        submissions: (newEffect.submissions ?? []).map((s, i) =>
+          i === (newEffect.submissions ?? []).length - 1
+            ? { ...s, status: "failed", errorMsg: msg }
+            : s
+        ),
       };
       setHistory((prev) =>
         prev.map((e) => (e.effectId === newEffect.effectId ? failed : e))
@@ -2027,180 +2174,66 @@ export function GenerateWorkbenchView({
                     )}
                 </div>
 
-                {/* 结果展示：单节点聚合（一次提交 = 一个时间轴节点）
+                {/* 结果展示：按 submissions 数组逐条渲染时间轴节点
                  *
-                 * 关键：batchSize>1 时 N 张图必须归到同一个节点里、共享节点头部
-                 * （共 N 张 · 时间戳），而不是 N 个独立节点（否则用户看时间轴会
-                 * 误以为是 N 次"独立"提交 —— 实际是一次批量）。
+                 * 关键 UX：每次提交都是时间轴上独立的一行 —— 已完成的 submission
+                 * 永远不被新提交覆盖，新提交作为新节点追加在末尾。这是 ChatGPT
+                 * "消息气泡按时间顺序累积"风格。
                  *
-                 * 节点内：宫格拼接模式单图大预览；普通多图走 grid 多列网格，
-                 * 单元格 hover 边框变色 + click 打开 Lightbox。
+                 * 节点内：
+                 * - completed → 单图大预览 / 多图网格（hover 高亮 + 点击大图）
+                 * - processing → spinner 占位（不霸占整个区域，不影响其它节点）
+                 * - failed → 红框 + 错误信息 + 「重试」按钮
+                 *
+                 * 历史兼容：如果 effect 没有 submissions（旧 effect / hydrate 还没
+                 * 升级的数据），回退到 effect.resultUrls 单节点展示。
                  */}
-                {selectedEffect.status === "completed" &&
-                selectedEffect.resultUrls.length > 0 &&
-                selectedEffect ? (
-                  <div className="space-y-3">
-                    {/* 宫格拼接模式提示 */}
-                    {selectedEffect.isGridComposite && (
-                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary/5 border border-primary/20 text-[11px] text-primary">
-                        <Sparkles className="h-3 w-3 shrink-0" />
-                        <span>
-                          {(() => {
-                            const tplCandidateCount =
-                              selectedTemplate?.candidateCount ?? 1;
-                            const layout =
-                              tplCandidateCount === 4 ? "2×2" : "3×3";
-                            return `宫格拼接（${layout} · ${tplCandidateCount} 个候选已合成 1 张大图）`;
-                          })()}
-                        </span>
-                      </div>
-                    )}
-
-                    {/* 单节点时间轴：圆点 + 节点头部（数量 + 绝对时间 + 模型） */}
-                    <div className="relative pl-5">
-                      <div className="absolute left-[5px] top-1.5 h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-card" />
-                      <div className="flex items-center gap-2 mb-2 text-[11px]">
-                        <span className="font-mono font-semibold">
-                          共 {selectedEffect.resultUrls.length} 张
-                        </span>
-                        <span className="text-muted-foreground/40">·</span>
-                        <span className="font-mono text-muted-foreground tabular-nums">
-                          {formatAbsoluteTime(selectedEffect.createdAt)}
-                        </span>
-                      </div>
-
-                      {/* 单图 → 单张大预览（更易看清细节） */}
-                      {selectedEffect.resultUrls.length === 1 ? (
-                        <button
-                          type="button"
-                          onClick={() =>
+                <div className="space-y-3">
+                  {(() => {
+                    const subs = selectedEffect.submissions ?? [];
+                    // hydrate fallback：submissions 为空但 effect 有 resultUrls，
+                    // 视为一条 completed submission（DB 单行映射）。
+                    if (subs.length === 0 && selectedEffect.resultUrls.length > 0) {
+                      return (
+                        <SubmissionNode
+                          effectId={selectedEffect.effectId}
+                          submission={{
+                            submissionId: "legacy",
+                            status: "completed",
+                            resultUrls: selectedEffect.resultUrls,
+                            createdAt: selectedEffect.createdAt,
+                            ...(selectedEffect.isGridComposite
+                              ? { isGridComposite: true }
+                              : {}),
+                            prompt: selectedEffect.prompt,
+                          }}
+                          onLightbox={(url, idx) =>
                             setLightbox({
-                              url: selectedEffect.resultUrls[0]!,
+                              url,
                               effectId: selectedEffect.effectId,
-                              index: 0,
+                              index: idx,
                             })
                           }
-                          className="group block max-w-[280px] rounded-lg overflow-hidden border bg-muted hover:border-primary/60 transition-colors text-left"
-                          title="点击查看大图"
-                        >
-                          {/* biome-ignore lint/performance/noImgElement: 单图预览 */}
-                          <img
-                            src={selectedEffect.resultUrls[0]}
-                            alt="生成结果"
-                            className="block w-full h-auto transition-transform duration-300 group-hover:scale-[1.02]"
-                            loading="lazy"
-                          />
-                        </button>
-                      ) : (
-                        /* 多图 → 网格（2/3 列自适应），单节点聚合视觉 */
-                        <div className="grid grid-cols-2 gap-2 max-w-[360px]">
-                          {selectedEffect.resultUrls.map((url, i) => (
-                            <button
-                              // biome-ignore lint/suspicious/noArrayIndexKey: 一次提交内的图按生成顺序
-                              key={i}
-                              type="button"
-                              onClick={() =>
-                                setLightbox({
-                                  url,
-                                  effectId: selectedEffect.effectId,
-                                  index: i,
-                                })
-                              }
-                              className="group relative aspect-square overflow-hidden rounded-lg border bg-muted hover:border-primary/60 transition-colors"
-                              title={`第 ${i + 1} 张 · 点击查看大图`}
-                            >
-                              {/* biome-ignore lint/performance/noImgElement: 多图网格缩略图 */}
-                              <img
-                                src={url}
-                                alt={`结果 ${i + 1}`}
-                                className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
-                                loading="lazy"
-                              />
-                              {/* hover 序号 chip（左下角） */}
-                              <span className="absolute bottom-1 left-1 bg-black/60 backdrop-blur-sm text-white text-[9px] px-1 py-0.5 rounded font-mono leading-none opacity-0 group-hover:opacity-100 transition-opacity">
-                                #{i + 1}
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ) : selectedEffect.status === "processing" ? (
-                  <div className="aspect-video rounded-2xl border-2 border-dashed border-primary/30 bg-gradient-to-br from-primary/10 via-primary/5 to-primary/10 flex flex-col items-center justify-center gap-4 overflow-hidden relative">
-                    {/* 背景的扩散光晕 —— Lovart 风的"还在动"暗示 */}
-                    <div className="absolute inset-0 flex items-center justify-center opacity-30 pointer-events-none">
-                      <div className="h-32 w-32 rounded-full bg-primary/30 blur-3xl animate-pulse" />
-                    </div>
-                    <div className="relative flex flex-col items-center gap-4">
-                      <div className="relative h-16 w-16 rounded-full bg-background shadow-lg flex items-center justify-center">
-                        <Loader2 className="h-7 w-7 text-primary animate-spin" />
-                      </div>
-                      {selectedEffect.taskId ? (
-                        <div className="space-y-1 text-center">
-                          <p className="text-sm font-semibold">
-                            任务已提交，正在异步生成…
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            上游排队中，最长约 180s
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="space-y-1 text-center">
-                          <p className="text-sm font-semibold">
-                            AI 正在生成中…
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            预计 {(modelConfig.avgDuration / 1000).toFixed(1)}s
-                            完成
-                          </p>
-                        </div>
-                      )}
-                      {/* 进度 chip：让用户感知"还在动" */}
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 border border-primary/20 px-2.5 py-1 text-[10px] font-medium text-primary">
-                        <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
-                        实时同步中
-                      </span>
-                    </div>
-                  </div>
-                ) : selectedEffect.status === "failed" ? (
-                  <div className="aspect-video rounded-2xl border-2 border-dashed border-rose-500/30 bg-gradient-to-br from-rose-500/5 to-orange-500/5 flex flex-col items-center justify-center gap-3 px-6">
-                    <div className="h-16 w-16 rounded-full bg-rose-500/10 flex items-center justify-center">
-                      <XCircle className="h-8 w-8 text-rose-500" />
-                    </div>
-                    <div className="space-y-1 text-center max-w-md">
-                      <p className="text-sm font-semibold text-rose-700 dark:text-rose-400">
-                        生成失败
-                      </p>
-                      <p className="text-xs text-muted-foreground leading-relaxed">
-                        {selectedEffect.errorMsg ?? "未知错误，请稍后重试"}
-                      </p>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="border-rose-500/30 text-rose-700 hover:bg-rose-500/5"
-                      onClick={handleGenerate}
-                    >
-                      <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                      重新生成
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="aspect-video rounded-2xl border-2 border-dashed border-amber-500/30 bg-gradient-to-br from-amber-500/5 to-orange-500/5 flex flex-col items-center justify-center gap-3">
-                    <div className="h-14 w-14 rounded-full bg-amber-500/10 flex items-center justify-center">
-                      <Clock className="h-7 w-7 text-amber-600" />
-                    </div>
-                    <div className="space-y-0.5 text-center">
-                      <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">
-                        排队中
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        即将开始生成
-                      </p>
-                    </div>
-                  </div>
-                )}
+                        />
+                      );
+                    }
+                    return subs.map((sub) => (
+                      <SubmissionNode
+                        key={sub.submissionId}
+                        effectId={selectedEffect.effectId}
+                        submission={sub}
+                        onLightbox={(url, idx) =>
+                          setLightbox({
+                            url,
+                            effectId: selectedEffect.effectId,
+                            index: idx,
+                          })
+                        }
+                        onRetry={handleGenerate}
+                      />
+                    ));
+                  })()}
+                </div>
               </div>
               )
             ) : (
@@ -2470,5 +2503,160 @@ export function GenerateWorkbenchView({
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+/**
+ * 单个 submission 的时间轴节点。
+ *
+ * 三种状态分别走不同 layout：
+ * - processing：左圆点 + spinner + "生成中" 标签 —— 不占满区域、不影响其他节点
+ * - completed：左圆点 + 节点头部（数量 + 绝对时间） + 单图/网格缩略图
+ * - failed：左红圆点 + 错误信息 + 重试按钮
+ *
+ * 圆点 + 节点布局与时间轴主视图一致；每个节点独立、不抢空间。
+ */
+function SubmissionNode({
+  effectId: _effectId,
+  submission,
+  onLightbox,
+  onRetry,
+}: {
+  effectId: string;
+  submission: WorkbenchSubmission;
+  onLightbox: (url: string, index: number) => void;
+  onRetry?: () => void;
+}) {
+  const { status, resultUrls, createdAt, errorMsg, isGridComposite } =
+    submission;
+
+  if (status === "processing") {
+    return (
+      <div className="relative pl-5">
+        <div className="absolute left-[5px] top-1.5 h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-card animate-pulse" />
+        <div className="flex items-center gap-2 mb-2 text-[11px]">
+          <Loader2 className="h-3 w-3 text-primary animate-spin" />
+          <span className="font-medium text-primary">生成中…</span>
+          <span className="text-muted-foreground/40">·</span>
+          <span className="font-mono text-muted-foreground tabular-nums">
+            {formatAbsoluteTime(createdAt)}
+          </span>
+        </div>
+        <div className="rounded-xl border border-primary/30 bg-primary/5 px-4 py-6 flex items-center gap-3">
+          <Loader2 className="h-4 w-4 text-primary animate-spin shrink-0" />
+          <div className="space-y-0.5">
+            <p className="text-xs font-medium">AI 正在生成中</p>
+            <p className="text-[10px] text-muted-foreground">
+              之前的图仍然可见，本次提交追加在时间轴末尾
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (status === "failed") {
+    return (
+      <div className="relative pl-5">
+        <div className="absolute left-[5px] top-1.5 h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-card" />
+        <div className="flex items-center gap-2 mb-2 text-[11px]">
+          <XCircle className="h-3 w-3 text-rose-500" />
+          <span className="font-medium text-rose-700 dark:text-rose-400">
+            失败
+          </span>
+          <span className="text-muted-foreground/40">·</span>
+          <span className="font-mono text-muted-foreground tabular-nums">
+            {formatAbsoluteTime(createdAt)}
+          </span>
+        </div>
+        <div className="rounded-xl border border-rose-500/30 bg-rose-500/5 px-4 py-3 flex items-start gap-3">
+          <div className="space-y-1.5 flex-1 min-w-0">
+            <p className="text-xs font-medium text-rose-700 dark:text-rose-400">
+              生成失败
+            </p>
+            <p className="text-[11px] text-muted-foreground leading-relaxed break-all">
+              {errorMsg ?? "未知错误，请稍后重试"}
+            </p>
+          </div>
+          {onRetry && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-rose-500/30 text-rose-700 hover:bg-rose-500/5 h-7 px-2.5 text-xs"
+              onClick={onRetry}
+            >
+              <RefreshCw className="h-3 w-3 mr-1" />
+              重试
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // completed（含 legacy fallback —— status 不在 processing/failed 时统一按 completed 处理）
+  return (
+    <div className="relative pl-5">
+      <div className="absolute left-[5px] top-1.5 h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-card" />
+      <div className="flex items-center gap-2 mb-2 text-[11px]">
+        <span className="font-mono font-semibold">
+          共 {resultUrls.length} 张
+        </span>
+        <span className="text-muted-foreground/40">·</span>
+        <span className="font-mono text-muted-foreground tabular-nums">
+          {formatAbsoluteTime(createdAt)}
+        </span>
+        {isGridComposite && (
+          <>
+            <span className="text-muted-foreground/40">·</span>
+            <span className="inline-flex items-center gap-1 text-primary">
+              <Sparkles className="h-3 w-3" />
+              宫格拼接
+            </span>
+          </>
+        )}
+      </div>
+
+      {resultUrls.length === 1 ? (
+        <button
+          type="button"
+          onClick={() => onLightbox(resultUrls[0]!, 0)}
+          className="group block max-w-[280px] rounded-lg overflow-hidden border bg-muted hover:border-primary/60 transition-colors text-left"
+          title="点击查看大图"
+        >
+          {/* biome-ignore lint/performance/noImgElement: 单图预览 */}
+          <img
+            src={resultUrls[0]}
+            alt="生成结果"
+            className="block w-full h-auto transition-transform duration-300 group-hover:scale-[1.02]"
+            loading="lazy"
+          />
+        </button>
+      ) : (
+        <div className="grid grid-cols-2 gap-2 max-w-[360px]">
+          {resultUrls.map((url, i) => (
+            <button
+              // biome-ignore lint/suspicious/noArrayIndexKey: 一次提交内的图按生成顺序
+              key={i}
+              type="button"
+              onClick={() => onLightbox(url, i)}
+              className="group relative aspect-square overflow-hidden rounded-lg border bg-muted hover:border-primary/60 transition-colors"
+              title={`第 ${i + 1} 张 · 点击查看大图`}
+            >
+              {/* biome-ignore lint/performance/noImgElement: 多图网格缩略图 */}
+              <img
+                src={url}
+                alt={`结果 ${i + 1}`}
+                className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+                loading="lazy"
+              />
+              <span className="absolute bottom-1 left-1 bg-black/60 backdrop-blur-sm text-white text-[9px] px-1 py-0.5 rounded font-mono leading-none opacity-0 group-hover:opacity-100 transition-opacity">
+                #{i + 1}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
