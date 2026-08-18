@@ -21,7 +21,6 @@ import {
   Image as ImageIcon,
   Library,
   Loader2,
-  Maximize2,
   Minus,
   Plus,
   RectangleHorizontal,
@@ -196,24 +195,16 @@ const REF_MODE_LABELS: Record<RefMode, string> = {
  * vs"刚生成"。modelName 失败时退回 job.model 原值，至少不会显示空白。
  */
 /**
- * 相对时间格式：刚刚 / X 分钟前 / X 小时前 / 当天 HH:MM / 跨天 MM-DD HH:MM
+ * 绝对时间格式：MM-DD HH:MM:SS（不带年份 —— 工作台都是近期会话，省一年更清爽）。
  *
- * 用于结果时间轴 tile 上的时间 chip —— 让用户一眼看清每张（实际是整批）
- * 是什么时候生成的。WorkbenchEffect.createdAt 是会话级，整批共享同一时间。
+ * 用于结果时间轴上每个节点的标题行 —— 用户要"具体时间"而不是"X 小时前"
+ * 这种模糊表述，所以显示到秒。
  */
-function formatRelativeTime(iso: string): string {
-  const t = new Date(iso).getTime();
-  if (Number.isNaN(t)) return "-";
-  const diffMs = Date.now() - t;
-  const min = Math.floor(diffMs / 60_000);
-  if (min < 1) return "刚刚";
-  if (min < 60) return `${min} 分钟前`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr} 小时前`;
-  // 跨天：MM-DD HH:MM（不再加年份，避免污染视觉）
-  const d = new Date(t);
+function formatAbsoluteTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "-";
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 function toWorkbenchEffect(job: ImageJob): WorkbenchEffect {
@@ -2064,45 +2055,55 @@ export function GenerateWorkbenchView({
                       </span>
                     </div>
 
-                    {/* 垂直时间轴：每张结果占一行，宽撑满容器，像对话气泡 */}
-                    <div className="flex flex-col gap-3">
+                    {/* 垂直时间轴：左侧连线 + 每节点圆点 + 节点头部（编号 + 绝对时间）+ 小缩略图
+                     * 与 GitHub commits / Slack thread 一致的视觉语言 —— 让用户
+                     * 一眼看出"哪些图是同一批 / 隔了多久 / 是第几张"。
+                     */}
+                    <div className="relative pl-5">
+                      {/* 左侧连接线 */}
+                      <div className="absolute left-[5px] top-2 bottom-2 w-px bg-border" />
                       {selectedEffect.resultUrls.map((url, i) => (
-                        <button
+                        <div
                           // biome-ignore lint/suspicious/noArrayIndexKey: 时间轴按生成顺序展示
                           key={i}
-                          type="button"
-                          onClick={() =>
-                            setLightbox({
-                              url,
-                              effectId: selectedEffect.effectId,
-                              index: i,
-                            })
-                          }
-                          className="group relative w-full overflow-hidden rounded-xl border bg-muted hover:border-primary/60 transition-all text-left"
-                          title={`第 ${i + 1} 张 · ${formatRelativeTime(selectedEffect.createdAt)} · 点击查看大图`}
+                          className="relative pb-4 last:pb-0"
                         >
-                          {/* 主图：宽撑满容器，高按 aspect-ratio 自适应（不裁切） */}
-                          {/* biome-ignore lint/performance/noImgElement: 时间轴主图 */}
-                          <img
-                            src={url}
-                            alt={`结果 ${i + 1}`}
-                            className="w-full h-auto block transition-transform duration-300 group-hover:scale-[1.01]"
-                            loading="lazy"
+                          {/* 时间轴圆点：压在连接线上 */}
+                          <div
+                            className="absolute -left-5 top-1.5 h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-card"
+                            aria-hidden="true"
                           />
-                          {/* 顶部 chip 行：编号 + 时间 */}
-                          <div className="absolute top-2 left-2 flex items-center gap-1.5">
-                            <span className="bg-black/55 backdrop-blur-sm text-white text-[10px] px-1.5 py-0.5 rounded font-mono leading-none">
+                          {/* 节点头部：编号 + 绝对时间 */}
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <span className="text-[11px] font-mono font-semibold">
                               #{i + 1}
                             </span>
-                            <span className="bg-black/55 backdrop-blur-sm text-white text-[10px] px-1.5 py-0.5 rounded leading-none">
-                              {formatRelativeTime(selectedEffect.createdAt)}
+                            <span className="text-[11px] font-mono text-muted-foreground tabular-nums">
+                              {formatAbsoluteTime(selectedEffect.createdAt)}
                             </span>
                           </div>
-                          {/* hover：放大图标 + 暗色蒙层 */}
-                          <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
-                            <Maximize2 className="h-5 w-5 text-white drop-shadow" />
-                          </div>
-                        </button>
+                          {/* 小缩略图：max-w 限制尺寸，不撑满面板 */}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setLightbox({
+                                url,
+                                effectId: selectedEffect.effectId,
+                                index: i,
+                              })
+                            }
+                            className="group block max-w-[240px] rounded-lg overflow-hidden border bg-muted hover:border-primary/60 transition-colors text-left"
+                            title={`第 ${i + 1} 张 · 点击查看大图`}
+                          >
+                            {/* biome-ignore lint/performance/noImgElement: 时间轴主图 */}
+                            <img
+                              src={url}
+                              alt={`结果 ${i + 1}`}
+                              className="block w-full h-auto transition-transform duration-300 group-hover:scale-[1.02]"
+                              loading="lazy"
+                            />
+                          </button>
+                        </div>
                       ))}
                     </div>
                   </div>
