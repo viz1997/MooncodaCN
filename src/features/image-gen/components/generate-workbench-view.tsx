@@ -2027,7 +2027,15 @@ export function GenerateWorkbenchView({
                     )}
                 </div>
 
-                {/* 结果展示：垂直对话式时间轴（GPT/Midjourney Discord/Lovart 风） */}
+                {/* 结果展示：单节点聚合（一次提交 = 一个时间轴节点）
+                 *
+                 * 关键：batchSize>1 时 N 张图必须归到同一个节点里、共享节点头部
+                 * （共 N 张 · 时间戳），而不是 N 个独立节点（否则用户看时间轴会
+                 * 误以为是 N 次"独立"提交 —— 实际是一次批量）。
+                 *
+                 * 节点内：宫格拼接模式单图大预览；普通多图走 grid 多列网格，
+                 * 单元格 hover 边框变色 + click 打开 Lightbox。
+                 */}
                 {selectedEffect.status === "completed" &&
                 selectedEffect.resultUrls.length > 0 &&
                 selectedEffect ? (
@@ -2048,63 +2056,74 @@ export function GenerateWorkbenchView({
                       </div>
                     )}
 
-                    {/* 顶部小信息条：数量 + 提示点击查看大图 */}
-                    <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                      <span>
-                        共 {selectedEffect.resultUrls.length} 张 · 点击查看大图
-                      </span>
-                    </div>
-
-                    {/* 垂直时间轴：左侧连线 + 每节点圆点 + 节点头部（编号 + 绝对时间）+ 小缩略图
-                     * 与 GitHub commits / Slack thread 一致的视觉语言 —— 让用户
-                     * 一眼看出"哪些图是同一批 / 隔了多久 / 是第几张"。
-                     */}
+                    {/* 单节点时间轴：圆点 + 节点头部（数量 + 绝对时间 + 模型） */}
                     <div className="relative pl-5">
-                      {/* 左侧连接线 */}
-                      <div className="absolute left-[5px] top-2 bottom-2 w-px bg-border" />
-                      {selectedEffect.resultUrls.map((url, i) => (
-                        <div
-                          // biome-ignore lint/suspicious/noArrayIndexKey: 时间轴按生成顺序展示
-                          key={i}
-                          className="relative pb-4 last:pb-0"
+                      <div className="absolute left-[5px] top-1.5 h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-card" />
+                      <div className="flex items-center gap-2 mb-2 text-[11px]">
+                        <span className="font-mono font-semibold">
+                          共 {selectedEffect.resultUrls.length} 张
+                        </span>
+                        <span className="text-muted-foreground/40">·</span>
+                        <span className="font-mono text-muted-foreground tabular-nums">
+                          {formatAbsoluteTime(selectedEffect.createdAt)}
+                        </span>
+                      </div>
+
+                      {/* 单图 → 单张大预览（更易看清细节） */}
+                      {selectedEffect.resultUrls.length === 1 ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setLightbox({
+                              url: selectedEffect.resultUrls[0]!,
+                              effectId: selectedEffect.effectId,
+                              index: 0,
+                            })
+                          }
+                          className="group block max-w-[280px] rounded-lg overflow-hidden border bg-muted hover:border-primary/60 transition-colors text-left"
+                          title="点击查看大图"
                         >
-                          {/* 时间轴圆点：压在连接线上 */}
-                          <div
-                            className="absolute -left-5 top-1.5 h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-card"
-                            aria-hidden="true"
+                          {/* biome-ignore lint/performance/noImgElement: 单图预览 */}
+                          <img
+                            src={selectedEffect.resultUrls[0]}
+                            alt="生成结果"
+                            className="block w-full h-auto transition-transform duration-300 group-hover:scale-[1.02]"
+                            loading="lazy"
                           />
-                          {/* 节点头部：编号 + 绝对时间 */}
-                          <div className="flex items-center gap-2 mb-1.5">
-                            <span className="text-[11px] font-mono font-semibold">
-                              #{i + 1}
-                            </span>
-                            <span className="text-[11px] font-mono text-muted-foreground tabular-nums">
-                              {formatAbsoluteTime(selectedEffect.createdAt)}
-                            </span>
-                          </div>
-                          {/* 小缩略图：max-w 限制尺寸，不撑满面板 */}
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setLightbox({
-                                url,
-                                effectId: selectedEffect.effectId,
-                                index: i,
-                              })
-                            }
-                            className="group block max-w-[240px] rounded-lg overflow-hidden border bg-muted hover:border-primary/60 transition-colors text-left"
-                            title={`第 ${i + 1} 张 · 点击查看大图`}
-                          >
-                            {/* biome-ignore lint/performance/noImgElement: 时间轴主图 */}
-                            <img
-                              src={url}
-                              alt={`结果 ${i + 1}`}
-                              className="block w-full h-auto transition-transform duration-300 group-hover:scale-[1.02]"
-                              loading="lazy"
-                            />
-                          </button>
+                        </button>
+                      ) : (
+                        /* 多图 → 网格（2/3 列自适应），单节点聚合视觉 */
+                        <div className="grid grid-cols-2 gap-2 max-w-[360px]">
+                          {selectedEffect.resultUrls.map((url, i) => (
+                            <button
+                              // biome-ignore lint/suspicious/noArrayIndexKey: 一次提交内的图按生成顺序
+                              key={i}
+                              type="button"
+                              onClick={() =>
+                                setLightbox({
+                                  url,
+                                  effectId: selectedEffect.effectId,
+                                  index: i,
+                                })
+                              }
+                              className="group relative aspect-square overflow-hidden rounded-lg border bg-muted hover:border-primary/60 transition-colors"
+                              title={`第 ${i + 1} 张 · 点击查看大图`}
+                            >
+                              {/* biome-ignore lint/performance/noImgElement: 多图网格缩略图 */}
+                              <img
+                                src={url}
+                                alt={`结果 ${i + 1}`}
+                                className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+                                loading="lazy"
+                              />
+                              {/* hover 序号 chip（左下角） */}
+                              <span className="absolute bottom-1 left-1 bg-black/60 backdrop-blur-sm text-white text-[9px] px-1 py-0.5 rounded font-mono leading-none opacity-0 group-hover:opacity-100 transition-opacity">
+                                #{i + 1}
+                              </span>
+                            </button>
+                          ))}
                         </div>
-                      ))}
+                      )}
                     </div>
                   </div>
                 ) : selectedEffect.status === "processing" ? (

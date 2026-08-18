@@ -636,6 +636,48 @@ function openAIImageToUrl(item: OpenAIImageData): string {
   throw new Error("OpenAI 响应中缺少图片数据");
 }
 
+/**
+ * 单图重试包装器：给 submitLingtingTask 加短间隔重试，吸收偶发 cold start。
+ *
+ * 为什么不在 submitLingtingTask 内部加：Lingting 没有幂等键，重复提交会
+ * 真实扣多张额度 —— gpt-image 链路的硬规则（见 src/inngest/functions.ts
+ * submitGenerationJob retries=0 注释）。所以 retry 必须放在调用方、且
+ * 必须知道上次到底有没有真提交 —— submitLingtingTask 只要 throw 就是
+ * 没有进 Lingting 队列（network/abort/5xx 都是 throw），可以安全重试。
+ *
+ * @param maxRetries  默认 2：试 1 次 + 重试 2 次 = 最多 3 次
+ * @param delayMs     默认 2000：cold start 通常 1-3s 内自动恢复
+ */
+async function retrySubmitLingtingTask(
+  imageUrl: string,
+  prompt: string,
+  size: string,
+  imageIdx: number,
+  maxRetries = 2,
+  delayMs = 2000
+): Promise<Awaited<ReturnType<typeof submitLingtingTask>>> {
+  const sleep = (ms: number) =>
+    new Promise<void>((r) => setTimeout(r, ms));
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await submitLingtingTask(
+        "_wbl",
+        imageUrl,
+        prompt,
+        size,
+        imageIdx
+      );
+    } catch (err) {
+      lastErr = err;
+      if (attempt < maxRetries) {
+        await sleep(delayMs);
+      }
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error("submitLingtingTask 失败");
+}
+
 // ============ 9. GPT-Image-2 适配器（via WellAPI） ============
 // 直接复用 gpt-image 的 submitLingtingTask / queryLingtingTask /
 // persistCandidateToR2，与 /p/[token] 走完全一致的 wellapi 调用路径、R2
@@ -685,9 +727,16 @@ export const gptImage2Adapter: ImageModelAdapter = {
     // 2026-08-18：上限从 4 提到 10，与 IMAGE_MODELS.gpt_image_2.maxBatchSize 保持一致。
     const batchSize = Math.min(req.batchSize ?? 1, 10);
 
+    // 2026-08-18：加 per-image retry（2 次 × 2s），与 gpt-image submitGeneration
+    // 同语义。原因：batchSize > 1 时 Promise.allSettled 并发触发 2-N 次
+    // submitLingtingTask，Lingting 偶发 cold start 单张超时（AbortError
+    // "The operation was aborted due to timeout"）会让整批 failed —
+    // 用户体感 "第 2 张失败、其他图也没出来"。submitLingtingTask 自身没
+    // retry（避免 Lingting 重复扣配额），retry 包在外层，2 次短间隔足够
+    // 覆盖 cold start；都失败才计入 failures 走整批失败分支。
     const tasks = await Promise.allSettled(
       Array.from({ length: batchSize }, (_, i) =>
-        submitLingtingTask("_wbl", req.imageUrl!, req.prompt, size, i)
+        retrySubmitLingtingTask(req.imageUrl!, req.prompt, size, i, 2, 2000)
       )
     );
 
