@@ -195,6 +195,27 @@ const REF_MODE_LABELS: Record<RefMode, string> = {
  * `EF_${Date.now().slice(-6)}` 撞 key，也方便一眼分辨"从 DB 恢复"
  * vs"刚生成"。modelName 失败时退回 job.model 原值，至少不会显示空白。
  */
+/**
+ * 相对时间格式：刚刚 / X 分钟前 / X 小时前 / 当天 HH:MM / 跨天 MM-DD HH:MM
+ *
+ * 用于结果时间轴 tile 上的时间 chip —— 让用户一眼看清每张（实际是整批）
+ * 是什么时候生成的。WorkbenchEffect.createdAt 是会话级，整批共享同一时间。
+ */
+function formatRelativeTime(iso: string): string {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "-";
+  const diffMs = Date.now() - t;
+  const min = Math.floor(diffMs / 60_000);
+  if (min < 1) return "刚刚";
+  if (min < 60) return `${min} 分钟前`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} 小时前`;
+  // 跨天：MM-DD HH:MM（不再加年份，避免污染视觉）
+  const d = new Date(t);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function toWorkbenchEffect(job: ImageJob): WorkbenchEffect {
   const modelConfig = IMAGE_MODELS[job.model as ImageModelId];
   return {
@@ -487,6 +508,15 @@ export function GenerateWorkbenchView({
     effectId: string;
     index: number;
     mime?: string | null;
+  } | null>(null);
+  /**
+   * 参考图预览 Dialog：
+   * 上传/库选之后默认只显示小缩略图（避免撑满 380px 左侧面板把其他
+   * 设置挤到屏幕外），用户主动点缩略图才弹全屏预览。
+   */
+  const [refPreview, setRefPreview] = useState<{
+    url: string;
+    name: string;
   } | null>(null);
   // 每张结果图的下载/分享去抖锁：避免 hover 按钮连点导致重复 fetch
   const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -1130,29 +1160,59 @@ export function GenerateWorkbenchView({
 
                   {refMode === "upload" &&
                     (uploadedImage ? (
-                      <div className="relative group">
-                        {/* biome-ignore lint/performance/noImgElement: 本地预览需要原生 img */}
-                        <img
-                          src={uploadedImage.previewUrl}
-                          alt={uploadedImage.fileName}
-                          className={cn(
-                            "w-full aspect-square object-cover rounded-lg border",
-                            uploadedImage.uploading !== null && "opacity-60"
-                          )}
-                        />
-                        {uploadedImage.uploading !== null && (
-                          <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded-lg">
-                            <Loader2 className="h-5 w-5 text-white animate-spin" />
-                          </div>
-                        )}
+                      <div className="flex items-center gap-2 p-2 rounded-lg border bg-muted/30">
+                        {/* 缩略图：点击预览 */}
                         <button
                           type="button"
+                          onClick={() =>
+                            setRefPreview({
+                              url: uploadedImage.previewUrl,
+                              name: uploadedImage.fileName,
+                            })
+                          }
+                          className="relative shrink-0 h-12 w-12 rounded-md overflow-hidden border bg-muted hover:border-primary/60 transition-colors group/thumb"
+                          title="点击预览"
+                        >
+                          {/* biome-ignore lint/performance/noImgElement: 缩略图 */}
+                          <img
+                            src={uploadedImage.previewUrl}
+                            alt={uploadedImage.fileName}
+                            className={cn(
+                              "w-full h-full object-cover",
+                              uploadedImage.uploading !== null && "opacity-60"
+                            )}
+                          />
+                          {uploadedImage.uploading !== null && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                              <Loader2 className="h-3.5 w-3.5 text-white animate-spin" />
+                            </div>
+                          )}
+                        </button>
+                        {/* 文件信息 */}
+                        <div className="flex-1 min-w-0 space-y-0.5">
+                          <p className="text-xs font-medium truncate">
+                            {uploadedImage.fileName}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground">
+                            {(uploadedImage.fileSize / 1024).toFixed(1)} KB
+                            {uploadedImage.uploading !== null
+                              ? " · 上传中…"
+                              : uploadedImage.publicUrl
+                                ? " · 已就绪"
+                                : ""}
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 shrink-0 text-muted-foreground hover:text-rose-600"
                           onClick={handleRemoveUpload}
-                          className="absolute top-2 right-2 p-1 rounded-full bg-rose-500 text-white opacity-0 group-hover:opacity-100 transition-opacity"
                           aria-label="移除"
+                          title="移除"
                         >
                           <X className="h-3.5 w-3.5" />
-                        </button>
+                        </Button>
                       </div>
                     ) : (
                       <button
@@ -1201,24 +1261,51 @@ export function GenerateWorkbenchView({
                   {refMode === "library" && (
                     <div className="space-y-2">
                       {selectedPhoto && (
-                        <div className="relative">
-                          {/* biome-ignore lint/performance/noImgElement: R2 动态 URL 用原生 img */}
-                          <img
-                            src={
-                              selectedPhoto.thumbnailUrl ??
-                              selectedPhoto.fileUrl
-                            }
-                            alt={selectedPhoto.fileName}
-                            className="w-full aspect-square object-cover rounded-lg border border-primary"
-                          />
+                        <div className="flex items-center gap-2 p-2 rounded-lg border border-primary/40 bg-primary/5">
+                          {/* 缩略图：点击预览 */}
                           <button
                             type="button"
+                            onClick={() =>
+                              setRefPreview({
+                                url:
+                                  selectedPhoto.thumbnailUrl ??
+                                  selectedPhoto.fileUrl,
+                                name: selectedPhoto.fileName,
+                              })
+                            }
+                            className="relative shrink-0 h-12 w-12 rounded-md overflow-hidden border bg-muted hover:border-primary/60 transition-colors"
+                            title="点击预览"
+                          >
+                            {/* biome-ignore lint/performance/noImgElement: R2 缩略图 */}
+                            <img
+                              src={
+                                selectedPhoto.thumbnailUrl ??
+                                selectedPhoto.fileUrl
+                              }
+                              alt={selectedPhoto.fileName}
+                              className="w-full h-full object-cover"
+                            />
+                          </button>
+                          {/* 文件信息 */}
+                          <div className="flex-1 min-w-0 space-y-0.5">
+                            <p className="text-xs font-medium truncate">
+                              {selectedPhoto.fileName}
+                            </p>
+                            <p className="text-[10px] text-muted-foreground">
+                              {selectedPhoto.format?.toUpperCase() ?? "IMG"}
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 shrink-0 text-muted-foreground hover:text-rose-600"
                             onClick={() => setSelectedPhoto(null)}
-                            className="absolute top-2 right-2 p-1 rounded-full bg-rose-500 text-white"
                             aria-label="移除已选"
+                            title="移除"
                           >
                             <X className="h-3.5 w-3.5" />
-                          </button>
+                          </Button>
                         </div>
                       )}
 
@@ -1949,7 +2036,7 @@ export function GenerateWorkbenchView({
                     )}
                 </div>
 
-                {/* 结果展示：水平时间轴小图条（主流生图平台范式） */}
+                {/* 结果展示：垂直对话式时间轴（GPT/Midjourney Discord/Lovart 风） */}
                 {selectedEffect.status === "completed" &&
                 selectedEffect.resultUrls.length > 0 &&
                 selectedEffect ? (
@@ -1977,8 +2064,8 @@ export function GenerateWorkbenchView({
                       </span>
                     </div>
 
-                    {/* 水平时间轴：固定高度小图，超出横滚 */}
-                    <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1 snap-x snap-mandatory">
+                    {/* 垂直时间轴：每张结果占一行，宽撑满容器，像对话气泡 */}
+                    <div className="flex flex-col gap-3">
                       {selectedEffect.resultUrls.map((url, i) => (
                         <button
                           // biome-ignore lint/suspicious/noArrayIndexKey: 时间轴按生成顺序展示
@@ -1991,23 +2078,29 @@ export function GenerateWorkbenchView({
                               index: i,
                             })
                           }
-                          className="group relative shrink-0 h-28 w-28 rounded-lg overflow-hidden border bg-muted hover:border-primary/60 transition-all snap-start"
-                          title={`第 ${i + 1} 张 · 点击查看大图`}
+                          className="group relative w-full overflow-hidden rounded-xl border bg-muted hover:border-primary/60 transition-all text-left"
+                          title={`第 ${i + 1} 张 · ${formatRelativeTime(selectedEffect.createdAt)} · 点击查看大图`}
                         >
-                          {/* biome-ignore lint/performance/noImgElement: 时间轴缩略图 */}
+                          {/* 主图：宽撑满容器，高按 aspect-ratio 自适应（不裁切） */}
+                          {/* biome-ignore lint/performance/noImgElement: 时间轴主图 */}
                           <img
                             src={url}
                             alt={`结果 ${i + 1}`}
-                            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.05]"
+                            className="w-full h-auto block transition-transform duration-300 group-hover:scale-[1.01]"
                             loading="lazy"
                           />
-                          {/* 编号 chip：始终可见 */}
-                          <div className="absolute top-1 left-1 bg-black/55 backdrop-blur-sm text-white text-[9px] px-1 py-0.5 rounded font-mono leading-none">
-                            #{i + 1}
+                          {/* 顶部 chip 行：编号 + 时间 */}
+                          <div className="absolute top-2 left-2 flex items-center gap-1.5">
+                            <span className="bg-black/55 backdrop-blur-sm text-white text-[10px] px-1.5 py-0.5 rounded font-mono leading-none">
+                              #{i + 1}
+                            </span>
+                            <span className="bg-black/55 backdrop-blur-sm text-white text-[10px] px-1.5 py-0.5 rounded leading-none">
+                              {formatRelativeTime(selectedEffect.createdAt)}
+                            </span>
                           </div>
-                          {/* hover：放大图标 + 黑色蒙层 */}
-                          <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                            <Maximize2 className="h-4 w-4 text-white drop-shadow" />
+                          {/* hover：放大图标 + 暗色蒙层 */}
+                          <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                            <Maximize2 className="h-5 w-5 text-white drop-shadow" />
                           </div>
                         </button>
                       ))}
@@ -2328,6 +2421,31 @@ export function GenerateWorkbenchView({
                 </Button>
               </div>
             </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ============ 参考图预览 Dialog ============
+       * 用户点击左侧上传/库选的小缩略图才打开。
+       * 全屏查看、Esc/点背景关闭 —— 与 Lightbox 同形态。
+       */}
+      <Dialog
+        open={refPreview !== null}
+        onOpenChange={(open) => {
+          if (!open) setRefPreview(null);
+        }}
+      >
+        <DialogContent className="max-w-4xl p-2 bg-transparent border-none shadow-none">
+          <DialogTitle className="sr-only">
+            {refPreview?.name ?? "参考图预览"}
+          </DialogTitle>
+          {refPreview && (
+            // biome-ignore lint/performance/noImgElement: 全屏预览原生 img
+            <img
+              src={refPreview.url}
+              alt={refPreview.name}
+              className="w-full h-auto max-h-[85vh] object-contain rounded-lg"
+            />
           )}
         </DialogContent>
       </Dialog>
