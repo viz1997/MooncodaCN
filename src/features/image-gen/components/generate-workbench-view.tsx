@@ -16,8 +16,6 @@
 
 import {
   CheckCircle2,
-  ChevronDown,
-  ChevronRight,
   Clock,
   Download,
   Heart,
@@ -26,6 +24,8 @@ import {
   Library,
   Loader2,
   Maximize2,
+  RectangleHorizontal,
+  RectangleVertical,
   RefreshCw,
   RotateCcw,
   Search,
@@ -33,6 +33,7 @@ import {
   Settings2,
   Share2,
   Sparkles,
+  Square,
   Trash2,
   Type,
   Upload,
@@ -43,6 +44,12 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -333,6 +340,24 @@ async function downloadImage(url: string, filename: string): Promise<void> {
 }
 
 /**
+ * 把 ImageSize（如 "1344x768"）解析成 [w, h] 二元组，无法解析时兜底 [1, 1]。
+ */
+function parseImageSize(size: ImageSize): [number, number] {
+  const m = /^(\d+)x(\d+)$/.exec(size);
+  return m?.[1] && m[2] ? [Number(m[1]), Number(m[2])] : [1, 1];
+}
+
+/**
+ * 按宽高比挑 lucide 图标：w==h → Square，w>h → 横向，w<h → 纵向。
+ * Lovart / Midjourney 风格的尺寸可视化。
+ */
+function getAspectIcon(size: ImageSize) {
+  const [w, h] = parseImageSize(size);
+  if (w === h) return Square;
+  return w > h ? RectangleHorizontal : RectangleVertical;
+}
+
+/**
  * 推断图片扩展名：从 URL 路径末段拿，否则看 mime 头，否则兜底 .png。
  */
 function inferImageExtension(url: string, mime?: string | null): string {
@@ -436,8 +461,7 @@ export function GenerateWorkbenchView({
   const [batchSize, setBatchSize] = useState(1);
   const [size, setSize] = useState<ImageSize>("1024x1024");
 
-  // 高级参数（折叠）
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  // 高级参数（Accordion 默认折叠，无需本地 state）
   const [guidanceScale, setGuidanceScale] = useState(7);
   const [steps, setSteps] = useState(30);
   const [seed, setSeed] = useState<number | "">("");
@@ -1018,680 +1042,832 @@ export function GenerateWorkbenchView({
             </p>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-3 space-y-4">
-            {/* 参考图 */}
-            <section className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs font-semibold flex items-center gap-1">
-                  <ImageIcon className="h-3.5 w-3.5" />
+          {/*
+            Lovart 风格分栏：5 个可折叠分区（Accordion）取代平铺的 9 个 section。
+            - 参考图 / 提示词模板 / 生图模型 / 输出参数：默认展开
+            - 高级参数：默认折叠（用 showAdvanced 状态兜底，避免被外部控制冲突）
+            每个 Trigger 右侧带状态 chip，折叠后也能看到当前选了啥。
+          */}
+          <Accordion
+            type="multiple"
+            defaultValue={["ref", "prompt", "model", "output"]}
+            className="flex-1 overflow-y-auto"
+          >
+            {/* ============ ① 参考图 ============ */}
+            <AccordionItem value="ref" className="border-b-0 px-3">
+              <AccordionTrigger className="hover:no-underline py-2.5 px-2 -mx-2 rounded-md data-[state=open]:bg-muted/30 hover:bg-muted/40 transition-colors [&[data-state=open]>svg]:-rotate-90">
+                <span className="flex items-center gap-2 text-xs font-semibold">
+                  <ImageIcon className="h-3.5 w-3.5 text-violet-600" />
                   参考图
-                </Label>
-                <div className="flex gap-0.5 bg-muted rounded p-0.5">
-                  {(["upload", "library", "none"] as RefMode[]).map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => handleModeChange(m)}
-                      className={cn(
-                        "text-[10px] px-2 py-1 rounded transition-colors",
-                        refMode === m
-                          ? "bg-background shadow-sm font-medium"
-                          : "text-muted-foreground hover:text-foreground"
-                      )}
-                    >
-                      {REF_MODE_LABELS[m]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {refMode === "upload" &&
-                (uploadedImage ? (
-                  <div className="relative group">
-                    {/* biome-ignore lint/performance/noImgElement: 本地预览需要原生 img */}
-                    <img
-                      src={uploadedImage.previewUrl}
-                      alt={uploadedImage.fileName}
-                      className={cn(
-                        "w-full aspect-square object-cover rounded-lg border",
-                        uploadedImage.uploading !== null && "opacity-60"
-                      )}
-                    />
-                    {uploadedImage.uploading !== null && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded-lg">
-                        <Loader2 className="h-5 w-5 text-white animate-spin" />
-                      </div>
-                    )}
-                    <button
-                      type="button"
-                      onClick={handleRemoveUpload}
-                      className="absolute top-2 right-2 p-1 rounded-full bg-rose-500 text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                      aria-label="移除"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                    <div className="absolute bottom-2 left-2 right-2 bg-black/60 text-white text-[10px] px-2 py-1 rounded truncate">
-                      {uploadedImage.fileName} ·{" "}
-                      {(uploadedImage.fileSize / 1024).toFixed(1)}KB
-                      {uploadedImage.uploading !== null && " · 上传中…"}
-                    </div>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      setDragOver(true);
-                    }}
-                    onDragLeave={() => setDragOver(false)}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      setDragOver(false);
-                      handleFileSelect(e.dataTransfer.files?.[0]);
-                    }}
-                    onClick={() => fileInputRef.current?.click()}
-                    className={cn(
-                      "w-full border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors",
-                      dragOver
-                        ? "border-violet-500 bg-violet-500/5"
-                        : "border-muted-foreground/30 hover:border-violet-500/50 hover:bg-muted/30"
-                    )}
+                </span>
+                <span className="flex items-center gap-1.5 ml-auto mr-2">
+                  <Badge
+                    variant="secondary"
+                    className="text-[9px] h-4 px-1.5 font-normal"
                   >
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/jpeg,image/jpg,image/png,image/webp"
-                      className="hidden"
-                      onChange={(e) => handleFileSelect(e.target.files?.[0])}
+                    {REF_MODE_LABELS[refMode]}
+                  </Badge>
+                  {(refMode === "upload" && uploadedImage) ||
+                  (refMode === "library" && selectedPhoto) ? (
+                    <span
+                      className="h-1.5 w-1.5 rounded-full bg-violet-500"
+                      title="已选"
                     />
-                    <Upload
-                      className={cn(
-                        "h-8 w-8 mx-auto mb-2",
-                        dragOver ? "text-violet-500" : "text-muted-foreground"
-                      )}
-                    />
-                    <p className="text-xs font-medium">
-                      {dragOver ? "释放即可上传" : "点击或拖拽图片"}
-                    </p>
-                    <p className="text-[10px] text-muted-foreground mt-1">
-                      JPG/PNG/WEBP · ≤10MB
-                    </p>
-                  </button>
-                ))}
-
-              {refMode === "library" && (
+                  ) : null}
+                </span>
+              </AccordionTrigger>
+              <AccordionContent className="pt-2 pb-3">
                 <div className="space-y-2">
-                  {/* 已选预览 */}
-                  {selectedPhoto && (
-                    <div className="relative group">
-                      {/* biome-ignore lint/performance/noImgElement: R2 动态 URL 用原生 img */}
-                      <img
-                        src={
-                          selectedPhoto.thumbnailUrl ?? selectedPhoto.fileUrl
-                        }
-                        alt={selectedPhoto.fileName}
-                        className="w-full aspect-square object-cover rounded-lg border border-violet-500"
-                      />
+                  <div className="flex gap-0.5 bg-muted rounded p-0.5 w-fit">
+                    {(["upload", "library", "none"] as RefMode[]).map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => handleModeChange(m)}
+                        className={cn(
+                          "text-[10px] px-2 py-1 rounded transition-colors",
+                          refMode === m
+                            ? "bg-background shadow-sm font-medium"
+                            : "text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        {REF_MODE_LABELS[m]}
+                      </button>
+                    ))}
+                  </div>
+
+                  {refMode === "upload" &&
+                    (uploadedImage ? (
+                      <div className="relative group">
+                        {/* biome-ignore lint/performance/noImgElement: 本地预览需要原生 img */}
+                        <img
+                          src={uploadedImage.previewUrl}
+                          alt={uploadedImage.fileName}
+                          className={cn(
+                            "w-full aspect-square object-cover rounded-lg border",
+                            uploadedImage.uploading !== null && "opacity-60"
+                          )}
+                        />
+                        {uploadedImage.uploading !== null && (
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded-lg">
+                            <Loader2 className="h-5 w-5 text-white animate-spin" />
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={handleRemoveUpload}
+                          className="absolute top-2 right-2 p-1 rounded-full bg-rose-500 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                          aria-label="移除"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                        <div className="absolute bottom-2 left-2 right-2 bg-black/60 text-white text-[10px] px-2 py-1 rounded truncate">
+                          {uploadedImage.fileName} ·{" "}
+                          {(uploadedImage.fileSize / 1024).toFixed(1)}KB
+                          {uploadedImage.uploading !== null && " · 上传中…"}
+                        </div>
+                      </div>
+                    ) : (
                       <button
                         type="button"
-                        onClick={() => setSelectedPhoto(null)}
-                        className="absolute top-2 right-2 p-1 rounded-full bg-rose-500 text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                        aria-label="移除已选"
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          setDragOver(true);
+                        }}
+                        onDragLeave={() => setDragOver(false)}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          setDragOver(false);
+                          handleFileSelect(e.dataTransfer.files?.[0]);
+                        }}
+                        onClick={() => fileInputRef.current?.click()}
+                        className={cn(
+                          "w-full border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors",
+                          dragOver
+                            ? "border-violet-500 bg-violet-500/5"
+                            : "border-muted-foreground/30 hover:border-violet-500/50 hover:bg-muted/30"
+                        )}
                       >
-                        <X className="h-3.5 w-3.5" />
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/jpeg,image/jpg,image/png,image/webp"
+                          className="hidden"
+                          onChange={(e) =>
+                            handleFileSelect(e.target.files?.[0])
+                          }
+                        />
+                        <Upload
+                          className={cn(
+                            "h-8 w-8 mx-auto mb-2",
+                            dragOver
+                              ? "text-violet-500"
+                              : "text-muted-foreground"
+                          )}
+                        />
+                        <p className="text-xs font-medium">
+                          {dragOver ? "释放即可上传" : "点击或拖拽图片"}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground mt-1">
+                          JPG/PNG/WEBP · ≤10MB
+                        </p>
                       </button>
-                      <div className="absolute bottom-2 left-2 right-2 bg-black/60 text-white text-[10px] px-2 py-1 rounded truncate flex items-center gap-1">
-                        <Badge
-                          variant="outline"
-                          className="text-[9px] py-0 h-3.5 bg-violet-500/30 border-violet-400/50 text-white uppercase shrink-0"
-                        >
-                          {selectedPhoto.format ?? "img"}
-                        </Badge>
-                        <span className="truncate">
-                          {selectedPhoto.fileName}
-                        </span>
+                    ))}
+
+                  {refMode === "library" && (
+                    <div className="space-y-2">
+                      {selectedPhoto && (
+                        <div className="relative group">
+                          {/* biome-ignore lint/performance/noImgElement: R2 动态 URL 用原生 img */}
+                          <img
+                            src={
+                              selectedPhoto.thumbnailUrl ??
+                              selectedPhoto.fileUrl
+                            }
+                            alt={selectedPhoto.fileName}
+                            className="w-full aspect-square object-cover rounded-lg border border-violet-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setSelectedPhoto(null)}
+                            className="absolute top-2 right-2 p-1 rounded-full bg-rose-500 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                            aria-label="移除已选"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                          <div className="absolute bottom-2 left-2 right-2 bg-black/60 text-white text-[10px] px-2 py-1 rounded truncate flex items-center gap-1">
+                            <Badge
+                              variant="outline"
+                              className="text-[9px] py-0 h-3.5 bg-violet-500/30 border-violet-400/50 text-white uppercase shrink-0"
+                            >
+                              {selectedPhoto.format ?? "img"}
+                            </Badge>
+                            <span className="truncate">
+                              {selectedPhoto.fileName}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="relative">
+                        <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                        <input
+                          value={librarySearch}
+                          onChange={(e) => setLibrarySearch(e.target.value)}
+                          placeholder="搜索图库..."
+                          className="w-full h-8 pl-7 pr-2 text-xs rounded border bg-background focus:outline-none focus:ring-2 focus:ring-violet-500/30"
+                        />
                       </div>
+
+                      <div className="max-h-[280px] overflow-y-auto rounded-lg border bg-muted/20">
+                        {libraryLoading ? (
+                          <div className="flex flex-col items-center justify-center py-8 text-muted-foreground gap-2">
+                            <Loader2 className="h-5 w-5 animate-spin" />
+                            <span className="text-[10px]">加载图库中...</span>
+                          </div>
+                        ) : libraryError ? (
+                          <div className="p-3 text-center">
+                            <XCircle className="h-5 w-5 text-rose-500 mx-auto mb-1" />
+                            <p className="text-[10px] text-rose-600 dark:text-rose-400">
+                              {libraryError}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                libraryFetchedRef.current = false;
+                                setRefMode("none");
+                                setTimeout(() => setRefMode("library"), 0);
+                              }}
+                              className="text-[10px] text-violet-600 hover:underline mt-1.5 inline-flex items-center gap-1"
+                            >
+                              <RefreshCw className="h-3 w-3" /> 重试
+                            </button>
+                          </div>
+                        ) : libraryPhotos.length === 0 ? (
+                          <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground gap-1.5">
+                            <Library className="h-6 w-6" />
+                            <p className="text-xs font-medium">图库为空</p>
+                            <p className="text-[10px]">先去照片管理上传图片</p>
+                            <a
+                              href="/dashboard/photos"
+                              className="text-[10px] text-violet-600 hover:underline mt-0.5"
+                            >
+                              前往图库管理 →
+                            </a>
+                          </div>
+                        ) : (
+                          (() => {
+                            const filtered = libraryPhotos.filter((p) =>
+                              p.fileName
+                                .toLowerCase()
+                                .includes(librarySearch.trim().toLowerCase())
+                            );
+                            if (filtered.length === 0) {
+                              return (
+                                <div className="py-6 text-center text-[10px] text-muted-foreground">
+                                  没有匹配 “{librarySearch}” 的图片
+                                </div>
+                              );
+                            }
+                            return (
+                              <div className="grid grid-cols-3 gap-1 p-1">
+                                {filtered.map((p) => {
+                                  const selected = selectedPhoto?.id === p.id;
+                                  return (
+                                    <button
+                                      key={p.id}
+                                      type="button"
+                                      onClick={() => setSelectedPhoto(p)}
+                                      className={cn(
+                                        "relative aspect-square rounded overflow-hidden border-2 transition-all",
+                                        selected
+                                          ? "border-violet-500 ring-1 ring-violet-500/30"
+                                          : "border-transparent hover:border-violet-500/50"
+                                      )}
+                                      title={p.fileName}
+                                      aria-label={`选择 ${p.fileName}`}
+                                    >
+                                      {/* biome-ignore lint/performance/noImgElement: R2 动态 URL 用原生 img */}
+                                      <img
+                                        src={p.thumbnailUrl ?? p.fileUrl}
+                                        alt={p.fileName}
+                                        className="w-full h-full object-cover"
+                                        loading="lazy"
+                                      />
+                                      {selected && (
+                                        <div className="absolute inset-0 bg-violet-500/20 flex items-center justify-center">
+                                          <CheckCircle2 className="h-5 w-5 text-white drop-shadow" />
+                                        </div>
+                                      )}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })()
+                        )}
+                      </div>
+
+                      <p className="text-[10px] text-muted-foreground text-center">
+                        {libraryPhotos.length > 0 && !libraryLoading
+                          ? `共 ${libraryPhotos.length} 张 · 点选即用`
+                          : ""}
+                      </p>
                     </div>
                   )}
 
-                  {/* 搜索 */}
-                  <div className="relative">
-                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-                    <input
-                      value={librarySearch}
-                      onChange={(e) => setLibrarySearch(e.target.value)}
-                      placeholder="搜索图库..."
-                      className="w-full h-8 pl-7 pr-2 text-xs rounded border bg-background focus:outline-none focus:ring-2 focus:ring-violet-500/30"
+                  {refMode === "none" && (
+                    <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3 text-center">
+                      <Type className="h-5 w-5 text-amber-600 mx-auto mb-1" />
+                      <p className="text-xs text-amber-700 dark:text-amber-400 font-medium">
+                        纯文生图模式
+                      </p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        仅根据提示词生成
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+
+            {/* ============ ② 提示词 / 模板 ============ */}
+            <AccordionItem value="prompt" className="border-b-0 px-3">
+              <AccordionTrigger className="hover:no-underline py-2.5 px-2 -mx-2 rounded-md data-[state=open]:bg-muted/30 hover:bg-muted/40 transition-colors [&[data-state=open]>svg]:-rotate-90">
+                <span className="flex items-center gap-2 text-xs font-semibold">
+                  <Sparkles className="h-3.5 w-3.5 text-violet-600" />
+                  提示词 / 模板
+                </span>
+                <span className="flex items-center gap-1.5 ml-auto mr-2">
+                  <Badge
+                    variant="secondary"
+                    className="text-[9px] h-4 px-1.5 font-normal"
+                  >
+                    {useTemplate ? (selectedTemplate?.name ?? "模板") : "手动"}
+                  </Badge>
+                  {useTemplate &&
+                    (selectedTemplate?.variables ?? []).length > 0 && (
+                      <Badge
+                        variant="outline"
+                        className="text-[9px] h-4 px-1.5 font-normal text-violet-700 dark:text-violet-400 border-violet-500/30"
+                      >
+                        {selectedTemplate?.variables?.length} 项
+                      </Badge>
+                    )}
+                </span>
+              </AccordionTrigger>
+              <AccordionContent className="pt-2 pb-3">
+                <div className="space-y-3">
+                  {/* 模板开关 */}
+                  <div className="flex items-center justify-between p-2 rounded-lg bg-muted/30">
+                    <div>
+                      <p className="text-xs font-medium flex items-center gap-1">
+                        <Sparkles className="h-3 w-3 text-violet-600" />
+                        使用模板
+                      </p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        {useTemplate
+                          ? "从效果模板生成提示词"
+                          : "手动输入提示词"}
+                      </p>
+                    </div>
+                    <Switch
+                      checked={useTemplate}
+                      onCheckedChange={setUseTemplate}
                     />
                   </div>
 
-                  {/* 列表 / 状态 */}
-                  <div className="max-h-[280px] overflow-y-auto rounded-lg border bg-muted/20">
-                    {libraryLoading ? (
-                      <div className="flex flex-col items-center justify-center py-8 text-muted-foreground gap-2">
-                        <Loader2 className="h-5 w-5 animate-spin" />
-                        <span className="text-[10px]">加载图库中...</span>
-                      </div>
-                    ) : libraryError ? (
-                      <div className="p-3 text-center">
-                        <XCircle className="h-5 w-5 text-rose-500 mx-auto mb-1" />
-                        <p className="text-[10px] text-rose-600 dark:text-rose-400">
-                          {libraryError}
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            libraryFetchedRef.current = false;
-                            // 触发重新拉取：直接把 refMode 设为自身会触发上面的 effect
-                            setRefMode("none");
-                            setTimeout(() => setRefMode("library"), 0);
-                          }}
-                          className="text-[10px] text-violet-600 hover:underline mt-1.5 inline-flex items-center gap-1"
+                  {/* 模板卡片 */}
+                  {useTemplate && (
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-semibold flex items-center gap-1">
+                        效果模版
+                        <Badge
+                          variant="outline"
+                          className="text-[9px] py-0 h-3.5 text-violet-700 dark:text-violet-400 border-violet-500/30"
                         >
-                          <RefreshCw className="h-3 w-3" /> 重试
-                        </button>
-                      </div>
-                    ) : libraryPhotos.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground gap-1.5">
-                        <Library className="h-6 w-6" />
-                        <p className="text-xs font-medium">图库为空</p>
-                        <p className="text-[10px]">先去照片管理上传图片</p>
-                        <a
-                          href="/dashboard/photos"
-                          className="text-[10px] text-violet-600 hover:underline mt-0.5"
-                        >
-                          前往图库管理 →
-                        </a>
-                      </div>
-                    ) : (
-                      (() => {
-                        const filtered = libraryPhotos.filter((p) =>
-                          p.fileName
-                            .toLowerCase()
-                            .includes(librarySearch.trim().toLowerCase())
-                        );
-                        if (filtered.length === 0) {
-                          return (
-                            <div className="py-6 text-center text-[10px] text-muted-foreground">
-                              没有匹配 “{librarySearch}” 的图片
-                            </div>
-                          );
-                        }
-                        return (
-                          <div className="grid grid-cols-3 gap-1 p-1">
-                            {filtered.map((p) => {
-                              const selected = selectedPhoto?.id === p.id;
+                          必选
+                        </Badge>
+                      </Label>
+                      {activeTemplates.length === 0 ? (
+                        <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-2.5 space-y-1">
+                          <p className="text-[10px] text-amber-700 dark:text-amber-400 font-medium flex items-center gap-1">
+                            <Sparkles className="h-3 w-3" />
+                            还没有可用的提示词模板
+                          </p>
+                          <p className="text-[10px] text-muted-foreground leading-relaxed">
+                            请联系管理员在
+                            <a
+                              href="/admin/prompt-templates"
+                              className="text-violet-600 hover:underline mx-0.5"
+                            >
+                              提示词模板管理
+                            </a>
+                            新建并启用模板。
+                          </p>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="-mx-1 px-1 flex gap-2 overflow-x-auto pb-1 snap-x snap-mandatory">
+                            {activeTemplates.map((tpl) => {
+                              const selected = tpl.id === selectedMask;
                               return (
                                 <button
-                                  key={p.id}
+                                  key={tpl.id}
                                   type="button"
-                                  onClick={() => setSelectedPhoto(p)}
+                                  onClick={() => handleSelectMask(tpl.id)}
                                   className={cn(
-                                    "relative aspect-square rounded overflow-hidden border-2 transition-all",
+                                    "snap-start shrink-0 w-36 h-20 rounded-lg border-2 overflow-hidden text-left transition-all relative group",
                                     selected
-                                      ? "border-violet-500 ring-1 ring-violet-500/30"
-                                      : "border-transparent hover:border-violet-500/50"
+                                      ? "border-violet-500 ring-2 ring-violet-500/30 shadow-md"
+                                      : "border-transparent hover:border-muted-foreground/30 bg-muted/40 hover:bg-muted/60"
                                   )}
-                                  title={p.fileName}
-                                  aria-label={`选择 ${p.fileName}`}
+                                  title={tpl.description}
                                 >
-                                  {/* biome-ignore lint/performance/noImgElement: R2 动态 URL 用原生 img */}
-                                  <img
-                                    src={p.thumbnailUrl ?? p.fileUrl}
-                                    alt={p.fileName}
-                                    className="w-full h-full object-cover"
-                                    loading="lazy"
-                                  />
+                                  {tpl.coverUrl ? (
+                                    // biome-ignore lint/performance/noImgElement: 模板封面用原生 img
+                                    <img
+                                      src={tpl.coverUrl}
+                                      alt={tpl.name}
+                                      className="w-full h-full object-cover"
+                                      loading="lazy"
+                                    />
+                                  ) : (
+                                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-violet-500/10 to-purple-500/10">
+                                      <Sparkles className="h-5 w-5 text-violet-600/60" />
+                                    </div>
+                                  )}
+                                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-2 py-1.5">
+                                    <div className="flex items-end justify-between gap-1">
+                                      <span className="text-[10px] font-medium text-white truncate flex-1">
+                                        {tpl.name}
+                                      </span>
+                                      <span className="text-[9px] font-mono text-white/80 shrink-0">
+                                        ¥{tpl.price ?? 0}
+                                      </span>
+                                    </div>
+                                  </div>
                                   {selected && (
-                                    <div className="absolute inset-0 bg-violet-500/20 flex items-center justify-center">
-                                      <CheckCircle2 className="h-5 w-5 text-white drop-shadow" />
+                                    <div className="absolute top-1 right-1 h-4 w-4 rounded-full bg-violet-500 flex items-center justify-center">
+                                      <CheckCircle2 className="h-3 w-3 text-white" />
                                     </div>
                                   )}
                                 </button>
                               );
                             })}
                           </div>
-                        );
-                      })()
+                          {selectedTemplate && (
+                            <p className="text-[10px] text-muted-foreground bg-violet-500/5 border border-violet-500/20 rounded p-1.5 leading-relaxed">
+                              {selectedTemplate.description}
+                            </p>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 模板参数 */}
+                  {useTemplate &&
+                    selectedTemplate &&
+                    (selectedTemplate.variables ?? []).length > 0 && (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs font-semibold flex items-center gap-1">
+                            <Sparkles className="h-3 w-3 text-violet-600" />
+                            模板参数
+                          </Label>
+                          <span className="text-[10px] text-muted-foreground">
+                            共 {(selectedTemplate.variables ?? []).length} 项
+                          </span>
+                        </div>
+                        <div className="space-y-2">
+                          {(selectedTemplate.variables ?? []).map((v) => (
+                            <div key={v.key} className="space-y-1">
+                              <Label className="text-[11px] flex items-center gap-1">
+                                <span className="font-mono text-violet-700 dark:text-violet-400">
+                                  {`{{${v.key}}}`}
+                                </span>
+                                <span className="text-muted-foreground">
+                                  {v.label}
+                                </span>
+                                {v.required && (
+                                  <span className="text-rose-600 text-[10px]">
+                                    *
+                                  </span>
+                                )}
+                              </Label>
+                              {v.options && v.options.length > 0 ? (
+                                <Select
+                                  value={paramValues[v.key] ?? v.defaultValue}
+                                  onValueChange={(val) =>
+                                    setParamValues((p) => ({
+                                      ...p,
+                                      [v.key]: val,
+                                    }))
+                                  }
+                                >
+                                  <SelectTrigger className="h-8 text-xs">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {v.options.map((opt) => (
+                                      <SelectItem
+                                        key={opt}
+                                        value={opt}
+                                        className="text-xs"
+                                      >
+                                        {opt}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              ) : (
+                                <Input
+                                  value={paramValues[v.key] ?? ""}
+                                  onChange={(e) =>
+                                    setParamValues((p) => ({
+                                      ...p,
+                                      [v.key]: e.target.value,
+                                    }))
+                                  }
+                                  placeholder={
+                                    v.defaultValue || `请输入${v.label}`
+                                  }
+                                  className="h-8 text-xs"
+                                />
+                              )}
+                              {v.description && (
+                                <p className="text-[10px] text-muted-foreground">
+                                  {v.description}
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                  {/* 手动 prompt */}
+                  {!useTemplate && (
+                    <>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-semibold flex items-center gap-1">
+                          <Type className="h-3.5 w-3.5" />
+                          提示词
+                        </Label>
+                        <Textarea
+                          value={prompt}
+                          onChange={(e) => setPrompt(e.target.value)}
+                          placeholder="描述你想要的图像效果..."
+                          rows={5}
+                          className="text-xs resize-none"
+                        />
+                        <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                          <span>{prompt.length} 字符</span>
+                          <button
+                            type="button"
+                            onClick={() => setPrompt("")}
+                            className="hover:text-foreground inline-flex items-center gap-0.5"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                            清空
+                          </button>
+                        </div>
+                      </div>
+
+                      {modelConfig.capabilities.supportsNegativePrompt && (
+                        <div className="space-y-1.5">
+                          <Label className="text-xs font-semibold">
+                            反向提示词{" "}
+                            <span className="text-[10px] text-muted-foreground font-normal">
+                              (可选)
+                            </span>
+                          </Label>
+                          <Textarea
+                            value={negativePrompt}
+                            onChange={(e) => setNegativePrompt(e.target.value)}
+                            placeholder="不希望出现的内容..."
+                            rows={2}
+                            className="text-xs resize-none"
+                          />
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+
+            {/* ============ ③ 生图模型 ============ */}
+            <AccordionItem value="model" className="border-b-0 px-3">
+              <AccordionTrigger className="hover:no-underline py-2.5 px-2 -mx-2 rounded-md data-[state=open]:bg-muted/30 hover:bg-muted/40 transition-colors [&[data-state=open]>svg]:-rotate-90">
+                <span className="flex items-center gap-2 text-xs font-semibold">
+                  <Sparkles className="h-3.5 w-3.5 text-violet-600" />
+                  生图模型
+                </span>
+                <span className="flex items-center gap-1.5 ml-auto mr-2">
+                  <span
+                    className="h-1.5 w-1.5 rounded-full"
+                    style={{ backgroundColor: modelConfig.color }}
+                  />
+                  <Badge
+                    variant="secondary"
+                    className="text-[9px] h-4 px-1.5 font-normal"
+                  >
+                    {modelConfig.name}
+                  </Badge>
+                </span>
+              </AccordionTrigger>
+              <AccordionContent className="pt-2 pb-3">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    {isModelOverridden ? (
+                      <Badge
+                        variant="outline"
+                        className="text-[9px] py-0 h-4 bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30"
+                      >
+                        已覆盖模板默认
+                      </Badge>
+                    ) : useTemplate && templateDefaultModel ? (
+                      <Badge
+                        variant="outline"
+                        className="text-[9px] py-0 h-4 bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/30"
+                      >
+                        模板默认
+                      </Badge>
+                    ) : (
+                      <span />
+                    )}
+                    {isModelOverridden && (
+                      <button
+                        type="button"
+                        onClick={handleRestoreTemplateModel}
+                        className="text-[10px] text-violet-600 hover:text-violet-700 dark:text-violet-400 flex items-center gap-1"
+                        title={`还原为「${selectedTemplate?.name}」模板默认`}
+                      >
+                        <RotateCcw className="h-3 w-3" />
+                        还原
+                      </button>
                     )}
                   </div>
 
-                  <p className="text-[10px] text-muted-foreground text-center">
-                    {libraryPhotos.length > 0 && !libraryLoading
-                      ? `共 ${libraryPhotos.length} 张 · 点选即用`
-                      : ""}
-                  </p>
-                </div>
-              )}
-
-              {refMode === "none" && (
-                <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3 text-center">
-                  <Type className="h-5 w-5 text-amber-600 mx-auto mb-1" />
-                  <p className="text-xs text-amber-700 dark:text-amber-400 font-medium">
-                    纯文生图模式
-                  </p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">
-                    仅根据提示词生成
-                  </p>
-                </div>
-              )}
-            </section>
-
-            {/* 模板开关 */}
-            <section className="flex items-center justify-between p-2.5 rounded-lg bg-muted/40">
-              <div>
-                <p className="text-xs font-semibold flex items-center gap-1">
-                  <Sparkles className="h-3.5 w-3.5 text-violet-600" />
-                  提示词模板
-                </p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">
-                  {useTemplate ? "使用效果模版的提示词" : "手动输入提示词"}
-                </p>
-              </div>
-              <Switch checked={useTemplate} onCheckedChange={setUseTemplate} />
-            </section>
-
-            {/* 提示词 - 仅关闭模板时显示 */}
-            {!useTemplate && (
-              <section className="space-y-2">
-                <Label className="text-xs font-semibold flex items-center gap-1">
-                  <Type className="h-3.5 w-3.5" />
-                  提示词
-                </Label>
-                <Textarea
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  placeholder="描述你想要的图像效果..."
-                  rows={5}
-                  className="text-xs resize-none"
-                />
-                <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                  <span>{prompt.length} 字符</span>
-                  <button
-                    type="button"
-                    onClick={() => setPrompt("")}
-                    className="hover:text-foreground"
-                  >
-                    <Trash2 className="h-3 w-3 inline mr-0.5" />
-                    清空
-                  </button>
-                </div>
-              </section>
-            )}
-
-            {/* 反向提示词 */}
-            {!useTemplate &&
-              modelConfig.capabilities.supportsNegativePrompt && (
-                <section className="space-y-2">
-                  <Label className="text-xs font-semibold">
-                    反向提示词{" "}
-                    <span className="text-[10px] text-muted-foreground font-normal">
-                      (可选)
-                    </span>
-                  </Label>
-                  <Textarea
-                    value={negativePrompt}
-                    onChange={(e) => setNegativePrompt(e.target.value)}
-                    placeholder="不希望出现的内容..."
-                    rows={2}
-                    className="text-xs resize-none"
-                  />
-                </section>
-              )}
-
-            {/* 生图模型 */}
-            <section className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs font-semibold flex items-center gap-1">
-                  <Sparkles className="h-3.5 w-3.5" />
-                  生图模型
-                  {isModelOverridden ? (
-                    <Badge
-                      variant="outline"
-                      className="text-[9px] py-0 h-3.5 bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30"
-                    >
-                      已覆盖「
-                      {selectedTemplate?.name}」模板默认
-                    </Badge>
-                  ) : (
-                    useTemplate &&
-                    templateDefaultModel && (
-                      <Badge
-                        variant="outline"
-                        className="text-[9px] py-0 h-3.5 bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/30"
-                      >
-                        由模板指定
-                      </Badge>
-                    )
-                  )}
-                </Label>
-                {isModelOverridden && (
-                  <button
-                    type="button"
-                    onClick={handleRestoreTemplateModel}
-                    className="text-[10px] text-violet-600 hover:text-violet-700 dark:text-violet-400 flex items-center gap-1"
-                    title="还原为「{selectedTemplate?.name}」模板默认"
-                  >
-                    <RotateCcw className="h-3 w-3" />
-                    还原默认
-                  </button>
-                )}
-              </div>
-              <Select
-                value={selectedModel}
-                onValueChange={(v) => setSelectedModel(v as ImageModelId)}
-              >
-                <SelectTrigger className="h-9 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {IMAGE_MODEL_LIST.filter((m) => m.status === "active").map(
-                    (m) => (
-                      <SelectItem
-                        key={m.id}
-                        value={m.id}
-                        // Phase：isAvailable=false 的模型在 API 层是占位 stub（simulateLatency +
-                        // picsum），不能让用户选了不报错 —— UI 层直接禁用并加「即将上线」标记。
-                        disabled={!m.isAvailable}
-                        className="text-xs"
-                      >
-                        <span className="flex items-center gap-2">
-                          <span
-                            className="h-2 w-2 rounded-full"
-                            style={{ backgroundColor: m.color }}
-                          />
-                          {m.name}
-                          <span className="text-[10px] text-muted-foreground">
-                            {m.currency === "CNY" ? "¥" : "$"}
-                            {m.pricePerImage} ·{" "}
-                            {(m.avgDuration / 1000).toFixed(1)}s
-                          </span>
-                          {m.isDomestic && (
-                            <Badge
-                              variant="outline"
-                              className="text-[9px] py-0 h-3.5"
-                            >
-                              国产
-                            </Badge>
-                          )}
-                          {!m.isAvailable && (
-                            <Badge
-                              variant="outline"
-                              className="text-[9px] py-0 h-3.5 bg-zinc-500/10 text-zinc-500 border-zinc-500/30"
-                            >
-                              即将上线
-                            </Badge>
-                          )}
-                        </span>
-                      </SelectItem>
-                    )
-                  )}
-                </SelectContent>
-              </Select>
-              {isModelOverridden ? (
-                <p className="text-[10px] text-amber-700 dark:text-amber-400 bg-amber-500/5 border border-amber-500/20 rounded p-1.5 flex items-center gap-1">
-                  <Sparkles className="h-3 w-3 shrink-0" />
-                  已覆盖「{selectedTemplate?.name}」模板默认（
-                  {templateDefaultModel &&
-                    IMAGE_MODELS[templateDefaultModel]?.name}
-                  ），点上方「还原默认」可恢复
-                </p>
-              ) : useTemplate && templateDefaultModel ? (
-                <p className="text-[10px] text-violet-700 dark:text-violet-400 bg-violet-500/5 border border-violet-500/20 rounded p-1.5 flex items-center gap-1">
-                  <Sparkles className="h-3 w-3 shrink-0" />
-                  模型由「{selectedTemplate?.name}」模板指定为{" "}
-                  {modelConfig.name}
-                  ，可手动切换到其他模型
-                </p>
-              ) : (
-                <p className="text-[10px] text-muted-foreground bg-muted/30 rounded p-1.5">
-                  {modelConfig.description}
-                </p>
-              )}
-            </section>
-
-            {/* 产品效果模版 */}
-            <section className="space-y-2">
-              <Label className="text-xs font-semibold flex items-center gap-1">
-                效果模版
-                {useTemplate && (
-                  <Badge
-                    variant="outline"
-                    className="text-[9px] py-0 h-3.5 text-violet-700 dark:text-violet-400 border-violet-500/30"
-                  >
-                    必选
-                  </Badge>
-                )}
-              </Label>
-              {activeTemplates.length === 0 ? (
-                <>
-                  <Select value="" disabled>
-                    <SelectTrigger className="h-9 text-xs opacity-60">
-                      <SelectValue placeholder="暂无提示词模板" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="_empty" disabled className="text-xs">
-                        暂无提示词模板
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-2.5 space-y-1">
-                    <p className="text-[10px] text-amber-700 dark:text-amber-400 font-medium flex items-center gap-1">
-                      <Sparkles className="h-3 w-3" />
-                      还没有可用的提示词模板
-                    </p>
-                    <p className="text-[10px] text-muted-foreground leading-relaxed">
-                      请联系管理员在
-                      <a
-                        href="/admin/prompt-templates"
-                        className="text-violet-600 hover:underline mx-0.5"
-                      >
-                        提示词模板管理
-                      </a>
-                      新建并启用模板。模板里
-                      <code className="mx-0.5 px-1 py-0.5 rounded bg-muted text-[9px] font-mono">
-                        isActive=false
-                      </code>
-                      的不会出现在此下拉里。
-                    </p>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <Select value={selectedMask} onValueChange={handleSelectMask}>
-                    <SelectTrigger className="h-9 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {!useTemplate && (
-                        <SelectItem value="none" className="text-xs">
-                          不使用模版（自定义）
-                        </SelectItem>
-                      )}
-                      {activeTemplates.map((tpl) => (
-                        <SelectItem
-                          key={tpl.id}
-                          value={tpl.id}
-                          className="text-xs"
-                        >
-                          {tpl.name} · ¥{tpl.price ?? 0}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {useTemplate && selectedTemplate && (
-                    <p className="text-[10px] text-muted-foreground bg-violet-500/5 border border-violet-500/20 rounded p-1.5">
-                      {selectedTemplate.description}
-                    </p>
-                  )}
-                </>
-              )}
-            </section>
-
-            {/* 模板参数 */}
-            {useTemplate &&
-              selectedTemplate &&
-              (selectedTemplate.variables ?? []).length > 0 && (
-                <section className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-xs font-semibold flex items-center gap-1">
-                      <Sparkles className="h-3 w-3 text-violet-600" />
-                      模参数
-                    </Label>
-                    <span className="text-[10px] text-muted-foreground">
-                      共 {(selectedTemplate.variables ?? []).length} 项
-                    </span>
-                  </div>
-                  <div className="space-y-2">
-                    {(selectedTemplate.variables ?? []).map((v) => (
-                      <div key={v.key} className="space-y-1">
-                        <Label className="text-[11px] flex items-center gap-1">
-                          <span className="font-mono text-violet-700 dark:text-violet-400">
-                            {`{{${v.key}}}`}
-                          </span>
-                          <span className="text-muted-foreground">
-                            {v.label}
-                          </span>
-                          {v.required && (
-                            <span className="text-rose-600 text-[10px]">*</span>
-                          )}
-                        </Label>
-                        {v.options && v.options.length > 0 ? (
-                          <Select
-                            value={paramValues[v.key] ?? v.defaultValue}
-                            onValueChange={(val) =>
-                              setParamValues((p) => ({
-                                ...p,
-                                [v.key]: val,
-                              }))
+                  <div className="-mx-1 px-1 flex gap-1.5 overflow-x-auto pb-1 snap-x snap-mandatory">
+                    {IMAGE_MODEL_LIST.filter((m) => m.status === "active").map(
+                      (m) => {
+                        const selected = m.id === selectedModel;
+                        return (
+                          <button
+                            key={m.id}
+                            type="button"
+                            disabled={!m.isAvailable}
+                            onClick={() => setSelectedModel(m.id)}
+                            className={cn(
+                              "snap-start shrink-0 flex items-center gap-1.5 pl-1.5 pr-2.5 py-1.5 rounded-full border text-[11px] font-medium transition-all",
+                              selected
+                                ? "border-transparent text-white shadow-sm"
+                                : !m.isAvailable
+                                  ? "border-dashed border-muted-foreground/30 text-muted-foreground/60 cursor-not-allowed"
+                                  : "border-border bg-background hover:border-muted-foreground/40 hover:bg-muted/40"
+                            )}
+                            style={
+                              selected
+                                ? {
+                                    backgroundColor: m.color,
+                                    boxShadow: `0 2px 8px ${m.color}33`,
+                                  }
+                                : undefined
+                            }
+                            title={
+                              !m.isAvailable
+                                ? `${m.name} 即将上线`
+                                : `${m.name} · ${m.currency === "CNY" ? "¥" : "$"}${m.pricePerImage} · ${(m.avgDuration / 1000).toFixed(1)}s`
                             }
                           >
-                            <SelectTrigger className="h-8 text-xs">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {v.options.map((opt) => (
-                                <SelectItem
-                                  key={opt}
-                                  value={opt}
-                                  className="text-xs"
-                                >
-                                  {opt}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        ) : (
-                          <Input
-                            value={paramValues[v.key] ?? ""}
-                            onChange={(e) =>
-                              setParamValues((p) => ({
-                                ...p,
-                                [v.key]: e.target.value,
-                              }))
-                            }
-                            placeholder={v.defaultValue || `请输入${v.label}`}
-                            className="h-8 text-xs"
-                          />
-                        )}
-                        {v.description && (
-                          <p className="text-[10px] text-muted-foreground">
-                            {v.description}
-                          </p>
-                        )}
-                      </div>
-                    ))}
+                            <span
+                              className={cn(
+                                "h-2 w-2 rounded-full shrink-0",
+                                !selected && "ring-2 ring-background"
+                              )}
+                              style={{
+                                backgroundColor: m.isAvailable
+                                  ? m.color
+                                  : "transparent",
+                                border: !m.isAvailable
+                                  ? `1.5px dashed ${m.color}`
+                                  : undefined,
+                              }}
+                            />
+                            <span>{m.name}</span>
+                            {!m.isAvailable && (
+                              <span className="text-[9px] opacity-70">
+                                即将上线
+                              </span>
+                            )}
+                          </button>
+                        );
+                      }
+                    )}
                   </div>
-                </section>
-              )}
 
-            {/* 基础参数 */}
-            <section className="space-y-3">
-              <div className="space-y-1">
-                <Label className="text-xs font-semibold">输出尺寸</Label>
-                <div className="grid grid-cols-4 gap-1">
-                  {availableSizes.slice(0, 4).map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => setSize(s)}
-                      className={cn(
-                        "text-[10px] py-1.5 rounded border font-mono transition-colors",
-                        size === s
-                          ? "border-violet-500 bg-violet-500/5 text-violet-700 dark:text-violet-400"
-                          : "hover:bg-muted"
-                      )}
-                    >
-                      {s}
-                    </button>
-                  ))}
+                  {isModelOverridden ? (
+                    <p className="text-[10px] text-amber-700 dark:text-amber-400 bg-amber-500/5 border border-amber-500/20 rounded p-1.5 flex items-center gap-1">
+                      <Sparkles className="h-3 w-3 shrink-0" />
+                      已覆盖「{selectedTemplate?.name}」模板默认（
+                      {templateDefaultModel &&
+                        IMAGE_MODELS[templateDefaultModel]?.name}
+                      ）
+                    </p>
+                  ) : useTemplate && templateDefaultModel ? (
+                    <p className="text-[10px] text-violet-700 dark:text-violet-400 bg-violet-500/5 border border-violet-500/20 rounded p-1.5 flex items-center gap-1">
+                      <Sparkles className="h-3 w-3 shrink-0" />
+                      模板推荐「{modelConfig.name}」，可点击切换
+                    </p>
+                  ) : (
+                    <p className="text-[10px] text-muted-foreground bg-muted/30 rounded p-1.5">
+                      {modelConfig.description}
+                    </p>
+                  )}
                 </div>
-              </div>
+              </AccordionContent>
+            </AccordionItem>
 
-              <div className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs font-semibold">生成数量</Label>
-                  <span className="text-xs font-mono text-violet-600">
-                    {batchSize} 张
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min={1}
-                  max={modelConfig.capabilities.maxBatchSize}
-                  value={batchSize}
-                  onChange={(e) => setBatchSize(Number(e.target.value))}
-                  disabled={(() => {
-                    const tplCandidateCount = useTemplate
-                      ? (selectedTemplate?.candidateCount ?? 1)
-                      : 1;
-                    return tplCandidateCount === 4 || tplCandidateCount === 9;
-                  })()}
-                  className="w-full accent-violet-500 disabled:opacity-50"
-                />
-                <div className="flex justify-between text-[9px] text-muted-foreground">
-                  <span>1</span>
-                  <span>最多 {modelConfig.capabilities.maxBatchSize}</span>
-                </div>
-                {(() => {
-                  const tplCandidateCount = useTemplate
-                    ? (selectedTemplate?.candidateCount ?? 1)
-                    : 1;
-                  if (tplCandidateCount === 4 || tplCandidateCount === 9) {
-                    return (
-                      <p className="text-[10px] text-violet-700 dark:text-violet-400 bg-violet-500/5 border border-violet-500/20 rounded p-1.5 mt-1">
-                        当前模板为
-                        {tplCandidateCount === 4 ? "2×2" : "3×3"}
-                        宫格拼接，将返回 1
-                        张含全部候选的拼接大图，批量数量已自动锁定
-                      </p>
-                    );
-                  }
-                  return null;
-                })()}
-              </div>
-            </section>
+            {/* ============ ④ 输出参数 ============ */}
+            <AccordionItem value="output" className="border-b-0 px-3">
+              <AccordionTrigger className="hover:no-underline py-2.5 px-2 -mx-2 rounded-md data-[state=open]:bg-muted/30 hover:bg-muted/40 transition-colors [&[data-state=open]>svg]:-rotate-90">
+                <span className="flex items-center gap-2 text-xs font-semibold">
+                  <Settings2 className="h-3.5 w-3.5 text-violet-600" />
+                  输出参数
+                </span>
+                <span className="flex items-center gap-1.5 ml-auto mr-2">
+                  <Badge
+                    variant="secondary"
+                    className="text-[9px] h-4 px-1.5 font-normal font-mono"
+                  >
+                    {(() => {
+                      const [w, h] = parseImageSize(size);
+                      return w === h ? "1:1" : `${w}:${h}`;
+                    })()}
+                  </Badge>
+                  <Badge
+                    variant="secondary"
+                    className="text-[9px] h-4 px-1.5 font-normal"
+                  >
+                    {(() => {
+                      const tplCandidateCount = useTemplate
+                        ? (selectedTemplate?.candidateCount ?? 1)
+                        : 1;
+                      if (tplCandidateCount === 4 || tplCandidateCount === 9) {
+                        return `1 张拼接`;
+                      }
+                      return `${batchSize} 张`;
+                    })()}
+                  </Badge>
+                </span>
+              </AccordionTrigger>
+              <AccordionContent className="pt-2 pb-3">
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold">输出尺寸</Label>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {availableSizes.slice(0, 4).map((s) => {
+                        const selected = size === s;
+                        const [w, h] = parseImageSize(s);
+                        const AspectIcon = getAspectIcon(s);
+                        return (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => setSize(s)}
+                            title={`${s} (${w}:${h})`}
+                            className={cn(
+                              "flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border-2 transition-all",
+                              selected
+                                ? "border-violet-500 bg-violet-500/10 text-violet-700 dark:text-violet-400 shadow-sm"
+                                : "border-transparent bg-muted/30 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                            )}
+                          >
+                            <AspectIcon
+                              className="h-4 w-4"
+                              strokeWidth={1.75}
+                            />
+                            <span className="text-[9px] font-mono leading-none">
+                              {w === h ? "1:1" : `${w}:${h}`}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
 
-            {/* 高级参数 */}
-            <section className="border-t pt-3">
-              <button
-                type="button"
-                onClick={() => setShowAdvanced(!showAdvanced)}
-                className="w-full flex items-center justify-between text-xs font-semibold"
-              >
-                <span className="flex items-center gap-1">
-                  <Settings2 className="h-3.5 w-3.5" />
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-semibold">生成数量</Label>
+                      <span className="text-xs font-mono text-violet-600">
+                        {batchSize} 张
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={1}
+                      max={modelConfig.capabilities.maxBatchSize}
+                      value={batchSize}
+                      onChange={(e) => setBatchSize(Number(e.target.value))}
+                      disabled={(() => {
+                        const tplCandidateCount = useTemplate
+                          ? (selectedTemplate?.candidateCount ?? 1)
+                          : 1;
+                        return (
+                          tplCandidateCount === 4 || tplCandidateCount === 9
+                        );
+                      })()}
+                      className="w-full accent-violet-500 disabled:opacity-50"
+                    />
+                    <div className="flex justify-between text-[9px] text-muted-foreground">
+                      <span>1</span>
+                      <span>最多 {modelConfig.capabilities.maxBatchSize}</span>
+                    </div>
+                    {(() => {
+                      const tplCandidateCount = useTemplate
+                        ? (selectedTemplate?.candidateCount ?? 1)
+                        : 1;
+                      if (tplCandidateCount === 4 || tplCandidateCount === 9) {
+                        return (
+                          <p className="text-[10px] text-violet-700 dark:text-violet-400 bg-violet-500/5 border border-violet-500/20 rounded p-1.5 mt-1">
+                            当前模板为
+                            {tplCandidateCount === 4 ? "2×2" : "3×3"}
+                            宫格拼接，将返回 1
+                            张含全部候选的拼接大图，批量数量已自动锁定
+                          </p>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </div>
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+
+            {/* ============ ⑤ 高级参数（默认折叠）============ */}
+            <AccordionItem value="advanced" className="border-b-0 px-3">
+              <AccordionTrigger className="hover:no-underline py-2.5 px-2 -mx-2 rounded-md data-[state=open]:bg-muted/30 hover:bg-muted/40 transition-colors [&[data-state=open]>svg]:-rotate-90">
+                <span className="flex items-center gap-2 text-xs font-semibold">
+                  <Settings2 className="h-3.5 w-3.5 text-violet-600" />
                   高级参数
                 </span>
-                {showAdvanced ? (
-                  <ChevronDown className="h-3.5 w-3.5" />
-                ) : (
-                  <ChevronRight className="h-3.5 w-3.5" />
-                )}
-              </button>
-
-              {showAdvanced && (
-                <div className="mt-3 space-y-3">
+                <span className="flex items-center gap-1.5 ml-auto mr-2">
+                  {(guidanceScale !== 7 ||
+                    steps !== 30 ||
+                    seed !== "" ||
+                    !safetyCheck) && (
+                    <span
+                      className="h-1.5 w-1.5 rounded-full bg-amber-500"
+                      title="已修改默认"
+                    />
+                  )}
+                </span>
+              </AccordionTrigger>
+              <AccordionContent className="pt-2 pb-3">
+                <div className="space-y-3">
                   {modelConfig.capabilities.supportsGuidance && (
                     <div className="space-y-1">
                       <div className="flex items-center justify-between">
@@ -1778,9 +1954,9 @@ export function GenerateWorkbenchView({
                     </div>
                   )}
                 </div>
-              )}
-            </section>
-          </div>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
 
           {/* 底部：生成按钮（工作台不扣积分，去掉"预计成本"行） */}
           <div className="p-3 border-t bg-muted/30 space-y-2">
@@ -1849,307 +2025,407 @@ export function GenerateWorkbenchView({
           <div className="flex-1 overflow-y-auto p-4">
             {selectedEffect ? (
               <div className="space-y-4">
-                {/* 状态栏 */}
-                <div className="flex items-center justify-between flex-wrap gap-2">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span
-                      className={cn(
-                        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium",
-                        STATUS_CONFIG[selectedEffect.status].bg,
-                        STATUS_CONFIG[selectedEffect.status].color
-                      )}
-                    >
-                      {(() => {
-                        const Icon = STATUS_CONFIG[selectedEffect.status].icon;
-                        return (
-                          <Icon
-                            className={cn(
-                              "h-3 w-3",
-                              selectedEffect.status === "processing" &&
-                                "animate-spin"
-                            )}
-                          />
-                        );
-                      })()}
-                      {STATUS_CONFIG[selectedEffect.status].label}
-                    </span>
-                    <span
-                      className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-white"
-                      style={{ backgroundColor: modelConfig.color }}
-                    >
-                      <Sparkles className="h-2.5 w-2.5" />
-                      {selectedEffect.imageModelName}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground">
-                      {selectedEffect.maskName} ·{" "}
-                      {selectedEffect.mode === "text_to_image"
-                        ? "文生图"
-                        : "图生图"}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-muted-foreground">
-                      {new Date(selectedEffect.createdAt).toLocaleString(
-                        "zh-CN"
-                      )}
-                    </span>
-                    {selectedEffect.status === "processing" &&
-                      selectedEffect.jobId && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-6 px-2 text-[10px]"
-                          disabled={refreshing}
-                          onClick={async () => {
-                            if (!selectedEffect.jobId) return;
-                            setRefreshing(true);
-                            try {
-                              const job = await pollImageJob(
-                                selectedEffect.jobId
-                              );
-                              if (job) {
-                                applyJobUpdate(selectedEffect.effectId, job);
-                              }
-                            } catch (err) {
-                              toast.error(
-                                err instanceof Error ? err.message : "刷新失败"
-                              );
-                            } finally {
-                              setRefreshing(false);
-                            }
-                          }}
-                        >
-                          {refreshing ? (
-                            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                          ) : (
-                            <Sparkles className="h-3 w-3 mr-1" />
+                {/* 状态栏 —— Lovart 风：单个统一 pill + 右上角刷新 */}
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  {(() => {
+                    const sc = STATUS_CONFIG[selectedEffect.status];
+                    const Icon = sc.icon;
+                    const durationSec =
+                      selectedEffect.duration && selectedEffect.duration > 0
+                        ? `${(selectedEffect.duration / 1000).toFixed(1)}s`
+                        : null;
+                    return (
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium",
+                          sc.bg,
+                          sc.color
+                        )}
+                      >
+                        <Icon
+                          className={cn(
+                            "h-3 w-3",
+                            selectedEffect.status === "processing" &&
+                              "animate-spin"
                           )}
-                          刷新状态
-                        </Button>
-                      )}
-                  </div>
+                        />
+                        <span>{sc.label}</span>
+                        <span className="text-muted-foreground/60">·</span>
+                        <span
+                          className="inline-flex items-center gap-1"
+                          style={{ color: modelConfig.color }}
+                        >
+                          <span
+                            className="h-1.5 w-1.5 rounded-full"
+                            style={{ backgroundColor: modelConfig.color }}
+                          />
+                          {selectedEffect.imageModelName}
+                        </span>
+                        <span className="text-muted-foreground/60">·</span>
+                        <span className="text-muted-foreground">
+                          {selectedEffect.mode === "text_to_image"
+                            ? "文生图"
+                            : "图生图"}
+                        </span>
+                        {durationSec && (
+                          <>
+                            <span className="text-muted-foreground/60">·</span>
+                            <span className="text-muted-foreground font-mono">
+                              {durationSec}
+                            </span>
+                          </>
+                        )}
+                      </span>
+                    );
+                  })()}
+                  {selectedEffect.status === "processing" &&
+                    selectedEffect.jobId && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 px-2.5 text-xs"
+                        disabled={refreshing}
+                        onClick={async () => {
+                          if (!selectedEffect.jobId) return;
+                          setRefreshing(true);
+                          try {
+                            const job = await pollImageJob(
+                              selectedEffect.jobId
+                            );
+                            if (job) {
+                              applyJobUpdate(selectedEffect.effectId, job);
+                            }
+                          } catch (err) {
+                            toast.error(
+                              err instanceof Error ? err.message : "刷新失败"
+                            );
+                          } finally {
+                            setRefreshing(false);
+                          }
+                        }}
+                      >
+                        {refreshing ? (
+                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-3 w-3 mr-1" />
+                        )}
+                        刷新状态
+                      </Button>
+                    )}
                 </div>
 
                 {/* 结果图片网格 */}
                 {selectedEffect.status === "completed" &&
                 selectedEffect.resultUrls.length > 0 ? (
-                  <div
-                    className={cn(
-                      "grid gap-3",
-                      selectedEffect.resultUrls.length === 1
-                        ? "grid-cols-1"
-                        : selectedEffect.resultUrls.length === 2
-                          ? "grid-cols-2"
-                          : "grid-cols-2 md:grid-cols-3"
-                    )}
-                  >
-                    {selectedEffect.resultUrls.map((url, i) => (
-                      <div
-                        // biome-ignore lint/suspicious/noArrayIndexKey: 结果图按生成顺序展示
-                        key={i}
-                        className="group relative aspect-square rounded-lg overflow-hidden border bg-muted"
-                      >
-                        {/* biome-ignore lint/performance/noImgElement: 生成结果用原生 img 性能更佳 */}
-                        <img
-                          src={url}
-                          alt={`结果 ${i + 1}`}
-                          className="w-full h-full object-cover"
-                        />
-                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100">
-                          {/* 下载：fetch→blob→a[download]，文件名带模型+任务 id+时间戳 */}
-                          <Button
-                            size="icon"
-                            variant="secondary"
-                            className="h-8 w-8"
-                            disabled={
-                              busyKey === `dl-${selectedEffect.effectId}-${i}`
-                            }
-                            onClick={async () => {
-                              const key = `dl-${selectedEffect.effectId}-${i}`;
-                              setBusyKey(key);
-                              try {
-                                await downloadImage(
-                                  url,
-                                  buildDownloadFilename(selectedEffect, url, i)
-                                );
-                                toast.success("已下载");
-                              } catch (err) {
-                                toast.error(
-                                  err instanceof Error
-                                    ? err.message
-                                    : "下载失败"
-                                );
-                              } finally {
-                                setBusyKey(null);
-                              }
-                            }}
-                            title="下载"
-                          >
-                            {busyKey ===
-                            `dl-${selectedEffect.effectId}-${i}` ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <Download className="h-3.5 w-3.5" />
-                            )}
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="secondary"
-                            className="h-8 w-8"
-                            onClick={() => toast.success("已收藏")}
-                            title="收藏"
-                          >
-                            <Heart className="h-3.5 w-3.5" />
-                          </Button>
-                          {/* 分享：复制图片 URL 到剪贴板（navigator.clipboard） */}
-                          <Button
-                            size="icon"
-                            variant="secondary"
-                            className="h-8 w-8"
-                            disabled={
-                              busyKey ===
-                              `share-${selectedEffect.effectId}-${i}`
-                            }
-                            onClick={async () => {
-                              const key = `share-${selectedEffect.effectId}-${i}`;
-                              setBusyKey(key);
-                              try {
-                                if (
-                                  !navigator.clipboard ||
-                                  !navigator.clipboard.writeText
-                                ) {
-                                  throw new Error("当前浏览器不支持剪贴板 API");
-                                }
-                                await navigator.clipboard.writeText(url);
-                                toast.success("链接已复制");
-                              } catch (err) {
-                                toast.error(
-                                  err instanceof Error
-                                    ? err.message
-                                    : "复制失败"
-                                );
-                              } finally {
-                                setBusyKey(null);
-                              }
-                            }}
-                            title="复制链接"
-                          >
-                            {busyKey ===
-                            `share-${selectedEffect.effectId}-${i}` ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <Share2 className="h-3.5 w-3.5" />
-                            )}
-                          </Button>
-                          {/* 放大查看：弹出 Dialog 全屏预览 */}
-                          <Button
-                            size="icon"
-                            variant="secondary"
-                            className="h-8 w-8"
-                            onClick={() =>
-                              setLightbox({
-                                url,
-                                effectId: selectedEffect.effectId,
-                                index: i,
-                              })
-                            }
-                            title="放大查看"
-                          >
-                            <Maximize2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                        <div className="absolute top-1.5 left-1.5 bg-black/60 text-white text-[9px] px-1.5 py-0.5 rounded font-mono">
-                          #{i + 1}
-                        </div>
+                  <div className="space-y-2">
+                    {/* 宫格拼接模式提示：服务端返的是 1 张 2×2/3×3 大图，不是多张独立图 */}
+                    {selectedEffect.isGridComposite && (
+                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-violet-500/5 border border-violet-500/20 text-[11px] text-violet-700 dark:text-violet-400">
+                        <Sparkles className="h-3 w-3 shrink-0" />
+                        <span>
+                          {(() => {
+                            const tplCandidateCount =
+                              selectedTemplate?.candidateCount ?? 1;
+                            const layout =
+                              tplCandidateCount === 4 ? "2×2" : "3×3";
+                            return `宫格拼接（${layout} · ${tplCandidateCount} 个候选已合成 1 张大图）`;
+                          })()}
+                        </span>
                       </div>
-                    ))}
+                    )}
+                    <div
+                      className={cn(
+                        "grid gap-3",
+                        // 1 张时全宽；2 张平分；≥3 张响应式
+                        selectedEffect.resultUrls.length === 1 &&
+                          !selectedEffect.isGridComposite
+                          ? "grid-cols-1"
+                          : selectedEffect.resultUrls.length === 2
+                            ? "grid-cols-2"
+                            : "grid-cols-2 md:grid-cols-3 lg:grid-cols-4"
+                      )}
+                    >
+                      {selectedEffect.resultUrls.map((url, i) => {
+                        // 用 size 状态算出实际宽高比，避免裁切非 1:1 输出
+                        const [tileW, tileH] = parseImageSize(size);
+                        return (
+                          <div
+                            // biome-ignore lint/suspicious/noArrayIndexKey: 结果图按生成顺序展示
+                            key={i}
+                            className="group relative rounded-xl overflow-hidden border-2 border-transparent hover:border-violet-500/40 bg-muted transition-colors duration-200"
+                            style={{ aspectRatio: `${tileW} / ${tileH}` }}
+                          >
+                            {/* biome-ignore lint/performance/noImgElement: 生成结果用原生 img 性能更佳 */}
+                            <img
+                              src={url}
+                              alt={`结果 ${i + 1}`}
+                              className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-[1.02]"
+                            />
+                            {/* Lovart 风格：底部渐变蒙层，hover 时滑入 */}
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+                            {/* 左上角编号 chip：始终可见 */}
+                            <div className="absolute top-2 left-2 bg-black/55 backdrop-blur-sm text-white text-[10px] px-2 py-0.5 rounded-md font-mono tracking-tight">
+                              #{i + 1}
+                            </div>
+                            {/* 右上角快捷操作：hover 才显示，避免遮挡结果 */}
+                            <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200 translate-y-[-4px] group-hover:translate-y-0">
+                              <Button
+                                size="icon"
+                                variant="secondary"
+                                className="h-8 w-8 rounded-full bg-white/90 hover:bg-white text-foreground shadow-lg"
+                                disabled={
+                                  busyKey ===
+                                  `dl-${selectedEffect.effectId}-${i}`
+                                }
+                                onClick={async () => {
+                                  const key = `dl-${selectedEffect.effectId}-${i}`;
+                                  setBusyKey(key);
+                                  try {
+                                    await downloadImage(
+                                      url,
+                                      buildDownloadFilename(
+                                        selectedEffect,
+                                        url,
+                                        i
+                                      )
+                                    );
+                                    toast.success("已下载");
+                                  } catch (err) {
+                                    toast.error(
+                                      err instanceof Error
+                                        ? err.message
+                                        : "下载失败"
+                                    );
+                                  } finally {
+                                    setBusyKey(null);
+                                  }
+                                }}
+                                title="下载"
+                              >
+                                {busyKey ===
+                                `dl-${selectedEffect.effectId}-${i}` ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Download className="h-3.5 w-3.5" />
+                                )}
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="secondary"
+                                className="h-8 w-8 rounded-full bg-white/90 hover:bg-white text-foreground shadow-lg"
+                                onClick={() => toast.success("已收藏")}
+                                title="收藏"
+                              >
+                                <Heart className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="secondary"
+                                className="h-8 w-8 rounded-full bg-white/90 hover:bg-white text-foreground shadow-lg"
+                                disabled={
+                                  busyKey ===
+                                  `share-${selectedEffect.effectId}-${i}`
+                                }
+                                onClick={async () => {
+                                  const key = `share-${selectedEffect.effectId}-${i}`;
+                                  setBusyKey(key);
+                                  try {
+                                    if (
+                                      !navigator.clipboard ||
+                                      !navigator.clipboard.writeText
+                                    ) {
+                                      throw new Error(
+                                        "当前浏览器不支持剪贴板 API"
+                                      );
+                                    }
+                                    await navigator.clipboard.writeText(url);
+                                    toast.success("链接已复制");
+                                  } catch (err) {
+                                    toast.error(
+                                      err instanceof Error
+                                        ? err.message
+                                        : "复制失败"
+                                    );
+                                  } finally {
+                                    setBusyKey(null);
+                                  }
+                                }}
+                                title="复制链接"
+                              >
+                                {busyKey ===
+                                `share-${selectedEffect.effectId}-${i}` ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Share2 className="h-3.5 w-3.5" />
+                                )}
+                              </Button>
+                            </div>
+                            {/* 底部居中：放大查看 pill —— 主要 CTA */}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setLightbox({
+                                  url,
+                                  effectId: selectedEffect.effectId,
+                                  index: i,
+                                })
+                              }
+                              className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-3.5 h-9 rounded-full bg-white text-foreground text-xs font-medium shadow-xl opacity-0 group-hover:opacity-100 transition-all duration-200 translate-y-2 group-hover:translate-y-0 hover:bg-white/95 active:scale-95"
+                              title="放大查看"
+                              aria-label={`放大查看第 ${i + 1} 张`}
+                            >
+                              <Maximize2 className="h-3.5 w-3.5" />
+                              查看大图
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 ) : selectedEffect.status === "processing" ? (
-                  <div className="aspect-video rounded-lg border-2 border-dashed border-sky-500/30 bg-sky-500/5 flex flex-col items-center justify-center gap-3">
-                    <Loader2 className="h-10 w-10 text-sky-500 animate-spin" />
-                    {selectedEffect.taskId ? (
-                      <>
-                        <p className="text-sm font-medium text-sky-700 dark:text-sky-400">
-                          任务已提交，正在异步生成…
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          上游排队中，最长约 180s
-                        </p>
-                      </>
-                    ) : (
-                      <>
-                        <p className="text-sm font-medium text-sky-700 dark:text-sky-400">
-                          AI 正在生成中...
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          预计 {(modelConfig.avgDuration / 1000).toFixed(1)}s
-                          完成
-                        </p>
-                      </>
-                    )}
+                  <div className="aspect-video rounded-2xl border-2 border-dashed border-violet-500/30 bg-gradient-to-br from-violet-500/5 via-sky-500/5 to-purple-500/5 flex flex-col items-center justify-center gap-4 overflow-hidden relative">
+                    {/* 背景的扩散光晕 —— Lovart 风的"还在动"暗示 */}
+                    <div className="absolute inset-0 flex items-center justify-center opacity-30 pointer-events-none">
+                      <div className="h-32 w-32 rounded-full bg-violet-500/30 blur-3xl animate-pulse" />
+                    </div>
+                    <div className="relative flex flex-col items-center gap-4">
+                      <div className="relative h-16 w-16 rounded-full bg-background shadow-lg flex items-center justify-center">
+                        <Loader2 className="h-7 w-7 text-violet-600 animate-spin" />
+                      </div>
+                      {selectedEffect.taskId ? (
+                        <div className="space-y-1 text-center">
+                          <p className="text-sm font-semibold">
+                            任务已提交，正在异步生成…
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            上游排队中，最长约 180s
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-1 text-center">
+                          <p className="text-sm font-semibold">
+                            AI 正在生成中…
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            预计 {(modelConfig.avgDuration / 1000).toFixed(1)}s
+                            完成
+                          </p>
+                        </div>
+                      )}
+                      {/* 进度 chip：让用户感知"还在动" */}
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-500/10 border border-violet-500/20 px-2.5 py-1 text-[10px] font-medium text-violet-700 dark:text-violet-400">
+                        <span className="h-1.5 w-1.5 rounded-full bg-violet-500 animate-pulse" />
+                        实时同步中
+                      </span>
+                    </div>
                   </div>
                 ) : selectedEffect.status === "failed" ? (
-                  <div className="aspect-video rounded-lg border-2 border-dashed border-rose-500/30 bg-rose-500/5 flex flex-col items-center justify-center gap-3">
-                    <XCircle className="h-10 w-10 text-rose-500" />
-                    <p className="text-sm font-medium text-rose-700 dark:text-rose-400">
-                      生成失败
-                    </p>
-                    <p className="text-xs text-muted-foreground max-w-md text-center">
-                      {selectedEffect.errorMsg}
-                    </p>
+                  <div className="aspect-video rounded-2xl border-2 border-dashed border-rose-500/30 bg-gradient-to-br from-rose-500/5 to-orange-500/5 flex flex-col items-center justify-center gap-3 px-6">
+                    <div className="h-16 w-16 rounded-full bg-rose-500/10 flex items-center justify-center">
+                      <XCircle className="h-8 w-8 text-rose-500" />
+                    </div>
+                    <div className="space-y-1 text-center max-w-md">
+                      <p className="text-sm font-semibold text-rose-700 dark:text-rose-400">
+                        生成失败
+                      </p>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        {selectedEffect.errorMsg ?? "未知错误，请稍后重试"}
+                      </p>
+                    </div>
                     <Button
                       size="sm"
                       variant="outline"
+                      className="border-rose-500/30 text-rose-700 hover:bg-rose-500/5"
                       onClick={handleGenerate}
                     >
                       <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                      重试
+                      重新生成
                     </Button>
                   </div>
                 ) : (
-                  <div className="aspect-video rounded-lg border-2 border-dashed border-amber-500/30 bg-amber-500/5 flex flex-col items-center justify-center gap-2">
-                    <Clock className="h-8 w-8 text-amber-500" />
-                    <p className="text-sm text-amber-700 dark:text-amber-400">
-                      排队中...
-                    </p>
+                  <div className="aspect-video rounded-2xl border-2 border-dashed border-amber-500/30 bg-gradient-to-br from-amber-500/5 to-orange-500/5 flex flex-col items-center justify-center gap-3">
+                    <div className="h-14 w-14 rounded-full bg-amber-500/10 flex items-center justify-center">
+                      <Clock className="h-7 w-7 text-amber-600" />
+                    </div>
+                    <div className="space-y-0.5 text-center">
+                      <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">
+                        排队中
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        即将开始生成
+                      </p>
+                    </div>
                   </div>
                 )}
               </div>
             ) : (
-              <div className="h-full flex flex-col items-center justify-center text-center">
-                <div className="rounded-full bg-muted p-6 mb-4">
-                  <Sparkles className="h-10 w-10 text-muted-foreground" />
+              <div className="h-full flex flex-col items-center justify-center text-center px-6 relative overflow-hidden">
+                {/* Lovart 风：背景渐变光晕 + 居中大图标 */}
+                <div className="absolute inset-0 flex items-center justify-center opacity-50 pointer-events-none">
+                  <div className="h-72 w-72 rounded-full bg-gradient-to-br from-violet-500/15 via-purple-500/15 to-sky-500/15 blur-3xl" />
                 </div>
-                <h3 className="text-lg font-semibold mb-1">
-                  开始你的第一次生成
-                </h3>
-                <p className="text-sm text-muted-foreground max-w-sm">
-                  在左侧选择参考图与提示词，点击「生成」按钮开始创作
-                </p>
+                <div className="relative flex flex-col items-center gap-4">
+                  <div className="h-24 w-24 rounded-3xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-2xl shadow-violet-500/20">
+                    <Sparkles className="h-12 w-12 text-white" />
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="text-xl font-bold">开始你的第一次生成</h3>
+                    <p className="text-sm text-muted-foreground max-w-sm leading-relaxed">
+                      在左侧选择参考图与提示词模板，点击「生成」按钮开始创作
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                    <kbd className="rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px]">
+                      1
+                    </kbd>
+                    <span>选参考</span>
+                    <span className="text-muted-foreground/40">→</span>
+                    <kbd className="rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px]">
+                      2
+                    </kbd>
+                    <span>写提示</span>
+                    <span className="text-muted-foreground/40">→</span>
+                    <kbd className="rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px]">
+                      3
+                    </kbd>
+                    <span>生成</span>
+                  </div>
+                </div>
               </div>
             )}
           </div>
 
-          {/* 历史缩略图条 */}
+          {/* 历史缩略图条 —— Lovart 风：精致 pill 风选中态 + 状态点 */}
           {history.length > 0 && (
-            <div className="border-t bg-muted/20 p-2">
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] text-muted-foreground shrink-0">
-                  历史
-                </span>
-                <div className="flex gap-1.5 overflow-x-auto pb-1">
+            <div className="border-t bg-gradient-to-r from-muted/30 via-muted/10 to-muted/30 px-3 py-2.5">
+              <div className="flex items-center gap-2.5">
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <History className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="text-[11px] font-medium text-muted-foreground">
+                    历史
+                  </span>
+                  <Badge
+                    variant="secondary"
+                    className="h-4 px-1.5 text-[9px] font-mono"
+                  >
+                    {history.length}
+                  </Badge>
+                </div>
+                <div className="flex gap-2 overflow-x-auto pb-1 flex-1">
                   {history.slice(0, 20).map((eff) => {
                     const Icon = STATUS_CONFIG[eff.status].icon;
+                    const isSelected =
+                      selectedEffect?.effectId === eff.effectId;
                     return (
                       <button
                         key={eff.effectId}
                         type="button"
                         onClick={() => setSelectedEffect(eff)}
                         className={cn(
-                          "relative h-12 w-12 rounded border-2 overflow-hidden shrink-0 transition-all",
-                          selectedEffect?.effectId === eff.effectId
-                            ? "border-violet-500 ring-1 ring-violet-500/30"
-                            : "border-transparent hover:border-muted-foreground/30"
+                          "relative h-14 w-14 rounded-xl overflow-hidden shrink-0 transition-all duration-200",
+                          isSelected
+                            ? "ring-2 ring-violet-500 ring-offset-2 ring-offset-background shadow-md scale-105"
+                            : "ring-1 ring-border hover:ring-muted-foreground/40 hover:scale-105"
                         )}
                       >
                         {eff.resultUrls[0] ? (
@@ -2163,20 +2439,26 @@ export function GenerateWorkbenchView({
                           <div className="w-full h-full flex items-center justify-center bg-muted">
                             <Icon
                               className={cn(
-                                "h-3.5 w-3.5",
+                                "h-4 w-4",
                                 STATUS_CONFIG[eff.status].color,
                                 eff.status === "processing" && "animate-spin"
                               )}
                             />
                           </div>
                         )}
-                        <span
-                          className="absolute bottom-0 left-0 right-0 h-1.5"
-                          style={{
-                            backgroundColor:
-                              IMAGE_MODELS[eff.imageModel]?.color ?? "#64748b",
-                          }}
-                        />
+                        {/* 状态点：右上角小圆点（仅非 completed 才显示） */}
+                        {eff.status !== "completed" && (
+                          <span
+                            className={cn(
+                              "absolute top-1 right-1 h-2 w-2 rounded-full ring-2 ring-background",
+                              eff.status === "processing" &&
+                                "bg-sky-500 animate-pulse",
+                              eff.status === "failed" && "bg-rose-500",
+                              eff.status === "pending" && "bg-amber-500"
+                            )}
+                            title={STATUS_CONFIG[eff.status].label}
+                          />
+                        )}
                       </button>
                     );
                   })}
