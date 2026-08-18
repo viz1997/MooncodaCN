@@ -1240,15 +1240,6 @@ export function GenerateWorkbenchView({
       <div className="flex h-[calc(100vh-8rem)] gap-4">
         {/* ============ 左侧：参数面板 ============ */}
         <aside className="w-[380px] shrink-0 flex flex-col bg-card border rounded-lg overflow-hidden">
-          <div className="p-3 border-b bg-muted/30">
-            <h2 className="text-sm font-bold flex items-center gap-2">
-              <Wand2 className="h-4 w-4 text-primary" />
-              生图工作台
-            </h2>
-            <p className="text-[10px] text-muted-foreground mt-0.5">
-              选择模型与参数，生成 2D 效果图
-            </p>
-          </div>
 
           {/*
             精简布局 —— Kimi/DeepSeek/GPT 式：
@@ -2048,16 +2039,7 @@ export function GenerateWorkbenchView({
                * 完整链接 / 复制按钮。不再横在页面顶部 —— 它是边缘功能，
                * 不该跟工作台主功能抢纵向空间。 */}
               <ExternalImageGenCard />
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 text-xs"
-                onClick={handleNewSession}
-                title="新建会话"
-              >
-                <Plus className="h-3.5 w-3.5 mr-1" />
-                新建会话
-              </Button>
+           
             </div>
           </div>
 
