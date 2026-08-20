@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { AntdLayoutShell } from "@/components/antd-layout-shell";
 import {
   DashboardMainWrapper,
   DashboardSidebar,
@@ -20,11 +21,13 @@ export default async function DashboardLayout({
   }
 
   return (
-    <SidebarProvider>
-      <div className="min-h-screen bg-muted/40">
-        <DashboardSidebar />
-        <DashboardMainWrapper>{children}</DashboardMainWrapper>
-      </div>
-    </SidebarProvider>
+    <AntdLayoutShell>
+      <SidebarProvider>
+        <div className="min-h-screen bg-muted/40">
+          <DashboardSidebar />
+          <DashboardMainWrapper>{children}</DashboardMainWrapper>
+        </div>
+      </SidebarProvider>
+    </AntdLayoutShell>
   );
 }

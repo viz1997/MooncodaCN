@@ -1,12 +1,10 @@
 "use client";
 
-import { KeyRound, Loader2, Mail } from "lucide-react";
+import { Button, Input } from "antd";
+import { KeyRound, Mail } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { forgetPassword } from "@/lib/auth/client";
 
 import { AuthErrorAlert } from "./auth-error-alert";
@@ -18,6 +16,10 @@ import { AuthErrorAlert } from "./auth-error-alert";
  * - 输入邮箱地址
  * - 发送密码重置链接
  * - 显示成功/错误状态
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 1）
+ * - Input / Button 切到 antd
+ * - 用 Button.loading 替代 Loader2 图标手动 spinner
  */
 export function ForgotPasswordForm() {
   // 表单状态
@@ -105,7 +107,9 @@ export function ForgotPasswordForm() {
       <form onSubmit={handleSubmit} className="space-y-4">
         {/* 邮箱输入 */}
         <div className="space-y-2">
-          <Label htmlFor="email">Email address</Label>
+          <label htmlFor="email" className="text-sm font-medium">
+            Email address
+          </label>
           <Input
             id="email"
             type="email"
@@ -115,19 +119,19 @@ export function ForgotPasswordForm() {
             disabled={isLoading}
             autoComplete="email"
             autoFocus
+            size="large"
           />
         </div>
 
         {/* 提交按钮 */}
-        <Button type="submit" className="w-full" disabled={isLoading}>
-          {isLoading ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Sending...
-            </>
-          ) : (
-            "Send reset password link"
-          )}
+        <Button
+          type="primary"
+          htmlType="submit"
+          block
+          loading={isLoading}
+          size="large"
+        >
+          {isLoading ? "Sending..." : "Send reset password link"}
         </Button>
       </form>
 

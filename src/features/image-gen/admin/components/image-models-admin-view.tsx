@@ -11,8 +11,14 @@
  * - 详情对话框：性能 + 商务 + 模式 + 尺寸 + 高级能力 + API 配置
  *
  * 数据来自 IMAGE_MODEL_LIST（src/features/image-gen/lib/image-models/types.ts）
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 3.3）
+ * - shadcn Card 系列 → 内联 div
+ * - shadcn Badge/Button/Dialog → antd
+ * - shadcn useToast → antd App.useApp().message
  */
 
+import { App, Badge, Button, Modal } from "antd";
 import {
   Activity,
   AlertTriangle,
@@ -34,23 +40,6 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import type {
   GenerationMode,
   ImageModelConfig,
@@ -65,7 +54,6 @@ import {
   EmptyState,
   ModuleHeader,
 } from "@/features/mooncada/components/shared";
-import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
 const STATUS_CONFIG: Record<
@@ -135,7 +123,7 @@ function ModelCard({
   const statusCfg = STATUS_CONFIG[model.status];
   const StatusIcon = statusCfg.icon;
   return (
-    <Card className="overflow-hidden hover:shadow-md transition-all flex flex-col">
+    <div className="rounded-lg border bg-card text-card-foreground shadow-sm overflow-hidden hover:shadow-md transition-all flex flex-col">
       <div className={cn("bg-gradient-to-br p-4 text-white", model.gradient)}>
         <div className="flex items-start justify-between">
           <div>
@@ -153,7 +141,7 @@ function ModelCard({
         </div>
       </div>
 
-      <CardContent className="p-4 space-y-3 flex-1">
+      <div className="p-4 space-y-3 flex-1">
         <p className="text-xs text-muted-foreground line-clamp-2 h-8">
           {model.description}
         </p>
@@ -254,16 +242,15 @@ function ModelCard({
         </div>
 
         <Button
-          size="sm"
-          variant="outline"
-          className="w-full"
+          size="small"
           onClick={onDetail}
+          className="w-full"
+          icon={<Settings className="h-3.5 w-3.5" />}
         >
-          <Settings className="h-3.5 w-3.5 mr-1.5" />
           查看详情
         </Button>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 
@@ -276,324 +263,281 @@ function ModelDetailDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { toast } = useToast();
+  const { message } = App.useApp();
   if (!model) return null;
   const statusCfg = STATUS_CONFIG[model.status];
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-3">
-            <div
-              className={cn(
-                "h-10 w-10 rounded-lg bg-gradient-to-br flex items-center justify-center text-white",
-                model.gradient
-              )}
-            >
-              <Wand2 className="h-5 w-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                {model.name}
-                <span
-                  className={cn(
-                    "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium",
-                    statusCfg.color
-                  )}
-                >
-                  {statusCfg.label}
-                </span>
-                {model.isDomestic && (
-                  <Badge
-                    variant="outline"
-                    className="text-[10px] bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-500/20"
-                  >
-                    国产
-                  </Badge>
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground font-normal">
-                {model.fullName} · {model.vendor}
-              </p>
-            </div>
-          </DialogTitle>
-          <DialogDescription>{model.description}</DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4">
-          {/* 最佳场景 */}
-          <div>
-            <p className="text-xs font-medium mb-1.5">最佳使用场景</p>
-            <div className="flex flex-wrap gap-1.5">
-              {model.bestFor.map((s) => (
-                <Badge
-                  key={s}
-                  variant="outline"
-                  className="text-[10px] bg-muted/30"
-                >
-                  {s}
-                </Badge>
-              ))}
-            </div>
-          </div>
-
-          {/* 性能与商务 */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2 bg-muted/30 rounded-lg p-3">
-              <p className="text-xs font-medium flex items-center gap-1.5">
-                <Zap className="h-3 w-3 text-amber-500" />
-                性能指标
-              </p>
-              <ScoreBar
-                value={model.qualityScore}
-                label="质量评分"
-                color="bg-violet-500"
-              />
-              <ScoreBar
-                value={model.stabilityScore}
-                label="稳定性"
-                color="bg-emerald-500"
-              />
-              <div className="flex items-center justify-between text-xs pt-1">
-                <span className="text-muted-foreground">平均耗时</span>
-                <span className="font-mono">
-                  {(model.avgDuration / 1000).toFixed(2)}s
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">成功率</span>
-                <span className="font-mono text-emerald-600">
-                  {model.successRate}%
-                </span>
-              </div>
-              {model.asyncMode && (
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">任务模式</span>
-                  <span className="font-mono text-rose-600">
-                    异步 (轮询 {(model.pollingInterval / 1000).toFixed(1)}s)
-                  </span>
-                </div>
-              )}
-            </div>
-            <div className="space-y-2 bg-muted/30 rounded-lg p-3">
-              <p className="text-xs font-medium flex items-center gap-1.5">
-                <DollarSign className="h-3 w-3 text-emerald-500" />
-                商务信息
-              </p>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">单张价格</span>
-                <span className="font-bold">
-                  {model.currency === "CNY" ? "¥" : "$"}
-                  {model.pricePerImage}
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">每月免费额度</span>
-                <span className="font-mono">{model.freeQuota} 张</span>
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">累计生成</span>
-                <span className="font-mono">
-                  {model.totalGenerated.toLocaleString("zh-CN")}
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">币种</span>
-                <span className="font-mono">{model.currency}</span>
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">单次最大批量</span>
-                <span className="font-mono">
-                  {model.capabilities.maxBatchSize} 张
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* 支持的生成模式 */}
-          <div>
-            <p className="text-xs font-medium mb-2 flex items-center gap-1.5">
-              <Type className="h-3 w-3" />
-              支持的生成模式
-            </p>
-            <div className="grid grid-cols-3 gap-2">
-              {(
-                [
-                  "text_to_image",
-                  "image_to_image",
-                  "image_editing",
-                  "inpainting",
-                  "upscaling",
-                ] as GenerationMode[]
-              ).map((m) => {
-                const enabled = model.capabilities.modes.includes(m);
-                const Icon = MODE_ICONS[m] ?? Type;
-                return (
-                  <div
-                    key={m}
-                    className={cn(
-                      "rounded-lg border p-2 flex items-center gap-2",
-                      enabled
-                        ? "border-emerald-500/30 bg-emerald-500/5"
-                        : "border-border bg-muted/20 opacity-50"
-                    )}
-                  >
-                    <Icon
-                      className={cn(
-                        "h-3.5 w-3.5",
-                        enabled ? "text-emerald-600" : "text-muted-foreground"
-                      )}
-                    />
-                    <span className="text-[11px]">{MODE_LABELS[m]}</span>
-                    {enabled ? (
-                      <CheckCircle2 className="h-3 w-3 text-emerald-500 ml-auto" />
-                    ) : (
-                      <XCircle className="h-3 w-3 ml-auto" />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* 支持的尺寸 */}
-          <div className="bg-muted/30 rounded-lg p-3 space-y-1.5">
-            <p className="text-xs font-medium">支持尺寸</p>
-            <div className="flex flex-wrap gap-1">
-              {model.capabilities.sizes.map((s) => (
-                <Badge
-                  key={s}
-                  variant="outline"
-                  className="text-[10px] font-mono"
-                >
-                  {s}
-                </Badge>
-              ))}
-            </div>
-          </div>
-
-          {/* 高级能力 */}
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <div
-              className={cn(
-                "rounded-lg border p-2 flex items-center justify-between",
-                model.capabilities.supportsNegativePrompt
-                  ? "border-emerald-500/30 bg-emerald-500/5"
-                  : "border-border opacity-50"
-              )}
-            >
-              <span>反向提示词</span>
-              {model.capabilities.supportsNegativePrompt ? (
-                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-              ) : (
-                <XCircle className="h-3.5 w-3.5" />
-              )}
-            </div>
-            <div
-              className={cn(
-                "rounded-lg border p-2 flex items-center justify-between",
-                model.capabilities.supportsSeed
-                  ? "border-emerald-500/30 bg-emerald-500/5"
-                  : "border-border opacity-50"
-              )}
-            >
-              <span>随机种子</span>
-              {model.capabilities.supportsSeed ? (
-                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-              ) : (
-                <XCircle className="h-3.5 w-3.5" />
-              )}
-            </div>
-            <div
-              className={cn(
-                "rounded-lg border p-2 flex items-center justify-between",
-                model.capabilities.supportsGuidance
-                  ? "border-emerald-500/30 bg-emerald-500/5"
-                  : "border-border opacity-50"
-              )}
-            >
-              <span>引导系数</span>
-              {model.capabilities.supportsGuidance ? (
-                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-              ) : (
-                <XCircle className="h-3.5 w-3.5" />
-              )}
-            </div>
-            <div
-              className={cn(
-                "rounded-lg border p-2 flex items-center justify-between",
-                model.capabilities.supportsStyle
-                  ? "border-emerald-500/30 bg-emerald-500/5"
-                  : "border-border opacity-50"
-              )}
-            >
-              <span>风格预设</span>
-              {model.capabilities.supportsStyle ? (
-                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-              ) : (
-                <XCircle className="h-3.5 w-3.5" />
-              )}
-            </div>
-          </div>
-
-          {/* API 配置 */}
-          <div className="bg-zinc-900 dark:bg-zinc-950 text-zinc-300 rounded-lg p-3 space-y-1">
-            <p className="text-xs font-medium text-zinc-100">API 配置</p>
-            <div className="text-[11px] font-mono space-y-0.5">
-              <p>
-                <span className="text-zinc-500">Endpoint:</span>{" "}
-                {model.apiEndpoint}
-              </p>
-              <p>
-                <span className="text-zinc-500">Auth:</span> {model.authType}
-              </p>
-              <p>
-                <span className="text-zinc-500">Key Env:</span>{" "}
-                <span className="text-amber-400">${model.apiKeyEnv}</span>
-              </p>
-              <p>
-                <span className="text-zinc-500">Async:</span>{" "}
-                {model.asyncMode ? "是" : "否"}
-              </p>
-            </div>
-          </div>
-
-          <a
-            href={model.vendorUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-xs text-sky-600 hover:underline"
+    <Modal
+      open={open}
+      onCancel={() => onOpenChange(false)}
+      title={
+        <span className="flex items-center gap-3">
+          <div
+            className={cn(
+              "h-10 w-10 rounded-lg bg-gradient-to-br flex items-center justify-center text-white",
+              model.gradient
+            )}
           >
-            <ExternalLink className="h-3 w-3" />
-            访问 {model.vendor} 官网
-          </a>
+            <Wand2 className="h-5 w-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              {model.name}
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                  statusCfg.color
+                )}
+              >
+                {statusCfg.label}
+              </span>
+              {model.isDomestic && (
+                <Badge color="cyan" className="!text-[10px]">
+                  国产
+                </Badge>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground font-normal">
+              {model.fullName} · {model.vendor}
+            </p>
+          </div>
+        </span>
+      }
+      footer={[
+        <Button
+          key="config"
+          onClick={() =>
+            message.success("配置已打开 · 实际部署时此处跳转到 API Key 配置")
+          }
+          icon={<Settings className="h-4 w-4" />}
+        >
+          配置 API Key
+        </Button>,
+        <Button key="close" type="primary" onClick={() => onOpenChange(false)}>
+          关闭
+        </Button>,
+      ]}
+      width={672}
+    >
+      <div className="space-y-4">
+        <p className="text-sm text-muted-foreground">{model.description}</p>
+
+        {/* 最佳场景 */}
+        <div>
+          <p className="text-xs font-medium mb-1.5">最佳使用场景</p>
+          <div className="flex flex-wrap gap-1.5">
+            {model.bestFor.map((s) => (
+              <Badge key={s} color="default" className="!text-[10px]">
+                {s}
+              </Badge>
+            ))}
+          </div>
         </div>
 
-        <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() =>
-              toast({
-                title: "配置已打开",
-                description: "实际部署时此处跳转到 API Key 配置",
-              })
-            }
-          >
-            <Settings className="h-4 w-4 mr-1.5" />
-            配置 API Key
-          </Button>
-          <Button onClick={() => onOpenChange(false)}>关闭</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        {/* 性能与商务 */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-2 bg-muted/30 rounded-lg p-3">
+            <p className="text-xs font-medium flex items-center gap-1.5">
+              <Zap className="h-3 w-3 text-amber-500" />
+              性能指标
+            </p>
+            <ScoreBar
+              value={model.qualityScore}
+              label="质量评分"
+              color="bg-violet-500"
+            />
+            <ScoreBar
+              value={model.stabilityScore}
+              label="稳定性"
+              color="bg-emerald-500"
+            />
+            <div className="flex items-center justify-between text-xs pt-1">
+              <span className="text-muted-foreground">平均耗时</span>
+              <span className="font-mono">
+                {(model.avgDuration / 1000).toFixed(2)}s
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">成功率</span>
+              <span className="font-mono text-emerald-600">
+                {model.successRate}%
+              </span>
+            </div>
+            {model.asyncMode && (
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">任务模式</span>
+                <span className="font-mono text-rose-600">
+                  异步 (轮询 {(model.pollingInterval / 1000).toFixed(1)}s)
+                </span>
+              </div>
+            )}
+          </div>
+          <div className="space-y-2 bg-muted/30 rounded-lg p-3">
+            <p className="text-xs font-medium flex items-center gap-1.5">
+              <DollarSign className="h-3 w-3 text-emerald-500" />
+              商务信息
+            </p>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">单张价格</span>
+              <span className="font-bold">
+                {model.currency === "CNY" ? "¥" : "$"}
+                {model.pricePerImage}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">每月免费额度</span>
+              <span className="font-mono">{model.freeQuota} 张</span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">累计生成</span>
+              <span className="font-mono">
+                {model.totalGenerated.toLocaleString("zh-CN")}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">币种</span>
+              <span className="font-mono">{model.currency}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">单次最大批量</span>
+              <span className="font-mono">
+                {model.capabilities.maxBatchSize} 张
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* 支持的生成模式 */}
+        <div>
+          <p className="text-xs font-medium mb-2 flex items-center gap-1.5">
+            <Type className="h-3 w-3" />
+            支持的生成模式
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            {(
+              [
+                "text_to_image",
+                "image_to_image",
+                "image_editing",
+                "inpainting",
+                "upscaling",
+              ] as GenerationMode[]
+            ).map((m) => {
+              const enabled = model.capabilities.modes.includes(m);
+              const Icon = MODE_ICONS[m] ?? Type;
+              return (
+                <div
+                  key={m}
+                  className={cn(
+                    "rounded-lg border p-2 flex items-center gap-2",
+                    enabled
+                      ? "border-emerald-500/30 bg-emerald-500/5"
+                      : "border-border bg-muted/20 opacity-50"
+                  )}
+                >
+                  <Icon
+                    className={cn(
+                      "h-3.5 w-3.5",
+                      enabled ? "text-emerald-600" : "text-muted-foreground"
+                    )}
+                  />
+                  <span className="text-[11px]">{MODE_LABELS[m]}</span>
+                  {enabled ? (
+                    <CheckCircle2 className="h-3 w-3 text-emerald-500 ml-auto" />
+                  ) : (
+                    <XCircle className="h-3 w-3 ml-auto" />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 支持的尺寸 */}
+        <div className="bg-muted/30 rounded-lg p-3 space-y-1.5">
+          <p className="text-xs font-medium">支持尺寸</p>
+          <div className="flex flex-wrap gap-1">
+            {model.capabilities.sizes.map((s) => (
+              <Badge key={s} color="default" className="!text-[10px] font-mono">
+                {s}
+              </Badge>
+            ))}
+          </div>
+        </div>
+
+        {/* 高级能力 */}
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          {(
+            [
+              { key: "supportsNegativePrompt", label: "反向提示词" },
+              { key: "supportsSeed", label: "随机种子" },
+              { key: "supportsGuidance", label: "引导系数" },
+              { key: "supportsStyle", label: "风格预设" },
+            ] as const
+          ).map(({ key, label }) => {
+            const enabled = model.capabilities[key];
+            return (
+              <div
+                key={key}
+                className={cn(
+                  "rounded-lg border p-2 flex items-center justify-between",
+                  enabled
+                    ? "border-emerald-500/30 bg-emerald-500/5"
+                    : "border-border opacity-50"
+                )}
+              >
+                <span>{label}</span>
+                {enabled ? (
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                ) : (
+                  <XCircle className="h-3.5 w-3.5" />
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* API 配置 */}
+        <div className="bg-zinc-900 dark:bg-zinc-950 text-zinc-300 rounded-lg p-3 space-y-1">
+          <p className="text-xs font-medium text-zinc-100">API 配置</p>
+          <div className="text-[11px] font-mono space-y-0.5">
+            <p>
+              <span className="text-zinc-500">Endpoint:</span>{" "}
+              {model.apiEndpoint}
+            </p>
+            <p>
+              <span className="text-zinc-500">Auth:</span> {model.authType}
+            </p>
+            <p>
+              <span className="text-zinc-500">Key Env:</span>{" "}
+              <span className="text-amber-400">${model.apiKeyEnv}</span>
+            </p>
+            <p>
+              <span className="text-zinc-500">Async:</span>{" "}
+              {model.asyncMode ? "是" : "否"}
+            </p>
+          </div>
+        </div>
+
+        <a
+          href={model.vendorUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-xs text-sky-600 hover:underline"
+        >
+          <ExternalLink className="h-3 w-3" />
+          访问 {model.vendor} 官网
+        </a>
+      </div>
+    </Modal>
   );
 }
 
 const COMPARE_LIMIT = 4;
 
 export function ImageModelsAdminView() {
-  const { toast } = useToast();
+  const { message } = App.useApp();
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterDomestic, setFilterDomestic] = useState<string>("all");
@@ -635,10 +579,7 @@ export function ImageModelsAdminView() {
         next.delete(id);
       } else {
         if (next.size >= COMPARE_LIMIT) {
-          toast({
-            title: `最多对比 ${COMPARE_LIMIT} 个`,
-            variant: "destructive",
-          });
+          message.warning(`最多对比 ${COMPARE_LIMIT} 个`);
           return prev;
         }
         next.add(id);
@@ -658,18 +599,18 @@ export function ImageModelsAdminView() {
         description="统一管理 11 个主流生图大模型 · DALL·E 3 / SD 3 / Flux / Midjourney / 即梦 / 通义万相 / 文心一格 / CogView / GPT-Image-2 / Nano Banana Pro / Nano Banana 2"
         actions={
           <Button
-            variant={compareMode ? "default" : "outline"}
+            type={compareMode ? "primary" : "default"}
             onClick={() => {
               setCompareMode(!compareMode);
               if (compareMode) setSelectedForCompare(new Set());
             }}
             className={
               compareMode
-                ? "bg-gradient-to-r from-violet-500 to-purple-600"
+                ? "bg-gradient-to-r from-violet-500 to-purple-600 border-0"
                 : ""
             }
+            icon={<Layers className="h-4 w-4" />}
           >
-            <Layers className="h-4 w-4 mr-1.5" />
             {compareMode
               ? "退出对比"
               : `对比模式${selectedForCompare.size > 0 ? ` (${selectedForCompare.size})` : ""}`}
@@ -679,7 +620,7 @@ export function ImageModelsAdminView() {
 
       {/* 统计卡片 */}
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-        <Card className="p-3">
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] text-muted-foreground">模型总数</p>
@@ -689,8 +630,8 @@ export function ImageModelsAdminView() {
               <ImageIcon className="h-4 w-4 text-violet-600" />
             </div>
           </div>
-        </Card>
-        <Card className="p-3">
+        </div>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] text-muted-foreground">运行中</p>
@@ -702,8 +643,8 @@ export function ImageModelsAdminView() {
               <CheckCircle2 className="h-4 w-4 text-emerald-600" />
             </div>
           </div>
-        </Card>
-        <Card className="p-3">
+        </div>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] text-muted-foreground">国产模型</p>
@@ -713,8 +654,8 @@ export function ImageModelsAdminView() {
               <Globe className="h-4 w-4 text-sky-600" />
             </div>
           </div>
-        </Card>
-        <Card className="p-3">
+        </div>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] text-muted-foreground">国际模型</p>
@@ -726,8 +667,8 @@ export function ImageModelsAdminView() {
               <Globe className="h-4 w-4 text-amber-600" />
             </div>
           </div>
-        </Card>
-        <Card className="p-3">
+        </div>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] text-muted-foreground">累计生成</p>
@@ -739,8 +680,8 @@ export function ImageModelsAdminView() {
               <TrendingUp className="h-4 w-4 text-rose-600" />
             </div>
           </div>
-        </Card>
-        <Card className="p-3">
+        </div>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] text-muted-foreground">平均质量</p>
@@ -752,7 +693,7 @@ export function ImageModelsAdminView() {
               <Shield className="h-4 w-4 text-teal-600" />
             </div>
           </div>
-        </Card>
+        </div>
       </div>
 
       {/* 过滤器 */}
@@ -804,15 +745,15 @@ export function ImageModelsAdminView() {
 
       {/* 模型卡片 */}
       {filtered.length === 0 ? (
-        <Card>
-          <CardContent>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="p-6">
             <EmptyState
               icon={ImageIcon}
               title="无匹配模型"
               description="尝试调整搜索条件"
             />
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((m) => (
@@ -842,17 +783,17 @@ export function ImageModelsAdminView() {
 
       {/* 对比视图 */}
       {compareMode && compareModels.length >= 2 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="flex flex-col space-y-1.5 p-6">
+            <h3 className="text-base font-semibold leading-none tracking-tight flex items-center gap-2">
               <Layers className="h-4 w-4 text-violet-600" />
               模型对比 ({compareModels.length})
-            </CardTitle>
-            <CardDescription className="text-xs">
+            </h3>
+            <p className="text-xs text-muted-foreground">
               横向对比已选模型的关键指标
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="overflow-x-auto">
+            </p>
+          </div>
+          <div className="overflow-x-auto p-6 pt-0">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b">
@@ -978,8 +919,8 @@ export function ImageModelsAdminView() {
                         {m.capabilities.modes.map((mode) => (
                           <Badge
                             key={mode}
-                            variant="outline"
-                            className="text-[9px] py-0"
+                            color="default"
+                            className="!text-[9px]"
                           >
                             {MODE_LABELS[mode]}
                           </Badge>
@@ -1019,8 +960,8 @@ export function ImageModelsAdminView() {
                 </tr>
               </tbody>
             </table>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       )}
 
       {/* 详情对话框 */}

@@ -1,43 +1,39 @@
 "use client";
 
-import { ArrowLeft, Loader2 } from "lucide-react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
-import { createTicketAction } from "@/features/support/actions";
-import { ticketCategories, ticketPriorities } from "@/features/support/schemas";
-
 /**
  * 新建工单页面
  *
  * 用户填写表单创建新的支持工单
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 2.7）
+ * - shadcn Button/Card/Input/Label/Select/Textarea 切到 antd
+ * - toast 切到 App.useApp().message
  */
+
+import { App, Button, Input, Select } from "antd";
+import { ArrowLeft } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+
+import { createTicketAction } from "@/features/support/actions";
+import { ticketCategories, ticketPriorities } from "@/features/support/schemas";
+
+type TicketCategory = "billing" | "technical" | "bug" | "feature" | "other";
+
+type TicketPriority = "low" | "medium" | "high";
+
 export default function NewTicketPage() {
   const router = useRouter();
+  const { message } = App.useApp();
   const [isLoading, setIsLoading] = useState(false);
 
   // 表单状态
   const [subject, setSubject] = useState("");
-  const [category, setCategory] = useState<string>("other");
-  const [priority, setPriority] = useState<string>("medium");
-  const [message, setMessage] = useState("");
+  const [category, setCategory] = useState<TicketCategory>("other");
+  const [priority, setPriority] = useState<TicketPriority>("medium");
+  const [msg, setMsg] = useState("");
 
-  /**
-   * 处理表单提交
-   */
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
@@ -45,24 +41,19 @@ export default function NewTicketPage() {
     try {
       const result = await createTicketAction({
         subject,
-        category: category as
-          | "billing"
-          | "technical"
-          | "bug"
-          | "feature"
-          | "other",
-        priority: priority as "low" | "medium" | "high",
-        message,
+        category,
+        priority,
+        message: msg,
       });
 
       if (result?.data) {
-        toast.success("工单创建成功");
+        message.success("工单创建成功");
         router.push(`/dashboard/support/${result.data.ticketId}`);
       } else if (result?.serverError) {
-        toast.error(result.serverError);
+        message.error(result.serverError);
       }
     } catch (error) {
-      toast.error("创建工单失败，请重试");
+      message.error("创建工单失败，请重试");
       console.error(error);
     } finally {
       setIsLoading(false);
@@ -74,9 +65,11 @@ export default function NewTicketPage() {
       {/* 页面标题 */}
       <div className="flex items-center gap-4">
         <Link href="/dashboard/support">
-          <Button variant="ghost" size="icon">
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
+          <Button
+            type="text"
+            shape="circle"
+            icon={<ArrowLeft className="h-4 w-4" />}
+          />
         </Link>
         <div>
           <h2 className="text-2xl font-bold tracking-tight">新建工单</h2>
@@ -87,21 +80,27 @@ export default function NewTicketPage() {
       </div>
 
       {/* 工单表单 */}
-      <Card>
-        <CardHeader>
-          <CardTitle>工单信息</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+        <div className="flex flex-col space-y-1.5 p-6">
+          <h3 className="text-lg leading-none font-semibold tracking-tight">
+            工单信息
+          </h3>
+        </div>
+        <div className="p-6 pt-0">
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* 主题 */}
             <div className="space-y-2">
-              <Label htmlFor="subject">主题 *</Label>
+              <label
+                htmlFor="subject"
+                className="text-sm font-medium leading-none"
+              >
+                主题 *
+              </label>
               <Input
                 id="subject"
                 placeholder="简要描述您的问题"
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
-                required
                 minLength={5}
                 maxLength={200}
               />
@@ -110,71 +109,78 @@ export default function NewTicketPage() {
             {/* 类别和优先级 */}
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="category">类别</Label>
-                <Select value={category} onValueChange={setCategory}>
-                  <SelectTrigger id="category">
-                    <SelectValue placeholder="选择类别" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {ticketCategories.map((cat) => (
-                      <SelectItem key={cat.value} value={cat.value}>
-                        {cat.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <label
+                  htmlFor="category"
+                  className="text-sm font-medium leading-none"
+                >
+                  类别
+                </label>
+                <Select
+                  id="category"
+                  value={category}
+                  onChange={(v) => setCategory(v as TicketCategory)}
+                  className="w-full"
+                  options={ticketCategories.map((cat) => ({
+                    value: cat.value,
+                    label: cat.label,
+                  }))}
+                />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="priority">优先级</Label>
-                <Select value={priority} onValueChange={setPriority}>
-                  <SelectTrigger id="priority">
-                    <SelectValue placeholder="选择优先级" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {ticketPriorities.map((pri) => (
-                      <SelectItem key={pri.value} value={pri.value}>
-                        {pri.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <label
+                  htmlFor="priority"
+                  className="text-sm font-medium leading-none"
+                >
+                  优先级
+                </label>
+                <Select
+                  id="priority"
+                  value={priority}
+                  onChange={(v) => setPriority(v as TicketPriority)}
+                  className="w-full"
+                  options={ticketPriorities.map((pri) => ({
+                    value: pri.value,
+                    label: pri.label,
+                  }))}
+                />
               </div>
             </div>
 
             {/* 详细描述 */}
             <div className="space-y-2">
-              <Label htmlFor="message">详细描述 *</Label>
-              <Textarea
+              <label
+                htmlFor="message"
+                className="text-sm font-medium leading-none"
+              >
+                详细描述 *
+              </label>
+              <Input.TextArea
                 id="message"
-                placeholder="请详细描述您遇到的问题，包括：&#10;- 问题发生的时间&#10;- 具体的错误信息&#10;- 您已尝试的解决方法"
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                required
+                placeholder={`请详细描述您遇到的问题，包括：\n- 问题发生的时间\n- 具体的错误信息\n- 您已尝试的解决方法`}
+                value={msg}
+                onChange={(e) => setMsg(e.target.value)}
                 minLength={10}
                 maxLength={5000}
                 rows={8}
               />
               <p className="text-xs text-muted-foreground">
-                {message.length}/5000 字符
+                {msg.length}/5000 字符
               </p>
             </div>
 
             {/* 提交按钮 */}
             <div className="flex justify-end gap-4">
               <Link href="/dashboard/support">
-                <Button type="button" variant="outline">
-                  取消
-                </Button>
+                <Button type="default">取消</Button>
               </Link>
-              <Button type="submit" disabled={isLoading}>
-                {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              <Button type="primary" htmlType="submit" loading={isLoading}>
                 提交工单
               </Button>
             </div>
           </form>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }

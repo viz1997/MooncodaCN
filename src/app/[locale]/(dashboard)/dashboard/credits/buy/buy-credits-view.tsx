@@ -4,25 +4,19 @@
  * 购买积分套餐视图组件
  *
  * 显示积分套餐列表，允许用户选择并购买
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 2.7）
+ * - shadcn Badge/Button/Card/Separator 切到 antd
+ * - Card 改成 inline div（避免 antd Card 的 padding 行为干扰 grid）
+ * - toast 切到 App.useApp().message
  */
 
-import { Check, Coins, Loader2, Sparkles } from "lucide-react";
+import { App, Badge, Button, Divider } from "antd";
+import { Check, Coins, Sparkles } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAction } from "next-safe-action/hooks";
 import { useEffect } from "react";
-import { toast } from "sonner";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import { createCreditsPurchaseCheckout } from "@/features/credits/actions";
 import { CREDIT_PACKAGES } from "@/features/credits/config";
 import { cn } from "@/lib/utils";
@@ -33,6 +27,7 @@ import { cn } from "@/lib/utils";
 export function BuyCreditPackagesView() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { message } = App.useApp();
   const canceled = searchParams.get("canceled");
 
   // 创建 Checkout Session
@@ -43,18 +38,18 @@ export function BuyCreditPackagesView() {
       }
     },
     onError: ({ error }) => {
-      toast.error(error.serverError ?? "创建支付会话失败");
+      message.error(error.serverError ?? "创建支付会话失败");
     },
   });
 
   // 显示取消提示
   useEffect(() => {
     if (canceled) {
-      toast.info("支付已取消");
+      message.info("支付已取消");
       // 清除 URL 参数
       router.replace("/dashboard/credits/buy");
     }
-  }, [canceled, router]);
+  }, [canceled, router, message]);
 
   /**
    * 处理购买按钮点击
@@ -79,27 +74,31 @@ export function BuyCreditPackagesView() {
           const isPopular = "popular" in pkg && pkg.popular;
 
           return (
-            <Card
+            <div
               key={pkg.id}
               className={cn(
-                "relative flex flex-col",
+                "relative flex flex-col rounded-lg border bg-card text-card-foreground shadow-sm",
                 isPopular && "border-primary shadow-lg"
               )}
             >
               {/* 热门标签 */}
               {isPopular && (
-                <Badge className="absolute -top-3 left-1/2 -translate-x-1/2 gap-1">
+                <Badge className="absolute -top-3 left-1/2 -translate-x-1/2 !gap-1">
                   <Sparkles className="h-3 w-3" />
                   Most Popular
                 </Badge>
               )}
 
-              <CardHeader className="text-center pb-4">
-                <CardTitle className="text-xl">{pkg.name}</CardTitle>
-                <CardDescription>{pkg.description}</CardDescription>
-              </CardHeader>
+              <div className="text-center p-6 pb-4">
+                <h3 className="text-xl font-semibold leading-none tracking-tight">
+                  {pkg.name}
+                </h3>
+                <p className="text-sm text-muted-foreground mt-2">
+                  {pkg.description}
+                </p>
+              </div>
 
-              <CardContent className="flex-1 space-y-4">
+              <div className="p-6 pt-0 flex-1 space-y-4">
                 {/* 积分数量 */}
                 <div className="flex items-center justify-center gap-2">
                   <Coins className="h-6 w-6 text-amber-500" />
@@ -107,7 +106,7 @@ export function BuyCreditPackagesView() {
                   <span className="text-muted-foreground">credits</span>
                 </div>
 
-                <Separator />
+                <Divider />
 
                 {/* 价格 */}
                 <div className="text-center">
@@ -130,28 +129,21 @@ export function BuyCreditPackagesView() {
                     <span>Use for all AI features</span>
                   </li>
                 </ul>
-              </CardContent>
+              </div>
 
-              <CardFooter>
+              <div className="flex items-center p-6 pt-0">
                 <Button
+                  type={isPopular ? "primary" : "default"}
                   className="w-full"
-                  variant={isPopular ? "default" : "outline"}
-                  disabled={isPending}
+                  loading={isPending}
                   onClick={() =>
                     handlePurchase(pkg.id as "lite" | "standard" | "pro")
                   }
                 >
-                  {isPending ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Processing...
-                    </>
-                  ) : (
-                    `Buy ${pkg.name}`
-                  )}
+                  {isPending ? "Processing..." : `Buy ${pkg.name}`}
                 </Button>
-              </CardFooter>
-            </Card>
+              </div>
+            </div>
           );
         })}
       </div>
@@ -159,7 +151,7 @@ export function BuyCreditPackagesView() {
       {/* 返回链接 */}
       <div className="text-center">
         <Button
-          variant="ghost"
+          type="text"
           onClick={() => router.push("/dashboard/settings?tab=usage")}
         >
           ← Back to Usage

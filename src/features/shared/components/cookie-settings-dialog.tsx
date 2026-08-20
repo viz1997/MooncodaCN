@@ -1,23 +1,16 @@
 "use client";
 
+import { Button, Collapse, Modal, Switch } from "antd";
 import { ChevronDown } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useState } from "react";
+import {
+  cloneElement,
+  isValidElement,
+  useCallback,
+  useEffect,
+  useState,
+} from "react";
 
-import { Button } from "@/components/ui/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { Switch } from "@/components/ui/switch";
 import {
   COOKIE_CONSENT_CHANGE_EVENT,
   COOKIE_CONSENT_KEY,
@@ -40,7 +33,7 @@ const DEFAULT_PREFERENCES: CookiePreferences = {
  */
 interface CookieSettingsDialogProps {
   /** 触发按钮的子元素 */
-  children: React.ReactNode;
+  children: React.ReactElement;
 }
 
 /**
@@ -50,6 +43,11 @@ interface CookieSettingsDialogProps {
  * - 显示 Cookie 偏好设置对话框
  * - 可展开的 Cookie 类别
  * - 支持 Accept all / Reject all / Accept current selection
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 2.6）
+ * - Dialog → antd Modal（用 controlled open 状态 + cloneElement 把 onClick 注入 trigger）
+ * - Collapsible → antd Collapse（用 items API）
+ * - Switch → antd Switch（API 几乎一致：checked / onChange）
  */
 export function CookieSettingsDialog({ children }: CookieSettingsDialogProps) {
   const t = useTranslations("Cookie");
@@ -176,23 +174,47 @@ export function CookieSettingsDialog({ children }: CookieSettingsDialogProps) {
     if (id === "marketing") updatePreference("marketing", value);
   };
 
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent
-        className="max-h-[90vh] max-w-2xl overflow-hidden p-0 [&>button]:hidden"
-        overlayClassName="bg-black/30"
-      >
-        {/* Header */}
-        <DialogHeader className="border-b px-6 py-4">
-          <div className="flex items-center justify-between">
-            <DialogTitle className="text-lg font-semibold">
-              {t("dialog.title")}
-            </DialogTitle>
-          </div>
-        </DialogHeader>
+  /**
+   * 把 onClick 注入到 trigger 子元素（替代 shadcn DialogTrigger asChild）
+   */
+  const triggerElement = isValidElement(children)
+    ? cloneElement(
+        children as React.ReactElement<{
+          onClick?: (...args: unknown[]) => void;
+        }>,
+        {
+          onClick: (...args: unknown[]) => {
+            // 调用原本的 onClick（如果有）
+            const original = (
+              children.props as {
+                onClick?: (...args: unknown[]) => void;
+              }
+            ).onClick;
+            if (original) {
+              original(...args);
+            }
+            setOpen(true);
+          },
+        }
+      )
+    : children;
 
-        {/* Content */}
+  return (
+    <>
+      {triggerElement}
+      <Modal
+        open={open}
+        onCancel={() => setOpen(false)}
+        footer={null}
+        width={672}
+        className="!max-h-[90vh] !p-0"
+        title={
+          <span className="text-lg font-semibold">{t("dialog.title")}</span>
+        }
+        closeIcon={null}
+        destroyOnClose={false}
+        maskClosable
+      >
         <div className="max-h-[60vh] overflow-y-auto px-6 py-4">
           {/* Description */}
           <div className="mb-6">
@@ -203,80 +225,86 @@ export function CookieSettingsDialog({ children }: CookieSettingsDialogProps) {
           </div>
 
           {/* Cookie Categories */}
-          <div className="space-y-3">
-            {cookieCategories.map((category) => {
+          <Collapse
+            activeKey={expandedItems}
+            onChange={(keys) => {
+              const next = Array.isArray(keys) ? keys : [keys];
+              setExpandedItems(
+                next.filter((k): k is string => typeof k === "string")
+              );
+            }}
+            ghost
+            items={cookieCategories.map((category) => {
               const isExpanded = expandedItems.includes(category.id);
               const isChecked = getCategoryValue(category.id);
-
-              return (
-                <Collapsible
-                  key={category.id}
-                  open={isExpanded}
-                  onOpenChange={() => toggleExpanded(category.id)}
-                >
-                  <div className="rounded-lg border">
-                    {/* Category Header */}
-                    <div className="flex items-center justify-between p-4">
-                      <CollapsibleTrigger asChild>
-                        <button
-                          type="button"
-                          className="flex items-center gap-2 text-left"
-                        >
-                          <ChevronDown
-                            className={cn(
-                              "h-4 w-4 text-muted-foreground transition-transform",
-                              isExpanded && "rotate-180"
-                            )}
-                          />
-                          <span className="font-medium">{category.title}</span>
-                        </button>
-                      </CollapsibleTrigger>
+              return {
+                key: category.id,
+                showArrow: false,
+                label: (
+                  <div className="flex w-full items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleExpanded(category.id);
+                      }}
+                      className="flex items-center gap-2 text-left"
+                    >
+                      <ChevronDown
+                        className={cn(
+                          "h-4 w-4 text-muted-foreground transition-transform",
+                          isExpanded && "rotate-180"
+                        )}
+                      />
+                      <span className="font-medium">{category.title}</span>
+                    </button>
+                    {/* biome-ignore lint/a11y/noStaticElementInteractions: antd Switch 自带键盘事件 */}
+                    {/* biome-ignore lint/a11y/useKeyWithClickEvents: 同上 */}
+                    <span
+                      onClick={(e) => e.stopPropagation()}
+                      className="ml-auto"
+                    >
                       <Switch
                         checked={isChecked}
-                        onCheckedChange={(value) =>
+                        onChange={(value) =>
                           handleCategoryChange(category.id, value)
                         }
                         disabled={category.required}
                       />
-                    </div>
-
-                    {/* Category Description */}
-                    <CollapsibleContent>
-                      <div className="border-t px-4 py-3">
-                        <p className="text-sm text-muted-foreground">
-                          {category.description}
-                        </p>
-                      </div>
-                    </CollapsibleContent>
+                    </span>
                   </div>
-                </Collapsible>
-              );
+                ),
+                children: (
+                  <div className="px-1 pb-3 pt-1">
+                    <p className="text-sm text-muted-foreground">
+                      {category.description}
+                    </p>
+                  </div>
+                ),
+              };
             })}
-          </div>
+          />
         </div>
 
         {/* Footer */}
         <div className="flex items-center justify-between border-t px-6 py-4">
           <div className="flex gap-2">
             <Button
+              type="primary"
               onClick={handleAcceptAll}
-              className="bg-gray-900 text-white hover:bg-gray-800"
+              className="!bg-gray-900 hover:!bg-gray-800"
             >
               {t("acceptAll")}
             </Button>
-            <Button
-              variant="outline"
-              onClick={handleRejectAll}
-              className="border-gray-900 text-gray-900 hover:bg-gray-100"
-            >
+            <Button type="default" onClick={handleRejectAll}>
               {t("rejectAll")}
             </Button>
           </div>
-          <Button variant="outline" onClick={handleSavePreferences}>
+          <Button type="default" onClick={handleSavePreferences}>
             {t("dialog.acceptCurrentSelection")}
           </Button>
         </div>
-      </DialogContent>
-    </Dialog>
+      </Modal>
+    </>
   );
 }

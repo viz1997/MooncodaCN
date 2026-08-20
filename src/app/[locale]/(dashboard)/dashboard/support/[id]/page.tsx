@@ -1,11 +1,9 @@
+import { Avatar, Badge, Button } from "antd";
 import { and, eq } from "drizzle-orm";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
 import { db } from "@/db";
 import { ticket, ticketMessage, user } from "@/db/schema";
 import { TicketMessageForm } from "@/features/support/components/ticket-message-form";
@@ -23,9 +21,34 @@ interface TicketDetailPageProps {
 }
 
 /**
+ * 工单状态 → antd Badge color
+ */
+const STATUS_COLOR_MAP: Record<string, string> = {
+  open: "blue",
+  in_progress: "gold",
+  resolved: "green",
+  closed: "default",
+};
+
+/**
+ * 优先级 → antd Badge color
+ */
+const PRIORITY_COLOR_MAP: Record<string, string> = {
+  low: "green",
+  medium: "gold",
+  high: "red",
+};
+
+/**
  * 工单详情页面
  *
  * 展示工单信息和消息历史，允许用户回复
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 2.7）
+ * - shadcn Avatar 切到 antd Avatar（src + size + className + children）
+ * - shadcn Badge 切到 antd Badge（color）
+ * - shadcn Button 切到 antd Button（type="text" shape="circle" 替代 ghost+icon）
+ * - shadcn Card 切到内联 div
  */
 export default async function TicketDetailPage({
   params,
@@ -68,69 +91,39 @@ export default async function TicketDetailPage({
     .where(eq(ticketMessage.ticketId, id))
     .orderBy(ticketMessage.createdAt);
 
-  /**
-   * 获取状态徽章样式
-   */
   const getStatusBadge = (status: string) => {
     const statusConfig = ticketStatuses.find((s) => s.value === status);
-    const colorMap: Record<string, string> = {
-      open: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300",
-      in_progress:
-        "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300",
-      resolved:
-        "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300",
-      closed: "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300",
-    };
     return (
-      <Badge
-        className={colorMap[status] || colorMap.closed}
-        variant="secondary"
-      >
+      <Badge color={STATUS_COLOR_MAP[status] ?? "default"} className="!text-xs">
         {statusConfig?.label || status}
       </Badge>
     );
   };
 
-  /**
-   * 获取优先级徽章样式
-   */
   const getPriorityBadge = (priority: string) => {
     const priorityConfig = ticketPriorities.find((p) => p.value === priority);
-    const colorMap: Record<string, string> = {
-      low: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300",
-      medium:
-        "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300",
-      high: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300",
-    };
     return (
       <Badge
-        className={colorMap[priority] || colorMap.medium}
-        variant="secondary"
+        color={PRIORITY_COLOR_MAP[priority] ?? "default"}
+        className="!text-xs"
       >
         {priorityConfig?.label || priority}
       </Badge>
     );
   };
 
-  /**
-   * 获取类别标签
-   */
   const getCategoryLabel = (category: string) => {
     const categoryConfig = ticketCategories.find((c) => c.value === category);
     return categoryConfig?.label || category;
   };
 
-  /**
-   * 获取用户名首字母
-   */
-  const getInitials = (name: string) => {
-    return name
+  const getInitials = (name: string) =>
+    name
       .split(" ")
       .map((n) => n[0])
       .join("")
       .toUpperCase()
       .slice(0, 2);
-  };
 
   const isClosed = ticketData.status === "closed";
 
@@ -139,9 +132,11 @@ export default async function TicketDetailPage({
       {/* 页面标题 */}
       <div className="flex items-center gap-4">
         <Link href="/dashboard/support">
-          <Button variant="ghost" size="icon">
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
+          <Button
+            type="text"
+            shape="circle"
+            icon={<ArrowLeft className="h-4 w-4" />}
+          />
         </Link>
         <div className="flex-1">
           <h2 className="text-2xl font-bold tracking-tight">
@@ -159,11 +154,13 @@ export default async function TicketDetailPage({
       </div>
 
       {/* 消息列表 */}
-      <Card>
-        <CardHeader>
-          <CardTitle>对话记录</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+        <div className="flex flex-col space-y-1.5 p-6">
+          <h3 className="text-lg leading-none font-semibold tracking-tight">
+            对话记录
+          </h3>
+        </div>
+        <div className="p-6 pt-0 space-y-4">
           {messages.map((msg) => (
             <div
               key={msg.id}
@@ -173,20 +170,17 @@ export default async function TicketDetailPage({
                   : "bg-muted/50"
               }`}
             >
-              <Avatar className="h-10 w-10">
-                <AvatarImage
-                  src={msg.user?.image || undefined}
-                  alt={msg.user?.name || "用户"}
-                />
-                <AvatarFallback
-                  className={
-                    msg.isAdminResponse
-                      ? "bg-blue-600 text-white"
-                      : "bg-primary text-primary-foreground"
-                  }
-                >
-                  {msg.user?.name ? getInitials(msg.user.name) : "U"}
-                </AvatarFallback>
+              <Avatar
+                src={msg.user?.image || undefined}
+                alt={msg.user?.name || "用户"}
+                size={40}
+                className={
+                  msg.isAdminResponse
+                    ? "shrink-0 !bg-blue-600 !text-white"
+                    : "shrink-0 !bg-primary !text-primary-foreground"
+                }
+              >
+                {msg.user?.name ? getInitials(msg.user.name) : "U"}
               </Avatar>
               <div className="flex-1 space-y-1">
                 <div className="flex items-center gap-2">
@@ -194,7 +188,7 @@ export default async function TicketDetailPage({
                     {msg.user?.name || "用户"}
                   </span>
                   {msg.isAdminResponse && (
-                    <Badge variant="secondary" className="text-xs">
+                    <Badge color="blue" className="!text-xs">
                       客服
                     </Badge>
                   )}
@@ -206,16 +200,16 @@ export default async function TicketDetailPage({
               </div>
             </div>
           ))}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* 回复表单 */}
       {isClosed ? (
-        <Card>
-          <CardContent className="py-6 text-center text-muted-foreground">
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="p-6 py-6 text-center text-muted-foreground">
             此工单已关闭，无法添加新消息
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       ) : (
         <TicketMessageForm ticketId={id} />
       )}

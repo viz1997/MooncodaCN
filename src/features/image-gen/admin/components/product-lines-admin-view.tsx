@@ -11,8 +11,13 @@
  *
  * 注：mooncada 的 ProductLine 类型有 30+ 字段（嵌套 spec/designSpec/pricing/production），
  * 本次按简化版 MockProductLine 渲染，后续接入 Drizzle 表时再扩展。
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 3.3）
+ * - shadcn Card 系列 → 内联 div
+ * - shadcn Badge/Button/Dialog/Tabs → antd
  */
 
+import { Badge, Button, Modal, Tabs } from "antd";
 import {
   DollarSign,
   Edit,
@@ -28,18 +33,6 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   MOCK_PRODUCT_LINES,
   type MockProductLine,
@@ -233,214 +226,222 @@ function ProductLineDetailDialog({
 }) {
   if (!productLine) return null;
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Package className="h-5 w-5 text-violet-600" />
-            {productLine.name}
-          </DialogTitle>
-          <DialogDescription className="flex items-center gap-2 flex-wrap">
-            <span className="font-mono">{productLine.productLineId}</span>
-            <span
-              className={cn(
-                "inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-semibold",
-                CATEGORY_COLORS[productLine.category]
-              )}
-            >
-              {CATEGORY_LABELS[productLine.category]}
-            </span>
-            <Badge variant="outline" className="text-[10px]">
-              评分 {productLine.rating} ★
-            </Badge>
-            <Badge
-              variant="outline"
-              className={cn(
-                "text-[10px]",
-                productLine.status === "active"
-                  ? "bg-emerald-500/10 text-emerald-700"
-                  : "bg-zinc-500/10 text-zinc-700"
-              )}
-            >
-              {productLine.status === "active" ? "上架" : "下架"}
-            </Badge>
-          </DialogDescription>
-        </DialogHeader>
-
-        {/* 预览图 + 描述 */}
-        <div className="grid grid-cols-3 gap-4">
-          <div className="aspect-square rounded-lg overflow-hidden bg-muted">
-            {/* biome-ignore lint/performance/noImgElement: 外部预览图（Picsum）需要原生 img */}
-            <img
-              src={previewUrlFor(productLine.productLineId)}
-              alt={productLine.name}
-              className="w-full h-full object-cover"
-            />
+  const tabItems = [
+    {
+      key: "spec",
+      label: (
+        <span className="text-xs">
+          <Ruler className="h-3 w-3 mr-1" />
+          规格
+        </span>
+      ),
+      children: (
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          <div className="bg-muted/30 rounded-lg p-2.5">
+            <p className="text-muted-foreground text-[10px]">默认尺寸</p>
+            <p className="font-medium">{productLine.spec.size}</p>
           </div>
-          <div className="col-span-2 space-y-2">
-            <p className="text-sm">{productLine.description}</p>
-            <div className="flex flex-wrap gap-1">
-              {productLine.tags.map((t) => (
-                <Badge key={t} variant="outline" className="text-[10px]">
-                  {t}
-                </Badge>
-              ))}
+          <div className="bg-muted/30 rounded-lg p-2.5">
+            <p className="text-muted-foreground text-[10px]">主材质</p>
+            <p className="font-medium">{productLine.spec.material}</p>
+          </div>
+          <div className="bg-muted/30 rounded-lg p-2.5">
+            <p className="text-muted-foreground text-[10px]">厚度</p>
+            <p className="font-medium">{productLine.spec.thickness}</p>
+          </div>
+          <div className="bg-muted/30 rounded-lg p-2.5">
+            <p className="text-muted-foreground text-[10px]">重量</p>
+            <p className="font-medium">{productLine.spec.weight}</p>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "pricing",
+      label: (
+        <span className="text-xs">
+          <DollarSign className="h-3 w-3 mr-1" />
+          定价
+        </span>
+      ),
+      children: (
+        <div className="grid grid-cols-3 gap-2">
+          <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-3 text-center">
+            <p className="text-[10px] text-muted-foreground">基础价 (1件)</p>
+            <p className="text-xl font-bold text-emerald-700 dark:text-emerald-400">
+              {formatCurrency(
+                productLine.pricing.basePrice,
+                productLine.pricing.currency
+              )}
+            </p>
+          </div>
+          <div className="bg-sky-500/5 border border-sky-500/20 rounded-lg p-3 text-center">
+            <p className="text-[10px] text-muted-foreground">批量价 (≥100)</p>
+            <p className="text-xl font-bold text-sky-700 dark:text-sky-400">
+              {formatCurrency(
+                productLine.pricing.bulkPrice,
+                productLine.pricing.currency
+              )}
+            </p>
+          </div>
+          <div className="bg-violet-500/5 border border-violet-500/20 rounded-lg p-3 text-center">
+            <p className="text-[10px] text-muted-foreground">最小起订</p>
+            <p className="text-xl font-bold text-violet-700 dark:text-violet-400">
+              {productLine.pricing.moq}
+            </p>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "production",
+      label: (
+        <span className="text-xs">
+          <Factory className="h-3 w-3 mr-1" />
+          生产
+        </span>
+      ),
+      children: (
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          <div className="bg-muted/30 rounded-lg p-2.5">
+            <p className="text-muted-foreground text-[10px]">生产周期</p>
+            <p className="font-medium">
+              {productLine.production.productionTime}
+            </p>
+          </div>
+          <div className="bg-muted/30 rounded-lg p-2.5">
+            <p className="text-muted-foreground text-[10px]">日产能</p>
+            <p className="font-medium">
+              {productLine.production.dailyCapacity.toLocaleString("zh-CN")}{" "}
+              件/天
+            </p>
+          </div>
+          <div className="bg-muted/30 rounded-lg p-2.5 col-span-2">
+            <p className="text-muted-foreground text-[10px]">生产工厂</p>
+            <p className="font-medium">{productLine.production.factory}</p>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "masks",
+      label: (
+        <span className="text-xs">
+          <Sparkles className="h-3 w-3 mr-1" />
+          兼容效果
+        </span>
+      ),
+      children: (
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">
+            该产品线兼容 {productLine.compatibleMaskIds.length} 个 AI 效果模版
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            {productLine.compatibleMaskIds.map((mid) => (
+              <div
+                key={mid}
+                className="flex items-center gap-2 p-2 rounded-lg border bg-card"
+              >
+                <div className="h-10 w-10 rounded bg-violet-500/10 flex items-center justify-center">
+                  <Palette className="h-4 w-4 text-violet-600" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-mono">{mid}</p>
+                  <p className="text-[10px] text-muted-foreground">效果模版</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ),
+    },
+  ];
+
+  return (
+    <Modal
+      open={open}
+      onCancel={() => onOpenChange(false)}
+      title={
+        <span className="flex items-center gap-2">
+          <Package className="h-5 w-5 text-violet-600" />
+          {productLine.name}
+        </span>
+      }
+      footer={[
+        <Button key="close" onClick={() => onOpenChange(false)}>
+          关闭
+        </Button>,
+      ]}
+      width={672}
+    >
+      <p className="text-xs text-muted-foreground flex items-center gap-2 flex-wrap mb-3">
+        <span className="font-mono">{productLine.productLineId}</span>
+        <span
+          className={cn(
+            "inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-semibold",
+            CATEGORY_COLORS[productLine.category]
+          )}
+        >
+          {CATEGORY_LABELS[productLine.category]}
+        </span>
+        <Badge color="default" className="!text-[10px]">
+          评分 {productLine.rating} ★
+        </Badge>
+        <Badge
+          color={productLine.status === "active" ? "green" : "default"}
+          className="!text-[10px]"
+        >
+          {productLine.status === "active" ? "上架" : "下架"}
+        </Badge>
+      </p>
+
+      {/* 预览图 + 描述 */}
+      <div className="grid grid-cols-3 gap-4 mb-4">
+        <div className="aspect-square rounded-lg overflow-hidden bg-muted">
+          {/* biome-ignore lint/performance/noImgElement: 外部预览图（Picsum）需要原生 img */}
+          <img
+            src={previewUrlFor(productLine.productLineId)}
+            alt={productLine.name}
+            className="w-full h-full object-cover"
+          />
+        </div>
+        <div className="col-span-2 space-y-2">
+          <p className="text-sm">{productLine.description}</p>
+          <div className="flex flex-wrap gap-1">
+            {productLine.tags.map((t) => (
+              <Badge key={t} color="default" className="!text-[10px]">
+                {t}
+              </Badge>
+            ))}
+          </div>
+          <div className="grid grid-cols-3 gap-2 pt-1">
+            <div className="bg-muted/30 rounded p-2 text-center">
+              <p className="text-[10px] text-muted-foreground">累计销量</p>
+              <p className="text-sm font-bold">
+                {productLine.totalSold.toLocaleString("zh-CN")}
+              </p>
             </div>
-            <div className="grid grid-cols-3 gap-2 pt-1">
-              <div className="bg-muted/30 rounded p-2 text-center">
-                <p className="text-[10px] text-muted-foreground">累计销量</p>
-                <p className="text-sm font-bold">
-                  {productLine.totalSold.toLocaleString("zh-CN")}
-                </p>
-              </div>
-              <div className="bg-muted/30 rounded p-2 text-center">
-                <p className="text-[10px] text-muted-foreground">月销</p>
-                <p className="text-sm font-bold text-emerald-600">
-                  {productLine.monthlySold.toLocaleString("zh-CN")}
-                </p>
-              </div>
-              <div className="bg-muted/30 rounded p-2 text-center">
-                <p className="text-[10px] text-muted-foreground">基础价</p>
-                <p className="text-sm font-bold">
-                  {formatCurrency(
-                    productLine.pricing.basePrice,
-                    productLine.pricing.currency
-                  )}
-                </p>
-              </div>
+            <div className="bg-muted/30 rounded p-2 text-center">
+              <p className="text-[10px] text-muted-foreground">月销</p>
+              <p className="text-sm font-bold text-emerald-600">
+                {productLine.monthlySold.toLocaleString("zh-CN")}
+              </p>
+            </div>
+            <div className="bg-muted/30 rounded p-2 text-center">
+              <p className="text-[10px] text-muted-foreground">基础价</p>
+              <p className="text-sm font-bold">
+                {formatCurrency(
+                  productLine.pricing.basePrice,
+                  productLine.pricing.currency
+                )}
+              </p>
             </div>
           </div>
         </div>
+      </div>
 
-        <Tabs defaultValue="spec" className="w-full">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="spec" className="text-xs">
-              <Ruler className="h-3 w-3 mr-1" />
-              规格
-            </TabsTrigger>
-            <TabsTrigger value="pricing" className="text-xs">
-              <DollarSign className="h-3 w-3 mr-1" />
-              定价
-            </TabsTrigger>
-            <TabsTrigger value="production" className="text-xs">
-              <Factory className="h-3 w-3 mr-1" />
-              生产
-            </TabsTrigger>
-            <TabsTrigger value="masks" className="text-xs">
-              <Sparkles className="h-3 w-3 mr-1" />
-              兼容效果
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="spec" className="space-y-2 mt-3">
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className="bg-muted/30 rounded-lg p-2.5">
-                <p className="text-muted-foreground text-[10px]">默认尺寸</p>
-                <p className="font-medium">{productLine.spec.size}</p>
-              </div>
-              <div className="bg-muted/30 rounded-lg p-2.5">
-                <p className="text-muted-foreground text-[10px]">主材质</p>
-                <p className="font-medium">{productLine.spec.material}</p>
-              </div>
-              <div className="bg-muted/30 rounded-lg p-2.5">
-                <p className="text-muted-foreground text-[10px]">厚度</p>
-                <p className="font-medium">{productLine.spec.thickness}</p>
-              </div>
-              <div className="bg-muted/30 rounded-lg p-2.5">
-                <p className="text-muted-foreground text-[10px]">重量</p>
-                <p className="font-medium">{productLine.spec.weight}</p>
-              </div>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="pricing" className="space-y-3 mt-3">
-            <div className="grid grid-cols-3 gap-2">
-              <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-3 text-center">
-                <p className="text-[10px] text-muted-foreground">
-                  基础价 (1件)
-                </p>
-                <p className="text-xl font-bold text-emerald-700 dark:text-emerald-400">
-                  {formatCurrency(
-                    productLine.pricing.basePrice,
-                    productLine.pricing.currency
-                  )}
-                </p>
-              </div>
-              <div className="bg-sky-500/5 border border-sky-500/20 rounded-lg p-3 text-center">
-                <p className="text-[10px] text-muted-foreground">
-                  批量价 (≥100)
-                </p>
-                <p className="text-xl font-bold text-sky-700 dark:text-sky-400">
-                  {formatCurrency(
-                    productLine.pricing.bulkPrice,
-                    productLine.pricing.currency
-                  )}
-                </p>
-              </div>
-              <div className="bg-violet-500/5 border border-violet-500/20 rounded-lg p-3 text-center">
-                <p className="text-[10px] text-muted-foreground">最小起订</p>
-                <p className="text-xl font-bold text-violet-700 dark:text-violet-400">
-                  {productLine.pricing.moq}
-                </p>
-              </div>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="production" className="space-y-2 mt-3">
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className="bg-muted/30 rounded-lg p-2.5">
-                <p className="text-muted-foreground text-[10px]">生产周期</p>
-                <p className="font-medium">
-                  {productLine.production.productionTime}
-                </p>
-              </div>
-              <div className="bg-muted/30 rounded-lg p-2.5">
-                <p className="text-muted-foreground text-[10px]">日产能</p>
-                <p className="font-medium">
-                  {productLine.production.dailyCapacity.toLocaleString("zh-CN")}{" "}
-                  件/天
-                </p>
-              </div>
-              <div className="bg-muted/30 rounded-lg p-2.5 col-span-2">
-                <p className="text-muted-foreground text-[10px]">生产工厂</p>
-                <p className="font-medium">{productLine.production.factory}</p>
-              </div>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="masks" className="space-y-2 mt-3">
-            <p className="text-xs text-muted-foreground">
-              该产品线兼容 {productLine.compatibleMaskIds.length} 个 AI 效果模版
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              {productLine.compatibleMaskIds.map((mid) => (
-                <div
-                  key={mid}
-                  className="flex items-center gap-2 p-2 rounded-lg border bg-card"
-                >
-                  <div className="h-10 w-10 rounded bg-violet-500/10 flex items-center justify-center">
-                    <Palette className="h-4 w-4 text-violet-600" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-mono">{mid}</p>
-                    <p className="text-[10px] text-muted-foreground">
-                      效果模版
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </TabsContent>
-        </Tabs>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            关闭
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      <Tabs defaultActiveKey="spec" items={tabItems} className="w-full" />
+    </Modal>
   );
 }
 
@@ -483,7 +484,7 @@ export function ProductLinesAdminView() {
 
       {/* 统计卡片 */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <Card className="p-3">
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] text-muted-foreground">产品线</p>
@@ -493,8 +494,8 @@ export function ProductLinesAdminView() {
               <Package className="h-4 w-4 text-violet-600" />
             </div>
           </div>
-        </Card>
-        <Card className="p-3">
+        </div>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] text-muted-foreground">上架中</p>
@@ -506,8 +507,8 @@ export function ProductLinesAdminView() {
               <TrendingUp className="h-4 w-4 text-emerald-600" />
             </div>
           </div>
-        </Card>
-        <Card className="p-3">
+        </div>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] text-muted-foreground">累计销量</p>
@@ -519,8 +520,8 @@ export function ProductLinesAdminView() {
               <TrendingUp className="h-4 w-4 text-sky-600" />
             </div>
           </div>
-        </Card>
-        <Card className="p-3">
+        </div>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] text-muted-foreground">月销量</p>
@@ -532,8 +533,8 @@ export function ProductLinesAdminView() {
               <TrendingUp className="h-4 w-4 text-amber-600" />
             </div>
           </div>
-        </Card>
-        <Card className="p-3">
+        </div>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] text-muted-foreground">平均评分</p>
@@ -545,7 +546,7 @@ export function ProductLinesAdminView() {
               <Star className="h-4 w-4 text-rose-600" />
             </div>
           </div>
-        </Card>
+        </div>
       </div>
 
       {/* 过滤器 */}
@@ -580,21 +581,21 @@ export function ProductLinesAdminView() {
 
       {/* 产品线卡片 */}
       {filtered.length === 0 ? (
-        <Card>
-          <CardContent>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="p-6">
             <EmptyState
               icon={Package}
               title="无匹配产品线"
               description="尝试调整搜索条件"
             />
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((p) => (
-            <Card
+            <div
               key={p.productLineId}
-              className="overflow-hidden hover:shadow-md transition-all"
+              className="rounded-lg border bg-card text-card-foreground shadow-sm overflow-hidden hover:shadow-md transition-all"
             >
               {/* 预览图 */}
               <div className="aspect-[4/3] bg-gradient-to-br from-muted to-muted/50 relative cursor-pointer group">
@@ -606,11 +607,10 @@ export function ProductLinesAdminView() {
                 />
                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
                   <Button
-                    size="sm"
-                    variant="secondary"
+                    size="small"
                     onClick={() => setPreviewLine(p)}
+                    icon={<Eye className="h-3.5 w-3.5" />}
                   >
-                    <Eye className="h-3.5 w-3.5 mr-1" />
                     查看详情
                   </Button>
                 </div>
@@ -628,7 +628,7 @@ export function ProductLinesAdminView() {
                 </span>
               </div>
 
-              <CardContent className="p-3 space-y-2">
+              <div className="p-3 space-y-2">
                 <div>
                   <p className="text-sm font-medium">{p.name}</p>
                   <p className="text-[10px] text-muted-foreground font-mono">
@@ -691,20 +691,21 @@ export function ProductLinesAdminView() {
 
                 <div className="flex items-center gap-2">
                   <Button
-                    size="sm"
-                    variant="outline"
-                    className="flex-1"
+                    size="small"
                     onClick={() => setPreviewLine(p)}
+                    className="flex-1"
+                    icon={<Eye className="h-3.5 w-3.5" />}
                   >
-                    <Eye className="h-3.5 w-3.5 mr-1.5" />
                     查看
                   </Button>
-                  <Button size="sm" variant="ghost" className="h-8 px-2">
-                    <Edit className="h-3.5 w-3.5" />
-                  </Button>
+                  <Button
+                    size="small"
+                    type="text"
+                    icon={<Edit className="h-3.5 w-3.5" />}
+                  />
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           ))}
         </div>
       )}

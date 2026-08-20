@@ -11,14 +11,13 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { db } from "@/db";
 import { creditsBalance } from "@/db/schema";
 import { getUserTransactions } from "@/features/credits/core";
 import { getUserPlan } from "@/features/subscription/services/user-plan";
 import { Link } from "@/i18n/routing";
 import { auth } from "@/lib/auth";
+import { cn } from "@/lib/utils";
 
 /**
  * 积分"进账"类型（用于最近动态里判断 +/- 方向与配色）
@@ -120,22 +119,18 @@ export default async function DashboardPage({
       {/* 主体网格：最近动态（2 列）+ 计划卡 / 快捷操作（1 列） */}
       <div className="grid gap-6 lg:grid-cols-3">
         {/* 最近动态 */}
-        <Card className="gap-0 py-0 shadow-none lg:col-span-2">
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm lg:col-span-2">
           <div className="flex items-center justify-between p-6 pb-4">
             <h3 className="font-semibold tracking-tight">
               {t("transactions.title")}
             </h3>
-            <Button
-              variant="ghost"
-              size="sm"
-              asChild
-              className="text-muted-foreground"
+            <Link
+              href="/dashboard/settings"
+              className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
             >
-              <Link href="/dashboard/settings">
-                {t("transactions.viewAll")}
-                <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
-            </Button>
+              {t("transactions.viewAll")}
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
           </div>
           <div className="border-t px-6 pb-4">
             {transactions.length === 0 ? (
@@ -181,33 +176,34 @@ export default async function DashboardPage({
               </ul>
             )}
           </div>
-        </Card>
+        </div>
 
         {/* 侧栏：计划卡 + 快捷操作 */}
         <div className="space-y-6">
-          <Card className="gap-0 py-0 shadow-none">
+          <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
             <div className="p-6">
               <span className="eyebrow">{t("stats.plan.title")}</span>
               <div className="mt-4 text-2xl font-bold tracking-tight">
                 {userPlan.planName}
               </div>
               <p className="mt-1 text-xs text-muted-foreground">{planHint}</p>
-              <Button
-                asChild
-                size="sm"
-                className="mt-5 w-full"
-                variant={userPlan.hasActiveSubscription ? "outline" : "default"}
+              <Link
+                href="/dashboard/settings"
+                className={cn(
+                  "mt-5 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md px-4 text-sm font-medium transition-colors",
+                  userPlan.hasActiveSubscription
+                    ? "border bg-background hover:bg-accent hover:text-accent-foreground"
+                    : "bg-primary text-primary-foreground hover:brightness-110"
+                )}
               >
-                <Link href="/dashboard/settings">
-                  {userPlan.hasActiveSubscription
-                    ? t("planCard.manage")
-                    : t("planCard.upgrade")}
-                </Link>
-              </Button>
+                {userPlan.hasActiveSubscription
+                  ? t("planCard.manage")
+                  : t("planCard.upgrade")}
+              </Link>
             </div>
-          </Card>
+          </div>
 
-          <Card className="gap-0 p-2 shadow-none">
+          <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-2">
             <QuickAction href="/dashboard/credits/buy" icon={Coins}>
               {t("actions.credits")}
             </QuickAction>
@@ -217,7 +213,7 @@ export default async function DashboardPage({
             <QuickAction href="/dashboard/support" icon={Headset}>
               {t("actions.support")}
             </QuickAction>
-          </Card>
+          </div>
         </div>
       </div>
     </div>
@@ -241,7 +237,7 @@ function StatCard({
   value: string;
 }) {
   return (
-    <Card className="gap-0 py-0 shadow-none">
+    <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
       <div className="p-5">
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium text-muted-foreground">
@@ -260,7 +256,7 @@ function StatCard({
         </div>
         <div className="mt-1 text-xs text-muted-foreground">{hint}</div>
       </div>
-    </Card>
+    </div>
   );
 }
 

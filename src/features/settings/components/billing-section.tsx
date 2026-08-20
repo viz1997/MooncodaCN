@@ -8,26 +8,18 @@
  * - 当前订阅计划
  * - 支付方式
  * - 账单历史
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 2.4）
+ * - shadcn AlertDialog 切到 antd Modal（controlled open 状态）
+ * - shadcn Badge/Button/Separator 切到 antd
  */
 
-import { Loader2, Receipt, Sparkles } from "lucide-react";
+import { App, Badge, Button, Divider, Modal } from "antd";
+import { Receipt, Sparkles } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useAction } from "next-safe-action/hooks";
 import { useEffect, useMemo, useState, useTransition } from "react";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
+
 import { findPlanByPriceId } from "@/config/payment";
 import {
   PLAN_PRIVILEGES,
@@ -47,6 +39,7 @@ import { Link } from "@/i18n/routing";
 export function BillingSection() {
   const t = useTranslations("Settings.billing");
   const locale = useLocale();
+  const { message } = App.useApp();
 
   // 获取用户订阅计划
   const { execute: fetchPlan, result: planResult } = useAction(getMyPlanAction);
@@ -104,9 +97,11 @@ export function BillingSection() {
       try {
         await cancelSubscription();
         setCancelDialogOpen(false);
+        message.success(t("currentPlan.cancelDialog.success"));
         fetchPlan(); // 刷新状态
       } catch (error) {
         console.error("Failed to cancel subscription:", error);
+        message.error(t("currentPlan.cancelDialog.error"));
       }
     });
   };
@@ -131,7 +126,7 @@ export function BillingSection() {
                   <h3 className="text-lg font-semibold">
                     {planConfig.name} Plan
                   </h3>
-                  <Badge variant="secondary">{t("currentPlan.current")}</Badge>
+                  <Badge color="default">{t("currentPlan.current")}</Badge>
                 </div>
                 <p className="text-sm text-muted-foreground">
                   {userPlan === "free"
@@ -141,76 +136,34 @@ export function BillingSection() {
               </div>
             </div>
             {userPlan === "free" && (
-              <Button asChild>
-                <Link href="/#pricing">
-                  <Sparkles className="mr-2 h-4 w-4" />
+              <Link href="/#pricing">
+                <Button type="primary" icon={<Sparkles className="h-4 w-4" />}>
                   {t("currentPlan.upgradePlan")}
-                </Link>
-              </Button>
+                </Button>
+              </Link>
             )}
             {userPlan !== "free" && (
               <div className="flex items-center gap-2">
                 {isCancelPending ? (
-                  <Badge variant="secondary" className="text-amber-600">
+                  <Badge color="gold" className="!text-amber-600">
                     {t("currentPlan.cancelPending", {
                       date: formattedRenewalDate ?? "",
                     })}
                   </Badge>
                 ) : (
-                  <AlertDialog
-                    open={cancelDialogOpen}
-                    onOpenChange={setCancelDialogOpen}
+                  <Button
+                    type="default"
+                    size="small"
+                    onClick={() => setCancelDialogOpen(true)}
                   >
-                    <AlertDialogTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="text-muted-foreground"
-                      >
-                        {t("currentPlan.cancelSubscription")}
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>
-                          {t("currentPlan.cancelDialog.title")}
-                        </AlertDialogTitle>
-                        <AlertDialogDescription className="space-y-2">
-                          <span className="block">
-                            {t("currentPlan.cancelDialog.description", {
-                              date: formattedRenewalDate ?? "",
-                            })}
-                          </span>
-                          <span className="block font-medium text-foreground">
-                            {t("currentPlan.cancelDialog.keepBenefits", {
-                              date: formattedRenewalDate ?? "",
-                            })}
-                          </span>
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>
-                          {t("currentPlan.cancelDialog.cancel")}
-                        </AlertDialogCancel>
-                        <AlertDialogAction
-                          onClick={handleCancelSubscription}
-                          disabled={isCancelling}
-                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                        >
-                          {isCancelling && (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          )}
-                          {t("currentPlan.cancelDialog.confirm")}
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
+                    {t("currentPlan.cancelSubscription")}
+                  </Button>
                 )}
               </div>
             )}
           </div>
 
-          <Separator className="my-4" />
+          <Divider className="!my-4" />
 
           <div className="grid grid-cols-3 gap-4 text-sm">
             <div>
@@ -247,7 +200,46 @@ export function BillingSection() {
         </div>
       </section>
 
-      <Separator />
+      {/* 取消订阅确认对话框 */}
+      <Modal
+        open={cancelDialogOpen}
+        onCancel={() => setCancelDialogOpen(false)}
+        title={t("currentPlan.cancelDialog.title")}
+        footer={[
+          <Button
+            key="cancel"
+            type="default"
+            onClick={() => setCancelDialogOpen(false)}
+            disabled={isCancelling}
+          >
+            {t("currentPlan.cancelDialog.cancel")}
+          </Button>,
+          <Button
+            key="confirm"
+            type="primary"
+            danger
+            loading={isCancelling}
+            onClick={handleCancelSubscription}
+          >
+            {t("currentPlan.cancelDialog.confirm")}
+          </Button>,
+        ]}
+      >
+        <div className="space-y-2">
+          <p>
+            {t("currentPlan.cancelDialog.description", {
+              date: formattedRenewalDate ?? "",
+            })}
+          </p>
+          <p className="font-medium">
+            {t("currentPlan.cancelDialog.keepBenefits", {
+              date: formattedRenewalDate ?? "",
+            })}
+          </p>
+        </div>
+      </Modal>
+
+      <Divider />
 
       {/* 账单历史 */}
       <section className="space-y-6">
@@ -269,7 +261,7 @@ export function BillingSection() {
             <div className="col-span-1 text-center">{t("history.invoice")}</div>
           </div>
 
-          <Separator />
+          <Divider className="!my-0" />
 
           {/* 空状态 */}
           <div className="flex flex-col items-center justify-center py-12 text-center">

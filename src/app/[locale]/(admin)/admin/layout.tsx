@@ -1,3 +1,4 @@
+import { AntdLayoutShell } from "@/components/antd-layout-shell";
 import { AdminSidebar } from "@/features/admin/components";
 import { checkAdmin } from "@/lib/auth/admin";
 
@@ -8,6 +9,7 @@ import { checkAdmin } from "@/lib/auth/admin";
  * - RBAC 权限检查 (只有 admin 角色可访问)
  * - Admin 专用侧边栏
  * - 深色主题背景以区别于普通 Dashboard
+ * - AntdLayoutShell：业务侧 antd 化（2026-08-20）
  */
 export default async function AdminLayout({
   children,
@@ -18,16 +20,18 @@ export default async function AdminLayout({
   await checkAdmin();
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
-      <AdminSidebar />
-      <div className="pl-64">
-        {/* Admin 顶栏 */}
-        <header className="sticky top-0 z-30 flex h-14 items-center border-b bg-white/80 px-6 backdrop-blur dark:bg-slate-900/80">
-          <h1 className="text-lg font-semibold">管理后台</h1>
-        </header>
-        {/* 主内容区域 */}
-        <main className="p-6">{children}</main>
+    <AntdLayoutShell>
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
+        <AdminSidebar />
+        <div className="pl-64">
+          {/* Admin 顶栏 */}
+          <header className="sticky top-0 z-30 flex h-14 items-center border-b bg-white/80 px-6 backdrop-blur dark:bg-slate-900/80">
+            <h1 className="text-lg font-semibold">管理后台</h1>
+          </header>
+          {/* 主内容区域 */}
+          <main className="p-6">{children}</main>
+        </div>
       </div>
-    </div>
+    </AntdLayoutShell>
   );
 }

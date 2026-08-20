@@ -1,13 +1,22 @@
 "use client";
 
-import { Loader2, Send } from "lucide-react";
+/**
+ * 工单消息回复表单组件
+ *
+ * 用于用户或管理员在工单中添加新消息
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 2.5）
+ * - shadcn Card/Button/Textarea 切到 antd
+ * - 用 antd Input.TextArea 替代 Textarea
+ * - toast 切到 App.useApp().message
+ */
+
+import { App, Button, Input } from "antd";
+import { Send } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
+
 import { addTicketMessageAction } from "@/features/support/actions";
 
 interface TicketMessageFormProps {
@@ -17,28 +26,21 @@ interface TicketMessageFormProps {
   isAdmin?: boolean;
 }
 
-/**
- * 工单消息回复表单组件
- *
- * 用于用户或管理员在工单中添加新消息
- */
 export function TicketMessageForm({
   ticketId,
   isAdmin = false,
 }: TicketMessageFormProps) {
   const router = useRouter();
   const t = useTranslations("Support");
+  const { message } = App.useApp();
   const [content, setContent] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  /**
-   * 处理消息提交
-   */
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!content.trim()) {
-      toast.error(t("enterMessage"));
+      message.error(t("enterMessage"));
       return;
     }
 
@@ -51,14 +53,14 @@ export function TicketMessageForm({
       });
 
       if (result?.data) {
-        toast.success(t("messageSent"));
+        message.success(t("messageSent"));
         setContent("");
         router.refresh();
       } else if (result?.serverError) {
-        toast.error(result.serverError);
+        message.error(result.serverError);
       }
     } catch (error) {
-      toast.error(t("sendFailed"));
+      message.error(t("sendFailed"));
       console.error(error);
     } finally {
       setIsLoading(false);
@@ -66,13 +68,15 @@ export function TicketMessageForm({
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{isAdmin ? t("replyUser") : t("addReply")}</CardTitle>
-      </CardHeader>
-      <CardContent>
+    <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+      <div className="flex flex-col space-y-1.5 p-6">
+        <h3 className="text-lg leading-none font-semibold tracking-tight">
+          {isAdmin ? t("replyUser") : t("addReply")}
+        </h3>
+      </div>
+      <div className="p-6 pt-0">
         <form onSubmit={handleSubmit} className="space-y-4">
-          <Textarea
+          <Input.TextArea
             placeholder={t("inputPlaceholder")}
             value={content}
             onChange={(e) => setContent(e.target.value)}
@@ -83,17 +87,18 @@ export function TicketMessageForm({
             <p className="text-xs text-muted-foreground">
               {content.length}/5000 {t("characters")}
             </p>
-            <Button type="submit" disabled={isLoading || !content.trim()}>
-              {isLoading ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Send className="mr-2 h-4 w-4" />
-              )}
+            <Button
+              type="primary"
+              htmlType="submit"
+              loading={isLoading}
+              disabled={!content.trim()}
+              icon={<Send className="h-4 w-4" />}
+            >
               {t("send")}
             </Button>
           </div>
         </form>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

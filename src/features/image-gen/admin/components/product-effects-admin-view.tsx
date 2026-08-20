@@ -12,16 +12,19 @@
  *   - 底部统计与 maskId，操作按钮（预览 / 编辑 / 切换上架 / 删除）
  * - 编辑/新建用 EditEffectDialog 弹窗（不再跳独立路由）
  * - 分类筛选换 Radix Select
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 3.3）
+ * - shadcn Card → 内联 div
+ * - shadcn Badge/Button/Dialog/Select → antd
+ * - sonner toast → antd App.useApp().message
  */
 
+import { App, Badge, Button, Modal, Select } from "antd";
 import {
-  Activity,
   CheckCircle2,
-  Clock,
   Edit,
   Eye,
   Layers,
-  Loader2,
   Plus,
   Search,
   Sparkles,
@@ -30,26 +33,7 @@ import {
 } from "lucide-react";
 import { useAction } from "next-safe-action/hooks";
 import { useMemo, useState } from "react";
-import { toast } from "sonner";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   deleteProductEffectAdminAction,
   updateProductEffectAdminAction,
@@ -71,6 +55,7 @@ interface ProductEffectsAdminViewProps {
 export function ProductEffectsAdminView({
   effects: initialEffects,
 }: ProductEffectsAdminViewProps) {
+  const { message } = App.useApp();
   const [effects, setEffects] = useState<ProductEffect[]>(initialEffects);
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState<string>("all");
@@ -91,10 +76,10 @@ export function ProductEffectsAdminView({
       onSuccess: ({ input }) => {
         setEffects((prev) => prev.filter((e) => e.maskId !== input.maskId));
         setDeletingEffect(null);
-        toast.success("删除成功");
+        message.success("删除成功");
       },
       onError: ({ error }) => {
-        toast.error(error.serverError ?? "删除失败");
+        message.error(error.serverError ?? "删除失败");
       },
     }
   );
@@ -115,10 +100,10 @@ export function ProductEffectsAdminView({
               : e
           )
         );
-        toast.success(next === "active" ? "已上架" : "已下架");
+        message.success(next === "active" ? "已上架" : "已下架");
       },
       onError: ({ error }) => {
-        toast.error(error.serverError ?? "状态更新失败");
+        message.error(error.serverError ?? "状态更新失败");
       },
     }
   );
@@ -180,24 +165,22 @@ export function ProductEffectsAdminView({
               className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border bg-muted/40 focus:bg-background focus:outline-none focus:ring-2 focus:ring-violet-500/30"
             />
           </div>
-          <Select value={filterCategory} onValueChange={setFilterCategory}>
-            <SelectTrigger className="w-full sm:w-40">
-              <SelectValue placeholder="分类" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">全部分类</SelectItem>
-              {categories.map((c) => (
-                <SelectItem key={c} value={c}>
-                  {c}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Select
+            value={filterCategory}
+            onChange={setFilterCategory}
+            className="w-full sm:w-40"
+            placeholder="分类"
+            options={[
+              { value: "all", label: "全部分类" },
+              ...categories.map((c) => ({ value: c, label: c })),
+            ]}
+          />
           <Button
-            className="bg-gradient-to-r from-teal-500 to-emerald-600 hover:opacity-90"
+            type="primary"
             onClick={() => setCreateOpen(true)}
+            className="bg-gradient-to-r from-teal-500 to-emerald-600 border-0"
+            icon={<Plus className="h-4 w-4" />}
           >
-            <Plus className="h-4 w-4 mr-1.5" />
             新增效果
           </Button>
         </div>
@@ -205,7 +188,7 @@ export function ProductEffectsAdminView({
 
       {/* 统计卡片 */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Card className="p-3">
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] text-muted-foreground">效果总数</p>
@@ -215,8 +198,8 @@ export function ProductEffectsAdminView({
               <Layers className="h-4 w-4 text-violet-600" />
             </div>
           </div>
-        </Card>
-        <Card className="p-3">
+        </div>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] text-muted-foreground">上架中</p>
@@ -228,8 +211,8 @@ export function ProductEffectsAdminView({
               <CheckCircle2 className="h-4 w-4 text-emerald-600" />
             </div>
           </div>
-        </Card>
-        <Card className="p-3">
+        </div>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] text-muted-foreground">累计调用</p>
@@ -238,11 +221,11 @@ export function ProductEffectsAdminView({
               </p>
             </div>
             <div className="rounded-lg bg-sky-500/10 p-2">
-              <Activity className="h-4 w-4 text-sky-600" />
+              <TrendingUp className="h-4 w-4 text-sky-600" />
             </div>
           </div>
-        </Card>
-        <Card className="p-3">
+        </div>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] text-muted-foreground">平均成功率</p>
@@ -251,29 +234,29 @@ export function ProductEffectsAdminView({
               </p>
             </div>
             <div className="rounded-lg bg-amber-500/10 p-2">
-              <Activity className="h-4 w-4 text-amber-600" />
+              <TrendingUp className="h-4 w-4 text-amber-600" />
             </div>
           </div>
-        </Card>
+        </div>
       </div>
 
       {/* 模板网格 */}
       {filtered.length === 0 ? (
-        <Card>
-          <CardContent className="py-12">
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="py-12">
             <div className="flex flex-col items-center justify-center text-center text-muted-foreground">
               <Layers className="h-10 w-10 mb-3" />
               <p className="font-medium">暂无效果模板</p>
               <p className="text-sm">点击右上角新增效果模板</p>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {filtered.map((effect) => (
-            <Card
+            <div
               key={effect.maskId}
-              className="overflow-hidden hover:shadow-md transition-all"
+              className="rounded-lg border bg-card text-card-foreground shadow-sm overflow-hidden hover:shadow-md transition-all"
             >
               <button
                 type="button"
@@ -299,18 +282,14 @@ export function ProductEffectsAdminView({
                 </div>
                 <div className="absolute top-2 right-2">
                   <Badge
-                    className={cn(
-                      "text-[10px] border-0",
-                      effect.status === "active"
-                        ? "bg-emerald-500/90 text-white"
-                        : "bg-zinc-500/90 text-white"
-                    )}
+                    color={effect.status === "active" ? "green" : "default"}
+                    className="!text-[10px]"
                   >
                     {effect.status === "active" ? "上架" : "下架"}
                   </Badge>
                 </div>
               </button>
-              <CardContent className="p-3 space-y-2">
+              <div className="p-3 space-y-2">
                 <p className="text-sm font-medium truncate">{effect.name}</p>
                 <p className="text-[10px] text-muted-foreground line-clamp-2 h-7">
                   {effect.description}
@@ -384,108 +363,92 @@ export function ProductEffectsAdminView({
                   <span className="flex items-center gap-1">
                     <TrendingUp className="h-3 w-3" /> 使用 {effect.usageCount}
                   </span>
-                  <span className="flex items-center gap-1">
-                    <Clock className="h-3 w-3" />
-                    {(effect.avgDuration / 1000).toFixed(1)}s
-                  </span>
                   <span className="font-mono">{effect.maskId}</span>
                 </div>
 
                 <div className="flex gap-1.5 pt-1">
                   <Button
-                    size="sm"
-                    variant="outline"
-                    className="flex-1"
+                    size="small"
                     onClick={() => setPreviewEffect(effect)}
+                    className="flex-1"
+                    icon={<Eye className="h-3 w-3" />}
                   >
-                    <Eye className="h-3 w-3 mr-1" /> 预览
+                    预览
                   </Button>
                   <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 w-7 p-0"
+                    size="small"
+                    type="text"
                     onClick={() => setEditingEffect(effect)}
                     aria-label="编辑"
-                  >
-                    <Edit className="h-3.5 w-3.5" />
-                  </Button>
+                    icon={<Edit className="h-3.5 w-3.5" />}
+                  />
                   <Button
-                    size="sm"
-                    variant="ghost"
+                    size="small"
+                    type="text"
                     className={cn(
-                      "h-7 w-7 p-0",
                       effect.status === "active"
-                        ? "text-emerald-600"
-                        : "text-muted-foreground"
+                        ? "!text-emerald-600"
+                        : "!text-muted-foreground"
                     )}
                     onClick={() => handleToggleStatus(effect)}
                     disabled={isToggling}
+                    loading={isToggling}
                     aria-label={effect.status === "active" ? "下架" : "上架"}
-                  >
-                    {isToggling ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                    )}
-                  </Button>
+                    icon={<CheckCircle2 className="h-3.5 w-3.5" />}
+                  />
                   <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 w-7 p-0 text-rose-600 hover:text-rose-700"
+                    size="small"
+                    type="text"
+                    danger
                     onClick={() => setDeletingEffect(effect)}
                     aria-label="删除"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                    icon={<Trash2 className="h-3.5 w-3.5" />}
+                  />
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           ))}
         </div>
       )}
 
       {/* 删除确认 */}
-      <Dialog
+      <Modal
         open={!!deletingEffect}
-        onOpenChange={(open) => !open && setDeletingEffect(null)}
+        onCancel={() => !isDeleting && setDeletingEffect(null)}
+        title={
+          <span className="flex items-center gap-2 text-rose-600">
+            <Trash2 className="h-4 w-4" />
+            确认删除产品效果
+          </span>
+        }
+        footer={[
+          <Button
+            key="cancel"
+            onClick={() => setDeletingEffect(null)}
+            disabled={isDeleting}
+          >
+            取消
+          </Button>,
+          <Button
+            key="confirm"
+            danger
+            loading={isDeleting}
+            onClick={() => {
+              if (deletingEffect) {
+                deleteEffect({ maskId: deletingEffect.maskId });
+              }
+            }}
+          >
+            {isDeleting ? "删除中..." : "确认删除"}
+          </Button>,
+        ]}
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-rose-600">
-              <Trash2 className="h-4 w-4" />
-              确认删除产品效果
-            </DialogTitle>
-            <DialogDescription>此操作不可撤销</DialogDescription>
-          </DialogHeader>
-          <div className="py-2">
-            <p className="text-sm">
-              确定要删除{" "}
-              <span className="font-semibold">{deletingEffect?.name}</span> (
-              {deletingEffect?.maskId}) 吗？
-            </p>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDeletingEffect(null)}
-              disabled={isDeleting}
-            >
-              取消
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                if (deletingEffect) {
-                  deleteEffect({ maskId: deletingEffect.maskId });
-                }
-              }}
-              disabled={isDeleting}
-            >
-              {isDeleting ? "删除中..." : "确认删除"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        <p className="text-sm py-2">
+          确定要删除{" "}
+          <span className="font-semibold">{deletingEffect?.name}</span> (
+          {deletingEffect?.maskId}) 吗？此操作不可撤销。
+        </p>
+      </Modal>
 
       {/* 预览对话框 */}
       <PreviewEffectDialog

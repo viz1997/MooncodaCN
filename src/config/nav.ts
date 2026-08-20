@@ -1,7 +1,9 @@
 import {
   Award,
+  BookOpen,
   Box,
   Cpu,
+  Frame,
   Globe,
   Headset,
   Image,
@@ -182,13 +184,15 @@ export const dashboardNav: NavGroup[] = [
         href: "/dashboard/generate",
         icon: Wand2,
       },
+      {
+        title: "Generate V2",
+        href: "/dashboard/generate-v2",
+        icon: Sparkles,
+      },
       // 已隐藏：公开生图（与 /image-gen 公开页重复）
       // { title: "Public Image Gen", href: "/image-gen", icon: Sparkles },
-      {
-        title: "Photos",
-        href: "/dashboard/photos",
-        icon: Image,
-      },
+      // 已隐藏：照片库独立入口 —— 已合并到「我的资产」里的「我的照片」Tab
+      // { title: "Photos", href: "/dashboard/photos", icon: Image },
       {
         title: "Effects",
         href: "/dashboard/effects",
@@ -202,6 +206,21 @@ export const dashboardNav: NavGroup[] = [
         title: "Orders",
         href: "/dashboard/prompt-orders",
         icon: ListOrdered,
+      },
+      {
+        title: "Canvas",
+        href: "/dashboard/canvas",
+        icon: Frame,
+      },
+      {
+        title: "Prompt Library",
+        href: "/dashboard/prompts",
+        icon: BookOpen,
+      },
+      {
+        title: "My Assets",
+        href: "/dashboard/assets",
+        icon: Images,
       },
       {
         title: "Settings",

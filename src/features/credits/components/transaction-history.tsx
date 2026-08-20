@@ -4,8 +4,14 @@
  * 积分交易历史组件
  *
  * 显示用户的积分交易记录表格
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 2.3）
+ * - shadcn Badge/Select/Button/Separator 切到 antd
+ * - shadcn Select（受控 value/onValueChange + children） 切到 antd Select（value/onChange + options）
+ * - shadcn Badge variant 切到 antd Badge color
  */
 
+import { Badge, Button, Divider, Select } from "antd";
 import {
   ChevronLeft,
   ChevronRight,
@@ -17,16 +23,6 @@ import { useLocale, useTranslations } from "next-intl";
 import { useAction } from "next-safe-action/hooks";
 import { useEffect, useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
 import { getMyTransactions } from "@/features/credits/actions";
 import { cn } from "@/lib/utils";
 
@@ -43,19 +39,16 @@ type TransactionTypeKey =
   | "refund";
 
 /**
- * 交易类型变体映射
+ * 交易类型 → antd Badge color
  */
-const TRANSACTION_TYPE_VARIANTS: Record<
-  TransactionTypeKey,
-  "default" | "secondary" | "destructive" | "outline"
-> = {
-  registration_bonus: "default",
-  admin_grant: "default",
-  monthly_grant: "default",
-  purchase: "secondary",
-  consumption: "destructive",
-  expiration: "outline",
-  refund: "secondary",
+const TRANSACTION_TYPE_COLORS: Record<TransactionTypeKey, string> = {
+  registration_bonus: "blue",
+  admin_grant: "blue",
+  monthly_grant: "blue",
+  purchase: "gold",
+  consumption: "red",
+  expiration: "default",
+  refund: "gold",
 };
 
 /**
@@ -109,7 +102,7 @@ export function TransactionHistory() {
    */
   const getTypeLabel = (type: string): string => {
     const typeKey = type as TransactionTypeKey;
-    if (typeKey in TRANSACTION_TYPE_VARIANTS) {
+    if (typeKey in TRANSACTION_TYPE_COLORS) {
       return t(`types.${typeKey}`);
     }
     return type;
@@ -156,13 +149,11 @@ export function TransactionHistory() {
   };
 
   /**
-   * 获取交易类型变体
+   * 获取交易类型 Badge color
    */
-  const getTypeVariant = (
-    type: string
-  ): "default" | "secondary" | "destructive" | "outline" => {
+  const getTypeColor = (type: string): string => {
     const typeKey = type as TransactionTypeKey;
-    return TRANSACTION_TYPE_VARIANTS[typeKey] ?? "outline";
+    return TRANSACTION_TYPE_COLORS[typeKey] ?? "default";
   };
 
   // 空状态
@@ -205,7 +196,7 @@ export function TransactionHistory() {
           <div className="col-span-2 text-right">{t("transactionAmount")}</div>
         </div>
 
-        <Separator />
+        <Divider className="!my-0" />
 
         {/* 加载状态 */}
         {isPending ? (
@@ -232,10 +223,7 @@ export function TransactionHistory() {
 
                   {/* 类型 */}
                   <div className="col-span-2">
-                    <Badge
-                      variant={getTypeVariant(tx.type)}
-                      className="text-xs"
-                    >
+                    <Badge color={getTypeColor(tx.type)} className="!text-xs">
                       {getTypeLabel(tx.type)}
                     </Badge>
                   </div>
@@ -281,20 +269,18 @@ export function TransactionHistory() {
             <span>{t("rowsPerPage")}</span>
             <Select
               value={String(pageSize)}
-              onValueChange={(v) => {
+              onChange={(v) => {
                 setPageSize(Number(v));
                 setPage(1);
               }}
-            >
-              <SelectTrigger className="w-16 h-8">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="10">10</SelectItem>
-                <SelectItem value="20">20</SelectItem>
-                <SelectItem value="50">50</SelectItem>
-              </SelectContent>
-            </Select>
+              style={{ width: 64, height: 32 }}
+              size="small"
+              options={[
+                { value: "10", label: "10" },
+                { value: "20", label: "20" },
+                { value: "50", label: "50" },
+              ]}
+            />
           </div>
 
           {/* 页码信息 */}
@@ -303,41 +289,33 @@ export function TransactionHistory() {
           {/* 分页按钮 */}
           <div className="flex items-center gap-1">
             <Button
-              variant="outline"
-              size="icon"
-              className="h-8 w-8"
+              type="default"
+              size="small"
               onClick={() => setPage(1)}
               disabled={page === 1}
-            >
-              <ChevronsLeft className="h-4 w-4" />
-            </Button>
+              icon={<ChevronsLeft className="h-4 w-4" />}
+            />
             <Button
-              variant="outline"
-              size="icon"
-              className="h-8 w-8"
+              type="default"
+              size="small"
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page === 1}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
+              icon={<ChevronLeft className="h-4 w-4" />}
+            />
             <Button
-              variant="outline"
-              size="icon"
-              className="h-8 w-8"
+              type="default"
+              size="small"
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={page === totalPages}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
+              icon={<ChevronRight className="h-4 w-4" />}
+            />
             <Button
-              variant="outline"
-              size="icon"
-              className="h-8 w-8"
+              type="default"
+              size="small"
               onClick={() => setPage(totalPages)}
               disabled={page === totalPages}
-            >
-              <ChevronsRight className="h-4 w-4" />
-            </Button>
+              icon={<ChevronsRight className="h-4 w-4" />}
+            />
           </div>
         </div>
       </div>

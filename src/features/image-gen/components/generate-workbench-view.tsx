@@ -1,7 +1,9 @@
 "use client";
 
+import { Input as AntdInput, App, Modal } from "antd";
+
 /**
- * 生图工作台 - 仿 Mooncada 设计
+ * 生图工作台 - 仿 Mooncoda 设计
  *
  * 双栏布局：
  * - 左侧 380px 参数面板：参考图 / 模板开关 / 提示词 / 反向提示词 / 生图模型 /
@@ -15,9 +17,12 @@
  */
 
 import {
+  BookmarkPlus,
+  BookOpen,
   CheckCircle2,
   Clock,
   Download,
+  FolderPlus,
   Image as ImageIcon,
   Library,
   Loader2,
@@ -33,7 +38,6 @@ import {
   Sparkles,
   Square,
   Upload,
-  Wand2,
   X,
   XCircle,
 } from "lucide-react";
@@ -67,12 +71,17 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import type { PromptVariable } from "@/db/image-gen-types";
 import type { ImageJob, Photo } from "@/db/schema";
+import type { InsertAssetPayload } from "@/features/canvas/components/canvas/asset-picker-modal";
+import { AssetPickerModal } from "@/features/canvas/components/canvas/asset-picker-modal";
+import { PromptSelectDialog } from "@/features/canvas/components/prompts/prompt-select-dialog";
+import { useMyPromptStore } from "@/features/canvas/stores/use-my-prompt-store";
 import type { PromptTemplateView } from "@/features/gpt-image/lib/types";
 import {
   generateImageAction,
   listImageJobsAction,
   listPhotosAction,
 } from "@/features/image-gen/actions";
+import { ExternalImageGenCard } from "@/features/image-gen/components/external-image-gen-card";
 import type {
   ImageModelId,
   ImageSize,
@@ -81,7 +90,6 @@ import {
   IMAGE_MODEL_LIST,
   IMAGE_MODELS,
 } from "@/features/image-gen/lib/image-models/types";
-import { ExternalImageGenCard } from "@/features/image-gen/components/external-image-gen-card";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
@@ -497,6 +505,13 @@ export function GenerateWorkbenchView({
   // 提示词模板开关
   const [useTemplate, setUseTemplate] = useState(true);
 
+  // 三按钮对应的三个 Dialog（与 V2 image-workbench 对齐：收藏 / 提示词库 / 资产库）
+  // 与 V2 不同点：V1 的 prompt 输入区可能处于「模板模式」，三按钮仅在手动模式下出现
+  // —— 模板模式由模板变量 + selectedMask 决定，用户没自由输入 prompt 的入口
+  const [promptDialogOpen, setPromptDialogOpen] = useState(false);
+  const [assetPickerOpen, setAssetPickerOpen] = useState(false);
+  const [savePromptOpen, setSavePromptOpen] = useState(false);
+
   // 模型与提示词模板（Phase C：mask → template 语义重命名，但 selectedMask 状态名保留
   // 以兼容 WorkbenchEffect.maskId 字段与 generateImageAction({ maskId }) 调用）
   // 默认 gpt_image_2：唯一支持 batchSize>1 的真实接入模型，工作台主推。
@@ -589,6 +604,51 @@ export function GenerateWorkbenchView({
       init[v.key] = v.defaultValue;
     });
     setParamValues(init);
+  };
+
+  // 「收藏当前提示词」 —— 写进 useMyPromptStore（localforage）。
+  // 与 V2 image-workbench 的 handleConfirmSavePrompt 同形态：用户填标题，存「我的提示词」Tab。
+  const addMyPrompt = useMyPromptStore((state) => state.addPrompt);
+  const handleOpenSavePrompt = () => {
+    if (!prompt.trim()) {
+      toast.error("请先输入提示词");
+      return;
+    }
+    setSavePromptOpen(true);
+  };
+  const handleConfirmSavePrompt = (title: string) => {
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) {
+      toast.error("请输入标题");
+      return;
+    }
+    addMyPrompt({
+      title: trimmedTitle,
+      prompt,
+      tags: [],
+      source: "workbench",
+    });
+    setSavePromptOpen(false);
+    toast.success("已收藏到「我的提示词」");
+  };
+  // 资产库插入 —— V1 当前没用「参考图」之外的资产消费场景，先只把图片贴到 prompt 上方的缩略图位置
+  // （refMode 库选）。视频/文本暂不接，与 AssetPickerModal 的语义保持一致即可。
+  const handleInsertAsset = (payload: InsertAssetPayload) => {
+    if (payload.kind !== "image") return;
+    setRefMode("library");
+    setUploadedImage(null);
+    setSelectedPhoto({
+      id: `picker-${Date.now()}`,
+      userId: "self",
+      fileName: payload.title,
+      fileUrl: payload.dataUrl,
+      thumbnailUrl: payload.dataUrl,
+      width: null,
+      height: null,
+      format: null,
+      fileSize: null,
+      createdAt: new Date(),
+    } as Photo);
   };
 
   // 首次加载按默认选中模板填充参数
@@ -801,9 +861,7 @@ export function GenerateWorkbenchView({
         ...eff,
         // 仅在 effect 主 effect 是 processing 时一起刷成 completed（最后一条
         // submission 完成 → effect 也算完成）。如果有 pending submission 保持 processing。
-        status: hasUnfinishedSubmission(eff)
-          ? "processing"
-          : "completed",
+        status: hasUnfinishedSubmission(eff) ? "processing" : "completed",
         resultUrls,
         ...duration,
         ...cost,
@@ -820,9 +878,7 @@ export function GenerateWorkbenchView({
       setHistory((prev) =>
         prev.map((e) => (e.effectId === effectId ? next : e))
       );
-      setSelectedEffect((prev) =>
-        prev?.effectId === effectId ? next : prev
-      );
+      setSelectedEffect((prev) => (prev?.effectId === effectId ? next : prev));
       toast.success(`${eff.imageModelName} 生成完成`);
       return;
     }
@@ -1162,8 +1218,7 @@ export function GenerateWorkbenchView({
         jobId: returnedJobId,
         submissions: (newEffect.submissions ?? []).map((s, i) => {
           // 找到 handleGenerate 刚 push 的那一条 submission，给它赋 jobId
-          const isLatest =
-            i === (newEffect.submissions ?? []).length - 1;
+          const isLatest = i === (newEffect.submissions ?? []).length - 1;
           return isLatest ? { ...s, jobId: returnedJobId } : s;
         }),
       };
@@ -1238,9 +1293,103 @@ export function GenerateWorkbenchView({
   return (
     <>
       <div className="flex h-[calc(100vh-8rem)] gap-4">
-        {/* ============ 左侧：参数面板 ============ */}
-        <aside className="w-[380px] shrink-0 flex flex-col bg-card border rounded-lg overflow-hidden">
+        {/* ============ 左侧：会话历史 rail（Lovart 风）============
+         * 垂直窄列：顶部「+」新建会话按钮 + 下方可滚动的会话缩略图列表。
+         * 历史从主画布底部挪到这里 —— 新会话里就不会再出现旧会话的缩略图，
+         * 点哪个会话就进入哪个，符合 Lovart 的"会话即工作流"心智。
+         */}
+        <aside className="w-[88px] shrink-0 flex flex-col bg-card border rounded-lg overflow-hidden">
+          <div className="p-2 border-b bg-muted/30 flex flex-col items-center gap-1">
+            <span className="text-[10px] font-medium text-muted-foreground tracking-wide">
+              会话
+            </span>
+            <button
+              type="button"
+              onClick={handleNewSession}
+              className="h-12 w-12 rounded-xl border-2 border-dashed border-muted-foreground/30 bg-muted/30 hover:bg-muted/60 hover:border-primary/60 flex items-center justify-center transition-all duration-200 hover:scale-105 group"
+              title="新建会话"
+              aria-label="新建会话"
+            >
+              <Plus className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-2">
+            {history.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center text-[10px] text-muted-foreground/60 text-center px-1 leading-relaxed">
+                点击「+」开始第一次生图
+              </div>
+            ) : (
+              history.map((eff) => {
+                const Icon = STATUS_CONFIG[eff.status].icon;
+                const isSelected = selectedEffect?.effectId === eff.effectId;
+                return (
+                  <button
+                    key={eff.effectId}
+                    type="button"
+                    onClick={() => setSelectedEffect(eff)}
+                    className={cn(
+                      "relative h-12 w-12 rounded-xl overflow-hidden transition-all duration-200 group/sess",
+                      isSelected
+                        ? "ring-2 ring-primary ring-offset-2 ring-offset-card shadow-md scale-105"
+                        : "ring-1 ring-border hover:ring-muted-foreground/40 hover:scale-105"
+                    )}
+                    title={
+                      eff.maskName +
+                      (eff.status === "draft"
+                        ? ""
+                        : ` · ${STATUS_CONFIG[eff.status].label}`)
+                    }
+                  >
+                    {eff.resultUrls[0] ? (
+                      // biome-ignore lint/performance/noImgElement: 缩略图用原生 img
+                      <img
+                        src={eff.resultUrls[0]}
+                        alt={eff.maskName}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center bg-muted">
+                        <Icon
+                          className={cn(
+                            "h-4 w-4",
+                            STATUS_CONFIG[eff.status].color,
+                            eff.status === "processing" && "animate-spin"
+                          )}
+                        />
+                      </div>
+                    )}
+                    {/* 状态点：右上角小圆点（仅非 completed 才显示） */}
+                    {eff.status !== "completed" && (
+                      <span
+                        className={cn(
+                          "absolute top-0.5 right-0.5 h-2 w-2 rounded-full ring-2 ring-card",
+                          eff.status === "processing" &&
+                            "bg-primary animate-pulse",
+                          eff.status === "failed" && "bg-rose-500",
+                          eff.status === "pending" && "bg-amber-500",
+                          eff.status === "draft" && "bg-primary"
+                        )}
+                      />
+                    )}
+                  </button>
+                );
+              })
+            )}
+          </div>
+          {history.length > 0 && (
+            <div className="p-2 border-t bg-muted/30 flex justify-center">
+              <Badge
+                variant="secondary"
+                className="h-4 px-1.5 text-[9px] font-mono"
+              >
+                {history.length}
+              </Badge>
+            </div>
+          )}
+        </aside>
 
+        {/* ============ 中间：参数面板 ============ */}
+        <aside className="w-[380px] shrink-0 flex flex-col bg-card border rounded-lg overflow-hidden">
           {/*
             精简布局 —— Kimi/DeepSeek/GPT 式：
             - 三个 Accordion：参考图 / 提示词 / 输出
@@ -1377,9 +1526,7 @@ export function GenerateWorkbenchView({
                         <Upload
                           className={cn(
                             "h-5 w-5 mx-auto mb-1.5",
-                            dragOver
-                              ? "text-primary"
-                              : "text-muted-foreground"
+                            dragOver ? "text-primary" : "text-muted-foreground"
                           )}
                         />
                         <p className="text-xs">
@@ -1547,17 +1694,19 @@ export function GenerateWorkbenchView({
                   提示词
                 </span>
                 <span className="ml-auto text-[11px] text-muted-foreground font-normal">
-                  {useTemplate ? selectedTemplate?.name ?? "模板" : "手动"}
+                  {useTemplate ? (selectedTemplate?.name ?? "模板") : "手动"}
                 </span>
               </AccordionTrigger>
               <AccordionContent className="pb-3">
                 <div className="space-y-2">
                   {/* 模板/手动 toggle */}
                   <div className="flex gap-0.5 bg-muted rounded p-0.5 w-fit">
-                    {([
-                      { v: true, label: "模板" },
-                      { v: false, label: "手动" },
-                    ] as const).map((opt) => (
+                    {(
+                      [
+                        { v: true, label: "模板" },
+                        { v: false, label: "手动" },
+                      ] as const
+                    ).map((opt) => (
                       <button
                         key={String(opt.v)}
                         type="button"
@@ -1633,61 +1782,58 @@ export function GenerateWorkbenchView({
                           {selectedTemplate &&
                             (selectedTemplate.variables ?? []).length > 0 && (
                               <div className="space-y-1.5">
-                                {(selectedTemplate.variables ?? []).map(
-                                  (v) => (
-                                    <div
-                                      key={v.key}
-                                      className="flex items-center gap-2"
-                                    >
-                                      <Label className="text-[11px] text-muted-foreground shrink-0 w-20 truncate">
-                                        {v.label}
-                                      </Label>
-                                      {v.options && v.options.length > 0 ? (
-                                        <Select
-                                          value={
-                                            paramValues[v.key] ??
-                                            v.defaultValue
-                                          }
-                                          onValueChange={(val) =>
-                                            setParamValues((p) => ({
-                                              ...p,
-                                              [v.key]: val,
-                                            }))
-                                          }
-                                        >
-                                          <SelectTrigger className="h-7 text-xs flex-1">
-                                            <SelectValue />
-                                          </SelectTrigger>
-                                          <SelectContent>
-                                            {v.options.map((opt) => (
-                                              <SelectItem
-                                                key={opt}
-                                                value={opt}
-                                                className="text-xs"
-                                              >
-                                                {opt}
-                                              </SelectItem>
-                                            ))}
-                                          </SelectContent>
-                                        </Select>
-                                      ) : (
-                                        <Input
-                                          value={paramValues[v.key] ?? ""}
-                                          onChange={(e) =>
-                                            setParamValues((p) => ({
-                                              ...p,
-                                              [v.key]: e.target.value,
-                                            }))
-                                          }
-                                          placeholder={
-                                            v.defaultValue || `请输入${v.label}`
-                                          }
-                                          className="h-7 text-xs flex-1"
-                                        />
-                                      )}
-                                    </div>
-                                  )
-                                )}
+                                {(selectedTemplate.variables ?? []).map((v) => (
+                                  <div
+                                    key={v.key}
+                                    className="flex items-center gap-2"
+                                  >
+                                    <Label className="text-[11px] text-muted-foreground shrink-0 w-20 truncate">
+                                      {v.label}
+                                    </Label>
+                                    {v.options && v.options.length > 0 ? (
+                                      <Select
+                                        value={
+                                          paramValues[v.key] ?? v.defaultValue
+                                        }
+                                        onValueChange={(val) =>
+                                          setParamValues((p) => ({
+                                            ...p,
+                                            [v.key]: val,
+                                          }))
+                                        }
+                                      >
+                                        <SelectTrigger className="h-7 text-xs flex-1">
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {v.options.map((opt) => (
+                                            <SelectItem
+                                              key={opt}
+                                              value={opt}
+                                              className="text-xs"
+                                            >
+                                              {opt}
+                                            </SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    ) : (
+                                      <Input
+                                        value={paramValues[v.key] ?? ""}
+                                        onChange={(e) =>
+                                          setParamValues((p) => ({
+                                            ...p,
+                                            [v.key]: e.target.value,
+                                          }))
+                                        }
+                                        placeholder={
+                                          v.defaultValue || `请输入${v.label}`
+                                        }
+                                        className="h-7 text-xs flex-1"
+                                      />
+                                    )}
+                                  </div>
+                                ))}
                               </div>
                             )}
                         </>
@@ -1698,6 +1844,40 @@ export function GenerateWorkbenchView({
                   {/* 手动模式 */}
                   {!useTemplate && (
                     <div className="space-y-1.5">
+                      {/* 三按钮：收藏当前 / 提示词库 / 资产库（与 V2 工作台对齐） */}
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-[11px]"
+                          disabled={!prompt.trim()}
+                          onClick={handleOpenSavePrompt}
+                        >
+                          <BookmarkPlus className="mr-1 h-3 w-3" />
+                          收藏当前
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-[11px]"
+                          onClick={() => setPromptDialogOpen(true)}
+                        >
+                          <BookOpen className="mr-1 h-3 w-3" />
+                          提示词库
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-[11px]"
+                          onClick={() => setAssetPickerOpen(true)}
+                        >
+                          <FolderPlus className="mr-1 h-3 w-3" />
+                          资产库
+                        </Button>
+                      </div>
                       <Textarea
                         value={prompt}
                         onChange={(e) => setPrompt(e.target.value)}
@@ -1734,10 +1914,7 @@ export function GenerateWorkbenchView({
                       const tplCandidateCount = useTemplate
                         ? (selectedTemplate?.candidateCount ?? 1)
                         : 1;
-                      if (
-                        tplCandidateCount === 4 ||
-                        tplCandidateCount === 9
-                      ) {
+                      if (tplCandidateCount === 4 || tplCandidateCount === 9) {
                         return "1 张拼接";
                       }
                       return `${batchSize} 张`;
@@ -1808,10 +1985,7 @@ export function GenerateWorkbenchView({
                                 : "border-border text-muted-foreground hover:border-muted-foreground/50"
                             )}
                           >
-                            <AspectIcon
-                              className="h-3 w-3"
-                              strokeWidth={2}
-                            />
+                            <AspectIcon className="h-3 w-3" strokeWidth={2} />
                             <span className="font-mono">
                               {w === h ? "1:1" : `${w}:${h}`}
                             </span>
@@ -1842,7 +2016,9 @@ export function GenerateWorkbenchView({
                             variant="outline"
                             className="h-7 w-7"
                             disabled={isLocked || display <= 1}
-                            onClick={() => setBatchSize(Math.max(1, display - 1))}
+                            onClick={() =>
+                              setBatchSize(Math.max(1, display - 1))
+                            }
                             aria-label="减少数量"
                           >
                             <Minus className="h-3 w-3" />
@@ -1936,11 +2112,7 @@ export function GenerateWorkbenchView({
                   )}
                 </Button>
               </PopoverTrigger>
-              <PopoverContent
-                align="end"
-                side="top"
-                className="w-72 space-y-3"
-              >
+              <PopoverContent align="end" side="top" className="w-72 space-y-3">
                 <p className="text-xs font-semibold">高级参数</p>
                 {modelConfig.capabilities.supportsGuidance && (
                   <div className="space-y-1">
@@ -1954,9 +2126,7 @@ export function GenerateWorkbenchView({
                       max={20}
                       step={0.5}
                       value={guidanceScale}
-                      onChange={(e) =>
-                        setGuidanceScale(Number(e.target.value))
-                      }
+                      onChange={(e) => setGuidanceScale(Number(e.target.value))}
                       className="w-full accent-primary h-1"
                     />
                   </div>
@@ -1987,9 +2157,7 @@ export function GenerateWorkbenchView({
                       value={seed}
                       onChange={(e) =>
                         setSeed(
-                          e.target.value === ""
-                            ? ""
-                            : Number(e.target.value)
+                          e.target.value === "" ? "" : Number(e.target.value)
                         )
                       }
                       placeholder="随机"
@@ -2039,7 +2207,6 @@ export function GenerateWorkbenchView({
                * 完整链接 / 复制按钮。不再横在页面顶部 —— 它是边缘功能，
                * 不该跟工作台主功能抢纵向空间。 */}
               <ExternalImageGenCard />
-           
             </div>
           </div>
 
@@ -2071,129 +2238,149 @@ export function GenerateWorkbenchView({
                   </div>
                 </div>
               ) : (
-              <div className="space-y-4">
-                {/* 状态栏 —— Lovart 风：单个统一 pill + 右上角刷新 */}
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  {(() => {
-                    const sc = STATUS_CONFIG[selectedEffect.status];
-                    const Icon = sc.icon;
-                    const durationSec =
-                      selectedEffect.duration && selectedEffect.duration > 0
-                        ? `${(selectedEffect.duration / 1000).toFixed(1)}s`
-                        : null;
-                    return (
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium",
-                          sc.bg,
-                          sc.color
-                        )}
-                      >
-                        <Icon
-                          className={cn(
-                            "h-3 w-3",
-                            selectedEffect.status === "processing" &&
-                              "animate-spin"
-                          )}
-                        />
-                        <span>{sc.label}</span>
-                        <span className="text-muted-foreground/60">·</span>
-                        <span
-                          className="inline-flex items-center gap-1"
-                          style={{ color: modelConfig.color }}
-                        >
-                          <span
-                            className="h-1.5 w-1.5 rounded-full"
-                            style={{ backgroundColor: modelConfig.color }}
-                          />
-                          {selectedEffect.imageModelName}
-                        </span>
-                        <span className="text-muted-foreground/60">·</span>
-                        <span className="text-muted-foreground">
-                          {selectedEffect.mode === "text_to_image"
-                            ? "文生图"
-                            : "图生图"}
-                        </span>
-                        {durationSec && (
-                          <>
-                            <span className="text-muted-foreground/60">·</span>
-                            <span className="text-muted-foreground font-mono">
-                              {durationSec}
-                            </span>
-                          </>
-                        )}
-                      </span>
-                    );
-                  })()}
-                  {selectedEffect.status === "processing" &&
-                    selectedEffect.jobId && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-7 px-2.5 text-xs"
-                        disabled={refreshing}
-                        onClick={async () => {
-                          if (!selectedEffect.jobId) return;
-                          setRefreshing(true);
-                          try {
-                            const job = await pollImageJob(
-                              selectedEffect.jobId
-                            );
-                            if (job) {
-                              applyJobUpdate(selectedEffect.effectId, job);
-                            }
-                          } catch (err) {
-                            toast.error(
-                              err instanceof Error ? err.message : "刷新失败"
-                            );
-                          } finally {
-                            setRefreshing(false);
-                          }
-                        }}
-                      >
-                        {refreshing ? (
-                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                        ) : (
-                          <RefreshCw className="h-3 w-3 mr-1" />
-                        )}
-                        刷新状态
-                      </Button>
-                    )}
-                </div>
-
-                {/* 结果展示：按 submissions 数组逐条渲染时间轴节点
-                 *
-                 * 关键 UX：每次提交都是时间轴上独立的一行 —— 已完成的 submission
-                 * 永远不被新提交覆盖，新提交作为新节点追加在末尾。这是 ChatGPT
-                 * "消息气泡按时间顺序累积"风格。
-                 *
-                 * 节点内：
-                 * - completed → 单图大预览 / 多图网格（hover 高亮 + 点击大图）
-                 * - processing → spinner 占位（不霸占整个区域，不影响其它节点）
-                 * - failed → 红框 + 错误信息 + 「重试」按钮
-                 *
-                 * 历史兼容：如果 effect 没有 submissions（旧 effect / hydrate 还没
-                 * 升级的数据），回退到 effect.resultUrls 单节点展示。
-                 */}
-                <div className="space-y-3">
-                  {(() => {
-                    const subs = selectedEffect.submissions ?? [];
-                    // hydrate fallback：submissions 为空但 effect 有 resultUrls，
-                    // 视为一条 completed submission（DB 单行映射）。
-                    if (subs.length === 0 && selectedEffect.resultUrls.length > 0) {
+                <div className="space-y-4">
+                  {/* 状态栏 —— Lovart 风：单个统一 pill + 右上角刷新 */}
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    {(() => {
+                      const sc = STATUS_CONFIG[selectedEffect.status];
+                      const Icon = sc.icon;
+                      const durationSec =
+                        selectedEffect.duration && selectedEffect.duration > 0
+                          ? `${(selectedEffect.duration / 1000).toFixed(1)}s`
+                          : null;
                       return (
-                        <SubmissionNode
-                          effectId={selectedEffect.effectId}
-                          submission={{
-                            submissionId: "legacy",
-                            status: "completed",
-                            resultUrls: selectedEffect.resultUrls,
-                            createdAt: selectedEffect.createdAt,
-                            ...(selectedEffect.isGridComposite
-                              ? { isGridComposite: true }
-                              : {}),
-                            prompt: selectedEffect.prompt,
+                        <span
+                          className={cn(
+                            "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium",
+                            sc.bg,
+                            sc.color
+                          )}
+                        >
+                          <Icon
+                            className={cn(
+                              "h-3 w-3",
+                              selectedEffect.status === "processing" &&
+                                "animate-spin"
+                            )}
+                          />
+                          <span>{sc.label}</span>
+                          <span className="text-muted-foreground/60">·</span>
+                          <span
+                            className="inline-flex items-center gap-1"
+                            style={{ color: modelConfig.color }}
+                          >
+                            <span
+                              className="h-1.5 w-1.5 rounded-full"
+                              style={{ backgroundColor: modelConfig.color }}
+                            />
+                            {selectedEffect.imageModelName}
+                          </span>
+                          <span className="text-muted-foreground/60">·</span>
+                          <span className="text-muted-foreground">
+                            {selectedEffect.mode === "text_to_image"
+                              ? "文生图"
+                              : "图生图"}
+                          </span>
+                          {durationSec && (
+                            <>
+                              <span className="text-muted-foreground/60">
+                                ·
+                              </span>
+                              <span className="text-muted-foreground font-mono">
+                                {durationSec}
+                              </span>
+                            </>
+                          )}
+                        </span>
+                      );
+                    })()}
+                    {selectedEffect.status === "processing" &&
+                      selectedEffect.jobId && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2.5 text-xs"
+                          disabled={refreshing}
+                          onClick={async () => {
+                            if (!selectedEffect.jobId) return;
+                            setRefreshing(true);
+                            try {
+                              const job = await pollImageJob(
+                                selectedEffect.jobId
+                              );
+                              if (job) {
+                                applyJobUpdate(selectedEffect.effectId, job);
+                              }
+                            } catch (err) {
+                              toast.error(
+                                err instanceof Error ? err.message : "刷新失败"
+                              );
+                            } finally {
+                              setRefreshing(false);
+                            }
                           }}
+                        >
+                          {refreshing ? (
+                            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-3 w-3 mr-1" />
+                          )}
+                          刷新状态
+                        </Button>
+                      )}
+                  </div>
+
+                  {/* 结果展示：按 submissions 数组逐条渲染时间轴节点
+                   *
+                   * 关键 UX：每次提交都是时间轴上独立的一行 —— 已完成的 submission
+                   * 永远不被新提交覆盖，新提交作为新节点追加在末尾。这是 ChatGPT
+                   * "消息气泡按时间顺序累积"风格。
+                   *
+                   * 节点内：
+                   * - completed → 单图大预览 / 多图网格（hover 高亮 + 点击大图）
+                   * - processing → spinner 占位（不霸占整个区域，不影响其它节点）
+                   * - failed → 红框 + 错误信息 + 「重试」按钮
+                   *
+                   * 历史兼容：如果 effect 没有 submissions（旧 effect / hydrate 还没
+                   * 升级的数据），回退到 effect.resultUrls 单节点展示。
+                   */}
+                  <div className="space-y-3">
+                    {(() => {
+                      const subs = selectedEffect.submissions ?? [];
+                      // hydrate fallback：submissions 为空但 effect 有 resultUrls，
+                      // 视为一条 completed submission（DB 单行映射）。
+                      if (
+                        subs.length === 0 &&
+                        selectedEffect.resultUrls.length > 0
+                      ) {
+                        return (
+                          <SubmissionNode
+                            effectId={selectedEffect.effectId}
+                            submission={{
+                              submissionId: "legacy",
+                              status: "completed",
+                              resultUrls: selectedEffect.resultUrls,
+                              createdAt: selectedEffect.createdAt,
+                              ...(selectedEffect.isGridComposite
+                                ? { isGridComposite: true }
+                                : {}),
+                              prompt: selectedEffect.prompt,
+                            }}
+                            onLightbox={(url, idx) =>
+                              setLightbox({
+                                url,
+                                effectId: selectedEffect.effectId,
+                                index: idx,
+                              })
+                            }
+                          />
+                        );
+                      }
+                      return subs.map((sub) => (
+                        <SubmissionNode
+                          key={sub.submissionId}
+                          effectId={selectedEffect.effectId}
+                          submission={sub}
                           onLightbox={(url, idx) =>
                             setLightbox({
                               url,
@@ -2201,27 +2388,12 @@ export function GenerateWorkbenchView({
                               index: idx,
                             })
                           }
+                          onRetry={handleGenerate}
                         />
-                      );
-                    }
-                    return subs.map((sub) => (
-                      <SubmissionNode
-                        key={sub.submissionId}
-                        effectId={selectedEffect.effectId}
-                        submission={sub}
-                        onLightbox={(url, idx) =>
-                          setLightbox({
-                            url,
-                            effectId: selectedEffect.effectId,
-                            index: idx,
-                          })
-                        }
-                        onRetry={handleGenerate}
-                      />
-                    ));
-                  })()}
+                      ));
+                    })()}
+                  </div>
                 </div>
-              </div>
               )
             ) : (
               <div className="h-full flex flex-col items-center justify-center text-center px-6 relative overflow-hidden">
@@ -2260,99 +2432,6 @@ export function GenerateWorkbenchView({
             )}
           </div>
         </main>
-
-        {/* ============ 右侧：会话历史 rail（Lovart 风）============
-         * 垂直窄列：顶部「+」新建会话按钮 + 下方可滚动的会话缩略图列表。
-         * 历史从主画布底部挪到这里 —— 新会话里就不会再出现旧会话的缩略图，
-         * 点哪个会话就进入哪个，符合 Lovart 的"会话即工作流"心智。
-         */}
-        <aside className="w-[88px] shrink-0 flex flex-col bg-card border rounded-lg overflow-hidden">
-          <div className="p-2 border-b bg-muted/30 flex flex-col items-center gap-1">
-            <span className="text-[10px] font-medium text-muted-foreground tracking-wide">
-              会话
-            </span>
-            <button
-              type="button"
-              onClick={handleNewSession}
-              className="h-12 w-12 rounded-xl border-2 border-dashed border-muted-foreground/30 bg-muted/30 hover:bg-muted/60 hover:border-primary/60 flex items-center justify-center transition-all duration-200 hover:scale-105 group"
-              title="新建会话"
-              aria-label="新建会话"
-            >
-              <Plus className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-2">
-            {history.length === 0 ? (
-              <div className="flex-1 flex items-center justify-center text-[10px] text-muted-foreground/60 text-center px-1 leading-relaxed">
-                点击「+」开始第一次生图
-              </div>
-            ) : (
-              history.map((eff) => {
-                const Icon = STATUS_CONFIG[eff.status].icon;
-                const isSelected =
-                  selectedEffect?.effectId === eff.effectId;
-                return (
-                  <button
-                    key={eff.effectId}
-                    type="button"
-                    onClick={() => setSelectedEffect(eff)}
-                    className={cn(
-                      "relative h-12 w-12 rounded-xl overflow-hidden transition-all duration-200 group/sess",
-                      isSelected
-                        ? "ring-2 ring-primary ring-offset-2 ring-offset-card shadow-md scale-105"
-                        : "ring-1 ring-border hover:ring-muted-foreground/40 hover:scale-105"
-                    )}
-                    title={
-                      eff.maskName +
-                      (eff.status === "draft"
-                        ? ""
-                        : ` · ${STATUS_CONFIG[eff.status].label}`)
-                    }
-                  >
-                    {eff.resultUrls[0] ? (
-                      // biome-ignore lint/performance/noImgElement: 缩略图用原生 img
-                      <img
-                        src={eff.resultUrls[0]}
-                        alt={eff.maskName}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center bg-muted">
-                        <Icon
-                          className={cn(
-                            "h-4 w-4",
-                            STATUS_CONFIG[eff.status].color,
-                            eff.status === "processing" && "animate-spin"
-                          )}
-                        />
-                      </div>
-                    )}
-                    {/* 状态点：右上角小圆点（仅非 completed 才显示） */}
-                    {eff.status !== "completed" && (
-                      <span
-                        className={cn(
-                          "absolute top-0.5 right-0.5 h-2 w-2 rounded-full ring-2 ring-card",
-                          eff.status === "processing" &&
-                            "bg-primary animate-pulse",
-                          eff.status === "failed" && "bg-rose-500",
-                          eff.status === "pending" && "bg-amber-500",
-                          eff.status === "draft" && "bg-primary"
-                        )}
-                      />
-                    )}
-                  </button>
-                );
-              })
-            )}
-          </div>
-          {history.length > 0 && (
-            <div className="p-2 border-t bg-muted/30 flex justify-center">
-              <Badge variant="secondary" className="h-4 px-1.5 text-[9px] font-mono">
-                {history.length}
-              </Badge>
-            </div>
-          )}
-        </aside>
       </div>
 
       {/* ============ Lightbox 放大查看 ============
@@ -2489,7 +2568,95 @@ export function GenerateWorkbenchView({
           )}
         </DialogContent>
       </Dialog>
+
+      {/* 提示词库 —— 三 Tab：外部源 / 模板库（DB）/ 我的提示词（localforage） */}
+      <PromptSelectDialog
+        open={promptDialogOpen}
+        onOpenChange={setPromptDialogOpen}
+        onSelect={(text) => setPrompt(text)}
+      />
+
+      {/* 资产库 —— 两 Tab：我的资产（localforage）/ 我的图片（DB photo 表） */}
+      <AssetPickerModal
+        open={assetPickerOpen}
+        onInsert={handleInsertAsset}
+        onClose={() => setAssetPickerOpen(false)}
+      />
+
+      {/* 收藏当前提示词 —— 写 useMyPromptStore（与 V2 同形态） */}
+      <SavePromptModal
+        open={savePromptOpen}
+        prompt={prompt}
+        onClose={() => setSavePromptOpen(false)}
+        onConfirm={handleConfirmSavePrompt}
+      />
     </>
+  );
+}
+
+/**
+ * 收藏当前提示词的对话框 —— antd Modal + Input。
+ * 形态与 V2 image-workbench.tsx 的同名组件保持一致：用户填标题（必填），存到
+ * useMyPromptStore。这里独立定义而不是从 V2 导入，是因为 V2 那个是 image-workbench
+ * 的内部函数，未导出。逻辑短，复制比跨模块 export 更简单。
+ */
+function SavePromptModal({
+  open,
+  prompt,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  prompt: string;
+  onClose: () => void;
+  onConfirm: (title: string) => void;
+}) {
+  const { message } = App.useApp();
+  const [title, setTitle] = useState("");
+
+  useEffect(() => {
+    if (!open) setTitle("");
+  }, [open]);
+
+  const handleOk = () => {
+    const trimmed = title.trim();
+    if (!trimmed) {
+      message.warning("请输入标题");
+      return;
+    }
+    onConfirm(trimmed);
+  };
+
+  return (
+    <Modal
+      title="收藏当前提示词"
+      open={open}
+      onOk={handleOk}
+      onCancel={onClose}
+      okText="保存"
+      cancelText="取消"
+      destroyOnHidden
+      width={520}
+    >
+      <div className="space-y-3 py-2">
+        <AntdInput
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          onPressEnter={handleOk}
+          placeholder="给提示词起个名字"
+          maxLength={64}
+          autoFocus
+        />
+        <div className="rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-xs leading-5 text-stone-600 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-300">
+          <div className="mb-1 text-[10px] uppercase tracking-wider text-stone-400">
+            提示词
+          </div>
+          <p className="line-clamp-6 whitespace-pre-wrap break-words">
+            {prompt || "—"}
+          </p>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

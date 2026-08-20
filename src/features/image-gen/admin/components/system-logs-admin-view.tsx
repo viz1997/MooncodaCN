@@ -9,8 +9,13 @@
  * - 日志列表（图标 + 级别 + 类型 + ID + 时间 + 用户/IP/details）
  *
  * 数据使用前端 mock（MOCK_SYS_LOGS），后续接入 Pino/Axiom 日志流
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 3.3）
+ * - shadcn Card 系列 → 内联 div
+ * - shadcn Badge/Select → antd
  */
 
+import { Badge, Select } from "antd";
 import {
   AlertCircle,
   AlertTriangle,
@@ -21,15 +26,6 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   LOG_LEVEL_CONFIG,
   LOG_TYPE_LABELS,
@@ -105,30 +101,30 @@ export function SystemLogsAdminView() {
             className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border bg-muted/40 focus:bg-background focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
           />
         </div>
-        <Select value={filterLevel} onValueChange={setFilterLevel}>
-          <SelectTrigger className="w-full sm:w-32">
-            <SelectValue placeholder="级别" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">全部级别</SelectItem>
-            <SelectItem value="debug">Debug</SelectItem>
-            <SelectItem value="info">Info</SelectItem>
-            <SelectItem value="warn">Warn</SelectItem>
-            <SelectItem value="error">Error</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={filterType} onValueChange={setFilterType}>
-          <SelectTrigger className="w-full sm:w-32">
-            <SelectValue placeholder="类型" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">全部类型</SelectItem>
-            <SelectItem value="auth">认证</SelectItem>
-            <SelectItem value="business">业务</SelectItem>
-            <SelectItem value="system">系统</SelectItem>
-            <SelectItem value="api">API</SelectItem>
-          </SelectContent>
-        </Select>
+        <Select
+          value={filterLevel}
+          onChange={setFilterLevel}
+          className="w-full sm:w-32"
+          options={[
+            { value: "all", label: "全部级别" },
+            { value: "debug", label: "Debug" },
+            { value: "info", label: "Info" },
+            { value: "warn", label: "Warn" },
+            { value: "error", label: "Error" },
+          ]}
+        />
+        <Select
+          value={filterType}
+          onChange={setFilterType}
+          className="w-full sm:w-32"
+          options={[
+            { value: "all", label: "全部类型" },
+            { value: "auth", label: "认证" },
+            { value: "business", label: "业务" },
+            { value: "system", label: "系统" },
+            { value: "api", label: "API" },
+          ]}
+        />
       </div>
 
       {/* 日志级别统计 */}
@@ -138,7 +134,10 @@ export function SystemLogsAdminView() {
           const Icon = LEVEL_ICON[lv];
           const count = counts[lv];
           return (
-            <Card key={lv} className="p-3">
+            <div
+              key={lv}
+              className="rounded-lg border bg-card text-card-foreground shadow-sm p-3"
+            >
               <div className="flex items-center justify-between">
                 <Icon className={cn("h-4 w-4", config.color)} />
                 <span className="text-lg font-bold">{count}</span>
@@ -146,25 +145,25 @@ export function SystemLogsAdminView() {
               <p className="text-[10px] text-muted-foreground mt-1 uppercase">
                 {lv}
               </p>
-            </Card>
+            </div>
           );
         })}
       </div>
 
       {/* 日志列表 */}
       {filtered.length === 0 ? (
-        <Card>
-          <CardContent>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="p-6">
             <EmptyState
               icon={ScrollText}
               title="暂无日志"
               description="没有匹配的日志记录"
             />
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       ) : (
-        <Card>
-          <CardContent className="p-0">
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="p-0">
             <div className="divide-y max-h-[600px] overflow-y-auto">
               {filtered.map((log: MockSysLog) => {
                 const config = LOG_LEVEL_CONFIG[log.level];
@@ -197,7 +196,7 @@ export function SystemLogsAdminView() {
                           >
                             {log.level}
                           </span>
-                          <Badge variant="outline" className="text-[10px] py-0">
+                          <Badge color="default" className="!text-[10px]">
                             {LOG_TYPE_LABELS[log.logType as LogType]}
                           </Badge>
                           <span className="text-[10px] text-muted-foreground font-mono">
@@ -232,8 +231,8 @@ export function SystemLogsAdminView() {
                 );
               })}
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       )}
     </div>
   );

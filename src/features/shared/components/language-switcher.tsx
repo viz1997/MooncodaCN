@@ -1,17 +1,11 @@
 "use client";
 
+import { Button, Dropdown } from "antd";
 import { Globe } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useLocale } from "next-intl";
 import { useTransition } from "react";
 
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { usePathname, useRouter } from "@/i18n/routing";
 
 /**
@@ -29,6 +23,10 @@ const locales = [
  * - 显示当前语言
  * - 下拉菜单切换语言
  * - 切换时保持当前路径
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 2.6）
+ * - DropdownMenu → antd Dropdown（用 menu.items API）
+ * - Button variant="ghost" size="icon" → type="text" shape="circle"
  */
 export function LanguageSwitcher() {
   const locale = useLocale();
@@ -53,30 +51,30 @@ export function LanguageSwitcher() {
   };
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          disabled={isPending}
-          className="relative"
-        >
-          <Globe className="h-5 w-5" />
-          <span className="sr-only">切换语言</span>
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        {locales.map((loc) => (
-          <DropdownMenuItem
-            key={loc.code}
-            onClick={() => handleLocaleChange(loc.code)}
-            className={locale === loc.code ? "bg-accent" : ""}
-          >
-            <span className="mr-2">{loc.flag}</span>
-            {loc.label}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <Dropdown
+      placement="bottomRight"
+      trigger={["click"]}
+      menu={{
+        items: locales.map((loc) => ({
+          key: loc.code,
+          label: (
+            <span className={locale === loc.code ? "font-medium" : ""}>
+              <span className="mr-2">{loc.flag}</span>
+              {loc.label}
+            </span>
+          ),
+          onClick: () => handleLocaleChange(loc.code),
+        })),
+        selectedKeys: [locale],
+      }}
+    >
+      <Button
+        type="text"
+        shape="circle"
+        disabled={isPending}
+        aria-label="切换语言"
+        icon={<Globe className="h-5 w-5" />}
+      />
+    </Dropdown>
   );
 }

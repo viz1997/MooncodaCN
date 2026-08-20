@@ -7,7 +7,7 @@ import {
   TrendingUp,
   Users,
 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
 import { db } from "@/db";
 import { creditsBalance, subscription, ticket, user } from "@/db/schema";
 
@@ -19,6 +19,10 @@ import { creditsBalance, subscription, ticket, user } from "@/db/schema";
  * - 工单统计
  * - 积分统计
  * - 订阅统计
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 3.1）
+ * - shadcn Card 切到内联 div（保留 rounded-lg + border + bg-card + shadow）
+ * - 卡片头/卡片内容改成 div 组合，避免 antd Card padding 行为干扰 grid
  */
 export default async function AdminDashboardPage() {
   // 获取今天的开始时间
@@ -133,77 +137,77 @@ export default async function AdminDashboardPage() {
       {/* 主要统计卡片 */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {/* 总用户数 */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">总用户数</CardTitle>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="flex flex-row items-center justify-between space-y-0 p-6 pb-2">
+            <h3 className="text-sm font-medium">总用户数</h3>
             <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
+          </div>
+          <div className="p-6 pt-0">
             <div className="text-2xl font-bold">{stats.users.total}</div>
             <p className="text-xs text-muted-foreground">
               本周新增 {stats.users.newThisWeek} 位
             </p>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
         {/* 待处理工单 */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">待处理工单</CardTitle>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="flex flex-row items-center justify-between space-y-0 p-6 pb-2">
+            <h3 className="text-sm font-medium">待处理工单</h3>
             <Ticket className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
+          </div>
+          <div className="p-6 pt-0">
             <div className="text-2xl font-bold text-orange-600">
               {stats.tickets.open + stats.tickets.inProgress}
             </div>
             <p className="text-xs text-muted-foreground">
               今日新增 {stats.tickets.newToday} 个
             </p>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
         {/* 活跃订阅 */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">活跃订阅</CardTitle>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="flex flex-row items-center justify-between space-y-0 p-6 pb-2">
+            <h3 className="text-sm font-medium">活跃订阅</h3>
             <CreditCard className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
+          </div>
+          <div className="p-6 pt-0">
             <div className="text-2xl font-bold text-green-600">
               {stats.subscriptions.active}
             </div>
             <p className="text-xs text-muted-foreground">
               总订阅 {stats.subscriptions.total} 个
             </p>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
         {/* 积分流通量 */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">积分流通</CardTitle>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="flex flex-row items-center justify-between space-y-0 p-6 pb-2">
+            <h3 className="text-sm font-medium">积分流通</h3>
             <Coins className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
+          </div>
+          <div className="p-6 pt-0">
             <div className="text-2xl font-bold text-yellow-600">
               {stats.credits.totalBalance.toLocaleString()}
             </div>
             <p className="text-xs text-muted-foreground">当前用户持有总积分</p>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
 
       {/* 详细统计 */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {/* 用户详情 */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="flex flex-col space-y-1.5 p-6">
+            <h3 className="flex items-center gap-2 text-lg font-semibold leading-none tracking-tight">
               <Users className="h-5 w-5" />
               用户统计
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
+            </h3>
+          </div>
+          <div className="space-y-3 p-6 pt-0">
             <div className="flex justify-between">
               <span className="text-muted-foreground">总用户</span>
               <span className="font-medium">{stats.users.total}</span>
@@ -232,18 +236,18 @@ export default async function AdminDashboardPage() {
                 +{stats.users.newThisWeek}
               </span>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
         {/* 工单详情 */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="flex flex-col space-y-1.5 p-6">
+            <h3 className="flex items-center gap-2 text-lg font-semibold leading-none tracking-tight">
               <MessageSquare className="h-5 w-5" />
               工单统计
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
+            </h3>
+          </div>
+          <div className="space-y-3 p-6 pt-0">
             <div className="flex justify-between">
               <span className="text-muted-foreground">待处理</span>
               <span className="font-medium text-blue-600">
@@ -266,18 +270,18 @@ export default async function AdminDashboardPage() {
                 +{stats.tickets.newToday}
               </span>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
         {/* 积分详情 */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="flex flex-col space-y-1.5 p-6">
+            <h3 className="flex items-center gap-2 text-lg font-semibold leading-none tracking-tight">
               <TrendingUp className="h-5 w-5" />
               积分流水
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
+            </h3>
+          </div>
+          <div className="space-y-3 p-6 pt-0">
             <div className="flex justify-between">
               <span className="text-muted-foreground">当前持有</span>
               <span className="font-medium text-yellow-600">
@@ -302,17 +306,19 @@ export default async function AdminDashboardPage() {
                 {stats.subscriptions.active} 活跃
               </span>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
 
       {/* 快速操作 */}
       <div className="grid gap-4 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>快速操作</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="flex flex-col space-y-1.5 p-6">
+            <h3 className="text-lg font-semibold leading-none tracking-tight">
+              快速操作
+            </h3>
+          </div>
+          <div className="space-y-2 p-6 pt-0">
             <a
               href="/admin/users"
               className="flex items-center gap-2 rounded-md p-2 hover:bg-muted transition-colors"
@@ -335,14 +341,16 @@ export default async function AdminDashboardPage() {
                 </span>
               )}
             </a>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>系统信息</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="flex flex-col space-y-1.5 p-6">
+            <h3 className="text-lg font-semibold leading-none tracking-tight">
+              系统信息
+            </h3>
+          </div>
+          <div className="space-y-2 p-6 pt-0 text-sm">
             <div className="flex justify-between">
               <span className="text-muted-foreground">版本</span>
               <span>1.0.0</span>
@@ -355,8 +363,8 @@ export default async function AdminDashboardPage() {
               <span className="text-muted-foreground">数据库</span>
               <span>PostgreSQL</span>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
     </div>
   );

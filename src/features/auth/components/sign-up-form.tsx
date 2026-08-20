@@ -1,15 +1,11 @@
 "use client";
 
-import { Eye, EyeOff, Mail } from "lucide-react";
+import { App, Button, Divider, Input } from "antd";
+import { Mail } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { toast } from "sonner";
 
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import { GoogleIcon } from "@/features/shared/icons";
 import {
   resendVerificationEmail,
@@ -25,12 +21,17 @@ import { AuthLogo } from "./auth-logo";
  *
  * 功能:
  * - Google OAuth 注册
- * - GitHub OAuth 注册
  * - 邮箱密码注册
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 1）
+ * - Input / Button / Divider 切到 antd
+ * - 成功提示用 antd App.useApp().message 替代 sonner
+ * - 密码字段用 antd Input.Password（眼睑自动跟随主密码的 showPassword 状态）
  */
 export function SignUpForm() {
   const t = useTranslations("Auth.signUp");
   const tCommon = useTranslations("Auth.common");
+  const { message } = App.useApp();
 
   // 表单状态
   const [name, setName] = useState("");
@@ -122,7 +123,7 @@ export function SignUpForm() {
 
       // 注册成功，显示验证邮件提示
       if (result.data?.token) {
-        toast.success(tCommon("success"));
+        message.success(tCommon("success"));
         window.location.href = "/dashboard";
         return;
       }
@@ -156,10 +157,11 @@ export function SignUpForm() {
 
         <div className="flex flex-col items-center gap-3">
           <Button
-            variant="outline"
-            className="w-full"
+            type="default"
+            block
             onClick={handleResendEmail}
             disabled={resendCooldown > 0}
+            size="large"
           >
             {resendCooldown > 0
               ? t("verifyEmail.resendCooldown", { seconds: resendCooldown })
@@ -189,35 +191,29 @@ export function SignUpForm() {
       <AuthErrorAlert message={error} />
 
       {/* OAuth 登录按钮 */}
-      <div className="space-y-3">
-        <Button
-          variant="outline"
-          className="w-full"
-          onClick={handleGoogleSignUp}
-          disabled={isLoading}
-        >
-          <GoogleIcon className="mr-2 h-4 w-4" />
-          {tCommon("google")}
-        </Button>
-      </div>
+      <Button
+        type="default"
+        block
+        onClick={handleGoogleSignUp}
+        disabled={isLoading}
+        size="large"
+        icon={<GoogleIcon className="h-4 w-4" />}
+      >
+        {tCommon("google")}
+      </Button>
 
-      {/* 分隔线 */}
-      <div className="relative">
-        <div className="absolute inset-0 flex items-center">
-          <Separator className="w-full" />
-        </div>
-        <div className="relative flex justify-center text-xs uppercase">
-          <span className="bg-muted/30 px-2 text-muted-foreground">
-            {tCommon("or")}
-          </span>
-        </div>
-      </div>
+      {/* 分隔线 + 居中文案 */}
+      <Divider plain className="!text-xs !uppercase">
+        {tCommon("or")}
+      </Divider>
 
       {/* 邮箱密码表单 */}
       <form onSubmit={handleEmailSignUp} className="space-y-4">
         {/* 姓名输入 */}
         <div className="space-y-2">
-          <Label htmlFor="name">{t("nameLabel")}</Label>
+          <label htmlFor="name" className="text-sm font-medium">
+            {t("nameLabel")}
+          </label>
           <Input
             id="name"
             type="text"
@@ -226,12 +222,15 @@ export function SignUpForm() {
             onChange={(e) => setName(e.target.value)}
             disabled={isLoading}
             autoComplete="name"
+            size="large"
           />
         </div>
 
         {/* 邮箱输入 */}
         <div className="space-y-2">
-          <Label htmlFor="email">{t("emailLabel")}</Label>
+          <label htmlFor="email" className="text-sm font-medium">
+            {t("emailLabel")}
+          </label>
           <Input
             id="email"
             type="email"
@@ -240,55 +239,59 @@ export function SignUpForm() {
             onChange={(e) => setEmail(e.target.value)}
             disabled={isLoading}
             autoComplete="email"
+            size="large"
           />
         </div>
 
         {/* 密码输入 */}
         <div className="space-y-2">
-          <Label htmlFor="password">{t("passwordLabel")}</Label>
-          <div className="relative">
-            <Input
-              id="password"
-              type={showPassword ? "text" : "password"}
-              placeholder={t("passwordPlaceholder")}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              disabled={isLoading}
-              autoComplete="new-password"
-              className="pr-10"
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-              tabIndex={-1}
-            >
-              {showPassword ? (
-                <EyeOff className="h-4 w-4" />
-              ) : (
-                <Eye className="h-4 w-4" />
-              )}
-            </button>
-          </div>
+          <label htmlFor="password" className="text-sm font-medium">
+            {t("passwordLabel")}
+          </label>
+          <Input.Password
+            id="password"
+            placeholder={t("passwordPlaceholder")}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            disabled={isLoading}
+            autoComplete="new-password"
+            size="large"
+            visibilityToggle={{
+              visible: showPassword,
+              onVisibleChange: setShowPassword,
+            }}
+          />
         </div>
 
-        {/* 确认密码输入 */}
+        {/* 确认密码输入（跟随 showPassword） */}
         <div className="space-y-2">
-          <Label htmlFor="confirmPassword">{t("confirmPasswordLabel")}</Label>
-          <Input
+          <label htmlFor="confirmPassword" className="text-sm font-medium">
+            {t("confirmPasswordLabel")}
+          </label>
+          <Input.Password
             id="confirmPassword"
-            type={showPassword ? "text" : "password"}
             placeholder={t("confirmPasswordPlaceholder")}
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
             disabled={isLoading}
             autoComplete="new-password"
+            size="large"
+            visibilityToggle={{
+              visible: showPassword,
+              onVisibleChange: setShowPassword,
+            }}
           />
         </div>
 
         {/* 提交按钮 */}
-        <Button type="submit" className="w-full" disabled={isLoading}>
-          {isLoading ? t("loading") : t("submit")}
+        <Button
+          type="primary"
+          htmlType="submit"
+          block
+          loading={isLoading}
+          size="large"
+        >
+          {t("submit")}
         </Button>
       </form>
 

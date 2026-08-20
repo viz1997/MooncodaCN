@@ -1,15 +1,10 @@
 "use client";
 
-import { Eye, EyeOff } from "lucide-react";
+import { App, Button, Divider, Input } from "antd";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { toast } from "sonner";
 
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import { resendVerificationEmail, signInWithEmail } from "@/lib/auth/client";
 
 import { AuthErrorAlert } from "./auth-error-alert";
@@ -23,10 +18,16 @@ const LAST_SIGNIN_EMAIL_KEY = "auth:last-signin-email";
  *
  * 功能:
  * - 邮箱密码登录
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 1）
+ * - Input / Button / Divider 切到 antd
+ * - 密码字段用 antd Input.Password（自带眼睑切换，替代 shadcn 绝对定位的 eye 按钮）
+ * - 成功提示用 antd App.useApp().message 替代 sonner
  */
 export function SignInForm() {
   const t = useTranslations("Auth.signIn");
   const tCommon = useTranslations("Auth.common");
+  const { message } = App.useApp();
 
   // 表单状态
   // 邮箱初始值从 localStorage 读上次成功登录的账号（仅客户端）。
@@ -40,7 +41,6 @@ export function SignInForm() {
     }
   });
   const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showResend, setShowResend] = useState(false);
@@ -103,7 +103,7 @@ export function SignInForm() {
       } catch {
         // 隐私模式 / 配额满时静默忽略，不阻塞登录
       }
-      toast.success(t("success"));
+      message.success(t("success"));
       window.location.href = "/dashboard";
     } catch {
       setError(t("errors.invalidCredentials"));
@@ -126,8 +126,8 @@ export function SignInForm() {
       {/* 重发验证邮件 */}
       {showResend && (
         <Button
-          variant="outline"
-          className="w-full"
+          type="default"
+          block
           onClick={handleResendEmail}
           disabled={resendCooldown > 0}
         >
@@ -137,23 +137,18 @@ export function SignInForm() {
         </Button>
       )}
 
-      {/* 分隔线 */}
-      <div className="relative">
-        <div className="absolute inset-0 flex items-center">
-          <Separator className="w-full" />
-        </div>
-        <div className="relative flex justify-center text-xs uppercase">
-          <span className="bg-background px-2 text-muted-foreground">
-            {tCommon("or")}
-          </span>
-        </div>
-      </div>
+      {/* 分隔线 + 居中文案 */}
+      <Divider plain className="!text-xs !uppercase">
+        {tCommon("or")}
+      </Divider>
 
       {/* 邮箱密码表单 */}
       <form onSubmit={handleEmailSignIn} className="space-y-4">
         {/* 邮箱输入 */}
         <div className="space-y-2">
-          <Label htmlFor="email">{t("emailLabel")}</Label>
+          <label htmlFor="email" className="text-sm font-medium">
+            {t("emailLabel")}
+          </label>
           <Input
             id="email"
             type="email"
@@ -162,35 +157,23 @@ export function SignInForm() {
             onChange={(e) => setEmail(e.target.value)}
             disabled={isLoading}
             autoComplete="email"
+            size="large"
           />
         </div>
 
         {/* 密码输入 */}
         <div className="space-y-2">
-          <Label htmlFor="password">{t("passwordLabel")}</Label>
-          <div className="relative">
-            <Input
-              id="password"
-              type={showPassword ? "text" : "password"}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              disabled={isLoading}
-              autoComplete="current-password"
-              className="pr-10"
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-              tabIndex={-1}
-            >
-              {showPassword ? (
-                <EyeOff className="h-4 w-4" />
-              ) : (
-                <Eye className="h-4 w-4" />
-              )}
-            </button>
-          </div>
+          <label htmlFor="password" className="text-sm font-medium">
+            {t("passwordLabel")}
+          </label>
+          <Input.Password
+            id="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            disabled={isLoading}
+            autoComplete="current-password"
+            size="large"
+          />
         </div>
 
         {/* 忘记密码链接 */}
@@ -204,8 +187,14 @@ export function SignInForm() {
         </div>
 
         {/* 提交按钮 */}
-        <Button type="submit" className="w-full" disabled={isLoading}>
-          {isLoading ? t("loading") : t("submit")}
+        <Button
+          type="primary"
+          htmlType="submit"
+          block
+          loading={isLoading}
+          size="large"
+        >
+          {t("submit")}
         </Button>
       </form>
     </div>

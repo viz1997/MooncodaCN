@@ -1,8 +1,9 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { GenerateWorkbenchView } from "@/features/image-gen/components/generate-workbench-view";
 import { getActivePromptTemplates } from "@/features/image-gen/lib/prompt-template-source";
 import { auth } from "@/lib/auth";
+
+import { ImageWorkbenchV1Client } from "./image-workbench-v1-client";
 
 export default async function GeneratePage() {
   const session = await auth.api.getSession({ headers: await headers() });
@@ -17,5 +18,9 @@ export default async function GeneratePage() {
   // 「生成结果」标题栏右侧的 action 区（与「新建会话」按钮并列），hover
   // Popover 才显示完整链接 / 复制按钮。避免工作台用户每次进站被一条横条
   // 提醒"免登录入口" —— 它属于边缘功能，常驻 UI 太抢戏。
-  return <GenerateWorkbenchView templates={templates} />;
+  //
+  // 2026-08-19：套 ImageWorkbenchV1Client（CanvasI18nProvider + AntdProvider
+  // + CanvasQueryProvider），与 V2 共用 PromptSelectDialog / AssetPickerModal
+  // 三 Tab / 双 Tab 的提示词与资产管理能力。
+  return <ImageWorkbenchV1Client templates={templates} />;
 }

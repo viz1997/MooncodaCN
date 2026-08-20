@@ -3,23 +3,14 @@
 /**
  * wellapi 测试表单 - 客户端组件
  * 负责：上传图、构造 FormData、POST 到 /api/test/wellapi、展示结果
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 2.7）
+ * - shadcn Badge/Button/Input/Label/Select/Textarea 切到 antd
  */
 
-import { Download, Loader2, Send } from "lucide-react";
+import { Badge, Button, Input, Select } from "antd";
+import { Download, Send } from "lucide-react";
 import { useState } from "react";
-
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 
 const SIZE_OPTIONS = [
   { value: "auto", label: "auto（默认）" },
@@ -135,12 +126,15 @@ export function WellapiTestForm() {
       {/* ============ 左侧：表单 ============ */}
       <div className="space-y-3 rounded-lg border bg-card p-4">
         <div className="space-y-2">
-          <Label className="text-xs font-semibold">参考图（≤25MB）</Label>
-          <Input
+          <label htmlFor="wellapi-file" className="text-xs font-semibold">
+            参考图（≤25MB）
+          </label>
+          <input
+            id="wellapi-file"
             type="file"
             accept="image/jpeg,image/jpg,image/png,image/webp"
             onChange={(e) => handleFile(e.target.files?.[0])}
-            className="text-xs"
+            className="text-xs w-full rounded-md border border-input bg-transparent px-3 py-2 shadow-sm"
           />
           {previewUrl && (
             <div className="mt-2">
@@ -158,81 +152,69 @@ export function WellapiTestForm() {
         </div>
 
         <div className="space-y-2">
-          <Label className="text-xs font-semibold">Prompt</Label>
-          <Textarea
+          <span className="text-xs font-semibold">Prompt</span>
+          <Input.TextArea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             rows={4}
-            className="text-xs font-mono"
+            className="!text-xs !font-mono"
           />
         </div>
 
         <div className="grid grid-cols-2 gap-2">
           <div className="space-y-2">
-            <Label className="text-xs font-semibold">数量 n</Label>
-            <Select value={n} onValueChange={setN}>
-              <SelectTrigger className="h-9 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((v) => (
-                  <SelectItem key={v} value={String(v)} className="text-xs">
-                    {v}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <span className="text-xs font-semibold">数量 n</span>
+            <Select
+              value={n}
+              onChange={setN}
+              size="small"
+              className="!text-xs"
+              options={[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((v) => ({
+                value: String(v),
+                label: String(v),
+              }))}
+            />
           </div>
           <div className="space-y-2">
-            <Label className="text-xs font-semibold">尺寸</Label>
-            <Select value={size} onValueChange={setSize}>
-              <SelectTrigger className="h-9 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {SIZE_OPTIONS.map((s) => (
-                  <SelectItem key={s.value} value={s.value} className="text-xs">
-                    {s.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <span className="text-xs font-semibold">尺寸</span>
+            <Select
+              value={size}
+              onChange={setSize}
+              size="small"
+              className="!text-xs"
+              options={SIZE_OPTIONS.map((s) => ({
+                value: s.value,
+                label: s.label,
+              }))}
+            />
           </div>
         </div>
 
         <Button
+          type="primary"
           onClick={handleSubmit}
-          disabled={submitting}
-          className="w-full bg-violet-600 hover:bg-violet-700"
+          loading={submitting}
+          icon={submitting ? undefined : <Send className="h-4 w-4" />}
+          className="w-full !bg-violet-600 hover:!bg-violet-700"
         >
-          {submitting ? (
-            <>
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              wellapi 推理中…
-            </>
-          ) : (
-            <>
-              <Send className="h-4 w-4 mr-2" />
-              提交测试
-            </>
-          )}
+          {submitting ? "wellapi 推理中…" : "提交测试"}
         </Button>
       </div>
 
       {/* ============ 右侧：结果 ============ */}
       <div className="space-y-3 rounded-lg border bg-card p-4">
         <div className="flex items-center justify-between">
-          <Label className="text-xs font-semibold">结果</Label>
+          <span className="text-xs font-semibold">结果</span>
           {result && (
             <div className="flex items-center gap-2">
               {elapsedMs !== null && (
-                <Badge variant="outline" className="text-[10px] font-mono">
+                <Badge className="!text-[10px] !font-mono">
                   {(elapsedMs / 1000).toFixed(1)}s
                 </Badge>
               )}
               <Badge
-                variant={result.success ? "default" : "destructive"}
-                className="text-[10px]"
+                color={result.success ? "green" : "red"}
+                className="!text-[10px]"
               >
                 {result.success
                   ? `${result.status ?? 200} OK`
@@ -266,10 +248,7 @@ export function WellapiTestForm() {
               >
                 {images.map((img, i) => {
                   const isDataUri = img.src.startsWith("data:");
-                  const dl = isDataUri
-                    ? // data URI 用 <a download> 直接下载
-                      img.src
-                    : img.src;
+                  const dl = isDataUri ? img.src : img.src;
                   const dlName = `wellapi-${Date.now()}-${i + 1}.png`;
                   return (
                     <div

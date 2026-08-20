@@ -32,7 +32,12 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "motion/react": ["./src/features/canvas/components/ui/motion-shim"],
+      "radix-ui": ["./src/features/canvas/components/ui/radix-ui-shim"],
+      "@ant-design/pro-components": [
+        "./src/features/canvas/components/layout/pro-components-shim"
+      ]
     }
   },
   "include": [

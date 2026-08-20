@@ -44,7 +44,7 @@ export const metadata: Metadata = {
     images: [siteConfig.ogImage],
     creator: "@mooncoda",
   },
-  manifest: "/site.webmanifest",
+  manifest: "/manifest.webmanifest",
 };
 
 /**

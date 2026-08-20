@@ -1,39 +1,36 @@
 "use client";
 
+/**
+ * 管理员 - 用户管理页面 (客户端组件)
+ *
+ * 功能:
+ * - 搜索用户 (邮箱/名称)
+ * - 查看积分余额
+ * - 查看订阅状态
+ * - 修改用户角色
+ * - 封禁/解封用户
+ * - 手动充值积分
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 3.1）
+ * - shadcn Avatar/Badge/Button/Card/Checkbox/Dialog/Input/Label/Select/Textarea 切到 antd
+ * - shadcn Dialog 切到 antd Modal
+ * - toast 切到 App.useApp().message
+ * - shadcn Card 切到内联 div
+ */
+
 import {
-  Ban,
-  Coins,
-  Loader2,
-  Pencil,
-  Plus,
-  Search,
-  UserCheck,
-} from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
-import { toast } from "sonner";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
+  App,
+  Avatar,
+  Badge,
+  Button,
+  Checkbox,
+  Input,
+  Modal,
   Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+} from "antd";
+import { Ban, Coins, Pencil, Plus, Search, UserCheck } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+
 import {
   adminGrantCreditsAction,
   banUserAction,
@@ -43,9 +40,6 @@ import {
 import { UserEditDialog, UserRoleSelect } from "@/features/support/components";
 import { useSessionContext } from "@/lib/auth/session-context";
 
-/**
- * 用户类型定义
- */
 interface UserWithDetails {
   id: string;
   name: string;
@@ -71,17 +65,24 @@ interface UserWithDetails {
 }
 
 /**
- * 管理员 - 用户管理页面 (客户端组件)
- *
- * 功能:
- * - 搜索用户 (邮箱/名称)
- * - 查看积分余额
- * - 查看订阅状态
- * - 修改用户角色
- * - 封禁/解封用户
- * - 手动充值积分
+ * 订阅状态 → antd Badge color
  */
+const SUB_STATUS_COLOR_MAP: Record<string, string> = {
+  active: "green",
+  canceled: "gold",
+  past_due: "red",
+  incomplete: "default",
+};
+
+const SUB_STATUS_LABEL: Record<string, string> = {
+  active: "订阅中",
+  canceled: "已取消",
+  past_due: "逾期",
+  incomplete: "未完成",
+};
+
 export default function AdminUsersPage() {
+  const { message } = App.useApp();
   const { user: currentUser } = useSessionContext();
   const [users, setUsers] = useState<UserWithDetails[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -118,20 +119,23 @@ export default function AdminUsersPage() {
   /**
    * 加载用户列表
    */
-  const loadUsers = useCallback(async (query?: string) => {
-    setIsLoading(true);
-    try {
-      const result = await getAllUsersAction(query ? { query } : undefined);
-      if (result?.data?.users) {
-        setUsers(result.data.users as UserWithDetails[]);
+  const loadUsers = useCallback(
+    async (query?: string) => {
+      setIsLoading(true);
+      try {
+        const result = await getAllUsersAction(query ? { query } : undefined);
+        if (result?.data?.users) {
+          setUsers(result.data.users as UserWithDetails[]);
+        }
+      } catch (error) {
+        message.error("加载用户列表失败");
+        console.error(error);
+      } finally {
+        setIsLoading(false);
       }
-    } catch (error) {
-      toast.error("加载用户列表失败");
-      console.error(error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
+    },
+    [message]
+  );
 
   // 初始加载
   useEffect(() => {
@@ -171,14 +175,14 @@ export default function AdminUsersPage() {
       });
 
       if (result?.data) {
-        toast.success(result.data.message);
+        message.success(result.data.message);
         setBanDialogOpen(false);
         loadUsers(searchQuery);
       } else if (result?.serverError) {
-        toast.error(result.serverError);
+        message.error(result.serverError);
       }
     } catch (error) {
-      toast.error("操作失败");
+      message.error("操作失败");
       console.error(error);
     } finally {
       setIsBanning(false);
@@ -203,12 +207,12 @@ export default function AdminUsersPage() {
 
     const amount = parseInt(grantAmount, 10);
     if (Number.isNaN(amount) || amount <= 0) {
-      toast.error("请输入有效的积分数量");
+      message.error("请输入有效的积分数量");
       return;
     }
 
     if (!grantReason.trim()) {
-      toast.error("请填写充值原因");
+      message.error("请填写充值原因");
       return;
     }
 
@@ -221,14 +225,14 @@ export default function AdminUsersPage() {
       });
 
       if (result?.data) {
-        toast.success(result.data.message);
+        message.success(result.data.message);
         setGrantDialogOpen(false);
         loadUsers(searchQuery);
       } else if (result?.serverError) {
-        toast.error(result.serverError);
+        message.error(result.serverError);
       }
     } catch (error) {
-      toast.error("充值失败");
+      message.error("充值失败");
       console.error(error);
     } finally {
       setIsGranting(false);
@@ -260,17 +264,17 @@ export default function AdminUsersPage() {
    */
   const handleCreateUser = async () => {
     if (!createName.trim()) {
-      toast.error("请输入用户名");
+      message.error("请输入用户名");
       return;
     }
 
     if (!createEmail.trim()) {
-      toast.error("请输入邮箱地址");
+      message.error("请输入邮箱地址");
       return;
     }
 
     if (createPassword && createPassword.length < 8) {
-      toast.error("密码至少需要8位");
+      message.error("密码至少需要8位");
       return;
     }
 
@@ -285,14 +289,14 @@ export default function AdminUsersPage() {
       });
 
       if (result?.data) {
-        toast.success(result.data.message);
+        message.success(result.data.message);
         setCreateDialogOpen(false);
         loadUsers(searchQuery);
       } else if (result?.serverError) {
-        toast.error(result.serverError);
+        message.error(result.serverError);
       }
     } catch (error) {
-      toast.error("创建用户失败");
+      message.error("创建用户失败");
       console.error(error);
     } finally {
       setIsCreating(false);
@@ -302,14 +306,13 @@ export default function AdminUsersPage() {
   /**
    * 获取用户名首字母
    */
-  const getInitials = (name: string) => {
-    return name
+  const getInitials = (name: string) =>
+    name
       .split(" ")
       .map((n) => n[0])
       .join("")
       .toUpperCase()
       .slice(0, 2);
-  };
 
   /**
    * 获取订阅状态显示
@@ -317,28 +320,17 @@ export default function AdminUsersPage() {
   const getSubscriptionBadge = (sub: UserWithDetails["subscription"]) => {
     if (!sub) {
       return (
-        <Badge variant="secondary" className="bg-gray-100 text-gray-800">
+        <Badge color="default" className="!text-xs">
           无订阅
         </Badge>
       );
     }
-
-    const statusMap: Record<string, { label: string; color: string }> = {
-      active: { label: "订阅中", color: "bg-green-100 text-green-800" },
-      canceled: { label: "已取消", color: "bg-yellow-100 text-yellow-800" },
-      past_due: { label: "逾期", color: "bg-red-100 text-red-800" },
-      incomplete: { label: "未完成", color: "bg-gray-100 text-gray-800" },
-    };
-
-    // 获取配置，使用默认值避免 undefined
-    const defaultConfig = {
-      label: "未完成",
-      color: "bg-gray-100 text-gray-800",
-    };
-    const config = statusMap[sub.status] ?? defaultConfig;
     return (
-      <Badge variant="secondary" className={config.color}>
-        {config.label}
+      <Badge
+        color={SUB_STATUS_COLOR_MAP[sub.status] ?? "default"}
+        className="!text-xs"
+      >
+        {SUB_STATUS_LABEL[sub.status] ?? "未完成"}
       </Badge>
     );
   };
@@ -359,53 +351,56 @@ export default function AdminUsersPage() {
           <h2 className="text-2xl font-bold tracking-tight">用户管理</h2>
           <p className="text-muted-foreground">查看和管理系统中的所有用户</p>
         </div>
-        <Button onClick={openCreateDialog}>
-          <Plus className="mr-2 h-4 w-4" />
+        <Button
+          type="primary"
+          onClick={openCreateDialog}
+          icon={<Plus className="h-4 w-4" />}
+        >
           新增用户
         </Button>
       </div>
 
       {/* 统计信息 */}
       <div className="grid gap-4 md:grid-cols-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">总用户数</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="flex flex-col space-y-1.5 p-6 pb-2">
+            <h3 className="text-sm font-medium">总用户数</h3>
+          </div>
+          <div className="p-6 pt-0">
             <div className="text-2xl font-bold">{totalUsers}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">管理员</CardTitle>
-          </CardHeader>
-          <CardContent>
+          </div>
+        </div>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="flex flex-col space-y-1.5 p-6 pb-2">
+            <h3 className="text-sm font-medium">管理员</h3>
+          </div>
+          <div className="p-6 pt-0">
             <div className="text-2xl font-bold text-blue-600">{adminCount}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">订阅用户</CardTitle>
-          </CardHeader>
-          <CardContent>
+          </div>
+        </div>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="flex flex-col space-y-1.5 p-6 pb-2">
+            <h3 className="text-sm font-medium">订阅用户</h3>
+          </div>
+          <div className="p-6 pt-0">
             <div className="text-2xl font-bold text-green-600">
               {activeSubscriptions}
             </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">已封禁</CardTitle>
-          </CardHeader>
-          <CardContent>
+          </div>
+        </div>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="flex flex-col space-y-1.5 p-6 pb-2">
+            <h3 className="text-sm font-medium">已封禁</h3>
+          </div>
+          <div className="p-6 pt-0">
             <div className="text-2xl font-bold text-red-600">{bannedCount}</div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
 
       {/* 搜索栏 */}
-      <Card>
-        <CardContent className="pt-6">
+      <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+        <div className="pt-6 p-6">
           <form onSubmit={handleSearch} className="flex gap-4">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -413,17 +408,15 @@ export default function AdminUsersPage() {
                 placeholder="搜索邮箱或用户名..."
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
-                className="pl-10"
+                className="!pl-10"
               />
             </div>
-            <Button type="submit" disabled={isLoading}>
-              {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            <Button type="primary" htmlType="submit" loading={isLoading}>
               搜索
             </Button>
             {searchQuery && (
               <Button
-                type="button"
-                variant="outline"
+                type="default"
                 onClick={() => {
                   setSearchInput("");
                   setSearchQuery("");
@@ -434,25 +427,25 @@ export default function AdminUsersPage() {
               </Button>
             )}
           </form>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* 用户列表 */}
-      <Card>
-        <CardHeader>
-          <CardTitle>
+      <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+        <div className="flex flex-col space-y-1.5 p-6">
+          <h3 className="text-lg font-semibold leading-none tracking-tight">
             用户列表
             {searchQuery && (
               <span className="ml-2 text-sm font-normal text-muted-foreground">
                 搜索: "{searchQuery}"
               </span>
             )}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
+          </h3>
+        </div>
+        <div className="p-6 pt-0">
           {isLoading ? (
             <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground border-r-transparent" />
             </div>
           ) : users.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
@@ -476,14 +469,13 @@ export default function AdminUsersPage() {
                     <tr key={u.id} className="border-b">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
-                          <Avatar className="h-8 w-8">
-                            <AvatarImage
-                              src={u.image || undefined}
-                              alt={u.name}
-                            />
-                            <AvatarFallback className="bg-primary text-primary-foreground text-xs">
-                              {getInitials(u.name)}
-                            </AvatarFallback>
+                          <Avatar
+                            src={u.image || undefined}
+                            alt={u.name}
+                            size={32}
+                            className="shrink-0 !bg-primary !text-primary-foreground !text-xs"
+                          >
+                            {getInitials(u.name)}
                           </Avatar>
                           <div>
                             <span className="font-medium">{u.name}</span>
@@ -496,19 +488,15 @@ export default function AdminUsersPage() {
                       <td className="px-4 py-3">
                         <div className="flex flex-col gap-1">
                           {u.banned ? (
-                            <Badge variant="destructive">已封禁</Badge>
+                            <Badge color="red" className="!text-xs">
+                              已封禁
+                            </Badge>
                           ) : u.emailVerified ? (
-                            <Badge
-                              variant="secondary"
-                              className="bg-green-100 text-green-800"
-                            >
+                            <Badge color="green" className="!text-xs">
                               已验证
                             </Badge>
                           ) : (
-                            <Badge
-                              variant="secondary"
-                              className="bg-yellow-100 text-yellow-800"
-                            >
+                            <Badge color="gold" className="!text-xs">
                               {u.needsVerification ? "需邮箱验证" : "未验证"}
                             </Badge>
                           )}
@@ -531,33 +519,33 @@ export default function AdminUsersPage() {
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <Button
-                            size="sm"
-                            variant="outline"
+                            size="small"
+                            type="default"
                             onClick={() => openEditDialog(u)}
                             title="编辑用户"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
+                            icon={<Pencil className="h-4 w-4" />}
+                          />
                           <Button
-                            size="sm"
-                            variant="outline"
+                            size="small"
+                            type="default"
                             onClick={() => openGrantDialog(u)}
                             title="充值积分"
-                          >
-                            <Coins className="h-4 w-4" />
-                          </Button>
+                            icon={<Coins className="h-4 w-4" />}
+                          />
                           <Button
-                            size="sm"
-                            variant={u.banned ? "default" : "destructive"}
+                            size="small"
+                            danger={!u.banned}
+                            type={u.banned ? "primary" : "default"}
                             onClick={() => openBanDialog(u)}
                             title={u.banned ? "解封" : "封禁"}
-                          >
-                            {u.banned ? (
-                              <UserCheck className="h-4 w-4" />
-                            ) : (
-                              <Ban className="h-4 w-4" />
-                            )}
-                          </Button>
+                            icon={
+                              u.banned ? (
+                                <UserCheck className="h-4 w-4" />
+                              ) : (
+                                <Ban className="h-4 w-4" />
+                              )
+                            }
+                          />
                         </div>
                       </td>
                     </tr>
@@ -566,200 +554,233 @@ export default function AdminUsersPage() {
               </table>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* 封禁对话框 */}
-      <Dialog open={banDialogOpen} onOpenChange={setBanDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {selectedUser?.banned ? "解除封禁" : "封禁用户"}
-            </DialogTitle>
-            <DialogDescription>
-              {selectedUser?.banned
-                ? `确定要解除用户 ${selectedUser?.name} 的封禁吗？`
-                : `确定要封禁用户 ${selectedUser?.name} 吗？封禁后该用户将无法登录。`}
-            </DialogDescription>
-          </DialogHeader>
-          {!selectedUser?.banned && (
-            <div className="space-y-2">
-              <Label htmlFor="banReason">封禁原因 (可选)</Label>
-              <Textarea
-                id="banReason"
-                placeholder="请输入封禁原因..."
-                value={banReason}
-                onChange={(e) => setBanReason(e.target.value)}
-              />
-            </div>
-          )}
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setBanDialogOpen(false)}
-              disabled={isBanning}
+      <Modal
+        open={banDialogOpen}
+        onCancel={() => !isBanning && setBanDialogOpen(false)}
+        title={selectedUser?.banned ? "解除封禁" : "封禁用户"}
+        footer={[
+          <Button
+            key="cancel"
+            type="default"
+            onClick={() => setBanDialogOpen(false)}
+            disabled={isBanning}
+          >
+            取消
+          </Button>,
+          <Button
+            key="confirm"
+            type="primary"
+            danger={!selectedUser?.banned}
+            loading={isBanning}
+            onClick={handleBan}
+          >
+            {selectedUser?.banned ? "解除封禁" : "确认封禁"}
+          </Button>,
+        ]}
+      >
+        <p className="mb-4 text-sm text-muted-foreground">
+          {selectedUser?.banned
+            ? `确定要解除用户 ${selectedUser?.name} 的封禁吗？`
+            : `确定要封禁用户 ${selectedUser?.name} 吗？封禁后该用户将无法登录。`}
+        </p>
+        {!selectedUser?.banned && (
+          <div className="space-y-2">
+            <label
+              htmlFor="banReason"
+              className="text-sm font-medium leading-none"
             >
-              取消
-            </Button>
-            <Button
-              variant={selectedUser?.banned ? "default" : "destructive"}
-              onClick={handleBan}
-              disabled={isBanning}
-            >
-              {isBanning && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {selectedUser?.banned ? "解除封禁" : "确认封禁"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              封禁原因 (可选)
+            </label>
+            <Input.TextArea
+              id="banReason"
+              placeholder="请输入封禁原因..."
+              value={banReason}
+              onChange={(e) => setBanReason(e.target.value)}
+              rows={3}
+            />
+          </div>
+        )}
+      </Modal>
 
       {/* 充值对话框 */}
-      <Dialog open={grantDialogOpen} onOpenChange={setGrantDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>手动充值积分</DialogTitle>
-            <DialogDescription>
-              为用户 {selectedUser?.name} 充值积分
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="grantAmount">积分数量 *</Label>
-              <Input
-                id="grantAmount"
-                type="number"
-                placeholder="请输入积分数量"
-                value={grantAmount}
-                onChange={(e) => setGrantAmount(e.target.value)}
-                min={1}
-                max={100000}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="grantReason">充值原因 *</Label>
-              <Textarea
-                id="grantReason"
-                placeholder="请输入充值原因 (如：客服补偿、活动奖励等)"
-                value={grantReason}
-                onChange={(e) => setGrantReason(e.target.value)}
-                maxLength={200}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setGrantDialogOpen(false)}
-              disabled={isGranting}
+      <Modal
+        open={grantDialogOpen}
+        onCancel={() => !isGranting && setGrantDialogOpen(false)}
+        title="手动充值积分"
+        footer={[
+          <Button
+            key="cancel"
+            type="default"
+            onClick={() => setGrantDialogOpen(false)}
+            disabled={isGranting}
+          >
+            取消
+          </Button>,
+          <Button
+            key="confirm"
+            type="primary"
+            loading={isGranting}
+            onClick={handleGrant}
+          >
+            确认充值
+          </Button>,
+        ]}
+      >
+        <p className="mb-4 text-sm text-muted-foreground">
+          为用户 {selectedUser?.name} 充值积分
+        </p>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <label
+              htmlFor="grantAmount"
+              className="text-sm font-medium leading-none"
             >
-              取消
-            </Button>
-            <Button onClick={handleGrant} disabled={isGranting}>
-              {isGranting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              确认充值
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              积分数量 *
+            </label>
+            <Input
+              id="grantAmount"
+              type="number"
+              placeholder="请输入积分数量"
+              value={grantAmount}
+              onChange={(e) => setGrantAmount(e.target.value)}
+              min={1}
+              max={100000}
+            />
+          </div>
+          <div className="space-y-2">
+            <label
+              htmlFor="grantReason"
+              className="text-sm font-medium leading-none"
+            >
+              充值原因 *
+            </label>
+            <Input.TextArea
+              id="grantReason"
+              placeholder="请输入充值原因 (如：客服补偿、活动奖励等)"
+              value={grantReason}
+              onChange={(e) => setGrantReason(e.target.value)}
+              maxLength={200}
+              rows={3}
+            />
+          </div>
+        </div>
+      </Modal>
 
       {/* 新增用户对话框 */}
-      <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>新增用户</DialogTitle>
-            <DialogDescription>
-              手动创建账户。支持设置初始密码和邮箱验证要求。
-              无密码账户将强制需要邮箱验证。
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="createName">姓名 *</Label>
-              <Input
-                id="createName"
-                placeholder="请输入用户姓名"
-                value={createName}
-                onChange={(e) => setCreateName(e.target.value)}
-                maxLength={50}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="createEmail">邮箱 *</Label>
-              <Input
-                id="createEmail"
-                type="email"
-                placeholder="请输入邮箱地址"
-                value={createEmail}
-                onChange={(e) => setCreateEmail(e.target.value)}
-                autoComplete="email"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="createPassword">
-                密码
-                <span className="ml-1 text-xs text-muted-foreground">
-                  （留空则创建无密码账户）
-                </span>
-              </Label>
-              <Input
-                id="createPassword"
-                type="password"
-                placeholder="至少8位（可选）"
-                value={createPassword}
-                onChange={(e) => setCreatePassword(e.target.value)}
-                autoComplete="new-password"
-                minLength={8}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="createRole">角色</Label>
-              <Select
-                value={createRole}
-                onValueChange={(v) => setCreateRole(v as "user" | "admin")}
-              >
-                <SelectTrigger id="createRole">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="user">普通用户</SelectItem>
-                  <SelectItem value="admin">管理员</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id="createNeedsVerification"
-                checked={createNeedsVerification}
-                onCheckedChange={(v) => setCreateNeedsVerification(!!v)}
-              />
-              <Label
-                htmlFor="createNeedsVerification"
-                className="text-sm leading-none"
-              >
-                需要邮箱验证
-                <span className="ml-1 text-xs text-muted-foreground">
-                  {createPassword
-                    ? "（用户需验证后登录）"
-                    : "（无密码账户，必填）"}
-                </span>
-              </Label>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setCreateDialogOpen(false)}
-              disabled={isCreating}
+      <Modal
+        open={createDialogOpen}
+        onCancel={() => !isCreating && setCreateDialogOpen(false)}
+        title="新增用户"
+        footer={[
+          <Button
+            key="cancel"
+            type="default"
+            onClick={() => setCreateDialogOpen(false)}
+            disabled={isCreating}
+          >
+            取消
+          </Button>,
+          <Button
+            key="confirm"
+            type="primary"
+            loading={isCreating}
+            onClick={handleCreateUser}
+          >
+            确认创建
+          </Button>,
+        ]}
+      >
+        <p className="mb-4 text-sm text-muted-foreground">
+          手动创建账户。支持设置初始密码和邮箱验证要求。
+          无密码账户将强制需要邮箱验证。
+        </p>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <label
+              htmlFor="createName"
+              className="text-sm font-medium leading-none"
             >
-              取消
-            </Button>
-            <Button onClick={handleCreateUser} disabled={isCreating}>
-              {isCreating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              确认创建
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              姓名 *
+            </label>
+            <Input
+              id="createName"
+              placeholder="请输入用户姓名"
+              value={createName}
+              onChange={(e) => setCreateName(e.target.value)}
+              maxLength={50}
+            />
+          </div>
+          <div className="space-y-2">
+            <label
+              htmlFor="createEmail"
+              className="text-sm font-medium leading-none"
+            >
+              邮箱 *
+            </label>
+            <Input
+              id="createEmail"
+              type="email"
+              placeholder="请输入邮箱地址"
+              value={createEmail}
+              onChange={(e) => setCreateEmail(e.target.value)}
+              autoComplete="email"
+            />
+          </div>
+          <div className="space-y-2">
+            <label
+              htmlFor="createPassword"
+              className="text-sm font-medium leading-none"
+            >
+              密码
+              <span className="ml-1 text-xs text-muted-foreground">
+                （留空则创建无密码账户）
+              </span>
+            </label>
+            <Input
+              id="createPassword"
+              placeholder="至少8位（可选）"
+              value={createPassword}
+              onChange={(e) => setCreatePassword(e.target.value)}
+              autoComplete="new-password"
+            />
+          </div>
+          <div className="space-y-2">
+            <label
+              htmlFor="createRole"
+              className="text-sm font-medium leading-none"
+            >
+              角色
+            </label>
+            <Select
+              id="createRole"
+              value={createRole}
+              onChange={(v) => setCreateRole(v as "user" | "admin")}
+              className="w-full"
+              options={[
+                { value: "user", label: "普通用户" },
+                { value: "admin", label: "管理员" },
+              ]}
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Checkbox
+              checked={createNeedsVerification}
+              onChange={(e) => setCreateNeedsVerification(e.target.checked)}
+            >
+              需要邮箱验证
+              <span className="ml-1 text-xs text-muted-foreground">
+                {createPassword
+                  ? "（用户需验证后登录）"
+                  : "（无密码账户，必填）"}
+              </span>
+            </Checkbox>
+          </div>
+        </div>
+      </Modal>
 
       {/* 编辑用户对话框 */}
       <UserEditDialog

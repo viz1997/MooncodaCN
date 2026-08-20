@@ -4,13 +4,16 @@
  * 积分余额徽章组件
  *
  * 显示在侧边栏中，展示用户当前可用积分
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 2.3）
+ * - shadcn Badge 切到 antd Badge（color 替代 variant）
  */
 
+import { Badge } from "antd";
 import { Coins } from "lucide-react";
 import { useAction } from "next-safe-action/hooks";
 import { useEffect } from "react";
 
-import { Badge } from "@/components/ui/badge";
 import { getMyCreditsBalance } from "@/features/credits/actions";
 
 /**
@@ -34,7 +37,11 @@ export function CreditBalanceBadge() {
   // 加载状态
   if (isPending) {
     return (
-      <Badge variant="secondary" className="gap-1 px-2 py-1">
+      <Badge
+        color="default"
+        title="Available Credits"
+        className="!gap-1 !px-2 !py-1"
+      >
         <Coins className="h-3 w-3" />
         <span className="text-xs">...</span>
       </Badge>
@@ -43,9 +50,9 @@ export function CreditBalanceBadge() {
 
   return (
     <Badge
-      variant="secondary"
-      className="gap-1 px-2 py-1 bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400"
+      color="gold"
       title="Available Credits"
+      className="!gap-1 !px-2 !py-1"
     >
       <Coins className="h-3 w-3" />
       <span className="text-xs font-medium">{balance.toLocaleString()}</span>

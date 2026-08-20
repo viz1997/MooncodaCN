@@ -1,8 +1,7 @@
+import { Avatar, Badge } from "antd";
 import { desc, eq } from "drizzle-orm";
 import Link from "next/link";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
 import { db } from "@/db";
 import { ticket, user } from "@/db/schema";
 import {
@@ -12,9 +11,32 @@ import {
 } from "@/features/support/schemas";
 
 /**
+ * 工单状态 → antd Badge color
+ */
+const STATUS_COLOR_MAP: Record<string, string> = {
+  open: "blue",
+  in_progress: "gold",
+  resolved: "green",
+  closed: "default",
+};
+
+/**
+ * 优先级 → antd Badge color
+ */
+const PRIORITY_COLOR_MAP: Record<string, string> = {
+  low: "green",
+  medium: "gold",
+  high: "red",
+};
+
+/**
  * 管理员 - 工单管理列表页面
  *
  * 展示所有用户提交的工单
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 3.1）
+ * - shadcn Avatar/Badge 切到 antd
+ * - shadcn Card 切到内联 div（保留 rounded-lg + border + bg-card + shadow）
  */
 export default async function AdminTicketsPage() {
   // 获取所有工单（包含用户信息）
@@ -39,43 +61,26 @@ export default async function AdminTicketsPage() {
     .orderBy(desc(ticket.createdAt));
 
   /**
-   * 获取状态徽章样式
+   * 获取状态徽章
    */
   const getStatusBadge = (status: string) => {
     const statusConfig = ticketStatuses.find((s) => s.value === status);
-    const colorMap: Record<string, string> = {
-      open: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300",
-      in_progress:
-        "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300",
-      resolved:
-        "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300",
-      closed: "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300",
-    };
     return (
-      <Badge
-        className={colorMap[status] || colorMap.closed}
-        variant="secondary"
-      >
+      <Badge color={STATUS_COLOR_MAP[status] ?? "default"} className="!text-xs">
         {statusConfig?.label || status}
       </Badge>
     );
   };
 
   /**
-   * 获取优先级徽章样式
+   * 获取优先级徽章
    */
   const getPriorityBadge = (priority: string) => {
     const priorityConfig = ticketPriorities.find((p) => p.value === priority);
-    const colorMap: Record<string, string> = {
-      low: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300",
-      medium:
-        "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300",
-      high: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300",
-    };
     return (
       <Badge
-        className={colorMap[priority] || colorMap.medium}
-        variant="secondary"
+        color={PRIORITY_COLOR_MAP[priority] ?? "default"}
+        className="!text-xs"
       >
         {priorityConfig?.label || priority}
       </Badge>
@@ -93,14 +98,13 @@ export default async function AdminTicketsPage() {
   /**
    * 获取用户名首字母
    */
-  const getInitials = (name: string) => {
-    return name
+  const getInitials = (name: string) =>
+    name
       .split(" ")
       .map((n) => n[0])
       .join("")
       .toUpperCase()
       .slice(0, 2);
-  };
 
   // 统计数据
   const openCount = tickets.filter((t) => t.status === "open").length;
@@ -119,50 +123,52 @@ export default async function AdminTicketsPage() {
 
       {/* 统计信息 */}
       <div className="grid gap-4 md:grid-cols-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">待处理</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="flex flex-col space-y-1.5 p-6 pb-2">
+            <h3 className="text-sm font-medium">待处理</h3>
+          </div>
+          <div className="p-6 pt-0">
             <div className="text-2xl font-bold text-blue-600">{openCount}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">处理中</CardTitle>
-          </CardHeader>
-          <CardContent>
+          </div>
+        </div>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="flex flex-col space-y-1.5 p-6 pb-2">
+            <h3 className="text-sm font-medium">处理中</h3>
+          </div>
+          <div className="p-6 pt-0">
             <div className="text-2xl font-bold text-yellow-600">
               {inProgressCount}
             </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">已解决</CardTitle>
-          </CardHeader>
-          <CardContent>
+          </div>
+        </div>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="flex flex-col space-y-1.5 p-6 pb-2">
+            <h3 className="text-sm font-medium">已解决</h3>
+          </div>
+          <div className="p-6 pt-0">
             <div className="text-2xl font-bold text-green-600">
               {resolvedCount}
             </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">总工单</CardTitle>
-          </CardHeader>
-          <CardContent>
+          </div>
+        </div>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="flex flex-col space-y-1.5 p-6 pb-2">
+            <h3 className="text-sm font-medium">总工单</h3>
+          </div>
+          <div className="p-6 pt-0">
             <div className="text-2xl font-bold">{tickets.length}</div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
 
       {/* 工单列表 */}
-      <Card>
-        <CardHeader>
-          <CardTitle>工单列表</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+        <div className="flex flex-col space-y-1.5 p-6">
+          <h3 className="text-lg font-semibold leading-none tracking-tight">
+            工单列表
+          </h3>
+        </div>
+        <div className="p-6 pt-0">
           {tickets.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               暂无工单
@@ -196,14 +202,13 @@ export default async function AdminTicketsPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          <Avatar className="h-6 w-6">
-                            <AvatarImage
-                              src={t.user?.image || undefined}
-                              alt={t.user?.name || "用户"}
-                            />
-                            <AvatarFallback className="bg-primary text-primary-foreground text-xs">
-                              {t.user?.name ? getInitials(t.user.name) : "U"}
-                            </AvatarFallback>
+                          <Avatar
+                            src={t.user?.image || undefined}
+                            alt={t.user?.name || "用户"}
+                            size={24}
+                            className="shrink-0 !bg-primary !text-primary-foreground !text-xs"
+                          >
+                            {t.user?.name ? getInitials(t.user.name) : "U"}
                           </Avatar>
                           <div>
                             <div className="font-medium text-sm">
@@ -231,8 +236,8 @@ export default async function AdminTicketsPage() {
               </table>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }

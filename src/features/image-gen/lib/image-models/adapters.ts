@@ -656,18 +656,11 @@ async function retrySubmitLingtingTask(
   maxRetries = 2,
   delayMs = 2000
 ): Promise<Awaited<ReturnType<typeof submitLingtingTask>>> {
-  const sleep = (ms: number) =>
-    new Promise<void>((r) => setTimeout(r, ms));
+  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
   let lastErr: unknown;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      return await submitLingtingTask(
-        "_wbl",
-        imageUrl,
-        prompt,
-        size,
-        imageIdx
-      );
+      return await submitLingtingTask("_wbl", imageUrl, prompt, size, imageIdx);
     } catch (err) {
       lastErr = err;
       if (attempt < maxRetries) {
@@ -675,7 +668,9 @@ async function retrySubmitLingtingTask(
       }
     }
   }
-  throw lastErr instanceof Error ? lastErr : new Error("submitLingtingTask 失败");
+  throw lastErr instanceof Error
+    ? lastErr
+    : new Error("submitLingtingTask 失败");
 }
 
 // ============ 9. GPT-Image-2 适配器（via WellAPI） ============
@@ -705,7 +700,8 @@ export const gptImage2Adapter: ImageModelAdapter = {
       return "图生图模式需要 imageUrl";
     if (req.mode === "inpainting" && !req.maskUrl)
       return "局部重绘需要 maskUrl";
-    if (req.batchSize && req.batchSize > 10) return "GPT-Image-2 单次最多 10 张";
+    if (req.batchSize && req.batchSize > 10)
+      return "GPT-Image-2 单次最多 10 张";
     if (req.negativePrompt) return "GPT-Image-2 不支持反向提示词";
     if (!GEMINI_CONFIG.apiKey) return "LINGTING_API_KEY 未配置";
     return null;

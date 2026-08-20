@@ -10,16 +10,18 @@
  * - 即将过期积分提示
  * - 订阅状态
  * - 交易历史
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 2.3）
+ * - shadcn Button/Separator 切到 antd
  */
 
+import { Button, Divider } from "antd";
 import { Clock, Coins } from "lucide-react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { useAction } from "next-safe-action/hooks";
 import { useEffect } from "react";
 
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import {
   getMyActiveBatches,
   getMyCreditsBalance,
@@ -110,7 +112,7 @@ export function CreditUsageSection() {
         </div>
       </div>
 
-      <Separator />
+      <Divider />
 
       {/* 购买更多积分 */}
       <div className="space-y-4">
@@ -122,16 +124,16 @@ export function CreditUsageSection() {
         </div>
 
         <div className="flex gap-3">
-          <Button asChild>
-            <Link href="/#pricing">{t("getMoreCredits.viewPlans")}</Link>
-          </Button>
+          <Link href="/#pricing">
+            <Button type="primary">{t("getMoreCredits.viewPlans")}</Button>
+          </Link>
         </div>
       </div>
 
       {/* 即将过期积分提示 */}
       {expiringBatch && (
         <>
-          <Separator />
+          <Divider />
           <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50/50 px-4 py-3 dark:border-amber-800 dark:bg-amber-900/10">
             <div className="flex items-center gap-3">
               <Clock className="h-5 w-5 text-amber-600 dark:text-amber-400" />
@@ -151,7 +153,7 @@ export function CreditUsageSection() {
         </>
       )}
 
-      <Separator />
+      <Divider />
 
       {/* 交易历史 */}
       <TransactionHistory />

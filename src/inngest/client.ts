@@ -1,6 +1,6 @@
-import type { InternalGenerateInput } from "@/features/image-gen/lib/validation";
-
 import { Inngest } from "inngest";
+import type { CanvasRemoteGenerateInput } from "@/features/canvas/services/canvas-server-generate";
+import type { InternalGenerateInput } from "@/features/image-gen/lib/validation";
 
 /**
  * Inngest 客户端配置
@@ -66,6 +66,28 @@ export type Events = {
     data: {
       jobId: string;
       input: InternalGenerateInput;
+    };
+  };
+  /**
+   * 画布内置渠道提交生成任务（image / audio）
+   *
+   * 由 /api/canvas/generate 在写 canvasRemoteJob（status=pending）后立即 send。
+   * 前端拿到 jobId 后轮询 GET /api/canvas/poll/{jobId}；Inngest 函数在后台
+   * 跑 generateOnServerSync（pre-consume 积分 + 调上游 + R2 + 失败 refund），
+   * 把 result 写回 canvasRemoteJob 行。
+   *
+   * payload 必须带完整 CanvasRemoteGenerateInput（含 references/mask data URL），
+   * 因为 canvasRemoteJob.payload 是 json 序列化后的快照 —— Inngest 函数
+   * 直接拿这个调 service，无需再回前端取。
+   *
+   * retries: 0 与既有约定一致 —— 上游（OpenAI / Lingting）无幂等键，
+   * 重复提交会重复扣积分 / 重复消耗配额。
+   */
+  "canvas/remote-generate": {
+    data: {
+      jobId: string;
+      userId: string;
+      payload: CanvasRemoteGenerateInput;
     };
   };
 };

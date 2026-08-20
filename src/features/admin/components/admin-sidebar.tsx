@@ -1,5 +1,25 @@
 "use client";
 
+/**
+ * Admin 侧边栏组件
+ *
+ * 功能:
+ * - Admin 专用导航菜单 (从配置读取)
+ * - 用户信息弹出菜单
+ * - 主题切换
+ * - 返回用户端入口
+ * - 登出功能
+ *
+ * 样式:
+ * - 使用深色背景以区别于普通 Dashboard
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 3.1）
+ * - shadcn Avatar 切到 antd Avatar（src + size + className + children）
+ * - shadcn Popover 切到 antd Popover（controlled + content）
+ * - shadcn Separator 切到 antd Divider
+ */
+
+import { Avatar, Divider, Popover } from "antd";
 import {
   ArrowLeft,
   ChevronsUpDown,
@@ -13,35 +33,12 @@ import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { Separator } from "@/components/ui/separator";
 import { adminConfig, siteConfig } from "@/config";
 import { signOut, useSession } from "@/lib/auth/client";
 import { cn } from "@/lib/utils";
 
-/**
- * 主题类型
- */
 type Theme = "light" | "dark" | "system";
 
-/**
- * Admin 侧边栏组件
- *
- * 功能:
- * - Admin 专用导航菜单 (从配置读取)
- * - 用户信息弹出菜单
- * - 主题切换
- * - 返回用户端入口
- * - 登出功能
- *
- * 样式:
- * - 使用深色背景以区别于普通 Dashboard
- */
 export function AdminSidebar() {
   const pathname = usePathname();
   const router = useRouter();
@@ -79,14 +76,13 @@ export function AdminSidebar() {
   /**
    * 获取用户名首字母作为头像回退
    */
-  const getInitials = (name: string) => {
-    return name
+  const getInitials = (name: string) =>
+    name
       .split(" ")
       .map((n) => n[0])
       .join("")
       .toUpperCase()
       .slice(0, 2);
-  };
 
   /**
    * 处理登出
@@ -211,117 +207,115 @@ export function AdminSidebar() {
       {/* 用户信息区域 */}
       <div className="border-t border-slate-700 p-4">
         {user ? (
-          <Popover open={open} onOpenChange={setOpen}>
-            <PopoverTrigger asChild>
-              <button
-                type="button"
-                className="flex w-full items-center gap-3 rounded-md px-2 py-2 hover:bg-slate-800 transition-colors"
-              >
-                <Avatar className="h-8 w-8">
-                  <AvatarImage src={user.image || undefined} alt={user.name} />
-                  <AvatarFallback className="bg-red-600 text-white text-xs">
+          <Popover
+            open={open}
+            onOpenChange={setOpen}
+            trigger="click"
+            placement="topLeft"
+            content={
+              <div className="w-64">
+                {/* 用户信息头部 */}
+                <div className="flex items-center gap-3 p-4">
+                  <Avatar
+                    src={user.image || undefined}
+                    alt={user.name}
+                    size={40}
+                    className="!bg-red-600 !text-white"
+                  >
                     {getInitials(user.name)}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="flex-1 truncate text-left">
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium text-white">
-                      {user.name}
+                  </Avatar>
+                  <div className="flex-1 truncate">
+                    <p className="font-medium">{user.name}</p>
+                    <p className="truncate text-sm text-muted-foreground">
+                      {user.email}
                     </p>
-                    <span className="rounded bg-red-600/20 px-1.5 py-0.5 text-xs font-medium text-red-400">
-                      {t("roleBadge")}
-                    </span>
                   </div>
-                  <p className="truncate text-xs text-slate-400">
-                    {user.email}
-                  </p>
                 </div>
-                <ChevronsUpDown className="h-4 w-4 text-slate-400" />
-              </button>
-            </PopoverTrigger>
 
-            <PopoverContent
-              side="top"
-              align="start"
-              sideOffset={8}
-              className="w-64 p-0"
+                <Divider className="!my-0" />
+
+                {/* 主题切换 */}
+                <div className="flex items-center justify-center gap-1 p-3">
+                  <button
+                    type="button"
+                    onClick={() => setTheme("light")}
+                    className={cn(
+                      "flex h-9 w-9 items-center justify-center rounded-md transition-colors",
+                      theme === "light"
+                        ? "bg-muted text-foreground"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    )}
+                    title={t("lightMode")}
+                  >
+                    <Sun className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTheme("dark")}
+                    className={cn(
+                      "flex h-9 w-9 items-center justify-center rounded-md transition-colors",
+                      theme === "dark"
+                        ? "bg-muted text-foreground"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    )}
+                    title={t("darkMode")}
+                  >
+                    <Moon className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTheme("system")}
+                    className={cn(
+                      "flex h-9 w-9 items-center justify-center rounded-md transition-colors",
+                      theme === "system"
+                        ? "bg-red-100 text-red-600 dark:bg-red-900 dark:text-red-300"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    )}
+                    title={t("followSystem")}
+                  >
+                    <Monitor className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <Divider className="!my-0" />
+
+                {/* 菜单项 */}
+                <div className="p-2">
+                  <button
+                    type="button"
+                    onClick={handleSignOut}
+                    className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted transition-colors"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    {t("signOut")}
+                  </button>
+                </div>
+              </div>
+            }
+          >
+            <button
+              type="button"
+              className="flex w-full items-center gap-3 rounded-md px-2 py-2 hover:bg-slate-800 transition-colors"
             >
-              {/* 用户信息头部 */}
-              <div className="flex items-center gap-3 p-4">
-                <Avatar className="h-10 w-10">
-                  <AvatarImage src={user.image || undefined} alt={user.name} />
-                  <AvatarFallback className="bg-red-600 text-white">
-                    {getInitials(user.name)}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="flex-1 truncate">
-                  <p className="font-medium">{user.name}</p>
-                  <p className="truncate text-sm text-muted-foreground">
-                    {user.email}
-                  </p>
+              <Avatar
+                src={user.image || undefined}
+                alt={user.name}
+                size={32}
+                className="!bg-red-600 !text-white !text-xs"
+              >
+                {getInitials(user.name)}
+              </Avatar>
+              <div className="flex-1 truncate text-left">
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-medium text-white">{user.name}</p>
+                  <span className="rounded bg-red-600/20 px-1.5 py-0.5 text-xs font-medium text-red-400">
+                    {t("roleBadge")}
+                  </span>
                 </div>
+                <p className="truncate text-xs text-slate-400">{user.email}</p>
               </div>
-
-              <Separator />
-
-              {/* 主题切换 */}
-              <div className="flex items-center justify-center gap-1 p-3">
-                <button
-                  type="button"
-                  onClick={() => setTheme("light")}
-                  className={cn(
-                    "flex h-9 w-9 items-center justify-center rounded-md transition-colors",
-                    theme === "light"
-                      ? "bg-muted text-foreground"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  )}
-                  title={t("lightMode")}
-                >
-                  <Sun className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTheme("dark")}
-                  className={cn(
-                    "flex h-9 w-9 items-center justify-center rounded-md transition-colors",
-                    theme === "dark"
-                      ? "bg-muted text-foreground"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  )}
-                  title={t("darkMode")}
-                >
-                  <Moon className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTheme("system")}
-                  className={cn(
-                    "flex h-9 w-9 items-center justify-center rounded-md transition-colors",
-                    theme === "system"
-                      ? "bg-red-100 text-red-600 dark:bg-red-900 dark:text-red-300"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  )}
-                  title={t("followSystem")}
-                >
-                  <Monitor className="h-4 w-4" />
-                </button>
-              </div>
-
-              <Separator />
-
-              {/* 菜单项 */}
-              <div className="p-2">
-                {/* 登出 */}
-                <button
-                  type="button"
-                  onClick={handleSignOut}
-                  className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted transition-colors"
-                >
-                  <LogOut className="h-4 w-4" />
-                  {t("signOut")}
-                </button>
-              </div>
-            </PopoverContent>
+              <ChevronsUpDown className="h-4 w-4 text-slate-400" />
+            </button>
           </Popover>
         ) : (
           // 加载状态

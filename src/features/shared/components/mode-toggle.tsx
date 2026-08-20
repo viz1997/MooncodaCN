@@ -1,15 +1,9 @@
 "use client";
 
+import { Button, Dropdown, Tooltip } from "antd";
 import { Monitor, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
 /**
@@ -19,6 +13,10 @@ import { cn } from "@/lib/utils";
  * - 在浅色、深色、系统主题之间切换
  * - 使用 next-themes 管理主题状态
  * - 支持两种显示模式: dropdown 和 inline
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 2.6）
+ * - DropdownMenu → antd Dropdown
+ * - Button variant="ghost" size="icon" → type="text" shape="circle"
  */
 
 interface ModeToggleProps {
@@ -44,76 +42,84 @@ export function ModeToggle({
   if (variant === "inline") {
     return (
       <div className={cn("flex items-center gap-1", className)}>
-        <button
-          type="button"
-          onClick={() => setTheme("light")}
-          className={cn(
-            "flex h-9 w-9 items-center justify-center rounded-md transition-colors",
-            theme === "light"
-              ? "bg-muted text-foreground"
-              : "text-muted-foreground hover:bg-muted hover:text-foreground"
-          )}
-          title="浅色模式"
-        >
-          <Sun className="h-4 w-4" />
-          <span className="sr-only">浅色模式</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setTheme("dark")}
-          className={cn(
-            "flex h-9 w-9 items-center justify-center rounded-md transition-colors",
-            theme === "dark"
-              ? "bg-muted text-foreground"
-              : "text-muted-foreground hover:bg-muted hover:text-foreground"
-          )}
-          title="深色模式"
-        >
-          <Moon className="h-4 w-4" />
-          <span className="sr-only">深色模式</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setTheme("system")}
-          className={cn(
-            "flex h-9 w-9 items-center justify-center rounded-md transition-colors",
-            theme === "system"
-              ? "bg-primary/10 text-primary dark:bg-primary/20 dark:text-primary"
-              : "text-muted-foreground hover:bg-muted hover:text-foreground"
-          )}
-          title="跟随系统"
-        >
-          <Monitor className="h-4 w-4" />
-          <span className="sr-only">跟随系统</span>
-        </button>
+        <Tooltip title="浅色模式">
+          <Button
+            type={theme === "light" ? "default" : "text"}
+            shape="circle"
+            onClick={() => setTheme("light")}
+            icon={<Sun className="h-4 w-4" />}
+          />
+        </Tooltip>
+        <Tooltip title="深色模式">
+          <Button
+            type={theme === "dark" ? "default" : "text"}
+            shape="circle"
+            onClick={() => setTheme("dark")}
+            icon={<Moon className="h-4 w-4" />}
+          />
+        </Tooltip>
+        <Tooltip title="跟随系统">
+          <Button
+            type={theme === "system" ? "primary" : "text"}
+            shape="circle"
+            onClick={() => setTheme("system")}
+            icon={<Monitor className="h-4 w-4" />}
+          />
+        </Tooltip>
       </div>
     );
   }
 
   // 下拉菜单模式 (默认)
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className={className}>
+    <Dropdown
+      placement="bottomRight"
+      trigger={["click"]}
+      menu={{
+        items: [
+          {
+            key: "light",
+            label: (
+              <span>
+                <Sun className="mr-2 inline h-4 w-4" />
+                浅色
+              </span>
+            ),
+            onClick: () => setTheme("light"),
+          },
+          {
+            key: "dark",
+            label: (
+              <span>
+                <Moon className="mr-2 inline h-4 w-4" />
+                深色
+              </span>
+            ),
+            onClick: () => setTheme("dark"),
+          },
+          {
+            key: "system",
+            label: (
+              <span>
+                <Monitor className="mr-2 inline h-4 w-4" />
+                跟随系统
+              </span>
+            ),
+            onClick: () => setTheme("system"),
+          },
+        ],
+        selectedKeys: [theme ?? ""],
+      }}
+    >
+      <Button
+        type="text"
+        shape="circle"
+        aria-label="切换主题"
+        icon={
           <Sun className="h-5 w-5 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-          <Moon className="absolute h-5 w-5 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
-          <span className="sr-only">切换主题</span>
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => setTheme("light")}>
-          <Sun className="mr-2 h-4 w-4" />
-          浅色
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme("dark")}>
-          <Moon className="mr-2 h-4 w-4" />
-          深色
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme("system")}>
-          <Monitor className="mr-2 h-4 w-4" />
-          跟随系统
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+        }
+        {...(className ? { className } : {})}
+      />
+    </Dropdown>
   );
 }

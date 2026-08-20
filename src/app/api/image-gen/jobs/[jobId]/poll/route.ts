@@ -29,8 +29,8 @@ import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { imageJob } from "@/db/schema";
 import { advanceImageGenJob } from "@/features/image-gen/lib/generation-service";
-import { auth } from "@/lib/auth";
 import { withApiLogging } from "@/lib/api-logger";
+import { auth } from "@/lib/auth";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";

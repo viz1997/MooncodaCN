@@ -11,10 +11,15 @@
  * - 详情对话框：性能 + 商务 + 能力矩阵 + 输出规格 + API 配置
  *
  * 数据来自 PROVIDER_LIST_3D（src/features/mooncada/lib/providers/types.ts）
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 3.3）
+ * - shadcn Card 系列 → 内联 div
+ * - shadcn Badge/Button/Dialog → antd
+ * - shadcn useToast → antd App.useApp().message
  */
 
+import { App, Badge, Button, Modal } from "antd";
 import {
-  Activity,
   AlertTriangle,
   Bone,
   Box,
@@ -35,23 +40,6 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   EmptyState,
   ModuleHeader,
@@ -66,7 +54,6 @@ import {
   PROVIDERS_3D,
   RECOMMEND_BY_SCENE,
 } from "@/features/mooncada/lib/providers/types";
-import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
 const STATUS_CONFIG: Record<
@@ -152,7 +139,7 @@ function ProviderCard({
   const statusCfg = STATUS_CONFIG[provider.status];
   const StatusIcon = statusCfg.icon;
   return (
-    <Card className="overflow-hidden hover:shadow-md transition-all flex flex-col">
+    <div className="rounded-lg border bg-card text-card-foreground shadow-sm overflow-hidden hover:shadow-md transition-all flex flex-col">
       <div
         className={cn("bg-gradient-to-br p-4 text-white", provider.gradient)}
       >
@@ -171,7 +158,7 @@ function ProviderCard({
         </div>
       </div>
 
-      <CardContent className="p-4 space-y-3 flex-1">
+      <div className="p-4 space-y-3 flex-1">
         <p className="text-xs text-muted-foreground line-clamp-2 h-8">
           {provider.description}
         </p>
@@ -194,7 +181,7 @@ function ProviderCard({
             </p>
           </div>
           <div className="bg-muted/40 rounded-lg p-1.5">
-            <Activity className="h-3 w-3 mx-auto text-violet-600" />
+            <Shield className="h-3 w-3 mx-auto text-violet-600" />
             <p className="text-[10px] text-muted-foreground mt-0.5">成功率</p>
             <p className="text-xs font-bold">{provider.successRate}%</p>
           </div>
@@ -254,16 +241,15 @@ function ProviderCard({
         </div>
 
         <Button
-          size="sm"
-          variant="outline"
-          className="w-full"
+          size="small"
           onClick={onDetail}
+          className="w-full"
+          icon={<Settings className="h-3.5 w-3.5" />}
         >
-          <Settings className="h-3.5 w-3.5 mr-1.5" />
           查看详情
         </Button>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 
@@ -276,247 +262,243 @@ function ProviderDetailDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { toast } = useToast();
+  const { message } = App.useApp();
   if (!provider) return null;
   const statusCfg = STATUS_CONFIG[provider.status];
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-3">
-            <div
-              className={cn(
-                "h-10 w-10 rounded-lg bg-gradient-to-br flex items-center justify-center text-white",
-                provider.gradient
-              )}
-            >
-              <Cpu className="h-5 w-5" />
+    <Modal
+      open={open}
+      onCancel={() => onOpenChange(false)}
+      title={
+        <span className="flex items-center gap-3">
+          <div
+            className={cn(
+              "h-10 w-10 rounded-lg bg-gradient-to-br flex items-center justify-center text-white",
+              provider.gradient
+            )}
+          >
+            <Cpu className="h-5 w-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              {provider.name}
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                  statusCfg.color
+                )}
+              >
+                {statusCfg.label}
+              </span>
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                {provider.name}
-                <span
+            <p className="text-xs text-muted-foreground font-normal">
+              {provider.fullName} · {provider.vendor}
+            </p>
+          </div>
+        </span>
+      }
+      footer={[
+        <Button
+          key="config"
+          onClick={() =>
+            message.success("配置已打开 · 实际部署时此处跳转到 API Key 配置")
+          }
+          icon={<Settings className="h-4 w-4" />}
+        >
+          配置 API Key
+        </Button>,
+        <Button key="close" type="primary" onClick={() => onOpenChange(false)}>
+          关闭
+        </Button>,
+      ]}
+      width={672}
+    >
+      <div className="space-y-4">
+        <p className="text-sm text-muted-foreground">{provider.description}</p>
+
+        {/* 最佳场景 */}
+        <div>
+          <p className="text-xs font-medium mb-1.5">最佳使用场景</p>
+          <div className="flex flex-wrap gap-1.5">
+            {provider.bestFor.map((s) => (
+              <Badge key={s} color="default" className="!text-[10px]">
+                {s}
+              </Badge>
+            ))}
+          </div>
+        </div>
+
+        {/* 性能指标 */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-2 bg-muted/30 rounded-lg p-3">
+            <p className="text-xs font-medium flex items-center gap-1.5">
+              <Zap className="h-3 w-3 text-amber-500" />
+              性能指标
+            </p>
+            <ScoreBar
+              value={provider.qualityScore}
+              label="质量评分"
+              color="bg-violet-500"
+            />
+            <ScoreBar
+              value={provider.stabilityScore}
+              label="稳定性"
+              color="bg-emerald-500"
+            />
+            <div className="flex items-center justify-between text-xs pt-1">
+              <span className="text-muted-foreground">平均耗时</span>
+              <span className="font-mono">
+                {(provider.avgDuration / 1000).toFixed(2)}s
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">成功率</span>
+              <span className="font-mono text-emerald-600">
+                {provider.successRate}%
+              </span>
+            </div>
+          </div>
+          <div className="space-y-2 bg-muted/30 rounded-lg p-3">
+            <p className="text-xs font-medium flex items-center gap-1.5">
+              <DollarSign className="h-3 w-3 text-emerald-500" />
+              商务信息
+            </p>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">单次价格</span>
+              <span className="font-bold">
+                {provider.currency === "CNY" ? "¥" : "$"}
+                {provider.pricePerGeneration}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">每月免费额度</span>
+              <span className="font-mono">{provider.freeQuota} 次</span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">累计生成</span>
+              <span className="font-mono">
+                {provider.totalGenerated.toLocaleString("zh-CN")}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">币种</span>
+              <span className="font-mono">{provider.currency}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* 能力矩阵 */}
+        <div>
+          <p className="text-xs font-medium mb-2 flex items-center gap-1.5">
+            <Box className="h-3 w-3" />
+            能力矩阵
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            {(
+              Object.entries(CAPABILITY_ICONS) as [
+                keyof typeof CAPABILITY_ICONS,
+                (typeof CAPABILITY_ICONS)[keyof typeof CAPABILITY_ICONS],
+              ][]
+            ).map(([key, cfg]) => {
+              const Icon = cfg.icon;
+              const enabled = provider.capabilities[key];
+              return (
+                <div
+                  key={key}
                   className={cn(
-                    "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium",
-                    statusCfg.color
+                    "rounded-lg border p-2 flex items-center gap-2",
+                    enabled
+                      ? "border-emerald-500/30 bg-emerald-500/5"
+                      : "border-border bg-muted/20 opacity-50"
                   )}
                 >
-                  {statusCfg.label}
-                </span>
-              </div>
-              <p className="text-xs text-muted-foreground font-normal">
-                {provider.fullName} · {provider.vendor}
-              </p>
-            </div>
-          </DialogTitle>
-          <DialogDescription>{provider.description}</DialogDescription>
-        </DialogHeader>
+                  <Icon
+                    className={cn(
+                      "h-3.5 w-3.5",
+                      enabled ? "text-emerald-600" : "text-muted-foreground"
+                    )}
+                  />
+                  <span className="text-[11px]">{cfg.label}</span>
+                  {enabled ? (
+                    <CheckCircle2 className="h-3 w-3 text-emerald-500 ml-auto" />
+                  ) : (
+                    <XCircle className="h-3 w-3 ml-auto" />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
 
-        <div className="space-y-4">
-          {/* 最佳场景 */}
-          <div>
-            <p className="text-xs font-medium mb-1.5">最佳使用场景</p>
-            <div className="flex flex-wrap gap-1.5">
-              {provider.bestFor.map((s) => (
+        {/* 输出规格 */}
+        <div className="bg-muted/30 rounded-lg p-3 space-y-1.5">
+          <p className="text-xs font-medium">输出规格</p>
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-muted-foreground">支持格式</span>
+            <div className="flex gap-1">
+              {provider.capabilities.outputFormats.map((f) => (
                 <Badge
-                  key={s}
-                  variant="outline"
-                  className="text-[10px] bg-muted/30"
+                  key={f}
+                  color="default"
+                  className="!text-[10px] font-mono uppercase"
                 >
-                  {s}
+                  {f}
                 </Badge>
               ))}
             </div>
           </div>
-
-          {/* 性能指标 */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2 bg-muted/30 rounded-lg p-3">
-              <p className="text-xs font-medium flex items-center gap-1.5">
-                <Zap className="h-3 w-3 text-amber-500" />
-                性能指标
-              </p>
-              <ScoreBar
-                value={provider.qualityScore}
-                label="质量评分"
-                color="bg-violet-500"
-              />
-              <ScoreBar
-                value={provider.stabilityScore}
-                label="稳定性"
-                color="bg-emerald-500"
-              />
-              <div className="flex items-center justify-between text-xs pt-1">
-                <span className="text-muted-foreground">平均耗时</span>
-                <span className="font-mono">
-                  {(provider.avgDuration / 1000).toFixed(2)}s
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">成功率</span>
-                <span className="font-mono text-emerald-600">
-                  {provider.successRate}%
-                </span>
-              </div>
-            </div>
-            <div className="space-y-2 bg-muted/30 rounded-lg p-3">
-              <p className="text-xs font-medium flex items-center gap-1.5">
-                <DollarSign className="h-3 w-3 text-emerald-500" />
-                商务信息
-              </p>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">单次价格</span>
-                <span className="font-bold">
-                  {provider.currency === "CNY" ? "¥" : "$"}
-                  {provider.pricePerGeneration}
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">每月免费额度</span>
-                <span className="font-mono">{provider.freeQuota} 次</span>
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">累计生成</span>
-                <span className="font-mono">
-                  {provider.totalGenerated.toLocaleString("zh-CN")}
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">币种</span>
-                <span className="font-mono">{provider.currency}</span>
-              </div>
-            </div>
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-muted-foreground">最大面数</span>
+            <span className="font-mono">
+              {provider.capabilities.maxPolyCount.toLocaleString("zh-CN")}
+            </span>
           </div>
-
-          {/* 能力矩阵 */}
-          <div>
-            <p className="text-xs font-medium mb-2 flex items-center gap-1.5">
-              <Box className="h-3 w-3" />
-              能力矩阵
-            </p>
-            <div className="grid grid-cols-3 gap-2">
-              {(
-                Object.entries(CAPABILITY_ICONS) as [
-                  keyof typeof CAPABILITY_ICONS,
-                  (typeof CAPABILITY_ICONS)[keyof typeof CAPABILITY_ICONS],
-                ][]
-              ).map(([key, cfg]) => {
-                const Icon = cfg.icon;
-                const enabled = provider.capabilities[key];
-                return (
-                  <div
-                    key={key}
-                    className={cn(
-                      "rounded-lg border p-2 flex items-center gap-2",
-                      enabled
-                        ? "border-emerald-500/30 bg-emerald-500/5"
-                        : "border-border bg-muted/20 opacity-50"
-                    )}
-                  >
-                    <Icon
-                      className={cn(
-                        "h-3.5 w-3.5",
-                        enabled ? "text-emerald-600" : "text-muted-foreground"
-                      )}
-                    />
-                    <span className="text-[11px]">{cfg.label}</span>
-                    {enabled ? (
-                      <CheckCircle2 className="h-3 w-3 text-emerald-500 ml-auto" />
-                    ) : (
-                      <XCircle className="h-3 w-3 ml-auto" />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-muted-foreground">最大纹理分辨率</span>
+            <span className="font-mono">
+              {provider.capabilities.maxTextureResolution}×
+              {provider.capabilities.maxTextureResolution}
+            </span>
           </div>
-
-          {/* 输出规格 */}
-          <div className="bg-muted/30 rounded-lg p-3 space-y-1.5">
-            <p className="text-xs font-medium">输出规格</p>
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-muted-foreground">支持格式</span>
-              <div className="flex gap-1">
-                {provider.capabilities.outputFormats.map((f) => (
-                  <Badge
-                    key={f}
-                    variant="outline"
-                    className="text-[10px] font-mono uppercase"
-                  >
-                    {f}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-muted-foreground">最大面数</span>
-              <span className="font-mono">
-                {provider.capabilities.maxPolyCount.toLocaleString("zh-CN")}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-muted-foreground">最大纹理分辨率</span>
-              <span className="font-mono">
-                {provider.capabilities.maxTextureResolution}×
-                {provider.capabilities.maxTextureResolution}
-              </span>
-            </div>
-          </div>
-
-          {/* API 配置 */}
-          <div className="bg-zinc-900 dark:bg-zinc-950 text-zinc-300 rounded-lg p-3 space-y-1">
-            <p className="text-xs font-medium text-zinc-100">API 配置</p>
-            <div className="text-[11px] font-mono space-y-0.5">
-              <p>
-                <span className="text-zinc-500">Endpoint:</span>{" "}
-                {provider.apiEndpoint}
-              </p>
-              <p>
-                <span className="text-zinc-500">Auth:</span> {provider.authType}
-              </p>
-              <p>
-                <span className="text-zinc-500">Key Env:</span>{" "}
-                <span className="text-amber-400">${provider.apiKeyEnv}</span>
-              </p>
-            </div>
-          </div>
-
-          <a
-            href={provider.vendorUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-xs text-sky-600 hover:underline"
-          >
-            <ExternalLink className="h-3 w-3" />
-            访问 {provider.vendor} 官网
-          </a>
         </div>
 
-        <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() =>
-              toast({
-                title: "配置已打开",
-                description: "实际部署时此处跳转到 API Key 配置",
-              })
-            }
-          >
-            <Settings className="h-4 w-4 mr-1.5" />
-            配置 API Key
-          </Button>
-          <Button onClick={() => onOpenChange(false)}>关闭</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        {/* API 配置 */}
+        <div className="bg-zinc-900 dark:bg-zinc-950 text-zinc-300 rounded-lg p-3 space-y-1">
+          <p className="text-xs font-medium text-zinc-100">API 配置</p>
+          <div className="text-[11px] font-mono space-y-0.5">
+            <p>
+              <span className="text-zinc-500">Endpoint:</span>{" "}
+              {provider.apiEndpoint}
+            </p>
+            <p>
+              <span className="text-zinc-500">Auth:</span> {provider.authType}
+            </p>
+            <p>
+              <span className="text-zinc-500">Key Env:</span>{" "}
+              <span className="text-amber-400">${provider.apiKeyEnv}</span>
+            </p>
+          </div>
+        </div>
+
+        <a
+          href={provider.vendorUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-xs text-sky-600 hover:underline"
+        >
+          <ExternalLink className="h-3 w-3" />
+          访问 {provider.vendor} 官网
+        </a>
+      </div>
+    </Modal>
   );
 }
 
 const COMPARE_LIMIT = 4;
 
 export function Providers3DAdminView() {
-  const { toast } = useToast();
+  const { message } = App.useApp();
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [detailProvider, setDetailProvider] = useState<Provider3DConfig | null>(
@@ -556,10 +538,7 @@ export function Providers3DAdminView() {
         next.delete(id);
       } else {
         if (next.size >= COMPARE_LIMIT) {
-          toast({
-            title: `最多对比 ${COMPARE_LIMIT} 个`,
-            variant: "destructive",
-          });
+          message.warning(`最多对比 ${COMPARE_LIMIT} 个`);
           return prev;
         }
         next.add(id);
@@ -579,18 +558,18 @@ export function Providers3DAdminView() {
         description="统一管理 6 个 3D 生成引擎 · Tripo3D / 混元3D / Meshy / Hyper3D / Hitem3D / Triverse3D · 能力对比与调用路由"
         actions={
           <Button
-            variant={compareMode ? "default" : "outline"}
+            type={compareMode ? "primary" : "default"}
             onClick={() => {
               setCompareMode(!compareMode);
               if (compareMode) setSelectedForCompare(new Set());
             }}
             className={
               compareMode
-                ? "bg-gradient-to-r from-violet-500 to-purple-600"
+                ? "bg-gradient-to-r from-violet-500 to-purple-600 border-0"
                 : ""
             }
+            icon={<Layers className="h-4 w-4" />}
           >
-            <Layers className="h-4 w-4 mr-1.5" />
             {compareMode
               ? "退出对比"
               : `对比模式${selectedForCompare.size > 0 ? ` (${selectedForCompare.size})` : ""}`}
@@ -600,7 +579,7 @@ export function Providers3DAdminView() {
 
       {/* 统计卡片 */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <Card className="p-3">
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] text-muted-foreground">引擎总数</p>
@@ -610,8 +589,8 @@ export function Providers3DAdminView() {
               <Cpu className="h-4 w-4 text-violet-600" />
             </div>
           </div>
-        </Card>
-        <Card className="p-3">
+        </div>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] text-muted-foreground">运行中</p>
@@ -623,8 +602,8 @@ export function Providers3DAdminView() {
               <CheckCircle2 className="h-4 w-4 text-emerald-600" />
             </div>
           </div>
-        </Card>
-        <Card className="p-3">
+        </div>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] text-muted-foreground">维护中</p>
@@ -636,8 +615,8 @@ export function Providers3DAdminView() {
               <AlertTriangle className="h-4 w-4 text-amber-600" />
             </div>
           </div>
-        </Card>
-        <Card className="p-3">
+        </div>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] text-muted-foreground">累计生成</p>
@@ -649,8 +628,8 @@ export function Providers3DAdminView() {
               <TrendingUp className="h-4 w-4 text-sky-600" />
             </div>
           </div>
-        </Card>
-        <Card className="p-3">
+        </div>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] text-muted-foreground">平均质量</p>
@@ -662,21 +641,21 @@ export function Providers3DAdminView() {
               <Shield className="h-4 w-4 text-teal-600" />
             </div>
           </div>
-        </Card>
+        </div>
       </div>
 
       {/* 场景推荐 */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
+      <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+        <div className="flex flex-col space-y-1.5 p-6">
+          <h3 className="text-base font-semibold leading-none tracking-tight flex items-center gap-2">
             <Zap className="h-4 w-4 text-amber-500" />
             场景推荐引擎
-          </CardTitle>
-          <CardDescription className="text-xs">
+          </h3>
+          <p className="text-xs text-muted-foreground">
             根据使用场景智能推荐最佳引擎
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2">
+          </p>
+        </div>
+        <div className="space-y-2 p-6 pt-0">
           {Object.entries(RECOMMEND_BY_SCENE).map(([scene, providers]) => (
             <div
               key={scene}
@@ -720,8 +699,8 @@ export function Providers3DAdminView() {
               </div>
             </div>
           ))}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* 过滤器 */}
       <div className="flex items-center gap-3">
@@ -757,15 +736,15 @@ export function Providers3DAdminView() {
 
       {/* 引擎卡片网格 */}
       {filtered.length === 0 ? (
-        <Card>
-          <CardContent>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="p-6">
             <EmptyState
               icon={Cpu}
               title="无匹配引擎"
               description="尝试调整搜索条件"
             />
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((p) => (
@@ -798,17 +777,17 @@ export function Providers3DAdminView() {
 
       {/* 对比视图 */}
       {compareMode && compareProviders.length >= 2 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <div className="flex flex-col space-y-1.5 p-6">
+            <h3 className="text-base font-semibold leading-none tracking-tight flex items-center gap-2">
               <Layers className="h-4 w-4 text-violet-600" />
               引擎对比 ({compareProviders.length})
-            </CardTitle>
-            <CardDescription className="text-xs">
+            </h3>
+            <p className="text-xs text-muted-foreground">
               横向对比已选引擎的关键指标
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="overflow-x-auto">
+            </p>
+          </div>
+          <div className="overflow-x-auto p-6 pt-0">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b">
@@ -917,7 +896,7 @@ export function Providers3DAdminView() {
                   </td>
                   {compareProviders.map((p) => (
                     <td key={p.id} className="py-2 px-3 font-mono">
-                      {provider_cap_resolution(p)}px
+                      {p.capabilities.maxTextureResolution}px
                     </td>
                   ))}
                 </tr>
@@ -929,8 +908,8 @@ export function Providers3DAdminView() {
                         {p.capabilities.outputFormats.map((f) => (
                           <Badge
                             key={f}
-                            variant="outline"
-                            className="text-[9px] py-0 uppercase font-mono"
+                            color="default"
+                            className="!text-[9px] uppercase font-mono"
                           >
                             {f}
                           </Badge>
@@ -960,8 +939,8 @@ export function Providers3DAdminView() {
                 </tr>
               </tbody>
             </table>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       )}
 
       {/* 详情对话框 */}
@@ -972,8 +951,4 @@ export function Providers3DAdminView() {
       />
     </div>
   );
-}
-
-function provider_cap_resolution(p: Provider3DConfig): number {
-  return p.capabilities.maxTextureResolution;
 }

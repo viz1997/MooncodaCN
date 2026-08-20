@@ -546,6 +546,42 @@ export const generationModeEnum = pgEnum("generation_mode", [
   "upscaling",
 ]);
 
+/**
+ * 画布内置渠道生成任务状态枚举
+ *
+ * Phase 4 起，`/api/canvas/generate` 对 image/audio 改异步 send + 轮询，
+ * 任务状态持久化在本表里供前端 GET /api/canvas/poll/[jobId] 查。
+ *
+ * 状态机：
+ *   pending → processing → completed
+ *                    \    → failed
+ *
+ * - `pending`：路由已写 job 行、inngest.send 已发出，Inngest 函数还没接管
+ * - `processing`：Inngest 函数已 step.run("generate")，正在调上游 + R2
+ * - `completed`：items 已落库 + R2 永久 URL 已写入 result
+ * - `failed`：上游失败，积分已 refund，error 字段已写入
+ */
+export const canvasRemoteJobStatusEnum = pgEnum("canvas_remote_job_status", [
+  "pending",
+  "processing",
+  "completed",
+  "failed",
+]);
+
+/**
+ * 画布内置渠道 capability 枚举
+ *
+ * 与 `CanvasCapability` 类型（src/features/canvas/services/canvas-credit-cost.ts）
+ * 保持一致：image / video / audio / text。video 当前仍走 VIDEO_JOBS Map，本表预留；
+ * text 在 route 层 400 拒绝，本表预留。
+ */
+export const canvasRemoteCapabilityEnum = pgEnum("canvas_remote_capability", [
+  "image",
+  "video",
+  "audio",
+  "text",
+]);
+
 // ============================================
 // 照片表 (Photo)
 // ============================================
@@ -1016,6 +1052,70 @@ export type PromptOrderHistoryTrigger =
   (typeof promptOrderHistoryTriggerEnum.enumValues)[number];
 
 // ============================================
+// 画布内置渠道生成任务表 (CanvasRemoteJob)
+// ============================================
+//
+// Phase 4 起 `/api/canvas/generate` 对 image/audio 走 Inngest send + 轮询，
+// job 状态持久化在本表里。video 仍走 VIDEO_JOBS Map（向后兼容），
+// 后续可统一迁过来。
+//
+// 设计要点：
+// - payload 存完整 `CanvasRemoteGenerateInput`（含 references/mask data URL）
+//   Inngest 函数直接拿 payload 调 generateOnServerSync，无需再回前端取
+// - result 存 `{url, storageKey, mimeType, bytes}[]`，前端 poll 拿到后直接渲染
+// - creditsConsumed + transactionId 由 Inngest 函数写回（与 generateOnServerSync
+//   的 consumeCredits 返回值对齐），失败时由 service 内的 safeRefund 兜底，
+//   本表只记"花出去了多少"用于审计
+// - error 字段存失败原因（最多 1000 字符）
+// - `providerJobId` 预留：video 若迁过来存 OpenAI `/v1/videos` 返的 id；当前 image
+//   不用
+// - `inngestEventId` 预留：用于 reconcile cron 排查"事件已发但函数没跑"的情况
+
+export const canvasRemoteJob = pgTable(
+  "canvas_remote_job",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    capability: canvasRemoteCapabilityEnum("capability").notNull(),
+    mode: text("mode").notNull(), // "generation" | "edit" | "text"
+    payload: json("payload").$type<unknown>().notNull(),
+    status: canvasRemoteJobStatusEnum("status").notNull().default("pending"),
+    result:
+      json("result").$type<
+        Array<{
+          url: string;
+          storageKey: string;
+          mimeType: string;
+          width?: number;
+          height?: number;
+          bytes: number;
+        }>
+      >(),
+    error: text("error"),
+    creditsConsumed: integer("credits_consumed"),
+    transactionId: text("transaction_id"),
+    providerJobId: text("provider_job_id"),
+    inngestEventId: text("inngest_event_id"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    completedAt: timestamp("completed_at"),
+  },
+  (t) => [
+    index("crj_user_created_idx").on(t.userId, t.createdAt),
+    index("crj_status_idx").on(t.status),
+  ]
+);
+
+export type CanvasRemoteJob = typeof canvasRemoteJob.$inferSelect;
+export type NewCanvasRemoteJob = typeof canvasRemoteJob.$inferInsert;
+export type CanvasRemoteJobStatus =
+  (typeof canvasRemoteJobStatusEnum.enumValues)[number];
+export type CanvasRemoteCapability =
+  (typeof canvasRemoteCapabilityEnum.enumValues)[number];
+
+// ============================================
 // Better Auth 关联关系（启用 experimental.joins 后必填）
 // ============================================
 //
@@ -1033,6 +1133,7 @@ export const userRelations = relations(user, ({ many }) => ({
   creditsTransactions: many(creditsTransaction),
   photos: many(photo),
   imageJobs: many(imageJob),
+  canvasRemoteJobs: many(canvasRemoteJob),
   tickets: many(ticket),
   ticketMessages: many(ticketMessage),
 }));
@@ -1080,6 +1181,16 @@ export const promptOrderHistoryRelations = relations(
     order: one(promptOrder, {
       fields: [promptOrderHistory.orderId],
       references: [promptOrder.id],
+    }),
+  })
+);
+
+export const canvasRemoteJobRelations = relations(
+  canvasRemoteJob,
+  ({ one }) => ({
+    user: one(user, {
+      fields: [canvasRemoteJob.userId],
+      references: [user.id],
     }),
   })
 );

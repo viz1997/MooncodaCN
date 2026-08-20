@@ -1,20 +1,13 @@
 "use client";
 
+import { Avatar, Button, Divider, Drawer, Popover } from "antd";
 import { ChevronsUpDown, LogOut, Settings } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useAction } from "next-safe-action/hooks";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { Separator } from "@/components/ui/separator";
-import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { dashboardConfig } from "@/config";
 import { CreditBalanceBadge } from "@/features/credits/components";
 import { useSidebar } from "@/features/dashboard/context";
@@ -37,6 +30,11 @@ import { cn } from "@/lib/utils";
  * - 设置入口
  * - 登出功能
  * - 支持折叠/展开
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 2.1）
+ * - Avatar/Popover/Sheet/Separator 切到 antd
+ * - Popover content 用受控 open 状态
+ * - Sheet → antd Drawer（placement="left"）
  */
 export function DashboardSidebar() {
   const pathname = usePathname();
@@ -49,9 +47,6 @@ export function DashboardSidebar() {
   const { data: session } = useSession();
   const user = session?.user;
   const userRole = (user as { role?: string } | undefined)?.role;
-
-  // Popover 开关状态
-  const [open, setOpen] = useState(false);
 
   // 获取用户订阅计划
   const { execute: fetchPlan, result: planResult } = useAction(getMyPlanAction);
@@ -71,12 +66,15 @@ export function DashboardSidebar() {
     const titleMap: Record<string, string> = {
       Dashboard: t("nav.dashboard"),
       Generate: t("nav.generate"),
+      "Generate V2": t("nav.generateV2"),
       "Public Image Gen": t("nav.publicImageGen"),
-      Photos: t("nav.photos"),
       Effects: t("nav.effects"),
       Models: t("nav.models"),
       Credits: t("nav.credits"),
       Orders: t("nav.orders"),
+      Canvas: t("nav.canvas"),
+      "Prompt Library": t("nav.promptLibrary"),
+      "My Assets": t("nav.myAssets"),
       Settings: t("nav.settings"),
       Support: t("nav.support"),
       "New Ticket": t("nav.newTicket"),
@@ -102,7 +100,6 @@ export function DashboardSidebar() {
    * 处理登出
    */
   const handleSignOut = async () => {
-    setOpen(false);
     await signOut({
       fetchOptions: {
         onSuccess: () => {
@@ -116,7 +113,6 @@ export function DashboardSidebar() {
    * 处理设置点击
    */
   const handleSettingsClick = () => {
-    setOpen(false);
     router.push("/dashboard/settings");
   };
 
@@ -143,6 +139,7 @@ export function DashboardSidebar() {
               }
             }}
           >
+            {/* biome-ignore lint/performance/noImgElement: 静态 logo，不需要 next/image 优化 */}
             <img src="/logo.svg" alt="Mooncoda" className="h-6 w-6 shrink-0" />
             <span
               className={cn(
@@ -209,101 +206,93 @@ export function DashboardSidebar() {
         {/* 用户信息区域 */}
         <div className="border-t border-sidebar-border p-3">
           {user ? (
-            <Popover open={open} onOpenChange={setOpen}>
-              <PopoverTrigger asChild>
-                <button
-                  type="button"
-                  className={cn(
-                    "flex w-full items-center gap-3 rounded-md px-2 py-1.5 hover:bg-sidebar-accent/50 transition-colors",
-                    collapsed && "justify-center px-0"
-                  )}
-                >
-                  <Avatar className="h-8 w-8 shrink-0">
-                    <AvatarImage
+            <Popover
+              trigger="click"
+              placement="topRight"
+              content={
+                <div className="w-64">
+                  {/* 用户信息头部 */}
+                  <div className="flex items-center gap-3 p-4">
+                    <Avatar
                       src={user.image || undefined}
                       alt={user.name}
-                    />
-                    <AvatarFallback className="bg-primary text-primary-foreground text-xs">
+                      size={40}
+                      className="shrink-0 bg-primary text-primary-foreground"
+                    >
                       {getInitials(user.name)}
-                    </AvatarFallback>
-                  </Avatar>
-                  {!collapsed && (
-                    <>
-                      <div className="flex-1 truncate text-left">
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm font-medium">{user.name}</p>
-                          <CreditBalanceBadge />
-                        </div>
-                        <p className="truncate text-xs text-muted-foreground">
-                          {user.email}
-                        </p>
+                    </Avatar>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="truncate font-medium">{user.name}</p>
+                        <PlanBadge plan={userPlan} size="xs" />
                       </div>
-                      <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
-                    </>
-                  )}
-                </button>
-              </PopoverTrigger>
-
-              <PopoverContent
-                side="top"
-                align="start"
-                sideOffset={8}
-                className="w-64 p-0"
-              >
-                {/* 用户信息头部 */}
-                <div className="flex items-center gap-3 p-4">
-                  <Avatar className="h-10 w-10">
-                    <AvatarImage
-                      src={user.image || undefined}
-                      alt={user.name}
-                    />
-                    <AvatarFallback className="bg-primary text-primary-foreground">
-                      {getInitials(user.name)}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1 truncate">
-                    <div className="flex items-center gap-2">
-                      <p className="font-medium">{user.name}</p>
-                      <PlanBadge plan={userPlan} size="xs" />
+                      <p className="truncate text-sm text-muted-foreground">
+                        {user.email}
+                      </p>
                     </div>
-                    <p className="truncate text-sm text-muted-foreground">
-                      {user.email}
-                    </p>
+                  </div>
+
+                  <Divider className="!my-0" />
+
+                  {/* 主题切换 */}
+                  <div className="flex items-center justify-center p-3">
+                    <ModeToggle variant="inline" />
+                  </div>
+
+                  <Divider className="!my-0" />
+
+                  {/* 菜单项 */}
+                  <div className="p-2">
+                    <Button
+                      type="text"
+                      block
+                      onClick={handleSettingsClick}
+                      icon={<Settings className="h-4 w-4" />}
+                    >
+                      {t("sidebar.settings")}
+                    </Button>
+                    <Button
+                      type="text"
+                      block
+                      onClick={handleSignOut}
+                      icon={<LogOut className="h-4 w-4" />}
+                    >
+                      {t("sidebar.logout")}
+                    </Button>
                   </div>
                 </div>
-
-                <Separator />
-
-                {/* 主题切换 - 使用共享 ModeToggle 组件 */}
-                <div className="flex items-center justify-center p-3">
-                  <ModeToggle variant="inline" />
-                </div>
-
-                <Separator />
-
-                {/* 菜单项 */}
-                <div className="p-2">
-                  {/* 设置 */}
-                  <button
-                    type="button"
-                    onClick={handleSettingsClick}
-                    className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted transition-colors"
-                  >
-                    <Settings className="h-4 w-4" />
-                    {t("sidebar.settings")}
-                  </button>
-
-                  {/* 登出 */}
-                  <button
-                    type="button"
-                    onClick={handleSignOut}
-                    className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted transition-colors"
-                  >
-                    <LogOut className="h-4 w-4" />
-                    {t("sidebar.logout")}
-                  </button>
-                </div>
-              </PopoverContent>
+              }
+            >
+              <button
+                type="button"
+                className={cn(
+                  "flex w-full items-center gap-3 rounded-md px-2 py-1.5 hover:bg-sidebar-accent/50 transition-colors",
+                  collapsed && "justify-center px-0"
+                )}
+              >
+                <Avatar
+                  src={user.image || undefined}
+                  alt={user.name}
+                  size={32}
+                  className="shrink-0 bg-primary text-primary-foreground"
+                >
+                  {getInitials(user.name)}
+                </Avatar>
+                {!collapsed && (
+                  <>
+                    <div className="flex-1 truncate text-left">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium">{user.name}</p>
+                        <CreditBalanceBadge />
+                      </div>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {user.email}
+                      </p>
+                    </div>
+                    <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
+                  </>
+                )}
+              </button>
             </Popover>
           ) : (
             // 加载状态
@@ -339,18 +328,18 @@ export function DashboardSidebar() {
         {renderSidebarContent(false)}
       </aside>
 
-      {/* 移动端 Sheet 侧边栏 */}
-      <Sheet open={isMobileOpen} onOpenChange={setMobileOpen}>
-        <SheetContent
-          side="left"
-          className="w-64 bg-sidebar p-0 md:hidden [&>button:last-child]:hidden"
-        >
-          <SheetTitle className="sr-only">Navigation</SheetTitle>
-          <div className="flex h-full flex-col">
-            {renderSidebarContent(true)}
-          </div>
-        </SheetContent>
-      </Sheet>
+      {/* 移动端 Drawer 侧边栏 */}
+      <Drawer
+        open={isMobileOpen}
+        onClose={() => setMobileOpen(false)}
+        placement="left"
+        width={256}
+        rootClassName="md:hidden"
+        closable={false}
+        title={null}
+      >
+        <div className="flex h-full flex-col">{renderSidebarContent(true)}</div>
+      </Drawer>
     </>
   );
 }

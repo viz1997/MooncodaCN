@@ -1,12 +1,13 @@
 import { and, eq, isNotNull, lt } from "drizzle-orm";
 
 import { db } from "@/db";
-import { imageJob } from "@/db/schema";
+import { canvasRemoteJob, imageJob } from "@/db/schema";
+import { generateOnServerSync } from "@/features/canvas/services/canvas-server-generate";
+import { submitGeneration } from "@/features/gpt-image/lib/generation-service";
 import {
   dispatchImageGenerationJob,
   updateImageJobFromTaskResult,
 } from "@/features/image-gen/lib/generation-service";
-import { submitGeneration } from "@/features/gpt-image/lib/generation-service";
 import { logger } from "@/lib/logger";
 
 import { inngest } from "./client";
@@ -196,6 +197,114 @@ export const submitImageGenJob = inngest.createFunction(
 );
 
 /**
+ * 画布内置渠道 image / audio 异步生成入口。
+ *
+ * 调用链路：
+ *   POST /api/canvas/generate (image / audio)
+ *     → 写 canvasRemoteJob 行 (status=pending) + inngest.send
+ *     → 立即返 202 + jobId
+ *
+ *   Inngest 云端：
+ *     canvasRemoteGenerateJob → generateOnServerSync(payload)
+ *     → **image / audio 不消耗积分**（产品决策 2026-08-20），video 在 createVideoOnServer 内 pre-consume
+ *     → image edit（有 references + Lingting 已配）走 Lingting/WellAPI
+ *       submitLingtingTask → 同步 url 立即落 R2 / taskId 轮询直到 done
+ *     → 其他 image 场景（text-to-image / Lingting 未配）走 OpenAI SDK
+ *       imageGeneration / imageEdit
+ *     → audio 仍走 OpenAI SDK audioSpeech（TTS wellapi 没提供）
+ *     → 所有结果 fetchToBuffer → R2 putObject → 返 items
+ *     → 把 items / creditsConsumed (始终 0) / transactionId (始终 "") 写回 canvasRemoteJob
+ *
+ *   [失败]
+ *     image / audio 不消耗积分 → 无 refund；video 路径 generateOnServerSync 仍负责 pre-consume + safeRefund
+ *     本函数只负责把错误信息写到 canvasRemoteJob.error 字段
+ *
+ * 与 gpt-image submitGenerationJob / image-gen submitImageGenJob 同语义：
+ * 把"submit 撞 Vercel 函数预算"的风险从 HTTP 路径挪到 Inngest cloud。
+ *
+ * retries: 0 —— 上游（Lingting / OpenAI）无幂等键，重试会重复扣积分（视频路径仍受影响）。
+ *
+ * 2026-08-20：image edit 路径改走 Lingting/WellAPI。原因：用户网络下
+ * OpenAI SDK 直连撞 undici connectTimeout 10s × 3 ≈ 38s 抛
+ * APIConnectionTimeoutError；Lingting 走 HTTPS multipart，connect 是
+ * 一次握手后流式上传 + 后台轮询，不受该 timeout 链路影响（与
+ * image-gen 工作台 gptImage2Adapter 同语义）。
+ *
+ * 2026-08-20：image / audio 路径取消积分扣减。内置渠道 = 用户带
+ * key 平台代付，不扣用户积分；video 路径（OpenAI /v1/videos）保持
+ * pre-consume + refund 不变。
+ */
+export const canvasRemoteGenerateJob = inngest.createFunction(
+  {
+    id: "canvas-remote-generate",
+    retries: 0,
+  },
+  { event: "canvas/remote-generate" },
+  async ({ event, step }) => {
+    const { jobId, userId, payload } = event.data;
+    await step.run("generate", async () => {
+      logger.info(
+        { jobId, userId, capability: payload.capability, mode: payload.mode },
+        "Inngest: 开始画布内置渠道生成"
+      );
+      // 1. 标记 processing
+      await db
+        .update(canvasRemoteJob)
+        .set({ status: "processing", updatedAt: new Date() })
+        .where(eq(canvasRemoteJob.id, jobId));
+
+      try {
+        // 2. 调 service —— image / audio 不消耗积分；video 路径内部仍 pre-consume + safeRefund
+        const result = await generateOnServerSync({
+          ...payload,
+          userId,
+        });
+        // 3. 写回 result（image / audio：creditsConsumed=0、transactionId=""）
+        await db
+          .update(canvasRemoteJob)
+          .set({
+            status: "completed",
+            result: result.items,
+            creditsConsumed: result.creditsConsumed,
+            transactionId: result.transactionId,
+            completedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(canvasRemoteJob.id, jobId));
+        logger.info(
+          {
+            jobId,
+            capability: result.capability,
+            itemCount: result.items.length,
+            creditsConsumed: result.creditsConsumed,
+          },
+          "Inngest: 画布内置渠道生成完成"
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "未知错误";
+        // 失败：image / audio 不消耗积分（无 refund）；video 路径 service 内部已 safeRefund
+        await db
+          .update(canvasRemoteJob)
+          .set({
+            status: "failed",
+            error: message.slice(0, 1000),
+            updatedAt: new Date(),
+            completedAt: new Date(),
+          })
+          .where(eq(canvasRemoteJob.id, jobId));
+        logger.error(
+          { jobId, userId, err },
+          "Inngest: 画布内置渠道生成失败（image/audio 不扣积分；video 已 refund）"
+        );
+        // 不 rethrow —— 失败已持久化，让前端轮询能拿到 failed 状态
+        // 若 rethrow，Inngest 会记 run failed，但 canvasRemoteJob 行已经
+        // 是 failed，前端轮询仍能正确处理；为简化监控日志，这里 swallow。
+      }
+    });
+  }
+);
+
+/**
  * 导出所有 Inngest 函数
  * 在 src/app/api/inngest/route.ts 中注册
  *
@@ -214,10 +323,15 @@ export const submitImageGenJob = inngest.createFunction(
  * 2026-08-17 引入 submitImageGenJob：把工作台的 generateImageAction 也
  * 改成 Inngest send → 202 异步 submit，与 /p/[token] /upload 路由的
  * triggerSubmit 模式对齐。
+ *
+ * 2026-08-20 引入 canvasRemoteGenerateJob：/api/canvas/generate 的
+ * image/audio 同步阻塞（gpt-image-2 单图 30-90s）撞 Vercel maxDuration，
+ * 改为 Inngest 异步 send + 前端轮询 /api/canvas/poll/[jobId]。
  */
 export const functions = [
   helloWorld,
   submitGenerationJob,
   reconcileStaleJobs,
   submitImageGenJob,
+  canvasRemoteGenerateJob,
 ];

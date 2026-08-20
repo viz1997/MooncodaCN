@@ -6,16 +6,16 @@
  * Settings > Security Tab 的主要内容
  * 包含:
  * - 修改密码
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 2.4）
+ * - shadcn Button/Input/Label 切到 antd
+ * - 用 antd Alert 显示错误（替代纯文本）
  */
 
-import { Eye, EyeOff } from "lucide-react";
+import { Alert, App, Button, Input } from "antd";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { toast } from "sonner";
 
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { changePassword } from "@/lib/auth/client";
 
 /**
@@ -23,11 +23,11 @@ import { changePassword } from "@/lib/auth/client";
  */
 export function SecuritySection() {
   const t = useTranslations("Settings.security");
+  const { message } = App.useApp();
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [showPasswords, setShowPasswords] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,7 +57,7 @@ export function SecuritySection() {
     try {
       setIsLoading(true);
       await changePassword(currentPassword, newPassword);
-      toast.success(t("success"));
+      message.success(t("success"));
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
@@ -82,10 +82,12 @@ export function SecuritySection() {
             </p>
           </div>
           <Button
-            size="sm"
+            type="primary"
+            size="small"
             disabled={
               isLoading || !currentPassword || !newPassword || !confirmPassword
             }
+            loading={isLoading}
             onClick={handleChangePassword}
           >
             {isLoading
@@ -94,44 +96,35 @@ export function SecuritySection() {
           </Button>
         </div>
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && (
+          <Alert type="error" message={error} showIcon className="!text-sm" />
+        )}
 
         <div className="max-w-md space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="current-password">
+            <label
+              htmlFor="current-password"
+              className="text-sm font-medium leading-none"
+            >
               {t("changePassword.currentPassword")}
-            </Label>
-            <div className="relative">
-              <Input
-                id="current-password"
-                type={showPasswords ? "text" : "password"}
-                placeholder={t("changePassword.currentPasswordPlaceholder")}
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                disabled={isLoading}
-                className="pr-10"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPasswords(!showPasswords)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                tabIndex={-1}
-              >
-                {showPasswords ? (
-                  <EyeOff className="h-4 w-4" />
-                ) : (
-                  <Eye className="h-4 w-4" />
-                )}
-              </button>
-            </div>
+            </label>
+            <Input.Password
+              id="current-password"
+              placeholder={t("changePassword.currentPasswordPlaceholder")}
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              disabled={isLoading}
+            />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="new-password">
+            <label
+              htmlFor="new-password"
+              className="text-sm font-medium leading-none"
+            >
               {t("changePassword.newPassword")}
-            </Label>
-            <Input
+            </label>
+            <Input.Password
               id="new-password"
-              type={showPasswords ? "text" : "password"}
               placeholder={t("changePassword.newPasswordPlaceholder")}
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
@@ -139,12 +132,14 @@ export function SecuritySection() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="confirm-password">
+            <label
+              htmlFor="confirm-password"
+              className="text-sm font-medium leading-none"
+            >
               {t("changePassword.confirmPassword")}
-            </Label>
-            <Input
+            </label>
+            <Input.Password
               id="confirm-password"
-              type={showPasswords ? "text" : "password"}
               placeholder={t("changePassword.confirmPasswordPlaceholder")}
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}

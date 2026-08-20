@@ -10,8 +10,16 @@
  * - 新建对话框：生成新 Key，默认配额 100/月
  *
  * 数据为前端 mock（MOCK_EXTERNAL_API_KEYS），后端接入留后续阶段
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 3.3）
+ * - shadcn Card/CardContent/CardHeader/CardTitle/CardDescription 切到内联 div（保留 rounded-lg + border + bg-card + shadow）
+ * - shadcn Badge 切到 antd Badge 或 div（带语义色）
+ * - shadcn Button 切到 antd Button（variant 映射：outline→default, ghost→text）
+ * - shadcn Dialog 切到 antd Modal（footer 数组）
+ * - shadcn useToast 切到 antd App.useApp().message
  */
 
+import { App, Badge, Button, Modal } from "antd";
 import {
   Activity,
   AlertCircle,
@@ -29,26 +37,8 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { MOCK_EXTERNAL_API_KEYS } from "@/features/image-gen/lib/external-api-keys-mock";
 import type { ExternalApiKey } from "@/features/image-gen/lib/external-api-keys-types";
-import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
 const QUOTA_BAR_RED = 1;
@@ -91,7 +81,7 @@ function computeQuota(monthlyCalls: number, monthlyQuota: number): QuotaStat {
 }
 
 export function ExternalApiKeysAdminView() {
-  const { toast } = useToast();
+  const { message } = App.useApp();
   const [apiKeys, setApiKeys] = useState<ExternalApiKey[]>(
     MOCK_EXTERNAL_API_KEYS
   );
@@ -110,7 +100,7 @@ export function ExternalApiKeysAdminView() {
     if (typeof navigator !== "undefined" && navigator.clipboard) {
       navigator.clipboard.writeText(key).catch(() => {});
     }
-    toast({ title: "已复制 API Key" });
+    message.success("已复制 API Key");
   };
 
   const handleToggleStatus = (k: ExternalApiKey) => {
@@ -125,10 +115,7 @@ export function ExternalApiKeysAdminView() {
           : x
       )
     );
-    toast({
-      title: nextStatus === "active" ? "已启用" : "已禁用",
-      description: k.name,
-    });
+    message.success(nextStatus === "active" ? "已启用" : "已禁用");
   };
 
   const handleCreate = () => {
@@ -150,16 +137,12 @@ export function ExternalApiKeysAdminView() {
     };
     setApiKeys((prev) => [newKey, ...prev]);
     setCreateOpen(false);
-    toast({ title: "API Key 已创建", description: newKey.name });
+    message.success(`API Key 已创建 · ${newKey.name}`);
   };
 
   const handleDelete = (k: ExternalApiKey) => {
     setApiKeys((prev) => prev.filter((x) => x.id !== k.id));
-    toast({
-      title: "已删除",
-      description: k.name,
-      variant: "destructive",
-    });
+    message.success(`已删除 · ${k.name}`);
   };
 
   const openPublicPage = () => {
@@ -182,23 +165,26 @@ export function ExternalApiKeysAdminView() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={openPublicPage}>
-            <ExternalLink className="h-4 w-4 mr-1.5" />
+          <Button
+            onClick={openPublicPage}
+            icon={<ExternalLink className="h-4 w-4" />}
+          >
             打开外部生图页面
           </Button>
           <Button
+            type="primary"
             onClick={() => setCreateOpen(true)}
-            className="bg-gradient-to-r from-violet-500 to-purple-600"
+            className="bg-gradient-to-r from-violet-500 to-purple-600 border-0"
+            icon={<Plus className="h-4 w-4" />}
           >
-            <Plus className="h-4 w-4 mr-1.5" />
             新建 API Key
           </Button>
         </div>
       </div>
 
       {/* 外部页面预览卡片 */}
-      <Card className="overflow-hidden border-violet-500/20 bg-gradient-to-br from-violet-500/5 to-purple-500/5">
-        <CardContent className="p-5">
+      <div className="rounded-lg border border-violet-500/20 bg-gradient-to-br from-violet-500/5 to-purple-500/5 text-card-foreground shadow-sm overflow-hidden">
+        <div className="p-5">
           <div className="flex items-start gap-4">
             <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white shrink-0">
               <Globe className="h-6 w-6" />
@@ -206,10 +192,7 @@ export function ExternalApiKeysAdminView() {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1">
                 <h3 className="text-sm font-bold">外部生图页面</h3>
-                <Badge
-                  variant="outline"
-                  className="text-[10px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20"
-                >
+                <Badge color="green" className="!text-[10px]">
                   <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" />
                   已部署
                 </Badge>
@@ -223,9 +206,9 @@ export function ExternalApiKeysAdminView() {
                   /image-gen
                 </code>
                 <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-6 text-xs"
+                  size="small"
+                  type="text"
+                  className="!h-6 !text-xs"
                   onClick={openPublicPage}
                 >
                   访问页面 <ExternalLink className="h-3 w-3 ml-1" />
@@ -251,12 +234,12 @@ export function ExternalApiKeysAdminView() {
               </div>
             ))}
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* 统计卡片 */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <Card className="p-3">
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] text-muted-foreground">API Key 总数</p>
@@ -266,8 +249,8 @@ export function ExternalApiKeysAdminView() {
               <Key className="h-4 w-4 text-violet-600" />
             </div>
           </div>
-        </Card>
-        <Card className="p-3">
+        </div>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] text-muted-foreground">启用中</p>
@@ -279,8 +262,8 @@ export function ExternalApiKeysAdminView() {
               <CheckCircle2 className="h-4 w-4 text-emerald-600" />
             </div>
           </div>
-        </Card>
-        <Card className="p-3">
+        </div>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] text-muted-foreground">累计调用</p>
@@ -292,8 +275,8 @@ export function ExternalApiKeysAdminView() {
               <Activity className="h-4 w-4 text-sky-600" />
             </div>
           </div>
-        </Card>
-        <Card className="p-3">
+        </div>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] text-muted-foreground">本月调用</p>
@@ -305,8 +288,8 @@ export function ExternalApiKeysAdminView() {
               <TrendingUp className="h-4 w-4 text-amber-600" />
             </div>
           </div>
-        </Card>
-        <Card className="p-3">
+        </div>
+        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] text-muted-foreground">累计成本</p>
@@ -318,21 +301,21 @@ export function ExternalApiKeysAdminView() {
               <DollarSign className="h-4 w-4 text-rose-600" />
             </div>
           </div>
-        </Card>
+        </div>
       </div>
 
       {/* API Key 列表 */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
+      <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+        <div className="flex flex-col space-y-1.5 p-6">
+          <h3 className="text-base font-semibold leading-none tracking-tight flex items-center gap-2">
             <Key className="h-4 w-4 text-violet-600" />
             API Key 管理
-          </CardTitle>
-          <CardDescription className="text-xs">
+          </h3>
+          <p className="text-xs text-muted-foreground">
             每个 Key 对应一个外部客户，可独立配置配额与权限
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="p-0">
+          </p>
+        </div>
+        <div className="p-0">
           {apiKeys.length === 0 ? (
             <div className="p-12 flex flex-col items-center justify-center text-center text-muted-foreground">
               <Key className="h-10 w-10 mb-3" />
@@ -467,8 +450,8 @@ export function ExternalApiKeysAdminView() {
                           {k.allowedMasks.map((m) => (
                             <Badge
                               key={m}
-                              variant="outline"
-                              className="text-[9px] font-mono py-0"
+                              color="default"
+                              className="!text-[9px] font-mono"
                             >
                               {m}
                             </Badge>
@@ -479,21 +462,21 @@ export function ExternalApiKeysAdminView() {
                       {/* 操作按钮 */}
                       <div className="flex flex-col gap-1 shrink-0">
                         <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 text-xs"
+                          size="small"
+                          type="text"
+                          className="!h-7 !text-xs"
                           onClick={() => handleToggleStatus(k)}
                         >
                           {k.status === "active" ? "禁用" : "启用"}
                         </Button>
                         <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 text-xs text-rose-600 hover:text-rose-700"
+                          size="small"
+                          type="text"
+                          danger
+                          className="!h-7 !text-xs"
                           onClick={() => handleDelete(k)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
+                          icon={<Trash2 className="h-3.5 w-3.5" />}
+                        />
                       </div>
                     </div>
                   </div>
@@ -501,44 +484,44 @@ export function ExternalApiKeysAdminView() {
               })}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* 创建对话框（简化版，直接创建） */}
-      <Dialog
+      <Modal
         open={createOpen}
-        onOpenChange={(open) => !open && setCreateOpen(false)}
+        onCancel={() => setCreateOpen(false)}
+        title={
+          <span className="flex items-center gap-2">
+            <Plus className="h-4 w-4 text-violet-600" />
+            新建 API Key
+          </span>
+        }
+        footer={[
+          <Button key="cancel" onClick={() => setCreateOpen(false)}>
+            取消
+          </Button>,
+          <Button
+            key="confirm"
+            type="primary"
+            onClick={handleCreate}
+            className="bg-gradient-to-r from-violet-500 to-purple-600 border-0"
+          >
+            确认创建
+          </Button>,
+        ]}
       >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Plus className="h-4 w-4 text-violet-600" />
-              新建 API Key
-            </DialogTitle>
-            <DialogDescription>
-              将创建一个新的 API Key，默认配额 100 次/月，允许使用 MASK_001 和
-              MASK_002 效果。创建后可在详情中调整。
-            </DialogDescription>
-          </DialogHeader>
-          <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3 flex items-start gap-2">
-            <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-            <p className="text-xs text-muted-foreground">
-              提示：创建后可在 API Key 列表查看与编辑详细信息。
-            </p>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCreateOpen(false)}>
-              取消
-            </Button>
-            <Button
-              className="bg-gradient-to-r from-violet-500 to-purple-600"
-              onClick={handleCreate}
-            >
-              确认创建
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        <p className="text-sm text-muted-foreground mb-3">
+          将创建一个新的 API Key，默认配额 100 次/月，允许使用 MASK_001 和
+          MASK_002 效果。创建后可在详情中调整。
+        </p>
+        <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3 flex items-start gap-2">
+          <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+          <p className="text-xs text-muted-foreground">
+            提示：创建后可在 API Key 列表查看与编辑详细信息。
+          </p>
+        </div>
+      </Modal>
     </div>
   );
 }

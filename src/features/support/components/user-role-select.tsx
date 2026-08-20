@@ -1,18 +1,21 @@
 "use client";
 
-import { Loader2 } from "lucide-react";
+/**
+ * 用户角色选择组件
+ *
+ * 管理员可以通过此组件修改用户角色
+ *
+ * 2026-08-20：shadcn → antd 迁移（Phase 2.5）
+ * - shadcn Select/Badge 切到 antd
+ * - toast 切到 App.useApp().message
+ * - 加载中显示 spinner + 文案（不再渲染 Select）
+ */
+
+import { App, Badge, Select } from "antd";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+
 import { updateUserRoleAction } from "@/features/support/actions";
 
 interface UserRoleSelectProps {
@@ -22,20 +25,20 @@ interface UserRoleSelectProps {
   currentRole: "user" | "admin";
 }
 
-/**
- * 用户角色选择组件
- *
- * 管理员可以通过此组件修改用户角色
- */
+type UserRole = "user" | "admin";
+
+const ROLE_CONFIG: Record<UserRole, { color: string }> = {
+  user: { color: "default" },
+  admin: { color: "red" },
+};
+
 export function UserRoleSelect({ userId, currentRole }: UserRoleSelectProps) {
   const router = useRouter();
   const t = useTranslations("Support");
+  const { message } = App.useApp();
   const [isLoading, setIsLoading] = useState(false);
-  const [role, setRole] = useState(currentRole);
+  const [role, setRole] = useState<UserRole>(currentRole);
 
-  /**
-   * 处理角色变更
-   */
   const handleRoleChange = async (newRole: string) => {
     if (newRole === role) return;
 
@@ -44,72 +47,49 @@ export function UserRoleSelect({ userId, currentRole }: UserRoleSelectProps) {
     try {
       const result = await updateUserRoleAction({
         userId,
-        role: newRole as "user" | "admin",
+        role: newRole as UserRole,
       });
 
       if (result?.data) {
-        toast.success(result.data.message);
-        setRole(newRole as "user" | "admin");
+        message.success(result.data.message);
+        setRole(newRole as UserRole);
         router.refresh();
       } else if (result?.serverError) {
-        toast.error(result.serverError);
+        message.error(result.serverError);
       }
     } catch (error) {
-      toast.error(t("roleUpdateFailed"));
+      message.error(t("roleUpdateFailed"));
       console.error(error);
     } finally {
       setIsLoading(false);
     }
   };
 
-  // 显示当前角色的徽章样式
-  const getRoleBadge = (r: string) => {
-    if (r === "admin") {
-      return (
-        <Badge className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300">
-          管理员
-        </Badge>
-      );
-    }
-    return (
-      <Badge
-        variant="secondary"
-        className="bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300"
-      >
-        普通用户
-      </Badge>
-    );
-  };
+  const renderBadge = (value: UserRole) => (
+    <Badge color={ROLE_CONFIG[value].color} className="!text-xs">
+      {value === "admin" ? t("admin") : t("user")}
+    </Badge>
+  );
 
   if (isLoading) {
     return (
-      <div className="flex items-center gap-2">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        <span className="text-sm text-muted-foreground"> {t("updating")}</span>
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-r-transparent" />
+        {t("updating")}
       </div>
     );
   }
 
   return (
-    <Select value={role} onValueChange={handleRoleChange}>
-      <SelectTrigger className="w-[120px]">
-        <SelectValue>{getRoleBadge(role)}</SelectValue>
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="user">
-          <Badge
-            variant="secondary"
-            className="bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300"
-          >
-            {t("user")}
-          </Badge>
-        </SelectItem>
-        <SelectItem value="admin">
-          <Badge className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300">
-            {t("admin")}
-          </Badge>
-        </SelectItem>
-      </SelectContent>
-    </Select>
+    <Select
+      value={role}
+      onChange={handleRoleChange}
+      style={{ width: 120 }}
+      options={(["user", "admin"] as const).map((value) => ({
+        value,
+        label: renderBadge(value),
+      }))}
+      labelRender={(props) => renderBadge(props.value as UserRole)}
+    />
   );
 }
