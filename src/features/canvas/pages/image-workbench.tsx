@@ -49,6 +49,7 @@ import localforage from "localforage";
 import {
   ArrowLeft,
   ArrowRight,
+  BookOpen,
   BookmarkPlus,
   CheckSquare,
   ClipboardPaste,
@@ -68,7 +69,9 @@ import { nanoid } from "nanoid";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AppConfigModal } from "@/features/canvas/components/layout/app-config-modal";
+import { AssetPickerModal } from "@/features/canvas/components/canvas/asset-picker-modal";
 import { ModelPicker } from "@/features/canvas/components/model-picker/model-picker";
+import { PromptSelectDialog } from "@/features/canvas/components/prompts/prompt-select-dialog";
 import {
   ImageSettingsPanel,
   imageQualityLabel,
@@ -173,6 +176,8 @@ export function ImageWorkbench() {
   const [logsOpen, setLogsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [savePromptOpen, setSavePromptOpen] = useState(false);
+  const [promptLibraryOpen, setPromptLibraryOpen] = useState(false);
+  const [assetPickerOpen, setAssetPickerOpen] = useState(false);
   const [startedAt, setStartedAt] = useState(0);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
@@ -259,6 +264,39 @@ export function ImageWorkbench() {
     }
   };
 
+  /**
+   * 资产库插入 —— 当前只消费 image 类型（text/video 不适合作为生图参考图）。
+   * 与 addReferencesFromClipboard 行为对齐：拿到 dataUrl + 可选 storageKey，
+   * 灌进 references 列表。重复 id 由 setReferences 的 filter 逻辑保证不重复。
+   */
+  const handleInsertAsset = (
+    payload:
+      | { kind: "text"; content: string; title: string }
+      | { kind: "image"; dataUrl: string; title: string; storageKey?: string }
+      | {
+          kind: "video";
+          url: string;
+          title: string;
+          storageKey?: string;
+          width?: number;
+          height?: number;
+        }
+  ) => {
+    if (payload.kind !== "image") return;
+    setReferences((value) => [
+      ...value,
+      {
+        id: nanoid(),
+        name: payload.title || "asset",
+        type: "image/png",
+        dataUrl: payload.dataUrl,
+        storageKey: payload.storageKey,
+      },
+    ]);
+    setAssetPickerOpen(false);
+    message.success(t("imageWorkbench.addedReference"));
+  };
+
   const generate = async () => {
     const agentTaskId = agentTaskIdRef.current;
     agentTaskIdRef.current = undefined;
@@ -283,7 +321,7 @@ export function ImageWorkbench() {
       return;
     }
 
-    const snapshot = buildRequestSnapshot();
+    const snapshot = buildRequestSnapshot({ batchCount: generationCount });
     if (!snapshot) {
       if (agentTaskId)
         updateAgentTask(agentTaskId, {
@@ -307,28 +345,19 @@ export function ImageWorkbench() {
     const batchStartedAt = performance.now();
     setStartedAt(batchStartedAt);
 
-    const tasks = Array.from({ length: generationCount }, (_, index) =>
-      runGenerationSlot(index, snapshot)
-    );
-
-    const result = await Promise.allSettled(tasks);
-    const successImages = result
-      .filter(
-        (item): item is PromiseFulfilledResult<GeneratedImage> =>
-          item.status === "fulfilled"
-      )
-      .map((item) => item.value);
+    // 单 POST with n=N（对齐 V1 / 画布编辑器，不 fan-out）
+    let successImages: GeneratedImage[] = [];
+    let error: string | undefined;
+    try {
+      successImages = await runBatchGeneration(snapshot);
+    } catch (caught) {
+      error =
+        caught instanceof Error
+          ? caught.message
+          : t("workbench.generationFailed");
+    }
     const successCount = successImages.length;
     const failCount = generationCount - successCount;
-    const failed = result.find(
-      (item): item is PromiseRejectedResult => item.status === "rejected"
-    );
-    const error =
-      failed?.reason instanceof Error
-        ? failed.reason.message
-        : failCount
-          ? t("workbench.generationFailed")
-          : undefined;
     if (agentTaskId)
       updateAgentTask(agentTaskId, {
         status: successCount ? "succeeded" : "failed",
@@ -367,11 +396,7 @@ export function ImageWorkbench() {
       );
       successCount
         ? message.success(t("imageWorkbench.generated"))
-        : message.error(
-            failed?.reason instanceof Error
-              ? failed.reason.message
-              : t("workbench.generationFailed")
-          );
+        : message.error(error || t("workbench.generationFailed"));
     } finally {
       setRunning(false);
     }
@@ -519,7 +544,7 @@ export function ImageWorkbench() {
     );
   };
 
-  const buildRequestSnapshot = () => {
+  const buildRequestSnapshot = (options?: { batchCount?: number }) => {
     const text = prompt.trim();
     if (!text) {
       message.error(t("imageWorkbench.promptRequired"));
@@ -530,11 +555,65 @@ export function ImageWorkbench() {
       openConfigDialog(true);
       return null;
     }
+    // 单图 retry 默认 count="1"；批量 generate 传 batchCount=N，让上游一次返回 N 张
+    // （对齐 V1 generate-workbench-view：1 POST with n=N，不 fan-out）
     return {
       text,
-      config: { ...effectiveConfig, model, count: "1" },
+      config: {
+        ...effectiveConfig,
+        model,
+        count: options?.batchCount
+          ? String(options.batchCount)
+          : "1",
+      },
       references: [...references],
     };
+  };
+
+  /**
+   * 批量生图 —— 1 个 POST with n=N，对齐 V1 generate-workbench-view 与画布编辑器：
+   * 上游一次返 N 张图，按 index 分发到对应 result card；缺额（上游返 < N）
+   * 标记为 failed。失败整组 catch，失败语义与 V1 一致（全组 fail）。
+   */
+  const runBatchGeneration = async (
+    snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }
+  ): Promise<GeneratedImage[]> => {
+    const itemStartedAt = performance.now();
+    const result = snapshot.references.length
+      ? await requestEdit(snapshot.config, snapshot.text, snapshot.references)
+      : await requestGeneration(snapshot.config, snapshot.text);
+    if (!result.length) throw new Error(t("imageWorkbench.missingResult"));
+    const images = await Promise.all(
+      result.map(async (image) => {
+        const meta = await readImageMeta(image.dataUrl);
+        return {
+          id: image.id,
+          dataUrl: image.dataUrl,
+          durationMs: performance.now() - itemStartedAt,
+          width: meta.width,
+          height: meta.height,
+          bytes: getDataUrlByteSize(image.dataUrl),
+        };
+      })
+    );
+    setResults((prev) => {
+      const next = [...prev];
+      images.forEach((img, i) => {
+        if (i < next.length) {
+          next[i] = { id: img.id, status: "success", image: img };
+        }
+      });
+      // 上游返图数 < 用户期望时，剩余 slot 标 failed
+      for (let i = images.length; i < next.length; i++) {
+        next[i] = {
+          ...next[i],
+          status: "failed",
+          error: t("workbench.generationFailed"),
+        };
+      }
+      return next;
+    });
+    return images;
   };
 
   const runGenerationSlot = async (
@@ -683,6 +762,24 @@ export function ImageWorkbench() {
                         disabled={!prompt.trim()}
                       >
                         {t("prompts.saveCurrent")}
+                      </Button>
+                    </Tooltip>
+                    <Tooltip title={t("prompts.library")}>
+                      <Button
+                        size="small"
+                        icon={<BookOpen className="size-3.5" />}
+                        onClick={() => setPromptLibraryOpen(true)}
+                      >
+                        {t("prompts.library")}
+                      </Button>
+                    </Tooltip>
+                    <Tooltip title={t("common.assetLibrary")}>
+                      <Button
+                        size="small"
+                        icon={<FolderPlus className="size-3.5" />}
+                        onClick={() => setAssetPickerOpen(true)}
+                      >
+                        {t("common.assetLibrary")}
                       </Button>
                     </Tooltip>
                   </div>
@@ -941,6 +1038,16 @@ export function ImageWorkbench() {
         onClose={() => setSavePromptOpen(false)}
         onConfirm={handleConfirmSavePrompt}
       />
+      <PromptSelectDialog
+        open={promptLibraryOpen}
+        onOpenChange={setPromptLibraryOpen}
+        onSelect={(value) => setPrompt(value)}
+      />
+      <AssetPickerModal
+        open={assetPickerOpen}
+        onInsert={handleInsertAsset}
+        onClose={() => setAssetPickerOpen(false)}
+      />
       <Modal
         title={t("workbench.deleteLogs")}
         open={deleteConfirmOpen}
@@ -1123,7 +1230,6 @@ function ResultImageCard({
               icon={<FolderPlus className="size-3.5" />}
               onClick={() => void onSaveAsset(image, index)}
             >
-              {t("common.addToAssets")}
             </Button>
           </Tooltip>
           <Tooltip title={t("imageWorkbench.addReference")}>
@@ -1133,7 +1239,6 @@ function ResultImageCard({
               icon={<PenLine className="size-3.5" />}
               onClick={() => void onEdit(image, index)}
             >
-              {t("imageWorkbench.addReference")}
             </Button>
           </Tooltip>
           <Tooltip title={t("common.download")}>
@@ -1143,7 +1248,6 @@ function ResultImageCard({
               icon={<Download className="size-3.5" />}
               onClick={() => onDownload(image, index)}
             >
-              {t("common.download")}
             </Button>
           </Tooltip>
         </div>

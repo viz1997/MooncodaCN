@@ -16,6 +16,7 @@ export default {
     details: "Details",
     addToAssets: "Add to My Assets",
     addedToAssets: "Added to My Assets",
+    assetLibrary: "Asset Library",
     copyPrompt: "Copy prompt",
     promptCopied: "Prompt copied",
     created: "Created: {{date}}",

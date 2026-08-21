@@ -333,7 +333,7 @@ export function DashboardSidebar() {
         open={isMobileOpen}
         onClose={() => setMobileOpen(false)}
         placement="left"
-        width={256}
+        size={256}
         rootClassName="md:hidden"
         closable={false}
         title={null}

@@ -54,6 +54,13 @@ export const internalGenerateSchema = z.object({
     ])
     .optional(),
   batchSize: z.number().int().min(1).max(4).default(1),
+  // 2026-08-20：与 V2 ImageSettingsPanel 对齐，新增 quality + background 字段。
+  // - quality: "auto" / "high" / "medium" / "low"（"auto" 不透传给上游）
+  // - background: "transparent" 表示透明背景；其他值（含 undefined）走默认不透明
+  // 各 provider adapter 还没统一消费这两个字段，先在 schema + UI 层贯通，
+  // Inngest submit 通过 InternalGenerateInput 自动透传，TODO: 各适配器按 model 能力启用
+  quality: z.enum(["auto", "high", "medium", "low"]).optional(),
+  background: z.string().optional(),
   seed: z.number().int().optional(),
   guidanceScale: z.number().min(1).max(20).optional(),
   numInferenceSteps: z.number().int().min(10).max(50).optional(),

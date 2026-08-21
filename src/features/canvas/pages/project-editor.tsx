@@ -1026,7 +1026,6 @@ function InfiniteCanvasPage() {
     usePluginHost({
       effectiveConfig,
       isAiConfigReady,
-      openConfigDialog,
       theme,
       nodesRef,
       connectionsRef,
@@ -2600,7 +2599,6 @@ function InfiniteCanvasPage() {
       finishGenerationRequest,
       isAiConfigReady,
       message,
-      openConfigDialog,
       startGenerationRequest,
       t,
     ]
@@ -2762,7 +2760,6 @@ function InfiniteCanvasPage() {
     [
       effectiveConfig,
       finishGenerationRequest,
-      openConfigDialog,
       startGenerationRequest,
       t,
     ]
@@ -3930,7 +3927,6 @@ function InfiniteCanvasPage() {
       finishGenerationRequest,
       isAiConfigReady,
       message,
-      openConfigDialog,
       startGenerationRequest,
       t,
     ]
@@ -4339,7 +4335,6 @@ function InfiniteCanvasPage() {
       finishGenerationRequest,
       isAiConfigReady,
       message,
-      openConfigDialog,
       startGenerationRequest,
       t,
     ]

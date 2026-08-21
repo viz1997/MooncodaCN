@@ -416,6 +416,41 @@ function getAspectIcon(size: ImageSize) {
 }
 
 /**
+ * 2026-08-21：与 V2 ImageSettingsPanel 对齐 —— V2 的 aspect ratio 网格总是显示
+ * 全部 13 个 aspect，不按模型能力过滤。V1 之前用 `modelConfig.capabilities.sizes`
+ * 过滤，导致不同模型看到的尺寸列表不一样。
+ *
+ * 现在固定显示所有 ImageSize 选项，按常用度排序：1:1 → 4:3 / 3:4 → 16:9 / 9:16 → 2k。
+ * 上游是否真支持由 provider adapter 决定；model 不支持时由上游报错，不在前端预过滤。
+ */
+const ALL_IMAGE_SIZES: ImageSize[] = [
+  // 1:1（最常用）
+  "1024x1024",
+  "2048x2048",
+  // 4:3 / 3:4
+  "1024x768",
+  "768x1024",
+  "1152x864",
+  "864x1152",
+  "1344x768",
+  "768x1344",
+  // 3:2 / 2:3
+  "1536x1024",
+  "1024x1536",
+  // 16:9 / 9:16
+  "1792x1024",
+  "1024x1792",
+  "1280x720",
+  "720x1280",
+  // 小尺寸
+  "768x768",
+  "512x512",
+  "256x256",
+  // auto
+  "auto",
+];
+
+/**
  * 推断图片扩展名：从 URL 路径末段拿，否则看 mime 头，否则兜底 .png。
  */
 function inferImageExtension(url: string, mime?: string | null): string {
@@ -527,6 +562,13 @@ export function GenerateWorkbenchView({
   // 基础参数
   const [batchSize, setBatchSize] = useState(1);
   const [size, setSize] = useState<ImageSize>("1024x1024");
+  // 2026-08-20：与 V2 ImageSettingsPanel 对齐 —— 质量 / 透明背景
+  // - quality: 默认 "auto"（不透传给上游，由 provider adapter 决定默认）
+  // - transparentBackground: true → 提交时把 background="transparent" 透传
+  const [quality, setQuality] = useState<"auto" | "high" | "medium" | "low">(
+    "auto"
+  );
+  const [transparentBackground, setTransparentBackground] = useState(false);
 
   // 高级参数（Accordion 默认折叠，无需本地 state）
   const [guidanceScale, setGuidanceScale] = useState(7);
@@ -1177,6 +1219,11 @@ export function GenerateWorkbenchView({
         imageUrl: safeRefImage?.imageUrl,
         size,
         batchSize: effectiveBatchSize,
+        // 2026-08-20：与 V2 ImageSettingsPanel 对齐 —— quality + background 透传
+        // - quality="auto" 不传（让上游决定默认值）
+        // - transparentBackground 仅在用户开启时传 background="transparent"
+        ...(quality !== "auto" ? { quality } : {}),
+        ...(transparentBackground ? { background: "transparent" } : {}),
         seed: seed === "" ? undefined : seed,
         guidanceScale: modelConfig.capabilities.supportsGuidance
           ? guidanceScale
@@ -1284,8 +1331,9 @@ export function GenerateWorkbenchView({
     setSelectedEffect(draft);
   };
 
-  // 模板可用尺寸（与模型能力交集）
-  const availableSizes: ImageSize[] = modelConfig.capabilities.sizes;
+  // 模板可用尺寸（与模型能力交集）— 2026-08-21：尺寸 UI 改为显示全集 ALL_IMAGE_SIZES，
+// 不再按 model 能力过滤（对齐 V2 ImageSettingsPanel 行为）。
+  // const availableSizes: ImageSize[] = modelConfig.capabilities.sizes;
 
   // 抑制未使用变量告警
   void legacyToast;
@@ -1909,16 +1957,13 @@ export function GenerateWorkbenchView({
                 </span>
                 <span className="ml-auto text-[11px] text-muted-foreground font-normal font-mono">
                   {(() => {
-                    const [w, h] = parseImageSize(size);
-                    return `${w === h ? "1:1" : `${w}:${h}`} · ${(() => {
-                      const tplCandidateCount = useTemplate
-                        ? (selectedTemplate?.candidateCount ?? 1)
-                        : 1;
-                      if (tplCandidateCount === 4 || tplCandidateCount === 9) {
-                        return "1 张拼接";
-                      }
-                      return `${batchSize} 张`;
-                    })()}`;
+                    const tplCandidateCount = useTemplate
+                      ? (selectedTemplate?.candidateCount ?? 1)
+                      : 1;
+                    if (tplCandidateCount === 4 || tplCandidateCount === 9) {
+                      return "1 张拼接";
+                    }
+                    return `${batchSize} 张`;
                   })()}
                 </span>
               </AccordionTrigger>
@@ -1964,88 +2009,6 @@ export function GenerateWorkbenchView({
                       ))}
                     </SelectContent>
                   </Select>
-
-                  {/* 尺寸 + 数量 横向 */}
-                  <div className="flex gap-1.5">
-                    <div className="grid grid-cols-4 gap-1 flex-1">
-                      {availableSizes.slice(0, 4).map((s) => {
-                        const selected = size === s;
-                        const [w, h] = parseImageSize(s);
-                        const AspectIcon = getAspectIcon(s);
-                        return (
-                          <button
-                            key={s}
-                            type="button"
-                            onClick={() => setSize(s)}
-                            title={`${s} (${w}:${h})`}
-                            className={cn(
-                              "flex items-center justify-center gap-1 py-1.5 rounded border transition-all text-[10px]",
-                              selected
-                                ? "border-primary bg-primary/10 text-primary"
-                                : "border-border text-muted-foreground hover:border-muted-foreground/50"
-                            )}
-                          >
-                            <AspectIcon className="h-3 w-3" strokeWidth={2} />
-                            <span className="font-mono">
-                              {w === h ? "1:1" : `${w}:${h}`}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* 数量 stepper（Lovart/GPT 风：- 数字 +） */}
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] text-muted-foreground shrink-0">
-                      数量
-                    </span>
-                    {(() => {
-                      const tplCandidateCount = useTemplate
-                        ? (selectedTemplate?.candidateCount ?? 1)
-                        : 1;
-                      const isLocked =
-                        tplCandidateCount === 4 || tplCandidateCount === 9;
-                      const max = modelConfig.capabilities.maxBatchSize;
-                      const display = isLocked ? 1 : batchSize;
-                      return (
-                        <>
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="outline"
-                            className="h-7 w-7"
-                            disabled={isLocked || display <= 1}
-                            onClick={() =>
-                              setBatchSize(Math.max(1, display - 1))
-                            }
-                            aria-label="减少数量"
-                          >
-                            <Minus className="h-3 w-3" />
-                          </Button>
-                          <span className="text-sm font-mono w-8 text-center tabular-nums">
-                            {display}
-                          </span>
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="outline"
-                            className="h-7 w-7"
-                            disabled={isLocked || display >= max}
-                            onClick={() =>
-                              setBatchSize(Math.min(max, display + 1))
-                            }
-                            aria-label="增加数量"
-                          >
-                            <Plus className="h-3 w-3" />
-                          </Button>
-                          <span className="text-[10px] text-muted-foreground ml-auto">
-                            {isLocked ? "宫格拼接已锁定" : `最多 ${max} 张`}
-                          </span>
-                        </>
-                      );
-                    })()}
-                  </div>
                 </div>
               </AccordionContent>
             </AccordionItem>
@@ -2104,7 +2067,11 @@ export function GenerateWorkbenchView({
                   {(guidanceScale !== 7 ||
                     steps !== 30 ||
                     seed !== "" ||
-                    !safetyCheck) && (
+                    !safetyCheck ||
+                    size !== "1024x1024" ||
+                    batchSize !== 1 ||
+                    quality !== "auto" ||
+                    transparentBackground) && (
                     <span
                       className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-amber-500"
                       title="已修改默认"
@@ -2185,6 +2152,154 @@ export function GenerateWorkbenchView({
                     />
                   </div>
                 )}
+
+                {/* 2026-08-21：与 V2 ImageSettingsPanel 对齐，尺寸 / 数量 / 质量 / 透明背景放进高级参数。
+                   * - size: 当前 model 支持的所有尺寸（含 AspectIcon），V2 风格卡片（h-[72px]，icon 在上 label 在下）
+                   * - batchSize: 1~maxBatchSize，宫格拼接模板（4/9）时锁定为 1
+                   * - quality: auto/high/medium/low（auto 不透传给上游）
+                   * - transparentBackground: 开启后提交时 background="transparent"
+                   * 标记"已修改默认"小红点：当 size/batchSize 非默认 || quality !== "auto" || transparentBackground 时点亮 */}
+                <div className="space-y-1.5">
+                  <span className="text-[11px] text-muted-foreground">
+                    尺寸
+                  </span>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {ALL_IMAGE_SIZES.map((s) => {
+                      const selected = size === s;
+                      const [w, h] = parseImageSize(s);
+                      const AspectIcon = getAspectIcon(s);
+                      return (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => setSize(s)}
+                          title={`${s} (${w}:${h})`}
+                          className={cn(
+                            "flex h-[72px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border bg-transparent text-xs transition",
+                            selected
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-border text-muted-foreground hover:border-muted-foreground/50"
+                          )}
+                        >
+                          <AspectIcon className="h-4 w-4" strokeWidth={2} />
+                          <span className="font-mono">
+                            {w === h ? "1:1" : `${w}:${h}`}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 数量 stepper（宫格拼接模板锁定 1，否则 1~maxBatchSize） */}
+                <div className="space-y-1.5">
+                  <span className="text-[11px] text-muted-foreground">
+                    数量
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="outline"
+                      className="h-7 w-7"
+                      disabled={
+                        (useTemplate &&
+                          (selectedTemplate?.candidateCount === 4 ||
+                            selectedTemplate?.candidateCount === 9)) ||
+                        batchSize <= 1
+                      }
+                      onClick={() => setBatchSize(Math.max(1, batchSize - 1))}
+                      aria-label="减少数量"
+                    >
+                      <Minus className="h-3 w-3" />
+                    </Button>
+                    <span className="text-sm font-mono w-8 text-center tabular-nums">
+                      {useTemplate &&
+                      (selectedTemplate?.candidateCount === 4 ||
+                        selectedTemplate?.candidateCount === 9)
+                        ? 1
+                        : batchSize}
+                    </span>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="outline"
+                      className="h-7 w-7"
+                      disabled={
+                        (useTemplate &&
+                          (selectedTemplate?.candidateCount === 4 ||
+                            selectedTemplate?.candidateCount === 9)) ||
+                        batchSize >= modelConfig.capabilities.maxBatchSize
+                      }
+                      onClick={() =>
+                        setBatchSize(
+                          Math.min(
+                            modelConfig.capabilities.maxBatchSize,
+                            batchSize + 1
+                          )
+                        )
+                      }
+                      aria-label="增加数量"
+                    >
+                      <Plus className="h-3 w-3" />
+                    </Button>
+                    <span className="text-[10px] text-muted-foreground ml-auto">
+                      {useTemplate &&
+                      (selectedTemplate?.candidateCount === 4 ||
+                        selectedTemplate?.candidateCount === 9)
+                        ? "宫格拼接已锁定"
+                        : `最多 ${modelConfig.capabilities.maxBatchSize} 张`}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <span className="text-[11px] text-muted-foreground">
+                    质量
+                  </span>
+                  <div className="grid grid-cols-4 gap-1">
+                    {(
+                      [
+                        { value: "auto", label: "自动" },
+                        { value: "high", label: "高" },
+                        { value: "medium", label: "中" },
+                        { value: "low", label: "低" },
+                      ] as const
+                    ).map((opt) => {
+                      const selected = quality === opt.value;
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setQuality(opt.value)}
+                          className={cn(
+                            "py-1 rounded border transition-all text-[10px]",
+                            selected
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-border text-muted-foreground hover:border-muted-foreground/50"
+                          )}
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="min-w-0">
+                    <span className="text-[11px] text-muted-foreground">
+                      透明背景
+                    </span>
+                    <p className="text-[10px] text-muted-foreground/70">
+                      生成 PNG 透明背景图（仅部分模型/尺寸支持）
+                    </p>
+                  </div>
+                  <Switch
+                    checked={transparentBackground}
+                    onCheckedChange={setTransparentBackground}
+                  />
+                </div>
               </PopoverContent>
             </Popover>
           </div>
