@@ -1494,7 +1494,7 @@ async function pollRemoteImageJob(
       throw new Error(pollBody.message || "内置渠道生成失败（积分已自动回退）");
     }
   }
-  throw new Error(apiText("videoTimeout", { provider: "" }));
+  throw new Error(apiText("imageTimeout", { provider: "" }));
 }
 
 function delay(ms: number, signal?: AbortSignal) {

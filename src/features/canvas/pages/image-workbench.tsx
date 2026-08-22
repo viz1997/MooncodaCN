@@ -355,6 +355,15 @@ export function ImageWorkbench() {
         caught instanceof Error
           ? caught.message
           : t("workbench.generationFailed");
+      // 整组失败时把还没成功的卡从 pending 切到 failed，否则用户看到的"生成中"
+      // 文字会无限期停留（generate() finally 只重置 running、不动 results）
+      setResults((prev) =>
+        prev.map((r) =>
+          r.status === "success"
+            ? r
+            : { ...r, status: "failed", error: error ?? "" }
+        )
+      );
     }
     const successCount = successImages.length;
     const failCount = generationCount - successCount;

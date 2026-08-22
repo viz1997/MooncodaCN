@@ -305,6 +305,124 @@ export const canvasRemoteGenerateJob = inngest.createFunction(
 );
 
 /**
+ * 画布内置渠道（image / audio / video）—— 兜底 reconcile cron。
+ *
+ * 与 reconcileStaleJobs（image-gen 工作台）同语义：
+ * - canvasRemoteGenerateJob 走 Inngest send + 前端轮询路径
+ * - 如果 inngest.send 失败但 HTTP 路径已成功返回 jobId，DB 行永远卡 pending
+ * - 如果 Inngest 函数本身 step.run 抛错但 catch 没写 status，也卡 processing
+ * - 前端 `image-workbench.tsx:351-358` 的 catch 不写 results 是个独立 bug，
+ *   但即便前端修了，DB 状态不更新 /poll 就拿不到 completed，UI 仍卡"生成中"
+ *
+ * 因此必须有一个独立于前端的兜底把 stale 行标 failed，否则：
+ * - 用户下次打开工作台看到一堆 orphan pending 行
+ * - 长期占用 DB + 影响看板统计
+ *
+ * 行为：
+ * 1. 找 pending 超过 STALE_PENDING_MS（10 min）+ processing 超过 STALE_PROCESSING_MS（15 min）
+ *    的行。pending 卡死几乎一定是 Inngest 事件没被云端收到；processing 卡死
+ *    是 step.run 内吞了错或 Inngest 函数本身崩溃
+ * 2. 单条 UPDATE 标 failed，不查上游（与 reconcileStaleJobs 对齐）
+ * 3. 不 refund 积分：image / audio 路径不消耗积分（见 canvasRemoteGenerateJob 注释
+ *    + canvas-server-generate.ts:596-598），video 路径 service 内部已 safeRefund
+ *
+ * 频率：每 5 分钟一次（cron "slash 5 * * * *"，与 reconcileStaleJobs 对齐）。
+ * Vercel Hobby 计划只支持每天一次 cron，所以这条路径在 Hobby 下不会被自动触发；
+ * 正式环境走 Pro + 改 vercel.json，或外部 cron-job.org 每 5 分钟 POST 注册的 endpoint。
+ */
+export const reconcileCanvasRemoteJobs = inngest.createFunction(
+  {
+    id: "canvas-remote-reconcile-stale-jobs",
+    retries: 1,
+  },
+  { cron: "*/5 * * * *" },
+  async ({ step }) => {
+    const STALE_PENDING_MS = 10 * 60_000;
+    const STALE_PROCESSING_MS = 15 * 60_000;
+    const BATCH = 30;
+    const now = new Date();
+
+    const stuckPending = await step.run("find-stale-pending", async () =>
+      db.query.canvasRemoteJob.findMany({
+        where: and(
+          eq(canvasRemoteJob.status, "pending"),
+          lt(canvasRemoteJob.createdAt, new Date(now.getTime() - STALE_PENDING_MS))
+        ),
+        columns: { id: true, userId: true, capability: true, createdAt: true },
+        limit: BATCH,
+        orderBy: (j, { asc }) => [asc(j.createdAt)],
+      })
+    );
+
+    const stuckProcessing = await step.run("find-stale-processing", async () =>
+      db.query.canvasRemoteJob.findMany({
+        where: and(
+          eq(canvasRemoteJob.status, "processing"),
+          lt(
+            canvasRemoteJob.updatedAt,
+            new Date(now.getTime() - STALE_PROCESSING_MS)
+          )
+        ),
+        columns: { id: true, userId: true, capability: true, updatedAt: true },
+        limit: BATCH,
+        orderBy: (j, { asc }) => [asc(j.updatedAt)],
+      })
+    );
+
+    const markFailed = async (
+      rows: Array<{ id: string; userId: string; capability: string }>,
+      reason: string
+    ) => {
+      if (rows.length === 0) return 0;
+      let count = 0;
+      for (const row of rows) {
+        try {
+          await db
+            .update(canvasRemoteJob)
+            .set({
+              status: "failed",
+              error: reason.slice(0, 1000),
+              completedAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .where(eq(canvasRemoteJob.id, row.id));
+          count++;
+          logger.warn(
+            {
+              jobId: row.id,
+              userId: row.userId,
+              capability: row.capability,
+            },
+            `reconcile: canvasRemoteJob 标 failed (${reason})`
+          );
+        } catch (err) {
+          logger.error(
+            { err, jobId: row.id },
+            "reconcile: 单条 update 失败"
+          );
+        }
+      }
+      return count;
+    };
+
+    const pendingCleaned = await markFailed(
+      stuckPending,
+      "任务提交超时未启动，请重新生成"
+    );
+    const processingCleaned = await markFailed(
+      stuckProcessing,
+      "生成任务已超时未返回结果，请重新生成"
+    );
+
+    return {
+      pendingCleaned,
+      processingCleaned,
+      timestamp: now.toISOString(),
+    };
+  }
+);
+
+/**
  * 导出所有 Inngest 函数
  * 在 src/app/api/inngest/route.ts 中注册
  *
@@ -327,6 +445,12 @@ export const canvasRemoteGenerateJob = inngest.createFunction(
  * 2026-08-20 引入 canvasRemoteGenerateJob：/api/canvas/generate 的
  * image/audio 同步阻塞（gpt-image-2 单图 30-90s）撞 Vercel maxDuration，
  * 改为 Inngest 异步 send + 前端轮询 /api/canvas/poll/[jobId]。
+ *
+ * 2026-08-22 引入 reconcileCanvasRemoteJobs：画布内置渠道没有 V1 那样的
+ * 服务端轮询驱动，纯靠前端 image-workbench.tsx 的 pollRemoteImageJob。
+ * 前端 catch 不写 results（[image-workbench.tsx:351-358]）+ Inngest send 失
+ * 败但 HTTP 已返 202 + step.run 内部吞错 等场景下，没有兜底就把行永远卡住。
+ * 5 分钟 cron 把 stale 行标 failed，与 reconcileStaleJobs 同语义。
  */
 export const functions = [
   helloWorld,
@@ -334,4 +458,5 @@ export const functions = [
   reconcileStaleJobs,
   submitImageGenJob,
   canvasRemoteGenerateJob,
+  reconcileCanvasRemoteJobs,
 ];

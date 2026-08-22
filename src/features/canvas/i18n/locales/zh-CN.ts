@@ -238,6 +238,7 @@ export default {
     noContent: "没有返回内容",
     modelReadFailed: "读取模型失败",
     videoTimeout: "{{provider}}视频生成超时，请稍后重试",
+    imageTimeout: "{{provider}}图片生成超时，请稍后重试",
     videoReferencesUnsupported:
       "当前视频接口不支持参考视频或参考音频，请切换到 Seedance 2.0 / 火山 Agent Plan 模型，或移除参考资产",
     pluginVideoExpired: "插件视频任务已失效，请重新生成",

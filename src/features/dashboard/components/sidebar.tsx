@@ -2,8 +2,6 @@
 
 import { Avatar, Button, Divider, Drawer, Popover } from "antd";
 import { ChevronsUpDown, LogOut, Settings } from "lucide-react";
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useAction } from "next-safe-action/hooks";
 import { useEffect } from "react";
@@ -17,6 +15,7 @@ import {
   PlanBadge,
   type PlanType,
 } from "@/features/subscription/components/plan-badge";
+import { Link, usePathname, useRouter } from "@/i18n/routing";
 import { signOut, useSession } from "@/lib/auth/client";
 import { cn } from "@/lib/utils";
 

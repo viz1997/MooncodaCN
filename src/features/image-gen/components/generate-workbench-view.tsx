@@ -37,6 +37,7 @@ import {
   Share2,
   Sparkles,
   Square,
+  Timer,
   Upload,
   X,
   XCircle,
@@ -132,6 +133,13 @@ interface WorkbenchSubmission {
   isGridComposite?: boolean;
   /** 该次提交的 prompt（与 effect 主 prompt 可能不同 —— 用户连续微调时） */
   prompt: string;
+  /**
+   * 该次提交实际生成耗时（ms）。
+   * 与 effect.duration 不同 —— effect.duration 是 effect 级最后刷新的
+   * 一次 job 耗时，覆盖式写入；submission.duration 是这一条 submission
+   * 自己的耗时，多次提交互不覆盖。时间轴节点显示用这个。
+   */
+  duration?: number;
 }
 
 interface WorkbenchEffect {
@@ -902,8 +910,12 @@ export function GenerateWorkbenchView({
       const next: WorkbenchEffect = {
         ...eff,
         // 仅在 effect 主 effect 是 processing 时一起刷成 completed（最后一条
-        // submission 完成 → effect 也算完成）。如果有 pending submission 保持 processing。
-        status: hasUnfinishedSubmission(eff) ? "processing" : "completed",
+        // submission 完成 → effect 也算完成）。这里必须用 Except 版本 —— 被
+        // 完成的那条 submission 在 eff 里还标记着 processing，普通版本会
+        // 永远返 true，导致 effect 永远卡 processing。
+        status: hasUnfinishedSubmissionExcept(eff, targetSubmissionIdx)
+          ? "processing"
+          : "completed",
         resultUrls,
         ...duration,
         ...cost,
@@ -913,6 +925,9 @@ export function GenerateWorkbenchView({
                 ...s,
                 status: "completed",
                 resultUrls,
+                // 同时把本次 job 的耗时写到对应 submission（覆盖式：每条 submission
+                // 各自记自己的耗时，effect 级 duration 是最新一次的值）
+                ...duration,
               }
             : s
         ),
@@ -954,13 +969,11 @@ export function GenerateWorkbenchView({
   };
 
   /**
-   * effect 是否还有未结束的 submission（用于决定 effect 自身 status）
+   * effect 是否还有**除 exceptIdx 之外**未结束的 submission。
+   * 完成/失败分支都用 Except 版本 —— 不能用普通版，普通版会把正在被标记
+   * 为 completed 的那条也算进去（它在 eff 里还是 processing），effect 永远
+   * 卡 processing。
    */
-  function hasUnfinishedSubmission(eff: WorkbenchEffect): boolean {
-    return (eff.submissions ?? []).some(
-      (s) => s.status === "processing" || s.status === "pending"
-    );
-  }
   function hasUnfinishedSubmissionExcept(
     eff: WorkbenchEffect,
     exceptIdx: number
@@ -1148,18 +1161,19 @@ export function GenerateWorkbenchView({
 
     // 决定会话归属：复用还是新建。
     //
-    // 复用条件：当前选中的是 processing/completed/failed 真实会话（非 draft），
-    // 且 model / mode / mask（模板）全部一致。draft / 不一致 / 没有当前会话 →
-    // 新建会话。ChatGPT 风格 —— 同一对话内连续提问不强制开新 chat。
+    // 2026-08-22 简化：只要当前有选中的 effect 就复用，**不再因 model / mode /
+    // 模板变化开新会话**。draft 占位会被原地"提升"为真实 EF（补全 maskId /
+    // maskName / imageModelName / mode 等占位字段），历史里不再产生 orphan
+    // draft + EF_xxx 双胞胎。
     //
-    // 为什么不强制每次新建：用户连续"再来一张""微调 prompt 再试"时，强行
-    // 开新会话会把历史时间轴撑得很乱，与主流生图平台 UX 不符。
-    const canAppendToCurrent =
-      selectedEffect &&
-      selectedEffect.status !== "draft" &&
-      selectedEffect.imageModel === selectedModel &&
-      selectedEffect.mode === generationMode &&
-      (selectedEffect.maskId || "CUSTOM") === (selectedMask || "CUSTOM");
+    // 唯一会新建 EF_xxx 的场景：当前完全没选中任何 effect（首次进入工作台 +
+    // 从来没点过历史项）。
+    //
+    // 为什么不强制每次新建：用户连续"再来一张""微调 prompt 再试""换个模型
+    // 再试"时，强行开新会话会把历史时间轴撑得很乱。effect 的 imageModel /
+    // mode / maskName 字段是**会话首次生成时**的快照，不随中途切换更新；
+    // 后续提交的实际参数由 submission 自身 + 入参 generateImageAction 决定。
+    const canAppendToCurrent = !!selectedEffect;
 
     const submissionTs = new Date().toISOString();
     const submissionId = `sub_${String(Date.now()).slice(-6)}`;
@@ -1175,13 +1189,26 @@ export function GenerateWorkbenchView({
     let newEffect: WorkbenchEffect;
     if (canAppendToCurrent && selectedEffect) {
       // 复用：保留 effect 主结构，把新 submission 追加到 submissions 列表
-      // 时间戳刷成最新，effect 自身 status 保持上一次的状态（不影响旧结果展示）
+      // 时间戳刷成最新。如果当前 effect 是 draft（来自 handleNewSession），
+      // 顺便补全 maskId / maskName / mode / imageModel / imageModelName
+      // 等占位字段，原地"提升"为真实会话。
       const existingSubs = selectedEffect.submissions ?? [];
+      const isDraft = selectedEffect.status === "draft";
       newEffect = {
         ...selectedEffect,
         createdAt: submissionTs,
         status: "processing", // effect 状态跟随最新提交
         prompt: finalPrompt, // prompt 用最新的
+        ...(isDraft
+          ? {
+              maskId: selectedMask || "CUSTOM",
+              maskName: selectedTemplate?.name ?? "自定义",
+              mode: generationMode,
+              imageModel: selectedModel,
+              imageModelName: modelConfig.name,
+              isGridComposite,
+            }
+          : {}),
         submissions: [...existingSubs, newSubmission],
       };
       setHistory((prev) =>
@@ -2479,6 +2506,9 @@ export function GenerateWorkbenchView({
                               ...(selectedEffect.isGridComposite
                                 ? { isGridComposite: true }
                                 : {}),
+                              ...(selectedEffect.duration
+                                ? { duration: selectedEffect.duration }
+                                : {}),
                               prompt: selectedEffect.prompt,
                             }}
                             onLightbox={(url, idx) =>
@@ -2496,6 +2526,9 @@ export function GenerateWorkbenchView({
                           key={sub.submissionId}
                           effectId={selectedEffect.effectId}
                           submission={sub}
+                          {...(selectedEffect.duration
+                            ? { effectDuration: selectedEffect.duration }
+                            : {})}
                           onLightbox={(url, idx) =>
                             setLightbox({
                               url,
@@ -2788,16 +2821,25 @@ function SavePromptModal({
 function SubmissionNode({
   effectId: _effectId,
   submission,
+  effectDuration,
   onLightbox,
   onRetry,
 }: {
   effectId: string;
   submission: WorkbenchSubmission;
+  /**
+   * 兜底耗时：本次 submission 没记录 duration 时（迁移前 / 老数据 / applyJobUpdate
+   * 还没跑到的那条），从 effect 级 duration 顶上。effect.duration 是 effect
+   * 内最近一次 job 的耗时，对绝大多数老 submission 是合理近似。
+   */
+  effectDuration?: number;
   onLightbox: (url: string, index: number) => void;
   onRetry?: () => void;
 }) {
-  const { status, resultUrls, createdAt, errorMsg, isGridComposite } =
+  const { status, resultUrls, createdAt, errorMsg, isGridComposite, duration } =
     submission;
+  // submission 自身 duration 优先；缺失则降级到 effect 级 duration。
+  const displayDuration = duration ?? effectDuration;
 
   if (status === "processing") {
     return (
@@ -2875,6 +2917,18 @@ function SubmissionNode({
         <span className="font-mono text-muted-foreground tabular-nums">
           {formatAbsoluteTime(createdAt)}
         </span>
+        {displayDuration && displayDuration > 0 && (
+          <>
+            <span className="text-muted-foreground/40">·</span>
+            <span
+              className="inline-flex items-center gap-1 font-mono text-muted-foreground tabular-nums"
+              title="本次生成耗时"
+            >
+              <Timer className="h-3 w-3" />
+              {(displayDuration / 1000).toFixed(1)}s
+            </span>
+          </>
+        )}
         {isGridComposite && (
           <>
             <span className="text-muted-foreground/40">·</span>

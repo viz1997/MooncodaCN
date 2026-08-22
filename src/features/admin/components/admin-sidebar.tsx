@@ -28,12 +28,11 @@ import {
   Moon,
   Sun,
 } from "lucide-react";
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
 import { adminConfig, siteConfig } from "@/config";
+import { Link, usePathname, useRouter } from "@/i18n/routing";
 import { signOut, useSession } from "@/lib/auth/client";
 import { cn } from "@/lib/utils";
 

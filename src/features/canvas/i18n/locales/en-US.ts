@@ -262,6 +262,7 @@ export default {
     noContent: "No content returned",
     modelReadFailed: "Failed to load models",
     videoTimeout: "{{provider}}video generation timed out. Try again later.",
+    imageTimeout: "{{provider}}image generation timed out. Try again later.",
     videoReferencesUnsupported:
       "This video API does not support reference video or audio. Switch to Seedance 2.0 / Volcengine Agent Plan, or remove the reference assets.",
     pluginVideoExpired: "The plugin video task has expired. Generate it again.",
