@@ -27,6 +27,9 @@ import {
   Library,
   Loader2,
   Minus,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Pencil,
   Plus,
   RectangleHorizontal,
   RectangleVertical,
@@ -38,6 +41,7 @@ import {
   Sparkles,
   Square,
   Timer,
+  Trash2,
   Upload,
   X,
   XCircle,
@@ -45,12 +49,6 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -253,24 +251,127 @@ function formatAbsoluteTime(iso: string): string {
   return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-function toWorkbenchEffect(job: ImageJob): WorkbenchEffect {
-  const modelConfig = IMAGE_MODELS[job.model as ImageModelId];
-  return {
-    effectId: `job_${job.id.slice(0, 8)}`,
-    jobId: job.id,
-    // exactOptionalPropertyTypes 下不能写 `key: undefined`，要么省略要么改类型
-    ...(job.taskId ? { taskId: job.taskId } : {}),
-    prompt: job.prompt,
-    maskId: job.maskId ?? "CUSTOM",
-    maskName: job.maskId ?? "自定义",
-    status: job.status,
-    resultUrls: (job.resultUrls as string[]) ?? [],
-    mode: job.mode as "text_to_image" | "image_to_image",
-    imageModel: job.model as ImageModelId,
-    imageModelName: modelConfig?.name ?? job.model,
-    createdAt: job.createdAt.toISOString(),
-    ...(job.errorMsg ? { errorMsg: job.errorMsg } : {}),
-  };
+/**
+ * 短相对时间，rail 里塞不下绝对时间。
+ * - < 60s → "刚刚"
+ * - < 60min → "X 分钟前"
+ * - 同一天 → "X 小时前"
+ * - 跨天 → "MM-DD"
+ * - 跨年 → "YYYY-MM-DD"
+ */
+function formatRelativeTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "-";
+  const diffMs = Date.now() - d.getTime();
+  const sec = Math.max(0, Math.floor(diffMs / 1000));
+  if (sec < 60) return "刚刚";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} 分钟前`;
+  const hr = Math.floor(min / 60);
+  // "今天 X 小时前"：5 分钟阈值内算今天
+  if (hr < 24 && d.toDateString() === new Date().toDateString()) {
+    return `${hr} 小时前`;
+  }
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return sameYear
+    ? `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+    : `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/**
+ * 把 DB 里的 imageJob 行列表 hydrate 成 WorkbenchEffect 列表。
+ *
+ * 2026-08-23 修复 Bug3：之前每个 imageJob 行被 toWorkbenchEffect 1:1 映射成
+ * 独立 effect（`job_${id.slice(0,8)}`）。但客户端 handleGenerate 把多次提交
+ * 合并到同一个 effect 的 submissions[] —— "ChatGPT 风格一个会话多条消息"。
+ * 概念上的"同一个会话"在 DB 里没有 sessionId 列（imageJob 只有 maskId 列），
+ * 不加 schema 迁移的前提下用 (model, mode, maskId) 启发式合并：同一组合下
+ * 按 createdAt 倒序把每条 row 当成一条 submission 塞进 effect.submissions。
+ *
+ * 为什么是 (model, mode, maskId)：
+ * - 这三项是 effect "会话级容器"的固定字段，handleGenerate 里 mode 切换 /
+ *   mask 切换都会促发 handleNewSession 走新 draft 路径
+ * - 用户主动点 "+ 新建会话" 时切不同的 model/mode/mask 才会真正另起炉灶
+ *   —— 同设置下点 "+" 是罕见 corner case，误合并可接受
+ *
+ * effectId 用最早一条 jobId.slice(0,8) —— 同一 group 反复刷新 effectId 稳
+ * 定，pollingRef / selectedEffect 都靠这个 key 不会错位。latestJob.id 写顶层
+ * jobId —— applyJobUpdate / polling 只跟最新一条未完 submission 打交道（生
+ * 成按钮 generating guard 同一 effect 同一时刻最多 1 条 in-flight）。
+ */
+function jobsToEffects(jobs: ImageJob[]): WorkbenchEffect[] {
+  // 按 createdAt 升序排，分组后取 [0] 是最早一条
+  const sorted = [...jobs].sort((a, b) => +a.createdAt - +b.createdAt);
+
+  // 按 (model, mode, maskId) 分桶
+  const groups = new Map<string, ImageJob[]>();
+  for (const job of sorted) {
+    const key = `${job.model}|${job.mode}|${job.maskId ?? ""}`;
+    let bucket = groups.get(key);
+    if (!bucket) {
+      bucket = [];
+      groups.set(key, bucket);
+    }
+    bucket.push(job);
+  }
+
+  const effects: WorkbenchEffect[] = [];
+  for (const groupJobs of groups.values()) {
+    const firstJob = groupJobs[0]!;
+    const latestJob = groupJobs[groupJobs.length - 1]!;
+    const modelConfig = IMAGE_MODELS[firstJob.model as ImageModelId];
+
+    // 每行 imageJob → 一条 WorkbenchSubmission。submissionId 用
+    // `hydrated_<id8>` 前缀避免和 handleGenerate 的 `sub_<ts6>` 撞 key
+    // （applyJobUpdate 用 s.jobId === matchJobId 找对应 submission，不依赖
+    // submissionId，但 React key / 测试断言里要用到，保持稳定可读）。
+    const submissions: WorkbenchSubmission[] = groupJobs.map((job) => ({
+      submissionId: `hydrated_${job.id.slice(0, 8)}`,
+      jobId: job.id,
+      resultUrls: (job.resultUrls as string[]) ?? [],
+      status: job.status,
+      prompt: job.prompt,
+      createdAt: job.createdAt.toISOString(),
+      ...(job.taskId ? { taskId: job.taskId } : {}),
+      ...(job.errorMsg ? { errorMsg: job.errorMsg } : {}),
+    }));
+
+    // effect 顶层 status：有任一 submission 未完 → processing；
+    // 全完但有 failed → failed；其余（全部 completed） → completed。
+    // 顶层的 createdAt / prompt / resultUrls 用最新一条 —— rail 缩略图 /
+    // "刚刚 / 1 小时前" / displayName 都看顶层字段。
+    const hasUnfinished = submissions.some(
+      (s) => s.status === "pending" || s.status === "processing"
+    );
+    const hasFailed = submissions.some((s) => s.status === "failed");
+    const effectStatus: EffectStatus = hasUnfinished
+      ? "processing"
+      : hasFailed && latestJob.status !== "completed"
+        ? "failed"
+        : "completed";
+
+    effects.push({
+      effectId: `job_${firstJob.id.slice(0, 8)}`,
+      jobId: latestJob.id,
+      ...(latestJob.taskId ? { taskId: latestJob.taskId } : {}),
+      prompt: latestJob.prompt,
+      maskId: latestJob.maskId ?? "CUSTOM",
+      maskName: latestJob.maskId ?? "自定义",
+      status: effectStatus,
+      resultUrls: (latestJob.resultUrls as string[]) ?? [],
+      mode: latestJob.mode as "text_to_image" | "image_to_image",
+      imageModel: latestJob.model as ImageModelId,
+      imageModelName: modelConfig?.name ?? latestJob.model,
+      createdAt: latestJob.createdAt.toISOString(),
+      submissions,
+    });
+  }
+
+  // 按 createdAt 倒序，rail 最新在最上面
+  return effects.sort(
+    (a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)
+  );
 }
 
 /**
@@ -578,6 +679,10 @@ export function GenerateWorkbenchView({
   );
   const [transparentBackground, setTransparentBackground] = useState(false);
 
+  // 2026-08-23：会话列表 rail 默认折叠 —— 给中间参数面板 + 右侧结果区更多横向空间，
+  // 用户点 sider 上的展开图标再展开；右上角的 collapse 图标手动收起
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   // 高级参数（Accordion 默认折叠，无需本地 state）
   const [guidanceScale, setGuidanceScale] = useState(7);
   const [steps, setSteps] = useState(30);
@@ -754,11 +859,32 @@ export function GenerateWorkbenchView({
         const res = await listImageJobsAction({ limit: 20 });
         if (cancelled) return;
         const jobs = res?.data?.jobs ?? [];
-        const hydrated: WorkbenchEffect[] = jobs.map(toWorkbenchEffect);
-        setHistory((prev) => mergeHydratedHistory(prev, hydrated));
-        // 给残留的 processing job 续轮询
+        // 2026-08-23 修复 Bug3：jobsToEffects 按 (model, mode, maskId) 把多次
+        // 提交合并到同一个 effect.submissions，refresh 后 rail 不再把同一会话
+        // 的多次提交显示成 N 条独立会话。
+        const hydrated: WorkbenchEffect[] = jobsToEffects(jobs);
+        // mount 时 prev=[]，merged 与 hydrated 顺序等价（都是按 createdAt 倒序）
+        const merged = mergeHydratedHistory([], hydrated);
+        setHistory(merged);
+        // 刷新页面场景：selectedEffect 组件 state 会丢，没选过任何 effect 时
+        // 默认选最新一条历史 —— 否则右侧结果区一直空着，要用户手动点 rail
+        // 才能看到处理中的任务 / 上次结果（用户报告"生图任务中刷新页面导致
+        // 任务无法显示"就是这里出的问题）。
+        setSelectedEffect((prev) => prev ?? merged[0] ?? null);
+        // 给残留的 processing job 续轮询。注意 effect.jobId 是最新一条 submission
+        // 的 jobId，但合并后 effect.status="processing" 也可能是因为中间某条
+        // 老的 submission 还在跑 —— 此时 poll 最新那条已经 completed 的 jobId
+        // 会立刻返 completed 然后停掉，in-flight 的老 submission 永远收不到
+        // 状态推送。改成从 submissions[] 反向找第一条 in-flight 的来 poll。
         for (const eff of hydrated) {
-          if (eff.status === "processing" && eff.jobId) {
+          if (eff.status !== "processing") continue;
+          const pendingSub = [...(eff.submissions ?? [])]
+            .reverse()
+            .find((s) => s.status === "pending" || s.status === "processing");
+          if (pendingSub?.jobId) {
+            startPolling(eff.effectId, pendingSub.jobId);
+          } else if (eff.jobId) {
+            // 兜底：submissions 缺数据（异常 hydrate）时退回到顶层 jobId
             startPolling(eff.effectId, eff.jobId);
           }
         }
@@ -1161,19 +1287,21 @@ export function GenerateWorkbenchView({
 
     // 决定会话归属：复用还是新建。
     //
-    // 2026-08-22 简化：只要当前有选中的 effect 就复用，**不再因 model / mode /
-    // 模板变化开新会话**。draft 占位会被原地"提升"为真实 EF（补全 maskId /
-    // maskName / imageModelName / mode 等占位字段），历史里不再产生 orphan
-    // draft + EF_xxx 双胞胎。
+    // 2026-08-22 二次收紧（用户反馈 "同一个会话生图为什么会自动新建会话"）：
+    // **只有用户主动点 "+ 新建会话" 才会创建 EF_xxx**。即使 selectedEffect
+    // 为 null（用户没点过历史项），也 fallback 到 `history[0]`（最近一条，
+    // 含 processing / completed / failed 全状态）继续 append —— 这条规则
+    // 覆盖 99% 场景：用户刷新页面 / 切走 Tab / 刚生成完没点历史项就再生成。
     //
-    // 唯一会新建 EF_xxx 的场景：当前完全没选中任何 effect（首次进入工作台 +
-    // 从来没点过历史项）。
+    // 唯一会真正新建 EF_xxx 的场景：**history 也为空**（首次进入工作台 +
+    // 从来没生成过）。此时不创建就没法提交，所以是不可避免的兜底，不算
+    // "自动创建会话"。
     //
-    // 为什么不强制每次新建：用户连续"再来一张""微调 prompt 再试""换个模型
-    // 再试"时，强行开新会话会把历史时间轴撑得很乱。effect 的 imageModel /
-    // mode / maskName 字段是**会话首次生成时**的快照，不随中途切换更新；
-    // 后续提交的实际参数由 submission 自身 + 入参 generateImageAction 决定。
-    const canAppendToCurrent = !!selectedEffect;
+    // effect 的 imageModel / mode / maskName 字段是**会话首次生成时**的
+    // 快照，不随中途切换更新；后续提交的实际参数由 submission 自身 + 入参
+    // generateImageAction 决定。
+    const targetEffect = selectedEffect ?? history[0] ?? null;
+    const canAppendToCurrent = !!targetEffect;
 
     const submissionTs = new Date().toISOString();
     const submissionId = `sub_${String(Date.now()).slice(-6)}`;
@@ -1187,15 +1315,18 @@ export function GenerateWorkbenchView({
     };
 
     let newEffect: WorkbenchEffect;
-    if (canAppendToCurrent && selectedEffect) {
+    if (canAppendToCurrent && targetEffect) {
       // 复用：保留 effect 主结构，把新 submission 追加到 submissions 列表
-      // 时间戳刷成最新。如果当前 effect 是 draft（来自 handleNewSession），
-      // 顺便补全 maskId / maskName / mode / imageModel / imageModelName
-      // 等占位字段，原地"提升"为真实会话。
-      const existingSubs = selectedEffect.submissions ?? [];
-      const isDraft = selectedEffect.status === "draft";
+      // 时间戳刷成最新。targetEffect 可能是 selectedEffect，也可能是
+      // history[0] fallback —— 后者场景下用户没显式点过历史项，但有
+      // 历史可承接（用户刷新页面 / 切走 Tab 后回来直接生成）。如果当前
+      // effect 是 draft（来自 handleNewSession），顺便补全 maskId /
+      // maskName / mode / imageModel / imageModelName 等占位字段，原地
+      // "提升"为真实会话。
+      const existingSubs = targetEffect.submissions ?? [];
+      const isDraft = targetEffect.status === "draft";
       newEffect = {
-        ...selectedEffect,
+        ...targetEffect,
         createdAt: submissionTs,
         status: "processing", // effect 状态跟随最新提交
         prompt: finalPrompt, // prompt 用最新的
@@ -1212,9 +1343,7 @@ export function GenerateWorkbenchView({
         submissions: [...existingSubs, newSubmission],
       };
       setHistory((prev) =>
-        prev.map((e) =>
-          e.effectId === selectedEffect.effectId ? newEffect : e
-        )
+        prev.map((e) => (e.effectId === targetEffect.effectId ? newEffect : e))
       );
     } else {
       newEffect = {
@@ -1340,8 +1469,23 @@ export function GenerateWorkbenchView({
    *
    * effectId 用 `draft_<ts.slice(-6)>` —— 跟 `EF_` 前缀区分，避免和真生成撞 key
    * 触发 startPolling 时找不到对应历史条目。
+   *
+   * 2026-08-22：重置 uploadedImage / selectedPhoto / librarySearch，让新会话
+   * 拿到干净的初始状态。上一个会话残留的 uploadedImage（上传中 / publicUrl=null /
+   * 上传失败）会跨会话延续，把新会话的"生成"按钮 disable 住：
+   *   refMode === "upload" && uploadedImage !== null &&
+   *     (uploading !== null || !publicUrl)
+   * 用户报告"会话任务进行中新建会话，新会话的生成按钮无法点击"就是这个原因。
+   * revokeObjectURL 是为了避免 blob URL 内存泄漏。
    */
   const handleNewSession = () => {
+    if (uploadedImage) {
+      URL.revokeObjectURL(uploadedImage.previewUrl);
+      setUploadedImage(null);
+    }
+    setSelectedPhoto(null);
+    setLibrarySearch("");
+
     const draft: WorkbenchEffect = {
       effectId: `draft_${String(Date.now()).slice(-6)}`,
       prompt: "",
@@ -1358,8 +1502,82 @@ export function GenerateWorkbenchView({
     setSelectedEffect(draft);
   };
 
+  // ============ 会话改名 / 删除 ============
+  //
+  // 2026-08-22 新增（用户反馈 "会话支持删除和修改名称"）。
+  //
+  // 重命名：本地更新 maskName，**不写 DB**。原因：imageJob 表只有 maskId 列
+  // 没有 title/customName，要持久化得先加列（schema 迁移）+ 改 jobsToEffects
+  // + 改 hydrate。短期收益低，TODO。如果后续要持久化，建议加 `customTitle`
+  // 列 + `renameImageJob` server action。
+  //
+  // 删除：本地从 history 移除。**DB 行不清理**（原因同上 —— 没有 deleteImageJob
+  // server action；下次刷新 listImageJobsAction 还会把它读回来）。删除前需要
+  // 用户二次确认（confirmingDeleteId 状态）。
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(
+    null
+  );
+
+  const handleStartRename = (eff: WorkbenchEffect) => {
+    setEditingSessionId(eff.effectId);
+    // 初始值用当前显示名（draft → effectId，与 rail displayName 保持一致；
+    // 其余取当前 maskName）
+    const current =
+      eff.status === "draft"
+        ? eff.effectId
+        : eff.maskName && eff.maskName !== "CUSTOM"
+          ? eff.maskName
+          : eff.prompt?.slice(0, 24) || "";
+    setEditingName(current);
+    setConfirmingDeleteId(null);
+  };
+
+  const handleSaveRename = () => {
+    if (!editingSessionId) return;
+    const trimmed = editingName.trim().slice(0, 32);
+    if (!trimmed) {
+      // 空字符串 = 取消（视为放弃编辑）
+      setEditingSessionId(null);
+      setEditingName("");
+      return;
+    }
+    setHistory((prev) =>
+      prev.map((e) =>
+        e.effectId === editingSessionId
+          ? { ...e, maskName: trimmed, maskId: trimmed }
+          : e
+      )
+    );
+    setEditingSessionId(null);
+    setEditingName("");
+  };
+
+  const handleCancelRename = () => {
+    setEditingSessionId(null);
+    setEditingName("");
+  };
+
+  const handleRequestDelete = (effectId: string) => {
+    setConfirmingDeleteId(effectId);
+    setEditingSessionId(null);
+  };
+
+  const handleConfirmDelete = (effectId: string) => {
+    setHistory((prev) => prev.filter((e) => e.effectId !== effectId));
+    setSelectedEffect((prev) => (prev?.effectId === effectId ? null : prev));
+    // 停掉对该 effect 的轮询
+    pollingRef.current.delete(effectId);
+    setConfirmingDeleteId(null);
+  };
+
+  const handleCancelDelete = () => {
+    setConfirmingDeleteId(null);
+  };
+
   // 模板可用尺寸（与模型能力交集）— 2026-08-21：尺寸 UI 改为显示全集 ALL_IMAGE_SIZES，
-// 不再按 model 能力过滤（对齐 V2 ImageSettingsPanel 行为）。
+  // 不再按 model 能力过滤（对齐 V2 ImageSettingsPanel 行为）。
   // const availableSizes: ImageSize[] = modelConfig.capabilities.sizes;
 
   // 抑制未使用变量告警
@@ -1369,149 +1587,364 @@ export function GenerateWorkbenchView({
     <>
       <div className="flex h-[calc(100vh-8rem)] gap-4">
         {/* ============ 左侧：会话历史 rail（Lovart 风）============
-         * 垂直窄列：顶部「+」新建会话按钮 + 下方可滚动的会话缩略图列表。
-         * 历史从主画布底部挪到这里 —— 新会话里就不会再出现旧会话的缩略图，
-         * 点哪个会话就进入哪个，符合 Lovart 的"会话即工作流"心智。
+         *
+         * 2026-08-22 改造：宽度从 w-[88px] 扩到 w-60（240px），每条 session 从
+         * 纯缩略图升级为"缩略图 + 名称 + 相对时间 + 状态"四要素，方便用户识别
+         * 旧会话 —— 之前用户反馈"无法滚动查看以及查看全部，没有名称时间"。
+         *
+         * 顶部「+」按钮 sticky，让用户长会话列表滚到底也能新建；底部总数 +
+         * 滚动提示。
+         *
+         * 2026-08-23：默认折叠（sidebarOpen=false）—— 给中间参数面板 + 右侧
+         * 结果区更多横向空间；只在用户主动点左侧展开按钮时显示完整列表。
          */}
-        <aside className="w-[88px] shrink-0 flex flex-col bg-card border rounded-lg overflow-hidden">
-          <div className="p-2 border-b bg-muted/30 flex flex-col items-center gap-1">
-            <span className="text-[10px] font-medium text-muted-foreground tracking-wide">
-              会话
-            </span>
-            <button
-              type="button"
-              onClick={handleNewSession}
-              className="h-12 w-12 rounded-xl border-2 border-dashed border-muted-foreground/30 bg-muted/30 hover:bg-muted/60 hover:border-primary/60 flex items-center justify-center transition-all duration-200 hover:scale-105 group"
-              title="新建会话"
-              aria-label="新建会话"
-            >
-              <Plus className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-2">
-            {history.length === 0 ? (
-              <div className="flex-1 flex items-center justify-center text-[10px] text-muted-foreground/60 text-center px-1 leading-relaxed">
-                点击「+」开始第一次生图
-              </div>
-            ) : (
-              history.map((eff) => {
-                const Icon = STATUS_CONFIG[eff.status].icon;
-                const isSelected = selectedEffect?.effectId === eff.effectId;
-                return (
-                  <button
-                    key={eff.effectId}
-                    type="button"
-                    onClick={() => setSelectedEffect(eff)}
-                    className={cn(
-                      "relative h-12 w-12 rounded-xl overflow-hidden transition-all duration-200 group/sess",
-                      isSelected
-                        ? "ring-2 ring-primary ring-offset-2 ring-offset-card shadow-md scale-105"
-                        : "ring-1 ring-border hover:ring-muted-foreground/40 hover:scale-105"
-                    )}
-                    title={
-                      eff.maskName +
-                      (eff.status === "draft"
-                        ? ""
-                        : ` · ${STATUS_CONFIG[eff.status].label}`)
-                    }
-                  >
-                    {eff.resultUrls[0] ? (
-                      // biome-ignore lint/performance/noImgElement: 缩略图用原生 img
-                      <img
-                        src={eff.resultUrls[0]}
-                        alt={eff.maskName}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center bg-muted">
-                        <Icon
-                          className={cn(
-                            "h-4 w-4",
-                            STATUS_CONFIG[eff.status].color,
-                            eff.status === "processing" && "animate-spin"
-                          )}
-                        />
-                      </div>
-                    )}
-                    {/* 状态点：右上角小圆点（仅非 completed 才显示） */}
-                    {eff.status !== "completed" && (
-                      <span
-                        className={cn(
-                          "absolute top-0.5 right-0.5 h-2 w-2 rounded-full ring-2 ring-card",
-                          eff.status === "processing" &&
-                            "bg-primary animate-pulse",
-                          eff.status === "failed" && "bg-rose-500",
-                          eff.status === "pending" && "bg-amber-500",
-                          eff.status === "draft" && "bg-primary"
-                        )}
-                      />
-                    )}
-                  </button>
-                );
-              })
-            )}
-          </div>
-          {history.length > 0 && (
-            <div className="p-2 border-t bg-muted/30 flex justify-center">
+        {sidebarOpen ? (
+          <aside className="w-60 shrink-0 flex flex-col bg-card border rounded-lg overflow-hidden">
+            {/* 顶部：sticky，新建按钮始终可见 */}
+            <div className="p-2 border-b bg-muted/30 flex items-center gap-2 sticky top-0 z-10">
+              <button
+                type="button"
+                onClick={() => setSidebarOpen(false)}
+                className="h-7 w-7 rounded-md flex items-center justify-center hover:bg-muted transition-colors"
+                title="收起会话列表"
+                aria-label="收起会话列表"
+              >
+                <PanelLeftClose className="h-4 w-4 text-muted-foreground" />
+              </button>
+              <span className="text-[10px] font-medium text-muted-foreground tracking-wide">
+                会话
+              </span>
               <Badge
                 variant="secondary"
                 className="h-4 px-1.5 text-[9px] font-mono"
               >
                 {history.length}
               </Badge>
+              <button
+                type="button"
+                onClick={handleNewSession}
+                className="ml-auto h-8 w-8 rounded-lg border-2 border-dashed border-muted-foreground/30 bg-muted/30 hover:bg-muted/60 hover:border-primary/60 flex items-center justify-center transition-all duration-200 hover:scale-105 group"
+                title="新建会话"
+                aria-label="新建会话"
+              >
+                <Plus className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
+              </button>
             </div>
-          )}
-        </aside>
+            {/* 中部：可滚动列表 —— 显式加 max-h + overflow-y-auto 兜底，部分
+             * 浏览器 flex-1 在嵌套布局里会失效 */}
+            <div
+              className="flex-1 overflow-y-auto p-2 space-y-1.5"
+              style={{ maxHeight: "calc(100vh - 11rem)" }}
+            >
+              {history.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 text-[10px] text-muted-foreground/60 text-center px-1 leading-relaxed gap-2">
+                  <span>暂无会话</span>
+                  <span>点击右上「+」开始第一次生图</span>
+                </div>
+              ) : (
+                history.map((eff) => {
+                  const Icon = STATUS_CONFIG[eff.status].icon;
+                  const isSelected = selectedEffect?.effectId === eff.effectId;
+                  const isEditing = editingSessionId === eff.effectId;
+                  const isConfirmingDelete =
+                    confirmingDeleteId === eff.effectId;
+                  // 名称：draft 默认显示 effectId（用户反馈"新建会话默认名称为
+                  // 该会话id"——和 maskName="新会话"那种纯占位比，id 至少有辨识
+                  // 度，多个 draft 并存不会撞名）；其余优先 maskName，回退到
+                  // prompt 前 24 字
+                  const displayName =
+                    eff.status === "draft"
+                      ? eff.effectId
+                      : eff.maskName && eff.maskName !== "CUSTOM"
+                        ? eff.maskName
+                        : eff.prompt?.slice(0, 24) || "未命名";
+                  const tooltipTitle = `${displayName} · ${STATUS_CONFIG[eff.status].label} · ${formatAbsoluteTime(eff.createdAt)}`;
+                  return (
+                    // 嵌套 button 不能放进 button，外层用 div + onClick 选中
+                    // biome-ignore lint/a11y/useKeyWithClickEvents: rail 项支持 hover 出现操作按钮
+                    <div
+                      key={eff.effectId}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => {
+                        if (!isEditing && !isConfirmingDelete) {
+                          setSelectedEffect(eff);
+                        }
+                      }}
+                      title={
+                        isEditing || isConfirmingDelete
+                          ? undefined
+                          : tooltipTitle
+                      }
+                      className={cn(
+                        "w-full flex items-start gap-2 rounded-lg p-1.5 text-left transition-colors group/sess",
+                        isSelected
+                          ? "bg-primary/10 ring-1 ring-primary/50"
+                          : "hover:bg-muted/60 ring-1 ring-transparent",
+                        isConfirmingDelete &&
+                          "ring-1 ring-rose-500/50 bg-rose-500/5"
+                      )}
+                    >
+                      {/* 缩略图：48x48（2026-08-23：去掉右上角状态点 overlay，用户反馈
+                       * "不要这个"——状态信息已在右侧状态行（label + 相对时间）
+                       * 体现，缩略图上重复点反而干扰视线） */}
+                      <span className="relative h-12 w-12 shrink-0 rounded-md overflow-hidden bg-muted">
+                        {eff.resultUrls[0] ? (
+                          // biome-ignore lint/performance/noImgElement: 缩略图用原生 img
+                          <img
+                            src={eff.resultUrls[0]}
+                            alt={displayName}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <span className="w-full h-full flex items-center justify-center">
+                            <Icon
+                              className={cn(
+                                "h-4 w-4",
+                                STATUS_CONFIG[eff.status].color,
+                                eff.status === "processing" && "animate-spin"
+                              )}
+                            />
+                          </span>
+                        )}
+                      </span>
+
+                      {isEditing ? (
+                        // 重命名模式：input + 状态行
+                        <span className="min-w-0 flex-1 flex flex-col gap-1">
+                          <input
+                            autoFocus
+                            value={editingName}
+                            onChange={(e) => setEditingName(e.target.value)}
+                            onBlur={handleSaveRename}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                handleSaveRename();
+                              } else if (e.key === "Escape") {
+                                e.preventDefault();
+                                handleCancelRename();
+                              }
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            maxLength={32}
+                            className="w-full px-1.5 py-0.5 text-xs font-medium rounded border border-primary/50 bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                          <span className="text-[10px] text-muted-foreground">
+                            Enter 保存 · Esc 取消
+                          </span>
+                        </span>
+                      ) : isConfirmingDelete ? (
+                        // 删除确认模式
+                        <span className="min-w-0 flex-1 flex flex-col gap-1">
+                          <span className="text-xs font-medium text-rose-700 dark:text-rose-400 truncate">
+                            删除该会话？
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleConfirmDelete(eff.effectId);
+                              }}
+                              className="h-6 px-2 text-[10px] font-medium rounded bg-rose-500 text-white hover:bg-rose-600 transition-colors"
+                            >
+                              删除
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleCancelDelete();
+                              }}
+                              className="h-6 px-2 text-[10px] font-medium rounded bg-muted hover:bg-muted/80 transition-colors"
+                            >
+                              取消
+                            </button>
+                          </span>
+                        </span>
+                      ) : (
+                        // 正常显示模式
+                        <>
+                          {/* 文字：名称 + 状态 + 相对时间 */}
+                          <span className="min-w-0 flex-1 flex flex-col gap-0.5">
+                            <span
+                              className={cn(
+                                "text-xs font-medium truncate",
+                                isSelected ? "text-primary" : "text-foreground"
+                              )}
+                            >
+                              {displayName}
+                            </span>
+                            <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                              <span
+                                className={cn(
+                                  "shrink-0",
+                                  STATUS_CONFIG[eff.status].color
+                                )}
+                              >
+                                {STATUS_CONFIG[eff.status].label}
+                              </span>
+                              <span className="shrink-0">·</span>
+                              <span className="font-mono tabular-nums truncate">
+                                {formatRelativeTime(eff.createdAt)}
+                              </span>
+                            </span>
+                          </span>
+                          {/* 操作图标：hover 时显示，✏️ + 🗑️ */}
+                          <span className="flex flex-col gap-0.5 shrink-0 opacity-0 group-hover/sess:opacity-100 transition-opacity">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleStartRename(eff);
+                              }}
+                              className="h-5 w-5 rounded flex items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground"
+                              title="重命名"
+                              aria-label="重命名会话"
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRequestDelete(eff.effectId);
+                              }}
+                              className="h-5 w-5 rounded flex items-center justify-center hover:bg-rose-500/10 text-muted-foreground hover:text-rose-500"
+                              title="删除"
+                              aria-label="删除会话"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </aside>
+        ) : (
+          // 折叠态：只显示会话缩略图竖列（最小宽度 56px = 48px 缩略图 + padding），
+          // 顶部一个图标按钮用来切回完整列表。点缩略图 = 选中该会话（不自动展开）
+          <aside className="w-14 shrink-0 flex flex-col bg-card border rounded-lg overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(true)}
+              className="h-11 flex items-center justify-center hover:bg-muted/60 transition-colors border-b"
+              title="展开会话列表"
+              aria-label="展开会话列表"
+            >
+              <PanelLeftOpen className="h-4 w-4 text-muted-foreground" />
+            </button>
+            {/* 缩略图列表：每个 cell = 48px 方图（与展开态一致），title 提供名称/状态/时间
+             * hover 查看，selected 用 primary ring 高亮 */}
+            <div className="flex-1 overflow-y-auto p-1 space-y-1">
+              {history.length === 0 ? (
+                <span
+                  className="block text-[9px] text-muted-foreground/60 text-center py-2 leading-tight"
+                  title="暂无会话"
+                >
+                  暂无
+                </span>
+              ) : (
+                history.map((eff) => {
+                  const Icon = STATUS_CONFIG[eff.status].icon;
+                  const isSelected = selectedEffect?.effectId === eff.effectId;
+                  const displayName =
+                    eff.status === "draft"
+                      ? eff.effectId
+                      : eff.maskName && eff.maskName !== "CUSTOM"
+                        ? eff.maskName
+                        : eff.prompt?.slice(0, 24) || "未命名";
+                  return (
+                    // biome-ignore lint/a11y/useKeyWithClickEvents: 缩略图 cell 仅做选中
+                    <div
+                      key={eff.effectId}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setSelectedEffect(eff)}
+                      title={`${displayName} · ${STATUS_CONFIG[eff.status].label} · ${formatAbsoluteTime(eff.createdAt)}`}
+                      className={cn(
+                        "h-12 w-12 mx-auto rounded-md overflow-hidden bg-muted cursor-pointer transition-all",
+                        isSelected
+                          ? "ring-2 ring-primary"
+                          : "hover:ring-1 hover:ring-primary/40"
+                      )}
+                    >
+                      {eff.resultUrls[0] ? (
+                        // biome-ignore lint/performance/noImgElement: 缩略图用原生 img
+                        <img
+                          src={eff.resultUrls[0]}
+                          alt={displayName}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <span className="w-full h-full flex items-center justify-center">
+                          <Icon
+                            className={cn(
+                              "h-4 w-4",
+                              STATUS_CONFIG[eff.status].color,
+                              eff.status === "processing" && "animate-spin"
+                            )}
+                          />
+                        </span>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </aside>
+        )}
 
         {/* ============ 中间：参数面板 ============ */}
         <aside className="w-[380px] shrink-0 flex flex-col bg-card border rounded-lg overflow-hidden">
           {/*
-            精简布局 —— Kimi/DeepSeek/GPT 式：
-            - 三个 Accordion：参考图 / 提示词 / 输出
-            - 高级参数折叠到一个右上角「⚙️」按钮弹出的 Popover
-            - 标签去 chip / 去「必选」「已覆盖」冗余 badge
-            - Accordion trigger 用最小化样式（无 hover background、无图标旋转动画）
+            2026-08-23：去掉 Accordion 折叠 —— 用户反馈"提示词和参考图不需要展开收起这功能"。
+            三个分区（参考图 / 提示词 / 输出）始终可见，全在一个可滚动容器里纵向铺开，
+            每个区的高度由内容本身决定（textarea rows=12、dropzone p-8），不靠折叠省空间。
+            segmented control 留在每个区标题栏右侧，模式切换零成本。
           */}
-          <Accordion
-            type="multiple"
-            defaultValue={["ref", "prompt", "output"]}
-            className="flex-1 overflow-y-auto px-3"
-          >
+          <div className="flex-1 overflow-y-auto px-3 divide-y divide-border/40">
             {/* ============ 参考图 ============ */}
-            <AccordionItem value="ref" className="border-b border-border/40">
-              <AccordionTrigger className="hover:no-underline py-2.5 text-xs font-medium [&[data-state=open]>svg]:hidden">
-                <span className="flex items-center gap-2">
+            <div className="py-3">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <span className="flex items-center gap-2 text-xs font-medium flex-1">
                   <ImageIcon className="h-3.5 w-3.5 text-primary" />
-                  参考图
+                  <span>参考图</span>
+                  <span className="ml-auto text-[11px] text-muted-foreground font-normal">
+                    {(refMode === "upload" && uploadedImage) ||
+                    (refMode === "library" && selectedPhoto)
+                      ? "已选"
+                      : ""}
+                  </span>
                 </span>
-                <span className="ml-auto text-[11px] text-muted-foreground font-normal">
-                  {REF_MODE_LABELS[refMode]}
-                  {(refMode === "upload" && uploadedImage) ||
-                  (refMode === "library" && selectedPhoto)
-                    ? " · 已选"
-                    : ""}
-                </span>
-              </AccordionTrigger>
-              <AccordionContent className="pb-3">
+                <div
+                  className="flex gap-0.5 bg-muted rounded p-0.5 shrink-0"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {(["upload", "library", "none"] as RefMode[]).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => handleModeChange(m)}
+                      className={cn(
+                        "text-[10px] px-2 py-1 rounded transition-colors",
+                        refMode === m
+                          ? "bg-background shadow-sm font-medium"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      {REF_MODE_LABELS[m]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-2">
                 <div className="space-y-2">
-                  <div className="flex gap-0.5 bg-muted rounded p-0.5 w-fit">
-                    {(["upload", "library", "none"] as RefMode[]).map((m) => (
-                      <button
-                        key={m}
-                        type="button"
-                        onClick={() => handleModeChange(m)}
-                        className={cn(
-                          "text-[10px] px-2 py-1 rounded transition-colors",
-                          refMode === m
-                            ? "bg-background shadow-sm font-medium"
-                            : "text-muted-foreground hover:text-foreground"
-                        )}
-                      >
-                        {REF_MODE_LABELS[m]}
-                      </button>
-                    ))}
-                  </div>
-
                   {refMode === "upload" &&
                     (uploadedImage ? (
                       <div className="flex items-center gap-2 p-2 rounded-lg border bg-muted/30">
@@ -1583,7 +2016,9 @@ export function GenerateWorkbenchView({
                         }}
                         onClick={() => fileInputRef.current?.click()}
                         className={cn(
-                          "w-full border border-dashed rounded-lg p-5 text-center cursor-pointer transition-colors",
+                          // 2026-08-23：上传区域高度从 p-5 (~80px) 抬到 p-8 (~140px)，
+                          // 用户反馈"图片上传区域高度太小"，加图标尺寸 + 副文案，让落地点更明显
+                          "w-full border border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors space-y-1.5",
                           dragOver
                             ? "border-primary bg-primary/5"
                             : "border-border hover:border-primary/40 hover:bg-muted/30"
@@ -1600,12 +2035,15 @@ export function GenerateWorkbenchView({
                         />
                         <Upload
                           className={cn(
-                            "h-5 w-5 mx-auto mb-1.5",
+                            "h-7 w-7 mx-auto",
                             dragOver ? "text-primary" : "text-muted-foreground"
                           )}
                         />
-                        <p className="text-xs">
+                        <p className="text-xs font-medium">
                           {dragOver ? "释放即可上传" : "点击或拖拽图片"}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          支持 JPG / PNG / WebP，单张
                         </p>
                       </button>
                     ))}
@@ -1722,6 +2160,10 @@ export function GenerateWorkbenchView({
                               <div className="grid grid-cols-3 gap-1 p-1">
                                 {filtered.map((p) => {
                                   const selected = selectedPhoto?.id === p.id;
+                                  // 2026-08-23：photo 表统一承载本地上传 + 生图结果，
+                                  // 图库 cell 加 chip 区分来源；放左上角避免与
+                                  // selected 时的中央 checkmark 冲突。
+                                  const isGen = p.source === "generation";
                                   return (
                                     <button
                                       key={p.id}
@@ -1742,6 +2184,23 @@ export function GenerateWorkbenchView({
                                         className="w-full h-full object-cover"
                                         loading="lazy"
                                       />
+                                      {/* 来源 chip：左上角，selected 状态中央
+                                       * checkmark 时仍可见（背景半透避免遮挡图） */}
+                                      <span
+                                        className={cn(
+                                          "absolute top-0.5 left-0.5 inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[8px] font-medium leading-none backdrop-blur-sm",
+                                          isGen
+                                            ? "bg-violet-500/80 text-white"
+                                            : "bg-emerald-500/80 text-white"
+                                        )}
+                                      >
+                                        {isGen ? (
+                                          <Sparkles className="h-2 w-2" />
+                                        ) : (
+                                          <Upload className="h-2 w-2" />
+                                        )}
+                                        {isGen ? "生图" : "上传"}
+                                      </span>
                                       {selected && (
                                         <div className="absolute inset-0 bg-primary/30 flex items-center justify-center">
                                           <CheckCircle2 className="h-4 w-4 text-white" />
@@ -1758,46 +2217,44 @@ export function GenerateWorkbenchView({
                     </div>
                   )}
                 </div>
-              </AccordionContent>
-            </AccordionItem>
+              </div>
+            </div>
 
             {/* ============ 提示词 ============ */}
-            <AccordionItem value="prompt" className="border-b border-border/40">
-              <AccordionTrigger className="hover:no-underline py-2.5 text-xs font-medium [&[data-state=open]>svg]:hidden">
-                <span className="flex items-center gap-2">
+            <div className="py-3">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <span className="flex items-center gap-2 text-xs font-medium flex-1">
                   <Sparkles className="h-3.5 w-3.5 text-primary" />
-                  提示词
+                  <span>提示词</span>
                 </span>
-                <span className="ml-auto text-[11px] text-muted-foreground font-normal">
-                  {useTemplate ? (selectedTemplate?.name ?? "模板") : "手动"}
-                </span>
-              </AccordionTrigger>
-              <AccordionContent className="pb-3">
+                <div
+                  className="flex gap-0.5 bg-muted rounded p-0.5 shrink-0"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {(
+                    [
+                      { v: true, label: "模板" },
+                      { v: false, label: "手动" },
+                    ] as const
+                  ).map((opt) => (
+                    <button
+                      key={String(opt.v)}
+                      type="button"
+                      onClick={() => setUseTemplate(opt.v)}
+                      className={cn(
+                        "text-[10px] px-2 py-1 rounded transition-colors",
+                        useTemplate === opt.v
+                          ? "bg-background shadow-sm font-medium"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-2">
                 <div className="space-y-2">
-                  {/* 模板/手动 toggle */}
-                  <div className="flex gap-0.5 bg-muted rounded p-0.5 w-fit">
-                    {(
-                      [
-                        { v: true, label: "模板" },
-                        { v: false, label: "手动" },
-                      ] as const
-                    ).map((opt) => (
-                      <button
-                        key={String(opt.v)}
-                        type="button"
-                        onClick={() => setUseTemplate(opt.v)}
-                        className={cn(
-                          "text-[10px] px-2 py-1 rounded transition-colors",
-                          useTemplate === opt.v
-                            ? "bg-background shadow-sm font-medium"
-                            : "text-muted-foreground hover:text-foreground"
-                        )}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-
                   {/* 模板模式 */}
                   {useTemplate && (
                     <div className="space-y-2">
@@ -1957,7 +2414,8 @@ export function GenerateWorkbenchView({
                         value={prompt}
                         onChange={(e) => setPrompt(e.target.value)}
                         placeholder="描述你想要的图像效果..."
-                        rows={4}
+                        // 2026-08-23：rows 8 → 12，再抬一档；用户连续两次反馈高度太小
+                        rows={12}
                         className="text-xs resize-none"
                       />
                       {modelConfig.capabilities.supportsNegativePrompt && (
@@ -1965,49 +2423,48 @@ export function GenerateWorkbenchView({
                           value={negativePrompt}
                           onChange={(e) => setNegativePrompt(e.target.value)}
                           placeholder="反向提示词（可选）"
-                          rows={2}
+                          // 2026-08-23：rows 4 → 6
+                          rows={6}
                           className="text-xs resize-none"
                         />
                       )}
                     </div>
                   )}
                 </div>
-              </AccordionContent>
-            </AccordionItem>
+              </div>
+            </div>
 
             {/* ============ 输出参数（合并模型 + 尺寸 + 数量）============ */}
-            <AccordionItem value="output" className="border-b-0">
-              <AccordionTrigger className="hover:no-underline py-2.5 text-xs font-medium [&[data-state=open]>svg]:hidden">
-                <span className="flex items-center gap-2">
+            <div className="py-3">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <span className="flex items-center gap-2 text-xs font-medium flex-1">
                   <Settings2 className="h-3.5 w-3.5 text-primary" />
-                  输出
+                  <span>输出</span>
+                  <span className="ml-auto text-[11px] text-muted-foreground font-normal font-mono">
+                    {(() => {
+                      const tplCandidateCount = useTemplate
+                        ? (selectedTemplate?.candidateCount ?? 1)
+                        : 1;
+                      if (tplCandidateCount === 4 || tplCandidateCount === 9) {
+                        return "1 张拼接";
+                      }
+                      return `${batchSize} 张`;
+                    })()}
+                  </span>
                 </span>
-                <span className="ml-auto text-[11px] text-muted-foreground font-normal font-mono">
-                  {(() => {
-                    const tplCandidateCount = useTemplate
-                      ? (selectedTemplate?.candidateCount ?? 1)
-                      : 1;
-                    if (tplCandidateCount === 4 || tplCandidateCount === 9) {
-                      return "1 张拼接";
-                    }
-                    return `${batchSize} 张`;
-                  })()}
-                </span>
-              </AccordionTrigger>
-              <AccordionContent className="pb-3">
-                <div className="space-y-3">
-                  {/* 模型 */}
-                  <Select
-                    value={selectedModel}
-                    onValueChange={(v) => setSelectedModel(v as ImageModelId)}
-                  >
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue placeholder="选择模型" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {IMAGE_MODEL_LIST.filter(
-                        (m) => m.status === "active"
-                      ).map((m) => (
+              </div>
+              <div className="space-y-3">
+                {/* 模型 */}
+                <Select
+                  value={selectedModel}
+                  onValueChange={(v) => setSelectedModel(v as ImageModelId)}
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder="选择模型" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {IMAGE_MODEL_LIST.filter((m) => m.status === "active").map(
+                      (m) => (
                         <SelectItem
                           key={m.id}
                           value={m.id}
@@ -2033,13 +2490,13 @@ export function GenerateWorkbenchView({
                             </span>
                           </span>
                         </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </AccordionContent>
-            </AccordionItem>
-          </Accordion>
+                      )
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
 
           {/* 底部：生成按钮 + 高级齿轮入口（工作台不扣积分） */}
           <div className="p-3 border-t bg-muted/30 flex items-center gap-2">
@@ -2181,11 +2638,11 @@ export function GenerateWorkbenchView({
                 )}
 
                 {/* 2026-08-21：与 V2 ImageSettingsPanel 对齐，尺寸 / 数量 / 质量 / 透明背景放进高级参数。
-                   * - size: 当前 model 支持的所有尺寸（含 AspectIcon），V2 风格卡片（h-[72px]，icon 在上 label 在下）
-                   * - batchSize: 1~maxBatchSize，宫格拼接模板（4/9）时锁定为 1
-                   * - quality: auto/high/medium/low（auto 不透传给上游）
-                   * - transparentBackground: 开启后提交时 background="transparent"
-                   * 标记"已修改默认"小红点：当 size/batchSize 非默认 || quality !== "auto" || transparentBackground 时点亮 */}
+                 * - size: 当前 model 支持的所有尺寸（含 AspectIcon），V2 风格卡片（h-[72px]，icon 在上 label 在下）
+                 * - batchSize: 1~maxBatchSize，宫格拼接模板（4/9）时锁定为 1
+                 * - quality: auto/high/medium/low（auto 不透传给上游）
+                 * - transparentBackground: 开启后提交时 background="transparent"
+                 * 标记"已修改默认"小红点：当 size/batchSize 非默认 || quality !== "auto" || transparentBackground 时点亮 */}
                 <div className="space-y-1.5">
                   <span className="text-[11px] text-muted-foreground">
                     尺寸
@@ -2475,8 +2932,12 @@ export function GenerateWorkbenchView({
                   {/* 结果展示：按 submissions 数组逐条渲染时间轴节点
                    *
                    * 关键 UX：每次提交都是时间轴上独立的一行 —— 已完成的 submission
-                   * 永远不被新提交覆盖，新提交作为新节点追加在末尾。这是 ChatGPT
-                   * "消息气泡按时间顺序累积"风格。
+                   * 永远不被新提交覆盖。2026-08-23 改：用户反馈 timeline 倒序看着
+                   * 费力（ChatGPT 那种"消息累积"不符合生图场景 —— 用户要看的是
+                   * "我刚才提交的最新那张"，不是历史堆栈），改为**最新 submission
+                   * 渲染在最上面**，老 submission 自然沉到底部。数据数组保持
+                   * chronological ASC（jobsToEffects 写入顺序、handleGenerate
+                   * append 也走末尾），只在 render 时 `.reverse()` 倒序遍历。
                    *
                    * 节点内：
                    * - completed → 单图大预览 / 多图网格（hover 高亮 + 点击大图）
@@ -2489,8 +2950,8 @@ export function GenerateWorkbenchView({
                   <div className="space-y-3">
                     {(() => {
                       const subs = selectedEffect.submissions ?? [];
-                      // hydrate fallback：submissions 为空但 effect 有 resultUrls，
-                      // 视为一条 completed submission（DB 单行映射）。
+                      // hydrate fallback 1：submissions 为空 + 有 resultUrls
+                      // → 视为一条 completed submission（DB 单行映射）
                       if (
                         subs.length === 0 &&
                         selectedEffect.resultUrls.length > 0
@@ -2521,7 +2982,39 @@ export function GenerateWorkbenchView({
                           />
                         );
                       }
-                      return subs.map((sub) => (
+                      // hydrate fallback 2：submissions 为空 + effect 是 processing 状态
+                      // → 视为一条 processing submission（处理中的 DB 单行映射）。
+                      // 配合 mount useEffect 的 setSelectedEffect 默认选中，
+                      // 刷新页面后右侧时间轴能立刻看到 spinner + "生成中"，
+                      // 而不是空白（用户报告"刷新页面导致任务无法显示"补这一刀）。
+                      if (
+                        subs.length === 0 &&
+                        selectedEffect.status === "processing"
+                      ) {
+                        return (
+                          <SubmissionNode
+                            effectId={selectedEffect.effectId}
+                            submission={{
+                              submissionId: "hydrated-processing",
+                              status: "processing",
+                              resultUrls: [],
+                              createdAt: selectedEffect.createdAt,
+                              ...(selectedEffect.isGridComposite
+                                ? { isGridComposite: true }
+                                : {}),
+                              prompt: selectedEffect.prompt,
+                            }}
+                            onLightbox={(url, idx) =>
+                              setLightbox({
+                                url,
+                                effectId: selectedEffect.effectId,
+                                index: idx,
+                              })
+                            }
+                          />
+                        );
+                      }
+                      return [...subs].reverse().map((sub) => (
                         <SubmissionNode
                           key={sub.submissionId}
                           effectId={selectedEffect.effectId}
@@ -2940,46 +3433,42 @@ function SubmissionNode({
         )}
       </div>
 
-      {resultUrls.length === 1 ? (
-        <button
-          type="button"
-          onClick={() => onLightbox(resultUrls[0]!, 0)}
-          className="group block max-w-[280px] rounded-lg overflow-hidden border bg-muted hover:border-primary/60 transition-colors text-left"
-          title="点击查看大图"
-        >
-          {/* biome-ignore lint/performance/noImgElement: 单图预览 */}
-          <img
-            src={resultUrls[0]}
-            alt="生成结果"
-            className="block w-full h-auto transition-transform duration-300 group-hover:scale-[1.02]"
-            loading="lazy"
-          />
-        </button>
-      ) : (
-        <div className="grid grid-cols-2 gap-2 max-w-[360px]">
-          {resultUrls.map((url, i) => (
-            <button
-              // biome-ignore lint/suspicious/noArrayIndexKey: 一次提交内的图按生成顺序
-              key={i}
-              type="button"
-              onClick={() => onLightbox(url, i)}
-              className="group relative aspect-square overflow-hidden rounded-lg border bg-muted hover:border-primary/60 transition-colors"
-              title={`第 ${i + 1} 张 · 点击查看大图`}
-            >
-              {/* biome-ignore lint/performance/noImgElement: 多图网格缩略图 */}
-              <img
-                src={url}
-                alt={`结果 ${i + 1}`}
-                className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
-                loading="lazy"
-              />
+      {/* 单图 / 多图统一走 grid-cols-3：每张图占 1 格，跟多图网格同布局、同尺寸。
+       * 2026-08-23：用户反馈"单图按照多图网格"——之前单图单独一个 button
+       * + h-auto，整图直接渲染到 360px，与多图 3×N 网格（cell ~115px）视觉
+       * 重量不一致；统一后所有 submission 都按 N 格缩略图渲染，缩略图点
+       * 击仍走 onLightbox 放大看。aspect-square + object-cover 会按中心
+       * 裁切到方形（与多图网格一致）—— 横长竖长图都会被裁，代价是单图
+       * 看到的是方形预览而非原图比例，用户需要细节就点开 lightbox。 */}
+      <div className="grid grid-cols-3 gap-2 max-w-[360px]">
+        {resultUrls.map((url, i) => (
+          <button
+            // biome-ignore lint/suspicious/noArrayIndexKey: 一次提交内的图按生成顺序
+            key={i}
+            type="button"
+            onClick={() => onLightbox(url, i)}
+            className="group relative aspect-square overflow-hidden rounded-lg border bg-muted hover:border-primary/60 transition-colors"
+            title={
+              resultUrls.length === 1
+                ? "点击查看大图"
+                : `第 ${i + 1} 张 · 点击查看大图`
+            }
+          >
+            {/* biome-ignore lint/performance/noImgElement: timeline 缩略图 */}
+            <img
+              src={url}
+              alt={resultUrls.length === 1 ? "生成结果" : `结果 ${i + 1}`}
+              className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+              loading="lazy"
+            />
+            {resultUrls.length > 1 && (
               <span className="absolute bottom-1 left-1 bg-black/60 backdrop-blur-sm text-white text-[9px] px-1 py-0.5 rounded font-mono leading-none opacity-0 group-hover:opacity-100 transition-opacity">
                 #{i + 1}
               </span>
-            </button>
-          ))}
-        </div>
-      )}
+            )}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
