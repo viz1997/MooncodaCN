@@ -350,7 +350,7 @@ function PhotosTab({
       title: item.fileName,
       cover: item.thumbnailUrl ?? item.fileUrl,
       source: "photo",
-      photo,
+      photo: item,
     }));
     const fromAssets: PhotoEntry[] = allAssets
       .filter((asset) => asset.kind === "image")
