@@ -1,5 +1,6 @@
 import { relations } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   boolean,
   index,
   integer,
@@ -547,6 +548,22 @@ export const generationModeEnum = pgEnum("generation_mode", [
 ]);
 
 /**
+ * 资产来源枚举（photo 表）
+ *
+ * - upload: 用户本地上传（createPhotoAction 写入）
+ * - generation: 生图结果入库（saveGenerationResultsAsAssets 写入，
+ *   2026-08-23 起由 generation-service.ts 在生图完成回调里自动落库）
+ *
+ * 之所以不另开"asset"表直接合并 imageJob.resultUrls —— 后者是生图任务的
+ * 状态机权威来源，resultUrls JSON 数组是它的产物；photo 只是资产索引，
+ * 拆表 + source 区分是最低耦合的方案。
+ */
+export const photoSourceEnum = pgEnum("photo_source", [
+  "upload",
+  "generation",
+]);
+
+/**
  * 画布内置渠道生成任务状态枚举
  *
  * Phase 4 起，`/api/canvas/generate` 对 image/audio 改异步 send + 轮询，
@@ -626,6 +643,16 @@ export const photo = pgTable("photo", {
   userId: text("user_id")
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
+  // 2026-08-23：资产统一为 photo 表，加 source 区分"本地上传"和"生图结果"
+  source: photoSourceEnum("source").notNull().default("upload"),
+  // source=generation 时关联的生图任务；onDelete: "set null" 防止 imageJob 误删连带删资产
+  // 用 AnyPgColumn 打破 photo ↔ imageJob 的循环 FK 推导（Drizzle 官方推荐做法）
+  imageJobId: text("image_job_id").references((): AnyPgColumn => imageJob.id, {
+    onDelete: "set null",
+  }),
+  // 生图时的 prompt / model（source=upload 时为 null）
+  prompt: text("prompt"),
+  model: text("model"),
   fileName: text("file_name").notNull(),
   fileUrl: text("file_url").notNull(),
   thumbnailUrl: text("thumbnail_url"),
@@ -676,7 +703,7 @@ export const imageJob = pgTable("image_job", {
   userId: text("user_id")
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
-  photoId: text("photo_id").references(() => photo.id, {
+  photoId: text("photo_id").references((): AnyPgColumn => photo.id, {
     onDelete: "set null",
   }),
   maskId: text("mask_id"),

@@ -11,6 +11,7 @@ import { db } from "@/db";
 import { type ImageJob, imageJob } from "@/db/schema";
 import { consumeCredits } from "@/features/credits/core";
 import { checkFileSizePrivilege } from "@/features/subscription/services/user-plan";
+import { logger } from "@/lib/logger";
 import {
   buildResultFields,
   dispatchGenerateImage,
@@ -20,6 +21,7 @@ import {
   IMAGE_MODELS,
   logImageGen,
 } from "../";
+import { saveGenerationResultsAsAssets } from "./asset-writer";
 import { updateEffectUsageStats } from "./db-effects";
 import type {
   GenerateImageRequest,
@@ -316,6 +318,36 @@ export async function dispatchImageGenerationJob(options: {
 
   await db.update(imageJob).set(updateData).where(eq(imageJob.id, jobId));
 
+  // 2026-08-23：生图结果入库到 photo 表（source=generation）—— 让"我的资产"
+  // 统一承载本地上传 + 生图结果。仅在 completed + 有图时入库；非致命（imageJob
+  // 写入已成功），失败只 warn 不抛。userId 不在 input 里，事后从 imageJob 行取。
+  if (
+    result.status === "completed" &&
+    result.images &&
+    result.images.length > 0
+  ) {
+    try {
+      const jobRow = await db.query.imageJob.findFirst({
+        where: eq(imageJob.id, jobId),
+        columns: { id: true, userId: true, prompt: true, model: true },
+      });
+      if (jobRow) {
+        await saveGenerationResultsAsAssets({
+          jobId: jobRow.id,
+          userId: jobRow.userId,
+          resultUrls: result.images.map((img) => img.url),
+          prompt: jobRow.prompt,
+          model: jobRow.model,
+        });
+      }
+    } catch (err) {
+      logger.warn(
+        { err, jobId },
+        "生图结果入库到 photo 失败，仅 imageJob.resultUrls 写入已成功（前端仍可见结果，「我的资产」会缺失该次生成图）"
+      );
+    }
+  }
+
   logImageGen({
     ...extractSubmitContext(req, "internal"),
     ...buildResultFields(result),
@@ -408,6 +440,29 @@ export async function updateImageJobFromTaskResult(
       completedAt: isTerminal ? new Date() : job.completedAt,
     })
     .where(eq(imageJob.id, job.id));
+
+  // 2026-08-23：生图结果入库到 photo 表（source=generation），与同步路径对齐。
+  // 失败非致命，仅 warn —— imageJob.resultUrls 是前端可见结果的权威来源。
+  if (
+    result.status === "completed" &&
+    result.images &&
+    result.images.length > 0
+  ) {
+    try {
+      await saveGenerationResultsAsAssets({
+        jobId: job.id,
+        userId: job.userId,
+        resultUrls: result.images.map((img) => img.url),
+        prompt: job.prompt,
+        model: job.model,
+      });
+    } catch (err) {
+      logger.warn(
+        { err, jobId: job.id },
+        "生图结果入库到 photo 失败（异步 polling 路径），仅 imageJob.resultUrls 写入已成功"
+      );
+    }
+  }
 }
 
 /**

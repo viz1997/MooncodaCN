@@ -8,6 +8,7 @@ import {
   List as ListIcon,
   Loader2,
   Search,
+  Sparkles,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -54,6 +55,11 @@ export function PhotosManagerView({ initialPhotos }: PhotosManagerViewProps) {
   const [photos, setPhotos] = useState<Photo[]>(initialPhotos);
   const [view, setView] = useState<"grid" | "list">("grid");
   const [search, setSearch] = useState("");
+  // 2026-08-23：资产统一后，photo 表承载"本地上传 + 生图结果"。
+  // sourceFilter 决定显示哪一类；默认 "all" 让用户先看到全部。
+  const [sourceFilter, setSourceFilter] = useState<
+    "all" | "upload" | "generation"
+  >("all");
   const [uploadOpen, setUploadOpen] = useState(false);
   const [previewPhoto, setPreviewPhoto] = useState<Photo | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -88,8 +94,9 @@ export function PhotosManagerView({ initialPhotos }: PhotosManagerViewProps) {
 
   const filtered = photos.filter(
     (p) =>
-      p.fileName.toLowerCase().includes(search.toLowerCase()) ||
-      p.id.toLowerCase().includes(search.toLowerCase())
+      (sourceFilter === "all" || p.source === sourceFilter) &&
+      (p.fileName.toLowerCase().includes(search.toLowerCase()) ||
+        p.id.toLowerCase().includes(search.toLowerCase()))
   );
 
   const handleCopyId = (photo: Photo) => {
@@ -213,6 +220,56 @@ export function PhotosManagerView({ initialPhotos }: PhotosManagerViewProps) {
         </div>
       </div>
 
+      <div className="flex items-center gap-1 rounded-lg border p-0.5 w-fit">
+        <button
+          type="button"
+          onClick={() => setSourceFilter("all")}
+          className={cn(
+            "px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1.5",
+            sourceFilter === "all"
+              ? "bg-muted text-foreground"
+              : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+          )}
+        >
+          全部
+          <Badge variant="outline" className="text-[10px] h-4 px-1">
+            {photos.length}
+          </Badge>
+        </button>
+        <button
+          type="button"
+          onClick={() => setSourceFilter("upload")}
+          className={cn(
+            "px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1.5",
+            sourceFilter === "upload"
+              ? "bg-muted text-foreground"
+              : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+          )}
+        >
+          <Upload className="h-3.5 w-3.5" />
+          本地上传
+          <Badge variant="outline" className="text-[10px] h-4 px-1">
+            {photos.filter((p) => p.source === "upload").length}
+          </Badge>
+        </button>
+        <button
+          type="button"
+          onClick={() => setSourceFilter("generation")}
+          className={cn(
+            "px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1.5",
+            sourceFilter === "generation"
+              ? "bg-muted text-foreground"
+              : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+          )}
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          生图结果
+          <Badge variant="outline" className="text-[10px] h-4 px-1">
+            {photos.filter((p) => p.source === "generation").length}
+          </Badge>
+        </button>
+      </div>
+
       {filtered.length === 0 ? (
         <Card>
           <CardContent className="py-12">
@@ -249,6 +306,20 @@ export function PhotosManagerView({ initialPhotos }: PhotosManagerViewProps) {
                 <Badge className="absolute top-1.5 right-1.5 text-[10px] uppercase">
                   {photo.format}
                 </Badge>
+                {photo.source === "generation" ? (
+                  <Badge className="absolute top-1.5 left-1.5 text-[10px] gap-1 bg-violet-500/90 hover:bg-violet-500/90 text-white">
+                    <Sparkles className="h-2.5 w-2.5" />
+                    生图
+                  </Badge>
+                ) : (
+                  <Badge
+                    variant="secondary"
+                    className="absolute top-1.5 left-1.5 text-[10px] gap-1 bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/15"
+                  >
+                    <Upload className="h-2.5 w-2.5" />
+                    上传
+                  </Badge>
+                )}
               </button>
               <div className="p-2.5 space-y-1">
                 <p
@@ -302,15 +373,39 @@ export function PhotosManagerView({ initialPhotos }: PhotosManagerViewProps) {
                     className="h-14 w-14 rounded-lg object-cover"
                   />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">
-                      {photo.fileName}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium truncate">
+                        {photo.fileName}
+                      </p>
+                      {photo.source === "generation" ? (
+                        <Badge className="text-[10px] gap-1 bg-violet-500/90 hover:bg-violet-500/90 text-white">
+                          <Sparkles className="h-2.5 w-2.5" />
+                          生图
+                        </Badge>
+                      ) : (
+                        <Badge
+                          variant="secondary"
+                          className="text-[10px] gap-1 bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/15"
+                        >
+                          <Upload className="h-2.5 w-2.5" />
+                          上传
+                        </Badge>
+                      )}
+                    </div>
                     <p className="text-xs text-muted-foreground">
                       {photo.id} ·{" "}
                       {photo.fileSize ? formatFileSize(photo.fileSize) : "-"} ·{" "}
                       {photo.width ?? 0}×{photo.height ?? 0} ·{" "}
                       {formatDate(photo.createdAt)}
                     </p>
+                    {photo.source === "generation" && photo.prompt && (
+                      <p
+                        className="text-xs text-muted-foreground truncate mt-0.5"
+                        title={photo.prompt}
+                      >
+                        提示词：{photo.prompt}
+                      </p>
+                    )}
                   </div>
                   <Badge variant="outline" className="uppercase text-[10px]">
                     {photo.format}

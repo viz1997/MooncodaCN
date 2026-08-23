@@ -16,6 +16,7 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "admin:seed": "tsx scripts/seed-default-admin.ts",
+    "backfill:image-job-to-photo": "tsx scripts/backfill-image-job-to-photo.ts",
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:run": "vitest run",
