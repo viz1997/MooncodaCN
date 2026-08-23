@@ -193,11 +193,10 @@ export const dashboardNav: NavGroup[] = [
       // { title: "Public Image Gen", href: "/image-gen", icon: Sparkles },
       // 已隐藏：照片库独立入口 —— 已合并到「我的资产」里的「我的照片」Tab
       // { title: "Photos", href: "/dashboard/photos", icon: Image },
-      {
-        title: "Effects",
-        href: "/dashboard/effects",
-        icon: Image,
-      },
+      // 已隐藏：效果图独立入口 —— 2026-08-23 「生图结果入库 photo 表」后，
+      // 用户在「我的资产」按 source=generation 筛选即可看到所有生图历史，
+      // 不需要在 sider 单独放一个 nav。
+      // { title: "Effects", href: "/dashboard/effects", icon: Image },
       // 已隐藏：3D 模型管理
       // { title: "Models", href: "/dashboard/models", icon: Image },
       // 已隐藏：积分页（积分功能未启用）
