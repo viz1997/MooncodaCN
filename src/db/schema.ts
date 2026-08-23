@@ -971,6 +971,22 @@ export const promptOrder = pgTable(
     selectedIndex: integer("selected_index"),
     selections: text("selections"),
     errorMessage: text("error_message"),
+    // 2026-08-23：代理商业务（飞书 docx "链接生成管理系统"）—— promptOrder
+    // 区分 ToC 店铺单 / ToB 代理商单。ToC 用 platform 字段标识淘宝/小红书/
+    // 抖店；ToB 用 agentId 关联 agent 表。互斥：agentId 优先，platform 仅
+    // 用于 ToC。isAgentOrder 视图层根据 agentId 是否 null 计算。
+    //
+    // 为什么不在 platform enum 加 'agent'：platform 语义是"订单从哪个分发
+    // 渠道来"（外部渠道），代理商是内部角色，不是渠道。混在一起后期统计
+    // "各平台来源订单数"会被污染。
+    //
+    // onDelete: "set null" —— 删代理商时保留历史订单，但 UI 显示"已删除代理"
+    productTypeCode: text("product_type_code"),
+    productSize: text("product_size"),
+    accessoryCode: text("accessory_code"),
+    agentId: text("agent_id").references((): AnyPgColumn => agent.id, {
+      onDelete: "set null",
+    }),
     /**
      * 本轮生图的 Lingting 任务态（JSON，见 features/gpt-image/lib/generation-task.ts）。
      * null = 无进行中任务。服务端只做 submit 拿 task_id 存这里，
@@ -1077,6 +1093,39 @@ export type NewPromptOrderHistory = typeof promptOrderHistory.$inferInsert;
 /** 效果图历史快照触发原因类型 */
 export type PromptOrderHistoryTrigger =
   (typeof promptOrderHistoryTriggerEnum.enumValues)[number];
+
+// ============================================
+// 代理商表 (Agent) —— 飞书 docx「链接生成管理系统」ToB 业务
+// ============================================
+//
+// 代理商是 WJP 业务 ToB 端的"渠道运营方"，本身没有生产能力，纯做品牌 +
+// 客服 + 渠道。订单从代理商侧发，工厂按订单全流程代工。
+//
+// 为什么不复用 user 表：代理商和终端消费者走两套 UI（代理商有自己的客户
+// 上传入口 / 报价 / 发货流程）。user 表是终端消费者账号体系，硬塞代理
+// 商进来要扩 user.role enum + 加权限中间件，得不偿失。新建独立 agent
+// 表 + 与 user 完全解耦是最简方案。
+//
+// 字段：
+// - id: 业务可读 ID（A001 / zhangsan 都行，nanoid 生成也行）
+// - name: 代理商名称（管理端 / 链接生成管理后台显示）
+// - contact / phone / email: 联系信息，订单链接分发用
+// - isActive: 停用后不能再被新订单选择（已有订单不受影响）
+// - remark: 内部备注
+export const agent = pgTable("agent", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  contact: text("contact"),
+  phone: text("phone"),
+  email: text("email"),
+  remark: text("remark"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export type Agent = typeof agent.$inferSelect;
+export type NewAgent = typeof agent.$inferInsert;
 
 // ============================================
 // 画布内置渠道生成任务表 (CanvasRemoteJob)
@@ -1200,6 +1249,14 @@ export const promptOrderRelations = relations(promptOrder, ({ one, many }) => ({
     references: [promptTemplate.id],
   }),
   history: many(promptOrderHistory),
+  agent: one(agent, {
+    fields: [promptOrder.agentId],
+    references: [agent.id],
+  }),
+}));
+
+export const agentRelations = relations(agent, ({ many }) => ({
+  orders: many(promptOrder),
 }));
 
 export const promptOrderHistoryRelations = relations(
