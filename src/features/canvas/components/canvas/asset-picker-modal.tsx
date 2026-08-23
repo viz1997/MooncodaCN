@@ -318,9 +318,10 @@ function PhotosTab({
   const { t, i18n } = useTranslation();
   const [keyword, setKeyword] = useState("");
   const [page, setPage] = useState(1);
-  const assetImages = useAssetStore((state) =>
-    state.assets.filter((asset) => asset.kind === "image")
-  );
+  // 选择器必须返回稳定引用，否则 React useSyncExternalStore 检测到引用
+  // 变化会判为 "store changed"，触发无限重渲染 —— 这里只取 state.assets
+  // （本身在 store mutation 时才换引用），过滤挪到下面 useMemo 里做。
+  const allAssets = useAssetStore((state) => state.assets);
 
   const query = useQuery({
     queryKey: ["asset-picker-photos"],
@@ -351,17 +352,19 @@ function PhotosTab({
       source: "photo",
       photo,
     }));
-    const fromAssets: PhotoEntry[] = assetImages.map((asset) => ({
-      id: `asset:${asset.id}`,
-      title: asset.title,
-      cover:
-        asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : ""),
-      source: "asset",
-      asset,
-    }));
+    const fromAssets: PhotoEntry[] = allAssets
+      .filter((asset) => asset.kind === "image")
+      .map((asset) => ({
+        id: `asset:${asset.id}`,
+        title: asset.title,
+        cover:
+          asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : ""),
+        source: "asset",
+        asset,
+      }));
     // 工作台保存的最新，按 createdAt 排前面；photo 表默认按 desc(createdAt) 服务端排好
     return [...fromAssets, ...fromServer];
-  }, [assetImages, query.data]);
+  }, [allAssets, query.data]);
 
   const filtered = useMemo(() => {
     const normalized = keyword.trim().toLowerCase();
