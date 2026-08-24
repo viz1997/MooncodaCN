@@ -1397,7 +1397,15 @@ async function requestRemoteImage(params: {
   references?: ReferenceImage[];
   mask?: ReferenceImage;
   signal?: AbortSignal;
-}): Promise<Array<{ id: string; dataUrl: string }>> {
+}): Promise<{
+  items: Array<{ id: string; dataUrl: string }>;
+  /**
+   * 2026-08-24：服务端实测耗时（completedAt - createdAt）。优先用这个值，
+   * 客户端不要再算 performance.now()，否则会把客户端 prep + poll 间隙 +
+   * Inngest cold start 全算进去，看起来"超时实际才 60s"。
+   */
+  serverDurationMs?: number;
+}> {
   const { config, mode, prompt, references, mask, signal } = params;
   const jobId = await createRemoteImageJob({
     config,
@@ -1408,7 +1416,10 @@ async function requestRemoteImage(params: {
     signal,
   });
   const result = await pollRemoteImageJob(jobId, signal);
-  return result.items.map((item) => ({ id: nanoid(), dataUrl: item.url }));
+  return {
+    items: result.items.map((item) => ({ id: nanoid(), dataUrl: item.url })),
+    ...(result.durationMs ? { serverDurationMs: result.durationMs } : {}),
+  };
 }
 
 async function createRemoteImageJob(params: {
@@ -1470,6 +1481,8 @@ async function pollRemoteImageJob(
 ): Promise<{
   status: "completed";
   items: Array<{ url: string; mimeType?: string }>;
+  /** 服务端实测耗时（completedAt - createdAt），可选 */
+  durationMs?: number;
 }> {
   for (let attempt = 0; attempt < IMAGE_POLL_MAX_ATTEMPTS; attempt += 1) {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
@@ -1483,6 +1496,7 @@ async function pollRemoteImageJob(
       success?: boolean;
       status?: "pending" | "completed" | "failed";
       items?: Array<{ url: string; mimeType?: string }>;
+      durationMs?: number;
       message?: string;
       error?: string;
     };
@@ -1494,7 +1508,13 @@ async function pollRemoteImageJob(
     }
 
     if (pollBody.status === "completed" && pollBody.items) {
-      return { status: "completed", items: pollBody.items };
+      return {
+        status: "completed",
+        items: pollBody.items,
+        ...(typeof pollBody.durationMs === "number"
+          ? { durationMs: pollBody.durationMs }
+          : {}),
+      };
     }
 
     if (pollBody.status === "failed") {

@@ -396,7 +396,9 @@ export function ImageWorkbench() {
           model,
           config: { ...snapshot.config, count: String(generationCount) },
           references: snapshot.references,
-          durationMs: performance.now() - batchStartedAt,
+          // 2026-08-24：同 runBatchGeneration —— 优先 serverDurationMs
+          durationMs:
+            logImages[0]?.durationMs ?? performance.now() - batchStartedAt,
           successCount,
           failCount,
           status: successCount ? "success" : "failed",
@@ -588,17 +590,23 @@ export function ImageWorkbench() {
     references: ReferenceImage[];
   }): Promise<GeneratedImage[]> => {
     const itemStartedAt = performance.now();
-    const result = snapshot.references.length
+    const remoteResult = snapshot.references.length
       ? await requestEdit(snapshot.config, snapshot.text, snapshot.references)
       : await requestGeneration(snapshot.config, snapshot.text);
+    const result = remoteResult.items;
     if (!result.length) throw new Error(t("imageWorkbench.missingResult"));
+    // 2026-08-24：优先用服务端实测耗时（completedAt - createdAt），不含客户端
+    // prep / poll 间隙 / Inngest cold start，避免显示"2 分钟"虚胖成实际 56s。
+    // 兜底用 performance.now()（视频路径 / 服务端暂未支持时的旧数据）。
+    const durationMs =
+      remoteResult.serverDurationMs ?? performance.now() - itemStartedAt;
     const images = await Promise.all(
       result.map(async (image) => {
         const meta = await readImageMeta(image.dataUrl);
         return {
           id: image.id,
           dataUrl: image.dataUrl,
-          durationMs: performance.now() - itemStartedAt,
+          durationMs,
           width: meta.width,
           height: meta.height,
           bytes: getDataUrlByteSize(image.dataUrl),
@@ -631,16 +639,19 @@ export function ImageWorkbench() {
   ) => {
     const itemStartedAt = performance.now();
     try {
-      const result = snapshot.references.length
+      const remoteResult = snapshot.references.length
         ? await requestEdit(snapshot.config, snapshot.text, snapshot.references)
         : await requestGeneration(snapshot.config, snapshot.text);
-      const image = result[0];
+      const image = remoteResult.items[0];
       if (!image) throw new Error(t("imageWorkbench.missingResult"));
       const meta = await readImageMeta(image.dataUrl);
+      // 2026-08-24：同 runBatchGeneration —— 优先 serverDurationMs
+      const durationMs =
+        remoteResult.serverDurationMs ?? performance.now() - itemStartedAt;
       const nextImage = {
         id: image.id,
         dataUrl: image.dataUrl,
-        durationMs: performance.now() - itemStartedAt,
+        durationMs,
         width: meta.width,
         height: meta.height,
         bytes: getDataUrlByteSize(image.dataUrl),

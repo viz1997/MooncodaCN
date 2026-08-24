@@ -34,6 +34,14 @@ type PollResponse =
       status: "completed";
       items: Array<{ url: string; mimeType?: string }>;
       creditsConsumed: number;
+      /**
+       * 2026-08-24：服务端实测耗时（ms）= completedAt - createdAt。
+       * 让 V2 image-workbench 显示真实上游生成时长，不被客户端 prep /
+       * poll 间隙 / Inngest cold start 虚胖。
+       * createdAt / completedAt 都从 canvasRemoteJob 行取，差值为负或缺失
+       * 时不返回（兜底让前端用 performance.now() 估算）。
+       */
+      durationMs?: number;
     }
   | { status: "failed"; message: string; creditsConsumed: number };
 
@@ -90,6 +98,13 @@ async function pollCanvasRemoteJob(input: {
   });
   if (job) {
     if (job.status === "completed") {
+      // 服务端实测耗时：createdAt 是 POST /api/canvas/generate 写表的时刻，
+      // completedAt 是 Inngest 函数跑完写 status=completed 的时刻，差值即
+      // 真实"上游生成 + R2 持久化"时长（不含客户端 prep / poll 间隙）。
+      const serverDurationMs =
+        job.createdAt && job.completedAt
+          ? job.completedAt.getTime() - job.createdAt.getTime()
+          : 0;
       return {
         status: "completed",
         items: (job.result ?? []).map((item) => ({
@@ -97,6 +112,7 @@ async function pollCanvasRemoteJob(input: {
           ...(item.mimeType ? { mimeType: item.mimeType } : {}),
         })),
         creditsConsumed: job.creditsConsumed ?? 0,
+        ...(serverDurationMs > 0 ? { durationMs: serverDurationMs } : {}),
       };
     }
     if (job.status === "failed") {
