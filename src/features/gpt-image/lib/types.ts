@@ -125,6 +125,17 @@ export interface OrderView {
   cancelledAt: string | null;
   createdAt: string;
   updatedAt: string;
+  // ============================================
+  // 2026-08-23：代理商业务字段（ToB 订单专属，ToC 全部 null）
+  // ============================================
+  /** 代理商 ID（FK agent.id），null = ToC 订单 */
+  agentId: string | null;
+  /** 产品型号（R/A/P/RM），null = 未指定 */
+  productTypeCode: string | null;
+  /** 尺寸（厘米数字字符串），null = 未指定 */
+  productSize: string | null;
+  /** 配件（leather/pvc/bracket），null = 无配件或未指定 */
+  accessoryCode: string | null;
   template: {
     id: string;
     name: string;

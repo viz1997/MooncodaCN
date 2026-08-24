@@ -52,6 +52,11 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     cancelledAt: null,
     createdAt: ago,
     updatedAt: ago,
+    // 2026-08-23：代理商业务字段（mock 数据默认 ToC）
+    agentId: null,
+    productTypeCode: null,
+    productSize: null,
+    accessoryCode: null,
     template: {
       id: "t1",
       name: "证件照定制",
@@ -86,6 +91,11 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     cancelledAt: null,
     createdAt: ago,
     updatedAt: now,
+    // 2026-08-23：代理商业务字段（mock 数据默认 ToC）
+    agentId: null,
+    productTypeCode: null,
+    productSize: null,
+    accessoryCode: null,
     template: {
       id: "t1",
       name: "艺术写真",
@@ -120,6 +130,11 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     cancelledAt: null,
     createdAt: ago,
     updatedAt: ago,
+    // 2026-08-23：代理商业务字段（mock 数据默认 ToC）
+    agentId: null,
+    productTypeCode: null,
+    productSize: null,
+    accessoryCode: null,
     template: {
       id: "t1",
       name: "职业形象照",
@@ -154,6 +169,11 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     cancelledAt: null,
     createdAt: ago,
     updatedAt: ago,
+    // 2026-08-23：代理商业务字段（mock 数据默认 ToC）
+    agentId: null,
+    productTypeCode: null,
+    productSize: null,
+    accessoryCode: null,
     template: {
       id: "t1",
       name: "证件照定制",
@@ -188,6 +208,11 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     cancelledAt: null,
     createdAt: ago,
     updatedAt: ago,
+    // 2026-08-23：代理商业务字段（mock 数据默认 ToC）
+    agentId: null,
+    productTypeCode: null,
+    productSize: null,
+    accessoryCode: null,
     template: {
       id: "t1",
       name: "单张证件照",
@@ -222,6 +247,11 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     cancelledAt: null,
     createdAt: ago,
     updatedAt: now,
+    // 2026-08-23：代理商业务字段（mock 数据默认 ToC）
+    agentId: null,
+    productTypeCode: null,
+    productSize: null,
+    accessoryCode: null,
     template: {
       id: "t1",
       name: "个人写真",
@@ -256,6 +286,11 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     cancelledAt: null,
     createdAt: ago,
     updatedAt: now,
+    // 2026-08-23：代理商业务字段（mock 数据默认 ToC）
+    agentId: null,
+    productTypeCode: null,
+    productSize: null,
+    accessoryCode: null,
     template: {
       id: "t1",
       name: "艺术写真",
@@ -290,6 +325,11 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     cancelledAt: now,
     createdAt: ago,
     updatedAt: now,
+    // 2026-08-23：代理商业务字段（mock 数据默认 ToC）
+    agentId: null,
+    productTypeCode: null,
+    productSize: null,
+    accessoryCode: null,
     template: {
       id: "t1",
       name: "证件照定制",
@@ -335,6 +375,11 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     cancelledAt: null,
     createdAt: ago,
     updatedAt: now,
+    // 2026-08-23：代理商业务字段（mock 数据默认 ToC）
+    agentId: null,
+    productTypeCode: null,
+    productSize: null,
+    accessoryCode: null,
     template: {
       id: "t1",
       name: "双图定制",

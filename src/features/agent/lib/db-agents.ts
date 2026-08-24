@@ -21,6 +21,22 @@ export async function listAgentsFromDb(): Promise<Agent[]> {
 }
 
 /**
+ * 获取启用的代理商（订单创建表单下拉用；停用的过滤掉）
+ *
+ * 仅返回 id / name / contact 三个字段，避免把 email/phone/remark 等内部信息
+ * 暴露给订单创建上下文（订单创建走的是 protectedAction，不止 admin）。
+ */
+export async function listActiveAgentsFromDb(): Promise<
+  Pick<Agent, "id" | "name" | "contact">[]
+> {
+  return db.query.agent.findMany({
+    where: eq(agent.isActive, true),
+    orderBy: [asc(agent.name)],
+    columns: { id: true, name: true, contact: true },
+  });
+}
+
+/**
  * 单条查询（编辑/删除前预校验、关联订单展示等场景）
  */
 export async function getAgentFromDb(id: string): Promise<Agent | null> {

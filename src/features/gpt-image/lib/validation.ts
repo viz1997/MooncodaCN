@@ -90,6 +90,19 @@ export const promptOrderCreateSchema = z.object({
    * null/undefined 表示全新创建。
    */
   replaceOrderId: z.string().min(1).optional(),
+  // ============================================
+  // 2026-08-23：代理商业务（飞书 docx「链接生成管理系统」）
+  // 4 个可选字段，ToB 订单创建时由管理员挑选；ToC 订单全部留空。
+  // 字典见 src/features/gpt-image/lib/product-catalog.ts。
+  // ============================================
+  /** 代理商 ID（指向 agent.id，FK 已设 set null）。空 = ToC 订单 */
+  agentId: z.string().min(1).max(64).optional(),
+  /** 产品型号（R/A/P/RM，单字母） */
+  productTypeCode: z.string().min(1).max(8).optional(),
+  /** 尺寸（厘米数字字符串 4/6/8/11） */
+  productSize: z.string().min(1).max(8).optional(),
+  /** 配件（leather/pvc/bracket），部分型号无配件选项，可选 */
+  accessoryCode: z.string().min(1).max(16).optional(),
 });
 
 /** 用户上传原图（dataUrl 数组） */

@@ -1,20 +1,22 @@
 "use server";
 
 /**
- * 代理商 Admin Server Actions
+ * 代理商 Server Actions
  *
- * 全部走 adminAction 客户端（要求登录用户 role=admin），
- * 与 src/features/image-gen/admin/actions.ts 同源。
+ * - listActiveAgentsAction：protectedAction（订单创建表单下拉用），
+ *   仅返回启用的代理商，避免把停用项暴露给业务侧
+ * - 其余（list / create / update / setActive）：adminAction，要求 admin 角色
  */
 
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { adminAction } from "@/lib/safe-action";
+import { adminAction, protectedAction } from "@/lib/safe-action";
 
 import {
   insertAgentToDb,
+  listActiveAgentsFromDb,
   listAgentsFromDb,
   setAgentActiveInDb,
   updateAgentInDb,
@@ -22,6 +24,23 @@ import {
 
 const withAgentAdminAction = (name: string) =>
   adminAction.metadata({ action: `agent.admin.${name}` });
+
+const withAgentProtectedAction = (name: string) =>
+  protectedAction.metadata({ action: `agent.protected.${name}` });
+
+/**
+ * 列出启用的代理商（订单创建表单 picker 用）
+ *
+ * 返回 id / name / contact 三个字段，详见 listActiveAgentsFromDb。
+ */
+export const listActiveAgentsAction = withAgentProtectedAction(
+  "listActiveAgents"
+)
+  .schema(z.void().optional())
+  .action(async () => {
+    const agents = await listActiveAgentsFromDb();
+    return { agents };
+  });
 
 /**
  * 列表

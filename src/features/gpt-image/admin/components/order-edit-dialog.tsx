@@ -70,6 +70,12 @@ export function OrderEditDialog({
         uploadCount,
         imagesPerUpload,
         regenerateLimit,
+        // 2026-08-23：代理商业务字段（编辑时直传；不提供"清空"按钮，先
+        // 用 order 上的值兜底；要清空就在管理后台编辑 DB 或后续扩展 UI）
+        agentId: order.agentId ?? null,
+        productTypeCode: order.productTypeCode ?? null,
+        productSize: order.productSize ?? null,
+        accessoryCode: order.accessoryCode ?? null,
       });
       if (!res?.data) throw new Error("保存失败");
       message.success("订单已更新");

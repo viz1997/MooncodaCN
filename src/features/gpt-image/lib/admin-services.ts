@@ -9,7 +9,7 @@ import { nanoid } from "nanoid";
 
 import { db } from "@/db";
 import type { PromptOrderPlatform, PromptOrderStatus } from "@/db/schema";
-import { promptOrder, promptTemplate } from "@/db/schema";
+import { agent, promptOrder, promptTemplate } from "@/db/schema";
 import { generateOrderToken } from "./generation-service";
 import {
   countCandidateGroups,
@@ -253,6 +253,14 @@ export async function createOrder(input: {
    * 传 null/undefined 表示创建新订单。
    */
   replaceOrderId?: string | undefined;
+  // ============================================
+  // 2026-08-23：代理商业务 —— ToB 订单可选挂代理商 + 产品三件套。
+  // ToC 订单四个字段全部 undefined。详见 [[agent-module-design]]。
+  // ============================================
+  agentId?: string | undefined;
+  productTypeCode?: string | undefined;
+  productSize?: string | undefined;
+  accessoryCode?: string | undefined;
 }) {
   // 替换分支：用 updateOrder 同样的"业务字段"语义，只是不改 createdBy/templateId
   if (input.replaceOrderId) {
@@ -264,6 +272,10 @@ export async function createOrder(input: {
       uploadCount: input.uploadCount,
       imagesPerUpload: input.imagesPerUpload,
       regenerateLimit: input.regenerateLimit,
+      agentId: input.agentId ?? null,
+      productTypeCode: input.productTypeCode ?? null,
+      productSize: input.productSize ?? null,
+      accessoryCode: input.accessoryCode ?? null,
     });
   }
 
@@ -283,6 +295,17 @@ export async function createOrder(input: {
   });
   if (!template) throw new Error("模板不存在");
 
+  // ToB 订单若传 agentId 需校验 agent 存在且启用（避免历史脏数据）
+  if (input.agentId) {
+    const a = await db.query.agent.findFirst({
+      where: eq(agent.id, input.agentId),
+      columns: { id: true, isActive: true },
+    });
+    if (!a || !a.isActive) {
+      throw new Error("代理商不存在或已停用");
+    }
+  }
+
   const [created] = await db
     .insert(promptOrder)
     .values({
@@ -297,6 +320,10 @@ export async function createOrder(input: {
       imagesPerUpload: input.imagesPerUpload,
       regenerateLimit: input.regenerateLimit,
       createdBy: input.createdBy ?? null,
+      agentId: input.agentId ?? null,
+      productTypeCode: input.productTypeCode ?? null,
+      productSize: input.productSize ?? null,
+      accessoryCode: input.accessoryCode ?? null,
     })
     .returning();
 
@@ -322,6 +349,10 @@ export async function createOrder(input: {
     cancelledAt: created.cancelledAt?.toISOString() ?? null,
     createdAt: created.createdAt.toISOString(),
     updatedAt: created.updatedAt.toISOString(),
+    agentId: created.agentId,
+    productTypeCode: created.productTypeCode,
+    productSize: created.productSize,
+    accessoryCode: created.accessoryCode,
     hasUploadedImage: false,
     uploadedImageCount: 0,
     candidateCount: 0,
@@ -386,6 +417,11 @@ export async function listOrders(filters: {
       cancelledAt: promptOrder.cancelledAt,
       createdAt: promptOrder.createdAt,
       updatedAt: promptOrder.updatedAt,
+      // 2026-08-23：代理商 + 产品三件套
+      agentId: promptOrder.agentId,
+      productTypeCode: promptOrder.productTypeCode,
+      productSize: promptOrder.productSize,
+      accessoryCode: promptOrder.accessoryCode,
       // 模板字段（LEFT JOIN，可能为 null）
       tId: promptTemplate.id,
       tName: promptTemplate.name,
@@ -422,6 +458,10 @@ export async function listOrders(filters: {
       cancelledAt: o.cancelledAt?.toISOString() ?? null,
       createdAt: o.createdAt.toISOString(),
       updatedAt: o.updatedAt.toISOString(),
+      agentId: o.agentId,
+      productTypeCode: o.productTypeCode,
+      productSize: o.productSize,
+      accessoryCode: o.accessoryCode,
       hasUploadedImage: uploaded.length > 0,
       uploadedImageCount: countUploadedImages(uploaded),
       candidateCount: countCandidateGroups(candidates),
@@ -505,6 +545,11 @@ export async function updateOrder(input: {
   uploadCount: number;
   imagesPerUpload: number;
   regenerateLimit: number;
+  // 2026-08-23：代理商业务字段（nullable = 清空该列；不传 undefined = 不改）
+  agentId?: string | null | undefined;
+  productTypeCode?: string | null | undefined;
+  productSize?: string | null | undefined;
+  accessoryCode?: string | null | undefined;
 }) {
   const [updated] = await db
     .update(promptOrder)
@@ -515,6 +560,17 @@ export async function updateOrder(input: {
       uploadCount: input.uploadCount,
       imagesPerUpload: input.imagesPerUpload,
       regenerateLimit: input.regenerateLimit,
+      // 4 字段：undefined = 不改；null/值 = 写入
+      ...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
+      ...(input.productTypeCode !== undefined
+        ? { productTypeCode: input.productTypeCode }
+        : {}),
+      ...(input.productSize !== undefined
+        ? { productSize: input.productSize }
+        : {}),
+      ...(input.accessoryCode !== undefined
+        ? { accessoryCode: input.accessoryCode }
+        : {}),
       updatedAt: new Date(),
     })
     .where(eq(promptOrder.id, input.id))
@@ -556,6 +612,10 @@ export async function updateOrder(input: {
     cancelledAt: updated.cancelledAt?.toISOString() ?? null,
     createdAt: updated.createdAt.toISOString(),
     updatedAt: updated.updatedAt.toISOString(),
+    agentId: updated.agentId,
+    productTypeCode: updated.productTypeCode,
+    productSize: updated.productSize,
+    accessoryCode: updated.accessoryCode,
     hasUploadedImage: uploaded.length > 0,
     uploadedImageCount: countUploadedImages(uploaded),
     candidateCount: countCandidateGroups(candidates),

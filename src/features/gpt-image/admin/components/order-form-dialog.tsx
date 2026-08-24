@@ -19,6 +19,7 @@ import {
   Tooltip,
 } from "antd";
 import {
+  Briefcase,
   ChevronDown,
   HelpCircle,
   Minus,
@@ -26,12 +27,18 @@ import {
   RefreshCw,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
+import { listActiveAgentsAction } from "@/features/agent/actions/agents";
 import {
   checkOrderNoConflictAction,
   createOrderAction,
 } from "@/features/gpt-image/actions/orders";
+import {
+  ACCESSORIES,
+  getProductType,
+  PRODUCT_TYPES,
+} from "@/features/gpt-image/lib/product-catalog";
 
 import {
   ORDER_PLATFORM_LABELS,
@@ -90,6 +97,38 @@ export function OrderFormDialog({
   );
   /** 冲突检查的 loading，避免按钮闪烁 */
   const [checkingConflict, setCheckingConflict] = useState(false);
+  // ============================================
+  // 2026-08-23：代理商业务（ToB 订单专属字段）
+  // ============================================
+  /** 启用的代理商列表（picker） */
+  const [activeAgents, setActiveAgents] = useState<
+    { id: string; name: string; contact: string | null }[]
+  >([]);
+  const [agentId, setAgentId] = useState<string | "">("");
+  const [productTypeCode, setProductTypeCode] = useState<string>("");
+  const [productSize, setProductSize] = useState<string>("");
+  const [accessoryCode, setAccessoryCode] = useState<string>("");
+
+  /**
+   * 打开时拉取启用中的代理商；同时重置产品三件套
+   */
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    listActiveAgentsAction()
+      .then((res) => {
+        if (cancelled) return;
+        if (res?.data?.agents) {
+          setActiveAgents(res.data.agents);
+        }
+      })
+      .catch((err) => {
+        console.error("[OrderFormDialog] 加载代理商列表失败：", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   useEffect(() => {
     if (open) {
@@ -101,8 +140,38 @@ export function OrderFormDialog({
       setImagesPerUpload(3);
       setRegenerateLimit(5);
       setPendingConflict(null);
+      setAgentId("");
+      setProductTypeCode("");
+      setProductSize("");
+      setAccessoryCode("");
     }
   }, [open, templates]);
+
+  /**
+   * 当前选中型号下的可选尺寸 / 配件（cascade）
+   * 没选型号时三个 select 都禁用
+   */
+  const selectedProductType = useMemo(
+    () => getProductType(productTypeCode),
+    [productTypeCode]
+  );
+  const availableSizes = selectedProductType?.sizes ?? [];
+  const availableAccessories = useMemo(() => {
+    if (!selectedProductType) return [];
+    return selectedProductType.accessories.map((code) => {
+      const a = ACCESSORIES.find((x) => x.code === code);
+      return a ?? { code, name: code };
+    });
+  }, [selectedProductType]);
+
+  /**
+   * 切换型号：清空尺寸与配件（避免遗留选项）
+   */
+  const handleProductTypeChange = (v: string) => {
+    setProductTypeCode(v);
+    setProductSize("");
+    setAccessoryCode("");
+  };
 
   /**
    * 真正下单（覆盖分支复用此函数）
@@ -118,6 +187,10 @@ export function OrderFormDialog({
         uploadCount,
         imagesPerUpload,
         regenerateLimit,
+        ...(agentId ? { agentId } : {}),
+        ...(productTypeCode ? { productTypeCode } : {}),
+        ...(productSize ? { productSize } : {}),
+        ...(accessoryCode ? { accessoryCode } : {}),
         ...(replaceOrderId ? { replaceOrderId } : {}),
       });
       if (!res?.data) {
@@ -400,6 +473,150 @@ export function OrderFormDialog({
             ]}
           />
         </div>
+
+        {/* ============================================
+            2026-08-23：代理商业务（ToB）—— 默认收起
+            ToC 订单留空所有 4 个字段；选代理商 / 选型号 后尺寸/配件 select 自动启用
+            ============================================ */}
+        <Collapse
+          ghost
+          items={[
+            {
+              key: "agent",
+              label: (
+                <span className="flex items-center gap-1.5 text-sm text-stone-600">
+                  <Briefcase className="h-3.5 w-3.5" />
+                  代理商业务（ToB）
+                  {agentId && (
+                    <span className="text-[10px] text-violet-600 font-medium">
+                      · 已绑定
+                    </span>
+                  )}
+                </span>
+              ),
+              extra: (
+                <span className="text-xs text-stone-400">
+                  {agentId ? "绑定代理商 + 产品规格" : "默认留空 = ToC 订单"}
+                </span>
+              ),
+              children: (
+                <div className="grid grid-cols-1 gap-y-3 pb-1">
+                  <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
+                    <div className="flex items-center gap-1">
+                      <span className="text-sm">代理商</span>
+                      <Tooltip title="绑定代理商后此订单归因到该渠道；订单统计与对账会按代理商分组">
+                        <HelpCircle className="h-3.5 w-3.5 text-stone-400 cursor-help" />
+                      </Tooltip>
+                    </div>
+                    <Select
+                      value={agentId || "_none"}
+                      onChange={(v) => setAgentId(v === "_none" ? "" : v)}
+                      placeholder={
+                        activeAgents.length === 0
+                          ? "暂无可用代理商"
+                          : "未指定（ToC 订单）"
+                      }
+                      className="w-full"
+                      options={[
+                        { value: "_none", label: "未指定（ToC 订单）" },
+                        ...activeAgents.map((a) => ({
+                          value: a.id,
+                          label: a.contact
+                            ? `${a.name} · ${a.contact}`
+                            : a.name,
+                        })),
+                      ]}
+                      disabled={activeAgents.length === 0}
+                      notFoundContent={
+                        activeAgents.length === 0
+                          ? "暂无可用代理商，请先在代理商管理启用"
+                          : null
+                      }
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
+                    <div className="flex items-center gap-1">
+                      <span className="text-sm">产品型号</span>
+                    </div>
+                    <Select
+                      value={productTypeCode || "_none"}
+                      onChange={(v) =>
+                        handleProductTypeChange(v === "_none" ? "" : v)
+                      }
+                      placeholder="未指定"
+                      className="w-full"
+                      options={[
+                        { value: "_none", label: "未指定" },
+                        ...PRODUCT_TYPES.map((t) => ({
+                          value: t.code,
+                          label: `${t.code} · ${t.name}`,
+                        })),
+                      ]}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
+                    <div className="flex items-center gap-1">
+                      <span className="text-sm">尺寸</span>
+                      {!selectedProductType && (
+                        <span className="text-xs font-normal text-zinc-400">
+                          （先选型号）
+                        </span>
+                      )}
+                    </div>
+                    <Select
+                      value={productSize || "_none"}
+                      onChange={(v) => setProductSize(v === "_none" ? "" : v)}
+                      placeholder={
+                        selectedProductType ? "未指定" : "请先选择型号"
+                      }
+                      className="w-full"
+                      disabled={!selectedProductType}
+                      options={[
+                        { value: "_none", label: "未指定" },
+                        ...availableSizes.map((s) => ({
+                          value: s,
+                          label: `${s}cm`,
+                        })),
+                      ]}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
+                    <div className="flex items-center gap-1">
+                      <span className="text-sm">配件</span>
+                    </div>
+                    <Select
+                      value={accessoryCode || "_none"}
+                      onChange={(v) => setAccessoryCode(v === "_none" ? "" : v)}
+                      placeholder={
+                        selectedProductType
+                          ? availableAccessories.length === 0
+                            ? "该型号无配件选项"
+                            : "未指定"
+                          : "请先选择型号"
+                      }
+                      className="w-full"
+                      disabled={
+                        !selectedProductType ||
+                        availableAccessories.length === 0
+                      }
+                      options={[
+                        { value: "_none", label: "未指定" },
+                        ...availableAccessories.map((a) => ({
+                          value: a.code,
+                          label: a.name,
+                        })),
+                      ]}
+                    />
+                  </div>
+                </div>
+              ),
+            },
+          ]}
+          className="rounded-lg border border-dashed border-stone-200 bg-stone-50/50"
+        />
 
         {/* 高级设置 —— 不常用字段折叠起来，默认收起保持表单简洁 */}
         <Collapse
