@@ -903,6 +903,7 @@
       "dashboard": "Dashboard",
       "userManagement": "User Management",
       "ticketManagement": "Ticket Management",
+      "agentManagement": "Agent Management",
       "productEffects": "Product Effects",
       "imageModels": "Image Models",
       "externalApiKeys": "External API Keys",

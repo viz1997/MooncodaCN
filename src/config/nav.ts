@@ -2,6 +2,7 @@ import {
   Award,
   BookOpen,
   Box,
+  Briefcase,
   Cpu,
   Frame,
   Globe,
@@ -268,6 +269,13 @@ export const adminNav: NavGroup[] = [
         title: "工单管理",
         href: "/admin/tickets",
         icon: Ticket,
+      },
+      {
+        // 2026-08-23：代理商业务（飞书 docx「链接生成管理系统」），
+        // ToB 订单归因与代理商档案管理。与商品管理并列。
+        title: "代理商管理",
+        href: "/admin/agents",
+        icon: Briefcase,
       },
       {
         title: "商品管理",

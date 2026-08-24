@@ -66,7 +66,9 @@ export const ACCESSORIES: readonly Accessory[] = [
 /**
  * 找产品型号。找不到返回 null。
  */
-export function getProductType(code: string | null | undefined): ProductType | null {
+export function getProductType(
+  code: string | null | undefined
+): ProductType | null {
   if (!code) return null;
   return PRODUCT_TYPES.find((t) => t.code === code) ?? null;
 }
@@ -74,7 +76,9 @@ export function getProductType(code: string | null | undefined): ProductType | n
 /**
  * 找配件。找不到返回 null。
  */
-export function getAccessory(code: string | null | undefined): Accessory | null {
+export function getAccessory(
+  code: string | null | undefined
+): Accessory | null {
   if (!code) return null;
   return ACCESSORIES.find((a) => a.code === code) ?? null;
 }

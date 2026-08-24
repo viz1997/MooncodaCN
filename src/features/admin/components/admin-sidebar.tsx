@@ -49,6 +49,7 @@ export function AdminSidebar() {
       控制面板: t("nav.dashboard"),
       用户管理: t("nav.userManagement"),
       工单管理: t("nav.ticketManagement"),
+      代理商管理: t("nav.agentManagement"),
       效果模板: t("nav.productEffects"),
       生图模型: t("nav.imageModels"),
       外部生图: t("nav.externalApiKeys"),

@@ -30,31 +30,40 @@ async function main() {
        FROM information_schema.columns
       WHERE table_name = 'prompt_order'
         AND column_name IN ('product_type_code','product_size','accessory_code','agent_id')
-      ORDER BY column_name`,
+      ORDER BY column_name`
   );
   console.log(
     "prompt_order new cols:",
     cols.rows.map((r) => `${r.column_name}:${r.data_type}`).join(", ") ||
-      "(none)",
+      "(none)"
   );
 
   const fk = await client.query<{ constraint_name: string }>(
     `SELECT constraint_name
        FROM information_schema.table_constraints
       WHERE constraint_name = 'prompt_order_agent_id_agent_id_fk'
-        AND table_name = 'prompt_order'`,
+        AND table_name = 'prompt_order'`
   );
-  console.log("FK prompt_order_agent_id_agent_id_fk:", fk.rows.length ? "OK" : "MISSING");
+  console.log(
+    "FK prompt_order_agent_id_agent_id_fk:",
+    fk.rows.length ? "OK" : "MISSING"
+  );
 
-  const agent = await client.query<{ column_name: string; data_type: string; is_nullable: string }>(
+  const agent = await client.query<{
+    column_name: string;
+    data_type: string;
+    is_nullable: string;
+  }>(
     `SELECT column_name, data_type, is_nullable
        FROM information_schema.columns
       WHERE table_name = 'agent'
-      ORDER BY ordinal_position`,
+      ORDER BY ordinal_position`
   );
   console.log("agent table:");
   for (const r of agent.rows) {
-    console.log(`  - ${r.column_name}: ${r.data_type} ${r.is_nullable === "NO" ? "NOT NULL" : ""}`);
+    console.log(
+      `  - ${r.column_name}: ${r.data_type} ${r.is_nullable === "NO" ? "NOT NULL" : ""}`
+    );
   }
 
   await client.end();

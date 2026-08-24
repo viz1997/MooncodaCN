@@ -558,10 +558,7 @@ export const generationModeEnum = pgEnum("generation_mode", [
  * 状态机权威来源，resultUrls JSON 数组是它的产物；photo 只是资产索引，
  * 拆表 + source 区分是最低耦合的方案。
  */
-export const photoSourceEnum = pgEnum("photo_source", [
-  "upload",
-  "generation",
-]);
+export const photoSourceEnum = pgEnum("photo_source", ["upload", "generation"]);
 
 /**
  * 画布内置渠道生成任务状态枚举

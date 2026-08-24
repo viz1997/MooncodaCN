@@ -900,6 +900,7 @@
       "dashboard": "控制面板",
       "userManagement": "用户管理",
       "ticketManagement": "工单管理",
+      "agentManagement": "代理商管理",
       "productEffects": "效果模板",
       "imageModels": "生图模型",
       "externalApiKeys": "外部生图",
