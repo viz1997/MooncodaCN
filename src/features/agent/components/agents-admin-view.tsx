@@ -17,7 +17,7 @@
 
 import { App, Badge, Button, Empty, Input, Switch, Table } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { Plus, Search, Users } from "lucide-react";
+import { ExternalLink, Plus, Search, ShoppingBag, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { Agent } from "@/db/schema";
@@ -32,9 +32,12 @@ import {
 
 import { AgentFormDialog } from "./agent-form-dialog";
 
+/** 列表行类型：Agent + 订单数聚合 */
+type AgentRow = Agent & { orderCount: number };
+
 export function AgentsAdminView() {
   const { message } = App.useApp();
-  const [agents, setAgents] = useState<Agent[]>([]);
+  const [agents, setAgents] = useState<AgentRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
@@ -101,6 +104,18 @@ export function AgentsAdminView() {
     setDialogOpen(true);
   };
 
+  /**
+   * 跳到订单管理列表，过滤到当前代理商。
+   * agentId / agentName 都用 query string 传，前端订单列表直接读取渲染提示。
+   */
+  const handleViewOrders = (a: Agent) => {
+    const params = new URLSearchParams({
+      agentId: a.id,
+      agentName: a.name,
+    });
+    window.location.href = `/dashboard/prompt-orders?${params.toString()}`;
+  };
+
   const handleToggleActive = async (a: Agent, next: boolean) => {
     try {
       const result = await setAgentActiveAdminAction({
@@ -119,7 +134,7 @@ export function AgentsAdminView() {
     }
   };
 
-  const columns: ColumnsType<Agent> = [
+  const columns: ColumnsType<AgentRow> = [
     {
       title: "ID",
       dataIndex: "id",
@@ -135,7 +150,7 @@ export function AgentsAdminView() {
       title: "名称",
       dataIndex: "name",
       key: "name",
-      render: (name: string, record: Agent) => (
+      render: (name: string, record: AgentRow) => (
         <div className="space-y-0.5">
           <span className="font-medium">{name}</span>
           {record.remark && (
@@ -182,6 +197,27 @@ export function AgentsAdminView() {
         ),
     },
     {
+      title: "订单数",
+      dataIndex: "orderCount",
+      key: "orderCount",
+      width: 90,
+      render: (n: number, record: AgentRow) =>
+        n > 0 ? (
+          <Button
+            type="link"
+            size="small"
+            className="!px-0 !h-auto text-violet-700"
+            onClick={() => handleViewOrders(record)}
+            icon={<ShoppingBag className="h-3 w-3" />}
+            title={`查看该代理商的 ${n} 个订单`}
+          >
+            {n}
+          </Button>
+        ) : (
+          <span className="text-xs text-muted-foreground">0</span>
+        ),
+    },
+    {
       title: "状态",
       dataIndex: "isActive",
       key: "isActive",
@@ -200,8 +236,8 @@ export function AgentsAdminView() {
     {
       title: "操作",
       key: "actions",
-      width: 180,
-      render: (_: unknown, record: Agent) => (
+      width: 200,
+      render: (_: unknown, record: AgentRow) => (
         <div className="flex items-center gap-2">
           <Button
             size="small"
@@ -209,6 +245,15 @@ export function AgentsAdminView() {
             onClick={() => handleEdit(record)}
           >
             编辑
+          </Button>
+          <Button
+            size="small"
+            type="text"
+            onClick={() => handleViewOrders(record)}
+            title="跳到订单列表查看该代理商的全部订单"
+            icon={<ExternalLink className="h-3.5 w-3.5" />}
+          >
+            订单
           </Button>
           <Switch
             size="small"
@@ -284,7 +329,7 @@ export function AgentsAdminView() {
 
       {/* 代理商列表 */}
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm overflow-hidden">
-        <Table<Agent>
+        <Table<AgentRow>
           rowKey="id"
           columns={columns}
           dataSource={filtered}

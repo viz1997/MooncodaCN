@@ -26,21 +26,23 @@ const ORDERS_TAG = "orders";
  * 都打 Supabase（ap-southeast-1 跨区往返 500ms-2s）。
  * 创建 / 删除订单时通过 revalidateTag(ORDERS_TAG) 强制失效。
  *
- * 缓存 key 包含 createdBy / skipCreatorFilter，确保不同用户/角色不会
- * 共享到错误的列表快照。
+ * 缓存 key 包含 createdBy / skipCreatorFilter / agentId，确保不同用户/角色/
+ * 代理商筛选不会共享到错误的列表快照。
  */
 const cachedListOrders = unstable_cache(
   async (
     status: string,
     templateId: string,
     createdBy: string,
-    skipCreatorFilter: boolean
+    skipCreatorFilter: boolean,
+    agentId: string
   ) =>
     listOrdersSvc({
       ...(status ? { status: status as PromptOrderStatus } : {}),
       ...(templateId ? { templateId } : {}),
       ...(createdBy ? { createdBy } : {}),
       ...(skipCreatorFilter ? { skipCreatorFilter: true } : {}),
+      ...(agentId ? { agentId } : {}),
     }),
   ["orders-list"],
   { revalidate: 60, tags: [ORDERS_TAG] }
@@ -71,12 +73,15 @@ async function getHandler(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status") ?? undefined;
     const templateId = searchParams.get("templateId") ?? undefined;
+    // 2026-08-24：代理商过滤（?agentId=AG_xxx 从 /admin/agents 跳转）
+    const agentId = searchParams.get("agentId") ?? undefined;
     const isAdmin = auth.user.role === "admin";
     const orders = await cachedListOrders(
       status ?? "",
       templateId ?? "",
       auth.user.id,
-      isAdmin
+      isAdmin,
+      agentId ?? ""
     );
     return NextResponse.json({ success: true, data: orders });
   } catch (err) {

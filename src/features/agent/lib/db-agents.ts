@@ -5,19 +5,48 @@
  * 列表 / 创建 / 更新 / 启停 全部走这里，UI 与 server actions 都共享同一份映射。
  */
 
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { type Agent, agent, type NewAgent } from "@/db/schema";
+import { type Agent, agent, type NewAgent, promptOrder } from "@/db/schema";
 // NewAgent 仅在 insertAgentToDb 签名里用到
 
 /**
- * 获取所有代理商（按创建时间升序，列表页用）
+ * 代理商 + 订单数（管理后台列表展示用）。
+ * 与 Agent 不同之处：多了 orderCount: number（按 agentId group by 统计）。
  */
-export async function listAgentsFromDb(): Promise<Agent[]> {
-  return db.query.agent.findMany({
-    orderBy: [asc(agent.createdAt)],
-  });
+export type AgentWithCount = Agent & { orderCount: number };
+
+/**
+ * 获取所有代理商 + 各自的订单数（按创建时间升序，列表页用）
+ *
+ * 不走 LEFT JOIN 的关系查询 —— Drizzle 关系查询会触发 N+1；
+ * 改用一次 groupBy 聚合 + 内存里 map 合并，2 条 SQL 完成。
+ */
+export async function listAgentsFromDb(): Promise<AgentWithCount[]> {
+  const [rows, counts] = await Promise.all([
+    db.query.agent.findMany({
+      orderBy: [asc(agent.createdAt)],
+    }),
+    db
+      .select({
+        agentId: promptOrder.agentId,
+        n: sql<number>`count(*)::int`,
+      })
+      .from(promptOrder)
+      .groupBy(promptOrder.agentId),
+  ]);
+
+  const countMap = new Map(
+    counts
+      .filter((c): c is { agentId: string; n: number } => c.agentId !== null)
+      .map((c) => [c.agentId, c.n])
+  );
+
+  return rows.map((a) => ({
+    ...a,
+    orderCount: countMap.get(a.id) ?? 0,
+  }));
 }
 
 /**

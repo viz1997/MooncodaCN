@@ -392,6 +392,12 @@ export async function listOrders(filters: {
   createdBy?: string | undefined;
   /** 管理员特权：true 时忽略 createdBy 过滤 */
   skipCreatorFilter?: boolean | undefined;
+  /**
+   * 2026-08-24：代理商业务 —— 仅查某代理商的订单（/admin/agents 跳过来）。
+   * 与 createdBy 同时存在时取交集（理论上同一订单不可能同时有 agentId 和
+   * "另一个用户的 createdBy"，所以场景上是 OR）。
+   */
+  agentId?: string | undefined;
 }) {
   // 显式 LEFT JOIN 一次往返，比 query.findMany({with:{template:true}}) 的
   // 关系查询少一次网络往返（关系查询在 Drizzle 里会拆成 2 条串行 SQL）。
@@ -404,6 +410,10 @@ export async function listOrders(filters: {
   // 非管理员必须按 createdBy 过滤；管理员显式传 skipCreatorFilter=true 才放行
   if (!filters.skipCreatorFilter && filters.createdBy) {
     conditions.push(eq(promptOrder.createdBy, filters.createdBy));
+  }
+  // 代理商过滤（仅 ToB 订单列表；与 createdBy 互相独立，两者都生效）
+  if (filters.agentId) {
+    conditions.push(eq(promptOrder.agentId, filters.agentId));
   }
   const where = conditions.length > 0 ? and(...conditions) : undefined;
 
