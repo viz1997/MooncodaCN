@@ -208,7 +208,7 @@ export function TemplatesAdminView() {
                       />
                     </div>
                     <p
-                      className={`font-mono text-xs break-all text-slate-700 ${
+                      className={`h-32 overflow-y-auto whitespace-pre-wrap break-words rounded-sm bg-white/60 p-1.5 font-mono text-xs text-slate-700 ${
                         promptVisible ? "" : "blur-sm select-none"
                       }`}
                     >
