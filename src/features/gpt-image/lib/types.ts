@@ -126,10 +126,16 @@ export interface OrderView {
   createdAt: string;
   updatedAt: string;
   // ============================================
-  // 2026-08-23：代理商业务字段（ToB 订单专属，ToC 全部 null）
+  // 2026-08-24：代理商业务字段（ToB 订单专属，ToC 全部 null）
   // ============================================
   /** 代理商 ID（FK agent.id），null = ToC 订单 */
   agentId: string | null;
+  /**
+   * 代理商名称（LEFT JOIN agent.name，列表展示用）。
+   * 可选字段：纯 ToC / 老数据未 JOIN 时是 undefined（UI 退化为 "—"）；
+   * FK set null 后理论上 agentId 还在但 agentName 已为 null —— 同样显示 "（已删除）"。
+   */
+  agentName?: string | null;
   /** 产品型号（R/A/P/RM），null = 未指定 */
   productTypeCode: string | null;
   /** 尺寸（厘米数字字符串），null = 未指定 */

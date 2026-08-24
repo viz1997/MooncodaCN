@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { deleteOrderAction } from "@/features/gpt-image/actions/orders";
+import { formatProductSpec } from "@/features/gpt-image/lib/product-catalog";
 import {
   ORDER_PLATFORM_LABELS,
   ORDER_PLATFORMS,
@@ -360,12 +361,14 @@ export function OrdersAdminView() {
 
           <div className="overflow-hidden rounded-md border">
             {/* 表头 */}
-            <div className="grid grid-cols-[140px_1fr_1fr_100px_100px_120px_140px_220px] gap-2 bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground border-b">
+            <div className="grid grid-cols-[140px_1fr_1fr_100px_100px_110px_150px_120px_140px_220px] gap-2 bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground border-b">
               <div>订单号</div>
               <div>用户</div>
               <div>模板</div>
               <div>状态</div>
               <div>平台</div>
+              <div>代理商</div>
+              <div>产品规格</div>
               <div>原图/选择</div>
               <div>创建时间</div>
               <div className="text-right">操作</div>
@@ -383,7 +386,7 @@ export function OrdersAdminView() {
                 filtered.map((order) => (
                   <div
                     key={order.id}
-                    className="grid grid-cols-[140px_1fr_1fr_100px_100px_120px_140px_220px] gap-2 px-3 py-2 text-sm hover:bg-muted/30 transition-colors items-center"
+                    className="grid grid-cols-[140px_1fr_1fr_100px_100px_110px_150px_120px_140px_220px] gap-2 px-3 py-2 text-sm hover:bg-muted/30 transition-colors items-center"
                   >
                     <div className="font-mono text-xs">{order.orderNo}</div>
                     <div>
@@ -411,6 +414,36 @@ export function OrdersAdminView() {
                         <span className="text-zinc-400 italic text-xs">
                           未指定
                         </span>
+                      )}
+                    </div>
+                    <div>
+                      {/* 代理商列：agentName 有值 = 展示；agentId 在但 agentName 为空
+                          = agent 已被 set null（FK 会把 agentId 一起置空，所以这条
+                          路径实际走不到，留 defensive）；agentId=null = ToC 订单 */}
+                      {order.agentName ? (
+                        <span
+                          className="text-xs"
+                          title={order.agentId ?? undefined}
+                        >
+                          {order.agentName}
+                        </span>
+                      ) : (
+                        <span className="text-zinc-400 italic text-xs">
+                          ToC
+                        </span>
+                      )}
+                    </div>
+                    <div>
+                      {order.productTypeCode ? (
+                        <span className="text-xs">
+                          {formatProductSpec({
+                            productTypeCode: order.productTypeCode,
+                            productSize: order.productSize,
+                            accessoryCode: order.accessoryCode,
+                          })}
+                        </span>
+                      ) : (
+                        <span className="text-zinc-400 italic text-xs">—</span>
                       )}
                     </div>
                     <div>

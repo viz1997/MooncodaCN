@@ -329,6 +329,18 @@ export async function createOrder(input: {
 
   if (!created) throw new Error("创建订单失败");
 
+  // 取代理商名（与 listOrders 形态一致，列表可直接显示）
+  // 仅在 agentId 真存在时查，省一次 DB 调用 —— 走的是 cachedListOrders
+  // 之外的路径，乐观插入前一次性查即可
+  let agentName: string | null = null;
+  if (created.agentId) {
+    const a = await db.query.agent.findFirst({
+      where: eq(agent.id, created.agentId),
+      columns: { name: true },
+    });
+    agentName = a?.name ?? null;
+  }
+
   // 返回 OrderView 形态（含 template），客户端可直接乐观插入列表
   return {
     id: created.id,
@@ -350,6 +362,7 @@ export async function createOrder(input: {
     createdAt: created.createdAt.toISOString(),
     updatedAt: created.updatedAt.toISOString(),
     agentId: created.agentId,
+    agentName,
     productTypeCode: created.productTypeCode,
     productSize: created.productSize,
     accessoryCode: created.accessoryCode,
@@ -382,6 +395,7 @@ export async function listOrders(filters: {
 }) {
   // 显式 LEFT JOIN 一次往返，比 query.findMany({with:{template:true}}) 的
   // 关系查询少一次网络往返（关系查询在 Drizzle 里会拆成 2 条串行 SQL）。
+  // 2026-08-24：再加一次 LEFT JOIN agent 取代理商名，列表展示用。
   const conditions: SQL[] = [];
   const status = filters.status;
   const templateId = filters.templateId;
@@ -417,8 +431,9 @@ export async function listOrders(filters: {
       cancelledAt: promptOrder.cancelledAt,
       createdAt: promptOrder.createdAt,
       updatedAt: promptOrder.updatedAt,
-      // 2026-08-23：代理商 + 产品三件套
+      // 2026-08-24：代理商 + 产品三件套 + 代理商名
       agentId: promptOrder.agentId,
+      agentName: agent.name,
       productTypeCode: promptOrder.productTypeCode,
       productSize: promptOrder.productSize,
       accessoryCode: promptOrder.accessoryCode,
@@ -431,6 +446,7 @@ export async function listOrders(filters: {
     })
     .from(promptOrder)
     .leftJoin(promptTemplate, eq(promptOrder.templateId, promptTemplate.id))
+    .leftJoin(agent, eq(promptOrder.agentId, agent.id))
     .where(where ?? sql`true`)
     .orderBy(desc(promptOrder.createdAt))
     .limit(100);
@@ -459,6 +475,9 @@ export async function listOrders(filters: {
       createdAt: o.createdAt.toISOString(),
       updatedAt: o.updatedAt.toISOString(),
       agentId: o.agentId,
+      // agent LEFT JOIN：agentId=null 时 agentName 也是 null；agentId 在但
+      // agent 被删（FK set null 后不会发生，但留 defensive），agentName=null
+      agentName: o.agentName ?? null,
       productTypeCode: o.productTypeCode,
       productSize: o.productSize,
       accessoryCode: o.accessoryCode,
@@ -589,6 +608,16 @@ export async function updateOrder(input: {
     },
   });
 
+  // 2026-08-24：代理商名（与 listOrders 形态一致；admin 列表 / 编辑对话框都用）
+  let agentName: string | null = null;
+  if (updated.agentId) {
+    const a = await db.query.agent.findFirst({
+      where: eq(agent.id, updated.agentId),
+      columns: { name: true },
+    });
+    agentName = a?.name ?? null;
+  }
+
   const uploaded = parseUploadedImages(updated.uploadedImages);
   const candidates = parseCandidates(updated.candidates);
   const selections = parseSelections(updated.selections);
@@ -613,6 +642,7 @@ export async function updateOrder(input: {
     createdAt: updated.createdAt.toISOString(),
     updatedAt: updated.updatedAt.toISOString(),
     agentId: updated.agentId,
+    agentName,
     productTypeCode: updated.productTypeCode,
     productSize: updated.productSize,
     accessoryCode: updated.accessoryCode,
