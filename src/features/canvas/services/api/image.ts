@@ -1247,11 +1247,18 @@ export async function requestEdit(
   }
   const files = await Promise.all(
     references.map(async (image) =>
-      dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })
+      dataUrlToFile({
+        ...image,
+        dataUrl: await imageToDataUrl(image, { forceDataUrl: true }),
+      })
     )
   );
   files.forEach((file) => formData.append("image", file));
-  if (mask) formData.set("mask", dataUrlToFile(mask));
+  if (mask)
+    formData.set(
+      "mask",
+      dataUrlToFile({ ...mask, dataUrl: await imageToDataUrl(mask, { forceDataUrl: true }) })
+    );
 
   try {
     const response = await axios.post<ImageApiResponse>(

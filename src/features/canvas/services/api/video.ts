@@ -391,7 +391,10 @@ async function createOpenAIVideoTask(
     references
       .slice(0, 7)
       .map(async (image) =>
-        dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })
+        dataUrlToFile({
+          ...image,
+          dataUrl: await imageToDataUrl(image, { forceDataUrl: true }),
+        })
       )
   );
   files.forEach((file) => body.append("input_reference[]", file));

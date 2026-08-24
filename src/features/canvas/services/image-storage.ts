@@ -87,14 +87,27 @@ export async function setImageBlob(storageKey: string, blob: Blob) {
   return url;
 }
 
-export async function imageToDataUrl(image: {
-  url?: string;
-  dataUrl?: string;
-  storageKey?: string;
-}) {
+export async function imageToDataUrl(
+  image: {
+    url?: string;
+    dataUrl?: string;
+    storageKey?: string;
+  },
+  /**
+   * 2026-08-24：内置渠道（/api/canvas/generate）已经把节点 URL 持久化为 R2
+   * 公开地址，无脑 fetch + base64 会让多张高清参考图的 POST body 直接撞
+   * Vercel 4.5MB 上限（413）。这里默认对 https URL 直传，但用户配置渠道里
+   * 还有 FormData multipart 上传路径（OpenAI /images/edits、OpenAI 视频）
+   * 真需要 base64 才能塞进 File —— 这种情况 caller 必须传
+   * `{ forceDataUrl: true }`，否则会把 URL 字符串当 base64 解码成 0 字节文件。
+   */
+  options: { forceDataUrl?: boolean } = {}
+) {
   const url =
     image.dataUrl || (await resolveImageUrl(image.storageKey, image.url || ""));
-  if (!url || url.startsWith("data:")) return url;
+  if (!url) return "";
+  if (!options.forceDataUrl && /^https?:\/\//i.test(url)) return url;
+  if (url.startsWith("data:")) return url;
   return blobToDataUrl(await (await fetch(url)).blob());
 }
 
