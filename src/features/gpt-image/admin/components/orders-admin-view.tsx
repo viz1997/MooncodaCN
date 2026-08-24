@@ -9,6 +9,7 @@
 
 import { App, Badge, Button, Input, Modal, Select } from "antd";
 import {
+  Briefcase,
   Check,
   CheckCircle2,
   Clock,
@@ -28,7 +29,10 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { deleteOrderAction } from "@/features/gpt-image/actions/orders";
-import { formatProductSpec } from "@/features/gpt-image/lib/product-catalog";
+import {
+  formatProductSpec,
+  getAccessory,
+} from "@/features/gpt-image/lib/product-catalog";
 import {
   ORDER_PLATFORM_LABELS,
   ORDER_PLATFORMS,
@@ -83,21 +87,63 @@ export function OrdersAdminView() {
   const [filterPlatform, setFilterPlatform] = useState<string>("ALL");
   const [search, setSearch] = useState("");
   const [copied, setCopied] = useState(false);
+  /**
+   * 2026-08-24：代理商过滤（从 /admin/agents 跳过来时带 ?agentId=AG_xxx&agentName=XXX）
+   * 仅展示过滤提示，不会写入 search 输入框；清除时同步移除 URL 参数。
+   */
+  const [agentFilter, setAgentFilter] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
 
-  const fetchOrders = useCallback(async (opts: { silent?: boolean } = {}) => {
-    // 仅在"还没有任何数据"时才显示 loading 骨架，避免后台 refetch 时把已显示的
-    // 表格又变回 loading 态
-    if (!opts.silent) setLoading(true);
-    try {
-      const res = await fetch("/api/orders");
-      const json = await res.json();
-      if (json.success) setOrders(json.data as OrderView[]);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      if (!opts.silent) setLoading(false);
-    }
+  /**
+   * 组件挂载时读 URL 上的 agentId/agentName（仅执行一次）
+   */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URL(window.location.href).searchParams;
+    const id = params.get("agentId");
+    if (!id) return;
+    setAgentFilter({
+      id,
+      name: params.get("agentName") ?? id,
+    });
   }, []);
+
+  /**
+   * 清除代理商过滤：清 state + 用 replaceState 移除 URL 参数，
+   * 避免污染浏览器历史栈
+   */
+  const clearAgentFilter = useCallback(() => {
+    setAgentFilter(null);
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("agentId");
+    url.searchParams.delete("agentName");
+    window.history.replaceState(null, "", url.toString());
+  }, []);
+
+  const fetchOrders = useCallback(
+    async (opts: { silent?: boolean } = {}) => {
+      // 仅在"还没有任何数据"时才显示 loading 骨架，避免后台 refetch 时把已显示的
+      // 表格又变回 loading 态
+      if (!opts.silent) setLoading(true);
+      try {
+        // 2026-08-24：代理商过滤（?agentId=AG_xxx 时只拉该代理商的订单）
+        const url = agentFilter
+          ? `/api/orders?agentId=${encodeURIComponent(agentFilter.id)}`
+          : "/api/orders";
+        const res = await fetch(url);
+        const json = await res.json();
+        if (json.success) setOrders(json.data as OrderView[]);
+      } catch (e) {
+        console.error(e);
+      } finally {
+        if (!opts.silent) setLoading(false);
+      }
+    },
+    [agentFilter]
+  );
 
   const fetchTemplates = useCallback(
     async (opts: { silent?: boolean } = {}) => {
@@ -311,6 +357,25 @@ export function OrdersAdminView() {
           创建订单
         </Button>
       </div>
+
+      {/* 2026-08-24：代理商过滤提示（从 /admin/agents 跳过来时显示） */}
+      {agentFilter && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-violet-200 bg-violet-50/40 px-3 py-2 text-xs">
+          <Briefcase className="h-3.5 w-3.5 text-violet-600" />
+          <span className="text-violet-700 font-medium">代理商过滤：</span>
+          <span className="font-mono">{agentFilter.name}</span>
+          <span className="text-muted-foreground">({agentFilter.id})</span>
+          <Button
+            type="link"
+            size="small"
+            className="!h-auto !px-1 !py-0 text-violet-700"
+            onClick={clearAgentFilter}
+            icon={<X className="h-3 w-3" />}
+          >
+            清除过滤
+          </Button>
+        </div>
+      )}
 
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
         <div className="space-y-3 p-4">
@@ -746,6 +811,59 @@ export function OrdersAdminView() {
                 {detailDialog.selectionCount ?? 0} /{" "}
                 {detailDialog.uploadedImageCount ?? 0} 张
               </div>
+              {/* 2026-08-24：代理商业务块 —— 仅 ToB 订单展示。
+                  col-span-2 让"代理商业务"标题独占一行，下面 4 项用 4-col 子网格。 */}
+              {(detailDialog.agentId ||
+                detailDialog.productTypeCode ||
+                detailDialog.productSize ||
+                detailDialog.accessoryCode) && (
+                <div className="col-span-2 mt-1 rounded-md border border-violet-200 bg-violet-50/40 p-2.5">
+                  <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-violet-700">
+                    <Briefcase className="h-3.5 w-3.5" />
+                    代理商业务（ToB）
+                  </div>
+                  <div className="grid grid-cols-2 gap-y-1 gap-x-3 text-xs sm:grid-cols-4">
+                    <div>
+                      <span className="text-muted-foreground">代理商：</span>
+                      {detailDialog.agentName || (
+                        <span className="italic text-zinc-400">
+                          {detailDialog.agentId ? "（已删除）" : "未指定"}
+                        </span>
+                      )}
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">型号：</span>
+                      {detailDialog.productTypeCode ?? (
+                        <span className="italic text-zinc-400">未指定</span>
+                      )}
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">尺寸：</span>
+                      {detailDialog.productSize ? (
+                        `${detailDialog.productSize}cm`
+                      ) : (
+                        <span className="italic text-zinc-400">未指定</span>
+                      )}
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">配件：</span>
+                      {getAccessory(detailDialog.accessoryCode)?.name ?? (
+                        <span className="italic text-zinc-400">未指定</span>
+                      )}
+                    </div>
+                    {detailDialog.productTypeCode && (
+                      <div className="col-span-2 sm:col-span-4 text-xs text-muted-foreground">
+                        合计：
+                        {formatProductSpec({
+                          productTypeCode: detailDialog.productTypeCode,
+                          productSize: detailDialog.productSize,
+                          accessoryCode: detailDialog.accessoryCode,
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
               {detailDialog.uploadedAt && (
                 <div className="flex items-center gap-1">
                   <Upload className="h-3 w-3 text-emerald-600" />
