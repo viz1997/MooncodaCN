@@ -399,7 +399,23 @@ export function OrderEditDialog({
                               : a.name,
                           })),
                         ]}
-                        disabled={activeAgents.length === 0}
+                        // 2026-08-24：同 order-form-dialog，空态不 disable，让 notFoundContent
+                        // 的跳转指引能被用户看到
+                        notFoundContent={
+                          activeAgents.length === 0 ? (
+                            <div className="space-y-1.5 py-1 text-xs text-muted-foreground">
+                              <div>暂无启用的代理商</div>
+                              <a
+                                href="/admin/agents"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-violet-700 hover:underline"
+                              >
+                                去代理商管理新建 →
+                              </a>
+                            </div>
+                          ) : null
+                        }
                       />
                     </div>
 

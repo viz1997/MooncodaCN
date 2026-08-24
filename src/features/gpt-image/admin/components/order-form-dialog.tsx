@@ -526,11 +526,22 @@ export function OrderFormDialog({
                             : a.name,
                         })),
                       ]}
-                      disabled={activeAgents.length === 0}
+                      // 2026-08-24：不 disable —— 让用户能打开 dropdown 看 notFoundContent 的
+                      // 跳转指引。否则空态时 select 灰成死控件，notFoundContent 永远不显示
                       notFoundContent={
-                        activeAgents.length === 0
-                          ? "暂无可用代理商，请先在代理商管理启用"
-                          : null
+                        activeAgents.length === 0 ? (
+                          <div className="space-y-1.5 py-1 text-xs text-muted-foreground">
+                            <div>暂无启用的代理商</div>
+                            <a
+                              href="/admin/agents"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-violet-700 hover:underline"
+                            >
+                              去代理商管理新建 →
+                            </a>
+                          </div>
+                        ) : null
                       }
                     />
                   </div>
