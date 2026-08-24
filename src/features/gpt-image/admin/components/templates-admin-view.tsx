@@ -11,7 +11,7 @@
 
 import { App, Badge, Button, Modal, Switch } from "antd";
 import { Eye, EyeOff, FileImage, Pencil, Plus, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   deleteTemplateAction,
@@ -34,7 +34,7 @@ export function TemplatesAdminView() {
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const fetchTemplates = async () => {
+  const fetchTemplates = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch("/api/admin/templates");
@@ -45,7 +45,7 @@ export function TemplatesAdminView() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void fetchTemplates();
