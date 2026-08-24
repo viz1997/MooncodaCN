@@ -346,7 +346,10 @@ export const reconcileCanvasRemoteJobs = inngest.createFunction(
       db.query.canvasRemoteJob.findMany({
         where: and(
           eq(canvasRemoteJob.status, "pending"),
-          lt(canvasRemoteJob.createdAt, new Date(now.getTime() - STALE_PENDING_MS))
+          lt(
+            canvasRemoteJob.createdAt,
+            new Date(now.getTime() - STALE_PENDING_MS)
+          )
         ),
         columns: { id: true, userId: true, capability: true, createdAt: true },
         limit: BATCH,
@@ -396,10 +399,7 @@ export const reconcileCanvasRemoteJobs = inngest.createFunction(
             `reconcile: canvasRemoteJob 标 failed (${reason})`
           );
         } catch (err) {
-          logger.error(
-            { err, jobId: row.id },
-            "reconcile: 单条 update 失败"
-          );
+          logger.error({ err, jobId: row.id }, "reconcile: 单条 update 失败");
         }
       }
       return count;

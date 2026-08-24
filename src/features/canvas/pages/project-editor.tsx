@@ -2757,12 +2757,7 @@ function InfiniteCanvasPage() {
         setRunningNodeId(null);
       }
     },
-    [
-      effectiveConfig,
-      finishGenerationRequest,
-      startGenerationRequest,
-      t,
-    ]
+    [effectiveConfig, finishGenerationRequest, startGenerationRequest, t]
   );
 
   const handleFontSizeChange = useCallback(
@@ -3349,14 +3344,13 @@ function InfiniteCanvasPage() {
                   undefined,
                   { signal: controller.signal }
                 )
-              : await requestGeneration(
-                  generationConfig,
-                  effectivePrompt,
-                  { signal: controller.signal }
-                );
+              : await requestGeneration(generationConfig, effectivePrompt, {
+                  signal: controller.signal,
+                });
           } catch (err) {
             if (isGenerationCanceled(err)) {
-              if (rootId !== nodeId) finishGenerationRequest(rootId, controller);
+              if (rootId !== nodeId)
+                finishGenerationRequest(rootId, controller);
               return;
             }
             requestError =

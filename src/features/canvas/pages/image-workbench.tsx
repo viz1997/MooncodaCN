@@ -49,8 +49,8 @@ import localforage from "localforage";
 import {
   ArrowLeft,
   ArrowRight,
-  BookOpen,
   BookmarkPlus,
+  BookOpen,
   CheckSquare,
   ClipboardPaste,
   Download,
@@ -68,8 +68,8 @@ import {
 import { nanoid } from "nanoid";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AppConfigModal } from "@/features/canvas/components/layout/app-config-modal";
 import { AssetPickerModal } from "@/features/canvas/components/canvas/asset-picker-modal";
+import { AppConfigModal } from "@/features/canvas/components/layout/app-config-modal";
 import { ModelPicker } from "@/features/canvas/components/model-picker/model-picker";
 import { PromptSelectDialog } from "@/features/canvas/components/prompts/prompt-select-dialog";
 import {
@@ -571,9 +571,7 @@ export function ImageWorkbench() {
       config: {
         ...effectiveConfig,
         model,
-        count: options?.batchCount
-          ? String(options.batchCount)
-          : "1",
+        count: options?.batchCount ? String(options.batchCount) : "1",
       },
       references: [...references],
     };
@@ -584,9 +582,11 @@ export function ImageWorkbench() {
    * 上游一次返 N 张图，按 index 分发到对应 result card；缺额（上游返 < N）
    * 标记为 failed。失败整组 catch，失败语义与 V1 一致（全组 fail）。
    */
-  const runBatchGeneration = async (
-    snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }
-  ): Promise<GeneratedImage[]> => {
+  const runBatchGeneration = async (snapshot: {
+    text: string;
+    config: AiConfig;
+    references: ReferenceImage[];
+  }): Promise<GeneratedImage[]> => {
     const itemStartedAt = performance.now();
     const result = snapshot.references.length
       ? await requestEdit(snapshot.config, snapshot.text, snapshot.references)
@@ -1238,8 +1238,7 @@ function ResultImageCard({
               size="small"
               icon={<FolderPlus className="size-3.5" />}
               onClick={() => void onSaveAsset(image, index)}
-            >
-            </Button>
+            ></Button>
           </Tooltip>
           <Tooltip title={t("imageWorkbench.addReference")}>
             <Button
@@ -1247,8 +1246,7 @@ function ResultImageCard({
               size="small"
               icon={<PenLine className="size-3.5" />}
               onClick={() => void onEdit(image, index)}
-            >
-            </Button>
+            ></Button>
           </Tooltip>
           <Tooltip title={t("common.download")}>
             <Button
@@ -1256,8 +1254,7 @@ function ResultImageCard({
               size="small"
               icon={<Download className="size-3.5" />}
               onClick={() => onDownload(image, index)}
-            >
-            </Button>
+            ></Button>
           </Tooltip>
         </div>
       </div>

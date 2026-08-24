@@ -98,58 +98,61 @@ export function OrdersAdminView() {
     }
   }, []);
 
-  const fetchTemplates = useCallback(async (opts: { silent?: boolean } = {}) => {
-    // 走 /api/templates 而不是 /api/admin/templates —— 后者 requireAdmin，
-    // 普通用户会拿到 403，导致 templates 永远空、"创建订单"按钮永远 disabled。
-    // /api/templates 任何登录用户都能用，且不返回 prompt（用户端不能看）。
-    //
-    // 错误必须可见：早期版本 try/catch 把所有错误吞了，UI 上 templates 永远 []
-    // 但用户不知道为什么 —— 401/500/JSON 解析失败都长一个样。这次把每个分支
-    // 都写到 state + message，让 OrderFormDialog 区分 loading / error / empty。
-    if (!opts.silent) setTemplatesLoading(true);
-    setTemplatesError(null);
-    try {
-      const res = await fetch("/api/templates", { credentials: "include" });
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        // HTTP 状态码翻译成用户能看懂的提示；区分 401（登录态问题）、
-        // 5xx（服务端瞬时故障）和 4xx 其他（请求结构问题）。
-        let friendly: string;
-        if (res.status === 401) {
-          friendly = "登录已过期或未登录，请刷新页面重新登录后再试";
-        } else if (res.status === 403) {
-          friendly = "没有访问模板列表的权限";
-        } else if (res.status === 404) {
-          friendly = "模板接口不存在（404），请检查部署版本";
-        } else if (res.status >= 500) {
-          friendly = `服务端异常（HTTP ${res.status}），请稍后重试`;
-        } else {
-          friendly = `请求失败（HTTP ${res.status}）`;
+  const fetchTemplates = useCallback(
+    async (opts: { silent?: boolean } = {}) => {
+      // 走 /api/templates 而不是 /api/admin/templates —— 后者 requireAdmin，
+      // 普通用户会拿到 403，导致 templates 永远空、"创建订单"按钮永远 disabled。
+      // /api/templates 任何登录用户都能用，且不返回 prompt（用户端不能看）。
+      //
+      // 错误必须可见：早期版本 try/catch 把所有错误吞了，UI 上 templates 永远 []
+      // 但用户不知道为什么 —— 401/500/JSON 解析失败都长一个样。这次把每个分支
+      // 都写到 state + message，让 OrderFormDialog 区分 loading / error / empty。
+      if (!opts.silent) setTemplatesLoading(true);
+      setTemplatesError(null);
+      try {
+        const res = await fetch("/api/templates", { credentials: "include" });
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          // HTTP 状态码翻译成用户能看懂的提示；区分 401（登录态问题）、
+          // 5xx（服务端瞬时故障）和 4xx 其他（请求结构问题）。
+          let friendly: string;
+          if (res.status === 401) {
+            friendly = "登录已过期或未登录，请刷新页面重新登录后再试";
+          } else if (res.status === 403) {
+            friendly = "没有访问模板列表的权限";
+          } else if (res.status === 404) {
+            friendly = "模板接口不存在（404），请检查部署版本";
+          } else if (res.status >= 500) {
+            friendly = `服务端异常（HTTP ${res.status}），请稍后重试`;
+          } else {
+            friendly = `请求失败（HTTP ${res.status}）`;
+          }
+          // 保留原始错误（行内显示给排查用），但 message 用友好文案。
+          const raw = text ? text.slice(0, 120) : res.statusText;
+          throw new Error(`${friendly}（${raw}）`);
         }
-        // 保留原始错误（行内显示给排查用），但 message 用友好文案。
-        const raw = text ? text.slice(0, 120) : res.statusText;
-        throw new Error(`${friendly}（${raw}）`);
+        const json = (await res.json()) as {
+          success?: boolean;
+          data?: PromptTemplateView[];
+          error?: string;
+        };
+        if (!json.success || !Array.isArray(json.data)) {
+          throw new Error(json.error ?? "返回数据格式异常");
+        }
+        setTemplates(json.data);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "未知错误";
+        setTemplatesError(msg);
+        console.error("[OrdersAdminView] fetchTemplates 失败:", msg);
+        if (!opts.silent) {
+          message.error(`模板加载失败：${msg}`);
+        }
+      } finally {
+        if (!opts.silent) setTemplatesLoading(false);
       }
-      const json = (await res.json()) as {
-        success?: boolean;
-        data?: PromptTemplateView[];
-        error?: string;
-      };
-      if (!json.success || !Array.isArray(json.data)) {
-        throw new Error(json.error ?? "返回数据格式异常");
-      }
-      setTemplates(json.data);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "未知错误";
-      setTemplatesError(msg);
-      console.error("[OrdersAdminView] fetchTemplates 失败:", msg);
-      if (!opts.silent) {
-        message.error(`模板加载失败：${msg}`);
-      }
-    } finally {
-      if (!opts.silent) setTemplatesLoading(false);
-    }
-  }, []);
+    },
+    []
+  );
 
   useEffect(() => {
     void fetchOrders();
