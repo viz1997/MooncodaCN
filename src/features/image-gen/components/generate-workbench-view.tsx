@@ -266,11 +266,20 @@ const REF_MODE_LABELS: Record<RefMode, string> = {
  * SubmissionNode 结果网格列数映射。
  * 2026-08-25：原本固定 grid-cols-3，4 张图变成 3+1 换行（用户报告）；现在按
  * resultUrls.length 选列数 —— 4 张走 2×2 宫格、5+ 张保持 3 列多行。
+ *
+ * 2026-08-26：单图 (N=1) 从 grid-cols-1 改成 grid-cols-3。
+ * 之前 2026-08-23 "单图按多图网格"那一轮改成了走 N 格网格，但 grid-cols-1
+ * 让单 cell 占满 360px，aspect-square 后单图 cell 是 360×360，仍然比 N=3+ 时
+ * 的 ~114×114 cell 大很多 —— 视觉重量没真的统一。
+ * 用户反馈"单图的也要网格小图那样" → 改成 grid-cols-3，单图 cell 同样约
+ * 114×114，与 N=3/N=5+ 一致。N=2 维持 grid-cols-2、4 维持 2×2 是因为 2 张图
+ * 用 3 列会留 1 个空 cell（视觉上更怪），1 张图就没这个问题。
+ *
  * 用静态对象而不是动态 className 字符串拼接，因为 Tailwind 不扫描动态类名。
  */
 const MAX_RESULT_GRID_KEY = 9;
 const RESULT_GRID_COLS: Record<number, string> = {
-  1: "grid-cols-1",
+  1: "grid-cols-3", // 单图也走 3 列网格 → 单 cell 约 114×114，与 N=3+ 一致
   2: "grid-cols-2",
   3: "grid-cols-3",
   4: "grid-cols-2", // 2×2 宫格
@@ -3693,8 +3702,10 @@ function SubmissionNode({
       ) : (
         /* 列数按 resultUrls.length 动态选（用静态类名映射，Tailwind 不支持
          * 动态 className）：
-         *  - 1 张：1 列（保留 2026-08-23 "单图走 3-列网格第 1 格"的视觉重量一致）
-         *  - 2 张：2 列
+         *  - 1 张：3 列 —— 用户反馈"单图的也要网格小图那样"，统一到
+         *    ~114×114 cell，与 N=3/5+ 时一致（之前 grid-cols-1 单 cell
+         *    占满 360px，视觉重量没真的统一）
+         *  - 2 张：2 列（3 列会留 1 个空 cell，视觉上更怪）
          *  - 3 张：3 列（一行铺满）
          *  - 4 张：2 列 2×2 —— 用户反馈"明明还有位置第四张换行"是因为之前
          *    固定 3 列导致 4 张成 3+1；改成 2×2 宫格是最常见的 4 候选布局
