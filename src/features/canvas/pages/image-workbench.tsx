@@ -88,6 +88,7 @@ import {
   readImageMeta,
 } from "@/features/canvas/lib/image-utils";
 import { stitchToGrid } from "@/features/canvas/lib/stitch-images";
+import { thumbnailUrl } from "@/features/image-gen/lib/thumbnail-url";
 import {
   requestEdit,
   requestGeneration,
@@ -919,7 +920,7 @@ export function ImageWorkbench() {
                       className="group relative size-20 shrink-0 overflow-hidden rounded-md border border-stone-200 dark:border-stone-800"
                     >
                       <img
-                        src={item.dataUrl}
+                        src={thumbnailUrl(item.dataUrl, 160)}
                         alt={item.name}
                         className="size-full object-cover"
                       />
@@ -1319,7 +1320,7 @@ function ResultImageCard({
   return (
     <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
       <Image
-        src={image.dataUrl}
+        src={thumbnailUrl(image.dataUrl, 400)}
         alt={t("imageWorkbench.resultAlt", { count: index + 1 })}
         className="aspect-square object-cover"
       />
@@ -1545,7 +1546,7 @@ function LogCard({
                 {thumbnails.map((image, index) => (
                   <img
                     key={`${log.id}-${index}`}
-                    src={image}
+                    src={thumbnailUrl(image, 64)}
                     alt=""
                     className="size-8 shrink-0 rounded-md object-cover"
                   />

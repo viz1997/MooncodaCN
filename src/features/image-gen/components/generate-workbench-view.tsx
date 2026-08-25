@@ -91,6 +91,10 @@ import {
   IMAGE_MODEL_LIST,
   IMAGE_MODELS,
 } from "@/features/image-gen/lib/image-models/types";
+import {
+  downloadProxyUrl,
+  thumbnailUrl,
+} from "@/features/image-gen/lib/thumbnail-url";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
@@ -541,28 +545,48 @@ async function uploadFileToR2(file: File): Promise<string> {
  * - 跨域 + 未带 CORS 头时，浏览器对 `download` 属性无效，会直接打开图片。
  * 走 fetch → blob → 本地 objectURL 一定能强制下载，且不依赖服务器端配置。
  *
+ * 2026-08-26：HTTP(S) URL 改走 /api/image-gen/download 服务端代理
+ * —— R2 默认未配 CORS，浏览器直接 fetch 会被拒（"Failed to fetch"）。
+ * 服务端 fetch 无跨域限制，回流靠 Content-Disposition: attachment 触发下载。
+ * data: URL 不走代理（fetch data: 无 CORS 问题）。
+ *
  * 失败语义：throw 让调用方 toast 报错；不静默吞（否则用户以为下载成功但没拿到）。
  */
 async function downloadImage(url: string, filename: string): Promise<void> {
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`下载失败：HTTP ${res.status}`);
+  // data: URL 走原 fetch → blob → objectURL（data: 无 CORS 问题）
+  if (url.startsWith("data:")) {
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`下载失败：HTTP ${res.status}`);
+    }
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    try {
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = filename;
+      // 必须挂到 DOM 才能在 Firefox 上正常触发 click
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } finally {
+      // 给浏览器一点时间启动下载再回收，避免某些浏览器提前失效
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    }
+    return;
   }
-  const blob = await res.blob();
-  const objectUrl = URL.createObjectURL(blob);
-  try {
-    const a = document.createElement("a");
-    a.href = objectUrl;
-    a.download = filename;
-    // 必须挂到 DOM 才能在 Firefox 上正常触发 click
-    a.style.display = "none";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  } finally {
-    // 给浏览器一点时间启动下载再回收，避免某些浏览器提前失效
-    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
-  }
+
+  // HTTP(S) URL：浏览器直接 GET 服务端代理，靠 Content-Disposition: attachment
+  // 触发下载。无 CORS、无内存峰值、无需 fetch + blob 解码。
+  const a = document.createElement("a");
+  a.href = downloadProxyUrl(url, filename);
+  a.download = filename;
+  a.rel = "noopener";
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 /**
@@ -1783,7 +1807,7 @@ export function GenerateWorkbenchView({
                   // resultUrls 拆开，resultUrls 始终保留 N 张原图，所以这里
                   // stitchedUrl 优先以展示"拼接"的视觉，否则用 resultUrls[0]
                   // 退到原图第一张。
-                  const railThumb = eff.stitchedUrl ?? eff.resultUrls[0];
+                  const railThumb = eff.stitchedUrl ?? eff.resultUrls[0] ?? "";
                   return (
                     // 嵌套 button 不能放进 button，外层用 div + onClick 选中
                     // biome-ignore lint/a11y/useKeyWithClickEvents: rail 项支持 hover 出现操作按钮
@@ -1817,7 +1841,7 @@ export function GenerateWorkbenchView({
                         {eff.resultUrls[0] ? (
                           // biome-ignore lint/performance/noImgElement: 缩略图用原生 img
                           <img
-                            src={railThumb}
+                            src={thumbnailUrl(railThumb, 96)}
                             alt={displayName}
                             className="w-full h-full object-cover"
                           />
@@ -1984,7 +2008,7 @@ export function GenerateWorkbenchView({
                       : eff.maskName && eff.maskName !== "CUSTOM"
                         ? eff.maskName
                         : eff.prompt?.slice(0, 24) || "未命名";
-                  const railThumb = eff.stitchedUrl ?? eff.resultUrls[0];
+                  const railThumb = eff.stitchedUrl ?? eff.resultUrls[0] ?? "";
                   return (
                     // biome-ignore lint/a11y/useKeyWithClickEvents: 缩略图 cell 仅做选中
                     <div
@@ -2003,7 +2027,7 @@ export function GenerateWorkbenchView({
                       {eff.resultUrls[0] ? (
                         // biome-ignore lint/performance/noImgElement: 缩略图用原生 img
                         <img
-                          src={railThumb}
+                          src={thumbnailUrl(railThumb, 96)}
                           alt={displayName}
                           className="w-full h-full object-cover"
                         />
@@ -2194,10 +2218,11 @@ export function GenerateWorkbenchView({
                           >
                             {/* biome-ignore lint/performance/noImgElement: R2 缩略图 */}
                             <img
-                              src={
+                              src={thumbnailUrl(
                                 selectedPhoto.thumbnailUrl ??
-                                selectedPhoto.fileUrl
-                              }
+                                  selectedPhoto.fileUrl,
+                                96
+                              )}
                               alt={selectedPhoto.fileName}
                               className="w-full h-full object-cover"
                             />
@@ -2305,7 +2330,10 @@ export function GenerateWorkbenchView({
                                     >
                                       {/* biome-ignore lint/performance/noImgElement: R2 动态 URL 用原生 img */}
                                       <img
-                                        src={p.thumbnailUrl ?? p.fileUrl}
+                                        src={thumbnailUrl(
+                                          p.thumbnailUrl ?? p.fileUrl,
+                                          200
+                                        )}
                                         alt={p.fileName}
                                         className="w-full h-full object-cover"
                                         loading="lazy"
@@ -3656,7 +3684,7 @@ function SubmissionNode({
           >
             {/* biome-ignore lint/performance/noImgElement: timeline 拼接大图 */}
             <img
-              src={stitchedUrl}
+              src={thumbnailUrl(stitchedUrl, 720)}
               alt="宫格拼接大图"
               className="block w-full h-auto transition-transform duration-300 group-hover:scale-[1.02]"
               loading="lazy"
@@ -3687,7 +3715,7 @@ function SubmissionNode({
               >
                 {/* biome-ignore lint/performance/noImgElement: timeline 缩略图 */}
                 <img
-                  src={url}
+                  src={thumbnailUrl(url, 228)}
                   alt={`结果 ${i + 1}`}
                   className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
                   loading="lazy"
@@ -3733,7 +3761,7 @@ function SubmissionNode({
             >
               {/* biome-ignore lint/performance/noImgElement: timeline 缩略图 */}
               <img
-                src={url}
+                src={thumbnailUrl(url, 228)}
                 alt={resultUrls.length === 1 ? "生成结果" : `结果 ${i + 1}`}
                 className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
                 loading="lazy"

@@ -33,6 +33,7 @@ import {
   deletePhotoAction,
 } from "@/features/image-gen/actions";
 import { SafeImage } from "@/features/image-gen/components/safe-image";
+import { thumbnailUrl } from "@/features/image-gen/lib/thumbnail-url";
 import { cn } from "@/lib/utils";
 
 interface PhotosManagerViewProps {
@@ -294,7 +295,7 @@ export function PhotosManagerView({ initialPhotos }: PhotosManagerViewProps) {
                 aria-label={`查看 ${photo.fileName}`}
               >
                 <SafeImage
-                  src={photo.thumbnailUrl ?? photo.fileUrl}
+                  src={thumbnailUrl(photo.thumbnailUrl ?? photo.fileUrl, 400)}
                   alt={photo.fileName}
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                 />
@@ -368,7 +369,7 @@ export function PhotosManagerView({ initialPhotos }: PhotosManagerViewProps) {
                   className="flex items-center gap-4 p-3 hover:bg-muted/50 transition-colors"
                 >
                   <SafeImage
-                    src={photo.thumbnailUrl ?? photo.fileUrl}
+                    src={thumbnailUrl(photo.thumbnailUrl ?? photo.fileUrl, 112)}
                     alt={photo.fileName}
                     className="h-14 w-14 rounded-lg object-cover"
                   />

@@ -29,6 +29,7 @@ import {
   type Asset,
   useAssetStore,
 } from "@/features/canvas/stores/use-asset-store";
+import { thumbnailUrl } from "@/features/image-gen/lib/thumbnail-url";
 
 export type InsertAssetPayload =
   | { kind: "text"; content: string; title: string }
@@ -130,7 +131,7 @@ function PickerCard({
     >
       {cover ? (
         <img
-          src={cover}
+          src={thumbnailUrl(cover, 400)}
           alt={title}
           className="aspect-[4/3] w-full object-cover"
         />
