@@ -688,6 +688,94 @@ interface GenerateWorkbenchViewProps {
   templates: PromptTemplateView[];
 }
 
+/**
+ * 2026-08-26：V1 设置持久化 —— 之前只有 autoStitch 用单独的 localStorage
+ * key（imagegen:v1:autoStitch），其他设置（model / template / count / size /
+ * quality / prompt 等）都是 useState 默认值，刷新即丢。现在统一存到
+ * imagegen:v1:settings，刷新时一次性回填。
+ *
+ * 与 V2（zustand persist）相比，V1 走"裸 useState + 单 mount-load useEffect
+ * + 单 save useEffect"轻量模式：组件已 5000+ 行，重构成 zustand store
+ * 收益小、风险大。代价是 useState 数量多，save effect 列出所有 deps。
+ *
+ * 迁移：旧 `imagegen:v1:autoStitch` 还在 —— 首次加载时若新 key 不存在，
+ * 回退读旧 key；写入新 key 后保留旧 key 不动（避免一次性大改 schema）。
+ */
+const V1_SETTINGS_KEY = "imagegen:v1:settings";
+const LEGACY_AUTO_STITCH_KEY = "imagegen:v1:autoStitch";
+
+interface V1PersistedSettings {
+  selectedModel: ImageModelId;
+  selectedMask: string;
+  paramValues: Record<string, string>;
+  batchSize: number;
+  size: ImageSize;
+  quality: "auto" | "high" | "medium" | "low";
+  transparentBackground: boolean;
+  guidanceScale: number;
+  steps: number;
+  seed: number | "";
+  safetyCheck: boolean;
+  sidebarOpen: boolean;
+  prompt: string;
+  negativePrompt: string;
+  autoStitch: boolean;
+  useTemplate: boolean;
+}
+
+const DEFAULT_V1_SETTINGS: V1PersistedSettings = {
+  selectedModel: "gpt_image_2",
+  selectedMask: "",
+  paramValues: {},
+  batchSize: 1,
+  size: "1024x1024",
+  quality: "auto",
+  transparentBackground: false,
+  guidanceScale: 7,
+  steps: 30,
+  seed: "",
+  safetyCheck: true,
+  sidebarOpen: false,
+  prompt: "",
+  negativePrompt: "",
+  autoStitch: false,
+  useTemplate: true,
+};
+
+function loadV1Settings(): V1PersistedSettings {
+  // SSR / 沙箱 / 隐私模式：window.localStorage 不可用，直接返回默认
+  if (typeof window === "undefined") return DEFAULT_V1_SETTINGS;
+  try {
+    const raw = window.localStorage.getItem(V1_SETTINGS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<V1PersistedSettings>;
+      // 浅合并：缺失字段用默认补齐，避免老格式 / 部分写入导致 undefined
+      return { ...DEFAULT_V1_SETTINGS, ...parsed };
+    }
+  } catch {
+    // JSON 损坏 / quota 满 → 静默吞
+  }
+  // 迁移兼容：旧 key 单独存的 autoStitch
+  try {
+    const legacy = window.localStorage.getItem(LEGACY_AUTO_STITCH_KEY);
+    if (legacy === "true") {
+      return { ...DEFAULT_V1_SETTINGS, autoStitch: true };
+    }
+  } catch {
+    // 同上
+  }
+  return DEFAULT_V1_SETTINGS;
+}
+
+function saveV1Settings(settings: V1PersistedSettings): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(V1_SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    // localStorage 满 / 禁用，静默吞：刷新时丢设置而已，不影响当次使用
+  }
+}
+
 export function GenerateWorkbenchView({
   templates,
 }: GenerateWorkbenchViewProps) {
@@ -721,10 +809,14 @@ export function GenerateWorkbenchView({
   const libraryFetchedRef = useRef(false);
 
   // 提示词
-  const [prompt, setPrompt] = useState("");
-  const [negativePrompt, setNegativePrompt] = useState("");
+  const [prompt, setPrompt] = useState(DEFAULT_V1_SETTINGS.prompt);
+  const [negativePrompt, setNegativePrompt] = useState(
+    DEFAULT_V1_SETTINGS.negativePrompt
+  );
   // 提示词模板开关
-  const [useTemplate, setUseTemplate] = useState(true);
+  const [useTemplate, setUseTemplate] = useState(
+    DEFAULT_V1_SETTINGS.useTemplate
+  );
 
   // 三按钮对应的三个 Dialog（与 V2 image-workbench 对齐：收藏 / 提示词库 / 资产库）
   // 与 V2 不同点：V1 的 prompt 输入区可能处于「模板模式」，三按钮仅在手动模式下出现
@@ -736,62 +828,120 @@ export function GenerateWorkbenchView({
   // 模型与提示词模板（Phase C：mask → template 语义重命名，但 selectedMask 状态名保留
   // 以兼容 WorkbenchEffect.maskId 字段与 generateImageAction({ maskId }) 调用）
   // 默认 gpt_image_2：唯一支持 batchSize>1 的真实接入模型，工作台主推。
-  const [selectedModel, setSelectedModel] =
-    useState<ImageModelId>("gpt_image_2");
+  const [selectedModel, setSelectedModel] = useState<ImageModelId>(
+    DEFAULT_V1_SETTINGS.selectedModel
+  );
   const activeTemplates = templates.filter((t) => t.isActive);
+  // 初始为 ""，mount-load effect 会按持久化值 / 首个 active 模板补全
   const [selectedMask, setSelectedMask] = useState<string>(
-    activeTemplates[0]?.id ?? ""
+    DEFAULT_V1_SETTINGS.selectedMask
   );
   // 模板变量取值
-  const [paramValues, setParamValues] = useState<Record<string, string>>({});
+  const [paramValues, setParamValues] = useState<Record<string, string>>(
+    DEFAULT_V1_SETTINGS.paramValues
+  );
 
   // 基础参数
-  const [batchSize, setBatchSize] = useState(1);
-  const [size, setSize] = useState<ImageSize>("1024x1024");
+  const [batchSize, setBatchSize] = useState(DEFAULT_V1_SETTINGS.batchSize);
+  const [size, setSize] = useState<ImageSize>(DEFAULT_V1_SETTINGS.size);
   // 2026-08-20：与 V2 ImageSettingsPanel 对齐 —— 质量 / 透明背景
   // - quality: 默认 "auto"（不透传给上游，由 provider adapter 决定默认）
   // - transparentBackground: true → 提交时把 background="transparent" 透传
   const [quality, setQuality] = useState<"auto" | "high" | "medium" | "low">(
-    "auto"
+    DEFAULT_V1_SETTINGS.quality
   );
-  const [transparentBackground, setTransparentBackground] = useState(false);
+  const [transparentBackground, setTransparentBackground] = useState(
+    DEFAULT_V1_SETTINGS.transparentBackground
+  );
 
   // 2026-08-25：自动拼接宫格图 —— 用户开启后，handleGenerate / applyJobUpdate
   // 拿到的 N 张候选图会被客户端 Canvas API 拼成 √N×√N 宫格大图，作为
   // 单张图展示 / 下载。模板自带宫格拼接（candidateCount=4/9 → 模型返 1
   // 张大图）不受此开关影响 —— 已经是 1 张了，没法再"拼接"。
   // 默认 false：不打扰现有用户。
-  const AUTO_STITCH_KEY = "imagegen:v1:autoStitch";
-  const [autoStitch, setAutoStitch] = useState(false);
-  // mount 时从 localStorage 读，避免每次组件初始化都看到默认值
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(AUTO_STITCH_KEY);
-      if (raw === "true") setAutoStitch(true);
-    } catch {
-      // localStorage 不可用（隐私模式 / SSR / 沙盒）静默吞
-    }
-  }, []);
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        AUTO_STITCH_KEY,
-        autoStitch ? "true" : "false"
-      );
-    } catch {
-      // 同上
-    }
-  }, [autoStitch]);
+  // 2026-08-26：与下面 V1PersistedSettings 合并到 imagegen:v1:settings 统一
+  // 持久化（之前用独立 key imagegen:v1:autoStitch，新用户用新 key；老用户
+  // 由 loadV1Settings 回退读旧 key 自动迁移）。
+  const [autoStitch, setAutoStitch] = useState(DEFAULT_V1_SETTINGS.autoStitch);
 
   // 2026-08-23：会话列表 rail 默认折叠 —— 给中间参数面板 + 右侧结果区更多横向空间，
   // 用户点 sider 上的展开图标再展开；右上角的 collapse 图标手动收起
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(
+    DEFAULT_V1_SETTINGS.sidebarOpen
+  );
 
   // 高级参数（Accordion 默认折叠，无需本地 state）
-  const [guidanceScale, setGuidanceScale] = useState(7);
-  const [steps, setSteps] = useState(30);
-  const [seed, setSeed] = useState<number | "">("");
-  const [safetyCheck, setSafetyCheck] = useState(true);
+  const [guidanceScale, setGuidanceScale] = useState(
+    DEFAULT_V1_SETTINGS.guidanceScale
+  );
+  const [steps, setSteps] = useState(DEFAULT_V1_SETTINGS.steps);
+  const [seed, setSeed] = useState<number | "">(DEFAULT_V1_SETTINGS.seed);
+  const [safetyCheck, setSafetyCheck] = useState(
+    DEFAULT_V1_SETTINGS.safetyCheck
+  );
+
+  // mount 时一次性从 localStorage 回填所有设置
+  // —— 避免 SSR / 首次渲染看到默认值后立即跳到持久化值产生闪烁。
+  useEffect(() => {
+    const s = loadV1Settings();
+    setSelectedModel(s.selectedModel);
+    setParamValues(s.paramValues);
+    setBatchSize(s.batchSize);
+    setSize(s.size);
+    setQuality(s.quality);
+    setTransparentBackground(s.transparentBackground);
+    setAutoStitch(s.autoStitch);
+    setGuidanceScale(s.guidanceScale);
+    setSteps(s.steps);
+    setSeed(s.seed);
+    setSafetyCheck(s.safetyCheck);
+    setPrompt(s.prompt);
+    setNegativePrompt(s.negativePrompt);
+    setUseTemplate(s.useTemplate);
+    // selectedMask 持久化值可能是空（首次使用），保留 "" 让下方 derived state
+    // 兜底首个 active 模板 —— 避免 useEffect 把 templates prop 当 dep
+    setSelectedMask(s.selectedMask);
+    setSidebarOpen(s.sidebarOpen);
+  }, []);
+
+  // 任一字段变化都同步到 localStorage —— deps 全展开（仅写一行的额外成本）
+  useEffect(() => {
+    saveV1Settings({
+      selectedModel,
+      selectedMask,
+      paramValues,
+      batchSize,
+      size,
+      quality,
+      transparentBackground,
+      autoStitch,
+      guidanceScale,
+      steps,
+      seed,
+      safetyCheck,
+      sidebarOpen,
+      prompt,
+      negativePrompt,
+      useTemplate,
+    });
+  }, [
+    selectedModel,
+    selectedMask,
+    paramValues,
+    batchSize,
+    size,
+    quality,
+    transparentBackground,
+    autoStitch,
+    guidanceScale,
+    steps,
+    seed,
+    safetyCheck,
+    sidebarOpen,
+    prompt,
+    negativePrompt,
+    useTemplate,
+  ]);
 
   const [generating, setGenerating] = useState(false);
   // 手动「刷新状态」按钮的去抖锁：避免用户连点导致同 jobId 重复打 /poll
@@ -816,7 +966,15 @@ export function GenerateWorkbenchView({
   // 每张结果图的下载/分享去抖锁：避免 hover 按钮连点导致重复 fetch
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const modelConfig = IMAGE_MODELS[selectedModel];
-  const selectedTemplate = activeTemplates.find((t) => t.id === selectedMask);
+  // 2026-08-26：selectedMask 持久化可能为空（首次使用 / 用户从未切换），
+  // derived 一个 effectiveSelectedMask 兜底首个 active 模板 —— 不需要把
+  // templates prop 当 useEffect 依赖（避免 mount-load effect 被 deps 推着
+  // 重跑，破坏"只读一次 localStorage"语义）。
+  const effectiveSelectedMask =
+    selectedMask || activeTemplates[0]?.id || "";
+  const selectedTemplate = activeTemplates.find(
+    (t) => t.id === effectiveSelectedMask
+  );
   /**
    * 当前模板推荐的模型 id（Phase：模板 model 字段允许为空，模板可选 doubao 等
    * 占位但未实现的模型当默认；空或占位时不强制锁，仍按模板 model 字段填）。
@@ -1475,7 +1633,7 @@ export function GenerateWorkbenchView({
         prompt: finalPrompt, // prompt 用最新的
         ...(isDraft
           ? {
-              maskId: selectedMask || "CUSTOM",
+              maskId: effectiveSelectedMask || "CUSTOM",
               maskName: selectedTemplate?.name ?? "自定义",
               mode: generationMode,
               imageModel: selectedModel,
@@ -1494,7 +1652,7 @@ export function GenerateWorkbenchView({
         prompt: finalPrompt,
         // maskId 字段名保留以兼容 generateImageAction / imageJob.maskId 列；
         // 实际值是 promptTemplate.id。
-        maskId: selectedMask || "CUSTOM",
+        maskId: effectiveSelectedMask || "CUSTOM",
         maskName: selectedTemplate?.name ?? "自定义",
         status: "processing",
         resultUrls: [],
@@ -1530,7 +1688,7 @@ export function GenerateWorkbenchView({
         numInferenceSteps:
           modelConfig.capabilities.maxInferenceSteps > 0 ? steps : undefined,
         enableSafetyCheck: safetyCheck,
-        maskId: selectedMask || undefined,
+        maskId: effectiveSelectedMask || undefined,
         photoId: safeRefImage?.photoId,
       });
 
@@ -2427,7 +2585,7 @@ export function GenerateWorkbenchView({
                         <>
                           <div className="-mx-1 px-1 flex gap-1.5 overflow-x-auto pb-1 snap-x">
                             {activeTemplates.map((tpl) => {
-                              const selected = tpl.id === selectedMask;
+                              const selected = tpl.id === effectiveSelectedMask;
                               return (
                                 <button
                                   key={tpl.id}
