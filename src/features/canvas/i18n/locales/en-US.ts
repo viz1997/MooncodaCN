@@ -50,6 +50,9 @@ export default {
         "Generate an image without a background when supported by the model",
       count: "Image count",
       images: "{{count}} images",
+      autoStitch: "Auto-stitch into grid",
+      autoStitchHint:
+        "Stitch all candidates into a single √N × √N composite image (only when count ≥ 2)",
     },
     video: {
       title: "Video settings",
@@ -469,6 +472,7 @@ export default {
     empty: "No images generated yet",
     resultAlt: "Generated image {{count}}",
     addReference: "Add as reference",
+    mergedToGrid: "Merged into grid composite",
   },
   videoWorkbench: {
     title: "Video Studio",

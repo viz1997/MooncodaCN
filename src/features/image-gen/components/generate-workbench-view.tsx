@@ -23,6 +23,7 @@ import {
   Clock,
   Download,
   FolderPlus,
+  Grid3x3,
   Image as ImageIcon,
   Library,
   Loader2,
@@ -73,6 +74,7 @@ import type { ImageJob, Photo } from "@/db/schema";
 import type { InsertAssetPayload } from "@/features/canvas/components/canvas/asset-picker-modal";
 import { AssetPickerModal } from "@/features/canvas/components/canvas/asset-picker-modal";
 import { PromptSelectDialog } from "@/features/canvas/components/prompts/prompt-select-dialog";
+import { stitchToGrid } from "@/features/canvas/lib/stitch-images";
 import { useMyPromptStore } from "@/features/canvas/stores/use-my-prompt-store";
 import type { PromptTemplateView } from "@/features/gpt-image/lib/types";
 import {
@@ -129,6 +131,17 @@ interface WorkbenchSubmission {
   errorMsg?: string;
   /** 是否为宫格拼接模式（candidateCount=4/9 一张大图） */
   isGridComposite?: boolean;
+  /**
+   * 是否为客户端二次拼接（用户在高级参数里勾选了「自动拼接宫格图」，
+   * 把 N 张独立候选用 Canvas API 拼成一张宫格大图）。仅展示层用：
+   * - 标题徽章改为"已拼接"
+   * - 单图布局（不显示 N 格网格）
+   * - 下载文件名加 `_stitched` 后缀
+   *
+   * 注意：isGridComposite 与 isStitched 互斥 —— 模板自带宫格拼接时
+   * 不再二次拼接。
+   */
+  isStitched?: boolean;
   /** 该次提交的 prompt（与 effect 主 prompt 可能不同 —— 用户连续微调时） */
   prompt: string;
   /**
@@ -181,6 +194,11 @@ interface WorkbenchEffect {
    * 仅展示层用：标题 / 单图布局 / 下载行为。
    */
   isGridComposite?: boolean;
+  /**
+   * submission 是否被客户端二次拼接（见 WorkbenchSubmission.isStitched）。
+   * effect 级仅展示层用：rail 缩略图走 single 模式。
+   */
+  isStitched?: boolean;
   /**
    * 提交记录列表（每次 handleGenerate push 一条）。时间轴按 submissions
    * 顺序渲染 —— 这就是 ChatGPT 风格"消息气泡按时间顺序堆积"。
@@ -533,28 +551,22 @@ function getAspectIcon(size: ImageSize) {
  * 上游是否真支持由 provider adapter 决定；model 不支持时由上游报错，不在前端预过滤。
  */
 const ALL_IMAGE_SIZES: ImageSize[] = [
-  // 1:1（最常用）
+  // 2026-08-25：尺寸列表去重，删除同比例的重复项（之前 1:1 有 5 个 entry
+  // 都显示 "1:1" 标签，用户根本分不清是哪个；4:3 / 3:4 也各有两个近比例
+  // 变体）。现在每个宽高比只保留 1~2 个标准尺寸，1:1 多留一个 2K 高清。
+  // 其它高分辨率（4K 等）由上游 provider adapter 决定，前端不预列。
+  // 1:1
   "1024x1024",
   "2048x2048",
   // 4:3 / 3:4
   "1024x768",
   "768x1024",
-  "1152x864",
-  "864x1152",
-  "1344x768",
-  "768x1344",
   // 3:2 / 2:3
   "1536x1024",
   "1024x1536",
   // 16:9 / 9:16
-  "1792x1024",
-  "1024x1792",
   "1280x720",
   "720x1280",
-  // 小尺寸
-  "768x768",
-  "512x512",
-  "256x256",
   // auto
   "auto",
 ];
@@ -678,6 +690,33 @@ export function GenerateWorkbenchView({
     "auto"
   );
   const [transparentBackground, setTransparentBackground] = useState(false);
+
+  // 2026-08-25：自动拼接宫格图 —— 用户开启后，handleGenerate / applyJobUpdate
+  // 拿到的 N 张候选图会被客户端 Canvas API 拼成 √N×√N 宫格大图，作为
+  // 单张图展示 / 下载。模板自带宫格拼接（candidateCount=4/9 → 模型返 1
+  // 张大图）不受此开关影响 —— 已经是 1 张了，没法再"拼接"。
+  // 默认 false：不打扰现有用户。
+  const AUTO_STITCH_KEY = "imagegen:v1:autoStitch";
+  const [autoStitch, setAutoStitch] = useState(false);
+  // mount 时从 localStorage 读，避免每次组件初始化都看到默认值
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(AUTO_STITCH_KEY);
+      if (raw === "true") setAutoStitch(true);
+    } catch {
+      // localStorage 不可用（隐私模式 / SSR / 沙盒）静默吞
+    }
+  }, []);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        AUTO_STITCH_KEY,
+        autoStitch ? "true" : "false"
+      );
+    } catch {
+      // 同上
+    }
+  }, [autoStitch]);
 
   // 2026-08-23：会话列表 rail 默认折叠 —— 给中间参数面板 + 右侧结果区更多横向空间，
   // 用户点 sider 上的展开图标再展开；右上角的 collapse 图标手动收起
@@ -1004,7 +1043,7 @@ export function GenerateWorkbenchView({
    * 不处理 pending/processing —— 此时不动 state，让 setTimeout tick 自然
    * 落到下一轮。
    */
-  const applyJobUpdate = (effectId: string, job: ImageJob) => {
+  const applyJobUpdate = async (effectId: string, job: ImageJob) => {
     const eff = historyRef.current.find((e) => e.effectId === effectId);
     if (!eff) return;
 
@@ -1033,6 +1072,26 @@ export function GenerateWorkbenchView({
         ? { duration: job.generateDuration as number }
         : {};
 
+      // 找到对应 submission，看是不是宫格拼接模板（candidateCount=4/9 时模型
+      // 本身就返 1 张大图，不再二次拼接）。isGridComposite 由 handleGenerate 在
+      // 新建 submission 时根据模板 candidateCount 写入。
+      const targetSubmission = (eff.submissions ?? [])[targetSubmissionIdx];
+      const isTemplateGrid = targetSubmission?.isGridComposite === true;
+      // 2026-08-25：自动拼接宫格图 —— 开启 + ≥ 2 张 + 非模板宫格 → 客户端
+      // Canvas 拼接成单张大图。注意 applyJobUpdate 是 async 函数（外层 startPolling
+      // 是 async），可以直接 await。失败（任何一张图解码失败）就静默回退原 URLs。
+      let finalUrls = resultUrls;
+      let isStitched = false;
+      if (autoStitch && !isTemplateGrid && resultUrls.length >= 2) {
+        try {
+          const composite = await stitchToGrid(resultUrls);
+          finalUrls = [composite];
+          isStitched = true;
+        } catch (err) {
+          console.warn("[workbench] stitch failed:", err);
+        }
+      }
+
       const next: WorkbenchEffect = {
         ...eff,
         // 仅在 effect 主 effect 是 processing 时一起刷成 completed（最后一条
@@ -1042,7 +1101,7 @@ export function GenerateWorkbenchView({
         status: hasUnfinishedSubmissionExcept(eff, targetSubmissionIdx)
           ? "processing"
           : "completed",
-        resultUrls,
+        resultUrls: finalUrls,
         ...duration,
         ...cost,
         submissions: (eff.submissions ?? []).map((s, i) =>
@@ -1050,7 +1109,8 @@ export function GenerateWorkbenchView({
             ? {
                 ...s,
                 status: "completed",
-                resultUrls,
+                resultUrls: finalUrls,
+                isStitched,
                 // 同时把本次 job 的耗时写到对应 submission（覆盖式：每条 submission
                 // 各自记自己的耗时，effect 级 duration 是最新一次的值）
                 ...duration,
@@ -2555,7 +2615,8 @@ export function GenerateWorkbenchView({
                     size !== "1024x1024" ||
                     batchSize !== 1 ||
                     quality !== "auto" ||
-                    transparentBackground) && (
+                    transparentBackground ||
+                    autoStitch) && (
                     <span
                       className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-amber-500"
                       title="已修改默认"
@@ -2563,8 +2624,37 @@ export function GenerateWorkbenchView({
                   )}
                 </Button>
               </PopoverTrigger>
-              <PopoverContent align="end" side="top" className="w-72 space-y-3">
+              <PopoverContent
+                align="end"
+                side="top"
+                className="w-72 max-h-[70vh] space-y-3 overflow-y-auto"
+              >
                 <p className="text-xs font-semibold">高级参数</p>
+
+                {/* 2026-08-25：自动拼接宫格图 —— 提到 Popover 最顶部的"生成选项"
+                 * 分组。之前塞在 9 个区块最末尾，用户很难找到；现在和尺寸 /
+                 * 数量 / 质量同级，作为"生成结果如何呈现"的开关优先展示。
+                 * - 仅 batchSize ≥ 2 时生效（模板宫格 candidateCount=4/9 不受影响）
+                 * - 开启后右侧结果区单张宫格大图展示，标题徽章显示"自动拼接" */}
+                <div className="rounded-md border bg-muted/40 px-2.5 py-2 space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <Grid3x3 className="h-3.5 w-3.5 text-primary shrink-0" />
+                      <span className="text-xs font-semibold">
+                        自动拼接宫格图
+                      </span>
+                    </div>
+                    <Switch
+                      checked={autoStitch}
+                      onCheckedChange={setAutoStitch}
+                    />
+                  </div>
+                  <p className="text-[10px] text-muted-foreground/80 leading-snug">
+                    多张结果自动拼成一张宫格大图（仅 batchSize ≥ 2 时生效）
+                  </p>
+                </div>
+
+                <div className="border-t border-border/50" />
                 {modelConfig.capabilities.supportsGuidance && (
                   <div className="space-y-1">
                     <div className="flex items-center justify-between text-[11px]">
@@ -2652,6 +2742,16 @@ export function GenerateWorkbenchView({
                       const selected = size === s;
                       const [w, h] = parseImageSize(s);
                       const AspectIcon = getAspectIcon(s);
+                      // 1:1 同时存在 1024x1024 / 2048x2048 两个 entry，
+                      // 单显示 "1:1" 用户分不清。补一行分辨率副标题。
+                      const subtitle =
+                        w === h
+                          ? w >= 2048
+                            ? "2K"
+                            : w >= 1024
+                              ? "1K"
+                              : `${w}²`
+                          : null;
                       return (
                         <button
                           key={s}
@@ -2669,6 +2769,11 @@ export function GenerateWorkbenchView({
                           <span className="font-mono">
                             {w === h ? "1:1" : `${w}:${h}`}
                           </span>
+                          {subtitle && (
+                            <span className="text-[9px] text-muted-foreground/70 font-mono leading-none">
+                              {subtitle}
+                            </span>
+                          )}
                         </button>
                       );
                     })}
@@ -2966,6 +3071,9 @@ export function GenerateWorkbenchView({
                               createdAt: selectedEffect.createdAt,
                               ...(selectedEffect.isGridComposite
                                 ? { isGridComposite: true }
+                                : {}),
+                              ...(selectedEffect.isStitched
+                                ? { isStitched: true }
                                 : {}),
                               ...(selectedEffect.duration
                                 ? { duration: selectedEffect.duration }
@@ -3329,8 +3437,15 @@ function SubmissionNode({
   onLightbox: (url: string, index: number) => void;
   onRetry?: () => void;
 }) {
-  const { status, resultUrls, createdAt, errorMsg, isGridComposite, duration } =
-    submission;
+  const {
+    status,
+    resultUrls,
+    createdAt,
+    errorMsg,
+    isGridComposite,
+    isStitched,
+    duration,
+  } = submission;
   // submission 自身 duration 优先；缺失则降级到 effect 级 duration。
   const displayDuration = duration ?? effectDuration;
 
@@ -3403,9 +3518,13 @@ function SubmissionNode({
     <div className="relative pl-5">
       <div className="absolute left-[5px] top-1.5 h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-card" />
       <div className="flex items-center gap-2 mb-2 text-[11px]">
-        <span className="font-mono font-semibold">
-          共 {resultUrls.length} 张
-        </span>
+        {isStitched ? (
+          <span className="font-mono font-semibold">宫格大图</span>
+        ) : (
+          <span className="font-mono font-semibold">
+            共 {resultUrls.length} 张
+          </span>
+        )}
         <span className="text-muted-foreground/40">·</span>
         <span className="font-mono text-muted-foreground tabular-nums">
           {formatAbsoluteTime(createdAt)}
@@ -3422,7 +3541,18 @@ function SubmissionNode({
             </span>
           </>
         )}
-        {isGridComposite && (
+        {isStitched ? (
+          <>
+            <span className="text-muted-foreground/40">·</span>
+            <span
+              className="inline-flex items-center gap-1 text-primary"
+              title="已自动拼接为宫格大图"
+            >
+              <Sparkles className="h-3 w-3" />
+              自动拼接
+            </span>
+          </>
+        ) : isGridComposite ? (
           <>
             <span className="text-muted-foreground/40">·</span>
             <span className="inline-flex items-center gap-1 text-primary">
@@ -3430,7 +3560,7 @@ function SubmissionNode({
               宫格拼接
             </span>
           </>
-        )}
+        ) : null}
       </div>
 
       {/* 单图 / 多图统一走 grid-cols-3：每张图占 1 格，跟多图网格同布局、同尺寸。
@@ -3439,36 +3569,57 @@ function SubmissionNode({
        * 重量不一致；统一后所有 submission 都按 N 格缩略图渲染，缩略图点
        * 击仍走 onLightbox 放大看。aspect-square + object-cover 会按中心
        * 裁切到方形（与多图网格一致）—— 横长竖长图都会被裁，代价是单图
-       * 看到的是方形预览而非原图比例，用户需要细节就点开 lightbox。 */}
-      <div className="grid grid-cols-3 gap-2 max-w-[360px]">
-        {resultUrls.map((url, i) => (
-          <button
-            // biome-ignore lint/suspicious/noArrayIndexKey: 一次提交内的图按生成顺序
-            key={i}
-            type="button"
-            onClick={() => onLightbox(url, i)}
-            className="group relative aspect-square overflow-hidden rounded-lg border bg-muted hover:border-primary/60 transition-colors"
-            title={
-              resultUrls.length === 1
-                ? "点击查看大图"
-                : `第 ${i + 1} 张 · 点击查看大图`
-            }
-          >
-            {/* biome-ignore lint/performance/noImgElement: timeline 缩略图 */}
-            <img
-              src={url}
-              alt={resultUrls.length === 1 ? "生成结果" : `结果 ${i + 1}`}
-              className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
-              loading="lazy"
-            />
-            {resultUrls.length > 1 && (
-              <span className="absolute bottom-1 left-1 bg-black/60 backdrop-blur-sm text-white text-[9px] px-1 py-0.5 rounded font-mono leading-none opacity-0 group-hover:opacity-100 transition-opacity">
-                #{i + 1}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
+       * 看到的是方形预览而非原图比例，用户需要细节就点开 lightbox。
+       *
+       * 2026-08-25：isStitched 走单图大预览 —— 客户端已拼接为一张宫格大图，
+       * 不再拆 N 格展示，否则又退化成 N 格网格 + 一张大图，重复且难看。
+       * 单图布局给到 max-w-[640px]，比 N 格缩略图大不少，让"拼接"的价值可见。 */}
+      {isStitched ? (
+        <button
+          type="button"
+          onClick={() => onLightbox(resultUrls[0] ?? "", 0)}
+          className="group relative block w-full max-w-[640px] overflow-hidden rounded-lg border bg-muted hover:border-primary/60 transition-colors"
+          title="点击查看大图"
+        >
+          {/* biome-ignore lint/performance/noImgElement: timeline 大预览 */}
+          <img
+            src={resultUrls[0]}
+            alt="宫格拼接大图"
+            className="block w-full h-auto transition-transform duration-300 group-hover:scale-[1.02]"
+            loading="lazy"
+          />
+        </button>
+      ) : (
+        <div className="grid grid-cols-3 gap-2 max-w-[360px]">
+          {resultUrls.map((url, i) => (
+            <button
+              // biome-ignore lint/suspicious/noArrayIndexKey: 一次提交内的图按生成顺序
+              key={i}
+              type="button"
+              onClick={() => onLightbox(url, i)}
+              className="group relative aspect-square overflow-hidden rounded-lg border bg-muted hover:border-primary/60 transition-colors"
+              title={
+                resultUrls.length === 1
+                  ? "点击查看大图"
+                  : `第 ${i + 1} 张 · 点击查看大图`
+              }
+            >
+              {/* biome-ignore lint/performance/noImgElement: timeline 缩略图 */}
+              <img
+                src={url}
+                alt={resultUrls.length === 1 ? "生成结果" : `结果 ${i + 1}`}
+                className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+                loading="lazy"
+              />
+              {resultUrls.length > 1 && (
+                <span className="absolute bottom-1 left-1 bg-black/60 backdrop-blur-sm text-white text-[9px] px-1 py-0.5 rounded font-mono leading-none opacity-0 group-hover:opacity-100 transition-opacity">
+                  #{i + 1}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

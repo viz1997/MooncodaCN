@@ -53,6 +53,12 @@ export type AiConfig = {
   background: string;
   count: string;
   canvasImageCount: string;
+  /**
+   * 2026-08-25：自动拼接宫格图 —— V2 工作台生成多张候选时，是否把它们
+   * 客户端 Canvas API 拼成一张 √N×√N 大图再展示 / 下载。默认 false。
+   * 仅生图工作台 V2 读（canvas 内部用 canvasImageCount 不读这个）。
+   */
+  autoStitch: boolean;
 };
 
 export type WebdavSyncConfig = {
@@ -124,6 +130,7 @@ export const defaultConfig: AiConfig = {
   background: "",
   count: "1",
   canvasImageCount: "3",
+  autoStitch: false,
 };
 
 export const defaultWebdavSyncConfig: WebdavSyncConfig = {

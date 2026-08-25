@@ -49,6 +49,8 @@ export default {
       transparentHint: "开启后生成无背景的透明图像（仅部分模型可用）",
       count: "生成张数",
       images: "{{count}} 张",
+      autoStitch: "自动拼接宫格图",
+      autoStitchHint: "多张结果自动拼成一张宫格大图（仅 count ≥ 2 时生效）",
     },
     video: {
       title: "视频设置",
@@ -433,6 +435,7 @@ export default {
     empty: "还没有生成图片",
     resultAlt: "生成结果 {{count}}",
     addReference: "加入参考图",
+    mergedToGrid: "已合并到宫格大图",
   },
   videoWorkbench: {
     title: "视频创作台",

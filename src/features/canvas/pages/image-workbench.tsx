@@ -86,6 +86,7 @@ import {
   getDataUrlByteSize,
   readImageMeta,
 } from "@/features/canvas/lib/image-utils";
+import { stitchToGrid } from "@/features/canvas/lib/stitch-images";
 import {
   requestEdit,
   requestGeneration,
@@ -367,6 +368,51 @@ export function ImageWorkbench() {
     }
     const successCount = successImages.length;
     const failCount = generationCount - successCount;
+
+    // 2026-08-25：自动拼接宫格图 —— 开启 + 至少 2 张成功 → 客户端 Canvas
+    // 把成功候选拼成 √N×√N 单张大图，替换 results 的 success 槽。
+    // 失败槽保持原样（用户能看到"哪些张失败"），复合图本身仍按成功数计。
+    // 拼接失败（任一张图解码/CORS 失败）静默回退到原 successImages。
+    let displayedSuccessImages = successImages;
+    if (effectiveConfig.autoStitch && successImages.length >= 2) {
+      try {
+        const compositeDataUrl = await stitchToGrid(
+          successImages.map((image) => image.dataUrl)
+        );
+        const composite: GeneratedImage = {
+          ...successImages[0]!,
+          id: nanoid(),
+          dataUrl: compositeDataUrl,
+          // 拼接后的字节数 = 各原图字节之和（PNG 压缩率相近，估算够用）
+          bytes: successImages.reduce((sum, img) => sum + img.bytes, 0),
+          mimeType: "image/png",
+        };
+        displayedSuccessImages = [composite];
+        // 替换 results 数组：清空 success 槽，把 composite 放第一格
+        setResults((prev) => {
+          let placed = false;
+          return prev.map((r) => {
+            if (r.status === "success") {
+              if (!placed) {
+                placed = true;
+                return { id: composite.id, status: "success", image: composite };
+              }
+              // 后续 success 槽被合并 → 改成"已合并到宫格大图"的失败卡，
+              // 让失败计数仍然准确，同时给用户视觉提示
+              return {
+                ...r,
+                status: "failed",
+                error: t("imageWorkbench.mergedToGrid"),
+                image: undefined,
+              };
+            }
+            return r;
+          });
+        });
+      } catch (caught) {
+        console.warn("[workbench] stitch failed:", caught);
+      }
+    }
     if (agentTaskId)
       updateAgentTask(agentTaskId, {
         status: successCount ? "succeeded" : "failed",
@@ -937,6 +983,7 @@ export function ImageWorkbench() {
                   )}
                   count={generationCount}
                   transparent={config.background === "transparent"}
+                  autoStitch={Boolean(config.autoStitch)}
                   onAdjust={() => setSettingsOpen(true)}
                 />
               </div>
@@ -1172,12 +1219,18 @@ function SettingsSummary({
   qualityLabel,
   count,
   transparent,
+  autoStitch,
   onAdjust,
 }: {
   sizeLabel: string;
   qualityLabel: string;
   count: number;
   transparent: boolean;
+  /**
+   * 2026-08-25：自动拼接宫格图开关状态。开启时在摘要条多显示一段，
+   * 让用户不进 Modal 也能看到当前开关状态（Modal 里有真正的 Switch）。
+   */
+  autoStitch: boolean;
   onAdjust: () => void;
 }) {
   const { t } = useTranslation();
@@ -1187,6 +1240,7 @@ function SettingsSummary({
     t("settingsPanels.image.images", { count }),
   ];
   if (transparent) parts.push(t("settingsPanels.image.transparent"));
+  if (autoStitch) parts.push(t("settingsPanels.image.autoStitch"));
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900">
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-stone-500 dark:text-stone-400">

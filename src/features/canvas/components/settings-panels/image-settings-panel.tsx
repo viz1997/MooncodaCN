@@ -17,6 +17,10 @@ const qualityOptions = [
 const DIMENSION_STEP = 16;
 
 const aspectOptions = [
+  // 2026-08-25：去重尺寸。之前 16:9 有 3 个 entry（16:9 / 16:9(2k) / 16:9(4k)），
+  // 9:16 同理有 3 个，1:1 有 2 个 —— 同一个宽高比反复出现，用户难选。
+  // 现在每个比例只留 1 个标准分辨率；高分辨率需求交给上方的 W/H 数字输入
+  // （已经支持自定义分辨率，会按 16 倍数对齐），不再塞进预设网格。
   { value: "1:1", label: "1:1", width: 1024, height: 1024, icon: "square" },
   { value: "3:2", label: "3:2", width: 1536, height: 1024, icon: "landscape" },
   { value: "2:3", label: "2:3", width: 1024, height: 1536, icon: "portrait" },
@@ -30,46 +34,6 @@ const aspectOptions = [
     icon: "landscape",
   },
   { value: "9:16", label: "9:16", width: 1024, height: 1824, icon: "portrait" },
-  {
-    value: "1:1-2k",
-    label: "1:1(2k)",
-    size: "2048x2048",
-    width: 2048,
-    height: 2048,
-    icon: "square",
-  },
-  {
-    value: "16:9-2k",
-    label: "16:9(2k)",
-    size: "2048x1152",
-    width: 2048,
-    height: 1152,
-    icon: "landscape",
-  },
-  {
-    value: "9:16-2k",
-    label: "9:16(2k)",
-    size: "1152x2048",
-    width: 1152,
-    height: 2048,
-    icon: "portrait",
-  },
-  {
-    value: "16:9-4k",
-    label: "16:9(4k)",
-    size: "3840x2160",
-    width: 3840,
-    height: 2160,
-    icon: "landscape",
-  },
-  {
-    value: "9:16-4k",
-    label: "9:16(4k)",
-    size: "2160x3840",
-    width: 2160,
-    height: 3840,
-    icon: "portrait",
-  },
   { value: "auto", label: "auto", width: 0, height: 0, icon: "auto" },
 ];
 
@@ -87,8 +51,8 @@ export const imageAspectOptions = aspectOptions.map((item) => ({
 type ImageSettingsPanelProps = {
   config: AiConfig;
   onConfigChange: (
-    key: "quality" | "size" | "count" | "background",
-    value: string
+    key: "quality" | "size" | "count" | "background" | "autoStitch",
+    value: string | boolean
   ) => void;
   theme: CanvasTheme;
   showTitle?: boolean;
@@ -163,6 +127,34 @@ export function ImageSettingsPanel({
             {t("settingsPanels.image.title")}
           </div>
         ) : null}
+        {/* 2026-08-25：自动拼接宫格图 —— 放到设置面板最顶端，作为"结果呈现"
+         * 开关优先级最高（用户进 Modal 最先想看到的就是这个）。之前放在
+         * count 之后、Modal 末尾，Modal 内容长时容易被滚动条藏住。 */}
+        <div
+          className="rounded-md border bg-muted/40 px-3 py-2"
+          style={{ borderColor: theme.node.stroke }}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <div className="text-sm font-semibold">
+                {t("settingsPanels.image.autoStitch")}
+              </div>
+              <div
+                className="text-xs"
+                style={{ color: theme.node.muted, opacity: 0.75 }}
+              >
+                {t("settingsPanels.image.autoStitchHint")}
+              </div>
+            </div>
+            <span onMouseDown={(event) => event.stopPropagation()}>
+              <Switch
+                size="small"
+                checked={Boolean(config.autoStitch)}
+                onChange={(checked) => onConfigChange("autoStitch", checked)}
+              />
+            </span>
+          </div>
+        </div>
         <div className="space-y-2.5">
           <SettingTitle color={theme.node.muted}>
             {t("settingsPanels.image.quality")}
