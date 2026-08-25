@@ -57,6 +57,7 @@ import {
   FolderPlus,
   History,
   ImagePlus,
+  LayoutGrid,
   LoaderCircle,
   PenLine,
   Plus,
@@ -172,6 +173,13 @@ export function ImageWorkbench() {
   const [prompt, setPrompt] = useState("");
   const [references, setReferences] = useState<ReferenceImage[]>([]);
   const [results, setResults] = useState<GenerationResult[]>([]);
+  // 2026-08-25：自动拼接宫格图 —— 用户开启 + 至少 2 张成功时，客户端 Canvas
+  // 把成功候选拼成 √N×√N 单张大图，单独存为 stitchedComposite；results
+  // 数组里的 N 张原图**不再被覆盖**（用户要求"也需要保留多个原图"），统一
+  // 在结果区顶部展示宫格大图、下面展示 N 张原图网格，互不干扰。失败/重试
+  // 通过 resetStitchedComposite 清空，保证下次 generate 不残留旧 composite。
+  const [stitchedComposite, setStitchedComposite] =
+    useState<GeneratedImage | null>(null);
   const [logs, setLogs] = useState<GenerationLog[]>([]);
   const [running, setRunning] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
@@ -370,10 +378,12 @@ export function ImageWorkbench() {
     const failCount = generationCount - successCount;
 
     // 2026-08-25：自动拼接宫格图 —— 开启 + 至少 2 张成功 → 客户端 Canvas
-    // 把成功候选拼成 √N×√N 单张大图，替换 results 的 success 槽。
-    // 失败槽保持原样（用户能看到"哪些张失败"），复合图本身仍按成功数计。
-    // 拼接失败（任一张图解码/CORS 失败）静默回退到原 successImages。
-    let displayedSuccessImages = successImages;
+    // 把成功候选拼成 √N×√N 单张大图。**results 数组不再被覆盖**：之前会把
+    // success 槽合并成 1 张 composite + 把其余 success 标 failed（"已合并到
+    // 宫格大图"），用户反馈"也需要保留多个原图"——原图被丢了，关闭拼接也
+    // 看不到。现在改为：results 数组保留全部 success 原图，composite 单独
+    // 存为 stitchedComposite；结果区顶部展示拼接大图、下面展示 N 张原图
+    // 网格。失败（任一张图解码/CORS 失败）静默回退，不打 composite。
     if (effectiveConfig.autoStitch && successImages.length >= 2) {
       try {
         const compositeDataUrl = await stitchToGrid(
@@ -387,31 +397,14 @@ export function ImageWorkbench() {
           bytes: successImages.reduce((sum, img) => sum + img.bytes, 0),
           mimeType: "image/png",
         };
-        displayedSuccessImages = [composite];
-        // 替换 results 数组：清空 success 槽，把 composite 放第一格
-        setResults((prev) => {
-          let placed = false;
-          return prev.map((r) => {
-            if (r.status === "success") {
-              if (!placed) {
-                placed = true;
-                return { id: composite.id, status: "success", image: composite };
-              }
-              // 后续 success 槽被合并 → 改成"已合并到宫格大图"的失败卡，
-              // 让失败计数仍然准确，同时给用户视觉提示
-              return {
-                ...r,
-                status: "failed",
-                error: t("imageWorkbench.mergedToGrid"),
-                image: undefined,
-              };
-            }
-            return r;
-          });
-        });
+        setStitchedComposite(composite);
       } catch (caught) {
         console.warn("[workbench] stitch failed:", caught);
+        setStitchedComposite(null);
       }
+    } else {
+      // autoStitch 关 / 不足 2 张 → 不出 composite（清掉旧值避免上批残留）
+      setStitchedComposite(null);
     }
     if (agentTaskId)
       updateAgentTask(agentTaskId, {
@@ -533,6 +526,8 @@ export function ImageWorkbench() {
     setPrompt("");
     setReferences([]);
     setResults([]);
+    // 2026-08-25：新会话清空拼接大图，避免上批 composite 残留到新会话
+    setStitchedComposite(null);
     setElapsedMs(0);
     setStartedAt(0);
     setSelectedLogIds([]);
@@ -554,6 +549,8 @@ export function ImageWorkbench() {
     if (previewLog && selectedLogIds.includes(previewLog.id)) {
       setPreviewLog(null);
       setResults([]);
+      // 同步清掉当前会话的拼接大图，避免"删除当前日志后还残留 composite"
+      setStitchedComposite(null);
     }
     setSelectedLogIds([]);
     setDeleteConfirmOpen(false);
@@ -1018,28 +1015,66 @@ export function ImageWorkbench() {
               ) : null}
             </div>
             {results.length ? (
-              <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
-                {results.map((result, index) =>
-                  result.status === "success" && result.image ? (
-                    <ResultImageCard
-                      key={result.id}
-                      image={result.image}
-                      index={index}
-                      onEdit={addResultToReferences}
-                      onDownload={downloadImage}
-                      onSaveAsset={saveResultToAssets}
-                    />
-                  ) : result.status === "failed" ? (
-                    <FailedImageCard
-                      key={result.id}
-                      error={result.error || t("workbench.generationFailed")}
-                      onRetry={() => retryResult(index)}
-                    />
-                  ) : (
-                    <PendingImageCard key={result.id} />
-                  )
-                )}
-              </div>
+              <>
+                {/* 2026-08-25：自动拼接宫格图 —— 开启 + 至少 2 张成功 → 在
+                 * 结果区顶部额外展示一张宫格大图，下方仍是 N 张原图网格。
+                 * 用户要求"宫格大图太大了，需要统一，而且也需要保留多个原图"——
+                 * 宫格大图宽度限制 max-w-[360px]（与 V1 SubmissionNode 一致），
+                 * 下面原图网格保留完整编辑 / 下载 / 收藏动作。结果区头部加
+                 * ≡ icon chip 标识"宫格"，方便用户一眼区分。 */}
+                {stitchedComposite ? (
+                  <div className="mb-4 flex justify-center">
+                    <div
+                      className="group relative w-full max-w-[360px] overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800"
+                      title={t("imageWorkbench.stitchedComposite")}
+                    >
+                      <Image
+                        src={stitchedComposite.dataUrl}
+                        alt={t("imageWorkbench.stitchedCompositeAlt")}
+                        className="block w-full h-auto transition-transform duration-300 group-hover:scale-[1.02]"
+                      />
+                      <span className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-sm text-white text-[10px] font-medium leading-none">
+                        <LayoutGrid className="size-3" />
+                        {t("settingsPanels.image.autoStitch")}
+                      </span>
+                      {/* 下载按钮：直接复用 downloadImage(GeneratedImage) 形态 */}
+                      <div className="absolute top-1.5 right-1.5">
+                        <Tooltip title={t("common.download")}>
+                          <Button
+                            size="small"
+                            type="text"
+                            className="!h-7 !w-7 !bg-black/60 !p-0 !text-white hover:!bg-black/80"
+                            icon={<Download className="size-3.5" />}
+                            onClick={() => downloadImage(stitchedComposite, 0)}
+                          />
+                        </Tooltip>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+                <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
+                  {results.map((result, index) =>
+                    result.status === "success" && result.image ? (
+                      <ResultImageCard
+                        key={result.id}
+                        image={result.image}
+                        index={index}
+                        onEdit={addResultToReferences}
+                        onDownload={downloadImage}
+                        onSaveAsset={saveResultToAssets}
+                      />
+                    ) : result.status === "failed" ? (
+                      <FailedImageCard
+                        key={result.id}
+                        error={result.error || t("workbench.generationFailed")}
+                        onRetry={() => retryResult(index)}
+                      />
+                    ) : (
+                      <PendingImageCard key={result.id} />
+                    )
+                  )}
+                </div>
+              </>
             ) : (
               <div className="flex min-h-[320px] flex-col items-center justify-center rounded-lg border border-dashed border-stone-300 text-center dark:border-stone-700 lg:min-h-[560px]">
                 <ImagePlus className="mb-4 size-11 text-stone-400" />

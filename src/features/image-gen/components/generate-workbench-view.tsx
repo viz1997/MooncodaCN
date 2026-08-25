@@ -142,6 +142,13 @@ interface WorkbenchSubmission {
    * 不再二次拼接。
    */
   isStitched?: boolean;
+  /**
+   * 客户端拼接的宫格大图 dataURL。仅在 isStitched=true 且拼接成功时设置。
+   * 与 resultUrls（始终保留 N 张原图）并存 —— 用户既能看宫格大图也能保留
+   * 单独访问每张原图。SubmissionNode 渲染时按 isStitched 分支选择主预览
+   * 是 composite 还是 N 格原图，并把另一形态作为附属缩略图。
+   */
+  stitchedUrl?: string;
   /** 该次提交的 prompt（与 effect 主 prompt 可能不同 —— 用户连续微调时） */
   prompt: string;
   /**
@@ -199,6 +206,12 @@ interface WorkbenchEffect {
    * effect 级仅展示层用：rail 缩略图走 single 模式。
    */
   isStitched?: boolean;
+  /**
+   * 最新一条 submission 的拼接宫格大图 dataURL（见
+   * WorkbenchSubmission.stitchedUrl）。effect 级镜像，方便 rail / 外部直接
+   * 读 effect 拿 composite，不必再穿透 submissions[last]。
+   */
+  stitchedUrl?: string;
   /**
    * 提交记录列表（每次 handleGenerate push 一条）。时间轴按 submissions
    * 顺序渲染 —— 这就是 ChatGPT 风格"消息气泡按时间顺序堆积"。
@@ -1097,19 +1110,25 @@ export function GenerateWorkbenchView({
       const targetSubmission = (eff.submissions ?? [])[targetSubmissionIdx];
       const isTemplateGrid = targetSubmission?.isGridComposite === true;
       // 2026-08-25：自动拼接宫格图 —— 开启 + ≥ 2 张 + 非模板宫格 → 客户端
-      // Canvas 拼接成单张大图。注意 applyJobUpdate 是 async 函数（外层 startPolling
-      // 是 async），可以直接 await。失败（任何一张图解码失败）就静默回退原 URLs。
-      let finalUrls = resultUrls;
-      let isStitched = false;
+      // Canvas 拼接成单张大图。
+      //
+      // 关键设计：resultUrls 始终保留 N 张原图（用户要求"也需要保留多个原图"，
+      // 否则一旦开启拼接就再也看不到单张候选）。宫格大图作为"另一种视图"挂
+      // 在 stitchedUrl 上，SubmissionNode 按 isStitched 分支决定主预览是
+      // composite 还是 N 格原图，并把另一形态作为附属缩略图。这样既不丢
+      // 原图、又不牺牲"一张宫格大图"的视觉冲击。
+      //
+      // applyJobUpdate 是 async 函数（外层 startPolling 是 async），可以直接
+      // await。失败（任何一张图解码失败）就静默回退，不打 isStitched 标记。
+      let stitchedComposite: string | undefined;
       if (autoStitch && !isTemplateGrid && resultUrls.length >= 2) {
         try {
-          const composite = await stitchToGrid(resultUrls);
-          finalUrls = [composite];
-          isStitched = true;
+          stitchedComposite = await stitchToGrid(resultUrls);
         } catch (err) {
           console.warn("[workbench] stitch failed:", err);
         }
       }
+      const isStitchedNow = stitchedComposite !== undefined;
 
       const next: WorkbenchEffect = {
         ...eff,
@@ -1120,7 +1139,15 @@ export function GenerateWorkbenchView({
         status: hasUnfinishedSubmissionExcept(eff, targetSubmissionIdx)
           ? "processing"
           : "completed",
-        resultUrls: finalUrls,
+        // resultUrls 保持 N 张原图（不再被 composite 覆盖）。rail 缩略图按
+        // stitchedUrl ?? resultUrls[0] 选择展示素材。
+        resultUrls,
+        // 拼接大图：拆成两个独立条件，避免 TS 把 stitchedComposite 的类型扩成
+        // string | undefined 后撞到 exactOptionalPropertyTypes。
+        ...(stitchedComposite !== undefined
+          ? { stitchedUrl: stitchedComposite }
+          : {}),
+        ...(isStitchedNow ? { isStitched: true } : {}),
         ...duration,
         ...cost,
         submissions: (eff.submissions ?? []).map((s, i) =>
@@ -1128,8 +1155,12 @@ export function GenerateWorkbenchView({
             ? {
                 ...s,
                 status: "completed",
-                resultUrls: finalUrls,
-                isStitched,
+                // submission 级 resultUrls 同样保留 N 张原图，stitchedUrl 单独存
+                resultUrls,
+                ...(stitchedComposite !== undefined
+                  ? { stitchedUrl: stitchedComposite }
+                  : {}),
+                ...(isStitchedNow ? { isStitched: true } : {}),
                 // 同时把本次 job 的耗时写到对应 submission（覆盖式：每条 submission
                 // 各自记自己的耗时，effect 级 duration 是最新一次的值）
                 ...duration,
@@ -1738,6 +1769,12 @@ export function GenerateWorkbenchView({
                         ? eff.maskName
                         : eff.prompt?.slice(0, 24) || "未命名";
                   const tooltipTitle = `${displayName} · ${STATUS_CONFIG[eff.status].label} · ${formatAbsoluteTime(eff.createdAt)}`;
+                  // 2026-08-25：rail 缩略图走拼接大图（开启自动拼接时）或 N 张
+                  // 原图的首张（默认）。applyJobUpdate 现在把 stitchedUrl 与
+                  // resultUrls 拆开，resultUrls 始终保留 N 张原图，所以这里
+                  // stitchedUrl 优先以展示"拼接"的视觉，否则用 resultUrls[0]
+                  // 退到原图第一张。
+                  const railThumb = eff.stitchedUrl ?? eff.resultUrls[0];
                   return (
                     // 嵌套 button 不能放进 button，外层用 div + onClick 选中
                     // biome-ignore lint/a11y/useKeyWithClickEvents: rail 项支持 hover 出现操作按钮
@@ -1771,7 +1808,7 @@ export function GenerateWorkbenchView({
                         {eff.resultUrls[0] ? (
                           // biome-ignore lint/performance/noImgElement: 缩略图用原生 img
                           <img
-                            src={eff.resultUrls[0]}
+                            src={railThumb}
                             alt={displayName}
                             className="w-full h-full object-cover"
                           />
@@ -1938,6 +1975,7 @@ export function GenerateWorkbenchView({
                       : eff.maskName && eff.maskName !== "CUSTOM"
                         ? eff.maskName
                         : eff.prompt?.slice(0, 24) || "未命名";
+                  const railThumb = eff.stitchedUrl ?? eff.resultUrls[0];
                   return (
                     // biome-ignore lint/a11y/useKeyWithClickEvents: 缩略图 cell 仅做选中
                     <div
@@ -1956,7 +1994,7 @@ export function GenerateWorkbenchView({
                       {eff.resultUrls[0] ? (
                         // biome-ignore lint/performance/noImgElement: 缩略图用原生 img
                         <img
-                          src={eff.resultUrls[0]}
+                          src={railThumb}
                           alt={displayName}
                           className="w-full h-full object-cover"
                         />
@@ -3459,6 +3497,7 @@ function SubmissionNode({
   const {
     status,
     resultUrls,
+    stitchedUrl,
     createdAt,
     errorMsg,
     isGridComposite,
@@ -3538,7 +3577,9 @@ function SubmissionNode({
       <div className="absolute left-[5px] top-1.5 h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-card" />
       <div className="flex items-center gap-2 mb-2 text-[11px]">
         {isStitched ? (
-          <span className="font-mono font-semibold">宫格大图</span>
+          <span className="font-mono font-semibold">
+            宫格大图 · {resultUrls.length} 张原图
+          </span>
         ) : (
           <span className="font-mono font-semibold">
             共 {resultUrls.length} 张
@@ -3590,24 +3631,65 @@ function SubmissionNode({
        * 裁切到方形（与多图网格一致）—— 横长竖长图都会被裁，代价是单图
        * 看到的是方形预览而非原图比例，用户需要细节就点开 lightbox。
        *
-       * 2026-08-25：isStitched 走单图大预览 —— 客户端已拼接为一张宫格大图，
-       * 不再拆 N 格展示，否则又退化成 N 格网格 + 一张大图，重复且难看。
-       * 单图布局给到 max-w-[640px]，比 N 格缩略图大不少，让"拼接"的价值可见。 */}
-      {isStitched ? (
-        <button
-          type="button"
-          onClick={() => onLightbox(resultUrls[0] ?? "", 0)}
-          className="group relative block w-full max-w-[640px] overflow-hidden rounded-lg border bg-muted hover:border-primary/60 transition-colors"
-          title="点击查看大图"
-        >
-          {/* biome-ignore lint/performance/noImgElement: timeline 大预览 */}
-          <img
-            src={resultUrls[0]}
-            alt="宫格拼接大图"
-            className="block w-full h-auto transition-transform duration-300 group-hover:scale-[1.02]"
-            loading="lazy"
-          />
-        </button>
+       * 2026-08-25：isStitched + stitchedUrl 时同时展示**宫格大图 + N 张原图**——
+       * 用户反馈"宫格大图太大了，需要统一，而且也需要保留多个原图"。
+       * 之前 640px 大图与 360px 网格视觉重量差距太大，且关闭拼接才看得到单张。
+       * 现在 composite 也用 max-w-[360px]（与 N 格网格同宽，视觉一致），
+       * 紧跟 N 张原图小缩略图，方便用户既看拼接也保留单图访问能力。 */}
+      {isStitched && stitchedUrl ? (
+        <div className="space-y-2">
+          {/* 宫格大图：max-w-[360px] 与 N 格网格同宽；左上角带"宫格"chip 标识 */}
+          <button
+            type="button"
+            onClick={() => onLightbox(stitchedUrl, 0)}
+            className="group relative block w-full max-w-[360px] overflow-hidden rounded-lg border bg-muted hover:border-primary/60 transition-colors"
+            title="点击查看宫格大图"
+          >
+            {/* biome-ignore lint/performance/noImgElement: timeline 拼接大图 */}
+            <img
+              src={stitchedUrl}
+              alt="宫格拼接大图"
+              className="block w-full h-auto transition-transform duration-300 group-hover:scale-[1.02]"
+              loading="lazy"
+            />
+            <span className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-sm text-white text-[9px] font-medium leading-none">
+              <Grid3x3 className="h-2.5 w-2.5" />
+              宫格
+            </span>
+          </button>
+          {/* N 张原图：与未拼接分支共享同一份 RESULT_GRID_COLS 映射，保证视觉
+           * 重量一致 —— 用户无论开不开拼接，看到的 N 格缩略图都是同尺寸。 */}
+          <div
+            className={cn(
+              "grid gap-2 max-w-[360px]",
+              RESULT_GRID_COLS[
+                Math.min(resultUrls.length, MAX_RESULT_GRID_KEY)
+              ] ?? "grid-cols-3"
+            )}
+          >
+            {resultUrls.map((url, i) => (
+              <button
+                // biome-ignore lint/suspicious/noArrayIndexKey: 一次提交内的图按生成顺序
+                key={i}
+                type="button"
+                onClick={() => onLightbox(url, i)}
+                className="group relative aspect-square overflow-hidden rounded-lg border bg-muted hover:border-primary/60 transition-colors"
+                title={`原图 ${i + 1} · 点击查看大图`}
+              >
+                {/* biome-ignore lint/performance/noImgElement: timeline 缩略图 */}
+                <img
+                  src={url}
+                  alt={`结果 ${i + 1}`}
+                  className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+                  loading="lazy"
+                />
+                <span className="absolute bottom-1 left-1 bg-black/60 backdrop-blur-sm text-white text-[9px] px-1 py-0.5 rounded font-mono leading-none opacity-0 group-hover:opacity-100 transition-opacity">
+                  #{i + 1}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
       ) : (
         /* 列数按 resultUrls.length 动态选（用静态类名映射，Tailwind 不支持
          * 动态 className）：

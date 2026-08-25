@@ -435,7 +435,11 @@ export default {
     empty: "还没有生成图片",
     resultAlt: "生成结果 {{count}}",
     addReference: "加入参考图",
-    mergedToGrid: "已合并到宫格大图",
+    // 2026-08-25：宫格拼接大图展示 —— 顶部单独展示拼接大图，原图保留在下方网格。
+    // 原 mergedToGrid（"已合并到宫格大图"）不再使用：现在不再合并、也不再把
+    // 成功槽改成失败卡。下面 2 个 key 给顶部 composite card 用。
+    stitchedComposite: "宫格拼接大图（点击下方原图查看单张）",
+    stitchedCompositeAlt: "宫格拼接大图",
   },
   videoWorkbench: {
     title: "视频创作台",
