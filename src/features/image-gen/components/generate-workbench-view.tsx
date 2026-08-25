@@ -250,6 +250,25 @@ const REF_MODE_LABELS: Record<RefMode, string> = {
 };
 
 /**
+ * SubmissionNode 结果网格列数映射。
+ * 2026-08-25：原本固定 grid-cols-3，4 张图变成 3+1 换行（用户报告）；现在按
+ * resultUrls.length 选列数 —— 4 张走 2×2 宫格、5+ 张保持 3 列多行。
+ * 用静态对象而不是动态 className 字符串拼接，因为 Tailwind 不扫描动态类名。
+ */
+const MAX_RESULT_GRID_KEY = 9;
+const RESULT_GRID_COLS: Record<number, string> = {
+  1: "grid-cols-1",
+  2: "grid-cols-2",
+  3: "grid-cols-3",
+  4: "grid-cols-2", // 2×2 宫格
+  5: "grid-cols-3",
+  6: "grid-cols-3",
+  7: "grid-cols-3",
+  8: "grid-cols-3",
+  9: "grid-cols-3",
+};
+
+/**
  * 把 imageJob（DB 行）映射成客户端 WorkbenchEffect。
  *
  * effectId 用 `job_${id.slice(0, 8)}` 前缀 —— 避免和新建时用的
@@ -3590,7 +3609,22 @@ function SubmissionNode({
           />
         </button>
       ) : (
-        <div className="grid grid-cols-3 gap-2 max-w-[360px]">
+        /* 列数按 resultUrls.length 动态选（用静态类名映射，Tailwind 不支持
+         * 动态 className）：
+         *  - 1 张：1 列（保留 2026-08-23 "单图走 3-列网格第 1 格"的视觉重量一致）
+         *  - 2 张：2 列
+         *  - 3 张：3 列（一行铺满）
+         *  - 4 张：2 列 2×2 —— 用户反馈"明明还有位置第四张换行"是因为之前
+         *    固定 3 列导致 4 张成 3+1；改成 2×2 宫格是最常见的 4 候选布局
+         *  - 5+ 张：3 列（保持原行为，5/6/7/8/9 走多行） */
+        <div
+          className={cn(
+            "grid gap-2 max-w-[360px]",
+            RESULT_GRID_COLS[
+              Math.min(resultUrls.length, MAX_RESULT_GRID_KEY)
+            ] ?? "grid-cols-3"
+          )}
+        >
           {resultUrls.map((url, i) => (
             <button
               // biome-ignore lint/suspicious/noArrayIndexKey: 一次提交内的图按生成顺序
