@@ -14,13 +14,19 @@
  */
 
 import { type NextRequest, NextResponse } from "next/server";
+import { after } from "next/server";
 import sharp from "sharp";
 
+import {
+  isHydrateCandidate,
+  migrateResultUrlToR2,
+} from "@/features/image-gen/lib/result-url-hydrate";
 import {
   inferImageContentType,
   isAllowedImageUrl,
 } from "@/features/image-gen/lib/url-guard";
 import { withApiLogging } from "@/lib/api-logger";
+import { logger } from "@/lib/logger";
 import {
   checkRateLimit,
   createRateLimitResponse,
@@ -106,6 +112,35 @@ async function getHandler(req: NextRequest) {
   }
 
   const inputBuffer = Buffer.from(await upstream.arrayBuffer());
+  const upstreamContentType =
+    upstream.headers.get("Content-Type") ?? inferImageContentType(urlParam);
+
+  // 首屏 hydrate：URL 命中已知会过期的硬编码 provider 域（wellapi.*）时，
+  // 把已 fetch 到的 buffer 复用 → R2 + UPDATE image_job.result_urls。
+  // next/server 的 after() 是 stable API（来自
+  // node_modules/next/dist/server/after/index.d.ts），fire-and-forget：
+  // handler 已经返回 sharp 缩略图，hydrate 在响应送出后跑，不阻塞用户。
+  // 失败仅 log，**不影响**已经返回的缩略图 ——
+  // 这次慢，下一次任何人看就 R2 CDN。
+  if (isHydrateCandidate(urlParam)) {
+    after(async () => {
+      try {
+        await migrateResultUrlToR2(
+          urlParam,
+          inputBuffer,
+          upstreamContentType,
+        );
+      } catch (err) {
+        logger.warn(
+          {
+            url: urlParam,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          "image-gen: 后台 hydrate 历史 URL 失败",
+        );
+      }
+    });
+  }
 
   let output: Buffer;
   try {

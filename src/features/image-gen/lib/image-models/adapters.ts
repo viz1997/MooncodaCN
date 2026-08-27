@@ -11,6 +11,7 @@ import {
   submitLingtingTask,
 } from "@/features/gpt-image/lib/generation-service";
 import { seededRandom } from "../providers/random";
+import { persistUpstreamImageToR2 } from "../persist-image";
 import { GEMINI_CONFIG } from "./gemini-config";
 import {
   getOpenAIImageApiKey,
@@ -973,6 +974,28 @@ async function callGeminiImageAPI(
     }
 
     findImage(data);
+
+    // 2026-08-27：上游 wellapi.cc 返回的 URL 有 TTL（典型 1-24h），
+    // 与 gpt_image_2 适配器走 lingting wrapper 时由 persistCandidateToR2
+    // 自动转存 R2 一致；Gemini 这条路径不走 lingting，adapter 自己负责
+    // 把 http(s) URL fetch + 上传 R2，永久化。data: URL 不转存
+    // （thumbnailUrl 短路规则直接走，存 R2 没意义反而膨胀体积）。
+    // 失败语义：抛错，与 gpt-image persistCandidateToR2 保持一致，
+    // 避免 "R2 未配置 / fetch 撞 timeout 时 Gemini 静默返 TTL URL，
+    // 几天后整批图破" 的隐性事故。
+    const traceHint = `${modelId}-${Date.now()}-${seededRandom().toString(36).slice(2, 8)}`;
+    if (imageUrl && /^https?:\/\//i.test(imageUrl)) {
+      try {
+        imageUrl = await persistUpstreamImageToR2(imageUrl, traceHint, 0);
+      } catch (err) {
+        return {
+          success: false,
+          model: modelId,
+          status: "failed",
+          error: `上游效果图转存 R2 失败: ${err instanceof Error ? err.message : "unknown"}`,
+        };
+      }
+    }
 
     if (!imageUrl) {
       return {

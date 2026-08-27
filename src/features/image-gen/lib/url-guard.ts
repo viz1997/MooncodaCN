@@ -15,8 +15,22 @@
 
 import { getR2PublicHosts } from "@/features/image-gen/lib/r2";
 
-/** 硬编码白名单：上游 provider 域，结果 URL 可能直链。 */
-const HARDCODED_ALLOWED_HOSTS = ["wellapi.ai", "cdn.wellapi.ai"] as const;
+/**
+ * 硬编码白名单：上游 provider 域，结果 URL 可能直链。
+ *
+ * - wellapi.ai / cdn.wellapi.ai：gpt-image / Lingting / gpt_image_2 系列
+ * - wellapi.cc：Gemini 3 / 3.1 Flash image-preview 端点
+ *   （types.ts:540, 583，model id = gemini-3-pro-image-preview 等）。
+ *   Gemini 适配器当前直链 wellapi.cc,因此必须纳入白名单,
+ *   否则服务端缩略图代理会返回 403,前端 <img> 拿到 403 body 就不出图。
+ *   适配器后续阶段会补 persistCandidateToR2 把结果回迁 R2,届时
+ *   可以再考虑把 wellapi.cc 移出。
+ */
+const HARDCODED_ALLOWED_HOSTS = [
+  "wellapi.ai",
+  "cdn.wellapi.ai",
+  "wellapi.cc",
+] as const;
 
 function isHardcodedAllowed(host: string): boolean {
   return HARDCODED_ALLOWED_HOSTS.some(
