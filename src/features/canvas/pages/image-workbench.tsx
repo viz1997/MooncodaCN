@@ -1053,19 +1053,33 @@ export function ImageWorkbench() {
                     </div>
                   </div>
                 ) : null}
-                {/* 2026-08-27：autoStitch 开启 + count ≥ 2 时，生成中只显示一张
-                 * 合并占位卡（对齐 V1 SubmissionNode processing 态的视觉），
-                 * 避免 "4 张独立 spinner 平铺" 与 "最终会拼成 1 张宫格" 的心智冲突。
-                 * 不满足条件（autoStitch 关 / 不足 2 张）时仍按 N 张独立卡渲染，
-                 * 让用户看到逐张 progress。reconcile：仅当仍有 pending 且还没出
-                 * composite 时用合并占位卡;一旦 runBatchGeneration 完成、
-                 * status 切换到 success/failed，下方走原 grid 分支渲染 N 张原图与
-                 * 顶部 composite。 */}
+                {/* 2026-08-27：autoStitch 开启 + count ≥ 2 时：
+                 *   - 生成中（全 pending 且未出 composite）→ 显示一张合并占位卡（PendingGridCard）
+                 *     对齐 V1 SubmissionNode 视觉,避免 "4 张独立 spinner" 与
+                 *     "最终会拼成 1 张宫格" 的心智冲突。
+                 *   - 完成态（stitchedComposite 出）→ 顶部 composite 主导 + 下方
+                 *     N 张原图压缩成 1 行缩略图条（ResultThumbnailStrip），保留
+                 *     [[workbench-auto-stitch-coexist-with-originals]] 原图
+                 *     编辑/下载/收藏入口,视觉重量较之前下降约 60%。
+                 *   - 部分失败 / autoStitch 关 / count<2 → 仍走原 N 张独立卡 grid
+                 *     让用户看到每张卡的 success/failed 状态。 */}
                 {effectiveConfig.autoStitch &&
                 generationCount >= 2 &&
                 results.some((r) => r.status === "pending") &&
                 !stitchedComposite ? (
                   <PendingGridCard count={generationCount} />
+                ) : stitchedComposite ? (
+                  <ResultThumbnailStrip
+                    images={results
+                      .filter(
+                        (r): r is GenerationResult & { image: GeneratedImage } =>
+                          r.status === "success" && !!r.image,
+                      )
+                      .map((r) => ({ id: r.id, image: r.image }))}
+                    onEdit={addResultToReferences}
+                    onDownload={downloadImage}
+                    onSaveAsset={saveResultToAssets}
+                  />
                 ) : (
                   <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
                     {results.map((result, index) =>
@@ -1425,6 +1439,82 @@ function PendingGridCard({ count }: { count: number }) {
           </p>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * 宫格完成态下方的"N 张原图缩略图条"。
+ *
+ * 2026-08-27：B 方案 —— composite 在顶部占主导，下方 N 张原图从
+ * `grid-cols-2 2xl:grid-cols-3`（每张占满宽 + 3 按钮大条）的独立卡
+ * 压缩成 1 行 80×80 缩略图 + 紧凑按钮列，flex 横排。
+ *
+ * 仍保留 [[workbench-auto-stitch-coexist-with-originals]] 的原图
+ * 编辑/下载/收藏入口（只是视觉压缩）；antd `<Image preview>` 仍支持
+ * 点击放大。视觉重量较之前下降约 60%，与 360px 宫格并列时不再
+ * 视觉打架。
+ *
+ * max-w-[360px] 与宫格大图同宽，4 个 80px cell + 3*8px gap ≈ 344px 装下。
+ */
+function ResultThumbnailStrip({
+  images,
+  onEdit,
+  onDownload,
+  onSaveAsset,
+}: {
+  images: { id?: string; image: GeneratedImage }[];
+  onEdit: (image: GeneratedImage, index: number) => void;
+  onDownload: (image: GeneratedImage, index: number) => void;
+  onSaveAsset: (image: GeneratedImage, index: number) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex max-w-[360px] flex-wrap gap-2">
+      {images.map(({ id, image }, index) => (
+        <div
+          key={id ?? image.dataUrl ?? `${index}`}
+          className="flex w-[80px] flex-col overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800"
+        >
+          <Image
+            src={thumbnailUrl(image.dataUrl, 160)}
+            alt={t("imageWorkbench.resultAlt", { count: index + 1 })}
+            className="!w-[80px] aspect-square object-cover"
+            // 不主动打开 antd preview mask:缩略图就是入口,点开看大图由
+            // 顶部 stitchedComposite 的 onClick 弹 lightbox 提供。
+            preview={false}
+          />
+          <div className="flex border-t border-stone-200 dark:border-stone-800">
+            <Tooltip title={t("common.addToAssets")}>
+              <Button
+                size="small"
+                type="text"
+                className="!h-6 !min-w-0 flex-1 !rounded-none !px-0"
+                icon={<FolderPlus className="size-3" />}
+                onClick={() => void onSaveAsset(image, index)}
+              />
+            </Tooltip>
+            <Tooltip title={t("imageWorkbench.addReference")}>
+              <Button
+                size="small"
+                type="text"
+                className="!h-6 !min-w-0 flex-1 !rounded-none !px-0"
+                icon={<PenLine className="size-3" />}
+                onClick={() => onEdit(image, index)}
+              />
+            </Tooltip>
+            <Tooltip title={t("common.download")}>
+              <Button
+                size="small"
+                type="text"
+                className="!h-6 !min-w-0 flex-1 !rounded-none !px-0"
+                icon={<Download className="size-3" />}
+                onClick={() => onDownload(image, index)}
+              />
+            </Tooltip>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
