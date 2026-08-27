@@ -10,8 +10,12 @@
  * 实现：HTMLCanvasElement drawImage + object-fit: cover 语义。
  * 每张图按等比裁切到 cell 大小，居中绘制，避免拉伸变形。
  *
- * 失败语义：任何一张图加载失败（解码失败 / CORS 拒绝 / cross-origin 不可读）
+ * 失败语义：任何一张图加载失败（fetch 非 2xx / 解码失败 / canvas drawImage 抛错）
  * 就 throw —— 让调用方 catch 后回退到原 resultUrls，不阻塞用户的生成结果。
+ *
+ * 2026-08-27：CORS 修复 —— 不再给 <img> 设 crossOrigin="anonymous"。
+ * R2 公网 URL 没带 Access-Control-Allow-Origin，浏览器直接 onerror；
+ * 改为同源代理 /api/image-gen/thumbnail → blob URL 加载（详见 loadImage）。
  *
  * 输出：PNG dataURL（无压缩损、无 alpha 通道损失），base64 字符串。data URL
  * 不是持久 URL（blob URL 跨页面失效），但工作台单次会话内用足够；落库场景由
@@ -80,13 +84,63 @@ function drawCover(
   ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
 }
 
+/**
+ * 加载图片并保证 canvas 不被污染 —— 关键：远程 URL 不能直接走
+ * `<img crossOrigin="anonymous">`，因为 R2 公网 URL（pub-*.r2.dev）默认没
+ * `Access-Control-Allow-Origin` 响应头，浏览器直接 onerror；不走
+ * crossOrigin 又会让 canvas 被污染（不同源 drawImage），toDataURL 抛
+ * SecurityError。两条路在 R2 这种"不配 CORS 的对象存储"上都走不通。
+ *
+ * 唯一可行的方案：远程 URL 走同源代理 `/api/image-gen/thumbnail`（已存在，
+ * 复用 gpt-image 缩略图逻辑）→ 同源 fetch 拿到字节 → Blob →
+ * URL.createObjectURL → img.src。blob URL 与文档同源，画到 canvas 不算污染，
+ * toDataURL 通过。
+ *
+ * data: URL 是 base64 内联，本身就同源，直接 img.src。
+ *
+ * 失败语义：fetch 非 2xx / 图片解码失败 / canvas drawImage 抛错 → reject，
+ * 调用方 catch 后回退到原 N 张独立卡，不阻塞用户。
+ *
+ * 2026-08-27：CORS 修复 —— 之前的 crossOrigin="anonymous" 在 R2 上直接
+ * onerror，原因如上。改为同源代理。代理已用 immutable 1 年缓存，二次拼接
+ * 几乎免费。
+ */
 function loadImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error(`图片加载失败：${truncate(url)}`));
-    img.src = url;
+    let objectUrl: string | null = null;
+    const cleanup = () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      objectUrl = null;
+    };
+    img.onload = () => {
+      cleanup();
+      resolve(img);
+    };
+    img.onerror = () => {
+      cleanup();
+      reject(new Error(`图片加载失败：${truncate(url)}`));
+    };
+    if (url.startsWith("data:")) {
+      img.src = url;
+      return;
+    }
+    // 远程 URL 走同源代理：浏览器 fetch 到同源不需要 CORS，response 的字节
+    // 创建成 blob URL 后画图，blob URL 也与文档同源 —— 双向同源，无污染。
+    const proxiedUrl = `/api/image-gen/thumbnail?url=${encodeURIComponent(url)}&w=2048`;
+    fetch(proxiedUrl)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.blob();
+      })
+      .then((blob) => {
+        objectUrl = URL.createObjectURL(blob);
+        img.src = objectUrl;
+      })
+      .catch((err) => {
+        cleanup();
+        reject(new Error(`图片拉取失败：${(err as Error).message ?? String(err)}`));
+      });
   });
 }
 
