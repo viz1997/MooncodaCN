@@ -159,7 +159,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 ## Canvas Module (infinite-canvas 融合)
 
-画布编辑器是 infinite-canvas（Vite SPA）整体迁入的"客户端孤岛"，路由在 `src/app/[locale]/(dashboard)/dashboard/canvas/`，模块代码集中在 `src/features/canvas/`。融合细节按设计文件 `D:\下载\infinite-canvas-nextdevtpl-fusion-plan.md` 推进。
+画布编辑器是 infinite-canvas（Vite SPA）整体迁入的"客户端孤岛"，路由在 `src/app/[locale]/(dashboard)/dashboard/canvas/`，模块代码集中在 `src/features/canvas/`。融合细节按设计文件 `D:\下载\infinite-canvas-Mooncoda-fusion-plan.md` 推进。
 
 ### 路由 & 边界
 - `/dashboard/canvas` —— 项目列表页（`<CanvasProjectList />`）

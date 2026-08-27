@@ -5,7 +5,7 @@
  * 画布内独立的 i18next 实例（孤岛）
  *
  * 设计动机：
- * - NextDevTpl 主体用 next-intl（messages/{zh,en}.json）
+ * - Mooncoda 主体用 next-intl（messages/{zh,en}.json）
  * - infinite-canvas 用 i18next（react-i18next）
  * - 两套体系共用一个 <html lang> 会互相污染 namespace
  * - 这里初始化一份**仅画布内有效**的 i18next 实例，配 locale 持久化

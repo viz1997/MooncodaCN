@@ -1141,7 +1141,7 @@ export default {
     channelMode: {
       title: "API 渠道",
       description:
-        "「内置」走 NextDevTpl 系统 Key，按次扣积分，结果永久保存到 R2；「自定义」自己填 baseUrl + apiKey，浏览器直连上游（不扣积分）。",
+        "「内置」走 Mooncoda 系统 Key，按次扣积分，结果永久保存到 R2；「自定义」自己填 baseUrl + apiKey，浏览器直连上游（不扣积分）。",
       remote: "内置",
       local: "自定义",
       remoteHint:

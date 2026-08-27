@@ -7,7 +7,7 @@
  *      → 实际来自 @radix-ui/react-select
  *
  * 背景：radix-ui 在某段时间出过 umbrella npm package "radix-ui"，里面把所有
- * 子 primitive 都 export 出来。NextDevTpl 用具体的子包（@radix-ui/react-select 等）。
+ * 子 primitive 都 export 出来。Mooncoda 用具体的子包（@radix-ui/react-select 等）。
  * 这里只 shim 用到的 select 一族。
  */
 import * as SelectPrimitive from "@radix-ui/react-select";

@@ -1200,7 +1200,7 @@ export default {
     channelMode: {
       title: "API provider",
       description:
-        "Built-in uses NextDevTpl system keys, charges per call, persists to R2. Custom uses your own baseUrl + apiKey, browser direct to upstream (no credits).",
+        "Built-in uses Mooncoda system keys, charges per call, persists to R2. Custom uses your own baseUrl + apiKey, browser direct to upstream (no credits).",
       remote: "Built-in",
       local: "Custom",
       remoteHint:
