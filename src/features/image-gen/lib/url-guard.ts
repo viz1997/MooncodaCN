@@ -32,6 +32,10 @@ const HARDCODED_ALLOWED_HOSTS = [
   "wellapi.cc",
 ] as const;
 
+/** 对外暴露一份 read-only view，让 hydrate 模块复用,避免双维护。 */
+export const HARDCODED_PROVIDER_HOSTS: readonly string[] =
+  HARDCODED_ALLOWED_HOSTS;
+
 function isHardcodedAllowed(host: string): boolean {
   return HARDCODED_ALLOWED_HOSTS.some(
     (suffix) => host === suffix || host.endsWith(`.${suffix}`)

@@ -112,24 +112,21 @@ async function getHandler(req: NextRequest) {
   }
 
   const inputBuffer = Buffer.from(await upstream.arrayBuffer());
-  const upstreamContentType =
-    upstream.headers.get("Content-Type") ?? inferImageContentType(urlParam);
 
   // 首屏 hydrate：URL 命中已知会过期的硬编码 provider 域（wellapi.*）时，
-  // 把已 fetch 到的 buffer 复用 → R2 + UPDATE image_job.result_urls。
+  // 后台 fire-and-forget 把 wellapi URL → R2 永久 URL 并 UPDATE image_job。
   // next/server 的 after() 是 stable API（来自
-  // node_modules/next/dist/server/after/index.d.ts），fire-and-forget：
-  // handler 已经返回 sharp 缩略图，hydrate 在响应送出后跑，不阻塞用户。
-  // 失败仅 log，**不影响**已经返回的缩略图 ——
-  // 这次慢，下一次任何人看就 R2 CDN。
+  // node_modules/next/dist/server/after/index.d.ts），handler 已经返回 sharp
+  // 缩略图，hydrate 在响应送出后跑，不阻塞用户。失败仅 log，**不影响**已经
+  // 返回的缩略图 —— 这次慢，下一次任何人看就 R2 CDN。
+  //
+  // R2 上传委派给 gpt-image/lib/generation-service:persistCandidateToR2
+  // （与 gpt_image_2 adapter 同源），本项目已有的方案；hydrate 模块只剩
+  // "判定候选 + DB 反查 + UPDATE"。
   if (isHydrateCandidate(urlParam)) {
     after(async () => {
       try {
-        await migrateResultUrlToR2(
-          urlParam,
-          inputBuffer,
-          upstreamContentType,
-        );
+        await migrateResultUrlToR2(urlParam);
       } catch (err) {
         logger.warn(
           {

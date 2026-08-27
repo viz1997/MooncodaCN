@@ -7,71 +7,50 @@
  * （首次走 wellapi CDN，本就要付 60s fetch；hydrate 在后台异步，等同
  * 免费搭车），DB 写回后下次任何人访问都是 R2 CDN。
  *
- * 不抽到 pg 跨集群共享状态：DB SELECT 用 jsonb @> 谓词 + objectKey 随机
- * 后缀，重复 migrate 同一张图只产生孤儿 R2 对象（几十 GB 上限，后续可清理）。
- * 失败仅 log，不抛响 —— 缩略图本身已经正确返回。
+ * R2 上传这一步**不自己做**,直接复用
+ * `src/features/gpt-image/lib/generation-service.ts:53 persistCandidateToR2`
+ * —— gpt_image_2 adapter 也用它跨模块 import,本仓库的现成方案。
+ * 本模块只剩 DB 反查 image_job + UPDATE 两件事。
  *
- * 与 `lib/persist-image.ts: persistUpstreamImageToR2` 区别：本函数多一步 DB
- * 回写，且**复用上游 thumbnail 已 fetch 到的 buffer**（不再二次 fetch 上游，
- * 节省 60s）。persistedUrl 与 objectKey 设计一致，objectKey 前缀
- * `image-gen/migrated/` 与 `image-gen/results/` 物理隔离，方便区分
- * "新生成结果" vs "历史迁移结果"。
+ * 没抽出"哪些 URL 要 hydrate"的判定 —— 复用 url-guard.ts HARDCODED 域
+ * 集合,通过 `isHydrateCandidate` 检查白名单通过后的 URL 是否还在
+ * hardcoded 集合内（R2 域已迁过,跳过）。
  */
-
-import { randomBytes } from "node:crypto";
 
 import { eq, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { imageJob } from "@/db/schema";
+import { persistCandidateToR2 } from "@/features/gpt-image/lib/generation-service";
+import { HARDCODED_PROVIDER_HOSTS } from "@/features/image-gen/lib/url-guard";
 import { logger } from "@/lib/logger";
-
-import { isR2Configured, putObject } from "./r2";
 
 /**
  * 把单个历史 wellapi URL 迁到 R2，并把 DB 里所有 result_urls 引用它的
  * image_job 行写回新 URL。
  *
+ * R2 上传委派给现成 persistCandidateToR2；本函数只做 DB 反查 + UPDATE。
+ *
  * 失败语义：抛错由调用方(after() 包装)catch，**不影响**已经返回的
  * 缩略图响应。
  *
  * @param upstreamUrl  上游 wellapi/历史直链 URL
- * @param buffer       上游 fetch 已读到的 byte 内容（来自 thumbnail handler）
- * @param contentType  上游响应的 Content-Type（用于 putObject + ext 推断）
  * @returns R2 公开 URL；DB 写回成功后此 URL 会在后续 thumbnail 请求中
- *          命中 isR2Configured() 走 R2 CDN
+ *          直接命中白名单 R2 分支走 R2 CDN
  */
 export async function migrateResultUrlToR2(
   upstreamUrl: string,
-  buffer: Uint8Array,
-  contentType: string,
 ): Promise<string> {
-  if (!isR2Configured()) {
-    // R2 未配置，不抛错 —— 调用方会 catch 后直接 log 退出。
-    // 这种情况实际上意味着部署没配 R2,业务不可用,但这是配置问题。
-    throw new Error("R2 未配置，无法 hydrate 历史 URL");
-  }
-  if (buffer.byteLength === 0) {
-    throw new Error("上游 buffer 为空");
-  }
-
-  // 推断扩展名（与 persistUpstreamImageToR2 同形）
-  const ext =
-    contentType.includes("jpeg") || contentType.includes("jpg")
-      ? "jpg"
-      : contentType.includes("webp")
-        ? "webp"
-        : contentType.includes("gif")
-          ? "gif"
-          : "png";
-
-  // objectKey 前缀 `migrated/` 与 `results/` 物理隔离
-  const objectKey = `image-gen/migrated/${Date.now()}-${randomBytes(6).toString("hex")}.${ext}`;
-  const persistedUrl = await putObject({
-    objectKey,
-    body: buffer,
-    contentType,
-  });
+  // 复用 gpt-image 已有的 helper：fetch upstream → putObject R2 → 返回 R2 URL。
+  // 这一步失败由调用方 catch 记 warn,不影响已返回的缩略图。
+  // traceHint 仅用于 objectKey 与日志,清理成纯 base36 字符串避免
+  // URL 末段字符（.png / .ico）污染 R2 objectKey 形态。
+  const traceHint = `ih${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  const persistedUrl = await persistCandidateToR2(
+    upstreamUrl,
+    traceHint,
+    0,
+  );
 
   // DB 反查：jsonb @> jsonb 谓词表示 "result_urls 数组包含 url 这个元素"。
   //
@@ -90,12 +69,9 @@ export async function migrateResultUrlToR2(
     );
 
   if (matches.length === 0) {
-    // 没找到引用 —— 可能是孤儿 URL（被 link-only 分享出去、或被人工
-    // 清过 result_urls）。R2 对象已上传但没人引用，记 warn 让后续清理
-    // 脚本捡到。
     logger.warn(
-      { upstreamUrl, persistedUrl, objectKey },
-      "image-gen: hydrate 没找到引用 image_job",
+      { upstreamUrl, persistedUrl },
+      "image-gen: hydrate 没找到引用 image_job,可能是孤儿 URL",
     );
     return persistedUrl;
   }
@@ -116,7 +92,6 @@ export async function migrateResultUrlToR2(
         .where(eq(imageJob.id, row.id));
       updatedRows += 1;
     } catch (err) {
-      // 单行失败不阻断 —— 其他 row 仍要尝试
       logger.error(
         {
           jobId: row.id,
@@ -132,7 +107,6 @@ export async function migrateResultUrlToR2(
     {
       upstreamUrl,
       persistedUrl,
-      bytes: buffer.byteLength,
       matched: matches.length,
       updatedRows,
     },
@@ -145,12 +119,13 @@ export async function migrateResultUrlToR2(
 /**
  * 判定一个 URL 是不是需要 hydrate 的"上游直链"。
  *
- * 当前实现：白名单 HARDCODED 域（wellapi.ai / wellapi.cc / cdn.wellapi.ai）
+ * 当前实现：HARDCODED provider 域（wellapi.ai / wellapi.cc / cdn.wellapi.ai）
  * 都视为可能过期、需要 hydrate；R2 域（动态 getR2PublicHosts()）视为已
  * 持久化,跳过。
  *
- * 与 `lib/url-guard.ts HARDCODED_ALLOWED_HOSTS` 的关系：url-guard 决定
- * "能代理",本函数决定 "代理完成后是否要 hydrate"。两集合保持同步。
+ * 复用 url-guard 暴露的 HARDCODED_PROVIDER_HOSTS —— 单一来源,url-guard
+ * 决定 "能否代理",本函数决定 "代理完成后是否要 hydrate"。两集合从
+ * 同一 const 派生,增减 provider 域只改一处。
  */
 export function isHydrateCandidate(value: string): boolean {
   if (!value || typeof value !== "string") return false;
@@ -162,9 +137,7 @@ export function isHydrateCandidate(value: string): boolean {
     return false;
   }
   if (!host) return false;
-  // 复用白名单常量：避免双维护
-  const HARDCODED = ["wellapi.ai", "cdn.wellapi.ai", "wellapi.cc"] as const;
-  return HARDCODED.some(
+  return HARDCODED_PROVIDER_HOSTS.some(
     (suffix) => host === suffix || host.endsWith(`.${suffix}`),
   );
 }

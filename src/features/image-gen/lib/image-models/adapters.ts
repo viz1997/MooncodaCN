@@ -7,11 +7,12 @@
 // 不抽 shared —— 同项目的 PromptTemplateView 也是从 gpt-image/lib/types 导的，
 // 跨 feature import 在这个仓库已经是有先例的模式。
 import {
+  persistBase64ToR2,
+  persistCandidateToR2,
   queryLingtingTask,
   submitLingtingTask,
 } from "@/features/gpt-image/lib/generation-service";
 import { seededRandom } from "../providers/random";
-import { persistUpstreamImageToR2 } from "../persist-image";
 import { GEMINI_CONFIG } from "./gemini-config";
 import {
   getOpenAIImageApiKey,
@@ -976,17 +977,28 @@ async function callGeminiImageAPI(
     findImage(data);
 
     // 2026-08-27：上游 wellapi.cc 返回的 URL 有 TTL（典型 1-24h），
-    // 与 gpt_image_2 适配器走 lingting wrapper 时由 persistCandidateToR2
-    // 自动转存 R2 一致；Gemini 这条路径不走 lingting，adapter 自己负责
-    // 把 http(s) URL fetch + 上传 R2，永久化。data: URL 不转存
-    // （thumbnailUrl 短路规则直接走，存 R2 没意义反而膨胀体积）。
-    // 失败语义：抛错，与 gpt-image persistCandidateToR2 保持一致，
+    // Gemini 这条 path 不走 lingting（gpt_image_2 那条 path 内部 lingting
+    // wrapper 已自动 persistCandidateToR2），adapter 自己负责拉 upstream
+    // 转存 R2。直接复用 gpt-image/lib/generation-service 已有的 helper：
+    // URL 形态 → persistCandidateToR2；inline base64 → persistBase64ToR2。
+    // 跨 feature import 在本仓库有先例（gpt_image_2 adapter 同文件就导过
+    // lingting helpers），不抽 shared。
+    // 失败语义：抛错，与 gpt-image 既有 helper 保持一致，
     // 避免 "R2 未配置 / fetch 撞 timeout 时 Gemini 静默返 TTL URL，
     // 几天后整批图破" 的隐性事故。
     const traceHint = `${modelId}-${Date.now()}-${seededRandom().toString(36).slice(2, 8)}`;
-    if (imageUrl && /^https?:\/\//i.test(imageUrl)) {
+    if (imageUrl) {
       try {
-        imageUrl = await persistUpstreamImageToR2(imageUrl, traceHint, 0);
+        if (imageUrl.startsWith("data:")) {
+          // findImage 已经把 inline_data 拼成 data:<mime>;base64,<b64>
+          const m = imageUrl.match(/^data:([^;]+);base64,(.+)$/i);
+          if (m) {
+            imageUrl = await persistBase64ToR2(m[2]!, m[1]!, traceHint, 0);
+          }
+          // 形态不对则保守透传（fall through）
+        } else if (/^https?:\/\//i.test(imageUrl)) {
+          imageUrl = await persistCandidateToR2(imageUrl, traceHint, 0);
+        }
       } catch (err) {
         return {
           success: false,
