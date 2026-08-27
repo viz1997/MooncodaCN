@@ -1053,28 +1053,43 @@ export function ImageWorkbench() {
                     </div>
                   </div>
                 ) : null}
-                <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
-                  {results.map((result, index) =>
-                    result.status === "success" && result.image ? (
-                      <ResultImageCard
-                        key={result.id}
-                        image={result.image}
-                        index={index}
-                        onEdit={addResultToReferences}
-                        onDownload={downloadImage}
-                        onSaveAsset={saveResultToAssets}
-                      />
-                    ) : result.status === "failed" ? (
-                      <FailedImageCard
-                        key={result.id}
-                        error={result.error || t("workbench.generationFailed")}
-                        onRetry={() => retryResult(index)}
-                      />
-                    ) : (
-                      <PendingImageCard key={result.id} />
-                    )
-                  )}
-                </div>
+                {/* 2026-08-27：autoStitch 开启 + count ≥ 2 时，生成中只显示一张
+                 * 合并占位卡（对齐 V1 SubmissionNode processing 态的视觉），
+                 * 避免 "4 张独立 spinner 平铺" 与 "最终会拼成 1 张宫格" 的心智冲突。
+                 * 不满足条件（autoStitch 关 / 不足 2 张）时仍按 N 张独立卡渲染，
+                 * 让用户看到逐张 progress。reconcile：仅当仍有 pending 且还没出
+                 * composite 时用合并占位卡;一旦 runBatchGeneration 完成、
+                 * status 切换到 success/failed，下方走原 grid 分支渲染 N 张原图与
+                 * 顶部 composite。 */}
+                {effectiveConfig.autoStitch &&
+                generationCount >= 2 &&
+                results.some((r) => r.status === "pending") &&
+                !stitchedComposite ? (
+                  <PendingGridCard count={generationCount} />
+                ) : (
+                  <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
+                    {results.map((result, index) =>
+                      result.status === "success" && result.image ? (
+                        <ResultImageCard
+                          key={result.id}
+                          image={result.image}
+                          index={index}
+                          onEdit={addResultToReferences}
+                          onDownload={downloadImage}
+                          onSaveAsset={saveResultToAssets}
+                        />
+                      ) : result.status === "failed" ? (
+                        <FailedImageCard
+                          key={result.id}
+                          error={result.error || t("workbench.generationFailed")}
+                          onRetry={() => retryResult(index)}
+                        />
+                      ) : (
+                        <PendingImageCard key={result.id} />
+                      )
+                    )}
+                  </div>
+                )}
               </>
             ) : (
               <div className="flex min-h-[320px] flex-col items-center justify-center rounded-lg border border-dashed border-stone-300 text-center dark:border-stone-700 lg:min-h-[560px]">
@@ -1378,6 +1393,37 @@ function PendingImageCard() {
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-stone-500 dark:text-stone-400">
         <LoaderCircle className="size-6 animate-spin" />
         <span>{t("workbench.generating")}</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * autoStitch 开启 + count ≥ 2 时,生成中只显示这一张合并占位卡,
+ * 对齐 V1 SubmissionNode 的 processing 视觉 —— 一次提交 = 一个 spinner,
+ * 而不是 N 张独立 spinner 与最终 "拼接成 1 张宫格" 的心智冲突。
+ *
+ * 仅生成中时(仍有 pending 但还没出 stitchedComposite)展示;
+ * runBatchGeneration 完成 → status 切到 success/failed → 走回原 N 张卡
+ * 的渲染分支显示 N 张原图 + 顶部宫格大图。
+ */
+function PendingGridCard({ count }: { count: number }) {
+  const { t } = useTranslation();
+  return (
+    <div className="relative overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 p-6 dark:border-stone-700 dark:bg-stone-900">
+      <div className="flex items-start gap-3">
+        <LoaderCircle className="mt-0.5 size-5 shrink-0 animate-spin text-stone-500 dark:text-stone-400" />
+        <div className="space-y-1">
+          <p className="text-sm font-medium text-stone-700 dark:text-stone-200">
+            {t("workbench.generating")}
+            <span className="ml-2 text-xs font-mono text-stone-500 dark:text-stone-400">
+              · {count} {t("workbench.candidates")}
+            </span>
+          </p>
+          <p className="text-xs text-stone-500 dark:text-stone-400">
+            {t("imageWorkbench.stitchOnFinish", { count })}
+          </p>
+        </div>
       </div>
     </div>
   );

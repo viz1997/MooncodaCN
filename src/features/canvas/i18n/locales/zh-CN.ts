@@ -397,6 +397,7 @@ export default {
     waiting: "等待 {{time}}",
     model: "模型",
     generating: "生成中",
+    candidates: "张候选",
     success: "成功",
     failed: "生成失败",
     retry: "重试",
@@ -440,6 +441,7 @@ export default {
     // 成功槽改成失败卡。下面 2 个 key 给顶部 composite card 用。
     stitchedComposite: "宫格拼接大图（点击下方原图查看单张）",
     stitchedCompositeAlt: "宫格拼接大图",
+    stitchOnFinish: "{{count}} 张生成完成后会自动拼成宫格大图",
   },
   videoWorkbench: {
     title: "视频创作台",

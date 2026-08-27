@@ -433,6 +433,7 @@ export default {
     waiting: "Waiting {{time}}",
     model: "Model",
     generating: "Generating",
+    candidates: "candidates",
     success: "Succeeded",
     failed: "Generation failed",
     retry: "Retry",
@@ -477,6 +478,7 @@ export default {
     // 下面 2 个 key 给顶部 composite card 用。
     stitchedComposite: "Grid composite (click originals below to inspect)",
     stitchedCompositeAlt: "Grid composite image",
+    stitchOnFinish: "Once all {{count}} complete, they will stitch into a grid composite",
   },
   videoWorkbench: {
     title: "Video Studio",
