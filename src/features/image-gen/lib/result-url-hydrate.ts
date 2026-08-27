@@ -73,8 +73,11 @@ export async function migrateResultUrlToR2(
     contentType,
   });
 
-  // DB 反查：jsonb @> 谓词对 json / jsonb 都可用。`json @> '["url"]'::jsonb`
-  // 表示 "result_urls 数组包含 url 这个元素"。返回所有匹配 rowId。
+  // DB 反查：jsonb @> jsonb 谓词表示 "result_urls 数组包含 url 这个元素"。
+  //
+  // schema 里 result_urls 是 json 类型（不是 jsonb），所以左右都 cast 成 jsonb：
+  // `json @> jsonb` 操作符在 PG18 不存在，会报
+  // ERROR: operator does not exist: json @> jsonb。两侧 ::jsonb cast 解决。
   //
   // 没建 GIN 索引：imageJob 表生产规模约 ~几万行，全表扫可控；
   // 如果未来 imageJob 行数膨胀到 10w+ 再考虑加
@@ -83,7 +86,7 @@ export async function migrateResultUrlToR2(
     .select({ id: imageJob.id, resultUrls: imageJob.resultUrls })
     .from(imageJob)
     .where(
-      sql`${imageJob.resultUrls} @> ${JSON.stringify([upstreamUrl])}::jsonb`,
+      sql`${imageJob.resultUrls}::jsonb @> ${JSON.stringify([upstreamUrl])}::jsonb`,
     );
 
   if (matches.length === 0) {
