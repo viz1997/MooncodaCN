@@ -388,14 +388,12 @@ async function createOpenAIVideoTask(
   body.append("resolution_name", normalizeVideoResolution(config.vquality));
   body.append("preset", "normal");
   const files = await Promise.all(
-    references
-      .slice(0, 7)
-      .map(async (image) =>
-        dataUrlToFile({
-          ...image,
-          dataUrl: await imageToDataUrl(image, { forceDataUrl: true }),
-        })
-      )
+    references.slice(0, 7).map(async (image) =>
+      dataUrlToFile({
+        ...image,
+        dataUrl: await imageToDataUrl(image, { forceDataUrl: true }),
+      })
+    )
   );
   files.forEach((file) => body.append("input_reference[]", file));
   try {

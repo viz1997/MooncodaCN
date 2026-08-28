@@ -1257,7 +1257,10 @@ export async function requestEdit(
   if (mask)
     formData.set(
       "mask",
-      dataUrlToFile({ ...mask, dataUrl: await imageToDataUrl(mask, { forceDataUrl: true }) })
+      dataUrlToFile({
+        ...mask,
+        dataUrl: await imageToDataUrl(mask, { forceDataUrl: true }),
+      })
     );
 
   try {

@@ -21,8 +21,7 @@
  *      polling 桶专为此设计。
  */
 
-import { type NextRequest, NextResponse } from "next/server";
-import { after } from "next/server";
+import { after, type NextRequest, NextResponse } from "next/server";
 
 import {
   isHydrateCandidate,
@@ -109,7 +108,7 @@ async function getHandler(req: NextRequest) {
             url: urlParam,
             err: err instanceof Error ? err.message : String(err),
           },
-          "image-gen: 后台 hydrate 历史 URL 失败",
+          "image-gen: 后台 hydrate 历史 URL 失败"
         );
       }
     });

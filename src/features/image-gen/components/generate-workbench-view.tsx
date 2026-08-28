@@ -267,34 +267,6 @@ const REF_MODE_LABELS: Record<RefMode, string> = {
 };
 
 /**
- * SubmissionNode 结果网格列数映射。
- * 2026-08-25：原本固定 grid-cols-3，4 张图变成 3+1 换行（用户报告）；现在按
- * resultUrls.length 选列数 —— 4 张走 2×2 宫格、5+ 张保持 3 列多行。
- *
- * 2026-08-26：单图 (N=1) 从 grid-cols-1 改成 grid-cols-3。
- * 之前 2026-08-23 "单图按多图网格"那一轮改成了走 N 格网格，但 grid-cols-1
- * 让单 cell 占满 360px，aspect-square 后单图 cell 是 360×360，仍然比 N=3+ 时
- * 的 ~114×114 cell 大很多 —— 视觉重量没真的统一。
- * 用户反馈"单图的也要网格小图那样" → 改成 grid-cols-3，单图 cell 同样约
- * 114×114，与 N=3/N=5+ 一致。N=2 维持 grid-cols-2、4 维持 2×2 是因为 2 张图
- * 用 3 列会留 1 个空 cell（视觉上更怪），1 张图就没这个问题。
- *
- * 用静态对象而不是动态 className 字符串拼接，因为 Tailwind 不扫描动态类名。
- */
-const MAX_RESULT_GRID_KEY = 9;
-const RESULT_GRID_COLS: Record<number, string> = {
-  1: "grid-cols-3", // 单图也走 3 列网格 → 单 cell 约 114×114，与 N=3+ 一致
-  2: "grid-cols-2",
-  3: "grid-cols-3",
-  4: "grid-cols-2", // 2×2 宫格
-  5: "grid-cols-3",
-  6: "grid-cols-3",
-  7: "grid-cols-3",
-  8: "grid-cols-3",
-  9: "grid-cols-3",
-};
-
-/**
  * 把 imageJob（DB 行）映射成客户端 WorkbenchEffect。
  *
  * effectId 用 `job_${id.slice(0, 8)}` 前缀 —— 避免和新建时用的
@@ -970,8 +942,7 @@ export function GenerateWorkbenchView({
   // derived 一个 effectiveSelectedMask 兜底首个 active 模板 —— 不需要把
   // templates prop 当 useEffect 依赖（避免 mount-load effect 被 deps 推着
   // 重跑，破坏"只读一次 localStorage"语义）。
-  const effectiveSelectedMask =
-    selectedMask || activeTemplates[0]?.id || "";
+  const effectiveSelectedMask = selectedMask || activeTemplates[0]?.id || "";
   const selectedTemplate = activeTemplates.find(
     (t) => t.id === effectiveSelectedMask
   );
@@ -3818,22 +3789,18 @@ function SubmissionNode({
         ) : null}
       </div>
 
-      {/* 单图 / 多图统一走 grid-cols-3：每张图占 1 格，跟多图网格同布局、同尺寸。
-       * 2026-08-23：用户反馈"单图按照多图网格"——之前单图单独一个 button
-       * + h-auto，整图直接渲染到 360px，与多图 3×N 网格（cell ~115px）视觉
-       * 重量不一致；统一后所有 submission 都按 N 格缩略图渲染，缩略图点
-       * 击仍走 onLightbox 放大看。aspect-square + object-cover 会按中心
-       * 裁切到方形（与多图网格一致）—— 横长竖长图都会被裁，代价是单图
-       * 看到的是方形预览而非原图比例，用户需要细节就点开 lightbox。
+      {/* 单图 / 多图统一走 horizontal flex-wrap（2026-08-28）：用户反馈
+       * "多张图水平排列即可，一行放不下才换行"。每张 80px 方形 cell，
+       * max-w-[360px] 与上方 composite 等宽，1-4 张一行，5+ 自动换行，
+       * 不再依赖 grid-cols-N 静态映射。1 张图也按 80px 显示（之前 grid-cols-3
+       * 1/3 宽 ~115px，现在统一到 80px，与 V2 ResultThumbnailStrip 视觉一致）。
        *
-       * 2026-08-25：isStitched + stitchedUrl 时同时展示**宫格大图 + N 张原图**——
-       * 用户反馈"宫格大图太大了，需要统一，而且也需要保留多个原图"。
-       * 之前 640px 大图与 360px 网格视觉重量差距太大，且关闭拼接才看得到单张。
-       * 现在 composite 也用 max-w-[360px]（与 N 格网格同宽，视觉一致），
-       * 紧跟 N 张原图小缩略图，方便用户既看拼接也保留单图访问能力。 */}
+       * isStitched + stitchedUrl 分支：宫格大图在上（点击看大图），N 张原图
+       * 在下用同一份 flex-wrap —— 用户无论开不开拼接，看到的 N 张原图都是
+       * 同一布局。composite 宽度也按 max-w-[360px] 对齐，整组视觉重量统一。 */}
       {isStitched && stitchedUrl ? (
         <div className="space-y-2">
-          {/* 宫格大图：max-w-[360px] 与 N 格网格同宽；左上角带"宫格"chip 标识 */}
+          {/* 宫格大图:max-w-[360px] 与下方 N 张原图同宽;左上角带"宫格"chip 标识 */}
           <button
             type="button"
             onClick={() => onLightbox(stitchedUrl, 0)}
@@ -3852,23 +3819,16 @@ function SubmissionNode({
               宫格
             </span>
           </button>
-          {/* N 张原图：与未拼接分支共享同一份 RESULT_GRID_COLS 映射，保证视觉
-           * 重量一致 —— 用户无论开不开拼接，看到的 N 格缩略图都是同尺寸。 */}
-          <div
-            className={cn(
-              "grid gap-2 max-w-[360px]",
-              RESULT_GRID_COLS[
-                Math.min(resultUrls.length, MAX_RESULT_GRID_KEY)
-              ] ?? "grid-cols-3"
-            )}
-          >
+          {/* N 张原图:水平 flex-wrap,1-4 张一行铺满 360px,5+ 自动换行。
+           * 与下方未拼接分支共享同一份 button 结构,保证视觉重量一致。 */}
+          <div className="flex max-w-[360px] flex-wrap gap-2">
             {resultUrls.map((url, i) => (
               <button
                 // biome-ignore lint/suspicious/noArrayIndexKey: 一次提交内的图按生成顺序
                 key={i}
                 type="button"
                 onClick={() => onLightbox(url, i)}
-                className="group relative aspect-square overflow-hidden rounded-lg border bg-muted hover:border-primary/60 transition-colors"
+                className="group relative h-[80px] w-[80px] shrink-0 overflow-hidden rounded-lg border bg-muted hover:border-primary/60 transition-colors"
                 title={`原图 ${i + 1} · 点击查看大图`}
               >
                 {/* biome-ignore lint/performance/noImgElement: timeline 缩略图 */}
@@ -3886,31 +3846,16 @@ function SubmissionNode({
           </div>
         </div>
       ) : (
-        /* 列数按 resultUrls.length 动态选（用静态类名映射，Tailwind 不支持
-         * 动态 className）：
-         *  - 1 张：3 列 —— 用户反馈"单图的也要网格小图那样"，统一到
-         *    ~114×114 cell，与 N=3/5+ 时一致（之前 grid-cols-1 单 cell
-         *    占满 360px，视觉重量没真的统一）
-         *  - 2 张：2 列（3 列会留 1 个空 cell，视觉上更怪）
-         *  - 3 张：3 列（一行铺满）
-         *  - 4 张：2 列 2×2 —— 用户反馈"明明还有位置第四张换行"是因为之前
-         *    固定 3 列导致 4 张成 3+1；改成 2×2 宫格是最常见的 4 候选布局
-         *  - 5+ 张：3 列（保持原行为，5/6/7/8/9 走多行） */
-        <div
-          className={cn(
-            "grid gap-2 max-w-[360px]",
-            RESULT_GRID_COLS[
-              Math.min(resultUrls.length, MAX_RESULT_GRID_KEY)
-            ] ?? "grid-cols-3"
-          )}
-        >
+        /* 单次生成的多张图:水平 flex-wrap,1-4 张一行,5+ 换行。
+         * 与上方 stitched 分支的 N 张原图同布局,共享 max-w-[360px] 与 w-[80px]。 */
+        <div className="flex max-w-[360px] flex-wrap gap-2">
           {resultUrls.map((url, i) => (
             <button
               // biome-ignore lint/suspicious/noArrayIndexKey: 一次提交内的图按生成顺序
               key={i}
               type="button"
               onClick={() => onLightbox(url, i)}
-              className="group relative aspect-square overflow-hidden rounded-lg border bg-muted hover:border-primary/60 transition-colors"
+              className="group relative h-[80px] w-[80px] shrink-0 overflow-hidden rounded-lg border bg-muted hover:border-primary/60 transition-colors"
               title={
                 resultUrls.length === 1
                   ? "点击查看大图"

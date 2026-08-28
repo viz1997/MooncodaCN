@@ -139,7 +139,9 @@ function loadImage(url: string): Promise<HTMLImageElement> {
       })
       .catch((err) => {
         cleanup();
-        reject(new Error(`图片拉取失败：${(err as Error).message ?? String(err)}`));
+        reject(
+          new Error(`图片拉取失败：${(err as Error).message ?? String(err)}`)
+        );
       });
   });
 }

@@ -88,7 +88,6 @@ import {
   readImageMeta,
 } from "@/features/canvas/lib/image-utils";
 import { stitchToGrid } from "@/features/canvas/lib/stitch-images";
-import { thumbnailUrl } from "@/features/image-gen/lib/thumbnail-url";
 import {
   requestEdit,
   requestGeneration,
@@ -108,6 +107,7 @@ import { useMyPromptStore } from "@/features/canvas/stores/use-my-prompt-store";
 import { useThemeStore } from "@/features/canvas/stores/use-theme-store";
 import { useWorkbenchAgentStore } from "@/features/canvas/stores/use-workbench-agent-store";
 import type { ReferenceImage } from "@/features/canvas/types/image";
+import { thumbnailUrl } from "@/features/image-gen/lib/thumbnail-url";
 
 type GeneratedImage = {
   id: string;
@@ -1072,8 +1072,10 @@ export function ImageWorkbench() {
                   <ResultThumbnailStrip
                     images={results
                       .filter(
-                        (r): r is GenerationResult & { image: GeneratedImage } =>
-                          r.status === "success" && !!r.image,
+                        (
+                          r
+                        ): r is GenerationResult & { image: GeneratedImage } =>
+                          r.status === "success" && !!r.image
                       )
                       .map((r) => ({ id: r.id, image: r.image }))}
                     onEdit={addResultToReferences}
@@ -1081,7 +1083,12 @@ export function ImageWorkbench() {
                     onSaveAsset={saveResultToAssets}
                   />
                 ) : (
-                  <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
+                  /* 非拼接的单次生成多张图:水平 flex-wrap,每张卡 w-[280px],
+                   * 放不下自动换行(2026-08-28) —— 对齐 V1 SubmissionNode
+                   * "水平排列,一行放不下才换行"的产品意图。之前是
+                   * grid sm:grid-cols-2 2xl:grid-cols-3,1-2 张图时纵向堆,
+                   * 与 V1 timeline 的横向行为不一致。 */
+                  <div className="flex flex-wrap gap-4">
                     {results.map((result, index) =>
                       result.status === "success" && result.image ? (
                         <ResultImageCard
@@ -1095,7 +1102,9 @@ export function ImageWorkbench() {
                       ) : result.status === "failed" ? (
                         <FailedImageCard
                           key={result.id}
-                          error={result.error || t("workbench.generationFailed")}
+                          error={
+                            result.error || t("workbench.generationFailed")
+                          }
                           onRetry={() => retryResult(index)}
                         />
                       ) : (
@@ -1347,7 +1356,7 @@ function ResultImageCard({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
+    <div className="w-[280px] shrink-0 overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
       <Image
         src={thumbnailUrl(image.dataUrl, 400)}
         alt={t("imageWorkbench.resultAlt", { count: index + 1 })}
@@ -1395,7 +1404,7 @@ function ResultImageCard({
 function PendingImageCard() {
   const { t } = useTranslation();
   return (
-    <div className="relative aspect-square overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900">
+    <div className="relative aspect-square w-[280px] shrink-0 overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900">
       <div
         className="absolute inset-0 opacity-60"
         style={{
@@ -1528,7 +1537,7 @@ function FailedImageCard({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="overflow-hidden rounded-lg border border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20">
+    <div className="w-[280px] shrink-0 overflow-hidden rounded-lg border border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20">
       <div className="flex aspect-square flex-col items-center justify-center gap-3 p-5 text-center">
         <div className="text-sm font-medium text-red-600 dark:text-red-300">
           {t("workbench.failed")}

@@ -39,18 +39,14 @@ import { logger } from "@/lib/logger";
  *          直接命中白名单 R2 分支走 R2 CDN
  */
 export async function migrateResultUrlToR2(
-  upstreamUrl: string,
+  upstreamUrl: string
 ): Promise<string> {
   // 复用 gpt-image 已有的 helper：fetch upstream → putObject R2 → 返回 R2 URL。
   // 这一步失败由调用方 catch 记 warn,不影响已返回的缩略图。
   // traceHint 仅用于 objectKey 与日志,清理成纯 base36 字符串避免
   // URL 末段字符（.png / .ico）污染 R2 objectKey 形态。
   const traceHint = `ih${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-  const persistedUrl = await persistCandidateToR2(
-    upstreamUrl,
-    traceHint,
-    0,
-  );
+  const persistedUrl = await persistCandidateToR2(upstreamUrl, traceHint, 0);
 
   // DB 反查：jsonb @> jsonb 谓词表示 "result_urls 数组包含 url 这个元素"。
   //
@@ -65,13 +61,13 @@ export async function migrateResultUrlToR2(
     .select({ id: imageJob.id, resultUrls: imageJob.resultUrls })
     .from(imageJob)
     .where(
-      sql`${imageJob.resultUrls}::jsonb @> ${JSON.stringify([upstreamUrl])}::jsonb`,
+      sql`${imageJob.resultUrls}::jsonb @> ${JSON.stringify([upstreamUrl])}::jsonb`
     );
 
   if (matches.length === 0) {
     logger.warn(
       { upstreamUrl, persistedUrl },
-      "image-gen: hydrate 没找到引用 image_job,可能是孤儿 URL",
+      "image-gen: hydrate 没找到引用 image_job,可能是孤儿 URL"
     );
     return persistedUrl;
   }
@@ -83,7 +79,7 @@ export async function migrateResultUrlToR2(
   for (const row of matches) {
     if (!row.resultUrls.includes(upstreamUrl)) continue;
     const next = row.resultUrls.map((u) =>
-      u === upstreamUrl ? persistedUrl : u,
+      u === upstreamUrl ? persistedUrl : u
     );
     try {
       await db
@@ -98,7 +94,7 @@ export async function migrateResultUrlToR2(
           upstreamUrl,
           err: err instanceof Error ? err.message : String(err),
         },
-        "image-gen: hydrate UPDATE 单行失败",
+        "image-gen: hydrate UPDATE 单行失败"
       );
     }
   }
@@ -110,7 +106,7 @@ export async function migrateResultUrlToR2(
       matched: matches.length,
       updatedRows,
     },
-    "image-gen: hydrate 完成",
+    "image-gen: hydrate 完成"
   );
 
   return persistedUrl;
@@ -138,6 +134,6 @@ export function isHydrateCandidate(value: string): boolean {
   }
   if (!host) return false;
   return HARDCODED_PROVIDER_HOSTS.some(
-    (suffix) => host === suffix || host.endsWith(`.${suffix}`),
+    (suffix) => host === suffix || host.endsWith(`.${suffix}`)
   );
 }
