@@ -67,6 +67,11 @@ export async function uploadImage(
 
 export async function resolveImageUrl(storageKey?: string, fallback = "") {
   if (!storageKey) return fallback;
+  // 2026-08-28：r2: 前缀的 storageKey 是 Phase 3 内置渠道持久化方案
+  // （见 uploadImage 注释）—— URL 本身就是 R2 公开地址，没有对应的 localforage
+  // blob。直接返回 URL，否则会去 store.getItem miss、再回落 fallback，导致
+  // thumbnailUrl(dataUrl, w) 拿到空串 → <img> 破图。
+  if (storageKey.startsWith("r2:")) return storageKey.slice(3);
   const cached = objectUrls.get(storageKey);
   if (cached) return cached;
   const blob = await store.getItem<Blob>(storageKey);
