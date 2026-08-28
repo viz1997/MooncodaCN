@@ -856,6 +856,24 @@ export function ImageWorkbench() {
                 />
               </div>
 
+              {/* 2026-08-28：生成按钮从中间列最底（mt-auto）挪到 prompt
+               * textarea 下方紧跟 —— 用户原话"v2 开始生成按钮在最下面,
+               * 体验很差"。prompt 是主输入,生成是主操作,挨在一起
+               * 符合"输入完立刻能点"的直觉。references / model / settings
+               * 这些次要配置原本就要点开调整，挪到按钮下面不抢主操作
+               * 的视觉焦点。 */}
+              <Button
+                type="primary"
+                size="large"
+                block
+                icon={<Sparkles className="size-4" />}
+                loading={running}
+                disabled={!canGenerate || running}
+                onClick={() => void generate()}
+              >
+                {t("workbench.generate")}
+              </Button>
+
               <div className="min-w-0">
                 <div className="mb-2 flex items-center justify-between gap-3">
                   <span className="text-base font-semibold">
@@ -985,20 +1003,6 @@ export function ImageWorkbench() {
                   onAdjust={() => setSettingsOpen(true)}
                 />
               </div>
-            </div>
-
-            <div className="mt-auto pt-6">
-              <Button
-                type="primary"
-                size="large"
-                block
-                icon={<Sparkles className="size-4" />}
-                loading={running}
-                disabled={!canGenerate || running}
-                onClick={() => void generate()}
-              >
-                {t("workbench.generate")}
-              </Button>
             </div>
           </div>
 
