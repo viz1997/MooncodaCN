@@ -1016,40 +1016,50 @@ export function ImageWorkbench() {
               ) : null}
             </div>
             {results.length ? (
-              <>
+              /* 2026-08-28：composite + 下方 conditional block 包到同一个
+               * wrapper 里（space-y-3）保证左对齐一致 —— 之前 composite
+               * 在 `<div mb-4 flex justify-center>` 居中、ResultThumbnailStrip
+               * 默认左对齐，stitched 完成后 composite 居中、N 张原图却左
+               * 对齐，左右边对不齐，视觉"分开"。改成统一左对齐 + space-y-3
+               * 控制两个区块的间距，整组视觉重量与 V1 SubmissionNode
+               * stitched 分支保持一致（composite 上 + N 张原图下，同宽 360px）。 */
+              <div className="space-y-3">
                 {/* 2026-08-25：自动拼接宫格图 —— 开启 + 至少 2 张成功 → 在
                  * 结果区顶部额外展示一张宫格大图，下方仍是 N 张原图网格。
                  * 用户要求"宫格大图太大了，需要统一，而且也需要保留多个原图"——
                  * 宫格大图宽度限制 max-w-[360px]（与 V1 SubmissionNode 一致），
                  * 下面原图网格保留完整编辑 / 下载 / 收藏动作。结果区头部加
-                 * ≡ icon chip 标识"宫格"，方便用户一眼区分。 */}
+                 * ≡ icon chip 标识"宫格"，方便用户一眼区分。
+                 *
+                 * 2026-08-28：composite 不再外层居中容器（之前
+                 * `<div mb-4 flex justify-center>`），由外层 wrapper
+                 * `space-y-3` 统一控制间距，避免与下方 ResultThumbnailStrip
+                 * 左对齐错位。 */}
                 {stitchedComposite ? (
-                  <div className="mb-4 flex justify-center">
-                    <div
-                      className="group relative w-full max-w-[360px] overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800"
-                      title={t("imageWorkbench.stitchedComposite")}
-                    >
-                      <Image
-                        src={stitchedComposite.dataUrl}
-                        alt={t("imageWorkbench.stitchedCompositeAlt")}
-                        className="block w-full h-auto transition-transform duration-300 group-hover:scale-[1.02]"
-                      />
-                      <span className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-sm text-white text-[10px] font-medium leading-none">
-                        <LayoutGrid className="size-3" />
-                        {t("settingsPanels.image.autoStitch")}
-                      </span>
-                      {/* 下载按钮：直接复用 downloadImage(GeneratedImage) 形态 */}
-                      <div className="absolute top-1.5 right-1.5">
-                        <Tooltip title={t("common.download")}>
-                          <Button
-                            size="small"
-                            type="text"
-                            className="!h-7 !w-7 !bg-black/60 !p-0 !text-white hover:!bg-black/80"
-                            icon={<Download className="size-3.5" />}
-                            onClick={() => downloadImage(stitchedComposite, 0)}
-                          />
-                        </Tooltip>
-                      </div>
+                  <div
+                    className="group relative w-full max-w-[360px] overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800"
+                    title={t("imageWorkbench.stitchedComposite")}
+                  >
+                    <Image
+                      src={stitchedComposite.dataUrl}
+                      alt={t("imageWorkbench.stitchedCompositeAlt")}
+                      className="block w-full h-auto transition-transform duration-300 group-hover:scale-[1.02]"
+                    />
+                    <span className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-sm text-white text-[10px] font-medium leading-none">
+                      <LayoutGrid className="size-3" />
+                      {t("settingsPanels.image.autoStitch")}
+                    </span>
+                    {/* 下载按钮：直接复用 downloadImage(GeneratedImage) 形态 */}
+                    <div className="absolute top-1.5 right-1.5">
+                      <Tooltip title={t("common.download")}>
+                        <Button
+                          size="small"
+                          type="text"
+                          className="!h-7 !w-7 !bg-black/60 !p-0 !text-white hover:!bg-black/80"
+                          icon={<Download className="size-3.5" />}
+                          onClick={() => downloadImage(stitchedComposite, 0)}
+                        />
+                      </Tooltip>
                     </div>
                   </div>
                 ) : null}
@@ -1113,7 +1123,7 @@ export function ImageWorkbench() {
                     )}
                   </div>
                 )}
-              </>
+              </div>
             ) : (
               <div className="flex min-h-[320px] flex-col items-center justify-center rounded-lg border border-dashed border-stone-300 text-center dark:border-stone-700 lg:min-h-[560px]">
                 <ImagePlus className="mb-4 size-11 text-stone-400" />
