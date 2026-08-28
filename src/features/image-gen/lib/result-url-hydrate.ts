@@ -3,7 +3,7 @@
  *
  * 触发点：/api/image-gen/thumbnail 命中白名单中 hardcoded provider 域
  * （wellapi.ai / wellapi.cc / cdn.wellapi.ai），通过 `next/server` 的 after()
- * 后台 fire-and-forget 调本函数。用户感知到的 sharp 缩略图仍来自上游
+ * 后台 fire-and-forget 调本函数。用户感知到的代理图仍来自上游 CDN
  * （首次走 wellapi CDN，本就要付 60s fetch；hydrate 在后台异步，等同
  * 免费搭车），DB 写回后下次任何人访问都是 R2 CDN。
  *

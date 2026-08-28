@@ -3,17 +3,17 @@
  *
  * 工作台 / 资产库 / photo 表的 <img> 缩略图位统一通过这个函数拿到 src：
  *   - data: URL 直接返回原值（浏览器原生支持，无 CORS 问题）
- *   - http(s) URL 走 /api/image-gen/thumbnail 代理，服务端 sharp 缩放 +
- *     immutable 缓存
+ *   - http(s) URL 走 /api/image-gen/thumbnail 代理，stream 透传上游原图 +
+ *     immutable 1 年缓存（不再服务端缩放，见 route.ts 注释）
  *
- * width 按 retina 2x 给（48px cell → w=96），保证 HiDPI 屏锐利。
- * 上限 w=1024（生成结果原图通常就是这个尺寸，再大浪费带宽）。
+ * width 参数保留是为了接口稳定 + 未来如果再加服务端处理能力时不用改 caller；
+ * 当前实现忽略 width，由浏览器 <img> 用 object-fit / sizes / srcset 自适应。
  *
  * 注意：lightbox 全屏查看、参考图 Dialog 等"需要原始分辨率"的场景不走
  * 这个函数 —— 直接用原 URL。
  */
 
-/** 缩略图最大宽度。生成结果原图通常 1024~1536px，超过即视为超大图。 */
+/** 缩略图最大宽度。当前路由已不缩放,这里保留仅为接口兼容性。 */
 const MAX_THUMB_WIDTH = 1024;
 
 /**
