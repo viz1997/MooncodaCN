@@ -35,7 +35,10 @@ import {
 } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
+// 2026-08-28：R2 从 Vercel 函数拉链路上限 ~16s（curl 实测），加上
+// sharp resize + 1MB+ buffer 读取，30s 死线撞 Vercel 杀掉 → 500。
+// 升到 60s 给 sharp / 缓冲留余地（Vercel 所有 plan 都允许 60s）。
+export const maxDuration = 60;
 
 const DEFAULT_WIDTH = 256;
 const MIN_WIDTH = 16;
@@ -87,7 +90,10 @@ async function getHandler(req: NextRequest) {
   let upstream: Response;
   try {
     upstream = await fetch(urlParam, {
-      signal: AbortSignal.timeout(20_000),
+      // 2026-08-28：从 20s 提到 25s —— R2 dev 子域从 Vercel 函数拉 cold
+      // fetch 实测 16s+（curl time_total=16.2s，1.37MB PNG），20s 太紧，
+      // 后续 arrayBuffer 还没读完就被 abort，抛 AbortError 冒泡到 500。
+      signal: AbortSignal.timeout(25_000),
       redirect: "follow",
     });
   } catch (err) {
@@ -111,7 +117,21 @@ async function getHandler(req: NextRequest) {
     );
   }
 
-  const inputBuffer = Buffer.from(await upstream.arrayBuffer());
+  // 2026-08-28：arrayBuffer() 没在 try/catch —— fetch 已经返回 200 但 body
+  // 流被 AbortSignal 打断或上游断连时，arrayBuffer 抛 AbortError / network
+  // error 冒泡到 withApiLogging → 500。包一层返 502。
+  let inputBuffer: Buffer;
+  try {
+    inputBuffer = Buffer.from(await upstream.arrayBuffer());
+  } catch (err) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: `读取上游 body 失败：${err instanceof Error ? err.message : "unknown"}`,
+      },
+      { status: 502 }
+    );
+  }
 
   // 首屏 hydrate：URL 命中已知会过期的硬编码 provider 域（wellapi.*）时，
   // 后台 fire-and-forget 把 wellapi URL → R2 永久 URL 并 UPDATE image_job。

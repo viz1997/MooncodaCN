@@ -31,7 +31,8 @@ import {
 } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
+// 2026-08-28：与 thumbnail 路由同步,R2 cold fetch ~16s,30s 死线撞 Vercel 杀掉。
+export const maxDuration = 60;
 
 async function getHandler(req: NextRequest) {
   const urlParam = req.nextUrl.searchParams.get("url");
@@ -59,7 +60,8 @@ async function getHandler(req: NextRequest) {
   let upstream: Response;
   try {
     upstream = await fetch(urlParam, {
-      signal: AbortSignal.timeout(20_000),
+      // 2026-08-28：R2 dev 子域 cold fetch 16s+，从 20s 提到 25s
+      signal: AbortSignal.timeout(25_000),
       // 不自动跟随重定向到非 https（防御性）
       redirect: "follow",
     });
