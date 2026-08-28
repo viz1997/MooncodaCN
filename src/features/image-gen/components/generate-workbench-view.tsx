@@ -267,36 +267,6 @@ const REF_MODE_LABELS: Record<RefMode, string> = {
 };
 
 /**
- * SubmissionNode **stitched 分支** N 张原图网格列数映射（2026-08-28
- * 重新引入）：之前为了非拼接分支的"水平 flex-wrap"砍掉了这个常量，
- * 结果拼接分支的 N 张原图用 flex 80px cell 只占 344px（< 360px composite
- * 宽度），右边缘对不齐 composite 视觉上"分开了"。stitched 分支的 N 张
- * 原图必须用 grid 撑满 360px 宽度，与 composite 严格对齐。
- *
- * 列数规则：
- *  - N=2: grid-cols-2（两格约 173×173，最常见的 2 候选）
- *  - N=3: grid-cols-3（一行三格 ~115×115）
- *  - N=4: grid-cols-2（2×2 宫格，与 composite 同布局 ~173×173）
- *  - N=5+: grid-cols-3（保持原行为）
- *  - N=1 不会进 stitched 分支（stitched 需要 count≥2 + 成功），兜底
- *    grid-cols-3
- *
- * 静态对象是因为 Tailwind 不扫描动态 className。非拼接分支改用
- * horizontal flex-wrap（详见下方注释）已经不需要这个映射了。
- */
-const STITCHED_GRID_COLS: Record<number, string> = {
-  1: "grid-cols-3",
-  2: "grid-cols-2",
-  3: "grid-cols-3",
-  4: "grid-cols-2", // 2×2 宫格，对齐 composite 2×2 形态
-  5: "grid-cols-3",
-  6: "grid-cols-3",
-  7: "grid-cols-3",
-  8: "grid-cols-3",
-  9: "grid-cols-3",
-};
-
-/**
  * 把 imageJob（DB 行）映射成客户端 WorkbenchEffect。
  *
  * effectId 用 `job_${id.slice(0, 8)}` 前缀 —— 避免和新建时用的
@@ -3819,75 +3789,37 @@ function SubmissionNode({
         ) : null}
       </div>
 
-      {/* 单图 / 多图统一走 horizontal flex-wrap（2026-08-28）：用户反馈
-       * "多张图水平排列即可，一行放不下才换行"。每张 80px 方形 cell，
-       * max-w-[360px] 与上方 composite 等宽，1-4 张一行，5+ 自动换行，
-       * 不再依赖 grid-cols-N 静态映射。1 张图也按 80px 显示（之前 grid-cols-3
-       * 1/3 宽 ~115px，现在统一到 80px，与 V2 ResultThumbnailStrip 视觉一致）。
+      {/* isStitched + stitchedUrl 分支（2026-08-28 改成只渲染 composite）：
+       * 用户反复强调"自动拼接是多张图拼接成一张宫格图"——之前
+       * composite + N 张原图共存的设计虽然保留了单张访问入口，但
+       * 与"自动拼接"的定义冲突：composite 已经把所有原图缝合成 1 张
+       * 宫格图，再在下方展示 N 张独立图就成了"又分开成多个独立图"。
+       * 现在 stitched 时只渲染 1 张 composite 宫格大图，不再叠加
+       * N 张原图。需要看单张原图就关闭自动拼接开关（走非 stitched
+       * 分支的 flex 80px 缩略图），或点开 lightbox 放大看 composite。
        *
-       * isStitched + stitchedUrl 分支（2026-08-28 复用 grid）：用户反馈
-       * "自动拼接的为什么又分开了"——之前 N 张原图也走 80px flex，4 张
-       * 实际只占 344px，右边缘比 360px composite 短 16px，视觉错位。
-       * 改回 grid + STITCHED_GRID_COLS 映射：N=4 → 2×2 宫格（~173×173），
-       * N=3 → 1×3（~115×115），N=2 → 1×2（~173×173），撑满 360px 与
-       * composite 严格对齐。stitched 与非 stitched 形态不同但同宽，
-       * 整组视觉重量统一。 */}
+       * 非 stitched 分支（2026-08-28 用户原话"水平排列即可，一行放不下
+       * 才换行"）走 `flex max-w-[360px] flex-wrap gap-2`，每张 80px 方形
+       * cell，1-4 张一行，5+ 换行。 */}
       {isStitched && stitchedUrl ? (
-        <div className="space-y-2">
-          {/* 宫格大图:max-w-[360px] 与下方 N 张原图同宽;左上角带"宫格"chip 标识 */}
-          <button
-            type="button"
-            onClick={() => onLightbox(stitchedUrl, 0)}
-            className="group relative block w-full max-w-[360px] overflow-hidden rounded-lg border bg-muted hover:border-primary/60 transition-colors"
-            title="点击查看宫格大图"
-          >
-            {/* biome-ignore lint/performance/noImgElement: timeline 拼接大图 */}
-            <img
-              src={thumbnailUrl(stitchedUrl, 720)}
-              alt="宫格拼接大图"
-              className="block w-full h-auto transition-transform duration-300 group-hover:scale-[1.02]"
-              loading="lazy"
-            />
-            <span className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-sm text-white text-[9px] font-medium leading-none">
-              <Grid3x3 className="h-2.5 w-2.5" />
-              宫格
-            </span>
-          </button>
-          {/* N 张原图:grid 撑满 360px 与 composite 严格对齐(2026-08-28)。
-           * 之前用 flex 80px 4 张只占 344px,右边缘短 16px → 视觉"分开";
-           * 改回 grid 映射,N=4 走 2×2(对齐 composite 2×2 形态)、
-           * N=3 走 1×3、N=2 走 1×2,cell 自动撑高填满 360px 宽度。 */}
-          <div
-            className={cn(
-              "grid gap-2 max-w-[360px]",
-              STITCHED_GRID_COLS[
-                Math.min(resultUrls.length, 9)
-              ] ?? "grid-cols-3"
-            )}
-          >
-            {resultUrls.map((url, i) => (
-              <button
-                // biome-ignore lint/suspicious/noArrayIndexKey: 一次提交内的图按生成顺序
-                key={i}
-                type="button"
-                onClick={() => onLightbox(url, i)}
-                className="group relative aspect-square overflow-hidden rounded-lg border bg-muted hover:border-primary/60 transition-colors"
-                title={`原图 ${i + 1} · 点击查看大图`}
-              >
-                {/* biome-ignore lint/performance/noImgElement: timeline 缩略图 */}
-                <img
-                  src={thumbnailUrl(url, 228)}
-                  alt={`结果 ${i + 1}`}
-                  className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
-                  loading="lazy"
-                />
-                <span className="absolute bottom-1 left-1 bg-black/60 backdrop-blur-sm text-white text-[9px] px-1 py-0.5 rounded font-mono leading-none opacity-0 group-hover:opacity-100 transition-opacity">
-                  #{i + 1}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
+        <button
+          type="button"
+          onClick={() => onLightbox(stitchedUrl, 0)}
+          className="group relative block w-full max-w-[360px] overflow-hidden rounded-lg border bg-muted hover:border-primary/60 transition-colors"
+          title="点击查看宫格大图"
+        >
+          {/* biome-ignore lint/performance/noImgElement: timeline 拼接大图 */}
+          <img
+            src={thumbnailUrl(stitchedUrl, 720)}
+            alt="宫格拼接大图"
+            className="block w-full h-auto transition-transform duration-300 group-hover:scale-[1.02]"
+            loading="lazy"
+          />
+          <span className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-sm text-white text-[9px] font-medium leading-none">
+            <Grid3x3 className="h-2.5 w-2.5" />
+            宫格
+          </span>
+        </button>
       ) : (
         /* 单次生成的多张图:水平 flex-wrap,1-4 张一行,5+ 换行(2026-08-28)。
          * 非 stitched 分支走 80px 方形 cell,简短访问入口。 */

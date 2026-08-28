@@ -1016,25 +1016,18 @@ export function ImageWorkbench() {
               ) : null}
             </div>
             {results.length ? (
-              /* 2026-08-28：composite + 下方 conditional block 包到同一个
-               * wrapper 里（space-y-3）保证左对齐一致 —— 之前 composite
-               * 在 `<div mb-4 flex justify-center>` 居中、ResultThumbnailStrip
-               * 默认左对齐，stitched 完成后 composite 居中、N 张原图却左
-               * 对齐，左右边对不齐，视觉"分开"。改成统一左对齐 + space-y-3
-               * 控制两个区块的间距，整组视觉重量与 V1 SubmissionNode
-               * stitched 分支保持一致（composite 上 + N 张原图下，同宽 360px）。 */
+              /* 2026-08-28：composite 单独渲染在 wrapper 顶部，stitched 完成后
+               * 不再下方叠加 ResultThumbnailStrip / N 张原图网格 —— 用户反复
+               * 强调"自动拼接是多张图拼接成一张宫格图"，下面再排 N 张独立
+               * 卡就成了"又分开成多个独立图"。需要看单张原图就关闭自动
+               * 拼接开关（走非 stitched 分支的 flex 280px 卡），或点开
+               * lightbox 放大看 composite。 */
               <div className="space-y-3">
                 {/* 2026-08-25：自动拼接宫格图 —— 开启 + 至少 2 张成功 → 在
-                 * 结果区顶部额外展示一张宫格大图，下方仍是 N 张原图网格。
-                 * 用户要求"宫格大图太大了，需要统一，而且也需要保留多个原图"——
+                 * 结果区顶部额外展示一张宫格大图。
                  * 宫格大图宽度限制 max-w-[360px]（与 V1 SubmissionNode 一致），
-                 * 下面原图网格保留完整编辑 / 下载 / 收藏动作。结果区头部加
-                 * ≡ icon chip 标识"宫格"，方便用户一眼区分。
-                 *
-                 * 2026-08-28：composite 不再外层居中容器（之前
-                 * `<div mb-4 flex justify-center>`），由外层 wrapper
-                 * `space-y-3` 统一控制间距，避免与下方 ResultThumbnailStrip
-                 * 左对齐错位。 */}
+                 * 左上角 LayoutGrid chip 标识"宫格"，右上角下载按钮方便
+                 * 用户直接下载 composite。 */}
                 {stitchedComposite ? (
                   <div
                     className="group relative w-full max-w-[360px] overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800"
@@ -1063,36 +1056,22 @@ export function ImageWorkbench() {
                     </div>
                   </div>
                 ) : null}
-                {/* 2026-08-27：autoStitch 开启 + count ≥ 2 时：
-                 *   - 生成中（全 pending 且未出 composite）→ 显示一张合并占位卡（PendingGridCard）
-                 *     对齐 V1 SubmissionNode 视觉,避免 "4 张独立 spinner" 与
-                 *     "最终会拼成 1 张宫格" 的心智冲突。
-                 *   - 完成态（stitchedComposite 出）→ 顶部 composite 主导 + 下方
-                 *     N 张原图压缩成 1 行缩略图条（ResultThumbnailStrip），保留
-                 *     [[workbench-auto-stitch-coexist-with-originals]] 原图
-                 *     编辑/下载/收藏入口,视觉重量较之前下降约 60%。
-                 *   - 部分失败 / autoStitch 关 / count<2 → 仍走原 N 张独立卡 grid
-                 *     让用户看到每张卡的 success/failed 状态。 */}
+                {/* 2026-08-28：autoStitch 开启 + count ≥ 2 时：
+                 *   - 生成中（全 pending 且未出 composite）→ 显示一张合并
+                 *     占位卡（PendingGridCard）对齐 V1 SubmissionNode 视觉，
+                 *     避免 "4 张独立 spinner" 与 "最终会拼成 1 张宫格" 的
+                 *     心智冲突。
+                 *   - 完成态（stitchedComposite 出）→ 仅渲染上方 composite，
+                 *     下方不叠 N 张原图（用户原话"自动拼接是多张图拼接成一
+                 *     张宫格图"，再排 N 张独立图就成了"分开"）。
+                 *   - 部分失败 / autoStitch 关 / count<2 → 仍走原 N 张独立卡
+                 *     grid 让用户看到每张卡的 success/failed 状态。 */}
                 {effectiveConfig.autoStitch &&
                 generationCount >= 2 &&
                 results.some((r) => r.status === "pending") &&
                 !stitchedComposite ? (
                   <PendingGridCard count={generationCount} />
-                ) : stitchedComposite ? (
-                  <ResultThumbnailStrip
-                    images={results
-                      .filter(
-                        (
-                          r
-                        ): r is GenerationResult & { image: GeneratedImage } =>
-                          r.status === "success" && !!r.image
-                      )
-                      .map((r) => ({ id: r.id, image: r.image }))}
-                    onEdit={addResultToReferences}
-                    onDownload={downloadImage}
-                    onSaveAsset={saveResultToAssets}
-                  />
-                ) : (
+                ) : stitchedComposite ? null : (
                   /* 非拼接的单次生成多张图:水平 flex-wrap,每张卡 w-[280px],
                    * 放不下自动换行(2026-08-28) —— 对齐 V1 SubmissionNode
                    * "水平排列,一行放不下才换行"的产品意图。之前是
@@ -1458,82 +1437,6 @@ function PendingGridCard({ count }: { count: number }) {
           </p>
         </div>
       </div>
-    </div>
-  );
-}
-
-/**
- * 宫格完成态下方的"N 张原图缩略图条"。
- *
- * 2026-08-27：B 方案 —— composite 在顶部占主导，下方 N 张原图从
- * `grid-cols-2 2xl:grid-cols-3`（每张占满宽 + 3 按钮大条）的独立卡
- * 压缩成 1 行 80×80 缩略图 + 紧凑按钮列，flex 横排。
- *
- * 仍保留 [[workbench-auto-stitch-coexist-with-originals]] 的原图
- * 编辑/下载/收藏入口（只是视觉压缩）；antd `<Image preview>` 仍支持
- * 点击放大。视觉重量较之前下降约 60%，与 360px 宫格并列时不再
- * 视觉打架。
- *
- * max-w-[360px] 与宫格大图同宽，4 个 80px cell + 3*8px gap ≈ 344px 装下。
- */
-function ResultThumbnailStrip({
-  images,
-  onEdit,
-  onDownload,
-  onSaveAsset,
-}: {
-  images: { id?: string; image: GeneratedImage }[];
-  onEdit: (image: GeneratedImage, index: number) => void;
-  onDownload: (image: GeneratedImage, index: number) => void;
-  onSaveAsset: (image: GeneratedImage, index: number) => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="flex max-w-[360px] flex-wrap gap-2">
-      {images.map(({ id, image }, index) => (
-        <div
-          key={id ?? image.dataUrl ?? `${index}`}
-          className="flex w-[80px] flex-col overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800"
-        >
-          <Image
-            src={thumbnailUrl(image.dataUrl, 160)}
-            alt={t("imageWorkbench.resultAlt", { count: index + 1 })}
-            className="!w-[80px] aspect-square object-cover"
-            // 不主动打开 antd preview mask:缩略图就是入口,点开看大图由
-            // 顶部 stitchedComposite 的 onClick 弹 lightbox 提供。
-            preview={false}
-          />
-          <div className="flex border-t border-stone-200 dark:border-stone-800">
-            <Tooltip title={t("common.addToAssets")}>
-              <Button
-                size="small"
-                type="text"
-                className="!h-6 !min-w-0 flex-1 !rounded-none !px-0"
-                icon={<FolderPlus className="size-3" />}
-                onClick={() => void onSaveAsset(image, index)}
-              />
-            </Tooltip>
-            <Tooltip title={t("imageWorkbench.addReference")}>
-              <Button
-                size="small"
-                type="text"
-                className="!h-6 !min-w-0 flex-1 !rounded-none !px-0"
-                icon={<PenLine className="size-3" />}
-                onClick={() => onEdit(image, index)}
-              />
-            </Tooltip>
-            <Tooltip title={t("common.download")}>
-              <Button
-                size="small"
-                type="text"
-                className="!h-6 !min-w-0 flex-1 !rounded-none !px-0"
-                icon={<Download className="size-3" />}
-                onClick={() => onDownload(image, index)}
-              />
-            </Tooltip>
-          </div>
-        </div>
-      ))}
     </div>
   );
 }
