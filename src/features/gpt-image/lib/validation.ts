@@ -41,6 +41,10 @@ export const promptTemplateSchema = z.object({
   candidateCount: z.number().int().min(1).max(9).default(4),
   coverUrl: z.string().url().nullable().optional(),
   isActive: z.boolean().default(true),
+  // 2026-09-01：候选输出模式（默认 'grid' 兼容老模板）
+  //  - grid：n=1 + prompt 末尾追加宫格指令，让 Lingting 一次返 1 张拼接图
+  //  - separate：n=candidateCount + 不追加指令，让 Lingting 一次返 N 张独立图
+  outputMode: z.enum(["grid", "separate"]).default("grid"),
   // Phase A 起新增：image-gen 工作台复用 —— {{变量}} 替换 + 按效果锁模型 + 价格
   variables: z.array(promptVariableSchema).max(20).default([]),
   model: z

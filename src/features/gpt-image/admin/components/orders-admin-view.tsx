@@ -804,7 +804,11 @@ export function OrdersAdminView() {
               </div>
               <div>
                 <span className="text-muted-foreground">每组候选数：</span>
-                {detailDialog.template.candidateCount} 张（拼接成 1 张宫格图）
+                {detailDialog.template.candidateCount} 张（
+                {detailDialog.template.outputMode === "separate"
+                  ? "独立候选 N 张"
+                  : "拼接成 1 张宫格图"}
+                ）
               </div>
               <div>
                 <span className="text-muted-foreground">已选择：</span>
@@ -907,7 +911,11 @@ export function OrdersAdminView() {
                     <h4 className="text-sm font-medium">
                       每张原图的效果图（{detailDialog.uploadedImageCount}{" "}
                       张原图，每张 {detailDialog.template.candidateCount}{" "}
-                      个候选，存为 1 张宫格图）
+                      个候选，
+                      {detailDialog.template.outputMode === "separate"
+                        ? "存为 N 张独立图"
+                        : "存为 1 张宫格图"}
+                      ）
                     </h4>
                   </div>
                   <div className="space-y-3">
@@ -998,107 +1006,195 @@ export function OrdersAdminView() {
                                 </button>
                               </div>
                             </div>
-                            {/* 宫格模式：实际只存 1 张拼接图，candidates[imgIdx][0]，
-                                用 CSS 网格叠层画格子分割 + 选中高亮，避免误以为是多张独立候选 */}
-                            {(() => {
-                              const cols =
-                                candCount === 1
-                                  ? 1
-                                  : candCount === 2
-                                    ? 2
-                                    : candCount === 4
-                                      ? 2
-                                      : 3;
-                              const rows =
-                                candCount === 1
-                                  ? 1
-                                  : candCount === 2
-                                    ? 1
-                                    : candCount === 4
-                                      ? 2
-                                      : 3;
-                              return (
-                                <div className="group/preview relative aspect-square cursor-pointer overflow-hidden rounded-md border border-slate-200 bg-slate-100">
-                                  {selIdx !== null ? (
-                                    // 用户已选：显示该格子对应的高清裁剪图
-                                    (() => {
-                                      const col = selIdx % cols;
-                                      const row = Math.floor(selIdx / cols);
-                                      return (
-                                        <div
-                                          className="absolute inset-0"
-                                          style={{
-                                            backgroundImage: `url(/api/orders/${detailDialog.token}/candidates/${imgIdx}/0)`,
-                                            backgroundSize: `${cols * 100}% ${rows * 100}%`,
-                                            backgroundRepeat: "no-repeat",
-                                            backgroundPosition:
-                                              cols > 1
-                                                ? `${(col / (cols - 1)) * 100}% ${row > 0 ? (row / (rows - 1)) * 100 : 0}%`
-                                                : "0 0",
-                                          }}
+                            {/* 2026-09-01：按 template.outputMode 分支渲染候选预览
+                                - grid（默认）：1 张拼接图 + CSS overlay 切格子，与老行为一致
+                                - separate：N 张独立候选（candIdx 0..candCount-1），
+                                  列出每张缩略图 + 已选高亮 + hover 放大/下载 */}
+                            {detailDialog.template.outputMode === "separate" ? (
+                              <div className="grid grid-cols-2 gap-1.5">
+                                {Array.from({ length: candCount }).map(
+                                  (_, candIdx) => {
+                                    const isSel = selIdx === candIdx;
+                                    const candUrl = `/api/orders/${detailDialog.token}/candidates/${imgIdx}/${candIdx}`;
+                                    return (
+                                      <div
+                                        // biome-ignore lint/suspicious/noArrayIndexKey: 顺序即索引
+                                        key={candIdx}
+                                        className={cn(
+                                          "group/preview relative aspect-square cursor-pointer overflow-hidden rounded-md border bg-slate-100",
+                                          isSel
+                                            ? "border-emerald-400 ring-2 ring-emerald-300"
+                                            : "border-slate-200"
+                                        )}
+                                      >
+                                        {/* biome-ignore lint/performance/noImgElement: 远程预览图 */}
+                                        <img
+                                          src={candUrl}
+                                          alt={`候选 ${candIdx + 1}`}
+                                          className="h-full w-full object-cover"
+                                          loading="lazy"
                                           onClick={() =>
+                                            setLightbox({
+                                              url: candUrl,
+                                              title: `第 ${imgIdx + 1} 张原图 · 候选 #${candIdx + 1}`,
+                                              filename: `${detailDialog.orderNo ?? detailDialog.token}-${imgIdx + 1}-q${candIdx + 1}.png`,
+                                            })
+                                          }
+                                        />
+                                        <span
+                                          className={cn(
+                                            "pointer-events-none absolute top-1 left-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-white",
+                                            isSel
+                                              ? "bg-emerald-600"
+                                              : "bg-slate-700/80"
+                                          )}
+                                        >
+                                          候选 #{candIdx + 1}
+                                        </span>
+                                        {isSel && (
+                                          <span className="pointer-events-none absolute right-1 bottom-1 rounded bg-emerald-500 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                                            已选
+                                          </span>
+                                        )}
+                                        <div className="absolute inset-0 z-20 flex items-center justify-center gap-2 bg-black/0 opacity-0 transition-all group-hover/preview:bg-black/40 group-hover/preview:opacity-100">
+                                          <button
+                                            type="button"
+                                            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/90 text-zinc-700 transition-colors hover:bg-white"
+                                            aria-label="放大查看候选"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setLightbox({
+                                                url: candUrl,
+                                                title: `第 ${imgIdx + 1} 张原图 · 候选 #${candIdx + 1}`,
+                                                filename: `${detailDialog.orderNo ?? detailDialog.token}-${imgIdx + 1}-q${candIdx + 1}.png`,
+                                              });
+                                            }}
+                                          >
+                                            <Maximize2 className="h-4 w-4" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/90 text-zinc-700 transition-colors hover:bg-white"
+                                            aria-label="下载候选"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              void handleDownload(
+                                                candUrl,
+                                                `${detailDialog.orderNo ?? detailDialog.token}-${imgIdx + 1}-q${candIdx + 1}.png`
+                                              );
+                                            }}
+                                          >
+                                            <Download className="h-4 w-4" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    );
+                                  }
+                                )}
+                              </div>
+                            ) : (
+                              /* 宫格模式：实际只存 1 张拼接图，candidates[imgIdx][0]，
+                                用 CSS 网格叠层画格子分割 + 选中高亮，避免误以为是多张独立候选 */
+                              (() => {
+                                const cols =
+                                  candCount === 1
+                                    ? 1
+                                    : candCount === 2
+                                      ? 2
+                                      : candCount === 4
+                                        ? 2
+                                        : 3;
+                                const rows =
+                                  candCount === 1
+                                    ? 1
+                                    : candCount === 2
+                                      ? 1
+                                      : candCount === 4
+                                        ? 2
+                                        : 3;
+                                return (
+                                  <div className="group/preview relative aspect-square cursor-pointer overflow-hidden rounded-md border border-slate-200 bg-slate-100">
+                                    {selIdx !== null ? (
+                                      // 用户已选：显示该格子对应的高清裁剪图
+                                      (() => {
+                                        const col = selIdx % cols;
+                                        const row = Math.floor(selIdx / cols);
+                                        return (
+                                          <div
+                                            className="absolute inset-0"
+                                            style={{
+                                              backgroundImage: `url(/api/orders/${detailDialog.token}/candidates/${imgIdx}/0)`,
+                                              backgroundSize: `${cols * 100}% ${rows * 100}%`,
+                                              backgroundRepeat: "no-repeat",
+                                              backgroundPosition:
+                                                cols > 1
+                                                  ? `${(col / (cols - 1)) * 100}% ${row > 0 ? (row / (rows - 1)) * 100 : 0}%`
+                                                  : "0 0",
+                                            }}
+                                            onClick={() =>
+                                              setLightbox({
+                                                url: `/api/orders/${detailDialog.token}/candidates/${imgIdx}/0`,
+                                                title: `第 ${imgIdx + 1} 张原图 - 已选分镜 #${selIdx + 1}`,
+                                                filename: `${detailDialog.orderNo ?? detailDialog.token}-composite-${imgIdx + 1}-q${selIdx + 1}.png`,
+                                              })
+                                            }
+                                          >
+                                            <span className="pointer-events-none absolute top-1 left-1 rounded bg-emerald-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                                              分镜 #{selIdx + 1}
+                                            </span>
+                                            <span className="pointer-events-none absolute right-1 bottom-1 rounded bg-emerald-500 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                                              已选
+                                            </span>
+                                          </div>
+                                        );
+                                      })()
+                                    ) : (
+                                      // 用户未选：占位提示
+                                      <div className="flex h-full w-full flex-col items-center justify-center text-slate-400">
+                                        <Eye className="mb-1 h-6 w-6" />
+                                        <span className="text-xs">
+                                          用户尚未选择
+                                        </span>
+                                      </div>
+                                    )}
+                                    {/* hover 浮层：放大 / 下载按钮（仅已选时可用） */}
+                                    {selIdx !== null && (
+                                      <div className="absolute inset-0 z-20 flex items-center justify-center gap-2 bg-black/0 opacity-0 transition-all group-hover/preview:bg-black/40 group-hover/preview:opacity-100">
+                                        <button
+                                          type="button"
+                                          className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/90 text-zinc-700 transition-colors hover:bg-white"
+                                          aria-label="放大查看选中分镜"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
                                             setLightbox({
                                               url: `/api/orders/${detailDialog.token}/candidates/${imgIdx}/0`,
                                               title: `第 ${imgIdx + 1} 张原图 - 已选分镜 #${selIdx + 1}`,
                                               filename: `${detailDialog.orderNo ?? detailDialog.token}-composite-${imgIdx + 1}-q${selIdx + 1}.png`,
-                                            })
-                                          }
+                                            });
+                                          }}
                                         >
-                                          <span className="pointer-events-none absolute top-1 left-1 rounded bg-emerald-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white">
-                                            分镜 #{selIdx + 1}
-                                          </span>
-                                          <span className="pointer-events-none absolute right-1 bottom-1 rounded bg-emerald-500 px-1.5 py-0.5 text-[10px] font-medium text-white">
-                                            已选
-                                          </span>
-                                        </div>
-                                      );
-                                    })()
-                                  ) : (
-                                    // 用户未选：占位提示
-                                    <div className="flex h-full w-full flex-col items-center justify-center text-slate-400">
-                                      <Eye className="mb-1 h-6 w-6" />
-                                      <span className="text-xs">
-                                        用户尚未选择
-                                      </span>
-                                    </div>
-                                  )}
-                                  {/* hover 浮层：放大 / 下载按钮（仅已选时可用） */}
-                                  {selIdx !== null && (
-                                    <div className="absolute inset-0 z-20 flex items-center justify-center gap-2 bg-black/0 opacity-0 transition-all group-hover/preview:bg-black/40 group-hover/preview:opacity-100">
-                                      <button
-                                        type="button"
-                                        className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/90 text-zinc-700 transition-colors hover:bg-white"
-                                        aria-label="放大查看选中分镜"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setLightbox({
-                                            url: `/api/orders/${detailDialog.token}/candidates/${imgIdx}/0`,
-                                            title: `第 ${imgIdx + 1} 张原图 - 已选分镜 #${selIdx + 1}`,
-                                            filename: `${detailDialog.orderNo ?? detailDialog.token}-composite-${imgIdx + 1}-q${selIdx + 1}.png`,
-                                          });
-                                        }}
-                                      >
-                                        <Maximize2 className="h-4 w-4" />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/90 text-zinc-700 transition-colors hover:bg-white"
-                                        aria-label="下载选中分镜"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          void handleDownload(
-                                            `/api/orders/${detailDialog.token}/candidates/${imgIdx}/0`,
-                                            `${detailDialog.orderNo ?? detailDialog.token}-composite-${imgIdx + 1}-q${selIdx + 1}.png`
-                                          );
-                                        }}
-                                      >
-                                        <Download className="h-4 w-4" />
-                                      </button>
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })()}
+                                          <Maximize2 className="h-4 w-4" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/90 text-zinc-700 transition-colors hover:bg-white"
+                                          aria-label="下载选中分镜"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            void handleDownload(
+                                              `/api/orders/${detailDialog.token}/candidates/${imgIdx}/0`,
+                                              `${detailDialog.orderNo ?? detailDialog.token}-composite-${imgIdx + 1}-q${selIdx + 1}.png`
+                                            );
+                                          }}
+                                        >
+                                          <Download className="h-4 w-4" />
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })()
+                            )}
                           </div>
                         </div>
                       );

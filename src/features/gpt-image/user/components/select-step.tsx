@@ -20,6 +20,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import type { OrderHistorySnapshotView } from "@/features/gpt-image/lib/types";
+import { CandidateStrip } from "./candidate-strip";
 import { ImageProgress } from "./image-progress";
 import {
   candidateUrl,
@@ -37,6 +38,12 @@ interface SelectStepProps {
   updatedAt: string;
   imageCount: number;
   candidateCount: number;
+  /**
+   * 2026-09-01：模板级候选输出模式。
+   * - "grid"（默认）：Lingting 返 1 张拼接图，用 QuadrantGrid 切格子
+   * - "separate"：Lingting 返 N 张独立候选，用 CandidateStrip 列出
+   */
+  outputMode?: "grid" | "separate";
   /** 每张原图的当前选择（长度 = uploadedImageCount）
    *  - 本地草稿值（未提交）：用户在 SelectStep 内点击但还没确认的候选
    *  - 服务端锁定值（已提交）：partial submit 写入、不可再改
@@ -107,6 +114,7 @@ export function SelectStep({
   updatedAt,
   imageCount,
   candidateCount,
+  outputMode,
   selections,
   selectedCount,
   lockedCount,
@@ -205,10 +213,15 @@ export function SelectStep({
   }, [selections]);
 
   useEffect(() => {
-    const urls: string[] = [
-      originalUrl(token, safeIdx, updatedAt),
-      candidateUrl(token, safeIdx, 0, updatedAt),
-    ];
+    const urls: string[] = [originalUrl(token, safeIdx, updatedAt)];
+    // 2026-09-01：grid 模式仅 candIdx=0（拼接图）；separate 模式全部 candIdx 预热
+    if (outputMode === "separate") {
+      for (let c = 0; c < candidateCount; c++) {
+        urls.push(candidateUrl(token, safeIdx, c, updatedAt));
+      }
+    } else {
+      urls.push(candidateUrl(token, safeIdx, 0, updatedAt));
+    }
     if (safeIdx + 1 < imageCount) {
       urls.push(candidateUrl(token, safeIdx + 1, 0, updatedAt));
     }
@@ -219,7 +232,15 @@ export function SelectStep({
       urls.push(historyCandidateUrl(token, snap.id, safeIdx, snap.createdAt));
     }
     preloadImages(urls);
-  }, [token, updatedAt, safeIdx, imageCount, imageSnapshots]);
+  }, [
+    token,
+    updatedAt,
+    safeIdx,
+    imageCount,
+    imageSnapshots,
+    outputMode,
+    candidateCount,
+  ]);
 
   const handleToggle = useCallback(
     (imageIdx: number, candIdx: number) => {
@@ -410,27 +431,44 @@ export function SelectStep({
           </div>
         )}
 
-        {/* 宫格 / Lightbox 触发 —— 大图区不再叠加任何按钮，避免压住候选格可点区 */}
+        {/* 候选区 —— 2026-09-01 按 template.outputMode 分支：
+            - grid（默认）：QuadrantGrid 1 张拼接图 + CSS 网格切格子
+            - separate：CandidateStrip N 张独立候选
+            历史快照只在 grid 模式下展示（snapshot.candidates[imageIdx][0] 是 1 张拼接图）；
+            separate 模式每个 imageSnapshots 的 N 张候选分别存储，UI 暂不接入历史切换 */}
         <div ref={swipeAreaRef} className="relative">
-          <QuadrantGrid
-            token={token}
-            updatedAt={updatedAt}
-            imageIdx={safeIdx}
-            compositeUrl={
-              viewingCompositeUrl ?? candidateUrl(token, safeIdx, 0, updatedAt)
-            }
-            quadrantCount={
-              (candidateCount === 1 ||
-              candidateCount === 2 ||
-              candidateCount === 4 ||
-              candidateCount === 9
-                ? candidateCount
-                : 4) as 1 | 2 | 4 | 9
-            }
-            selectedQuadrant={isViewingOldSnapshot ? null : currentSelection}
-            onSelect={(q) => handleToggle(safeIdx, q)}
-            disabled={isCurrentLocked}
-          />
+          {outputMode === "separate" ? (
+            <CandidateStrip
+              token={token}
+              updatedAt={updatedAt}
+              imageIdx={safeIdx}
+              candidateCount={candidateCount}
+              selectedCand={isViewingOldSnapshot ? null : currentSelection}
+              disabled={isCurrentLocked || isViewingOldSnapshot}
+              onSelect={(c) => handleToggle(safeIdx, c)}
+            />
+          ) : (
+            <QuadrantGrid
+              token={token}
+              updatedAt={updatedAt}
+              imageIdx={safeIdx}
+              compositeUrl={
+                viewingCompositeUrl ??
+                candidateUrl(token, safeIdx, 0, updatedAt)
+              }
+              quadrantCount={
+                (candidateCount === 1 ||
+                candidateCount === 2 ||
+                candidateCount === 4 ||
+                candidateCount === 9
+                  ? candidateCount
+                  : 4) as 1 | 2 | 4 | 9
+              }
+              selectedQuadrant={isViewingOldSnapshot ? null : currentSelection}
+              onSelect={(q) => handleToggle(safeIdx, q)}
+              disabled={isCurrentLocked}
+            />
+          )}
         </div>
 
         {/* 历史快照切换 —— 放在大图下方，避开可点选区。
@@ -577,6 +615,8 @@ export function SelectStep({
           }}
           imageCount={imageCount}
           candidateCount={candidateCount}
+          // 2026-09-01：让 Lightbox 区分 grid crop vs separate 整图
+          outputMode={outputMode}
           selectedCand={selections[lightbox.imageIdx] ?? null}
           onSelect={(i, c) => {
             handleToggle(i, c);

@@ -48,6 +48,8 @@ export async function listTemplatesWithCounts() {
     candidateCount: t.candidateCount,
     coverUrl: t.coverUrl,
     isActive: t.isActive,
+    // 2026-09-01：候选输出模式（grid 四宫格拼接 vs separate 独立候选）
+    outputMode: (t.outputMode as "grid" | "separate") ?? "grid",
     // Phase A 起新增：image-gen 工作台与 gpt-image 共用表所需字段
     variables: t.variables,
     model: t.model,
@@ -76,6 +78,8 @@ export async function listActiveTemplatesForOrderCreate() {
       candidateCount: promptTemplate.candidateCount,
       coverUrl: promptTemplate.coverUrl,
       isActive: promptTemplate.isActive,
+      // 2026-09-01：候选输出模式
+      outputMode: promptTemplate.outputMode,
       // Phase A 起新增：image-gen 工作台复用
       variables: promptTemplate.variables,
       model: promptTemplate.model,
@@ -95,6 +99,7 @@ export async function listActiveTemplatesForOrderCreate() {
     candidateCount: t.candidateCount,
     coverUrl: t.coverUrl,
     isActive: t.isActive,
+    outputMode: (t.outputMode as "grid" | "separate") ?? "grid",
     // Phase A 起新增
     variables: t.variables,
     model: t.model,
@@ -121,6 +126,7 @@ export async function listActivePromptTemplatesForWorkbench() {
       candidateCount: promptTemplate.candidateCount,
       coverUrl: promptTemplate.coverUrl,
       isActive: promptTemplate.isActive,
+      outputMode: promptTemplate.outputMode,
       variables: promptTemplate.variables,
       model: promptTemplate.model,
       price: promptTemplate.price,
@@ -140,6 +146,7 @@ export async function listActivePromptTemplatesForWorkbench() {
     candidateCount: t.candidateCount,
     coverUrl: t.coverUrl,
     isActive: t.isActive,
+    outputMode: (t.outputMode as "grid" | "separate") ?? "grid",
     variables: t.variables,
     model: t.model,
     price: t.price,
@@ -156,6 +163,8 @@ export async function createTemplate(input: {
   candidateCount: number;
   coverUrl: string | null;
   isActive: boolean;
+  // 2026-09-01：候选输出模式（默认 'grid' 兼容老模板）
+  outputMode?: "grid" | "separate";
   // Phase A 起新增：image-gen 工作台复用
   variables?: import("@/db/image-gen-types").PromptVariable[];
   model?: string | null;
@@ -172,6 +181,7 @@ export async function createTemplate(input: {
       candidateCount: input.candidateCount,
       coverUrl: input.coverUrl,
       isActive: input.isActive,
+      outputMode: input.outputMode ?? "grid",
       variables: input.variables ?? [],
       model: input.model ?? "doubao",
       price: input.price ?? 0,
@@ -192,6 +202,8 @@ export async function updateTemplate(
     candidateCount: number | undefined;
     coverUrl: string | null | undefined;
     isActive: boolean | undefined;
+    // 2026-09-01：候选输出模式
+    outputMode?: "grid" | "separate" | undefined;
     // Phase A 起新增：image-gen 工作台复用
     variables?: import("@/db/image-gen-types").PromptVariable[] | undefined;
     model?: string | null | undefined;
@@ -291,6 +303,8 @@ export async function createOrder(input: {
       description: true,
       coverUrl: true,
       candidateCount: true,
+      // 2026-09-01：orderView.template.outputMode 依赖
+      outputMode: true,
     },
   });
   if (!template) throw new Error("模板不存在");
@@ -378,6 +392,8 @@ export async function createOrder(input: {
       description: template.description,
       coverUrl: template.coverUrl,
       candidateCount: template.candidateCount,
+      // 2026-09-01：让 admin/user UI 可按模式分支渲染
+      outputMode: (template.outputMode as "grid" | "separate") ?? "grid",
     },
   };
 }
@@ -453,6 +469,8 @@ export async function listOrders(filters: {
       tDescription: promptTemplate.description,
       tCoverUrl: promptTemplate.coverUrl,
       tCandidateCount: promptTemplate.candidateCount,
+      // 2026-09-01：模板级候选输出模式
+      tOutputMode: promptTemplate.outputMode,
     })
     .from(promptOrder)
     .leftJoin(promptTemplate, eq(promptOrder.templateId, promptTemplate.id))
@@ -502,6 +520,8 @@ export async function listOrders(filters: {
         description: o.tDescription ?? "",
         coverUrl: o.tCoverUrl,
         candidateCount: o.tCandidateCount ?? 4,
+        // 2026-09-01：admin/user UI 按模式分支渲染
+        outputMode: (o.tOutputMode as "grid" | "separate") ?? "grid",
       },
     };
   });
@@ -615,6 +635,8 @@ export async function updateOrder(input: {
       description: true,
       coverUrl: true,
       candidateCount: true,
+      // 2026-09-01：admin/user UI 按模式分支渲染
+      outputMode: true,
     },
   });
 
@@ -668,6 +690,8 @@ export async function updateOrder(input: {
       description: template?.description ?? "",
       coverUrl: template?.coverUrl ?? null,
       candidateCount: template?.candidateCount ?? 4,
+      // 2026-09-01：admin/user UI 按模式分支渲染
+      outputMode: (template?.outputMode as "grid" | "separate") ?? "grid",
     },
   };
 }

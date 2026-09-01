@@ -239,6 +239,10 @@ async function persistWellapiDataToR2(
  * 部检测 url/b64 两种返回形态，b64 路径走 persistBase64ToR2 落库后
  * 透明返 { kind: "url", url }。
  *
+ * 2026-09-01：增加 n 参数（默认 1 保持兼容）。模板 outputMode="separate" 时
+ * 调用方传 candidateCount，让 Lingting 一次返 N 张独立图（替代宫格模式）；
+ * "grid" 模式仍走 n=1 + prompt 末尾追加宫格指令。
+ *
  * 失败直接抛错，由调用方决定如何落库。
  */
 export async function submitLingtingTask(
@@ -246,7 +250,9 @@ export async function submitLingtingTask(
   imageUrl: string,
   prompt: string,
   size: string,
-  imageIdx: number
+  imageIdx: number,
+  // 2026-09-01：n=1 = 宫格模式（默认），n>1 = 独立候选模式
+  n: number = 1
 ): Promise<SubmitResult> {
   if (!LINGTING_API_KEY) {
     throw new Error("LINGTING_API_KEY 未配置");
@@ -288,7 +294,9 @@ export async function submitLingtingTask(
   );
   form.append("model", "gpt-image-2");
   form.append("prompt", prompt);
-  form.append("n", "1");
+  // 2026-09-01：n 按 outputMode 传 —— grid 模式仍是 1（让 Lingting 自己拼宫格），
+  // separate 模式传 candidateCount（一次返 N 张独立候选）。
+  form.append("n", String(n));
   form.append("size", size);
   // 注意：gpt-image 系列固定返 b64_json，response_format 参数无效。
   // 部分账户在 dall-e-2 模型上仍接受此参数，但 gpt-image-2 路径会被忽略，
@@ -492,8 +500,22 @@ export async function submitGeneration(
   }
 
   const uploaded = parseUploadedImages(order.uploadedImages);
-  const layout = buildGridLayout(candidateCount);
-  const compositePrompt = order.template.prompt + layout.suffix;
+  // 2026-09-01：按模板 outputMode 分支
+  //  - "grid"（默认）：n=1 + prompt 末尾追加宫格指令，让 Lingting 一次返 1 张拼接图
+  //  - "separate"：n=candidateCount + 不追加指令，让 Lingting 一次返 N 张独立候选
+  // 老模板 DB 默认 'grid'，行为不变。
+  const outputMode =
+    (order.template.outputMode as "grid" | "separate") ?? "grid";
+  let effectivePrompt: string;
+  let n: number;
+  if (outputMode === "separate") {
+    effectivePrompt = order.template.prompt;
+    n = candidateCount;
+  } else {
+    const layout = buildGridLayout(candidateCount);
+    effectivePrompt = order.template.prompt + layout.suffix;
+    n = 1;
+  }
   const size = order.template.size;
 
   // uploadCount 基本为 1；多图时并行 submit，避免串行放大请求耗时
@@ -520,9 +542,10 @@ export async function submitGeneration(
           const result = await submitLingtingTask(
             orderId,
             imageUrl,
-            compositePrompt,
+            effectivePrompt,
             size,
-            imageIdx
+            imageIdx,
+            n
           );
           if (attempt > 1) {
             logger.info({ orderId, imageIdx, attempt }, "提交生图任务重试成功");

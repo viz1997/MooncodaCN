@@ -909,6 +909,18 @@ export const promptTemplate = pgTable("prompt_template", {
   candidateCount: integer("candidate_count").notNull().default(4),
   coverUrl: text("cover_url"),
   isActive: boolean("is_active").notNull().default(true),
+  /**
+   * 2026-09-01：候选输出模式。两种都保留，让模板作者按风格选：
+   * - "grid"（默认，兼容旧模板）：n=1 + prompt 末尾追加宫格指令，
+   *   让 Lingting 一次返 1 张拼接图，candidates[imageIdx] = [compositeUrl]，
+   *   UI 用 QuadrantGrid CSS overlay 切分候选
+   * - "separate"：n=candidateCount + 不追加指令，让 Lingting 一次返 N 张独立图，
+   *   candidates[imageIdx] = [url1, ..., urlN]，UI 直接遍历渲染
+   *
+   * 加列默认值 "grid"，老模板一行不动；新建模板时可在 admin UI 切到 separate。
+   * 详见 [[gpt-image-output-mode]]
+   */
+  outputMode: text("output_mode").notNull().default("grid"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

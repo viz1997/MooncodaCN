@@ -32,6 +32,13 @@ export interface PromptTemplateView {
   coverUrl: string | null;
   isActive: boolean;
   /**
+   * 2026-09-01：候选输出模式（参见 DB schema 注释）。
+   * - "grid"（默认）：Lingting 返 1 张拼接图，UI 用 QuadrantGrid CSS overlay 切分
+   * - "separate"：Lingting 返 N 张独立图，UI 遍历渲染
+   * 老模板 DB 默认 'grid'；新建/编辑时可在 admin UI 切。
+   */
+  outputMode?: "grid" | "separate";
+  /**
    * 提示词变量定义（Phase A 起 image-gen 工作台与 gpt-image 共用 promptTemplate 表后新增）。
    * 让管理员能配置 {{变量}} 模板，工作台用户在生成前填值替换。
    * gpt-image 用户端无消费但仍保留字段以保持 admin UI 一致。
@@ -148,6 +155,11 @@ export interface OrderView {
     description: string;
     coverUrl: string | null;
     candidateCount: number;
+    /**
+     * 2026-09-01：候选输出模式（参见 PromptTemplateView.outputMode）。
+     * UI 用它分支：grid 走 QuadrantGrid 切 1 张拼接图；separate 遍历 N 张独立候选。
+     */
+    outputMode?: "grid" | "separate";
   };
 }
 

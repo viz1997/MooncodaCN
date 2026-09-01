@@ -67,6 +67,8 @@ export function TemplateFormDialog({
   const [prompt, setPrompt] = useState("");
   const [size, setSize] = useState<string>("1024x1024");
   const [candidateCount, setCandidateCount] = useState<number>(4);
+  // 2026-09-01：候选输出模式（grid 四宫格拼接 vs separate 独立候选）
+  const [outputMode, setOutputMode] = useState<"grid" | "separate">("grid");
   const [coverUrl, setCoverUrl] = useState("");
   const [isActive, setIsActive] = useState(true);
   // Phase A 起新增：image-gen 工作台复用 —— {{变量}} + 推荐模型 + 价格
@@ -83,6 +85,8 @@ export function TemplateFormDialog({
       setPrompt(template.prompt ?? "");
       setSize(template.size);
       setCandidateCount(template.candidateCount);
+      // 2026-09-01：outputMode 老数据兜底 "grid"
+      setOutputMode(template.outputMode ?? "grid");
       setCoverUrl(template.coverUrl ?? "");
       setIsActive(template.isActive);
       setVariables(template.variables ?? []);
@@ -94,6 +98,7 @@ export function TemplateFormDialog({
       setPrompt("");
       setSize("1024x1024");
       setCandidateCount(4);
+      setOutputMode("grid");
       setCoverUrl("");
       setIsActive(true);
       setVariables([]);
@@ -186,6 +191,8 @@ export function TemplateFormDialog({
         prompt: prompt.trim(),
         size: size as (typeof IMAGE_SIZES)[number]["value"],
         candidateCount,
+        // 2026-09-01：候选输出模式
+        outputMode,
         coverUrl: coverUrl.trim() || null,
         isActive,
         // Phase A 起新增
@@ -398,7 +405,33 @@ export function TemplateFormDialog({
               }))}
             />
             <p className="text-xs text-muted-foreground mt-1">
-              单次生图返回的网格图数量
+              单次生图返回的候选数量
+            </p>
+          </Form.Item>
+
+          {/* 2026-09-01：候选输出模式（grid 宫格拼接 vs separate 独立候选） */}
+          <Form.Item label="候选输出模式" className="!mb-0">
+            <Select
+              value={outputMode}
+              onChange={(v) => setOutputMode(v)}
+              className="w-full"
+              options={[
+                {
+                  value: "grid",
+                  label: "宫格拼接（1 张拼接图，CSS 切候选）",
+                },
+                {
+                  value: "separate",
+                  label: "独立候选（N 张独立图，各自可选）",
+                },
+              ]}
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              grid 模式依赖模型听懂宫格指令；separate 模式按
+              <code className="mx-1 rounded bg-muted px-1 text-xs">
+                n=candidateCount
+              </code>
+              一次返 N 张独立候选
             </p>
           </Form.Item>
         </div>

@@ -28,6 +28,13 @@ interface LightboxProps {
   onTargetChange: (t: LightboxTarget) => void;
   imageCount: number;
   candidateCount: number;
+  /**
+   * 2026-09-01：模板级候选输出模式。
+   * - "grid"（默认）：candidateCount>1 时用 CSS crop 切拼接图
+   * - "separate"：N 张独立候选，按 candIdx 直接渲染整张图
+   * 未传 = 视为 "grid"，与历史行为一致。
+   */
+  outputMode?: "grid" | "separate" | undefined;
   selectedCand: number | null;
   readOnly?: boolean;
   onSelect: (imageIdx: number, candIdx: number) => void;
@@ -45,10 +52,13 @@ export function Lightbox({
   onTargetChange,
   imageCount,
   candidateCount,
+  outputMode,
   selectedCand,
   readOnly = false,
   onSelect,
 }: LightboxProps) {
+  // 2026-09-01：separate 模式走 N 张独立图，不要走 CSS crop 宫格切片
+  const useGridCrop = outputMode !== "separate" && candidateCount > 1;
   const { imageIdx, candIdx } = target;
   const reduce = useReducedMotion();
   const [compareMode, setCompareMode] = useState(false);
@@ -170,19 +180,19 @@ export function Lightbox({
   /**
    * 宫格模式下用 background-image 裁出对应格子，避免把整张拼接图等比缩小
    * （拼接图是 1 张图，候选是其中一块，缩小后整图小到看不清细节）。
+   * separate 模式下整张候选本身就是独立图，不需要 crop。
    */
-  const candidateCropStyle: React.CSSProperties =
-    candidateCount > 1
-      ? {
-          backgroundImage: `url(${currentSrc})`,
-          backgroundSize: `${cols * 100}% ${rows * 100}%`,
-          backgroundRepeat: "no-repeat",
-          backgroundPosition:
-            cols > 1
-              ? `${(col / (cols - 1)) * 100}% ${row > 0 ? (row / (rows - 1)) * 100 : 0}%`
-              : "0 0",
-        }
-      : {};
+  const candidateCropStyle: React.CSSProperties = useGridCrop
+    ? {
+        backgroundImage: `url(${currentSrc})`,
+        backgroundSize: `${cols * 100}% ${rows * 100}%`,
+        backgroundRepeat: "no-repeat",
+        backgroundPosition:
+          cols > 1
+            ? `${(col / (cols - 1)) * 100}% ${row > 0 ? (row / (rows - 1)) * 100 : 0}%`
+            : "0 0",
+      }
+    : {};
 
   const fade = reduce
     ? {}
@@ -311,7 +321,7 @@ export function Lightbox({
                   </figcaption>
                 </figure>
                 <figure className="flex min-h-0 flex-col items-center justify-center gap-1.5">
-                  {candidateCount > 1 ? (
+                  {useGridCrop ? (
                     <div
                       aria-label={`第 ${imageIdx + 1} 张照片的效果图 ${candIdx + 1}`}
                       className="max-h-full min-h-0 w-auto max-w-full rounded-lg"
@@ -335,7 +345,7 @@ export function Lightbox({
             ) : (
               <>
                 <AnimatePresence mode="wait" initial={false}>
-                  {peeking || candidateCount === 1 ? (
+                  {peeking || !useGridCrop ? (
                     <motion.img
                       key={`${imageIdx}-${candIdx}-${peeking ? "o" : "c"}`}
                       {...fade}

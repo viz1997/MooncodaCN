@@ -209,6 +209,8 @@ function MockOrderContent({ order }: { order: OrderView }) {
                 updatedAt={order.updatedAt}
                 imageCount={uploadedCount}
                 candidateCount={candidateCount}
+                // 2026-09-01：mock 视图默认 grid（演示拼接图模式）
+                outputMode={order.template.outputMode ?? "grid"}
                 selections={selection.selections}
                 selectedCount={selection.selectedCount}
                 lockedCount={selection.lockedCount}

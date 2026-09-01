@@ -221,6 +221,8 @@ function UserOrderContent({
                 updatedAt={order.updatedAt}
                 imageCount={uploadedCount}
                 candidateCount={candidateCount}
+                // 2026-09-01：模板级候选输出模式分支
+                outputMode={order.template.outputMode ?? "grid"}
                 selections={selection.selections}
                 selectedCount={selection.selectedCount}
                 lockedCount={selection.lockedCount}
