@@ -145,6 +145,13 @@ type GenerationLog = {
   status: "success" | "failed";
   images: GeneratedImage[];
   thumbnails: string[];
+  /**
+   * 2026-08-31：自动拼接的宫格大图（与 images 并存的另一种视图）。刷新页面后
+   * preview 一个 log 时，stitchedComposite 会一并恢复到右侧 results 区顶部，
+   * 避免用户看到的"刷新后回到 N 张独立图"（用户原话"自动拼接是多张图拼接成
+   * 一张宫格图"）。仅 autoStitch 开 + ≥2 张成功才有值。
+   */
+  stitchedComposite?: GeneratedImage;
 };
 
 type GenerationLogConfig = Pick<
@@ -385,6 +392,11 @@ export function ImageWorkbench() {
     // 看不到。现在改为：results 数组保留全部 success 原图，composite 单独
     // 存为 stitchedComposite；结果区顶部展示拼接大图、下面展示 N 张原图
     // 网格。失败（任一张图解码/CORS 失败）静默回退，不打 composite。
+    //
+    // 2026-08-31：composite 提到外层作用域 —— 后面 buildLog 要把它一起写进
+    // log，刷新后 preview 这条 log 时能把 stitchedComposite 恢复到右侧结果区
+    // 顶部，避免"刷新后回到 N 张独立图"。
+    let compositeForLog: GeneratedImage | undefined;
     if (effectiveConfig.autoStitch && successImages.length >= 2) {
       try {
         const compositeDataUrl = await stitchToGrid(
@@ -399,6 +411,7 @@ export function ImageWorkbench() {
           mimeType: "image/png",
         };
         setStitchedComposite(composite);
+        compositeForLog = composite;
       } catch (caught) {
         console.warn("[workbench] stitch failed:", caught);
         setStitchedComposite(null);
@@ -443,6 +456,9 @@ export function ImageWorkbench() {
           failCount,
           status: successCount ? "success" : "failed",
           images: logImages,
+          // 2026-08-31：拼接大图随 log 一起持久化，刷新后 preview 这条 log 时
+          // 能恢复"顶部宫格大图"。compositeForLog 仅在 autoStitch 成功时才有值
+          stitchedComposite: compositeForLog,
         })
       );
       successCount
@@ -597,6 +613,10 @@ export function ImageWorkbench() {
     setResults(
       log.images.map((image) => ({ id: image.id, status: "success", image }))
     );
+    // 2026-08-31：刷新页面后 preview 一条 log，把当时的拼接大图也灌回 state。
+    // 没有这步，刷新后 stitchedComposite 是 null，用户看到 N 张独立图，
+    // 实际生成时却是宫格形态 —— 与"自动拼接"产品定义不符。
+    setStitchedComposite(log.stitchedComposite ?? null);
   };
 
   const buildRequestSnapshot = (options?: { batchCount?: number }) => {
@@ -1786,6 +1806,9 @@ function buildLog({
   failCount,
   status,
   images,
+  // 2026-08-31：拼接大图持久化到 log —— 刷新后 preview 这条 log 时能把
+  // stitchedComposite 一并灌回去，右侧结果区恢复"顶部宫格大图"形态。
+  stitchedComposite,
 }: {
   prompt: string;
   model: string;
@@ -1796,6 +1819,7 @@ function buildLog({
   failCount: number;
   status: GenerationLog["status"];
   images: GeneratedImage[];
+  stitchedComposite?: GeneratedImage;
 }): GenerationLog {
   const logConfig = {
     model: config.model,
@@ -1822,5 +1846,7 @@ function buildLog({
     status,
     images,
     thumbnails: images.map((image) => image.dataUrl).filter(Boolean),
+    // 拼接大图：有才挂；用条件 spread 避免 exactOptionalPropertyTypes 报错
+    ...(stitchedComposite ? { stitchedComposite } : {}),
   };
 }
