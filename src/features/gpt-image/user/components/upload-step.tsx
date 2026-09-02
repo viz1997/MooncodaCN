@@ -314,7 +314,18 @@ export function UploadStep({
 
             {!quotaFull && (
               <p className="text-center text-xs text-stone-500">
-                本订单还差 {totalCapacity - uploadedImageCount} 张未上传
+                {/* 2026-09-02：原写"本订单还差 N 张未上传"被用户误读成"必须一次
+                  传满 N 张才能生成"。改为批次进度 + 总进度，避免歧义：
+                  - 已上传 X / totalCapacity 张
+                  - 第 currentBatch / uploadCount 批
+                  - 当前批可传 1~imagesPerUpload 张（不必填满），提交后进下一批 */}
+                订单共 {uploadCount} 批 × {imagesPerUpload} 张，已上传{" "}
+                {uploadedImageCount} / {totalCapacity} 张（当前第{" "}
+                {Math.min(
+                  uploadCount,
+                  Math.floor(uploadedImageCount / imagesPerUpload) + 1
+                )}{" "}
+                批）
               </p>
             )}
           </div>
