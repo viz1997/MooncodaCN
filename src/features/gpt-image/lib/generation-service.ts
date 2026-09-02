@@ -320,6 +320,14 @@ export async function submitLingtingTask(
 
   if (!submitRes.ok) {
     const text = await submitRes.text().catch(() => "");
+    // 2026-09-02：Lingting/WellAPI 对 multipart body 限制约 8MB，超过会返 413。
+    // 前端 handleFileSelect / handleFiles / uploadFile 已经先 resize 到 ≤5MB；
+    // 这里仍命中意味着上游对当前账号限制更严，给用户可操作提示。
+    if (submitRes.status === 413) {
+      throw new Error(
+        `Lingting 提交失败：HTTP 413（参考图过大，请压缩到 5MB 以下再试）${text.slice(0, 100)}`
+      );
+    }
     throw new Error(
       `Lingting 提交失败：HTTP ${submitRes.status} ${text.slice(0, 200)}`
     );

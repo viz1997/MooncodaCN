@@ -22,7 +22,10 @@ const ALLOWED_TYPES = new Set([
   "image/png",
   "image/webp",
 ]);
-const MAX_BYTES = 10 * 1024 * 1024;
+// 2026-09-02：上限统一 5MB —— Lingting/WellAPI `/v1/images/edits` multipart body
+// 上限约 8MB，前端 10MB 会被上游返 413。前端会先客户端降采样到 ≤5MB
+// 再 presign，这里与服务端 MAX_REF_IMAGE_BYTES 保持单点常量。
+const MAX_BYTES = 5 * 1024 * 1024;
 
 interface PresignRequestBody {
   contentType?: string;
@@ -79,7 +82,11 @@ export async function POST(req: NextRequest) {
 
   if (typeof body.size === "number" && body.size > MAX_BYTES) {
     return NextResponse.json(
-      { success: false, error: "文件过大，最大 10MB", code: "FILE_TOO_LARGE" },
+      {
+        success: false,
+        error: "文件过大，最大 5MB（请先在客户端压缩）",
+        code: "FILE_TOO_LARGE",
+      },
       { status: 400 }
     );
   }

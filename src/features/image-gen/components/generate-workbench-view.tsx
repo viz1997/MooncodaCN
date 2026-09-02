@@ -49,7 +49,6 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -96,6 +95,7 @@ import {
   thumbnailUrl,
 } from "@/features/image-gen/lib/thumbnail-url";
 import { useToast } from "@/hooks/use-toast";
+import { resizeImage, wrapBlobAsFile } from "@/lib/image-client-resize";
 import { cn } from "@/lib/utils";
 
 // ============ 类型 ============
@@ -1197,6 +1197,8 @@ export function GenerateWorkbenchView({
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
+      // 10MB 是浏览器 File API / canvas resize 的 memory 兜底 —— 超过此值
+      // 即便降到 ≤5MB 也要先拒，避免 tab OOM。
       toast.error("文件过大，最大 10MB");
       return;
     }
@@ -1213,27 +1215,52 @@ export function GenerateWorkbenchView({
       fileSize: file.size,
     });
 
-    // 异步上传到 R2 —— 拿到 publicUrl 才能让 submitLingtingTask 在服务端 fetch。
-    // 失败时 publicUrl 保持 null，handleGenerate 会拒绝提交并 toast 报错。
-    void uploadFileToR2(file)
-      .then((publicUrl) => {
+    // 异步：先客户端降采样再上传 R2 —— Lingting/WellAPI `/v1/images/edits`
+    // 对 multipart body 限制约 8MB，9MB 原图会被上游返 413 拒收。
+    // 服务端不能做 resize（sharp 被禁用，submitLingtingTask 跑在 Inngest 上），
+    // 唯一可行的降采样入口在这里。
+    void (async () => {
+      let toUpload: File = file;
+      let finalSize = file.size;
+      try {
+        const resized = await resizeImage(file);
+        if (resized.resized) {
+          // 仅当实际压缩 ≥5% 才提示，避免无意义的 toast 噪音
+          if (resized.finalBytes < resized.originalBytes * 0.95) {
+            toast.success(
+              `已自动压缩 ${(resized.originalBytes / 1024 / 1024).toFixed(1)}MB → ${(resized.finalBytes / 1024 / 1024).toFixed(1)}MB`
+            );
+          }
+          toUpload = wrapBlobAsFile(resized.blob, file.name, file.type);
+          finalSize = resized.finalBytes;
+        }
+      } catch (err) {
+        // resize 失败：原图已 ≤10MB，按原图上传；Lingting 端可能再 413 但至少 try 一下
+        // eslint-disable-next-line no-console
+        console.warn("[workbench] resize failed, uploading original:", err);
+      }
+
+      try {
+        const publicUrl = await uploadFileToR2(toUpload);
         setUploadedImage((prev) =>
-          prev && prev.file === file
-            ? { ...prev, publicUrl, uploading: null }
+          prev && prev.fileName === file.name
+            ? { ...prev, publicUrl, uploading: null, fileSize: finalSize }
             : prev
         );
         if (!publicUrl) {
           toast.error("参考图上传失败，请重试");
         }
-      })
-      .catch((err) => {
+      } catch (err) {
         // eslint-disable-next-line no-console
         console.warn("[workbench] upload to R2 failed:", err);
         setUploadedImage((prev) =>
-          prev && prev.file === file ? { ...prev, uploading: null } : prev
+          prev && prev.fileName === file.name
+            ? { ...prev, uploading: null }
+            : prev
         );
         toast.error(err instanceof Error ? err.message : "上传失败");
-      });
+      }
+    })();
   };
 
   const handleRemoveUpload = () => {
@@ -2051,7 +2078,6 @@ export function GenerateWorkbenchView({
                         // 重命名模式：input + 状态行
                         <span className="min-w-0 flex-1 flex flex-col gap-1">
                           <input
-                            autoFocus
                             value={editingName}
                             onChange={(e) => setEditingName(e.target.value)}
                             onBlur={handleSaveRename}

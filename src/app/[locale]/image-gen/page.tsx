@@ -19,6 +19,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { resizeImage, wrapBlobAsFile } from "@/lib/image-client-resize";
 import { cn } from "@/lib/utils";
 
 interface PublicMask {
@@ -248,7 +249,7 @@ export default function PublicImageGenPage() {
     pollTimerRef.current = setTimeout(tick, immediate ? 0 : POLL_INTERVAL);
   };
 
-  useEffect(() => () => clearPoll(), []);
+  useEffect(() => () => clearPoll(), [clearPoll]);
 
   useEffect(() => {
     fetch("/api/public/generate")
@@ -282,7 +283,7 @@ export default function PublicImageGenPage() {
     setPendingModelName(task.maskName);
     pollTask(task, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [masks]);
+  }, [masks, pollTask, toast]);
 
   const handleFileSelect = async (file: File | undefined) => {
     if (!file) return;
@@ -308,6 +309,26 @@ export default function PublicImageGenPage() {
     }
 
     const previewUrl = URL.createObjectURL(file);
+    // 客户端降采样到 ≤5MB —— 与 /api/public/upload 服务端 MAX_BYTES 对齐
+    // 避免 Lingting/WellAPI `/v1/images/edits` 8MB body 上限撞 413
+    let toUpload: File = file;
+    try {
+      const resized = await resizeImage(file);
+      if (resized.resized) {
+        if (resized.finalBytes < resized.originalBytes * 0.95) {
+          const origMb = (resized.originalBytes / 1024 / 1024).toFixed(1);
+          const finalMb = (resized.finalBytes / 1024 / 1024).toFixed(1);
+          toast({
+            title: "已自动压缩",
+            description: `${file.name} ${origMb}MB → ${finalMb}MB`,
+          });
+        }
+        toUpload = wrapBlobAsFile(resized.blob, file.name, file.type);
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("[image-gen demo] resize failed, uploading original:", err);
+    }
     setUploading(true);
 
     const BASE64_MAX_BYTES = 3 * 1024 * 1024;
@@ -317,9 +338,9 @@ export default function PublicImageGenPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contentType: file.type,
-          size: file.size,
-          ext: file.name.split(".").pop(),
+          contentType: toUpload.type,
+          size: toUpload.size,
+          ext: toUpload.name.split(".").pop(),
         }),
       });
       const presign = await presignRes.json();
@@ -328,13 +349,13 @@ export default function PublicImageGenPage() {
         const putRes = await fetch(presign.uploadUrl, {
           method: "PUT",
           headers: presign.headers,
-          body: file,
+          body: toUpload,
         });
         if (!putRes.ok) throw new Error(`R2 上传失败: ${putRes.status}`);
         setUploadedImage({
           publicUrl: presign.publicUrl,
           previewUrl,
-          fileName: file.name,
+          fileName: toUpload.name,
         });
         toast({ title: "参考图已上传" });
         setResult(null);
@@ -342,7 +363,7 @@ export default function PublicImageGenPage() {
         return;
       }
       if (presign.code === "R2_NOT_CONFIGURED") {
-        if (file.size > BASE64_MAX_BYTES) {
+        if (toUpload.size > BASE64_MAX_BYTES) {
           throw new Error(
             "参考图过大且 R2 未配置，请配置 R2 环境变，或使用小于 3MB 的图片"
           );
@@ -352,7 +373,7 @@ export default function PublicImageGenPage() {
         throw new Error(presign.error || "R2 签名失败");
       }
     } catch (err) {
-      if (file.size > BASE64_MAX_BYTES) {
+      if (toUpload.size > BASE64_MAX_BYTES) {
         setUploading(false);
         URL.revokeObjectURL(previewUrl);
         const msg = err instanceof Error ? err.message : "参考图上传失败";

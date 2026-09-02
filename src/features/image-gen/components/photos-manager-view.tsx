@@ -34,6 +34,7 @@ import {
 } from "@/features/image-gen/actions";
 import { SafeImage } from "@/features/image-gen/components/safe-image";
 import { thumbnailUrl } from "@/features/image-gen/lib/thumbnail-url";
+import { resizeImage, wrapBlobAsFile } from "@/lib/image-client-resize";
 import { cn } from "@/lib/utils";
 
 interface PhotosManagerViewProps {
@@ -118,19 +119,45 @@ export function PhotosManagerView({ initialPhotos }: PhotosManagerViewProps) {
         return;
       }
       if (file.size > 10 * 1024 * 1024) {
+        // 10MB 硬卡：避免浏览器 File API / canvas OOM；5~10MB 走 resizeImage
+        // 自动压到 ≤5MB（见下方），与 Lingting/WellAPI 8MB body 上限对齐
         toast.error("文件过大，最大 10MB");
         return;
       }
 
       setUploading(true);
       try {
-        const ext = file.name.split(".").pop() ?? "jpg";
+        // 客户端降采样到 ≤5MB —— 与 /api/image/upload 的服务端 MAX_BYTES 对齐
+        let toUpload: File = file;
+        let finalSize = file.size;
+        try {
+          const resized = await resizeImage(file);
+          if (resized.resized) {
+            if (resized.finalBytes < resized.originalBytes * 0.95) {
+              const origMb = (resized.originalBytes / 1024 / 1024).toFixed(1);
+              const finalMb = (resized.finalBytes / 1024 / 1024).toFixed(1);
+              toast.success(
+                `已自动压缩 ${file.name} ${origMb}MB → ${finalMb}MB`
+              );
+            }
+            toUpload = wrapBlobAsFile(resized.blob, file.name, file.type);
+            finalSize = resized.finalBytes;
+          }
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            "[photos-manager] resize failed, uploading original:",
+            err
+          );
+        }
+
+        const ext = toUpload.name.split(".").pop() ?? "jpg";
         const presignRes = await fetch("/api/image/upload", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            contentType: file.type,
-            size: file.size,
+            contentType: toUpload.type,
+            size: toUpload.size,
             ext,
           }),
         });
@@ -141,22 +168,23 @@ export function PhotosManagerView({ initialPhotos }: PhotosManagerViewProps) {
 
         const uploadRes = await fetch(presign.uploadUrl, {
           method: "PUT",
-          body: file,
-          headers: { "Content-Type": file.type },
+          body: toUpload,
+          headers: { "Content-Type": toUpload.type },
         });
         if (!uploadRes.ok) {
           throw new Error("文件上传失败");
         }
 
+        // fileSize 写入压缩后大小：UI 显示与 R2 实际存储一致
         createPhoto({
-          fileName: file.name,
+          fileName: toUpload.name,
           fileUrl: presign.publicUrl,
           thumbnailUrl: presign.publicUrl,
           md5: "",
           width: 0,
           height: 0,
           format: ext,
-          fileSize: file.size,
+          fileSize: finalSize,
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "上传失败";

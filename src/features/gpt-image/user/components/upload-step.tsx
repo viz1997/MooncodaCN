@@ -3,7 +3,10 @@
 import { ArrowRight, ImageIcon, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { resizeImage, wrapBlobAsFile } from "@/lib/image-client-resize";
 
+// 单张参考图硬上限：超过此值直接 toast 拒绝（避免浏览器 File API / canvas OOM）
+// 5MB ~ 10MB 之间的图由 handleConfirm 的 resizeImage 自动压到 ≤5MB
 const MAX_BYTES = 10 * 1024 * 1024;
 const ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
 
@@ -35,7 +38,7 @@ interface UploadStepProps {
  *
  * 保留原 upload-stage 的全部业务逻辑：
  * - 多文件上传（受 imagesPerUpload 限制）
- * - 10MB 限制 / 张
+ * - 5MB 上限 / 张（前端先 resize 再上传，避开 Lingting/WellAPI 上游 8MB body 限制）
  * - blob URL 预览（不用 FileReader，避免 base64）
  * - 父组件负责 R2 预签名 + PUT + /upload
  */
@@ -115,6 +118,8 @@ export function UploadStep({
         continue;
       }
       if (file.size > MAX_BYTES) {
+        // 10MB 硬卡：避免浏览器 File API / canvas resize 的 memory OOM；
+        // 5~10MB 之间的图会自动压缩到 5MB（见 handleConfirm 的 resizeImage）
         toast.error(`${file.name} 超过 10MB`);
         continue;
       }
@@ -168,7 +173,30 @@ export function UploadStep({
 
   const handleConfirm = async () => {
     if (previews.length === 0) return;
-    const files = previews.map((p) => p.file);
+    // 客户端降采样到 ≤5MB：避开 Lingting/WellAPI `/v1/images/edits` 的
+    // 8MB multipart body 上限。服务端 submitLingtingTask 跑在 Inngest 上，
+    // 不能在 server 侧 resize；sharp 被部署 hardblock（Vercel libvips 装不稳）。
+    // 任何一张 resize 失败就按原图上传（≤10MB），由 presign 端再做兜底。
+    const files: File[] = [];
+    for (const p of previews) {
+      try {
+        const resized = await resizeImage(p.file);
+        if (resized.resized) {
+          if (resized.finalBytes < resized.originalBytes * 0.95) {
+            const origMb = (resized.originalBytes / 1024 / 1024).toFixed(1);
+            const finalMb = (resized.finalBytes / 1024 / 1024).toFixed(1);
+            toast.success(`已自动压缩 ${p.name} ${origMb}MB → ${finalMb}MB`);
+          }
+          files.push(wrapBlobAsFile(resized.blob, p.name, p.file.type));
+        } else {
+          files.push(p.file);
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn("[upload-step] resize failed, uploading original:", err);
+        files.push(p.file);
+      }
+    }
     const ok = await onUpload(files);
     if (ok) clearPreviews();
   };
@@ -308,7 +336,7 @@ export function UploadStep({
               </span>
             </p>
             <p className="mt-3 text-[11px] text-stone-300">
-              支持多选 · 本批最多 {imagesPerUpload} 张 · 单张 ≤ 10MB
+              支持多选 · 本批最多 {imagesPerUpload} 张 · 单张 ≤ 5MB（自动压缩）
             </p>
           </label>
         )}
