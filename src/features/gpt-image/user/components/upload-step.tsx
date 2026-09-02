@@ -97,10 +97,26 @@ export function UploadStep({
     const list = Array.from(files as ArrayLike<File>);
     if (list.length === 0) return;
 
-    // 校验：本批最多 imagesPerUpload 张
-    const slots = Math.max(0, remainingForThisRound);
-    const accepted = list.slice(0, Math.min(list.length, slots));
-    const rejected = list.slice(slots);
+    // 2026-09-02：改累加式。
+    // 原本是"替换式预览"（return valid），用户连选两次会只剩最后
+    // 一张 —— 体感"只能看到最新的参考图"。现在改为追加：
+    // - 本批上限 = imagesPerUpload（不变）
+    // - 已选了 previews.length 张，本次再选 list，最多累计到
+    //   min(remainingForThisRound, imagesPerUpload) 张
+    // - 超出 rejected 走 toast 提示（同旧语义）
+    // 第二批由 clearPreviews() 在 handleConfirm 成功后归零，自然重新累计。
+    //
+    // stale closure 处理：闭包外 previews.length 来自 React 渲染快照。
+    // 用户每次点开文件选择对话框是 async（OS 弹窗 → 选择 → 关闭），相
+    // 邻两次 handleFiles 之间必经过 React 重新渲染（setPreviews 触发），
+    // 新一次调用拿到的是新 previews 长度。但 setPreviews 内仍用 prev
+    // 做长度校验，避免任何极端时序错位。
+    const remainingSlots = Math.max(
+      0,
+      Math.min(remainingForThisRound, imagesPerUpload) - previews.length
+    );
+    const accepted = list.slice(0, Math.min(list.length, remainingSlots));
+    const rejected = list.slice(remainingSlots);
 
     if (rejected.length > 0) {
       toast.error(
@@ -137,16 +153,11 @@ export function UploadStep({
 
     if (valid.length === 0) return;
     setPreviews((prev) => {
-      // 替换旧的预览（已上传完一批就清掉，准备下一批）
-      const prevIds = new Set(prev.map((p) => p.id));
-      for (const p of prev) {
-        if (!prevIds.has(p.id)) {
-          const url = previewRefs.current.get(p.id);
-          if (url) URL.revokeObjectURL(url);
-          previewRefs.current.delete(p.id);
-        }
-      }
-      return valid;
+      // 累加后再次截断：闭包外的 previews.length 与 setState 内的 prev
+      // 可能差 1（连续触发），这里用 prev 兜底，避免越界入预览区。
+      const cap = Math.min(remainingForThisRound, imagesPerUpload);
+      const merged = [...prev, ...valid];
+      return merged.slice(0, cap);
     });
   };
 
