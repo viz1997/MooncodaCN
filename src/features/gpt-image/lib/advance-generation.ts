@@ -129,9 +129,11 @@ export async function advanceOrderGeneration(
     if (res.state === "done") {
       doneUrls.push({ imageIdx: task.imageIdx, urls: res.urls });
     } else if (res.state === "failed") {
-      failures.push(`第 ${task.imageIdx + 1} 张：${res.error}`);
+      // 2026-09-02：imageIdx 现在 = 批次槽位下标，不是单图下标。3 张参考
+      // 图合一次生图，失败文案从「第 X 张」改为「第 X 批」与新语义匹配。
+      failures.push(`第 ${task.imageIdx + 1} 批：${res.error}`);
     } else if (isTaskTimedOut(task, now)) {
-      failures.push(`第 ${task.imageIdx + 1} 张：生成超时，请重新生成`);
+      failures.push(`第 ${task.imageIdx + 1} 批：生成超时，请重新生成`);
     } else {
       remaining.push(task);
     }

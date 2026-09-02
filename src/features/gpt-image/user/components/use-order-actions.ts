@@ -24,24 +24,26 @@ export interface UseOrderActionsResult {
   /**
    * 提交选择（partial select 语义）：
    * - 旧式：`number[]`（全量提交，长度对齐 uploadedImageCount）—— 兼容老调用
-   * - 新式：`Array<{ imageIdx: number; candIdx: number }>` —— 增量提交，
-   *   服务端按 imageIdx 合并；只锁定被列出的位。
+   * - 新式：`Array<{ batchIdx: number; candIdx: number }>` —— 增量提交，
+   *   服务端按 batchIdx 合并；只锁定被列出的批。
    *
    * 服务端 `/api/orders/[token]/select` 自动判别两种格式（normalizeSelections）。
    */
   submit: (
-    payload: number[] | Array<{ imageIdx: number; candIdx: number }>
+    payload: number[] | Array<{ batchIdx: number; candIdx: number }>
   ) => Promise<boolean>;
   /** 取消整个订单 → 状态变成 CANCELLED，链接失效 */
   cancel: () => Promise<boolean>;
   /** 停止生成 → 中断当前 in-flight 的生成任务，订单保留 */
   stopGeneration: () => Promise<boolean>;
-  regenerate: (imageIdx: number) => Promise<boolean>;
+  /** 2026-09-02：按 batch 维度重新生成（imageIdx → batchIdx） */
+  regenerate: (batchIdx: number) => Promise<boolean>;
   /** 失败后一键重试：对所有已上传图重新跑生成 */
   retryAll: () => Promise<boolean>;
+  /** 2026-09-02：按 batch 维度下载（imageIdx → batchIdx） */
   download: (
     orderNo: string,
-    imageIdx: number,
+    batchIdx: number,
     candIdx: number
   ) => Promise<void>;
 }
@@ -182,7 +184,7 @@ export function useOrderActions({
 
   const submit = useCallback(
     async (
-      payload: number[] | Array<{ imageIdx: number; candIdx: number }>
+      payload: number[] | Array<{ batchIdx: number; candIdx: number }>
     ) => {
       setSubmitting(true);
       try {
@@ -227,7 +229,7 @@ export function useOrderActions({
     } finally {
       setCancelling(false);
     }
-  }, [token, refresh]);
+  }, [token]);
 
   /**
    * "停止生成"——**不是取消订单**。
@@ -255,13 +257,13 @@ export function useOrderActions({
   }, [token, refresh]);
 
   const regenerate = useCallback(
-    async (imageIdx: number) => {
+    async (batchIdx: number) => {
       setRegenerating(true);
       try {
         const res = await fetch(`/api/orders/${token}/regenerate`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ imageIdx }),
+          body: JSON.stringify({ batchIdx }),
         });
         if (!res.ok) throw new Error(await readError(res, "重新生成失败"));
         toast.success("正在重新生成效果图");
@@ -280,7 +282,7 @@ export function useOrderActions({
   const retryAll = useCallback(async () => {
     setRetryingAll(true);
     try {
-      // 不传 imageIdx = 批量重跑所有已上传图（用于 FAILED 状态）
+      // 不传 batchIdx = 批量重跑所有已上传图（用于 FAILED 状态）
       const res = await fetch(`/api/orders/${token}/regenerate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -299,7 +301,7 @@ export function useOrderActions({
   }, [token, refresh]);
 
   const download = useCallback(
-    async (orderNo: string, imageIdx: number, candIdx: number) => {
+    async (orderNo: string, batchIdx: number, candIdx: number) => {
       try {
         // 2026-09-02：服务端 stream + Content-Disposition 触发下载。
         // 历史原因：之前是 fetch /candidates 跟随 302 → R2 公开域，R2
@@ -311,7 +313,7 @@ export function useOrderActions({
         // Content-Disposition 头 attachment 不影响 a[download]，我们仍然
         // 读 blob → objectURL → a[download] 拿到用户指定的文件名。
         const res = await fetch(
-          `${candidateUrl(token, imageIdx, candIdx)}?download=1`
+          `${candidateUrl(token, batchIdx, candIdx)}?download=1`
         );
         if (!res.ok) throw new Error(await readError(res, "下载失败"));
         const blob = await res.blob();
@@ -319,7 +321,7 @@ export function useOrderActions({
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `${orderNo}-img${imageIdx + 1}.${ext}`;
+        a.download = `${orderNo}-batch${batchIdx + 1}.${ext}`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);

@@ -150,13 +150,14 @@ export function OrderTimeline({
     if (uploadedAt) {
       const totalCapacity = uploadCount * imagesPerUpload;
       const remain = Math.max(0, totalCapacity - uploadedImageCount);
+      // 2026-09-02：批次语义 —— N 张上传图合一次生图，文案从"原图"改为"参考图"。
       list.push({
         id: "uploaded",
         icon: Upload,
         title:
           uploadedImageCount >= totalCapacity
-            ? `已上传全部 ${totalCapacity} 张原图（${uploadCount} 批 × ${imagesPerUpload} 张/批）`
-            : `已上传 ${uploadedImageCount} 张原图${remain > 0 ? `（还差 ${remain} 张）` : ""}`,
+            ? `已上传全部 ${totalCapacity} 张参考图（${uploadCount} 批 × ${imagesPerUpload} 张/批）`
+            : `已上传 ${uploadedImageCount} 张参考图${remain > 0 ? `（还差 ${remain} 张）` : ""}`,
         at: uploadedAt,
         tone: "primary",
       });
@@ -166,7 +167,8 @@ export function OrderTimeline({
       list.push({
         id: "generated",
         icon: Sparkles,
-        title: `已生成 ${candidateGroups} 组候选效果图（每组 ${candidateCount} 张）`,
+        // candidateGroups 现在 = 已合成候选组数 = 已上传批次数（每批 N 张合一次生图）
+        title: `已生成 ${candidateGroups} 批候选效果图（每批 ${imagesPerUpload} 张参考图合一次生成，每组 ${candidateCount} 张）`,
         at: generatedAt,
         tone: "blue",
       });
@@ -191,7 +193,8 @@ export function OrderTimeline({
       list.push({
         id: "selected",
         icon: CheckCircle2,
-        title: `已选定 ${selectedCount} 张效果图并提交`,
+        // selectedCount 现在 = 已锁定候选组数 = 批次数，不是张数
+        title: `已为 ${selectedCount} 批候选选定效果并提交`,
         at: selectedAt,
         tone: "emerald",
       });

@@ -516,9 +516,9 @@ export function OrdersAdminView() {
                         {order.hasUploadedImage ? (
                           <span
                             className="inline-flex items-center gap-0.5 text-emerald-700"
-                            title={`用户已上传 ${order.uploadedImageCount ?? 0} / ${(order.uploadCount ?? 1) * (order.imagesPerUpload ?? 3)} 张原图（${order.uploadCount ?? 1} 批 × ${order.imagesPerUpload ?? 3} 张/批）`}
+                            title={`用户已上传 ${order.uploadedImageCount ?? 0} 张参考图（${order.uploadCount ?? 1} 批 × ${order.imagesPerUpload ?? 3} 张/批 = ${Math.ceil((order.uploadedImageCount ?? 0) / Math.max(1, order.imagesPerUpload ?? 3))} 批已合成候选）`}
                           >
-                            <Upload className="h-3 w-3" /> 原图×
+                            <Upload className="h-3 w-3" /> 参考图×
                             {order.uploadedImageCount ?? 0}/
                             {(order.uploadCount ?? 1) *
                               (order.imagesPerUpload ?? 3)}
@@ -536,11 +536,15 @@ export function OrdersAdminView() {
                         {order.selectionCount && order.selectionCount > 0 ? (
                           <span
                             className="inline-flex items-center gap-0.5 text-emerald-700"
-                            title={`已为 ${order.selectionCount} 张原图各选定一个效果`}
+                            // 2026-09-02：selectionCount 现在 = 已选候选组数 = 批数（不是张数）
+                            title={`已为 ${order.selectionCount} 批候选选定效果`}
                           >
                             <CheckCircle2 className="h-3 w-3" /> 已选
                             {order.selectionCount}/
-                            {order.uploadedImageCount ?? 0}
+                            {Math.ceil(
+                              (order.uploadedImageCount ?? 0) /
+                                Math.max(1, order.imagesPerUpload ?? 3)
+                            )}
                           </span>
                         ) : order.candidateCount > 0 ? (
                           <span
@@ -758,458 +762,502 @@ export function OrdersAdminView() {
           body: { maxHeight: "calc(90vh - 110px)", overflowY: "auto" },
         }}
       >
-        {detailDialog && (
-          <div className="space-y-4 py-2">
-            <p className="text-sm text-muted-foreground">
-              订单 <span className="font-mono">{detailDialog.orderNo}</span>
-              {detailDialog.recipientName &&
-                ` · 用户「${detailDialog.recipientName}」`}
-              · 每张原图独立生成一组效果图。
-            </p>
-            <div className="grid grid-cols-2 gap-y-1.5 rounded-md border bg-slate-50 p-3 text-xs">
-              <div>
-                <span className="text-muted-foreground">订单号：</span>
-                <span className="font-mono">{detailDialog.orderNo}</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">状态：</span>
-                <Badge
-                  color={statusBadgeColor(
-                    ORDER_STATUS_COLORS[detailDialog.status as OrderStatus]
-                  )}
-                  className="!text-[10px]"
-                >
-                  {ORDER_STATUS_LABELS[detailDialog.status as OrderStatus]}
-                </Badge>
-              </div>
-              <div>
-                <span className="text-muted-foreground">模板：</span>
-                {detailDialog.template.name}
-              </div>
-              <div>
-                <span className="text-muted-foreground">上传图片数量：</span>
-                {detailDialog.uploadedImageCount ?? 0} /{" "}
-                {(detailDialog.uploadCount ?? 1) *
-                  (detailDialog.imagesPerUpload ?? 3)}{" "}
-                张（{detailDialog.uploadCount ?? 1} 批 ×{" "}
-                {detailDialog.imagesPerUpload ?? 3} 张/批）
-                {(detailDialog.uploadedImageCount ?? 0) > 0 &&
-                (detailDialog.uploadedImageCount ?? 0) <
-                  (detailDialog.uploadCount ?? 1) *
-                    (detailDialog.imagesPerUpload ?? 3) ? (
-                  <span className="ml-1 text-xs text-amber-600">
-                    （渐进式上传，未满额）
-                  </span>
-                ) : null}
-              </div>
-              <div>
-                <span className="text-muted-foreground">每组候选数：</span>
-                {detailDialog.template.candidateCount} 张（
-                {detailDialog.template.outputMode === "separate"
-                  ? "独立候选 N 张"
-                  : "拼接成 1 张宫格图"}
-                ）
-              </div>
-              <div>
-                <span className="text-muted-foreground">已选择：</span>
-                {detailDialog.selectionCount ?? 0} /{" "}
-                {detailDialog.uploadedImageCount ?? 0} 张
-              </div>
-              {/* 2026-08-24：代理商业务块 —— 仅 ToB 订单展示。
+        {detailDialog &&
+          (() => {
+            // 2026-09-02：批次数 = ceil(uploadedImageCount / imagesPerUpload)，
+            // 单图场景（uploadCount=1, imagesPerUpload=1）退化为张数。
+            // 整段详情文案与缩略图循环都按批次遍历（避免 N 张图当 N 次生图）。
+            const _uploaded = detailDialog.uploadedImageCount ?? 0;
+            const _perBatch = Math.max(1, detailDialog.imagesPerUpload ?? 3);
+            const batchCount =
+              _perBatch > 1 ? Math.ceil(_uploaded / _perBatch) : _uploaded;
+            return (
+              <div className="space-y-4 py-2">
+                <p className="text-sm text-muted-foreground">
+                  订单 <span className="font-mono">{detailDialog.orderNo}</span>
+                  {detailDialog.recipientName &&
+                    ` · 用户「${detailDialog.recipientName}」`}
+                  · 每批参考图合一次生成。
+                </p>
+                <div className="grid grid-cols-2 gap-y-1.5 rounded-md border bg-slate-50 p-3 text-xs">
+                  <div>
+                    <span className="text-muted-foreground">订单号：</span>
+                    <span className="font-mono">{detailDialog.orderNo}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">状态：</span>
+                    <Badge
+                      color={statusBadgeColor(
+                        ORDER_STATUS_COLORS[detailDialog.status as OrderStatus]
+                      )}
+                      className="!text-[10px]"
+                    >
+                      {ORDER_STATUS_LABELS[detailDialog.status as OrderStatus]}
+                    </Badge>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">模板：</span>
+                    {detailDialog.template.name}
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">上传参考图：</span>
+                    {/* 2026-09-02：按批次口径。X 批 × N 张/批 = uploadedImageCount 张参考图，
+                    合计合成 X 个 candidates 槽位（每批合一次生图） */}
+                    {detailDialog.uploadedImageCount ?? 0} 张（{batchCount} 批 ×{" "}
+                    {detailDialog.imagesPerUpload ?? 3} 张/批）
+                    {(detailDialog.uploadedImageCount ?? 0) > 0 &&
+                    (detailDialog.uploadedImageCount ?? 0) <
+                      (detailDialog.uploadCount ?? 1) *
+                        (detailDialog.imagesPerUpload ?? 3) ? (
+                      <span className="ml-1 text-xs text-amber-600">
+                        （渐进式上传，未满额）
+                      </span>
+                    ) : null}
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">每组候选数：</span>
+                    {detailDialog.template.candidateCount} 张（
+                    {detailDialog.template.outputMode === "separate"
+                      ? "独立候选 N 张"
+                      : "拼接成 1 张宫格图"}
+                    ）
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">已选择：</span>
+                    {/* 2026-09-02：按批次维度，不是张数维度。每个 candidates 槽位
+                    （= 每批）独立 lock，一个 batch 选一张候选就算"该批已选"。 */}
+                    {detailDialog.selectionCount ?? 0} / {batchCount} 批
+                  </div>
+                  {/* 2026-08-24：代理商业务块 —— 仅 ToB 订单展示。
                   col-span-2 让"代理商业务"标题独占一行，下面 4 项用 4-col 子网格。 */}
-              {(detailDialog.agentId ||
-                detailDialog.productTypeCode ||
-                detailDialog.productSize ||
-                detailDialog.accessoryCode) && (
-                <div className="col-span-2 mt-1 rounded-md border border-violet-200 bg-violet-50/40 p-2.5">
-                  <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-violet-700">
-                    <Briefcase className="h-3.5 w-3.5" />
-                    代理商业务（ToB）
-                  </div>
-                  <div className="grid grid-cols-2 gap-y-1 gap-x-3 text-xs sm:grid-cols-4">
-                    <div>
-                      <span className="text-muted-foreground">代理商：</span>
-                      {detailDialog.agentName || (
-                        <span className="italic text-zinc-400">
-                          {detailDialog.agentId ? "（已删除）" : "未指定"}
-                        </span>
-                      )}
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">型号：</span>
-                      {detailDialog.productTypeCode ?? (
-                        <span className="italic text-zinc-400">未指定</span>
-                      )}
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">尺寸：</span>
-                      {detailDialog.productSize ? (
-                        `${detailDialog.productSize}cm`
-                      ) : (
-                        <span className="italic text-zinc-400">未指定</span>
-                      )}
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">配件：</span>
-                      {getAccessory(detailDialog.accessoryCode)?.name ?? (
-                        <span className="italic text-zinc-400">未指定</span>
-                      )}
-                    </div>
-                    {detailDialog.productTypeCode && (
-                      <div className="col-span-2 sm:col-span-4 text-xs text-muted-foreground">
-                        合计：
-                        {formatProductSpec({
-                          productTypeCode: detailDialog.productTypeCode,
-                          productSize: detailDialog.productSize,
-                          accessoryCode: detailDialog.accessoryCode,
-                        })}
+                  {(detailDialog.agentId ||
+                    detailDialog.productTypeCode ||
+                    detailDialog.productSize ||
+                    detailDialog.accessoryCode) && (
+                    <div className="col-span-2 mt-1 rounded-md border border-violet-200 bg-violet-50/40 p-2.5">
+                      <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-violet-700">
+                        <Briefcase className="h-3.5 w-3.5" />
+                        代理商业务（ToB）
                       </div>
-                    )}
-                  </div>
-                </div>
-              )}
-              {detailDialog.uploadedAt && (
-                <div className="flex items-center gap-1">
-                  <Upload className="h-3 w-3 text-emerald-600" />
-                  <span className="text-muted-foreground">上传时间：</span>
-                  {new Date(detailDialog.uploadedAt).toLocaleString("zh-CN")}
-                </div>
-              )}
-              {detailDialog.generatedAt && (
-                <div className="flex items-center gap-1">
-                  <Clock className="h-3 w-3 text-amber-600" />
-                  <span className="text-muted-foreground">生成完成：</span>
-                  {new Date(detailDialog.generatedAt).toLocaleString("zh-CN")}
-                </div>
-              )}
-              {detailDialog.selectedAt && (
-                <div className="flex items-center gap-1">
-                  <CheckCircle2 className="h-3 w-3 text-emerald-600" />
-                  <span className="text-muted-foreground">用户提交：</span>
-                  {new Date(detailDialog.selectedAt).toLocaleString("zh-CN")}
-                </div>
-              )}
-              {detailDialog.cancelledAt && (
-                <div className="flex items-center gap-1">
-                  <span className="text-muted-foreground">取消时间：</span>
-                  {new Date(detailDialog.cancelledAt).toLocaleString("zh-CN")}
-                </div>
-              )}
-              {detailDialog.errorMessage && (
-                <div className="col-span-2 text-red-600">
-                  <span className="text-muted-foreground">错误：</span>
-                  {detailDialog.errorMessage}
-                </div>
-              )}
-            </div>
-
-            {detailDialog.hasUploadedImage &&
-              (detailDialog.uploadedImageCount ?? 0) > 0 && (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <ImageIcon className="h-4 w-4 text-emerald-600" />
-                    <h4 className="text-sm font-medium">
-                      每张原图的效果图（{detailDialog.uploadedImageCount}{" "}
-                      张原图，每张 {detailDialog.template.candidateCount}{" "}
-                      个候选，
-                      {detailDialog.template.outputMode === "separate"
-                        ? "存为 N 张独立图"
-                        : "存为 1 张宫格图"}
-                      ）
-                    </h4>
-                  </div>
-                  <div className="space-y-3">
-                    {Array.from({
-                      length: detailDialog.uploadedImageCount ?? 0,
-                    }).map((_, imgIdx) => {
-                      const selIdx = detailDialog.selections?.[imgIdx] ?? null;
-                      const candCount = detailDialog.template.candidateCount;
-                      return (
-                        <div
-                          key={imgIdx}
-                          className={cn(
-                            "rounded-lg border p-3",
-                            selIdx !== null
-                              ? "border-emerald-300 bg-emerald-50/30"
-                              : "border-slate-200"
+                      <div className="grid grid-cols-2 gap-y-1 gap-x-3 text-xs sm:grid-cols-4">
+                        <div>
+                          <span className="text-muted-foreground">
+                            代理商：
+                          </span>
+                          {detailDialog.agentName || (
+                            <span className="italic text-zinc-400">
+                              {detailDialog.agentId ? "（已删除）" : "未指定"}
+                            </span>
                           )}
-                        >
-                          <div className="mb-2 flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-medium">
-                                第 {imgIdx + 1} 张原图
-                              </span>
-                              {selIdx !== null ? (
-                                <Badge
-                                  color="green"
-                                  className="!text-[10px] inline-flex items-center gap-0.5"
-                                >
-                                  <CheckCircle2 className="h-3 w-3" />
-                                  用户已选 #{selIdx + 1}
-                                </Badge>
-                              ) : (
-                                <Badge color="default" className="!text-[10px]">
-                                  未选择
-                                </Badge>
-                              )}
-                            </div>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">型号：</span>
+                          {detailDialog.productTypeCode ?? (
+                            <span className="italic text-zinc-400">未指定</span>
+                          )}
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">尺寸：</span>
+                          {detailDialog.productSize ? (
+                            `${detailDialog.productSize}cm`
+                          ) : (
+                            <span className="italic text-zinc-400">未指定</span>
+                          )}
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">配件：</span>
+                          {getAccessory(detailDialog.accessoryCode)?.name ?? (
+                            <span className="italic text-zinc-400">未指定</span>
+                          )}
+                        </div>
+                        {detailDialog.productTypeCode && (
+                          <div className="col-span-2 sm:col-span-4 text-xs text-muted-foreground">
+                            合计：
+                            {formatProductSpec({
+                              productTypeCode: detailDialog.productTypeCode,
+                              productSize: detailDialog.productSize,
+                              accessoryCode: detailDialog.accessoryCode,
+                            })}
                           </div>
-                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                            <div className="group/preview relative aspect-square cursor-pointer overflow-hidden rounded-md border border-emerald-200 bg-slate-100">
-                              {/* biome-ignore lint/performance/noImgElement: 远程预览图 */}
-                              <img
-                                src={`/api/orders/${detailDialog.token}/image?index=${imgIdx}`}
-                                alt={`原图 ${imgIdx + 1}`}
-                                className="h-full w-full object-cover"
-                                loading="lazy"
-                                onClick={() =>
-                                  setLightbox({
-                                    url: `/api/orders/${detailDialog.token}/image?index=${imgIdx}`,
-                                    title: `第 ${imgIdx + 1} 张原图`,
-                                    filename: `${detailDialog.orderNo ?? detailDialog.token}-original-${imgIdx + 1}.png`,
-                                  })
-                                }
-                              />
-                              <div className="absolute top-1 left-1 rounded bg-emerald-600/90 px-1.5 py-0.5 text-[10px] text-white">
-                                原图
-                              </div>
-                              {/* hover 时显示放大 + 下载按钮 */}
-                              <div className="absolute inset-0 flex items-center justify-center gap-2 bg-black/0 opacity-0 transition-all group-hover/preview:bg-black/40 group-hover/preview:opacity-100">
-                                <button
-                                  type="button"
-                                  className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/90 text-zinc-700 transition-colors hover:bg-white"
-                                  aria-label="放大查看原图"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setLightbox({
-                                      url: `/api/orders/${detailDialog.token}/image?index=${imgIdx}`,
-                                      title: `第 ${imgIdx + 1} 张原图`,
-                                      filename: `${detailDialog.orderNo ?? detailDialog.token}-original-${imgIdx + 1}.png`,
-                                    });
-                                  }}
-                                >
-                                  <Maximize2 className="h-4 w-4" />
-                                </button>
-                                <button
-                                  type="button"
-                                  className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/90 text-zinc-700 transition-colors hover:bg-white"
-                                  aria-label="下载原图"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    void handleDownload(
-                                      `/api/orders/${detailDialog.token}/image?index=${imgIdx}`,
-                                      `${detailDialog.orderNo ?? detailDialog.token}-original-${imgIdx + 1}.png`
-                                    );
-                                  }}
-                                >
-                                  <Download className="h-4 w-4" />
-                                </button>
-                              </div>
-                            </div>
-                            {/* 2026-09-01：按 template.outputMode 分支渲染候选预览
-                                - grid（默认）：1 张拼接图 + CSS overlay 切格子，与老行为一致
-                                - separate：N 张独立候选（candIdx 0..candCount-1），
-                                  列出每张缩略图 + 已选高亮 + hover 放大/下载 */}
-                            {detailDialog.template.outputMode === "separate" ? (
-                              <div className="grid grid-cols-2 gap-1.5">
-                                {Array.from({ length: candCount }).map(
-                                  (_, candIdx) => {
-                                    const isSel = selIdx === candIdx;
-                                    const candUrl = `/api/orders/${detailDialog.token}/candidates/${imgIdx}/${candIdx}`;
-                                    return (
-                                      <div
-                                        // biome-ignore lint/suspicious/noArrayIndexKey: 顺序即索引
-                                        key={candIdx}
-                                        className={cn(
-                                          "group/preview relative aspect-square cursor-pointer overflow-hidden rounded-md border bg-slate-100",
-                                          isSel
-                                            ? "border-emerald-400 ring-2 ring-emerald-300"
-                                            : "border-slate-200"
-                                        )}
-                                      >
-                                        {/* biome-ignore lint/performance/noImgElement: 远程预览图 */}
-                                        <img
-                                          src={candUrl}
-                                          alt={`候选 ${candIdx + 1}`}
-                                          className="h-full w-full object-cover"
-                                          loading="lazy"
-                                          onClick={() =>
-                                            setLightbox({
-                                              url: candUrl,
-                                              title: `第 ${imgIdx + 1} 张原图 · 候选 #${candIdx + 1}`,
-                                              filename: `${detailDialog.orderNo ?? detailDialog.token}-${imgIdx + 1}-q${candIdx + 1}.png`,
-                                            })
-                                          }
-                                        />
-                                        <span
-                                          className={cn(
-                                            "pointer-events-none absolute top-1 left-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-white",
-                                            isSel
-                                              ? "bg-emerald-600"
-                                              : "bg-slate-700/80"
-                                          )}
-                                        >
-                                          候选 #{candIdx + 1}
-                                        </span>
-                                        {isSel && (
-                                          <span className="pointer-events-none absolute right-1 bottom-1 rounded bg-emerald-500 px-1.5 py-0.5 text-[10px] font-medium text-white">
-                                            已选
-                                          </span>
-                                        )}
-                                        <div className="absolute inset-0 z-20 flex items-center justify-center gap-2 bg-black/0 opacity-0 transition-all group-hover/preview:bg-black/40 group-hover/preview:opacity-100">
-                                          <button
-                                            type="button"
-                                            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/90 text-zinc-700 transition-colors hover:bg-white"
-                                            aria-label="放大查看候选"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              setLightbox({
-                                                url: candUrl,
-                                                title: `第 ${imgIdx + 1} 张原图 · 候选 #${candIdx + 1}`,
-                                                filename: `${detailDialog.orderNo ?? detailDialog.token}-${imgIdx + 1}-q${candIdx + 1}.png`,
-                                              });
-                                            }}
-                                          >
-                                            <Maximize2 className="h-4 w-4" />
-                                          </button>
-                                          <button
-                                            type="button"
-                                            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/90 text-zinc-700 transition-colors hover:bg-white"
-                                            aria-label="下载候选"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              void handleDownload(
-                                                candUrl,
-                                                `${detailDialog.orderNo ?? detailDialog.token}-${imgIdx + 1}-q${candIdx + 1}.png`
-                                              );
-                                            }}
-                                          >
-                                            <Download className="h-4 w-4" />
-                                          </button>
-                                        </div>
-                                      </div>
-                                    );
-                                  }
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {detailDialog.uploadedAt && (
+                    <div className="flex items-center gap-1">
+                      <Upload className="h-3 w-3 text-emerald-600" />
+                      <span className="text-muted-foreground">上传时间：</span>
+                      {new Date(detailDialog.uploadedAt).toLocaleString(
+                        "zh-CN"
+                      )}
+                    </div>
+                  )}
+                  {detailDialog.generatedAt && (
+                    <div className="flex items-center gap-1">
+                      <Clock className="h-3 w-3 text-amber-600" />
+                      <span className="text-muted-foreground">生成完成：</span>
+                      {new Date(detailDialog.generatedAt).toLocaleString(
+                        "zh-CN"
+                      )}
+                    </div>
+                  )}
+                  {detailDialog.selectedAt && (
+                    <div className="flex items-center gap-1">
+                      <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                      <span className="text-muted-foreground">用户提交：</span>
+                      {new Date(detailDialog.selectedAt).toLocaleString(
+                        "zh-CN"
+                      )}
+                    </div>
+                  )}
+                  {detailDialog.cancelledAt && (
+                    <div className="flex items-center gap-1">
+                      <span className="text-muted-foreground">取消时间：</span>
+                      {new Date(detailDialog.cancelledAt).toLocaleString(
+                        "zh-CN"
+                      )}
+                    </div>
+                  )}
+                  {detailDialog.errorMessage && (
+                    <div className="col-span-2 text-red-600">
+                      <span className="text-muted-foreground">错误：</span>
+                      {detailDialog.errorMessage}
+                    </div>
+                  )}
+                </div>
+
+                {detailDialog.hasUploadedImage &&
+                  (detailDialog.uploadedImageCount ?? 0) > 0 && (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <ImageIcon className="h-4 w-4 text-emerald-600" />
+                        <h4 className="text-sm font-medium">
+                          {/* 2026-09-02：按批次遍历（每批 N 张参考图合一次生图）。
+                          batchCount = ceil(uploadedImageCount / imagesPerUpload)，
+                          遍历每个 batch 显示其代表图（首张原图）+ 该批 candidates。
+                          原本按 uploadedImageCount 张原图遍历 → 同 batch 的 3 张
+                          原图会渲染同一组 candidates 3 次，新版避免重复。 */}
+                          每个批次的效果图（共 {batchCount} 批，每批{" "}
+                          {detailDialog.imagesPerUpload ?? 3} 张参考图，每组{" "}
+                          {detailDialog.template.candidateCount} 个候选，
+                          {detailDialog.template.outputMode === "separate"
+                            ? "存为 N 张独立图"
+                            : "存为 1 张宫格图"}
+                          ）
+                        </h4>
+                      </div>
+                      <div className="space-y-3">
+                        {Array.from({ length: batchCount }).map(
+                          (_, batchIdx) => {
+                            // 2026-09-02：selections 索引按 batch 维度（不是 imageIdx 维度）。
+                            // 老订单的 selections 可能按 imageIdx 存（长度 = uploadedImageCount），
+                            // 这里按 batchIdx 读——老索引 i 对应 batchIdx i 是兼容的，但 length
+                            // 不一致时按 batchIdx 截断 / 补齐 null。
+                            const rawSel =
+                              detailDialog.selections?.[batchIdx] ?? null;
+                            const selIdx =
+                              typeof rawSel === "number" ? rawSel : null;
+                            const candCount =
+                              detailDialog.template.candidateCount;
+                            // 批次代表图下标 = batchIdx * imagesPerUpload
+                            const repImageIdx =
+                              batchIdx *
+                              Math.max(1, detailDialog.imagesPerUpload ?? 3);
+                            return (
+                              <div
+                                key={batchIdx}
+                                className={cn(
+                                  "rounded-lg border p-3",
+                                  selIdx !== null
+                                    ? "border-emerald-300 bg-emerald-50/30"
+                                    : "border-slate-200"
                                 )}
-                              </div>
-                            ) : (
-                              /* 宫格模式：实际只存 1 张拼接图，candidates[imgIdx][0]，
-                                用 CSS 网格叠层画格子分割 + 选中高亮，避免误以为是多张独立候选 */
-                              (() => {
-                                const cols =
-                                  candCount === 1
-                                    ? 1
-                                    : candCount === 2
-                                      ? 2
-                                      : candCount === 4
-                                        ? 2
-                                        : 3;
-                                const rows =
-                                  candCount === 1
-                                    ? 1
-                                    : candCount === 2
-                                      ? 1
-                                      : candCount === 4
-                                        ? 2
-                                        : 3;
-                                return (
-                                  <div className="group/preview relative aspect-square cursor-pointer overflow-hidden rounded-md border border-slate-200 bg-slate-100">
+                              >
+                                <div className="mb-2 flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-medium">
+                                      第 {batchIdx + 1} 批（
+                                      {detailDialog.imagesPerUpload ?? 3}{" "}
+                                      张参考图）
+                                    </span>
                                     {selIdx !== null ? (
-                                      // 用户已选：显示该格子对应的高清裁剪图
-                                      (() => {
-                                        const col = selIdx % cols;
-                                        const row = Math.floor(selIdx / cols);
-                                        return (
-                                          <div
-                                            className="absolute inset-0"
-                                            style={{
-                                              backgroundImage: `url(/api/orders/${detailDialog.token}/candidates/${imgIdx}/0)`,
-                                              backgroundSize: `${cols * 100}% ${rows * 100}%`,
-                                              backgroundRepeat: "no-repeat",
-                                              backgroundPosition:
-                                                cols > 1
-                                                  ? `${(col / (cols - 1)) * 100}% ${row > 0 ? (row / (rows - 1)) * 100 : 0}%`
-                                                  : "0 0",
-                                            }}
-                                            onClick={() =>
-                                              setLightbox({
-                                                url: `/api/orders/${detailDialog.token}/candidates/${imgIdx}/0`,
-                                                title: `第 ${imgIdx + 1} 张原图 - 已选分镜 #${selIdx + 1}`,
-                                                filename: `${detailDialog.orderNo ?? detailDialog.token}-composite-${imgIdx + 1}-q${selIdx + 1}.png`,
-                                              })
-                                            }
-                                          >
-                                            <span className="pointer-events-none absolute top-1 left-1 rounded bg-emerald-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white">
-                                              分镜 #{selIdx + 1}
-                                            </span>
-                                            <span className="pointer-events-none absolute right-1 bottom-1 rounded bg-emerald-500 px-1.5 py-0.5 text-[10px] font-medium text-white">
-                                              已选
-                                            </span>
-                                          </div>
-                                        );
-                                      })()
+                                      <Badge
+                                        color="green"
+                                        className="!text-[10px] inline-flex items-center gap-0.5"
+                                      >
+                                        <CheckCircle2 className="h-3 w-3" />
+                                        用户已选 #{selIdx + 1}
+                                      </Badge>
                                     ) : (
-                                      // 用户未选：占位提示
-                                      <div className="flex h-full w-full flex-col items-center justify-center text-slate-400">
-                                        <Eye className="mb-1 h-6 w-6" />
-                                        <span className="text-xs">
-                                          用户尚未选择
-                                        </span>
-                                      </div>
-                                    )}
-                                    {/* hover 浮层：放大 / 下载按钮（仅已选时可用） */}
-                                    {selIdx !== null && (
-                                      <div className="absolute inset-0 z-20 flex items-center justify-center gap-2 bg-black/0 opacity-0 transition-all group-hover/preview:bg-black/40 group-hover/preview:opacity-100">
-                                        <button
-                                          type="button"
-                                          className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/90 text-zinc-700 transition-colors hover:bg-white"
-                                          aria-label="放大查看选中分镜"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setLightbox({
-                                              url: `/api/orders/${detailDialog.token}/candidates/${imgIdx}/0`,
-                                              title: `第 ${imgIdx + 1} 张原图 - 已选分镜 #${selIdx + 1}`,
-                                              filename: `${detailDialog.orderNo ?? detailDialog.token}-composite-${imgIdx + 1}-q${selIdx + 1}.png`,
-                                            });
-                                          }}
-                                        >
-                                          <Maximize2 className="h-4 w-4" />
-                                        </button>
-                                        <button
-                                          type="button"
-                                          className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/90 text-zinc-700 transition-colors hover:bg-white"
-                                          aria-label="下载选中分镜"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            void handleDownload(
-                                              `/api/orders/${detailDialog.token}/candidates/${imgIdx}/0`,
-                                              `${detailDialog.orderNo ?? detailDialog.token}-composite-${imgIdx + 1}-q${selIdx + 1}.png`
-                                            );
-                                          }}
-                                        >
-                                          <Download className="h-4 w-4" />
-                                        </button>
-                                      </div>
+                                      <Badge
+                                        color="default"
+                                        className="!text-[10px]"
+                                      >
+                                        未选择
+                                      </Badge>
                                     )}
                                   </div>
-                                );
-                              })()
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
+                                </div>
+                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                  <div className="group/preview relative aspect-square cursor-pointer overflow-hidden rounded-md border border-emerald-200 bg-slate-100">
+                                    {/* biome-ignore lint/performance/noImgElement: 远程预览图 */}
+                                    <img
+                                      src={`/api/orders/${detailDialog.token}/image?index=${repImageIdx}`}
+                                      alt={`第 ${batchIdx + 1} 批代表图（原图 ${repImageIdx + 1}）`}
+                                      className="h-full w-full object-cover"
+                                      loading="lazy"
+                                      onClick={() =>
+                                        setLightbox({
+                                          url: `/api/orders/${detailDialog.token}/image?index=${repImageIdx}`,
+                                          title: `第 ${batchIdx + 1} 批代表图（原图 ${repImageIdx + 1}）`,
+                                          filename: `${detailDialog.orderNo ?? detailDialog.token}-batch${batchIdx + 1}-rep.png`,
+                                        })
+                                      }
+                                    />
+                                    <div className="absolute top-1 left-1 rounded bg-emerald-600/90 px-1.5 py-0.5 text-[10px] text-white">
+                                      批 {batchIdx + 1} 代表图
+                                    </div>
+                                    {/* hover 时显示放大 + 下载按钮 */}
+                                    <div className="absolute inset-0 flex items-center justify-center gap-2 bg-black/0 opacity-0 transition-all group-hover/preview:bg-black/40 group-hover/preview:opacity-100">
+                                      <button
+                                        type="button"
+                                        className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/90 text-zinc-700 transition-colors hover:bg-white"
+                                        aria-label="放大查看代表图"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setLightbox({
+                                            url: `/api/orders/${detailDialog.token}/image?index=${repImageIdx}`,
+                                            title: `第 ${batchIdx + 1} 批代表图（原图 ${repImageIdx + 1}）`,
+                                            filename: `${detailDialog.orderNo ?? detailDialog.token}-batch${batchIdx + 1}-rep.png`,
+                                          });
+                                        }}
+                                      >
+                                        <Maximize2 className="h-4 w-4" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/90 text-zinc-700 transition-colors hover:bg-white"
+                                        aria-label="下载代表图"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          void handleDownload(
+                                            `/api/orders/${detailDialog.token}/image?index=${repImageIdx}`,
+                                            `${detailDialog.orderNo ?? detailDialog.token}-batch${batchIdx + 1}-rep.png`
+                                          );
+                                        }}
+                                      >
+                                        <Download className="h-4 w-4" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                  {/* 2026-09-01 + 2026-09-02：按 template.outputMode 分支渲染候选预览。
+                                索引语义 batchIdx（candidates 外层下标）。 */}
+                                  {detailDialog.template.outputMode ===
+                                  "separate" ? (
+                                    <div className="grid grid-cols-2 gap-1.5">
+                                      {Array.from({ length: candCount }).map(
+                                        (_, candIdx) => {
+                                          const isSel = selIdx === candIdx;
+                                          const candUrl = `/api/orders/${detailDialog.token}/candidates/${batchIdx}/${candIdx}`;
+                                          return (
+                                            <div
+                                              // biome-ignore lint/suspicious/noArrayIndexKey: 顺序即索引
+                                              key={candIdx}
+                                              className={cn(
+                                                "group/preview relative aspect-square cursor-pointer overflow-hidden rounded-md border bg-slate-100",
+                                                isSel
+                                                  ? "border-emerald-400 ring-2 ring-emerald-300"
+                                                  : "border-slate-200"
+                                              )}
+                                            >
+                                              {/* biome-ignore lint/performance/noImgElement: 远程预览图 */}
+                                              <img
+                                                src={candUrl}
+                                                alt={`候选 ${candIdx + 1}`}
+                                                className="h-full w-full object-cover"
+                                                loading="lazy"
+                                                onClick={() =>
+                                                  setLightbox({
+                                                    url: candUrl,
+                                                    title: `第 ${batchIdx + 1} 批 · 候选 #${candIdx + 1}`,
+                                                    filename: `${detailDialog.orderNo ?? detailDialog.token}-batch${batchIdx + 1}-q${candIdx + 1}.png`,
+                                                  })
+                                                }
+                                              />
+                                              <span
+                                                className={cn(
+                                                  "pointer-events-none absolute top-1 left-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-white",
+                                                  isSel
+                                                    ? "bg-emerald-600"
+                                                    : "bg-slate-700/80"
+                                                )}
+                                              >
+                                                候选 #{candIdx + 1}
+                                              </span>
+                                              {isSel && (
+                                                <span className="pointer-events-none absolute right-1 bottom-1 rounded bg-emerald-500 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                                                  已选
+                                                </span>
+                                              )}
+                                              <div className="absolute inset-0 z-20 flex items-center justify-center gap-2 bg-black/0 opacity-0 transition-all group-hover/preview:bg-black/40 group-hover/preview:opacity-100">
+                                                <button
+                                                  type="button"
+                                                  className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/90 text-zinc-700 transition-colors hover:bg-white"
+                                                  aria-label="放大查看候选"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setLightbox({
+                                                      url: candUrl,
+                                                      title: `第 ${batchIdx + 1} 批 · 候选 #${candIdx + 1}`,
+                                                      filename: `${detailDialog.orderNo ?? detailDialog.token}-batch${batchIdx + 1}-q${candIdx + 1}.png`,
+                                                    });
+                                                  }}
+                                                >
+                                                  <Maximize2 className="h-4 w-4" />
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/90 text-zinc-700 transition-colors hover:bg-white"
+                                                  aria-label="下载候选"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    void handleDownload(
+                                                      candUrl,
+                                                      `${detailDialog.orderNo ?? detailDialog.token}-batch${batchIdx + 1}-q${candIdx + 1}.png`
+                                                    );
+                                                  }}
+                                                >
+                                                  <Download className="h-4 w-4" />
+                                                </button>
+                                              </div>
+                                            </div>
+                                          );
+                                        }
+                                      )}
+                                    </div>
+                                  ) : (
+                                    /* 宫格模式：实际只存 1 张拼接图，candidates[batchIdx][0]，
+                                用 CSS 网格叠层画格子分割 + 选中高亮，避免误以为是多张独立候选 */
+                                    (() => {
+                                      const cols =
+                                        candCount === 1
+                                          ? 1
+                                          : candCount === 2
+                                            ? 2
+                                            : candCount === 4
+                                              ? 2
+                                              : 3;
+                                      const rows =
+                                        candCount === 1
+                                          ? 1
+                                          : candCount === 2
+                                            ? 1
+                                            : candCount === 4
+                                              ? 2
+                                              : 3;
+                                      return (
+                                        <div className="group/preview relative aspect-square cursor-pointer overflow-hidden rounded-md border border-slate-200 bg-slate-100">
+                                          {selIdx !== null ? (
+                                            // 用户已选：显示该格子对应的高清裁剪图
+                                            (() => {
+                                              const col = selIdx % cols;
+                                              const row = Math.floor(
+                                                selIdx / cols
+                                              );
+                                              return (
+                                                <div
+                                                  className="absolute inset-0"
+                                                  style={{
+                                                    backgroundImage: `url(/api/orders/${detailDialog.token}/candidates/${batchIdx}/0)`,
+                                                    backgroundSize: `${cols * 100}% ${rows * 100}%`,
+                                                    backgroundRepeat:
+                                                      "no-repeat",
+                                                    backgroundPosition:
+                                                      cols > 1
+                                                        ? `${(col / (cols - 1)) * 100}% ${row > 0 ? (row / (rows - 1)) * 100 : 0}%`
+                                                        : "0 0",
+                                                  }}
+                                                  onClick={() =>
+                                                    setLightbox({
+                                                      url: `/api/orders/${detailDialog.token}/candidates/${batchIdx}/0`,
+                                                      title: `第 ${batchIdx + 1} 批 - 已选分镜 #${selIdx + 1}`,
+                                                      filename: `${detailDialog.orderNo ?? detailDialog.token}-batch${batchIdx + 1}-composite-q${selIdx + 1}.png`,
+                                                    })
+                                                  }
+                                                >
+                                                  <span className="pointer-events-none absolute top-1 left-1 rounded bg-emerald-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                                                    分镜 #{selIdx + 1}
+                                                  </span>
+                                                  <span className="pointer-events-none absolute right-1 bottom-1 rounded bg-emerald-500 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                                                    已选
+                                                  </span>
+                                                </div>
+                                              );
+                                            })()
+                                          ) : (
+                                            // 用户未选：占位提示
+                                            <div className="flex h-full w-full flex-col items-center justify-center text-slate-400">
+                                              <Eye className="mb-1 h-6 w-6" />
+                                              <span className="text-xs">
+                                                用户尚未选择
+                                              </span>
+                                            </div>
+                                          )}
+                                          {/* hover 浮层：放大 / 下载按钮（仅已选时可用） */}
+                                          {selIdx !== null && (
+                                            <div className="absolute inset-0 z-20 flex items-center justify-center gap-2 bg-black/0 opacity-0 transition-all group-hover/preview:bg-black/40 group-hover/preview:opacity-100">
+                                              <button
+                                                type="button"
+                                                className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/90 text-zinc-700 transition-colors hover:bg-white"
+                                                aria-label="放大查看选中分镜"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  setLightbox({
+                                                    url: `/api/orders/${detailDialog.token}/candidates/${batchIdx}/0`,
+                                                    title: `第 ${batchIdx + 1} 批 - 已选分镜 #${selIdx + 1}`,
+                                                    filename: `${detailDialog.orderNo ?? detailDialog.token}-batch${batchIdx + 1}-composite-q${selIdx + 1}.png`,
+                                                  });
+                                                }}
+                                              >
+                                                <Maximize2 className="h-4 w-4" />
+                                              </button>
+                                              <button
+                                                type="button"
+                                                className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/90 text-zinc-700 transition-colors hover:bg-white"
+                                                aria-label="下载选中分镜"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  void handleDownload(
+                                                    `/api/orders/${detailDialog.token}/candidates/${batchIdx}/0`,
+                                                    `${detailDialog.orderNo ?? detailDialog.token}-batch${batchIdx + 1}-composite-q${selIdx + 1}.png`
+                                                  );
+                                                }}
+                                              >
+                                                <Download className="h-4 w-4" />
+                                              </button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })()
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          }
+                        )}
+                      </div>
+                    </div>
+                  )}
 
-            {!detailDialog.hasUploadedImage && (
-              <div className="py-8 text-center text-sm text-muted-foreground">
-                用户尚未上传图片，无详情可查看。
+                {!detailDialog.hasUploadedImage && (
+                  <div className="py-8 text-center text-sm text-muted-foreground">
+                    用户尚未上传图片，无详情可查看。
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        )}
+            );
+          })()}
       </Modal>
 
       {/* 图片放大预览（点击原图/候选宫格图触发） */}

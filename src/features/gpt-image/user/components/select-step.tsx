@@ -36,7 +36,18 @@ import { QuadrantGrid } from "./quadrant-grid";
 interface SelectStepProps {
   token: string;
   updatedAt: string;
-  imageCount: number;
+  /**
+   * 2026-09-02：批次数（= ceil(uploadedImageCount / imagesPerUpload)）。
+   * 索引语义从 imageIdx（张数）改成 batchIdx（批次槽位）。
+   */
+  batchCount: number;
+  /**
+   * 2026-09-02：每批参考图张数。OriginalStrip / OriginalLightbox 用它
+   * 计算批次代表图与批次内循环张数。
+   */
+  imagesPerUpload: number;
+  /** 2026-09-02：订单实际已上传参考图张数（拍平 uploadedImages.length）。 */
+  uploadedImageCount: number;
   candidateCount: number;
   /**
    * 2026-09-01：模板级候选输出模式。
@@ -44,32 +55,29 @@ interface SelectStepProps {
    * - "separate"：Lingting 返 N 张独立候选，用 CandidateStrip 列出
    */
   outputMode?: "grid" | "separate";
-  /** 每张原图的当前选择（长度 = uploadedImageCount）
-   *  - 本地草稿值（未提交）：用户在 SelectStep 内点击但还没确认的候选
-   *  - 服务端锁定值（已提交）：partial submit 写入、不可再改
-   *  - null：待选
-   */
+  /** 长度 = batchCount，按 batchIdx 索引 */
   selections: (number | null)[];
   /** 非空位总数（含本地草稿 + 服务端锁定） */
   selectedCount: number;
   /** 服务端已锁定位数量（CANDIDATES_READY 下 selections 非空） */
   lockedCount: number;
-  /** 判定某 index 是否已服务端锁定 */
-  isLocked: (imageIdx: number) => boolean;
+  /** 判定某 batchIdx 是否已服务端锁定 */
+  isLocked: (batchIdx: number) => boolean;
   submitting: boolean;
   regenerating: boolean;
-  onToggle: (imageIdx: number, candIdx: number) => void;
+  /** 切换某批的本地候选选择；已锁定批忽略 */
+  onToggle: (batchIdx: number, candIdx: number) => void;
   onSubmit: () => void;
-  /** 重新生成当前原图（第 safeIdx 张） */
-  onRegenerate: (imageIdx: number) => Promise<boolean>;
-  /** 单图重新生成次数上限（来自订单 regenerateLimit） */
+  /** 重新生成当前批次（第 safeBatchIdx + 1 批） */
+  onRegenerate: (batchIdx: number) => Promise<boolean>;
+  /** 单批重新生成次数上限（来自订单 regenerateLimit） */
   regenerateLimit: number;
   /** 已用重新生成次数（trigger=regenerate_single 的快照行数） */
   regenerateUsedCount: number;
   /**
-   * 当前订单的全部历史快照（round DESC）。前端再按 imageIdx 过滤：
+   * 当前订单的全部历史快照（round DESC）。前端再按 batchIdx 过滤：
    * - 查看最新快照（index 0）：QuadrantGrid 用当前 candidates（可点选）
-   * - 查看旧快照：QuadrantGrid 用 snapshot.candidates[safeIdx][0] 作 compositeUrl（只读）
+   * - 查看旧快照：QuadrantGrid 用 snapshot.candidates[safeBatchIdx][0] 作 compositeUrl（只读）
    */
   snapshots: OrderHistorySnapshotView[];
 }
@@ -77,42 +85,52 @@ interface SelectStepProps {
 const SWIPE_THRESHOLD = 50; // px
 
 /**
- * 选图步骤 —— mobile-first 单列布局（partial select 感知版）。
+ * 选图步骤 —— mobile-first 单列布局（partial select + 批次索引版）。
  *
- * partial select 引入后的行为差异：
- * - 按钮"确认提交"现在锁定**当前 safeIdx 张**（不再是"全选后统一提交"）。
- *   服务端按 imageIdx 增量合并，其他未提交位保持原状。
- * - 已锁定位视觉态：
+ * 2026-09-02：索引语义从 imageIdx（张数）改成 batchIdx（批次槽位）。
+ * 多张参考图合一次生图后，candidates 最小锁定单元是「批次」而不是「单张
+ * 原图」。按钮文案同步：
+ * - 「已锁定 X/Y 张」→「」→ 已锁定 X/Y 批」
+ * - 「重新生成第 N 张」→「」→ 重新生成第 N 批」
+ * - 「提交后该张效果」→「」→ 提交后该批效果」
+ * - 「剩余 N 张可继续上传」→「」→ 剩余 N 批可继续上传」
+ *
+ * partial select 行为差异（2026-08 起）：
+ * - 按钮"确认提交"现在锁定**当前 safeBatchIdx 批**（不再是"全选后统一提交"）。
+ *   服务端按 batchIdx 增量合并，其他未提交批保持原状。
+ * - 已锁定批视觉态：
  *   - QuadrantGrid disabled（不可点候选）
- *   - 当前原图小卡角标改 "已锁定 #N" + Lock 图标
- *   - "重新生成第 N 张"按钮 disabled
- *   - "确认提交第 N 张"按钮 disabled，文案改 "已提交 #N"
- * - Enter 键 / 触发 confirm dialog：当前张未锁定 + 选了候选 → 触发 confirm；
- *   当前张已锁定 → Enter 无操作（用户应继续选下一张）。
+ *   - 当前批小卡角标改 "已锁定 #N" + Lock 图标
+ *   - "重新生成第 N 批"按钮 disabled
+ *   - "确认提交第 N 批"按钮 disabled，文案改 "已提交 #N"
+ * - Enter 键 / 触发 confirm dialog：当前批未锁定 + 选了候选 → 触发 confirm；
+ *   当前批已锁定 → Enter 无操作（用户应继续选下一批）。
  *
- * 锁定 = 不可重做（2026-08 批次模型保留 partial select 不可逆语义）：
- * 提交后该张即被服务端锁定，UI 只读（视觉提示保留：emerald 边框 +
+ * 锁定 = 不可重做（批次模型保留 partial select 不可逆语义）：
+ * 提交后该批即被服务端锁定，UI 只读（视觉提示保留：emerald 边框 +
  * Lock 角标）。要重新生成 / 重选只能服务端把 selections[i] 置 null 后
  * 用户才能在 UI 上重新触发——这是有意识的，避免"锁了又解锁"状态混乱。
  *
- * 布局（参考 select-step.tsx）：
+ * 布局：
  * 1. 顶部「第 3 步 · 选择效果图」徽章 + 标题
- * 2. 进度小条（多图时显示）
- * 3. 原图缩略图横排（切换用）—— 已锁定位永久 emerald 边框
- * 4. 当前原图卡片（小） + QuadrantGrid（已锁定位 disabled）
+ * 2. 进度小条（多批时显示）
+ * 3. 批次缩略图横排（切换用）—— 已锁定批永久 emerald 边框
+ * 4. 当前批候选组（小） + QuadrantGrid（已锁定批 disabled）
  * 5. 浮底 CTA：双按钮（重新生成 + 确认提交），按 isCurrentLocked 切态
  *
  * 交互保留：
- * - 1-9 选、←→ 切图、Z 撤销、Enter 提交、R 重新生成、? 帮助
+ * - 1-9 选、←→ 切批、Z 撤销、Enter 提交、R 重新生成、? 帮助
  * - Lightbox：点击放大 + 在大图模式下选
  * - AlertDialog：提交 / 重新生成 二次确认
- * - 切图方式：点 OriginalStrip 缩略图、←/→ 箭头键、Lightbox 横向滑动。
- *   2026-08-15 起移除"点击候选自动跳下一张"逻辑（用户反馈：不想被自动推进）。
+ * - 切批方式：点 OriginalStrip 缩略图、←/→ 箭头键、Lightbox 横向滑动。
+ *   2026-08-15 起移除"点击候选自动跳下一批"逻辑（用户反馈：不想被自动推进）。
  */
 export function SelectStep({
   token,
   updatedAt,
-  imageCount,
+  batchCount,
+  imagesPerUpload,
+  uploadedImageCount,
   candidateCount,
   outputMode,
   selections,
@@ -129,14 +147,9 @@ export function SelectStep({
   snapshots,
 }: SelectStepProps) {
   const [currentIdx, setCurrentIdx] = useState(() => {
-    // 默认从第一张原图（imageIdx=0）开始：让 OriginalStrip 默认高亮的那张和
-    // QuadrantGrid 默认展示的候选组**对齐**，避免"strip 视觉默认第一张
-    // （emerald 边框=已锁）但下方 QuadrantGrid 跳到第二张未锁位"的错位感。
-    //
-    // 之前"first unlocked"逻辑会把 currentIdx 推到下一张未选位，但锁定位的
-    // emerald 边框视觉权重远高于当前但未选的 zinc-300 边框，用户看上去仍像
-    // "第一张是默认当前 tab"——与 QuadrantGrid 实际显示的位不一致。统一
-    // 默认从 0 起，用户需要看别的位时手动点 OriginalStrip 切或 ←/→。
+    // 默认从第 0 批开始：让 OriginalStrip 默认高亮的那批和 QuadrantGrid
+    // 默认展示的候选组**对齐**。避免 "strip 视觉默认第一批（emerald
+    // 边框=已锁）但下方 QuadrantGrid 跳到第二批未锁位" 的错位感。
     return 0;
   });
   const [lightbox, setLightbox] = useState<LightboxTarget | null>(null);
@@ -148,16 +161,16 @@ export function SelectStep({
    * 当前正在查看的快照索引（在 `imageSnapshots` 数组里的位置）。
    * 默认 null = 看最新候选（compositeUrl = candidateUrl(...)，QuadrantGrid 可点选）。
    * 非 null = 看历史快照（QuadrantGrid 只读，compositeUrl 走 historyId 通道）。
-   * imageIdx 切换或 regen 完成后重置为 null（看最新）。
+   * batchIdx 切换或 regen 完成后重置为 null（看最新）。
    */
   const [viewingSnapshotIdx, setViewingSnapshotIdx] = useState<number | null>(
     null
   );
 
-  const safeIdx = Math.min(currentIdx, Math.max(0, imageCount - 1));
-  const currentSelection = selections[safeIdx] ?? null;
-  const isCurrentLocked = isLocked(safeIdx);
-  // 单图重新生成剩余次数（用户主动重生成第 N 张）。已锁定位不可改，
+  const safeBatchIdx = Math.min(currentIdx, Math.max(0, batchCount - 1));
+  const currentSelection = selections[safeBatchIdx] ?? null;
+  const isCurrentLocked = isLocked(safeBatchIdx);
+  // 单批重新生成剩余次数（用户主动重生成第 N 批）。已锁定批不可改，
   // 但剩余次数仍按订单级统计，不影响显示。regenerateLimit=0 表示禁用。
   const regenerateRemaining = Math.max(
     0,
@@ -165,17 +178,22 @@ export function SelectStep({
   );
   const canRegenerate = !isCurrentLocked && regenerateRemaining > 0;
 
-  // 当前原图下的所有历史快照（按 round DESC，与传入顺序一致）
+  // 当前批下的所有历史快照（按 round DESC，与传入顺序一致）
+  //
+  // 历史快照按 batchIdx 维度存（candidates[batchIdx][candIdx]）。这里
+  // batchCount 是新语义，老快照按 imageIdx 维度存时 length 不一致——过滤
+  // 时按 snapshot.batchCount >= safeBatchIdx 兜底。
   const imageSnapshots = useMemo(
-    () => snapshots.filter((s) => s.imageCount > safeIdx),
-    [snapshots, safeIdx]
+    () =>
+      snapshots.filter((s) => (s.batchCount ?? s.imageCount) > safeBatchIdx),
+    [snapshots, safeBatchIdx]
   );
 
-  // 切原图或重新生成完成后，自动跳回最新候选（避免停在某个旧快照上状态错乱）
+  // 切批或重新生成完成后，自动跳回最新候选（避免停在某个旧快照上状态错乱）
   // biome-ignore lint/correctness/useExhaustiveDependencies: deps 是触发器，不是读取
   useEffect(() => {
     setViewingSnapshotIdx(null);
-  }, [safeIdx, regenerateUsedCount]);
+  }, [safeBatchIdx, regenerateUsedCount]);
 
   const viewingSnapshot =
     viewingSnapshotIdx !== null
@@ -196,13 +214,13 @@ export function SelectStep({
   const canGoNextSnapshot =
     isViewingOldSnapshot && safeSnapshotIdx !== null && safeSnapshotIdx > 0;
 
-  // 旧快照的 compositeUrl：通过 /candidates/[imageIdx]/0?historyId=... 走历史通道
+  // 旧快照的 compositeUrl：通过 /candidates/[batchIdx]/0?historyId=... 走历史通道
   const viewingCompositeUrl =
     viewingSnapshot !== null
-      ? `/api/orders/${token}/candidates/${safeIdx}/0?historyId=${viewingSnapshot.id}&t=${encodeURIComponent(viewingSnapshot.createdAt)}`
+      ? `/api/orders/${token}/candidates/${safeBatchIdx}/0?historyId=${viewingSnapshot.id}&t=${encodeURIComponent(viewingSnapshot.createdAt)}`
       : null;
 
-  // 最近一次"被赋值"的图片索引
+  // 最近一次"被赋值"的批次索引
   const lastSelectedIdx = useMemo(() => {
     let last: number | null = null;
     for (let i = 0; i < selections.length; i++) {
@@ -213,45 +231,53 @@ export function SelectStep({
   }, [selections]);
 
   useEffect(() => {
-    const urls: string[] = [originalUrl(token, safeIdx, updatedAt)];
-    // 2026-09-01：grid 模式仅 candIdx=0（拼接图）；separate 模式全部 candIdx 预热
+    // 2026-09-02：批次代表图下标 = safeBatchIdx * imagesPerUpload
+    const repImageIdx = safeBatchIdx * Math.max(1, imagesPerUpload);
+    const urls: string[] = [originalUrl(token, repImageIdx, updatedAt)];
+    // grid 模式仅 candIdx=0（拼接图）；separate 模式全部 candIdx 预热
     if (outputMode === "separate") {
       for (let c = 0; c < candidateCount; c++) {
-        urls.push(candidateUrl(token, safeIdx, c, updatedAt));
+        urls.push(candidateUrl(token, safeBatchIdx, c, updatedAt));
       }
     } else {
-      urls.push(candidateUrl(token, safeIdx, 0, updatedAt));
+      urls.push(candidateUrl(token, safeBatchIdx, 0, updatedAt));
     }
-    if (safeIdx + 1 < imageCount) {
-      urls.push(candidateUrl(token, safeIdx + 1, 0, updatedAt));
+    if (safeBatchIdx + 1 < batchCount) {
+      // 下一批代表图预热
+      urls.push(
+        originalUrl(
+          token,
+          (safeBatchIdx + 1) * Math.max(1, imagesPerUpload),
+          updatedAt
+        )
+      );
+      urls.push(candidateUrl(token, safeBatchIdx + 1, 0, updatedAt));
     }
     // 历史快照 URL：用户切"上一版/下一版"时立刻命中浏览器缓存，
-    // 不再空白等待服务端 roundtrip。把所有 imageSnapshots 都加进预热列表
-    // （数量有限，每张占一张宫格图，体积可控）。
+    // 不再空白等待服务端 round-trip。
     for (const snap of imageSnapshots) {
-      urls.push(historyCandidateUrl(token, snap.id, safeIdx, snap.createdAt));
+      urls.push(
+        historyCandidateUrl(token, snap.id, safeBatchIdx, snap.createdAt)
+      );
     }
     preloadImages(urls);
   }, [
     token,
     updatedAt,
-    safeIdx,
-    imageCount,
+    safeBatchIdx,
+    batchCount,
+    imagesPerUpload,
     imageSnapshots,
     outputMode,
     candidateCount,
   ]);
 
   const handleToggle = useCallback(
-    (imageIdx: number, candIdx: number) => {
-      // 已锁定位：本地点不动（防御性，正常情况下 use-selections 的
+    (batchIdx: number, candIdx: number) => {
+      // 已锁定批：本地点不动（防御性，正常情况下 use-selections 的
       // toggle 已短路；这里再防一次 Lightbox / 外部直接触发）
-      if (isLocked(imageIdx)) return;
-      onToggle(imageIdx, candIdx);
-      // 注：原本在选完后会自动 setCurrentIdx 跳到下一张未选原图。
-      // 2026-08-15 用户反馈"为什么点了第一张的效果图会自动跳到第二张"——
-      // 决定去掉自动推进，保留在当前原图。用户需要切图时手动点 OriginalStrip
-      // 缩略图、或用 ←/→ 箭头键、或从候选 Lightbox 里左右滑。
+      if (isLocked(batchIdx)) return;
+      onToggle(batchIdx, candIdx);
     },
     [onToggle, isLocked]
   );
@@ -260,7 +286,7 @@ export function SelectStep({
     if (lastSelectedIdx === null || lastSelectedIdx === undefined) return;
     const cur = selections[lastSelectedIdx];
     if (cur === null || cur === undefined) return;
-    if (isLocked(lastSelectedIdx)) return; // 已锁定位不可撤销
+    if (isLocked(lastSelectedIdx)) return; // 已锁定批不可撤销
     onToggle(lastSelectedIdx, cur); // toggle 取消
     setCurrentIdx(lastSelectedIdx);
   }, [selections, onToggle, lastSelectedIdx, isLocked]);
@@ -271,12 +297,8 @@ export function SelectStep({
 
   /**
    * 提交按钮启用条件（partial select 语义，锁定 = 不可重做）：
-   * - 当前张本地草稿非空（已有候选可锁定）
-   * - 当前张未服务端锁定（已锁定不可再提交；要重做只能服务端解锁）
-   *
-   * 与原版"allSelected 才可点"差异：现在每张图独立锁定，不需要全选完。
-   * confirmOpen 点击时调 onSubmit；onSubmit 内部用 use-selections 的
-   * toPayload() 提交增量项。
+   * - 当前批本地草稿非空（已有候选可锁定）
+   * - 当前批未服务端锁定（已锁定不可再提交；要重做只能服务端解锁）
    */
   const canConfirm = currentSelection !== null && !isCurrentLocked;
 
@@ -301,7 +323,7 @@ export function SelectStep({
         const n = Number.parseInt(e.key, 10) - 1;
         if (n < candidateCount) {
           e.preventDefault();
-          handleToggle(safeIdx, n);
+          handleToggle(safeBatchIdx, n);
         }
         return;
       }
@@ -313,7 +335,7 @@ export function SelectStep({
           break;
         case "ArrowRight":
           e.preventDefault();
-          setCurrentIdx((i) => Math.min(imageCount - 1, i + 1));
+          setCurrentIdx((i) => Math.min(batchCount - 1, i + 1));
           break;
         case "z":
         case "Z":
@@ -322,7 +344,7 @@ export function SelectStep({
           handleUndo();
           break;
         case "Enter":
-          // 当前张未锁定 + 本地有候选 → 打开确认；已锁定 → 跳过
+          // 当前批未锁定 + 本地有候选 → 打开确认；已锁定 → 跳过
           if (currentSelection !== null && !isCurrentLocked) {
             e.preventDefault();
             setConfirmOpen(true);
@@ -331,7 +353,7 @@ export function SelectStep({
         case "r":
         case "R":
           if (!(e.ctrlKey || e.metaKey)) {
-            // 已锁定位不可重新生成（要重做只能服务端解锁后用户重新触发）
+            // 已锁定批不可重新生成（要重做只能服务端解锁后用户重新触发）
             if (isCurrentLocked) return;
             e.preventDefault();
             setRegenConfirmOpen(true);
@@ -351,15 +373,15 @@ export function SelectStep({
     regenConfirmOpen,
     helpOpen,
     candidateCount,
-    safeIdx,
-    imageCount,
+    safeBatchIdx,
+    batchCount,
     currentSelection,
     isCurrentLocked,
     handleToggle,
     handleUndo,
   ]);
 
-  // ─── 移动端左右滑动切图 ───
+  // ─── 移动端左右滑动切批 ───
   const swipeAreaRef = useRef<HTMLDivElement>(null);
   const touchStart = useRef<{ x: number; y: number } | null>(null);
 
@@ -381,7 +403,7 @@ export function SelectStep({
       const dy = t.clientY - start.y;
       if (Math.abs(dx) < SWIPE_THRESHOLD) return;
       if (Math.abs(dx) < Math.abs(dy)) return;
-      if (dx < 0) setCurrentIdx((i) => Math.min(imageCount - 1, i + 1));
+      if (dx < 0) setCurrentIdx((i) => Math.min(batchCount - 1, i + 1));
       else setCurrentIdx((i) => Math.max(0, i - 1));
     };
     el.addEventListener("touchstart", onTouchStart, { passive: true });
@@ -390,7 +412,7 @@ export function SelectStep({
       el.removeEventListener("touchstart", onTouchStart);
       el.removeEventListener("touchend", onTouchEnd);
     };
-  }, [imageCount]);
+  }, [batchCount]);
 
   return (
     <>
@@ -398,35 +420,36 @@ export function SelectStep({
         {/* 标题 */}
         <div className="mb-4 text-center">
           <h2 className="text-xl font-bold text-stone-900">
-            {imageCount > 1 ? "选择效果图" : "挑一张你最喜欢的"}
+            {batchCount > 1 ? "选择效果图" : "挑一张你最喜欢的"}
           </h2>
-          {imageCount > 1 && lockedCount > 0 && (
+          {batchCount > 1 && lockedCount > 0 && (
             <p className="mt-1 text-xs text-stone-400">
-              已锁定 {lockedCount}/{imageCount} 张，剩余可继续上传或挑选
+              已锁定 {lockedCount}/{batchCount} 批，剩余可继续上传或挑选
             </p>
           )}
         </div>
 
-        {/* 进度小条（多图时） */}
-        {imageCount > 1 && (
+        {/* 进度小条（多批时） */}
+        {batchCount > 1 && (
           <ImageProgress
-            total={imageCount}
-            current={safeIdx}
+            total={batchCount}
+            current={safeBatchIdx}
             done={selectedCount}
           />
         )}
 
-        {/* 原图缩略图横排（多图时） */}
-        {imageCount > 1 && (
+        {/* 批次缩略图横排（多批时）—— 2026-09-02 改名/按批次 */}
+        {batchCount > 1 && (
           <div className="mb-4">
             <OriginalStrip
               token={token}
               updatedAt={updatedAt}
-              count={imageCount}
-              currentIdx={safeIdx}
+              count={batchCount}
+              currentIdx={safeBatchIdx}
               selections={selections}
               onChange={setCurrentIdx}
               isLocked={isLocked}
+              imagesPerUpload={imagesPerUpload}
             />
           </div>
         )}
@@ -434,27 +457,27 @@ export function SelectStep({
         {/* 候选区 —— 2026-09-01 按 template.outputMode 分支：
             - grid（默认）：QuadrantGrid 1 张拼接图 + CSS 网格切格子
             - separate：CandidateStrip N 张独立候选
-            历史快照只在 grid 模式下展示（snapshot.candidates[imageIdx][0] 是 1 张拼接图）；
+            历史快照只在 grid 模式下展示（snapshot.candidates[batchIdx][0] 是 1 张拼接图）；
             separate 模式每个 imageSnapshots 的 N 张候选分别存储，UI 暂不接入历史切换 */}
         <div ref={swipeAreaRef} className="relative">
           {outputMode === "separate" ? (
             <CandidateStrip
               token={token}
               updatedAt={updatedAt}
-              imageIdx={safeIdx}
+              imageIdx={safeBatchIdx}
               candidateCount={candidateCount}
               selectedCand={isViewingOldSnapshot ? null : currentSelection}
               disabled={isCurrentLocked || isViewingOldSnapshot}
-              onSelect={(c) => handleToggle(safeIdx, c)}
+              onSelect={(c) => handleToggle(safeBatchIdx, c)}
             />
           ) : (
             <QuadrantGrid
               token={token}
               updatedAt={updatedAt}
-              imageIdx={safeIdx}
+              imageIdx={safeBatchIdx}
               compositeUrl={
                 viewingCompositeUrl ??
-                candidateUrl(token, safeIdx, 0, updatedAt)
+                candidateUrl(token, safeBatchIdx, 0, updatedAt)
               }
               quadrantCount={
                 (candidateCount === 1 ||
@@ -465,18 +488,14 @@ export function SelectStep({
                   : 4) as 1 | 2 | 4 | 9
               }
               selectedQuadrant={isViewingOldSnapshot ? null : currentSelection}
-              onSelect={(q) => handleToggle(safeIdx, q)}
+              onSelect={(q) => handleToggle(safeBatchIdx, q)}
               disabled={isCurrentLocked}
             />
           )}
         </div>
 
         {/* 历史快照切换 —— 放在大图下方，避开可点选区。
-            仅当该原图存在快照时渲染；查看最新时不显示 "回到最新"。
-            索引 0 = 最新候选快照；索引越大越旧。ChevronLeft = 往更旧跳、
-            ChevronRight = 往更新跳。viewingSnapshotIdx=null 表示正在看当前候选组。
-            三列网格 [1fr | auto | 1fr]：左列留空、中列 chevron 永远居中、
-            右列 "回到最新" 右对齐，跟 chevron 共占一行但不抢居中位。 */}
+            仅当该批存在快照时渲染；查看最新时不显示 "回到最新"。 */}
         {imageSnapshots.length > 0 && (
           <div className="mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-stone-500">
             <div />
@@ -526,7 +545,7 @@ export function SelectStep({
 
         {/* 操作按钮：重新生成（次级）+ 确认提交（主）并列，居中显示 */}
         <div className="mt-4 flex w-full items-stretch justify-center gap-2">
-          {/* 重新生成（次级）—— 已锁定位 / 次数用尽时禁用 */}
+          {/* 重新生成（次级）—— 已锁定批 / 次数用尽时禁用 */}
           <button
             type="button"
             onClick={() => {
@@ -548,10 +567,10 @@ export function SelectStep({
             ) : (
               <RefreshCw className="h-4 w-4" />
             )}
-            {imageCount > 1
+            {batchCount > 1
               ? isCurrentLocked
                 ? "已锁定"
-                : `重新生成第 ${safeIdx + 1} 张`
+                : `重新生成第 ${safeBatchIdx + 1} 批`
               : isCurrentLocked
                 ? "已锁定"
                 : "重新生成"}
@@ -562,7 +581,7 @@ export function SelectStep({
             )}
           </button>
 
-          {/* 确认提交（主）—— 已锁定位可再次点击以更新保存值（toPayload 会跳过无变化的位） */}
+          {/* 确认提交（主）—— 已锁定批可再次点击以更新保存值（toPayload 会跳过无变化的位） */}
           <button
             type="button"
             onClick={() => {
@@ -584,12 +603,14 @@ export function SelectStep({
             ) : isCurrentLocked ? (
               <span className="inline-flex items-center gap-1.5">
                 <Lock className="h-4 w-4" />
-                {currentSelection !== null ? "已提交" : "该张已提交"}
+                {currentSelection !== null ? "已提交" : "该批已提交"}
               </span>
             ) : (
               <span className="inline-flex items-center gap-1.5">
                 <CheckCircle2 className="h-4 w-4" />
-                {imageCount > 1 ? `确认提交第 ${safeIdx + 1} 张` : "确认提交"}
+                {batchCount > 1
+                  ? `确认提交第 ${safeBatchIdx + 1} 批`
+                  : "确认提交"}
               </span>
             )}
           </button>
@@ -597,7 +618,7 @@ export function SelectStep({
 
         {/* sr-only 状态说明，给屏幕阅读器 */}
         <span className="sr-only">
-          {safeIdx >= imageCount - 1 ? "这是最后一张图" : "继续选择下一张图"}
+          {safeBatchIdx >= batchCount - 1 ? "这是最后一批" : "继续选择下一批"}
         </span>
       </section>
 
@@ -613,9 +634,8 @@ export function SelectStep({
             setLightbox(t);
             setCurrentIdx(t.imageIdx);
           }}
-          imageCount={imageCount}
+          imageCount={batchCount}
           candidateCount={candidateCount}
-          // 2026-09-01：让 Lightbox 区分 grid crop vs separate 整图
           outputMode={outputMode}
           selectedCand={selections[lightbox.imageIdx] ?? null}
           onSelect={(i, c) => {
@@ -625,28 +645,30 @@ export function SelectStep({
         />
       )}
 
-      {/* ─── 原图预览灯箱 ─── */}
+      {/* ─── 原图预览灯箱（批次维度）─── */}
       <OriginalLightbox
         open={originalPreviewOpen}
         onClose={() => setOriginalPreviewOpen(false)}
         token={token}
         updatedAt={updatedAt}
-        imageIdx={safeIdx}
-        imageCount={imageCount}
-        onChangeImage={(idx) => setCurrentIdx(idx)}
+        batchIdx={safeBatchIdx}
+        batchCount={batchCount}
+        imagesPerUpload={imagesPerUpload}
+        uploadedImageCount={uploadedImageCount}
+        onChangeBatch={(idx) => setCurrentIdx(idx)}
       />
 
       {/* ─── 二次确认 dialogs ─── */}
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogTitle>
-            {imageCount > 1
-              ? `锁定第 ${safeIdx + 1} 张原图的选择？`
+            {batchCount > 1
+              ? `锁定第 ${safeBatchIdx + 1} 批的选择？`
               : "确认提交？"}
           </AlertDialogTitle>
           <AlertDialogDescription>
-            {imageCount > 1 && lockedCount + 1 < imageCount
-              ? `提交后该张效果将被锁定，无法再更换。剩余 ${imageCount - lockedCount - 1} 张可继续上传或挑选。如需全部重新选择，请取消订单后联系服务方重新创建。`
+            {batchCount > 1 && lockedCount + 1 < batchCount
+              ? `提交后该批效果将被锁定，无法再更换。剩余 ${batchCount - lockedCount - 1} 批可继续上传或挑选。如需全部重新选择，请取消订单后联系服务方重新创建。`
               : "提交后结果会被锁定，无法再更换效果图。如需重新挑选，请取消订单后联系服务方重新创建。"}
           </AlertDialogDescription>
           <AlertDialogFooter>
@@ -659,11 +681,11 @@ export function SelectStep({
       <AlertDialog open={regenConfirmOpen} onOpenChange={setRegenConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogTitle>
-            重新生成第 {safeIdx + 1} 张的效果？
+            重新生成第 {safeBatchIdx + 1} 批的效果？
           </AlertDialogTitle>
           <AlertDialogDescription>
-            这一张当前的选择会被清空，{candidateCount}{" "}
-            张效果图将重新生成，通常需要 30-90 秒。其他照片不受影响。
+            这一批当前的选择会被清空，{candidateCount}{" "}
+            张效果图将重新生成，通常需要 30-90 秒。其他批次不受影响。
           </AlertDialogDescription>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={regenerating}>
@@ -673,7 +695,7 @@ export function SelectStep({
               onClick={(e) => {
                 e.preventDefault();
                 setRegenConfirmOpen(false);
-                void onRegenerate(safeIdx);
+                void onRegenerate(safeBatchIdx);
               }}
             >
               确认重新生成

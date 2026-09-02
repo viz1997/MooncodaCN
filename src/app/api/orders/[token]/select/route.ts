@@ -2,33 +2,37 @@
  * 用户端 - 提交选择
  * POST /api/orders/[token]/select
  *
- * body: `Array<{ imageIdx: number; candIdx: number }>` ——「按图锁定」的增量提交。
+ * body: `Array<{ batchIdx: number; candIdx: number }>` ——「按批锁定」的增量提交。
  *
- * ## 语义（partial select）
+ * ## 语义（partial select，2026-09-02 改 batch 索引）
  *
- * 每张原图独立"锁定"：用户每选好一张候选并提交，就把那张图写入
- * `selections[imageIdx] = candIdx`（锁定 = 不可逆）。其他未提交的原图位置
- * 保持 null，可在后续继续上传 / 选图 / 提交。
+ * 每批参考图独立"锁定"：用户每选好一个候选并提交，就把该批写入
+ * `selections[batchIdx] = candIdx`（锁定 = 不可逆）。其他未提交的批位置
+ * 保持 null，可在后续继续选 / 提交。
  *
- * - 允许只提交部分图（任意非空子集）。已锁定的位不能再改（前端按钮禁用，
- *   服务端此处做"以最后一条为准"的合并——客户端按 `isLocked` 不会再触达）。
- * - 上传槽位已满（`uploadedImageCount === uploadCount × imagesPerUpload`）且全部图都锁定
- *   后，订单转入 SELECTED 终态；否则保留 CANDIDATES_READY（用户还可以
- *   继续上传下一张 / 选下一张候选）。仅"已上传的图全部锁定"不足以进
- *   终态——剩余 uploadCount 余量必须填满。
- * - `selectedAt` 只在**第一次**进 SELECTED 时写入；partial submit
- *   期间不刷新 selectedAt，避免时间线反复抖动。
+ * 2026-09-02：索引语义从 imageIdx 改成 batchIdx。
+ * - 旧语义：selections 长度 = uploadedImageCount（每张原图一个 candIdx）
+ * - 新语义：selections 长度 = batchCount = ceil(uploadedImageCount / imagesPerUpload)
+ *   （每批 N 张原图合一次生图 = 1 个 candIdx）
+ *
+ * 兼容老数据：
+ * - 入参接受旧式 imageIdx（按 uploadedImageCount 校验），内部按
+ *   `Math.floor(imageIdx / imagesPerUpload)` 转 batchIdx
+ * - 入参接受新式 batchIdx（按 batchCount 校验）
+ * - 写入按 batchIdx 维度覆盖，触发隐式数据迁移（老订单旧索引被新 batch 索引覆盖）
  *
  * 终态后（SELECTED / CANCELLED / GENERATING）→ 400 拒绝。
  *
  * 入参兼容两种形式（迁移期保留）：
- * - 新式：`Array<{ imageIdx: number; candIdx: number }>` —— 精确指明要锁定的位
+ * - 新式：`Array<{ batchIdx, candIdx }>` —— 精确指明要锁定的批
  * - 旧式：`number[]`（长度对齐 uploadedImageCount）—— 全部一次性提交，
- *   内部转成"按 index 覆盖"的增量 payload 处理
+ *   内部按 imageIdx 转 batchIdx 后增量合并
+ * - 过渡式：`Array<{ imageIdx, candIdx }>` —— 旧版 imageIdx 字段，内部转 batchIdx
  */
 
 import { eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
+
 import { db } from "@/db";
 import { promptOrder } from "@/db/schema";
 import {
@@ -39,43 +43,62 @@ import { withApiLogging } from "@/lib/api-logger";
 
 export const runtime = "nodejs";
 
+/**
+ * 2026-09-02：单次提交的最小单元。
+ * - 内部用 batchIdx 存
+ * - 外部入参兼容 batchIdx / imageIdx（前者优先）
+ */
 interface PartialSelectItem {
-  imageIdx: number;
+  batchIdx: number;
   candIdx: number;
 }
 
 /**
- * 把入参规范化为 PartialSelectItem[]。
+ * 把入参规范化为 PartialSelectItem[]（统一以 batchIdx 索引）。
  *
- * - `Array<{ imageIdx, candIdx }>` → 透传
- * - `number[]`（旧式）→ 按位置展开成 `{ imageIdx: i, candIdx: v }`
- * - 其他 → throw（被调用方 catch 后返回 400）
+ * - 新式 `Array<{ batchIdx, candIdx }>` → 透传（imageIdx / batchIdx 字段识别）
+ * - 旧式 `number[]`（长度对齐 uploadedImageCount）→ 按 imageIdx 转 batchIdx
+ * - 过渡式 `Array<{ imageIdx, candIdx }>` → imageIdx 转 batchIdx
+ * - 其他 → throw
  */
-function normalizeSelections(raw: unknown): PartialSelectItem[] {
+function normalizeSelections(
+  raw: unknown,
+  imagesPerUpload: number
+): PartialSelectItem[] {
   if (!Array.isArray(raw) || raw.length === 0) {
     throw new Error("EMPTY");
   }
 
-  // 旧式 number[]：每一项都是 number
+  // 旧式 number[]：每项都是 number
   const allNumbers = raw.every((v) => typeof v === "number");
   if (allNumbers) {
-    return raw.map((v, i) => ({
-      imageIdx: i,
+    const perBatch = Math.max(1, imagesPerUpload);
+    return raw.map((v, imageIdx) => ({
+      batchIdx: Math.floor(imageIdx / perBatch),
       candIdx: v as number,
     }));
   }
 
-  // 新式 { imageIdx, candIdx }[]
+  // 数组项形式：支持 { batchIdx, candIdx } 或 { imageIdx, candIdx }
   return raw.map((v) => {
-    if (
-      typeof v !== "object" ||
-      v === null ||
-      typeof (v as PartialSelectItem).imageIdx !== "number" ||
-      typeof (v as PartialSelectItem).candIdx !== "number"
-    ) {
+    if (typeof v !== "object" || v === null) {
       throw new Error("BAD_ITEM");
     }
-    return v as PartialSelectItem;
+    const obj = v as Record<string, unknown>;
+    const candRaw = obj.candIdx;
+    if (typeof candRaw !== "number") throw new Error("BAD_ITEM");
+    // 优先 batchIdx（新）；回退 imageIdx（兼容老客户端）
+    if (typeof obj.batchIdx === "number") {
+      return { batchIdx: obj.batchIdx, candIdx: candRaw };
+    }
+    if (typeof obj.imageIdx === "number") {
+      const perBatch = Math.max(1, imagesPerUpload);
+      return {
+        batchIdx: Math.floor(obj.imageIdx / perBatch),
+        candIdx: candRaw,
+      };
+    }
+    throw new Error("BAD_ITEM");
   });
 }
 
@@ -88,23 +111,6 @@ async function postHandler(
     const body = (await req.json().catch(() => ({}))) as {
       selections?: unknown;
     };
-
-    let items: PartialSelectItem[];
-    try {
-      items = normalizeSelections(body.selections);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "";
-      const errorText =
-        msg === "EMPTY"
-          ? "请提交至少一项选择"
-          : msg === "BAD_ITEM"
-            ? "每项必须是 { imageIdx: number, candIdx: number }，或旧式 number[]"
-            : "选择数据格式无效";
-      return NextResponse.json(
-        { success: false, error: errorText },
-        { status: 400 }
-      );
-    }
 
     const order = await db.query.promptOrder.findFirst({
       where: eq(promptOrder.token, token),
@@ -135,19 +141,39 @@ async function postHandler(
     const uploadedImageCount = parseUploadedImages(
       order.uploadedImages as string | null
     ).length;
+    const imagesPerUpload = Math.max(1, order.imagesPerUpload);
+    // 2026-09-02：batchCount = ceil(uploadedImageCount / imagesPerUpload)
+    const batchCount = Math.ceil(uploadedImageCount / imagesPerUpload);
     const candidateCount = order.template.candidateCount;
 
-    // 校验每项的 imageIdx / candIdx 范围
+    let items: PartialSelectItem[];
+    try {
+      items = normalizeSelections(body.selections, imagesPerUpload);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "";
+      const errorText =
+        msg === "EMPTY"
+          ? "请提交至少一项选择"
+          : msg === "BAD_ITEM"
+            ? "每项必须是 { batchIdx: number; candIdx: number }，或旧式 number[] / { imageIdx, candIdx }"
+            : "选择数据格式无效";
+      return NextResponse.json(
+        { success: false, error: errorText },
+        { status: 400 }
+      );
+    }
+
+    // 校验每项的 batchIdx / candIdx 范围
     for (const item of items) {
       if (
-        !Number.isInteger(item.imageIdx) ||
-        item.imageIdx < 0 ||
-        item.imageIdx >= uploadedImageCount
+        !Number.isInteger(item.batchIdx) ||
+        item.batchIdx < 0 ||
+        item.batchIdx >= batchCount
       ) {
         return NextResponse.json(
           {
             success: false,
-            error: `imageIdx ${item.imageIdx} 超出范围（应在 0-${uploadedImageCount - 1} 之间）`,
+            error: `batchIdx ${item.batchIdx} 超出范围（应在 0-${batchCount - 1} 之间）`,
           },
           { status: 400 }
         );
@@ -160,40 +186,44 @@ async function postHandler(
         return NextResponse.json(
           {
             success: false,
-            error: `第 ${item.imageIdx + 1} 张原图的 candIdx ${item.candIdx} 超出范围（应在 0-${candidateCount - 1} 之间）`,
+            error: `第 ${item.batchIdx + 1} 批的 candIdx ${item.candIdx} 超出范围（应在 0-${candidateCount - 1} 之间）`,
           },
           { status: 400 }
         );
       }
     }
 
-    // 合并：以服务端已有 selections 为基础，按 imageIdx 覆盖。
-    // 同一 imageIdx 重复提交以最后一条为准（防御性：前端按 isLocked 不会
-    // 重复提交，但恶意或老客户端可能触达）。
+    // 合并：以服务端已有 selections 为基础，按 batchIdx 覆盖。
+    // 同一 batchIdx 重复提交以最后一条为准（防御性）。
+    //
+    // 2026-09-02：DB selections 现在是按 batchIdx 维度存的 number[]，长度
+    // 应等于 batchCount。如果老数据按 imageIdx 维度存（长度 = uploadedImageCount），
+    // 这里按 batchIdx 读取会读到 batchIdx 位置上的旧 imageIdx 值，**意图覆盖
+    // 后即迁移完成**。读时 readSelectionsForBatch 已做适配，但本路由读的是
+    // DB 原始值（不调 use-selections 的 helper），所以这里直接按 batchCount
+    // 长度初始化——老数据未覆盖的位视为 null。
     const baseSelections =
       parseSelections(order.selections) ??
-      Array.from({ length: uploadedImageCount }, () => null);
-    // 对齐长度：避免极端情况（DB selections 长度小于 uploadedImageCount）
+      Array.from({ length: batchCount }, () => null);
     const merged: (number | null)[] = Array.from(
-      { length: uploadedImageCount },
+      { length: batchCount },
       (_, i) => baseSelections[i] ?? null
     );
     for (const item of items) {
-      merged[item.imageIdx] = item.candIdx;
+      merged[item.batchIdx] = item.candIdx;
     }
 
     const lockedCount = merged.filter((v) => v !== null).length;
-    // 终态条件：上传槽位已满（uploadedImageCount === uploadCount × imagesPerUpload）
-    // 且全部已锁。只锁完已上传的图但还剩上传余量时，保持 CANDIDATES_READY，
-    // 让用户继续传下一张原图。否则会出现"2/3 张全部锁定就直接终态"的
-    // 体验断裂，用户被迫取消订单重开。
+    // 2026-09-02：终态条件改成 batchCount（不是 uploadedImageCount）。
+    // 上传槽位已满（uploadedImageCount === uploadCount × imagesPerUpload）
+    // 且全部 batch 已锁 → SELECTED；否则保持 CANDIDATES_READY。
     const totalCapacity = order.uploadCount * order.imagesPerUpload;
     const slotsFull = uploadedImageCount === totalCapacity;
-    const allLocked = slotsFull && lockedCount === uploadedImageCount;
+    const allLocked = slotsFull && lockedCount === batchCount;
     const nextStatus = allLocked ? "SELECTED" : "CANDIDATES_READY";
-    // selectedAt 只在第一次进 SELECTED 时写入（partial submit 期间不刷新）。
-    // 上面状态校验已保证 order.status === "CANDIDATES_READY"，因此进入此
-    // 分支意味着订单首次进 SELECTED——直接写 selectedAt = now()。
+    // selectedIndex：保留 firstLocked 的 candIdx（订单级最终选择）。第一
+    // 个锁定的 batch 的 candIdx 仍然有意义——它代表"主批次"的选择。
+    const firstLockedIdx = merged.findIndex((v) => v !== null);
     const updateSet: {
       selections: string;
       status: typeof nextStatus;
@@ -206,7 +236,8 @@ async function postHandler(
       updatedAt: new Date(),
     };
     if (allLocked) {
-      updateSet.selectedIndex = merged[0] ?? null;
+      updateSet.selectedIndex =
+        firstLockedIdx >= 0 ? (merged[firstLockedIdx] ?? null) : null;
       updateSet.selectedAt = new Date();
     }
 
@@ -216,10 +247,10 @@ async function postHandler(
       .where(eq(promptOrder.id, order.id));
 
     const message = allLocked
-      ? `全部 ${uploadedImageCount} 张已锁定，订单已确认。结果不可修改，如需更改请取消订单。`
+      ? `全部 ${batchCount} 批已锁定，订单已确认。结果不可修改，如需更改请取消订单。`
       : slotsFull
-        ? `已锁定 ${lockedCount}/${uploadedImageCount} 张，订单已确认。`
-        : `已锁定 ${lockedCount}/${uploadedImageCount} 张。剩余 ${
+        ? `已锁定 ${lockedCount}/${batchCount} 批，订单已确认。`
+        : `已锁定 ${lockedCount}/${batchCount} 批。剩余 ${
             totalCapacity - uploadedImageCount
           } 张可继续上传。`;
 
@@ -230,7 +261,7 @@ async function postHandler(
         status: nextStatus,
         selections: merged,
         lockedCount,
-        totalCount: uploadedImageCount,
+        totalCount: batchCount,
         allLocked,
       },
     });

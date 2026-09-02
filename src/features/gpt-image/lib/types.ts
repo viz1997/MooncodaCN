@@ -218,7 +218,13 @@ export interface OrderHistorySnapshotView {
   trigger: OrderHistoryTrigger;
   imageIdx: number | null;
   candidateIdx: number;
+  /**
+   * 2026-09-02：保留 imageCount 字段 = 快照时实际原图张数（向后兼容老快照）。
+   * batchCount 是派生字段（新快照附带）= ceil(imageCount / imagesPerUpload)；
+   * select-step 用 batchCount 索引 candidates，老快照缺此字段时回退用 imageCount。
+   */
   imageCount: number;
+  batchCount?: number;
   candidateCount: number;
   size: string;
   /** selections 中非 null 数量 */

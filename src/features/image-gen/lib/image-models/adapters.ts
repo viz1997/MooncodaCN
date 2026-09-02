@@ -665,7 +665,8 @@ async function retrySubmitLingtingTask(
     try {
       return await submitLingtingTask(
         "_wbl",
-        imageUrl,
+        // 2026-09-02：V2 workbench 仍走单图参考，包成 [imageUrl] 兼容新签名。
+        [imageUrl],
         prompt,
         size,
         imageIdx,

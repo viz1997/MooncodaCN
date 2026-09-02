@@ -229,10 +229,15 @@ async function persistWellapiDataToR2(
 }
 
 /**
- * 提交一张原图的生成任务（不轮询）。
+ * 提交一批原图的生成任务（不轮询）。
  *
  * Lingting 的 /v1/images/edits 要求 multipart/form-data，必须把原图作为
- * 文件字段上传，不能用 JSON body + URL 引用，因此先下载原图拿 buffer。
+ * 文件字段上传，不能用 JSON body + URL 引用，因此先下载每张原图拿 buffer。
+ *
+ * 多图参考（2026-09-02）：wellapi.ai `/v1/images/edits` 接受同一 `image` key
+ * 重复多次（`image` + `image` + `image`），最大 16 张、50MB total，作为多张
+ * 参考图让模型综合生成。前端 `UploadStep` 已校验每批最多 imagesPerUpload
+ * 张，这里 imageUrls 数量 = 一次 /upload 接受的批次内张数（1..imagesPerUpload）。
  *
  * 关于 response_format：gpt-image 系列固定忽略此参数，sync 调用永远返
  * b64_json（参见 wellapi/OpenAI 文档）。我们不再发这个字段，由本函数内
@@ -243,13 +248,19 @@ async function persistWellapiDataToR2(
  * 调用方传 candidateCount，让 Lingting 一次返 N 张独立图（替代宫格模式）；
  * "grid" 模式仍走 n=1 + prompt 末尾追加宫格指令。
  *
+ * imageIdx 现在 = 批次槽位下标（= candidates 外层下标），不再是单张原图
+ * 下标 —— 一批 N 张合一次生图，candidates 写入用 batchIdx 而非 imageIdx。
+ *
  * 失败直接抛错，由调用方决定如何落库。
  */
 export async function submitLingtingTask(
   orderId: string,
-  imageUrl: string,
+  // 2026-09-02：imageUrls: string[] 改自单图 string。多张参考图作为
+  // multipart image[] 上传到 wellapi.ai，合一次生图任务。
+  imageUrls: string[],
   prompt: string,
   size: string,
+  // 2026-09-02：imageIdx 现在 = 批次槽位（= candidates 外层下标）。
   imageIdx: number,
   // 2026-09-01：n=1 = 宫格模式（默认），n>1 = 独立候选模式
   n: number = 1
@@ -257,41 +268,54 @@ export async function submitLingtingTask(
   if (!LINGTING_API_KEY) {
     throw new Error("LINGTING_API_KEY 未配置");
   }
+  if (imageUrls.length === 0) {
+    throw new Error("submitLingtingTask 需要至少 1 张参考图");
+  }
 
-  // 1. 下载原图 buffer（imageUrl 通常是 R2 公开域 URL）
+  // 1. 逐张下载原图 buffer（imageUrl 通常是 R2 公开域 URL）
   //
   // 超时 120s：旧 60s 在 Vercel 跨区域回源 R2 + 大图（>5MB）偶发撞线
   // （用户反馈 "第 1 张：The operation was aborted due to timeout"）。
   // 120s 给 R2 充足缓冲——async task_id 路径下这是阻塞点；sync URL 路径
   // 还会走 persistCandidateToR2（60s），叠加 245s 仍在 /upload maxDuration=300s
   // 预算内。
-  let imageBuf: ArrayBuffer;
-  let imageMime = "image/png";
-  try {
-    const imgRes = await fetch(imageUrl, {
-      signal: AbortSignal.timeout(120_000),
-    });
-    if (!imgRes.ok) {
-      throw new Error(
-        `下载原图失败：HTTP ${imgRes.status} ${imgRes.statusText}`
-      );
-    }
-    const ct = imgRes.headers.get("content-type");
-    if (ct?.startsWith("image/")) imageMime = ct;
-    imageBuf = await imgRes.arrayBuffer();
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "未知错误";
-    throw new Error(`下载原图失败（${imageIdx + 1}）：${msg}`);
-  }
-
-  // 2. 构造 multipart/form-data
-  const form = new FormData();
-  // 第二个参数必须是 Blob/Buffer，文件名随便取
-  form.append(
-    "image",
-    new Blob([new Uint8Array(imageBuf)], { type: imageMime }),
-    `original-${imageIdx + 1}.${imageMime.split("/")[1] ?? "png"}`
+  //
+  // 多张参考图时并行下载（每张独立 120s），wall-clock ≈ 单张时长 + ε。
+  const downloaded = await Promise.all(
+    imageUrls.map(async (url, i) => {
+      try {
+        const imgRes = await fetch(url, {
+          signal: AbortSignal.timeout(120_000),
+        });
+        if (!imgRes.ok) {
+          throw new Error(
+            `下载原图失败：HTTP ${imgRes.status} ${imgRes.statusText}`
+          );
+        }
+        const ct = imgRes.headers.get("content-type");
+        const mime = ct?.startsWith("image/") ? ct : "image/png";
+        const buf = await imgRes.arrayBuffer();
+        return { buf, mime };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "未知错误";
+        throw new Error(`下载原图失败（第 ${i + 1} 张）：${msg}`);
+      }
+    })
   );
+
+  // 2. 构造 multipart/form-data —— 同 key `image` 重复 append。
+  // wellapi 把多次 `image` 字段当 image[] 多图参考处理（主图在 image[0]，
+  // 其余按顺序 image[1..N-1]）。文件名 ref-1.png / ref-2.png 仅供调试，
+  // 上游不解析。
+  const form = new FormData();
+  for (let i = 0; i < downloaded.length; i++) {
+    const { buf, mime } = downloaded[i] as { buf: ArrayBuffer; mime: string };
+    form.append(
+      "image",
+      new Blob([new Uint8Array(buf)], { type: mime }),
+      `ref-${i + 1}.${mime.split("/")[1] ?? "png"}`
+    );
+  }
   form.append("model", "gpt-image-2");
   form.append("prompt", prompt);
   // 2026-09-01：n 按 outputMode 传 —— grid 模式仍是 1（让 Lingting 自己拼宫格），
@@ -526,65 +550,90 @@ export async function submitGeneration(
   }
   const size = order.template.size;
 
-  // uploadCount 基本为 1；多图时并行 submit，避免串行放大请求耗时
-  const targets: number[] = [];
-  for (let imageIdx = fromIdx; imageIdx < total; imageIdx++) {
-    if (uploaded[imageIdx]) targets.push(imageIdx);
-  }
-
-  // per-image retry：Lingting 偶发 cold start 120s 撞线（用户原话
-  // "第 1 张：The operation was aborted due to timeout"），单次提交失败
-  // 多半是上游排队瞬时拥堵，等 2s 再试一次大概率就过。**只重试单图**——
-  // 成功的图不重复提交，省 Lingting 配额（wellapi.ai 不支持幂等键）。
+  // 2026-09-02：拍平 batch 边界。
+  // 旧版按 uploadedImages 下标 fan-out：imagesPerUpload=3 时 N 张图跑 N 次
+  // 生图，扣 N 次额度。真实语义是 wellapi `image[]` 多图参考 —— 多张图是
+  // 同一组输入，合一次生图任务。
   //
-  // 重试失败 = 计入 failures，不影响其他图（仍在 Promise.all 内并行）
+  // 新版：
+  // - 按 imagesPerUpload 等分 uploadedImages 得到 batches[]（每批 imagesPerUpload 张）
+  // - fromIdx / total 是【张数】索引 → 转成【批次】下标
+  // - 每批调一次 submitLingtingTask(imageUrls: 本批全部 URL)
+  // - 重试 2 次 × 2s（per-batch），失败计入整批失败
+  //
+  // FAILED 重传场景不严格整除也按 Math.floor 切，最后一批残缺也参与一次生图。
+  const perBatch = Math.max(1, order.imagesPerUpload);
+  const batchCount = Math.ceil(uploaded.length / perBatch);
+  // fromIdx / total 是上传张数索引；转成批次：[0, fromBatch) 跳过
+  const fromBatch = Math.floor(fromIdx / perBatch);
+  // total 是 merged 后总张数；转成批次下标 [fromBatch, toBatch)
+  const toBatch = Math.min(batchCount, Math.ceil(total / perBatch));
+
+  // per-batch retry：Lingting 偶发 cold start 120s 撞线，整批等 2s 再试一次。
+  // **不重试成功的批** —— 成功的批次不重复提交，省 Lingting 配额
+  // （wellapi.ai 不支持幂等键，重复提交会被扣两次）。
   const MAX_SUBMIT_ATTEMPTS = 2;
   const SUBMIT_RETRY_DELAY_MS = 2_000;
 
   const settled = await Promise.all(
-    targets.map(async (imageIdx) => {
-      let lastError: string | null = null;
-      for (let attempt = 1; attempt <= MAX_SUBMIT_ATTEMPTS; attempt++) {
-        try {
-          const imageUrl = uploaded[imageIdx] as string;
-          const result = await submitLingtingTask(
-            orderId,
-            imageUrl,
-            effectivePrompt,
-            size,
-            imageIdx,
-            n
-          );
-          if (attempt > 1) {
-            logger.info({ orderId, imageIdx, attempt }, "提交生图任务重试成功");
-          }
-          return { imageIdx, result };
-        } catch (err) {
-          lastError = err instanceof Error ? err.message : "未知错误";
-          logger.warn(
-            {
-              err,
+    Array.from({ length: toBatch - fromBatch }, (_, localIdx) => {
+      const batchIdx = fromBatch + localIdx;
+      return (async () => {
+        const start = batchIdx * perBatch;
+        const end = Math.min(uploaded.length, start + perBatch);
+        const imageUrls = uploaded.slice(start, end);
+        if (imageUrls.length === 0) {
+          // 边界：merged 长度变化后某批可能为空（理论不应发生，防御）
+          return {
+            batchIdx,
+            error: `第 ${batchIdx + 1} 批：本批无参考图`,
+          };
+        }
+        let lastError: string | null = null;
+        for (let attempt = 1; attempt <= MAX_SUBMIT_ATTEMPTS; attempt++) {
+          try {
+            const result = await submitLingtingTask(
               orderId,
-              imageIdx,
-              attempt,
-              maxAttempts: MAX_SUBMIT_ATTEMPTS,
-            },
-            "提交生图任务失败"
-          );
-          if (attempt < MAX_SUBMIT_ATTEMPTS) {
-            await new Promise((r) => setTimeout(r, SUBMIT_RETRY_DELAY_MS));
+              imageUrls,
+              effectivePrompt,
+              size,
+              batchIdx,
+              n
+            );
+            if (attempt > 1) {
+              logger.info(
+                { orderId, batchIdx, attempt },
+                "提交生图任务重试成功"
+              );
+            }
+            return { batchIdx, result };
+          } catch (err) {
+            lastError = err instanceof Error ? err.message : "未知错误";
+            logger.warn(
+              {
+                err,
+                orderId,
+                batchIdx,
+                attempt,
+                maxAttempts: MAX_SUBMIT_ATTEMPTS,
+              },
+              "提交生图任务失败"
+            );
+            if (attempt < MAX_SUBMIT_ATTEMPTS) {
+              await new Promise((r) => setTimeout(r, SUBMIT_RETRY_DELAY_MS));
+            }
           }
         }
-      }
-      return {
-        imageIdx,
-        error: `第 ${imageIdx + 1} 张：${lastError ?? "未知错误"}`,
-      };
+        return {
+          batchIdx,
+          error: `第 ${batchIdx + 1} 批：${lastError ?? "未知错误"}`,
+        };
+      })();
     })
   );
 
   // 汇总：同步拿到 url 的直接落 candidates，拿到 taskId 的进待轮询列表
-  const nested = fillSparseSlots(parseCandidates(order.candidates), total);
+  const nested = fillSparseSlots(parseCandidates(order.candidates), batchCount);
   const tasks: GenerationTask[] = [];
   const failures: string[] = [];
   const now = Date.now();
@@ -600,12 +649,12 @@ export async function submitGeneration(
     if (result.kind === "url") {
       // submitLingtingTask 已经把每张图（url 或 b64）都落 R2 了，urls
       // 元素直接是永久 URL，可直接放 candidates。多图（wellapi 偶尔
-      // 返多张）会按顺序落入同一个 imageIdx 的槽位。
-      nested[item.imageIdx] = result.urls;
+      // 返多张）会按顺序落入同一个 batchIdx 的槽位。
+      nested[item.batchIdx] = result.urls;
       readyCount += result.urls.length;
     } else {
       tasks.push({
-        imageIdx: item.imageIdx,
+        imageIdx: item.batchIdx,
         taskId: result.taskId,
         submittedAt: now,
       });
@@ -618,7 +667,7 @@ export async function submitGeneration(
       .update(promptOrder)
       .set({
         candidates: JSON.stringify(nested),
-        generationTask: stringifyGenerationTask({ tasks, total }),
+        generationTask: stringifyGenerationTask({ tasks, total: batchCount }),
         status: "GENERATING",
         templateId: order.templateId,
         errorMessage: failures.length > 0 ? failures.join("；") : null,
@@ -626,7 +675,7 @@ export async function submitGeneration(
       })
       .where(eq(promptOrder.id, orderId));
     logger.info(
-      { orderId, taskCount: tasks.length, fromIdx, total },
+      { orderId, taskCount: tasks.length, fromIdx, total, batchCount },
       "生图任务已提交，等待前端轮询推进"
     );
     return;

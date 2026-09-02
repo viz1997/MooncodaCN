@@ -1,21 +1,25 @@
 /**
- * 用户端 - 重新生成指定原图（或全部）效果图
+ * 用户端 - 重新生成指定批次（或全部）效果图
  * POST /api/orders/[token]/regenerate
  *
- * body: { imageIdx?: number }
+ * body: { batchIdx?: number }
  *   - 不传 / 传 null：批量重跑所有已上传图（用于 FAILED 状态整体重试）
- *   - 传 imageIdx：仅重跑这一张（用于 CANDIDATES_READY 单图重新生成）
+ *   - 传 batchIdx：仅重跑这一批（用于 CANDIDATES_READY 单批重新生成）
+ *
+ * 2026-09-02：索引语义从 imageIdx 改成 batchIdx。
+ * 旧版单图重生成 = 重跑 1 张原图；新版单批重生成 = 重跑 1 个批次（每批
+ * imagesPerUpload 张原图合一次生图）。
  *
  * 允许的状态：
- *   - CANDIDATES_READY：单图或批量重跑
+ *   - CANDIDATES_READY：单批或批量重跑
  *   - FAILED：仅允许批量重跑（保证"链接不失效"，失败后可一键重试）
  *
- * 锁定限制（2026-08 保留 partial select 不可逆语义）：`selections[i] !== null`
- * 表示该张已提交，用户端不可重新生成。批次模型下用户每完成一次
- * upload → generate → select → submit 后，那张图即被服务端"锁定"——要
- * 重新生成必须服务端把该位置 selections[i] 置 null（解锁后用户才能在
- * UI 上重新触发）。
- * - 单图路径：若目标位已锁 → 409
+ * 锁定限制（partial select 不可逆语义）：`selections[batchIdx] !== null`
+ * 表示该批已提交，用户端不可重新生成。批次模型下用户每完成一次
+ * upload → generate → select → submit 后，该批即被服务端"锁定"——
+ * 要重新生成必须服务端把该位置 selections[batchIdx] 置 null（解锁后
+ * 用户才能在 UI 上重新触发）。
+ * - 单批路径：若目标位已锁 → 409
  * - 批量路径：只要有一位已锁 → 409（不能批量重跑覆盖已提交）
  */
 
@@ -45,25 +49,28 @@ export const maxDuration = 90;
 /**
  * 触发 submitGeneration：优先 Inngest 异步，失败降级同步。
  * 详见 /upload 路由同名函数注释。
+ *
+ * 2026-09-02：参数改为张数维度的 fromIdx / total（与 submitGeneration
+ * 内部一致），由调用方把 batchIdx 转张数索引。
  */
 async function triggerSubmit(
   orderId: string,
   fromIdx: number,
-  toIdx: number,
+  total: number,
   candidateCount: number
 ): Promise<{ mode: "ingest" | "sync" }> {
   try {
     await inngest.send({
       name: "gpt-image/submit-generation",
-      data: { orderId, fromIdx, total: toIdx, candidateCount },
+      data: { orderId, fromIdx, total, candidateCount },
     });
     return { mode: "ingest" };
   } catch (err) {
     logger.warn(
-      { err, orderId, fromIdx, toIdx },
+      { err, orderId, fromIdx, total },
       "Inngest send 失败，降级到同步 submitGeneration"
     );
-    await submitGeneration(orderId, fromIdx, toIdx, candidateCount);
+    await submitGeneration(orderId, fromIdx, total, candidateCount);
     return { mode: "sync" };
   }
 }
@@ -74,18 +81,18 @@ async function postHandler(
 ) {
   try {
     const { token } = await ctx.params;
-    const body = (await req.json().catch(() => ({}))) as { imageIdx?: unknown };
-    const imageIdx = body.imageIdx;
+    const body = (await req.json().catch(() => ({}))) as { batchIdx?: unknown };
+    const batchIdx = body.batchIdx;
 
     if (
-      imageIdx !== undefined &&
-      imageIdx !== null &&
-      (typeof imageIdx !== "number" ||
-        !Number.isInteger(imageIdx) ||
-        imageIdx < 0)
+      batchIdx !== undefined &&
+      batchIdx !== null &&
+      (typeof batchIdx !== "number" ||
+        !Number.isInteger(batchIdx) ||
+        batchIdx < 0)
     ) {
       return NextResponse.json(
-        { success: false, error: "imageIdx 必须是非负整数" },
+        { success: false, error: "batchIdx 必须是非负整数" },
         { status: 400 }
       );
     }
@@ -101,10 +108,10 @@ async function postHandler(
       );
     }
 
-    // 状态校验
-    const isSingle = typeof imageIdx === "number";
+    // 2026-09-02：状态校验按 batch 维度
+    const isSingle = typeof batchIdx === "number";
 
-    // 单图重新生成次数上限校验（仅 imageIdx 路径计数；批量 / FAILED 重试不计）。
+    // 单批重新生成次数上限校验（仅 batchIdx 路径计数；批量 / FAILED 重试不计）。
     // 实际已用次数 = promptOrderHistory 中 trigger='regenerate_single' 的行数。
     // regenerateLimit=0 意味着禁用用户主动重新生成。
     if (isSingle && order.regenerateLimit <= 0) {
@@ -141,7 +148,7 @@ async function postHandler(
       return NextResponse.json(
         {
           success: false,
-          error: `当前状态为 ${order.status}，单图重生成仅在 CANDIDATES_READY 时可用`,
+          error: `当前状态为 ${order.status}，单批重生成仅在 CANDIDATES_READY 时可用`,
         },
         { status: 400 }
       );
@@ -160,22 +167,26 @@ async function postHandler(
       );
     }
 
-    // 锁定短路：已提交锁定的位不可重新生成（partial select 不可逆）。
-    // 单图：imageIdx 位已锁 → 409
+    // 锁定短路：已提交锁定的批不可重新生成（partial select 不可逆）。
+    // 单批：batchIdx 位已锁 → 409
     // 批量：任意一位已锁 → 409（不允许批量覆盖已提交）
+    //
+    // DB selections 是按 batchIdx 存的 number[]，长度对齐 batchCount。
+    // 老订单可能是按 imageIdx 存（长度 = uploadedImageCount），此处按
+    // batchIdx 读——旧索引 i 对应 batchIdx i（兼容）但 length 不一致。
     const prevSelections = parseSelections(order.selections);
-    const lockedIndices: number[] = [];
+    const lockedBatchIndices: number[] = [];
     if (prevSelections) {
       for (let i = 0; i < prevSelections.length; i++) {
-        if (prevSelections[i] !== null) lockedIndices.push(i);
+        if (prevSelections[i] !== null) lockedBatchIndices.push(i);
       }
     }
-    if (lockedIndices.length > 0) {
-      if (isSingle && lockedIndices.includes(imageIdx as number)) {
+    if (lockedBatchIndices.length > 0) {
+      if (isSingle && lockedBatchIndices.includes(batchIdx as number)) {
         return NextResponse.json(
           {
             success: false,
-            error: `第 ${(imageIdx as number) + 1} 张已提交锁定，不可重新生成。如需更换效果请取消订单后联系服务方重新创建。`,
+            error: `第 ${(batchIdx as number) + 1} 批已提交锁定，不可重新生成。如需更换效果请取消订单后联系服务方重新创建。`,
           },
           { status: 409 }
         );
@@ -184,7 +195,7 @@ async function postHandler(
         return NextResponse.json(
           {
             success: false,
-            error: `订单已有 ${lockedIndices.length} 张已锁定，无法批量重跑。请先取消订单后联系服务方重新创建。`,
+            error: `订单已有 ${lockedBatchIndices.length} 批已锁定，无法批量重跑。请先取消订单后联系服务方重新创建。`,
           },
           { status: 409 }
         );
@@ -199,39 +210,54 @@ async function postHandler(
       );
     }
 
-    // 确定本次要重跑的索引范围
+    const imagesPerUpload = Math.max(1, order.imagesPerUpload);
+    const batchCount = Math.ceil(uploadedCount / imagesPerUpload);
+
+    // 2026-09-02：确定本次要重跑的索引范围（batchIdx → 张数 fromIdx）
     let fromIdx: number;
-    let toIdx: number;
+    let total: number;
     if (isSingle) {
-      if (imageIdx >= uploadedCount) {
+      if (batchIdx >= batchCount) {
         return NextResponse.json(
           {
             success: false,
-            error: `imageIdx ${imageIdx} 超出已上传数量 ${uploadedCount}`,
+            error: `batchIdx ${batchIdx} 超出已上传批数 ${batchCount}`,
           },
           { status: 400 }
         );
       }
-      fromIdx = imageIdx;
-      toIdx = imageIdx + 1;
+      fromIdx = batchIdx * imagesPerUpload;
+      total = Math.min(uploadedCount, (batchIdx + 1) * imagesPerUpload);
     } else {
-      // 批量：重跑全部
       fromIdx = 0;
-      toIdx = uploadedCount;
+      total = uploadedCount;
     }
 
     // 清空受影响槽位的 candidates + selections，状态置 GENERATING
+    // 2026-09-02：candidates 槽位按 batchIdx 索引
     const nested = parseCandidates(order.candidates);
-    for (let i = 0; i < uploadedCount; i++) {
+    for (let i = 0; i < batchCount; i++) {
       if (!Array.isArray(nested[i])) nested[i] = [];
     }
-    for (let i = fromIdx; i < toIdx; i++) {
-      nested[i] = [];
+    if (isSingle) {
+      nested[batchIdx] = [];
+    } else {
+      // 批量：清空所有 batchIdx
+      for (let i = 0; i < batchCount; i++) nested[i] = [];
     }
-    // prevSelections 来自上方锁定短路检测；此处目标区间 [fromIdx, toIdx)
-    // 内的位已被保证为 null（409 已拦截 isSingle 命中锁定、!isSingle 任意
-    // 锁定），无需再 .map 清空。直接复用，让 locked 位的 selections 不被踩坏。
-    const nextSelections = prevSelections;
+    // selections 同步：单批置 null / 批量保持 locked 不动
+    const nextSelections: (number | null)[] | null = prevSelections
+      ? Array.from({ length: batchCount }, (_, i) => {
+          if (isSingle) {
+            // 单批：目标 batchIdx 置 null
+            return i === batchIdx
+              ? null
+              : (prevSelections[i] ?? null);
+          }
+          // 批量：锁定短路保证没有锁，清空所有
+          return null;
+        })
+      : null;
 
     // 归档 + 清空 必须同一个事务（避免半成品快照 + 竞态 round 冲突）。
     // 事务外 send Inngest 事件触发 submitGeneration，让它在后台跑。
@@ -242,7 +268,7 @@ async function postHandler(
       await archiveOrderSnapshot(
         order.id,
         isSingle ? "regenerate_single" : "regenerate_all",
-        isSingle ? imageIdx : null,
+        isSingle ? batchIdx : null,
         { tx }
       );
       await tx
@@ -263,14 +289,14 @@ async function postHandler(
 
     const candidateCount = order.template.candidateCount;
     logger.info(
-      { orderId: order.id, fromIdx, toIdx, candidateCount },
-      isSingle ? "提交单图重新生成" : "提交批量重新生成"
+      { orderId: order.id, fromIdx, total, candidateCount, isSingle, batchIdx },
+      isSingle ? "提交单批重新生成" : "提交批量重新生成"
     );
     // 优先 Inngest 异步；失败降级到同步。详见 /upload 路由同函数注释。
     const { mode } = await triggerSubmit(
       order.id,
       fromIdx,
-      toIdx,
+      total,
       candidateCount
     );
 
@@ -278,12 +304,12 @@ async function postHandler(
       {
         success: true,
         message: isSingle
-          ? `正在为第 ${fromIdx + 1} 张照片重新生成效果图`
-          : `正在为 ${toIdx - fromIdx} 张照片重新生成效果图`,
+          ? `正在为第 ${batchIdx + 1} 批照片重新生成效果图`
+          : `正在为 ${batchCount} 批照片重新生成效果图`,
         data: {
           status: "GENERATING",
           fromIdx,
-          toIdx,
+          total,
           triggerMode: mode,
         },
       },

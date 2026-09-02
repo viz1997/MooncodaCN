@@ -16,6 +16,11 @@ interface GenerateStepProps {
   token: string;
   updatedAt: string;
   uploadedImageCount: number;
+  /**
+   * 2026-09-02：每批参考图张数。原图预览灯箱按 batchIdx 切批，
+   * previewIdx 是张数下标，转 batchIdx 用 Math.floor。
+   */
+  imagesPerUpload: number;
   /** 服务端已写入的效果组数 —— 真实进度，不是估算 */
   readyGroups: number;
   /** 停止中——禁用按钮防止重复点击 */
@@ -123,6 +128,7 @@ export function GenerateStep({
   token,
   updatedAt,
   uploadedImageCount,
+  imagesPerUpload,
   readyGroups,
   stopping = false,
   onStopClick,
@@ -345,14 +351,18 @@ export function GenerateStep({
         已完成 {done} 张，共 {uploadedImageCount} 张
       </p>
 
-      {/* 原图预览灯箱 */}
+      {/* 原图预览灯箱（批次维度）—— 2026-09-02：batchIdx 从 previewIdx 转 */}
       <OriginalLightbox
         open={originalPreviewOpen}
         onClose={() => setOriginalPreviewOpen(false)}
         token={token}
         updatedAt={updatedAt}
-        imageIdx={previewIdx}
-        imageCount={uploadedImageCount}
+        batchIdx={Math.floor(previewIdx / Math.max(1, imagesPerUpload))}
+        batchCount={Math.ceil(
+          uploadedImageCount / Math.max(1, imagesPerUpload)
+        )}
+        imagesPerUpload={imagesPerUpload}
+        uploadedImageCount={uploadedImageCount}
       />
     </section>
   );

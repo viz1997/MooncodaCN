@@ -195,6 +195,8 @@ function MockOrderContent({ order }: { order: OrderView }) {
                 token={order.token}
                 updatedAt={order.updatedAt}
                 uploadedImageCount={uploadedCount}
+                // 2026-09-02：OriginalLightbox 改批次维度
+                imagesPerUpload={imagesPerUpload}
                 readyGroups={readyGroups}
                 // mock 没有 useOrder，安静期视为已结束（直接显示真实节奏）
                 quietEndsAt={null}
@@ -207,7 +209,14 @@ function MockOrderContent({ order }: { order: OrderView }) {
               <SelectStep
                 token={order.token}
                 updatedAt={order.updatedAt}
-                imageCount={uploadedCount}
+                // 2026-09-02：索引语义从 imageCount 改成 batchCount
+                batchCount={
+                  imagesPerUpload > 1
+                    ? Math.ceil(uploadedCount / imagesPerUpload)
+                    : uploadedCount
+                }
+                imagesPerUpload={imagesPerUpload}
+                uploadedImageCount={uploadedCount}
                 candidateCount={candidateCount}
                 // 2026-09-01：mock 视图默认 grid（演示拼接图模式）
                 outputMode={order.template.outputMode ?? "grid"}
@@ -232,7 +241,13 @@ function MockOrderContent({ order }: { order: OrderView }) {
                 token={order.token}
                 orderNo={order.orderNo}
                 updatedAt={order.updatedAt}
-                imageCount={uploadedCount}
+                // 2026-09-02：索引语义从 imageCount 改成 batchCount
+                batchCount={
+                  imagesPerUpload > 1
+                    ? Math.ceil(uploadedCount / imagesPerUpload)
+                    : uploadedCount
+                }
+                imagesPerUpload={imagesPerUpload}
                 candidateCount={candidateCount}
                 selections={selection.selections}
                 onDownload={handleDownload}

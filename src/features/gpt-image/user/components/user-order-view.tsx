@@ -203,6 +203,7 @@ function UserOrderContent({
                 token={token}
                 updatedAt={order.updatedAt}
                 uploadedImageCount={uploadedCount}
+                imagesPerUpload={imagesPerUpload}
                 readyGroups={readyGroups}
                 // 共享给 useOrder 的同一时间源，让假进度 RAF 起点 = /poll
                 // 安静期起点；窗口内不打 /poll，只让假进度跑。
@@ -219,7 +220,15 @@ function UserOrderContent({
               <SelectStep
                 token={token}
                 updatedAt={order.updatedAt}
-                imageCount={uploadedCount}
+                // 2026-09-02：索引语义从 imageCount 改成 batchCount
+                // （= ceil(uploadedCount / imagesPerUpload)）。
+                batchCount={
+                  imagesPerUpload > 1
+                    ? Math.ceil(uploadedCount / imagesPerUpload)
+                    : uploadedCount
+                }
+                imagesPerUpload={imagesPerUpload}
+                uploadedImageCount={uploadedCount}
                 candidateCount={candidateCount}
                 // 2026-09-01：模板级候选输出模式分支
                 outputMode={order.template.outputMode ?? "grid"}
@@ -243,7 +252,13 @@ function UserOrderContent({
                 token={token}
                 orderNo={order.orderNo}
                 updatedAt={order.updatedAt}
-                imageCount={uploadedCount}
+                // 2026-09-02：索引语义从 imageCount 改成 batchCount
+                batchCount={
+                  imagesPerUpload > 1
+                    ? Math.ceil(uploadedCount / imagesPerUpload)
+                    : uploadedCount
+                }
+                imagesPerUpload={imagesPerUpload}
                 candidateCount={candidateCount}
                 selections={selection.selections}
                 onDownload={actions.download}

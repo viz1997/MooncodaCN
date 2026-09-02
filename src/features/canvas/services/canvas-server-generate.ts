@@ -189,7 +189,9 @@ async function retrySubmitLingtingTask(
     try {
       return await submitLingtingTask(
         orderId,
-        imageUrl,
+        // 2026-09-02：canvas 路径仍是单图参考（image[] 暂时不启用），
+        // 包成 [imageUrl] 兼容新签名。
+        [imageUrl],
         prompt,
         size,
         imageIdx

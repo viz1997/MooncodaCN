@@ -2,6 +2,10 @@
  * 用户端 - 获取效果图（URL / 二进制流）
  * GET /api/orders/[token]/candidates/[imageIdx]/[candIdx]
  *
+ * 2026-09-02：URL 路径段 [imageIdx] 内部实际 = batchIdx（candidates 数组
+ * 外层下标 = 批次槽位，不再是单张原图下标）。保留 URL 段名以兼容现有
+ * 前端 helper 与书签链接；调用方按 batchIdx 计算。
+ *
  * 默认：302 重定向到效果图 URL（用于 <img src> 直接展示）
  *
  * 带 ?historyId=... 时：从指定历史快照的 candidates JSON 中读图。
