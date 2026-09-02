@@ -23,12 +23,73 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
 import { promptOrder, promptOrderHistory } from "@/db/schema";
-import { parseCandidates } from "@/features/gpt-image/lib/order-helpers";
+import {
+  parseCandidates,
+  parseUploadedImages,
+} from "@/features/gpt-image/lib/order-helpers";
 import { withApiLogging } from "@/lib/api-logger";
 
 export const runtime = "nodejs";
 // 2026-09-02：download 路径要 stream R2 二进制，cold fetch 16s+
 export const maxDuration = 60;
+
+/**
+ * 解析候选图 URL（含旧 per-image 格式兜底）。
+ *
+ * 正常路径：`nested[imageIdx][candIdx]`，越界返 undefined。
+ *
+ * 旧 per-image candidates 兜底（2026-09-02 batch 索引重构前的数据）：
+ * 当 `nested.length > batchCount` 时判定为旧格式——candidates 外层长度
+ * 实际等于 uploadedImageCount（每张原图独立跑了 1 次生成）。这种订单
+ * 即使迁移过，如果再有边界情况走错 URL（例如 imageIdx 越界）也不该硬
+ * 返 404 —— 用户的图必须能看见。回退链：
+ *   1. nested[imageIdx][0]      （同 imageIdx 的首张候选，老 UI 也是这张）
+ *   2. nested[selectedIndex][0] （用户曾经选过的 imageIdx = selectedIndex
+ *                                的代表图，老 code 把 selectedIndex 当 imageIdx 用）
+ *   3. nested 任意一组的 [0]    （最后的兜底，只要 DB 有 URL 就给一张）
+ *
+ * 注意：这只在 nested.length > batchCount 触发，正常新格式数据走默认路径。
+ */
+function resolveCandidateUrl(
+  nested: string[][],
+  imageIdx: number,
+  candIdx: number,
+  fallbackCtx: {
+    uploadedImages: string | null;
+    imagesPerUpload: number;
+    selectedIndex: number | null;
+  }
+): string | undefined {
+  const group = nested[imageIdx];
+  const exact = Array.isArray(group) ? group[candIdx] : undefined;
+  if (typeof exact === "string" && exact) return exact;
+
+  // 兜底仅在「旧格式 candidates 外层过长」时启用
+  const uploadedCount = parseUploadedImages(fallbackCtx.uploadedImages).length;
+  const imagesPerUpload = Math.max(1, fallbackCtx.imagesPerUpload);
+  const batchCount = Math.ceil(uploadedCount / imagesPerUpload);
+  if (nested.length <= batchCount) return undefined;
+
+  // 1) 同 imageIdx 首张候选（per-image 模式下每张只有 1 张图）
+  if (Array.isArray(group) && typeof group[0] === "string" && group[0]) {
+    return group[0];
+  }
+  // 2) 用户选过的 imageIdx = selectedIndex（老 code 写 selectedIndex 时是 imageIdx 维度）
+  const si = fallbackCtx.selectedIndex;
+  if (
+    typeof si === "number" &&
+    Array.isArray(nested[si]) &&
+    typeof nested[si][0] === "string" &&
+    nested[si][0]
+  ) {
+    return nested[si][0];
+  }
+  // 3) 任意一组的首张
+  for (const g of nested) {
+    if (Array.isArray(g) && typeof g[0] === "string" && g[0]) return g[0];
+  }
+  return undefined;
+}
 
 async function getHandler(
   req: NextRequest,
@@ -53,7 +114,13 @@ async function getHandler(
 
     const order = await db.query.promptOrder.findFirst({
       where: eq(promptOrder.token, token),
-      columns: { id: true, candidates: true },
+      columns: {
+        id: true,
+        candidates: true,
+        uploadedImages: true,
+        imagesPerUpload: true,
+        selectedIndex: true,
+      },
     });
     if (!order) {
       return NextResponse.json(
@@ -82,8 +149,11 @@ async function getHandler(
         );
       }
       const nested = parseCandidates(row.candidates);
-      const group = nested[imageIdx];
-      const target = Array.isArray(group) ? group[candIdx] : undefined;
+      const target = resolveCandidateUrl(nested, imageIdx, candIdx, {
+        uploadedImages: order.uploadedImages,
+        imagesPerUpload: order.imagesPerUpload,
+        selectedIndex: order.selectedIndex,
+      });
       if (typeof target !== "string" || !target) {
         return NextResponse.json(
           { success: false, error: "历史快照的效果图不存在" },
@@ -143,8 +213,11 @@ async function getHandler(
 
     // 正常路径
     const nested = parseCandidates(order.candidates as string | null);
-    const group = nested[imageIdx];
-    const target = Array.isArray(group) ? group[candIdx] : undefined;
+    const target = resolveCandidateUrl(nested, imageIdx, candIdx, {
+      uploadedImages: order.uploadedImages,
+      imagesPerUpload: order.imagesPerUpload,
+      selectedIndex: order.selectedIndex,
+    });
     if (typeof target !== "string" || !target) {
       return NextResponse.json(
         { success: false, error: "效果图不存在" },
