@@ -414,6 +414,12 @@ export function ImageWorkbench() {
         compositeForLog = composite;
       } catch (caught) {
         console.warn("[workbench] stitch failed:", caught);
+        // 2026-09-02：stitch 失败提示 —— 之前仅 console.warn，用户看不
+        // 到拼接大图也不知道为什么。失败时静默走 N 张原图分支是正确
+        // 兜底（[[workbench-auto-stitch-composite-only]] 语义），但要让
+        // 用户知道"自动拼接没出"，避免反复刷新排查。antd message.warning
+        // 不打断流程。
+        message.warning(t("imageWorkbench.stitchFailed"));
         setStitchedComposite(null);
       }
     } else {

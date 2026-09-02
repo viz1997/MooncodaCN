@@ -442,6 +442,8 @@ export default {
     stitchedComposite: "宫格拼接大图（点击下方原图查看单张）",
     stitchedCompositeAlt: "宫格拼接大图",
     stitchOnFinish: "{{count}} 张生成完成后会自动拼成宫格大图",
+    // 2026-09-02：stitch 失败提示（拼接图生成失败，已切回原图）
+    stitchFailed: "宫格拼接失败，已切换显示原图",
   },
   videoWorkbench: {
     title: "视频创作台",

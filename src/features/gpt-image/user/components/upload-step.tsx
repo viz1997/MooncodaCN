@@ -201,10 +201,6 @@ export function UploadStep({
     if (ok) clearPreviews();
   };
 
-  const canAddMore =
-    previews.length < imagesPerUpload &&
-    previews.length < remainingForThisRound;
-
   return (
     <section className="flex flex-col items-center px-5 pt-6 pb-8 animate-[fadeIn_.3s_ease-out]">
       {/* 标题 */}
@@ -251,7 +247,11 @@ export function UploadStep({
             <div
               className={[
                 "grid gap-2",
-                previews.length === 1 ? "grid-cols-1" : "grid-cols-3",
+                previews.length === 1
+                  ? "grid-cols-2"
+                  : previews.length === 2
+                    ? "grid-cols-3"
+                    : "grid-cols-3",
               ].join(" ")}
             >
               {previews.map((p) => (
@@ -275,22 +275,25 @@ export function UploadStep({
                   </button>
                 </div>
               ))}
-              {/* 占位：剩余可加的空位 */}
-              {Array.from({
-                length: Math.max(0, imagesPerUpload - previews.length),
-              }).map((_, i) => (
-                <button
-                  // biome-ignore lint/suspicious/noArrayIndexKey: 占位符无稳定 id
-                  key={`slot-${i}`}
-                  type="button"
-                  onClick={() => inputRef.current?.click()}
-                  disabled={!canAddMore || uploading}
-                  className="flex aspect-square items-center justify-center rounded-xl border-2 border-dashed border-stone-200 text-stone-400 transition-colors hover:border-indigo-300 hover:bg-indigo-50/30 hover:text-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
-                  aria-label="添加更多图片"
-                >
-                  +
-                </button>
-              ))}
+              {/* 2026-09-02：剩余可加的空位。
+                  原本每个空位都渲染一个独立「+」按钮，imagesPerUpload=3
+                  时上传 1 张后预览区会出现 2 个空格子——用户感知成「多
+                  个上传区域」(issue #21)。改为只渲染 1 个「+」按钮，
+                  表达「可以再加更多」即可；点开后单文件选择可连选多张。
+                  这样视觉上跟 preview 1:N 分离，更像「已有图 + 添加」两个动作。 */}
+              {previews.length > 0 &&
+                previews.length < imagesPerUpload &&
+                previews.length < remainingForThisRound && (
+                  <button
+                    type="button"
+                    onClick={() => inputRef.current?.click()}
+                    disabled={uploading}
+                    className="flex aspect-square items-center justify-center rounded-xl border-2 border-dashed border-stone-200 text-stone-400 transition-colors hover:border-indigo-300 hover:bg-indigo-50/30 hover:text-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    aria-label="添加更多图片"
+                  >
+                    +
+                  </button>
+                )}
             </div>
 
             <button

@@ -1375,6 +1375,14 @@ export function GenerateWorkbenchView({
           writeStitchedToStorage(matchJobId, stitchedComposite);
         } catch (err) {
           console.warn("[workbench] stitch failed:", err);
+          // 2026-09-02：stitch 失败提示 —— 之前仅 console.warn，用户看
+          // 不到拼接大图也不知道为什么。失败时静默走 N 张原图分支是正确
+          // 兜底（[[workbench-auto-stitch-composite-only]] 语义），但要
+          // 让用户知道"自动拼接没出"，避免反复刷新排查。用 sonner.warning
+          // 提示一下，不打断流程。
+          toast.warning("自动拼接失败，已切换显示原图", {
+            description: err instanceof Error ? err.message : "未知错误",
+          });
         }
       }
       const isStitchedNow = stitchedComposite !== undefined;

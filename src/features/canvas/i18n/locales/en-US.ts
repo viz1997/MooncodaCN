@@ -480,6 +480,8 @@ export default {
     stitchedCompositeAlt: "Grid composite image",
     stitchOnFinish:
       "Once all {{count}} complete, they will stitch into a grid composite",
+    // 2026-09-02：stitch 失败提示
+    stitchFailed: "Grid composite failed, switched to showing original images",
   },
   videoWorkbench: {
     title: "Video Studio",

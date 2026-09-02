@@ -656,13 +656,21 @@ async function retrySubmitLingtingTask(
   size: string,
   imageIdx: number,
   maxRetries = 2,
-  delayMs = 2000
+  delayMs = 2000,
+  n = 1
 ): Promise<Awaited<ReturnType<typeof submitLingtingTask>>> {
   const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
   let lastErr: unknown;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      return await submitLingtingTask("_wbl", imageUrl, prompt, size, imageIdx);
+      return await submitLingtingTask(
+        "_wbl",
+        imageUrl,
+        prompt,
+        size,
+        imageIdx,
+        n
+      );
     } catch (err) {
       lastErr = err;
       if (attempt < maxRetries) {
@@ -719,82 +727,86 @@ export const gptImage2Adapter: ImageModelAdapter = {
     }
 
     const size = req.size === "auto" ? "1024x1024" : req.size;
-    // batchSize > 1：wellapi 一次只返 1 张，需要循环调 batchSize 次收集多张候选。
-    // 每张独立走 submitLingtingTask（含 R2 下载 + multipart 上传），并行触发避免
-    // 串行等待；任一张抛错就让整批失败（与 gpt-image submitGeneration 的语义一致）。
-    // 2026-08-18：上限从 4 提到 10，与 IMAGE_MODELS.gpt_image_2.maxBatchSize 保持一致。
+    // 2026-09-02：改单次调用 submitLingtingTask 并传 n=batchSize（与 gpt-image
+    // /p/[token] 的 submitGeneration 同语义），不再 fan-out batchSize 次。
+    //
+    // 原 fan-out 实现的根因 bug：
+    // - submitLingtingTask 不传 n 时默认 n=1 = Lingting 拼宫格模式，每次返 1 张拼接大图
+    // - V2 batchSize=4 时 fan-out 4 次 → 拿到 4 张宫格图（不是 4 张独立候选）
+    // - V2 workbench autoStitch 把这 4 张宫格图再客户端拼一次 → 宫格的宫格
+    // - 用户反馈：「生图工作台生成拼接图后我的资产里只看到拼接图，没有原图」——
+    //   根本原因是上游 Lingting 在 n=1 模式下永远只返拼接图，没有"原图"可入库
+    //
+    // 改后：
+    // - n=batchSize 让 Lingting 一次返 N 张独立候选（非拼接），保留原图
+    // - batchSize=1 时（用户模板自带宫格 + V2 workbench isGridComposite=true）
+    //   仍走 n=1 拼接模式，行为不变
+    // - batchSize 上限 10，与 IMAGE_MODELS.gpt_image_2.maxBatchSize 一致
     const batchSize = Math.min(req.batchSize ?? 1, 10);
 
-    // 2026-08-18：加 per-image retry（2 次 × 2s），与 gpt-image submitGeneration
-    // 同语义。原因：batchSize > 1 时 Promise.allSettled 并发触发 2-N 次
-    // submitLingtingTask，Lingting 偶发 cold start 单张超时（AbortError
-    // "The operation was aborted due to timeout"）会让整批 failed —
-    // 用户体感 "第 2 张失败、其他图也没出来"。submitLingtingTask 自身没
-    // retry（避免 Lingting 重复扣配额），retry 包在外层，2 次短间隔足够
-    // 覆盖 cold start；都失败才计入 failures 走整批失败分支。
-    const tasks = await Promise.allSettled(
-      Array.from({ length: batchSize }, (_, i) =>
-        retrySubmitLingtingTask(req.imageUrl!, req.prompt, size, i, 2, 2000)
-      )
-    );
-
-    // 任一失败 → 整批 failed（避免部分成功导致 UI 显示不全）
-    const failures = tasks
-      .map((t, i) => ({ t, i }))
-      .filter((x) => x.t.status === "rejected");
-    if (failures.length > 0) {
-      const msgs = failures
-        .map((x) =>
-          x.t.status === "rejected" ? (x.t.reason?.message ?? "未知错误") : ""
-        )
-        .join("；");
+    // 2026-09-02：单次调用 + n=batchSize。submitLingtingTask 自身没 retry
+    // （避免 Lingting 重复扣配额），retry 仍包在外层 2 次 × 2s 覆盖 cold start。
+    let submitResult: Awaited<ReturnType<typeof submitLingtingTask>>;
+    try {
+      submitResult = await retrySubmitLingtingTask(
+        req.imageUrl!,
+        req.prompt,
+        size,
+        0,
+        2,
+        2000,
+        batchSize
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "未知错误";
       return {
         success: false,
         model: "gpt_image_2",
         status: "failed",
-        error: `第 ${failures.map((x) => x.i + 1).join("/")} 张失败：${msgs}`,
+        error: `提交生图失败：${msg}`,
       };
     }
 
-    // 全部成功：收集所有 url（已落 R2 永久 URL）。
-    // submitLingtingTask 可能返 sync {kind:"url"} 或 async {kind:"task"}，
-    // batchSize>1 时任一是 task 形态就走混合流程——这里只把 url 形态的
-    // 收集成 images 立即返回，task 形态目前不接受（workbench UI 也不
-    // 支持多 taskId 聚合），单 task 兜底返第一张。
-    const urls: string[] = [];
-    for (const t of tasks) {
-      if (t.status === "fulfilled" && t.value.kind === "url") {
-        urls.push(...t.value.urls);
-      }
-    }
-    if (urls.length === 0) {
-      // 全部是 async task（少见）：拿第一个 taskId 走原有轮询路径，
-      // imageJob.resultUrls 暂时是空，等 queryTask 拿 url 后填。
-      const firstTask = tasks.find(
-        (t) => t.status === "fulfilled" && t.value.kind === "task"
-      );
-      if (
-        firstTask &&
-        firstTask.status === "fulfilled" &&
-        firstTask.value.kind === "task"
-      ) {
+    // 同步返 url（n=N 时 Lingting 直接返 N 张独立图，已落 R2）
+    if (submitResult.kind === "url") {
+      const urls = submitResult.urls;
+      if (urls.length === 0) {
+        // 防御：理论上不会到这里（kind:"url" 必有 urls）
         return {
-          success: true,
+          success: false,
           model: "gpt_image_2",
-          taskId: firstTask.value.taskId,
-          status: "processing",
+          status: "failed",
+          error: "Lingting 未返回任何图片 URL",
         };
       }
+      return {
+        success: true,
+        model: "gpt_image_2",
+        status: "completed",
+        images: urls.map((u) => ({ url: u })),
+        cost: 0.04 * batchSize,
+        currency: "USD",
+      };
     }
 
-    return {
-      success: true,
-      model: "gpt_image_2",
-      status: "completed",
-      images: urls.map((u) => ({ url: u })),
-      cost: 0.04 * batchSize,
-      currency: "USD",
-    };
+    // 异步 task：拿 taskId 走原有轮询路径（少见 —— n=N 通常 Lingting 同步返）
+    {
+      const taskId = submitResult.taskId;
+      if (!taskId) {
+        return {
+          success: false,
+          model: "gpt_image_2",
+          status: "failed",
+          error: "Lingting 响应格式异常（无 task_id 也无 url）",
+        };
+      }
+      return {
+        success: true,
+        model: "gpt_image_2",
+        taskId,
+        status: "processing",
+      };
+    }
   },
   /**
    * 异步任务轮询：完全转调 gpt-image 的 queryLingtingTask，

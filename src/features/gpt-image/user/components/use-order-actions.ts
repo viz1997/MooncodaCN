@@ -301,8 +301,18 @@ export function useOrderActions({
   const download = useCallback(
     async (orderNo: string, imageIdx: number, candIdx: number) => {
       try {
-        // /candidates 现在是 302 → fetch 自动跟随重定向拿到二进制
-        const res = await fetch(candidateUrl(token, imageIdx, candIdx));
+        // 2026-09-02：服务端 stream + Content-Disposition 触发下载。
+        // 历史原因：之前是 fetch /candidates 跟随 302 → R2 公开域，R2
+        // 默认无 CORS，浏览器拒绝 blob() 读到 body。修法是路由支持
+        // ?download=1 服务端 stream（与 workbench /api/image-gen/download
+        // 同语义，避免暴露 R2 / wellapi URL 给客户端逻辑）。
+        //
+        // 注意：路径是同源 API，所以 fetch 一定能拿到 blob；response
+        // Content-Disposition 头 attachment 不影响 a[download]，我们仍然
+        // 读 blob → objectURL → a[download] 拿到用户指定的文件名。
+        const res = await fetch(
+          `${candidateUrl(token, imageIdx, candIdx)}?download=1`
+        );
         if (!res.ok) throw new Error(await readError(res, "下载失败"));
         const blob = await res.blob();
         const ext = (blob.type.split("/")[1] || "png").replace("jpeg", "jpg");
