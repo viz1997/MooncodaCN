@@ -406,7 +406,7 @@ export function AgentOrderFormDialog({
         <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
           <div className="flex items-center gap-1">
             <span className="text-sm">每批重试次数</span>
-            <Tooltip title="每个效果图的重新生成机会。设为 0 表示不允许重新生成。">
+            <Tooltip title="每个效果图最多尝试次数，含首次生成。例如填 5 = 共可生成 5 次（首次 + 4 次重新生成）。设为 0 表示禁止用户主动重新生成。">
               <HelpCircle className="h-3.5 w-3.5 text-stone-400 cursor-help" />
             </Tooltip>
           </div>

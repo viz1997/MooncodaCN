@@ -111,14 +111,19 @@ async function postHandler(
     // 2026-09-02：状态校验按 batch 维度
     const isSingle = typeof batchIdx === "number";
 
-    // 单批重新生成次数上限校验（按批次独立计数；批量 / FAILED 重试不计）。
+    // 单批尝试次数上限校验（按批次独立计数；批量 / FAILED 重试不计）。
     // 实际已用次数 = promptOrderHistory 中 trigger='regenerate_single'
-    // AND imageIdx=batchIdx 的行数。regenerateLimit=0 意味着禁用。
+    // AND imageIdx=batchIdx 的行数。
+    //
+    // 业务语义（2026-09-03 用户确认）：regenerateLimit = 每批尝试总次数，
+    // 含首次（"重试次数，包括本次"）。首次生成不走 /regenerate，所以
+    // 这里 usedCount 计的是首次以外的触发数。最多允许触发数 = limit - 1。
+    // regenerateLimit=0 表示完全禁用重新生成（连首次也别想）。
     if (isSingle && order.regenerateLimit <= 0) {
       return NextResponse.json(
         {
           success: false,
-          error: "此订单已禁用主动重新生成功能",
+          error: "此订单的尝试次数为 0，已禁用主动重新生成",
         },
         { status: 403 }
       );
@@ -135,11 +140,12 @@ async function postHandler(
           )
         );
       const regenerateUsedCount = usedRows[0]?.used ?? 0;
-      if (regenerateUsedCount >= order.regenerateLimit) {
+      const maxRegenTriggers = Math.max(0, order.regenerateLimit - 1);
+      if (regenerateUsedCount >= maxRegenTriggers) {
         return NextResponse.json(
           {
             success: false,
-            error: `第 ${(batchIdx as number) + 1} 批的重新生成次数已用完（${order.regenerateLimit} 次）。如需继续，请联系服务方调整。`,
+            error: `第 ${(batchIdx as number) + 1} 批的尝试次数已用完（共 ${order.regenerateLimit} 次，含首次）。如需继续，请联系服务方调整。`,
           },
           { status: 429 }
         );

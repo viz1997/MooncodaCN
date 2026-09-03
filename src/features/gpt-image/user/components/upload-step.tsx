@@ -78,6 +78,9 @@ export function UploadStep({
   const remainingForThisRound = hasFailure
     ? imagesPerUpload
     : Math.max(0, totalCapacity - uploadedImageCount);
+  // 不再算"本批已传 X / N 张"——之前那个 "0/3 张" 里的 3 等于"每批参考图上限"，
+  // 用户会误读为"必须传够 3 张才能进下一批"。直接把上限写清楚即可，进度
+  // 由下方彩色进度条 + 右侧状态 chip + "已传 X/Y 个效果图"文案承担。
 
   // 头部标题：失败重试 vs 首次 / 续传
   let nextLabel: string;
@@ -228,8 +231,7 @@ export function UploadStep({
           {templateName} · 上传后将生成 {candidateCount} 种候选效果图
         </p>
         <p className="mt-1 text-xs text-stone-400">
-          本批最多 {imagesPerUpload} 张（订单共 {uploadCount} 批 ×{" "}
-          {imagesPerUpload} 张）
+          一次最多 {imagesPerUpload} 张，共需 {uploadCount} 张效果图
         </p>
       </div>
 
@@ -330,14 +332,12 @@ export function UploadStep({
               )}
             </button>
 
-            {!quotaFull && (
+            {!quotaFull && uploadCount > 1 && (
+              // 单数任务（uploadCount === 1）不显示这条 —— 没进度概念。
+              // 当前在做的"下一个"也不复述：用户刚上传完马上看到 1/2 → 2/2，
+              // 进度感全靠这条文案本身，不靠"还要做几次"这种脑补。
               <p className="text-center text-xs text-stone-500">
-                {/* 以「效果图」为主轴（每批 1 个效果图）：
-                  - X / totalBatches 批 = X / uploadCount 个效果图已传齐
-                  - 当前第 N 批可传 1~imagesPerUpload 张（不必填满） */}
-                已传 {filledBatchCount} / {uploadCount} 个效果图（每批最多{" "}
-                {safeImagesPerUpload} 张，当前第{" "}
-                {Math.min(uploadCount, filledBatchCount + 1)} 批）
+                已传 {filledBatchCount} / {uploadCount} 个效果图
               </p>
             )}
           </div>
@@ -382,42 +382,39 @@ export function UploadStep({
         />
       </div>
 
-      {/* 进度条：上传中 / 已完成 / 还差多少 */}
+      {/* 状态行 + 进度条（视觉反馈）。文案层面只用"已传 X/Y 个效果图"表达进度，
+        且仅在 uploadCount > 1 时显示 —— 单数任务没进度概念。参考图张数不当作
+        进度计数（之前 "0/3 张" 里的 3 等于每批上限 3 张，用户会误读）。 */}
       <div className="mt-5 w-full max-w-xs">
-        <div className="mb-2 flex items-center justify-between text-xs">
-          <span className="font-medium text-stone-500">
-            进度 {uploadedImageCount} / {totalCapacity} 张
-          </span>
-          {(() => {
-            // 右侧 chip 只在有"状态"可告知时才出现（避免显示一个空 pill）
-            // - hasFailure: 之前上传失败过
-            // - uploading: 正在上传
-            // - quotaFull: 本订单名额已满
-            // 其余情况（待上传 / 上传间隙）由左边 "X/Y 张" 进度条表达，不重复
-            if (hasFailure) {
-              return (
-                <span className="rounded-full bg-red-50 px-2.5 py-0.5 font-medium text-red-600 text-xs">
-                  上次失败，将替换之前图片
-                </span>
-              );
-            }
-            if (uploading) {
-              return (
-                <span className="rounded-full bg-stone-100 px-2.5 py-0.5 font-medium text-stone-600 text-xs">
-                  上传中...
-                </span>
-              );
-            }
-            if (quotaFull) {
-              return (
-                <span className="rounded-full bg-emerald-500 px-2.5 py-0.5 font-medium text-white text-xs">
-                  本订单已完成
-                </span>
-              );
-            }
-            return null;
-          })()}
-        </div>
+        {uploading || quotaFull ? (
+          <div className="mb-2 flex items-center justify-end text-xs">
+            {(() => {
+              // chip 只在有"状态"可告知时才出现
+              if (hasFailure) {
+                return (
+                  <span className="rounded-full bg-red-50 px-2.5 py-0.5 font-medium text-red-600 text-xs">
+                    上次失败，将替换之前图片
+                  </span>
+                );
+              }
+              if (uploading) {
+                return (
+                  <span className="rounded-full bg-stone-100 px-2.5 py-0.5 font-medium text-stone-600 text-xs">
+                    上传中...
+                  </span>
+                );
+              }
+              if (quotaFull) {
+                return (
+                  <span className="rounded-full bg-emerald-500 px-2.5 py-0.5 font-medium text-white text-xs">
+                    本订单已完成
+                  </span>
+                );
+              }
+              return null;
+            })()}
+          </div>
+        ) : null}
         <div className="h-1 overflow-hidden rounded-full bg-stone-100">
           <div
             className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-blue-500 transition-[width] duration-300 motion-reduce:transition-none"

@@ -336,8 +336,8 @@ export function OrderEditDialog({
               />
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              仅"重新生成第 N 张"（单图路径）计数；批量重跑 / FAILED
-              一键重试不计。
+              每个效果图最多尝试次数，含首次。例如填 5 = 1 次首次 + 4 次重新生成。
+              仅单图重新生成路径计数，批量重跑 / FAILED 一键重试不计。
             </p>
           </Form.Item>
 

@@ -749,11 +749,11 @@ export function OrdersAdminView() {
                   （每批 1 个，全部提交才算订单完成）
                 </li>
                 <li>
-                  每个效果图最多可重试{" "}
+                  每个效果图最多尝试{" "}
                   <span className="font-bold">
                     {linkDialog.regenerateLimit ?? 0} 次
                   </span>
-                  （每批独立计数）
+                  （含首次生成，每批独立计数）
                 </li>
                 <li>
                   每批参考图最多{" "}

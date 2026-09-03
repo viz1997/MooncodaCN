@@ -173,14 +173,19 @@ export function SelectStep({
   const safeBatchIdx = Math.min(currentIdx, Math.max(0, batchCount - 1));
   const currentSelection = selections[safeBatchIdx] ?? null;
   const isCurrentLocked = isLocked(safeBatchIdx);
-  // 单批重新生成剩余次数（用户主动重生成第 N 批）。
-  // 按批次独立计数：每批都有自己的 N 次机会，互不挤占。已锁定批不可改。
-  // regenerateLimit=0 表示禁用。
+  // 单批"重新生成"按钮剩余可点次数（用户主动重生成第 N 批）。
+  // 按批次独立计数：每批都有自己的额度，互不挤占。已锁定批不可改。
+  //
+  // 业务语义（2026-09-03 用户确认）：regenerateLimit = 每批尝试总次数，
+  // 含首次（"重试次数，包括本次"）。首次不走 /regenerate，所以这里"剩
+  // 余可点击次数"= limit-1-usedCount。limit=1 → 0 次可点（只有首次）；
+  // limit=0 → 按钮被外层 {regenerateLimit > 0} 隐藏。
   const regenerateUsedForCurrentBatch =
     regenerateUsedByBatch[safeBatchIdx] ?? 0;
+  const maxRegenTriggers = Math.max(0, regenerateLimit - 1);
   const regenerateRemaining = Math.max(
     0,
-    regenerateLimit - regenerateUsedForCurrentBatch
+    maxRegenTriggers - regenerateUsedForCurrentBatch
   );
   const canRegenerate = !isCurrentLocked && regenerateRemaining > 0;
 
