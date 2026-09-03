@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, ImageIcon, X } from "lucide-react";
+import { ArrowRight, Upload, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { resizeImage, wrapBlobAsFile } from "@/lib/image-client-resize";
@@ -73,9 +73,10 @@ export function UploadStep({
   // 2026-09-03：上传后点击缩略图的全屏预览。仅用本地 blob URL，无
   // token/updatedAt 等订单上下文，所以不复用 select-step 的 Lightbox
   // （那个还要管选 candidate / 翻页 / 对比模式）。点遮罩或 Esc 关闭。
-  const [previewing, setPreviewing] = useState<
-    { url: string; name: string } | null
-  >(null);
+  const [previewing, setPreviewing] = useState<{
+    url: string;
+    name: string;
+  } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const previewRefs = useRef<Map<string, string>>(new Map());
 
@@ -252,160 +253,155 @@ export function UploadStep({
         </p>
       </div>
 
-      {/* 拖拽框 / 预览区 */}
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: drop zone 容器 */}
-      <div
-        role="presentation"
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragging(false);
-          handleFiles(e.dataTransfer.files);
-        }}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={(e) => {
-          e.preventDefault();
-          setDragging(false);
-        }}
-        className={[
-          "w-full max-w-xs rounded-2xl border-2 transition-all duration-300",
-          previews.length > 0
-            ? "border-solid border-stone-200 p-4"
-            : dragging
-              ? "scale-[1.02] border-indigo-400 bg-indigo-50/50"
-              : "border-dashed border-stone-200 bg-stone-50/30 hover:border-indigo-300 hover:bg-indigo-50/30",
-        ].join(" ")}
-      >
-        {previews.length > 0 ? (
-          <div className="space-y-4">
-            {/* 多图预览网格（1/2/3 张自适应） */}
-            <div
-              className={[
-                "grid gap-2",
-                previews.length === 1
-                  ? "grid-cols-2"
-                  : previews.length === 2
-                    ? "grid-cols-3"
-                    : "grid-cols-3",
-              ].join(" ")}
-            >
-              {previews.map((p) => (
+      {/* 参考图上传 UI —— 2026-09-03 对齐 V1 工作台布局设计：
+          - 不要大圆角 rounded-2xl 容器
+          - 缩略图固定 3 列 grid（不按张数自适应 2/3 列）
+          - 单元 rounded-md + bg-stone-100（不再 rounded-xl）+ bg-black/60
+          - 删除按钮 opacity-0 hover 显示（不再常驻 top-right）
+          - 加 #1/#2/... 序号标签
+          - 空状态用紧凑 dashed dropzone（h-5 w-5 Upload icon + 小文案）
+            替代 h-14 w-14 圆角方框图标
+          - 仍保留 V1 没有的「上传 N 张并生成」CTA 按钮（订单页语义需要）
+            和 lightbox 灯箱预览（local blob URL 单文件预览）
+       */}
+      <div className="w-full max-w-xs space-y-3">
+        {/* 已选预览网格 —— 仅在选了图后渲染。
+            V1 是 grid-cols-3 gap-1.5（紧凑 cell），订单页 imagesPerUpload 默认 3 张，
+            1 张/2 张时仍走 3 列更一致。 */}
+        {previews.length > 0 && (
+          <div className="grid grid-cols-3 gap-1.5">
+            {previews.map((p, idx) => (
+              <div
+                key={p.id}
+                className="relative group/cell rounded-md overflow-hidden border border-stone-200 bg-stone-100 aspect-square"
+              >
                 <button
-                  key={p.id}
                   type="button"
                   onClick={() =>
                     setPreviewing({ url: p.objectUrl, name: p.name })
                   }
-                  className="group relative aspect-square cursor-zoom-in overflow-hidden rounded-xl bg-stone-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+                  className="absolute inset-0 w-full h-full"
+                  title={`第 ${idx + 1} 张：点击预览`}
                   aria-label={`放大预览 ${p.name}`}
                 >
                   {/* biome-ignore lint/performance/noImgElement: blob URL 本地预览 */}
                   <img
                     src={p.objectUrl}
                     alt={p.name}
-                    className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                    className="w-full h-full object-cover"
                   />
-                  <button
-                    type="button"
-                    // 阻止冒泡：点 X 不触发外层的"打开预览"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removeOne(p.id);
-                    }}
-                    aria-label="移除此图片"
-                    className="absolute top-1.5 right-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/40 text-white/90 backdrop-blur-sm transition-colors hover:bg-black/60"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
                 </button>
-              ))}
-              {/* 2026-09-02：剩余可加的空位。
-                  原本每个空位都渲染一个独立「+」按钮，imagesPerUpload=3
-                  时上传 1 张后预览区会出现 2 个空格子——用户感知成「多
-                  个上传区域」(issue #21)。改为只渲染 1 个「+」按钮，
-                  表达「可以再加更多」即可；点开后单文件选择可连选多张。
-                  这样视觉上跟 preview 1:N 分离，更像「已有图 + 添加」两个动作。 */}
-              {previews.length > 0 &&
-                previews.length < imagesPerUpload &&
-                previews.length < remainingForThisRound && (
-                  <button
-                    type="button"
-                    onClick={() => inputRef.current?.click()}
-                    disabled={uploading}
-                    className="flex aspect-square items-center justify-center rounded-xl border-2 border-dashed border-stone-200 text-stone-400 transition-colors hover:border-indigo-300 hover:bg-indigo-50/30 hover:text-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
-                    aria-label="添加更多图片"
-                  >
-                    +
-                  </button>
-                )}
-            </div>
-
-            <button
-              type="button"
-              onClick={() => void handleConfirm()}
-              disabled={uploading}
-              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-500 to-blue-500 text-sm font-medium text-white shadow-lg shadow-indigo-200/50 transition-shadow hover:shadow-indigo-300/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {uploading ? (
-                "上传中…"
-              ) : (
-                <>
-                  上传 {previews.length} 张并生成
-                  <ArrowRight className="h-4 w-4" />
-                </>
-              )}
-            </button>
-
-            {!quotaFull && uploadCount > 1 && (
-              // 单数任务（uploadCount === 1）不显示这条 —— 没进度概念。
-              // 当前在做的"下一个"也不复述：用户刚上传完马上看到 1/2 → 2/2，
-              // 进度感全靠这条文案本身，不靠"还要做几次"这种脑补。
-              <p className="text-center text-xs text-stone-500">
-                已传 {filledBatchCount} / {uploadCount} 个效果图
-              </p>
-            )}
+                <button
+                  type="button"
+                  // 阻止冒泡：点 X 不触发外层的"打开预览"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeOne(p.id);
+                  }}
+                  className="absolute top-0.5 right-0.5 h-5 w-5 rounded-full bg-black/60 hover:bg-rose-500 text-white flex items-center justify-center opacity-0 group-hover/cell:opacity-100 transition-opacity"
+                  aria-label={`移除第 ${idx + 1} 张`}
+                  title="移除"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+                <span className="absolute bottom-0.5 left-0.5 text-[9px] font-mono px-1 rounded bg-black/60 text-white tabular-nums">
+                  #{idx + 1}
+                </span>
+              </div>
+            ))}
           </div>
-        ) : (
-          <label
-            htmlFor="upload-step-input"
-            className="block cursor-pointer px-6 py-12 text-center"
-          >
-            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-50">
-              <ImageIcon
-                className="h-6 w-6 text-indigo-500"
-                strokeWidth={1.75}
-              />
-            </div>
-            <p className="text-sm font-medium text-stone-700">
-              {dragging ? "松开即可选择" : "拖拽照片到这里"}
-            </p>
-            <p className="mt-1 text-sm text-stone-400">
-              或
-              <span className="mx-0.5 font-medium text-indigo-500 hover:underline">
-                点击选择文件
-              </span>
-            </p>
-            <p className="mt-3 text-[11px] text-stone-300">
-              支持多选 · 本批最多 {imagesPerUpload} 张 · 单张 ≤ 5MB（自动压缩）
-            </p>
-          </label>
         )}
 
-        <input
-          id="upload-step-input"
-          ref={inputRef}
-          type="file"
-          accept={ACCEPT}
-          multiple
-          disabled={uploading}
-          className="sr-only"
-          onChange={(e) => {
-            handleFiles(e.target.files);
-            e.target.value = "";
-          }}
-        />
+        {/* 上传 dropzone —— V1 风格紧凑 dashed border p-6。
+            未到本批上限时显示（满了 dropzone 也隐藏，避免视觉噪声）。
+            整合 <input> + 拖拽事件 + 点击触发 = V1 写法。 */}
+        {previews.length < imagesPerUpload &&
+          previews.length < remainingForThisRound && (
+            <button
+              type="button"
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragging(true);
+              }}
+              onDragLeave={(e) => {
+                e.preventDefault();
+                setDragging(false);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragging(false);
+                handleFiles(e.dataTransfer.files);
+              }}
+              onClick={() => inputRef.current?.click()}
+              disabled={uploading}
+              className={[
+                "w-full border border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors space-y-1",
+                dragging
+                  ? "border-indigo-400 bg-indigo-50/50"
+                  : "border-stone-200 bg-stone-50/30 hover:border-indigo-300 hover:bg-indigo-50/30",
+              ].join(" ")}
+            >
+              <input
+                ref={inputRef}
+                type="file"
+                accept={ACCEPT}
+                multiple
+                disabled={uploading}
+                className="sr-only"
+                onChange={(e) => {
+                  handleFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+              <Upload
+                className={[
+                  "h-5 w-5 mx-auto",
+                  dragging ? "text-indigo-500" : "text-stone-400",
+                ].join(" ")}
+              />
+              <p className="text-xs font-medium text-stone-700">
+                {dragging
+                  ? "释放即可上传"
+                  : previews.length > 0
+                    ? `继续添加（${previews.length}/${imagesPerUpload}）`
+                    : "点击或拖拽图片"}
+              </p>
+              <p className="text-[10px] text-stone-400">
+                支持 JPG / PNG / WebP · 单张 ≤ 5MB（自动压缩）
+              </p>
+            </button>
+          )}
+
+        {/* 上传确认 CTA —— 仅在有预览时显示。
+            这是订单页特有的（V1 没这个，直接点 dropzone 就传了）；
+            因为订单页有"本批 vs 整单"的批次概念，需要显式「下一步」。
+            保留 indigo 渐变按钮，是这一步的视觉焦点。 */}
+        {previews.length > 0 && (
+          <button
+            type="button"
+            onClick={() => void handleConfirm()}
+            disabled={uploading}
+            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-500 to-blue-500 text-sm font-medium text-white shadow-lg shadow-indigo-200/50 transition-shadow hover:shadow-indigo-300/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {uploading ? (
+              "上传中…"
+            ) : (
+              <>
+                上传 {previews.length} 张并生成
+                <ArrowRight className="h-4 w-4" />
+              </>
+            )}
+          </button>
+        )}
+
+        {/* 批次进度文案 —— 单数任务（uploadCount === 1）不显示这条。
+            V1 没有这个（V1 是一次提交无批次），订单页的 uploadCount × imagesPerUpload
+            语义需要显式告诉用户「这一批是第几个」。 */}
+        {previews.length > 0 && !quotaFull && uploadCount > 1 && (
+          <p className="text-center text-xs text-stone-500">
+            已传 {filledBatchCount} / {uploadCount} 个效果图
+          </p>
+        )}
       </div>
 
       {/* 状态行 + 进度条（视觉反馈）。文案层面只用"已传 X/Y 个效果图"表达进度，
