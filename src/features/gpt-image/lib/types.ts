@@ -103,15 +103,16 @@ export interface OrderView {
   /** 已生成的候选组数（外层数组长度） */
   candidateGroups: number;
   /**
-   * 用户主动"重新生成第 N 张"的次数上限。仅 imageIdx 单图路径计数；
-   * 批量重跑 / FAILED 一键重试不计。
+   * 每批可主动"重新生成"的次数上限。仅 batchIdx 单批路径计数；
+   * 批量重跑 / FAILED 一键重试不计。每个 batchIdx 独立计数，互不挤占。
    */
   regenerateLimit: number;
   /**
-   * 已用重新生成次数（promptOrderHistory 中 trigger='regenerate_single' 的行数）。
+   * 每批已用重新生成次数（promptOrderHistory 中 trigger='regenerate_single'
+   * AND imageIdx=batchIdx 的行数）。长度对齐 batchCount。
    * 仅在用户端订单视图出现；admin 列表暂不展开（admin 通过历史快照间接看到）。
    */
-  regenerateUsedCount?: number | undefined;
+  regenerateUsedByBatch?: number[] | undefined;
   /**
    * 每张原图的候选选择（长度 = uploadedImageCount）。
    * partial select 语义下：

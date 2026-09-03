@@ -72,8 +72,11 @@ interface SelectStepProps {
   onRegenerate: (batchIdx: number) => Promise<boolean>;
   /** 单批重新生成次数上限（来自订单 regenerateLimit） */
   regenerateLimit: number;
-  /** 已用重新生成次数（trigger=regenerate_single 的快照行数） */
-  regenerateUsedCount: number;
+  /**
+   * 每批已用重新生成次数（trigger=regenerate_single 且 imageIdx=batchIdx
+   * 的快照行数）。长度对齐 batchCount；用 safeBatchIdx 索引当前批的剩余次数。
+   */
+  regenerateUsedByBatch: number[];
   /**
    * 当前订单的全部历史快照（round DESC）。前端再按 batchIdx 过滤：
    * - 查看最新快照（index 0）：QuadrantGrid 用当前 candidates（可点选）
@@ -143,7 +146,7 @@ export function SelectStep({
   onSubmit,
   onRegenerate,
   regenerateLimit,
-  regenerateUsedCount,
+  regenerateUsedByBatch,
   snapshots,
 }: SelectStepProps) {
   const [currentIdx, setCurrentIdx] = useState(() => {
@@ -170,11 +173,14 @@ export function SelectStep({
   const safeBatchIdx = Math.min(currentIdx, Math.max(0, batchCount - 1));
   const currentSelection = selections[safeBatchIdx] ?? null;
   const isCurrentLocked = isLocked(safeBatchIdx);
-  // 单批重新生成剩余次数（用户主动重生成第 N 批）。已锁定批不可改，
-  // 但剩余次数仍按订单级统计，不影响显示。regenerateLimit=0 表示禁用。
+  // 单批重新生成剩余次数（用户主动重生成第 N 批）。
+  // 按批次独立计数：每批都有自己的 N 次机会，互不挤占。已锁定批不可改。
+  // regenerateLimit=0 表示禁用。
+  const regenerateUsedForCurrentBatch =
+    regenerateUsedByBatch[safeBatchIdx] ?? 0;
   const regenerateRemaining = Math.max(
     0,
-    regenerateLimit - regenerateUsedCount
+    regenerateLimit - regenerateUsedForCurrentBatch
   );
   const canRegenerate = !isCurrentLocked && regenerateRemaining > 0;
 
@@ -189,11 +195,12 @@ export function SelectStep({
     [snapshots, safeBatchIdx]
   );
 
-  // 切批或重新生成完成后，自动跳回最新候选（避免停在某个旧快照上状态错乱）
+  // 切批或重新生成完成后，自动跳回最新候选（避免停在某个旧快照上状态错乱）。
+  // 按批次独立计数：只关心当前批的重试次数变化，其他批的重生成本批视图无关。
   // biome-ignore lint/correctness/useExhaustiveDependencies: deps 是触发器，不是读取
   useEffect(() => {
     setViewingSnapshotIdx(null);
-  }, [safeBatchIdx, regenerateUsedCount]);
+  }, [safeBatchIdx, regenerateUsedForCurrentBatch]);
 
   const viewingSnapshot =
     viewingSnapshotIdx !== null

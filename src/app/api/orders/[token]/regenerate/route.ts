@@ -111,9 +111,9 @@ async function postHandler(
     // 2026-09-02：状态校验按 batch 维度
     const isSingle = typeof batchIdx === "number";
 
-    // 单批重新生成次数上限校验（仅 batchIdx 路径计数；批量 / FAILED 重试不计）。
-    // 实际已用次数 = promptOrderHistory 中 trigger='regenerate_single' 的行数。
-    // regenerateLimit=0 意味着禁用用户主动重新生成。
+    // 单批重新生成次数上限校验（按批次独立计数；批量 / FAILED 重试不计）。
+    // 实际已用次数 = promptOrderHistory 中 trigger='regenerate_single'
+    // AND imageIdx=batchIdx 的行数。regenerateLimit=0 意味着禁用。
     if (isSingle && order.regenerateLimit <= 0) {
       return NextResponse.json(
         {
@@ -130,7 +130,8 @@ async function postHandler(
         .where(
           and(
             eq(promptOrderHistory.orderId, order.id),
-            eq(promptOrderHistory.trigger, "regenerate_single")
+            eq(promptOrderHistory.trigger, "regenerate_single"),
+            eq(promptOrderHistory.imageIdx, batchIdx as number)
           )
         );
       const regenerateUsedCount = usedRows[0]?.used ?? 0;
@@ -138,7 +139,7 @@ async function postHandler(
         return NextResponse.json(
           {
             success: false,
-            error: `已达到本订单的重新生成次数上限（${order.regenerateLimit} 次）。如需继续，请联系服务方调整。`,
+            error: `第 ${(batchIdx as number) + 1} 批的重新生成次数已用完（${order.regenerateLimit} 次）。如需继续，请联系服务方调整。`,
           },
           { status: 429 }
         );
@@ -250,9 +251,7 @@ async function postHandler(
       ? Array.from({ length: batchCount }, (_, i) => {
           if (isSingle) {
             // 单批：目标 batchIdx 置 null
-            return i === batchIdx
-              ? null
-              : (prevSelections[i] ?? null);
+            return i === batchIdx ? null : (prevSelections[i] ?? null);
           }
           // 批量：锁定短路保证没有锁，清空所有
           return null;

@@ -585,6 +585,11 @@ export async function findOrderByOrderNoForCreator(
  * 模板、token、状态、已上传图片均锁定，订单生命周期数据不能被覆盖。
  *
  * 返回最新的 OrderView（与 listOrders 同形），便于客户端乐观更新。
+ *
+ * 2026-09-03：代理商业务字段字典校验 —— 防直调 API 写脏值。
+ *   agentId：若提供必须是启用中的 agent（与 createOrder 对齐）
+ *   productTypeCode/productSize/accessoryCode：必须组合合法；用
+ *   validateProductSpec 复用 agent 模块的字典校验。
  */
 export async function updateOrder(input: {
   id: string;
@@ -600,6 +605,37 @@ export async function updateOrder(input: {
   productSize?: string | null | undefined;
   accessoryCode?: string | null | undefined;
 }) {
+  // 2026-09-03：字典校验（agentId / 三件套）—— 与 createOrder 对齐。
+  // 动态 import 避免循环依赖（agent 模块依赖 gpt-image 的 product-catalog）。
+  const { validateProductSpec } = await import(
+    "@/features/agent/lib/product-validation"
+  );
+
+  // 只有当"要写"的字段（不是 undefined）才参与校验。
+  // 场景：edit 对话框可能单独改 platform 而不动 agentId；这种情况下
+  // 不应该重校验已有三件套。
+  if (
+    input.productTypeCode !== undefined ||
+    input.productSize !== undefined ||
+    input.accessoryCode !== undefined
+  ) {
+    validateProductSpec(
+      input.productTypeCode ?? null,
+      input.productSize ?? null,
+      input.accessoryCode ?? null
+    );
+  }
+
+  if (input.agentId) {
+    const a = await db.query.agent.findFirst({
+      where: eq(agent.id, input.agentId),
+      columns: { id: true, isActive: true },
+    });
+    if (!a || !a.isActive) {
+      throw new Error("代理商不存在或已停用");
+    }
+  }
+
   const [updated] = await db
     .update(promptOrder)
     .set({

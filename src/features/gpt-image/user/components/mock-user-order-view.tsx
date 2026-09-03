@@ -230,7 +230,7 @@ function MockOrderContent({ order }: { order: OrderView }) {
                 onSubmit={handleSubmit}
                 onRegenerate={handleRegenerate}
                 regenerateLimit={order.regenerateLimit ?? 5}
-                regenerateUsedCount={order.regenerateUsedCount ?? 0}
+                regenerateUsedByBatch={order.regenerateUsedByBatch ?? []}
                 // mock 不接 useOrderHistory（不打 /history 接口），传空 stub
                 snapshots={mockHistory}
               />

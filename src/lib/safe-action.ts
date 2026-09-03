@@ -125,3 +125,29 @@ export const adminAction = protectedAction.use(async ({ next, ctx }) => {
     },
   });
 });
+
+/**
+ * 2026-09-03：代理商 Action 客户端（ToB 业务自下单）。
+ *
+ * 在 protectedAction 基础上校验"当前账号是否绑了某个代理商"——
+ * 即 user.agentId 非空。与 adminAction 互斥：
+ * - adminAction 校验 user.role = "admin"
+ * - agentAction 校验 user.agentId 非空
+ *
+ * ctx.agentId 注入到下游 action，方便 list/filter 时直接用 eq(table.agentId, ctx.agentId)
+ * 避免再查一次 session。
+ */
+export const agentAction = protectedAction.use(async ({ next, ctx }) => {
+  const userWithAgent = ctx.user as { agentId?: string | null };
+  const agentId = userWithAgent.agentId;
+  if (typeof agentId !== "string" || agentId.length === 0) {
+    throw new Error("此操作需要代理商权限");
+  }
+
+  return next({
+    ctx: {
+      ...ctx,
+      agentId,
+    },
+  });
+});

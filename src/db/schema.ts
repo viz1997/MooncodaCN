@@ -44,23 +44,41 @@ export const userRoleEnum = pgEnum("user_role", ["user", "admin"]);
  * @field bannedReason - 封禁原因
  * @field needsVerification - 是否需要邮箱验证（管理员手动创建时指定；无密码账户必须为 true）
  * @field customerId - 支付提供商客户 ID (Creem)
+ * @field agentId - 2026-09-03 起：代理商账号所属代理商（null = 普通用户）。
+ *   userAgentId IS NOT NULL 即为代理商；走 `(agent)` route group 与 agentAction 中间件。
+ *   agent 删除时 set null（agent 退出不影响该 user 继续用 ToC 业务）
  * @field createdAt - 创建时间
  * @field updatedAt - 更新时间
  */
-export const user = pgTable("user", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  email: text("email").notNull().unique(),
-  emailVerified: boolean("email_verified").notNull().default(false),
-  image: text("image"),
-  role: userRoleEnum("role").notNull().default("user"),
-  banned: boolean("banned").notNull().default(false),
-  bannedReason: text("banned_reason"),
-  needsVerification: boolean("needs_verification").notNull().default(false),
-  customerId: text("customer_id").unique(),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+export const user = pgTable(
+  "user",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    email: text("email").notNull().unique(),
+    emailVerified: boolean("email_verified").notNull().default(false),
+    image: text("image"),
+    role: userRoleEnum("role").notNull().default("user"),
+    banned: boolean("banned").notNull().default(false),
+    bannedReason: text("banned_reason"),
+    needsVerification: boolean("needs_verification").notNull().default(false),
+    customerId: text("customer_id").unique(),
+    /**
+     * 2026-09-03：代理商归属（ToB 自下单用）。
+     * null = 普通 ToC 用户；非空 = 该 user 是 agent.{id} 下的代理商员工/管理员。
+     * 不放在 userRoleEnum 是为了保持 role 枚举简洁（"user"/"admin" 两档够用）。
+     */
+    agentId: text("agent_id").references(() => agent.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    // 代理商账号列表（按代理商过滤）：WHERE agent_id = ?
+    index("user_agent_id_idx").on(t.agentId),
+  ]
+);
 
 // ============================================
 // 会话表 (Session)
@@ -940,7 +958,9 @@ export const promptTemplate = pgTable("prompt_template", {
  * @field uploadedImages - 已上传原图（dataUrl 字符串数组，JSON）
  * @field uploadCount - 用户可上传的批次次数（默认 1）。每批最多 imagesPerUpload 张参考图，总容量 = uploadCount × imagesPerUpload
  * @field imagesPerUpload - 每批上传的原图参考图数量（1-3，默认 3）
- * @field regenerateLimit - 用户主动重新生成次数上限（默认 5；批量重跑 / FAILED 重试不计）
+ * @field regenerateLimit - 每批效果图可重新生成的次数上限（默认 5）。
+ *   按批次独立计数：5 个效果图的订单下单时设为 5，每批都有 5 次重新
+ *   生成机会，互不挤占；批量重跑 / FAILED 一键重试不计。
  * @field candidates - 效果图（嵌套数组 [[b64,...],[b64,...]]，外层索引 = 原图索引）
  * @field selectedIndex - 兼容字段（旧模型：取 selections[0]）
  * @field selections - 每张原图的候选选择（长度 = uploadedImages.length，未选为 null）
@@ -970,10 +990,12 @@ export const promptOrder = pgTable(
      */
     imagesPerUpload: integer("images_per_upload").notNull().default(3),
     /**
-     * 用户主动"重新生成第 N 张"的次数上限。
-     * 仅 imageIdx 传入的单图路径计数（trigger=regenerate_single）；
+     * 每批效果图可主动"重新生成"的次数上限（默认 5）。
+     * 按批次独立计数：每个 batchIdx 都有 N 次机会，互不挤占。
+     * 仅 imageIdx 传入（即 batchIdx）的单批路径计数（trigger=regenerate_single）；
      * 批量重跑（regenerate_all / FAILED 重试）不消耗次数。
-     * 实际已用次数 = promptOrderHistory 中 trigger='regenerate_single' 的行数。
+     * 实际已用次数 = promptOrderHistory 中 trigger='regenerate_single'
+     * AND imageIdx=batchIdx 的行数。
      */
     regenerateLimit: integer("regenerate_limit").notNull().default(5),
     candidates: text("candidates"),
@@ -1017,11 +1039,14 @@ export const promptOrder = pgTable(
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
-  (t) => ({
-    templateIdx: index("prompt_order_template_idx").on(t.templateId),
-    statusIdx: index("prompt_order_status_idx").on(t.status),
-    createdByIdx: index("prompt_order_created_by_idx").on(t.createdBy),
-  })
+  (t) => [
+    index("prompt_order_template_idx").on(t.templateId),
+    index("prompt_order_status_idx").on(t.status),
+    index("prompt_order_created_by_idx").on(t.createdBy),
+    // 2026-09-03：代理商订单查询加速（agent 维度过滤）。
+    // WHERE agent_id = ? ORDER BY created_at DESC 走 (agentId) 索引。
+    index("prompt_order_agent_id_idx").on(t.agentId),
+  ]
 );
 
 // ============================================
@@ -1093,6 +1118,14 @@ export const promptOrderHistory = pgTable(
       t.orderId,
       t.createdAt
     ),
+    // 2026-09-03：按 batchIdx 重新生成次数查询用。
+    // WHERE orderId=? AND trigger='regenerate_single' AND imageIdx=?
+    // → 命中 (orderId, trigger, imageIdx) 前缀；GROUP BY imageIdx 也走索引。
+    orderTriggerImageIdxIdx: index("poh_order_trigger_image_idx_idx").on(
+      t.orderId,
+      t.trigger,
+      t.imageIdx
+    ),
   })
 );
 
@@ -1107,13 +1140,16 @@ export type PromptOrderHistoryTrigger =
 // 代理商表 (Agent) —— 飞书 docx「链接生成管理系统」ToB 业务
 // ============================================
 //
-// 代理商是 WJP 业务 ToB 端的"渠道运营方"，本身没有生产能力，纯做品牌 +
-// 客服 + 渠道。订单从代理商侧发，工厂按订单全流程代工。
+// 2026-09-03 改造（ToB 业务独立化）：
+// 代理商从「admin 替代理商店代下单」演化为「代理商自己登录 + 自下单 +
+// 自己上传参考图 + 自己挑候选」。新建 (agent) route group + agentAction
+// 中间件 + /agent/orders 新建入口，详见 `crystalline-cooking-flask.md`。
+// user.agentId 字段承担"账号属于哪个代理商"的归属关系；userRoleEnum 不
+// 扩展，靠 agentId IS NOT NULL 判断代理商身份。
 //
-// 为什么不复用 user 表：代理商和终端消费者走两套 UI（代理商有自己的客户
-// 上传入口 / 报价 / 发货流程）。user 表是终端消费者账号体系，硬塞代理
-// 商进来要扩 user.role enum + 加权限中间件，得不偿失。新建独立 agent
-// 表 + 与 user 完全解耦是最简方案。
+// 历史背景（2026-08-23 起）：代理商档案表，没有登录态；
+// admin 在 /admin/prompt-orders 替代理商店发链接、user 在 /p/[token] 上传
+// 参考图。本轮把 agent 用户化、portal 化。
 //
 // 字段：
 // - id: 业务可读 ID（A001 / zhangsan 都行，nanoid 生成也行）
@@ -1121,6 +1157,10 @@ export type PromptOrderHistoryTrigger =
 // - contact / phone / email: 联系信息，订单链接分发用
 // - isActive: 停用后不能再被新订单选择（已有订单不受影响）
 // - remark: 内部备注
+//
+// 与 user 的关系（userAgentId 字段）：FK set null —— 删代理商时把该代理
+// 商下的 user.agentId 清空（user 本身不删，转为普通 ToC 账号）。一对多
+// agent → users 走 agentRelations.users。
 export const agent = pgTable("agent", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
@@ -1209,7 +1249,7 @@ export type CanvasRemoteCapability =
 // 否则 findSession 等带 join 的查询会走"fallback join"二次查询，
 // 并把内部失败吞成日志噪音（Failed to query fallback join for model user）。
 
-export const userRelations = relations(user, ({ many }) => ({
+export const userRelations = relations(user, ({ many, one }) => ({
   sessions: many(session),
   accounts: many(account),
   subscriptions: many(subscription),
@@ -1221,6 +1261,11 @@ export const userRelations = relations(user, ({ many }) => ({
   canvasRemoteJobs: many(canvasRemoteJob),
   tickets: many(ticket),
   ticketMessages: many(ticketMessage),
+  // 2026-09-03：代理商归属（ToB 自下单 / (agent) route group）
+  agent: one(agent, {
+    fields: [user.agentId],
+    references: [agent.id],
+  }),
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -1266,6 +1311,11 @@ export const promptOrderRelations = relations(promptOrder, ({ one, many }) => ({
 
 export const agentRelations = relations(agent, ({ many }) => ({
   orders: many(promptOrder),
+  // 2026-09-03：反向 user → 代理商下挂的所有账号（按 agentId 过滤）
+  users: many(user),
+  // 2026-09-03：可选归属账号（agent 表的 owner 概念，nullable）
+  // 当前不启用，先把 relations 留位以免后续添加时 relation 找不到 user 表
+  // owner: one(user, { fields: [agent.ownerUserId], references: [user.id] }),
 }));
 
 export const promptOrderHistoryRelations = relations(

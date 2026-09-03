@@ -192,7 +192,7 @@ export function OrderEditDialog({
       width={480}
     >
       <p className="text-sm text-muted-foreground mb-4">
-        仅业务字段（订单号、收件人、平台、上传数量、重新生成次数）可改；模板、访问链接、状态、上传内容保持不变。
+        仅业务字段（订单号、收件人、平台、上传数量、每批重试次数）可改；模板、访问链接、状态、上传内容保持不变。
       </p>
 
       {!order ? null : (
@@ -235,7 +235,7 @@ export function OrderEditDialog({
             />
           </Form.Item>
 
-          <Form.Item label="用户上传批次（次数）" className="!mb-0">
+          <Form.Item label="效果数量" className="!mb-0">
             <div className="flex items-stretch gap-2">
               <Button
                 type="default"
@@ -270,7 +270,7 @@ export function OrderEditDialog({
             </p>
           </Form.Item>
 
-          <Form.Item label="每批上传原图数量" className="!mb-0">
+          <Form.Item label="每批参考图数量" className="!mb-0">
             <div className="flex items-stretch gap-2">
               <Button
                 type="default"
@@ -305,7 +305,7 @@ export function OrderEditDialog({
             </p>
           </Form.Item>
 
-          <Form.Item label="用户重新生成次数上限" className="!mb-0">
+          <Form.Item label="每批重试次数" className="!mb-0">
             <div className="flex items-stretch gap-2">
               <Button
                 type="default"

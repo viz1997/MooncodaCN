@@ -53,6 +53,13 @@ export function UploadStep({
   onUpload,
 }: UploadStepProps) {
   const totalCapacity = uploadCount * imagesPerUpload;
+  // 已"塞满"的批数（floor：3 张/批时 1-3 张都算第 1 批）。
+  // 对用户讲"已传 X 个效果图"时用这个，比用 uploadedImageCount 更直观。
+  const safeImagesPerUpload = Math.max(1, imagesPerUpload);
+  const filledBatchCount = Math.min(
+    uploadCount,
+    Math.floor(uploadedImageCount / safeImagesPerUpload)
+  );
   const [dragging, setDragging] = useState(false);
   const [previews, setPreviews] = useState<
     Array<{
@@ -325,18 +332,12 @@ export function UploadStep({
 
             {!quotaFull && (
               <p className="text-center text-xs text-stone-500">
-                {/* 2026-09-02：原写"本订单还差 N 张未上传"被用户误读成"必须一次
-                  传满 N 张才能生成"。改为批次进度 + 总进度，避免歧义：
-                  - 已上传 X / totalCapacity 张
-                  - 第 currentBatch / uploadCount 批
-                  - 当前批可传 1~imagesPerUpload 张（不必填满），提交后进下一批 */}
-                订单共 {uploadCount} 批 × {imagesPerUpload} 张，已上传{" "}
-                {uploadedImageCount} / {totalCapacity} 张（当前第{" "}
-                {Math.min(
-                  uploadCount,
-                  Math.floor(uploadedImageCount / imagesPerUpload) + 1
-                )}{" "}
-                批）
+                {/* 以「效果图」为主轴（每批 1 个效果图）：
+                  - X / totalBatches 批 = X / uploadCount 个效果图已传齐
+                  - 当前第 N 批可传 1~imagesPerUpload 张（不必填满） */}
+                已传 {filledBatchCount} / {uploadCount} 个效果图（每批最多{" "}
+                {safeImagesPerUpload} 张，当前第{" "}
+                {Math.min(uploadCount, filledBatchCount + 1)} 批）
               </p>
             )}
           </div>
@@ -387,22 +388,35 @@ export function UploadStep({
           <span className="font-medium text-stone-500">
             进度 {uploadedImageCount} / {totalCapacity} 张
           </span>
-          <span
-            className={[
-              "rounded-full px-2.5 py-0.5 text-xs font-medium",
-              hasFailure
-                ? "bg-red-50 text-red-600"
-                : quotaFull
-                  ? "bg-emerald-500 text-white"
-                  : "bg-stone-100 text-stone-600",
-            ].join(" ")}
-          >
-            {hasFailure
-              ? "上次失败，将替换之前图片"
-              : quotaFull
-                ? "本订单已完成"
-                : `还需 ${remainingForThisRound} 张`}
-          </span>
+          {(() => {
+            // 右侧 chip 只在有"状态"可告知时才出现（避免显示一个空 pill）
+            // - hasFailure: 之前上传失败过
+            // - uploading: 正在上传
+            // - quotaFull: 本订单名额已满
+            // 其余情况（待上传 / 上传间隙）由左边 "X/Y 张" 进度条表达，不重复
+            if (hasFailure) {
+              return (
+                <span className="rounded-full bg-red-50 px-2.5 py-0.5 font-medium text-red-600 text-xs">
+                  上次失败，将替换之前图片
+                </span>
+              );
+            }
+            if (uploading) {
+              return (
+                <span className="rounded-full bg-stone-100 px-2.5 py-0.5 font-medium text-stone-600 text-xs">
+                  上传中...
+                </span>
+              );
+            }
+            if (quotaFull) {
+              return (
+                <span className="rounded-full bg-emerald-500 px-2.5 py-0.5 font-medium text-white text-xs">
+                  本订单已完成
+                </span>
+              );
+            }
+            return null;
+          })()}
         </div>
         <div className="h-1 overflow-hidden rounded-full bg-stone-100">
           <div

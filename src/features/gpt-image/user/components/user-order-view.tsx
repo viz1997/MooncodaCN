@@ -242,7 +242,7 @@ function UserOrderContent({
                 onSubmit={handleSubmit}
                 onRegenerate={actions.regenerate}
                 regenerateLimit={order.regenerateLimit}
-                regenerateUsedCount={order.regenerateUsedCount ?? 0}
+                regenerateUsedByBatch={order.regenerateUsedByBatch ?? []}
                 snapshots={history.history}
               />
             )}

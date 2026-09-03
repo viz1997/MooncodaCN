@@ -51,18 +51,44 @@ async function getHandler(
     const uploaded = parseUploadedImages(order.uploadedImages as string | null);
     const selections = parseSelections(order.selections as string | null);
 
-    // 实际已用重新生成次数 = trigger='regenerate_single' 的快照行数
-    // （批量重跑 trigger='regenerate_all' / FAILED 重试同样走 regenerate_all，不计）
-    const usedRows = await db
-      .select({ used: count() })
+    // 每批已用重新生成次数：按 imageIdx=batchIdx 分组统计。
+    // imageIdx 字段在 2026-09-02 后已对齐到 batchIdx 语义；同一行同时
+    // 满足 trigger='regenerate_single' 才是单批重生成（批量重跑 / FAILED
+    // 重试用 trigger='regenerate_all' / 'failed_reupload'，不计）。
+    // 长度对齐 batchCount，未上传的批补 0。
+    const uploadedImageCount = countUploadedImages(uploaded);
+    const imagesPerUploadVal = Math.max(1, order.imagesPerUpload);
+    const batchCount =
+      imagesPerUploadVal > 1
+        ? Math.ceil(uploadedImageCount / imagesPerUploadVal)
+        : uploadedImageCount;
+    const usedByBatchRows = await db
+      .select({
+        batchIdx: promptOrderHistory.imageIdx,
+        used: count(),
+      })
       .from(promptOrderHistory)
       .where(
         and(
           eq(promptOrderHistory.orderId, order.id),
           eq(promptOrderHistory.trigger, "regenerate_single")
         )
-      );
-    const regenerateUsedCount = usedRows[0]?.used ?? 0;
+      )
+      .groupBy(promptOrderHistory.imageIdx);
+    const regenerateUsedByBatch: number[] = Array.from(
+      { length: batchCount },
+      () => 0
+    );
+    for (const row of usedByBatchRows) {
+      const idx = row.batchIdx;
+      if (
+        typeof idx === "number" &&
+        idx >= 0 &&
+        idx < regenerateUsedByBatch.length
+      ) {
+        regenerateUsedByBatch[idx] = Number(row.used);
+      }
+    }
 
     return NextResponse.json({
       success: true,
@@ -78,7 +104,7 @@ async function getHandler(
         candidateCount: order.template.candidateCount,
         candidateGroups: countCandidateGroups(candidates),
         regenerateLimit: order.regenerateLimit,
-        regenerateUsedCount,
+        regenerateUsedByBatch,
         selections,
         selectedIndex: order.selectedIndex,
         errorMessage: order.errorMessage,

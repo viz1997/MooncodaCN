@@ -389,9 +389,9 @@ export function OrderFormDialog({
         <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
           <div className="flex items-center gap-1">
             <span className="text-sm">
-              用户上传批次（次数） <span className="text-rose-600">*</span>
+              效果数量 <span className="text-rose-600">*</span>
             </span>
-            <Tooltip title="用户最多可分多少次上传原图（每次上传算 1 批）。默认 1 批，多张图 订单需要更多批次时可调高。建议 1-3 批，最多 10 批。">
+            <Tooltip title="用户需提交的「效果图」数量。每个效果图对应一批参考图，全部提交才算订单完成。建议 1-3 个，最多 10 个。">
               <HelpCircle className="h-3.5 w-3.5 text-stone-400 cursor-help" />
             </Tooltip>
           </div>
@@ -643,7 +643,7 @@ export function OrderFormDialog({
               ),
               extra: (
                 <span className="text-xs text-stone-400">
-                  每批张数 / 重新生成次数
+                  每批参考图 / 每批重试次数
                 </span>
               ),
               children: (
@@ -651,8 +651,7 @@ export function OrderFormDialog({
                   <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
                     <div className="flex items-center gap-1">
                       <span className="text-sm">
-                        每批上传原图数量{" "}
-                        <span className="text-rose-600">*</span>
+                        每批参考图数量 <span className="text-rose-600">*</span>
                       </span>
                       <Tooltip title="用户每次上传会话最多塞几张参考图。多张图被融合为单次生图输入。默认 3 张，可选 1-3 张。订单总容量 = 批次 × 每批张数。">
                         <HelpCircle className="h-3.5 w-3.5 text-stone-400 cursor-help" />
@@ -698,8 +697,8 @@ export function OrderFormDialog({
 
                   <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
                     <div className="flex items-center gap-1">
-                      <span className="text-sm">用户重新生成次数上限</span>
-                      <Tooltip title='仅"重新生成第 N 张"（单图路径）计数；批量重跑 / FAILED 一键重试不计。设为 0 表示禁止用户主动重新生成。'>
+                      <span className="text-sm">每批重试次数</span>
+                      <Tooltip title="每批效果图的重新生成机会。每个 batchIdx 独立计数，下 5 个效果图就有 5 × N 次总机会，互不挤占。批量重跑 / FAILED 一键重试不计。设为 0 表示禁止用户主动重新生成。">
                         <HelpCircle className="h-3.5 w-3.5 text-stone-400 cursor-help" />
                       </Tooltip>
                     </div>

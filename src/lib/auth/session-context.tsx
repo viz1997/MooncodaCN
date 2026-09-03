@@ -18,6 +18,14 @@ interface SessionUser {
    * 但 session-context 的窄类型不一定覆盖；如未来扩展更多字段，按需补充。
    */
   role?: string | null | undefined;
+  /**
+   * 2026-09-03：代理商归属（ToB 自下单）。从 user.agentId 透传。
+   * - undefined / null：当前账号不是代理商（普通 ToC 用户或 admin）
+   * - 字符串：当前账号属于这个 agent（id），可走 /agent/** portal
+   *
+   * 判断代理商快捷字段见下方 isAgent（computed）。
+   */
+  agentId?: string | null | undefined;
 }
 
 /**
@@ -30,6 +38,12 @@ interface SessionContextType {
   isLoading: boolean;
   /** 是否已认证 */
   isAuthenticated: boolean;
+  /**
+   * 2026-09-03：是否代理商账号 —— user.agentId 存在且非空。
+   * 注意 isAdmin 已经在 SessionUser.role === "admin" 处判断；本字段与
+   * admin 互斥（一个账号只能属于一个代理商或一个 admin）。
+   */
+  isAgent: boolean;
 }
 
 /**
@@ -60,11 +74,21 @@ const SessionContext = createContext<SessionContextType | undefined>(undefined);
  */
 export function SessionProvider({ children }: { children: ReactNode }) {
   const { data: session, isPending } = useSession();
+  // 2026-09-03：cast — Better Auth 的 useSession 类型推导不会把 additionalFields
+  // 里的 agentId 自动加到 session.user 的窄类型上（typegen 缺失）。手动 cast
+  // 到宽类型 SessionUser 后再读 agentId（运行时 Better Auth 会从 cookie-cache
+  // 把 agentId 注入到 user 对象）。
+  const u = (session?.user ?? null) as SessionUser | null;
+  // 2026-09-03：isAgent = 账号绑了某个代理商（agentId 非空）。
+  // 用 !! 双重否定把 null / undefined / "" 都归 false，剩下来就是
+  // 真正的 agentId 字符串。
+  const isAgent = !!u && typeof u.agentId === "string" && u.agentId.length > 0;
 
   const value: SessionContextType = {
-    user: session?.user ?? null,
+    user: u,
     isLoading: isPending,
     isAuthenticated: !!session?.user,
+    isAgent,
   };
 
   return (

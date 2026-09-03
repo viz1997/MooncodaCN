@@ -67,7 +67,7 @@ export const auth = betterAuth({
 
   /**
    * 用户自定义字段配置
-   * 将 role, banned, bannedReason, needsVerification 字段包含在会话用户中
+   * 将 role, banned, bannedReason, needsVerification, agentId 字段包含在会话用户中
    */
   user: {
     additionalFields: {
@@ -93,6 +93,17 @@ export const auth = betterAuth({
         required: false,
         defaultValue: false,
         input: false, // 仅管理员创建时设置
+      },
+      // 2026-09-03：代理商归属（ToB 业务自下单 / (agent) route group）。
+      // - nullable：非代理商账号 agentId 为 null
+      // - input: false：用户不能通过注册/更新自己改，只能 admin 后台或 SQL 写入
+      // - 存于 user.agentId，FK → agent.id，ON DELETE SET NULL
+      // 接入新 agent 业务时记得在 schema.ts 的 user 表加 agentId 列
+      // （迁移见 drizzle/0006_agent_portal.sql）。
+      agentId: {
+        type: "string",
+        required: false,
+        input: false, // 仅 admin 后台或 SQL 写入
       },
     },
   },
