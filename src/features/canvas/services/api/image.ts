@@ -8,7 +8,10 @@ import {
 } from "@/features/canvas/lib/canvas/sanitize-remote-config";
 import { buildImageReferencePromptText } from "@/features/canvas/lib/image-reference-prompt";
 import { dataUrlToFile } from "@/features/canvas/lib/image-utils";
-import { imageToDataUrl } from "@/features/canvas/services/image-storage";
+import {
+  ensureCanvasReferenceUrl,
+  imageToDataUrl,
+} from "@/features/canvas/services/image-storage";
 import {
   type AiConfig,
   buildApiUrl,
@@ -1445,15 +1448,18 @@ async function createRemoteImageJob(params: {
   if (references?.length) {
     payload.references = await Promise.all(
       references.map(async (ref) => {
-        const dataUrl = await imageToDataUrl(ref);
-        return { url: dataUrl, mimeType: "image/png" };
+        // 2026-09-03：不再 imageToDataUrl（会 base64 整张图撞 Vercel 4.5MB
+        // 413）。改为 ensureCanvasReferenceUrl：能直传 URL 就直传，
+        // 不能就 lazy 落 R2 再发 URL。
+        const url = await ensureCanvasReferenceUrl(ref);
+        return { url, mimeType: "image/png" };
       })
     );
   }
 
   if (mask) {
-    const maskDataUrl = await imageToDataUrl(mask);
-    payload.mask = { url: maskDataUrl, mimeType: "image/png" };
+    const maskUrl = await ensureCanvasReferenceUrl(mask);
+    payload.mask = { url: maskUrl, mimeType: "image/png" };
   }
 
   const response = await fetch("/api/canvas/generate", {

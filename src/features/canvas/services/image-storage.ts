@@ -116,6 +116,104 @@ export async function imageToDataUrl(
   return blobToDataUrl(await (await fetch(url)).blob());
 }
 
+/**
+ * 2026-09-03：V2 内置渠道提交前 lazy 持久化参考图为 https URL。
+ *
+ * 根因：imageToDataUrl 在 storageKey 是 localforage blob 时会 base64 编码
+ * 整个图，多张高清参考图 base64 拼起来直接撞 Vercel 4.5MB POST 限制（413）。
+ *
+ * 流程：
+ * - ref.url 是 https → 直接返（已 R2 持久化）
+ * - ref.storageKey 是 r2: 前缀 → 剥前缀返 URL（Phase 3 持久化产物）
+ * - 否则（localforage blob / data URL / blob: URL）→ 走 /api/image/upload
+ *   预签名 PUT 上 R2，返回 publicUrl
+ *
+ * 保持 localforage 暂存逻辑不变（跨刷新恢复），只在提交时按需落 R2。
+ */
+export async function ensureCanvasReferenceUrl(ref: {
+  url?: string;
+  dataUrl?: string;
+  storageKey?: string;
+  mimeType?: string;
+  name?: string;
+}): Promise<string> {
+  if (ref.url && /^https?:\/\//i.test(ref.url)) return ref.url;
+  if (ref.storageKey?.startsWith("r2:")) return ref.storageKey.slice(3);
+
+  // 取 blob 来源
+  let blob: Blob;
+  let contentType = ref.mimeType ?? "image/png";
+  const name = ref.name ?? "image.png";
+
+  if (ref.dataUrl) {
+    const res = await fetch(ref.dataUrl);
+    blob = await res.blob();
+    if (blob.type) contentType = blob.type;
+  } else if (ref.storageKey) {
+    const cached = await store.getItem<Blob>(ref.storageKey);
+    if (!cached) {
+      throw new Error(`参考图 storageKey=${ref.storageKey} 已失效`);
+    }
+    blob = cached;
+    if (blob.type) contentType = blob.type;
+  } else if (ref.url) {
+    // 兜底：尝试 fetch（blob: / http: / data:）
+    const res = await fetch(ref.url);
+    blob = await res.blob();
+    if (blob.type) contentType = blob.type;
+  } else {
+    throw new Error("参考图数据缺失（无 url / storageKey / dataUrl）");
+  }
+
+  // 客户端大小兜底：5MB 上限（与 /api/image/upload MAX_BYTES 对齐）。
+  // 超限直接抛错，避免走完预签名流程才发现服务端拒；用户需先压缩。
+  const MAX_BYTES = 5 * 1024 * 1024;
+  if (blob.size > MAX_BYTES) {
+    throw new Error(
+      `参考图 ${name} 超过 5MB 上限（实际 ${(blob.size / 1024 / 1024).toFixed(1)}MB），请先压缩`
+    );
+  }
+
+  // 1) 拿预签名
+  const presignRes = await fetch("/api/image/upload", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contentType,
+      size: blob.size,
+      ext: name.split(".").pop()?.toLowerCase() || "png",
+    }),
+  });
+  if (!presignRes.ok) {
+    throw new Error(`获取上传地址失败：HTTP ${presignRes.status}`);
+  }
+  const presignJson = (await presignRes.json()) as {
+    success: boolean;
+    uploadUrl?: string;
+    publicUrl?: string;
+    error?: string;
+  };
+  if (
+    !presignJson.success ||
+    !presignJson.uploadUrl ||
+    !presignJson.publicUrl
+  ) {
+    throw new Error(presignJson.error ?? "获取上传地址失败");
+  }
+
+  // 2) PUT 到 R2（直传，不经过我们 server）
+  const putRes = await fetch(presignJson.uploadUrl, {
+    method: "PUT",
+    headers: { "Content-Type": contentType },
+    body: blob,
+  });
+  if (!putRes.ok) {
+    throw new Error(`上传到存储失败：HTTP ${putRes.status}`);
+  }
+
+  return presignJson.publicUrl;
+}
+
 export async function deleteStoredImages(keys: Iterable<string>) {
   await Promise.all(
     Array.from(new Set(keys)).map(async (key) => {
