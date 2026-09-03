@@ -62,12 +62,20 @@ function calculateCreditsCost(
 function buildGenerateRequest(
   input: InternalGenerateInput
 ): GenerateImageRequest {
+  // 2026-09-03 V1 多图：normalize 成 imageUrls[]，旧 client 只传 imageUrl
+  // 的也兼容（包成单元素数组）。adapter 内部只看 imageUrls。
+  const imageUrls: string[] | undefined =
+    input.imageUrls && input.imageUrls.length > 0
+      ? input.imageUrls
+      : input.imageUrl
+        ? [input.imageUrl]
+        : undefined;
   return {
     model: input.model,
     mode: input.mode,
     prompt: input.prompt,
     ...(input.negativePrompt && { negativePrompt: input.negativePrompt }),
-    ...(input.imageUrl && { imageUrl: input.imageUrl }),
+    ...(imageUrls && { imageUrls }),
     ...(input.maskUrl && { maskUrl: input.maskUrl }),
     size: input.size,
     ...(input.customWidth && { customWidth: input.customWidth }),

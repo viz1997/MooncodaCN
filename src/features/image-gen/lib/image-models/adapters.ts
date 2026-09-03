@@ -75,8 +75,14 @@ export const dalle3Adapter: ImageModelAdapter = {
   config: IMAGE_MODELS.dalle3,
   validate(req) {
     if (!req.prompt) return "DALL-E 3 需要 prompt";
-    if (req.mode === "image_to_image" && !req.imageUrl)
-      return "图生图模式需要 imageUrl";
+    // 2026-09-03 V1 多图：imageUrls[] 优先；多张时只取第一张（OpenAI
+    // /v1/images/edits 仅支持单 image 字段，多图走 GPT-Image-1 / gpt_image_2）。
+    // 这里仅校验「至少 1 张」与「≤1 张」，超出明确拒绝，避免静默丢图。
+    const refCount = req.imageUrls?.length ?? 0;
+    if (req.mode === "image_to_image" && refCount === 0)
+      return "图生图模式需要至少 1 张参考图";
+    if (req.mode === "image_to_image" && refCount > 1)
+      return "DALL-E 3 仅支持 1 张参考图，多张请改用 GPT-Image-2";
     if (req.negativePrompt) return "DALL-E 3 不支持反向提示词";
     if (req.batchSize && req.batchSize > 1) return "DALL-E 3 单次只能生成 1 张";
     if (!getOpenAIImageApiKey()) return "OPENAI_API_KEY 未配置";
@@ -93,7 +99,8 @@ export const dalle3Adapter: ImageModelAdapter = {
       let response: OpenAIImagesResponse;
 
       if (isEdit) {
-        if (!req.imageUrl) {
+        const refUrls = req.imageUrls ?? [];
+        if (refUrls.length === 0) {
           return {
             success: false,
             model: "dalle3",
@@ -101,7 +108,9 @@ export const dalle3Adapter: ImageModelAdapter = {
             error: "图像编辑模式需要 imageUrl",
           };
         }
-        const { buffer } = await resolveReferenceImage(req.imageUrl);
+        // OpenAI /v1/images/edits 只接受单 image 字段（dall-e-2/gpt-image-1）；
+        // 上游校验已挡 > 1，这里取首张。
+        const { buffer } = await resolveReferenceImage(refUrls[0]!);
         const formData = new FormData();
         formData.append(
           "image",
@@ -651,7 +660,7 @@ function openAIImageToUrl(item: OpenAIImageData): string {
  * @param delayMs     默认 2000：cold start 通常 1-3s 内自动恢复
  */
 async function retrySubmitLingtingTask(
-  imageUrl: string,
+  imageUrls: string[],
   prompt: string,
   size: string,
   imageIdx: number,
@@ -665,8 +674,8 @@ async function retrySubmitLingtingTask(
     try {
       return await submitLingtingTask(
         "_wbl",
-        // 2026-09-02：V2 workbench 仍走单图参考，包成 [imageUrl] 兼容新签名。
-        [imageUrl],
+        // 2026-09-03：多图参考直接传 imageUrls[]（2026-09-02 起的签名）
+        imageUrls,
         prompt,
         size,
         imageIdx,
@@ -707,8 +716,15 @@ export const gptImage2Adapter: ImageModelAdapter = {
   config: IMAGE_MODELS.gpt_image_2,
   validate(req) {
     if (!req.prompt) return "GPT-Image-2 需要 prompt";
-    if (req.mode === "image_to_image" && !req.imageUrl)
-      return "图生图模式需要 imageUrl";
+    // 2026-09-03：多图改用 imageUrls[]。buildGenerateRequest 已把单数 imageUrl
+    // 包成 [imageUrl]，这里只看数组。
+    if (
+      req.mode === "image_to_image" &&
+      (!req.imageUrls || req.imageUrls.length === 0)
+    )
+      return "图生图模式需要至少 1 张参考图";
+    if (req.imageUrls && req.imageUrls.length > 10)
+      return "GPT-Image-2 单次最多 10 张参考图";
     if (req.mode === "inpainting" && !req.maskUrl)
       return "局部重绘需要 maskUrl";
     if (req.batchSize && req.batchSize > 10)
@@ -718,7 +734,8 @@ export const gptImage2Adapter: ImageModelAdapter = {
     return null;
   },
   async generate(req) {
-    if (!req.imageUrl) {
+    const refUrls = req.imageUrls ?? [];
+    if (refUrls.length === 0) {
       return {
         success: false,
         model: "gpt_image_2",
@@ -750,7 +767,7 @@ export const gptImage2Adapter: ImageModelAdapter = {
     let submitResult: Awaited<ReturnType<typeof submitLingtingTask>>;
     try {
       submitResult = await retrySubmitLingtingTask(
-        req.imageUrl!,
+        refUrls,
         req.prompt,
         size,
         0,
@@ -872,18 +889,26 @@ async function callGeminiImageAPI(
   // 构造 Gemini generateContent 请求体
   const parts: Array<Record<string, unknown>> = [{ text: req.prompt }];
 
-  // 参考图：data URI 抽 base64 走 inline_data；https URL 走 file_data
-  if (req.imageUrl) {
-    if (req.imageUrl.startsWith("data:")) {
-      const match = req.imageUrl.match(/^data:(image\/[\w+]+);base64,(.+)$/);
+  // 参考图：data URI 抽 base64 走 inline_data；https URL 走 file_data。
+  // 2026-09-03 V1 多图：取 imageUrls[]（兼容旧 imageUrl 单数）；
+  // 多张按顺序拼 parts，Gemini 支持 inline_data/file_data 多个。
+  const refUrls =
+    req.imageUrls && req.imageUrls.length > 0
+      ? req.imageUrls
+      : req.imageUrl
+        ? [req.imageUrl]
+        : [];
+  for (const refUrl of refUrls) {
+    if (refUrl.startsWith("data:")) {
+      const match = refUrl.match(/^data:(image\/[\w+]+);base64,(.+)$/);
       if (match) {
         parts.push({
           inline_data: { mime_type: match[1], data: match[2] },
         });
       }
-    } else if (/^https?:\/\//.test(req.imageUrl)) {
+    } else if (/^https?:\/\//.test(refUrl)) {
       parts.push({
-        file_data: { file_uri: req.imageUrl, mime_type: "image/png" },
+        file_data: { file_uri: refUrl, mime_type: "image/png" },
       });
     }
   }
@@ -1064,6 +1089,8 @@ export const nanoBananaProAdapter: ImageModelAdapter = {
     if (req.batchSize && req.batchSize > 1)
       return "Nano Banana Pro 单次只能生成 1 张";
     if (req.negativePrompt) return "Nano Banana Pro 不支持反向提示词";
+    // 2026-09-03 V1 多图：放宽到 imageUrls[]，Gemini 接口本身接受多张 inline_data。
+    // 没硬性 max —— callGeminiImageAPI 会逐张转 inline_data/file_data。
     return null;
   },
   async generate(req) {

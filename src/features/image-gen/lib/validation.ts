@@ -34,6 +34,10 @@ export const internalGenerateSchema = z.object({
   ]),
   prompt: z.string().min(1, "提示词不能为空"),
   negativePrompt: z.string().optional(),
+  // 2026-09-03 V1 多图：imageUrls[] 优先；imageUrl 单数兼容旧 client。
+  // generation-service.buildGenerateRequest 会把 imageUrl 包成 [imageUrl]。
+  // max=10：业务硬上限，超出 adapter 直接拒（避免 Lingting 8MB body 撞 413）。
+  imageUrls: z.array(z.string()).max(10).optional(),
   imageUrl: z.string().optional(),
   maskUrl: z.string().optional(),
   size: z.enum(IMAGE_SIZES).default("1024x1024"),

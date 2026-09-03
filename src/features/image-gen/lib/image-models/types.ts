@@ -624,7 +624,19 @@ export interface GenerateImageRequest {
   prompt: string; // 主提示词
   negativePrompt?: string | undefined; // 反向提示词
   // 图生图/编辑模式
-  imageUrl?: string | undefined; // 输入图片URL
+  /**
+   * 单张参考图 URL（向后兼容旧调用方；新代码优先用 imageUrls[]）。
+   * 实际语义上等价于 imageUrls=[imageUrl]，adapter 内部 normalize 成数组。
+   */
+  imageUrl?: string | undefined;
+  /**
+   * 多张参考图 URL（2026-09-03 V1 多图改造）：
+   * - gpt_image_2 (Lingting)：submitLingtingTask 已支持 image[] multipart
+   * - dalle3 (OpenAI)：FormData 多 image 字段
+   * - gemini：file_data 数组
+   * 上限 10（业务约束），下游 API 各自再校验
+   */
+  imageUrls?: string[] | undefined;
   maskUrl?: string | undefined; // 局部重绘蒙版
   // 输出
   size: ImageSize;

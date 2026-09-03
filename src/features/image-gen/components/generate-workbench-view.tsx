@@ -100,6 +100,12 @@ import { cn } from "@/lib/utils";
 
 // ============ 类型 ============
 interface UploadedImage {
+  /**
+   * 客户端唯一 id —— uploadedImages 是数组，handleRemoveUpload / upload
+   * 完成回调都靠这个找对应那张。Date.now() 在快速连选多张时会撞，用
+   * crypto.randomUUID() 截 8 位最稳。
+   */
+  localId: string;
   file: File;
   previewUrl: string;
   /**
@@ -818,10 +824,12 @@ export function GenerateWorkbenchView({
   // 2026-08-18：默认从 "none" 改为 "upload"。
   // 原因：默认模型 gpt_image_2 只支持图生图（无 imageUrl 会直接失败），
   // 默认进入上传区更顺手，也避免再点一次 toggle。
+  // 2026-09-03 V1 多图：uploadedImage 单数 → uploadedImages 数组（最多 10 张）。
+  // 业务约束：每张都要走 R2 预签名上传拿 publicUrl（服务端 fetch 不能用 blob URL），
+  // Lingting 上游 8MB multipart body 限制是更上游的硬上限（见 [[workbench-v2-lingting-413]]），
+  // 本前端层只负责把多张参考图一次性发给服务端，不做 server-side 降采样。
   const [refMode, setRefMode] = useState<RefMode>("upload");
-  const [uploadedImage, setUploadedImage] = useState<UploadedImage | null>(
-    null
-  );
+  const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1075,10 +1083,12 @@ export function GenerateWorkbenchView({
   };
   // 资产库插入 —— V1 当前没用「参考图」之外的资产消费场景，先只把图片贴到 prompt 上方的缩略图位置
   // （refMode 库选）。视频/文本暂不接，与 AssetPickerModal 的语义保持一致即可。
+  // 2026-09-03 V1 多图：清空 upload 数组（切到 library 模式）；保留库选 1 张的旧行为
+  // —— 资产库目前只支持单选，多选场景 TODO（library 模式仍走 photoId 单数）。
   const handleInsertAsset = (payload: InsertAssetPayload) => {
     if (payload.kind !== "image") return;
     setRefMode("library");
-    setUploadedImage(null);
+    handleClearAllUploads();
     setSelectedPhoto({
       id: `picker-${Date.now()}`,
       userId: "self",
@@ -1186,6 +1196,10 @@ export function GenerateWorkbenchView({
   }, []);
 
   // ============ 文件处理 ============
+  // 2026-09-03 V1 多图：handleFileSelect 现在接收单个文件并 push 到
+  // uploadedImages 数组（≥10 张时拒绝）。重复选择同一文件名会被替换（防拖拽
+  // 多次触发同名 upload 闭包错位）。每张独立异步：客户端降采样 → R2 上传，
+  // 完成后把那张对应的 uploadedImage 标记 publicUrl + uploading=null。
   const handleFileSelect = (file: File | undefined) => {
     if (!file) return;
     if (
@@ -1202,18 +1216,26 @@ export function GenerateWorkbenchView({
       toast.error("文件过大，最大 10MB");
       return;
     }
+    // 业务硬上限：单次最多 10 张参考图（与 internalGenerateSchema imageUrls.max(10) 对齐）。
+    // adapter 校验层也会挡，但前端先拒避免无意义上传。
+    if (uploadedImages.length >= 10) {
+      toast.error("参考图已达上限（最多 10 张）");
+      return;
+    }
     const previewUrl = URL.createObjectURL(file);
-    // uploading=null 表示「上传中或未上传」；publicUrl=null 表示没有可用的
-    // 服务端 URL。handleGenerate 看到这两个都是 null 就拒绝提交，避免把
-    // blob URL 当成 imageUrl 传给服务端踩 ENOENT 坑。
-    setUploadedImage({
+    // 用 stable id 给每张上传中的图一个 key —— 用 Date.now() + index 可能撞，
+    // 用 crypto.randomUUID() 截 8 位最稳。
+    const localId = `${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`;
+    const placeholder: UploadedImage = {
+      localId,
       file,
       previewUrl,
       publicUrl: null,
       uploading: 0,
       fileName: file.name,
       fileSize: file.size,
-    });
+    };
+    setUploadedImages((prev) => [...prev, placeholder]);
 
     // 异步：先客户端降采样再上传 R2 —— Lingting/WellAPI `/v1/images/edits`
     // 对 multipart body 限制约 8MB，9MB 原图会被上游返 413 拒收。
@@ -1242,10 +1264,12 @@ export function GenerateWorkbenchView({
 
       try {
         const publicUrl = await uploadFileToR2(toUpload);
-        setUploadedImage((prev) =>
-          prev && prev.fileName === file.name
-            ? { ...prev, publicUrl, uploading: null, fileSize: finalSize }
-            : prev
+        setUploadedImages((prev) =>
+          prev.map((img) =>
+            img.localId === localId
+              ? { ...img, publicUrl, uploading: null, fileSize: finalSize }
+              : img
+          )
         );
         if (!publicUrl) {
           toast.error("参考图上传失败，请重试");
@@ -1253,24 +1277,34 @@ export function GenerateWorkbenchView({
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn("[workbench] upload to R2 failed:", err);
-        setUploadedImage((prev) =>
-          prev && prev.fileName === file.name
-            ? { ...prev, uploading: null }
-            : prev
+        setUploadedImages((prev) =>
+          prev.map((img) =>
+            img.localId === localId ? { ...img, uploading: null } : img
+          )
         );
         toast.error(err instanceof Error ? err.message : "上传失败");
       }
     })();
   };
 
-  const handleRemoveUpload = () => {
-    if (uploadedImage) URL.revokeObjectURL(uploadedImage.previewUrl);
-    setUploadedImage(null);
+  const handleRemoveUpload = (localId: string) => {
+    setUploadedImages((prev) => {
+      const target = prev.find((img) => img.localId === localId);
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((img) => img.localId !== localId);
+    });
+  };
+
+  const handleClearAllUploads = () => {
+    setUploadedImages((prev) => {
+      for (const img of prev) URL.revokeObjectURL(img.previewUrl);
+      return [];
+    });
   };
 
   const handleModeChange = (mode: RefMode) => {
     // 离开 upload 模式：释放本地预览 URL，避免 blob 内存泄漏
-    if (mode !== "upload" && uploadedImage) handleRemoveUpload();
+    if (mode !== "upload" && uploadedImages.length > 0) handleClearAllUploads();
     // 离开 library 模式：清空已选照片 + 搜索词，避免切回 upload/none 还带着旧 photoId
     if (mode !== "library") {
       setSelectedPhoto(null);
@@ -1592,34 +1626,42 @@ export function GenerateWorkbenchView({
     }
 
     // refImage 三种形态：abort 标记 / 上传模式（无 photoId） / 图库模式（有 photoId）
+    // 2026-09-03 V1 多图：upload 模式支持 N 张，每张各自走上传完成检查；
+    // 仍有任何一张 uploading/失败 → abort。library 模式仍只支持单张 photoId
+    // （AssetPickerModal 当前未实现多选），返回 imageUrls[]=[photoUrl]。
     type RefImage =
       | { __abort: string }
-      | { imageUrl: string }
-      | { imageUrl: string; photoId: string }
+      | { imageUrls: string[] }
+      | { imageUrls: string[]; photoId: string }
       | null;
 
     const refImage: RefImage =
-      refMode === "upload" && uploadedImage
+      refMode === "upload" && uploadedImages.length > 0
         ? (() => {
-            // 上传模式：必须用 R2 publicUrl（服务端可 fetch），blob URL 仅供
-            // 本地预览。如果还在上传或上传失败，用一个标记值让外层 abort。
-            if (uploadedImage.uploading !== null) {
-              return { __abort: "参考图还在上传中，请稍候" };
-            }
-            if (!uploadedImage.publicUrl) {
-              return { __abort: "参考图上传失败，请重新选择" };
+            // 上传模式：每张都要已上传完成（uploading=null + publicUrl 非空）。
+            // 任一张未就绪就 abort —— 单 toast 报错，列出哪些张有问题。
+            const notReady = uploadedImages.filter(
+              (img) => img.uploading !== null || !img.publicUrl
+            );
+            if (notReady.length > 0) {
+              const reason = notReady.some((img) => img.uploading !== null)
+                ? "部分参考图还在上传中"
+                : "部分参考图上传失败";
+              return { __abort: reason };
             }
             return {
               // publicUrl 是 R2 公共域 URL（持久、可服务端 fetch）。
               // photoId 不写 —— image_job.photo_id 是 photo.id 外键，本地上传
               // 没经过 createPhotoAction，没有对应 photo 行；createImageJob
               // 内部还有一道 UUID 正则兜底把非 UUID 字符串过滤成 null。
-              imageUrl: uploadedImage.publicUrl,
+              imageUrls: uploadedImages
+                .map((img) => img.publicUrl)
+                .filter((u): u is string => !!u),
             };
           })()
         : refMode === "library" && selectedPhoto
           ? {
-              imageUrl: selectedPhoto.fileUrl,
+              imageUrls: [selectedPhoto.fileUrl],
               photoId: selectedPhoto.id,
             }
           : null;
@@ -1630,9 +1672,9 @@ export function GenerateWorkbenchView({
       return;
     }
     // 窄化为正常 refImage 形态（去掉 __abort 分支）
-    const safeRefImage: { imageUrl: string; photoId?: string } | null =
+    const safeRefImage: { imageUrls: string[]; photoId?: string } | null =
       refImage && !("__abort" in refImage)
-        ? (refImage as { imageUrl: string; photoId?: string })
+        ? (refImage as { imageUrls: string[]; photoId?: string })
         : null;
     const generationMode: "text_to_image" | "image_to_image" = safeRefImage
       ? "image_to_image"
@@ -1739,7 +1781,14 @@ export function GenerateWorkbenchView({
         mode: generationMode,
         prompt: finalPrompt,
         negativePrompt: negativePrompt || undefined,
-        imageUrl: safeRefImage?.imageUrl,
+        // 2026-09-03 V1 多图：imageUrls[] 透传给服务端，buildGenerateRequest
+        // 会原样收敛到 imageUrls（不会回退到 imageUrl 单数；旧 service 仍
+        // 接受 imageUrl 单数只是为了兼容历史 client）。photoId 仅 library
+        // 模式单选时透传 —— 多张上传全走 R2 不入 photo 表。
+        ...(safeRefImage?.imageUrls &&
+          safeRefImage.imageUrls.length > 0 && {
+            imageUrls: safeRefImage.imageUrls,
+          }),
         size,
         batchSize: effectiveBatchSize,
         // 2026-08-20：与 V2 ImageSettingsPanel 对齐 —— quality + background 透传
@@ -1844,12 +1893,13 @@ export function GenerateWorkbenchView({
    *     (uploading !== null || !publicUrl)
    * 用户报告"会话任务进行中新建会话，新会话的生成按钮无法点击"就是这个原因。
    * revokeObjectURL 是为了避免 blob URL 内存泄漏。
+   *
+   * 2026-09-03 V1 多图：uploadedImage 单数 → uploadedImages 数组，
+   * 重置逻辑改为清空整数组 + 逐张 revoke blob URL。
    */
   const handleNewSession = () => {
-    if (uploadedImage) {
-      URL.revokeObjectURL(uploadedImage.previewUrl);
-      setUploadedImage(null);
-    }
+    // 2026-09-03 V1 多图：清空所有上传，revoke 每个 blob URL。
+    handleClearAllUploads();
     setSelectedPhoto(null);
     setLibrarySearch("");
 
@@ -2289,10 +2339,11 @@ export function GenerateWorkbenchView({
                   <ImageIcon className="h-3.5 w-3.5 text-primary" />
                   <span>参考图</span>
                   <span className="ml-auto text-[11px] text-muted-foreground font-normal">
-                    {(refMode === "upload" && uploadedImage) ||
-                    (refMode === "library" && selectedPhoto)
-                      ? "已选"
-                      : ""}
+                    {refMode === "upload" && uploadedImages.length > 0
+                      ? `已选 ${uploadedImages.length}/10`
+                      : refMode === "library" && selectedPhoto
+                        ? "已选"
+                        : ""}
                   </span>
                 </span>
                 <div
@@ -2318,108 +2369,126 @@ export function GenerateWorkbenchView({
               </div>
               <div className="space-y-2">
                 <div className="space-y-2">
-                  {refMode === "upload" &&
-                    (uploadedImage ? (
-                      <div className="flex items-center gap-2 p-2 rounded-lg border bg-muted/30">
-                        {/* 缩略图：点击预览 */}
+                  {refMode === "upload" && (
+                    <>
+                      {/* 2026-09-03 V1 多图：已选 N 张缩略图平铺，flex-wrap
+                       * 3 列 grid。max=10 张超过时不再显示"+"按钮。点击
+                       * 缩略图预览，X 删除单张。*/}
+                      {uploadedImages.length > 0 && (
+                        <div className="grid grid-cols-3 gap-1.5">
+                          {uploadedImages.map((img, idx) => (
+                            <div
+                              key={img.localId}
+                              className="relative group/cell rounded-md overflow-hidden border bg-muted aspect-square"
+                            >
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setRefPreview({
+                                    url: img.previewUrl,
+                                    name: img.fileName,
+                                  })
+                                }
+                                className="absolute inset-0 w-full h-full"
+                                title={`第 ${idx + 1} 张：点击预览`}
+                              >
+                                {/* biome-ignore lint/performance/noImgElement: 缩略图 */}
+                                <img
+                                  src={img.previewUrl}
+                                  alt={img.fileName}
+                                  className={cn(
+                                    "w-full h-full object-cover",
+                                    img.uploading !== null && "opacity-60"
+                                  )}
+                                />
+                                {img.uploading !== null && (
+                                  <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                                    <Loader2 className="h-3.5 w-3.5 text-white animate-spin" />
+                                  </div>
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRemoveUpload(img.localId);
+                                }}
+                                className="absolute top-0.5 right-0.5 h-5 w-5 rounded-full bg-black/60 hover:bg-rose-500 text-white flex items-center justify-center opacity-0 group-hover/cell:opacity-100 transition-opacity"
+                                aria-label={`移除第 ${idx + 1} 张`}
+                                title="移除"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                              <span className="absolute bottom-0.5 left-0.5 text-[9px] font-mono px-1 rounded bg-black/60 text-white tabular-nums">
+                                #{idx + 1}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {/* 上传区：≥10 张时禁用。隐藏的 input 允许多选
+                       * (multiple) 以便用户一次性挑多张。*/}
+                      {uploadedImages.length < 10 && (
                         <button
                           type="button"
-                          onClick={() =>
-                            setRefPreview({
-                              url: uploadedImage.previewUrl,
-                              name: uploadedImage.fileName,
-                            })
-                          }
-                          className="relative shrink-0 h-12 w-12 rounded-md overflow-hidden border bg-muted hover:border-primary/60 transition-colors group/thumb"
-                          title="点击预览"
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            setDragOver(true);
+                          }}
+                          onDragLeave={() => setDragOver(false)}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            setDragOver(false);
+                            const files = Array.from(
+                              e.dataTransfer.files ?? []
+                            );
+                            for (const f of files) handleFileSelect(f);
+                          }}
+                          onClick={() => fileInputRef.current?.click()}
+                          className={cn(
+                            // 2026-08-23：上传区域高度从 p-5 (~80px) 抬到 p-8 (~140px)，
+                            // 用户反馈"图片上传区域高度太小"，加图标尺寸 + 副文案，让落地点更明显
+                            "w-full border border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors space-y-1",
+                            dragOver
+                              ? "border-primary bg-primary/5"
+                              : "border-border hover:border-primary/40 hover:bg-muted/30"
+                          )}
                         >
-                          {/* biome-ignore lint/performance/noImgElement: 缩略图 */}
-                          <img
-                            src={uploadedImage.previewUrl}
-                            alt={uploadedImage.fileName}
+                          <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="image/jpeg,image/jpg,image/png,image/webp"
+                            multiple
+                            className="hidden"
+                            onChange={(e) => {
+                              const files = Array.from(e.target.files ?? []);
+                              for (const f of files) handleFileSelect(f);
+                              // 清空 value 允许重复选同一张图
+                              e.target.value = "";
+                            }}
+                          />
+                          <Upload
                             className={cn(
-                              "w-full h-full object-cover",
-                              uploadedImage.uploading !== null && "opacity-60"
+                              "h-5 w-5 mx-auto",
+                              dragOver
+                                ? "text-primary"
+                                : "text-muted-foreground"
                             )}
                           />
-                          {uploadedImage.uploading !== null && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                              <Loader2 className="h-3.5 w-3.5 text-white animate-spin" />
-                            </div>
-                          )}
-                        </button>
-                        {/* 文件信息 */}
-                        <div className="flex-1 min-w-0 space-y-0.5">
-                          <p className="text-xs font-medium truncate">
-                            {uploadedImage.fileName}
+                          <p className="text-xs font-medium">
+                            {dragOver
+                              ? "释放即可上传"
+                              : uploadedImages.length > 0
+                                ? `继续添加（${uploadedImages.length}/10）`
+                                : "点击或拖拽图片"}
                           </p>
                           <p className="text-[10px] text-muted-foreground">
-                            {(uploadedImage.fileSize / 1024).toFixed(1)} KB
-                            {uploadedImage.uploading !== null
-                              ? " · 上传中…"
-                              : uploadedImage.publicUrl
-                                ? " · 已就绪"
-                                : ""}
+                            支持 JPG / PNG / WebP · 最多 10 张
                           </p>
-                        </div>
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7 shrink-0 text-muted-foreground hover:text-rose-600"
-                          onClick={handleRemoveUpload}
-                          aria-label="移除"
-                          title="移除"
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onDragOver={(e) => {
-                          e.preventDefault();
-                          setDragOver(true);
-                        }}
-                        onDragLeave={() => setDragOver(false)}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          setDragOver(false);
-                          handleFileSelect(e.dataTransfer.files?.[0]);
-                        }}
-                        onClick={() => fileInputRef.current?.click()}
-                        className={cn(
-                          // 2026-08-23：上传区域高度从 p-5 (~80px) 抬到 p-8 (~140px)，
-                          // 用户反馈"图片上传区域高度太小"，加图标尺寸 + 副文案，让落地点更明显
-                          "w-full border border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors space-y-1.5",
-                          dragOver
-                            ? "border-primary bg-primary/5"
-                            : "border-border hover:border-primary/40 hover:bg-muted/30"
-                        )}
-                      >
-                        <input
-                          ref={fileInputRef}
-                          type="file"
-                          accept="image/jpeg,image/jpg,image/png,image/webp"
-                          className="hidden"
-                          onChange={(e) =>
-                            handleFileSelect(e.target.files?.[0])
-                          }
-                        />
-                        <Upload
-                          className={cn(
-                            "h-7 w-7 mx-auto",
-                            dragOver ? "text-primary" : "text-muted-foreground"
-                          )}
-                        />
-                        <p className="text-xs font-medium">
-                          {dragOver ? "释放即可上传" : "点击或拖拽图片"}
-                        </p>
-                        <p className="text-[10px] text-muted-foreground">
-                          支持 JPG / PNG / WebP，单张
-                        </p>
-                      </button>
-                    ))}
+                        </button>
+                      )}
+                    </>
+                  )}
 
                   {refMode === "library" && (
                     <div className="space-y-2">
@@ -2882,10 +2951,12 @@ export function GenerateWorkbenchView({
               disabled={
                 generating ||
                 // 上传模式 + 还在上传/上传失败：禁用按钮，避免把 blob URL 提交给服务端
+                // 2026-09-03 V1 多图：上传数组里有任一张 uploading/失败都禁
                 (refMode === "upload" &&
-                  uploadedImage !== null &&
-                  (uploadedImage.uploading !== null ||
-                    !uploadedImage.publicUrl))
+                  uploadedImages.length > 0 &&
+                  uploadedImages.some(
+                    (img) => img.uploading !== null || !img.publicUrl
+                  ))
               }
               className="flex-1 bg-gradient-to-r from-primary to-primary/80 hover:from-primary hover:to-primary/70 shadow-lg shadow-primary/20"
             >
@@ -2895,8 +2966,8 @@ export function GenerateWorkbenchView({
                   生成中...
                 </>
               ) : refMode === "upload" &&
-                uploadedImage !== null &&
-                uploadedImage.uploading !== null ? (
+                uploadedImages.length > 0 &&
+                uploadedImages.some((img) => img.uploading !== null) ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                   上传参考图中…
