@@ -70,6 +70,12 @@ export function UploadStep({
       file: File;
     }>
   >([]);
+  // 2026-09-03：上传后点击缩略图的全屏预览。仅用本地 blob URL，无
+  // token/updatedAt 等订单上下文，所以不复用 select-step 的 Lightbox
+  // （那个还要管选 candidate / 翻页 / 对比模式）。点遮罩或 Esc 关闭。
+  const [previewing, setPreviewing] = useState<
+    { url: string; name: string } | null
+  >(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const previewRefs = useRef<Map<string, string>>(new Map());
 
@@ -101,6 +107,17 @@ export function UploadStep({
       previewRefs.current.clear();
     };
   }, []);
+
+  // 预览打开时锁 Esc → 关闭（不锁 body scroll：遮罩就是 fixed inset-0，
+  // 用户点遮罩 / 按 Esc 退出即可，不要把滚动也锁掉）
+  useEffect(() => {
+    if (!previewing) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPreviewing(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [previewing]);
 
   const handleFiles = (files: FileList | File[] | null) => {
     if (!files) return;
@@ -275,25 +292,34 @@ export function UploadStep({
               ].join(" ")}
             >
               {previews.map((p) => (
-                <div
+                <button
                   key={p.id}
-                  className="relative aspect-square overflow-hidden rounded-xl bg-stone-100"
+                  type="button"
+                  onClick={() =>
+                    setPreviewing({ url: p.objectUrl, name: p.name })
+                  }
+                  className="group relative aspect-square cursor-zoom-in overflow-hidden rounded-xl bg-stone-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+                  aria-label={`放大预览 ${p.name}`}
                 >
                   {/* biome-ignore lint/performance/noImgElement: blob URL 本地预览 */}
                   <img
                     src={p.objectUrl}
                     alt={p.name}
-                    className="h-full w-full object-cover"
+                    className="h-full w-full object-cover transition-transform group-hover:scale-105"
                   />
                   <button
                     type="button"
-                    onClick={() => removeOne(p.id)}
+                    // 阻止冒泡：点 X 不触发外层的"打开预览"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeOne(p.id);
+                    }}
                     aria-label="移除此图片"
                     className="absolute top-1.5 right-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/40 text-white/90 backdrop-blur-sm transition-colors hover:bg-black/60"
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
-                </div>
+                </button>
               ))}
               {/* 2026-09-02：剩余可加的空位。
                   原本每个空位都渲染一个独立「+」按钮，imagesPerUpload=3
@@ -428,6 +454,40 @@ export function UploadStep({
           />
         </div>
       </div>
+
+      {/* 2026-09-03：上传预览全屏灯箱。点遮罩或右上 X 关闭；Esc 也行。
+          不复用 select-step 的 Lightbox，那个组件是为已生成图设计的，依赖
+          token / updatedAt / candidate 翻页 / 对比模式。这里只有本地 blob URL，
+          用最简实现即可。 */}
+      {previewing && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="图片预览"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm"
+          onClick={() => setPreviewing(null)}
+        >
+          {/* biome-ignore lint/performance/noImgElement: blob URL 本地预览 */}
+          <img
+            src={previewing.url}
+            alt={previewing.name}
+            // 点图本身也走关闭（点遮罩同一处理：stopPropagation 阻止）
+            onClick={(e) => e.stopPropagation()}
+            className="max-h-[90vh] max-w-[92vw] rounded-lg object-contain shadow-2xl"
+          />
+          <button
+            type="button"
+            onClick={() => setPreviewing(null)}
+            aria-label="关闭预览"
+            className="absolute top-4 right-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white/90 backdrop-blur-sm transition-colors hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <p className="absolute bottom-4 left-1/2 max-w-[80vw] -translate-x-1/2 truncate rounded-full bg-black/40 px-3 py-1 text-xs text-white/80 backdrop-blur-sm">
+            {previewing.name}
+          </p>
+        </div>
+      )}
     </section>
   );
 }
