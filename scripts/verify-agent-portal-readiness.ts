@@ -77,9 +77,7 @@ async function main() {
       `  user_agent_id_idx 索引:       ${s.user_idx ? "✓" : "✗ 缺失"}`
     );
     console.log(
-      `  prompt_order_agent_id_idx:    ${
-        s.prompt_order_idx ? "✓" : "✗ 缺失"
-      }`
+      `  prompt_order_agent_id_idx:    ${s.prompt_order_idx ? "✓" : "✗ 缺失"}`
     );
     console.log(
       `  poh_trigger_image_idx_idx:    ${
@@ -113,7 +111,9 @@ async function main() {
     const u = userRes.rows[0];
     if (!u) throw new Error("user 查询失败");
     console.log("\n[user 表]");
-    console.log(`  总数: ${u.total}， admin: ${u.admins}， 绑 agentId: ${u.bound}`);
+    console.log(
+      `  总数: ${u.total}， admin: ${u.admins}， 绑 agentId: ${u.bound}`
+    );
 
     // 4. prompt_order 已有 agentId 的订单（验证 listOrders 过滤路径会返回数据）
     const orderRes = await client.query<{ total: string; with_agent: string }>(
@@ -124,7 +124,9 @@ async function main() {
     const o = orderRes.rows[0];
     if (!o) throw new Error("prompt_order 查询失败");
     console.log("\n[prompt_order 表]");
-    console.log(`  总数: ${o.total}， ToB 订单（agentId 非空）: ${o.with_agent}`);
+    console.log(
+      `  总数: ${o.total}， ToB 订单（agentId 非空）: ${o.with_agent}`
+    );
 
     // 5. 给出"想手动测 /agent 流程"的下一步
     console.log("\n============================================");
@@ -141,7 +143,9 @@ async function main() {
         "    UPDATE \"user\" SET agent_id = '<AG_xxx>' WHERE email = '<某账号邮箱>';"
       );
       console.log("  建议绑定一个 role='user' 的账号（不是 admin）来做自检");
-      console.log("  —— admin 绑 agentId 后 /admin 仍可用，但测的是双重身份路径");
+      console.log(
+        "  —— admin 绑 agentId 后 /admin 仍可用，但测的是双重身份路径"
+      );
     }
 
     const allReady =
@@ -153,7 +157,9 @@ async function main() {
       Number(ag.active) > 0 &&
       Number(u.bound) > 0;
     if (allReady) {
-      console.log("\n✓ schema 与数据全就绪 —— 可以登录绑定账号访问 /agent/orders");
+      console.log(
+        "\n✓ schema 与数据全就绪 —— 可以登录绑定账号访问 /agent/orders"
+      );
     }
   } finally {
     await client.end();

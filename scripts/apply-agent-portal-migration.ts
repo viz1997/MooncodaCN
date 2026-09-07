@@ -22,7 +22,8 @@ if (!databaseUrl) {
 }
 
 // 检测 SSL（Neon/Supabase 远程必开；本地可关）
-const isRemote = databaseUrl.includes("neon.tech") || databaseUrl.includes("supabase");
+const isRemote =
+  databaseUrl.includes("neon.tech") || databaseUrl.includes("supabase");
 const finalUrl = databaseUrl
   .replace(/[?&]sslmode=[^&]*/g, "")
   .replace(/[?&]ssl=[^&]*/g, "")
@@ -97,10 +98,7 @@ async function main() {
     const r = checkRes.rows[0];
     console.log("[verify] user.agent_id 列:", r.user_agent_id_col);
     console.log("[verify] user_agent_id_idx 索引:", r.user_idx);
-    console.log(
-      "[verify] prompt_order_agent_id_idx 索引:",
-      r.prompt_order_idx
-    );
+    console.log("[verify] prompt_order_agent_id_idx 索引:", r.prompt_order_idx);
 
     if (!r.user_agent_id_col || !r.user_idx || !r.prompt_order_idx) {
       throw new Error("迁移应用失败：sanity check 未全通过");

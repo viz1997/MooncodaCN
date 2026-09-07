@@ -52,7 +52,9 @@ async function main() {
       }))
     );
     console.log("\n绑定 SQL 模板（复制后改 email 与 agent_id）：");
-    console.log(`  UPDATE "user" SET agent_id = '<AG_id>' WHERE email = '<email>';`);
+    console.log(
+      `  UPDATE "user" SET agent_id = '<AG_id>' WHERE email = '<email>';`
+    );
   } finally {
     await client.end();
   }

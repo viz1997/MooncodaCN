@@ -63,9 +63,7 @@ async function main() {
       `UPDATE "user" SET agent_id = $1, "updatedAt" = NOW() WHERE id = $2`,
       [a.id, admin.id]
     );
-    console.log(
-      `[bind] OK —— admin ${admin.email} 现在绑到 agent ${a.name}`
-    );
+    console.log(`[bind] OK —— admin ${admin.email} 现在绑到 agent ${a.name}`);
 
     // 验证
     const verify = await client.query(
