@@ -19,6 +19,7 @@ import {
   parseSelections,
   parseUploadedImages,
 } from "./order-helpers";
+import { getProductType } from "./product-catalog";
 
 // ============================================
 // 模板服务
@@ -320,6 +321,30 @@ export async function createOrder(input: {
     }
   }
 
+  // ============================================
+  // 2026-09-07：代理商 / admin 创建订单时只挑产品型号，尺寸 + 配件由系统
+  // 按"该型号首选项"自动填入（"链接创建时定死"）。agent 选型号后不用
+  // 再管尺寸 / 配件；admin 同样简化（admin 编辑对话框仍可手动改存量订单）。
+  // - productTypeCode 没传 → 视为 ToC，三件套保持 null，不动
+  // - productTypeCode 传了但 size 空 → 取 type.sizes[0]
+  // - productTypeCode 传了但 accessory 空 → 取 type.accessories[0]（无配件则 null）
+  // ============================================
+  const finalProductTypeCode = input.productTypeCode ?? null;
+  let finalProductSize = input.productSize ?? null;
+  let finalAccessoryCode = input.accessoryCode ?? null;
+  if (finalProductTypeCode) {
+    const type = getProductType(finalProductTypeCode);
+    // type 找不到时让 schema 校验阶段已拦下；这里兜底取 null 不写脏值
+    if (type) {
+      if (!finalProductSize && type.sizes.length > 0) {
+        finalProductSize = type.sizes[0] ?? null;
+      }
+      if (!finalAccessoryCode && type.accessories.length > 0) {
+        finalAccessoryCode = type.accessories[0] ?? null;
+      }
+    }
+  }
+
   const [created] = await db
     .insert(promptOrder)
     .values({
@@ -335,9 +360,9 @@ export async function createOrder(input: {
       regenerateLimit: input.regenerateLimit,
       createdBy: input.createdBy ?? null,
       agentId: input.agentId ?? null,
-      productTypeCode: input.productTypeCode ?? null,
-      productSize: input.productSize ?? null,
-      accessoryCode: input.accessoryCode ?? null,
+      productTypeCode: finalProductTypeCode,
+      productSize: finalProductSize,
+      accessoryCode: finalAccessoryCode,
     })
     .returning();
 

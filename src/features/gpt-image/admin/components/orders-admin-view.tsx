@@ -7,7 +7,7 @@
  * - 保留 div + grid 表格结构（与 product-effects-admin-view 风格一致）
  */
 
-import { App, Badge, Button, Input, Modal, Select } from "antd";
+import { App, Badge, Button, Input, Modal, Select, Tabs } from "antd";
 import {
   Briefcase,
   Check,
@@ -87,6 +87,18 @@ export function OrdersAdminView() {
   const [filterPlatform, setFilterPlatform] = useState<string>("ALL");
   const [search, setSearch] = useState("");
   const [copied, setCopied] = useState(false);
+  /**
+   * 2026-09-07：tab 一级维度，按上传完成度区分。
+   * - "unsubmitted"：uploadedImageCount < uploadCount × imagesPerUpload
+   *   （还有批次未传完 —— 不论 status 是 PENDING / FAILED / CANCELLED）
+   * - "submitted"：uploadedImageCount >= uploadCount × imagesPerUpload
+   *   （用户已上完全部原图）
+   *
+   * 默认未提交：订单创建者最需要 follow-up 的视角（哪些客户还没传完图）。
+   */
+  const [activeTab, setActiveTab] = useState<"submitted" | "unsubmitted">(
+    "unsubmitted"
+  );
   /**
    * 2026-08-24：代理商过滤（从 /admin/agents 跳过来时带 ?agentId=AG_xxx&agentName=XXX）
    * 仅展示过滤提示，不会写入 search 输入框；清除时同步移除 URL 参数。
@@ -287,6 +299,20 @@ export function OrdersAdminView() {
     return true;
   });
 
+  // 2026-09-07：tab 一级维度（按上传完成度切分）。
+  // - 总Total 计数基于完整 orders 列表，不受 status/platform/search 影响
+  //   —— 让用户随时看到「还有多少未跟进 / 已完成」的全貌
+  // - displayed = filtered ∩ tab：在当前 tab 内再应用 status/platform/search 精筛
+  const orderTotalCapacity = (o: OrderView) =>
+    (o.uploadCount ?? 1) * (o.imagesPerUpload ?? 3);
+  const isUploadedComplete = (o: OrderView) =>
+    (o.uploadedImageCount ?? 0) >= orderTotalCapacity(o);
+  const allUnsubmitted = orders.filter((o) => !isUploadedComplete(o));
+  const allSubmitted = orders.filter(isUploadedComplete);
+  const displayed = filtered.filter((o) =>
+    activeTab === "submitted" ? isUploadedComplete(o) : !isUploadedComplete(o)
+  );
+
   const buildLink = (order: OrderView) => {
     if (typeof window === "undefined") return "";
     const origin = window.location.origin;
@@ -377,6 +403,25 @@ export function OrdersAdminView() {
         </div>
       )}
 
+      {/* 2026-09-07：一级维度 tab，按上传完成度切分。
+          总数基于完整 orders 列表，不被 status/platform/search 影响 —— 让用户
+          始终看到「还有多少未跟进 / 已完成」的全貌；filter card 里的 status /
+          platform / search 只在当前 tab 内做精筛。 */}
+      <Tabs
+        activeKey={activeTab}
+        onChange={(k) => setActiveTab(k as "submitted" | "unsubmitted")}
+        items={[
+          {
+            key: "unsubmitted",
+            label: `未提交 (${allUnsubmitted.length})`,
+          },
+          {
+            key: "submitted",
+            label: `已提交 (${allSubmitted.length})`,
+          },
+        ]}
+      />
+
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
         <div className="space-y-3 p-4">
           <div className="flex flex-wrap gap-2">
@@ -443,12 +488,22 @@ export function OrdersAdminView() {
                 <div className="py-8 text-center text-sm text-muted-foreground">
                   加载中...
                 </div>
-              ) : filtered.length === 0 ? (
+              ) : displayed.length === 0 ? (
                 <div className="py-8 text-center text-sm text-muted-foreground">
-                  {orders.length === 0 ? "暂无订单" : "没有匹配的订单"}
+                  {/* 三种空态：
+                      1. 全没订单
+                      2. 当前 tab 下没单（用户切到空的那一边）
+                      3. status/platform/search 过滤后没单 */}
+                  {orders.length === 0
+                    ? "暂无订单"
+                    : activeTab === "unsubmitted" && allUnsubmitted.length === 0
+                      ? "所有订单都已提交"
+                      : activeTab === "submitted" && allSubmitted.length === 0
+                        ? "还没有已提交的订单"
+                        : "当前 tab 下没有匹配的订单"}
                 </div>
               ) : (
-                filtered.map((order) => (
+                displayed.map((order) => (
                   <div
                     key={order.id}
                     className="grid grid-cols-[140px_1fr_1fr_100px_100px_110px_150px_120px_140px_220px] gap-2 px-3 py-2 text-sm hover:bg-muted/30 transition-colors items-center"

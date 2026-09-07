@@ -6,6 +6,10 @@
  * - sonner toast → antd App.useApp().message
  * - Collapsible 改为 antd Collapse
  * - Tooltip 改为 antd Tooltip
+ *
+ * 2026-09-07：代理商业务（ToB）—— 只选产品型号；尺寸 / 配件由 createOrder
+ * service 端按"该型号首选项"自动填入（"链接创建时定死"）。编辑存量订单
+ * 仍可在 OrderEditDialog 里手动调整。
  */
 
 import {
@@ -27,18 +31,14 @@ import {
   RefreshCw,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { listActiveAgentsAction } from "@/features/agent/actions/agents";
 import {
   checkOrderNoConflictAction,
   createOrderAction,
 } from "@/features/gpt-image/actions/orders";
-import {
-  ACCESSORIES,
-  getProductType,
-  PRODUCT_TYPES,
-} from "@/features/gpt-image/lib/product-catalog";
+import { PRODUCT_TYPES } from "@/features/gpt-image/lib/product-catalog";
 
 import {
   ORDER_PLATFORM_LABELS,
@@ -99,6 +99,7 @@ export function OrderFormDialog({
   const [checkingConflict, setCheckingConflict] = useState(false);
   // ============================================
   // 2026-08-23：代理商业务（ToB 订单专属字段）
+  // 2026-09-07：只挑 productTypeCode；尺寸 / 配件由 service 自动补
   // ============================================
   /** 启用的代理商列表（picker） */
   const [activeAgents, setActiveAgents] = useState<
@@ -106,11 +107,9 @@ export function OrderFormDialog({
   >([]);
   const [agentId, setAgentId] = useState<string | "">("");
   const [productTypeCode, setProductTypeCode] = useState<string>("");
-  const [productSize, setProductSize] = useState<string>("");
-  const [accessoryCode, setAccessoryCode] = useState<string>("");
 
   /**
-   * 打开时拉取启用中的代理商；同时重置产品三件套
+   * 打开时拉取启用中的代理商；同时重置产品型号
    */
   useEffect(() => {
     if (!open) return;
@@ -142,36 +141,8 @@ export function OrderFormDialog({
       setPendingConflict(null);
       setAgentId("");
       setProductTypeCode("");
-      setProductSize("");
-      setAccessoryCode("");
     }
   }, [open, templates]);
-
-  /**
-   * 当前选中型号下的可选尺寸 / 配件（cascade）
-   * 没选型号时三个 select 都禁用
-   */
-  const selectedProductType = useMemo(
-    () => getProductType(productTypeCode),
-    [productTypeCode]
-  );
-  const availableSizes = selectedProductType?.sizes ?? [];
-  const availableAccessories = useMemo(() => {
-    if (!selectedProductType) return [];
-    return selectedProductType.accessories.map((code) => {
-      const a = ACCESSORIES.find((x) => x.code === code);
-      return a ?? { code, name: code };
-    });
-  }, [selectedProductType]);
-
-  /**
-   * 切换型号：清空尺寸与配件（避免遗留选项）
-   */
-  const handleProductTypeChange = (v: string) => {
-    setProductTypeCode(v);
-    setProductSize("");
-    setAccessoryCode("");
-  };
 
   /**
    * 真正下单（覆盖分支复用此函数）
@@ -189,8 +160,6 @@ export function OrderFormDialog({
         regenerateLimit,
         ...(agentId ? { agentId } : {}),
         ...(productTypeCode ? { productTypeCode } : {}),
-        ...(productSize ? { productSize } : {}),
-        ...(accessoryCode ? { accessoryCode } : {}),
         ...(replaceOrderId ? { replaceOrderId } : {}),
       });
       if (!res?.data) {
@@ -553,7 +522,7 @@ export function OrderFormDialog({
                     <Select
                       value={productTypeCode || "_none"}
                       onChange={(v) =>
-                        handleProductTypeChange(v === "_none" ? "" : v)
+                        setProductTypeCode(v === "_none" ? "" : v)
                       }
                       placeholder="未指定"
                       className="w-full"
@@ -567,61 +536,11 @@ export function OrderFormDialog({
                     />
                   </div>
 
-                  <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
-                    <div className="flex items-center gap-1">
-                      <span className="text-sm">尺寸</span>
-                      {!selectedProductType && (
-                        <span className="text-xs font-normal text-zinc-400">
-                          （先选型号）
-                        </span>
-                      )}
-                    </div>
-                    <Select
-                      value={productSize || "_none"}
-                      onChange={(v) => setProductSize(v === "_none" ? "" : v)}
-                      placeholder={
-                        selectedProductType ? "未指定" : "请先选择型号"
-                      }
-                      className="w-full"
-                      disabled={!selectedProductType}
-                      options={[
-                        { value: "_none", label: "未指定" },
-                        ...availableSizes.map((s) => ({
-                          value: s,
-                          label: `${s}cm`,
-                        })),
-                      ]}
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
-                    <div className="flex items-center gap-1">
-                      <span className="text-sm">配件</span>
-                    </div>
-                    <Select
-                      value={accessoryCode || "_none"}
-                      onChange={(v) => setAccessoryCode(v === "_none" ? "" : v)}
-                      placeholder={
-                        selectedProductType
-                          ? availableAccessories.length === 0
-                            ? "该型号无配件选项"
-                            : "未指定"
-                          : "请先选择型号"
-                      }
-                      className="w-full"
-                      disabled={
-                        !selectedProductType ||
-                        availableAccessories.length === 0
-                      }
-                      options={[
-                        { value: "_none", label: "未指定" },
-                        ...availableAccessories.map((a) => ({
-                          value: a.code,
-                          label: a.name,
-                        })),
-                      ]}
-                    />
-                  </div>
+                  <p className="text-[11px] text-stone-500 pl-[152px] -mt-1">
+                    尺寸 /
+                    配件系统会按该型号默认规格自动填入（链接生成时定死），
+                    下单后不可改。需调整存量订单请用编辑功能。
+                  </p>
                 </div>
               ),
             },

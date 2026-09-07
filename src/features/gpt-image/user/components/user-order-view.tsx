@@ -1,6 +1,6 @@
 "use client";
 
-import { Ban, Loader2, X } from "lucide-react";
+import { Ban, Loader2, MoreHorizontal } from "lucide-react";
 import { useState } from "react";
 import {
   AlertDialog,
@@ -12,6 +12,17 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { OrderStatus, OrderView } from "@/features/gpt-image/lib/types";
 import { Link } from "@/i18n/routing";
 import { CancelledPanel } from "./cancelled-panel";
@@ -311,9 +322,23 @@ function UserOrderContent({
           <AlertDialogHeader>
             <AlertDialogTitle>确认取消这个订单？</AlertDialogTitle>
             <AlertDialogDescription>
-              {isSelected
-                ? "已提交的结果将作废。取消后无法恢复，如需重新生图请联系服务方创建新订单 🐾"
-                : "取消后将终止当前流程，此操作不可撤销 ✨"}
+              {isSelected ? (
+                <>
+                  <span className="font-medium text-red-600">
+                    订单立即作废，已提交的结果将一并作废。
+                  </span>
+                  <br />
+                  此操作不可恢复，如需重新生图请联系服务方创建新订单。
+                </>
+              ) : (
+                <>
+                  <span className="font-medium text-red-600">
+                    订单立即作废，不可恢复。
+                  </span>
+                  <br />
+                  当前正在生成的任务也会被中断。
+                </>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -334,7 +359,7 @@ function UserOrderContent({
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1.5">
-                  <Ban className="h-4 w-4" /> 确认取消
+                  <Ban className="h-4 w-4" /> 确认取消（不可恢复）
                 </span>
               )}
             </AlertDialogAction>
@@ -411,18 +436,43 @@ function TopBar({
           {pill.label}
         </span>
 
-        {/* 右：取消按钮（效果图历史入口已从用户页面隐藏，admin 端需要时复用 history-drawer.tsx） */}
+        {/* 右：更多操作菜单（2026-09-07：原 X 图标被误触当成"关闭"按钮
+            直接 CANCELLED 不可逆 → 换成 ... 溢出菜单 + Tooltip，避免误触，
+            destructive item 加危险色 + 二次确认。效果图历史入口已从用户
+            页面隐藏，admin 端需要时复用 history-drawer.tsx） */}
         <div className="flex shrink-0 items-center gap-1.5">
           {canCancel && (
-            <button
-              type="button"
-              onClick={onCancelClick}
-              disabled={cancelling}
-              aria-label="取消订单"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-full text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 disabled:opacity-60"
-            >
-              <X className="h-4 w-4" />
-            </button>
+            <DropdownMenu>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="更多操作"
+                      disabled={cancelling}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-full text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 disabled:opacity-60"
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </button>
+                  </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">更多操作</TooltipContent>
+              </Tooltip>
+              <DropdownMenuContent align="end" className="w-44">
+                <DropdownMenuItem
+                  variant="destructive"
+                  // DropdownMenu 默认 onSelect 关闭菜单后触发；这里只是开
+                  // AlertDialog，菜单本身点完自己会关。
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    onCancelClick();
+                  }}
+                >
+                  <Ban className="mr-2 h-4 w-4" />
+                  取消订单
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
         </div>
       </div>

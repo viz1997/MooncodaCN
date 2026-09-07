@@ -1,11 +1,16 @@
 "use client";
 
 /**
- * 2026-09-03：代理商 portal 自下单对话框（ToB 业务必填三件套）。
+ * 2026-09-07：代理商 portal 自下单对话框。
+ *
+ * 2026-09-07 调整：代理商自下单时只选产品型号（ToB 业务必填）；
+ * 尺寸 / 配件由 createOrder service 按"该型号首选项"自动填入（"链接
+ * 创建时定死"），前端不再提供。
  *
  * 与 admin 的 OrderFormDialog 区别：
  * - 没有 agentId 下拉 —— 强制注入 ctx.agentId（portal 用户看不到其他代理商）
- * - 产品三件套（productTypeCode/productSize/accessoryCode）必填，front-end 校验
+ * - 产品三件套里只暴露 productTypeCode；size / accessory 在 service 层
+ *   自动补
  * - 没有"订单号冲突"确认 —— 单个 agent 内 orderNo 允许重复（同 admin）
  * - 取消"更多设置"折叠（代理商自下单通常知道每批参考图 / 重试次数默认值，
  *   但还是展开以保持形态一致）
@@ -15,14 +20,10 @@
 
 import { App, Button, Form, Input, Modal, Select, Tooltip } from "antd";
 import { HelpCircle, Minus, Plus, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { agentCreateOrderAction } from "@/features/agent/actions/agent-portal";
-import {
-  ACCESSORIES,
-  getProductType,
-  PRODUCT_TYPES,
-} from "@/features/gpt-image/lib/product-catalog";
+import { PRODUCT_TYPES } from "@/features/gpt-image/lib/product-catalog";
 import type {
   OrderView,
   PromptTemplateView,
@@ -54,10 +55,8 @@ export function AgentOrderFormDialog({
   const [uploadCount, setUploadCount] = useState(1);
   const [imagesPerUpload, setImagesPerUpload] = useState(3);
   const [regenerateLimit, setRegenerateLimit] = useState(5);
-  // 三件套：代理商自下单必填
+  // 2026-09-07：代理商自下单只挑产品型号；尺寸 / 配件由 service 自动补
   const [productTypeCode, setProductTypeCode] = useState<string>("");
-  const [productSize, setProductSize] = useState<string>("");
-  const [accessoryCode, setAccessoryCode] = useState<string>("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -68,30 +67,8 @@ export function AgentOrderFormDialog({
       setImagesPerUpload(3);
       setRegenerateLimit(5);
       setProductTypeCode("");
-      setProductSize("");
-      setAccessoryCode("");
     }
   }, [open, templates]);
-
-  const selectedProductType = useMemo(
-    () => getProductType(productTypeCode),
-    [productTypeCode]
-  );
-  const availableSizes = selectedProductType?.sizes ?? [];
-  const availableAccessories = useMemo(() => {
-    if (!selectedProductType) return [];
-    return selectedProductType.accessories.map((code) => {
-      const a = ACCESSORIES.find((x) => x.code === code);
-      return a ?? { code, name: code };
-    });
-  }, [selectedProductType]);
-
-  // 切换型号：清空尺寸与配件
-  const handleProductTypeChange = (v: string) => {
-    setProductTypeCode(v);
-    setProductSize("");
-    setAccessoryCode("");
-  };
 
   const activeTemplates = templates.filter((t) => t.isActive);
 
@@ -108,18 +85,6 @@ export function AgentOrderFormDialog({
       message.error("请选择产品型号");
       return;
     }
-    if (!productSize) {
-      message.error("请选择产品尺寸");
-      return;
-    }
-    if (
-      selectedProductType &&
-      selectedProductType.accessories.length > 0 &&
-      !accessoryCode
-    ) {
-      message.error(`${selectedProductType.name} 必须选择配件`);
-      return;
-    }
     setSaving(true);
     try {
       const res = await agentCreateOrderAction({
@@ -129,8 +94,6 @@ export function AgentOrderFormDialog({
         imagesPerUpload,
         regenerateLimit,
         productTypeCode,
-        productSize,
-        accessoryCode: accessoryCode || undefined,
       });
       if (!res?.data) {
         const err = res as unknown as { serverError?: string };
@@ -282,8 +245,8 @@ export function AgentOrderFormDialog({
           </div>
         </div>
 
-        {/* ToB 三件套必填 */}
-        <div className="rounded-lg border border-violet-200 bg-violet-50/40 p-3 space-y-3">
+        {/* ToB 产品型号 —— 2026-09-07 起只挑型号；尺寸 / 配件由 service 自动取首选项 */}
+        <div className="rounded-lg border border-violet-200 bg-violet-50/40 p-3 space-y-2">
           <div className="flex items-center gap-1 text-violet-700">
             <span className="text-sm font-medium">产品规格（ToB 必填）</span>
           </div>
@@ -296,7 +259,7 @@ export function AgentOrderFormDialog({
             </div>
             <Select
               value={productTypeCode || undefined}
-              onChange={(v) => handleProductTypeChange(v ?? "")}
+              onChange={(v) => setProductTypeCode(v ?? "")}
               placeholder="选择型号"
               className="w-full"
               options={PRODUCT_TYPES.map((t) => ({
@@ -306,64 +269,10 @@ export function AgentOrderFormDialog({
             />
           </div>
 
-          <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
-            <div className="flex items-center gap-1">
-              <span className="text-sm">
-                尺寸 <span className="text-rose-600">*</span>
-              </span>
-              {!selectedProductType && (
-                <span className="text-xs font-normal text-zinc-400">
-                  （先选型号）
-                </span>
-              )}
-            </div>
-            <Select
-              value={productSize || undefined}
-              onChange={(v) => setProductSize(v ?? "")}
-              placeholder={selectedProductType ? "选择尺寸" : "请先选择型号"}
-              className="w-full"
-              disabled={!selectedProductType}
-              options={availableSizes.map((s) => ({
-                value: s,
-                label: `${s}cm`,
-              }))}
-            />
-          </div>
-
-          <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
-            <div className="flex items-center gap-1">
-              <span className="text-sm">
-                配件{" "}
-                {selectedProductType &&
-                selectedProductType.accessories.length > 0 ? (
-                  <span className="text-rose-600">*</span>
-                ) : (
-                  <span className="text-xs font-normal text-zinc-400">
-                    （该型号无配件）
-                  </span>
-                )}
-              </span>
-            </div>
-            <Select
-              value={accessoryCode || undefined}
-              onChange={(v) => setAccessoryCode(v ?? "")}
-              placeholder={
-                !selectedProductType
-                  ? "请先选择型号"
-                  : availableAccessories.length === 0
-                    ? "该型号无配件选项"
-                    : "选择配件"
-              }
-              className="w-full"
-              disabled={
-                !selectedProductType || availableAccessories.length === 0
-              }
-              options={availableAccessories.map((a) => ({
-                value: a.code,
-                label: a.name,
-              }))}
-            />
-          </div>
+          <p className="text-[11px] text-violet-700/80 pl-[152px]">
+            尺寸 /
+            配件系统会按该型号默认规格自动填入（链接生成时定死），下单后不可改。
+          </p>
         </div>
 
         <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">

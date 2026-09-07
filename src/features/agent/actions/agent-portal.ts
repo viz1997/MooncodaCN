@@ -1,7 +1,7 @@
 "use server";
 
 /**
- * 2026-09-03：代理商 portal Server Actions（ToB 自下单）。
+ * 2026-09-07：代理商 portal Server Actions（ToB 自下单）。
  *
  * 三个 action：
  * 1. agentCreateOrderAction —— 创建订单（强制 agentId = ctx.agentId）
@@ -11,6 +11,10 @@
  *
  * 中间件用 agentAction（不是 protectedAction）—— 多一层"必须绑了代理商"
  * 校验，免去每个 handler 重复查 session。
+ *
+ * 2026-09-07 调整：代理商自下单时只选产品型号；尺寸 / 配件由 createOrder
+ * service 端按"该型号首选项"自动填入（"链接创建时定死"）。详情见
+ * admin-services.createOrder 里的注释。
  *
  * 不复用 /admin/prompt-orders 路由：listOrders 那个 query 走 createdBy
  * 过滤；代理商查自己订单必须走 agentId 过滤、不能 createdBy 过滤（否则
@@ -27,7 +31,6 @@ import {
 } from "@/features/gpt-image/lib/admin-services";
 import { promptOrderCreateSchema } from "@/features/gpt-image/lib/validation";
 import { agentAction } from "@/lib/safe-action";
-import { validateAgentProductSpec } from "../lib/product-validation";
 
 const withAgentPortalAction = (name: string) =>
   agentAction.metadata({ action: `agent.portal.${name}` });
@@ -39,19 +42,12 @@ const withAgentPortalAction = (name: string) =>
  * - 中间件是 agentAction（ctx.agentId 必有）
  * - 强制把 ctx.agentId 写入订单（不允许 user 通过 parsedInput.agentId
  *   偷换"给别人下单"）
- * - 三件套字典必填（productTypeCode + productSize 必，accessoryCode 看
- *   型号），validateAgentProductSpec 校验
+ * - 三件套里代理商只选 productTypeCode；尺寸 / 配件由 createOrderSvc 自动按
+ *   该型号首选项填入。代理商不传 productSize / accessoryCode 即可。
  */
 export const agentCreateOrderAction = withAgentPortalAction("createOrder")
   .schema(promptOrderCreateSchema)
   .action(async ({ parsedInput, ctx }) => {
-    // 三件套必填校验（代理商自下单硬性要求）
-    validateAgentProductSpec({
-      productTypeCode: parsedInput.productTypeCode ?? null,
-      productSize: parsedInput.productSize ?? null,
-      accessoryCode: parsedInput.accessoryCode ?? null,
-    });
-
     // 防越权：parsedInput.agentId 必须是自己的 agentId（不允许替别人下单）
     if (parsedInput.agentId && parsedInput.agentId !== ctx.agentId) {
       throw new Error("不能为其他代理商下单");
