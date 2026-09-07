@@ -49,13 +49,14 @@ export interface UseOrderActionsResult {
     candIdx: number
   ) => Promise<void>;
   /**
-   * 2026-09-07：提交产品定制（皮革徽章 / 刻字 / 外露）。
+   * 2026-09-07：提交产品定制（刻字 / 外露）。
    * 由 /p/[token] 上传参考图前/后任意时机调用，状态机仅 PENDING 可改。
    * 服务端 /configure 路由按 product-catalog capabilities 自动拒绝不支持
    * 的字段，前端无须做能力预校验。
+   *
+   * 历史：初版还接收 hasLeatherBadge，同日下午重构为 LB 独立产品，已删。
    */
   configure: (input: {
-    hasLeatherBadge?: boolean | null;
     engravingText?: string | null;
     engravingExposed?: boolean | null;
   }) => Promise<boolean>;
@@ -349,7 +350,6 @@ export function useOrderActions({
   const [configuring, setConfiguring] = useState(false);
   const configure = useCallback(
     async (input: {
-      hasLeatherBadge?: boolean | null;
       engravingText?: string | null;
       engravingExposed?: boolean | null;
     }): Promise<boolean> => {

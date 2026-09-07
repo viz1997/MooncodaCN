@@ -20,11 +20,14 @@
 
 /**
  * 产品能力标记 —— 决定 /p/[token] 上"产品定制"区哪些输入项渲染。
- * - hasLeatherBadge：是否支持挂皮革徽章（R 钥匙扣挂皮套是天然场景）
- * - canEngrave：是否支持刻字
+ * - canEngrave：是否支持刻字（皮革徽章 / 钥匙扣 / 异性钥匙扣 / 相框都支持）
+ *
+ * 历史说明：2026-09-07 初版曾把"皮革徽章"作为 R 钥匙扣的 hasLeatherBadge
+ * capability，让用户在 /p/[token] 上勾选。但用户原意是把它作为独立产品型号，
+ * 所以 2026-09-07 同日重构：LB（皮革徽章）独立进 PRODUCT_TYPES，R 不再
+ * 拥有此能力，hasLeatherBadge 字段从 schema / /configure 路由 / UI 全删。
  */
 export interface ProductCapabilities {
-  hasLeatherBadge: boolean;
   canEngrave: boolean;
 }
 
@@ -45,32 +48,40 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
     name: "CM 钥匙扣",
     sizes: ["4", "6"],
     accessories: ["leather", "pvc"],
-    // 钥匙扣常配皮套 / PVC 皮套，挂皮套 + 刻字都是常见组合
-    capabilities: { hasLeatherBadge: true, canEngrave: true },
+    // 钥匙扣常配皮套 / PVC 皮套；皮革徽章是独立型号 LB，不再是 R 的能力
+    capabilities: { canEngrave: true },
   },
   {
     code: "A",
     name: "CM 异性钥匙扣",
     sizes: ["4", "6"],
     accessories: ["bracket"],
-    // 异性款以支架为主，皮套场景少；刻字仍支持
-    capabilities: { hasLeatherBadge: false, canEngrave: true },
+    // 异性款以支架为主；刻字仍支持
+    capabilities: { canEngrave: true },
   },
   {
     code: "P",
     name: "CM 冰箱贴",
     sizes: ["4", "6", "8"],
     accessories: [], // 冰箱贴没配件
-    // 冰箱贴不需要皮套，也不在表面刻字
-    capabilities: { hasLeatherBadge: false, canEngrave: false },
+    // 冰箱贴不在表面刻字
+    capabilities: { canEngrave: false },
   },
   {
     code: "RM",
     name: "CM 相框",
     sizes: ["6", "8", "11"],
     accessories: [],
-    // 相框不挂皮套；可在底座刻字（祝福语/日期）
-    capabilities: { hasLeatherBadge: false, canEngrave: true },
+    // 相框可在底座刻字（祝福语/日期）
+    capabilities: { canEngrave: true },
+  },
+  {
+    code: "LB",
+    name: "CM 皮革徽章",
+    sizes: ["4", "6"],
+    accessories: [], // 皮革徽章无配件
+    // 皮革徽章支持刻字（祝福语/日期/名字）
+    capabilities: { canEngrave: true },
   },
 ];
 
@@ -124,25 +135,23 @@ export function formatProductSpec(opts: {
 }
 
 /**
- * 把"产品定制"区（皮革徽章 / 刻字 / 刻字内容 / 外露）渲染成一行可读
- * 字符串。仅在 hasLeatherBadge / canEngrave 真的填了值时输出对应片段。
+ * 把"产品定制"区（刻字 / 刻字内容 / 外露）渲染成一行可读字符串。仅在
+ * 用户真的填了值时输出对应片段。
  *
- * - hasLeatherBadge=true → "✓ 皮革徽章"
  * - engravingText 非空 → `刻字："Love U"`（短文本原样）
  * - engravingText 非空且 engravingExposed=true → 上面那段尾巴加 "（外露）"
  * - engravingText 非空但 engravingExposed=false → "刻字：…（内刻）"
  *
  * 全 null 时返回空字符串（由 UI 决定是否展示"无定制"占位）。
+ *
+ * 历史：2026-09-07 初版还会渲染"✓ 皮革徽章"，但皮革徽章已重构为独立
+ * 产品 LB，hasLeatherBadge 字段已删除。
  */
 export function formatCustomization(opts: {
-  hasLeatherBadge?: boolean | null;
   engravingText?: string | null;
   engravingExposed?: boolean | null;
 }): string {
   const parts: string[] = [];
-  if (opts.hasLeatherBadge) {
-    parts.push("✓ 皮革徽章");
-  }
   const text = opts.engravingText?.trim();
   if (text) {
     const place = opts.engravingExposed ? "（外露）" : "（内刻）";

@@ -1,13 +1,15 @@
 "use client";
 
 /**
- * 2026-09-07：产品定制（皮革徽章 / 刻字 / 外露）
+ * 2026-09-07：产品定制（刻字 / 外露）
  *
  * 终端用户在 /p/[token] 上填（与"尺寸/配件"在创建时由代理商定死语义互补）。
  * 按 order.productTypeCode 的 capabilities 动态渲染：
- * - 没 productTypeCode 或 capabilities 全 false → 不渲染（ToC 订单）
- * - hasLeatherBadge=true → 渲染皮革徽章开关
+ * - 没 productTypeCode 或 capabilities.canEngrave=false → 不渲染（ToC 订单 或 冰箱贴）
  * - canEngrave=true → 渲染"是否刻字"开关；开启后渲染刻字文本框 + 外露开关
+ *
+ * 历史：初版还有皮革徽章开关挂在 R 钥匙扣上。同日下午重构：皮革徽章作为
+ * 独立产品型号 LB 进入 catalog，hasLeatherBadge capability + schema 列全删。
  *
  * 编辑模式：仅 PENDING 阶段可改（GENERATING 后已交给上游生图，刻什么
  * 字都来不及，强行改会和服务端生成内容不一致）。非 PENDING 阶段退化为
@@ -31,7 +33,6 @@ interface ProductConfigSectionProps {
   saving: boolean;
   /** 提交调用，success=true 表示后端已落库（包含服务端能力联动） */
   onSave: (input: {
-    hasLeatherBadge: boolean | null;
     engravingText: string | null;
     engravingExposed: boolean | null;
   }) => Promise<boolean>;
@@ -44,13 +45,9 @@ export function ProductConfigSection({
   onSave,
 }: ProductConfigSectionProps) {
   const type = getProductType(order.productTypeCode);
-  const capBadge = type?.capabilities.hasLeatherBadge ?? false;
   const canEngrave = type?.capabilities.canEngrave ?? false;
 
   // 本地草稿态：UI 即时响应，保存按钮才落库
-  const [leatherBadge, setLeatherBadge] = useState<boolean>(
-    order.hasLeatherBadge === true
-  );
   const [engrave, setEngrave] = useState<boolean>(
     Boolean(order.engravingText && order.engravingText.trim().length > 0)
   );
@@ -61,21 +58,19 @@ export function ProductConfigSection({
     order.engravingExposed === true
   );
 
-  // 订单刷新（别人/外部改了这 3 个字段）→ 同步本地草稿
+  // 订单刷新（别人/外部改了这 2 个字段）→ 同步本地草稿
   useEffect(() => {
-    setLeatherBadge(order.hasLeatherBadge === true);
     const text = order.engravingText ?? "";
     setEngrave(text.trim().length > 0);
     setEngravingText(text);
     setEngravingExposed(order.engravingExposed === true);
-  }, [order.hasLeatherBadge, order.engravingText, order.engravingExposed]);
+  }, [order.engravingText, order.engravingExposed]);
 
-  // 没型号 或 没任何能力 → 不渲染（hooks 全部已声明后再做早返，符合 rules-of-hooks）
-  if (!type || (!capBadge && !canEngrave)) return null;
+  // 没型号 或 不能刻字 → 不渲染（hooks 全部已声明后再做早返，符合 rules-of-hooks）
+  if (!type || !canEngrave) return null;
 
   // 摘要（始终展示，作为用户已选了什么的最权威视图）
   const summary = formatCustomization({
-    hasLeatherBadge: order.hasLeatherBadge,
     engravingText: order.engravingText,
     engravingExposed: order.engravingExposed,
   });
@@ -99,22 +94,17 @@ export function ProductConfigSection({
 
   // 编辑模式：本地草稿 + 保存按钮
   const dirty =
-    leatherBadge !== (order.hasLeatherBadge === true) ||
     (engrave ? engravingText.trim() : "") !==
-      (order.engravingText?.trim() ?? "") ||
+    (order.engravingText?.trim() ?? "") ||
     engravingExposed !== (order.engravingExposed === true);
 
   const handleSave = async () => {
     // 草稿 → 入参：刻字关闭时清空文本
     const finalText = engrave ? engravingText.trim() : "";
-    const ok = await onSave({
-      hasLeatherBadge: leatherBadge,
+    await onSave({
       engravingText: finalText.length > 0 ? finalText : null,
       engravingExposed: engrave ? engravingExposed : null,
     });
-    if (ok) {
-      // 草稿已被服务端 echo，无需本地 setState；useEffect 监听 order.* 会同步
-    }
   };
 
   return (
@@ -124,71 +114,51 @@ export function ProductConfigSection({
         产品定制（PENDING 阶段可改，开始生成后锁定）
       </div>
 
-      {capBadge && (
-        <label className="flex items-center justify-between gap-3 rounded-lg border border-stone-100 bg-stone-50/50 px-3 py-2 cursor-pointer">
+      <div className="rounded-lg border border-stone-100 bg-stone-50/50 px-3 py-2 space-y-2">
+        <label className="flex items-center justify-between gap-3 cursor-pointer">
           <div>
-            <div className="text-sm font-medium text-stone-800">皮革徽章</div>
+            <div className="text-sm font-medium text-stone-800">刻字</div>
             <p className="text-[11px] text-stone-500 mt-0.5">
-              在钥匙扣上加挂一块皮质装饰牌
+              最多 40 个字符（中文 / 英文 / 数字 / 空格）
             </p>
           </div>
           <input
             type="checkbox"
             className="h-5 w-5 accent-emerald-600"
-            checked={leatherBadge}
-            onChange={(e) => setLeatherBadge(e.target.checked)}
+            checked={engrave}
+            onChange={(e) => setEngrave(e.target.checked)}
             disabled={saving}
           />
         </label>
-      )}
-
-      {canEngrave && (
-        <div className="rounded-lg border border-stone-100 bg-stone-50/50 px-3 py-2 space-y-2">
-          <label className="flex items-center justify-between gap-3 cursor-pointer">
-            <div>
-              <div className="text-sm font-medium text-stone-800">刻字</div>
-              <p className="text-[11px] text-stone-500 mt-0.5">
-                最多 40 个字符（中文 / 英文 / 数字 / 空格）
-              </p>
-            </div>
+        {engrave && (
+          <>
             <input
-              type="checkbox"
-              className="h-5 w-5 accent-emerald-600"
-              checked={engrave}
-              onChange={(e) => setEngrave(e.target.checked)}
+              type="text"
+              value={engravingText}
+              onChange={(e) => setEngravingText(e.target.value.slice(0, 40))}
+              maxLength={40}
+              placeholder="如：Love U / 2026.09.07 / 宝贝 1 岁"
               disabled={saving}
+              className="w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-60"
             />
-          </label>
-          {engrave && (
-            <>
+            <label className="flex items-center justify-between gap-3 pt-1 cursor-pointer">
+              <div>
+                <div className="text-sm font-medium text-stone-800">外露</div>
+                <p className="text-[11px] text-stone-500 mt-0.5">
+                  关 = 内刻（默认）。开 = 刻在外表面
+                </p>
+              </div>
               <input
-                type="text"
-                value={engravingText}
-                onChange={(e) => setEngravingText(e.target.value.slice(0, 40))}
-                maxLength={40}
-                placeholder="如：Love U / 2026.09.07 / 宝贝 1 岁"
+                type="checkbox"
+                className="h-5 w-5 accent-emerald-600"
+                checked={engravingExposed}
+                onChange={(e) => setEngravingExposed(e.target.checked)}
                 disabled={saving}
-                className="w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-60"
               />
-              <label className="flex items-center justify-between gap-3 pt-1 cursor-pointer">
-                <div>
-                  <div className="text-sm font-medium text-stone-800">外露</div>
-                  <p className="text-[11px] text-stone-500 mt-0.5">
-                    关 = 内刻（默认）。开 = 刻在外表面
-                  </p>
-                </div>
-                <input
-                  type="checkbox"
-                  className="h-5 w-5 accent-emerald-600"
-                  checked={engravingExposed}
-                  onChange={(e) => setEngravingExposed(e.target.checked)}
-                  disabled={saving}
-                />
-              </label>
-            </>
-          )}
-        </div>
-      )}
+            </label>
+          </>
+        )}
+      </div>
 
       <div className="flex items-center justify-between gap-3 pt-1">
         <p className="text-[11px] text-stone-500 flex-1 min-w-0">

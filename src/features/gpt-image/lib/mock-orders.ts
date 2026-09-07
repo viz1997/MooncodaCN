@@ -57,8 +57,7 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     productTypeCode: null,
     productSize: null,
     accessoryCode: null,
-    // 2026-09-07：终端用户产品定制（皮革徽章 / 刻字 / 外露）
-    hasLeatherBadge: null,
+    // 2026-09-07：终端用户产品定制（刻字 / 外露）
     engravingText: null,
     engravingExposed: null,
     template: {
@@ -100,8 +99,7 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     productTypeCode: null,
     productSize: null,
     accessoryCode: null,
-    // 2026-09-07：终端用户产品定制（皮革徽章 / 刻字 / 外露）
-    hasLeatherBadge: null,
+    // 2026-09-07：终端用户产品定制（刻字 / 外露）
     engravingText: null,
     engravingExposed: null,
     template: {
@@ -143,8 +141,7 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     productTypeCode: null,
     productSize: null,
     accessoryCode: null,
-    // 2026-09-07：终端用户产品定制（皮革徽章 / 刻字 / 外露）
-    hasLeatherBadge: null,
+    // 2026-09-07：终端用户产品定制（刻字 / 外露）
     engravingText: null,
     engravingExposed: null,
     template: {
@@ -186,8 +183,7 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     productTypeCode: null,
     productSize: null,
     accessoryCode: null,
-    // 2026-09-07：终端用户产品定制（皮革徽章 / 刻字 / 外露）
-    hasLeatherBadge: null,
+    // 2026-09-07：终端用户产品定制（刻字 / 外露）
     engravingText: null,
     engravingExposed: null,
     template: {
@@ -229,8 +225,7 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     productTypeCode: null,
     productSize: null,
     accessoryCode: null,
-    // 2026-09-07：终端用户产品定制（皮革徽章 / 刻字 / 外露）
-    hasLeatherBadge: null,
+    // 2026-09-07：终端用户产品定制（刻字 / 外露）
     engravingText: null,
     engravingExposed: null,
     template: {
@@ -272,8 +267,7 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     productTypeCode: null,
     productSize: null,
     accessoryCode: null,
-    // 2026-09-07：终端用户产品定制（皮革徽章 / 刻字 / 外露）
-    hasLeatherBadge: null,
+    // 2026-09-07：终端用户产品定制（刻字 / 外露）
     engravingText: null,
     engravingExposed: null,
     template: {
@@ -315,8 +309,7 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     productTypeCode: null,
     productSize: null,
     accessoryCode: null,
-    // 2026-09-07：终端用户产品定制（皮革徽章 / 刻字 / 外露）
-    hasLeatherBadge: null,
+    // 2026-09-07：终端用户产品定制（刻字 / 外露）
     engravingText: null,
     engravingExposed: null,
     template: {
@@ -358,8 +351,7 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     productTypeCode: null,
     productSize: null,
     accessoryCode: null,
-    // 2026-09-07：终端用户产品定制（皮革徽章 / 刻字 / 外露）
-    hasLeatherBadge: null,
+    // 2026-09-07：终端用户产品定制（刻字 / 外露）
     engravingText: null,
     engravingExposed: null,
     template: {
@@ -412,8 +404,7 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     productTypeCode: null,
     productSize: null,
     accessoryCode: null,
-    // 2026-09-07：终端用户产品定制（皮革徽章 / 刻字 / 外露）
-    hasLeatherBadge: null,
+    // 2026-09-07：终端用户产品定制（刻字 / 外露）
     engravingText: null,
     engravingExposed: null,
     template: {

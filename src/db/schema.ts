@@ -1017,16 +1017,16 @@ export const promptOrder = pgTable(
     accessoryCode: text("accessory_code"),
     // ============================================
     // 2026-09-07：终端用户定制（/p/[token] 上由用户填）
-    // 4 个字段全部 nullable：
+    // 2 个字段全部 nullable：
     // - ToC 订单（无 productTypeCode）：始终 null
-    // - 产品 capabilities 没能力的字段：始终 null（例如冰箱贴的
-    //   engravingText / hasLeatherBadge 永远是 null）
+    // - 产品 capabilities 不支持刻字的型号：始终 null（例如冰箱贴 P）
     // - 用户没填：null
     // 与 capabilities 的联动校验在 /api/orders/[token]/configure 路由
     // + promptOrderCreateSchema 同步处理。
+    //
+    // 历史：初版还有 has_leather_badge 字段 + R 钥匙扣的 hasLeatherBadge
+    // capability；同日下午重构为 LB（皮革徽章）独立产品型号，已删除。
     // ============================================
-    /** 是否挂皮革徽章（仅 R 钥匙扣支持） */
-    hasLeatherBadge: boolean("has_leather_badge"),
     /** 刻字内容（仅 canEngrave=true 的型号可填） */
     engravingText: text("engraving_text"),
     /** 刻字是否外露（与 engravingText 独立 boolean，按用户决定） */

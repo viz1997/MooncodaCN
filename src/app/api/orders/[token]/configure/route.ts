@@ -1,12 +1,15 @@
 /**
- * 用户端 - 提交产品定制（皮革徽章 / 刻字 / 外露）
+ * 用户端 - 提交产品定制（刻字 / 外露）
  * POST /api/orders/[token]/configure
  *
- * 2026-09-07：4 个定制字段由 /p/[token] 上的终端用户填，与"尺寸/配件"
- * 在创建时由代理商定死的语义互补。能力按产品型号区分：
- * - hasLeatherBadge / engravingText 必须在 productTypeCode 的 capabilities
+ * 2026-09-07：终端用户在 /p/[token] 上填"刻字"定制，与"尺寸/配件"在
+ * 创建时由代理商定死的语义互补。能力按产品型号区分：
+ * - engravingText / engravingExposed 必须在 productTypeCode 的 capabilities
  *   支持的字段里才允许填，否则 400。
- * - 无 productTypeCode（ToC 订单）→ 4 字段全不接受。
+ * - 无 productTypeCode（ToC 订单）→ 全不接受。
+ *
+ * 历史：曾包含 hasLeatherBadge 字段（皮革徽章挂在 R 钥匙扣上的开关），
+ * 同日下午重构为 LB（皮革徽章）独立产品型号，已删除。
  *
  * 状态机：PENDING 阶段可改，GENERATING 之后锁死（用户没机会改，
  * 但万一前端误调，直接 400 拒绝）。
@@ -24,7 +27,6 @@ export const runtime = "nodejs";
 
 const configureSchema = z
   .object({
-    hasLeatherBadge: z.boolean().nullable().optional(),
     engravingText: z.string().trim().min(0).max(40).nullable().optional(),
     engravingExposed: z.boolean().nullable().optional(),
   })
@@ -93,10 +95,6 @@ async function postHandler(
     }
 
     // 能力联动校验：与产品 capabilities 严格对齐
-    const finalHasLeatherBadge =
-      type.capabilities.hasLeatherBadge && input.hasLeatherBadge === true
-        ? true
-        : null;
     // engravingText 联动：canEngrave=true 且用户给了非空文本才存
     const trimmedEngraving =
       type.capabilities.canEngrave &&
@@ -112,7 +110,6 @@ async function postHandler(
     await db
       .update(promptOrder)
       .set({
-        hasLeatherBadge: finalHasLeatherBadge,
         engravingText: trimmedEngraving,
         engravingExposed: finalEngravingExposed,
         updatedAt: new Date(),
@@ -122,7 +119,6 @@ async function postHandler(
     return NextResponse.json({
       success: true,
       data: {
-        hasLeatherBadge: finalHasLeatherBadge,
         engravingText: trimmedEngraving,
         engravingExposed: finalEngravingExposed,
       },

@@ -114,8 +114,7 @@ async function getHandler(
         cancelledAt: order.cancelledAt?.toISOString() ?? null,
         createdAt: order.createdAt.toISOString(),
         updatedAt: order.updatedAt.toISOString(),
-        // 2026-09-07：终端用户定制字段（皮革徽章 / 刻字 / 外露）
-        hasLeatherBadge: order.hasLeatherBadge ?? null,
+        // 2026-09-07：终端用户定制字段（刻字 / 外露）
         engravingText: order.engravingText ?? null,
         engravingExposed: order.engravingExposed ?? null,
         template: {

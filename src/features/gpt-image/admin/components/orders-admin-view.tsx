@@ -568,14 +568,12 @@ export function OrdersAdminView() {
                           {/* 2026-09-07：列表行末追加用户定制摘要（皮革徽章 / 刻字 / 外露），
                               让 admin 一眼看到"用户额外指定了什么"，无需打开详情。 */}
                           {formatCustomization({
-                            hasLeatherBadge: order.hasLeatherBadge,
                             engravingText: order.engravingText,
                             engravingExposed: order.engravingExposed,
                           }) && (
                             <div
                               className="flex items-center gap-1 text-[10px] text-amber-700"
                               title={formatCustomization({
-                                hasLeatherBadge: order.hasLeatherBadge,
                                 engravingText: order.engravingText,
                                 engravingExposed: order.engravingExposed,
                               })}
@@ -583,7 +581,6 @@ export function OrdersAdminView() {
                               <Sparkles className="h-2.5 w-2.5" />
                               <span className="truncate max-w-[120px]">
                                 {formatCustomization({
-                                  hasLeatherBadge: order.hasLeatherBadge,
                                   engravingText: order.engravingText,
                                   engravingExposed: order.engravingExposed,
                                 })}
@@ -987,7 +984,6 @@ export function OrdersAdminView() {
                             仅当用户在 /p/[token] 上填了至少一项才展示，由
                             formatCustomization 统一格式化（皮革徽章 ✓ / 刻字 / 内刻 vs 外露）。 */}
                         {formatCustomization({
-                          hasLeatherBadge: detailDialog.hasLeatherBadge,
                           engravingText: detailDialog.engravingText,
                           engravingExposed: detailDialog.engravingExposed,
                         }) && (
@@ -998,7 +994,6 @@ export function OrdersAdminView() {
                             </span>
                             <span className="text-stone-800">
                               {formatCustomization({
-                                hasLeatherBadge: detailDialog.hasLeatherBadge,
                                 engravingText: detailDialog.engravingText,
                                 engravingExposed: detailDialog.engravingExposed,
                               })}

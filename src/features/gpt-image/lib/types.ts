@@ -152,10 +152,11 @@ export interface OrderView {
   accessoryCode: string | null;
   // ============================================
   // 2026-09-07：终端用户定制（/p/[token] 上由用户填）
-  // 4 字段全部 nullable，能力外或未填时都是 null。
+  // 2 字段全部 nullable，能力外或未填时都是 null。
+  //
+  // 历史：初版还有 hasLeatherBadge 字段（R 钥匙扣的能力），同日下午
+  // 重构为 LB（皮革徽章）独立产品型号，已删除。
   // ============================================
-  /** 是否挂皮革徽章（仅 R 钥匙扣支持） */
-  hasLeatherBadge: boolean | null;
   /** 刻字内容（仅 canEngrave=true 的型号可填） */
   engravingText: string | null;
   /** 刻字是否外露（独立 boolean） */
