@@ -30,6 +30,7 @@ import { FailureNotice } from "./failure-notice";
 import { GenerateStep } from "./generate-step";
 import { InvalidLinkScreen } from "./invalid-link-screen";
 import { LoadingScreen } from "./loading-screen";
+import { ProductConfigSection } from "./product-config-section";
 import { ResultStep } from "./result-step";
 import { SelectStep } from "./select-step";
 import { UploadStep } from "./upload-step";
@@ -192,6 +193,18 @@ function UserOrderContent({
                 retrying={actions.retryingAll}
               />
             )}
+
+            {/* 2026-09-07：产品定制（皮革徽章 / 刻字 / 外露）
+                渲染顺序在 UploadStep 上方——定制与上传是两条独立轨道，
+                把它们"上下并排"能让用户意识到：定制字段也是订单的一部分，
+                改了也得跟着走。ProductConfigSection 内部按 productTypeCode
+                的 capabilities 决定渲染哪些字段；无型号/无能力则不渲染。 */}
+            <ProductConfigSection
+              order={order}
+              editable={isPending}
+              saving={actions.configuring}
+              onSave={actions.configure}
+            />
 
             {showUploadStep && (
               <UploadStep

@@ -19,6 +19,8 @@ export interface UseOrderActionsResult {
   stopping: boolean;
   regenerating: boolean;
   retryingAll: boolean;
+  /** 2026-09-07：正在保存产品定制（皮革徽章 / 刻字） */
+  configuring: boolean;
   /** 把单个文件走 R2 预签名直传，然后 POST publicUrl 列表到 /upload */
   upload: (files: File[]) => Promise<boolean>;
   /**
@@ -46,6 +48,17 @@ export interface UseOrderActionsResult {
     batchIdx: number,
     candIdx: number
   ) => Promise<void>;
+  /**
+   * 2026-09-07：提交产品定制（皮革徽章 / 刻字 / 外露）。
+   * 由 /p/[token] 上传参考图前/后任意时机调用，状态机仅 PENDING 可改。
+   * 服务端 /configure 路由按 product-catalog capabilities 自动拒绝不支持
+   * 的字段，前端无须做能力预校验。
+   */
+  configure: (input: {
+    hasLeatherBadge?: boolean | null;
+    engravingText?: string | null;
+    engravingExposed?: boolean | null;
+  }) => Promise<boolean>;
 }
 
 async function readError(res: Response, fallback: string) {
@@ -333,6 +346,35 @@ export function useOrderActions({
     [token]
   );
 
+  const [configuring, setConfiguring] = useState(false);
+  const configure = useCallback(
+    async (input: {
+      hasLeatherBadge?: boolean | null;
+      engravingText?: string | null;
+      engravingExposed?: boolean | null;
+    }): Promise<boolean> => {
+      setConfiguring(true);
+      try {
+        const res = await fetch(`/api/orders/${token}/configure`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(input),
+        });
+        if (!res.ok) {
+          throw new Error(await readError(res, "保存定制信息失败"));
+        }
+        await refresh();
+        return true;
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "保存定制信息失败");
+        return false;
+      } finally {
+        setConfiguring(false);
+      }
+    },
+    [token, refresh]
+  );
+
   return {
     uploading,
     submitting,
@@ -340,6 +382,7 @@ export function useOrderActions({
     stopping,
     regenerating,
     retryingAll,
+    configuring,
     upload,
     submit,
     cancel,
@@ -347,5 +390,6 @@ export function useOrderActions({
     regenerate,
     retryAll,
     download,
+    configure,
   };
 }

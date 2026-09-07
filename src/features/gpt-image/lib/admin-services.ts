@@ -405,6 +405,10 @@ export async function createOrder(input: {
     productTypeCode: created.productTypeCode,
     productSize: created.productSize,
     accessoryCode: created.accessoryCode,
+    // 2026-09-07：终端用户定制（皮革徽章 / 刻字 / 外露）
+    hasLeatherBadge: created.hasLeatherBadge ?? null,
+    engravingText: created.engravingText ?? null,
+    engravingExposed: created.engravingExposed ?? null,
     hasUploadedImage: false,
     uploadedImageCount: 0,
     candidateCount: 0,
@@ -488,6 +492,10 @@ export async function listOrders(filters: {
       productTypeCode: promptOrder.productTypeCode,
       productSize: promptOrder.productSize,
       accessoryCode: promptOrder.accessoryCode,
+      // 2026-09-07：终端用户定制（皮革徽章 / 刻字 / 外露）
+      hasLeatherBadge: promptOrder.hasLeatherBadge,
+      engravingText: promptOrder.engravingText,
+      engravingExposed: promptOrder.engravingExposed,
       // 模板字段（LEFT JOIN，可能为 null）
       tId: promptTemplate.id,
       tName: promptTemplate.name,
@@ -534,6 +542,10 @@ export async function listOrders(filters: {
       productTypeCode: o.productTypeCode,
       productSize: o.productSize,
       accessoryCode: o.accessoryCode,
+      // 2026-09-07：终端用户定制
+      hasLeatherBadge: o.hasLeatherBadge ?? null,
+      engravingText: o.engravingText ?? null,
+      engravingExposed: o.engravingExposed ?? null,
       hasUploadedImage: uploaded.length > 0,
       uploadedImageCount: countUploadedImages(uploaded),
       candidateCount: countCandidateGroups(candidates),
@@ -739,6 +751,10 @@ export async function updateOrder(input: {
     productTypeCode: updated.productTypeCode,
     productSize: updated.productSize,
     accessoryCode: updated.accessoryCode,
+    // 2026-09-07：终端用户定制
+    hasLeatherBadge: updated.hasLeatherBadge ?? null,
+    engravingText: updated.engravingText ?? null,
+    engravingExposed: updated.engravingExposed ?? null,
     hasUploadedImage: uploaded.length > 0,
     uploadedImageCount: countUploadedImages(uploaded),
     candidateCount: countCandidateGroups(candidates),

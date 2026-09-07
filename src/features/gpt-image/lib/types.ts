@@ -150,6 +150,16 @@ export interface OrderView {
   productSize: string | null;
   /** 配件（leather/pvc/bracket），null = 无配件或未指定 */
   accessoryCode: string | null;
+  // ============================================
+  // 2026-09-07：终端用户定制（/p/[token] 上由用户填）
+  // 4 字段全部 nullable，能力外或未填时都是 null。
+  // ============================================
+  /** 是否挂皮革徽章（仅 R 钥匙扣支持） */
+  hasLeatherBadge: boolean | null;
+  /** 刻字内容（仅 canEngrave=true 的型号可填） */
+  engravingText: string | null;
+  /** 刻字是否外露（独立 boolean） */
+  engravingExposed: boolean | null;
   template: {
     id: string;
     name: string;
