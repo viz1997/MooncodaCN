@@ -97,6 +97,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { resizeImage, wrapBlobAsFile } from "@/lib/image-client-resize";
 import { cn } from "@/lib/utils";
+import localforage from "localforage";
 
 // ============ 类型 ============
 interface UploadedImage {
@@ -159,6 +160,17 @@ interface WorkbenchSubmission {
    * 是 composite 还是 N 格原图，并把另一形态作为附属缩略图。
    */
   stitchedUrl?: string;
+  /**
+   * 2026-09-07：提交瞬间的 autoStitch 开关快照。applyJobUpdate 用这个字段
+   * （而不是 React state autoStitch）判断要不要拼接 —— 避免用户在 30s 轮询
+   * 窗口里切换开关导致本应拼接但不拼接（"提交时开着 → 完了关掉 → 没拼接"
+   * 是个真实路径，state 闭包拿到的是 false）。
+   *
+   * 老 submission（hydrate 进来的 completed 行）无此字段，applyJobUpdate
+   * fallback 到 state autoStitch；正常情况 applyJobUpdate 只跑在 in-flight
+   * submission（handleGenerate 创建时已写入），hydrate 走不到这条。
+   */
+  autoStitchedAtSubmit?: boolean;
   /** 该次提交的 prompt（与 effect 主 prompt 可能不同 —— 用户连续微调时） */
   prompt: string;
   /**
@@ -320,32 +332,116 @@ function formatRelativeTime(iso: string): string {
     : `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-// ============ stitchedUrl 持久化（localStorage） ============
-// 2026-08-31：客户端拼接的宫格大图 dataURL 持久化到 localStorage ——
-// imageJob 表没有 stitchedUrl 列，加 schema 迁移成本高（且 dataURL 这种
-// 大 base64 不适合塞关系库），用 localStorage 兜底：跨刷新能恢复。
-// key 格式 imagegen:v1:stitched:<jobId> = dataURL。
+// ============ stitchedUrl 持久化（localforage） ============
+// 2026-08-31 启用 localStorage；2026-09-07 迁到 localforage：
+//
+// localStorage 配额只有 5-10MB / origin，4 张拼接宫格（每张 ~2-3MB base64
+// PNG）就 QuotaExceededError，被 try/catch 静默吞掉 —— "刷新页面后回到 N
+// 张独立图"的根因。localforage 默认走 IndexedDB，配额 50MB+（用户实际可
+// 用空间通常几百 MB），同仓库 V2 workbench 在用同一套。
+//
+// 存 { dataUrl, ts }：dataUrl 是拼接大图，ts 用于 evict 排序。
 // 失败 / 拼接关 / count<2 → 不写，所以 jobsToEffects 查不到 = 走 N 张原图分支。
 // 删除会话是前端本地操作（imageJob 不清理，TODO：见 rename/delete 节注释），
-// 不主动删 localStorage —— 反正 jobsToEffects 只为 status=completed 的 submission
+// 不主动删 localforage —— 反正 jobsToEffects 只为 status=completed 的 submission
 // 标 isStitched，孤儿 entry 不会被读。
-const STITCHED_LS_PREFIX = "imagegen:v1:stitched:";
+const STITCHED_STORE_NAME = "image-gen-v1";
+const STITCHED_STORE_TABLE = "stitched";
+const STITCHED_LS_LEGACY_PREFIX = "imagegen:v1:stitched:";
 
-function readStitchedFromStorage(jobId: string): string | undefined {
-  if (typeof window === "undefined") return undefined;
+const stitchedStore =
+  typeof window === "undefined"
+    ? null
+    : localforage.createInstance({
+        name: STITCHED_STORE_NAME,
+        storeName: STITCHED_STORE_TABLE,
+        description: "V1 workbench auto-stitch composite persistence",
+      });
+
+interface StitchedRecord {
+  dataUrl: string;
+  ts: number;
+}
+
+/** 写入后保留多少条历史（按 ts 倒序裁剪）。50MB / 3MB/张 ≈ 16 张安全上限，给 20 留点 buffer。 */
+const STITCHED_KEEP_LIMIT = 20;
+
+async function readStitched(jobId: string): Promise<string | undefined> {
+  if (!stitchedStore) return undefined;
   try {
-    return window.localStorage.getItem(STITCHED_LS_PREFIX + jobId) ?? undefined;
+    const v = await stitchedStore.getItem<StitchedRecord>(jobId);
+    return v?.dataUrl;
   } catch {
     return undefined;
   }
 }
 
-function writeStitchedToStorage(jobId: string, dataUrl: string): void {
-  if (typeof window === "undefined") return;
+async function writeStitched(jobId: string, dataUrl: string): Promise<void> {
+  if (!stitchedStore) return;
   try {
-    window.localStorage.setItem(STITCHED_LS_PREFIX + jobId, dataUrl);
+    await stitchedStore.setItem(jobId, { dataUrl, ts: Date.now() });
+    // 顺手淘汰：避免无限增长（即便 IndexedDB 配额大，几百张累积也是负担）。
+    await evictOldStitched();
   } catch (err) {
-    console.warn("[workbench] save stitched to localStorage failed:", err);
+    console.warn("[workbench] save stitched to localforage failed:", err);
+  }
+}
+
+async function evictOldStitched(): Promise<void> {
+  if (!stitchedStore) return;
+  try {
+    const keys = await stitchedStore.keys();
+    if (keys.length <= STITCHED_KEEP_LIMIT) return;
+    // 并行读 ts，单次操作最多 21 条，不会撞配额
+    const items = await Promise.all(
+      keys.map(async (k) => {
+        const v = await stitchedStore.getItem<StitchedRecord>(k);
+        return { k, ts: v?.ts ?? 0 };
+      })
+    );
+    items.sort((a, b) => b.ts - a.ts);
+    const toRemove = items
+      .slice(STITCHED_KEEP_LIMIT)
+      .map((i) => i.k);
+    await Promise.all(toRemove.map((k) => stitchedStore.removeItem(k)));
+  } catch (err) {
+    console.warn("[workbench] evict old stitched failed:", err);
+  }
+}
+
+/**
+ * 把旧 localStorage 残留（imagegen:v1:stitched:<jobId>）一次性搬到
+ * localforage 然后清掉 LS。挂载时跑一次即可。
+ *
+ * 设计原因：2026-08-31 ~ 2026-09-07 之间用户存的拼接图如果有效，不应被这次
+ * 迁移清掉。已存在 localforage 的 jobId 跳过（ts 取更新值），缺失的才搬。
+ * 搬完即删 LS key —— 反正 localforage 是新的权威源，留 LS 只会撑爆配额。
+ */
+async function migrateStitchedFromLegacyLs(): Promise<void> {
+  if (typeof window === "undefined" || !stitchedStore) return;
+  try {
+    const ls = window.localStorage;
+    const keysToMigrate: string[] = [];
+    for (let i = 0; i < ls.length; i++) {
+      const k = ls.key(i);
+      if (k && k.startsWith(STITCHED_LS_LEGACY_PREFIX)) keysToMigrate.push(k);
+    }
+    if (keysToMigrate.length === 0) return;
+    for (const lsKey of keysToMigrate) {
+      const dataUrl = ls.getItem(lsKey);
+      if (!dataUrl) continue;
+      const jobId = lsKey.slice(STITCHED_LS_LEGACY_PREFIX.length);
+      const existing = await stitchedStore.getItem<StitchedRecord>(jobId);
+      if (!existing) {
+        await stitchedStore.setItem(jobId, { dataUrl, ts: Date.now() });
+      }
+      ls.removeItem(lsKey);
+    }
+    console.info(
+      `[workbench] migrated ${keysToMigrate.length} stitched LS entries to localforage`
+    );
+  } catch (err) {
+    console.warn("[workbench] migrate stitched from LS failed:", err);
   }
 }
 
@@ -370,7 +466,7 @@ function writeStitchedToStorage(jobId: string, dataUrl: string): void {
  * jobId —— applyJobUpdate / polling 只跟最新一条未完 submission 打交道（生
  * 成按钮 generating guard 同一 effect 同一时刻最多 1 条 in-flight）。
  */
-function jobsToEffects(jobs: ImageJob[]): WorkbenchEffect[] {
+async function jobsToEffects(jobs: ImageJob[]): Promise<WorkbenchEffect[]> {
   // 按 createdAt 升序排，分组后取 [0] 是最早一条
   const sorted = [...jobs].sort((a, b) => +a.createdAt - +b.createdAt);
 
@@ -386,6 +482,20 @@ function jobsToEffects(jobs: ImageJob[]): WorkbenchEffect[] {
     bucket.push(job);
   }
 
+  // 预取：所有 completed 的 jobId 一次性从 localforage 读拼接图 —— 之前
+  // 一个 job 一个 await 是 N 次串行，20 个 job 跑 20 次 indexeddb read，
+  // 1-2 秒才进 hydrate。批量 Promise.all + Map 命中降到 1 次。
+  const completedJobIds = sorted
+    .filter((j) => j.status === "completed")
+    .map((j) => j.id);
+  const stitchedMap = new Map<string, string>();
+  await Promise.all(
+    completedJobIds.map(async (id) => {
+      const url = await readStitched(id);
+      if (url) stitchedMap.set(id, url);
+    })
+  );
+
   const effects: WorkbenchEffect[] = [];
   for (const groupJobs of groups.values()) {
     const firstJob = groupJobs[0]!;
@@ -397,14 +507,15 @@ function jobsToEffects(jobs: ImageJob[]): WorkbenchEffect[] {
     // （applyJobUpdate 用 s.jobId === matchJobId 找对应 submission，不依赖
     // submissionId，但 React key / 测试断言里要用到，保持稳定可读）。
     //
-    // 2026-08-31：stitchedUrl 从 localStorage 读 —— DB imageJob 没有这列，
+    // 2026-09-07：stitchedUrl 从 localforage 读 —— DB imageJob 没有这列，
     // 不持久化就会"刷新后回到 N 张原图"，用户原话"自动拼接是多张图拼接成一张
     // 宫格图"。仅 completed 才标 isStitched（pending/processing 没拼接过）。
+    // 之前用 raw localStorage，4 张宫格（每张 ~2-3MB base64）就 QuotaExceededError
+    // 被 try/catch 静默吃掉 —— 改 localforage 后配额到 50MB+，顺带加 evict
+    // 保留最近 20 条。
     const submissions: WorkbenchSubmission[] = groupJobs.map((job) => {
       const stitchedUrl =
-        job.status === "completed"
-          ? readStitchedFromStorage(job.id)
-          : undefined;
+        job.status === "completed" ? stitchedMap.get(job.id) : undefined;
       return {
         submissionId: `hydrated_${job.id.slice(0, 8)}`,
         jobId: job.id,
@@ -433,13 +544,13 @@ function jobsToEffects(jobs: ImageJob[]): WorkbenchEffect[] {
         ? "failed"
         : "completed";
 
-    // 2026-08-31：effect 顶层 stitchedUrl 也要从 localStorage 补 —— rail 缩略图
+    // 2026-09-07：effect 顶层 stitchedUrl 也要从 localforage 补 —— rail 缩略图
     // 走 eff.stitchedUrl ?? eff.resultUrls[0]，没顶层 stitchedUrl 的话刷新后
     // rail 退到第一张原图，rail 视觉也跟着掉。latestJob 的拼接图就是 effect 的
     // 当前拼接图（与 applyJobUpdate 写顶层 stitchedUrl 的语义一致）。
     const latestStitched =
       latestJob.status === "completed"
-        ? readStitchedFromStorage(latestJob.id)
+        ? stitchedMap.get(latestJob.id)
         : undefined;
 
     effects.push({
@@ -1153,13 +1264,18 @@ export function GenerateWorkbenchView({
     let cancelled = false;
     (async () => {
       try {
+        // 2026-09-07：把旧 localStorage 残留的 imagegen:v1:stitched:* 一次性
+        // 搬到 localforage。空操作时不等 store 写入，~ms 级；只在真的有 LS
+        // 残留时才耗 indexeddb read。先跑再 hydrate 是为了让 hydrate 一次
+        // 读到完整数据集，不需要再补一次 setHistory。
+        await migrateStitchedFromLegacyLs();
         const res = await listImageJobsAction({ limit: 20 });
         if (cancelled) return;
         const jobs = res?.data?.jobs ?? [];
         // 2026-08-23 修复 Bug3：jobsToEffects 按 (model, mode, maskId) 把多次
         // 提交合并到同一个 effect.submissions，refresh 后 rail 不再把同一会话
         // 的多次提交显示成 N 条独立会话。
-        const hydrated: WorkbenchEffect[] = jobsToEffects(jobs);
+        const hydrated: WorkbenchEffect[] = await jobsToEffects(jobs);
         // mount 时 prev=[]，merged 与 hydrated 顺序等价（都是按 createdAt 倒序）
         const merged = mergeHydratedHistory([], hydrated);
         setHistory(merged);
@@ -1397,16 +1513,27 @@ export function GenerateWorkbenchView({
       //
       // applyJobUpdate 是 async 函数（外层 startPolling 是 async），可以直接
       // await。失败（任何一张图解码失败）就静默回退，不打 isStitched 标记。
+      //
+      // 2026-09-07：开关读 submission.autoStitchedAtSubmit（提交瞬间），不读
+      // React state autoStitch（30s 后可能已被用户切换）。targetSubmission
+      // 缺失时（异常 hydrate）fallback 到 state autoStitch。
+      const shouldStitch =
+        targetSubmission?.autoStitchedAtSubmit ?? autoStitch;
       let stitchedComposite: string | undefined;
-      if (autoStitch && !isTemplateGrid && resultUrls.length >= 2) {
+      if (shouldStitch && !isTemplateGrid && resultUrls.length >= 2) {
         try {
           stitchedComposite = await stitchToGrid(resultUrls);
-          // 2026-08-31：拼接成功后立刻落 localStorage —— imageJob 表没有
-          // stitchedUrl 列，跨刷新靠这个兜底恢复。失败时不动 localStorage
+          // 2026-09-07：拼接成功后立刻落 localforage —— imageJob 表没有
+          // stitchedUrl 列，跨刷新靠这个兜底恢复。失败时不动 localforage
           // （保留旧 entry 也无害：jobsToEffects 走 status=completed 才读，
           // 旧 job 的 entry 自然命中；新 job 失败 = 没有 stitchedUrl entry =
           // 走 N 张原图分支，与失败语义一致）。
-          writeStitchedToStorage(matchJobId, stitchedComposite);
+          //
+          // 历史：之前用 raw localStorage，4 张拼接（每张 ~2-3MB base64）就
+          // QuotaExceededError 被 try/catch 静默吃掉 —— "刷新后回到 N 张独
+          // 立图"的根因。localforage（IndexedDB）配额 50MB+，evict 保留最近
+          // 20 条。
+          await writeStitched(matchJobId, stitchedComposite);
         } catch (err) {
           console.warn("[workbench] stitch failed:", err);
           // 2026-09-02：stitch 失败提示 —— 之前仅 console.warn，用户看
@@ -1721,6 +1848,10 @@ export function GenerateWorkbenchView({
       createdAt: submissionTs,
       isGridComposite,
       prompt: finalPrompt,
+      // 2026-09-07：快照提交瞬间的 autoStitch 开关到 submission（见
+      // WorkbenchSubmission.autoStitchedAtSubmit 注释）。applyJobUpdate 用
+      // 这个字段判断要不要拼接，不依赖 30s 后 React state 的当前值。
+      autoStitchedAtSubmit: autoStitch,
     };
 
     let newEffect: WorkbenchEffect;
