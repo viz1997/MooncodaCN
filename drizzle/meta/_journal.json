@@ -29,6 +29,20 @@
       "when": 1785938000000,
       "tag": "0003_wide_silk_frog",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1757347000000,
+      "tag": "0004_history_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1757347200000,
+      "tag": "0005_agent_workbench",
+      "breakpoints": true
     }
   ]
 }
