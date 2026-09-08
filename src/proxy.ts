@@ -106,9 +106,8 @@ export async function proxy(request: NextRequest) {
   const pathnameWithoutLocale = pathname.replace(/^\/(en|zh)/, "") || "/";
 
   // 定义需要保护的路由
-  // 2026-09-03：代理商 portal（ToB 自下单）—— 与 /admin 同级，要求 session token。
-  // role/agentId 判定在 (agent)/layout.tsx 的 checkAgent() 内做（细粒度）。
-  const protectedRoutes = ["/", "/dashboard", "/admin", "/agent"];
+  // 2026-09-08：(agent) route group 已删，不再需要把 /agent 加进 protectedRoutes。
+  const protectedRoutes = ["/", "/dashboard", "/admin"];
 
   // 定义认证页面路由 (已登录用户不应访问)
   const authRoutes = ["/sign-in", "/sign-up"];

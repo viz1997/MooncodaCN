@@ -4,7 +4,7 @@
  * 提供创建测试数据的工厂函数
  */
 
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import * as schema from "@/db/schema";
 import { testDb } from "./db";
@@ -603,47 +603,10 @@ export async function cleanupUserImageGenData(userId: string): Promise<void> {
 }
 
 // ============================================
-// 代理商 / 模板工厂（2026-09-07）
+// 模板工厂（保留给 user 维度 workbench）
+// 2026-09-08：代理商业务砍掉后只留 createTestPromptTemplate，
+// createTestAgent / assignTemplatesToAgent / cleanupTestAgents 全部删除。
 // ============================================
-
-export interface CreateTestAgentOptions {
-  id?: string;
-  name?: string;
-  contact?: string | null;
-  phone?: string | null;
-  email?: string | null;
-  remark?: string | null;
-  isActive?: boolean;
-  imageGenToken?: string | null;
-  creditBalance?: number;
-}
-
-export async function createTestAgent(
-  options: CreateTestAgentOptions = {}
-): Promise<schema.Agent> {
-  const id = options.id ?? generateTestId("test_agent");
-  const now = new Date();
-
-  const agentData: schema.NewAgent = {
-    id,
-    name: options.name ?? `Test Agent ${id}`,
-    contact: options.contact ?? null,
-    phone: options.phone ?? null,
-    email: options.email ?? null,
-    remark: options.remark ?? null,
-    isActive: options.isActive ?? true,
-    imageGenToken: options.imageGenToken ?? generateTestId("test_agtok"),
-    creditBalance: options.creditBalance ?? 0,
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  const [row] = await testDb.insert(schema.agent).values(agentData).returning();
-  if (!row) {
-    throw new Error("创建测试代理商失败");
-  }
-  return row;
-}
 
 export interface CreateTestPromptTemplateOptions {
   id?: string;
@@ -691,33 +654,4 @@ export async function createTestPromptTemplate(
     throw new Error("创建测试提示词模板失败");
   }
   return row;
-}
-
-/** 给 agent 授权 promptTemplate（写入 M2M） */
-export async function assignTemplatesToAgent(
-  agentId: string,
-  templateIds: string[]
-): Promise<void> {
-  if (templateIds.length === 0) return;
-  await testDb.insert(schema.agentPromptTemplate).values(
-    templateIds.map((promptTemplateId) => ({
-      agentId,
-      promptTemplateId,
-    }))
-  );
-}
-
-/** 测试清理：删除 agent（含级联流水 / M2M / 历史订单） */
-export async function cleanupTestAgents(agentIds: string[]): Promise<void> {
-  if (agentIds.length === 0) return;
-  await testDb
-    .delete(schema.agentCreditTransaction)
-    .where(inArray(schema.agentCreditTransaction.agentId, agentIds));
-  await testDb
-    .delete(schema.agentPromptTemplate)
-    .where(inArray(schema.agentPromptTemplate.agentId, agentIds));
-  await testDb
-    .delete(schema.promptOrder)
-    .where(inArray(schema.promptOrder.agentId, agentIds));
-  await testDb.delete(schema.agent).where(inArray(schema.agent.id, agentIds));
 }

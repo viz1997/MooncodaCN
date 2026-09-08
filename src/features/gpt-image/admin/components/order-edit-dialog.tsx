@@ -11,20 +11,10 @@
  * 想清空 ToB 块就把 4 个 select 全部切到"未指定"。
  */
 
-import {
-  App,
-  Button,
-  Collapse,
-  Form,
-  Input,
-  Modal,
-  Select,
-  Tooltip,
-} from "antd";
-import { Briefcase, HelpCircle, Minus, Plus } from "lucide-react";
+import { App, Button, Collapse, Form, Input, Modal, Select } from "antd";
+import { Minus, Plus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { listActiveAgentsAction } from "@/features/agent/actions/agents";
 import { updateOrderAction } from "@/features/gpt-image/actions/orders";
 import {
   ACCESSORIES,
@@ -61,35 +51,10 @@ export function OrderEditDialog({
   const [imagesPerUpload, setImagesPerUpload] = useState(3);
   const [regenerateLimit, setRegenerateLimit] = useState(5);
   const [saving, setSaving] = useState(false);
-  // ============================================
-  // 2026-08-24：代理商业务（ToB）—— 编辑时可改 / 可清空
-  // ============================================
-  const [activeAgents, setActiveAgents] = useState<
-    { id: string; name: string; contact: string | null }[]
-  >([]);
-  const [agentId, setAgentId] = useState<string>("");
+  // 三件套字段（管理员编辑存量订单时可改）
   const [productTypeCode, setProductTypeCode] = useState<string>("");
   const [productSize, setProductSize] = useState<string>("");
   const [accessoryCode, setAccessoryCode] = useState<string>("");
-
-  // 打开时拉代理商列表（与 OrderFormDialog 共用 action）
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    listActiveAgentsAction()
-      .then((res) => {
-        if (cancelled) return;
-        if (res?.data?.agents) {
-          setActiveAgents(res.data.agents);
-        }
-      })
-      .catch((err) => {
-        console.error("[OrderEditDialog] 加载代理商列表失败：", err);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open]);
 
   // 每次打开时用 order 字段填充表单
   useEffect(() => {
@@ -100,7 +65,6 @@ export function OrderEditDialog({
     setUploadCount(order.uploadCount);
     setImagesPerUpload(order.imagesPerUpload ?? 3);
     setRegenerateLimit(order.regenerateLimit ?? 5);
-    setAgentId(order.agentId ?? "");
     setProductTypeCode(order.productTypeCode ?? "");
     setProductSize(order.productSize ?? "");
     setAccessoryCode(order.accessoryCode ?? "");
@@ -148,9 +112,7 @@ export function OrderEditDialog({
         uploadCount,
         imagesPerUpload,
         regenerateLimit,
-        // 2026-08-24：代理商业务字段 —— 编辑对话框语义是"覆盖"，
-        // 不再像之前那样回退到 order 的旧值；value || null 让用户能直接清空 ToB 块
-        agentId: agentId || null,
+        // 三件套：编辑对话框语义是"覆盖"，value || null 让用户能直接清空
         productTypeCode: productTypeCode || null,
         productSize: productSize || null,
         accessoryCode: accessoryCode || null,
@@ -343,83 +305,38 @@ export function OrderEditDialog({
           </Form.Item>
 
           {/* ============================================
-              2026-08-24：代理商业务（ToB）—— 可编辑
-              默认展开：如果 order 原本就绑了 ToB 数据，自动让用户看到；ToC
-              订单也展开，方便把"无意中归到 ToB"或反过来切换。
+              2026-09-08：(agent) 业务砍掉后只剩三件套编辑。
+              管理员编辑存量订单时改 productTypeCode / productSize / accessoryCode。
               ============================================ */}
           <Collapse
             ghost
-            defaultActiveKey={["agent"]}
+            defaultActiveKey={["product"]}
             items={[
               {
-                key: "agent",
+                key: "product",
                 label: (
                   <span className="flex items-center gap-1.5 text-sm text-stone-600">
-                    <Briefcase className="h-3.5 w-3.5" />
-                    代理商业务（ToB）
-                    {agentId ? (
+                    产品规格
+                    {productTypeCode ? (
                       <span className="text-[10px] text-violet-600 font-medium">
-                        · 已绑定
+                        · 已绑定 {productTypeCode}
                       </span>
                     ) : (
                       <span className="text-[10px] text-stone-400 font-normal">
-                        · 未绑定（ToC）
+                        · 未指定
                       </span>
                     )}
                   </span>
                 ),
                 extra: (
                   <span className="text-xs text-stone-400">
-                    {agentId ? "改代理商 / 改规格" : "默认留空 = ToC 订单"}
+                    {productTypeCode
+                      ? "改型号 / 改尺寸 / 改配件"
+                      : "默认留空 = 不绑型号"}
                   </span>
                 ),
                 children: (
                   <div className="grid grid-cols-1 gap-y-3 pb-1">
-                    <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
-                      <div className="flex items-center gap-1">
-                        <span className="text-sm">代理商</span>
-                        <Tooltip title="编辑时可切换或清空；清空后订单回到 ToC。">
-                          <HelpCircle className="h-3.5 w-3.5 text-stone-400 cursor-help" />
-                        </Tooltip>
-                      </div>
-                      <Select
-                        value={agentId || "_none"}
-                        onChange={(v) => setAgentId(v === "_none" ? "" : v)}
-                        placeholder={
-                          activeAgents.length === 0
-                            ? "暂无可用代理商"
-                            : "未指定（ToC 订单）"
-                        }
-                        className="w-full"
-                        options={[
-                          { value: "_none", label: "未指定（ToC 订单）" },
-                          ...activeAgents.map((a) => ({
-                            value: a.id,
-                            label: a.contact
-                              ? `${a.name} · ${a.contact}`
-                              : a.name,
-                          })),
-                        ]}
-                        // 2026-08-24：同 order-form-dialog，空态不 disable，让 notFoundContent
-                        // 的跳转指引能被用户看到
-                        notFoundContent={
-                          activeAgents.length === 0 ? (
-                            <div className="space-y-1.5 py-1 text-xs text-muted-foreground">
-                              <div>暂无启用的代理商</div>
-                              <a
-                                href="/admin/agents"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 text-violet-700 hover:underline"
-                              >
-                                去代理商管理新建 →
-                              </a>
-                            </div>
-                          ) : null
-                        }
-                      />
-                    </div>
-
                     <div className="grid grid-cols-[140px_1fr] items-center gap-x-3">
                       <span className="text-sm">产品型号</span>
                       <Select

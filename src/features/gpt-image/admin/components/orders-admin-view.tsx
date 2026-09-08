@@ -9,7 +9,6 @@
 
 import { App, Badge, Button, Input, Modal, Select, Tabs } from "antd";
 import {
-  Briefcase,
   Check,
   CheckCircle2,
   Clock,
@@ -101,63 +100,21 @@ export function OrdersAdminView() {
   const [activeTab, setActiveTab] = useState<"submitted" | "unsubmitted">(
     "unsubmitted"
   );
-  /**
-   * 2026-08-24：代理商过滤（从 /admin/agents 跳过来时带 ?agentId=AG_xxx&agentName=XXX）
-   * 仅展示过滤提示，不会写入 search 输入框；清除时同步移除 URL 参数。
-   */
-  const [agentFilter, setAgentFilter] = useState<{
-    id: string;
-    name: string;
-  } | null>(null);
 
-  /**
-   * 组件挂载时读 URL 上的 agentId/agentName（仅执行一次）
-   */
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const params = new URL(window.location.href).searchParams;
-    const id = params.get("agentId");
-    if (!id) return;
-    setAgentFilter({
-      id,
-      name: params.get("agentName") ?? id,
-    });
+  const fetchOrders = useCallback(async (opts: { silent?: boolean } = {}) => {
+    // 仅在"还没有任何数据"时才显示 loading 骨架，避免后台 refetch 时把已显示的
+    // 表格又变回 loading 态
+    if (!opts.silent) setLoading(true);
+    try {
+      const res = await fetch("/api/orders");
+      const json = await res.json();
+      if (json.success) setOrders(json.data as OrderView[]);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      if (!opts.silent) setLoading(false);
+    }
   }, []);
-
-  /**
-   * 清除代理商过滤：清 state + 用 replaceState 移除 URL 参数，
-   * 避免污染浏览器历史栈
-   */
-  const clearAgentFilter = useCallback(() => {
-    setAgentFilter(null);
-    if (typeof window === "undefined") return;
-    const url = new URL(window.location.href);
-    url.searchParams.delete("agentId");
-    url.searchParams.delete("agentName");
-    window.history.replaceState(null, "", url.toString());
-  }, []);
-
-  const fetchOrders = useCallback(
-    async (opts: { silent?: boolean } = {}) => {
-      // 仅在"还没有任何数据"时才显示 loading 骨架，避免后台 refetch 时把已显示的
-      // 表格又变回 loading 态
-      if (!opts.silent) setLoading(true);
-      try {
-        // 2026-08-24：代理商过滤（?agentId=AG_xxx 时只拉该代理商的订单）
-        const url = agentFilter
-          ? `/api/orders?agentId=${encodeURIComponent(agentFilter.id)}`
-          : "/api/orders";
-        const res = await fetch(url);
-        const json = await res.json();
-        if (json.success) setOrders(json.data as OrderView[]);
-      } catch (e) {
-        console.error(e);
-      } finally {
-        if (!opts.silent) setLoading(false);
-      }
-    },
-    [agentFilter]
-  );
 
   const fetchTemplates = useCallback(
     async (opts: { silent?: boolean } = {}) => {
@@ -386,25 +343,6 @@ export function OrdersAdminView() {
         </Button>
       </div>
 
-      {/* 2026-08-24：代理商过滤提示（从 /admin/agents 跳过来时显示） */}
-      {agentFilter && (
-        <div className="flex flex-wrap items-center gap-2 rounded-md border border-violet-200 bg-violet-50/40 px-3 py-2 text-xs">
-          <Briefcase className="h-3.5 w-3.5 text-violet-600" />
-          <span className="text-violet-700 font-medium">代理商过滤：</span>
-          <span className="font-mono">{agentFilter.name}</span>
-          <span className="text-muted-foreground">({agentFilter.id})</span>
-          <Button
-            type="link"
-            size="small"
-            className="!h-auto !px-1 !py-0 text-violet-700"
-            onClick={clearAgentFilter}
-            icon={<X className="h-3 w-3" />}
-          >
-            清除过滤
-          </Button>
-        </div>
-      )}
-
       {/* 2026-09-07：一级维度 tab，按上传完成度切分。
           总数基于完整 orders 列表，不被 status/platform/search 影响 —— 让用户
           始终看到「还有多少未跟进 / 已完成」的全貌；filter card 里的 status /
@@ -473,13 +411,12 @@ export function OrdersAdminView() {
 
           <div className="overflow-hidden rounded-md border">
             {/* 表头 */}
-            <div className="grid grid-cols-[140px_1fr_1fr_100px_100px_110px_150px_120px_140px_220px] gap-2 bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground border-b">
+            <div className="grid grid-cols-[140px_1fr_1fr_100px_100px_150px_120px_140px_220px] gap-2 bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground border-b">
               <div>订单号</div>
               <div>用户</div>
               <div>模板</div>
               <div>状态</div>
               <div>平台</div>
-              <div>代理商</div>
               <div>产品规格</div>
               <div>原图/选择</div>
               <div>创建时间</div>
@@ -508,7 +445,7 @@ export function OrdersAdminView() {
                 displayed.map((order) => (
                   <div
                     key={order.id}
-                    className="grid grid-cols-[140px_1fr_1fr_100px_100px_110px_150px_120px_140px_220px] gap-2 px-3 py-2 text-sm hover:bg-muted/30 transition-colors items-center"
+                    className="grid grid-cols-[140px_1fr_1fr_100px_100px_150px_120px_140px_220px] gap-2 px-3 py-2 text-sm hover:bg-muted/30 transition-colors items-center"
                   >
                     <div className="font-mono text-xs">{order.orderNo}</div>
                     <div>
@@ -535,23 +472,6 @@ export function OrdersAdminView() {
                       ) : (
                         <span className="text-zinc-400 italic text-xs">
                           未指定
-                        </span>
-                      )}
-                    </div>
-                    <div>
-                      {/* 代理商列：agentName 有值 = 展示；agentId 在但 agentName 为空
-                          = agent 已被 set null（FK 会把 agentId 一起置空，所以这条
-                          路径实际走不到，留 defensive）；agentId=null = ToC 订单 */}
-                      {order.agentName ? (
-                        <span
-                          className="text-xs"
-                          title={order.agentId ?? undefined}
-                        >
-                          {order.agentName}
-                        </span>
-                      ) : (
-                        <span className="text-zinc-400 italic text-xs">
-                          ToC
                         </span>
                       )}
                     </div>
@@ -928,28 +848,17 @@ export function OrdersAdminView() {
                     （= 每批）独立 lock，一个 batch 选一张候选就算"该批已选"。 */}
                     {detailDialog.selectionCount ?? 0} / {batchCount} 批
                   </div>
-                  {/* 2026-08-24：代理商业务块 —— 仅 ToB 订单展示。
-                  col-span-2 让"代理商业务"标题独占一行，下面 4 项用 4-col 子网格。 */}
-                  {(detailDialog.agentId ||
-                    detailDialog.productTypeCode ||
+                  {/* 2026-09-08：(agent) 业务砍掉后详情只剩产品规格块。
+                      ToB agent 字段全部不再展示；productTypeCode / productSize /
+                      accessoryCode 保留（来自 promptOrder，直接显示）。 */}
+                  {(detailDialog.productTypeCode ||
                     detailDialog.productSize ||
                     detailDialog.accessoryCode) && (
                     <div className="col-span-2 mt-1 rounded-md border border-violet-200 bg-violet-50/40 p-2.5">
                       <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-violet-700">
-                        <Briefcase className="h-3.5 w-3.5" />
-                        代理商业务（ToB）
+                        产品规格
                       </div>
-                      <div className="grid grid-cols-2 gap-y-1 gap-x-3 text-xs sm:grid-cols-4">
-                        <div>
-                          <span className="text-muted-foreground">
-                            代理商：
-                          </span>
-                          {detailDialog.agentName || (
-                            <span className="italic text-zinc-400">
-                              {detailDialog.agentId ? "（已删除）" : "未指定"}
-                            </span>
-                          )}
-                        </div>
+                      <div className="grid grid-cols-2 gap-y-1 gap-x-3 text-xs sm:grid-cols-3">
                         <div>
                           <span className="text-muted-foreground">型号：</span>
                           {detailDialog.productTypeCode ?? (
@@ -971,7 +880,7 @@ export function OrdersAdminView() {
                           )}
                         </div>
                         {detailDialog.productTypeCode && (
-                          <div className="col-span-2 sm:col-span-4 text-xs text-muted-foreground">
+                          <div className="col-span-2 sm:col-span-3 text-xs text-muted-foreground">
                             合计：
                             {formatProductSpec({
                               productTypeCode: detailDialog.productTypeCode,
@@ -987,7 +896,7 @@ export function OrdersAdminView() {
                           engravingText: detailDialog.engravingText,
                           engravingExposed: detailDialog.engravingExposed,
                         }) && (
-                          <div className="col-span-2 sm:col-span-4 flex items-center gap-1.5 text-xs">
+                          <div className="col-span-2 sm:col-span-3 flex items-center gap-1.5 text-xs">
                             <Sparkles className="h-3 w-3 text-amber-500" />
                             <span className="text-muted-foreground">
                               用户定制：

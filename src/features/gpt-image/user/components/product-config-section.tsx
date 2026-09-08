@@ -3,7 +3,7 @@
 /**
  * 2026-09-07：产品定制（刻字 / 外露）
  *
- * 终端用户在 /p/[token] 上填（与"尺寸/配件"在创建时由代理商定死语义互补）。
+ * 终端用户在 /p/[token] 上填（与"尺寸/配件"在创建时由 admin 定死语义互补）。
  * 按 order.productTypeCode 的 capabilities 动态渲染：
  * - 没 productTypeCode 或 capabilities.canEngrave=false → 不渲染（ToC 订单 或 冰箱贴）
  * - canEngrave=true → 渲染"是否刻字"开关；开启后渲染刻字文本框 + 外露开关

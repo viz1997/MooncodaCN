@@ -101,7 +101,7 @@ export const deleteOrderAction = withOrderAction("delete")
  *
  * 模板、token、状态、上传内容均锁定，仅允许改：
  * - orderNo / recipientName / platform / uploadCount / imagesPerUpload / regenerateLimit
- * - 2026-08-23 起允许改代理商 / 产品三件套（业务字段）
+ * - 2026-08-23 起允许改产品三件套（业务字段；代理商字段已砍）
  */
 const updateOrderSchema = z.object({
   id: z.string().min(1),
@@ -111,7 +111,6 @@ const updateOrderSchema = z.object({
   uploadCount: z.number().int().min(1).max(50),
   imagesPerUpload: z.number().int().min(1).max(3),
   regenerateLimit: z.number().int().min(0).max(20),
-  agentId: z.string().min(1).max(64).nullable(),
   productTypeCode: z.string().min(1).max(8).nullable(),
   productSize: z.string().min(1).max(8).nullable(),
   accessoryCode: z.string().min(1).max(16).nullable(),

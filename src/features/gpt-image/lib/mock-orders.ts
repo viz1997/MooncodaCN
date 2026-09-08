@@ -52,8 +52,6 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     cancelledAt: null,
     createdAt: ago,
     updatedAt: ago,
-    // 2026-08-23：代理商业务字段（mock 数据默认 ToC）
-    agentId: null,
     productTypeCode: null,
     productSize: null,
     accessoryCode: null,
@@ -94,8 +92,6 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     cancelledAt: null,
     createdAt: ago,
     updatedAt: now,
-    // 2026-08-23：代理商业务字段（mock 数据默认 ToC）
-    agentId: null,
     productTypeCode: null,
     productSize: null,
     accessoryCode: null,
@@ -136,8 +132,6 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     cancelledAt: null,
     createdAt: ago,
     updatedAt: ago,
-    // 2026-08-23：代理商业务字段（mock 数据默认 ToC）
-    agentId: null,
     productTypeCode: null,
     productSize: null,
     accessoryCode: null,
@@ -178,8 +172,6 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     cancelledAt: null,
     createdAt: ago,
     updatedAt: ago,
-    // 2026-08-23：代理商业务字段（mock 数据默认 ToC）
-    agentId: null,
     productTypeCode: null,
     productSize: null,
     accessoryCode: null,
@@ -220,8 +212,6 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     cancelledAt: null,
     createdAt: ago,
     updatedAt: ago,
-    // 2026-08-23：代理商业务字段（mock 数据默认 ToC）
-    agentId: null,
     productTypeCode: null,
     productSize: null,
     accessoryCode: null,
@@ -262,8 +252,6 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     cancelledAt: null,
     createdAt: ago,
     updatedAt: now,
-    // 2026-08-23：代理商业务字段（mock 数据默认 ToC）
-    agentId: null,
     productTypeCode: null,
     productSize: null,
     accessoryCode: null,
@@ -304,8 +292,6 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     cancelledAt: null,
     createdAt: ago,
     updatedAt: now,
-    // 2026-08-23：代理商业务字段（mock 数据默认 ToC）
-    agentId: null,
     productTypeCode: null,
     productSize: null,
     accessoryCode: null,
@@ -346,8 +332,6 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     cancelledAt: now,
     createdAt: ago,
     updatedAt: now,
-    // 2026-08-23：代理商业务字段（mock 数据默认 ToC）
-    agentId: null,
     productTypeCode: null,
     productSize: null,
     accessoryCode: null,
@@ -399,8 +383,6 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     cancelledAt: null,
     createdAt: ago,
     updatedAt: now,
-    // 2026-08-23：代理商业务字段（mock 数据默认 ToC）
-    agentId: null,
     productTypeCode: null,
     productSize: null,
     accessoryCode: null,

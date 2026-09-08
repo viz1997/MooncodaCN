@@ -159,3 +159,45 @@ export function formatCustomization(opts: {
   }
   return parts.join(" · ");
 }
+
+/**
+ * 校验产品三件套（型号 + 尺寸 + 配件）组合是否合法。
+ * 三件套全 null 通过；任一非空就必须组合合法。
+ *
+ * 2026-09-08：从原 `@/features/agent/lib/product-validation` 迁来。
+ * (agent) route group 砍掉后只剩管理员编辑存量订单时还会调用，故放到 gpt-image/lib
+ * 离调用方更近。
+ */
+export function validateProductSpec(
+  productTypeCode: string | null | undefined,
+  productSize: string | null | undefined,
+  accessoryCode: string | null | undefined
+): void {
+  const type = getProductType(productTypeCode);
+  // 型号未指定 → 整套必须 null（避免只写 size 不写 type 这种脏数据）
+  if (!productTypeCode) {
+    if (productSize || accessoryCode) {
+      throw new Error("未选择产品型号时，不能指定尺寸或配件");
+    }
+    return;
+  }
+  // 型号指定了但找不到 → 字典过期或输入拼错
+  if (!type) {
+    throw new Error(`未知的产品型号：${productTypeCode}`);
+  }
+  // 尺寸必须在该型号的 sizes 列表里
+  if (productSize && !type.sizes.includes(productSize)) {
+    throw new Error(
+      `产品型号 ${type.code} 不支持尺寸 ${productSize}cm（可选：${type.sizes.join("/")}cm）`
+    );
+  }
+  // 配件必须在该型号的 accessories 列表里
+  if (
+    accessoryCode &&
+    !type.accessories.includes(accessoryCode as AccessoryCode)
+  ) {
+    throw new Error(
+      `产品型号 ${type.code} 不支持配件 ${accessoryCode}（可选：${type.accessories.join("/") || "无"}）`
+    );
+  }
+}

@@ -3,7 +3,7 @@
  */
 
 import { z } from "zod";
-import { validateProductSpec } from "@/features/agent/lib/product-validation";
+import { validateProductSpec } from "./product-catalog";
 
 /** 单个提示词变量结构（Phase A 起 image-gen 工作台复用） */
 export const promptVariableSchema = z.object({
@@ -58,9 +58,9 @@ export const promptTemplateSchema = z.object({
     .transform((v) => v || "doubao"),
   price: z.number().int().min(0).max(9999).default(0),
   /**
-   * 2026-09-07：关联商品类别（agent workbench 流程要求模板即商品类别）。
+   * 2026-09-07：关联商品类别（管理员下订单时只挑型号）。
    * - 运行时校验对齐 PRODUCT_TYPES 字典（lib/product-catalog.ts）
-   * - nullable 允许 ToC 老模板继续可用（agent 不绑就 workbench 不能用）
+   * - nullable 允许 ToC 老模板继续可用
    */
   productTypeCode: z
     .string()
@@ -109,24 +109,14 @@ export const promptOrderCreateSchema = z
      * null/undefined 表示全新创建。
      */
     replaceOrderId: z.string().min(1).optional(),
-    // ============================================
-    // 2026-08-23：代理商业务（飞书 docx「链接生成管理系统」）
-    // 4 个可选字段，ToB 订单创建时由管理员挑选；ToC 订单全部留空。
-    // 字典见 src/features/gpt-image/lib/product-catalog.ts。
-    // ============================================
-    /** 代理商 ID（指向 agent.id，FK 已设 set null）。空 = ToC 订单 */
-    agentId: z.string().min(1).max(64).optional(),
-    /** 产品型号（R/A/P/RM，单字母） */
+    /** 产品型号（R/A/P/RM/LB，单字母） */
     productTypeCode: z.string().min(1).max(8).optional(),
     /** 尺寸（厘米数字字符串 4/6/8/11） */
     productSize: z.string().min(1).max(8).optional(),
     /** 配件（leather/pvc/bracket），部分型号无配件选项，可选 */
     accessoryCode: z.string().min(1).max(16).optional(),
   })
-  // 2026-09-03：三件套字典组合校验 —— 复用 agent 模块的 validateProductSpec。
-  // ToC 订单允许三件套全 null；只要任一字段非空就跑校验。
-  // 静态 import：实际不构成循环依赖（agent/lib 只依赖 product-catalog，
-  // 不依赖 validation）。
+  // 三件套字典组合校验：ToC 订单允许三件套全 null；只要任一字段非空就跑校验。
   .superRefine((data, ctx) => {
     if (!data.productTypeCode && !data.productSize && !data.accessoryCode) {
       return;

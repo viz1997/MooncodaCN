@@ -16,7 +16,6 @@ import {
   ScrollText,
   ShoppingCart,
   Sparkles,
-  Store,
   Users,
   Wand2,
 } from "lucide-react";
@@ -128,13 +127,6 @@ const MODULE_DEFS: ModuleDef[] = [
     label: "设计师中心",
     icon: Palette,
     description: "任务统计与提现",
-    group: "角色中心",
-  },
-  {
-    key: "agent",
-    label: "代理商中心",
-    icon: Store,
-    description: "推广与佣金提现",
     group: "角色中心",
   },
   {

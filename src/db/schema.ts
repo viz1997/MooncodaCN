@@ -1170,6 +1170,14 @@ export type PromptOrderHistoryTrigger =
 // 代理商表 (Agent) —— 飞书 docx「链接生成管理系统」ToB 业务
 // ============================================
 //
+// ⚠️ 2026-09-08：(agent) 业务已砍掉，以下表 / 列保留**仅为历史数据可查**，
+// 业务代码不再读也不再写。后续清理（DROP 表 / 列）放到 schema cleanup PR。
+//   - agent
+//   - agentPromptTemplate (M2M：代理商 ↔ 模板)
+//   - agentCreditTransaction + agentCreditTxnTypeEnum
+//   - user.agentId
+//   - promptOrder.agentId
+//
 // 2026-09-03 改造（ToB 业务独立化）：
 // 代理商从「admin 替代理商店代下单」演化为「代理商自己登录 + 自下单 +
 // 自己上传参考图 + 自己挑候选」。新建 (agent) route group + agentAction

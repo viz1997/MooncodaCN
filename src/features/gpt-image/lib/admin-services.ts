@@ -9,7 +9,7 @@ import { nanoid } from "nanoid";
 
 import { db } from "@/db";
 import type { PromptOrderPlatform, PromptOrderStatus } from "@/db/schema";
-import { agent, promptOrder, promptTemplate } from "@/db/schema";
+import { promptOrder, promptTemplate } from "@/db/schema";
 import { generateOrderToken } from "./generation-service";
 import {
   countCandidateGroups,
@@ -19,7 +19,7 @@ import {
   parseSelections,
   parseUploadedImages,
 } from "./order-helpers";
-import { getProductType } from "./product-catalog";
+import { getProductType, validateProductSpec } from "./product-catalog";
 
 // ============================================
 // 模板服务
@@ -282,10 +282,14 @@ export async function createOrder(input: {
    */
   replaceOrderId?: string | undefined;
   // ============================================
-  // 2026-08-23：代理商业务 —— ToB 订单可选挂代理商 + 产品三件套。
-  // ToC 订单四个字段全部 undefined。详见 [[agent-module-design]]。
+  // 2026-09-07：管理员创建订单时只挑产品型号，尺寸 + 配件由系统
+  // 按"该型号首选项"自动填入（"链接创建时定死"）。admin 编辑对话框仍可手动改存量订单。
+  // - productTypeCode 没传 → 三件套保持 null，不动
+  // - productTypeCode 传了但 size 空 → 取 type.sizes[0]
+  // - productTypeCode 传了但 accessory 空 → 取 type.accessories[0]（无配件则 null）
+  // 2026-09-08：(agent) route group 已删，不再有"代理商选型号"的入口。
+  // 管理员仍是唯一创建者，promptOrder.agentId 字段写 null。
   // ============================================
-  agentId?: string | undefined;
   productTypeCode?: string | undefined;
   productSize?: string | undefined;
   accessoryCode?: string | undefined;
@@ -300,7 +304,6 @@ export async function createOrder(input: {
       uploadCount: input.uploadCount,
       imagesPerUpload: input.imagesPerUpload,
       regenerateLimit: input.regenerateLimit,
-      agentId: input.agentId ?? null,
       productTypeCode: input.productTypeCode ?? null,
       productSize: input.productSize ?? null,
       accessoryCode: input.accessoryCode ?? null,
@@ -325,25 +328,6 @@ export async function createOrder(input: {
   });
   if (!template) throw new Error("模板不存在");
 
-  // ToB 订单若传 agentId 需校验 agent 存在且启用（避免历史脏数据）
-  if (input.agentId) {
-    const a = await db.query.agent.findFirst({
-      where: eq(agent.id, input.agentId),
-      columns: { id: true, isActive: true },
-    });
-    if (!a || !a.isActive) {
-      throw new Error("代理商不存在或已停用");
-    }
-  }
-
-  // ============================================
-  // 2026-09-07：代理商 / admin 创建订单时只挑产品型号，尺寸 + 配件由系统
-  // 按"该型号首选项"自动填入（"链接创建时定死"）。agent 选型号后不用
-  // 再管尺寸 / 配件；admin 同样简化（admin 编辑对话框仍可手动改存量订单）。
-  // - productTypeCode 没传 → 视为 ToC，三件套保持 null，不动
-  // - productTypeCode 传了但 size 空 → 取 type.sizes[0]
-  // - productTypeCode 传了但 accessory 空 → 取 type.accessories[0]（无配件则 null）
-  // ============================================
   const finalProductTypeCode = input.productTypeCode ?? null;
   let finalProductSize = input.productSize ?? null;
   let finalAccessoryCode = input.accessoryCode ?? null;
@@ -374,7 +358,7 @@ export async function createOrder(input: {
       imagesPerUpload: input.imagesPerUpload,
       regenerateLimit: input.regenerateLimit,
       createdBy: input.createdBy ?? null,
-      agentId: input.agentId ?? null,
+      agentId: null,
       productTypeCode: finalProductTypeCode,
       productSize: finalProductSize,
       accessoryCode: finalAccessoryCode,
@@ -382,18 +366,6 @@ export async function createOrder(input: {
     .returning();
 
   if (!created) throw new Error("创建订单失败");
-
-  // 取代理商名（与 listOrders 形态一致，列表可直接显示）
-  // 仅在 agentId 真存在时查，省一次 DB 调用 —— 走的是 cachedListOrders
-  // 之外的路径，乐观插入前一次性查即可
-  let agentName: string | null = null;
-  if (created.agentId) {
-    const a = await db.query.agent.findFirst({
-      where: eq(agent.id, created.agentId),
-      columns: { name: true },
-    });
-    agentName = a?.name ?? null;
-  }
 
   // 返回 OrderView 形态（含 template），客户端可直接乐观插入列表
   return {
@@ -415,8 +387,6 @@ export async function createOrder(input: {
     cancelledAt: created.cancelledAt?.toISOString() ?? null,
     createdAt: created.createdAt.toISOString(),
     updatedAt: created.updatedAt.toISOString(),
-    agentId: created.agentId,
-    agentName,
     productTypeCode: created.productTypeCode,
     productSize: created.productSize,
     accessoryCode: created.accessoryCode,
@@ -451,16 +421,9 @@ export async function listOrders(filters: {
   createdBy?: string | undefined;
   /** 管理员特权：true 时忽略 createdBy 过滤 */
   skipCreatorFilter?: boolean | undefined;
-  /**
-   * 2026-08-24：代理商业务 —— 仅查某代理商的订单（/admin/agents 跳过来）。
-   * 与 createdBy 同时存在时取交集（理论上同一订单不可能同时有 agentId 和
-   * "另一个用户的 createdBy"，所以场景上是 OR）。
-   */
-  agentId?: string | undefined;
 }) {
   // 显式 LEFT JOIN 一次往返，比 query.findMany({with:{template:true}}) 的
   // 关系查询少一次网络往返（关系查询在 Drizzle 里会拆成 2 条串行 SQL）。
-  // 2026-08-24：再加一次 LEFT JOIN agent 取代理商名，列表展示用。
   const conditions: SQL[] = [];
   const status = filters.status;
   const templateId = filters.templateId;
@@ -469,10 +432,6 @@ export async function listOrders(filters: {
   // 非管理员必须按 createdBy 过滤；管理员显式传 skipCreatorFilter=true 才放行
   if (!filters.skipCreatorFilter && filters.createdBy) {
     conditions.push(eq(promptOrder.createdBy, filters.createdBy));
-  }
-  // 代理商过滤（仅 ToB 订单列表；与 createdBy 互相独立，两者都生效）
-  if (filters.agentId) {
-    conditions.push(eq(promptOrder.agentId, filters.agentId));
   }
   const where = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -500,9 +459,7 @@ export async function listOrders(filters: {
       cancelledAt: promptOrder.cancelledAt,
       createdAt: promptOrder.createdAt,
       updatedAt: promptOrder.updatedAt,
-      // 2026-08-24：代理商 + 产品三件套 + 代理商名
-      agentId: promptOrder.agentId,
-      agentName: agent.name,
+      // 产品三件套
       productTypeCode: promptOrder.productTypeCode,
       productSize: promptOrder.productSize,
       accessoryCode: promptOrder.accessoryCode,
@@ -520,7 +477,6 @@ export async function listOrders(filters: {
     })
     .from(promptOrder)
     .leftJoin(promptTemplate, eq(promptOrder.templateId, promptTemplate.id))
-    .leftJoin(agent, eq(promptOrder.agentId, agent.id))
     .where(where ?? sql`true`)
     .orderBy(desc(promptOrder.createdAt))
     .limit(100);
@@ -548,10 +504,6 @@ export async function listOrders(filters: {
       cancelledAt: o.cancelledAt?.toISOString() ?? null,
       createdAt: o.createdAt.toISOString(),
       updatedAt: o.updatedAt.toISOString(),
-      agentId: o.agentId,
-      // agent LEFT JOIN：agentId=null 时 agentName 也是 null；agentId 在但
-      // agent 被删（FK set null 后不会发生，但留 defensive），agentName=null
-      agentName: o.agentName ?? null,
       productTypeCode: o.productTypeCode,
       productSize: o.productSize,
       accessoryCode: o.accessoryCode,
@@ -635,10 +587,7 @@ export async function findOrderByOrderNoForCreator(
  *
  * 返回最新的 OrderView（与 listOrders 同形），便于客户端乐观更新。
  *
- * 2026-09-03：代理商业务字段字典校验 —— 防直调 API 写脏值。
- *   agentId：若提供必须是启用中的 agent（与 createOrder 对齐）
- *   productTypeCode/productSize/accessoryCode：必须组合合法；用
- *   validateProductSpec 复用 agent 模块的字典校验。
+ * 2026-09-08：(agent) 业务砍掉后只剩三件套字典校验（管理员编辑存量订单时仍可改）。
  */
 export async function updateOrder(input: {
   id: string;
@@ -648,21 +597,13 @@ export async function updateOrder(input: {
   uploadCount: number;
   imagesPerUpload: number;
   regenerateLimit: number;
-  // 2026-08-23：代理商业务字段（nullable = 清空该列；不传 undefined = 不改）
-  agentId?: string | null | undefined;
+  // 三件套字段（nullable = 清空该列；不传 undefined = 不改）
   productTypeCode?: string | null | undefined;
   productSize?: string | null | undefined;
   accessoryCode?: string | null | undefined;
 }) {
-  // 2026-09-03：字典校验（agentId / 三件套）—— 与 createOrder 对齐。
-  // 动态 import 避免循环依赖（agent 模块依赖 gpt-image 的 product-catalog）。
-  const { validateProductSpec } = await import(
-    "@/features/agent/lib/product-validation"
-  );
-
-  // 只有当"要写"的字段（不是 undefined）才参与校验。
-  // 场景：edit 对话框可能单独改 platform 而不动 agentId；这种情况下
-  // 不应该重校验已有三件套。
+  // 三件套字典校验：只有"要写"的字段才参与校验，
+  // 场景：edit 对话框可能单独改 platform 而不动三件套。
   if (
     input.productTypeCode !== undefined ||
     input.productSize !== undefined ||
@@ -675,16 +616,6 @@ export async function updateOrder(input: {
     );
   }
 
-  if (input.agentId) {
-    const a = await db.query.agent.findFirst({
-      where: eq(agent.id, input.agentId),
-      columns: { id: true, isActive: true },
-    });
-    if (!a || !a.isActive) {
-      throw new Error("代理商不存在或已停用");
-    }
-  }
-
   const [updated] = await db
     .update(promptOrder)
     .set({
@@ -694,8 +625,7 @@ export async function updateOrder(input: {
       uploadCount: input.uploadCount,
       imagesPerUpload: input.imagesPerUpload,
       regenerateLimit: input.regenerateLimit,
-      // 4 字段：undefined = 不改；null/值 = 写入
-      ...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
+      // 三件套：undefined = 不改；null/值 = 写入
       ...(input.productTypeCode !== undefined
         ? { productTypeCode: input.productTypeCode }
         : {}),
@@ -725,16 +655,6 @@ export async function updateOrder(input: {
     },
   });
 
-  // 2026-08-24：代理商名（与 listOrders 形态一致；admin 列表 / 编辑对话框都用）
-  let agentName: string | null = null;
-  if (updated.agentId) {
-    const a = await db.query.agent.findFirst({
-      where: eq(agent.id, updated.agentId),
-      columns: { name: true },
-    });
-    agentName = a?.name ?? null;
-  }
-
   const uploaded = parseUploadedImages(updated.uploadedImages);
   const candidates = parseCandidates(updated.candidates);
   const selections = parseSelections(updated.selections);
@@ -758,8 +678,6 @@ export async function updateOrder(input: {
     cancelledAt: updated.cancelledAt?.toISOString() ?? null,
     createdAt: updated.createdAt.toISOString(),
     updatedAt: updated.updatedAt.toISOString(),
-    agentId: updated.agentId,
-    agentName,
     productTypeCode: updated.productTypeCode,
     productSize: updated.productSize,
     accessoryCode: updated.accessoryCode,
