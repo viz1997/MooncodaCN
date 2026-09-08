@@ -6,7 +6,7 @@
  *
  * 流程：
  *   1. 未登录 → 重定向到 /sign-in?callbackUrl=/image-gen
- *   2. 登录后 → server-side fetch 模板 + 草稿，渲染 UserWorkbenchView
+ *   2. 登录后 → server-side 并行 fetch 模板 / 草稿 / 历史订单，渲染 UserWorkbenchView
  *
  * 详细 workbench 步骤（TemplateSelectStep / SpecSelectStep / ResultStep）
  * 在 UserWorkbenchView 客户端组件里展开；本页只负责 RSC 数据装配 + 登录 gate。
@@ -16,13 +16,16 @@
 
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+
+import { auth } from "@/lib/auth";
 import {
   createUserDraftOrderAction,
+  listUserOrderHistoryAction,
   listUserWorkbenchAction,
   submitUserDraftOrderAction,
 } from "@/features/image-gen/actions/workbench";
+
 import { UserWorkbenchView } from "@/features/image-gen/components/user-workbench-view";
-import { auth } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -33,11 +36,15 @@ export default async function ImageGenPage() {
     redirect("/sign-in?callbackUrl=/image-gen");
   }
 
-  // 拉 workbench 入口数据：active 模板 + 当前用户的进行中订单（如有）
-  // action 返回 SafeActionResult，需要 .data 拿负载
-  // schema 为 z.object({}).optional()，调用时直接传 undefined
-  const res = await listUserWorkbenchAction(undefined);
-  const result = res?.data ?? { templates: [], draftOrder: null };
+  // 并行拉数据：workbench 入口 + 用户订单历史。
+  // 两个 action 都返回 SafeActionResult，需要 .data 拿负载；schema 为
+  // z.object({}).optional()，调用时直接传 undefined。
+  const [workbenchRes, historyRes] = await Promise.all([
+    listUserWorkbenchAction(undefined),
+    listUserOrderHistoryAction(undefined),
+  ]);
+  const workbench = workbenchRes?.data ?? { templates: [], draftOrder: null };
+  const history = historyRes?.data ?? { orders: [] };
 
   return (
     <UserWorkbenchView
@@ -46,8 +53,9 @@ export default async function ImageGenPage() {
         name: session.user.name ?? null,
         email: session.user.email ?? null,
       }}
-      templates={result.templates}
-      draftOrder={result.draftOrder}
+      templates={workbench.templates}
+      draftOrder={workbench.draftOrder}
+      historyOrders={history.orders}
       // 把 server actions 透传到客户端组件，避免在 client 里手写 fetch /api/...
       // 三个 action 全部为 protectedAction（需登录），可放心传给 client。
       actions={{

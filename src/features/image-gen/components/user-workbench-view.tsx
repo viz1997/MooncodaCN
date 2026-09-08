@@ -41,6 +41,7 @@ import {
 } from "@/features/gpt-image/lib/product-catalog";
 import type {
   createUserDraftOrderAction,
+  listUserOrderHistoryAction,
   listUserWorkbenchAction,
   submitUserDraftOrderAction,
 } from "@/features/image-gen/actions/workbench";
@@ -57,10 +58,15 @@ type WorkbenchDraft = NonNullable<
   Awaited<ReturnType<typeof listUserWorkbenchAction>>["data"]
 >["draftOrder"];
 
+type HistoryOrders = NonNullable<
+  Awaited<ReturnType<typeof listUserOrderHistoryAction>>["data"]
+>["orders"];
+
 interface UserWorkbenchViewProps {
   user: { id: string; name: string | null; email: string | null };
   templates: WorkbenchTemplates;
   draftOrder: WorkbenchDraft;
+  historyOrders: HistoryOrders;
   actions: {
     createDraft: typeof createUserDraftOrderAction;
     submitDraft: typeof submitUserDraftOrderAction;
@@ -94,10 +100,29 @@ const STATUS_META: Record<
   },
 };
 
+/**
+ * 历史订单状态文案映射（终态）：
+ * - SELECTED: 已提交（按用户语义成功）
+ * - CANCELLED: 取消
+ * - FAILED: 生成失败
+ *
+ * 与草稿 STATUS_META 区分开 —— 草稿是 "进行中" 的颜色（warning/processing），
+ * 历史是 "终态"（success/error/default）。
+ */
+const HISTORY_STATUS_META: Record<
+  string,
+  { label: string; color: string }
+> = {
+  SELECTED: { label: "已提交", color: "success" },
+  CANCELLED: { label: "已取消", color: "default" },
+  FAILED: { label: "生成失败", color: "error" },
+};
+
 export function UserWorkbenchView({
   user,
   templates,
   draftOrder,
+  historyOrders,
   actions,
 }: UserWorkbenchViewProps) {
   const router = useRouter();
@@ -298,6 +323,9 @@ export function UserWorkbenchView({
         />
       </Modal>
 
+      {/* ===== 我的订单历史 ===== */}
+      <HistorySection orders={historyOrders} />
+
       {/* ===== 底部说明 ===== */}
       <footer className="text-xs text-muted-foreground border-t pt-4">
         <p>
@@ -446,5 +474,135 @@ function TemplateCard({
         </div>
       )}
     </button>
+  );
+}
+
+// ============================================
+// 子组件：我的订单历史
+// ============================================
+
+/**
+ * 展示当前登录用户提交过的所有非草稿订单（SELECTED / CANCELLED / FAILED）。
+ * 倒序排（service 层已 desc createdAt）。
+ *
+ * 每行展示：
+ * - 模板封面缩略图
+ * - 订单号 + 模板名
+ * - 状态徽章
+ * - 产品型号（紫色徽章）
+ * - 提交时间 / 取消时间
+ * - 「查看」按钮 → 跳 /p/[token]
+ *
+ * 不做分页：service 层 limit=50，登录用户的实际工作流很难超出。
+ */
+function HistorySection({ orders }: { orders: HistoryOrders }) {
+  if (orders.length === 0) {
+    return (
+      <section>
+        <h2 className="text-lg font-medium mb-3 flex items-center gap-2">
+          <Clock className="h-4 w-4" />
+          我的订单
+          <span className="text-xs text-muted-foreground font-normal">
+            （还没有提交过的订单）
+          </span>
+        </h2>
+      </section>
+    );
+  }
+
+  return (
+    <section>
+      <h2 className="text-lg font-medium mb-3 flex items-center gap-2">
+        <Clock className="h-4 w-4" />
+        我的订单
+        <span className="text-xs text-muted-foreground font-normal">
+          （共 {orders.length} 条 · 最多展示最近 50 条）
+        </span>
+      </h2>
+      <div className="space-y-2">
+        {orders.map((o) => (
+          <HistoryOrderCard key={o.id} order={o} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function HistoryOrderCard({
+  order,
+}: {
+  order: HistoryOrders[number];
+}) {
+  const meta = HISTORY_STATUS_META[order.status] ?? {
+    label: order.status,
+    color: "default",
+  };
+  // 时间显示：SELECTED 用 selectedAt，FAILED/CANCELLED 用 cancelledAt / createdAt
+  const timeLabel =
+    order.selectedAt ?? order.cancelledAt ?? order.createdAt;
+  const timeDate = timeLabel ? new Date(timeLabel) : null;
+  const timeText =
+    order.status === "SELECTED"
+      ? "提交于"
+      : order.status === "CANCELLED"
+        ? "取消于"
+        : "创建于";
+
+  return (
+    <Card
+      size="small"
+      className="hover:border-blue-400 transition-colors"
+    >
+      <div className="flex items-center gap-3">
+        {/* 模板封面 */}
+        <div className="h-12 w-12 rounded-md bg-muted overflow-hidden flex-shrink-0 flex items-center justify-center">
+          {order.template.coverUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={order.template.coverUrl}
+              alt={order.template.name}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <Sparkles className="h-5 w-5 text-muted-foreground" />
+          )}
+        </div>
+        {/* 中部：订单号 + 模板名 + 型号 */}
+        <div className="flex-1 min-w-0 space-y-0.5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge color={meta.color} text={meta.label} />
+            <span className="font-medium text-sm truncate">
+              {order.template.name}
+            </span>
+            {order.productTypeCode && (
+              <Badge color="purple" text={order.productTypeCode} />
+            )}
+          </div>
+          <div className="text-xs text-muted-foreground flex items-center gap-2">
+            <span className="font-mono">{order.orderNo}</span>
+            {order.engravingText && (
+              <span className="italic truncate max-w-[160px]">
+                · 刻字「{order.engravingText}」
+              </span>
+            )}
+          </div>
+        </div>
+        {/* 右侧：时间 + 跳转 */}
+        <div className="text-right space-y-1 flex-shrink-0">
+          <div className="text-xs text-muted-foreground">
+            {timeText}{" "}
+            {timeDate ? timeDate.toLocaleString("zh-CN") : "—"}
+          </div>
+          <a
+            href={`/p/${order.token}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-blue-600 hover:underline inline-flex items-center gap-1"
+          >
+            查看 <ArrowRight className="h-3 w-3" />
+          </a>
+        </div>
+      </div>
+    </Card>
   );
 }

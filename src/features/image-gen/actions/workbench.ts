@@ -143,6 +143,79 @@ export const listUserWorkbenchAction = withWorkbenchAction("list")
   });
 
 // ============================================
+// 历史订单：用户提交过的所有非草稿订单
+// ============================================
+
+/**
+ * 列出当前登录用户提交过的订单（排除 PENDING / GENERATING /
+ * CANDIDATES_READY 草稿 —— 那些在 listUserWorkbenchAction 里另外返回）。
+ * 倒序按 createdAt 排，最多 50 条。
+ *
+ * 与 admin listOrders 的区别：
+ * - 永远 createdBy=ctx.userId（service 层强制），无法 skipCreatorFilter
+ * - 永远不返 prompt 字段（同 listUserWorkbenchAction 理由）
+ * - 不返 history 表内容（用户不该看见自己的尝试次数明细）
+ *
+ * UI 上「我的订单」用。每行展示 orderNo / 模板名 / productTypeCode / status /
+ * 提交时间；点 token 跳 /p/[token] 看完整订单。
+ */
+export const listUserOrderHistoryAction = withWorkbenchAction("listHistory")
+  .schema(z.object({}).optional())
+  .action(async ({ ctx }) => {
+    const orders = await db.query.promptOrder.findMany({
+      where: and(
+        eq(promptOrder.createdBy, ctx.userId),
+        inArray(promptOrder.status, [
+          "SELECTED",
+          "CANCELLED",
+          "FAILED",
+        ])
+      ),
+      orderBy: desc(promptOrder.createdAt),
+      limit: 50,
+      columns: {
+        id: true,
+        orderNo: true,
+        token: true,
+        status: true,
+        productTypeCode: true,
+        productSize: true,
+        accessoryCode: true,
+        engravingText: true,
+        selectedAt: true,
+        cancelledAt: true,
+        createdAt: true,
+      },
+      with: {
+        template: {
+          columns: {
+            id: true,
+            name: true,
+            coverUrl: true,
+          },
+        },
+      },
+    });
+
+    return {
+      orders: orders.map((o) => ({
+        id: o.id,
+        orderNo: o.orderNo,
+        token: o.token,
+        status: o.status,
+        productTypeCode: o.productTypeCode,
+        productSize: o.productSize,
+        accessoryCode: o.accessoryCode,
+        engravingText: o.engravingText ?? null,
+        selectedAt: o.selectedAt?.toISOString() ?? null,
+        cancelledAt: o.cancelledAt?.toISOString() ?? null,
+        createdAt: o.createdAt.toISOString(),
+        template: o.template,
+      })),
+    };
+  });
+
+// ============================================
 // 建草稿
 // ============================================
 
