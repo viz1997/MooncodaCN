@@ -6,6 +6,7 @@
  */
 
 import { and, asc, eq, sql } from "drizzle-orm";
+import { nanoid } from "nanoid";
 
 import { db } from "@/db";
 import {
@@ -87,9 +88,18 @@ export async function getAgentFromDb(id: string): Promise<Agent | null> {
  * 新建代理商
  *
  * ID 由调用方生成（actions 层用 nanoid 12 位），便于跨表引用稳定。
+ *
+ * 2026-09-08：自动生成 imageGenToken（workbench URL token，24 字符），
+ * 调用方未指定时默认生成；保持 schema image_gen_token unique 约束不撞。
+ * 老 agent 行（image_gen_token IS NULL）需要一次性 SQL 回填，
+ * 见 scripts/backfill-agent-image-gen-tokens.sql。
  */
 export async function insertAgentToDb(input: NewAgent): Promise<Agent> {
-  const [row] = await db.insert(agent).values(input).returning();
+  const values: NewAgent = {
+    ...input,
+    imageGenToken: input.imageGenToken ?? nanoid(24),
+  };
+  const [row] = await db.insert(agent).values(values).returning();
   if (!row) {
     throw new Error("新建代理商失败");
   }
