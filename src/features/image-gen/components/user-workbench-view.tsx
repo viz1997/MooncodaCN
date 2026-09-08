@@ -23,7 +23,7 @@
  * 三件事，所以 v0 这个壳就够把流程跑起来。
  */
 
-import { App, Badge, Button, Card, Empty, Spin } from "antd";
+import { App, Badge, Button, Card, Empty, Modal, Select, Spin } from "antd";
 import {
   ArrowRight,
   CheckCircle2,
@@ -36,6 +36,9 @@ import {
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
+import {
+  PRODUCT_TYPES,
+} from "@/features/gpt-image/lib/product-catalog";
 import type {
   createUserDraftOrderAction,
   listUserWorkbenchAction,
@@ -106,26 +109,64 @@ export function UserWorkbenchView({
   const [isPending, startTransition] = useTransition();
 
   /**
-   * 用户点模板卡 → 创建草稿订单 → 刷新页面让 RSC 重新拉数据
+   * 「选型号」弹窗 —— 当模板本身没绑 productTypeCode 时，用户点模板卡
+   * 不直接进草稿，而是弹这个 Modal 让他选型号（或选「不绑型号 = ToC」）。
    *
-   * 不在 client 里维护状态机（上传 / 生成 / 选候选 这些留给后续 PR 的
-   * StepBar），v0 只打通「选模板 → 有草稿」这一段。
+   * productTypeCode 已经由模板绑死的 → 直接跳过 Modal，按模板绑定值进。
    */
-  const handlePickTemplate = (templateId: string) => {
+  const [typePickerOpen, setTypePickerOpen] = useState<{
+    templateId: string;
+    templateName: string;
+  } | null>(null);
+  const [pickerTypeCode, setPickerTypeCode] = useState<string>("");
+
+  /**
+   * 用户点模板卡 → 决定走向：
+   * - 模板本身绑了 productTypeCode → 直接传该值创建草稿
+   * - 模板没绑 → 弹 Modal 让用户选
+   */
+  const handlePickTemplate = (
+    templateId: string,
+    templateProductTypeCode: string | null
+  ) => {
+    if (templateProductTypeCode) {
+      void runCreateDraft(templateId, templateProductTypeCode);
+    } else {
+      setTypePickerOpen({
+        templateId,
+        templateName:
+          templates.find((t) => t.id === templateId)?.name ?? "该模板",
+      });
+      setPickerTypeCode("");
+    }
+  };
+
+  /**
+   * 实际创建草稿 —— 弹窗确认 / 模板绑定分支都走这里。
+   */
+  const runCreateDraft = async (
+    templateId: string,
+    productTypeCode: string | null
+  ) => {
     setPendingTemplateId(templateId);
-    startTransition(async () => {
-      try {
-        const res = await actions.createDraft({ templateId });
-        if (!res?.data) throw new Error("创建草稿失败");
-        message.success("已创建草稿订单");
-        // 刷新 RSC，让 draftOrder 数据重载
-        router.refresh();
-      } catch (e) {
-        message.error(e instanceof Error ? e.message : "创建失败");
-      } finally {
-        setPendingTemplateId(null);
-      }
-    });
+    try {
+      const res = await actions.createDraft({
+        templateId,
+        ...(productTypeCode ? { productTypeCode } : {}),
+      });
+      if (!res?.data) throw new Error("创建草稿失败");
+      message.success(
+        productTypeCode
+          ? `已创建草稿（型号 ${productTypeCode}）`
+          : "已创建草稿订单"
+      );
+      setTypePickerOpen(null);
+      router.refresh();
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : "创建失败");
+    } finally {
+      setPendingTemplateId(null);
+    }
   };
 
   /**
@@ -198,7 +239,7 @@ export function UserWorkbenchView({
           </span>
         </h2>
         {templates.length === 0 ? (
-          <Empty description="暂无可用模板" />
+          <Empty description="暂可用模板" />
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
             {templates.map((t) => (
@@ -212,12 +253,50 @@ export function UserWorkbenchView({
                   draftOrder !== null
                 }
                 loading={pendingTemplateId === t.id}
-                onPick={() => handlePickTemplate(t.id)}
+                onPick={() =>
+                  handlePickTemplate(t.id, t.productTypeCode ?? null)
+                }
               />
             ))}
           </div>
         )}
       </section>
+
+      {/* ===== 产品型号选择弹窗（模板未绑型号时） ===== */}
+      <Modal
+        open={typePickerOpen !== null}
+        title="选择产品型号"
+        okText="确认"
+        cancelText="取消"
+        okButtonProps={{ disabled: !pickerTypeCode }}
+        onCancel={() => {
+          if (pendingTemplateId) return; // 创建中禁止关闭
+          setTypePickerOpen(null);
+          setPickerTypeCode("");
+        }}
+        onOk={() => {
+          if (!typePickerOpen || !pickerTypeCode) return;
+          void runCreateDraft(typePickerOpen.templateId, pickerTypeCode);
+        }}
+        confirmLoading={pendingTemplateId !== null}
+      >
+        <p className="text-sm text-muted-foreground mb-3">
+          模板「{typePickerOpen?.templateName}」未绑定产品型号。选择后会按
+          catalog 自动补齐尺寸 + 配件。
+        </p>
+        <Select
+          className="w-full"
+          placeholder="选择产品型号（不选 = ToC 不绑型号）"
+          value={pickerTypeCode || undefined}
+          onChange={(v) => setPickerTypeCode(v ?? "")}
+          options={PRODUCT_TYPES.map((t) => ({
+            value: t.code,
+            label: `${t.code} · ${t.name}`,
+          }))}
+          showSearch
+          optionFilterProp="label"
+        />
+      </Modal>
 
       {/* ===== 底部说明 ===== */}
       <footer className="text-xs text-muted-foreground border-t pt-4">
@@ -260,6 +339,9 @@ function DraftBanner({
           <div className="flex items-center gap-2">
             <Badge color={meta.color} text={meta.label} />
             <span className="text-sm font-medium">{draft.template.name}</span>
+            {draft.productTypeCode && (
+              <Badge color="purple" text={`型号 ${draft.productTypeCode}`} />
+            )}
             <span className="text-xs text-muted-foreground">
               · token: {draft.token.slice(0, 8)}...
             </span>
@@ -334,7 +416,16 @@ function TemplateCard({
         )}
       </div>
       <div className="space-y-1">
-        <div className="font-medium text-sm truncate">{template.name}</div>
+        <div className="font-medium text-sm truncate flex items-center gap-1.5">
+          <span className="truncate">{template.name}</span>
+          {template.productTypeCode && (
+            <Badge
+              color="purple"
+              text={template.productTypeCode}
+              title={`已绑型号 ${template.productTypeCode}`}
+            />
+          )}
+        </div>
         <div className="text-xs text-muted-foreground line-clamp-2 min-h-[2em]">
           {template.description ?? "—"}
         </div>
