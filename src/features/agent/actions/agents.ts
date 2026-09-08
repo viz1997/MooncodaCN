@@ -11,9 +11,11 @@
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { z } from "zod";
 import { db } from "@/db";
 import { agent as agentTable } from "@/db/schema";
+import { auth } from "@/lib/auth";
 import { adminAction, protectedAction } from "@/lib/safe-action";
 import {
   insertAgentToDb,
@@ -58,8 +60,12 @@ export const listAgentsAdminAction = withAgentAdminAction("listAgents")
 /**
  * 创建
  *
- * name 必填；contact/phone/email/remark 可选；
+ * name / email / password 必填；contact/phone/remark 可选；
  * isActive 默认 true（新建即启用）。
+ *
+ * 2026-09-08：email 必填化 + 新增 password 字段。email 同时作为登录邮箱
+ * （复用 agent.email 列，不再额外存 loginEmail）；password 用于
+ * Better Auth admin 插件 createUser 创建登录账号，绑 user.agentId → agent.id。
  *
  * ID 用 nanoid 12 位，与 prompt_template / photo 风格一致。
  */
@@ -77,13 +83,15 @@ const createAgentSchema = z.object({
     .transform((v) => (v?.trim() ? v.trim() : undefined)),
   email: z
     .string()
+    .min(1, "请输入登录邮箱")
     .max(255, "邮箱过长")
-    .optional()
-    .transform((v) => (v?.trim() ? v.trim() : undefined))
-    .refine(
-      (v) => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v),
-      "请输入有效邮箱"
-    ),
+    .transform((v) => v.trim())
+    .refine((v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), "请输入有效邮箱"),
+  // bcrypt 72 字节上限（Better Auth 内部 hash 用 bcrypt）；最低 8 位平衡安全与记忆成本
+  password: z
+    .string()
+    .min(8, "初始密码至少 8 位")
+    .max(72, "密码过长（最多 72 字节）"),
   remark: z
     .string()
     .max(500, "备注最多500字符")
@@ -91,23 +99,66 @@ const createAgentSchema = z.object({
     .transform((v) => (v?.trim() ? v.trim() : undefined)),
 });
 
-export type CreateAgentInput = z.infer<typeof createAgentSchema>;
+export type CreateAgentInput = z.input<typeof createAgentSchema>;
 
 export const createAgentAdminAction = withAgentAdminAction("createAgent")
   .schema(createAgentSchema)
   .action(async ({ parsedInput }) => {
     const id = `AG_${nanoid(12)}`;
-    const agent = await insertAgentToDb({
-      id,
-      name: parsedInput.name,
-      ...(parsedInput.contact ? { contact: parsedInput.contact } : {}),
-      ...(parsedInput.phone ? { phone: parsedInput.phone } : {}),
-      ...(parsedInput.email ? { email: parsedInput.email } : {}),
-      ...(parsedInput.remark ? { remark: parsedInput.remark } : {}),
-      isActive: true,
-    });
-    revalidatePath("/admin/agents");
-    return { agent };
+    try {
+      // Step 1: INSERT agent 行（自己 tx，立即 commit）
+      const agent = await insertAgentToDb({
+        id,
+        name: parsedInput.name,
+        email: parsedInput.email,
+        ...(parsedInput.contact ? { contact: parsedInput.contact } : {}),
+        ...(parsedInput.phone ? { phone: parsedInput.phone } : {}),
+        ...(parsedInput.remark ? { remark: parsedInput.remark } : {}),
+        isActive: true,
+      });
+
+      // Step 2: Better Auth admin 插件 createUser（内部管 user+account 表）
+      // - user.agentId = agent.id：让代理商能用该 user 登录后访问 /p/agent/[token]
+      // - role: "user"：代理商不是平台 admin
+      // - needsVerification: false / emailVerified: true：admin 亲自设的密码，无需邮件验证
+      await auth.api.createUser({
+        headers: await headers(),
+        body: {
+          name: parsedInput.name,
+          email: parsedInput.email,
+          password: parsedInput.password,
+          role: "user",
+          data: {
+            agentId: agent.id,
+            needsVerification: false,
+            emailVerified: true,
+          },
+        },
+      });
+
+      revalidatePath("/admin/agents");
+      revalidatePath("/admin/users");
+      // 把凭证返回给 UI，让 admin 一次性看到密码并交付给代理商
+      return {
+        agent,
+        credentials: {
+          email: parsedInput.email,
+          password: parsedInput.password,
+        },
+      };
+    } catch (err) {
+      // Step 1 已成功但 Step 2 失败：手动回滚 agent 行（createUser 用 BA 自有连接，
+      // 不能复用外部 db.transaction）
+      await db
+        .delete(agentTable)
+        .where(eq(agentTable.id, id))
+        .catch(() => {});
+      const message = err instanceof Error ? err.message : "创建代理商失败";
+      if (/already exists/i.test(message)) {
+        throw new Error("该邮箱已被注册，请更换邮箱");
+      }
+      throw new Error(message);
+    }
   });
 
 /**
