@@ -24,6 +24,7 @@ import {
   createTemplateAction,
   updateTemplateAction,
 } from "@/features/gpt-image/actions/templates";
+import { PRODUCT_TYPES } from "@/features/gpt-image/lib/product-catalog";
 import {
   CANDIDATE_COUNTS,
   IMAGE_SIZES,
@@ -75,6 +76,8 @@ export function TemplateFormDialog({
   const [variables, setVariables] = useState<PromptVariable[]>([]);
   const [model, setModel] = useState<string>("doubao");
   const [price, setPrice] = useState<number>(0);
+  // 2026-09-07：关联商品类别（agent workbench 必填）
+  const [productTypeCode, setProductTypeCode] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -92,6 +95,7 @@ export function TemplateFormDialog({
       setVariables(template.variables ?? []);
       setModel(template.model ?? "doubao");
       setPrice(template.price ?? 0);
+      setProductTypeCode(template.productTypeCode ?? null);
     } else {
       setName("");
       setDescription("");
@@ -104,6 +108,7 @@ export function TemplateFormDialog({
       setVariables([]);
       setModel("doubao");
       setPrice(0);
+      setProductTypeCode(null);
     }
   }, [template]);
 
@@ -199,6 +204,8 @@ export function TemplateFormDialog({
         variables: cleanedVars,
         model: model || "doubao",
         price,
+        // 2026-09-07：关联商品类别（workbench 必填；空字符串 → null）
+        productTypeCode: productTypeCode ?? null,
       };
       if (template) {
         const res = await updateTemplateAction({
@@ -473,6 +480,35 @@ export function TemplateFormDialog({
             </p>
           </Form.Item>
         </div>
+
+        {/* 2026-09-07：关联商品类别（workbench 流程用） */}
+        <Form.Item
+          label={
+            <span>
+              关联商品类别{" "}
+              <span className="text-xs text-muted-foreground">
+                （agent workbench 用）
+              </span>
+            </span>
+          }
+          className="!mb-0"
+        >
+          <Select
+            allowClear
+            value={productTypeCode ?? undefined}
+            onChange={(v) => setProductTypeCode(v ?? null)}
+            placeholder="无（workbench 无法选用此模板）"
+            className="w-full"
+            options={PRODUCT_TYPES.map((t) => ({
+              value: t.code,
+              label: `${t.code} · ${t.name}`,
+            }))}
+          />
+          <p className="text-xs text-muted-foreground mt-1">
+            代理商 workbench 提交订单时按此规格校验 + 扣减积分。 留空 = ToC
+            老模板继续可用，agent 不能选。
+          </p>
+        </Form.Item>
 
         <Form.Item label="封面图 URL（可选）" className="!mb-0">
           <Input

@@ -11,9 +11,15 @@
  * 服务端校验在 actions 层再做一遍（next-safe-action schema）。
  *
  * 2026-08-23：shadcn → antd 风格统一（Modal + Input + App.useApp().message）
+ *
+ * 2026-09-07：edit 模式新增三块：
+ * - imageGenToken 显示 + 复制链接按钮
+ * - creditBalance 显示 + 充值/扣款按钮（弹出 AgentCreditDialog）
+ * - 可服务模板 M2M 编辑（AgentTemplatesSelector）
  */
 
-import { App, Button, Input, Modal } from "antd";
+import { App, Button, Divider, Input, Modal, Tag } from "antd";
+import { Copy } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import type { Agent } from "@/db/schema";
@@ -23,6 +29,9 @@ import {
   type UpdateAgentInput,
   updateAgentAdminAction,
 } from "@/features/agent/actions/agents";
+
+import { AgentCreditDialog } from "./agent-credit-dialog";
+import { AgentTemplatesSelector } from "./agent-templates-selector";
 
 type Mode = "create" | "edit";
 
@@ -70,12 +79,28 @@ export function AgentFormDialog({
   const { message } = App.useApp();
   const [form, setForm] = useState<FormState>(EMPTY);
   const [submitting, setSubmitting] = useState(false);
+  const [creditDialogOpen, setCreditDialogOpen] = useState(false);
 
   // 打开时重置 / 回填
   useEffect(() => {
     if (!open) return;
     setForm(mode === "edit" && agent ? fromAgent(agent) : EMPTY);
   }, [open, mode, agent]);
+
+  const workbenchUrl =
+    agent?.imageGenToken && typeof window !== "undefined"
+      ? `${window.location.origin}/p/agent/${agent.imageGenToken}`
+      : null;
+
+  const handleCopyLink = async () => {
+    if (!workbenchUrl) return;
+    try {
+      await navigator.clipboard.writeText(workbenchUrl);
+      message.success("已复制 workbench 链接");
+    } catch {
+      message.error("复制失败，请手动选中复制");
+    }
+  };
 
   const update = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -255,7 +280,78 @@ export function AgentFormDialog({
             rows={3}
           />
         </div>
+
+        {/* 2026-09-07：edit 模式才展示 workbench / 账本 / 模板三块 */}
+        {mode === "edit" && agent && (
+          <>
+            <Divider style={{ margin: "8px 0 16px" }} />
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium leading-none">
+                Workbench 链接
+              </label>
+              <div className="flex items-center gap-2">
+                <Input
+                  value={workbenchUrl ?? "(未生成)"}
+                  readOnly
+                  className="!font-mono !text-xs"
+                />
+                <Button
+                  icon={<Copy className="h-3.5 w-3.5" />}
+                  disabled={!workbenchUrl}
+                  onClick={handleCopyLink}
+                >
+                  复制
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                代理商登录后访问此链接进入 workbench。
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium leading-none">
+                积分余额
+              </label>
+              <div className="flex items-center gap-3 rounded-md border bg-violet-500/5 px-3 py-2">
+                <Tag color="violet" className="!m-0">
+                  ¥{agent.creditBalance}
+                </Tag>
+                <span className="text-[11px] text-muted-foreground flex-1">
+                  workbench 提交订单时按模板价格扣减
+                </span>
+                <Button
+                  size="small"
+                  type="default"
+                  onClick={() => setCreditDialogOpen(true)}
+                >
+                  充值 / 扣款
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium leading-none">
+                可服务商品类别（提示词模板）
+              </label>
+              <p className="text-[11px] text-muted-foreground">
+                代理商在 workbench 只能选择已勾选的模板生成效果图。
+              </p>
+              <AgentTemplatesSelector agentId={agent.id} onSaved={onSaved} />
+            </div>
+          </>
+        )}
       </div>
+
+      {/* 子对话框：账本管理（仅 edit 模式） */}
+      {mode === "edit" && agent && (
+        <AgentCreditDialog
+          open={creditDialogOpen}
+          agentId={agent.id}
+          agentName={agent.name}
+          onOpenChange={setCreditDialogOpen}
+        />
+      )}
     </Modal>
   );
 }

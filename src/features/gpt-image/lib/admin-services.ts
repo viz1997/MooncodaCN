@@ -55,6 +55,8 @@ export async function listTemplatesWithCounts() {
     variables: t.variables,
     model: t.model,
     price: t.price,
+    // 2026-09-07：商品类别（agent workbench 用）
+    productTypeCode: t.productTypeCode,
     createdAt: t.createdAt.toISOString(),
     updatedAt: t.updatedAt.toISOString(),
     orderCount: countMap.get(t.id) ?? 0,
@@ -85,6 +87,8 @@ export async function listActiveTemplatesForOrderCreate() {
       variables: promptTemplate.variables,
       model: promptTemplate.model,
       price: promptTemplate.price,
+      // 2026-09-07：商品类别
+      productTypeCode: promptTemplate.productTypeCode,
       createdAt: promptTemplate.createdAt,
       updatedAt: promptTemplate.updatedAt,
     })
@@ -105,6 +109,8 @@ export async function listActiveTemplatesForOrderCreate() {
     variables: t.variables,
     model: t.model,
     price: t.price,
+    // 2026-09-07：商品类别
+    productTypeCode: t.productTypeCode,
     createdAt: t.createdAt.toISOString(),
     updatedAt: t.updatedAt.toISOString(),
   }));
@@ -131,6 +137,8 @@ export async function listActivePromptTemplatesForWorkbench() {
       variables: promptTemplate.variables,
       model: promptTemplate.model,
       price: promptTemplate.price,
+      // 2026-09-07：商品类别
+      productTypeCode: promptTemplate.productTypeCode,
       createdAt: promptTemplate.createdAt,
       updatedAt: promptTemplate.updatedAt,
     })
@@ -151,6 +159,8 @@ export async function listActivePromptTemplatesForWorkbench() {
     variables: t.variables,
     model: t.model,
     price: t.price,
+    // 2026-09-07：商品类别
+    productTypeCode: t.productTypeCode,
     createdAt: t.createdAt.toISOString(),
     updatedAt: t.updatedAt.toISOString(),
   }));
@@ -170,6 +180,8 @@ export async function createTemplate(input: {
   variables?: import("@/db/image-gen-types").PromptVariable[];
   model?: string | null;
   price?: number;
+  // 2026-09-07：关联商品类别（workbench 流程用）
+  productTypeCode?: string | null;
 }) {
   const [created] = await db
     .insert(promptTemplate)
@@ -186,6 +198,7 @@ export async function createTemplate(input: {
       variables: input.variables ?? [],
       model: input.model ?? "doubao",
       price: input.price ?? 0,
+      productTypeCode: input.productTypeCode ?? null,
     })
     .returning();
 
@@ -209,6 +222,8 @@ export async function updateTemplate(
     variables?: import("@/db/image-gen-types").PromptVariable[] | undefined;
     model?: string | null | undefined;
     price?: number | undefined;
+    // 2026-09-07：关联商品类别
+    productTypeCode?: string | null | undefined;
   }>
 ) {
   if (Object.keys(data).length === 0) throw new Error("无字段需要更新");

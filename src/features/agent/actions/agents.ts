@@ -8,17 +8,20 @@
  * - 其余（list / create / update / setActive）：adminAction，要求 admin 角色
  */
 
+import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-
+import { db } from "@/db";
+import { agent as agentTable } from "@/db/schema";
 import { adminAction, protectedAction } from "@/lib/safe-action";
-
 import {
   insertAgentToDb,
   listActiveAgentsFromDb,
   listAgentsFromDb,
+  listAgentTemplatesFromDb,
   setAgentActiveInDb,
+  setAgentPromptTemplatesInDb,
   updateAgentInDb,
 } from "../lib/db-agents";
 
@@ -175,4 +178,72 @@ export const setAgentActiveAdminAction = withAgentAdminAction("setAgentActive")
     }
     revalidatePath("/admin/agents");
     return { agent: updated };
+  });
+
+// ============================================
+// 2026-09-07：代理商 ↔ 模板 M2M 编辑
+// ============================================
+
+/**
+ * 查询 agent 已分配的模板 id 列表（agent 编辑页 / workbench 模板选择器）
+ *
+ * 走 protectedAction 而非 adminAction：因为 workbench 入口需要查自己
+ * 的模板列表。admin 后台查任意 agent 的授权也走这里。
+ */
+export const listAgentTemplatesAction = withAgentProtectedAction(
+  "listAgentTemplates"
+)
+  .schema(z.object({ agentId: z.string().min(1) }))
+  .action(async ({ parsedInput }) => {
+    const rows = await listAgentTemplatesFromDb(parsedInput.agentId);
+    return {
+      templateIds: rows.map((r) => r.promptTemplateId),
+    };
+  });
+
+/**
+ * 替换 agent 的可服务模板集合（全删全插，幂等）。
+ *
+ * 仅 adminAction：业务侧不允许 agent 自己改授权范围。
+ */
+export const setAgentPromptTemplatesAdminAction = withAgentAdminAction(
+  "setAgentPromptTemplates"
+)
+  .schema(
+    z.object({
+      agentId: z.string().min(1),
+      templateIds: z.array(z.string().min(1)).max(200, "一次最多 200 个模板"),
+    })
+  )
+  .action(async ({ parsedInput }) => {
+    // 去重保持幂等
+    const uniq = Array.from(new Set(parsedInput.templateIds));
+    await setAgentPromptTemplatesInDb(parsedInput.agentId, uniq);
+    revalidatePath("/admin/agents");
+    return { agentId: parsedInput.agentId, count: uniq.length };
+  });
+
+/**
+ * 2026-09-07：当前登录代理商查自己的 workbench token（用于 portal 跳 workbench）。
+ *
+ * agentWorkbenchUrl = `/p/agent/{imageGenToken}`。
+ * 仅当 ctx.agentId 存在时返回（非 agent 账号返回 null）。
+ */
+export const getMyAgentWorkbenchTokenAction = withAgentProtectedAction(
+  "getMyAgentWorkbenchToken"
+)
+  .schema(z.void().optional())
+  .action(async ({ ctx }) => {
+    const agentId = (ctx as { agentId?: string | null }).agentId;
+    if (!agentId) {
+      return { token: null as string | null };
+    }
+    const row = await db.query.agent.findFirst({
+      where: eq(agentTable.id, agentId),
+      columns: { imageGenToken: true, isActive: true },
+    });
+    if (!row || !row.isActive) {
+      return { token: null as string | null };
+    }
+    return { token: row.imageGenToken };
   });

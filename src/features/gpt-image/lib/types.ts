@@ -54,6 +54,12 @@ export interface PromptTemplateView {
    * gpt-image 用户端无消费。0 = 免费。
    */
   price?: number;
+  /**
+   * 2026-09-07：关联商品类别（R/A/P/RM/LB）。agent workbench 流程必填，
+   * 提交订单时按此校验 productSize/accessoryCode 并扣减积分。
+   * null = ToC 老模板（workbench 不能选）。
+   */
+  productTypeCode?: string | null;
   createdAt: string;
   updatedAt: string;
   /** 关联订单数（管理端列表用） */

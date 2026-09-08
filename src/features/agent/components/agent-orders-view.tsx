@@ -22,23 +22,20 @@ import {
   Copy,
   ExternalLink,
   Eye,
-  PackagePlus,
   RefreshCw,
   Search,
+  Sparkles,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { agentListTemplatesAction } from "@/features/agent/actions/agent-portal";
+import { getMyAgentWorkbenchTokenAction } from "@/features/agent/actions/agents";
 import { formatProductSpec } from "@/features/gpt-image/lib/product-catalog";
 import {
   ORDER_STATUS_LABELS,
   type OrderStatus,
   type OrderView,
-  type PromptTemplateView,
 } from "@/features/gpt-image/lib/types";
 import { useRouter } from "@/i18n/routing";
 import { useSessionContext } from "@/lib/auth/session-context";
-
-import { AgentOrderFormDialog } from "./agent-order-form-dialog";
 
 export function AgentOrdersView() {
   const { message } = App.useApp();
@@ -47,12 +44,8 @@ export function AgentOrdersView() {
   const agentId = user?.agentId ?? null;
 
   const [orders, setOrders] = useState<OrderView[]>([]);
-  const [templates, setTemplates] = useState<PromptTemplateView[]>([]);
-  const [templatesLoading, setTemplatesLoading] = useState(true);
-  const [templatesError, setTemplatesError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [dialogOpen, setDialogOpen] = useState(false);
   const [filterStatus, setFilterStatus] = useState<string>("ALL");
   const [search, setSearch] = useState("");
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
@@ -77,42 +70,40 @@ export function AgentOrdersView() {
     [message]
   );
 
-  const fetchTemplates = useCallback(async () => {
-    setTemplatesLoading(true);
-    setTemplatesError(null);
-    try {
-      const res = await agentListTemplatesAction();
-      if (res?.data?.templates) setTemplates(res.data.templates);
-      else throw new Error("返回数据格式异常");
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "未知错误";
-      setTemplatesError(msg);
-      message.error(`模板加载失败：${msg}`);
-    } finally {
-      setTemplatesLoading(false);
-    }
-  }, [message]);
-
   useEffect(() => {
     void fetchOrders();
-    void fetchTemplates();
-  }, [fetchOrders, fetchTemplates]);
+  }, [fetchOrders]);
 
   const handleRefresh = useCallback(async () => {
     if (refreshing) return;
     setRefreshing(true);
     try {
-      await Promise.all([fetchOrders({ silent: true }), fetchTemplates()]);
+      await fetchOrders({ silent: true });
     } finally {
       setRefreshing(false);
     }
-  }, [fetchOrders, fetchTemplates, refreshing]);
+  }, [fetchOrders, refreshing]);
 
-  const handleCreated = (order: OrderView) => {
-    setOrders((prev) => [order, ...prev]);
-    // 创建成功后跳转到订单公开链接页（代理商自己上传参考图）
-    router.push(`/p/${order.token}`);
-  };
+  /**
+   * 2026-09-07：代理商跳到 workbench 创建新订单。
+   *
+   * 替代原"新建订单"按钮：原 AgentOrderFormDialog 是 agent 当 admin 填规格
+   * 创建订单的流程，与 workbench "先选模板生成 → 再选规格" 的语义重复。
+   * 跳 workbench 是统一入口，spec 由生成后的 SelectStep 阶段填写。
+   */
+  const handleOpenWorkbench = useCallback(async () => {
+    try {
+      const res = await getMyAgentWorkbenchTokenAction();
+      if (!res?.data?.token) {
+        message.error("未配置 workbench 链接，请联系管理员");
+        return;
+      }
+      window.location.href = `/p/agent/${res.data.token}`;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "跳转失败";
+      message.error(msg);
+    }
+  }, [message]);
 
   const copyLink = async (token: string) => {
     const url = `${window.location.origin}/p/${token}`;
@@ -172,11 +163,11 @@ export function AgentOrdersView() {
           </Button>
           <Button
             type="primary"
-            onClick={() => setDialogOpen(true)}
-            icon={<PackagePlus className="h-4 w-4" />}
+            onClick={() => void handleOpenWorkbench()}
+            icon={<Sparkles className="h-4 w-4" />}
             className="!bg-violet-600 hover:!bg-violet-700"
           >
-            新建订单
+            进入 Workbench
           </Button>
         </div>
       </div>
@@ -325,16 +316,6 @@ export function AgentOrdersView() {
           </table>
         </div>
       )}
-
-      <AgentOrderFormDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        templates={templates}
-        templatesLoading={templatesLoading}
-        templatesError={templatesError}
-        onRetryTemplates={fetchTemplates}
-        onCreated={handleCreated}
-      />
     </div>
   );
 }

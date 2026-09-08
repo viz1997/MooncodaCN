@@ -7,6 +7,7 @@ import {
   json,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -939,6 +940,13 @@ export const promptTemplate = pgTable("prompt_template", {
    * 详见 [[gpt-image-output-mode]]
    */
   outputMode: text("output_mode").notNull().default("grid"),
+  /**
+   * 2026-09-07：关联商品类别（与 PRODUCT_TYPES 字典对齐，运行时校验）。
+   * agent workbench 流程里模板即商品类别：模板选完后产品型号由本字段决定，
+   * SpecSelectStep 据此渲染 productSize / accessoryCode / engraving 等表单。
+   * nullable 允许 admin 临时创建"未绑定商品"的模板（workbench 不可用但 ToC 仍可用）。
+   */
+  productTypeCode: text("product_type_code"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -970,7 +978,13 @@ export const promptOrder = pgTable(
   "prompt_order",
   {
     id: text("id").primaryKey(),
-    orderNo: text("order_no").notNull(),
+    /**
+     * 业务唯一订单号。
+     * schema 这里丢了 .unique()（drizzle/0001_orange_joystick.sql 行 21-22
+     * 仍带 prompt_order_order_no_unique UNIQUE 约束）—— 顺手补回避免
+     * drizzle-kit generate 误删 DB 端的唯一性。
+     */
+    orderNo: text("order_no").notNull().unique(),
     templateId: text("template_id")
       .notNull()
       .references(() => promptTemplate.id, { onDelete: "restrict" }),
@@ -1185,12 +1199,122 @@ export const agent = pgTable("agent", {
   email: text("email"),
   remark: text("remark"),
   isActive: boolean("is_active").notNull().default(true),
+  /**
+   * 2026-09-07：代理商 workbench 入口 token。
+   * URL = /p/agent/{imageGenToken}，per-agent 持久 token，admin 可在
+   * agent 编辑页查看 / 复制链接发给代理商。迁移时用 nanoid 回填已存在的
+   * active agent。nullable 允许"暂未发放"的代理商暂时无链接。
+   */
+  imageGenToken: text("image_gen_token").unique(),
+  /**
+   * 2026-09-07：代理商专属账本余额（与 user 账本物理隔离）。
+   * 单位"元"，与 promptTemplate.price 同单位。workbench 提交订单时按
+   * template.price 一次性扣减；不足则拒绝提交。
+   * 不使用双表账本（FIFO 批次 / 过期），依赖 agent_credit_transaction
+   * 追加日志做审计对账。top-up / 手动调整走 admin 端 action。
+   */
+  creditBalance: integer("credit_balance").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 export type Agent = typeof agent.$inferSelect;
 export type NewAgent = typeof agent.$inferInsert;
+
+// ============================================
+// 2026-09-07：代理商专属账本 —— agent ↔ promptTemplate 多对多 + 流水日志
+// ============================================
+//
+// agentPromptTemplate：代理商可服务的"商品类别"白名单。
+// - 与 promptOrder.agentId 的区别：promptOrder.agentId 记录"这单归哪个代理
+//   商"，本表记录"这个代理商能服务哪些模板"。前者是订单归属，后者是能力授予。
+// - onDelete: cascade：删 agent / 删 template 时中间表行失去意义。
+//
+// agentCreditTransaction：账本流水日志。
+// - amount 字段带符号：topup 写正数，debit 写负数；求和即可对账。
+// - orderId 可选：topup 时为 null，debit 时指向对应订单。
+// - 不做双表镜像（不引入 FIFO 批次 / 过期）：代理商无套餐过期业务。
+// ============================================
+
+/**
+ * 代理商 ↔ 提示词模板 多对多中间表。
+ * 物理意义：代理商"代理的商品类别"白名单。
+ * 决策记录：见 [[agent-workbench-plan]]。
+ */
+export const agentPromptTemplate = pgTable(
+  "agent_prompt_template",
+  {
+    agentId: text("agent_id")
+      .notNull()
+      .references((): AnyPgColumn => agent.id, { onDelete: "cascade" }),
+    promptTemplateId: text("prompt_template_id")
+      .notNull()
+      .references(() => promptTemplate.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.agentId, t.promptTemplateId] }),
+    agentIdx: index("apt_agent_idx").on(t.agentId),
+    templateIdx: index("apt_template_idx").on(t.promptTemplateId),
+  })
+);
+
+export type AgentPromptTemplate = typeof agentPromptTemplate.$inferSelect;
+export type NewAgentPromptTemplate = typeof agentPromptTemplate.$inferInsert;
+
+/**
+ * 账本流水类型枚举：topup（充值）/ debit（消费）。
+ * amount 字段带符号：topup 存正整数，debit 存负整数；
+ * 对账时 SUM(amount) WHERE agent_id = ? 应等于当前 creditBalance。
+ */
+export const agentCreditTxnTypeEnum = pgEnum("agent_credit_txn_type", [
+  "topup",
+  "debit",
+]);
+
+/**
+ * 代理商账本流水日志。
+ *
+ * @field id - 流水 ID（nanoid）
+ * @field agentId - 归属代理商（FK，级联删）
+ * @field type - topup / debit
+ * @field amount - 金额（topup 正数 / debit 负数）
+ * @field orderId - 关联订单（可选，topup 时为 null）
+ * @field note - 备注（充值时 admin 填的备注 / 消费时为模板名）
+ * @field createdAt - 流水时间
+ */
+export const agentCreditTransaction = pgTable(
+  "agent_credit_transaction",
+  {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id")
+      .notNull()
+      .references((): AnyPgColumn => agent.id, { onDelete: "cascade" }),
+    type: agentCreditTxnTypeEnum("type").notNull(),
+    amount: integer("amount").notNull(),
+    /**
+     * 关联订单。可空：topup 时无订单归属。
+     * onDelete set null：订单删除后保留审计流水但解除关联。
+     */
+    orderId: text("order_id").references(() => promptOrder.id, {
+      onDelete: "set null",
+    }),
+    note: text("note"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("act_agent_created_idx").on(t.agentId, t.createdAt),
+    index("act_order_idx").on(t.orderId),
+  ]
+);
+
+export type AgentCreditTransaction = typeof agentCreditTransaction.$inferSelect;
+export type NewAgentCreditTransaction =
+  typeof agentCreditTransaction.$inferInsert;
+
+/** 代理商账本流水类型 */
+export type AgentCreditTxnType =
+  (typeof agentCreditTxnTypeEnum.enumValues)[number];
 
 // ============================================
 // 画布内置渠道生成任务表 (CanvasRemoteJob)

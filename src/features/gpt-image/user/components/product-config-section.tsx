@@ -95,7 +95,7 @@ export function ProductConfigSection({
   // 编辑模式：本地草稿 + 保存按钮
   const dirty =
     (engrave ? engravingText.trim() : "") !==
-    (order.engravingText?.trim() ?? "") ||
+      (order.engravingText?.trim() ?? "") ||
     engravingExposed !== (order.engravingExposed === true);
 
   const handleSave = async () => {

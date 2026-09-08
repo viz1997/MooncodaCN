@@ -16,6 +16,7 @@ import { Input as AntdInput, App, Modal } from "antd";
  * 所以 props 类型是 PromptTemplateView[]，不再依赖 ProductEffect 类型。
  */
 
+import localforage from "localforage";
 import {
   BookmarkPlus,
   BookOpen,
@@ -97,7 +98,6 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { resizeImage, wrapBlobAsFile } from "@/lib/image-client-resize";
 import { cn } from "@/lib/utils";
-import localforage from "localforage";
 
 // ============ 类型 ============
 interface UploadedImage {
@@ -400,9 +400,7 @@ async function evictOldStitched(): Promise<void> {
       })
     );
     items.sort((a, b) => b.ts - a.ts);
-    const toRemove = items
-      .slice(STITCHED_KEEP_LIMIT)
-      .map((i) => i.k);
+    const toRemove = items.slice(STITCHED_KEEP_LIMIT).map((i) => i.k);
     await Promise.all(toRemove.map((k) => stitchedStore.removeItem(k)));
   } catch (err) {
     console.warn("[workbench] evict old stitched failed:", err);
@@ -1517,8 +1515,7 @@ export function GenerateWorkbenchView({
       // 2026-09-07：开关读 submission.autoStitchedAtSubmit（提交瞬间），不读
       // React state autoStitch（30s 后可能已被用户切换）。targetSubmission
       // 缺失时（异常 hydrate）fallback 到 state autoStitch。
-      const shouldStitch =
-        targetSubmission?.autoStitchedAtSubmit ?? autoStitch;
+      const shouldStitch = targetSubmission?.autoStitchedAtSubmit ?? autoStitch;
       let stitchedComposite: string | undefined;
       if (shouldStitch && !isTemplateGrid && resultUrls.length >= 2) {
         try {

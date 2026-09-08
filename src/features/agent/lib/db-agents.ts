@@ -5,10 +5,18 @@
  * 列表 / 创建 / 更新 / 启停 全部走这里，UI 与 server actions 都共享同一份映射。
  */
 
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { type Agent, agent, type NewAgent, promptOrder } from "@/db/schema";
+import {
+  type Agent,
+  type AgentPromptTemplate,
+  agent,
+  agentPromptTemplate,
+  type NewAgent,
+  promptOrder,
+  promptTemplate,
+} from "@/db/schema";
 // NewAgent 仅在 insertAgentToDb 签名里用到
 
 /**
@@ -139,4 +147,136 @@ export async function setAgentActiveInDb(
 export async function deleteAgentFromDb(id: string): Promise<boolean> {
   const rows = await db.delete(agent).where(eq(agent.id, id)).returning();
   return rows.length > 0;
+}
+
+// ============================================
+// 2026-09-07：agent ↔ promptTemplate M2M 中间表辅助函数
+// ============================================
+
+/**
+ * 读取 agent 允许的 promptTemplate 完整记录。
+ *
+ * 与 listActiveTemplatesForOrderCreate 不同：本函数带 agentId 过滤，
+ * 只返回 agent_prompt_template 表里有授权的模板。
+ */
+export async function listAgentTemplatesFromDb(
+  agentId: string
+): Promise<AgentPromptTemplate[]> {
+  return db.query.agentPromptTemplate.findMany({
+    where: eq(agentPromptTemplate.agentId, agentId),
+  });
+}
+
+/**
+ * 替换 agent 的可服务模板集合（全删全插，幂等）。
+ *
+ * 决策：用"先全删再插入"而不是 diff + patch，原因是 agent 端 UI 用
+ * antd Checkbox.Group 一次性提交完整选中列表，幂等简化逻辑。
+ * 模板数量小（通常 < 20），性能无压力。
+ */
+export async function setAgentPromptTemplatesInDb(
+  agentId: string,
+  templateIds: string[]
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx
+      .delete(agentPromptTemplate)
+      .where(eq(agentPromptTemplate.agentId, agentId));
+    if (templateIds.length > 0) {
+      await tx.insert(agentPromptTemplate).values(
+        templateIds.map((promptTemplateId) => ({
+          agentId,
+          promptTemplateId,
+        }))
+      );
+    }
+  });
+}
+
+/**
+ * 校验 templateId 集合都属于 agent 的授权范围（workbench 提交前用）。
+ */
+export async function assertTemplatesAllowedForAgent(
+  agentId: string,
+  templateIds: string[]
+): Promise<boolean> {
+  if (templateIds.length === 0) return true;
+  const rows = await db
+    .select({ id: agentPromptTemplate.promptTemplateId })
+    .from(agentPromptTemplate)
+    .where(eq(agentPromptTemplate.agentId, agentId));
+  const allowed = new Set(rows.map((r) => r.id));
+  return templateIds.every((id) => allowed.has(id));
+}
+
+/**
+ * 校验单个模板是否在 agent 的授权列表里（单选场景）。
+ */
+export async function isTemplateAllowedForAgent(
+  agentId: string,
+  templateId: string
+): Promise<boolean> {
+  const found = await db.query.agentPromptTemplate.findFirst({
+    where: (t, { and, eq: eqOp }) =>
+      and(eqOp(t.agentId, agentId), eqOp(t.promptTemplateId, templateId)),
+  });
+  return !!found;
+}
+
+/**
+ * 列表"agentId + templateId"组合对应的 promptTemplate 完整字段
+ * （workbench 渲染 TemplateSelectStep 用）。
+ *
+ * 关联：agentPromptTemplate.promptTemplateId = promptTemplate.id，
+ * 只取 isActive=true 的模板（停用的不展示）。
+ */
+export async function listActiveAgentPromptTemplatesFromDb(agentId: string) {
+  return db
+    .select({
+      id: promptTemplate.id,
+      name: promptTemplate.name,
+      description: promptTemplate.description,
+      coverUrl: promptTemplate.coverUrl,
+      price: promptTemplate.price,
+      productTypeCode: promptTemplate.productTypeCode,
+      candidateCount: promptTemplate.candidateCount,
+      size: promptTemplate.size,
+      outputMode: promptTemplate.outputMode,
+      model: promptTemplate.model,
+    })
+    .from(agentPromptTemplate)
+    .innerJoin(
+      promptTemplate,
+      eq(agentPromptTemplate.promptTemplateId, promptTemplate.id)
+    )
+    .where(
+      and(
+        eq(agentPromptTemplate.agentId, agentId),
+        eq(promptTemplate.isActive, true)
+      )
+    );
+}
+
+// ============================================
+// 2026-09-07：agent workbench draft order 辅助函数
+// ============================================
+
+/**
+ * 找 agent 当前"未完成"的 draft promptOrder（用于 workbench 续做）。
+ *
+ * "未完成"定义：status ∈ { PENDING, GENERATING, CANDIDATES_READY }
+ * （即还没提交 SELECTED / CANCELLED / FAILED）。
+ *
+ * 返回最新的一个。返回 null 表示 agent 当前没有进行中的草稿，UI 应渲染
+ * TemplateSelectStep 让 agent 选模板创建新订单。
+ */
+export async function findAgentDraftOrderFromDb(agentId: string) {
+  return db.query.promptOrder.findFirst({
+    where: (o, { and: andOp, eq: eqOp, inArray }) =>
+      andOp(
+        eqOp(o.agentId, agentId),
+        inArray(o.status, ["PENDING", "GENERATING", "CANDIDATES_READY"])
+      ),
+    orderBy: (o, { desc }) => desc(o.createdAt),
+  });
 }

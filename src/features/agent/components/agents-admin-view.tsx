@@ -218,6 +218,19 @@ export function AgentsAdminView() {
         ),
     },
     {
+      // 2026-09-07：积分余额（workbench 提交扣费依据）
+      title: "余额",
+      dataIndex: "creditBalance",
+      key: "creditBalance",
+      width: 100,
+      render: (b: number) =>
+        b > 0 ? (
+          <span className="font-mono text-xs text-violet-700">¥{b}</span>
+        ) : (
+          <span className="font-mono text-xs text-muted-foreground">¥0</span>
+        ),
+    },
+    {
       title: "状态",
       dataIndex: "isActive",
       key: "isActive",

@@ -17,6 +17,7 @@
     "db:studio": "drizzle-kit studio",
     "admin:seed": "tsx scripts/seed-default-admin.ts",
     "backfill:image-job-to-photo": "tsx scripts/backfill-image-job-to-photo.ts",
+    "migrate:apply-agent-workbench": "tsx scripts/apply-agent-workbench-migration.ts",
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:run": "vitest run",

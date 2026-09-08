@@ -57,6 +57,19 @@ export const promptTemplateSchema = z.object({
     .optional()
     .transform((v) => v || "doubao"),
   price: z.number().int().min(0).max(9999).default(0),
+  /**
+   * 2026-09-07：关联商品类别（agent workbench 流程要求模板即商品类别）。
+   * - 运行时校验对齐 PRODUCT_TYPES 字典（lib/product-catalog.ts）
+   * - nullable 允许 ToC 老模板继续可用（agent 不绑就 workbench 不能用）
+   */
+  productTypeCode: z
+    .string()
+    .trim()
+    .min(1)
+    .max(8)
+    .nullable()
+    .optional()
+    .transform((v) => (v && v.length > 0 ? v : null)),
 });
 
 /** 订单来源平台（共享类型在 types.ts） */
