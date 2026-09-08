@@ -287,10 +287,7 @@ export function AgentWorkbenchView({
         )}
 
         {draft && draft.status === "CANDIDATES_READY" && phase === "order" && (
-          <SelectStep
-            orderToken={draft.token}
-            onSelected={handleSelected}
-          />
+          <SelectStep orderToken={draft.token} onSelected={handleSelected} />
         )}
 
         {draft && phase === "spec" && draft.status === "CANDIDATES_READY" && (

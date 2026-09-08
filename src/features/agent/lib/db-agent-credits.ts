@@ -189,9 +189,7 @@ export async function debitAgentCreditsInTx(
       creditBalance: sql`${agent.creditBalance} - ${amount}`,
       updatedAt: new Date(),
     })
-    .where(
-      and(eq(agent.id, agentId), sql`${agent.creditBalance} >= ${amount}`)
-    )
+    .where(and(eq(agent.id, agentId), sql`${agent.creditBalance} >= ${amount}`))
     .returning({ id: agent.id, creditBalance: agent.creditBalance });
 
   if (!updated) {
