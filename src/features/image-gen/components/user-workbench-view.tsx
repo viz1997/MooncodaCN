@@ -38,12 +38,15 @@ import { useState, useTransition } from "react";
 
 import {
   PRODUCT_TYPES,
+  ACCESSORIES,
+  getProductType,
 } from "@/features/gpt-image/lib/product-catalog";
 import type {
   createUserDraftOrderAction,
   listUserOrderHistoryAction,
   listUserWorkbenchAction,
   submitUserDraftOrderAction,
+  updateUserDraftSpecAction,
 } from "@/features/image-gen/actions/workbench";
 
 // ============================================
@@ -70,6 +73,7 @@ interface UserWorkbenchViewProps {
   actions: {
     createDraft: typeof createUserDraftOrderAction;
     submitDraft: typeof submitUserDraftOrderAction;
+    updateSpec: typeof updateUserDraftSpecAction;
   };
 }
 
@@ -204,7 +208,13 @@ export function UserWorkbenchView({
     setSubmitting(true);
     startTransition(async () => {
       try {
-        const res = await actions.submitDraft({ orderId: draftOrder.id });
+        const res = await actions.submitDraft({
+          orderId: draftOrder.id,
+          ...(spec.productSize ? { productSize: spec.productSize } : {}),
+          ...(spec.accessoryCode
+            ? { accessoryCode: spec.accessoryCode }
+            : {}),
+        });
         if (!res?.data) throw new Error("提交失败");
         message.success(
           `已提交，${res.data.creditsConsumed > 0 ? `扣减 ${res.data.creditsConsumed} 积分` : "无积分扣减"}`
@@ -216,6 +226,43 @@ export function UserWorkbenchView({
         setSubmitting(false);
       }
     });
+  };
+
+  /**
+   * 三件套规格本地 state —— 与草稿 draftOrder.productSize/accessoryCode 同步。
+   * 用户在选规格 UI 改值后立即调 updateUserDraftSpecAction 写回服务端。
+   */
+  const [spec, setSpec] = useState<{
+    productSize: string;
+    accessoryCode: string;
+  }>({
+    productSize: draftOrder?.productSize ?? "",
+    accessoryCode: draftOrder?.accessoryCode ?? "",
+  });
+
+  const handleSpecChange = (next: {
+    productSize: string;
+    accessoryCode: string;
+  }) => {
+    setSpec(next);
+    if (!draftOrder) return;
+    // 后台写回服务端 —— 失败只 toast，不阻塞 UI（用户可能没改）
+    void actions
+      .updateSpec({
+        orderId: draftOrder.id,
+        ...(next.productSize ? { productSize: next.productSize } : {}),
+        ...(next.accessoryCode
+          ? { accessoryCode: next.accessoryCode }
+          : { accessoryCode: null }),
+      })
+      .then((res) => {
+        if (!res?.data) {
+          message.error("规格保存失败");
+        }
+      })
+      .catch((e) => {
+        message.error(e instanceof Error ? e.message : "规格保存失败");
+      });
   };
 
   return (
@@ -239,6 +286,8 @@ export function UserWorkbenchView({
         <DraftBanner
           draft={draftOrder}
           submitting={submitting || isPending}
+          spec={spec}
+          onSpecChange={handleSpecChange}
           onSubmit={handleSubmit}
         />
       ) : (
@@ -348,10 +397,17 @@ export function UserWorkbenchView({
 function DraftBanner({
   draft,
   submitting,
+  spec,
+  onSpecChange,
   onSubmit,
 }: {
   draft: NonNullable<WorkbenchDraft>;
   submitting: boolean;
+  spec: { productSize: string; accessoryCode: string };
+  onSpecChange: (next: {
+    productSize: string;
+    accessoryCode: string;
+  }) => void;
   onSubmit: () => void;
 }) {
   const meta = STATUS_META[draft.status] ?? {
@@ -360,10 +416,22 @@ function DraftBanner({
     description: "",
   };
 
+  // 三件套可选性：拿 catalog 里 productType 的 sizes / accessories 推
+  const productType = draft.productTypeCode
+    ? getProductType(draft.productTypeCode)
+    : null;
+  const availableSizes = productType?.sizes ?? [];
+  const availableAccessories = (productType?.accessories ?? []).map(
+    (code) => ACCESSORIES.find((a) => a.code === code) ?? { code, name: code }
+  );
+  const showSpecSelectors =
+    draft.status === "CANDIDATES_READY" &&
+    Boolean(draft.productTypeCode);
+
   return (
     <Card size="small" className="border-l-4 border-l-blue-500">
-      <div className="flex items-center justify-between gap-4">
-        <div className="space-y-1">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="space-y-1 flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <Badge color={meta.color} text={meta.label} />
             <span className="text-sm font-medium">{draft.template.name}</span>
@@ -375,15 +443,94 @@ function DraftBanner({
             </span>
           </div>
           <p className="text-xs text-muted-foreground">{meta.description}</p>
-          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
             <span>批次 {draft.uploadCount}</span>
             <span>· 每批 {draft.imagesPerUpload} 张</span>
             <span>· 已上传 {draft.uploadedImageCount}</span>
             <span>· 候选批 {draft.candidateGroups}</span>
             <span>· 已选 {draft.selections}</span>
           </div>
+
+          {/* 选规格：仅 CANDIDATES_READY + 有 productTypeCode 时显示 */}
+          {showSpecSelectors && (
+            <div className="mt-3 p-3 rounded-md border border-violet-200 bg-violet-50/40 space-y-2">
+              <div className="flex items-center gap-1.5 text-xs font-medium text-violet-700">
+                <Sparkles className="h-3.5 w-3.5" />
+                选配件规格
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground w-12">
+                    尺寸
+                  </span>
+                  <Select
+                    className="flex-1"
+                    value={spec.productSize || undefined}
+                    onChange={(v) =>
+                      onSpecChange({ ...spec, productSize: v ?? "" })
+                    }
+                    placeholder="选择尺寸"
+                    options={availableSizes.map((s) => ({
+                      value: s,
+                      label: `${s}cm`,
+                    }))}
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground w-12">
+                    配件
+                  </span>
+                  <Select
+                    className="flex-1"
+                    value={spec.accessoryCode || undefined}
+                    onChange={(v) =>
+                      onSpecChange({ ...spec, accessoryCode: v ?? "" })
+                    }
+                    placeholder={
+                      availableAccessories.length === 0
+                        ? "该型号无配件"
+                        : "选择配件"
+                    }
+                    disabled={availableAccessories.length === 0}
+                    allowClear
+                    options={availableAccessories.map((a) => ({
+                      value: a.code,
+                      label: a.name,
+                    }))}
+                  />
+                </div>
+              </div>
+              <p className="text-[11px] text-stone-500">
+                选完后点「提交订单」扣个人积分；尺寸 / 配件提交后不可改。
+              </p>
+            </div>
+          )}
         </div>
-        <div className="flex items-center gap-2">
+
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {/* 进入生图：PENDING / GENERATING 状态 → 跳 /p/[token] 走 upload + generate + select 流程 */}
+          {(draft.status === "PENDING" ||
+            draft.status === "GENERATING") && (
+            <a
+              href={`/p/${draft.token}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <Button type="primary" icon={<ArrowRight className="h-4 w-4" />}>
+                进入生图
+              </Button>
+            </a>
+          )}
+          {/* CANDIDATES_READY 时让用户能跳回去改候选 */}
+          {draft.status === "CANDIDATES_READY" && (
+            <a
+              href={`/p/${draft.token}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <Button>查看候选</Button>
+            </a>
+          )}
           {draft.status === "CANDIDATES_READY" && (
             <Button
               type="primary"

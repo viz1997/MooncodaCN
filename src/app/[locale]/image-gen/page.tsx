@@ -23,6 +23,7 @@ import {
   listUserOrderHistoryAction,
   listUserWorkbenchAction,
   submitUserDraftOrderAction,
+  updateUserDraftSpecAction,
 } from "@/features/image-gen/actions/workbench";
 
 import { UserWorkbenchView } from "@/features/image-gen/components/user-workbench-view";
@@ -61,6 +62,7 @@ export default async function ImageGenPage() {
       actions={{
         createDraft: createUserDraftOrderAction,
         submitDraft: submitUserDraftOrderAction,
+        updateSpec: updateUserDraftSpecAction,
       }}
     />
   );

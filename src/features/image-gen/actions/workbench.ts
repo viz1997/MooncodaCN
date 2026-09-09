@@ -340,6 +340,76 @@ export const createUserDraftOrderAction = withWorkbenchAction("createDraft")
   });
 
 // ============================================
+// 更新草稿规格：用户在 workbench 主页的「选规格」UI 改三件套
+// ============================================
+
+const updateSpecSchema = z.object({
+  orderId: z.string().min(1),
+  // 三件套：productTypeCode 创建时定死（来自模板绑定或「选型号」弹窗），
+  // 这里只允许改 size + accessory（按 catalog 校验）
+  productSize: z.string().min(1).max(8).nullable().optional(),
+  accessoryCode: z.string().min(1).max(16).nullable().optional(),
+});
+
+/**
+ * 2026-09-09：workbench 主页的「选规格」UI 调这个 action 覆盖三件套。
+ * 与 admin updateOrder 的区别：
+ * - 永远 createdBy=ctx.userId 校验（防越权改别人的草稿）
+ * - 仅 PENDING / CANDIDATES_READY 状态可改（GENERATING 锁死防 race）
+ * - 不返 prompt / history 等敏感字段（同 listUserWorkbenchAction 原则）
+ *
+ * 替代路径：用户也可去 /p/[token] 调 /api/orders/[token]/configure 改 engravingText
+ * （不走本 action）。
+ */
+export const updateUserDraftSpecAction = withWorkbenchAction("updateSpec")
+  .schema(updateSpecSchema)
+  .action(async ({ parsedInput, ctx }) => {
+    const order = await db.query.promptOrder.findFirst({
+      where: eq(promptOrder.id, parsedInput.orderId),
+      columns: {
+        id: true,
+        createdBy: true,
+        status: true,
+        productTypeCode: true,
+        productSize: true,
+        accessoryCode: true,
+      },
+    });
+    if (!order) throw new Error("订单不存在");
+    if (order.createdBy !== ctx.userId) {
+      throw new Error("无权操作此订单");
+    }
+    if (
+      order.status !== "PENDING" &&
+      order.status !== "CANDIDATES_READY"
+    ) {
+      throw new Error(`当前状态（${order.status}）不允许修改规格`);
+    }
+
+    // 校验三件套（productTypeCode 来自订单本身）
+    validateProductSpec(
+      order.productTypeCode ?? null,
+      parsedInput.productSize ?? order.productSize ?? null,
+      parsedInput.accessoryCode ?? order.accessoryCode ?? null
+    );
+
+    await db
+      .update(promptOrder)
+      .set({
+        productSize: parsedInput.productSize ?? order.productSize ?? null,
+        accessoryCode:
+          parsedInput.accessoryCode ?? order.accessoryCode ?? null,
+        updatedAt: new Date(),
+      })
+      .where(eq(promptOrder.id, order.id));
+
+    revalidatePath("/image-gen");
+    revalidateTag("orders", "max");
+
+    return { success: true };
+  });
+
+// ============================================
 // 提交：扣个人 credit + 状态推进
 // ============================================
 
