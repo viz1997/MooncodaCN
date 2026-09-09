@@ -11,7 +11,7 @@
  *
  * 流程：
  *   1. 选 mask（productEffect 网格，从 /api/public/generate GET 拿）
- *   2. 上传参考图（可选，R2 presigned 直传；fallback base64 小图）
+ *   2. 上传参考图（多张 max 10，R2 presigned 直传 + 客户端 5MB 降采样）
  *   3. 点「生成图片」 → POST /api/public/generate → 轮询 → 1 张结果
  *   4. 结果卡：「下载 / 再生成一张 / 选择此效果下单」三按钮
  *   5. 点下单 → SpecModal 弹 → 选 productSize/accessoryCode/engraving
@@ -19,12 +19,18 @@
  *   6. 调 submitImageGenDemoAction → 扣个人 credit + 写 SELECTED promptOrder
  *   7. 成功卡：订单号 + 扣减积分 + 「查看订单 / 再生成一个」按钮
  *
+ * 参考 V1 生图工作台 generate-workbench-view.tsx handleFileSelect：多张图 + 5MB
+ * 客户端降采样 + /api/image/upload（登录用户专属 presign 路径） + imageUrls[]
+ * 透传 —— 避免 Lingting 上游 413，匹配 internalGenerateSchema imageUrls.max(10)
+ * 硬上限。
+ *
  * 复用：
  *   - /api/public/generate（GET 拿 mask 列表 / POST 发起 demo 生图）
  *   - /api/image/task/[id]（异步任务轮询）
- *   - /api/public/upload（R2 presigned）
+ *   - /api/image/upload（R2 presigned 登录用户路径）
  *   - submitImageGenDemoAction（demo 一键下单，写 SELECTED promptOrder + 扣 credit）
  *   - SpecModal（规格选择弹窗）
+ *   - @/lib/image-client-resize（浏览器端 5MB 降采样，避免 Lingting 413）
  */
 
 import {
@@ -52,6 +58,7 @@ import {
   SpecModal,
   type SpecSelection,
 } from "@/features/image-gen/components/spec-modal";
+import { resizeImage, wrapBlobAsFile } from "@/lib/image-client-resize";
 import { cn } from "@/lib/utils";
 
 interface PublicMask {
@@ -71,6 +78,22 @@ interface GeneratedResult {
   duration?: number | undefined;
 }
 
+// ============ 多张参考图（与 V1 工作台对齐，参考 generate-workbench-view） ============
+// 2026-09-09：demo 支持多张参考图，与 [[v1-workbench-multi-image]] 同结构
+// （uploadedImages 数组、localId 用 crypto.randomUUID 截 8 位、客户端 5MB 降采样、
+// /api/image/upload 登录用户路径）。max=10 与 internalGenerateSchema imageUrls.max(10) 对齐。
+interface UploadedImage {
+  localId: string;
+  previewUrl: string;
+  publicUrl: string | null;
+  uploading: 0 | 1;
+  fileName: string;
+  fileSize: number;
+}
+
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // File API / canvas 内存兜底
+const MAX_REFERENCE_IMAGES = 10; // 与 schema imageUrls.max(10) 对齐
+
 // ============ 本地历史记录（localStorage，不入库） ============
 interface HistoryItem {
   id: string;
@@ -78,7 +101,7 @@ interface HistoryItem {
   maskId: string;
   maskName: string;
   modelName: string;
-  refPreviewUrl?: string | undefined;
+  refPreviewUrls?: string[] | undefined;
   /** demo 下单成功后写入：用于历史缩略图上的「查看订单」徽章 */
   orderId?: string | undefined;
   orderNo?: string | undefined;
@@ -118,7 +141,7 @@ interface PendingTask {
   taskId: string;
   maskId: string;
   maskName: string;
-  refPreviewUrl?: string | undefined;
+  refPreviewUrls?: string[] | undefined;
   startedAt: string;
 }
 
@@ -152,15 +175,9 @@ function saveTask(t: PendingTask | null) {
 // ============================================
 
 export function PublicImageGenView() {
-  // ========== demo 主状态 ==========
-  const [uploadedImage, setUploadedImage] = useState<{
-    dataUrl?: string;
-    publicUrl?: string;
-    previewUrl: string;
-    fileName: string;
-  } | null>(null);
+  // ========== 多张参考图 ==========
+  const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
   const [dragOver, setDragOver] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [selectedMask, setSelectedMask] = useState<string>("");
@@ -230,7 +247,7 @@ export function PublicImageGenView() {
       maskId: task.maskId,
       maskName: task.maskName,
       modelName: task.maskName,
-      refPreviewUrl: task.refPreviewUrl,
+      refPreviewUrls: task.refPreviewUrls,
       createdAt: new Date().toISOString(),
     });
   };
@@ -311,13 +328,68 @@ export function PublicImageGenView() {
     setError(null);
     setPendingModelName(task.maskName);
     pollTask(task, true);
-    // 只在 masks 加载完成后恢复一次；pollTask/clearPoll 引用稳定（useCallback-free 但函数体依赖的 task 不变）
+    // 只在 masks 加载完成后恢复一次；pollTask/clearPoll 引用稳定
     // eslint-disable-next-line react-hooks/correctness/useExhaustiveDependencies
   }, [masks, pollTask]);
 
-  // 文件选择：优先走 R2 presigned 直传（图不经过服务器）；
-  // R2 未配置或签名失败时回退 base64（仅小图可行，大图会被 413）。
-  const handleFileSelect = async (file: File | undefined) => {
+  // ============================================
+  // 多张参考图上传（与 V1 工作台对齐）
+  // ============================================
+
+  /**
+   * 把单张图上传到 R2：
+   *   1) 客户端降采样到 ≤5MB（resizeImage）
+   *   2) POST /api/image/upload 拿 { uploadUrl, publicUrl }（登录用户路径）
+   *   3) PUT 文件到 R2 uploadUrl 直传
+   *   4) 返 publicUrl
+   *
+   * 与工作台 uploadFileToR2 一致；改自 [[workbench-v2-lingting-413]] 的 5MB 上限。
+   */
+  const uploadFileToR2 = async (file: File): Promise<string> => {
+    // 1) 拿预签名（/api/image/upload 是登录用户路径，5MB 限制 + 按 userId objectKey 隔离）
+    const presignRes = await fetch("/api/image/upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contentType: file.type,
+        size: file.size,
+        ext: file.name.split(".").pop()?.toLowerCase(),
+      }),
+    });
+    if (!presignRes.ok) {
+      throw new Error(`获取上传地址失败：HTTP ${presignRes.status}`);
+    }
+    const presignJson = (await presignRes.json()) as {
+      success: boolean;
+      uploadUrl?: string;
+      publicUrl?: string;
+      error?: string;
+    };
+    if (
+      !presignJson.success ||
+      !presignJson.uploadUrl ||
+      !presignJson.publicUrl
+    ) {
+      throw new Error(presignJson.error ?? "获取上传地址失败");
+    }
+
+    // 2) PUT 到 R2 直传
+    const putRes = await fetch(presignJson.uploadUrl, {
+      method: "PUT",
+      body: file,
+    });
+    if (!putRes.ok) {
+      throw new Error(`R2 上传失败：HTTP ${putRes.status}`);
+    }
+    return presignJson.publicUrl;
+  };
+
+  /**
+   * handleFileSelect —— push 单张图到 uploadedImages 数组，异步走客户端降采样 + R2 直传
+   * 与 V1 工作台 generate-workbench-view.tsx handleFileSelect 同形态
+   * （[[v1-workbench-multi-image]]）。
+   */
+  const handleFileSelect = (file: File | undefined) => {
     if (!file) return;
     if (
       !["image/jpeg", "image/jpg", "image/png", "image/webp"].includes(
@@ -327,101 +399,110 @@ export function PublicImageGenView() {
       toast.error("请上传 JPG/PNG/WEBP 格式");
       return;
     }
-    if (file.size > 10 * 1024 * 1024) {
+    if (file.size > MAX_UPLOAD_BYTES) {
       toast.error("文件过大，最大 10MB");
+      return;
+    }
+    if (uploadedImages.length >= MAX_REFERENCE_IMAGES) {
+      toast.error(`参考图已达上限（最多 ${MAX_REFERENCE_IMAGES} 张）`);
       return;
     }
 
     const previewUrl = URL.createObjectURL(file);
-    setUploading(true);
+    const localId = `${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`;
+    const placeholder: UploadedImage = {
+      localId,
+      previewUrl,
+      publicUrl: null,
+      uploading: 1,
+      fileName: file.name,
+      fileSize: file.size,
+    };
+    setUploadedImages((prev) => [...prev, placeholder]);
 
-    const BASE64_MAX_BYTES = 3 * 1024 * 1024;
+    // 异步：客户端降采样 → R2 上传
+    void (async () => {
+      let toUpload: File = file;
+      let finalSize = file.size;
+      try {
+        const resized = await resizeImage(file);
+        if (resized.resized) {
+          if (resized.finalBytes < resized.originalBytes * 0.95) {
+            toast.success(
+              `已自动压缩 ${(resized.originalBytes / 1024 / 1024).toFixed(1)}MB → ${(resized.finalBytes / 1024 / 1024).toFixed(1)}MB`
+            );
+          }
+          toUpload = wrapBlobAsFile(resized.blob, file.name, file.type);
+          finalSize = resized.finalBytes;
+        }
+      } catch (err) {
+        // resize 失败：原图已 ≤10MB，按原图上传；Lingting 端可能再 413 但至少 try 一下
+        // eslint-disable-next-line no-console
+        console.warn("[image-gen] resize failed, uploading original:", err);
+      }
 
-    // 先尝试 R2 直传
-    try {
-      const presignRes = await fetch("/api/public/upload", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contentType: file.type,
-          size: file.size,
-          ext: file.name.split(".").pop(),
-        }),
-      });
-      const presign = await presignRes.json();
-
-      if (presign.success) {
-        const putRes = await fetch(presign.uploadUrl, {
-          method: "PUT",
-          headers: presign.headers,
-          body: file,
-        });
-        if (!putRes.ok) throw new Error(`R2 上传失败: ${putRes.status}`);
-        setUploadedImage({
-          publicUrl: presign.publicUrl,
-          previewUrl,
-          fileName: file.name,
-        });
-        toast.success("参考图已上传");
+      try {
+        const publicUrl = await uploadFileToR2(toUpload);
+        setUploadedImages((prev) =>
+          prev.map((img) =>
+            img.localId === localId
+              ? { ...img, publicUrl, uploading: 0, fileSize: finalSize }
+              : img
+          )
+        );
         setResult(null);
         setError(null);
-        return;
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn("[image-gen] upload to R2 failed:", err);
+        setUploadedImages((prev) =>
+          prev.map((img) =>
+            img.localId === localId ? { ...img, uploading: 0 } : img
+          )
+        );
+        toast.error(err instanceof Error ? err.message : "参考图上传失败");
       }
-      if (presign.code === "R2_NOT_CONFIGURED") {
-        if (file.size > BASE64_MAX_BYTES) {
-          throw new Error(
-            "参考图过大且 R2 未配置，请配置 R2 环境变，或使用小于 3MB 的图片"
-          );
-        }
-        console.warn("[upload] R2 未配置，回退 base64（小图）");
-      } else {
-        throw new Error(presign.error || "R2 签名失败");
-      }
-    } catch (err) {
-      if (file.size > BASE64_MAX_BYTES) {
-        setUploading(false);
-        URL.revokeObjectURL(previewUrl);
-        const msg = err instanceof Error ? err.message : "参考图上传失败";
-        setError(msg);
-        toast.error(msg);
-        return;
-      }
-      console.warn("[upload] R2 直传失败，回退 base64:", err);
-    }
-
-    // 回退：base64 data URI（仅小图）—— 此路径下 publicUrl 为空，下单流程不能走
-    try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = () => reject(new Error("读取文件失败"));
-        reader.readAsDataURL(file);
-      });
-      setUploadedImage({
-        dataUrl,
-        previewUrl,
-        fileName: file.name,
-      });
-      setResult(null);
-      setError(null);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "图片读取失败";
-      setError(msg);
-      toast.error(msg);
-      URL.revokeObjectURL(previewUrl);
-    } finally {
-      setUploading(false);
-    }
+    })();
   };
 
-  const handleRemoveUpload = () => {
-    if (uploadedImage) URL.revokeObjectURL(uploadedImage.previewUrl);
-    setUploadedImage(null);
+  const handleRemoveUpload = (localId: string) => {
+    setUploadedImages((prev) => {
+      const target = prev.find((img) => img.localId === localId);
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((img) => img.localId !== localId);
+    });
   };
+
+  const handleClearAllUploads = () => {
+    setUploadedImages((prev) => {
+      for (const img of prev) URL.revokeObjectURL(img.previewUrl);
+      return [];
+    });
+  };
+
+  // 已上传成功的参考图 publicUrl 列表（传给生成 API）
+  const refImageUrls = uploadedImages
+    .filter((i) => i.publicUrl)
+    .map((i) => i.publicUrl) as string[];
+
+  // ============================================
+  // 生成 + 下单
+  // ============================================
 
   const handleGenerate = async () => {
     if (!selectedMask) {
       toast.error("请先选择效果");
+      return;
+    }
+    if (uploadedImages.some((i) => i.uploading === 1)) {
+      toast.error("参考图上传中，请稍候");
+      return;
+    }
+    if (
+      uploadedImages.length > 0 &&
+      refImageUrls.length !== uploadedImages.length
+    ) {
+      toast.error("部分参考图上传失败，请重试");
       return;
     }
     clearPoll();
@@ -437,7 +518,8 @@ export function PublicImageGenView() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          imageUrl: uploadedImage?.publicUrl ?? uploadedImage?.dataUrl,
+          // 多张参考图：imageUrls[] 优先；空数组退化为 text_to_image（mask 没 ref 图也能生成）
+          ...(refImageUrls.length > 0 ? { imageUrls: refImageUrls } : {}),
           maskId: selectedMask,
           size: "1024x1024",
         }),
@@ -452,7 +534,7 @@ export function PublicImageGenView() {
           taskId: data.taskId,
           maskId: selectedMask,
           maskName,
-          refPreviewUrl: uploadedImage?.previewUrl,
+          refPreviewUrls: uploadedImages.map((i) => i.previewUrl),
           startedAt: new Date().toISOString(),
         };
         saveTask(task);
@@ -476,7 +558,7 @@ export function PublicImageGenView() {
           maskId: selectedMask,
           maskName,
           modelName: maskName,
-          refPreviewUrl: uploadedImage?.previewUrl,
+          refPreviewUrls: uploadedImages.map((i) => i.previewUrl),
           createdAt: new Date().toISOString(),
         });
         toast.success(`生成完成：${maskName}`);
@@ -502,19 +584,14 @@ export function PublicImageGenView() {
     }
   };
 
-  // ============================================
-  // 下单流程
-  // ============================================
-
   const selectedMaskData = masks.find((m) => m.maskId === selectedMask);
 
   // 点「选择此效果下单」
   const handleClickSubmitOrder = () => {
     if (!result || !selectedMaskData) return;
-    if (!uploadedImage?.publicUrl) {
-      toast.error(
-        "下单需要参考图的 R2 URL。当前为 base64 模式，请重传 ≤3MB 的小图或配置 R2"
-      );
+    // demo 一键下单必须有 R2 URL（base64 不支持）；多图取第一张的 publicUrl 写订单的 uploadedImages[0]
+    if (refImageUrls.length === 0) {
+      toast.error("下单需要参考图的 R2 URL，请先上传至少一张参考图");
       return;
     }
     // 无 productTypeCode → 跳过 modal，直接走免规格下单
@@ -532,14 +609,20 @@ export function PublicImageGenView() {
 
   // 确认规格 → 调 submitImageGenDemoAction
   const handleConfirmSpec = async (spec: SpecSelection) => {
-    if (!result || !selectedMaskData || !uploadedImage?.publicUrl) return;
+    if (!result || !selectedMaskData) return;
+    if (refImageUrls.length === 0) {
+      toast.error("参考图丢失，请重新上传");
+      return;
+    }
 
     setShowSpecModal(false);
     setSubmitting(true);
     try {
       const res = await submitImageGenDemoAction({
         templateId: selectedMaskData.maskId,
-        referenceImageUrl: uploadedImage.publicUrl,
+        // demo 一键下单：上传图片列表里取第一张作为订单 uploadedImages[0]
+        // （多图模式下其他参考图保留在 uploadedImages 里供后续 regenerate 用）
+        referenceImageUrl: refImageUrls[0] ?? "",
         productTypeCode: selectedMaskData.productTypeCode,
         productSize: spec.productSize,
         accessoryCode: spec.accessoryCode,
@@ -692,36 +775,73 @@ export function PublicImageGenView() {
               )}
             </section>
 
-            {/* 参考图上传 */}
+            {/* 参考图上传（多张） */}
             <section className="space-y-2">
-              <span className="text-xs font-semibold flex items-center gap-1">
-                <ImageIcon className="h-3.5 w-3.5" />
-                参考图片
-                <span className="text-[10px] text-muted-foreground font-normal">
-                  (可选)
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold flex items-center gap-1">
+                  <ImageIcon className="h-3.5 w-3.5" />
+                  参考图片
+                  <span className="text-[10px] text-muted-foreground font-normal">
+                    (可选 · 最多 {MAX_REFERENCE_IMAGES} 张)
+                  </span>
                 </span>
-              </span>
-              {uploadedImage ? (
-                <div className="relative group">
-                  {/* biome-ignore lint/performance/noImgElement: 本地 blob/data URI 参考图预览 */}
-                  <img
-                    src={uploadedImage.previewUrl}
-                    alt="参考图"
-                    className="w-full aspect-square object-cover rounded-lg border"
-                  />
+                {uploadedImages.length > 0 && (
                   <button
                     type="button"
-                    onClick={handleRemoveUpload}
-                    className="absolute top-2 right-2 p-1.5 rounded-full bg-rose-500 text-white shadow-md hover:scale-110 transition-transform"
+                    onClick={handleClearAllUploads}
+                    className="text-[10px] text-muted-foreground hover:text-rose-600 flex items-center gap-0.5"
+                    title="清空所有参考图"
                   >
-                    <X className="h-3.5 w-3.5" />
+                    <Trash2 className="h-3 w-3" />
+                    清空
                   </button>
-                  <div className="absolute bottom-2 left-2 right-2 bg-black/50 backdrop-blur text-white text-[10px] px-2 py-0.5 rounded truncate">
-                    {uploadedImage.fileName}
-                    {!uploadedImage.publicUrl && (
-                      <span className="ml-1 text-amber-300">(base64)</span>
-                    )}
-                  </div>
+                )}
+              </div>
+              {uploadedImages.length > 0 ? (
+                <div className="grid grid-cols-3 gap-1.5">
+                  {uploadedImages.map((img, idx) => (
+                    <div
+                      key={img.localId}
+                      className="relative group aspect-square"
+                    >
+                      {/* biome-ignore lint/performance/noImgElement: 本地 blob 参考图预览 */}
+                      <img
+                        src={img.previewUrl}
+                        alt={`参考图 ${idx + 1}`}
+                        className={cn(
+                          "w-full h-full object-cover rounded-lg border",
+                          img.uploading === 1 && "opacity-50"
+                        )}
+                      />
+                      {img.uploading === 1 && (
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <Loader2 className="h-4 w-4 animate-spin text-violet-500" />
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveUpload(img.localId)}
+                        className="absolute top-0.5 right-0.5 p-1 rounded-full bg-rose-500 text-white shadow-md opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <X className="h-2.5 w-2.5" />
+                      </button>
+                      {img.publicUrl && (
+                        <div className="absolute bottom-0.5 left-0.5 h-3 w-3 rounded-full bg-emerald-500 flex items-center justify-center">
+                          <CheckCircle2 className="h-2 w-2 text-white" />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {uploadedImages.length < MAX_REFERENCE_IMAGES && (
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="aspect-square rounded-lg border-2 border-dashed border-muted-foreground/25 hover:border-violet-500/50 flex items-center justify-center text-muted-foreground hover:text-violet-500 transition"
+                      title="继续添加"
+                    >
+                      <Upload className="h-4 w-4" />
+                    </button>
+                  )}
                 </div>
               ) : (
                 // biome-ignore lint/a11y/useSemanticElements: 拖拽上传区
@@ -766,14 +886,10 @@ export function PublicImageGenView() {
                     )}
                   />
                   <p className="text-xs font-medium">
-                    {uploading
-                      ? "上传中..."
-                      : dragOver
-                        ? "释放即可上传"
-                        : "点击或拖拽图片"}
+                    {dragOver ? "释放即可上传" : "点击或拖拽图片"}
                   </p>
                   <p className="text-[10px] text-muted-foreground mt-1">
-                    JPG / PNG / WEBP · ≤10MB
+                    JPG / PNG / WEBP · ≤10MB（自动压缩到 5MB）
                   </p>
                 </div>
               )}
@@ -845,6 +961,11 @@ export function PublicImageGenView() {
                     <CheckCircle2 className="h-3.5 w-3.5" />
                     生成完成
                   </span>
+                  {uploadedImages.length > 0 && (
+                    <span className="inline-flex items-center gap-1 bg-violet-500/10 text-violet-700 dark:text-violet-400 text-xs px-3 py-1 rounded-full border border-violet-500/20">
+                      参考图 {uploadedImages.length} 张
+                    </span>
+                  )}
                 </div>
                 {/* 图片 */}
                 <div className="relative rounded-2xl overflow-hidden border-2 border-violet-500/20 shadow-xl">
@@ -873,7 +994,7 @@ export function PublicImageGenView() {
                     className="rounded-full"
                     onClick={() => {
                       setResult(null);
-                      handleGenerate();
+                      void handleGenerate();
                     }}
                     disabled={generating || submitting}
                   >
@@ -899,10 +1020,9 @@ export function PublicImageGenView() {
                     )}
                   </Button>
                 </div>
-                {!uploadedImage?.publicUrl && (
+                {refImageUrls.length === 0 && (
                   <p className="text-[10px] text-center text-amber-600 dark:text-amber-400">
-                    当前参考图为 base64 模式，下单需要 R2 URL ——
-                    请重传图片或配置 R2
+                    当前未上传参考图，下单需要至少 1 张参考图 —— 请先上传
                   </p>
                 )}
               </div>
@@ -1033,6 +1153,11 @@ export function PublicImageGenView() {
                   <div className="absolute inset-x-0 bottom-0 bg-black/55 text-white text-[9px] px-1 py-0.5 truncate text-center">
                     {h.maskName}
                   </div>
+                  {h.refPreviewUrls && h.refPreviewUrls.length > 0 && (
+                    <div className="absolute top-1 left-1 h-4 w-4 rounded-full bg-violet-500/90 flex items-center justify-center text-[9px] font-medium text-white">
+                      {h.refPreviewUrls.length}
+                    </div>
+                  )}
                   {h.orderId && (
                     <div
                       className="absolute top-1 right-1 h-4 w-4 rounded-full bg-emerald-500 flex items-center justify-center"

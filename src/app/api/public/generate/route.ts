@@ -178,7 +178,8 @@ export async function POST(req: NextRequest) {
         maskName,
         taskId: result.taskId,
         taskStatus: result.status,
-        error: result.success ? undefined : "生成失败，请稍后重试",
+        // 把上游真实错误透传给用户（之前 catch-all 文案掩盖了根因）
+        error: result.success ? undefined : result.error ?? "生成失败，请稍后重试",
       },
       { headers: getRateLimitHeaders(rl) }
     );
