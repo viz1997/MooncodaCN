@@ -52,6 +52,7 @@ async function main() {
       candidateCount: promptTemplate.candidateCount,
       coverUrl: promptTemplate.coverUrl,
       productTypeCode: promptTemplate.productTypeCode,
+      price: promptTemplate.price,
     })
     .from(promptTemplate)
     .where(eq(promptTemplate.isActive, true));
@@ -84,6 +85,8 @@ async function main() {
     avgDuration: 0,
     author: SOURCE_AUTHOR,
     productLineIds: [],
+    // 2026-09-09：透传 productTypeCode 给 /image-gen 工作台渲染 SpecStep
+    productTypeCode: s.productTypeCode ?? null,
   }));
 
   if (isDryRun) {

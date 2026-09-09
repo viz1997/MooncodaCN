@@ -34,6 +34,8 @@ function mapRowToProductEffect(row: ProductEffectRow): ProductEffect {
     avgDuration: row.avgDuration,
     author: row.author,
     productLineIds: row.productLineIds as string[],
+    // 2026-09-09：productTypeCode 列透传（schema 字段已加）
+    productTypeCode: row.productTypeCode ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -64,6 +66,8 @@ function mapProductEffectToRow(
     avgDuration: effect.avgDuration,
     author: effect.author,
     productLineIds: effect.productLineIds as ProductEffectRow["productLineIds"],
+    // 2026-09-09：productTypeCode 透传
+    productTypeCode: effect.productTypeCode ?? null,
   };
 }
 

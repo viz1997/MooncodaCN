@@ -201,7 +201,10 @@ export async function POST(req: NextRequest) {
 }
 
 // 获取外部用户可用的效果模版列表
-// ⚠️ 只返回 maskId + name + previewUrl，不暴露 model/price/prompt 等内部内容
+// ⚠️ 只返回 maskId + name + previewUrl + productTypeCode + price，不暴露 model/prompt 等内部内容
+// 2026-09-09：/image-gen 升级为下单工作台后，前端需要 productTypeCode 渲染 SpecStep
+// （productSize / accessoryCode / engraving 表单按 productTypeCode 走 PRODUCT_TYPES 字典），
+// 以及 price 显示模板定价。model/prompt 仍不在公开响应中（管理员专属）。
 export async function GET() {
   const effects = await getEffects();
   return NextResponse.json({
@@ -212,6 +215,13 @@ export async function GET() {
         maskId: m.maskId,
         name: m.name,
         previewUrl: m.previewUrl,
+        // 2026-09-09：扩给 /image-gen 6 步 stepper 用
+        productTypeCode: (m as { productTypeCode?: string | null })
+          .productTypeCode ?? null,
+        price: m.price ?? 0,
+        description: m.description ?? "",
+        // 推荐模型仅返回 id，前端按 id 展示名字；不暴露完整 prompt/cost
+        model: m.model,
       })),
   });
 }

@@ -806,6 +806,13 @@ export const productEffect = pgTable("product_effect", {
     .$type<string[]>()
     .notNull()
     .default([]),
+  /**
+   * 2026-09-09：/image-gen 升级为下单工作台后，前端 SpecStep 渲染
+   * productSize/accessoryCode/engraving 表单时要按这个 code 查 PRODUCT_TYPES 字典。
+   * promptTemplate.productTypeCode 通过 sync-from-promptTemplate 同步到此处；
+   * admin 手工录入的 productEffect 仍可空（兼容旧数据）。
+   */
+  productTypeCode: text("product_type_code"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

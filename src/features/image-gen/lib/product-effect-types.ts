@@ -76,4 +76,10 @@ export interface ProductEffect {
   author: string;
   // 关联的产品线
   productLineIds?: string[] | undefined;
+  /**
+   * 2026-09-09：绑定的产品型号（与 PRODUCT_TYPES 字典对齐）。
+   * /image-gen 工作台选模板后按此字段渲染 productSize/accessoryCode/engraving 表单。
+   * null 表示纯 ToC 模板（无定制）。
+   */
+  productTypeCode?: string | null | undefined;
 }
