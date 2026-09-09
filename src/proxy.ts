@@ -136,9 +136,33 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(signInUrl);
   }
 
-  // 如果已登录用户访问认证页面，重定向到 Dashboard
+  // 如果已登录用户访问认证页面，重定向到 callbackUrl（无则 Dashboard）
+  // 2026-09-09：之前无脑跳 /dashboard，会让代理商 / 普通用户从
+  //   /image-gen → /sign-in?callbackUrl=/image-gen → 登录 → /dashboard
+  //   丢失了原本的来源页。改成 callbackUrl 优先 + 白名单校验防 open redirect。
   if (isAuthRoute && sessionToken) {
-    return NextResponse.redirect(new URL(`/${locale}/dashboard`, request.url));
+    const callbackUrl = request.nextUrl.searchParams.get("callbackUrl");
+    const fallbackUrl = new URL(`/${locale}/dashboard`, request.url);
+
+    if (callbackUrl) {
+      // callbackUrl 必须是同源相对路径（不允许绝对 URL / 协议相对 / 双斜杠）
+      // 防止恶意 redirect 到外站。
+      const isSafePath =
+        callbackUrl.startsWith("/") &&
+        !callbackUrl.startsWith("//") &&
+        !callbackUrl.startsWith("/\\");
+      if (isSafePath) {
+        // 路径已包含语言前缀（如 /en/image-gen 或 /image-gen 都有）
+        // - 已有 /en|zh 前缀：直接用
+        // - 无语言前缀：补上前缀
+        const hasLocalePrefix = /^\/(en|zh)(\/|$)/.test(callbackUrl);
+        const targetPath = hasLocalePrefix
+          ? callbackUrl
+          : `/${locale}${callbackUrl.startsWith("/") ? "" : "/"}${callbackUrl}`;
+        return NextResponse.redirect(new URL(targetPath, request.url));
+      }
+    }
+    return NextResponse.redirect(fallbackUrl);
   }
 
   // 执行国际化中间件
