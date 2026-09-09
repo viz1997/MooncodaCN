@@ -1,0 +1,232 @@
+"use server";
+
+/**
+ * /image-gen demo 一键下单 server action（2026-09-09）
+ *
+ * 用户在 /image-gen demo 流里跑了一张预览图，点结果卡上「选择此效果下单」
+ * → SpecModal 选 productSize/accessoryCode/engraving → 确认后调这个 action：
+ *
+ *   1. 校验模板存在 + active
+ *   2. 校验三件套（用 validateProductSpec，全套 null 也合法）
+ *   3. 扣个人 credit（template.price=0 跳过；不足抛 InsufficientCreditsError）
+ *   4. 写 promptOrder (SELECTED) + 把 demo 预览图 URL 当唯一候选
+ *   5. revalidatePath + 返回 { orderId, orderNo, token, creditsConsumed }
+ *
+ * 设计要点：
+ * - **不走异步生图**：用户已经「看过 demo 预览图 + 点了下单」，再跑一遍异步
+ *   生成是浪费 token，且 demo 风格强调「提交即完成」。服务端也不需要候选候选
+ *   选择轮询，状态直接 SELECTED。
+ * - **candidates 写 1 条**：candidates = [[previewUrl]]（外层 imageIdx=0，
+ *   内层 candIdx=0），selections = "[0]"（锁定第 0 张第 0 个候选）。admin
+ *   后台看到的就是 demo 预览图本身。
+ * - **productSpec 三件套**：与 createOrderFromImageGenAction 一致——全 null
+ *   通过；非空必须按 catalog 字典合法。
+ * - **agentId=null**：代理商概念已砍，订单 createdBy=ctx.userId。
+ *
+ * 与 createOrderFromImageGenAction + submitPublicOrderAction 两步走的关系：
+ *   - 那两个 action 是「未来手动 6 步工作台」备用（用户从头选模板 → 选规格
+ *     → 上传 → 生成 → 选候选 → 提交）
+ *   - 本 action 是 demo 流「提交即完成」一键路径
+ *   - 两者共存：手动流程仍走前者，demo 流程走本 action
+ */
+
+import { and, eq } from "drizzle-orm";
+import { nanoid } from "nanoid";
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+
+import { db } from "@/db";
+import { promptOrder, promptTemplate } from "@/db/schema";
+import {
+  consumeCredits,
+  InsufficientCreditsError,
+} from "@/features/credits/core";
+import { generateOrderToken } from "@/features/gpt-image/lib/generation-service";
+import {
+  getProductType,
+  validateProductSpec,
+} from "@/features/gpt-image/lib/product-catalog";
+import { protectedAction } from "@/lib/safe-action";
+
+const withDemoAction = (name: string) =>
+  protectedAction.metadata({ action: `imageGen.demo.${name}` });
+
+const submitDemoSchema = z.object({
+  /** 模板 id（productEffect.id === promptTemplate.id，sync 后对齐） */
+  templateId: z.string().min(1),
+  /**
+   * demo 预览用的参考图 R2 publicUrl（必传，且必须已在 R2）。
+   * 走 demo 上传流程时已落到 R2，submit 时直接当 uploadedImages[0]。
+   * 为 null 时不允许——demo 一键下单必须有图（用户看了 demo 预览就要这张）。
+   */
+  referenceImageUrl: z.string().url(),
+  /**
+   * 模板绑定的 productTypeCode（来自 productEffect.productTypeCode）。
+   * null 表示老 ToC 模板，不显示规格窗、订单 spec 全 null。
+   */
+  productTypeCode: z.string().min(1).max(8).nullable().optional(),
+  productSize: z.string().min(1).max(8).nullable().optional(),
+  accessoryCode: z.string().min(1).max(16).nullable().optional(),
+  engravingText: z.string().trim().max(40).nullable().optional(),
+  engravingExposed: z.boolean().nullable().optional(),
+});
+
+/**
+ * /image-gen demo 流「选择此效果下单」一键提交：
+ * 校验 → 扣 credit → 写订单（SELECTED + 候选锁定为 demo 预览图）→ 返 token
+ */
+export const submitImageGenDemoAction = withDemoAction("submit")
+  .schema(submitDemoSchema)
+  .action(async ({ parsedInput, ctx }) => {
+    // 1. 模板存在 + active
+    const template = await db.query.promptTemplate.findFirst({
+      where: and(
+        eq(promptTemplate.id, parsedInput.templateId),
+        eq(promptTemplate.isActive, true)
+      ),
+      columns: {
+        id: true,
+        name: true,
+        price: true,
+        candidateCount: true,
+        size: true,
+      },
+    });
+    if (!template) throw new Error("模板不存在或已停用");
+
+    // 2. 三件套校验（NULL 全套合法）
+    validateProductSpec(
+      parsedInput.productTypeCode ?? null,
+      parsedInput.productSize ?? null,
+      parsedInput.accessoryCode ?? null
+    );
+
+    // 3. 按 catalog defaults 填 size/accessory（如未传）
+    let finalProductSize = parsedInput.productSize ?? null;
+    let finalAccessoryCode = parsedInput.accessoryCode ?? null;
+    if (parsedInput.productTypeCode) {
+      const type = getProductType(parsedInput.productTypeCode);
+      if (type) {
+        if (!finalProductSize && type.sizes.length > 0) {
+          finalProductSize = type.sizes[0] ?? null;
+        }
+        if (!finalAccessoryCode && type.accessories.length > 0) {
+          finalAccessoryCode = type.accessories[0] ?? null;
+        }
+      }
+    }
+
+    // 4. engraving 联动校验（canEngrave=false 时强制 null）
+    let finalEngravingText = parsedInput.engravingText ?? null;
+    let finalEngravingExposed = parsedInput.engravingExposed ?? null;
+    if (parsedInput.productTypeCode) {
+      const type = getProductType(parsedInput.productTypeCode);
+      if (!type || !type.capabilities.canEngrave) {
+        finalEngravingText = null;
+        finalEngravingExposed = null;
+      } else if (!finalEngravingText || finalEngravingText.trim() === "") {
+        finalEngravingText = null;
+        finalEngravingExposed = null;
+      }
+    } else {
+      finalEngravingText = null;
+      finalEngravingExposed = null;
+    }
+
+    // 5. 扣 credit（template.price=0 跳过；credit 不足抛 InsufficientCreditsError）
+    const price = template.price ?? 0;
+    if (price > 0) {
+      try {
+        await consumeCredits({
+          userId: ctx.userId,
+          amount: price,
+          serviceName: "image-gen-demo",
+          description: `/image-gen demo 下单 ${parsedInput.templateId}`,
+          metadata: {
+            templateId: parsedInput.templateId,
+            templateName: template.name,
+          },
+        });
+      } catch (err) {
+        if (err instanceof InsufficientCreditsError) {
+          throw new Error(
+            `个人积分不足（需要 ${err.required}，当前可用 ${err.available}），请充值后再下单`
+          );
+        }
+        throw err;
+      }
+    }
+
+    // 6. 写 promptOrder（SELECTED）—— demo 预览图当唯一候选
+    const token = generateOrderToken();
+    const orderNo = generateOrderNo();
+
+    // candidates 写 [[referenceImageUrl]]：外层 imageIdx=0，内层 candIdx=0。
+    // selections = "[0]"：锁定第 0 张第 0 个候选 = demo 预览图本身。
+    // 注：candidates 与 selections 都用 JSON 字符串（与 schema.ts promptOrder.candidates/selections 字段一致）
+    const candidatesJson = JSON.stringify([[parsedInput.referenceImageUrl]]);
+    const selectionsJson = JSON.stringify([0]);
+
+    const [created] = await db
+      .insert(promptOrder)
+      .values({
+        id: nanoid(),
+        orderNo,
+        templateId: parsedInput.templateId,
+        token,
+        status: "SELECTED",
+        uploadCount: 1,
+        imagesPerUpload: 1,
+        regenerateLimit: 5,
+        // uploadedImages 直接写 demo 参考图 URL（已在 R2）
+        uploadedImages: JSON.stringify([parsedInput.referenceImageUrl]),
+        uploadedAt: new Date(),
+        generatedAt: new Date(),
+        // demo 跳过异步生成，候选就是 demo 预览图本身
+        candidates: candidatesJson,
+        selections: selectionsJson,
+        // selectedAt 设当前，selectedIndex = 0（兼容旧字段）
+        selectedAt: new Date(),
+        selectedIndex: 0,
+        createdBy: ctx.userId,
+        agentId: null,
+        productTypeCode: parsedInput.productTypeCode ?? null,
+        productSize: finalProductSize,
+        accessoryCode: finalAccessoryCode,
+        engravingText: finalEngravingText,
+        engravingExposed: finalEngravingExposed,
+      })
+      .returning({ id: promptOrder.id });
+
+    if (!created) throw new Error("创建订单失败");
+
+    revalidatePath("/image-gen");
+    revalidatePath(`/p/${token}`);
+    revalidatePath("/dashboard/prompt-orders");
+
+    return {
+      orderId: created.id,
+      orderNo,
+      token,
+      creditsConsumed: price,
+    };
+  });
+
+// ============================================
+// helpers
+// ============================================
+
+/**
+ * 生成订单号：IG-YYYYMMDD-XXXXXX（IG = ImageGen，XXXXXX = nanoid 6 位大写）
+ * 与 actions/order.ts 里的 generateOrderNo 完全一致——保留独立一份避免
+ * 跨 server action 文件常量导入（next-safe-action 不允许 server action
+ * 互相 import 常量）。
+ */
+function generateOrderNo(): string {
+  const ts = new Date()
+    .toISOString()
+    .replace(/[-:T.Z]/g, "")
+    .slice(0, 8);
+  const rand = nanoid(6).toUpperCase();
+  return `IG-${ts}-${rand}`;
+}

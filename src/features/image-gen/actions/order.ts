@@ -32,11 +32,11 @@ import {
   consumeCredits,
   InsufficientCreditsError,
 } from "@/features/credits/core";
+import { generateOrderToken } from "@/features/gpt-image/lib/generation-service";
 import {
   getProductType,
   validateProductSpec,
 } from "@/features/gpt-image/lib/product-catalog";
-import { generateOrderToken } from "@/features/gpt-image/lib/generation-service";
 import { protectedAction } from "@/lib/safe-action";
 
 const withOrderAction = (name: string) =>
@@ -89,15 +89,15 @@ export const createOrderFromImageGenAction = withOrderAction("create")
             "PENDING",
             "GENERATING",
             "CANDIDATES_READY",
-          ]),
-        ),
+          ])
+        )
       );
 
     // 2. 校验模板存在 + active
     const template = await db.query.promptTemplate.findFirst({
       where: and(
         eq(promptTemplate.id, parsedInput.templateId),
-        eq(promptTemplate.isActive, true),
+        eq(promptTemplate.isActive, true)
       ),
       columns: {
         id: true,
@@ -111,7 +111,7 @@ export const createOrderFromImageGenAction = withOrderAction("create")
     validateProductSpec(
       parsedInput.productTypeCode ?? null,
       parsedInput.productSize ?? null,
-      parsedInput.accessoryCode ?? null,
+      parsedInput.accessoryCode ?? null
     );
 
     // 4. 按 catalog defaults 填 size / accessory
@@ -225,7 +225,7 @@ export const submitPublicOrderAction = withOrderAction("submit")
     }
     if (order.status !== "CANDIDATES_READY") {
       throw new Error(
-        `当前状态（${order.status}）不允许提交，需先生成并选择候选图`,
+        `当前状态（${order.status}）不允许提交，需先生成并选择候选图`
       );
     }
 
@@ -248,7 +248,7 @@ export const submitPublicOrderAction = withOrderAction("submit")
       } catch (err) {
         if (err instanceof InsufficientCreditsError) {
           throw new Error(
-            `个人积分不足（需要 ${err.required}，当前可用 ${err.available}），请充值后再提交`,
+            `个人积分不足（需要 ${err.required}，当前可用 ${err.available}），请充值后再提交`
           );
         }
         throw err;
@@ -296,7 +296,7 @@ export const listUserDraftAction = withOrderAction("listDraft")
           "PENDING",
           "GENERATING",
           "CANDIDATES_READY",
-        ]),
+        ])
       ),
       orderBy: desc(promptOrder.updatedAt),
       columns: {
