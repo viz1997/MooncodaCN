@@ -52,6 +52,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { listUserOrdersAction } from "@/features/image-gen/actions/order";
 import { submitImageGenDemoAction } from "@/features/image-gen/actions/submit-image-gen-demo";
 
 import {
@@ -222,6 +223,59 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
     token: string;
     creditsConsumed: number;
   } | null>(null);
+
+  // ========== 我的订单抽屉 ==========
+  const [showOrdersDrawer, setShowOrdersDrawer] = useState(false);
+  const [orders, setOrders] = useState<
+    {
+      orderId: string;
+      orderNo: string;
+      token: string;
+      status:
+        | "PENDING"
+        | "GENERATING"
+        | "CANDIDATES_READY"
+        | "SELECTED"
+        | "CANCELLED"
+        | "FAILED";
+      productTypeCode: string | null;
+      productSize: string | null;
+      accessoryCode: string | null;
+      templateName: string;
+      templateId: string;
+      thumbnailUrl: string | null;
+      createdAt: string;
+    }[]
+  >([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
+
+  const fetchOrders = async () => {
+    setLoadingOrders(true);
+    try {
+      const res = await listUserOrdersAction({});
+      if (res?.data) {
+        setOrders(res.data.orders);
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("[image-gen] list orders failed:", err);
+    } finally {
+      setLoadingOrders(false);
+    }
+  };
+
+  // 打开抽屉时拉一次；提交订单成功后再拉一次（新增订单要出现）
+  useEffect(() => {
+    if (showOrdersDrawer) {
+      void fetchOrders();
+    }
+  }, [showOrdersDrawer]);
+
+  useEffect(() => {
+    if (submitted) {
+      void fetchOrders();
+    }
+  }, [submitted]);
 
   // 加载历史
   useEffect(() => {
@@ -712,13 +766,25 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <Link
-            href="/dashboard/prompt-orders"
-            className="text-xs text-muted-foreground hover:text-violet-600 flex items-center gap-1 px-2 py-1 rounded-md hover:bg-violet-500/5 transition-colors"
+          <button
+            type="button"
+            onClick={() => setShowOrdersDrawer((v) => !v)}
+            className={cn(
+              "text-xs flex items-center gap-1 px-2 py-1 rounded-md transition-colors",
+              showOrdersDrawer
+                ? "bg-violet-500/10 text-violet-700 dark:text-violet-300"
+                : "text-muted-foreground hover:text-violet-600 hover:bg-violet-500/5"
+            )}
+            title="查看我的订单"
           >
             <ShoppingCart className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">我的订单</span>
-          </Link>
+            {orders.length > 0 && (
+              <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-emerald-500/90 text-white text-[10px] font-medium">
+                {orders.length}
+              </span>
+            )}
+          </button>
           {user ? (
             <div
               className="flex items-center gap-2 pl-2 ml-1"
@@ -1234,6 +1300,189 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
         onClose={() => setShowSpecModal(false)}
         onConfirm={(spec) => void handleConfirmSpec(spec)}
       />
+
+      {/* 我的订单抽屉 —— 2026-09-10 内嵌展示，不跳 /dashboard */}
+      {showOrdersDrawer && (
+        <>
+          <button
+            type="button"
+            aria-label="关闭订单抽屉"
+            className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[1px] animate-in fade-in"
+            onClick={() => setShowOrdersDrawer(false)}
+          />
+          <aside
+            className={cn(
+              "fixed top-12 right-0 bottom-0 z-50 w-[340px] bg-white dark:bg-zinc-900 border-l shadow-2xl",
+              "flex flex-col overflow-hidden",
+              "animate-in slide-in-from-right duration-200"
+            )}
+          >
+            <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b bg-gradient-to-r from-violet-500/10 to-purple-500/5">
+              <div className="flex items-center gap-2">
+                <ShoppingCart className="h-4 w-4 text-violet-600" />
+                <span className="text-sm font-semibold">我的订单</span>
+                <span className="text-[10px] text-muted-foreground">
+                  · {orders.length} 条
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => void fetchOrders()}
+                  className="text-muted-foreground hover:text-violet-600 p-1 rounded"
+                  title="刷新"
+                >
+                  <RefreshCw
+                    className={cn(
+                      "h-3.5 w-3.5",
+                      loadingOrders && "animate-spin"
+                    )}
+                  />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowOrdersDrawer(false)}
+                  className="text-muted-foreground hover:text-rose-600 p-1 rounded"
+                  title="关闭"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-2">
+              {loadingOrders && orders.length === 0 ? (
+                <div className="space-y-2">
+                  {["o-skel-0", "o-skel-1", "o-skel-2", "o-skel-3"].map((k) => (
+                    <div
+                      key={k}
+                      className="h-20 rounded-lg bg-muted animate-pulse"
+                    />
+                  ))}
+                </div>
+              ) : orders.length === 0 ? (
+                <div className="text-center text-muted-foreground py-12 space-y-2">
+                  <div className="h-12 w-12 rounded-xl bg-muted flex items-center justify-center mx-auto">
+                    <ShoppingCart className="h-5 w-5 opacity-30" />
+                  </div>
+                  <p className="text-xs">还没有订单</p>
+                  <p className="text-[10px]">
+                    选效果 + 上传参考图 + 生成后点「选择此效果下单」
+                  </p>
+                </div>
+              ) : (
+                orders.map((o) => (
+                  <button
+                    type="button"
+                    key={o.orderId}
+                    onClick={() => {
+                      window.location.href = `/p/${o.token}`;
+                    }}
+                    className="w-full text-left rounded-lg border bg-card hover:border-violet-500/50 hover:shadow-md transition-all overflow-hidden group"
+                  >
+                    <div className="flex gap-2.5 p-2">
+                      {/* 缩略图 */}
+                      <div className="shrink-0 h-16 w-16 rounded-md overflow-hidden bg-muted">
+                        {o.thumbnailUrl ? (
+                          // biome-ignore lint/performance/noImgElement: 订单缩略图为远程 URL
+                          <img
+                            src={o.thumbnailUrl}
+                            alt={o.templateName}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-muted-foreground">
+                            <ImageIcon className="h-4 w-4 opacity-30" />
+                          </div>
+                        )}
+                      </div>
+                      {/* 信息 */}
+                      <div className="flex-1 min-w-0 space-y-1">
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] font-mono text-muted-foreground truncate">
+                            {o.orderNo}
+                          </span>
+                          <OrderStatusBadge status={o.status} />
+                        </div>
+                        <p className="text-xs font-medium truncate group-hover:text-violet-600">
+                          {o.templateName}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {new Date(o.createdAt).toLocaleString("zh-CN", {
+                            month: "2-digit",
+                            day: "2-digit",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                          {o.productSize && ` · ${o.productSize}cm`}
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+            <div className="shrink-0 px-4 py-2 border-t text-[10px] text-muted-foreground text-center">
+              仅展示当前账号的订单
+            </div>
+          </aside>
+        </>
+      )}
     </div>
+  );
+}
+
+/**
+ * 订单状态徽章 —— 极简配色（与 /dashboard/prompt-orders 保持一致）
+ */
+function OrderStatusBadge({
+  status,
+}: {
+  status:
+    | "PENDING"
+    | "GENERATING"
+    | "CANDIDATES_READY"
+    | "SELECTED"
+    | "CANCELLED"
+    | "FAILED";
+}) {
+  const map: Record<string, { label: string; cls: string }> = {
+    PENDING: {
+      label: "待处理",
+      cls: "bg-zinc-500/10 text-zinc-700 dark:text-zinc-300 border-zinc-500/20",
+    },
+    GENERATING: {
+      label: "生成中",
+      cls: "bg-sky-500/10 text-sky-700 dark:text-sky-300 border-sky-500/20",
+    },
+    CANDIDATES_READY: {
+      label: "候选就绪",
+      cls: "bg-violet-500/10 text-violet-700 dark:text-violet-300 border-violet-500/20",
+    },
+    SELECTED: {
+      label: "已下单",
+      cls: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20",
+    },
+    CANCELLED: {
+      label: "已取消",
+      cls: "bg-zinc-500/10 text-zinc-500 border-zinc-500/20",
+    },
+    FAILED: {
+      label: "失败",
+      cls: "bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/20",
+    },
+  };
+  const item = map[status] ?? {
+    label: status,
+    cls: "bg-muted text-muted-foreground",
+  };
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center px-1.5 h-4 rounded text-[9px] font-medium border",
+        item.cls
+      )}
+    >
+      {item.label}
+    </span>
   );
 }

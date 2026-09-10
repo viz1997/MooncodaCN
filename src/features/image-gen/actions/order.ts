@@ -367,6 +367,117 @@ export const listUserDraftAction = withOrderAction("listDraft")
   });
 
 // ============================================
+// 列出当前用户的所有订单（/image-gen 右侧抽屉用）
+// ============================================
+
+/**
+ * 列出当前登录用户的所有 promptOrder（按 createdAt desc），最多 50 条。
+ *
+ * 2026-09-10：替代「跳 /dashboard/prompt-orders」—— /image-gen demo 流的内嵌
+ * 订单抽屉直接消费这个 action。每条订单返回：
+ *   - orderId / orderNo / token（前端跳 /p/[token]）
+ *   - status / productTypeCode / productSize / accessoryCode
+ *   - thumbnailUrl（candidates[0][selectedIndex] 或 candidates[0][0]，
+ *     demo 一键下单直接落 SELECTED + candidates=[[previewUrl]]）
+ *   - templateName（join promptTemplate.name 显示）
+ *   - createdAt
+ *
+ * agentId=null（代理商已砍），createdBy 限定当前用户。
+ */
+export const listUserOrdersAction = withOrderAction("listUserOrders")
+  .schema(z.object({}).optional())
+  .action(async ({ ctx }) => {
+    const rows = await db.query.promptOrder.findMany({
+      where: eq(promptOrder.createdBy, ctx.userId),
+      orderBy: desc(promptOrder.createdAt),
+      limit: 50,
+      columns: {
+        id: true,
+        orderNo: true,
+        token: true,
+        status: true,
+        productTypeCode: true,
+        productSize: true,
+        accessoryCode: true,
+        candidates: true,
+        selections: true,
+        selectedIndex: true,
+        createdAt: true,
+        templateId: true,
+      },
+      with: {
+        template: { columns: { name: true } },
+      },
+    });
+    return {
+      orders: rows.map((o) => ({
+        orderId: o.id,
+        orderNo: o.orderNo,
+        token: o.token,
+        status: o.status,
+        productTypeCode: o.productTypeCode ?? null,
+        productSize: o.productSize ?? null,
+        accessoryCode: o.accessoryCode ?? null,
+        templateName: o.template.name,
+        templateId: o.templateId,
+        // 缩略图：candidates 是嵌套数组 [[url1, url2, ...]]（外层 imageIdx，
+        // 内层 candIdx）；demo 模式下 candidates=[[previewUrl]] 长度=1。
+        // 优先用 selections[selectedIndex]，否则用 candidates[0][0]。
+        thumbnailUrl: extractOrderThumbnail(
+          o.candidates,
+          o.selections,
+          o.selectedIndex
+        ),
+        createdAt: o.createdAt.toISOString(),
+      })),
+    };
+  });
+
+/**
+ * 从 promptOrder.candidates + selections 提取缩略图 URL。
+ * 解析失败 / 空 → null。
+ */
+function extractOrderThumbnail(
+  candidatesRaw: string | null,
+  selectionsRaw: string | null,
+  selectedIndex: number | null
+): string | null {
+  if (!candidatesRaw) return null;
+  try {
+    const candidates: unknown = JSON.parse(candidatesRaw);
+    if (!Array.isArray(candidates) || candidates.length === 0) return null;
+    const firstImage = candidates[0];
+    if (!Array.isArray(firstImage) || firstImage.length === 0) return null;
+    const firstUrl = firstImage[0];
+    if (typeof firstUrl !== "string") return null;
+
+    // 优先 selections[selectedIndex]；否则取 candidates[0][0]
+    if (selectionsRaw) {
+      try {
+        const selections: unknown = JSON.parse(selectionsRaw);
+        if (
+          Array.isArray(selections) &&
+          typeof selectedIndex === "number" &&
+          selectedIndex >= 0 &&
+          selectedIndex < selections.length
+        ) {
+          // selections[imageIdx] 是 candIdx（数字）或者 null
+          const candIdx = selections[selectedIndex];
+          if (typeof candIdx === "number" && firstImage[candIdx]) {
+            return firstImage[candIdx] as string;
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return firstUrl;
+  } catch {
+    return null;
+  }
+}
+
+// ============================================
 // helpers
 // ============================================
 
