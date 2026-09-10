@@ -21,7 +21,7 @@
  *   - credit 不足抛 InsufficientCreditsError，UI 转友好提示
  */
 
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, like, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -384,13 +384,67 @@ export const listUserDraftAction = withOrderAction("listDraft")
  *
  * agentId=null（代理商已砍），createdBy 限定当前用户。
  */
+/**
+ * /image-gen/orders 列表查询参数
+ */
+const listUserOrdersSchema = z.object({
+  /** 状态过滤（可选） */
+  status: z
+    .enum([
+      "PENDING",
+      "GENERATING",
+      "CANDIDATES_READY",
+      "SELECTED",
+      "CANCELLED",
+      "FAILED",
+    ])
+    .optional(),
+  /**
+   * 关键字搜索（订单号 like + 模板名 in 名字集合，两边都满足才返回）。
+   * 模板名搜索走 SQL IN 子查询，避免全表 LIKE。
+   */
+  search: z.string().trim().max(64).optional(),
+  /** 取多少条，默认 50 */
+  limit: z.number().int().min(1).max(200).default(50),
+});
+
 export const listUserOrdersAction = withOrderAction("listUserOrders")
-  .schema(z.object({}).optional())
-  .action(async ({ ctx }) => {
+  .schema(listUserOrdersSchema)
+  .action(async ({ parsedInput, ctx }) => {
+    const { status, search, limit } = parsedInput;
+
+    // 搜索时先查出匹配的 templateId 集合，再去过滤 promptOrder。
+    // 避免 promptOrder.templateId 上做 join 而拖累主表查询。
+    let matchingTemplateIds: string[] | null = null;
+    if (search && search.length > 0) {
+      const matches = await db
+        .select({ id: promptTemplate.id })
+        .from(promptTemplate)
+        .where(like(promptTemplate.name, `%${search}%`));
+      matchingTemplateIds = matches.map((m) => m.id);
+      // 没有匹配模板 → 直接空集合返回
+      if (matchingTemplateIds.length === 0) {
+        return { orders: [] };
+      }
+    }
+
+    const whereClauses = [eq(promptOrder.createdBy, ctx.userId)];
+    if (status) {
+      whereClauses.push(eq(promptOrder.status, status));
+    }
+    if (search && search.length > 0) {
+      // orderNo like  OR  templateId in matchingTemplateIds
+      const orExpr = or(
+        like(promptOrder.orderNo, `%${search}%`),
+        inArray(promptOrder.templateId, matchingTemplateIds ?? [])
+      );
+      if (orExpr) whereClauses.push(orExpr);
+    }
+
     const rows = await db.query.promptOrder.findMany({
-      where: eq(promptOrder.createdBy, ctx.userId),
+      where: and(...whereClauses),
       orderBy: desc(promptOrder.createdAt),
-      limit: 50,
+      limit,
       columns: {
         id: true,
         orderNo: true,
