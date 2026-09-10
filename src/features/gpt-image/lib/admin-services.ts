@@ -393,6 +393,11 @@ export async function createOrder(input: {
     // 2026-09-07：终端用户定制（刻字 / 外露）
     engravingText: created.engravingText ?? null,
     engravingExposed: created.engravingExposed ?? null,
+    // 2026-09-10：LB 皮革徽章扩展定制（capability-gated）
+    leatherColor: created.leatherColor ?? null,
+    leatherExposed: created.leatherExposed ?? null,
+    pvcProtection: created.pvcProtection ?? null,
+    remarks: created.remarks ?? null,
     hasUploadedImage: false,
     uploadedImageCount: 0,
     candidateCount: 0,
@@ -684,6 +689,11 @@ export async function updateOrder(input: {
     // 2026-09-07：终端用户定制
     engravingText: updated.engravingText ?? null,
     engravingExposed: updated.engravingExposed ?? null,
+    // 2026-09-10：LB 皮革徽章扩展定制（capability-gated）
+    leatherColor: updated.leatherColor ?? null,
+    leatherExposed: updated.leatherExposed ?? null,
+    pvcProtection: updated.pvcProtection ?? null,
+    remarks: updated.remarks ?? null,
     hasUploadedImage: uploaded.length > 0,
     uploadedImageCount: countUploadedImages(uploaded),
     candidateCount: countCandidateGroups(candidates),

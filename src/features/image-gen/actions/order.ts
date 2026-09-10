@@ -35,6 +35,7 @@ import {
 import { generateOrderToken } from "@/features/gpt-image/lib/generation-service";
 import {
   getProductType,
+  validateLeatherColor,
   validateProductSpec,
 } from "@/features/gpt-image/lib/product-catalog";
 import { protectedAction } from "@/lib/safe-action";
@@ -60,6 +61,11 @@ const createOrderSchema = z.object({
   // 2026-09-09：/image-gen 工作台允许用户在创建时直接填 engraving（与 /p/[token] 体验区分）
   engravingText: z.string().trim().max(40).nullable().optional(),
   engravingExposed: z.boolean().nullable().optional(),
+  // 2026-09-10：LB 皮革徽章扩展定制（capability-gated）
+  leatherColor: z.string().min(1).max(32).nullable().optional(),
+  leatherExposed: z.boolean().nullable().optional(),
+  pvcProtection: z.boolean().nullable().optional(),
+  remarks: z.string().trim().min(0).max(500).nullable().optional(),
 });
 
 /**
@@ -180,6 +186,31 @@ export const createOrderFromImageGenAction = withOrderAction("create")
       finalEngravingExposed = null;
     }
 
+    // 5b. 2026-09-10：LB 皮革徽章定制联动（capability-gated，关闭的字段静默 collapse 为 null）
+    let finalLeatherColor: string | null = null;
+    let finalLeatherExposed: boolean | null = null;
+    let finalPvcProtection: boolean | null = null;
+    let finalRemarks: string | null = null;
+    if (parsedInput.productTypeCode) {
+      const capType = getProductType(parsedInput.productTypeCode);
+      if (capType) {
+        if (capType.capabilities.canLeatherColor) {
+          finalLeatherColor = parsedInput.leatherColor ?? null;
+          validateLeatherColor(finalLeatherColor); // 字典外的 code 直接抛
+        }
+        if (capType.capabilities.canLeatherExposed) {
+          finalLeatherExposed = parsedInput.leatherExposed === true;
+        }
+        if (capType.capabilities.canPvcProtection) {
+          finalPvcProtection = parsedInput.pvcProtection === true;
+        }
+        if (capType.capabilities.canHaveRemarks) {
+          const trimmed = parsedInput.remarks?.trim();
+          finalRemarks = trimmed && trimmed.length > 0 ? trimmed : null;
+        }
+      }
+    }
+
     const token = generateOrderToken();
 
     const [created] = await db
@@ -200,6 +231,10 @@ export const createOrderFromImageGenAction = withOrderAction("create")
         accessoryCode: finalAccessoryCode,
         engravingText: finalEngravingText,
         engravingExposed: finalEngravingExposed,
+        leatherColor: finalLeatherColor,
+        leatherExposed: finalLeatherExposed,
+        pvcProtection: finalPvcProtection,
+        remarks: finalRemarks,
       })
       .returning();
 
@@ -343,6 +378,11 @@ export const listUserDraftAction = withOrderAction("listDraft")
         accessoryCode: true,
         engravingText: true,
         engravingExposed: true,
+        // 2026-09-10：LB 皮革徽章扩展字段
+        leatherColor: true,
+        leatherExposed: true,
+        pvcProtection: true,
+        remarks: true,
         selectedIndex: true,
         templateId: true,
       },
@@ -359,6 +399,10 @@ export const listUserDraftAction = withOrderAction("listDraft")
             accessoryCode: order.accessoryCode,
             engravingText: order.engravingText,
             engravingExposed: order.engravingExposed,
+            leatherColor: order.leatherColor,
+            leatherExposed: order.leatherExposed,
+            pvcProtection: order.pvcProtection,
+            remarks: order.remarks,
             selectedIndex: order.selectedIndex,
             templateId: order.templateId,
           }
@@ -484,6 +528,11 @@ export const listUserOrdersAction = withOrderAction("listUserOrders")
         accessoryCode: true,
         engravingText: true,
         engravingExposed: true,
+        // 2026-09-10：LB 皮革徽章扩展字段
+        leatherColor: true,
+        leatherExposed: true,
+        pvcProtection: true,
+        remarks: true,
         candidates: true,
         selections: true,
         selectedIndex: true,
@@ -532,6 +581,11 @@ export const listUserOrdersAction = withOrderAction("listUserOrders")
           accessoryCode: o.accessoryCode ?? null,
           engravingText: o.engravingText ?? null,
           engravingExposed: o.engravingExposed ?? null,
+          // 2026-09-10：LB 皮革徽章扩展字段
+          leatherColor: o.leatherColor ?? null,
+          leatherExposed: o.leatherExposed ?? null,
+          pvcProtection: o.pvcProtection ?? null,
+          remarks: o.remarks ?? null,
           templateName: templateNameMap.get(o.templateId) ?? "未知模板",
           templateId: o.templateId,
           // 列表缩略图：selected > [0][0]

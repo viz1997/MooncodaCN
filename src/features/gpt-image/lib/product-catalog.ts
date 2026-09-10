@@ -21,6 +21,9 @@
 /**
  * 产品能力标记 —— 决定 /p/[token] 上"产品定制"区哪些输入项渲染。
  * - canEngrave：是否支持刻字（皮革徽章 / 钥匙扣 / 异性钥匙扣 / 相框都支持）
+ * - canLeatherColor / canPvcProtection / canLeatherExposed / canHaveRemarks：
+ *   2026-09-10 LB 皮革徽章扩展（颜色 / PVC 保护 / 皮革外露 / 备注）。
+ *   仅 LB 打开；其他型号全 false，/configure 路由会静默 collapse 为 null。
  *
  * 历史说明：2026-09-07 初版曾把"皮革徽章"作为 R 钥匙扣的 hasLeatherBadge
  * capability，让用户在 /p/[token] 上勾选。但用户原意是把它作为独立产品型号，
@@ -29,6 +32,14 @@
  */
 export interface ProductCapabilities {
   canEngrave: boolean;
+  /** 是否可选择皮革颜色（仅 LB） */
+  canLeatherColor: boolean;
+  /** 是否可选 PVC 保护加工（仅 LB） */
+  canPvcProtection: boolean;
+  /** 是否可填皮革实物外露（仅 LB；与 engravingExposed 独立语义） */
+  canLeatherExposed: boolean;
+  /** 是否可填备注（仅 LB；不参与生图，仅内部沟通） */
+  canHaveRemarks: boolean;
 }
 
 export interface ProductType {
@@ -49,7 +60,13 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
     sizes: ["4", "6"],
     accessories: ["leather", "pvc"],
     // 钥匙扣常配皮套 / PVC 皮套；皮革徽章是独立型号 LB，不再是 R 的能力
-    capabilities: { canEngrave: true },
+    capabilities: {
+      canEngrave: true,
+      canLeatherColor: false,
+      canPvcProtection: false,
+      canLeatherExposed: false,
+      canHaveRemarks: false,
+    },
   },
   {
     code: "A",
@@ -57,7 +74,13 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
     sizes: ["4", "6"],
     accessories: ["bracket"],
     // 异性款以支架为主；刻字仍支持
-    capabilities: { canEngrave: true },
+    capabilities: {
+      canEngrave: true,
+      canLeatherColor: false,
+      canPvcProtection: false,
+      canLeatherExposed: false,
+      canHaveRemarks: false,
+    },
   },
   {
     code: "P",
@@ -65,7 +88,13 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
     sizes: ["4", "6", "8"],
     accessories: [], // 冰箱贴没配件
     // 冰箱贴不在表面刻字
-    capabilities: { canEngrave: false },
+    capabilities: {
+      canEngrave: false,
+      canLeatherColor: false,
+      canPvcProtection: false,
+      canLeatherExposed: false,
+      canHaveRemarks: false,
+    },
   },
   {
     code: "RM",
@@ -73,15 +102,27 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
     sizes: ["6", "8", "11"],
     accessories: [],
     // 相框可在底座刻字（祝福语/日期）
-    capabilities: { canEngrave: true },
+    capabilities: {
+      canEngrave: true,
+      canLeatherColor: false,
+      canPvcProtection: false,
+      canLeatherExposed: false,
+      canHaveRemarks: false,
+    },
   },
   {
     code: "LB",
     name: "CM 皮革徽章",
     sizes: ["4", "6"],
     accessories: [], // 皮革徽章无配件
-    // 皮革徽章支持刻字（祝福语/日期/名字）
-    capabilities: { canEngrave: true },
+    // 2026-09-10：LB 全加工能力开启（颜色 / 外露 / PVC / 备注 + 原有的刻字）
+    capabilities: {
+      canEngrave: true,
+      canLeatherColor: true,
+      canPvcProtection: true,
+      canLeatherExposed: true,
+      canHaveRemarks: true,
+    },
   },
 ];
 
@@ -97,6 +138,44 @@ export const ACCESSORIES: readonly Accessory[] = [
   { code: "pvc", name: "PVC 皮套" },
   { code: "bracket", name: "支架" },
 ];
+
+// ============================================
+// 2026-09-10：皮革颜色字典（仅 LB 皮革徽章用）
+// 前端 hardcoded 与 PRODUCT_TYPES 同模式：量小（5 色）先不上 DB。
+// swatch 仅供 UI 渲染色卡，不存 DB；DB 只存 code。
+// ============================================
+export interface LeatherColor {
+  code: string;
+  name: string;
+  /** UI 渲染色卡用的 CSS 颜色；不进 DB */
+  swatch: string;
+}
+
+export const LEATHER_COLORS: readonly LeatherColor[] = [
+  { code: "natural", name: "皮革原色", swatch: "#c19a6b" },
+  { code: "brown", name: "棕色", swatch: "#6b4423" },
+  { code: "black", name: "黑色", swatch: "#1a1a1a" },
+  { code: "red", name: "酒红", swatch: "#722f37" },
+  { code: "navy", name: "藏青", swatch: "#1f2d4d" },
+];
+
+export function getLeatherColor(
+  code: string | null | undefined
+): LeatherColor | null {
+  if (!code) return null;
+  return LEATHER_COLORS.find((c) => c.code === code) ?? null;
+}
+
+/**
+ * 校验皮革颜色 code 在字典里。code 为 null / undefined 通过（用户不选 = 不定制）。
+ * 抛错信息给客户端 / 日志直接可读。
+ */
+export function validateLeatherColor(code: string | null | undefined): void {
+  if (!code) return;
+  if (!LEATHER_COLORS.some((c) => c.code === code)) {
+    throw new Error(`未知的皮革颜色：${code}`);
+  }
+}
 
 /**
  * 找产品型号。找不到返回 null。
@@ -135,21 +214,28 @@ export function formatProductSpec(opts: {
 }
 
 /**
- * 把"产品定制"区（刻字 / 刻字内容 / 外露）渲染成一行可读字符串。仅在
- * 用户真的填了值时输出对应片段。
+ * 把"产品定制"区渲染成一行可读字符串。仅在用户真的填了值时输出对应片段。
  *
  * - engravingText 非空 → `刻字："Love U"`（短文本原样）
  * - engravingText 非空且 engravingExposed=true → 上面那段尾巴加 "（外露）"
  * - engravingText 非空但 engravingExposed=false → "刻字：…（内刻）"
+ * - leatherColor 非空 → `皮革色：棕色`（按 LEATHER_COLORS 字典取中文名）
+ * - pvcProtection=true → `带 PVC 保护`
+ * - leatherExposed=true → `皮革外露`
+ * - remarks → **不进 summary**（备注可能很长 / 含换行，单独渲染更合适）
  *
  * 全 null 时返回空字符串（由 UI 决定是否展示"无定制"占位）。
  *
  * 历史：2026-09-07 初版还会渲染"✓ 皮革徽章"，但皮革徽章已重构为独立
- * 产品 LB，hasLeatherBadge 字段已删除。
+ * 产品 LB，hasLeatherBadge 字段已删除。2026-09-10 扩到 LB 全加工维度。
  */
 export function formatCustomization(opts: {
   engravingText?: string | null;
   engravingExposed?: boolean | null;
+  leatherColor?: string | null;
+  leatherExposed?: boolean | null;
+  pvcProtection?: boolean | null;
+  remarks?: string | null;
 }): string {
   const parts: string[] = [];
   const text = opts.engravingText?.trim();
@@ -157,6 +243,11 @@ export function formatCustomization(opts: {
     const place = opts.engravingExposed ? "（外露）" : "（内刻）";
     parts.push(`刻字：${text}${place}`);
   }
+  const color = getLeatherColor(opts.leatherColor);
+  if (color) parts.push(`皮革色：${color.name}`);
+  if (opts.pvcProtection === true) parts.push("带 PVC 保护");
+  if (opts.leatherExposed === true) parts.push("皮革外露");
+  // remarks 故意不参与 parts.join — 备注单独渲染更稳
   return parts.join(" · ");
 }
 

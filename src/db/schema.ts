@@ -1084,6 +1084,24 @@ export const promptOrder = pgTable(
     engravingText: text("engraving_text"),
     /** 刻字是否外露（与 engravingText 独立 boolean，按用户决定） */
     engravingExposed: boolean("engraving_exposed"),
+    // ============================================
+    // 2026-09-10：LB 皮革徽章扩展定制（capability-gated，其他型号保持 null）
+    // 4 个字段全部 nullable：
+    // - 非 LB 型号：始终 null（capability 在 /configure 路由被静默 collapse）
+    // - LB 但用户没填：null
+    // 与 capabilities 的联动校验在 /api/orders/[token]/configure 路由同步处理。
+    //
+    // 与 engravingExposed 独立语义：leatherExposed = "皮革实物是否外露"，
+    // engravingExposed = "刻字文字是否外露"，两者解耦。
+    // ============================================
+    /** 皮革颜色 code（仅 canLeatherColor=true 可填，对应 LEATHER_COLORS 字典） */
+    leatherColor: text("leather_color"),
+    /** 皮革实物是否外露（与 engravingExposed 独立） */
+    leatherExposed: boolean("leather_exposed"),
+    /** 是否带 PVC 透明保护膜 */
+    pvcProtection: boolean("pvc_protection"),
+    /** 备注（仅内部沟通，不参与生图；服务端 max 500） */
+    remarks: text("remarks"),
     agentId: text("agent_id").references((): AnyPgColumn => agent.id, {
       onDelete: "set null",
     }),

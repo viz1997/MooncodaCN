@@ -622,6 +622,11 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
         accessoryCode: null,
         engravingText: null,
         engravingExposed: null,
+        // 2026-09-10：LB 扩字段（无 productTypeCode → 全 null）
+        leatherColor: null,
+        leatherExposed: null,
+        pvcProtection: null,
+        remarks: null,
       });
       return;
     }

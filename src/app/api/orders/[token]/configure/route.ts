@@ -20,15 +20,24 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
 import { promptOrder } from "@/db/schema";
-import { getProductType } from "@/features/gpt-image/lib/product-catalog";
+import {
+  getProductType,
+  validateLeatherColor,
+} from "@/features/gpt-image/lib/product-catalog";
 import { withApiLogging } from "@/lib/api-logger";
 
 export const runtime = "nodejs";
 
+// 2026-09-10：扩 4 个 LB 皮革徽章定制字段（leatherColor / leatherExposed / pvcProtection / remarks）。
+// 全部 capability-gated：非 LB 型号在下面联动校验块被静默 collapse 为 null，不抛错。
 const configureSchema = z
   .object({
     engravingText: z.string().trim().min(0).max(40).nullable().optional(),
     engravingExposed: z.boolean().nullable().optional(),
+    leatherColor: z.string().min(1).max(32).nullable().optional(),
+    leatherExposed: z.boolean().nullable().optional(),
+    pvcProtection: z.boolean().nullable().optional(),
+    remarks: z.string().trim().min(0).max(500).nullable().optional(),
   })
   .strict();
 
@@ -107,11 +116,35 @@ async function postHandler(
         ? input.engravingExposed === true
         : null;
 
+    // 2026-09-10：LB 皮革徽章扩字段联动。capability 关闭的字段静默 collapse 为 null（与 engraving 同模式）。
+    const finalLeatherColor = type.capabilities.canLeatherColor
+      ? (input.leatherColor ?? null)
+      : null;
+    // 字典白名单 —— 字典外的 code 直接抛 400（避免脏数据落库）
+    validateLeatherColor(finalLeatherColor);
+    const finalLeatherExposed = type.capabilities.canLeatherExposed
+      ? input.leatherExposed === true
+      : null;
+    const finalPvcProtection = type.capabilities.canPvcProtection
+      ? input.pvcProtection === true
+      : null;
+    // remarks：capability 关闭 → null；开启但用户没填 → null；否则 trim 后存
+    const trimmedRemarks =
+      type.capabilities.canHaveRemarks &&
+      typeof input.remarks === "string" &&
+      input.remarks.trim().length > 0
+        ? input.remarks.trim()
+        : null;
+
     await db
       .update(promptOrder)
       .set({
         engravingText: trimmedEngraving,
         engravingExposed: finalEngravingExposed,
+        leatherColor: finalLeatherColor,
+        leatherExposed: finalLeatherExposed,
+        pvcProtection: finalPvcProtection,
+        remarks: trimmedRemarks,
         updatedAt: new Date(),
       })
       .where(eq(promptOrder.id, order.id));
@@ -121,6 +154,10 @@ async function postHandler(
       data: {
         engravingText: trimmedEngraving,
         engravingExposed: finalEngravingExposed,
+        leatherColor: finalLeatherColor,
+        leatherExposed: finalLeatherExposed,
+        pvcProtection: finalPvcProtection,
+        remarks: trimmedRemarks,
       },
     });
   } catch (err) {

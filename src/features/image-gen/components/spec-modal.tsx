@@ -6,13 +6,20 @@
  * 2026-09-09：用户点结果卡上「选择此效果下单」触发。按模板绑定的 productTypeCode
  * 动态渲染 productSize / accessoryCode / 可选 engraving 字段。
  *
+ * 2026-09-10：LB 皮革徽章扩 4 字段（皮革色 / 皮革外露 / PVC 保护 / 备注）。
+ * capability-gated：capabilities.canLeatherColor 等 4 flag 决定 UI 块是否渲染。
+ *
  * 字段规则：
  * - productTypeCode=null（老 ToC 模板） → 不应打开此 modal（UI 在父层直接走免规格分支）
  * - 有 productTypeCode 但 sizes 为空 → 不渲染 size 选择
  * - 有 productTypeCode 但 accessories 为空 → 不渲染 accessory 选择
  * - canEngrave=true → 渲染 engravingText + 外露 checkbox
+ * - canLeatherColor=true → 渲染皮革色色卡（仅 LB）
+ * - canLeatherExposed=true → 皮革外露 checkbox（仅 LB；与 engravingExposed 解耦）
+ * - canPvcProtection=true → PVC 保护 checkbox（仅 LB）
+ * - canHaveRemarks=true → 备注 textarea（仅 LB）
  *
- * 默认值：catalog 第一项；engraving 留空。
+ * 默认值：catalog 第一项；engraving 留空；皮革色默认不选（空）。
  *
  * 与 /p/[token] 上 ProductConfigSection 的区别：
  * - ProductConfigSection 是「修改已有订单的 engraving」（PENDING 阶段可改）
@@ -36,6 +43,7 @@ import { Label } from "@/components/ui/label";
 import {
   ACCESSORIES,
   getProductType,
+  LEATHER_COLORS,
   validateProductSpec,
 } from "@/features/gpt-image/lib/product-catalog";
 import { cn } from "@/lib/utils";
@@ -45,6 +53,11 @@ export interface SpecSelection {
   accessoryCode: string | null;
   engravingText: string | null;
   engravingExposed: boolean | null;
+  // 2026-09-10：LB 皮革徽章扩展字段
+  leatherColor: string | null;
+  leatherExposed: boolean | null;
+  pvcProtection: boolean | null;
+  remarks: string | null;
 }
 
 interface SpecModalProps {
@@ -97,13 +110,23 @@ export function SpecModal({
     ) ?? [];
   const hasSize = availableSizes.length > 0;
   const hasAccessory = availableAccessories.length > 0;
-  const canEngrave = productType?.capabilities.canEngrave ?? false;
+  const caps = productType?.capabilities;
+  const canEngrave = caps?.canEngrave ?? false;
+  const canLeatherColor = caps?.canLeatherColor ?? false;
+  const canLeatherExposed = caps?.canLeatherExposed ?? false;
+  const canPvcProtection = caps?.canPvcProtection ?? false;
+  const canHaveRemarks = caps?.canHaveRemarks ?? false;
 
   // 字段本地态
   const [productSize, setProductSize] = useState<string>("");
   const [accessoryCode, setAccessoryCode] = useState<string>("");
   const [engravingText, setEngravingText] = useState<string>("");
   const [engravingExposed, setEngravingExposed] = useState<boolean>(false);
+  // 2026-09-10：LB 皮革徽章 4 个新字段
+  const [leatherColor, setLeatherColor] = useState<string>("");
+  const [leatherExposed, setLeatherExposed] = useState<boolean>(false);
+  const [pvcProtection, setPvcProtection] = useState<boolean>(false);
+  const [remarks, setRemarks] = useState<string>("");
 
   // 打开时按可用规格 defaults 重置（受 allowed 子集过滤）
   useEffect(() => {
@@ -112,6 +135,10 @@ export function SpecModal({
     setAccessoryCode(availableAccessories[0] ?? "");
     setEngravingText("");
     setEngravingExposed(false);
+    setLeatherColor("");
+    setLeatherExposed(false);
+    setPvcProtection(false);
+    setRemarks("");
     // availableSizes/availableAccessories 依赖 template.allowed*；同步开 modal 时一并刷新
   }, [open, availableSizes, availableAccessories]);
 
@@ -127,11 +154,17 @@ export function SpecModal({
       // 客户端兜底校验失败 —— 理论上 UI 已禁用非法组合
       return;
     }
+    const trimmedEngraving = engravingText.trim();
     onConfirm({
       productSize: productSize || null,
       accessoryCode: accessoryCode || null,
-      engravingText: engravingText.trim() || null,
-      engravingExposed: engravingText.trim() ? engravingExposed : null,
+      engravingText: trimmedEngraving || null,
+      engravingExposed: trimmedEngraving ? engravingExposed : null,
+      // 2026-09-10：LB 扩字段透传。空字符串视为不选（与 createOrder 联动 null 对齐）
+      leatherColor: leatherColor || null,
+      leatherExposed: leatherExposed,
+      pvcProtection: pvcProtection,
+      remarks: remarks.trim() || null,
     });
   };
 
@@ -237,6 +270,96 @@ export function SpecModal({
                   />
                 </label>
               )}
+            </div>
+          )}
+
+          {/* 2026-09-10：LB 皮革颜色色卡（capability-gated） */}
+          {canLeatherColor && (
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">皮革颜色</Label>
+              <div className="flex flex-wrap gap-2">
+                {LEATHER_COLORS.map((c) => {
+                  const active = leatherColor === c.code;
+                  return (
+                    <button
+                      key={c.code}
+                      type="button"
+                      onClick={() => setLeatherColor(active ? "" : c.code)}
+                      className={cn(
+                        "flex items-center gap-1.5 rounded-full border pl-1 pr-2.5 py-1 text-xs font-medium transition-colors",
+                        active
+                          ? "border-violet-500 bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300"
+                          : "border-muted-foreground/20 hover:border-violet-500/50"
+                      )}
+                      title={c.name}
+                    >
+                      <span
+                        aria-hidden
+                        className={cn(
+                          "h-4 w-4 rounded-full border",
+                          active && "ring-2 ring-violet-500 ring-offset-1"
+                        )}
+                        style={{ backgroundColor: c.swatch }}
+                      />
+                      {c.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* 2026-09-10：皮革外露（独立于刻字外露） */}
+          {canLeatherExposed && (
+            <label className="flex items-center justify-between gap-3 cursor-pointer">
+              <div>
+                <div className="text-sm font-semibold">皮革外露</div>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  开 = 皮革面外露可见；关 = 内嵌不外露
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                className="h-5 w-5 accent-violet-600"
+                checked={leatherExposed}
+                onChange={(e) => setLeatherExposed(e.target.checked)}
+              />
+            </label>
+          )}
+
+          {/* 2026-09-10：PVC 保护 */}
+          {canPvcProtection && (
+            <label className="flex items-center justify-between gap-3 cursor-pointer">
+              <div>
+                <div className="text-sm font-semibold">PVC 保护</div>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  包一层透明 PVC 膜防刮花
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                className="h-5 w-5 accent-violet-600"
+                checked={pvcProtection}
+                onChange={(e) => setPvcProtection(e.target.checked)}
+              />
+            </label>
+          )}
+
+          {/* 2026-09-10：备注（不参与生图） */}
+          {canHaveRemarks && (
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">备注（可选）</Label>
+              <textarea
+                value={remarks}
+                onChange={(e) => setRemarks(e.target.value.slice(0, 500))}
+                maxLength={500}
+                rows={3}
+                placeholder="如：请尽快发货 / 希望礼品包装"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 resize-y"
+              />
+              <p className="text-[10px] text-muted-foreground text-right">
+                {remarks.length} / 500
+              </p>
             </div>
           )}
 

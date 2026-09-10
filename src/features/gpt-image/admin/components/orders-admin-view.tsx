@@ -486,16 +486,25 @@ export function OrdersAdminView() {
                             })}
                           </span>
                           {/* 2026-09-07：列表行末追加用户定制摘要（皮革徽章 / 刻字 / 外露），
+                              2026-09-10：扩到 LB 全加工维度（皮革色 / PVC / 外露 / 备注），
                               让 admin 一眼看到"用户额外指定了什么"，无需打开详情。 */}
                           {formatCustomization({
                             engravingText: order.engravingText,
                             engravingExposed: order.engravingExposed,
+                            leatherColor: order.leatherColor,
+                            leatherExposed: order.leatherExposed,
+                            pvcProtection: order.pvcProtection,
+                            remarks: order.remarks,
                           }) && (
                             <div
                               className="flex items-center gap-1 text-[10px] text-amber-700"
                               title={formatCustomization({
                                 engravingText: order.engravingText,
                                 engravingExposed: order.engravingExposed,
+                                leatherColor: order.leatherColor,
+                                leatherExposed: order.leatherExposed,
+                                pvcProtection: order.pvcProtection,
+                                remarks: order.remarks,
                               })}
                             >
                               <Sparkles className="h-2.5 w-2.5" />
@@ -503,6 +512,10 @@ export function OrdersAdminView() {
                                 {formatCustomization({
                                   engravingText: order.engravingText,
                                   engravingExposed: order.engravingExposed,
+                                  leatherColor: order.leatherColor,
+                                  leatherExposed: order.leatherExposed,
+                                  pvcProtection: order.pvcProtection,
+                                  remarks: order.remarks,
                                 })}
                               </span>
                             </div>
@@ -890,11 +903,17 @@ export function OrdersAdminView() {
                           </div>
                         )}
                         {/* 2026-09-07：终端用户定制（皮革徽章 / 刻字 / 外露）。
+                            2026-09-10：扩到 LB 全加工维度（皮革色 / 皮革外露 / PVC 保护 / 备注）。
                             仅当用户在 /p/[token] 上填了至少一项才展示，由
-                            formatCustomization 统一格式化（皮革徽章 ✓ / 刻字 / 内刻 vs 外露）。 */}
+                            formatCustomization 统一格式化。备注不参与 summary，
+                            在下方单独一行渲染。 */}
                         {formatCustomization({
                           engravingText: detailDialog.engravingText,
                           engravingExposed: detailDialog.engravingExposed,
+                          leatherColor: detailDialog.leatherColor,
+                          leatherExposed: detailDialog.leatherExposed,
+                          pvcProtection: detailDialog.pvcProtection,
+                          remarks: detailDialog.remarks,
                         }) && (
                           <div className="col-span-2 sm:col-span-3 flex items-center gap-1.5 text-xs">
                             <Sparkles className="h-3 w-3 text-amber-500" />
@@ -905,10 +924,24 @@ export function OrdersAdminView() {
                               {formatCustomization({
                                 engravingText: detailDialog.engravingText,
                                 engravingExposed: detailDialog.engravingExposed,
+                                leatherColor: detailDialog.leatherColor,
+                                leatherExposed: detailDialog.leatherExposed,
+                                pvcProtection: detailDialog.pvcProtection,
+                                remarks: detailDialog.remarks,
                               })}
                             </span>
                           </div>
                         )}
+                        {/* 2026-09-10：备注单独一行（不参与 summary string） */}
+                        {detailDialog.remarks &&
+                          detailDialog.remarks.trim().length > 0 && (
+                            <div className="col-span-2 sm:col-span-3 rounded-md bg-stone-50 px-3 py-2 text-xs text-stone-700 whitespace-pre-wrap break-words max-h-32 overflow-y-auto">
+                              <span className="text-stone-400 mr-1">
+                                备注：
+                              </span>
+                              {detailDialog.remarks.trim()}
+                            </div>
+                          )}
                       </div>
                     </div>
                   )}

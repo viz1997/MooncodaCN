@@ -16,6 +16,7 @@ import { CheckCircle2, ImageIcon, Sparkles } from "lucide-react";
 
 import {
   ACCESSORIES,
+  getLeatherColor,
   getProductType,
 } from "@/features/gpt-image/lib/product-catalog";
 import { cn } from "@/lib/utils";
@@ -36,6 +37,11 @@ export interface OrderDetail {
   accessoryCode: string | null;
   engravingText: string | null;
   engravingExposed: boolean | null;
+  // 2026-09-10：LB 皮革徽章扩展定制（capability-gated）
+  leatherColor: string | null;
+  leatherExposed: boolean | null;
+  pvcProtection: boolean | null;
+  remarks: string | null;
   templateName: string;
   templateId: string;
   candidateUrls: string[];
@@ -146,10 +152,62 @@ export function OrderDetailView({ order }: { order: OrderDetail }) {
                 )}
               </div>
             )}
+            {/* 2026-09-10：LB 皮革徽章定制详情（capability-gated 渲染）。
+                皮革颜色查字典取中文名；皮革外露 / PVC 保护独立 boolean；备注单独一行。 */}
+            {order.leatherColor && (
+              <div className="text-[11px] flex items-baseline gap-2">
+                <span className="text-muted-foreground w-16 shrink-0">
+                  皮革色
+                </span>
+                <span className="font-medium flex items-center gap-1.5">
+                  <span
+                    aria-hidden
+                    className="inline-block h-3 w-3 rounded-full border"
+                    style={{
+                      backgroundColor:
+                        getLeatherColor(order.leatherColor)?.swatch ?? "#999",
+                    }}
+                  />
+                  {getLeatherColor(order.leatherColor)?.name ?? order.leatherColor}
+                </span>
+              </div>
+            )}
+            {order.leatherExposed === true && (
+              <div className="text-[11px] flex items-baseline gap-2">
+                <span className="text-muted-foreground w-16 shrink-0">
+                  皮革外露
+                </span>
+                <span className="font-medium">是</span>
+              </div>
+            )}
+            {order.pvcProtection === true && (
+              <div className="text-[11px] flex items-baseline gap-2">
+                <span className="text-muted-foreground w-16 shrink-0">
+                  PVC 保护
+                </span>
+                <span className="font-medium">是</span>
+              </div>
+            )}
+            {order.remarks && order.remarks.trim().length > 0 && (
+              <div className="text-[11px] space-y-0.5">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-muted-foreground w-16 shrink-0">
+                    备注
+                  </span>
+                </div>
+                <div className="text-[11px] text-stone-700 whitespace-pre-wrap break-words bg-stone-50 rounded-md px-2.5 py-1.5 pl-[72px] max-h-24 overflow-y-auto">
+                  {order.remarks.trim()}
+                </div>
+              </div>
+            )}
             {!productType &&
               !order.productSize &&
               !order.accessoryCode &&
-              !order.engravingText && (
+              !order.engravingText &&
+              !order.leatherColor &&
+              order.leatherExposed !== true &&
+              order.pvcProtection !== true &&
+              !order.remarks && (
                 <div className="text-[11px] text-muted-foreground">
                   此订单无配件规格（通用款式）
                 </div>

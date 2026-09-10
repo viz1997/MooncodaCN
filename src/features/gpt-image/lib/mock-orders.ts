@@ -58,6 +58,11 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     // 2026-09-07：终端用户产品定制（刻字 / 外露）
     engravingText: null,
     engravingExposed: null,
+    // 2026-09-10：LB 皮革徽章扩展字段（所有 mock 默认 null，非 LB 场景保持全空）
+    leatherColor: null,
+    leatherExposed: null,
+    pvcProtection: null,
+    remarks: null,
     template: {
       id: "t1",
       name: "证件照定制",
@@ -98,6 +103,11 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     // 2026-09-07：终端用户产品定制（刻字 / 外露）
     engravingText: null,
     engravingExposed: null,
+    // 2026-09-10：LB 皮革徽章扩展字段（所有 mock 默认 null，非 LB 场景保持全空）
+    leatherColor: null,
+    leatherExposed: null,
+    pvcProtection: null,
+    remarks: null,
     template: {
       id: "t1",
       name: "艺术写真",
@@ -138,6 +148,11 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     // 2026-09-07：终端用户产品定制（刻字 / 外露）
     engravingText: null,
     engravingExposed: null,
+    // 2026-09-10：LB 皮革徽章扩展字段（所有 mock 默认 null，非 LB 场景保持全空）
+    leatherColor: null,
+    leatherExposed: null,
+    pvcProtection: null,
+    remarks: null,
     template: {
       id: "t1",
       name: "职业形象照",
@@ -178,6 +193,11 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     // 2026-09-07：终端用户产品定制（刻字 / 外露）
     engravingText: null,
     engravingExposed: null,
+    // 2026-09-10：LB 皮革徽章扩展字段（所有 mock 默认 null，非 LB 场景保持全空）
+    leatherColor: null,
+    leatherExposed: null,
+    pvcProtection: null,
+    remarks: null,
     template: {
       id: "t1",
       name: "证件照定制",
@@ -218,6 +238,11 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     // 2026-09-07：终端用户产品定制（刻字 / 外露）
     engravingText: null,
     engravingExposed: null,
+    // 2026-09-10：LB 皮革徽章扩展字段（所有 mock 默认 null，非 LB 场景保持全空）
+    leatherColor: null,
+    leatherExposed: null,
+    pvcProtection: null,
+    remarks: null,
     template: {
       id: "t1",
       name: "单张证件照",
@@ -258,6 +283,11 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     // 2026-09-07：终端用户产品定制（刻字 / 外露）
     engravingText: null,
     engravingExposed: null,
+    // 2026-09-10：LB 皮革徽章扩展字段（所有 mock 默认 null，非 LB 场景保持全空）
+    leatherColor: null,
+    leatherExposed: null,
+    pvcProtection: null,
+    remarks: null,
     template: {
       id: "t1",
       name: "个人写真",
@@ -298,6 +328,11 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     // 2026-09-07：终端用户产品定制（刻字 / 外露）
     engravingText: null,
     engravingExposed: null,
+    // 2026-09-10：LB 皮革徽章扩展字段（所有 mock 默认 null，非 LB 场景保持全空）
+    leatherColor: null,
+    leatherExposed: null,
+    pvcProtection: null,
+    remarks: null,
     template: {
       id: "t1",
       name: "艺术写真",
@@ -338,6 +373,11 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     // 2026-09-07：终端用户产品定制（刻字 / 外露）
     engravingText: null,
     engravingExposed: null,
+    // 2026-09-10：LB 皮革徽章扩展字段（所有 mock 默认 null，非 LB 场景保持全空）
+    leatherColor: null,
+    leatherExposed: null,
+    pvcProtection: null,
+    remarks: null,
     template: {
       id: "t1",
       name: "证件照定制",
@@ -389,6 +429,11 @@ export const MOCK_ORDERS: Record<string, OrderView> = {
     // 2026-09-07：终端用户产品定制（刻字 / 外露）
     engravingText: null,
     engravingExposed: null,
+    // 2026-09-10：LB 皮革徽章扩展字段（所有 mock 默认 null，非 LB 场景保持全空）
+    leatherColor: null,
+    leatherExposed: null,
+    pvcProtection: null,
+    remarks: null,
     template: {
       id: "t1",
       name: "双图定制",

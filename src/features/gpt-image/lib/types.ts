@@ -160,6 +160,19 @@ export interface OrderView {
   engravingText: string | null;
   /** 刻字是否外露（独立 boolean） */
   engravingExposed: boolean | null;
+  // ============================================
+  // 2026-09-10：LB 皮革徽章扩展定制（capability-gated）
+  // 4 字段全部 nullable；非 LB 型号 / 未填时为 null。
+  // leatherExposed 与 engravingExposed 独立语义（实物外露 vs 文字外露）。
+  // ============================================
+  /** 皮革颜色 code（仅 canLeatherColor=true 可填，对应 LEATHER_COLORS 字典） */
+  leatherColor: string | null;
+  /** 皮革实物是否外露（仅 canLeatherExposed=true；与 engravingExposed 解耦） */
+  leatherExposed: boolean | null;
+  /** 是否带 PVC 透明保护膜（仅 canPvcProtection=true） */
+  pvcProtection: boolean | null;
+  /** 备注（仅 canHaveRemarks=true；不参与生图，内部沟通用） */
+  remarks: string | null;
   template: {
     id: string;
     name: string;

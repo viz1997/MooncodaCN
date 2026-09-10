@@ -117,6 +117,11 @@ async function getHandler(
         // 2026-09-07：终端用户定制字段（刻字 / 外露）
         engravingText: order.engravingText ?? null,
         engravingExposed: order.engravingExposed ?? null,
+        // 2026-09-10：LB 皮革徽章扩展定制字段
+        leatherColor: order.leatherColor ?? null,
+        leatherExposed: order.leatherExposed ?? null,
+        pvcProtection: order.pvcProtection ?? null,
+        remarks: order.remarks ?? null,
         template: {
           id: order.template.id,
           name: order.template.name,
