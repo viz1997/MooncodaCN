@@ -40,7 +40,13 @@ const PUBLIC_ALLOWED_MODELS: ImageModelId[] = [
 
 interface PublicGenerateRequest {
   // 无需 apiKey，服务端预配置
-  imageUrl?: string; // 支持图片URL或base64 data URI
+  imageUrl?: string; // 支持图片URL或base64 data URI（兼容旧 client，单张）
+  /**
+   * 2026-09-10：多张参考图数组（与工作台对齐，max 10）。
+   * 客户端优先传 imageUrls[]；服务端同时认 imageUrls 和 imageUrl 单数（向后兼容）。
+   * mode 判断：imageUrls.length > 0 OR imageUrl 非空 都走 image_to_image。
+   */
+  imageUrls?: string[];
   maskId?: string;
   prompt?: string;
   size?: string;
@@ -130,11 +136,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // 2026-09-10：合并 imageUrls[]  + imageUrl 单数，统一收敛成 imageUrls[] 透传
+    // 给 dispatchGenerateImage（与 generation-service.buildGenerateRequest 语义一致）。
+    const refImageUrls: string[] = [
+      ...(Array.isArray(body.imageUrls) ? body.imageUrls : []),
+      ...(body.imageUrl ? [body.imageUrl] : []),
+    ];
+    const hasRef = refImageUrls.length > 0;
+
     const internalReq: GenerateImageRequest = {
       model: selectedModel,
-      mode: body.imageUrl ? "image_to_image" : "text_to_image",
+      mode: hasRef ? "image_to_image" : "text_to_image",
       prompt,
-      ...(body.imageUrl !== undefined && { imageUrl: body.imageUrl }),
+      // adapter 内部只看 imageUrls（看 adapters.ts validateImageRequest 系列校验）
+      ...(hasRef && { imageUrls: refImageUrls }),
       size: (body.size as GenerateImageRequest["size"]) ?? "1024x1024",
       batchSize: 1,
       enableSafetyCheck: true,
@@ -179,7 +194,9 @@ export async function POST(req: NextRequest) {
         taskId: result.taskId,
         taskStatus: result.status,
         // 把上游真实错误透传给用户（之前 catch-all 文案掩盖了根因）
-        error: result.success ? undefined : result.error ?? "生成失败，请稍后重试",
+        error: result.success
+          ? undefined
+          : (result.error ?? "生成失败，请稍后重试"),
       },
       { headers: getRateLimitHeaders(rl) }
     );
@@ -217,8 +234,8 @@ export async function GET() {
         name: m.name,
         previewUrl: m.previewUrl,
         // 2026-09-09：扩给 /image-gen 6 步 stepper 用
-        productTypeCode: (m as { productTypeCode?: string | null })
-          .productTypeCode ?? null,
+        productTypeCode:
+          (m as { productTypeCode?: string | null }).productTypeCode ?? null,
         price: m.price ?? 0,
         description: m.description ?? "",
         // 推荐模型仅返回 id，前端按 id 展示名字；不暴露完整 prompt/cost
