@@ -829,6 +829,24 @@ export const productEffect = pgTable("product_effect", {
    * - ["leather"] → 只允许皮套
    */
   allowedAccessories: text("allowed_accessories"),
+  // ============================================
+  // 2026-09-10：模板级 capability 覆盖 + 皮革色子集（仅 productEffect 表）
+  // ============================================
+  /**
+   * 模板级 capability 覆盖（JSON 字符串，Partial<ProductCapabilities>）。
+   * - null → 继承 catalog 默认（productType.capabilities）
+   * - 非 null → 仅对 override 里出现的 key 应用；canEngrave 不在覆盖范围
+   *   （沿用 catalog，避免和现有刻字字段冲突）
+   * 例子：{"canLeatherColor":true,"canPvcProtection":true}
+   * → admin 关掉 canLeatherExposed / canHaveRemarks，保留 canLeatherColor / canPvcProtection。
+   */
+  allowedCapabilities: text("allowed_capabilities"),
+  /**
+   * 皮革颜色子集（JSON 字符串数组，code 字符串）。
+   * - null/[] → LEATHER_COLORS 全展示
+   * - ["brown","black"] → 只允许棕/黑
+   */
+  allowedColors: text("allowed_colors"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

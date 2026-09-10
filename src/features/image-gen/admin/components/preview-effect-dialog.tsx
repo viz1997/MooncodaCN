@@ -15,7 +15,13 @@
 import { App, Badge, Button, Input, Modal, Select, Tabs } from "antd";
 import { Code, Copy, Play, Variable } from "lucide-react";
 import { useState } from "react";
-
+import {
+  type ProductCapabilities,
+} from "@/features/gpt-image/lib/product-catalog";
+import {
+  getEffectiveCapabilities,
+  getEffectiveLeatherColors,
+} from "@/features/image-gen/lib/product-effect-capabilities";
 import type {
   ProductEffect,
   PromptVariable,
@@ -157,6 +163,88 @@ export function PreviewEffectDialog({
           {renderHighlightedPrompt(currentContent)}
         </div>
       </div>
+
+      {/* 2026-09-10：加工能力与颜色（覆盖字典默认）
+          让 admin 在 preview 时也能看到"用户最终会看到什么"。仅选了产品型号时渲染。 */}
+      {effect.productTypeCode &&
+        (() => {
+          const effective = getEffectiveCapabilities(
+            effect.productTypeCode,
+            effect.allowedCapabilities
+          );
+          const colors = getEffectiveLeatherColors(effect.allowedColors);
+          if (!effective) return null;
+          return (
+            <div className="rounded-lg border bg-emerald-500/5 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold">加工能力 + 颜色</span>
+                {effect.allowedCapabilities &&
+                  Object.keys(effect.allowedCapabilities).length > 0 && (
+                    <Badge color="default" className="!text-[10px]">
+                      已覆盖字典
+                    </Badge>
+                  )}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {(
+                  [
+                    ["canLeatherColor", "皮革色"],
+                    ["canLeatherExposed", "皮革外露"],
+                    ["canPvcProtection", "PVC 保护"],
+                    ["canHaveRemarks", "备注"],
+                    ["canEngrave", "刻字"],
+                  ] as Array<[keyof ProductCapabilities, string]>
+                ).map(([key, label]) =>
+                  effective[key] ? (
+                    <Badge
+                      key={key}
+                      color="green"
+                      className="!text-[10px]"
+                    >
+                      {label} ✓
+                    </Badge>
+                  ) : (
+                    <Badge
+                      key={key}
+                      color="default"
+                      className="!text-[10px] text-muted-foreground"
+                    >
+                      {label} ✗
+                    </Badge>
+                  )
+                )}
+              </div>
+              {effective.canLeatherColor && colors.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 pt-1 border-t">
+                  <span className="text-[10px] text-muted-foreground">
+                    颜色：
+                  </span>
+                  {colors.map((c) => (
+                    <span
+                      key={c.code}
+                      title={c.name}
+                      className="inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px]"
+                    >
+                      <span
+                        aria-hidden
+                        className="h-3 w-3 rounded-full border"
+                        style={{ backgroundColor: c.swatch }}
+                      />
+                      {c.name}
+                    </span>
+                  ))}
+                  {effect.allowedColors &&
+                    effect.allowedColors.length > 0 && (
+                      <Badge color="default" className="!text-[10px]">
+                        子集 {effect.allowedColors.length}
+                        /5
+                      </Badge>
+                    )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
       {/* 关联产品线 */}
       {effect.productLineIds && effect.productLineIds.length > 0 ? (

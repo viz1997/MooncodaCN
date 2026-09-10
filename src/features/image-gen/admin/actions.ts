@@ -21,6 +21,7 @@ import type {
   PromptVersion,
 } from "@/features/image-gen/lib/product-effect-types";
 import { PROMPT_SCENE_LABELS } from "@/features/image-gen/lib/product-effect-types";
+import type { ProductCapabilities } from "@/features/gpt-image/lib/product-catalog";
 import { adminAction } from "@/lib/safe-action";
 
 const withImageGenAdminAction = (name: string) =>
@@ -108,6 +109,28 @@ const productEffectFormSchema = z.object({
    * - ["leather"] → 只允许皮套，SpecModal 只渲染这一个选项
    */
   allowedAccessories: z.array(z.string()).nullable().default(null),
+  /**
+   * 2026-09-10：模板级 capability 覆盖（Partial<ProductCapabilities>）。
+   * - null → 继承 catalog 默认（productTypeCode 对应 PRODUCT_TYPES 字典）
+   * - 非 null → 只覆盖 override 里出现的 key；canEngrave 不在覆盖范围
+   *   （避免和现有刻字字段冲突，沿用 catalog）
+   * 例：{ canLeatherColor: true, canPvcProtection: true } → 关掉皮革外露 / 备注
+   */
+  allowedCapabilities: z
+    .object({
+      canLeatherColor: z.boolean().optional(),
+      canLeatherExposed: z.boolean().optional(),
+      canPvcProtection: z.boolean().optional(),
+      canHaveRemarks: z.boolean().optional(),
+    })
+    .nullable()
+    .default(null),
+  /**
+   * 2026-09-10：皮革颜色子集（code 字符串数组，与 LEATHER_COLORS 字典对齐）。
+   * - null/[] → LEATHER_COLORS 全展示
+   * - ["brown","black"] → 只允许棕/黑（不在字典里的 code 会被静默丢弃）
+   */
+  allowedColors: z.array(z.string()).nullable().default(null),
   versions: z
     .array(
       z.object({
@@ -189,6 +212,11 @@ export const createProductEffectAdminAction = withImageGenAdminAction(
       // 2026-09-10：可配置尺寸 + 配件子集（null → undefined，匹配 ProductEffect 类型）
       allowedSizes: parsedInput.allowedSizes ?? undefined,
       allowedAccessories: parsedInput.allowedAccessories ?? undefined,
+      // 2026-09-10：模板级 capability 覆盖 + 皮革色子集
+      allowedCapabilities:
+        (parsedInput.allowedCapabilities as Partial<ProductCapabilities>) ??
+        null,
+      allowedColors: parsedInput.allowedColors ?? undefined,
     };
 
     const created = await createEffectInDb(effect);
@@ -241,6 +269,12 @@ export const updateProductEffectAdminAction = withImageGenAdminAction(
     if (updates.allowedAccessories !== undefined)
       updatePayload.allowedAccessories =
         updates.allowedAccessories ?? undefined;
+    // 2026-09-10：模板级 capability 覆盖 + 皮革色子集
+    if (updates.allowedCapabilities !== undefined)
+      updatePayload.allowedCapabilities =
+        (updates.allowedCapabilities as Partial<ProductCapabilities>) ?? null;
+    if (updates.allowedColors !== undefined)
+      updatePayload.allowedColors = updates.allowedColors ?? undefined;
     if (updates.versions !== undefined)
       updatePayload.versions = updates.versions;
 

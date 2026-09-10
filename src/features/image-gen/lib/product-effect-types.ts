@@ -5,6 +5,7 @@
 // 这里仅 re-export 保留向后兼容，Phase D 删除本文件时一并清理。
 
 import type { PromptVariable } from "@/db/image-gen-types";
+import type { ProductCapabilities } from "@/features/gpt-image/lib/product-catalog";
 
 export type { PromptVariable };
 
@@ -92,4 +93,19 @@ export interface ProductEffect {
    * 空 = 用字典全量。
    */
   allowedAccessories?: string[] | undefined;
+  /**
+   * 2026-09-10：模板级 capability 覆盖（仅作用于创建时，SpecModal 渲染 effective capability）。
+   * - null/undefined → 继承 productTypeCode 对应 PRODUCT_TYPES 字典里的 capabilities
+   * - 非空 → 只覆盖 override 里出现的 key；canEngrave 始终跟随 catalog（不在覆盖范围）
+   *
+   * /p/[token] 仍按 catalog 默认能力（不读此覆盖），避免"已生成订单被追溯关能力"，
+   * 覆盖的语义边界 = "未来创建的订单"。见 [[image-gen-product-effect-capabilities]]。
+   */
+  allowedCapabilities?: Partial<ProductCapabilities> | null | undefined;
+  /**
+   * 2026-09-10：皮革颜色子集（code 数组）。
+   * - null/undefined/[] → LEATHER_COLORS 全展示
+   * - 非空 → 仅这些 code（不在 LEATHER_COLORS 字典里的静默丢弃）
+   */
+  allowedColors?: string[] | null | undefined;
 }

@@ -53,6 +53,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { submitImageGenDemoAction } from "@/features/image-gen/actions/submit-image-gen-demo";
+import type { ProductCapabilities } from "@/features/gpt-image/lib/product-catalog";
 
 import {
   SpecModal,
@@ -90,6 +91,18 @@ interface PublicMask {
    * 2026-09-10：模板级可配置配件子集（code 数组）。
    */
   allowedAccessories?: string[] | null;
+  /**
+   * 2026-09-10：模板级 capability 覆盖。
+   * - null/undefined → 继承 catalog 默认
+   * - 非空 → SpecModal 用 effective capability 渲染
+   */
+  allowedCapabilities?: Partial<ProductCapabilities> | null;
+  /**
+   * 2026-09-10：皮革颜色子集。
+   * - null/undefined/[] → LEATHER_COLORS 全展示
+   * - 非空 → 仅这些 code（不在字典里的静默丢弃）
+   */
+  allowedColors?: string[] | null;
 }
 
 interface GeneratedResult {

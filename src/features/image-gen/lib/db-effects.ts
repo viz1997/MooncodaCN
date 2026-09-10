@@ -9,6 +9,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { type ProductEffectRow, productEffect } from "@/db/schema";
 
+import type { ProductCapabilities } from "@/features/gpt-image/lib/product-catalog";
 import type { ProductEffect, PromptVariable } from "./product-effect-types";
 
 /**
@@ -39,6 +40,9 @@ function mapRowToProductEffect(row: ProductEffectRow): ProductEffect {
     // 2026-09-10：allowedSizes/allowedAccessories 列（JSON 字符串数组）
     allowedSizes: parseJsonStringArray(row.allowedSizes),
     allowedAccessories: parseJsonStringArray(row.allowedAccessories),
+    // 2026-09-10：模板级 capability 覆盖 + 皮革色子集
+    allowedCapabilities: parseJsonCapabilities(row.allowedCapabilities),
+    allowedColors: parseJsonStringArray(row.allowedColors),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -94,6 +98,9 @@ function mapProductEffectToRow(
     // 2026-09-10：allowedSizes/allowedAccessories 序列化为 JSON 字符串
     allowedSizes: serializeJsonStringArray(effect.allowedSizes),
     allowedAccessories: serializeJsonStringArray(effect.allowedAccessories),
+    // 2026-09-10：模板级 capability 覆盖 + 皮革色子集
+    allowedCapabilities: serializeJsonCapabilities(effect.allowedCapabilities),
+    allowedColors: serializeJsonStringArray(effect.allowedColors),
   };
 }
 
@@ -105,6 +112,55 @@ function serializeJsonStringArray(
 ): string | null {
   if (!arr || arr.length === 0) return null;
   return JSON.stringify(arr);
+}
+
+/**
+ * 解析 JSON 字符串对象 → Partial<ProductCapabilities>
+ * 2026-09-10：admin 在 productEffect 表里存的模板级 capability 覆盖。
+ * 只识别 4 个 LB flag key；其他 key 静默丢弃（防御性，schema 加了新字段也不会爆老数据）。
+ */
+function parseJsonCapabilities(
+  raw: string | null | undefined
+): Partial<ProductCapabilities> | undefined {
+  if (raw == null) return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return undefined;
+    }
+    const obj = parsed as Record<string, unknown>;
+    const out: Partial<ProductCapabilities> = {};
+    if (typeof obj.canLeatherColor === "boolean") {
+      out.canLeatherColor = obj.canLeatherColor;
+    }
+    if (typeof obj.canLeatherExposed === "boolean") {
+      out.canLeatherExposed = obj.canLeatherExposed;
+    }
+    if (typeof obj.canPvcProtection === "boolean") {
+      out.canPvcProtection = obj.canPvcProtection;
+    }
+    if (typeof obj.canHaveRemarks === "boolean") {
+      out.canHaveRemarks = obj.canHaveRemarks;
+    }
+    return out;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 序列化 Partial<ProductCapabilities> 为 JSON 字符串；
+ * null/undefined/空对象 → null（DB 列 null 等价于"继承 catalog 默认"）。
+ */
+function serializeJsonCapabilities(
+  cap: Partial<ProductCapabilities> | null | undefined
+): string | null {
+  if (!cap) return null;
+  const keys = Object.keys(cap) as Array<keyof ProductCapabilities>;
+  if (keys.length === 0) return null;
+  return JSON.stringify(cap);
 }
 
 /**
@@ -215,6 +271,14 @@ export async function updateEffectInDb(
     updateData.allowedAccessories = serializeJsonStringArray(
       updates.allowedAccessories
     );
+  // 2026-09-10：模板级 capability 覆盖 + 皮革色子集
+  if (updates.allowedCapabilities !== undefined) {
+    updateData.allowedCapabilities = serializeJsonCapabilities(
+      updates.allowedCapabilities
+    );
+  }
+  if (updates.allowedColors !== undefined)
+    updateData.allowedColors = serializeJsonStringArray(updates.allowedColors);
 
   await db
     .update(productEffect)

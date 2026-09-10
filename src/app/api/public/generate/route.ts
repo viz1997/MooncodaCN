@@ -14,6 +14,7 @@ import type {
   GenerateImageRequest,
   ImageModelId,
 } from "@/features/image-gen/lib/image-models/types";
+import type { ProductCapabilities } from "@/features/gpt-image/lib/product-catalog";
 import {
   checkRateLimit,
   createRateLimitResponse,
@@ -245,6 +246,12 @@ export async function GET() {
         allowedSizes: (m as { allowedSizes?: string[] }).allowedSizes ?? null,
         allowedAccessories:
           (m as { allowedAccessories?: string[] }).allowedAccessories ?? null,
+        // 2026-09-10：模板级 capability 覆盖 + 皮革色子集（仅创建时 SpecModal 用）
+        allowedCapabilities:
+          (m as { allowedCapabilities?: Partial<ProductCapabilities> | null })
+            .allowedCapabilities ?? null,
+        allowedColors:
+          (m as { allowedColors?: string[] }).allowedColors ?? null,
       })),
   });
 }

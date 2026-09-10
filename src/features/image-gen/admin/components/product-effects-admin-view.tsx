@@ -359,6 +359,35 @@ export function ProductEffectsAdminView({
                   </div>
                 ) : null}
 
+                {/* 2026-09-10：模板级覆盖指示（让 admin 一眼看出哪些被定制了）
+                    - allowedCapabilities 非空 → 显示"已覆盖能力 N" chip
+                    - allowedColors 非空 → 显示"颜色 N/5" chip */}
+                {(effect.allowedCapabilities &&
+                  Object.keys(effect.allowedCapabilities).length > 0) ||
+                (effect.allowedColors && effect.allowedColors.length > 0) ? (
+                  <div className="flex flex-wrap gap-1">
+                    {effect.allowedCapabilities &&
+                      Object.keys(effect.allowedCapabilities).length > 0 && (
+                        <Badge
+                          color="default"
+                          className="!text-[9px] border-emerald-500/40 bg-emerald-500/10 text-emerald-700"
+                        >
+                          已覆盖能力{" "}
+                          {Object.keys(effect.allowedCapabilities).length}
+                        </Badge>
+                      )}
+                    {effect.allowedColors &&
+                      effect.allowedColors.length > 0 && (
+                        <Badge
+                          color="default"
+                          className="!text-[9px] border-amber-500/40 bg-amber-500/10 text-amber-700"
+                        >
+                          颜色 {effect.allowedColors.length}/5
+                        </Badge>
+                      )}
+                  </div>
+                ) : null}
+
                 <div className="flex items-center justify-between text-[10px] text-muted-foreground">
                   <span className="flex items-center gap-1">
                     <TrendingUp className="h-3 w-3" /> 使用 {effect.usageCount}

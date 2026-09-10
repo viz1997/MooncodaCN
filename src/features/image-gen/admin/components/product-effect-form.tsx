@@ -9,14 +9,16 @@
  * - sonner toast → antd App.useApp().message
  */
 
-import { App, Badge, Button, Checkbox, Form, Input, Select } from "antd";
+import { App, Badge, Button, Checkbox, Form, Input, Select, Switch } from "antd";
 import { History, Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useAction } from "next-safe-action/hooks";
 import { useEffect, useState } from "react";
 import {
   ACCESSORIES,
+  LEATHER_COLORS,
   PRODUCT_TYPES,
+  type ProductCapabilities,
   type ProductType,
 } from "@/features/gpt-image/lib/product-catalog";
 import {
@@ -90,12 +92,25 @@ export function ProductEffectForm({
   const [allowedAccessories, setAllowedAccessories] = useState<string[]>(
     initialData?.allowedAccessories ?? []
   );
+  // 2026-09-10：模板级 capability 覆盖（LB 皮革徽章 4 个 flag）。
+  // 存的是"用户改过的 override"——空对象 {} 表示 admin 没动，序列化时
+  // 落 null（让 SpecModal 沿用 catalog 默认）。
+  const [allowedCapabilities, setAllowedCapabilities] = useState<
+    Partial<ProductCapabilities>
+  >(initialData?.allowedCapabilities ?? {});
+  // 2026-09-10：皮革颜色子集（LEATHER_COLORS 全集；勾选 = 子集）
+  const [allowedColors, setAllowedColors] = useState<string[]>(
+    initialData?.allowedColors ?? []
+  );
   // 2026-09-10：切换产品型号时清空子集（避免上一个型号的尺寸/配件 ID 残留
-  // 到新型号字典里导致非法 chip）。新建模式下有效；编辑模式初次 mount 时
-  // 不会触发（因为 state 已被 initialData 初始化为同值）。
+  // 到新型号字典里导致非法 chip；LB flag 同样清掉避免老型号标志错误应用）。
+  // 新建模式下有效；编辑模式初次 mount 时不会触发（state 已被 initialData
+  // 初始化为同值）。
   useEffect(() => {
     setAllowedSizes([]);
     setAllowedAccessories([]);
+    setAllowedCapabilities({});
+    setAllowedColors([]);
   }, [productTypeCode]);
   const [variables, setVariables] = useState<PromptVariable[]>(
     initialData?.variables ?? []
@@ -215,6 +230,15 @@ export function ProductEffectForm({
       allowedSizes: allowedSizes.length > 0 ? allowedSizes : null,
       allowedAccessories:
         allowedAccessories.length > 0 ? allowedAccessories : null,
+      // 2026-09-10：模板级 capability 覆盖；空对象 → null（继承 catalog 默认）
+      // only-send-keys-with-explicit-override：用 Object.keys 过滤掉未动的 key，
+      // 避免把 catalog 默认的 false 也"覆盖"成 false 造成歧义。
+      allowedCapabilities:
+        Object.keys(allowedCapabilities).length > 0
+          ? allowedCapabilities
+          : null,
+      // 2026-09-10：皮革颜色子集；空数组 → null（LEATHER_COLORS 全展示）
+      allowedColors: allowedColors.length > 0 ? allowedColors : null,
     };
 
     if (isEdit) {
@@ -496,6 +520,126 @@ export function ProductEffectForm({
                 <div className="text-[10px] text-muted-foreground mt-1">
                   已选 {allowedAccessories.length} /{" "}
                   {productType.accessories.length} 个
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 2026-09-10：加工能力与颜色（覆盖字典默认，仅对 LB 等 4 个 flag 启用）
+         - 4 个 capability Switch：override 语义——打开表示"我要 override 这个 key"
+           （默认跟随 catalog 字典）；不勾 = 该 key 不在 override 里，落库时剔除
+         - 5 个皮革色 chip：勾选 = 子集；空 = 全集
+         - canEngrave 不展示（沿用 catalog，和现有刻字字段绑定避免歧义）
+         - 仅在选了产品型号时显示；切型号时自动清空 */}
+      {productType && (
+        <div className="rounded-lg border bg-emerald-500/5 px-4 py-3 space-y-3">
+          <div className="text-sm font-medium">
+            加工能力与颜色（覆盖字典默认）
+          </div>
+          <div className="text-xs text-muted-foreground">
+            不勾 = /image-gen
+            SpecModal 展示字典默认能力；勾选后只展示勾中的能力。已存在的订单不受影响。
+          </div>
+
+          {/* 4 个 capability Switch */}
+          <div className="space-y-2">
+            {(
+              [
+                ["canLeatherColor", "皮革颜色"],
+                ["canLeatherExposed", "皮革外露"],
+                ["canPvcProtection", "PVC 保护"],
+                ["canHaveRemarks", "备注"],
+              ] as Array<[keyof ProductCapabilities, string]>
+            ).map(([key, label]) => {
+              const catalogDefault = productType.capabilities[key];
+              const overrideValue = allowedCapabilities[key];
+              // 覆盖后的有效值：admin 没动 → 字典默认；动了 → override
+              const effective = overrideValue ?? catalogDefault;
+              const isOverride =
+                overrideValue !== undefined &&
+                overrideValue !== catalogDefault;
+              return (
+                <label
+                  key={key}
+                  className={cn(
+                    "flex items-center justify-between gap-3 rounded-md border px-3 py-2 cursor-pointer text-xs transition-colors",
+                    effective
+                      ? "bg-emerald-500/15 border-emerald-500/50 text-emerald-700"
+                      : "bg-background hover:bg-muted/50"
+                  )}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="font-medium">{label}</span>
+                    <span className="text-[10px] text-muted-foreground">
+                      字典默认：
+                      {catalogDefault ? "✓" : "✗"}
+                    </span>
+                    {isOverride && (
+                      <Badge color="default" className="!text-[10px]">
+                        已覆盖
+                      </Badge>
+                    )}
+                  </div>
+                  <Switch
+                    checked={effective}
+                    onChange={(checked) =>
+                      setAllowedCapabilities((prev) => ({
+                        ...prev,
+                        [key]: checked,
+                      }))
+                    }
+                  />
+                </label>
+              );
+            })}
+          </div>
+
+          {/* 皮革色 chips（仅当 catalog 有 canLeatherColor=true 时显示） */}
+          {productType.capabilities.canLeatherColor && (
+            <div className="pt-2 border-t">
+              <div className="text-xs font-medium mb-1.5">皮革颜色</div>
+              <div className="text-[10px] text-muted-foreground mb-2">
+                不勾选 = LEATHER_COLORS
+                全部展示；勾选后只展示勾中的颜色子集。
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {LEATHER_COLORS.map((c) => {
+                  const checked = allowedColors.includes(c.code);
+                  return (
+                    <label
+                      key={c.code}
+                      className={cn(
+                        "flex items-center gap-1.5 rounded-md border pl-1 pr-2.5 py-1 cursor-pointer text-xs transition-colors",
+                        checked
+                          ? "bg-amber-500/15 border-amber-500/50 text-amber-700"
+                          : "bg-background hover:bg-muted/50"
+                      )}
+                    >
+                      <Checkbox
+                        checked={checked}
+                        onChange={() =>
+                          setAllowedColors((prev) =>
+                            prev.includes(c.code)
+                              ? prev.filter((x) => x !== c.code)
+                              : [...prev, c.code]
+                          )
+                        }
+                      />
+                      <span
+                        aria-hidden
+                        className="h-3.5 w-3.5 rounded-full border"
+                        style={{ backgroundColor: c.swatch }}
+                      />
+                      {c.name}
+                    </label>
+                  );
+                })}
+              </div>
+              {allowedColors.length > 0 && (
+                <div className="text-[10px] text-muted-foreground mt-1">
+                  已选 {allowedColors.length} / {LEATHER_COLORS.length} 个
                 </div>
               )}
             </div>

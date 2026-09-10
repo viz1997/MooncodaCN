@@ -42,10 +42,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   ACCESSORIES,
+  type ProductCapabilities,
   getProductType,
-  LEATHER_COLORS,
   validateProductSpec,
 } from "@/features/gpt-image/lib/product-catalog";
+import {
+  getEffectiveCapabilities,
+  getEffectiveLeatherColors,
+} from "@/features/image-gen/lib/product-effect-capabilities";
 import { cn } from "@/lib/utils";
 
 export interface SpecSelection {
@@ -76,6 +80,15 @@ interface SpecModalProps {
      * 2026-09-10：模板级可配置配件子集。
      */
     allowedAccessories?: string[] | null;
+    /**
+     * 2026-09-10：模板级 capability 覆盖。null/undefined = 继承 catalog 默认。
+     * 仅在创建时生效；/p/[token] 路径不读此覆盖（catalog 默认）。
+     */
+    allowedCapabilities?: Partial<ProductCapabilities> | null;
+    /**
+     * 2026-09-10：皮革颜色子集。null/空 = LEATHER_COLORS 全展示。
+     */
+    allowedColors?: string[] | null;
   } | null;
   submitting?: boolean;
   onClose: () => void;
@@ -110,12 +123,22 @@ export function SpecModal({
     ) ?? [];
   const hasSize = availableSizes.length > 0;
   const hasAccessory = availableAccessories.length > 0;
-  const caps = productType?.capabilities;
+  // 2026-09-10：effective capability = catalog 默认 ∪ 模板级覆盖
+  // canEngrave 不参与覆盖，沿用 catalog 默认
+  const effectiveCaps = getEffectiveCapabilities(
+    template?.productTypeCode,
+    template?.allowedCapabilities
+  );
+  const caps = effectiveCaps ?? productType?.capabilities;
   const canEngrave = caps?.canEngrave ?? false;
   const canLeatherColor = caps?.canLeatherColor ?? false;
   const canLeatherExposed = caps?.canLeatherExposed ?? false;
   const canPvcProtection = caps?.canPvcProtection ?? false;
   const canHaveRemarks = caps?.canHaveRemarks ?? false;
+  // 2026-09-10：皮革色按 allowedColors 子集过滤
+  const effectiveLeatherColors = getEffectiveLeatherColors(
+    template?.allowedColors
+  );
 
   // 字段本地态
   const [productSize, setProductSize] = useState<string>("");
@@ -273,12 +296,12 @@ export function SpecModal({
             </div>
           )}
 
-          {/* 2026-09-10：LB 皮革颜色色卡（capability-gated） */}
+          {/* 2026-09-10：LB 皮革颜色色卡（capability-gated + 按 allowedColors 子集过滤） */}
           {canLeatherColor && (
             <div className="space-y-2">
               <Label className="text-sm font-semibold">皮革颜色</Label>
               <div className="flex flex-wrap gap-2">
-                {LEATHER_COLORS.map((c) => {
+                {effectiveLeatherColors.map((c) => {
                   const active = leatherColor === c.code;
                   return (
                     <button
