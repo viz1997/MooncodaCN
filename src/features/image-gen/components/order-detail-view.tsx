@@ -41,6 +41,12 @@ export interface OrderDetail {
   candidateUrls: string[];
   selectedImageIdx: number;
   createdAt: string;
+  /**
+   * 2026-09-10：列表缩略图（服务端从 candidates + selections 提取）；
+   * /image-gen/orders 列表项直接展示，详情视图用 candidateUrls 主图。
+   * /p/[token] 公共订单详情不传此字段，所以 optional。
+   */
+  thumbnailUrl?: string | null;
 }
 
 export function OrderDetailView({ order }: { order: OrderDetail }) {

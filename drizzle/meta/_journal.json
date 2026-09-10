@@ -43,6 +43,13 @@
       "when": 1757347200000,
       "tag": "0005_agent_workbench",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1757531200000,
+      "tag": "0006_prompt_order_cursor_idx",
+      "breakpoints": true
     }
   ]
 }

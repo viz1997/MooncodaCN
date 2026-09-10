@@ -1,4 +1,4 @@
-import { relations } from "drizzle-orm";
+import { desc, relations } from "drizzle-orm";
 import {
   type AnyPgColumn,
   boolean,
@@ -1115,6 +1115,21 @@ export const promptOrder = pgTable(
     // 2026-09-03：代理商订单查询加速（agent 维度过滤）。
     // WHERE agent_id = ? ORDER BY created_at DESC 走 (agentId) 索引。
     index("prompt_order_agent_id_idx").on(t.agentId),
+    // 2026-09-10：/image-gen/orders 无限滚动 keyset cursor 索引。
+    // 排序规则 (created_at DESC, id DESC) 走索引直接定位，无需 filesort。
+    // - 全部：WHERE created_by = ? AND (created_at < ? OR (created_at = ? AND id < ?))
+    // - 过滤状态：WHERE created_by = ? AND status = ? AND (same cursor expr)
+    index("prompt_order_cursor_idx").on(
+      t.createdBy,
+      desc(t.createdAt),
+      desc(t.id)
+    ),
+    index("prompt_order_cursor_status_idx").on(
+      t.createdBy,
+      t.status,
+      desc(t.createdAt),
+      desc(t.id)
+    ),
   ]
 );
 

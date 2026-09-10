@@ -21,7 +21,7 @@
  *   - credit 不足抛 InsufficientCreditsError，UI 转友好提示
  */
 
-import { and, desc, eq, inArray, like, or } from "drizzle-orm";
+import { and, desc, eq, inArray, like, lt, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -386,6 +386,11 @@ export const listUserDraftAction = withOrderAction("listDraft")
  */
 /**
  * /image-gen/orders 列表查询参数
+ *
+ * 2026-09-10：加 cursor 支持无限滚动（keyset pagination by (createdAt DESC, id DESC)）。
+ * 客户端第一页 cursor 留空；后续每页传上一页最后一项的 cursor，服务端
+ * 用 `(createdAt < cursor.createdAt) OR (createdAt = cursor.createdAt AND id < cursor.id)`
+ * 过滤。比 offset 在大表上稳定——按 (created_by, created_at DESC, id DESC) 索引直接定位。
  */
 const listUserOrdersSchema = z.object({
   /** 状态过滤（可选） */
@@ -404,14 +409,24 @@ const listUserOrdersSchema = z.object({
    * 模板名搜索走 SQL IN 子查询，避免全表 LIKE。
    */
   search: z.string().trim().max(64).optional(),
-  /** 取多少条，默认 50 */
-  limit: z.number().int().min(1).max(200).default(50),
+  /** 取多少条，默认 30（无限滚动友好） */
+  limit: z.number().int().min(1).max(100).default(30),
+  /**
+   * 翻页游标：第一页不传；后续传上一页返回的 nextCursor。
+   * Drizzle zod 不接 Date，要 ISO 字符串到 handler 里再 new Date()。
+   */
+  cursor: z
+    .object({
+      createdAt: z.string().datetime(),
+      id: z.string(),
+    })
+    .optional(),
 });
 
 export const listUserOrdersAction = withOrderAction("listUserOrders")
   .schema(listUserOrdersSchema)
   .action(async ({ parsedInput, ctx }) => {
-    const { status, search, limit } = parsedInput;
+    const { status, search, limit, cursor } = parsedInput;
 
     // 搜索时先查出匹配的 templateId 集合，再去过滤 promptOrder。
     // 避免 promptOrder.templateId 上做 join 而拖累主表查询。
@@ -424,7 +439,7 @@ export const listUserOrdersAction = withOrderAction("listUserOrders")
       matchingTemplateIds = matches.map((m) => m.id);
       // 没有匹配模板 → 直接空集合返回
       if (matchingTemplateIds.length === 0) {
-        return { orders: [] };
+        return { orders: [], nextCursor: null };
       }
     }
 
@@ -440,11 +455,25 @@ export const listUserOrdersAction = withOrderAction("listUserOrders")
       );
       if (orExpr) whereClauses.push(orExpr);
     }
+    // 2026-09-10：keyset cursor 过滤（id DESC 是 tiebreaker，防 createdAt 同毫秒撞行）
+    if (cursor) {
+      const cursorDate = new Date(cursor.createdAt);
+      whereClauses.push(
+        or(
+          lt(promptOrder.createdAt, cursorDate),
+          and(
+            eq(promptOrder.createdAt, cursorDate),
+            lt(promptOrder.id, cursor.id)
+          )
+        )!
+      );
+    }
 
+    // 拉 limit+1 行用于判断是否还有下一页；最后一条不返回，仅用来生成 nextCursor
     const rows = await db.query.promptOrder.findMany({
       where: and(...whereClauses),
-      orderBy: desc(promptOrder.createdAt),
-      limit,
+      orderBy: [desc(promptOrder.createdAt), desc(promptOrder.id)],
+      limit: limit + 1,
       columns: {
         id: true,
         orderNo: true,
@@ -463,8 +492,19 @@ export const listUserOrdersAction = withOrderAction("listUserOrders")
       },
     });
 
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
+    const lastPageRow = pageRows.at(-1);
+    const nextCursor =
+      hasMore && lastPageRow
+        ? {
+            createdAt: lastPageRow.createdAt.toISOString(),
+            id: lastPageRow.id,
+          }
+        : null;
+
     // 单独批量拉 template 名字（避免 relations 推断问题）
-    const templateIds = [...new Set(rows.map((o) => o.templateId))];
+    const templateIds = [...new Set(pageRows.map((o) => o.templateId))];
     const templates =
       templateIds.length > 0
         ? await db.query.promptTemplate.findMany({
@@ -475,7 +515,7 @@ export const listUserOrdersAction = withOrderAction("listUserOrders")
     const templateNameMap = new Map(templates.map((t) => [t.id, t.name]));
 
     return {
-      orders: rows.map((o) => {
+      orders: pageRows.map((o) => {
         // 解析所有候选图（详情视图要展示 grid）
         const allCandidates = parseCandidates(o.candidates);
         const selectedIdx = resolveSelectedImageIdx(
@@ -506,6 +546,7 @@ export const listUserOrdersAction = withOrderAction("listUserOrders")
           createdAt: o.createdAt.toISOString(),
         };
       }),
+      nextCursor,
     };
   });
 
