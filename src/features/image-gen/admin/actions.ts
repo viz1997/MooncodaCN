@@ -8,6 +8,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import type { ProductCapabilities } from "@/features/gpt-image/lib/product-catalog";
 import {
   createEffectInDb,
   deleteEffectInDb,
@@ -15,13 +16,23 @@ import {
   getEffectsFromDb,
   updateEffectInDb,
 } from "@/features/image-gen/lib/db-effects";
+import {
+  createLineInDb,
+  deleteLineInDb,
+  findLineInDb,
+  getActiveLinesFromDb,
+  getLinesFromDb,
+  updateLineInDb,
+} from "@/features/image-gen/lib/db-lines";
 import type {
   ProductEffect,
+  ProductLine,
+  ProductLinePricing,
+  ProductLineSpec,
   PromptScene,
   PromptVersion,
 } from "@/features/image-gen/lib/product-effect-types";
 import { PROMPT_SCENE_LABELS } from "@/features/image-gen/lib/product-effect-types";
-import type { ProductCapabilities } from "@/features/gpt-image/lib/product-catalog";
 import { adminAction } from "@/lib/safe-action";
 
 const withImageGenAdminAction = (name: string) =>
@@ -131,6 +142,12 @@ const productEffectFormSchema = z.object({
    * - ["brown","black"] → 只允许棕/黑（不在字典里的 code 会被静默丢弃）
    */
   allowedColors: z.array(z.string()).nullable().default(null),
+  /**
+   * 2026-09-10：引用 promptTemplate.id（gpt-image 模块的提示词模板表）。
+   * 生成时优先用 promptTemplate.prompt，缺失则 fallback 到本地 prompt 字段。
+   * null = 不引用，提交时校验是否存在（应用层校验，不加 DB FK）。
+   */
+  promptTemplateId: z.string().nullable().default(null),
   versions: z
     .array(
       z.object({
@@ -217,6 +234,8 @@ export const createProductEffectAdminAction = withImageGenAdminAction(
         (parsedInput.allowedCapabilities as Partial<ProductCapabilities>) ??
         null,
       allowedColors: parsedInput.allowedColors ?? undefined,
+      // 2026-09-10：引用 prompt_template.id（生成时优先取 promptTemplate.prompt）
+      promptTemplateId: parsedInput.promptTemplateId ?? null,
     };
 
     const created = await createEffectInDb(effect);
@@ -275,6 +294,9 @@ export const updateProductEffectAdminAction = withImageGenAdminAction(
         (updates.allowedCapabilities as Partial<ProductCapabilities>) ?? null;
     if (updates.allowedColors !== undefined)
       updatePayload.allowedColors = updates.allowedColors ?? undefined;
+    // 2026-09-10：promptTemplateId 引用更新（null = 解除引用）
+    if (updates.promptTemplateId !== undefined)
+      updatePayload.promptTemplateId = updates.promptTemplateId ?? null;
     if (updates.versions !== undefined)
       updatePayload.versions = updates.versions;
 
@@ -301,5 +323,184 @@ export const deleteProductEffectAdminAction = withImageGenAdminAction(
       throw new Error("效果模板不存在");
     }
     revalidatePath("/admin/product-effects");
+    return { success: true };
+  });
+
+// ============================================
+// 2026-09-10：产品线 admin actions（5 个 CRUD）
+// 替代 MOCK_PRODUCT_LINES 前端 mock，由 product_line 表接管
+// ============================================
+
+/**
+ * 解析产品线 spec / pricing 输入字符串为对象
+ * - 空 / 解析失败 → 空对象（fallback 到 schema 默认）
+ * - 非法 JSON 抛错让上层 toast 提示
+ */
+function parseLineJsonInput<T>(
+  raw: string | null | undefined,
+  label: string
+): T {
+  if (!raw || !raw.trim()) return {} as T;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as T;
+    }
+    throw new Error(`${label} 必须是 JSON 对象`);
+  } catch (err) {
+    if (err instanceof SyntaxError) {
+      throw new Error(`${label} JSON 解析失败：${err.message}`);
+    }
+    throw err;
+  }
+}
+
+const productLineFormSchema = z.object({
+  productLineId: z.string().min(1),
+  name: z.string().min(1),
+  category: z.string().min(1),
+  description: z.string().default(""),
+  coverUrl: z.string().default(""),
+  /**
+   * spec / pricing 在 form 里是 JSON 字符串（admin 手填 JSON 调试），
+   * 提交后由 parseLineJsonInput 转对象入库；DB 列存序列化 JSON 字符串。
+   */
+  spec: z.string().default(""),
+  pricing: z.string().default(""),
+  status: z.enum(["active", "inactive", "draft"]).default("active"),
+  sortOrder: z.number().int().default(0),
+});
+
+/**
+ * 获取所有产品线（管理后台用，含 inactive / draft）
+ */
+export const listProductLinesAdminAction = withImageGenAdminAction(
+  "listProductLines"
+)
+  .schema(z.void().optional())
+  .action(async () => {
+    const lines = await getLinesFromDb();
+    return { lines };
+  });
+
+/**
+ * 获取所有上架产品线（用户端 /image-gen 选模板用）
+ */
+export const listActiveProductLinesAdminAction = withImageGenAdminAction(
+  "listActiveProductLines"
+)
+  .schema(z.void().optional())
+  .action(async () => {
+    const lines = await getActiveLinesFromDb();
+    return { lines };
+  });
+
+/**
+ * 获取单个产品线
+ */
+export const getProductLineAdminAction = withImageGenAdminAction(
+  "getProductLine"
+)
+  .schema(z.object({ productLineId: z.string().min(1) }))
+  .action(async ({ parsedInput }) => {
+    const line = await findLineInDb(parsedInput.productLineId);
+    if (!line) throw new Error("产品线不存在");
+    return { line };
+  });
+
+/**
+ * 新增产品线
+ */
+export const createProductLineAdminAction = withImageGenAdminAction(
+  "createProductLine"
+)
+  .schema(productLineFormSchema)
+  .action(async ({ parsedInput }) => {
+    const spec = parseLineJsonInput<ProductLineSpec>(parsedInput.spec, "spec");
+    const pricing = parseLineJsonInput<ProductLinePricing>(
+      parsedInput.pricing,
+      "pricing"
+    );
+
+    const now = new Date().toISOString();
+    const line: ProductLine = {
+      productLineId: parsedInput.productLineId,
+      name: parsedInput.name,
+      category: parsedInput.category,
+      description: parsedInput.description,
+      coverUrl: parsedInput.coverUrl,
+      spec,
+      pricing,
+      status: parsedInput.status,
+      sortOrder: parsedInput.sortOrder,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const created = await createLineInDb(line);
+    revalidatePath("/admin/product-lines");
+    revalidatePath("/image-gen");
+    return { line: created };
+  });
+
+/**
+ * 更新产品线
+ */
+export const updateProductLineAdminAction = withImageGenAdminAction(
+  "updateProductLine"
+)
+  .schema(
+    z.object({
+      productLineId: z.string().min(1),
+      updates: productLineFormSchema.partial(),
+    })
+  )
+  .action(async ({ parsedInput }) => {
+    const { productLineId, updates } = parsedInput;
+
+    const updatePayload: Partial<ProductLine> = {};
+    if (updates.name !== undefined) updatePayload.name = updates.name;
+    if (updates.category !== undefined)
+      updatePayload.category = updates.category;
+    if (updates.description !== undefined)
+      updatePayload.description = updates.description;
+    if (updates.coverUrl !== undefined)
+      updatePayload.coverUrl = updates.coverUrl;
+    if (updates.spec !== undefined) {
+      updatePayload.spec = parseLineJsonInput<ProductLineSpec>(
+        updates.spec,
+        "spec"
+      );
+    }
+    if (updates.pricing !== undefined) {
+      updatePayload.pricing = parseLineJsonInput<ProductLinePricing>(
+        updates.pricing,
+        "pricing"
+      );
+    }
+    if (updates.status !== undefined) updatePayload.status = updates.status;
+    if (updates.sortOrder !== undefined)
+      updatePayload.sortOrder = updates.sortOrder;
+
+    const updated = await updateLineInDb(productLineId, updatePayload);
+    if (!updated) throw new Error("产品线不存在");
+
+    revalidatePath("/admin/product-lines");
+    revalidatePath("/image-gen");
+    return { line: updated };
+  });
+
+/**
+ * 删除产品线
+ */
+export const deleteProductLineAdminAction = withImageGenAdminAction(
+  "deleteProductLine"
+)
+  .schema(z.object({ productLineId: z.string().min(1) }))
+  .action(async ({ parsedInput }) => {
+    const deleted = await deleteLineInDb(parsedInput.productLineId);
+    if (!deleted) throw new Error("产品线不存在");
+    revalidatePath("/admin/product-lines");
+    revalidatePath("/image-gen");
     return { success: true };
   });

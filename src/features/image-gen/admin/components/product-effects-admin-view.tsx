@@ -19,7 +19,7 @@
  * - sonner toast → antd App.useApp().message
  */
 
-import { App, Badge, Button, Modal, Select } from "antd";
+import { App, Badge, Button, Modal, Segmented, Select } from "antd";
 import {
   CheckCircle2,
   Edit,
@@ -32,10 +32,11 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { useAction } from "next-safe-action/hooks";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   deleteProductEffectAdminAction,
+  listProductLinesAdminAction,
   updateProductEffectAdminAction,
 } from "@/features/image-gen/admin/actions";
 import { EditEffectDialog } from "@/features/image-gen/admin/components/edit-effect-dialog";
@@ -44,6 +45,7 @@ import {
   PROMPT_SCENE_COLORS,
   PROMPT_SCENE_LABELS,
   type ProductEffect,
+  type ProductLine,
 } from "@/features/image-gen/lib/product-effect-types";
 import { MOCK_PRODUCT_LINES } from "@/features/image-gen/lib/product-lines-mock";
 import { cn } from "@/lib/utils";
@@ -69,6 +71,26 @@ export function ProductEffectsAdminView({
     null
   );
   const [createOpen, setCreateOpen] = useState(false);
+  // 2026-09-10：产品线 Segmented 过滤 + DB-backed productLines 数据源
+  const [productLines, setProductLines] = useState<ProductLine[]>([]);
+  const [selectedLineId, setSelectedLineId] = useState<string>("all");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await listProductLinesAdminAction();
+        if (!cancelled && res?.data?.lines) {
+          setProductLines(res.data.lines);
+        }
+      } catch {
+        if (!cancelled) setProductLines([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const { execute: deleteEffect, isPending: isDeleting } = useAction(
     deleteProductEffectAdminAction,
@@ -124,7 +146,11 @@ export function ProductEffectsAdminView({
       e.maskId.toLowerCase().includes(search.toLowerCase());
     const matchCategory =
       filterCategory === "all" || e.category === filterCategory;
-    return matchSearch && matchCategory;
+    // 2026-09-10：产品线过滤（"all" 不过滤；否则 productLineIds 包含选中）
+    const matchLine =
+      selectedLineId === "all" ||
+      (e.productLineIds ?? []).includes(selectedLineId);
+    return matchSearch && matchCategory && matchLine;
   });
 
   // 统计卡片数据
@@ -183,6 +209,26 @@ export function ProductEffectsAdminView({
           >
             新增效果
           </Button>
+        </div>
+      </div>
+
+      {/* 2026-09-10：产品线 Segmented 过滤（DB-backed productLines） */}
+      <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-xs font-medium text-muted-foreground shrink-0">
+            产品线：
+          </span>
+          <Segmented
+            value={selectedLineId}
+            onChange={(v) => setSelectedLineId(v as string)}
+            options={[
+              { label: "全部", value: "all" },
+              ...productLines.map((p) => ({
+                label: p.name,
+                value: p.productLineId,
+              })),
+            ]}
+          />
         </div>
       </div>
 
@@ -329,30 +375,46 @@ export function ProductEffectsAdminView({
                   </div>
                 ) : null}
 
-                {/* 关联产品线 */}
+                {/* 关联产品线（2026-09-10：DB-backed productLines 查名字） */}
                 {effect.productLineIds && effect.productLineIds.length > 0 ? (
                   <div className="flex flex-wrap gap-1">
                     {effect.productLineIds.map((plId) => {
-                      const pl = MOCK_PRODUCT_LINES.find(
+                      // 优先查 DB-backed productLines；找不到回退 MOCK；再找不到显示原 id
+                      const dbLine = productLines.find(
                         (p) => p.productLineId === plId
                       );
-                      if (!pl) {
+                      if (dbLine) {
                         return (
                           <span
                             key={plId}
-                            className="inline-flex items-center gap-0.5 text-[9px] bg-zinc-500/10 text-zinc-700 dark:text-zinc-400 px-1.5 py-0.5 rounded font-mono"
+                            className="inline-flex items-center gap-0.5 text-[9px] bg-violet-500/10 text-violet-700 dark:text-violet-400 px-1.5 py-0.5 rounded"
                           >
-                            {plId}
+                            <Sparkles className="h-2.5 w-2.5" />
+                            {dbLine.name}
+                          </span>
+                        );
+                      }
+                      const mock = MOCK_PRODUCT_LINES.find(
+                        (p) => p.productLineId === plId
+                      );
+                      if (mock) {
+                        return (
+                          <span
+                            key={plId}
+                            className="inline-flex items-center gap-0.5 text-[9px] bg-violet-500/10 text-violet-700 dark:text-violet-400 px-1.5 py-0.5 rounded"
+                          >
+                            <Sparkles className="h-2.5 w-2.5" />
+                            {mock.name}
                           </span>
                         );
                       }
                       return (
                         <span
                           key={plId}
-                          className="inline-flex items-center gap-0.5 text-[9px] bg-violet-500/10 text-violet-700 dark:text-violet-400 px-1.5 py-0.5 rounded"
+                          className="inline-flex items-center gap-0.5 text-[9px] bg-zinc-500/10 text-zinc-700 dark:text-zinc-400 px-1.5 py-0.5 rounded font-mono"
+                          title="该 productLine 不在 DB 或 MOCK 中"
                         >
-                          <Sparkles className="h-2.5 w-2.5" />
-                          {pl.name}
+                          {plId}
                         </span>
                       );
                     })}

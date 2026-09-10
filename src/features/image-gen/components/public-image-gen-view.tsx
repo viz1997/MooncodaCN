@@ -52,8 +52,8 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { submitImageGenDemoAction } from "@/features/image-gen/actions/submit-image-gen-demo";
 import type { ProductCapabilities } from "@/features/gpt-image/lib/product-catalog";
+import { submitImageGenDemoAction } from "@/features/image-gen/actions/submit-image-gen-demo";
 
 import {
   SpecModal,
@@ -103,6 +103,31 @@ interface PublicMask {
    * - 非空 → 仅这些 code（不在字典里的静默丢弃）
    */
   allowedColors?: string[] | null;
+  /**
+   * 2026-09-10：引用 promptTemplate.id（POST 时优先用 promptTemplate.prompt）。
+   * 前端不直接读，保留字段用于诊断展示。
+   */
+  promptTemplateId?: string | null;
+  /**
+   * 2026-09-10：关联产品线 id 列表（productLineIds）—— 用于产品线 Segmented 分组过滤。
+   */
+  productLineIds?: string[];
+}
+
+/**
+ * 2026-09-10：用户端产品线（active），由 GET 响应带回。
+ * - productLineId：业务主键
+ * - name：中文显示名
+ * - coverUrl：封面图 URL（可空）
+ * - sortOrder：排序（小的靠前）
+ * - maskCount：该产品线下 active mask 数（用于 Segmented label 拼数字）
+ */
+interface PublicProductLine {
+  productLineId: string;
+  name: string;
+  coverUrl: string;
+  sortOrder: number;
+  maskCount: number;
 }
 
 interface GeneratedResult {
@@ -217,6 +242,9 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
   const [selectedMask, setSelectedMask] = useState<string>("");
   const [masks, setMasks] = useState<PublicMask[]>([]);
   const [loadingMasks, setLoadingMasks] = useState(true);
+  // 2026-09-10：产品线数据源 + 当前选中的产品线（"__all__" = 全部）
+  const [productLines, setProductLines] = useState<PublicProductLine[]>([]);
+  const [activeLineId, setActiveLineId] = useState<string>("__all__");
 
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState<GeneratedResult | null>(null);
@@ -332,17 +360,25 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
   // 组件卸载清理
   useEffect(() => () => clearPoll(), [clearPoll]);
 
-  // 加载 mask 列表
+  // 加载 mask 列表（2026-09-10：同时取 productLines）
   useEffect(() => {
     fetch("/api/public/generate")
       .then((r) => r.json())
       .then((data) => {
         if (data.success && Array.isArray(data.masks))
           setMasks(data.masks as PublicMask[]);
+        if (data.success && Array.isArray(data.productLines))
+          setProductLines(data.productLines as PublicProductLine[]);
       })
       .catch(() => {})
       .finally(() => setLoadingMasks(false));
   }, []);
+
+  // 2026-09-10：按产品线过滤后的 mask 列表（activeLineId === "__all__" 不过滤）
+  const visibleMasks =
+    activeLineId === "__all__"
+      ? masks
+      : masks.filter((m) => (m.productLineIds ?? []).includes(activeLineId));
 
   // 刷新恢复：masks 加载后，若存在进行中任务则恢复并续轮询
   useEffect(() => {
@@ -773,10 +809,44 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                 选择效果
                 {!loadingMasks && (
                   <span className="text-[10px] text-muted-foreground font-normal">
-                    · {masks.length} 个
+                    · {visibleMasks.length} 个
                   </span>
                 )}
               </span>
+              {/* 2026-09-10：产品线 Segmented 分组（DB-backed productLines） */}
+              {productLines.length > 0 && (
+                <div className="overflow-x-auto -mx-1 px-1 pb-1">
+                  <div className="flex items-center gap-1 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setActiveLineId("__all__")}
+                      className={cn(
+                        "text-[10px] px-2.5 py-1 rounded-full border transition-colors shrink-0",
+                        activeLineId === "__all__"
+                          ? "bg-violet-500 text-white border-violet-500"
+                          : "bg-background hover:bg-muted"
+                      )}
+                    >
+                      全部 · {masks.length}
+                    </button>
+                    {productLines.map((l) => (
+                      <button
+                        key={l.productLineId}
+                        type="button"
+                        onClick={() => setActiveLineId(l.productLineId)}
+                        className={cn(
+                          "text-[10px] px-2.5 py-1 rounded-full border transition-colors shrink-0",
+                          activeLineId === l.productLineId
+                            ? "bg-violet-500 text-white border-violet-500"
+                            : "bg-background hover:bg-muted"
+                        )}
+                      >
+                        {l.name} · {l.maskCount}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               {loadingMasks ? (
                 <div className="flex gap-2 overflow-x-auto pb-2">
                   {[
@@ -793,9 +863,13 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                     />
                   ))}
                 </div>
+              ) : visibleMasks.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">
+                  该产品线下暂无效果
+                </div>
               ) : (
                 <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1 snap-x snap-mandatory">
-                  {masks.map((m) => (
+                  {visibleMasks.map((m) => (
                     <button
                       key={m.maskId}
                       type="button"

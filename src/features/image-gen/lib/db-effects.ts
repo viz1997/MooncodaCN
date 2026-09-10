@@ -43,6 +43,8 @@ function mapRowToProductEffect(row: ProductEffectRow): ProductEffect {
     // 2026-09-10：模板级 capability 覆盖 + 皮革色子集
     allowedCapabilities: parseJsonCapabilities(row.allowedCapabilities),
     allowedColors: parseJsonStringArray(row.allowedColors),
+    // 2026-09-10：引用 prompt_template.id（生成时优先取 prompt_template.prompt）
+    promptTemplateId: row.promptTemplateId ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -101,6 +103,8 @@ function mapProductEffectToRow(
     // 2026-09-10：模板级 capability 覆盖 + 皮革色子集
     allowedCapabilities: serializeJsonCapabilities(effect.allowedCapabilities),
     allowedColors: serializeJsonStringArray(effect.allowedColors),
+    // 2026-09-10：prompt_template_id 引用（应用层校验，不加 DB FK）
+    promptTemplateId: effect.promptTemplateId ?? null,
   };
 }
 
@@ -279,6 +283,9 @@ export async function updateEffectInDb(
   }
   if (updates.allowedColors !== undefined)
     updateData.allowedColors = serializeJsonStringArray(updates.allowedColors);
+  // 2026-09-10：prompt_template_id 引用更新
+  if (updates.promptTemplateId !== undefined)
+    updateData.promptTemplateId = updates.promptTemplateId ?? null;
 
   await db
     .update(productEffect)

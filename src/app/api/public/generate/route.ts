@@ -1,6 +1,11 @@
 // 外部用户生图 API - 服务端预配置，用户无需登录
 // ⚠️ 安全：响应只返回图片 URL + 友好提示，不暴露内部 model/提示词/成本等
+
+import { eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
+import { db } from "@/db";
+import { promptTemplate } from "@/db/schema";
+import type { ProductCapabilities } from "@/features/gpt-image/lib/product-catalog";
 import {
   buildResultFields,
   dispatchGenerateImage,
@@ -10,11 +15,11 @@ import {
   IMAGE_MODELS,
   logImageGen,
 } from "@/features/image-gen";
+import { getActiveLinesFromDb } from "@/features/image-gen/lib/db-lines";
 import type {
   GenerateImageRequest,
   ImageModelId,
 } from "@/features/image-gen/lib/image-models/types";
-import type { ProductCapabilities } from "@/features/gpt-image/lib/product-catalog";
 import {
   checkRateLimit,
   createRateLimitResponse,
@@ -83,7 +88,25 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
-      prompt = mask.prompt;
+      // 2026-09-10：prompt 来源优先级
+      // 1) productEffect.promptTemplateId 命中 promptTemplate 行 → 用其 prompt
+      // 2) fallback 到 productEffect.prompt 本地字段
+      if (mask.promptTemplateId) {
+        try {
+          const tmpl = await db.query.promptTemplate.findFirst({
+            where: eq(promptTemplate.id, mask.promptTemplateId),
+          });
+          if (tmpl?.prompt) {
+            prompt = tmpl.prompt;
+          } else {
+            prompt = mask.prompt;
+          }
+        } catch {
+          prompt = mask.prompt;
+        }
+      } else {
+        prompt = mask.prompt;
+      }
       // 必填变量校验：required 且无 params 值且无 defaultValue → 拒绝
       const missing = mask.variables.find(
         (v) => v.required && !(body.params?.[v.key] ?? v.defaultValue)
@@ -225,33 +248,53 @@ export async function POST(req: NextRequest) {
 // （productSize / accessoryCode / engraving 表单按 productTypeCode 走 PRODUCT_TYPES 字典），
 // 以及 price 显示模板定价。model/prompt 仍不在公开响应中（管理员专属）。
 // 2026-09-10：扩 allowedSizes / allowedAccessories 让 SpecModal 按子集渲染（不暴露字典全量）
+// 2026-09-10：扩 promptTemplateId / productLineIds 让前端按 promptTemplate 优先 + 按产品线分组；
+// 返 productLines 数组（含 sortOrder + maskCount）让前端 Segmented 直接渲染分组筛选。
 export async function GET() {
   const effects = await getEffects();
+  const activeEffects = effects.filter((m) => m.status === "active");
+  // 2026-09-10：取上架产品线（active）；按 sortOrder 升序；
+  // maskCount = 该 productLineId 命中的 active mask 数
+  const lines = await getActiveLinesFromDb();
+  const productLines = lines.map((l) => ({
+    productLineId: l.productLineId,
+    name: l.name,
+    coverUrl: l.coverUrl ?? "",
+    sortOrder: l.sortOrder,
+    maskCount: activeEffects.filter((m) =>
+      (m.productLineIds ?? []).includes(l.productLineId)
+    ).length,
+  }));
+
   return NextResponse.json({
     success: true,
-    masks: effects
-      .filter((m) => m.status === "active")
-      .map((m) => ({
-        maskId: m.maskId,
-        name: m.name,
-        previewUrl: m.previewUrl,
-        // 2026-09-09：扩给 /image-gen 6 步 stepper 用
-        productTypeCode:
-          (m as { productTypeCode?: string | null }).productTypeCode ?? null,
-        price: m.price ?? 0,
-        description: m.description ?? "",
-        // 推荐模型仅返回 id，前端按 id 展示名字；不暴露完整 prompt/cost
-        model: m.model,
-        // 2026-09-10：模板级可配置规格子集；空 = 字典全量
-        allowedSizes: (m as { allowedSizes?: string[] }).allowedSizes ?? null,
-        allowedAccessories:
-          (m as { allowedAccessories?: string[] }).allowedAccessories ?? null,
-        // 2026-09-10：模板级 capability 覆盖 + 皮革色子集（仅创建时 SpecModal 用）
-        allowedCapabilities:
-          (m as { allowedCapabilities?: Partial<ProductCapabilities> | null })
-            .allowedCapabilities ?? null,
-        allowedColors:
-          (m as { allowedColors?: string[] }).allowedColors ?? null,
-      })),
+    masks: activeEffects.map((m) => ({
+      maskId: m.maskId,
+      name: m.name,
+      previewUrl: m.previewUrl,
+      // 2026-09-09：扩给 /image-gen 6 步 stepper 用
+      productTypeCode:
+        (m as { productTypeCode?: string | null }).productTypeCode ?? null,
+      price: m.price ?? 0,
+      description: m.description ?? "",
+      // 推荐模型仅返回 id，前端按 id 展示名字；不暴露完整 prompt/cost
+      model: m.model,
+      // 2026-09-10：模板级可配置规格子集；空 = 字典全量
+      allowedSizes: (m as { allowedSizes?: string[] }).allowedSizes ?? null,
+      allowedAccessories:
+        (m as { allowedAccessories?: string[] }).allowedAccessories ?? null,
+      // 2026-09-10：模板级 capability 覆盖 + 皮革色子集（仅创建时 SpecModal 用）
+      allowedCapabilities:
+        (m as { allowedCapabilities?: Partial<ProductCapabilities> | null })
+          .allowedCapabilities ?? null,
+      allowedColors: (m as { allowedColors?: string[] }).allowedColors ?? null,
+      // 2026-09-10：prompt_template.id 引用（POST 时优先用 promptTemplate.prompt）；
+      // 前端无需关心，只用于诊断 / 显示
+      promptTemplateId:
+        (m as { promptTemplateId?: string | null }).promptTemplateId ?? null,
+      // 2026-09-10：关联产品线 id 列表（用于 /image-gen 左侧产品线 Segmented 分组）
+      productLineIds: (m as { productLineIds?: string[] }).productLineIds ?? [],
+    })),
+    productLines,
   });
 }

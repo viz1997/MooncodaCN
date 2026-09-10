@@ -168,7 +168,8 @@ export function OrderDetailView({ order }: { order: OrderDetail }) {
                         getLeatherColor(order.leatherColor)?.swatch ?? "#999",
                     }}
                   />
-                  {getLeatherColor(order.leatherColor)?.name ?? order.leatherColor}
+                  {getLeatherColor(order.leatherColor)?.name ??
+                    order.leatherColor}
                 </span>
               </div>
             )}

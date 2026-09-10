@@ -792,6 +792,10 @@ export const productEffect = pgTable("product_effect", {
     .notNull()
     .default({ style: "custom" }),
   scene: promptSceneEnum("scene").notNull().default("generate_2d"),
+  // 2026-09-10：引用 prompt_template.id（gpt-image 模块的提示词模板表）
+  // 可空：NULL = 用本地 prompt 字段（非空 = 优先用 promptTemplate.prompt）
+  // 不加 DB FK，与现有 product_line_ids json 一致（应用层校验合法性）
+  promptTemplateId: text("prompt_template_id"),
   versions: json("versions")
     .$type<import("./image-gen-types").PromptVersion[]>()
     .notNull()
@@ -863,6 +867,38 @@ export type NewImageJob = typeof imageJob.$inferInsert;
 
 export type ProductEffectRow = typeof productEffect.$inferSelect;
 export type NewProductEffectRow = typeof productEffect.$inferInsert;
+
+// 2026-09-10：产品线独立表（替代 productEffect.product_line_ids JSON 列做关联）
+// productLineId 用业务主键 text，不用 uuid（便于 seed/迁移对齐 MOCK_PRODUCT_LINES.id）
+// spec / pricing 用 JSON 字符串列（沿用 db-effects.ts 解析模式）
+// status enum 复用 active / inactive / draft 三态（与 productEffect 一致）
+// 不加 DB FK，应用层校验合法性
+export const productLine = pgTable(
+  "product_line",
+  {
+    productLineId: text("product_line_id").primaryKey(),
+    name: text("name").notNull(),
+    category: text("category").notNull(),
+    description: text("description").notNull().default(""),
+    coverUrl: text("cover_url").notNull().default(""),
+    spec: text("spec").notNull().default(""),
+    pricing: text("pricing").notNull().default(""),
+    status: text("status", {
+      enum: ["active", "inactive", "draft"],
+    })
+      .notNull()
+      .default("active"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    statusIdx: index("product_line_status_idx").on(t.status),
+  })
+);
+
+export type ProductLineRow = typeof productLine.$inferSelect;
+export type NewProductLineRow = typeof productLine.$inferInsert;
 
 /** 生图任务状态类型 */
 export type ImageJobStatus = (typeof imageJobStatusEnum.enumValues)[number];

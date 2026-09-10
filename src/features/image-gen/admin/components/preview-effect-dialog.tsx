@@ -15,9 +15,7 @@
 import { App, Badge, Button, Input, Modal, Select, Tabs } from "antd";
 import { Code, Copy, Play, Variable } from "lucide-react";
 import { useState } from "react";
-import {
-  type ProductCapabilities,
-} from "@/features/gpt-image/lib/product-catalog";
+import type { ProductCapabilities } from "@/features/gpt-image/lib/product-catalog";
 import {
   getEffectiveCapabilities,
   getEffectiveLeatherColors,
@@ -196,11 +194,7 @@ export function PreviewEffectDialog({
                   ] as Array<[keyof ProductCapabilities, string]>
                 ).map(([key, label]) =>
                   effective[key] ? (
-                    <Badge
-                      key={key}
-                      color="green"
-                      className="!text-[10px]"
-                    >
+                    <Badge key={key} color="green" className="!text-[10px]">
                       {label} ✓
                     </Badge>
                   ) : (
@@ -233,13 +227,12 @@ export function PreviewEffectDialog({
                       {c.name}
                     </span>
                   ))}
-                  {effect.allowedColors &&
-                    effect.allowedColors.length > 0 && (
-                      <Badge color="default" className="!text-[10px]">
-                        子集 {effect.allowedColors.length}
-                        /5
-                      </Badge>
-                    )}
+                  {effect.allowedColors && effect.allowedColors.length > 0 && (
+                    <Badge color="default" className="!text-[10px]">
+                      子集 {effect.allowedColors.length}
+                      /5
+                    </Badge>
+                  )}
                 </div>
               )}
             </div>

@@ -1,42 +1,42 @@
 "use client";
 
 /**
- * 产品线管理 - Admin 视图
+ * 产品线管理 - Admin 视图（2026-09-10 重写）
  *
- * 仿 mooncada-source/modules/product-lines.tsx 设计：
- * - 5 张统计卡片（产品线 / 上架中 / 累计销量 / 月销量 / 平均评分）
- * - 搜索 + 分类筛选
- * - 卡片网格（预览图 + 关键规格 + 定价 + 销量 + 兼容效果数）
- * - 详情对话框：规格 / 设计规范 / 定价 / 生产 / 兼容效果 Tab
+ * 数据源切换：mooncada-source ENRICHED 内联 mock → product_line 表（db-lines.ts）
+ * 字段简化：
+ * - 移除 production / totalSold / monthlySold / rating / tags / compatibleMaskIds
+ *   （mock 字段，无业务意义，且 admin 后台不展示销量）
+ * - spec / pricing 改读 ProductLineSpec / ProductLinePricing JSON 字段
+ * - CRUD 接入 listProductLinesAdminAction + ProductLineFormDialog + deleteProductLineAdminAction
  *
- * 注：mooncada 的 ProductLine 类型有 30+ 字段（嵌套 spec/designSpec/pricing/production），
- * 本次按简化版 MockProductLine 渲染，后续接入 Drizzle 表时再扩展。
- *
- * 2026-08-20：shadcn → antd 迁移（Phase 3.3）
- * - shadcn Card 系列 → 内联 div
- * - shadcn Badge/Button/Dialog/Tabs → antd
+ * 2026-08-20：shadcn → antd 迁移（Phase 3.3）；规格/定价卡片从 ENRICHED 改 ProductLine.spec/pricing
  */
 
-import { Badge, Button, Modal, Tabs } from "antd";
+import { App, Badge, Button, Empty, Modal, Tabs } from "antd";
 import {
   DollarSign,
   Edit,
   Eye,
-  Factory,
   Package,
-  Palette,
+  Plus,
   Ruler,
   Search,
-  Sparkles,
-  Star,
-  TrendingUp,
+  Trash2,
 } from "lucide-react";
-import { useState } from "react";
+import { useAction } from "next-safe-action/hooks";
+import { useEffect, useMemo, useState } from "react";
 
 import {
-  MOCK_PRODUCT_LINES,
-  type MockProductLine,
-} from "@/features/image-gen/lib/product-lines-mock";
+  deleteProductLineAdminAction,
+  listProductLinesAdminAction,
+} from "@/features/image-gen/admin/actions";
+import { ProductLineFormDialog } from "@/features/image-gen/admin/components/product-line-form-dialog";
+import type {
+  ProductLine,
+  ProductLinePricing,
+  ProductLineSpec,
+} from "@/features/image-gen/lib/product-effect-types";
 import {
   EmptyState,
   formatCurrency,
@@ -44,318 +44,64 @@ import {
 } from "@/features/mooncada/components/shared";
 import { cn } from "@/lib/utils";
 
-type Category = MockProductLine["category"];
-
-// 分类颜色与标签（与 mooncada 对齐）
-const CATEGORY_LABELS: Record<Category, string> = {
+/**
+ * 通用 category 标签表（不强制 enum，DB 端是 text）。
+ * 几个常见类别给固定中文标签 + 配色；其他 fallback "其他"
+ */
+const CATEGORY_LABELS: Record<string, string> = {
   badge: "徽章",
   keychain: "钥匙扣",
   charm: "挂件",
+  pendant: "挂件",
   "fridge-magnet": "冰箱贴",
+  acrylic_stand: "亚克力立牌",
+  leather_badge: "皮革徽章",
   other: "其他",
 };
 
-const CATEGORY_COLORS: Record<Category, string> = {
+const CATEGORY_COLORS: Record<string, string> = {
   badge:
     "bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/20",
   keychain:
     "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20",
   charm: "bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-500/20",
+  pendant: "bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-500/20",
   "fridge-magnet":
     "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20",
+  acrylic_stand:
+    "bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/20",
+  leather_badge:
+    "bg-fuchsia-500/10 text-fuchsia-700 dark:text-fuchsia-400 border-fuchsia-500/20",
   other: "bg-zinc-500/10 text-zinc-700 dark:text-zinc-400 border-zinc-500/20",
 };
 
-// 演示用：基于 ID 给每个产品线生成预览图（picsum）+ 销量数字
-function previewUrlFor(id: string): string {
-  return `https://picsum.photos/seed/${id}/400/300`;
+function categoryLabel(category: string): string {
+  return CATEGORY_LABELS[category] ?? category;
 }
 
-interface EnrichedProductLine extends MockProductLine {
-  description: string;
-  spec: {
-    size: string;
-    material: string;
-    thickness: string;
-    weight: string;
-  };
-  pricing: {
-    basePrice: number;
-    bulkPrice: number;
-    moq: number;
-    currency: string;
-  };
-  production: {
-    productionTime: string;
-    dailyCapacity: number;
-    factory: string;
-  };
-  totalSold: number;
-  monthlySold: number;
-  rating: number;
-  compatibleMaskIds: string[];
-  tags: string[];
+function categoryColor(category: string): string {
+  return CATEGORY_COLORS[category] ?? CATEGORY_COLORS.other ?? "";
 }
 
-const ENRICHED: Record<string, Partial<EnrichedProductLine>> = {
-  PL_001: {
-    description:
-      "精美浮雕吧唧徽章，可定制任意图案，适合动漫周边、活动纪念、粉丝应援。马口铁底盘+亚克力面+浮雕层，质感细腻。",
-    spec: {
-      size: "直径 58mm",
-      material: "马口铁 + 亚克力",
-      thickness: "3mm",
-      weight: "约 15g",
-    },
-    pricing: { basePrice: 12, bulkPrice: 6.5, moq: 1, currency: "CNY" },
-    production: {
-      productionTime: "3-5 个工作日",
-      dailyCapacity: 2000,
-      factory: "深圳·浮雕车间 A",
-    },
-    totalSold: 15680,
-    monthlySold: 1820,
-    rating: 4.8,
-    compatibleMaskIds: ["MASK_001", "MASK_002", "MASK_005"],
-    tags: ["徽章", "吧唧", "浮雕", "动漫周边", "应援"],
-  },
-  PL_002: {
-    description:
-      "亚克力钥匙扣，浮雕效果清晰，坚固耐用。适合礼品定制、品牌周边、卡通形象衍生品。",
-    spec: {
-      size: "55×35mm",
-      material: "透明亚克力",
-      thickness: "4mm",
-      weight: "约 8g",
-    },
-    pricing: { basePrice: 6, bulkPrice: 3.5, moq: 1, currency: "CNY" },
-    production: {
-      productionTime: "2-4 个工作日",
-      dailyCapacity: 5000,
-      factory: "深圳·亚克力车间 B",
-    },
-    totalSold: 28460,
-    monthlySold: 3120,
-    rating: 4.7,
-    compatibleMaskIds: ["MASK_001", "MASK_003", "MASK_005"],
-    tags: ["钥匙扣", "亚克力", "礼品", "定制"],
-  },
-  PL_003: {
-    description:
-      "树脂挂件，立体浮雕，色泽鲜艳。适合高端礼品、IP 衍生品、收藏品。",
-    spec: {
-      size: "60×40mm",
-      material: "PU 树脂",
-      thickness: "6mm",
-      weight: "约 20g",
-    },
-    pricing: { basePrice: 18, bulkPrice: 10, moq: 1, currency: "CNY" },
-    production: {
-      productionTime: "5-7 个工作日",
-      dailyCapacity: 1200,
-      factory: "东莞·树脂车间 C",
-    },
-    totalSold: 9120,
-    monthlySold: 980,
-    rating: 4.9,
-    compatibleMaskIds: ["MASK_002", "MASK_004"],
-    tags: ["挂件", "树脂", "立体", "收藏"],
-  },
-  PL_004: {
-    description: "PVC 软胶冰箱贴，柔韧耐用。适合家居装饰、旅游纪念品。",
-    spec: {
-      size: "70×50mm",
-      material: "软质 PVC",
-      thickness: "3mm",
-      weight: "约 12g",
-    },
-    pricing: { basePrice: 4, bulkPrice: 2.5, moq: 1, currency: "CNY" },
-    production: {
-      productionTime: "3-5 个工作日",
-      dailyCapacity: 3000,
-      factory: "深圳·软胶车间 D",
-    },
-    totalSold: 5240,
-    monthlySold: 410,
-    rating: 4.6,
-    compatibleMaskIds: ["MASK_001"],
-    tags: ["冰箱贴", "PVC", "软胶", "纪念品"],
-  },
-};
-
-function enrich(line: MockProductLine): EnrichedProductLine {
-  const extra = ENRICHED[line.productLineId] ?? {};
-  return {
-    ...line,
-    description: extra.description ?? "",
-    spec: extra.spec ?? {
-      size: "-",
-      material: "-",
-      thickness: "-",
-      weight: "-",
-    },
-    pricing: extra.pricing ?? {
-      basePrice: 0,
-      bulkPrice: 0,
-      moq: 1,
-      currency: "CNY",
-    },
-    production: extra.production ?? {
-      productionTime: "-",
-      dailyCapacity: 0,
-      factory: "-",
-    },
-    totalSold: extra.totalSold ?? 0,
-    monthlySold: extra.monthlySold ?? 0,
-    rating: extra.rating ?? 0,
-    compatibleMaskIds: extra.compatibleMaskIds ?? [],
-    tags: extra.tags ?? [],
-  };
-}
-
-const ENRICHED_LINES = MOCK_PRODUCT_LINES.map(enrich);
-
+/**
+ * ProductLineDetailDialog - 产品线详情
+ * 渲染从 DB 来的 spec/pricing JSON 字段（替代 ENRICHED 内联 mock）
+ */
 function ProductLineDetailDialog({
   productLine,
   open,
   onOpenChange,
 }: {
-  productLine: EnrichedProductLine | null;
+  productLine: ProductLine | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   if (!productLine) return null;
 
-  const tabItems = [
-    {
-      key: "spec",
-      label: (
-        <span className="text-xs">
-          <Ruler className="h-3 w-3 mr-1" />
-          规格
-        </span>
-      ),
-      children: (
-        <div className="grid grid-cols-2 gap-2 text-xs">
-          <div className="bg-muted/30 rounded-lg p-2.5">
-            <p className="text-muted-foreground text-[10px]">默认尺寸</p>
-            <p className="font-medium">{productLine.spec.size}</p>
-          </div>
-          <div className="bg-muted/30 rounded-lg p-2.5">
-            <p className="text-muted-foreground text-[10px]">主材质</p>
-            <p className="font-medium">{productLine.spec.material}</p>
-          </div>
-          <div className="bg-muted/30 rounded-lg p-2.5">
-            <p className="text-muted-foreground text-[10px]">厚度</p>
-            <p className="font-medium">{productLine.spec.thickness}</p>
-          </div>
-          <div className="bg-muted/30 rounded-lg p-2.5">
-            <p className="text-muted-foreground text-[10px]">重量</p>
-            <p className="font-medium">{productLine.spec.weight}</p>
-          </div>
-        </div>
-      ),
-    },
-    {
-      key: "pricing",
-      label: (
-        <span className="text-xs">
-          <DollarSign className="h-3 w-3 mr-1" />
-          定价
-        </span>
-      ),
-      children: (
-        <div className="grid grid-cols-3 gap-2">
-          <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-3 text-center">
-            <p className="text-[10px] text-muted-foreground">基础价 (1件)</p>
-            <p className="text-xl font-bold text-emerald-700 dark:text-emerald-400">
-              {formatCurrency(
-                productLine.pricing.basePrice,
-                productLine.pricing.currency
-              )}
-            </p>
-          </div>
-          <div className="bg-sky-500/5 border border-sky-500/20 rounded-lg p-3 text-center">
-            <p className="text-[10px] text-muted-foreground">批量价 (≥100)</p>
-            <p className="text-xl font-bold text-sky-700 dark:text-sky-400">
-              {formatCurrency(
-                productLine.pricing.bulkPrice,
-                productLine.pricing.currency
-              )}
-            </p>
-          </div>
-          <div className="bg-violet-500/5 border border-violet-500/20 rounded-lg p-3 text-center">
-            <p className="text-[10px] text-muted-foreground">最小起订</p>
-            <p className="text-xl font-bold text-violet-700 dark:text-violet-400">
-              {productLine.pricing.moq}
-            </p>
-          </div>
-        </div>
-      ),
-    },
-    {
-      key: "production",
-      label: (
-        <span className="text-xs">
-          <Factory className="h-3 w-3 mr-1" />
-          生产
-        </span>
-      ),
-      children: (
-        <div className="grid grid-cols-2 gap-2 text-xs">
-          <div className="bg-muted/30 rounded-lg p-2.5">
-            <p className="text-muted-foreground text-[10px]">生产周期</p>
-            <p className="font-medium">
-              {productLine.production.productionTime}
-            </p>
-          </div>
-          <div className="bg-muted/30 rounded-lg p-2.5">
-            <p className="text-muted-foreground text-[10px]">日产能</p>
-            <p className="font-medium">
-              {productLine.production.dailyCapacity.toLocaleString("zh-CN")}{" "}
-              件/天
-            </p>
-          </div>
-          <div className="bg-muted/30 rounded-lg p-2.5 col-span-2">
-            <p className="text-muted-foreground text-[10px]">生产工厂</p>
-            <p className="font-medium">{productLine.production.factory}</p>
-          </div>
-        </div>
-      ),
-    },
-    {
-      key: "masks",
-      label: (
-        <span className="text-xs">
-          <Sparkles className="h-3 w-3 mr-1" />
-          兼容效果
-        </span>
-      ),
-      children: (
-        <div className="space-y-2">
-          <p className="text-xs text-muted-foreground">
-            该产品线兼容 {productLine.compatibleMaskIds.length} 个 AI 效果模版
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            {productLine.compatibleMaskIds.map((mid) => (
-              <div
-                key={mid}
-                className="flex items-center gap-2 p-2 rounded-lg border bg-card"
-              >
-                <div className="h-10 w-10 rounded bg-violet-500/10 flex items-center justify-center">
-                  <Palette className="h-4 w-4 text-violet-600" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-mono">{mid}</p>
-                  <p className="text-[10px] text-muted-foreground">效果模版</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      ),
-    },
-  ];
+  const spec: ProductLineSpec = productLine.spec ?? {};
+  const pricing = productLine.pricing as ProductLinePricing;
+  const materialList = spec.material ?? [];
+  const finishList = spec.finish ?? [];
 
   return (
     <Modal
@@ -379,86 +125,256 @@ function ProductLineDetailDialog({
         <span
           className={cn(
             "inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-semibold",
-            CATEGORY_COLORS[productLine.category]
+            categoryColor(productLine.category)
           )}
         >
-          {CATEGORY_LABELS[productLine.category]}
+          {categoryLabel(productLine.category)}
         </span>
-        <Badge color="default" className="!text-[10px]">
-          评分 {productLine.rating} ★
-        </Badge>
         <Badge
-          color={productLine.status === "active" ? "green" : "default"}
+          color={
+            productLine.status === "active"
+              ? "green"
+              : productLine.status === "draft"
+                ? "default"
+                : "default"
+          }
           className="!text-[10px]"
         >
-          {productLine.status === "active" ? "上架" : "下架"}
+          {productLine.status === "active"
+            ? "上架"
+            : productLine.status === "draft"
+              ? "草稿"
+              : "下架"}
         </Badge>
+        <span className="text-[10px] text-muted-foreground">
+          排序 {productLine.sortOrder}
+        </span>
       </p>
 
-      {/* 预览图 + 描述 */}
+      {/* 描述 + 封面图 */}
       <div className="grid grid-cols-3 gap-4 mb-4">
-        <div className="aspect-square rounded-lg overflow-hidden bg-muted">
-          {/* biome-ignore lint/performance/noImgElement: 外部预览图（Picsum）需要原生 img */}
-          <img
-            src={previewUrlFor(productLine.productLineId)}
-            alt={productLine.name}
-            className="w-full h-full object-cover"
-          />
-        </div>
+        {productLine.coverUrl ? (
+          <div className="aspect-square rounded-lg overflow-hidden bg-muted">
+            {/* biome-ignore lint/performance/noImgElement: 外部预览图 */}
+            <img
+              src={productLine.coverUrl}
+              alt={productLine.name}
+              className="w-full h-full object-cover"
+            />
+          </div>
+        ) : (
+          <div className="aspect-square rounded-lg bg-muted flex items-center justify-center">
+            <Package className="h-10 w-10 text-muted-foreground/40" />
+          </div>
+        )}
         <div className="col-span-2 space-y-2">
-          <p className="text-sm">{productLine.description}</p>
+          {productLine.description && (
+            <p className="text-sm">{productLine.description}</p>
+          )}
           <div className="flex flex-wrap gap-1">
-            {productLine.tags.map((t) => (
-              <Badge key={t} color="default" className="!text-[10px]">
-                {t}
+            {materialList.map((m) => (
+              <Badge key={m} color="default" className="!text-[10px]">
+                {m}
               </Badge>
             ))}
-          </div>
-          <div className="grid grid-cols-3 gap-2 pt-1">
-            <div className="bg-muted/30 rounded p-2 text-center">
-              <p className="text-[10px] text-muted-foreground">累计销量</p>
-              <p className="text-sm font-bold">
-                {productLine.totalSold.toLocaleString("zh-CN")}
-              </p>
-            </div>
-            <div className="bg-muted/30 rounded p-2 text-center">
-              <p className="text-[10px] text-muted-foreground">月销</p>
-              <p className="text-sm font-bold text-emerald-600">
-                {productLine.monthlySold.toLocaleString("zh-CN")}
-              </p>
-            </div>
-            <div className="bg-muted/30 rounded p-2 text-center">
-              <p className="text-[10px] text-muted-foreground">基础价</p>
-              <p className="text-sm font-bold">
-                {formatCurrency(
-                  productLine.pricing.basePrice,
-                  productLine.pricing.currency
-                )}
-              </p>
-            </div>
+            {finishList.map((f) => (
+              <Badge key={f} color="purple" className="!text-[10px]">
+                {f}
+              </Badge>
+            ))}
           </div>
         </div>
       </div>
 
-      <Tabs defaultActiveKey="spec" items={tabItems} className="w-full" />
+      <Tabs
+        defaultActiveKey="spec"
+        items={[
+          {
+            key: "spec",
+            label: (
+              <span className="text-xs">
+                <Ruler className="h-3 w-3 mr-1" />
+                规格
+              </span>
+            ),
+            children: (
+              <div className="space-y-2">
+                {spec.sizeRange ? (
+                  <div className="bg-muted/30 rounded-lg p-3 text-xs">
+                    <p className="text-muted-foreground text-[10px] mb-1">
+                      尺寸区间
+                    </p>
+                    <p className="font-medium">
+                      {spec.sizeRange.min} - {spec.sizeRange.max}{" "}
+                      {spec.sizeRange.unit}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    未设置尺寸区间
+                  </p>
+                )}
+                {materialList.length > 0 && (
+                  <div className="bg-muted/30 rounded-lg p-3 text-xs">
+                    <p className="text-muted-foreground text-[10px] mb-1">
+                      材质
+                    </p>
+                    <div className="flex flex-wrap gap-1">
+                      {materialList.map((m) => (
+                        <Badge key={m} color="default" className="!text-[10px]">
+                          {m}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {finishList.length > 0 && (
+                  <div className="bg-muted/30 rounded-lg p-3 text-xs">
+                    <p className="text-muted-foreground text-[10px] mb-1">
+                      工艺
+                    </p>
+                    <div className="flex flex-wrap gap-1">
+                      {finishList.map((f) => (
+                        <Badge key={f} color="purple" className="!text-[10px]">
+                          {f}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {!spec.sizeRange &&
+                  materialList.length === 0 &&
+                  finishList.length === 0 && (
+                    <Empty
+                      image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      description="暂无规格信息"
+                    />
+                  )}
+              </div>
+            ),
+          },
+          {
+            key: "pricing",
+            label: (
+              <span className="text-xs">
+                <DollarSign className="h-3 w-3 mr-1" />
+                定价
+              </span>
+            ),
+            children: (
+              <div className="space-y-2">
+                <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-3 text-center">
+                  <p className="text-[10px] text-muted-foreground">基础价</p>
+                  <p className="text-xl font-bold text-emerald-700 dark:text-emerald-400">
+                    {pricing.basePrice
+                      ? formatCurrency(
+                          pricing.basePrice,
+                          pricing.currency ?? "CNY"
+                        )
+                      : "-"}
+                  </p>
+                </div>
+                {pricing.sizeSurcharge && pricing.sizeSurcharge.length > 0 && (
+                  <div className="bg-muted/30 rounded-lg p-3 text-xs">
+                    <p className="text-muted-foreground text-[10px] mb-1">
+                      阶梯加价
+                    </p>
+                    <div className="space-y-0.5">
+                      {pricing.sizeSurcharge.map((s, i) => (
+                        <div
+                          // biome-ignore lint/suspicious/noArrayIndexKey: 简单列表渲染
+                          key={`size-${i}`}
+                          className="flex justify-between"
+                        >
+                          <span>≥ {s.threshold} cm</span>
+                          <span className="font-mono">
+                            + {s.extra.toFixed(2)} {pricing.currency ?? "CNY"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {pricing.finishSurcharge &&
+                  Object.keys(pricing.finishSurcharge).length > 0 && (
+                    <div className="bg-muted/30 rounded-lg p-3 text-xs">
+                      <p className="text-muted-foreground text-[10px] mb-1">
+                        工艺加价
+                      </p>
+                      <div className="space-y-0.5">
+                        {Object.entries(pricing.finishSurcharge).map(
+                          ([finish, extra]) => (
+                            <div key={finish} className="flex justify-between">
+                              <span>{finish}</span>
+                              <span className="font-mono">
+                                + {Number(extra).toFixed(2)}{" "}
+                                {pricing.currency ?? "CNY"}
+                              </span>
+                            </div>
+                          )
+                        )}
+                      </div>
+                    </div>
+                  )}
+              </div>
+            ),
+          },
+        ]}
+      />
     </Modal>
   );
 }
 
 export function ProductLinesAdminView() {
+  const { message } = App.useApp();
+  const [lines, setLines] = useState<ProductLine[]>([]);
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState<string>("all");
-  const [previewLine, setPreviewLine] = useState<EnrichedProductLine | null>(
-    null
+  const [previewLine, setPreviewLine] = useState<ProductLine | null>(null);
+  const [editingLine, setEditingLine] = useState<ProductLine | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [deletingLine, setDeletingLine] = useState<ProductLine | null>(null);
+
+  // 加载产品线列表
+  const reload = async () => {
+    try {
+      const res = await listProductLinesAdminAction();
+      if (res?.data?.lines) {
+        setLines(res.data.lines);
+      }
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : "加载产品线失败");
+    }
+  };
+
+  useEffect(() => {
+    reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const { execute: deleteLine, isPending: isDeleting } = useAction(
+    deleteProductLineAdminAction,
+    {
+      onSuccess: () => {
+        setDeletingLine(null);
+        message.success("删除成功");
+        reload();
+      },
+      onError: ({ error }) => {
+        message.error(error.serverError ?? "删除失败");
+      },
+    }
   );
 
-  const categories = Array.from(new Set(ENRICHED_LINES.map((l) => l.category)));
+  const categories = useMemo(
+    () => Array.from(new Set(lines.map((l) => l.category))),
+    [lines]
+  );
 
-  const filtered = ENRICHED_LINES.filter((p) => {
+  const filtered = lines.filter((p) => {
     const matchSearch =
       p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.productLineId.toLowerCase().includes(search.toLowerCase()) ||
-      p.tags.some((t) => t.toLowerCase().includes(search.toLowerCase()));
+      p.productLineId.toLowerCase().includes(search.toLowerCase());
     const matchCategory =
       filterCategory === "all" || p.category === filterCategory;
     return matchSearch && matchCategory;
@@ -466,24 +382,60 @@ export function ProductLinesAdminView() {
 
   // 统计
   const stats = {
-    total: ENRICHED_LINES.length,
-    active: ENRICHED_LINES.filter((p) => p.status === "active").length,
-    totalSold: ENRICHED_LINES.reduce((s, p) => s + p.totalSold, 0),
-    monthlySold: ENRICHED_LINES.reduce((s, p) => s + p.monthlySold, 0),
-    avgRating: (
-      ENRICHED_LINES.reduce((s, p) => s + p.rating, 0) / ENRICHED_LINES.length
-    ).toFixed(1),
+    total: lines.length,
+    active: lines.filter((p) => p.status === "active").length,
+    draft: lines.filter((p) => p.status === "draft").length,
   };
 
   return (
     <div className="space-y-6">
       <ModuleHeader
         title="产品线管理"
-        description="管理物理商品产品线 · 浮雕吧唧徽章 / 亚克力钥匙扣 / 树脂挂件 / PVC 软胶冰箱贴 · 规格定价与生产信息"
+        description="管理物理商品产品线 · 规格 · 报价 · 状态 · 排序"
       />
 
-      {/* 统计卡片 */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      {/* 操作栏 */}
+      <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+        <div className="flex items-center gap-2 flex-1">
+          <div className="relative max-w-md flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="搜索产品线名称、ID..."
+              className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border bg-muted/40 focus:bg-background focus:outline-none focus:ring-2 focus:ring-violet-500/30"
+            />
+          </div>
+          <div className="flex items-center gap-1 flex-wrap">
+            {(["all", ...categories] as const).map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => setFilterCategory(c)}
+                className={cn(
+                  "text-xs px-2.5 py-1 rounded-full border transition-colors",
+                  filterCategory === c
+                    ? "bg-foreground text-background border-foreground"
+                    : "hover:bg-muted"
+                )}
+              >
+                {c === "all" ? "全部" : categoryLabel(c)}
+              </button>
+            ))}
+          </div>
+        </div>
+        <Button
+          type="primary"
+          onClick={() => setCreateOpen(true)}
+          className="bg-gradient-to-r from-teal-500 to-emerald-600 border-0"
+          icon={<Plus className="h-4 w-4" />}
+        >
+          新建产品线
+        </Button>
+      </div>
+
+      {/* 统计卡片（3 张，去除 mock 的销量/评分） */}
+      <div className="grid grid-cols-3 gap-3">
         <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
@@ -504,78 +456,20 @@ export function ProductLinesAdminView() {
               </p>
             </div>
             <div className="rounded-lg bg-emerald-500/10 p-2">
-              <TrendingUp className="h-4 w-4 text-emerald-600" />
+              <Package className="h-4 w-4 text-emerald-600" />
             </div>
           </div>
         </div>
         <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-[10px] text-muted-foreground">累计销量</p>
-              <p className="text-xl font-bold">
-                {stats.totalSold.toLocaleString("zh-CN")}
-              </p>
+              <p className="text-[10px] text-muted-foreground">草稿</p>
+              <p className="text-xl font-bold text-zinc-600">{stats.draft}</p>
             </div>
-            <div className="rounded-lg bg-sky-500/10 p-2">
-              <TrendingUp className="h-4 w-4 text-sky-600" />
+            <div className="rounded-lg bg-zinc-500/10 p-2">
+              <Package className="h-4 w-4 text-zinc-600" />
             </div>
           </div>
-        </div>
-        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[10px] text-muted-foreground">月销量</p>
-              <p className="text-xl font-bold text-amber-600">
-                {stats.monthlySold.toLocaleString("zh-CN")}
-              </p>
-            </div>
-            <div className="rounded-lg bg-amber-500/10 p-2">
-              <TrendingUp className="h-4 w-4 text-amber-600" />
-            </div>
-          </div>
-        </div>
-        <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[10px] text-muted-foreground">平均评分</p>
-              <p className="text-xl font-bold text-rose-600">
-                {stats.avgRating}
-              </p>
-            </div>
-            <div className="rounded-lg bg-rose-500/10 p-2">
-              <Star className="h-4 w-4 text-rose-600" />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 过滤器 */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="搜索产品线名称、ID或标签..."
-            className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border bg-muted/40 focus:bg-background focus:outline-none focus:ring-2 focus:ring-violet-500/30"
-          />
-        </div>
-        <div className="flex items-center gap-1 flex-wrap">
-          {(["all", ...categories] as const).map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => setFilterCategory(c)}
-              className={cn(
-                "text-xs px-2.5 py-1 rounded-full border transition-colors",
-                filterCategory === c
-                  ? "bg-foreground text-background border-foreground"
-                  : "hover:bg-muted"
-              )}
-            >
-              {c === "all" ? "全部" : CATEGORY_LABELS[c]}
-            </button>
-          ))}
         </div>
       </div>
 
@@ -585,128 +479,143 @@ export function ProductLinesAdminView() {
           <div className="p-6">
             <EmptyState
               icon={Package}
-              title="无匹配产品线"
-              description="尝试调整搜索条件"
+              title={lines.length === 0 ? "暂无产品线" : "无匹配产品线"}
+              description={
+                lines.length === 0
+                  ? '点击右上角"新建产品线"开始'
+                  : "尝试调整搜索条件"
+              }
             />
           </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filtered.map((p) => (
-            <div
-              key={p.productLineId}
-              className="rounded-lg border bg-card text-card-foreground shadow-sm overflow-hidden hover:shadow-md transition-all"
-            >
-              {/* 预览图 */}
-              <div className="aspect-[4/3] bg-gradient-to-br from-muted to-muted/50 relative cursor-pointer group">
-                {/* biome-ignore lint/performance/noImgElement: 外部预览图（Picsum）需要原生 img */}
-                <img
-                  src={previewUrlFor(p.productLineId)}
-                  alt={p.name}
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                />
-                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
-                  <Button
-                    size="small"
-                    onClick={() => setPreviewLine(p)}
-                    icon={<Eye className="h-3.5 w-3.5" />}
-                  >
-                    查看详情
-                  </Button>
-                </div>
-                <span
-                  className={cn(
-                    "absolute top-2 left-2 inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-semibold",
-                    CATEGORY_COLORS[p.category]
+          {filtered.map((p) => {
+            const spec: ProductLineSpec = p.spec ?? {};
+            const pricing = p.pricing as ProductLinePricing;
+            const sizeRange = spec.sizeRange;
+            const materialList = spec.material ?? [];
+            const basePrice = pricing.basePrice;
+            return (
+              <div
+                key={p.productLineId}
+                className="rounded-lg border bg-card text-card-foreground shadow-sm overflow-hidden hover:shadow-md transition-all"
+              >
+                {/* 预览图 / 默认占位 */}
+                <div className="aspect-[4/3] bg-gradient-to-br from-muted to-muted/50 relative">
+                  {p.coverUrl ? (
+                    // biome-ignore lint/performance/noImgElement: 外部预览图
+                    <img
+                      src={p.coverUrl}
+                      alt={p.name}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <Package className="h-10 w-10 text-muted-foreground/40" />
+                    </div>
                   )}
-                >
-                  {CATEGORY_LABELS[p.category]}
-                </span>
-                <span className="absolute top-2 right-2 inline-flex items-center gap-0.5 rounded-md bg-black/60 text-white px-1.5 py-0.5 text-[10px]">
-                  <Star className="h-2.5 w-2.5 text-amber-400 fill-amber-400" />
-                  {p.rating}
-                </span>
-              </div>
-
-              <div className="p-3 space-y-2">
-                <div>
-                  <p className="text-sm font-medium">{p.name}</p>
-                  <p className="text-[10px] text-muted-foreground font-mono">
-                    {p.productLineId}
-                  </p>
-                </div>
-                <p className="text-xs text-muted-foreground line-clamp-2 h-8">
-                  {p.description}
-                </p>
-
-                {/* 关键规格 */}
-                <div className="grid grid-cols-2 gap-1.5 text-[10px]">
-                  <div className="flex items-center gap-1 bg-muted/30 rounded px-1.5 py-1">
-                    <Ruler className="h-3 w-3 text-muted-foreground shrink-0" />
-                    <span className="truncate">{p.spec.size}</span>
-                  </div>
-                  <div className="flex items-center gap-1 bg-muted/30 rounded px-1.5 py-1">
-                    <Package className="h-3 w-3 text-muted-foreground shrink-0" />
-                    <span className="truncate">{p.spec.material}</span>
-                  </div>
-                </div>
-
-                {/* 定价 */}
-                <div className="flex items-center justify-between bg-emerald-500/5 border border-emerald-500/20 rounded-lg px-2.5 py-1.5">
-                  <div>
-                    <p className="text-[10px] text-muted-foreground">基础价</p>
-                    <p className="text-sm font-bold text-emerald-700 dark:text-emerald-400">
-                      {formatCurrency(p.pricing.basePrice, p.pricing.currency)}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-[10px] text-muted-foreground">
-                      批量(≥100)
-                    </p>
-                    <p className="text-sm font-bold text-sky-700 dark:text-sky-400">
-                      {formatCurrency(p.pricing.bulkPrice, p.pricing.currency)}
-                    </p>
-                  </div>
-                </div>
-
-                {/* 生产 + 销量 */}
-                <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1 border-t">
-                  <span className="flex items-center gap-1">
-                    <Factory className="h-3 w-3" />
-                    {p.production.productionTime}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <TrendingUp className="h-3 w-3" />
-                    月销 {p.monthlySold}
-                  </span>
-                </div>
-
-                {/* 兼容效果数 */}
-                <div className="flex items-center gap-1.5 text-[10px]">
-                  <Sparkles className="h-3 w-3 text-violet-600" />
-                  <span className="text-muted-foreground">
-                    兼容 {p.compatibleMaskIds.length} 个效果模版
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Button
-                    size="small"
-                    onClick={() => setPreviewLine(p)}
-                    className="flex-1"
-                    icon={<Eye className="h-3.5 w-3.5" />}
+                  <span
+                    className={cn(
+                      "absolute top-2 left-2 inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-semibold",
+                      categoryColor(p.category)
+                    )}
                   >
-                    查看
-                  </Button>
-                  <Button
-                    size="small"
-                    type="text"
-                    icon={<Edit className="h-3.5 w-3.5" />}
-                  />
+                    {categoryLabel(p.category)}
+                  </span>
+                  <span
+                    className={cn(
+                      "absolute top-2 right-2 inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0.5 text-[10px]",
+                      p.status === "active"
+                        ? "bg-emerald-500/10 text-emerald-700 border-emerald-500/20"
+                        : p.status === "draft"
+                          ? "bg-zinc-500/10 text-zinc-700 border-zinc-500/20"
+                          : "bg-amber-500/10 text-amber-700 border-amber-500/20"
+                    )}
+                  >
+                    {p.status === "active"
+                      ? "上架"
+                      : p.status === "draft"
+                        ? "草稿"
+                        : "下架"}
+                  </span>
+                </div>
+
+                <div className="p-3 space-y-2">
+                  <div>
+                    <p className="text-sm font-medium">{p.name}</p>
+                    <p className="text-[10px] text-muted-foreground font-mono">
+                      {p.productLineId} · 排序 {p.sortOrder}
+                    </p>
+                  </div>
+                  {p.description && (
+                    <p className="text-xs text-muted-foreground line-clamp-2 h-8">
+                      {p.description}
+                    </p>
+                  )}
+
+                  {/* 关键规格 */}
+                  {(sizeRange || materialList.length > 0) && (
+                    <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+                      {sizeRange && (
+                        <div className="flex items-center gap-1 bg-muted/30 rounded px-1.5 py-1">
+                          <Ruler className="h-3 w-3 text-muted-foreground shrink-0" />
+                          <span className="truncate">
+                            {sizeRange.min}-{sizeRange.max}
+                            {sizeRange.unit}
+                          </span>
+                        </div>
+                      )}
+                      {materialList[0] && (
+                        <div className="flex items-center gap-1 bg-muted/30 rounded px-1.5 py-1">
+                          <Package className="h-3 w-3 text-muted-foreground shrink-0" />
+                          <span className="truncate">{materialList[0]}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 定价 */}
+                  {basePrice ? (
+                    <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg px-2.5 py-1.5">
+                      <p className="text-[10px] text-muted-foreground">
+                        基础价
+                      </p>
+                      <p className="text-sm font-bold text-emerald-700 dark:text-emerald-400">
+                        {formatCurrency(basePrice, pricing.currency ?? "CNY")}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  <div className="flex items-center gap-1.5 pt-1">
+                    <Button
+                      size="small"
+                      onClick={() => setPreviewLine(p)}
+                      className="flex-1"
+                      icon={<Eye className="h-3.5 w-3.5" />}
+                    >
+                      查看
+                    </Button>
+                    <Button
+                      size="small"
+                      type="text"
+                      onClick={() => setEditingLine(p)}
+                      aria-label="编辑"
+                      icon={<Edit className="h-3.5 w-3.5" />}
+                    />
+                    <Button
+                      size="small"
+                      type="text"
+                      danger
+                      onClick={() => setDeletingLine(p)}
+                      aria-label="删除"
+                      icon={<Trash2 className="h-3.5 w-3.5" />}
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -716,6 +625,58 @@ export function ProductLinesAdminView() {
         open={!!previewLine}
         onOpenChange={(open) => !open && setPreviewLine(null)}
       />
+
+      {/* 新建 / 编辑弹窗 */}
+      <ProductLineFormDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onSuccess={reload}
+      />
+      <ProductLineFormDialog
+        open={!!editingLine}
+        onOpenChange={(open) => !open && setEditingLine(null)}
+        initialLine={editingLine}
+        onSuccess={reload}
+      />
+
+      {/* 删除确认 */}
+      <Modal
+        open={!!deletingLine}
+        onCancel={() => !isDeleting && setDeletingLine(null)}
+        title={
+          <span className="flex items-center gap-2 text-rose-600">
+            <Trash2 className="h-4 w-4" />
+            确认删除产品线
+          </span>
+        }
+        footer={[
+          <Button
+            key="cancel"
+            onClick={() => setDeletingLine(null)}
+            disabled={isDeleting}
+          >
+            取消
+          </Button>,
+          <Button
+            key="confirm"
+            danger
+            loading={isDeleting}
+            onClick={() => {
+              if (deletingLine) {
+                deleteLine({ productLineId: deletingLine.productLineId });
+              }
+            }}
+          >
+            {isDeleting ? "删除中..." : "确认删除"}
+          </Button>,
+        ]}
+      >
+        <p className="text-sm py-2">
+          确定要删除 <span className="font-semibold">{deletingLine?.name}</span>{" "}
+          ({deletingLine?.productLineId}) 吗？关联的 effect.productLineIds
+          不会自动清理（应用层查询时会 fallback 显示原 id）。此操作不可撤销。
+        </p>
+      </Modal>
     </div>
   );
 }

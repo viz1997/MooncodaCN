@@ -108,4 +108,43 @@ export interface ProductEffect {
    * - 非空 → 仅这些 code（不在 LEATHER_COLORS 字典里的静默丢弃）
    */
   allowedColors?: string[] | null | undefined;
+  /**
+   * 2026-09-10：引用 prompt_template.id（gpt-image 模块的提示词模板表）。
+   * - null/undefined = 不引用，生成时用本地 prompt 字段
+   * - 非空 = 生成时优先用 promptTemplate.prompt（fallback 到本字段）
+   * admin 在 product-effect-form 里下拉选 promptTemplate；
+   * 不加 DB FK（与 productLineIds 一致，应用层校验合法性）
+   */
+  promptTemplateId?: string | null | undefined;
+}
+
+// ============================================
+// 2026-09-10：产品线独立类型（替代 MOCK_PRODUCT_LINES 前端 mock）
+// ============================================
+/** 产品线规格：尺寸区间 / 材质 / 工艺 */
+export interface ProductLineSpec {
+  sizeRange?: { min: number; max: number; unit: "mm" | "cm" };
+  material?: string[];
+  finish?: string[];
+}
+/** 产品线报价：基础价 / 阶梯加价 / 工艺加价 */
+export interface ProductLinePricing {
+  basePrice: number;
+  currency?: string;
+  sizeSurcharge?: Array<{ threshold: number; extra: number }>;
+  finishSurcharge?: Record<string, number>;
+}
+/** 产品线运行时类型（来自 product_line 表） */
+export interface ProductLine {
+  productLineId: string;
+  name: string;
+  category: string;
+  description: string;
+  coverUrl: string;
+  spec: ProductLineSpec;
+  pricing: ProductLinePricing;
+  status: "active" | "inactive" | "draft";
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
 }

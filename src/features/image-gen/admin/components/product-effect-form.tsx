@@ -9,11 +9,21 @@
  * - sonner toast → antd App.useApp().message
  */
 
-import { App, Badge, Button, Checkbox, Form, Input, Select, Switch } from "antd";
+import {
+  App,
+  Badge,
+  Button,
+  Checkbox,
+  Form,
+  Input,
+  Select,
+  Switch,
+} from "antd";
 import { History, Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useAction } from "next-safe-action/hooks";
 import { useEffect, useState } from "react";
+import { listTemplatesAction } from "@/features/gpt-image/actions/orders";
 import {
   ACCESSORIES,
   LEATHER_COLORS,
@@ -24,11 +34,13 @@ import {
 import {
   addProductEffectVersionAction,
   createProductEffectAdminAction,
+  listProductLinesAdminAction,
   updateProductEffectAdminAction,
 } from "@/features/image-gen/admin/actions";
 import { IMAGE_MODEL_LIST } from "@/features/image-gen/lib/image-models/types";
 import type {
   ProductEffect,
+  ProductLine,
   PromptVariable,
 } from "@/features/image-gen/lib/product-effect-types";
 import {
@@ -118,6 +130,58 @@ export function ProductEffectForm({
   const [productLineIds, setProductLineIds] = useState<string[]>(
     initialData?.productLineIds ?? []
   );
+  // 2026-09-10：产品线数据源（从 product_line 表读，替代 MOCK_PRODUCT_LINES）。
+  // 加载失败/未挂载时回退 MOCK，确保 dev 无 DB 也不报错。
+  const [productLines, setProductLines] = useState<ProductLine[]>([]);
+  // 2026-09-10：引用 prompt_template.id（生成时优先用 promptTemplate.prompt）。
+  // null = 不引用，直接用本表单的 prompt 字段
+  const [promptTemplateId, setPromptTemplateId] = useState<string | null>(
+    initialData?.promptTemplateId ?? null
+  );
+  // promptTemplate 下拉选项（id + name + productTypeCode 三列）
+  const [promptTemplateOptions, setPromptTemplateOptions] = useState<
+    Array<{ id: string; name: string; productTypeCode: string | null }>
+  >([]);
+
+  // 加载产品线 + promptTemplate 列表（mount 一次）
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await listProductLinesAdminAction();
+        if (!cancelled && res?.data?.lines) {
+          setProductLines(res.data.lines);
+        }
+      } catch {
+        // 静默降级：用 MOCK_PRODUCT_LINES 兜底
+        if (!cancelled) setProductLines([]);
+      }
+      try {
+        const res = await listTemplatesAction({});
+        if (!cancelled && res?.data?.templates) {
+          setPromptTemplateOptions(
+            res.data.templates.map(
+              (t: {
+                id: string;
+                name: string;
+                productTypeCode?: string | null;
+              }) => ({
+                id: t.id,
+                name: t.name,
+                productTypeCode: t.productTypeCode ?? null,
+              })
+            )
+          );
+        }
+      } catch {
+        if (!cancelled) setPromptTemplateOptions([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const versions = initialData?.versions ?? [];
   const [newVersionLabel, setNewVersionLabel] = useState("");
   const [newVersionNote, setNewVersionNote] = useState("");
@@ -239,6 +303,8 @@ export function ProductEffectForm({
           : null,
       // 2026-09-10：皮革颜色子集；空数组 → null（LEATHER_COLORS 全展示）
       allowedColors: allowedColors.length > 0 ? allowedColors : null,
+      // 2026-09-10：引用 prompt_template.id（null = 不引用，用本地 prompt 字段）
+      promptTemplateId,
     };
 
     if (isEdit) {
@@ -539,8 +605,8 @@ export function ProductEffectForm({
             加工能力与颜色（覆盖字典默认）
           </div>
           <div className="text-xs text-muted-foreground">
-            不勾 = /image-gen
-            SpecModal 展示字典默认能力；勾选后只展示勾中的能力。已存在的订单不受影响。
+            不勾 = /image-gen SpecModal
+            展示字典默认能力；勾选后只展示勾中的能力。已存在的订单不受影响。
           </div>
 
           {/* 4 个 capability Switch */}
@@ -558,8 +624,7 @@ export function ProductEffectForm({
               // 覆盖后的有效值：admin 没动 → 字典默认；动了 → override
               const effective = overrideValue ?? catalogDefault;
               const isOverride =
-                overrideValue !== undefined &&
-                overrideValue !== catalogDefault;
+                overrideValue !== undefined && overrideValue !== catalogDefault;
               return (
                 <label
                   key={key}
@@ -601,8 +666,7 @@ export function ProductEffectForm({
             <div className="pt-2 border-t">
               <div className="text-xs font-medium mb-1.5">皮革颜色</div>
               <div className="text-[10px] text-muted-foreground mb-2">
-                不勾选 = LEATHER_COLORS
-                全部展示；勾选后只展示勾中的颜色子集。
+                不勾选 = LEATHER_COLORS 全部展示；勾选后只展示勾中的颜色子集。
               </div>
               <div className="flex flex-wrap gap-2">
                 {LEATHER_COLORS.map((c) => {
@@ -747,7 +811,41 @@ export function ProductEffectForm({
         ))}
       </div>
 
-      {/* 产品线关联 */}
+      {/* 2026-09-10：关联 prompt_template（下拉单选）。
+         - null = 不引用，提交时 promptTemplateId=null → 生成时走本地 prompt 字段
+         - 非 null = 生成时优先用 promptTemplate.prompt（fallback 到本地）
+         数据源：gpt-image 模块的 listTemplatesAction（含所有 promptTemplate） */}
+      <Form.Item
+        label={
+          <span>
+            引用提示词模板
+            <span className="ml-1 text-xs text-muted-foreground">
+              （生成时优先用模板 prompt，缺失则用本表单 prompt 字段）
+            </span>
+          </span>
+        }
+      >
+        <Select
+          value={promptTemplateId ?? "__none__"}
+          onChange={(v) => setPromptTemplateId(v === "__none__" ? null : v)}
+          options={[
+            { value: "__none__", label: "不引用（直接用本表单 prompt 字段）" },
+            ...promptTemplateOptions.map((t) => ({
+              value: t.id,
+              label: `${t.id} · ${t.name}${
+                t.productTypeCode ? ` · ${t.productTypeCode}` : ""
+              }`,
+            })),
+          ]}
+          placeholder="选择 promptTemplate"
+          allowClear={false}
+          showSearch
+          optionFilterProp="label"
+          notFoundContent="暂无 promptTemplate"
+        />
+      </Form.Item>
+
+      {/* 产品线关联（2026-09-10：数据源从 MOCK_PRODUCT_LINES 切到 product_line 表） */}
       <div className="space-y-2 mb-4">
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium">关联产品线（多选）</span>
@@ -757,11 +855,19 @@ export function ProductEffectForm({
         </div>
         <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
           <div className="p-3 space-y-2">
-            {MOCK_PRODUCT_LINES.length === 0 ? (
-              <p className="text-xs text-muted-foreground">暂无产品线</p>
+            {productLines.length === 0 ? (
+              // 2026-09-10：DB 无数据时回退 MOCK（dev 环境无 DB 不报错）
+              MOCK_PRODUCT_LINES.length === 0 ? (
+                <p className="text-xs text-muted-foreground">暂无产品线</p>
+              ) : (
+                <FallbackMockProductLines
+                  productLineIds={productLineIds}
+                  onToggle={toggleProductLine}
+                />
+              )
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {MOCK_PRODUCT_LINES.map((pl) => {
+                {productLines.map((pl) => {
                   const checked = productLineIds.includes(pl.productLineId);
                   return (
                     <label
@@ -789,12 +895,12 @@ export function ProductEffectForm({
                           <Badge color="default" className="!text-[10px]">
                             {pl.category}
                           </Badge>
-                          {pl.status === "inactive" && (
+                          {pl.status !== "active" && (
                             <Badge
                               color="default"
                               className="!text-[10px] text-zinc-500"
                             >
-                              下架
+                              {pl.status}
                             </Badge>
                           )}
                         </div>
@@ -913,5 +1019,57 @@ export function ProductEffectForm({
         )}
       </div>
     </Form>
+  );
+}
+
+/**
+ * 2026-09-10：MOCK 产品线回退渲染（DB 无数据时兜底）。
+ * 独立组件避免主组件渲染逻辑嵌套过深。
+ */
+function FallbackMockProductLines({
+  productLineIds,
+  onToggle,
+}: {
+  productLineIds: string[];
+  onToggle: (id: string) => void;
+}) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+      {MOCK_PRODUCT_LINES.map((pl) => {
+        const checked = productLineIds.includes(pl.productLineId);
+        return (
+          <label
+            key={pl.productLineId}
+            className={cn(
+              "flex items-center gap-2 rounded-md border p-2 cursor-pointer transition-colors",
+              checked
+                ? "bg-violet-500/10 border-violet-500/40"
+                : "hover:bg-muted/50"
+            )}
+          >
+            <Checkbox
+              checked={checked}
+              onChange={() => onToggle(pl.productLineId)}
+            />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">{pl.name}</p>
+              <div className="flex items-center gap-1">
+                <Badge color="default" className="!text-[10px] font-mono">
+                  {pl.productLineId}
+                </Badge>
+                <Badge color="default" className="!text-[10px]">
+                  {pl.category}
+                </Badge>
+                {pl.status === "inactive" && (
+                  <Badge color="default" className="!text-[10px] text-zinc-500">
+                    下架
+                  </Badge>
+                )}
+              </div>
+            </div>
+          </label>
+        );
+      })}
+    </div>
   );
 }

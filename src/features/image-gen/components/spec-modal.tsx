@@ -42,8 +42,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   ACCESSORIES,
-  type ProductCapabilities,
   getProductType,
+  type ProductCapabilities,
   validateProductSpec,
 } from "@/features/gpt-image/lib/product-catalog";
 import {

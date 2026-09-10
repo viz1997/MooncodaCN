@@ -9,11 +9,11 @@
 // - /p/[token] 仍按 catalog 默认能力，避免"已生成订单被追溯关能力"的歧义。
 
 import {
+  getLeatherColor,
+  getProductType,
   LEATHER_COLORS,
   type LeatherColor,
   type ProductCapabilities,
-  getLeatherColor,
-  getProductType,
 } from "@/features/gpt-image/lib/product-catalog";
 
 /**
