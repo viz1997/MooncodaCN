@@ -58,8 +58,19 @@ import {
   SpecModal,
   type SpecSelection,
 } from "@/features/image-gen/components/spec-modal";
+import { Link } from "@/i18n/routing";
 import { resizeImage, wrapBlobAsFile } from "@/lib/image-client-resize";
 import { cn } from "@/lib/utils";
+
+/**
+ * 2026-09-10：登录用户信息（从 page.tsx RSC 透传）。用于顶栏渲染用户名 +
+ * 「我的订单」按钮 + 头像首字母。不传则降级到匿名样式（兼容单元测试）。
+ */
+export interface PublicImageGenUser {
+  id: string;
+  name: string | null;
+  email: string | null;
+}
 
 interface PublicMask {
   maskId: string;
@@ -69,6 +80,16 @@ interface PublicMask {
   price: number;
   description: string;
   model: string;
+  /**
+   * 2026-09-10：模板级可配置尺寸子集（cm 数字字符串数组）。
+   * - null/空数组 → 字典全量
+   * - 非空 → 仅这些
+   */
+  allowedSizes?: string[] | null;
+  /**
+   * 2026-09-10：模板级可配置配件子集（code 数组）。
+   */
+  allowedAccessories?: string[] | null;
 }
 
 interface GeneratedResult {
@@ -174,7 +195,7 @@ function saveTask(t: PendingTask | null) {
 // Page
 // ============================================
 
-export function PublicImageGenView() {
+export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
   // ========== 多张参考图 ==========
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
   const [dragOver, setDragOver] = useState(false);
@@ -679,17 +700,46 @@ export function PublicImageGenView() {
 
   return (
     <div className="h-screen flex flex-col bg-zinc-50 dark:bg-zinc-950 overflow-hidden">
-      {/* 顶部导航 */}
+      {/* 顶部导航 —— 2026-09-10 加用户信息 + 「我的订单」入口 */}
       <header className="h-12 shrink-0 bg-white dark:bg-zinc-900 border-b flex items-center justify-between px-4">
         <div className="flex items-center gap-2">
           <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white">
             <Sparkles className="h-3.5 w-3.5" />
           </div>
           <span className="font-bold text-sm">AI 生图</span>
+          <span className="text-[11px] text-muted-foreground hidden sm:inline">
+            · 3D打印定制 · 一键生成
+          </span>
         </div>
-        <span className="text-[11px] text-muted-foreground">
-          3D打印定制 · 一键生成
-        </span>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/dashboard/prompt-orders"
+            className="text-xs text-muted-foreground hover:text-violet-600 flex items-center gap-1 px-2 py-1 rounded-md hover:bg-violet-500/5 transition-colors"
+          >
+            <ShoppingCart className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">我的订单</span>
+          </Link>
+          {user ? (
+            <div
+              className="flex items-center gap-2 pl-2 ml-1"
+              title={user.email ?? user.name ?? user.id}
+            >
+              <div className="h-6 w-6 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white text-[10px] font-semibold">
+                {(user.name ?? user.email ?? user.id).slice(0, 1).toUpperCase()}
+              </div>
+              <span className="text-xs font-medium hidden md:inline max-w-[120px] truncate">
+                {user.name ?? user.email ?? "用户"}
+              </span>
+            </div>
+          ) : (
+            <Link
+              href="/sign-in?callbackUrl=/image-gen"
+              className="text-xs px-3 py-1 rounded-full bg-violet-500/10 text-violet-700 dark:text-violet-300 hover:bg-violet-500/20 transition-colors"
+            >
+              登录
+            </Link>
+          )}
+        </div>
       </header>
 
       {/* 主体：左输入 + 右结果 */}

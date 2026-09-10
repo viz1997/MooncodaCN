@@ -93,7 +93,7 @@ async function main() {
     console.log("[sync] --dry-run 模式，不写库。下面是预览：");
     for (const v of values) {
       console.log(
-        `  - ${v.id} | ${v.name} | model=${v.model} | category=${v.category} | ${v.previewUrl ? "有封面" : "无封面"}`,
+        `  - ${v.id} | ${v.name} | model=${v.model} | category=${v.category} | ${v.previewUrl ? "有封面" : "无封面"}`
       );
     }
     return;
@@ -107,7 +107,7 @@ async function main() {
     .returning({ id: productEffect.id });
 
   console.log(
-    `[sync] 实际新增 ${inserted.length} 行（剩余 ${sources.length - inserted.length} 行因 id 冲突跳过）`,
+    `[sync] 实际新增 ${inserted.length} 行（剩余 ${sources.length - inserted.length} 行因 id 冲突跳过）`
   );
 
   // 统计最终状态
@@ -121,7 +121,7 @@ async function main() {
   const s = stats[0];
   if (s) {
     console.log(
-      `[sync] product_effect 当前：total=${s.total}, active=${s.active}, sync-from-promptTemplate=${s.fromSync}`,
+      `[sync] product_effect 当前：total=${s.total}, active=${s.active}, sync-from-promptTemplate=${s.fromSync}`
     );
   }
 

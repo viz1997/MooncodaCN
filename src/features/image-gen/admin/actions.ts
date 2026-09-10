@@ -90,6 +90,24 @@ const productEffectFormSchema = z.object({
   status: z.enum(["active", "inactive"]).default("active"),
   author: z.string().default("admin"),
   productLineIds: z.array(z.string()).default([]),
+  /**
+   * 2026-09-10：绑产品型号（PRODUCT_TYPES 字典里的 code，如 "R"/"A"/"P"/"RM"/"LB"）。
+   * 绑了之后 /image-gen demo 流的 SpecModal 会按字典自动渲染尺寸 + 配件 + 刻字。
+   * null = 老 ToC 模板（无规格，spec 全 null）。
+   */
+  productTypeCode: z.string().nullable().default(null),
+  /**
+   * 2026-09-10：该模板允许的尺寸子集（cm 数字字符串数组，与 PRODUCT_TYPES 字典对齐）。
+   * - null/[] → 不限制，按 productTypeCode 字典全量提供
+   * - ["6"] → 只允许 6cm，SpecModal 只渲染这一个选项
+   */
+  allowedSizes: z.array(z.string()).nullable().default(null),
+  /**
+   * 2026-09-10：该模板允许的配件子集（code 字符串数组，与 ACCESSORIES 字典对齐）。
+   * - null/[] → 不限制，按 productTypeCode 字典全量提供
+   * - ["leather"] → 只允许皮套，SpecModal 只渲染这一个选项
+   */
+  allowedAccessories: z.array(z.string()).nullable().default(null),
   versions: z
     .array(
       z.object({
@@ -167,6 +185,10 @@ export const createProductEffectAdminAction = withImageGenAdminAction(
       successRate: 0,
       avgDuration: 0,
       productLineIds: parsedInput.productLineIds ?? [],
+      productTypeCode: parsedInput.productTypeCode ?? null,
+      // 2026-09-10：可配置尺寸 + 配件子集（null → undefined，匹配 ProductEffect 类型）
+      allowedSizes: parsedInput.allowedSizes ?? undefined,
+      allowedAccessories: parsedInput.allowedAccessories ?? undefined,
     };
 
     const created = await createEffectInDb(effect);
@@ -211,6 +233,14 @@ export const updateProductEffectAdminAction = withImageGenAdminAction(
     if (updates.author !== undefined) updatePayload.author = updates.author;
     if (updates.productLineIds !== undefined)
       updatePayload.productLineIds = updates.productLineIds;
+    if (updates.productTypeCode !== undefined)
+      updatePayload.productTypeCode = updates.productTypeCode;
+    // 2026-09-10：可配置尺寸 + 配件子集（null 表示不限制 / 字典全量）
+    if (updates.allowedSizes !== undefined)
+      updatePayload.allowedSizes = updates.allowedSizes ?? undefined;
+    if (updates.allowedAccessories !== undefined)
+      updatePayload.allowedAccessories =
+        updates.allowedAccessories ?? undefined;
     if (updates.versions !== undefined)
       updatePayload.versions = updates.versions;
 

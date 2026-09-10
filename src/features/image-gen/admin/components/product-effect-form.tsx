@@ -13,8 +13,12 @@ import { App, Badge, Button, Checkbox, Form, Input, Select } from "antd";
 import { History, Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useAction } from "next-safe-action/hooks";
-import { useState } from "react";
-
+import { useEffect, useState } from "react";
+import {
+  ACCESSORIES,
+  PRODUCT_TYPES,
+  type ProductType,
+} from "@/features/gpt-image/lib/product-catalog";
 import {
   addProductEffectVersionAction,
   createProductEffectAdminAction,
@@ -71,6 +75,28 @@ export function ProductEffectForm({
   const [status, setStatus] = useState<"active" | "inactive">(
     initialData?.status ?? "active"
   );
+  // 2026-09-10：产品型号（关联 PRODUCT_TYPES 字典）。选了之后会在表单底部展示
+  // 该型号的尺寸 + 配件预览，让 admin 配置时看到「/image-gen 弹出的可选规格」。
+  const [productTypeCode, setProductTypeCode] = useState<string | null>(
+    initialData?.productTypeCode ?? null
+  );
+  const productType: ProductType | null = productTypeCode
+    ? (PRODUCT_TYPES.find((t) => t.code === productTypeCode) ?? null)
+    : null;
+  // 2026-09-10：可配置尺寸 + 配件子集（null = 字典全量；非空数组 = 仅这些）
+  const [allowedSizes, setAllowedSizes] = useState<string[]>(
+    initialData?.allowedSizes ?? []
+  );
+  const [allowedAccessories, setAllowedAccessories] = useState<string[]>(
+    initialData?.allowedAccessories ?? []
+  );
+  // 2026-09-10：切换产品型号时清空子集（避免上一个型号的尺寸/配件 ID 残留
+  // 到新型号字典里导致非法 chip）。新建模式下有效；编辑模式初次 mount 时
+  // 不会触发（因为 state 已被 initialData 初始化为同值）。
+  useEffect(() => {
+    setAllowedSizes([]);
+    setAllowedAccessories([]);
+  }, [productTypeCode]);
   const [variables, setVariables] = useState<PromptVariable[]>(
     initialData?.variables ?? []
   );
@@ -184,6 +210,11 @@ export function ProductEffectForm({
       productLineIds,
       versions,
       author: initialData?.author ?? "admin",
+      productTypeCode: productTypeCode ?? null,
+      // 2026-09-10：可配置尺寸 + 配件子集；空数组 → null（不限制 = 字典全量）
+      allowedSizes: allowedSizes.length > 0 ? allowedSizes : null,
+      allowedAccessories:
+        allowedAccessories.length > 0 ? allowedAccessories : null,
     };
 
     if (isEdit) {
@@ -296,6 +327,181 @@ export function ProductEffectForm({
           placeholder="不指定"
         />
       </Form.Item>
+
+      {/* 2026-09-10：产品型号绑定。/image-gen demo 流选了模板后弹 SpecModal，
+          按 PRODUCT_TYPES 字典渲染该型号的尺寸 + 配件 + 刻字能力。null 表示老
+          ToC 模板（无规格，spec 全 null）。 */}
+      <Form.Item
+        label={
+          <span>
+            产品型号
+            <span className="ml-1 text-xs text-muted-foreground">
+              （/image-gen 弹规格窗时的可选项）
+            </span>
+          </span>
+        }
+      >
+        <Select
+          value={productTypeCode ?? "__none__"}
+          onChange={(v) => setProductTypeCode(v === "__none__" ? null : v)}
+          options={[
+            { value: "__none__", label: "不指定（老 ToC 模板）" },
+            ...PRODUCT_TYPES.map((t) => ({
+              value: t.code,
+              label: `${t.code} · ${t.name}`,
+            })),
+          ]}
+          placeholder="选择产品型号"
+        />
+      </Form.Item>
+
+      {/* 选完型号后展示字典里的可选项预览，让 admin 确认配置无误 */}
+      {productType && (
+        <div className="rounded-lg border bg-violet-500/5 px-4 py-3 space-y-1.5">
+          <div className="text-sm font-medium flex items-center gap-2">
+            <Badge color="purple">{productType.code}</Badge>
+            <span>{productType.name}</span>
+          </div>
+          <div className="text-xs text-muted-foreground space-y-1">
+            <div>
+              可选尺寸：
+              {productType.sizes.length > 0 ? (
+                productType.sizes.map((s) => (
+                  <Badge key={s} className="ml-1">
+                    {s}cm
+                  </Badge>
+                ))
+              ) : (
+                <span className="ml-1 text-muted-foreground">无</span>
+              )}
+            </div>
+            <div>
+              可选配件：
+              {productType.accessories.length > 0 ? (
+                productType.accessories.map((a) => {
+                  const acc = ACCESSORIES.find((x) => x.code === a);
+                  return (
+                    <Badge key={a} className="ml-1">
+                      {acc?.name ?? a}
+                    </Badge>
+                  );
+                })
+              ) : (
+                <span className="ml-1 text-muted-foreground">无</span>
+              )}
+            </div>
+            <div>
+              刻字能力：
+              <Badge
+                color={
+                  productType.capabilities.canEngrave ? "green" : "default"
+                }
+                className="ml-1"
+              >
+                {productType.capabilities.canEngrave ? "支持" : "不支持"}
+              </Badge>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 2026-09-10：可配置尺寸 + 配件子集（chip 多选）。
+         - 仅在选了产品型号时显示，chip 来源于该型号字典
+         - 默认空数组 = 字典全量（SpecModal 全部展示）；勾选子集 = 仅渲染这些
+         - 改产品型号时自动清空避免无效残留 */}
+      {productType && (
+        <div className="rounded-lg border bg-amber-500/5 px-4 py-3 space-y-3">
+          <div className="text-sm font-medium">
+            可选规格子集（覆盖字典默认）
+          </div>
+          <div className="text-xs text-muted-foreground">
+            不勾选 = 该模板在 /image-gen SpecModal
+            展示字典全量；勾选后只展示勾中的子集。
+          </div>
+
+          {/* 尺寸 chips */}
+          {productType.sizes.length > 0 && (
+            <div>
+              <div className="text-xs font-medium mb-1.5">尺寸</div>
+              <div className="flex flex-wrap gap-2">
+                {productType.sizes.map((s) => {
+                  const checked = allowedSizes.includes(s);
+                  return (
+                    <label
+                      key={s}
+                      className={cn(
+                        "flex items-center gap-1.5 rounded-md border px-2.5 py-1 cursor-pointer text-xs transition-colors",
+                        checked
+                          ? "bg-violet-500/15 border-violet-500/50 text-violet-700 dark:text-violet-300"
+                          : "bg-background hover:bg-muted/50"
+                      )}
+                    >
+                      <Checkbox
+                        checked={checked}
+                        onChange={() =>
+                          setAllowedSizes((prev) =>
+                            prev.includes(s)
+                              ? prev.filter((x) => x !== s)
+                              : [...prev, s]
+                          )
+                        }
+                      />
+                      {s}cm
+                    </label>
+                  );
+                })}
+              </div>
+              {allowedSizes.length > 0 && (
+                <div className="text-[10px] text-muted-foreground mt-1">
+                  已选 {allowedSizes.length} / {productType.sizes.length} 个
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 配件 chips */}
+          {productType.accessories.length > 0 && (
+            <div>
+              <div className="text-xs font-medium mb-1.5">配件</div>
+              <div className="flex flex-wrap gap-2">
+                {productType.accessories.map((a) => {
+                  const acc = ACCESSORIES.find((x) => x.code === a);
+                  const checked = allowedAccessories.includes(a);
+                  return (
+                    <label
+                      key={a}
+                      className={cn(
+                        "flex items-center gap-1.5 rounded-md border px-2.5 py-1 cursor-pointer text-xs transition-colors",
+                        checked
+                          ? "bg-emerald-500/15 border-emerald-500/50 text-emerald-700 dark:text-emerald-300"
+                          : "bg-background hover:bg-muted/50"
+                      )}
+                    >
+                      <Checkbox
+                        checked={checked}
+                        onChange={() =>
+                          setAllowedAccessories((prev) =>
+                            prev.includes(a)
+                              ? prev.filter((x) => x !== a)
+                              : [...prev, a]
+                          )
+                        }
+                      />
+                      {acc?.name ?? a}
+                    </label>
+                  );
+                })}
+              </div>
+              {allowedAccessories.length > 0 && (
+                <div className="text-[10px] text-muted-foreground mt-1">
+                  已选 {allowedAccessories.length} /{" "}
+                  {productType.accessories.length} 个
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <Form.Item label="场景">
         <Select

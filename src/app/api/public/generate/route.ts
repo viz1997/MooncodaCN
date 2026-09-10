@@ -223,6 +223,7 @@ export async function POST(req: NextRequest) {
 // 2026-09-09：/image-gen 升级为下单工作台后，前端需要 productTypeCode 渲染 SpecStep
 // （productSize / accessoryCode / engraving 表单按 productTypeCode 走 PRODUCT_TYPES 字典），
 // 以及 price 显示模板定价。model/prompt 仍不在公开响应中（管理员专属）。
+// 2026-09-10：扩 allowedSizes / allowedAccessories 让 SpecModal 按子集渲染（不暴露字典全量）
 export async function GET() {
   const effects = await getEffects();
   return NextResponse.json({
@@ -240,6 +241,10 @@ export async function GET() {
         description: m.description ?? "",
         // 推荐模型仅返回 id，前端按 id 展示名字；不暴露完整 prompt/cost
         model: m.model,
+        // 2026-09-10：模板级可配置规格子集；空 = 字典全量
+        allowedSizes: (m as { allowedSizes?: string[] }).allowedSizes ?? null,
+        allowedAccessories:
+          (m as { allowedAccessories?: string[] }).allowedAccessories ?? null,
       })),
   });
 }

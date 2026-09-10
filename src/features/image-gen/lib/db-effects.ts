@@ -36,9 +36,32 @@ function mapRowToProductEffect(row: ProductEffectRow): ProductEffect {
     productLineIds: row.productLineIds as string[],
     // 2026-09-09：productTypeCode 列透传（schema 字段已加）
     productTypeCode: row.productTypeCode ?? null,
+    // 2026-09-10：allowedSizes/allowedAccessories 列（JSON 字符串数组）
+    allowedSizes: parseJsonStringArray(row.allowedSizes),
+    allowedAccessories: parseJsonStringArray(row.allowedAccessories),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+/**
+ * 解析 JSON 字符串数组列；null/空字符串/解析失败 → undefined
+ */
+function parseJsonStringArray(
+  raw: string | null | undefined
+): string[] | undefined {
+  if (raw == null) return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((x): x is string => typeof x === "string");
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -68,7 +91,20 @@ function mapProductEffectToRow(
     productLineIds: effect.productLineIds as ProductEffectRow["productLineIds"],
     // 2026-09-09：productTypeCode 透传
     productTypeCode: effect.productTypeCode ?? null,
+    // 2026-09-10：allowedSizes/allowedAccessories 序列化为 JSON 字符串
+    allowedSizes: serializeJsonStringArray(effect.allowedSizes),
+    allowedAccessories: serializeJsonStringArray(effect.allowedAccessories),
   };
+}
+
+/**
+ * 序列化 string[] 为 JSON 字符串；空数组/null/undefined → null
+ */
+function serializeJsonStringArray(
+  arr: string[] | null | undefined
+): string | null {
+  if (!arr || arr.length === 0) return null;
+  return JSON.stringify(arr);
 }
 
 /**
@@ -171,6 +207,14 @@ export async function updateEffectInDb(
   if (updates.productLineIds !== undefined)
     updateData.productLineIds =
       updates.productLineIds as ProductEffectRow["productLineIds"];
+  if (updates.productTypeCode !== undefined)
+    updateData.productTypeCode = updates.productTypeCode ?? null;
+  if (updates.allowedSizes !== undefined)
+    updateData.allowedSizes = serializeJsonStringArray(updates.allowedSizes);
+  if (updates.allowedAccessories !== undefined)
+    updateData.allowedAccessories = serializeJsonStringArray(
+      updates.allowedAccessories
+    );
 
   await db
     .update(productEffect)

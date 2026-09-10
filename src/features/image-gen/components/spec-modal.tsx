@@ -54,6 +54,15 @@ interface SpecModalProps {
     name: string;
     previewUrl: string;
     productTypeCode: string | null;
+    /**
+     * 2026-09-10：模板级可配置尺寸子集（覆盖字典默认）。
+     * null/空 → 用字典全量；非空 → 仅这些。
+     */
+    allowedSizes?: string[] | null;
+    /**
+     * 2026-09-10：模板级可配置配件子集。
+     */
+    allowedAccessories?: string[] | null;
   } | null;
   submitting?: boolean;
   onClose: () => void;
@@ -68,8 +77,26 @@ export function SpecModal({
   onConfirm,
 }: SpecModalProps) {
   const productType = getProductType(template?.productTypeCode);
-  const hasSize = (productType?.sizes?.length ?? 0) > 0;
-  const hasAccessory = (productType?.accessories?.length ?? 0) > 0;
+  // 2026-09-10：模板允许的尺寸 / 配件子集（与字典全集求交集，过滤非法残留）。
+  // null/空数组 → 用字典全量；否则只渲染勾选出的子集。
+  const allowedSizeSet =
+    template?.allowedSizes && template.allowedSizes.length > 0
+      ? new Set(template.allowedSizes)
+      : null;
+  const allowedAccessorySet =
+    template?.allowedAccessories && template.allowedAccessories.length > 0
+      ? new Set(template.allowedAccessories)
+      : null;
+  const availableSizes =
+    productType?.sizes?.filter((s) =>
+      allowedSizeSet ? allowedSizeSet.has(s) : true
+    ) ?? [];
+  const availableAccessories =
+    productType?.accessories?.filter((a) =>
+      allowedAccessorySet ? allowedAccessorySet.has(a) : true
+    ) ?? [];
+  const hasSize = availableSizes.length > 0;
+  const hasAccessory = availableAccessories.length > 0;
   const canEngrave = productType?.capabilities.canEngrave ?? false;
 
   // 字段本地态
@@ -78,14 +105,15 @@ export function SpecModal({
   const [engravingText, setEngravingText] = useState<string>("");
   const [engravingExposed, setEngravingExposed] = useState<boolean>(false);
 
-  // 打开时按 catalog defaults 重置
+  // 打开时按可用规格 defaults 重置（受 allowed 子集过滤）
   useEffect(() => {
     if (!open) return;
-    setProductSize(productType?.sizes?.[0] ?? "");
-    setAccessoryCode(productType?.accessories?.[0] ?? "");
+    setProductSize(availableSizes[0] ?? "");
+    setAccessoryCode(availableAccessories[0] ?? "");
     setEngravingText("");
     setEngravingExposed(false);
-  }, [open, productType]);
+    // availableSizes/availableAccessories 依赖 template.allowed*；同步开 modal 时一并刷新
+  }, [open, availableSizes, availableAccessories]);
 
   const handleConfirm = () => {
     if (!template) return;
@@ -127,12 +155,12 @@ export function SpecModal({
         </DialogHeader>
 
         <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
-          {/* 尺寸 */}
+          {/* 尺寸（按 availableSizes，受 allowedSizes 子集过滤） */}
           {hasSize && productType && (
             <div className="space-y-2">
               <Label className="text-sm font-semibold">尺寸</Label>
               <div className="flex flex-wrap gap-2">
-                {productType.sizes.map((s) => (
+                {availableSizes.map((s) => (
                   <button
                     key={s}
                     type="button"
@@ -151,12 +179,12 @@ export function SpecModal({
             </div>
           )}
 
-          {/* 配件 */}
+          {/* 配件（按 availableAccessories，受 allowedAccessories 子集过滤） */}
           {hasAccessory && productType && (
             <div className="space-y-2">
               <Label className="text-sm font-semibold">配件</Label>
               <div className="flex flex-wrap gap-2">
-                {productType.accessories.map((a) => {
+                {availableAccessories.map((a) => {
                   const acc = ACCESSORIES.find((x) => x.code === a);
                   return (
                     <button

@@ -813,6 +813,22 @@ export const productEffect = pgTable("product_effect", {
    * admin 手工录入的 productEffect 仍可空（兼容旧数据）。
    */
   productTypeCode: text("product_type_code"),
+  /**
+   * 2026-09-10：该模板允许的尺寸子集（JSON 字符串数组，单位 cm 数字字符串）。
+   * - null/[] → 不限制，按 productTypeCode 对应 PRODUCT_TYPES 字典里的 sizes 全量提供
+   * - ["6"] → 只允许 6cm，下单时 SpecModal 仅渲染这一个选项
+   *
+   * 为什么允许子集：同一个产品型号（如 R = 钥匙扣）可以多个 productEffect 共用
+   * （「复古钥匙扣」「简约钥匙扣」），但每个效果图只展示部分尺寸 + 配件，避免
+   * 客户选了 4cm 钥匙扣效果图后弹规格窗却看到 8cm（冰箱贴尺寸）的尴尬。
+   */
+  allowedSizes: text("allowed_sizes"),
+  /**
+   * 2026-09-10：该模板允许的配件子集（JSON 字符串数组，code 字符串）。
+   * - null/[] → 不限制，按 productTypeCode 对应字典里的 accessories 全量提供
+   * - ["leather"] → 只允许皮套
+   */
+  allowedAccessories: text("allowed_accessories"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -954,6 +970,22 @@ export const promptTemplate = pgTable("prompt_template", {
    * nullable 允许 admin 临时创建"未绑定商品"的模板（workbench 不可用但 ToC 仍可用）。
    */
   productTypeCode: text("product_type_code"),
+  /**
+   * 2026-09-10：该模板允许的尺寸子集（JSON 字符串数组，单位 cm 数字字符串）。
+   * - null/[] → 不限制，按 productTypeCode 对应 PRODUCT_TYPES 字典里的 sizes 全量提供
+   * - ["6"] → 只允许 6cm，下单时 SpecModal 仅渲染这一个选项
+   *
+   * 为什么允许子集：同一个产品型号（如 R = 钥匙扣）可以多个 productEffect 共用
+   * （「复古钥匙扣」「简约钥匙扣」），但每个效果图只展示部分尺寸 + 配件，避免
+   * 客户选了 4cm 钥匙扣效果图后弹规格窗却看到 8cm（冰箱贴尺寸）的尴尬。
+   */
+  allowedSizes: text("allowed_sizes"),
+  /**
+   * 2026-09-10：该模板允许的配件子集（JSON 字符串数组，code 字符串）。
+   * - null/[] → 不限制，按 productTypeCode 对应字典里的 accessories 全量提供
+   * - ["leather"] → 只允许皮套
+   */
+  allowedAccessories: text("allowed_accessories"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

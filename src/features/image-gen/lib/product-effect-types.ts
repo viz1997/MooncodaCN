@@ -82,4 +82,14 @@ export interface ProductEffect {
    * null 表示纯 ToC 模板（无定制）。
    */
   productTypeCode?: string | null | undefined;
+  /**
+   * 2026-09-10：该模板允许的尺寸子集（单位 cm 数字字符串数组）。
+   * 空 = 用字典全量。
+   */
+  allowedSizes?: string[] | undefined;
+  /**
+   * 2026-09-10：该模板允许的配件子集（code 数组）。
+   * 空 = 用字典全量。
+   */
+  allowedAccessories?: string[] | undefined;
 }

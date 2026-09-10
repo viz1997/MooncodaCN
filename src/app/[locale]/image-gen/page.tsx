@@ -11,6 +11,9 @@
  *   - POST /api/public/generate  发起生图（同步返图或 taskId）
  *   - GET  /api/image/task/[id]  异步任务轮询
  *
+ * 2026-09-10：RSC 拿 session.user → 传给 PublicImageGenView，顶栏渲染用户名 +
+ * 邮箱 + 「我的订单」入口（链 /dashboard/prompt-orders）。
+ *
  * 与 workbench 的区别：本页是"一次性体验"——不创建 promptOrder、不扣 credit、
  * 不接订单系统。历史只存浏览器 localStorage（key=mooncoda_public_imagegen_history，
  * 最多 30 条），换浏览器/换账号就丢了；正式下单走 /p/[token] 或工作台 V1。
@@ -30,5 +33,13 @@ export default async function ImageGenPage() {
     redirect("/sign-in?callbackUrl=/image-gen");
   }
 
-  return <PublicImageGenView />;
+  return (
+    <PublicImageGenView
+      user={{
+        id: session.user.id,
+        name: session.user.name ?? null,
+        email: session.user.email ?? null,
+      }}
+    />
+  );
 }

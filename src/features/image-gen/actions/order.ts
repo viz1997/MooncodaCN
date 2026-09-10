@@ -93,7 +93,9 @@ export const createOrderFromImageGenAction = withOrderAction("create")
         )
       );
 
-    // 2. 校验模板存在 + active
+    // 2. 校验模板存在 + active；同时拉取 allowedSizes/allowedAccessories
+    //    校验提交上来的 size/accessory 必须落在模板允许的子集内
+    //    （2026-09-10：模板级可配置规格子集，避免选了 4cm 效果图却出 8cm 规格）。
     const template = await db.query.promptTemplate.findFirst({
       where: and(
         eq(promptTemplate.id, parsedInput.templateId),
@@ -103,6 +105,8 @@ export const createOrderFromImageGenAction = withOrderAction("create")
         id: true,
         candidateCount: true,
         size: true,
+        allowedSizes: true,
+        allowedAccessories: true,
       },
     });
     if (!template) throw new Error("模板不存在或已停用");
@@ -114,19 +118,49 @@ export const createOrderFromImageGenAction = withOrderAction("create")
       parsedInput.accessoryCode ?? null
     );
 
-    // 4. 按 catalog defaults 填 size / accessory
+    // 2026-09-10：解析模板级 allowedSizes/allowedAccessories 子集
+    const allowedSizes = parseJsonStringArray(template.allowedSizes);
+    const allowedAccessories = parseJsonStringArray(
+      template.allowedAccessories
+    );
+
+    // 4. 按 catalog defaults 填 size / accessory（受 allowed 子集过滤）
     let finalProductSize = parsedInput.productSize ?? null;
     let finalAccessoryCode = parsedInput.accessoryCode ?? null;
     if (parsedInput.productTypeCode) {
       const type = getProductType(parsedInput.productTypeCode);
       if (type) {
-        if (!finalProductSize && type.sizes.length > 0) {
-          finalProductSize = type.sizes[0] ?? null;
+        const sizesAvailable = type.sizes.filter((s) =>
+          allowedSizes ? allowedSizes.includes(s) : true
+        );
+        const accessoriesAvailable = type.accessories.filter((a) =>
+          allowedAccessories ? allowedAccessories.includes(a) : true
+        );
+        if (!finalProductSize && sizesAvailable.length > 0) {
+          finalProductSize = sizesAvailable[0] ?? null;
         }
-        if (!finalAccessoryCode && type.accessories.length > 0) {
-          finalAccessoryCode = type.accessories[0] ?? null;
+        if (!finalAccessoryCode && accessoriesAvailable.length > 0) {
+          finalAccessoryCode = accessoriesAvailable[0] ?? null;
         }
       }
+    }
+
+    // 2026-09-10：兜底校验——若 client 传了 size/accessory 但不在子集内，直接拒
+    if (
+      finalProductSize &&
+      allowedSizes &&
+      !allowedSizes.includes(finalProductSize)
+    ) {
+      throw new Error(
+        `模板仅允许尺寸：${allowedSizes.join("/")}cm，当前选择了 ${finalProductSize}cm`
+      );
+    }
+    if (
+      finalAccessoryCode &&
+      allowedAccessories &&
+      !allowedAccessories.includes(finalAccessoryCode)
+    ) {
+      throw new Error(`模板不允许该配件：${finalAccessoryCode}`);
     }
 
     // 5. engraving 联动校验
@@ -347,4 +381,23 @@ function generateOrderNo(): string {
     .slice(0, 8);
   const rand = nanoid(6).toUpperCase();
   return `IG-${ts}-${rand}`;
+}
+
+/**
+ * 解析 JSON 字符串数组列（与 db-effects.ts / submit-image-gen-demo 同名 helper）。
+ * null/空字符串/解析失败 → null（表示「不限制 / 字典全量」）。
+ */
+function parseJsonStringArray(raw: string | null | undefined): string[] | null {
+  if (raw == null) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((x): x is string => typeof x === "string");
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
