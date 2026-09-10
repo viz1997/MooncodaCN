@@ -52,6 +52,10 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import {
+  ACCESSORIES,
+  getProductType,
+} from "@/features/gpt-image/lib/product-catalog";
 import { listUserOrdersAction } from "@/features/image-gen/actions/order";
 import { submitImageGenDemoAction } from "@/features/image-gen/actions/submit-image-gen-demo";
 
@@ -241,13 +245,19 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
       productTypeCode: string | null;
       productSize: string | null;
       accessoryCode: string | null;
+      engravingText: string | null;
+      engravingExposed: boolean | null;
       templateName: string;
       templateId: string;
       thumbnailUrl: string | null;
+      candidateUrls: string[];
+      selectedImageIdx: number;
       createdAt: string;
     }[]
   >([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
+  // 2026-09-10：抽屉里"列表 ↔ 详情"内部切换，不再跳 /p/[token]
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
 
   const fetchOrders = async () => {
     setLoadingOrders(true);
@@ -268,6 +278,9 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
   useEffect(() => {
     if (showOrdersDrawer) {
       void fetchOrders();
+    } else {
+      // 关闭时清空选中订单，回到列表态
+      setSelectedOrderId(null);
     }
   }, [showOrdersDrawer]);
 
@@ -1319,11 +1332,26 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
           >
             <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b bg-gradient-to-r from-violet-500/10 to-purple-500/5">
               <div className="flex items-center gap-2">
-                <ShoppingCart className="h-4 w-4 text-violet-600" />
-                <span className="text-sm font-semibold">我的订单</span>
-                <span className="text-[10px] text-muted-foreground">
-                  · {orders.length} 条
+                {selectedOrderId ? (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedOrderId(null)}
+                    className="text-muted-foreground hover:text-violet-600 p-0.5 -ml-1 rounded text-sm"
+                    title="返回订单列表"
+                  >
+                    ←
+                  </button>
+                ) : (
+                  <ShoppingCart className="h-4 w-4 text-violet-600" />
+                )}
+                <span className="text-sm font-semibold">
+                  {selectedOrderId ? "订单详情" : "我的订单"}
                 </span>
+                {!selectedOrderId && (
+                  <span className="text-[10px] text-muted-foreground">
+                    · {orders.length} 条
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-1">
                 <button
@@ -1349,84 +1377,282 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                 </button>
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto p-3 space-y-2">
-              {loadingOrders && orders.length === 0 ? (
-                <div className="space-y-2">
-                  {["o-skel-0", "o-skel-1", "o-skel-2", "o-skel-3"].map((k) => (
-                    <div
-                      key={k}
-                      className="h-20 rounded-lg bg-muted animate-pulse"
-                    />
-                  ))}
-                </div>
-              ) : orders.length === 0 ? (
-                <div className="text-center text-muted-foreground py-12 space-y-2">
-                  <div className="h-12 w-12 rounded-xl bg-muted flex items-center justify-center mx-auto">
-                    <ShoppingCart className="h-5 w-5 opacity-30" />
-                  </div>
-                  <p className="text-xs">还没有订单</p>
-                  <p className="text-[10px]">
-                    选效果 + 上传参考图 + 生成后点「选择此效果下单」
-                  </p>
-                </div>
-              ) : (
-                orders.map((o) => (
-                  <button
-                    type="button"
-                    key={o.orderId}
-                    onClick={() => {
-                      window.location.href = `/p/${o.token}`;
-                    }}
-                    className="w-full text-left rounded-lg border bg-card hover:border-violet-500/50 hover:shadow-md transition-all overflow-hidden group"
-                  >
-                    <div className="flex gap-2.5 p-2">
-                      {/* 缩略图 */}
-                      <div className="shrink-0 h-16 w-16 rounded-md overflow-hidden bg-muted">
-                        {o.thumbnailUrl ? (
-                          // biome-ignore lint/performance/noImgElement: 订单缩略图为远程 URL
-                          <img
-                            src={o.thumbnailUrl}
-                            alt={o.templateName}
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-muted-foreground">
-                            <ImageIcon className="h-4 w-4 opacity-30" />
-                          </div>
-                        )}
-                      </div>
-                      {/* 信息 */}
-                      <div className="flex-1 min-w-0 space-y-1">
-                        <div className="flex items-center gap-1">
-                          <span className="text-[10px] font-mono text-muted-foreground truncate">
-                            {o.orderNo}
-                          </span>
-                          <OrderStatusBadge status={o.status} />
-                        </div>
-                        <p className="text-xs font-medium truncate group-hover:text-violet-600">
-                          {o.templateName}
-                        </p>
-                        <p className="text-[10px] text-muted-foreground">
-                          {new Date(o.createdAt).toLocaleString("zh-CN", {
-                            month: "2-digit",
-                            day: "2-digit",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                          {o.productSize && ` · ${o.productSize}cm`}
-                        </p>
-                      </div>
+            {selectedOrderId ? (
+              (() => {
+                const order = orders.find((o) => o.orderId === selectedOrderId);
+                if (!order) {
+                  return (
+                    <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">
+                      订单不存在
                     </div>
-                  </button>
-                ))
-              )}
-            </div>
-            <div className="shrink-0 px-4 py-2 border-t text-[10px] text-muted-foreground text-center">
-              仅展示当前账号的订单
-            </div>
+                  );
+                }
+                return <OrderDetailView order={order} />;
+              })()
+            ) : (
+              <>
+                <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                  {loadingOrders && orders.length === 0 ? (
+                    <div className="space-y-2">
+                      {["o-skel-0", "o-skel-1", "o-skel-2", "o-skel-3"].map(
+                        (k) => (
+                          <div
+                            key={k}
+                            className="h-20 rounded-lg bg-muted animate-pulse"
+                          />
+                        )
+                      )}
+                    </div>
+                  ) : orders.length === 0 ? (
+                    <div className="text-center text-muted-foreground py-12 space-y-2">
+                      <div className="h-12 w-12 rounded-xl bg-muted flex items-center justify-center mx-auto">
+                        <ShoppingCart className="h-5 w-5 opacity-30" />
+                      </div>
+                      <p className="text-xs">还没有订单</p>
+                      <p className="text-[10px]">
+                        选效果 + 上传参考图 + 生成后点「选择此效果下单」
+                      </p>
+                    </div>
+                  ) : (
+                    orders.map((o) => (
+                      <button
+                        type="button"
+                        key={o.orderId}
+                        onClick={() => setSelectedOrderId(o.orderId)}
+                        className="w-full text-left rounded-lg border bg-card hover:border-violet-500/50 hover:shadow-md transition-all overflow-hidden group"
+                      >
+                        <div className="flex gap-2.5 p-2">
+                          {/* 缩略图 */}
+                          <div className="shrink-0 h-16 w-16 rounded-md overflow-hidden bg-muted">
+                            {o.thumbnailUrl ? (
+                              // biome-ignore lint/performance/noImgElement: 订单缩略图为远程 URL
+                              <img
+                                src={o.thumbnailUrl}
+                                alt={o.templateName}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-muted-foreground">
+                                <ImageIcon className="h-4 w-4 opacity-30" />
+                              </div>
+                            )}
+                          </div>
+                          {/* 信息 */}
+                          <div className="flex-1 min-w-0 space-y-1">
+                            <div className="flex items-center gap-1">
+                              <span className="text-[10px] font-mono text-muted-foreground truncate">
+                                {o.orderNo}
+                              </span>
+                              <OrderStatusBadge status={o.status} />
+                            </div>
+                            <p className="text-xs font-medium truncate group-hover:text-violet-600">
+                              {o.templateName}
+                            </p>
+                            <p className="text-[10px] text-muted-foreground">
+                              {new Date(o.createdAt).toLocaleString("zh-CN", {
+                                month: "2-digit",
+                                day: "2-digit",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                              {o.productSize && ` · ${o.productSize}cm`}
+                            </p>
+                          </div>
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+                <div className="shrink-0 px-4 py-2 border-t text-[10px] text-muted-foreground text-center">
+                  仅展示当前账号的订单
+                </div>
+              </>
+            )}
           </aside>
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * 订单详情 —— 在抽屉里就地展示，不跳 /p/[token]
+ *
+ * 2026-09-10：替代 window.location.href 跳订单详情页。展示：
+ * - 大图（已选候选图）
+ * - 模板信息 + 订单号 + 状态 + 创建时间
+ * - 已选配件（productSize / accessoryCode / engraving）
+ * - 多候选图 grid（demo 一键下单 candidates=[[previewUrl]]，长度 1；
+ *   工作台 / 手动流程可能更长）
+ */
+function OrderDetailView({
+  order,
+}: {
+  order: {
+    orderId: string;
+    orderNo: string;
+    token: string;
+    status:
+      | "PENDING"
+      | "GENERATING"
+      | "CANDIDATES_READY"
+      | "SELECTED"
+      | "CANCELLED"
+      | "FAILED";
+    productTypeCode: string | null;
+    productSize: string | null;
+    accessoryCode: string | null;
+    engravingText: string | null;
+    engravingExposed: boolean | null;
+    templateName: string;
+    templateId: string;
+    candidateUrls: string[];
+    selectedImageIdx: number;
+    createdAt: string;
+  };
+}) {
+  const productType = getProductType(order.productTypeCode);
+  const accessoryName = (() => {
+    if (!order.accessoryCode) return null;
+    const acc = ACCESSORIES.find((x) => x.code === order.accessoryCode);
+    return acc?.name ?? order.accessoryCode;
+  })();
+  // 主图 = 当前已选图（candidates 扁平化后按 selectedImageIdx）
+  const primaryImageUrl =
+    order.candidateUrls[order.selectedImageIdx] ??
+    order.candidateUrls[0] ??
+    null;
+
+  return (
+    <div className="flex-1 overflow-y-auto">
+      {/* 主图 */}
+      <div className="aspect-square w-full bg-muted overflow-hidden">
+        {primaryImageUrl ? (
+          // biome-ignore lint/performance/noImgElement: 订单主图为远程 URL
+          <img
+            src={primaryImageUrl}
+            alt={order.templateName}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-muted-foreground">
+            <ImageIcon className="h-12 w-12 opacity-30" />
+          </div>
+        )}
+      </div>
+
+      <div className="p-4 space-y-4">
+        {/* 模板 + 状态 */}
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <OrderStatusBadge status={order.status} />
+            <span className="text-[10px] font-mono text-muted-foreground">
+              {order.orderNo}
+            </span>
+          </div>
+          <h3 className="text-base font-semibold">{order.templateName}</h3>
+          <p className="text-[10px] text-muted-foreground">
+            {new Date(order.createdAt).toLocaleString("zh-CN")}
+          </p>
+        </div>
+
+        {/* 已选规格 */}
+        <div className="rounded-lg border bg-card overflow-hidden">
+          <div className="px-3 py-2 bg-muted/40 border-b">
+            <span className="text-xs font-semibold flex items-center gap-1.5">
+              <Sparkles className="h-3 w-3 text-violet-500" />
+              已选规格
+            </span>
+          </div>
+          <div className="px-3 py-2.5 space-y-1.5">
+            {productType ? (
+              <div className="text-[10px] text-muted-foreground">
+                产品型号：
+                <span className="ml-1 inline-flex items-center px-1.5 h-4 rounded text-[10px] font-medium bg-violet-500/10 text-violet-700 dark:text-violet-300 border border-violet-500/20">
+                  {productType.name}
+                </span>
+              </div>
+            ) : (
+              <div className="text-[10px] text-muted-foreground">
+                产品型号：无（通用款式）
+              </div>
+            )}
+            <div className="text-[11px]">
+              尺寸：
+              <span className="ml-1 font-medium">
+                {order.productSize ? `${order.productSize} cm` : "默认"}
+              </span>
+            </div>
+            <div className="text-[11px]">
+              配件：
+              <span className="ml-1 font-medium">
+                {accessoryName ?? "默认"}
+              </span>
+            </div>
+            {order.engravingText && (
+              <div className="text-[11px] space-y-0.5">
+                <div>
+                  刻字：
+                  <span className="ml-1 font-medium">
+                    「{order.engravingText}」
+                  </span>
+                </div>
+                {order.engravingExposed !== null && (
+                  <div className="text-[10px] text-muted-foreground pl-1">
+                    {order.engravingExposed ? "外露" : "内刻（默认）"}
+                  </div>
+                )}
+              </div>
+            )}
+            {!productType &&
+              !order.productSize &&
+              !order.accessoryCode &&
+              !order.engravingText && (
+                <div className="text-[11px] text-muted-foreground">
+                  此订单无配件规格（通用款式）
+                </div>
+              )}
+          </div>
+        </div>
+
+        {/* 候选图 grid（demo 一键下单只有 1 张；多候选时全部展示） */}
+        {order.candidateUrls.length > 1 && (
+          <div className="space-y-1.5">
+            <div className="text-xs font-semibold">
+              候选图（{order.candidateUrls.length}）
+            </div>
+            <div className="grid grid-cols-3 gap-1.5">
+              {order.candidateUrls.map((url, idx) => (
+                <div
+                  key={url}
+                  className={cn(
+                    "relative aspect-square rounded-md overflow-hidden border-2",
+                    idx === order.selectedImageIdx
+                      ? "border-emerald-500"
+                      : "border-transparent opacity-70"
+                  )}
+                >
+                  {/* biome-ignore lint/performance/noImgElement: 候选图为远程 URL */}
+                  <img
+                    src={url}
+                    alt={`候选 ${idx + 1}`}
+                    className="w-full h-full object-cover"
+                  />
+                  {idx === order.selectedImageIdx && (
+                    <div className="absolute top-0.5 right-0.5 h-3.5 w-3.5 rounded-full bg-emerald-500 flex items-center justify-center">
+                      <CheckCircle2 className="h-2.5 w-2.5 text-white" />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="text-[10px] text-muted-foreground text-center pt-2 pb-1">
+          订单号：{order.orderNo}
+        </div>
+      </div>
     </div>
   );
 }

@@ -399,37 +399,59 @@ export const listUserOrdersAction = withOrderAction("listUserOrders")
         productTypeCode: true,
         productSize: true,
         accessoryCode: true,
+        engravingText: true,
+        engravingExposed: true,
         candidates: true,
         selections: true,
         selectedIndex: true,
         createdAt: true,
         templateId: true,
       },
-      with: {
-        template: { columns: { name: true } },
-      },
     });
+
+    // 单独批量拉 template 名字（避免 relations 推断问题）
+    const templateIds = [...new Set(rows.map((o) => o.templateId))];
+    const templates =
+      templateIds.length > 0
+        ? await db.query.promptTemplate.findMany({
+            where: inArray(promptTemplate.id, templateIds),
+            columns: { id: true, name: true },
+          })
+        : [];
+    const templateNameMap = new Map(templates.map((t) => [t.id, t.name]));
+
     return {
-      orders: rows.map((o) => ({
-        orderId: o.id,
-        orderNo: o.orderNo,
-        token: o.token,
-        status: o.status,
-        productTypeCode: o.productTypeCode ?? null,
-        productSize: o.productSize ?? null,
-        accessoryCode: o.accessoryCode ?? null,
-        templateName: o.template.name,
-        templateId: o.templateId,
-        // 缩略图：candidates 是嵌套数组 [[url1, url2, ...]]（外层 imageIdx，
-        // 内层 candIdx）；demo 模式下 candidates=[[previewUrl]] 长度=1。
-        // 优先用 selections[selectedIndex]，否则用 candidates[0][0]。
-        thumbnailUrl: extractOrderThumbnail(
-          o.candidates,
+      orders: rows.map((o) => {
+        // 解析所有候选图（详情视图要展示 grid）
+        const allCandidates = parseCandidates(o.candidates);
+        const selectedIdx = resolveSelectedImageIdx(
           o.selections,
           o.selectedIndex
-        ),
-        createdAt: o.createdAt.toISOString(),
-      })),
+        );
+        return {
+          orderId: o.id,
+          orderNo: o.orderNo,
+          token: o.token,
+          status: o.status,
+          productTypeCode: o.productTypeCode ?? null,
+          productSize: o.productSize ?? null,
+          accessoryCode: o.accessoryCode ?? null,
+          engravingText: o.engravingText ?? null,
+          engravingExposed: o.engravingExposed ?? null,
+          templateName: templateNameMap.get(o.templateId) ?? "未知模板",
+          templateId: o.templateId,
+          // 列表缩略图：selected > [0][0]
+          thumbnailUrl: extractOrderThumbnail(
+            o.candidates,
+            o.selections,
+            o.selectedIndex
+          ),
+          // 详情用：所有候选图扁平化（[[url1, url2], [url3, url4]] → [url1, url2, url3, url4]）
+          candidateUrls: allCandidates,
+          selectedImageIdx: selectedIdx,
+          createdAt: o.createdAt.toISOString(),
+        };
+      }),
     };
   });
 
@@ -475,6 +497,54 @@ function extractOrderThumbnail(
   } catch {
     return null;
   }
+}
+
+/**
+ * 解析 candidates 嵌套数组 → 扁平 URL 数组。
+ * candidates: [[url1, url2], [url3, url4]] → [url1, url2, url3, url4]
+ * 解析失败 → []
+ */
+function parseCandidates(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const flat: string[] = [];
+    for (const group of parsed) {
+      if (Array.isArray(group)) {
+        for (const url of group) {
+          if (typeof url === "string") flat.push(url);
+        }
+      }
+    }
+    return flat;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 从 selections 数组解析出已选的 imageIdx（外层索引）。
+ * 旧 schema 用 selectedIndex 单字段；新 schema 用 selections[imageIdx] = candIdx。
+ * 兼容两者：有 selections 走 selections；否则用 selectedIndex。
+ */
+function resolveSelectedImageIdx(
+  selectionsRaw: string | null,
+  selectedIndex: number | null
+): number {
+  if (selectionsRaw) {
+    try {
+      const selections: unknown = JSON.parse(selectionsRaw);
+      if (Array.isArray(selections)) {
+        for (let i = 0; i < selections.length; i++) {
+          if (typeof selections[i] === "number") return i;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return selectedIndex ?? 0;
 }
 
 // ============================================
