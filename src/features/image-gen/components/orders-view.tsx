@@ -1,3 +1,5 @@
+"use client";
+
 /**
  * /image-gen/orders 独立页面主体 —— 客户端双栏（列表 + 详情）
  *
