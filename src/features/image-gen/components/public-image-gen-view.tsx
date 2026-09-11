@@ -39,6 +39,7 @@ import {
   Download,
   History,
   Image as ImageIcon,
+  ImageOff,
   Loader2,
   RefreshCw,
   ShoppingCart,
@@ -303,6 +304,28 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
     }
   };
 
+  /**
+   * 2026-09-11：从 R2 公网 URL 列表还原 uploadedImages（供 history 点击 +
+   * finishTask 共用）。blob URL 刷新失效 → 必须用持久 URL；预览图直接复用
+   * R2 URL 当 previewUrl，无需 createObjectURL。
+   */
+  const restoreUploadedImagesFromR2 = (publicUrls: string[]) => {
+    if (publicUrls.length === 0) {
+      setUploadedImages([]);
+      return;
+    }
+    setUploadedImages(
+      publicUrls.map((publicUrl, idx) => ({
+        localId: `hist_${idx}_${Date.now().toString(36)}`,
+        previewUrl: publicUrl,
+        publicUrl,
+        uploading: 0,
+        fileName: `参考图 ${idx + 1}`,
+        fileSize: 0,
+      }))
+    );
+  };
+
   // 完成任务：入历史、清 task、停止轮询
   const finishTask = (task: PendingTask, url: string, duration?: number) => {
     saveTask(null);
@@ -315,6 +338,11 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
       maskName: task.maskName,
       duration,
     });
+    // 2026-09-11：刷新场景下任务完成时也要还原 uploadedImages，否则用户
+    // 直接点「选择此效果下单」会撞「需要参考图」假阳 bug。
+    if (task.refPublicUrls && task.refPublicUrls.length > 0) {
+      restoreUploadedImagesFromR2(task.refPublicUrls);
+    }
     pushHistory({
       id: `gen_${Date.now()}`,
       url,
@@ -680,7 +708,24 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
     if (!result || !selectedMaskData) return;
     // demo 一键下单必须有 R2 URL（base64 不支持）；多图取第一张的 publicUrl 写订单的 uploadedImages[0]
     if (refImageUrls.length === 0) {
-      toast.error("下单需要参考图的 R2 URL，请先上传至少一张参考图");
+      // 2026-09-11：区分两种「无参考图」场景，给出可操作的提示：
+      //   - 真正的未上传 / 上传失败 → 提示先上传
+      //   - 历史记录无原图（refPublicUrls 缺失，刷新前的老 history 项）→ 提示历史项无原图
+      //     让用户清楚是「这条 history 坏了」而不是「自己没传」。
+      const hasLegacyHistory = history.some(
+        (h) =>
+          h.id !== history[0]?.id &&
+          h.maskId === selectedMask &&
+          h.url === result.url &&
+          (!h.refPublicUrls || h.refPublicUrls.length === 0)
+      );
+      if (hasLegacyHistory) {
+        toast.error(
+          "该历史记录未保存原参考图（旧版本生成），请重新上传参考图后再下单"
+        );
+      } else {
+        toast.error("下单需要参考图的 R2 URL，请先上传至少一张参考图");
+      }
       return;
     }
     // 无 productTypeCode → 跳过 modal，直接走免规格下单
@@ -1318,21 +1363,7 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                     });
                     // 2026-09-11：还原 uploadedImages，避免「刷新后下单提示需要参考图」bug。
                     // 老 history 项没 refPublicUrls → 留空数组，让用户重新上传。
-                    if (h.refPublicUrls && h.refPublicUrls.length > 0) {
-                      setUploadedImages(
-                        h.refPublicUrls.map((publicUrl, idx) => ({
-                          localId: `hist_${idx}_${Date.now().toString(36)}`,
-                          // 用 R2 URL 直接当 preview（公网可访问，不需要 blob）
-                          previewUrl: publicUrl,
-                          publicUrl,
-                          uploading: 0,
-                          fileName: `参考图 ${idx + 1}`,
-                          fileSize: 0,
-                        }))
-                      );
-                    } else {
-                      setUploadedImages([]);
-                    }
+                    restoreUploadedImagesFromR2(h.refPublicUrls ?? []);
                   }}
                 >
                   {/* biome-ignore lint/performance/noImgElement: 历史图为动态远程 URL */}
@@ -1357,6 +1388,18 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                       <CheckCircle2 className="h-2.5 w-2.5 text-white" />
                     </div>
                   )}
+                  {/* 2026-09-11：legacy history 项（无 refPublicUrls）→ 提示原图不可恢复。
+                      触发场景：用户在修复此 bug 之前生成的历史项，刷新页面后点击会撞
+                      「需要参考图」错误。让用户提前看到这条 history「下单需重新上传」。 */}
+                  {!h.orderId &&
+                    (!h.refPublicUrls || h.refPublicUrls.length === 0) && (
+                      <div
+                        className="absolute bottom-1 right-1 h-4 w-4 rounded-full bg-amber-500/95 flex items-center justify-center"
+                        title="未保存原参考图（旧版本生成），下单需重新上传"
+                      >
+                        <ImageOff className="h-2.5 w-2.5 text-white" />
+                      </div>
+                    )}
                 </button>
               ))}
               <p className="text-center text-[9px] text-muted-foreground/70 pt-1">
