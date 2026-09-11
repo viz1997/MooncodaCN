@@ -44,7 +44,8 @@ export const SEED_PRODUCT_EFFECTS: ProductEffect[] = [
       },
     ],
     scene: "generate_2d",
-    model: "doubao",
+    // 2026-09-11：精简后只 3 个模型。3D 浮雕吧唧走 gpt_image_2（图像编辑 + 局部重绘强项）。
+    model: "gpt_image_2",
     versions: [
       {
         version: "v1.0.0",
@@ -91,7 +92,8 @@ export const SEED_PRODUCT_EFFECTS: ProductEffect[] = [
       },
     ],
     scene: "generate_2d",
-    model: "doubao",
+    // 2026-09-11：皮革徽章走 gpt_image_2（文字渲染强，刻字细节要求高的场景最稳）。
+    model: "gpt_image_2",
     versions: [
       {
         version: "v1.0.0",
@@ -185,7 +187,8 @@ export const SEED_PRODUCT_EFFECTS: ProductEffect[] = [
       },
     ],
     scene: "generate_2d",
-    model: "doubao",
+    // 2026-09-11：亚克力立牌走 qwen（中文场景理解 + 多模态强）。
+    model: "qwen",
     versions: [
       {
         version: "v1.0.0",
@@ -279,7 +282,8 @@ export const SEED_PRODUCT_EFFECTS: ProductEffect[] = [
       },
     ],
     scene: "generate_2d",
-    model: "doubao",
+    // 2026-09-11：PVC 冰箱贴走 qwen（中文场景 + 国产合规）。
+    model: "qwen",
     versions: [
       {
         version: "v1.0.0",

@@ -30,17 +30,11 @@ export const runtime = "nodejs";
 export const maxDuration = 120;
 
 // 外部用户可用全部模型（服务端控制，前端不感知具体模型）
+// 2026-09-11：精简为 3 个核心模型（qwen / gpt_image_2 / nano_banana2）。
+// 旧即梦 / DALL-E / SD / Flux / Midjourney / 通义万相 / 文心一格 / CogView / Nano Banana Pro 全部下线。
 const PUBLIC_ALLOWED_MODELS: ImageModelId[] = [
-  "doubao",
+  "qwen",
   "gpt_image_2",
-  "dalle3",
-  "sd3",
-  "flux1",
-  "midjourney",
-  "wanx",
-  "ernie",
-  "cogview",
-  "nano_banana_pro",
   "nano_banana2",
 ];
 
@@ -73,7 +67,8 @@ export async function POST(req: NextRequest) {
 
     // 解析 prompt
     let prompt = body.prompt ?? "";
-    let selectedModel: ImageModelId = "doubao";
+    // 2026-09-11：默认模型从 doubao 切到 qwen（中文场景 + 国产合规兜底）。
+    let selectedModel: ImageModelId = "qwen";
     let maskName = "自定义";
 
     if (body.maskId) {
@@ -123,11 +118,13 @@ export async function POST(req: NextRequest) {
         prompt = prompt.replace(new RegExp(`\\{\\{${v.key}\\}\\}`, "g"), val);
       });
       maskName = mask.name;
-      // 优先使用产品效果指定的生图模型（降级到 doubao）
-      const preferredModel = (mask.model as ImageModelId) || "doubao";
+      // 优先使用产品效果指定的生图模型（降级到 qwen）
+      // 2026-09-11：精简后旧 mask.model === "doubao" 也会被 isPublicAllowed 过滤掉，
+      // 自动落到 qwen（与 IMAGE_MODELS 默认值对齐）。
+      const preferredModel = (mask.model as ImageModelId) || "qwen";
       selectedModel = PUBLIC_ALLOWED_MODELS.includes(preferredModel)
         ? preferredModel
-        : "doubao";
+        : "qwen";
     }
 
     if (!prompt) {

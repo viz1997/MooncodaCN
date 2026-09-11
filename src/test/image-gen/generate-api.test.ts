@@ -42,7 +42,7 @@ describe("Internal Image Generation", () => {
     const result = await generateImageJob({
       userId: user.id,
       input: {
-        model: "doubao",
+        model: "qwen",
         mode: "text_to_image",
         prompt: effect.prompt,
         size: "1024x1024",
@@ -71,7 +71,7 @@ describe("Internal Image Generation", () => {
     await generateImageJob({
       userId: user.id,
       input: {
-        model: "doubao",
+        model: "qwen",
         mode: "text_to_image",
         prompt: "test prompt",
         size: "1024x1024",
@@ -94,7 +94,7 @@ describe("Internal Image Generation", () => {
     const result = await generateImageJob({
       userId: user.id,
       input: {
-        model: "doubao",
+        model: "qwen",
         mode: "image_to_image",
         prompt: "convert to relief",
         size: "1024x1024",
@@ -119,7 +119,7 @@ describe("Internal Image Generation", () => {
     const result = await generateImageJob({
       userId: user.id,
       input: {
-        model: "flux1",
+        model: "qwen",
         mode: "text_to_image",
         prompt: "async task test",
         size: "1024x1024",
@@ -134,7 +134,7 @@ describe("Internal Image Generation", () => {
 
     const mockResult: GenerateImageResult = {
       success: true,
-      model: "flux1",
+      model: "qwen",
       status: "completed",
       images: [{ url: "https://example.com/result.png" }],
       duration: 5000,

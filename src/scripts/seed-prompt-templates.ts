@@ -15,6 +15,7 @@
  */
 
 import { config } from "dotenv";
+
 config({ path: ".env.local" });
 
 import { inArray } from "drizzle-orm";

@@ -782,7 +782,7 @@ export const productEffect = pgTable("product_effect", {
     .$type<import("./image-gen-types").PromptVariable[]>()
     .notNull()
     .default([]),
-  model: text("model").notNull().default("doubao"),
+  model: text("model").notNull().default("qwen"),
   config: json("config")
     .$type<{
       style: string;
@@ -993,10 +993,11 @@ export const promptTemplate = pgTable("prompt_template", {
     .notNull()
     .default([]),
   /**
-   * 推荐生图模型 id（如 doubao / nano_banana2）。
+   * 推荐生图模型 id（如 qwen / gpt_image_2 / nano_banana2）。
    * image-gen 工作台选中模板时会锁定这个模型；为空时允许用户在 UI 里手动选。
+   * 2026-09-11：精简后仅这三个值，旧 doubao 已下线。
    */
-  model: text("model").default("doubao"),
+  model: text("model").default("qwen"),
   /**
    * 模板价格（分）。仅作展示用，单位元，0 = 免费。
    */
