@@ -14,6 +14,9 @@
  * - 再插入新行（用固定 id 不用 nanoid，方便 productEffect.promptTemplateId 引用）
  */
 
+import { config } from "dotenv";
+config({ path: ".env.local" });
+
 import { inArray } from "drizzle-orm";
 
 import { db } from "@/db";

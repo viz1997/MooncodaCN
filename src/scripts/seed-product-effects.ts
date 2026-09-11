@@ -12,6 +12,9 @@
  *   pnpm tsx src/scripts/seed-product-effects.ts
  */
 
+import { config } from "dotenv";
+config({ path: ".env.local" });
+
 import { sql } from "drizzle-orm";
 
 import { db } from "@/db";

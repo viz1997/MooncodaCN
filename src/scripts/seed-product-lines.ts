@@ -11,6 +11,9 @@
  *   pnpm tsx src/scripts/seed-product-lines.ts
  */
 
+import { config } from "dotenv";
+config({ path: ".env.local" });
+
 import { db } from "@/db";
 import { productLine } from "@/db/schema";
 import { createLineInDb } from "@/features/image-gen/lib/db-lines";
