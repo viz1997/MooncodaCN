@@ -161,6 +161,13 @@ interface HistoryItem {
   maskName: string;
   modelName: string;
   refPreviewUrls?: string[] | undefined;
+  /**
+   * 2026-09-11：参考图 R2 公网 URL（与 refPreviewUrls 一一对应，但 refPreviewUrls
+   * 是 blob URL 刷新即失效）。点击 history 缩略图时用 refPublicUrls 还原
+   * uploadedImages，避免「刷新后下单提示需要参考图」的假阳 bug。
+   * 老 history 项没这字段 → 视为空 → 提示用户重新上传。
+   */
+  refPublicUrls?: string[] | undefined;
   /** demo 下单成功后写入：用于历史缩略图上的「查看订单」徽章 */
   orderId?: string | undefined;
   orderNo?: string | undefined;
@@ -201,6 +208,11 @@ interface PendingTask {
   maskId: string;
   maskName: string;
   refPreviewUrls?: string[] | undefined;
+  /**
+   * 2026-09-11：参考图 R2 公网 URL（与 refPreviewUrls 一一对应，blob URL
+   * 刷新失效 → 任务恢复时或后续下单用 refPublicUrls 还原 uploadedImages）。
+   */
+  refPublicUrls?: string[] | undefined;
   startedAt: string;
 }
 
@@ -310,6 +322,8 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
       maskName: task.maskName,
       modelName: task.maskName,
       refPreviewUrls: task.refPreviewUrls,
+      // 2026-09-11：参考图 R2 公网 URL 入 history（点击缩略图时还原 uploadedImages）
+      refPublicUrls: task.refPublicUrls,
       createdAt: new Date().toISOString(),
     });
   };
@@ -605,6 +619,9 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
           maskId: selectedMask,
           maskName,
           refPreviewUrls: uploadedImages.map((i) => i.previewUrl),
+          // 2026-09-11：参考图 R2 公网 URL 入 PendingTask；任务完成或刷新后
+          // 下单时用这个还原 uploadedImages（修「刷新后下单提示需要参考图」）。
+          refPublicUrls: refImageUrls,
           startedAt: new Date().toISOString(),
         };
         saveTask(task);
@@ -629,6 +646,8 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
           maskName,
           modelName: maskName,
           refPreviewUrls: uploadedImages.map((i) => i.previewUrl),
+          // 2026-09-11：参考图 R2 公网 URL 入 history
+          refPublicUrls: refImageUrls,
           createdAt: new Date().toISOString(),
         });
         toast.success(`生成完成：${maskName}`);
@@ -1288,7 +1307,7 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                       window.location.href = `/p/${h.orderNo}`;
                       return;
                     }
-                    // 未下单的项 → 仅展示
+                    // 未下单的项 → 还原 result + 上传图片（如果有 R2 URL）
                     setSubmitted(null);
                     setError(null);
                     setSelectedMask(h.maskId);
@@ -1297,6 +1316,23 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                       modelName: h.modelName,
                       maskName: h.maskName,
                     });
+                    // 2026-09-11：还原 uploadedImages，避免「刷新后下单提示需要参考图」bug。
+                    // 老 history 项没 refPublicUrls → 留空数组，让用户重新上传。
+                    if (h.refPublicUrls && h.refPublicUrls.length > 0) {
+                      setUploadedImages(
+                        h.refPublicUrls.map((publicUrl, idx) => ({
+                          localId: `hist_${idx}_${Date.now().toString(36)}`,
+                          // 用 R2 URL 直接当 preview（公网可访问，不需要 blob）
+                          previewUrl: publicUrl,
+                          publicUrl,
+                          uploading: 0,
+                          fileName: `参考图 ${idx + 1}`,
+                          fileSize: 0,
+                        }))
+                      );
+                    } else {
+                      setUploadedImages([]);
+                    }
                   }}
                 >
                   {/* biome-ignore lint/performance/noImgElement: 历史图为动态远程 URL */}
