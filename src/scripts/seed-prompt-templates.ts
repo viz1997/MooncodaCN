@@ -1,27 +1,27 @@
 /**
- * 提示词模板种子脚本（2026-09-10 新建）
+ * 提示词模板种子脚本（2026-09-11 改 upsert）
  *
- * 为 6 条新 SEED_PRODUCT_EFFECTS 各创建一条 promptTemplate 行，
- * 让 productEffect.promptTemplateId 引用合法（生成时取 promptTemplate.prompt 优先）。
+ * 历史：
+ * - 2026-09-10 初版：先 db.delete(inArray) 再 insert。破坏性 — 用户在 admin
+ *   UI 改过的 promptTemplate.prompt 会被覆盖回 seed 占位。
+ * - 2026-09-11 改 upsert：保留 DB 中已有行，只更新 seed 里有的字段（id 命中
+ *   走 onConflictDoUpdate；id 不命中走 insert）。
+ *
+ * ⚠️ 注意：upsert 仍会用 seed 文件里的 prompt 覆盖你 admin UI 改过的同名
+ * 模板。改 prompt 推荐路径：直接 admin UI 改 promptTemplate 行，**不要**
+ * 跑这个脚本（跑一次就回到 seed 值）。
  *
  * 执行顺序：seed-product-lines → seed-prompt-templates → seed-product-effects
  *
  * 运行方式：
  *   pnpm tsx src/scripts/seed-prompt-templates.ts
- *
- * 幂等：
- * - 脚本会先按 id 删除这些 tpl_xxx_v1 行（如果有老数据）
- * - 再插入新行（用固定 id 不用 nanoid，方便 productEffect.promptTemplateId 引用）
  */
 
 import { config } from "dotenv";
 
 config({ path: ".env.local" });
 
-import { inArray } from "drizzle-orm";
-
 import { db } from "@/db";
-import type { PromptVariable } from "@/db/image-gen-types";
 import { promptTemplate } from "@/db/schema";
 import { SEED_PRODUCT_EFFECTS } from "@/features/image-gen/lib/seed-effects";
 
@@ -33,64 +33,62 @@ import { SEED_PRODUCT_EFFECTS } from "@/features/image-gen/lib/seed-effects";
  * - productTypeCode = effect.productTypeCode
  */
 function derivePromptTemplatesFromEffects() {
-  const rows: Array<{
-    id: string;
-    name: string;
-    description: string;
-    prompt: string;
-    variables: PromptVariable[];
-    model: string;
-    price: number;
-    productTypeCode: string | null;
-  }> = [];
-
-  for (const effect of SEED_PRODUCT_EFFECTS) {
+  return SEED_PRODUCT_EFFECTS.flatMap((effect) => {
     if (!effect.promptTemplateId) {
       console.warn(`↷ ${effect.maskId}: 无 promptTemplateId，跳过`);
-      continue;
+      return [];
     }
-    rows.push({
-      id: effect.promptTemplateId,
-      name: `${effect.name} · 模板`,
-      description: effect.description,
-      prompt: effect.prompt,
-      variables: effect.variables,
-      model: effect.model,
-      price: effect.price,
-      productTypeCode: effect.productTypeCode ?? null,
-    });
-  }
-
-  return rows;
+    return [
+      {
+        id: effect.promptTemplateId,
+        name: `${effect.name} · 模板`,
+        description: effect.description,
+        prompt: effect.prompt,
+        variables: effect.variables,
+        model: effect.model,
+        price: effect.price,
+        productTypeCode: effect.productTypeCode ?? null,
+      },
+    ];
+  });
 }
 
 async function main() {
   const rows = derivePromptTemplatesFromEffects();
-  const ids = rows.map((r) => r.id);
 
-  console.log(`清空 ${ids.length} 条 promptTemplate 行（按 id）...`);
-  if (ids.length > 0) {
-    await db.delete(promptTemplate).where(inArray(promptTemplate.id, ids));
-  }
-
-  console.log(`准备插入 ${rows.length} 条 promptTemplate 行...`);
+  console.log(`准备 upsert ${rows.length} 条 promptTemplate 行...`);
   for (const row of rows) {
     try {
-      await db.insert(promptTemplate).values({
-        id: row.id,
-        name: row.name,
-        description: row.description,
-        prompt: row.prompt,
-        variables: row.variables,
-        model: row.model,
-        price: row.price,
-        productTypeCode: row.productTypeCode,
-        // 其它字段走 schema 默认值
-        size: "1024x1024",
-        candidateCount: 4,
-        isActive: true,
-        outputMode: "grid",
-      });
+      await db
+        .insert(promptTemplate)
+        .values({
+          id: row.id,
+          name: row.name,
+          description: row.description,
+          prompt: row.prompt,
+          variables: row.variables,
+          model: row.model,
+          price: row.price,
+          productTypeCode: row.productTypeCode,
+          // 其它字段走 schema 默认值
+          size: "1024x1024",
+          candidateCount: 4,
+          isActive: true,
+          outputMode: "grid",
+        })
+        .onConflictDoUpdate({
+          target: promptTemplate.id,
+          set: {
+            name: row.name,
+            description: row.description,
+            prompt: row.prompt,
+            variables: row.variables,
+            model: row.model,
+            price: row.price,
+            productTypeCode: row.productTypeCode,
+            updatedAt: new Date(),
+          },
+        });
       console.log(`✓ ${row.id}: ${row.name}`);
     } catch (error) {
       console.error(`✗ ${row.id}:`, error);
@@ -98,7 +96,7 @@ async function main() {
     }
   }
 
-  console.log(`\n完成：写入 ${rows.length} 条 promptTemplate。`);
+  console.log(`\n完成：upsert ${rows.length} 条 promptTemplate（保留 id 不变）。`);
   process.exit(0);
 }
 
