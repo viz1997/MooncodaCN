@@ -51,7 +51,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-
+import { QuadrantGridPicker } from "@/components/quadrant-grid-picker";
 import { Button } from "@/components/ui/button";
 import type { ProductCapabilities } from "@/features/gpt-image/lib/product-catalog";
 import { submitImageGenDemoAction } from "@/features/image-gen/actions/submit-image-gen-demo";
@@ -113,6 +113,18 @@ interface PublicMask {
    * 2026-09-10：关联产品线 id 列表（productLineIds）—— 用于产品线 Segmented 分组过滤。
    */
   productLineIds?: string[];
+  /**
+   * 2026-09-11：候选宫格数（1/2/4/9）。=1 或 outputMode="separate" 时不渲染 picker，
+   * 直接以单图模式展示。>1 + outputMode="grid" 时必渲染 QuadrantGridPicker。
+   * 老 history 项 / 老 API 响应没这字段时视为 1。
+   */
+  candidateCount?: number;
+  /**
+   * 2026-09-11：输出模式 —— "grid" = 1 张 composite 含 N 个 cell（用 picker）；
+   * "separate" = N 张独立候选 URL（无需 picker，每张直接展示）。
+   * 缺省视为 "grid"。
+   */
+  outputMode?: "grid" | "separate";
 }
 
 /**
@@ -174,6 +186,16 @@ interface HistoryItem {
   orderNo?: string | undefined;
   /** 价格（demo 下单扣减的 credit 数） */
   creditsConsumed?: number | undefined;
+  /**
+   * 2026-09-11：用户当时在 demo 流里选的 cell（0..N-1）。点击 history 缩略图回填时
+   * 用它复原高亮 cell，避免「刷新历史后看不到当时选的是哪个」的假象。
+   * 老 history 项没这字段 → 视为 null（picker 未选态）。
+   */
+  selectedCell?: number | null;
+  /** 2026-09-11：当时生成结果的模板宫格候选数（决定要不要 picker） */
+  candidateCount?: number;
+  /** 2026-09-11：模板输出模式（grid/separate） */
+  outputMode?: "grid" | "separate";
   createdAt: string;
 }
 
@@ -214,6 +236,10 @@ interface PendingTask {
    * 刷新失效 → 任务恢复时或后续下单用 refPublicUrls 还原 uploadedImages）。
    */
   refPublicUrls?: string[] | undefined;
+  /** 2026-09-11：模板宫格候选数（让 finishTask 写 history 时带上） */
+  candidateCount?: number;
+  /** 2026-09-11：模板输出模式（grid/separate） */
+  outputMode?: "grid" | "separate";
   startedAt: string;
 }
 
@@ -262,6 +288,10 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState<GeneratedResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 2026-09-11：demo 流用户在宫格里选的 cell（0..N-1）。
+  // - candidateCount > 1 + outputMode="grid" 时必填才能提交
+  // - 切换 mask 时重置；finishTask 写 history 时持久化；刷新后用 PendingTask 复原
+  const [selectedCell, setSelectedCell] = useState<number | null>(null);
 
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [pendingModelName, setPendingModelName] = useState<string>("");
@@ -343,6 +373,8 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
     if (task.refPublicUrls && task.refPublicUrls.length > 0) {
       restoreUploadedImagesFromR2(task.refPublicUrls);
     }
+    // 2026-09-11：新生成结果默认 selectedCell=null（picker 待选态），
+    // 持久化 candidateCount/outputMode 让 history 缩略图恢复时知道要不要 picker。
     pushHistory({
       id: `gen_${Date.now()}`,
       url,
@@ -352,6 +384,9 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
       refPreviewUrls: task.refPreviewUrls,
       // 2026-09-11：参考图 R2 公网 URL 入 history（点击缩略图时还原 uploadedImages）
       refPublicUrls: task.refPublicUrls,
+      selectedCell: null,
+      candidateCount: task.candidateCount ?? 1,
+      outputMode: task.outputMode ?? "grid",
       createdAt: new Date().toISOString(),
     });
   };
@@ -624,6 +659,8 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
     setError(null);
     setResult(null);
     setSubmitted(null); // 新的生成重置已提交态
+    // 2026-09-11：新生成任务清空旧的 selectedCell（picker 等新结果出来再选）
+    setSelectedCell(null);
 
     try {
       const res = await fetch("/api/public/generate", {
@@ -642,6 +679,9 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
       const maskName = (data.maskName as string) || "AI 生图";
 
       if (data.taskId && data.taskStatus === "processing") {
+        // 2026-09-11：当前 mask 的 candidateCount/outputMode 入 PendingTask，
+        // 刷新后 finishTask 写 history 时拿得到（picker 决策依据）。
+        const currentMask = masks.find((m) => m.maskId === selectedMask);
         const task: PendingTask = {
           taskId: data.taskId,
           maskId: selectedMask,
@@ -650,6 +690,8 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
           // 2026-09-11：参考图 R2 公网 URL 入 PendingTask；任务完成或刷新后
           // 下单时用这个还原 uploadedImages（修「刷新后下单提示需要参考图」）。
           refPublicUrls: refImageUrls,
+          candidateCount: currentMask?.candidateCount ?? 1,
+          outputMode: currentMask?.outputMode ?? "grid",
           startedAt: new Date().toISOString(),
         };
         saveTask(task);
@@ -706,6 +748,14 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
   // 点「选择此效果下单」
   const handleClickSubmitOrder = () => {
     if (!result || !selectedMaskData) return;
+    // 2026-09-11：grid + 多候选必须先选 cell 才能下单（picker 强制 gate）。
+    // 单图（candidateCount=1）/ separate 模式跳过此检查。
+    const cc = selectedMaskData.candidateCount ?? 1;
+    const om = selectedMaskData.outputMode ?? "grid";
+    if (om === "grid" && cc > 1 && selectedCell === null) {
+      toast.error("请先在效果图上选一个分镜");
+      return;
+    }
     // demo 一键下单必须有 R2 URL（base64 不支持）；多图取第一张的 publicUrl 写订单的 uploadedImages[0]
     if (refImageUrls.length === 0) {
       // 2026-09-11：区分两种「无参考图」场景，给出可操作的提示：
@@ -779,6 +829,8 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
         platform: spec.platform,
         // 2026-09-11：渠道订单号（与 platform 配对；空/null = 未填）
         platformOrderNo: spec.platformOrderNo,
+        // 2026-09-11：用户从宫格里选的 cell（无 picker 场景下 null → server 强制 0）
+        selectedCell: selectedCell,
       });
       if (!res?.data) throw new Error("下单失败");
       const data = res.data;
@@ -789,7 +841,7 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
         creditsConsumed: data.creditsConsumed,
       });
 
-      // 历史更新：把刚生成的 item 加 orderId
+      // 历史更新：把刚生成的 item 加 orderId + selectedCell（持久化当时选的分镜）
       setHistory((prev) => {
         const next = prev.map((h) =>
           h.url === result.url && !h.orderId
@@ -798,6 +850,9 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                 orderId: data.orderId,
                 orderNo: data.orderNo,
                 creditsConsumed: data.creditsConsumed,
+                // 2026-09-11：把当时选的 cell 持久化到 history，
+                // 用户重开 history 缩略图能复原 picker 高亮
+                selectedCell: selectedCell,
               }
             : h
         );
@@ -952,6 +1007,8 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                       onClick={() => {
                         setSelectedMask(m.maskId);
                         setSubmitted(null);
+                        // 2026-09-11：换 mask 清空旧 cell 选择（新模板候选数可能不同）
+                        setSelectedCell(null);
                       }}
                       className={cn(
                         "group relative h-24 w-32 shrink-0 rounded-lg overflow-hidden border-2 transition-all snap-start",
@@ -1188,12 +1245,38 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                 </div>
                 {/* 图片 */}
                 <div className="relative rounded-2xl overflow-hidden border-2 border-violet-500/20 shadow-xl">
-                  {/* biome-ignore lint/performance/noImgElement: 生图结果为动态远程 URL */}
-                  <img
-                    src={result.url}
-                    alt="生成结果"
-                    className="w-full object-cover"
-                  />
+                  {/* 2026-09-11：grid + 多候选 → QuadrantGridPicker 覆盖透明 hotzone；
+                      单图 / separate 模式 → 保留单图展示。candidateCount 缺省视为 1。 */}
+                  {(() => {
+                    const currentMask = masks.find(
+                      (m) => m.maskId === selectedMask
+                    );
+                    const cc = currentMask?.candidateCount ?? 1;
+                    const om = currentMask?.outputMode ?? "grid";
+                    if (
+                      om === "grid" &&
+                      cc > 1 &&
+                      (cc === 2 || cc === 4 || cc === 9)
+                    ) {
+                      return (
+                        <QuadrantGridPicker
+                          compositeUrl={result.url}
+                          candidateCount={cc}
+                          selectedCell={selectedCell}
+                          onSelect={setSelectedCell}
+                          ariaLabel="生成效果图，点击选择一个分镜"
+                        />
+                      );
+                    }
+                    // biome-ignore lint/performance/noImgElement: 生图结果为动态远程 URL
+                    return (
+                      <img
+                        src={result.url}
+                        alt="生成结果"
+                        className="w-full object-cover"
+                      />
+                    );
+                  })()}
                 </div>
 
                 {/* 操作：下载 / 再生成 / 选择此效果下单 */}
@@ -1348,8 +1431,9 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                   title={`${h.maskName} · ${new Date(h.createdAt).toLocaleString("zh-CN")}`}
                   onClick={() => {
                     if (h.orderId) {
-                      // 已下单的项 → 跳订单页
-                      window.location.href = `/p/${h.orderNo}`;
+                      // 2026-09-11：demo 订单不进 /p/[token] 公共页（避免撞 404）；
+                      // 跳 /image-gen/orders 列表让用户点开查看详情。
+                      window.location.href = "/image-gen/orders";
                       return;
                     }
                     // 未下单的项 → 还原 result + 上传图片（如果有 R2 URL）
@@ -1364,6 +1448,8 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                     // 2026-09-11：还原 uploadedImages，避免「刷新后下单提示需要参考图」bug。
                     // 老 history 项没 refPublicUrls → 留空数组，让用户重新上传。
                     restoreUploadedImagesFromR2(h.refPublicUrls ?? []);
+                    // 2026-09-11：还原当时选的 cell（picker 高亮复原）
+                    setSelectedCell(h.selectedCell ?? null);
                   }}
                 >
                   {/* biome-ignore lint/performance/noImgElement: 历史图为动态远程 URL */}

@@ -96,7 +96,9 @@ async function main() {
     }
   }
 
-  console.log(`\n完成：upsert ${rows.length} 条 promptTemplate（保留 id 不变）。`);
+  console.log(
+    `\n完成：upsert ${rows.length} 条 promptTemplate（保留 id 不变）。`
+  );
   process.exit(0);
 }
 

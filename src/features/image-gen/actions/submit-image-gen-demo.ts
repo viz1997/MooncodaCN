@@ -89,6 +89,14 @@ const submitDemoSchema = z.object({
    * - capability-gated：canPlatform=false → 静默落 null
    */
   platformOrderNo: z.string().trim().min(0).max(64).nullable().optional(),
+  /**
+   * 2026-09-11：用户从宫格里选的 cell 索引（0..N-1，N=template.candidateCount）。
+   * - 仅在 outputMode=grid 且 candidateCount>1 时必填（picker 强制要求）
+   * - candidateCount=1 → 强制 0（无 picker 场景）
+   * - outputMode=separate → 忽略（candidates[i] 是独立 URL，无需选 cell）
+   * - 写入 promptOrder.selections = JSON.stringify([finalSelectedCell])
+   */
+  selectedCell: z.number().int().min(0).max(8).nullable().optional(),
 });
 
 /**
@@ -113,6 +121,8 @@ export const submitImageGenDemoAction = withDemoAction("submit")
         size: true,
         allowedSizes: true,
         allowedAccessories: true,
+        // 2026-09-11：demo 流按 outputMode 决定 selectedCell 校验策略
+        outputMode: true,
       },
     });
     if (!template) throw new Error("模板不存在或已停用");
@@ -233,6 +243,37 @@ export const submitImageGenDemoAction = withDemoAction("submit")
       }
     }
 
+    // 4c. 2026-09-11：selectedCell 校验（demo 流宫格选 cell 提交）
+    // 规则：
+    //   - candidateCount === 1 → 强制 0（无 picker，无需选）
+    //   - outputMode === "separate" → 忽略（candidates[i] 是独立 URL，无 cell 概念）
+    //   - outputMode === "grid" && candidateCount > 1 → 必填且 ∈ [0, candidateCount)
+    const templateCandidateCount = template.candidateCount ?? 1;
+    const templateOutputMode = (template.outputMode ?? "grid") as
+      | "grid"
+      | "separate";
+    let finalSelectedCell: number;
+    if (templateCandidateCount <= 1) {
+      finalSelectedCell = 0;
+    } else if (templateOutputMode === "separate") {
+      // separate 模式 candidates[i] 是独立 URL，cell 索引无意义 → 默认 0
+      finalSelectedCell = parsedInput.selectedCell ?? 0;
+    } else {
+      // grid + 多候选：picker 必选，未选 / 越界都报错
+      if (
+        parsedInput.selectedCell === null ||
+        parsedInput.selectedCell === undefined
+      ) {
+        throw new Error("请先在效果图上选一个分镜");
+      }
+      if (parsedInput.selectedCell >= templateCandidateCount) {
+        throw new Error(
+          `所选分镜索引 ${parsedInput.selectedCell} 超出范围（候选数 ${templateCandidateCount}）`
+        );
+      }
+      finalSelectedCell = parsedInput.selectedCell;
+    }
+
     // 5. 扣 credit（template.price=0 跳过；credit 不足抛 InsufficientCreditsError）
     const price = template.price ?? 0;
     if (price > 0) {
@@ -262,10 +303,12 @@ export const submitImageGenDemoAction = withDemoAction("submit")
     const orderNo = generateOrderNo();
 
     // candidates 写 [[referenceImageUrl]]：外层 imageIdx=0，内层 candIdx=0。
-    // selections = "[0]"：锁定第 0 张第 0 个候选 = demo 预览图本身。
+    // selections = "[finalSelectedCell]"：锁定第 0 张第 finalSelectedCell 个候选 =
+    // demo 预览图（composite）的第 N 格。composite 仍为 1 张图存在 R2，cell 索引语义
+    // 与 /p/[token] admin 详情（CSS background-position 切 cell）一致。
     // 注：candidates 与 selections 都用 JSON 字符串（与 schema.ts promptOrder.candidates/selections 字段一致）
     const candidatesJson = JSON.stringify([[parsedInput.referenceImageUrl]]);
-    const selectionsJson = JSON.stringify([0]);
+    const selectionsJson = JSON.stringify([finalSelectedCell]);
 
     const [created] = await db
       .insert(promptOrder)
@@ -309,7 +352,10 @@ export const submitImageGenDemoAction = withDemoAction("submit")
     if (!created) throw new Error("创建订单失败");
 
     revalidatePath("/image-gen");
-    revalidatePath(`/p/${token}`);
+    // 2026-09-11：demo 订单不进 /p/[token] 公共页（避免匿名访问撞 404 —
+    // candidates 是单张 composite，candIdx>0 时 resolveCandidateUrl 找不到图）。
+    // demo 流用户通过 /image-gen/orders 或 /dashboard/prompt-orders 看订单。
+    revalidatePath("/image-gen/orders");
     revalidatePath("/dashboard/prompt-orders");
 
     return {

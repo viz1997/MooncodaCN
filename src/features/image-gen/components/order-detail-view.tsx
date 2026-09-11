@@ -14,6 +14,7 @@
 
 import { CheckCircle2, ImageIcon, Sparkles } from "lucide-react";
 
+import { QuadrantGridPicker } from "@/components/quadrant-grid-picker";
 import {
   ACCESSORIES,
   getLeatherColor,
@@ -65,6 +66,23 @@ export interface OrderDetail {
    * /p/[token] 公共订单详情不传此字段，所以 optional。
    */
   thumbnailUrl?: string | null;
+  /**
+   * 2026-09-11：模板宫格候选数（promptTemplate.candidateCount）。
+   * 1 / 2 / 4 / 9。>1 且 outputMode=grid → 详情主图走 QuadrantGridPicker
+   * 只读模式（composite + 高亮已选 cell）。
+   */
+  candidateCount: number;
+  /**
+   * 2026-09-11：模板输出模式（promptTemplate.outputMode）。
+   * "grid" = composite 一张图；"separate" = 每张独立 URL。
+   */
+  outputMode: "grid" | "separate";
+  /**
+   * 2026-09-11：已选 cell（demo 订单 = composite 内 cell 索引；
+   * gpt-image 订单 = candIdx；老订单无值 = null）。详情主图渲染
+   * QuadrantGridPicker 时用此值显示 emerald 边框。
+   */
+  selectedCell: number | null;
 }
 
 export function OrderDetailView({ order }: { order: OrderDetail }) {
@@ -79,18 +97,40 @@ export function OrderDetailView({ order }: { order: OrderDetail }) {
     order.candidateUrls[order.selectedImageIdx] ??
     order.candidateUrls[0] ??
     null;
+  // 2026-09-11：grid + 多 cell 订单（典型：demo 流 4 宫格下单）走 QuadrantGridPicker
+  // 只读模式——composite 一张图 + 高亮已选 cell（emerald 边框）。
+  // outputMode=separate 或 candidateCount<=1 时退回原 <img> 单图渲染。
+  const cc = order.candidateCount;
+  const om = order.outputMode;
+  const isGridMulti =
+    om === "grid" &&
+    (cc === 2 || cc === 4 || cc === 9) &&
+    primaryImageUrl !== null;
 
   return (
     <div className="flex-1 overflow-y-auto bg-zinc-50 dark:bg-zinc-950">
       {/* 主图 */}
       <div className="aspect-square w-full max-h-[60vh] bg-muted overflow-hidden">
         {primaryImageUrl ? (
-          // biome-ignore lint/performance/noImgElement: 订单主图为远程 URL
-          <img
-            src={primaryImageUrl}
-            alt={order.templateName}
-            className="w-full h-full object-cover"
-          />
+          isGridMulti ? (
+            // 2026-09-11：grid 宫格订单只读 picker——onSelect 是 no-op（disabled 后点击无反应）
+            <QuadrantGridPicker
+              compositeUrl={primaryImageUrl}
+              candidateCount={cc as 2 | 4 | 9}
+              selectedCell={order.selectedCell}
+              disabled
+              onSelect={() => {}}
+              ariaLabel="已选分镜（已锁定）"
+              className="h-full w-full"
+            />
+          ) : (
+            // biome-ignore lint/performance/noImgElement: 订单主图为远程 URL
+            <img
+              src={primaryImageUrl}
+              alt={order.templateName}
+              className="w-full h-full object-cover"
+            />
+          )
         ) : (
           <div className="w-full h-full flex items-center justify-center text-muted-foreground">
             <ImageIcon className="h-12 w-12 opacity-30" />

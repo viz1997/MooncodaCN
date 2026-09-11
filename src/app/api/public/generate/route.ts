@@ -263,35 +263,67 @@ export async function GET() {
     ).length,
   }));
 
+  // 2026-09-11：按 promptTemplateId 一次性取 candidateCount/outputMode（避免 N+1）。
+  // mask 没绑 template → 走兜底（candidateCount=1，outputMode=grid）
+  const templateIds = Array.from(
+    new Set(
+      activeEffects
+        .map((m) => m.promptTemplateId ?? null)
+        .filter((id): id is string => Boolean(id))
+    )
+  );
+  const templates =
+    templateIds.length > 0
+      ? await db.query.promptTemplate.findMany({
+          where: (t, { inArray }) => inArray(t.id, templateIds),
+          columns: { id: true, candidateCount: true, outputMode: true },
+        })
+      : [];
+  const templateMap = new Map(templates.map((t) => [t.id, t] as const));
+
   return NextResponse.json({
     success: true,
-    masks: activeEffects.map((m) => ({
-      maskId: m.maskId,
-      name: m.name,
-      previewUrl: m.previewUrl,
-      // 2026-09-09：扩给 /image-gen 6 步 stepper 用
-      productTypeCode:
-        (m as { productTypeCode?: string | null }).productTypeCode ?? null,
-      price: m.price ?? 0,
-      description: m.description ?? "",
-      // 推荐模型仅返回 id，前端按 id 展示名字；不暴露完整 prompt/cost
-      model: m.model,
-      // 2026-09-10：模板级可配置规格子集；空 = 字典全量
-      allowedSizes: (m as { allowedSizes?: string[] }).allowedSizes ?? null,
-      allowedAccessories:
-        (m as { allowedAccessories?: string[] }).allowedAccessories ?? null,
-      // 2026-09-10：模板级 capability 覆盖 + 皮革色子集（仅创建时 SpecModal 用）
-      allowedCapabilities:
-        (m as { allowedCapabilities?: Partial<ProductCapabilities> | null })
-          .allowedCapabilities ?? null,
-      allowedColors: (m as { allowedColors?: string[] }).allowedColors ?? null,
-      // 2026-09-10：prompt_template.id 引用（POST 时优先用 promptTemplate.prompt）；
-      // 前端无需关心，只用于诊断 / 显示
-      promptTemplateId:
-        (m as { promptTemplateId?: string | null }).promptTemplateId ?? null,
-      // 2026-09-10：关联产品线 id 列表（用于 /image-gen 左侧产品线 Segmented 分组）
-      productLineIds: (m as { productLineIds?: string[] }).productLineIds ?? [],
-    })),
+    masks: activeEffects.map((m) => {
+      // 2026-09-11：从 promptTemplate 表取 candidateCount/outputMode，
+      // demo 流按此决定要不要渲染 QuadrantGridPicker
+      const tmpl = m.promptTemplateId
+        ? templateMap.get(m.promptTemplateId)
+        : null;
+      const candidateCount = tmpl?.candidateCount ?? 1;
+      const outputMode = (tmpl?.outputMode ?? "grid") as "grid" | "separate";
+      return {
+        maskId: m.maskId,
+        name: m.name,
+        previewUrl: m.previewUrl,
+        // 2026-09-09：扩给 /image-gen 6 步 stepper 用
+        productTypeCode:
+          (m as { productTypeCode?: string | null }).productTypeCode ?? null,
+        price: m.price ?? 0,
+        description: m.description ?? "",
+        // 推荐模型仅返回 id，前端按 id 展示名字；不暴露完整 prompt/cost
+        model: m.model,
+        // 2026-09-10：模板级可配置规格子集；空 = 字典全量
+        allowedSizes: (m as { allowedSizes?: string[] }).allowedSizes ?? null,
+        allowedAccessories:
+          (m as { allowedAccessories?: string[] }).allowedAccessories ?? null,
+        // 2026-09-10：模板级 capability 覆盖 + 皮革色子集（仅创建时 SpecModal 用）
+        allowedCapabilities:
+          (m as { allowedCapabilities?: Partial<ProductCapabilities> | null })
+            .allowedCapabilities ?? null,
+        allowedColors:
+          (m as { allowedColors?: string[] }).allowedColors ?? null,
+        // 2026-09-10：prompt_template.id 引用（POST 时优先用 promptTemplate.prompt）；
+        // 前端无需关心，只用于诊断 / 显示
+        promptTemplateId:
+          (m as { promptTemplateId?: string | null }).promptTemplateId ?? null,
+        // 2026-09-10：关联产品线 id 列表（用于 /image-gen 左侧产品线 Segmented 分组）
+        productLineIds:
+          (m as { productLineIds?: string[] }).productLineIds ?? [],
+        // 2026-09-11：模板宫格候选数 + 输出模式（让 demo 流按此决定 picker）
+        candidateCount,
+        outputMode,
+      };
+    }),
     productLines,
   });
 }

@@ -609,10 +609,16 @@ export const listUserOrdersAction = withOrderAction("listUserOrders")
       templateIds.length > 0
         ? await db.query.promptTemplate.findMany({
             where: inArray(promptTemplate.id, templateIds),
-            columns: { id: true, name: true },
+            // 2026-09-11：扩 candidateCount/outputMode 让 /image-gen/orders 详情按此决定要不要渲染 QuadrantGridPicker
+            columns: {
+              id: true,
+              name: true,
+              candidateCount: true,
+              outputMode: true,
+            },
           })
         : [];
-    const templateNameMap = new Map(templates.map((t) => [t.id, t.name]));
+    const templateMetaMap = new Map(templates.map((t) => [t.id, t]));
 
     return {
       orders: pageRows.map((o) => {
@@ -622,6 +628,14 @@ export const listUserOrdersAction = withOrderAction("listUserOrders")
           o.selections,
           o.selectedIndex
         );
+        // 2026-09-11：从 selections 派生 selectedCell：
+        //   - demo 订单 candidates=[[composite]]，selections=[cellIndex] → selectedCell = cellIndex
+        //   - gpt-image 订单 candidates=[[cand1,cand2,...]]，selections[imageIdx]=candIdx → selectedCell = candIdx
+        // 两者语义一致：都是「这张图里选哪个候选/cell」
+        const selectedCell = resolveSelectedCell(o.selections, selectedIdx);
+        const tpl = templateMetaMap.get(o.templateId);
+        const candidateCount = tpl?.candidateCount ?? 1;
+        const outputMode = (tpl?.outputMode ?? "grid") as "grid" | "separate";
         return {
           orderId: o.id,
           orderNo: o.orderNo,
@@ -641,8 +655,13 @@ export const listUserOrdersAction = withOrderAction("listUserOrders")
           platform: o.platform ?? null,
           // 2026-09-11：渠道订单号（与 platform 配对）
           platformOrderNo: o.platformOrderNo ?? null,
-          templateName: templateNameMap.get(o.templateId) ?? "未知模板",
+          templateName: tpl?.name ?? "未知模板",
           templateId: o.templateId,
+          // 2026-09-11：模板宫格候选数 + 输出模式（让 OrderDetailView 决定要不要 picker）
+          candidateCount,
+          outputMode,
+          // 2026-09-11：已选 cell（demo 订单 = composite 内 cell；gpt-image = candIdx）
+          selectedCell,
           // 列表缩略图：selected > [0][0]
           thumbnailUrl: extractOrderThumbnail(
             o.candidates,
@@ -749,6 +768,27 @@ function resolveSelectedImageIdx(
     }
   }
   return selectedIndex ?? 0;
+}
+
+/**
+ * 2026-09-11：从 selections 解析「已选 cell」索引（OrderDetailView 用）。
+ * - demo 订单 candidates=[[composite]]，selections=[cellIndex] → selectedCell = cellIndex
+ * - gpt-image 订单 candidates=[[cand1,cand2,...]]，selections[imageIdx]=candIdx → selectedCell = candIdx
+ * - 老订单无 selections / 解析失败 → null（详情页用未选态渲染）
+ */
+function resolveSelectedCell(
+  selectionsRaw: string | null,
+  selectedImageIdx: number
+): number | null {
+  if (!selectionsRaw) return null;
+  try {
+    const selections: unknown = JSON.parse(selectionsRaw);
+    if (!Array.isArray(selections)) return null;
+    const cell = selections[selectedImageIdx];
+    return typeof cell === "number" ? cell : null;
+  } catch {
+    return null;
+  }
 }
 
 // ============================================
