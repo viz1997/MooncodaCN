@@ -122,6 +122,10 @@ async function getHandler(
         leatherExposed: order.leatherExposed ?? null,
         pvcProtection: order.pvcProtection ?? null,
         remarks: order.remarks ?? null,
+        // 2026-09-11：订单来源平台（PLATFORMS 字典 code）
+        platform: order.platform ?? null,
+        // 2026-09-11：渠道订单号（与 platform 配对）
+        platformOrderNo: order.platformOrderNo ?? null,
         template: {
           id: order.template.id,
           name: order.template.name,

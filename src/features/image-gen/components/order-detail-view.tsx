@@ -17,6 +17,7 @@ import { CheckCircle2, ImageIcon, Sparkles } from "lucide-react";
 import {
   ACCESSORIES,
   getLeatherColor,
+  getPlatform,
   getProductType,
 } from "@/features/gpt-image/lib/product-catalog";
 import { cn } from "@/lib/utils";
@@ -42,6 +43,17 @@ export interface OrderDetail {
   leatherExposed: boolean | null;
   pvcProtection: boolean | null;
   remarks: string | null;
+  /**
+   * 2026-09-11：订单来源平台（仅 LB 皮革徽章业务使用，PLATFORMS 字典 code）。
+   * null = 用户未选；非 LB 型号不展示。
+   */
+  platform: string | null;
+  /**
+   * 2026-09-11：渠道订单号（与 platform 配对；仅 LB 业务）。
+   * null = 用户未填 / 未选 platform / 不展示。淘宝 15~18 位数字、小红书
+   * 字母数字混合等异构字符串，自由文本。
+   */
+  platformOrderNo: string | null;
   templateName: string;
   templateId: string;
   candidateUrls: string[];
@@ -201,6 +213,29 @@ export function OrderDetailView({ order }: { order: OrderDetail }) {
                 </div>
               </div>
             )}
+            {/* 2026-09-11：订单来源平台（LB 皮革徽章业务 ToB 渠道归因） */}
+            {order.platform && (
+              <div className="text-[11px] flex items-baseline gap-2">
+                <span className="text-muted-foreground w-16 shrink-0">
+                  来源
+                </span>
+                <span className="font-medium">
+                  {getPlatform(order.platform)?.name ?? order.platform}
+                </span>
+              </div>
+            )}
+            {/* 2026-09-11：渠道订单号（与 platform 配对；独立行展示，便于代理商对账） */}
+            {order.platformOrderNo &&
+              order.platformOrderNo.trim().length > 0 && (
+                <div className="text-[11px] flex items-baseline gap-2">
+                  <span className="text-muted-foreground w-16 shrink-0">
+                    渠道订单号
+                  </span>
+                  <span className="font-mono font-medium">
+                    {order.platformOrderNo.trim()}
+                  </span>
+                </div>
+              )}
             {!productType &&
               !order.productSize &&
               !order.accessoryCode &&
@@ -208,7 +243,9 @@ export function OrderDetailView({ order }: { order: OrderDetail }) {
               !order.leatherColor &&
               order.leatherExposed !== true &&
               order.pvcProtection !== true &&
-              !order.remarks && (
+              !order.remarks &&
+              !order.platform &&
+              !order.platformOrderNo && (
                 <div className="text-[11px] text-muted-foreground">
                   此订单无配件规格（通用款式）
                 </div>

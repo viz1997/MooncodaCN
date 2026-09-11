@@ -36,14 +36,15 @@ import {
   checkOrderNoConflictAction,
   createOrderAction,
 } from "@/features/gpt-image/actions/orders";
-import { PRODUCT_TYPES } from "@/features/gpt-image/lib/product-catalog";
-
 import {
-  ORDER_PLATFORM_LABELS,
-  ORDER_PLATFORMS,
-  type OrderPlatform,
-  type OrderView,
-  type PromptTemplateView,
+  PLATFORMS,
+  type PlatformCode,
+  PRODUCT_TYPES,
+} from "@/features/gpt-image/lib/product-catalog";
+
+import type {
+  OrderView,
+  PromptTemplateView,
 } from "@/features/gpt-image/lib/types";
 
 interface OrderFormDialogProps {
@@ -84,7 +85,9 @@ export function OrderFormDialog({
   const [orderNo, setOrderNo] = useState("");
   const [templateId, setTemplateId] = useState("");
   const [recipientName, setRecipientName] = useState("");
-  const [platform, setPlatform] = useState<OrderPlatform | "">("");
+  const [platform, setPlatform] = useState<PlatformCode | "">("");
+  // 2026-09-11：渠道订单号（与 platform 配对；空串 = 未填）
+  const [platformOrderNo, setPlatformOrderNo] = useState<string>("");
   const [uploadCount, setUploadCount] = useState(1);
   const [imagesPerUpload, setImagesPerUpload] = useState(3);
   const [regenerateLimit, setRegenerateLimit] = useState(5);
@@ -108,6 +111,7 @@ export function OrderFormDialog({
       setTemplateId(templates[0]?.id || "");
       setRecipientName("");
       setPlatform("");
+      setPlatformOrderNo("");
       setUploadCount(1);
       setImagesPerUpload(3);
       setRegenerateLimit(5);
@@ -127,6 +131,8 @@ export function OrderFormDialog({
         templateId,
         recipientName: recipientName.trim() || undefined,
         platform: platform || undefined,
+        // 2026-09-11：渠道订单号（与 platform 配对；空 → 不传）
+        platformOrderNo: platformOrderNo.trim() || undefined,
         uploadCount,
         imagesPerUpload,
         regenerateLimit,
@@ -399,19 +405,34 @@ export function OrderFormDialog({
           </div>
           <Select
             value={platform || "_none"}
-            onChange={(v) =>
-              setPlatform(v === "_none" ? "" : (v as OrderPlatform))
-            }
+            onChange={(v) => {
+              const next = v === "_none" ? "" : (v as PlatformCode);
+              // 切换平台时清空旧订单号，避免"换平台但留旧渠道订单号"混淆
+              if (next !== platform) setPlatformOrderNo("");
+              setPlatform(next);
+            }}
             placeholder="未指定"
             className="w-full"
             options={[
               { value: "_none", label: "未指定" },
-              ...ORDER_PLATFORMS.map((p: OrderPlatform) => ({
-                value: p,
-                label: ORDER_PLATFORM_LABELS[p],
+              ...PLATFORMS.map((p) => ({
+                value: p.code,
+                label: p.name,
               })),
             ]}
           />
+          {/* 2026-09-11：渠道订单号输入（max 64；切换平台时自动清空）。 */}
+          <Input
+            value={platformOrderNo}
+            onChange={(e) => setPlatformOrderNo(e.target.value.slice(0, 64))}
+            maxLength={64}
+            placeholder={platform ? "渠道订单号（可选）" : "请先选择平台"}
+            disabled={!platform}
+            className="font-mono text-sm"
+          />
+          <p className="text-[11px] text-stone-400 -mt-1">
+            用于代理商对账；淘宝订单号约 15~18 位数字
+          </p>
         </div>
 
         {/* ============================================

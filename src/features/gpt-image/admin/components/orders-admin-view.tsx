@@ -33,13 +33,12 @@ import {
   formatCustomization,
   formatProductSpec,
   getAccessory,
+  getPlatform,
+  PLATFORMS,
 } from "@/features/gpt-image/lib/product-catalog";
 import {
-  ORDER_PLATFORM_LABELS,
-  ORDER_PLATFORMS,
   ORDER_STATUS_COLORS,
   ORDER_STATUS_LABELS,
-  type OrderPlatform,
   type OrderStatus,
   type OrderView,
   type PromptTemplateView,
@@ -393,9 +392,9 @@ export function OrdersAdminView() {
               options={[
                 { value: "ALL", label: "全部平台" },
                 { value: "UNSPECIFIED", label: "未指定" },
-                ...ORDER_PLATFORMS.map((p: OrderPlatform) => ({
-                  value: p,
-                  label: ORDER_PLATFORM_LABELS[p],
+                ...PLATFORMS.map((p) => ({
+                  value: p.code,
+                  label: p.name,
                 })),
               ]}
             />
@@ -411,12 +410,13 @@ export function OrdersAdminView() {
 
           <div className="overflow-hidden rounded-md border">
             {/* 表头 */}
-            <div className="grid grid-cols-[140px_1fr_1fr_100px_100px_150px_120px_140px_220px] gap-2 bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground border-b">
+            <div className="grid grid-cols-[140px_1fr_1fr_100px_100px_150px_120px_120px_140px_220px] gap-2 bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground border-b">
               <div>订单号</div>
               <div>用户</div>
               <div>模板</div>
               <div>状态</div>
               <div>平台</div>
+              <div>渠道单号</div>
               <div>产品规格</div>
               <div>原图/选择</div>
               <div>创建时间</div>
@@ -445,7 +445,7 @@ export function OrdersAdminView() {
                 displayed.map((order) => (
                   <div
                     key={order.id}
-                    className="grid grid-cols-[140px_1fr_1fr_100px_100px_150px_120px_140px_220px] gap-2 px-3 py-2 text-sm hover:bg-muted/30 transition-colors items-center"
+                    className="grid grid-cols-[140px_1fr_1fr_100px_100px_150px_120px_120px_140px_220px] gap-2 px-3 py-2 text-sm hover:bg-muted/30 transition-colors items-center"
                   >
                     <div className="font-mono text-xs">{order.orderNo}</div>
                     <div>
@@ -467,12 +467,24 @@ export function OrdersAdminView() {
                     <div>
                       {order.platform ? (
                         <Badge color="default" className="!text-[10px]">
-                          {ORDER_PLATFORM_LABELS[order.platform]}
+                          {getPlatform(order.platform)?.name ?? order.platform}
                         </Badge>
                       ) : (
                         <span className="text-zinc-400 italic text-xs">
                           未指定
                         </span>
+                      )}
+                    </div>
+                    <div>
+                      {order.platformOrderNo ? (
+                        <span
+                          className="font-mono text-[11px] text-stone-700 truncate inline-block max-w-[120px]"
+                          title={order.platformOrderNo}
+                        >
+                          {order.platformOrderNo}
+                        </span>
+                      ) : (
+                        <span className="text-zinc-400 italic text-xs">—</span>
                       )}
                     </div>
                     <div>
@@ -487,39 +499,30 @@ export function OrdersAdminView() {
                           </span>
                           {/* 2026-09-07：列表行末追加用户定制摘要（皮革徽章 / 刻字 / 外露），
                               2026-09-10：扩到 LB 全加工维度（皮革色 / PVC / 外露 / 备注），
+                              2026-09-11：再加 platform（业务 ToB 渠道归因）。
                               让 admin 一眼看到"用户额外指定了什么"，无需打开详情。 */}
-                          {formatCustomization({
-                            engravingText: order.engravingText,
-                            engravingExposed: order.engravingExposed,
-                            leatherColor: order.leatherColor,
-                            leatherExposed: order.leatherExposed,
-                            pvcProtection: order.pvcProtection,
-                            remarks: order.remarks,
-                          }) && (
-                            <div
-                              className="flex items-center gap-1 text-[10px] text-amber-700"
-                              title={formatCustomization({
-                                engravingText: order.engravingText,
-                                engravingExposed: order.engravingExposed,
-                                leatherColor: order.leatherColor,
-                                leatherExposed: order.leatherExposed,
-                                pvcProtection: order.pvcProtection,
-                                remarks: order.remarks,
-                              })}
-                            >
-                              <Sparkles className="h-2.5 w-2.5" />
-                              <span className="truncate max-w-[120px]">
-                                {formatCustomization({
-                                  engravingText: order.engravingText,
-                                  engravingExposed: order.engravingExposed,
-                                  leatherColor: order.leatherColor,
-                                  leatherExposed: order.leatherExposed,
-                                  pvcProtection: order.pvcProtection,
-                                  remarks: order.remarks,
-                                })}
-                              </span>
-                            </div>
-                          )}
+                          {(() => {
+                            const summary = formatCustomization({
+                              engravingText: order.engravingText,
+                              engravingExposed: order.engravingExposed,
+                              leatherColor: order.leatherColor,
+                              leatherExposed: order.leatherExposed,
+                              pvcProtection: order.pvcProtection,
+                              remarks: order.remarks,
+                              platform: order.platform,
+                            });
+                            return summary ? (
+                              <div
+                                className="flex items-center gap-1 text-[10px] text-amber-700"
+                                title={summary}
+                              >
+                                <Sparkles className="h-2.5 w-2.5" />
+                                <span className="truncate max-w-[120px]">
+                                  {summary}
+                                </span>
+                              </div>
+                            ) : null;
+                          })()}
                         </div>
                       ) : (
                         <span className="text-zinc-400 italic text-xs">—</span>
@@ -827,6 +830,29 @@ export function OrdersAdminView() {
                     >
                       {ORDER_STATUS_LABELS[detailDialog.status as OrderStatus]}
                     </Badge>
+                  </div>
+                  {/* 2026-09-11：订单来源平台 + 渠道订单号（LB 业务，capability-gated）。
+                      平台和订单号配对展示，便于代理商对账。 */}
+                  <div>
+                    <span className="text-muted-foreground">来源平台：</span>
+                    {detailDialog.platform ? (
+                      <span className="font-medium">
+                        {getPlatform(detailDialog.platform)?.name ??
+                          detailDialog.platform}
+                      </span>
+                    ) : (
+                      <span className="italic text-zinc-400">未指定</span>
+                    )}
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">渠道订单号：</span>
+                    {detailDialog.platformOrderNo ? (
+                      <span className="font-mono font-medium">
+                        {detailDialog.platformOrderNo}
+                      </span>
+                    ) : (
+                      <span className="italic text-zinc-400">—</span>
+                    )}
                   </div>
                   <div>
                     <span className="text-muted-foreground">模板：</span>

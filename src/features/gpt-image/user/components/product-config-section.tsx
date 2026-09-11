@@ -30,6 +30,8 @@ import {
   formatCustomization,
   getProductType,
   LEATHER_COLORS,
+  PLATFORMS,
+  type PlatformCode,
 } from "@/features/gpt-image/lib/product-catalog";
 import type { OrderView } from "@/features/gpt-image/lib/types";
 
@@ -47,6 +49,10 @@ interface ProductConfigSectionProps {
     leatherExposed: boolean | null;
     pvcProtection: boolean | null;
     remarks: string | null;
+    /** 2026-09-11：订单来源平台（PLATFORMS 字典 code，null = 用户未选） */
+    platform: PlatformCode | null;
+    /** 2026-09-11：渠道订单号（与 platform 配对；空/null = 未填） */
+    platformOrderNo: string | null;
   }) => Promise<boolean>;
 }
 
@@ -65,6 +71,7 @@ export function ProductConfigSection({
     caps?.canPvcProtection ||
     caps?.canLeatherExposed ||
     caps?.canHaveRemarks ||
+    caps?.canPlatform ||
     false;
 
   // 本地草稿态：UI 即时响应，保存按钮才落库
@@ -88,6 +95,12 @@ export function ProductConfigSection({
     order.pvcProtection === true
   );
   const [remarks, setRemarks] = useState<string>(order.remarks ?? "");
+  // 2026-09-11：订单来源平台（PLATFORMS 字典 code；空串 = 未选）
+  const [platform, setPlatform] = useState<string>(order.platform ?? "");
+  // 2026-09-11：渠道订单号（与 platform 配对；空串 = 未填）
+  const [platformOrderNo, setPlatformOrderNo] = useState<string>(
+    order.platformOrderNo ?? ""
+  );
 
   // 订单刷新（别人/外部改了字段）→ 同步本地草稿
   useEffect(() => {
@@ -99,6 +112,8 @@ export function ProductConfigSection({
     setLeatherExposed(order.leatherExposed === true);
     setPvcProtection(order.pvcProtection === true);
     setRemarks(order.remarks ?? "");
+    setPlatform(order.platform ?? "");
+    setPlatformOrderNo(order.platformOrderNo ?? "");
   }, [
     order.engravingText,
     order.engravingExposed,
@@ -106,6 +121,8 @@ export function ProductConfigSection({
     order.leatherExposed,
     order.pvcProtection,
     order.remarks,
+    order.platform,
+    order.platformOrderNo,
   ]);
 
   // 没型号 或 所有 capability 都关 → 不渲染
@@ -120,8 +137,11 @@ export function ProductConfigSection({
     leatherExposed: order.leatherExposed,
     pvcProtection: order.pvcProtection,
     remarks: order.remarks,
+    platform: order.platform,
   });
   const trimmedRemarks = order.remarks?.trim() ?? "";
+  // 2026-09-11：渠道订单号（已保存的；只读 summary 中单独行展示）
+  const trimmedPlatformOrderNo = order.platformOrderNo?.trim() ?? "";
 
   // 只读 summary（非 PENDING 阶段）：直接展示
   if (!editable) {
@@ -142,6 +162,15 @@ export function ProductConfigSection({
             {trimmedRemarks}
           </div>
         )}
+        {/* 2026-09-11：渠道订单号（只读 summary 单独一行展示，便于 admin 复盘对账） */}
+        {trimmedPlatformOrderNo.length > 0 && (
+          <div className="mt-1.5 flex items-baseline gap-2 text-[11px]">
+            <span className="text-stone-400">渠道订单号：</span>
+            <span className="font-mono text-stone-700">
+              {trimmedPlatformOrderNo}
+            </span>
+          </div>
+        )}
       </section>
     );
   }
@@ -154,11 +183,18 @@ export function ProductConfigSection({
     leatherColor !== (order.leatherColor ?? "") ||
     leatherExposed !== (order.leatherExposed === true) ||
     pvcProtection !== (order.pvcProtection === true) ||
-    remarks !== (order.remarks ?? "");
+    remarks !== (order.remarks ?? "") ||
+    platform !== (order.platform ?? "") ||
+    platformOrderNo !== (order.platformOrderNo ?? "");
 
   const handleSave = async () => {
     // 草稿 → 入参：刻字关闭时清空文本
     const finalText = engrave ? engravingText.trim() : "";
+    // 2026-09-11：业务规则 — 渠道订单号必须配合 platform 一起填；只填订单号不选平台，
+    // UI 层 hint 提示但仍允许点保存，由 server 端抛 400 兜底。
+    const trimmedPlatformOrderNo = platformOrderNo.trim();
+    const finalPlatformOrderNo =
+      trimmedPlatformOrderNo.length > 0 ? trimmedPlatformOrderNo : null;
     await onSave({
       engravingText: finalText.length > 0 ? finalText : null,
       engravingExposed: engrave ? engravingExposed : null,
@@ -166,6 +202,10 @@ export function ProductConfigSection({
       leatherExposed: leatherExposed,
       pvcProtection: pvcProtection,
       remarks: remarks.trim() ? remarks.trim() : null,
+      // 2026-09-11：订单来源平台（PLATFORMS 字典 code；空串 → null）
+      platform: platform.trim() ? (platform.trim() as PlatformCode) : null,
+      // 2026-09-11：渠道订单号（与 platform 配对；空 → null）
+      platformOrderNo: finalPlatformOrderNo,
     });
   };
 
@@ -214,7 +254,8 @@ export function ProductConfigSection({
         </div>
       )}
 
-      {/* ============ 皮革外露（仅 canLeatherExposed=true，独立于刻字外露） ============ */}
+      {/* ============ 皮革外露（仅 canLeatherExposed=true，独立于刻字外露）
+            2026-09-11：与「PVC 保护」互斥（二选一）—— 勾选时自动取消另一项。 ============ */}
       {caps?.canLeatherExposed && (
         <div className="rounded-lg border border-stone-100 bg-stone-50/50 px-3 py-2">
           <label className="flex items-center justify-between gap-3 cursor-pointer">
@@ -228,14 +269,18 @@ export function ProductConfigSection({
               type="checkbox"
               className="h-5 w-5 accent-emerald-600"
               checked={leatherExposed}
-              onChange={(e) => setLeatherExposed(e.target.checked)}
+              onChange={(e) => {
+                setLeatherExposed(e.target.checked);
+                // 互斥：勾皮革外露 → 自动取消 PVC 保护
+                if (e.target.checked) setPvcProtection(false);
+              }}
               disabled={saving}
             />
           </label>
         </div>
       )}
 
-      {/* ============ PVC 保护（仅 canPvcProtection=true） ============ */}
+      {/* ============ PVC 保护（仅 canPvcProtection=true，与皮革外露互斥） ============ */}
       {caps?.canPvcProtection && (
         <div className="rounded-lg border border-stone-100 bg-stone-50/50 px-3 py-2">
           <label className="flex items-center justify-between gap-3 cursor-pointer">
@@ -249,7 +294,11 @@ export function ProductConfigSection({
               type="checkbox"
               className="h-5 w-5 accent-emerald-600"
               checked={pvcProtection}
-              onChange={(e) => setPvcProtection(e.target.checked)}
+              onChange={(e) => {
+                setPvcProtection(e.target.checked);
+                // 互斥：勾 PVC 保护 → 自动取消皮革外露
+                if (e.target.checked) setLeatherExposed(false);
+              }}
               disabled={saving}
             />
           </label>
@@ -324,6 +373,64 @@ export function ProductConfigSection({
           <p className="text-[10px] text-stone-400 text-right">
             {remarks.length} / 500
           </p>
+        </div>
+      )}
+
+      {/* ============ 订单来源平台（仅 canPlatform=true）
+            2026-09-11：业务侧 ToB 渠道归因 —— 用户告诉代理商从哪个渠道来的。
+            顺序按"自营 → 第三方电商 → 内容/网红 → 合作/营销"排列。
+            "未选" = 走 unknown 兜底，admin 复盘单独 group by。
+            2026-09-11：加「渠道订单号」输入框 —— 选中平台后才出现，
+            与 platform 配对用于代理商对账。 ============ */}
+      {caps?.canPlatform && (
+        <div className="rounded-lg border border-stone-100 bg-stone-50/50 px-3 py-2 space-y-2">
+          <div className="text-sm font-medium text-stone-800">订单来源</div>
+          <p className="text-[11px] text-stone-500">
+            从哪个渠道看到 / 找到我们的？用于活动结算
+          </p>
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {PLATFORMS.map((p) => {
+              const active = platform === p.code;
+              return (
+                <button
+                  key={p.code}
+                  type="button"
+                  disabled={saving}
+                  onClick={() => {
+                    // 切换平台时清空旧订单号，避免"换平台但留旧渠道订单号"混淆
+                    if (!active) setPlatformOrderNo("");
+                    setPlatform(active ? "" : p.code);
+                  }}
+                  className={`rounded-full border px-3 py-1 text-xs transition-colors disabled:opacity-60 ${
+                    active
+                      ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                      : "border-stone-200 bg-white hover:border-emerald-300"
+                  }`}
+                >
+                  {p.name}
+                </button>
+              );
+            })}
+          </div>
+          {/* 2026-09-11：渠道订单号（max 64）。平台选中后才出现。 */}
+          {platform && (
+            <div className="pt-1 space-y-1">
+              <label className="text-[11px] text-stone-600">
+                渠道订单号（可选，用于代理商对账）
+              </label>
+              <input
+                type="text"
+                value={platformOrderNo}
+                onChange={(e) =>
+                  setPlatformOrderNo(e.target.value.slice(0, 64))
+                }
+                maxLength={64}
+                disabled={saving}
+                placeholder="如淘宝订单号 / 小红书订单 ID"
+                className="w-full rounded-md border border-stone-200 bg-white px-2.5 py-1.5 text-sm font-mono outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-60"
+              />
+            </div>
+          )}
         </div>
       )}
 

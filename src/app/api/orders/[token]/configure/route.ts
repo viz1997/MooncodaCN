@@ -23,12 +23,15 @@ import { promptOrder } from "@/db/schema";
 import {
   getProductType,
   validateLeatherColor,
+  validatePlatform,
 } from "@/features/gpt-image/lib/product-catalog";
 import { withApiLogging } from "@/lib/api-logger";
 
 export const runtime = "nodejs";
 
 // 2026-09-10：扩 4 个 LB 皮革徽章定制字段（leatherColor / leatherExposed / pvcProtection / remarks）。
+// 2026-09-11：再加 platform（订单来源平台，PLATFORMS 字典 code；仅 LB canPlatform=true 接受）
+//   与 platformOrderNo（渠道订单号，与 platform 配对的异构字符串 free text）。
 // 全部 capability-gated：非 LB 型号在下面联动校验块被静默 collapse 为 null，不抛错。
 const configureSchema = z
   .object({
@@ -38,6 +41,9 @@ const configureSchema = z
     leatherExposed: z.boolean().nullable().optional(),
     pvcProtection: z.boolean().nullable().optional(),
     remarks: z.string().trim().min(0).max(500).nullable().optional(),
+    platform: z.string().min(1).max(32).nullable().optional(),
+    // 2026-09-11：渠道订单号（max 64：淘宝订单号 18 位 + 留余量）
+    platformOrderNo: z.string().trim().min(0).max(64).nullable().optional(),
   })
   .strict();
 
@@ -128,6 +134,17 @@ async function postHandler(
     const finalPvcProtection = type.capabilities.canPvcProtection
       ? input.pvcProtection === true
       : null;
+    // 2026-09-11：皮革外露 / PVC 保护互斥（二选一）。
+    // UI 层 ProductConfigSection 已经做了互斥，server 再兜一次挡绕过前端的脏请求。
+    if (finalLeatherExposed === true && finalPvcProtection === true) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "皮革外露 与 PVC 保护 不能同时勾选",
+        },
+        { status: 400 }
+      );
+    }
     // remarks：capability 关闭 → null；开启但用户没填 → null；否则 trim 后存
     const trimmedRemarks =
       type.capabilities.canHaveRemarks &&
@@ -135,6 +152,45 @@ async function postHandler(
       input.remarks.trim().length > 0
         ? input.remarks.trim()
         : null;
+
+    // 2026-09-11：订单来源平台。capability 关闭 → null；开启但用户没传 → null；
+    // 否则按 PLATFORMS 字典校验（非法 code 抛 400）。
+    let finalPlatform: string | null = null;
+    // 2026-09-11：渠道订单号（与 platform 配对；trim 后存；空 = null）。
+    let finalPlatformOrderNo: string | null = null;
+    if (type.capabilities.canPlatform) {
+      const raw = input.platform;
+      if (raw && raw.trim().length > 0) {
+        try {
+          validatePlatform(raw);
+          finalPlatform = raw;
+        } catch (e) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: e instanceof Error ? e.message : "平台 code 不合法",
+            },
+            { status: 400 }
+          );
+        }
+      }
+      // 渠道订单号：trim 后存；空串视为未填 → null
+      const rawOrderNo = input.platformOrderNo;
+      if (typeof rawOrderNo === "string") {
+        const trimmed = rawOrderNo.trim();
+        finalPlatformOrderNo = trimmed.length > 0 ? trimmed : null;
+      }
+      // 业务规则：用户填了渠道订单号但没选 platform → 400 提示配对填写
+      if (finalPlatformOrderNo && !finalPlatform) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "填写渠道订单号时需同时选择订单来源平台",
+          },
+          { status: 400 }
+        );
+      }
+    }
 
     await db
       .update(promptOrder)
@@ -145,6 +201,10 @@ async function postHandler(
         leatherExposed: finalLeatherExposed,
         pvcProtection: finalPvcProtection,
         remarks: trimmedRemarks,
+        // 2026-09-11：订单来源平台
+        platform: finalPlatform,
+        // 2026-09-11：渠道订单号（与 platform 配对）
+        platformOrderNo: finalPlatformOrderNo,
         updatedAt: new Date(),
       })
       .where(eq(promptOrder.id, order.id));
@@ -158,6 +218,10 @@ async function postHandler(
         leatherExposed: finalLeatherExposed,
         pvcProtection: finalPvcProtection,
         remarks: trimmedRemarks,
+        // 2026-09-11：订单来源平台（PLATFORMS 字典 code）
+        platform: finalPlatform,
+        // 2026-09-11：渠道订单号
+        platformOrderNo: finalPlatformOrderNo,
       },
     });
   } catch (err) {

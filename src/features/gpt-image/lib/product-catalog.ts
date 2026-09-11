@@ -40,6 +40,13 @@ export interface ProductCapabilities {
   canLeatherExposed: boolean;
   /** 是否可填备注（仅 LB；不参与生图，仅内部沟通） */
   canHaveRemarks: boolean;
+  /**
+   * 是否可选择订单来源平台（仅 LB 皮革徽章）。
+   * 2026-09-11：业务侧 ToB 渠道归因，下单时用户告诉代理商从哪个渠道
+   * 来的（淘宝 / 小红书 / 抖音 / 独立站 / 国内红人 / 国外红人 / 合作方 /
+   * 营销推广），用于结算与活动复盘。字典见 PLATFORMS。
+   */
+  canPlatform: boolean;
 }
 
 export interface ProductType {
@@ -66,6 +73,7 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
       canPvcProtection: false,
       canLeatherExposed: false,
       canHaveRemarks: false,
+      canPlatform: false,
     },
   },
   {
@@ -80,6 +88,7 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
       canPvcProtection: false,
       canLeatherExposed: false,
       canHaveRemarks: false,
+      canPlatform: false,
     },
   },
   {
@@ -94,6 +103,7 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
       canPvcProtection: false,
       canLeatherExposed: false,
       canHaveRemarks: false,
+      canPlatform: false,
     },
   },
   {
@@ -108,6 +118,7 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
       canPvcProtection: false,
       canLeatherExposed: false,
       canHaveRemarks: false,
+      canPlatform: false,
     },
   },
   {
@@ -116,12 +127,14 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
     sizes: ["4", "6"],
     accessories: [], // 皮革徽章无配件
     // 2026-09-10：LB 全加工能力开启（颜色 / 外露 / PVC / 备注 + 原有的刻字）
+    // 2026-09-11：再加 canPlatform（业务侧 ToB 渠道归因）
     capabilities: {
       canEngrave: true,
       canLeatherColor: true,
       canPvcProtection: true,
       canLeatherExposed: true,
       canHaveRemarks: true,
+      canPlatform: true,
     },
   },
 ];
@@ -174,6 +187,53 @@ export function validateLeatherColor(code: string | null | undefined): void {
   if (!code) return;
   if (!LEATHER_COLORS.some((c) => c.code === code)) {
     throw new Error(`未知的皮革颜色：${code}`);
+  }
+}
+
+// ============================================
+// 2026-09-11：订单来源平台字典（仅 LB 皮革徽章）
+// 业务侧 ToB 渠道归因：代理商想知道这单从哪儿来的，用于活动复盘 + 结算。
+// 字典量小（8 项）不上 DB；DB 只存 code，名称走 PLATFORMS 字典渲染。
+// 顺序按"自营 → 第三方电商 → 内容/网红 → 合作/营销"排列，UI 顺序与之一致。
+// ============================================
+export type PlatformCode =
+  | "taobao"
+  | "xiaohongshu"
+  | "douyin"
+  | "independent_site"
+  | "domestic_influencer"
+  | "foreign_influencer"
+  | "partner"
+  | "marketing";
+
+export interface Platform {
+  code: PlatformCode;
+  name: string;
+}
+
+export const PLATFORMS: readonly Platform[] = [
+  { code: "taobao", name: "淘宝" },
+  { code: "xiaohongshu", name: "小红书" },
+  { code: "douyin", name: "抖音" },
+  { code: "independent_site", name: "独立站" },
+  { code: "domestic_influencer", name: "国内红人" },
+  { code: "foreign_influencer", name: "国外红人" },
+  { code: "partner", name: "合作方" },
+  { code: "marketing", name: "营销推广" },
+];
+
+export function getPlatform(code: string | null | undefined): Platform | null {
+  if (!code) return null;
+  return PLATFORMS.find((p) => p.code === code) ?? null;
+}
+
+/**
+ * 校验平台 code 在字典里。code 为 null / undefined 通过（用户不选 = 默认走代理商统计 unknown）。
+ */
+export function validatePlatform(code: string | null | undefined): void {
+  if (!code) return;
+  if (!PLATFORMS.some((p) => p.code === code)) {
+    throw new Error(`未知的订单来源平台：${code}`);
   }
 }
 
@@ -236,6 +296,7 @@ export function formatCustomization(opts: {
   leatherExposed?: boolean | null;
   pvcProtection?: boolean | null;
   remarks?: string | null;
+  platform?: string | null;
 }): string {
   const parts: string[] = [];
   const text = opts.engravingText?.trim();
@@ -247,6 +308,9 @@ export function formatCustomization(opts: {
   if (color) parts.push(`皮革色：${color.name}`);
   if (opts.pvcProtection === true) parts.push("带 PVC 保护");
   if (opts.leatherExposed === true) parts.push("皮革外露");
+  // 2026-09-11：平台（仅 LB 业务使用，admin 复盘 / 结算归因）
+  const platform = getPlatform(opts.platform);
+  if (platform) parts.push(`来源：${platform.name}`);
   // remarks 故意不参与 parts.join — 备注单独渲染更稳
   return parts.join(" · ");
 }

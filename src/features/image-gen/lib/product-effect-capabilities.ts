@@ -43,6 +43,8 @@ export function getEffectiveCapabilities(
     canPvcProtection:
       override.canPvcProtection ?? type.capabilities.canPvcProtection,
     canHaveRemarks: override.canHaveRemarks ?? type.capabilities.canHaveRemarks,
+    // 2026-09-11：平台选择也支持模板级 override（admin 可关掉 LB 默认的 true）
+    canPlatform: override.canPlatform ?? type.capabilities.canPlatform,
   };
 }
 

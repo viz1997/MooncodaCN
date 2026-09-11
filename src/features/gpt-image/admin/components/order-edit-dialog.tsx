@@ -19,14 +19,11 @@ import { updateOrderAction } from "@/features/gpt-image/actions/orders";
 import {
   ACCESSORIES,
   getProductType,
+  PLATFORMS,
+  type PlatformCode,
   PRODUCT_TYPES,
 } from "@/features/gpt-image/lib/product-catalog";
-import {
-  ORDER_PLATFORM_LABELS,
-  ORDER_PLATFORMS,
-  type OrderPlatform,
-  type OrderView,
-} from "@/features/gpt-image/lib/types";
+import type { OrderView } from "@/features/gpt-image/lib/types";
 
 interface OrderEditDialogProps {
   open: boolean;
@@ -46,7 +43,9 @@ export function OrderEditDialog({
   const { message } = App.useApp();
   const [orderNo, setOrderNo] = useState("");
   const [recipientName, setRecipientName] = useState("");
-  const [platform, setPlatform] = useState<OrderPlatform | "">("");
+  const [platform, setPlatform] = useState<PlatformCode | "">("");
+  // 2026-09-11：渠道订单号（与 platform 配对；空串 = 未填）
+  const [platformOrderNo, setPlatformOrderNo] = useState<string>("");
   const [uploadCount, setUploadCount] = useState(1);
   const [imagesPerUpload, setImagesPerUpload] = useState(3);
   const [regenerateLimit, setRegenerateLimit] = useState(5);
@@ -61,7 +60,8 @@ export function OrderEditDialog({
     if (!open || !order) return;
     setOrderNo(order.orderNo);
     setRecipientName(order.recipientName ?? "");
-    setPlatform((order.platform ?? "") as OrderPlatform | "");
+    setPlatform((order.platform ?? "") as PlatformCode | "");
+    setPlatformOrderNo(order.platformOrderNo ?? "");
     setUploadCount(order.uploadCount);
     setImagesPerUpload(order.imagesPerUpload ?? 3);
     setRegenerateLimit(order.regenerateLimit ?? 5);
@@ -109,6 +109,8 @@ export function OrderEditDialog({
         orderNo: orderNo.trim(),
         recipientName: recipientName.trim(),
         platform: platform || null,
+        // 2026-09-11：渠道订单号（空/null → 清空；非空 → trim 后写入）
+        platformOrderNo: platformOrderNo.trim() || null,
         uploadCount,
         imagesPerUpload,
         regenerateLimit,
@@ -182,18 +184,35 @@ export function OrderEditDialog({
           <Form.Item label="来源平台" className="!mb-0">
             <Select
               value={platform || "_none"}
-              onChange={(v) =>
-                setPlatform(v === "_none" ? "" : (v as OrderPlatform))
-              }
+              onChange={(v) => {
+                const next = v === "_none" ? "" : (v as PlatformCode);
+                // 切换平台时清空旧订单号，避免"换平台但留旧渠道订单号"混淆
+                if (next !== platform) setPlatformOrderNo("");
+                setPlatform(next);
+              }}
               options={[
                 { value: "_none", label: "未指定" },
-                ...ORDER_PLATFORMS.map((p) => ({
-                  value: p,
-                  label: ORDER_PLATFORM_LABELS[p],
+                ...PLATFORMS.map((p) => ({
+                  value: p.code,
+                  label: p.name,
                 })),
               ]}
               placeholder="未指定"
               className="w-full"
+            />
+          </Form.Item>
+          {/* 2026-09-11：渠道订单号（与 platform 配对；max 64；可清空）。 */}
+          <Form.Item label="渠道订单号" className="!mb-0">
+            <Input
+              value={platformOrderNo}
+              onChange={(e) => setPlatformOrderNo(e.target.value.slice(0, 64))}
+              maxLength={64}
+              placeholder={
+                platform ? "如淘宝订单号 / 小红书订单 ID" : "请先选择平台"
+              }
+              disabled={!platform}
+              className="font-mono"
+              allowClear
             />
           </Form.Item>
 

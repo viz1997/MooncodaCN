@@ -670,12 +670,15 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
         productSize: null,
         accessoryCode: null,
         engravingText: null,
+        platformOrderNo: null,
         engravingExposed: null,
         // 2026-09-10：LB 扩字段（无 productTypeCode → 全 null）
         leatherColor: null,
         leatherExposed: null,
         pvcProtection: null,
         remarks: null,
+        // 2026-09-11：订单来源平台（无 productTypeCode → null）
+        platform: null,
       });
       return;
     }
@@ -703,6 +706,15 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
         accessoryCode: spec.accessoryCode,
         engravingText: spec.engravingText,
         engravingExposed: spec.engravingExposed,
+        // 2026-09-10：LB 皮革徽章扩展字段透传到 server action
+        leatherColor: spec.leatherColor,
+        leatherExposed: spec.leatherExposed,
+        pvcProtection: spec.pvcProtection,
+        remarks: spec.remarks,
+        // 2026-09-11：订单来源平台（PLATFORMS 字典 code；null = 未选）
+        platform: spec.platform,
+        // 2026-09-11：渠道订单号（与 platform 配对；空/null = 未填）
+        platformOrderNo: spec.platformOrderNo,
       });
       if (!res?.data) throw new Error("下单失败");
       const data = res.data;

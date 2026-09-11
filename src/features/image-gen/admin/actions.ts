@@ -126,6 +126,8 @@ const productEffectFormSchema = z.object({
    * - 非 null → 只覆盖 override 里出现的 key；canEngrave 不在覆盖范围
    *   （避免和现有刻字字段冲突，沿用 catalog）
    * 例：{ canLeatherColor: true, canPvcProtection: true } → 关掉皮革外露 / 备注
+   * 2026-09-11：加 canPlatform 字段（订单来源平台，PLATFORMS 字典），
+   * admin 可在 LB 模板级关掉这个开关（比如临时让一个 LB 模板不让用户选渠道）。
    */
   allowedCapabilities: z
     .object({
@@ -133,6 +135,7 @@ const productEffectFormSchema = z.object({
       canLeatherExposed: z.boolean().optional(),
       canPvcProtection: z.boolean().optional(),
       canHaveRemarks: z.boolean().optional(),
+      canPlatform: z.boolean().optional(),
     })
     .nullable()
     .default(null),

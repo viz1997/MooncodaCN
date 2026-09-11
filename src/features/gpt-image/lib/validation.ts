@@ -3,7 +3,7 @@
  */
 
 import { z } from "zod";
-import { validateProductSpec } from "./product-catalog";
+import { PLATFORMS, validateProductSpec } from "./product-catalog";
 
 /** 单个提示词变量结构（Phase A 起 image-gen 工作台复用） */
 export const promptVariableSchema = z.object({
@@ -72,11 +72,22 @@ export const promptTemplateSchema = z.object({
     .transform((v) => (v && v.length > 0 ? v : null)),
 });
 
-/** 订单来源平台（共享类型在 types.ts） */
-import { ORDER_PLATFORMS } from "./types";
-
+export { PLATFORMS as ORDER_PLATFORMS } from "./product-catalog";
+/** 订单来源平台（共享类型在 types.ts，字典在 product-catalog.ts）
+ *
+ * 2026-09-11：5 项老字典（taobao/douyin/xiaohongshu/kol/partner）扩到 8 项，
+ * 字典移到 product-catalog.ts 的 PLATFORMS / PlatformCode。OrderPlatform /
+ * OrderPlatformLabelMap 仍 re-export 出来给旧调用点。
+ *
+ * zod schema 需要 readonly tuple of string literals；这里从 PLATFORMS 派生
+ * 一个 `PLATFORM_CODES` 常量给 z.enum 用。
+ */
 export type { OrderPlatform } from "./types";
-export { ORDER_PLATFORM_LABELS, ORDER_PLATFORMS } from "./types";
+
+const PLATFORM_CODES = PLATFORMS.map((p) => p.code) as [
+  (typeof PLATFORMS)[number]["code"],
+  ...(typeof PLATFORMS)[number]["code"][],
+];
 
 /** 创建订单 */
 export const promptOrderCreateSchema = z
@@ -86,7 +97,17 @@ export const promptOrderCreateSchema = z
     // 用户名选填，留空时存 ""（DB 列 notNull 但允许默认空串）
     recipientName: z.string().trim().max(64).optional().default(""),
     // 平台选填，不指定为 undefined
-    platform: z.enum(ORDER_PLATFORMS).optional(),
+    platform: z.enum(PLATFORM_CODES).optional(),
+    /**
+     * 2026-09-11：渠道订单号（与 platform 配对；空串/null = 未填）。
+     * trim 后服务端二次校验；capability-gated（非 LB canPlatform=true 静默归 null）。
+     */
+    platformOrderNo: z
+      .string()
+      .trim()
+      .max(64, "渠道订单号过长")
+      .nullable()
+      .optional(),
     /**
      * 用户可上传的批次次数（默认 1）。总容量 = uploadCount × imagesPerUpload。
      * 历史遗留字段"上传图片数量"的实际语义是批次数，被误解为张数。

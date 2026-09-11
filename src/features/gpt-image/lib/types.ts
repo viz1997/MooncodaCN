@@ -7,6 +7,7 @@
  */
 
 import type { PromptOrderHistoryTrigger, PromptOrderStatus } from "@/db/schema";
+import type { PlatformCode } from "./product-catalog";
 
 export type OrderStatus =
   | "PENDING" // 等待用户上传图片
@@ -67,23 +68,19 @@ export interface PromptTemplateView {
 
 import type { PromptVariable } from "@/db/image-gen-types";
 
-/** 订单来源平台：与 DB schema 枚举保持一致 */
-export const ORDER_PLATFORMS = [
-  "taobao",
-  "douyin",
-  "xiaohongshu",
-  "kol",
-  "partner",
-] as const;
-export type OrderPlatform = (typeof ORDER_PLATFORMS)[number];
-
-export const ORDER_PLATFORM_LABELS: Record<OrderPlatform, string> = {
-  taobao: "淘宝",
-  douyin: "抖音",
-  xiaohongshu: "小红书",
-  kol: "红人",
-  partner: "合作方",
-};
+/** 订单来源平台：业务侧 ToB 渠道归因
+ *
+ * 2026-09-11：从 5 项老字典（taobao/douyin/xiaohongshu/kol/partner）扩到 8 项，
+ * 字典统一迁到 src/features/gpt-image/lib/product-catalog.ts 的 PLATFORMS /
+ * PlatformCode。历史 OrderPlatform / ORDER_PLATFORMS / ORDER_PLATFORM_LABELS
+ * 在本次重构里全部删除（前者只是 5 项 subset，留着会跟新字典撞名）。
+ *
+ * DB schema 端 promptOrderPlatformEnum 列与本字典解耦：表里 `platform` 列
+ * 是 text（无 CHECK），保留任意字符串值。pgEnum `prompt_order_platform` 是
+ * 历史遗留，本次新增字段不挂 enum，避免对生产 DB 做 migration。
+ */
+export type OrderPlatform = PlatformCode;
+export type { PlatformCode } from "./product-catalog";
 
 /** 用户端订单详情结构（不含 prompt） */
 export interface OrderView {
@@ -93,8 +90,6 @@ export interface OrderView {
   /** 用户昵称（创建订单时选填，留空时不在任何页面显示） */
   recipientName: string;
   token: string;
-  /** 订单来源平台（可空） */
-  platform: OrderPlatform | null;
   status: OrderStatus;
   hasUploadedImage: boolean;
   /** 实际已上传的图片数量（渐进式上传，可能 < uploadCount） */
@@ -173,6 +168,27 @@ export interface OrderView {
   pvcProtection: boolean | null;
   /** 备注（仅 canHaveRemarks=true；不参与生图，内部沟通用） */
   remarks: string | null;
+  /**
+   * 2026-09-11：订单来源平台（仅 canPlatform=true 可填，对应 PLATFORMS 字典）。
+   * 业务侧 ToB 渠道归因：admin 复盘 + 活动结算按这个 group by。
+   * null = 用户未选 / 未知渠道；非 LB 型号不渲染此字段。
+   *
+   * 类型沿用 ProductCapabilities.canPlatform 的字典 PlatformCode —— 8 项
+   * （taobao / xiaohongshu / douyin / independent_site / domestic_influencer /
+   * foreign_influencer / partner / marketing）；OrderPlatform 只是 PlatformCode
+   * 的别名（向下兼容老调用点）。
+   */
+  platform: PlatformCode | null;
+  /**
+   * 2026-09-11：渠道订单号（与 platform 配对；仅 LB canPlatform=true 业务）。
+   * 用户在淘宝 / 小红书 / 抖音 等外部渠道下单时填入的"渠道侧订单号"，用于
+   * 代理商对账。null = 用户未选 platform / 渠道订单号不知道 / 不展示。
+   *
+   * 跨平台订单号体系：淘宝 15~18 位数字、小红书字母数字混合、抖音 ID 等，
+   * 不强制结构化。DB 存 text，应用层只在 canPlatform=true 且 platform 有值
+   * 时建议填，不强校验格式。
+   */
+  platformOrderNo: string | null;
   template: {
     id: string;
     name: string;

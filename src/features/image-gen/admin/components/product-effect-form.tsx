@@ -609,7 +609,7 @@ export function ProductEffectForm({
             展示字典默认能力；勾选后只展示勾中的能力。已存在的订单不受影响。
           </div>
 
-          {/* 4 个 capability Switch */}
+          {/* 5 个 capability Switch（2026-09-11 加 canPlatform） */}
           <div className="space-y-2">
             {(
               [
@@ -617,6 +617,7 @@ export function ProductEffectForm({
                 ["canLeatherExposed", "皮革外露"],
                 ["canPvcProtection", "PVC 保护"],
                 ["canHaveRemarks", "备注"],
+                ["canPlatform", "订单来源平台"],
               ] as Array<[keyof ProductCapabilities, string]>
             ).map(([key, label]) => {
               const catalogDefault = productType.capabilities[key];

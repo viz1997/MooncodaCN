@@ -8,7 +8,7 @@ import { and, desc, eq, type SQL, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 
 import { db } from "@/db";
-import type { PromptOrderPlatform, PromptOrderStatus } from "@/db/schema";
+import type { PromptOrderStatus } from "@/db/schema";
 import { promptOrder, promptTemplate } from "@/db/schema";
 import { generateOrderToken } from "./generation-service";
 import {
@@ -19,7 +19,12 @@ import {
   parseSelections,
   parseUploadedImages,
 } from "./order-helpers";
-import { getProductType, validateProductSpec } from "./product-catalog";
+import {
+  getProductType,
+  type PlatformCode,
+  validatePlatform,
+  validateProductSpec,
+} from "./product-catalog";
 
 // ============================================
 // 模板服务
@@ -265,11 +270,37 @@ export async function deleteTemplate(id: string) {
 // 订单服务
 // ============================================
 
+/**
+ * 归一化 platform 字段：把任意 string 输入按 PLATFORMS 字典校验，
+ * 字典外的静默归 null（admin 复盘用 unknown 兜底，不抛错）。
+ * null / undefined 直接返回 null。
+ */
+function normalizePlatform(
+  input: string | null | undefined
+): PlatformCode | null {
+  if (!input) return null;
+  try {
+    validatePlatform(input);
+    return input as PlatformCode;
+  } catch {
+    return null;
+  }
+}
+
 export async function createOrder(input: {
   orderNo: string;
   templateId: string;
   recipientName?: string | undefined;
-  platform?: string | undefined;
+  /**
+   * 2026-09-11：订单来源平台（仅 LB 皮革徽章业务使用）。
+   * 未指定 / 字典外的 code → 静默落 null（admin 复盘用 unknown 兜底）。
+   */
+  platform?: string | null | undefined;
+  /**
+   * 2026-09-11：渠道订单号（与 platform 配对；跨平台异构字符串）。
+   * 未指定 / 空 → null；admin 编辑存量脏数据时允许任意字符串（不强制格式）。
+   */
+  platformOrderNo?: string | null | undefined;
   uploadCount: number;
   imagesPerUpload: number;
   regenerateLimit: number;
@@ -300,7 +331,8 @@ export async function createOrder(input: {
       id: input.replaceOrderId,
       orderNo: input.orderNo,
       recipientName: input.recipientName ?? "",
-      platform: (input.platform as string | null) ?? null,
+      platform: normalizePlatform(input.platform),
+      platformOrderNo: input.platformOrderNo ?? null,
       uploadCount: input.uploadCount,
       imagesPerUpload: input.imagesPerUpload,
       regenerateLimit: input.regenerateLimit,
@@ -351,7 +383,14 @@ export async function createOrder(input: {
       orderNo: input.orderNo,
       templateId: input.templateId,
       recipientName: input.recipientName ?? "",
-      platform: (input.platform as PromptOrderPlatform | undefined) ?? null,
+      platform: normalizePlatform(input.platform),
+      // 2026-09-11：渠道订单号。trim 后存；空串/null → null
+      platformOrderNo: (() => {
+        const raw = input.platformOrderNo;
+        if (!raw) return null;
+        const trimmed = raw.trim();
+        return trimmed.length > 0 ? trimmed : null;
+      })(),
       token,
       status: "PENDING",
       uploadCount: input.uploadCount,
@@ -374,7 +413,9 @@ export async function createOrder(input: {
     templateId: created.templateId,
     recipientName: created.recipientName,
     token: created.token,
-    platform: (created.platform ?? null) as PromptOrderPlatform | null,
+    platform: (created.platform ?? null) as PlatformCode | null,
+    // 2026-09-11：渠道订单号（与 platform 配对）
+    platformOrderNo: created.platformOrderNo ?? null,
     status: created.status,
     uploadCount: created.uploadCount,
     imagesPerUpload: created.imagesPerUpload,
@@ -448,6 +489,8 @@ export async function listOrders(filters: {
       templateId: promptOrder.templateId,
       recipientName: promptOrder.recipientName,
       platform: promptOrder.platform,
+      // 2026-09-11：渠道订单号（与 platform 配对）
+      platformOrderNo: promptOrder.platformOrderNo,
       token: promptOrder.token,
       status: promptOrder.status,
       uploadCount: promptOrder.uploadCount,
@@ -495,7 +538,9 @@ export async function listOrders(filters: {
       orderNo: o.orderNo,
       templateId: o.templateId,
       recipientName: o.recipientName,
-      platform: (o.platform ?? null) as PromptOrderPlatform | null,
+      platform: (o.platform ?? null) as PlatformCode | null,
+      // 2026-09-11：渠道订单号（与 platform 配对）
+      platformOrderNo: o.platformOrderNo ?? null,
       token: o.token,
       status: o.status,
       uploadCount: o.uploadCount,
@@ -599,6 +644,11 @@ export async function updateOrder(input: {
   orderNo: string;
   recipientName: string;
   platform: string | null;
+  /**
+   * 2026-09-11：渠道订单号（与 platform 配对）。undefined = 不改；null = 清空；
+   * 字符串 = trim 后写入。
+   */
+  platformOrderNo?: string | null | undefined;
   uploadCount: number;
   imagesPerUpload: number;
   regenerateLimit: number;
@@ -621,12 +671,23 @@ export async function updateOrder(input: {
     );
   }
 
+  // 2026-09-11：渠道订单号联动处理（trim；空串 → null）。
+  let normalizedPlatformOrderNo: string | null | undefined;
+  if (input.platformOrderNo !== undefined) {
+    const trimmed = input.platformOrderNo?.trim();
+    normalizedPlatformOrderNo = trimmed && trimmed.length > 0 ? trimmed : null;
+  }
+
   const [updated] = await db
     .update(promptOrder)
     .set({
       orderNo: input.orderNo,
       recipientName: input.recipientName,
-      platform: (input.platform as PromptOrderPlatform | null) ?? null,
+      platform: normalizePlatform(input.platform),
+      // 2026-09-11：渠道订单号（undefined 不写；非 undefined 写入 trim 后的值）
+      ...(normalizedPlatformOrderNo !== undefined
+        ? { platformOrderNo: normalizedPlatformOrderNo }
+        : {}),
       uploadCount: input.uploadCount,
       imagesPerUpload: input.imagesPerUpload,
       regenerateLimit: input.regenerateLimit,
@@ -669,7 +730,9 @@ export async function updateOrder(input: {
     orderNo: updated.orderNo,
     templateId: updated.templateId,
     recipientName: updated.recipientName,
-    platform: (updated.platform ?? null) as PromptOrderPlatform | null,
+    platform: (updated.platform ?? null) as PlatformCode | null,
+    // 2026-09-11：渠道订单号（与 platform 配对）
+    platformOrderNo: updated.platformOrderNo ?? null,
     token: updated.token,
     status: updated.status,
     uploadCount: updated.uploadCount,

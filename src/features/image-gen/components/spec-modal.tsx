@@ -43,7 +43,10 @@ import { Label } from "@/components/ui/label";
 import {
   ACCESSORIES,
   getProductType,
+  PLATFORMS,
+  type PlatformCode,
   type ProductCapabilities,
+  validatePlatform,
   validateProductSpec,
 } from "@/features/gpt-image/lib/product-catalog";
 import {
@@ -62,6 +65,13 @@ export interface SpecSelection {
   leatherExposed: boolean | null;
   pvcProtection: boolean | null;
   remarks: string | null;
+  /** 2026-09-11：订单来源平台（PLATFORMS 字典 code；null = 未选） */
+  platform: PlatformCode | null;
+  /**
+   * 2026-09-11：渠道订单号（与 platform 配对；异构字符串 free text）。
+   * 仅在 platform 选中的时候才会被收集；空串视为未填 → null。
+   */
+  platformOrderNo: string | null;
 }
 
 interface SpecModalProps {
@@ -135,6 +145,8 @@ export function SpecModal({
   const canLeatherExposed = caps?.canLeatherExposed ?? false;
   const canPvcProtection = caps?.canPvcProtection ?? false;
   const canHaveRemarks = caps?.canHaveRemarks ?? false;
+  // 2026-09-11：订单来源平台（仅 LB 皮革徽章）
+  const canPlatform = caps?.canPlatform ?? false;
   // 2026-09-10：皮革色按 allowedColors 子集过滤
   const effectiveLeatherColors = getEffectiveLeatherColors(
     template?.allowedColors
@@ -150,6 +162,10 @@ export function SpecModal({
   const [leatherExposed, setLeatherExposed] = useState<boolean>(false);
   const [pvcProtection, setPvcProtection] = useState<boolean>(false);
   const [remarks, setRemarks] = useState<string>("");
+  // 2026-09-11：订单来源平台
+  const [platform, setPlatform] = useState<string>("");
+  // 2026-09-11：渠道订单号（与 platform 配对；仅 platform 选中时才允许填写）
+  const [platformOrderNo, setPlatformOrderNo] = useState<string>("");
 
   // 打开时按可用规格 defaults 重置（受 allowed 子集过滤）
   useEffect(() => {
@@ -162,6 +178,8 @@ export function SpecModal({
     setLeatherExposed(false);
     setPvcProtection(false);
     setRemarks("");
+    setPlatform("");
+    setPlatformOrderNo("");
     // availableSizes/availableAccessories 依赖 template.allowed*；同步开 modal 时一并刷新
   }, [open, availableSizes, availableAccessories]);
 
@@ -178,6 +196,20 @@ export function SpecModal({
       return;
     }
     const trimmedEngraving = engravingText.trim();
+    // 2026-09-11：校验 platform code 在 PLATFORMS 字典里；空串视为未选。
+    let platformCode: PlatformCode | null = null;
+    if (platform) {
+      try {
+        validatePlatform(platform);
+        platformCode = platform as PlatformCode;
+      } catch {
+        platformCode = null;
+      }
+    }
+    // 2026-09-11：渠道订单号 trim；空 = null。
+    const trimmedPlatformOrderNo = platformOrderNo.trim();
+    const finalPlatformOrderNo =
+      trimmedPlatformOrderNo.length > 0 ? trimmedPlatformOrderNo : null;
     onConfirm({
       productSize: productSize || null,
       accessoryCode: accessoryCode || null,
@@ -188,6 +220,10 @@ export function SpecModal({
       leatherExposed: leatherExposed,
       pvcProtection: pvcProtection,
       remarks: remarks.trim() || null,
+      // 2026-09-11：订单来源平台（字典 code；空 = null）
+      platform: platformCode,
+      // 2026-09-11：渠道订单号（与 platform 配对）
+      platformOrderNo: finalPlatformOrderNo,
     });
   };
 
@@ -332,7 +368,8 @@ export function SpecModal({
             </div>
           )}
 
-          {/* 2026-09-10：皮革外露（独立于刻字外露） */}
+          {/* 2026-09-10：皮革外露（独立于刻字外露）。
+              2026-09-11：与「PVC 保护」互斥（二选一）—— 勾选时自动取消另一项。 */}
           {canLeatherExposed && (
             <label className="flex items-center justify-between gap-3 cursor-pointer">
               <div>
@@ -345,12 +382,16 @@ export function SpecModal({
                 type="checkbox"
                 className="h-5 w-5 accent-violet-600"
                 checked={leatherExposed}
-                onChange={(e) => setLeatherExposed(e.target.checked)}
+                onChange={(e) => {
+                  setLeatherExposed(e.target.checked);
+                  // 互斥：勾皮革外露 → 自动取消 PVC 保护
+                  if (e.target.checked) setPvcProtection(false);
+                }}
               />
             </label>
           )}
 
-          {/* 2026-09-10：PVC 保护 */}
+          {/* 2026-09-10：PVC 保护（与皮革外露互斥） */}
           {canPvcProtection && (
             <label className="flex items-center justify-between gap-3 cursor-pointer">
               <div>
@@ -363,7 +404,11 @@ export function SpecModal({
                 type="checkbox"
                 className="h-5 w-5 accent-violet-600"
                 checked={pvcProtection}
-                onChange={(e) => setPvcProtection(e.target.checked)}
+                onChange={(e) => {
+                  setPvcProtection(e.target.checked);
+                  // 互斥：勾 PVC 保护 → 自动取消皮革外露
+                  if (e.target.checked) setLeatherExposed(false);
+                }}
               />
             </label>
           )}
@@ -383,6 +428,63 @@ export function SpecModal({
               <p className="text-[10px] text-muted-foreground text-right">
                 {remarks.length} / 500
               </p>
+            </div>
+          )}
+
+          {/* 2026-09-11：订单来源平台（仅 LB 皮革徽章业务使用） */}
+          {canPlatform && (
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">订单来源（可选）</Label>
+              <p className="text-[11px] text-muted-foreground -mt-1">
+                从哪个渠道找到我们？用于代理商活动结算
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {PLATFORMS.map((p) => {
+                  const active = platform === p.code;
+                  return (
+                    <button
+                      key={p.code}
+                      type="button"
+                      onClick={() => {
+                        // 切换平台时清空旧订单号，避免"换平台但留旧渠道订单号"混淆
+                        if (!active) setPlatformOrderNo("");
+                        setPlatform(active ? "" : p.code);
+                      }}
+                      className={cn(
+                        "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                        active
+                          ? "border-violet-500 bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300"
+                          : "border-muted-foreground/20 hover:border-violet-500/50"
+                      )}
+                    >
+                      {p.name}
+                    </button>
+                  );
+                })}
+              </div>
+              {/* 2026-09-11：渠道订单号输入（platform 选中才出现；max 64 字符）。
+                  跨平台订单号体系：淘宝 15~18 位数字、小红书字母数字混合、抖音 ID 等，
+                  不强制格式校验。 */}
+              {platform && (
+                <div className="pt-1 space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">
+                    渠道订单号（可选）
+                  </Label>
+                  <Input
+                    type="text"
+                    value={platformOrderNo}
+                    onChange={(e) =>
+                      setPlatformOrderNo(e.target.value.slice(0, 64))
+                    }
+                    maxLength={64}
+                    placeholder="如淘宝订单号 / 小红书订单 ID"
+                    className="text-sm font-mono"
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    用于代理商对账；淘宝订单号约 15~18 位数字
+                  </p>
+                </div>
+              )}
             </div>
           )}
 

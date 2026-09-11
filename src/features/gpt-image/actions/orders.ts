@@ -100,14 +100,17 @@ export const deleteOrderAction = withOrderAction("delete")
  * 编辑订单
  *
  * 模板、token、状态、上传内容均锁定，仅允许改：
- * - orderNo / recipientName / platform / uploadCount / imagesPerUpload / regenerateLimit
+ * - orderNo / recipientName / platform / platformOrderNo / uploadCount / imagesPerUpload / regenerateLimit
  * - 2026-08-23 起允许改产品三件套（业务字段；代理商字段已砍）
+ * - 2026-09-11 加 platformOrderNo（渠道订单号；与 platform 配对，nullable = 清空）
  */
 const updateOrderSchema = z.object({
   id: z.string().min(1),
   orderNo: z.string().min(1, "请输入订单号").max(100),
   recipientName: z.string().max(100),
   platform: z.string().nullable(),
+  // 2026-09-11：渠道订单号（与 platform 配对；nullable = 清空；空串会被 service 端 trim 后归 null）
+  platformOrderNo: z.string().max(64).nullable(),
   uploadCount: z.number().int().min(1).max(50),
   imagesPerUpload: z.number().int().min(1).max(3),
   regenerateLimit: z.number().int().min(0).max(20),

@@ -45,6 +45,7 @@ import { generateOrderToken } from "@/features/gpt-image/lib/generation-service"
 import {
   getProductType,
   validateLeatherColor,
+  validatePlatform,
   validateProductSpec,
 } from "@/features/gpt-image/lib/product-catalog";
 import { protectedAction } from "@/lib/safe-action";
@@ -75,6 +76,19 @@ const submitDemoSchema = z.object({
   leatherExposed: z.boolean().nullable().optional(),
   pvcProtection: z.boolean().nullable().optional(),
   remarks: z.string().trim().min(0).max(500).nullable().optional(),
+  /**
+   * 2026-09-11：订单来源平台（PLATFORMS 字典 code）。
+   * - null/undefined = 用户未选 → 落 null
+   * - 非空 → 服务端用 validatePlatform 二次校验，字典外的 code 抛错
+   */
+  platform: z.string().min(1).max(32).nullable().optional(),
+  /**
+   * 2026-09-11：渠道订单号（与 platform 配对；跨平台异构字符串）。
+   * - null/undefined = 用户未填 → 落 null
+   * - 非空 → 服务端 trim 后存，max 64 字符
+   * - capability-gated：canPlatform=false → 静默落 null
+   */
+  platformOrderNo: z.string().trim().min(0).max(64).nullable().optional(),
 });
 
 /**
@@ -178,6 +192,10 @@ export const submitImageGenDemoAction = withDemoAction("submit")
     let finalLeatherExposed: boolean | null = null;
     let finalPvcProtection: boolean | null = null;
     let finalRemarks: string | null = null;
+    // 2026-09-11：订单来源平台（仅 LB canPlatform=true 接受）
+    let finalPlatform: string | null = null;
+    // 2026-09-11：渠道订单号（与 platform 配对；capability-gated）
+    let finalPlatformOrderNo: string | null = null;
     if (parsedInput.productTypeCode) {
       const capType = getProductType(parsedInput.productTypeCode);
       if (capType) {
@@ -191,9 +209,26 @@ export const submitImageGenDemoAction = withDemoAction("submit")
         if (capType.capabilities.canPvcProtection) {
           finalPvcProtection = parsedInput.pvcProtection === true;
         }
+        // 2026-09-11：皮革外露 / PVC 保护互斥（二选一）。
+        // UI 层 SpecModal 已经做了互斥，server 再兜一次挡绕过前端的脏请求。
+        if (finalLeatherExposed === true && finalPvcProtection === true) {
+          throw new Error("皮革外露 与 PVC 保护 不能同时勾选");
+        }
         if (capType.capabilities.canHaveRemarks) {
           const trimmed = parsedInput.remarks?.trim();
           finalRemarks = trimmed && trimmed.length > 0 ? trimmed : null;
+        }
+        if (capType.capabilities.canPlatform) {
+          finalPlatform = parsedInput.platform ?? null;
+          if (finalPlatform) validatePlatform(finalPlatform); // 字典外的 code 抛
+          // 渠道订单号：trim 后存；空串视为未填 → null
+          const trimmedOrderNo = parsedInput.platformOrderNo?.trim();
+          finalPlatformOrderNo =
+            trimmedOrderNo && trimmedOrderNo.length > 0 ? trimmedOrderNo : null;
+          // 业务规则：用户填了渠道订单号但没选 platform → 提示配对填写
+          if (finalPlatformOrderNo && !finalPlatform) {
+            throw new Error("填写渠道订单号时需同时选择订单来源平台");
+          }
         }
       }
     }
@@ -264,6 +299,10 @@ export const submitImageGenDemoAction = withDemoAction("submit")
         leatherExposed: finalLeatherExposed,
         pvcProtection: finalPvcProtection,
         remarks: finalRemarks,
+        // 2026-09-11：订单来源平台（PLATFORMS 字典 code）
+        platform: finalPlatform,
+        // 2026-09-11：渠道订单号（与 platform 配对）
+        platformOrderNo: finalPlatformOrderNo,
       })
       .returning({ id: promptOrder.id });
 

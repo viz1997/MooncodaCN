@@ -947,21 +947,22 @@ export const promptOrderHistoryTriggerEnum = pgEnum(
 );
 
 /**
- * 订单来源平台枚举
+ * 订单来源平台枚举（历史遗留，未挂任何列）
  *
- * 标识订单从哪个渠道分发（淘宝 / 抖音 / 小红书 / 红人 / 合作方），
- * 留空表示内部 / 未指定。
+ * 2026-09-11：平台字典从 5 项扩到 8 项（移至 src/features/gpt-image/lib/
+ * product-catalog.ts 的 PLATFORMS / PlatformCode）。prompt_order 表的
+ * platform 列是 text（无 CHECK），DB 端不再绑 enum。
+ *
+ * 此处仅保留历史 enum 定义以便老 migrate 不报错；PromptOrderPlatform
+ * type alias 已删除（无人引用）。
  */
 export const promptOrderPlatformEnum = pgEnum("prompt_order_platform", [
-  "taobao", // 淘宝
-  "douyin", // 抖音
-  "xiaohongshu", // 小红书
-  "kol", // 红人
-  "partner", // 合作方
+  "taobao",
+  "douyin",
+  "xiaohongshu",
+  "kol",
+  "partner",
 ]);
-
-export type PromptOrderPlatform =
-  (typeof promptOrderPlatformEnum.enumValues)[number];
 
 // ============================================
 // 提示词模板表 (PromptTemplate)
@@ -1084,8 +1085,37 @@ export const promptOrder = pgTable(
       .references(() => promptTemplate.id, { onDelete: "restrict" }),
     // 接收用户标识，可空（创建订单时选填）。旧记录可能为空字符串。
     recipientName: text("recipient_name").notNull().default(""),
-    // 订单来源平台（选填），null = 未指定
-    platform: promptOrderPlatformEnum("platform"),
+    /**
+     * 2026-09-11：订单来源平台（仅 LB 皮革徽章能力门控；业务侧 ToB 渠道归因）。
+     * 存 PLATFORMS 字典里的 code（taobao / xiaohongshu / douyin / independent_site /
+     * domestic_influencer / foreign_influencer / partner / marketing）。
+     * null = 未知 / 用户未选；admin 复盘 + 活动结算按这个 group by。
+     *
+     * 列类型是 text 而非 prompt_order_platform enum —— 历史 enum 5 项
+     * （taobao/douyin/xiaohongshu/kol/partner）已废弃，新字典 8 项直接走
+     * 应用层 PLATFORMS 校验。drizzle/0012_prompt_order_platform.sql 已加 text 列。
+     */
+    platform: text("platform"),
+    /**
+     * 2026-09-11：渠道订单号（仅 LB 皮革徽章能力门控；与 platform 配对）。
+     * 用户在淘宝 / 小红书 / 抖音 / 独立站 / 国内红人 / 国外红人 / 合作方 /
+     * 营销推广 等渠道下单时填入的"渠道侧订单号"，用于代理商对账。
+     *
+     * 字段语义：
+     *   - text：跨平台编号体系（淘宝 15~18 位数字 / 小红书字母数字混合 /
+     *     抖音 ID 等），不强制结构化
+     *   - nullable：null = 用户未选 platform / 渠道订单号不知道 / 单纯走代理商统计
+     *   - capability-gated：canPlatform=false 的型号此列保持 null
+     *
+     * 与 platform 字段的关系：platform 是"哪来的"（字典 code），platform_order_no
+     * 是"在那边的具体订单号"（free text）。可以 platform=null 但 platform_order_no
+     * 有值（理论上不该发生，但 server 端不强行绑死）。
+     *
+     * 列类型是 text 而非独立 enum —— 渠道订单号是异构字符串（数字 / 字母 /
+     * 横线 / 时间戳），上 enum 不合理。应用层只在 LB canPlatform=true 且
+     * platform 有值时建议填，不强校验格式。
+     */
+    platformOrderNo: text("platform_order_no"),
     token: text("token").notNull().unique(),
     status: promptOrderStatusEnum("status").notNull().default("PENDING"),
     uploadedImages: text("uploaded_images"),
@@ -1157,6 +1187,7 @@ export const promptOrder = pgTable(
     pvcProtection: boolean("pvc_protection"),
     /** 备注（仅内部沟通，不参与生图；服务端 max 500） */
     remarks: text("remarks"),
+    // platform 字段在表头 recipientName 后已声明（text 类型），见 line ~1089。
     agentId: text("agent_id").references((): AnyPgColumn => agent.id, {
       onDelete: "set null",
     }),

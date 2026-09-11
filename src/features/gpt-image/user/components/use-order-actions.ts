@@ -51,6 +51,8 @@ export interface UseOrderActionsResult {
   /**
    * 2026-09-07：提交产品定制（刻字 / 外露）。
    * 2026-09-10：扩到 LB 全加工维度（皮革颜色 / 皮革外露 / PVC 保护 / 备注）。
+   * 2026-09-11：再加 platform（订单来源平台，PLATFORMS 字典 code）。
+   * 2026-09-11：再加 platformOrderNo（渠道订单号，与 platform 配对的异构字符串）。
    * 由 /p/[token] 上传参考图前/后任意时机调用，状态机仅 PENDING 可改。
    * 服务端 /configure 路由按 product-catalog capabilities 自动拒绝不支持
    * 的字段，前端无须做能力预校验。
@@ -64,6 +66,10 @@ export interface UseOrderActionsResult {
     leatherExposed?: boolean | null;
     pvcProtection?: boolean | null;
     remarks?: string | null;
+    /** 2026-09-11：订单来源平台（PLATFORMS 字典 code；null = 清空） */
+    platform?: string | null;
+    /** 2026-09-11：渠道订单号（与 platform 配对；空串/null = 清空） */
+    platformOrderNo?: string | null;
   }) => Promise<boolean>;
 }
 
@@ -361,6 +367,8 @@ export function useOrderActions({
       leatherExposed?: boolean | null;
       pvcProtection?: boolean | null;
       remarks?: string | null;
+      platform?: string | null;
+      platformOrderNo?: string | null;
     }): Promise<boolean> => {
       setConfiguring(true);
       try {
