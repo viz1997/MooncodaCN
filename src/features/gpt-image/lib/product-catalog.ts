@@ -125,7 +125,9 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
     code: "LB",
     name: "CM 皮革徽章",
     sizes: ["4", "6"],
-    accessories: [], // 皮革徽章无配件
+    // 2026-09-12：LB 皮革徽章加「皮革 / 金属」二选一配件（用户原话"配件要显示对应的而不是默认，皮革还是金属"）。
+    // 字典补 metal；老订单 accessoryCode=null 时详情页不再渲染"配件：默认"行。
+    accessories: ["leather", "metal"],
     // 2026-09-10：LB 全加工能力开启（颜色 / 外露 / PVC / 备注 + 原有的刻字）
     // 2026-09-11：再加 canPlatform（业务侧 ToB 渠道归因）
     capabilities: {
@@ -139,7 +141,7 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
   },
 ];
 
-export type AccessoryCode = "leather" | "pvc" | "bracket";
+export type AccessoryCode = "leather" | "pvc" | "bracket" | "metal";
 
 export interface Accessory {
   code: AccessoryCode;
@@ -150,6 +152,8 @@ export const ACCESSORIES: readonly Accessory[] = [
   { code: "leather", name: "皮套" },
   { code: "pvc", name: "PVC 皮套" },
   { code: "bracket", name: "支架" },
+  // 2026-09-12：LB 皮革徽章用「金属」配件选项（与皮套二选一）
+  { code: "metal", name: "金属" },
 ];
 
 // ============================================

@@ -279,10 +279,16 @@ export function OrderDetailView({ order }: { order: OrderDetail }) {
                 {order.productSize ? `${order.productSize} cm` : "默认"}
               </span>
             </div>
-            <div className="text-[11px] flex items-baseline gap-2">
-              <span className="text-muted-foreground w-16 shrink-0">配件</span>
-              <span className="font-medium">{accessoryName ?? "默认"}</span>
-            </div>
+            {/* 2026-09-12：配件行——有 accessoryCode 才渲染（替代"默认"）。
+                LB 皮革徽章新加 leather / metal 二选一，accessoryCode=null 时不显示这一行。 */}
+            {order.accessoryCode && (
+              <div className="text-[11px] flex items-baseline gap-2">
+                <span className="text-muted-foreground w-16 shrink-0">
+                  配件
+                </span>
+                <span className="font-medium">{accessoryName}</span>
+              </div>
+            )}
             {order.engravingText && (
               <div className="text-[11px] space-y-0.5">
                 <div className="flex items-baseline gap-2">
@@ -319,20 +325,24 @@ export function OrderDetailView({ order }: { order: OrderDetail }) {
                 </span>
               </div>
             )}
+            {/* 2026-09-12：皮革外露 / PVC 保护文案整改 ——「是」改具体属性描述
+                - 皮革外露: true → "皮革面外露"（明示是皮革表面露在外面）
+                - PVC 保护: true → "PVC 保护套"（明示有 PVC 保护套）
+                - 二选一互斥（SpecModal + server action 已校验），详情页只渲染勾选的那一项 */}
             {order.leatherExposed === true && (
               <div className="text-[11px] flex items-baseline gap-2">
                 <span className="text-muted-foreground w-16 shrink-0">
-                  皮革外露
+                  皮革面
                 </span>
-                <span className="font-medium">是</span>
+                <span className="font-medium">皮革面外露</span>
               </div>
             )}
             {order.pvcProtection === true && (
               <div className="text-[11px] flex items-baseline gap-2">
                 <span className="text-muted-foreground w-16 shrink-0">
-                  PVC 保护
+                  保护套
                 </span>
-                <span className="font-medium">是</span>
+                <span className="font-medium">PVC 保护套</span>
               </div>
             )}
             {order.remarks && order.remarks.trim().length > 0 && (
