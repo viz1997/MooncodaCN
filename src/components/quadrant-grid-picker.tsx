@@ -101,13 +101,18 @@ export function QuadrantGridPicker({
   return (
     <div ref={containerRef} className={className ?? "relative"}>
       <div className="relative overflow-hidden rounded-xl border-2 border-zinc-200 bg-zinc-100">
-        {/* 底层拼接图（不裁剪，给用户看完整 2x2 / 3x3 区域） */}
+        {/* 底层拼接图（完整显示，不裁剪 —— 2026-09-12 修「订单详情效果图被遮挡」）
+            - w-full h-full object-contain: 容器固定 1:1（OrderDetailView aspect-square），
+              composite 任意 ratio 都按 contain 居中完整显示（留白不裁剪）
+            - 之前的 w-full 不限高，composite 高度按 ratio 撑开，被外层 overflow-hidden 切掉
+            - 老版本（生成时）也无 h-full：依赖外层 container 的 aspect-square 撑开 img
+            - 现在强制 h-full 让 img 撑满容器高度，object-contain 居中保持 ratio */}
         {/* biome-ignore lint/performance/noImgElement: 外部 R2 公开域，next/image 无法优化 */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={compositeUrl}
           alt={ariaLabel}
-          className="block w-full select-none"
+          className="block h-full w-full object-contain select-none"
           draggable={false}
         />
 

@@ -1420,7 +1420,10 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                   <Button
                     variant="outline"
                     onClick={() => {
-                      window.location.href = `/p/${submitted.token}`;
+                      // 2026-09-12：demo 订单不进 /p/[token]（避免匿名访问撞 404 —
+                      // candidates 是单张 composite，candIdx>0 时找不到图）。
+                      // 跳 /image-gen/orders 独立列表页（顶栏也跳这）。
+                      window.location.href = "/image-gen/orders";
                     }}
                   >
                     查看订单详情
@@ -1466,13 +1469,12 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                   className="group relative w-full aspect-square rounded-md overflow-hidden border bg-muted cursor-pointer hover:ring-2 hover:ring-violet-500/40 transition"
                   title={`${h.maskName} · ${new Date(h.createdAt).toLocaleString("zh-CN")}`}
                   onClick={() => {
-                    if (h.orderId) {
-                      // 2026-09-11：demo 订单不进 /p/[token] 公共页（避免撞 404）；
-                      // 跳 /image-gen/orders 列表让用户点开查看详情。
-                      window.location.href = "/image-gen/orders";
-                      return;
-                    }
-                    // 未下单的项 → 还原 result + 上传图片（如果有 R2 URL）
+                    // 2026-09-12：所有历史项（已下单 / 未下单）都还原成当前 result，
+                    // 让用户能基于这张图继续选 cell / 换模板继续下单。
+                    // - 已下单的项 = 已有订单，但用户可能想看另一张效果也下单（开新订单）
+                    // - 未下单的项 = 选过的预览图，回看 + 决定要不要提交
+                    // 已下单徽章保留右上角提示，不阻塞新提交；要看订单详情走
+                    // /image-gen/orders 列表（顶栏 Link）。
                     setSubmitted(null);
                     setError(null);
                     setSelectedMask(h.maskId);

@@ -176,10 +176,12 @@ export function OrderDetailView({ order }: { order: OrderDetail }) {
             />
           ) : (
             // biome-ignore lint/performance/noImgElement: 订单主图为远程 URL
+            // 2026-09-12：object-contain 避免 composite 任意 ratio 被裁
+            // （grid 模式由 QuadrantGridPicker 自身 object-contain 处理）
             <img
               src={primaryImageUrl}
               alt={order.templateName}
-              className="w-full h-full object-cover"
+              className="w-full h-full object-contain"
             />
           )
         ) : (
