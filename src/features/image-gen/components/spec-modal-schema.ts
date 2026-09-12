@@ -5,10 +5,14 @@
  * 把跨字段校验（订单号必须有 platform / 皮革外露 ⇄ PVC 互斥）集中到这里，免去
  * useState + 手写互斥逻辑。
  *
+ * 2026-09-12：去掉 engravingExposed 字段 —— 用户反馈「SpecModal 不需要外露开关」，
+ * 刻字一律默认内刻；DB 列 / 其他路径（/p/[token] / admin）保留该字段不删，
+ * 仅 SpecModal 不再写它。
+ *
  * 字段对照 SpecSelection（actions/submit-image-gen-demo.ts 入参）：
  * - productSize / accessoryCode：字符串，"" 视为 null
  * - engravingText / remarks / platformOrderNo：free text，受 max 限制
- * - engravingExposed / leatherExposed / pvcProtection：boolean
+ * - leatherExposed / pvcProtection：boolean
  * - leatherColor / platform：字典 code，"" 视为未选
  */
 
@@ -36,7 +40,6 @@ export const specModalSchema = z
     productSize: z.string(),
     accessoryCode: z.string(),
     engravingText: z.string().max(40),
-    engravingExposed: z.boolean(),
     leatherColor: leatherColorEnum,
     leatherExposed: z.boolean(),
     pvcProtection: z.boolean(),

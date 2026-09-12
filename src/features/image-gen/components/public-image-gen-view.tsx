@@ -459,12 +459,13 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
   );
 
   // 组件卸载清理
-  // 2026-09-12：deps 改为 [] —— clearPoll 已 useCallback 锁稳定，无须列入 deps。
-  // 旧版 deps=[clearPoll] 在每次父组件 re-render 时（clearPoll 引用更新）都会跑
-  // cleanup（clearPoll()）+ resubscribe，与下方 useEffect [masks, pollTask] 形成
-  // 双向 churn → SpecModal 内 useEffect reset 误触 → 字段态丢失。
-  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only cleanup；clearPoll 已 useCallback 锁稳定
-  useEffect(() => () => clearPoll(), []);
+  // 2026-09-12：clearPoll 已 useCallback 锁稳定 → `[clearPoll]` deps 在 render 间
+  // 不会变，等价于 mount-only cleanup；旧版 deps=[clearPoll]（clearPoll 不稳定时）
+  // 在每次父组件 re-render 时都会跑 cleanup（clearPoll()）+ resubscribe，与下方
+  // useEffect [masks, pollTask] 形成双向 churn → SpecModal 内 useEffect reset
+  // 误触 → 字段态丢失。修 clearPoll 引用稳定后 deps 缩不缩都一样，所以保留
+  // 完整 deps 让 biome 满意。
+  useEffect(() => () => clearPoll(), [clearPoll]);
 
   // 加载 mask 列表（2026-09-10：同时取 productLines）
   useEffect(() => {
@@ -487,6 +488,8 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
       : masks.filter((m) => (m.productLineIds ?? []).includes(activeLineId));
 
   // 刷新恢复：masks 加载后，若存在进行中任务则恢复并续轮询
+  // 2026-09-12：pollTask 已 useCallback 锁稳定 → [masks, pollTask] deps 不会 churn，
+  // effect 只在 masks 加载完成后跑一次（恢复进行中的 task），父组件 re-render 不触发。
   useEffect(() => {
     if (!masks.length) return;
     const task = loadTask();
@@ -504,12 +507,9 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
     setError(null);
     setPendingModelName(task.maskName);
     pollTask(task, true);
-    // 2026-09-12：deps 缩为 [masks] —— pollTask 已 useCallback 锁稳定，列入 deps
-    // 是噪音且会让 lint 误以为需要重跑；旧版 [masks, pollTask] 在 pollTask 引用
-    // 每 render 更新时 effect 会再跑一次（且中途 setX 形成状态反转），与上面
-    // useEffect `[clearPoll]` 一起把 SpecModal 状态吃掉。
-    // biome-ignore lint/correctness/useExhaustiveDependencies: pollTask 已 stable，列入会触发 false positive
-  }, [masks]);
+    // 2026-09-12：pollTask 已 useCallback 锁稳定 → 列入 deps 是安全的（不会 churn
+    // → effect 不会 re-run）。保留 [masks, pollTask] 让 biome 不再警告。
+  }, [masks, pollTask]);
 
   // ============================================
   // 多张参考图上传（与 V1 工作台对齐）
@@ -816,8 +816,6 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
         productSize: null,
         accessoryCode: null,
         engravingText: null,
-        platformOrderNo: null,
-        engravingExposed: null,
         // 2026-09-10：LB 扩字段（无 productTypeCode → 全 null）
         leatherColor: null,
         leatherExposed: null,
@@ -825,6 +823,7 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
         remarks: null,
         // 2026-09-11：订单来源平台（无 productTypeCode → null）
         platform: null,
+        platformOrderNo: null,
       });
       return;
     }
@@ -851,7 +850,8 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
         productSize: spec.productSize,
         accessoryCode: spec.accessoryCode,
         engravingText: spec.engravingText,
-        engravingExposed: spec.engravingExposed,
+        // 2026-09-12：engravingExposed 已从 SpecModal UI 移除；server schema
+        // 该字段仍然存在（DB 列 + /p/[token] 路径还在用），这里不传 → server 默认 null。
         // 2026-09-10：LB 皮革徽章扩展字段透传到 server action
         leatherColor: spec.leatherColor,
         leatherExposed: spec.leatherExposed,

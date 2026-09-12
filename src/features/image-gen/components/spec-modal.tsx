@@ -16,23 +16,24 @@
  * 引用每 render 新建 → useEffect `[clearPoll]` 每 render 跑 cleanup+resubscribe
  * → SpecModal 内部 useEffect reset 被 re-render storm 误触，字段点完就重置。
  *
+ * 2026-09-12：UI 重设计 —— 改为 3 分组卡片（产品选项 / 定制选项 / 订单信息），
+ * 每块独立 card 边框视觉分组。同时移除 engravingExposed 字段（用户反馈
+ * 「SpecModal 不需要外露开关」，刻字一律默认内刻；DB 列保留，server action
+ * 不传该字段时落 null）。
+ *
  * RHF 优势：
  * - 字段态在 ref 中，外部 React re-render 不重挂载 field DOM
  * - 跨字段校验（订单号必须有 platform / 皮革外露 ⇄ PVC 互斥）由 zod `.refine` 产出
  * - `form.watch()` 替代 useState 控制条件渲染
- * - `form.reset()` 在 `[open]` 切换时一次性重置，无误触风险
  *
- * 与 /p/[token] 上 ProductConfigSection 的区别：
- * - ProductConfigSection 是「修改已有订单的 engraving」（PENDING 阶段可改），用 useState
- * - SpecModal 是「创建订单时选 spec」（一次性，createOrder 时锁定），用 RHF
- *
- * SpecSelection 输出 contract 与 actions/submit-image-gen-demo.ts 入参对齐，
- * 父组件 handleConfirmSpec 调用点不动。
+ * SpecSelection 输出 contract：
+ * - 不再包含 engravingExposed（与 submit-image-gen-demo server 端对齐 → 默认 null）
+ * - 其余 9 个字段不变；父组件 handleConfirmSpec 调用点不动
  */
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2, Sparkles } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { Controller, useForm } from "react-hook-form";
 
 import { Button } from "@/components/ui/button";
@@ -67,7 +68,6 @@ export interface SpecSelection {
   productSize: string | null;
   accessoryCode: string | null;
   engravingText: string | null;
-  engravingExposed: boolean | null;
   // 2026-09-10：LB 皮革徽章扩展字段
   leatherColor: string | null;
   leatherExposed: boolean | null;
@@ -118,7 +118,6 @@ const EMPTY_DEFAULTS: SpecModalFormValues = {
   productSize: "",
   accessoryCode: "",
   engravingText: "",
-  engravingExposed: false,
   leatherColor: "",
   leatherExposed: false,
   pvcProtection: false,
@@ -187,14 +186,12 @@ export function SpecModal({
   const canPlatform = caps?.canPlatform ?? false;
 
   // ===== RHF =====
-  const form = useForm<SpecModalFormValues>({
-    resolver: zodResolver(specModalSchema),
-    defaultValues: EMPTY_DEFAULTS,
-    mode: "onChange",
-  });
 
   // defaults：按模板允许子集算出 size/accessory 默认项，其余字段不重置（用空值）
-  const defaults = useMemo<SpecModalFormValues>(
+  // 2026-09-12：直接喂 useForm defaultValues —— Dialog 关→开 时 children unmount/remount
+  // → RHF 在 mount 时读 defaultValues 重新初始化；不需要 useEffect reset，
+  // 也就不需要 [open] deps 触发的 biome 警告 + lint suppressions。
+  const formDefaults = useMemo<SpecModalFormValues>(
     () => ({
       ...EMPTY_DEFAULTS,
       productSize: availableSizes[0] ?? "",
@@ -203,17 +200,14 @@ export function SpecModal({
     [availableSizes, availableAccessories]
   );
 
-  // 打开时一次性 reset —— 仅依赖 [open]，不被父组件 re-render 误触
-  useEffect(() => {
-    if (open) form.reset(defaults);
-    // form 引用稳定；defaults 重新计算只在 availableSizes/Accessories 变化时触发（与 open toggle 通常同帧）
-    // biome-ignore lint/correctness/useExhaustiveDependencies: 故意只听 [open]；defaults 已 useMemo，form 由 RHF 锁定
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  const form = useForm<SpecModalFormValues>({
+    resolver: zodResolver(specModalSchema),
+    defaultValues: formDefaults,
+    mode: "onChange",
+  });
 
-  // 条件渲染 watch（替代旧 useState）
+  // 条件渲染 watch（仅订单号 disabled 需要 platform 状态）
   const platform = form.watch("platform");
-  const engravingText = form.watch("engravingText");
 
   const handleConfirm = form.handleSubmit((raw) => {
     if (!template) return;
@@ -243,7 +237,6 @@ export function SpecModal({
       productSize: raw.productSize || null,
       accessoryCode: raw.accessoryCode || null,
       engravingText: trimmedEngraving || null,
-      engravingExposed: trimmedEngraving ? raw.engravingExposed : null,
       leatherColor: raw.leatherColor || null,
       leatherExposed: raw.leatherExposed,
       pvcProtection: raw.pvcProtection,
@@ -261,8 +254,8 @@ export function SpecModal({
         if (!o) onClose();
       }}
     >
-      <DialogContent className="max-w-md sm:max-h-[85vh] flex flex-col">
-        <DialogHeader>
+      <DialogContent className="max-w-md sm:max-h-[90vh] flex flex-col gap-0 p-0 overflow-hidden">
+        <DialogHeader className="px-5 pt-5 pb-3 border-b border-border/60">
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-violet-500" />
             选择配件规格
@@ -276,352 +269,387 @@ export function SpecModal({
         <form
           id="spec-modal-form"
           onSubmit={handleConfirm}
-          className="space-y-4 flex-1 overflow-y-auto pr-1 sm:max-h-[calc(85vh-9rem)]"
+          className="flex-1 overflow-y-auto px-5 py-4 space-y-3"
         >
-          {/* 尺寸 */}
-          {hasSize && productType && (
-            <Controller
-              control={form.control}
-              name="productSize"
-              render={({ field }) => (
-                <fieldset className="space-y-2">
-                  <legend className="text-sm font-semibold">尺寸</legend>
-                  <div className="flex flex-wrap gap-2">
-                    {availableSizes.map((s) => {
-                      const active = field.value === s;
-                      return (
-                        <button
-                          key={s}
-                          type="button"
-                          aria-pressed={active}
-                          onClick={() => field.onChange(s)}
-                          className={cn(
-                            "inline-flex items-center px-3.5 py-1.5 rounded-lg border text-sm font-medium transition-all",
-                            active
-                              ? "border-violet-500 bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300"
-                              : "border-muted-foreground/20 hover:border-violet-500/50"
-                          )}
-                        >
-                          {s} cm
-                        </button>
-                      );
-                    })}
-                  </div>
-                </fieldset>
-              )}
-            />
-          )}
-
-          {/* 配件 */}
-          {hasAccessory && productType && (
-            <Controller
-              control={form.control}
-              name="accessoryCode"
-              render={({ field }) => (
-                <fieldset className="space-y-2">
-                  <legend className="text-sm font-semibold">配件</legend>
-                  <div className="flex flex-wrap gap-2">
-                    {availableAccessories.map((a) => {
-                      const acc = ACCESSORIES.find((x) => x.code === a);
-                      const active = field.value === a;
-                      return (
-                        <button
-                          key={a}
-                          type="button"
-                          aria-pressed={active}
-                          onClick={() => field.onChange(a)}
-                          className={cn(
-                            "inline-flex items-center px-3.5 py-1.5 rounded-lg border text-sm font-medium transition-all",
-                            active
-                              ? "border-violet-500 bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300"
-                              : "border-muted-foreground/20 hover:border-violet-500/50"
-                          )}
-                        >
-                          {acc?.name ?? a}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </fieldset>
-              )}
-            />
-          )}
-
-          {/* 刻字 */}
-          {canEngrave && (
-            <Controller
-              control={form.control}
-              name="engravingText"
-              render={({ field, fieldState }) => (
-                <div className="space-y-2">
-                  <Label className="text-sm font-semibold">刻字（可选）</Label>
-                  <Input
-                    type="text"
-                    placeholder="如：Love U / 2026.09.09 / 宝贝 1 岁"
-                    className="text-sm"
-                    maxLength={40}
-                    {...field}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    最多 40 个字符（中文 / 英文 / 数字 / 空格）
-                  </p>
-                  {fieldState.error?.message && (
-                    <p className="text-xs text-rose-600">
-                      {fieldState.error.message}
-                    </p>
-                  )}
-                  {engravingText.trim().length > 0 && (
-                    <Controller
-                      control={form.control}
-                      name="engravingExposed"
-                      render={({ field: expField }) => (
-                        <label className="flex items-center justify-between gap-3 cursor-pointer pt-1">
-                          <div>
-                            <div className="text-sm font-medium">外露</div>
-                            <p className="text-xs text-muted-foreground mt-1">
-                              关 = 内刻（默认）。开 = 刻在外表面
-                            </p>
-                          </div>
-                          <input
-                            type="checkbox"
-                            className="h-5 w-5 accent-violet-600"
-                            checked={expField.value}
-                            onChange={(e) =>
-                              expField.onChange(e.target.checked)
-                            }
-                          />
-                        </label>
-                      )}
-                    />
-                  )}
-                </div>
-              )}
-            />
-          )}
-
-          {/* 皮革颜色色卡 */}
-          {canLeatherColor && (
-            <Controller
-              control={form.control}
-              name="leatherColor"
-              render={({ field }) => (
-                <div className="space-y-2">
-                  <Label className="text-sm font-semibold">皮革颜色</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {effectiveLeatherColors.map((c) => {
-                      const active = field.value === c.code;
-                      return (
-                        <button
-                          key={c.code}
-                          type="button"
-                          aria-pressed={active}
-                          onClick={() => field.onChange(active ? "" : c.code)}
-                          className={cn(
-                            "inline-flex items-center gap-1.5 rounded-full border pl-1 pr-2.5 py-1 text-xs font-medium transition-colors",
-                            active
-                              ? "border-violet-500 bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300"
-                              : "border-muted-foreground/20 hover:border-violet-500/50"
-                          )}
-                          title={c.name}
-                        >
-                          <span
-                            aria-hidden
-                            className={cn(
-                              "h-4 w-4 rounded-full border",
-                              active && "ring-2 ring-violet-500 ring-offset-1"
-                            )}
-                            style={{ backgroundColor: c.swatch }}
-                          />
-                          {c.name}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            />
-          )}
-
-          {/* 皮革外露（与 PVC 保护互斥） */}
-          {canLeatherExposed && (
-            <Controller
-              control={form.control}
-              name="leatherExposed"
-              render={({ field }) => (
-                <label className="flex items-center justify-between gap-3 cursor-pointer">
-                  <div>
-                    <div className="text-sm font-semibold">皮革外露</div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      开 = 皮革面外露可见；关 = 内嵌不外露
-                    </p>
-                  </div>
-                  <input
-                    type="checkbox"
-                    className="h-5 w-5 accent-violet-600"
-                    checked={field.value}
-                    onChange={(e) => {
-                      field.onChange(e.target.checked);
-                      // 互斥：勾皮革外露 → 自动取消 PVC 保护（form.setValue 走 RHF store）
-                      if (e.target.checked)
-                        form.setValue("pvcProtection", false, {
-                          shouldValidate: false,
-                        });
-                    }}
-                  />
-                </label>
-              )}
-            />
-          )}
-
-          {/* PVC 保护（与皮革外露互斥） */}
-          {canPvcProtection && (
-            <Controller
-              control={form.control}
-              name="pvcProtection"
-              render={({ field, fieldState }) => (
-                <label className="flex items-center justify-between gap-3 cursor-pointer">
-                  <div>
-                    <div className="text-sm font-semibold">PVC 保护</div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      包一层透明 PVC 膜防刮花
-                    </p>
-                  </div>
-                  <input
-                    type="checkbox"
-                    className="h-5 w-5 accent-violet-600"
-                    checked={field.value}
-                    onChange={(e) => {
-                      field.onChange(e.target.checked);
-                      // 互斥：勾 PVC 保护 → 自动取消皮革外露
-                      if (e.target.checked)
-                        form.setValue("leatherExposed", false, {
-                          shouldValidate: false,
-                        });
-                    }}
-                  />
-                  {fieldState.error?.message && (
-                    <p className="text-xs text-rose-600">
-                      {fieldState.error.message}
-                    </p>
-                  )}
-                </label>
-              )}
-            />
-          )}
-
-          {/* 备注 */}
-          {canHaveRemarks && (
-            <Controller
-              control={form.control}
-              name="remarks"
-              render={({ field }) => (
-                <div className="space-y-2">
-                  <Label className="text-sm font-semibold">备注（可选）</Label>
-                  <textarea
-                    rows={3}
-                    placeholder="如：请尽快发货 / 希望礼品包装"
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 resize-y"
-                    maxLength={500}
-                    {...field}
-                  />
-                  <p className="text-xs text-muted-foreground text-right tabular-nums">
-                    {field.value.length} / 500
-                  </p>
-                </div>
-              )}
-            />
-          )}
-
-          {/* 订单来源平台 + 渠道订单号 */}
-          {canPlatform && (
-            <div className="space-y-2">
-              <Label className="text-sm font-semibold">订单来源（可选）</Label>
-              <p className="text-xs text-muted-foreground">
-                从哪个渠道找到我们？用于代理商活动结算
-              </p>
-              <Controller
-                control={form.control}
-                name="platform"
-                render={({ field, fieldState }) => (
-                  <div className="space-y-1.5">
-                    <div className="flex flex-wrap gap-2">
-                      {PLATFORMS.map((p) => {
-                        const active = field.value === p.code;
-                        return (
-                          <button
-                            key={p.code}
-                            type="button"
-                            aria-pressed={active}
-                            onClick={() => {
-                              // 切换平台时清空旧订单号，避免"换平台但留旧渠道订单号"混淆
-                              if (!active)
-                                form.setValue("platformOrderNo", "", {
-                                  shouldValidate: false,
-                                });
-                              field.onChange(active ? "" : p.code);
-                            }}
-                            className={cn(
-                              "inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-                              active
-                                ? "border-violet-500 bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300"
-                                : "border-muted-foreground/20 hover:border-violet-500/50"
-                            )}
-                          >
-                            {p.name}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    {fieldState.error?.message && (
-                      <p className="text-xs text-rose-600">
-                        {fieldState.error.message}
-                      </p>
-                    )}
-                  </div>
-                )}
-              />
-
-              {/* 渠道订单号：始终显示，未选平台时 disabled；视觉分隔与平台 pills 区分 */}
-              <div className="border-t border-border/60 pt-3 mt-2 space-y-1.5">
-                <Label className="text-xs font-medium text-muted-foreground">
-                  渠道订单号（可选）
-                </Label>
-                <Controller
-                  control={form.control}
-                  name="platformOrderNo"
-                  render={({ field }) => (
-                    <Input
-                      type="text"
-                      placeholder={
-                        platform
-                          ? "如淘宝订单号 / 小红书订单 ID"
-                          : "请先在上方选择订单来源平台"
-                      }
-                      disabled={!platform}
-                      maxLength={64}
-                      className="text-sm font-mono disabled:opacity-60"
-                      {...field}
-                    />
-                  )}
-                />
-                <p className="text-xs text-muted-foreground">
-                  {platform
-                    ? "用于代理商对账；淘宝订单号约 15~18 位数字"
-                    : "选中平台后才能填写渠道订单号"}
-                </p>
-              </div>
-            </div>
-          )}
-
           {/* 无 productTypeCode（老 ToC 模板）→ 提示「无需选规格」 */}
           {!productType && (
-            <div className="rounded-lg bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
+            <div className="rounded-lg border border-dashed border-border/80 bg-muted/40 px-4 py-6 text-center text-sm text-muted-foreground">
               此模板为通用款式，无需选择配件规格
             </div>
           )}
+
+          {/* ====== 卡片 1：产品选项 ====== */}
+          {(hasSize || hasAccessory) && (
+            <section className="rounded-lg border border-border/70 bg-card overflow-hidden">
+              <header className="px-4 py-2.5 bg-muted/40 border-b border-border/60 flex items-center gap-2">
+                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-violet-500/10 text-[11px] font-semibold text-violet-600 dark:text-violet-300">
+                  1
+                </span>
+                <h3 className="text-sm font-semibold">产品选项</h3>
+              </header>
+              <div className="p-4 space-y-4">
+                {/* 尺寸 */}
+                {hasSize && productType && (
+                  <Controller
+                    control={form.control}
+                    name="productSize"
+                    render={({ field }) => (
+                      <fieldset className="space-y-2">
+                        <legend className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                          尺寸
+                        </legend>
+                        <div className="flex flex-wrap gap-2">
+                          {availableSizes.map((s) => {
+                            const active = field.value === s;
+                            return (
+                              <button
+                                key={s}
+                                type="button"
+                                aria-pressed={active}
+                                onClick={() => field.onChange(s)}
+                                className={cn(
+                                  "inline-flex items-center px-3.5 py-1.5 rounded-lg border text-sm font-medium transition-all",
+                                  active
+                                    ? "border-violet-500 bg-violet-50 text-violet-700 shadow-sm dark:bg-violet-950/40 dark:text-violet-300"
+                                    : "border-border hover:border-violet-500/50"
+                                )}
+                              >
+                                {s} cm
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </fieldset>
+                    )}
+                  />
+                )}
+
+                {/* 配件 */}
+                {hasAccessory && productType && (
+                  <Controller
+                    control={form.control}
+                    name="accessoryCode"
+                    render={({ field }) => (
+                      <fieldset className="space-y-2">
+                        <legend className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                          配件
+                        </legend>
+                        <div className="flex flex-wrap gap-2">
+                          {availableAccessories.map((a) => {
+                            const acc = ACCESSORIES.find((x) => x.code === a);
+                            const active = field.value === a;
+                            return (
+                              <button
+                                key={a}
+                                type="button"
+                                aria-pressed={active}
+                                onClick={() => field.onChange(a)}
+                                className={cn(
+                                  "inline-flex items-center px-3.5 py-1.5 rounded-lg border text-sm font-medium transition-all",
+                                  active
+                                    ? "border-violet-500 bg-violet-50 text-violet-700 shadow-sm dark:bg-violet-950/40 dark:text-violet-300"
+                                    : "border-border hover:border-violet-500/50"
+                                )}
+                              >
+                                {acc?.name ?? a}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </fieldset>
+                    )}
+                  />
+                )}
+              </div>
+            </section>
+          )}
+
+          {/* ====== 卡片 2：定制选项 ====== */}
+          {(canEngrave ||
+            canLeatherColor ||
+            canLeatherExposed ||
+            canPvcProtection ||
+            canHaveRemarks) && (
+            <section className="rounded-lg border border-border/70 bg-card overflow-hidden">
+              <header className="px-4 py-2.5 bg-muted/40 border-b border-border/60 flex items-center gap-2">
+                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-violet-500/10 text-[11px] font-semibold text-violet-600 dark:text-violet-300">
+                  2
+                </span>
+                <h3 className="text-sm font-semibold">定制选项</h3>
+              </header>
+              <div className="p-4 space-y-4">
+                {/* 刻字 */}
+                {canEngrave && (
+                  <Controller
+                    control={form.control}
+                    name="engravingText"
+                    render={({ field, fieldState }) => (
+                      <div className="space-y-2">
+                        <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                          刻字（可选）
+                        </Label>
+                        <Input
+                          type="text"
+                          placeholder="如：Love U / 2026.09.09 / 宝贝 1 岁"
+                          className="text-sm"
+                          maxLength={40}
+                          {...field}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          最多 40 个字符（中文 / 英文 / 数字 / 空格）；默认内刻
+                        </p>
+                        {fieldState.error?.message && (
+                          <p className="text-xs text-rose-600">
+                            {fieldState.error.message}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  />
+                )}
+
+                {/* 皮革颜色色卡 */}
+                {canLeatherColor && (
+                  <Controller
+                    control={form.control}
+                    name="leatherColor"
+                    render={({ field }) => (
+                      <div className="space-y-2">
+                        <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                          皮革颜色
+                        </Label>
+                        <div className="flex flex-wrap gap-2">
+                          {effectiveLeatherColors.map((c) => {
+                            const active = field.value === c.code;
+                            return (
+                              <button
+                                key={c.code}
+                                type="button"
+                                aria-pressed={active}
+                                onClick={() =>
+                                  field.onChange(active ? "" : c.code)
+                                }
+                                className={cn(
+                                  "inline-flex items-center gap-1.5 rounded-full border pl-1 pr-2.5 py-1 text-xs font-medium transition-colors",
+                                  active
+                                    ? "border-violet-500 bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300"
+                                    : "border-border hover:border-violet-500/50"
+                                )}
+                                title={c.name}
+                              >
+                                <span
+                                  aria-hidden
+                                  className={cn(
+                                    "h-4 w-4 rounded-full border",
+                                    active &&
+                                      "ring-2 ring-violet-500 ring-offset-1"
+                                  )}
+                                  style={{ backgroundColor: c.swatch }}
+                                />
+                                {c.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  />
+                )}
+
+                {/* 皮革外露 / PVC 保护（互斥，二选一并排成 2 列） */}
+                {(canLeatherExposed || canPvcProtection) && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {canLeatherExposed && (
+                      <Controller
+                        control={form.control}
+                        name="leatherExposed"
+                        render={({ field }) => (
+                          <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-border/70 p-3 hover:border-violet-500/40 transition-colors">
+                            <input
+                              type="checkbox"
+                              className="mt-0.5 h-4 w-4 accent-violet-600"
+                              checked={field.value}
+                              onChange={(e) => {
+                                field.onChange(e.target.checked);
+                                if (e.target.checked)
+                                  form.setValue("pvcProtection", false, {
+                                    shouldValidate: false,
+                                  });
+                              }}
+                            />
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium leading-tight">
+                                皮革外露
+                              </div>
+                              <p className="text-xs text-muted-foreground mt-1 leading-snug">
+                                开 = 皮革面外露可见
+                              </p>
+                            </div>
+                          </label>
+                        )}
+                      />
+                    )}
+                    {canPvcProtection && (
+                      <Controller
+                        control={form.control}
+                        name="pvcProtection"
+                        render={({ field, fieldState }) => (
+                          <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-border/70 p-3 hover:border-violet-500/40 transition-colors">
+                            <input
+                              type="checkbox"
+                              className="mt-0.5 h-4 w-4 accent-violet-600"
+                              checked={field.value}
+                              onChange={(e) => {
+                                field.onChange(e.target.checked);
+                                if (e.target.checked)
+                                  form.setValue("leatherExposed", false, {
+                                    shouldValidate: false,
+                                  });
+                              }}
+                            />
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium leading-tight">
+                                PVC 保护
+                              </div>
+                              <p className="text-xs text-muted-foreground mt-1 leading-snug">
+                                包一层透明 PVC 膜防刮花
+                              </p>
+                            </div>
+                            {fieldState.error?.message && (
+                              <p className="text-xs text-rose-600 mt-1 col-span-2">
+                                {fieldState.error.message}
+                              </p>
+                            )}
+                          </label>
+                        )}
+                      />
+                    )}
+                  </div>
+                )}
+
+                {/* 备注 */}
+                {canHaveRemarks && (
+                  <Controller
+                    control={form.control}
+                    name="remarks"
+                    render={({ field }) => (
+                      <div className="space-y-2">
+                        <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                          备注（可选）
+                        </Label>
+                        <textarea
+                          rows={3}
+                          placeholder="如：请尽快发货 / 希望礼品包装"
+                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 resize-y"
+                          maxLength={500}
+                          {...field}
+                        />
+                        <p className="text-xs text-muted-foreground text-right tabular-nums">
+                          {field.value.length} / 500
+                        </p>
+                      </div>
+                    )}
+                  />
+                )}
+              </div>
+            </section>
+          )}
+
+          {/* ====== 卡片 3：订单信息 ====== */}
+          {canPlatform && (
+            <section className="rounded-lg border border-border/70 bg-card overflow-hidden">
+              <header className="px-4 py-2.5 bg-muted/40 border-b border-border/60 flex items-center gap-2">
+                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-violet-500/10 text-[11px] font-semibold text-violet-600 dark:text-violet-300">
+                  3
+                </span>
+                <h3 className="text-sm font-semibold">订单信息</h3>
+              </header>
+              <div className="p-4 space-y-4">
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    订单来源（可选）
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    从哪个渠道找到我们？用于代理商活动结算
+                  </p>
+                  <Controller
+                    control={form.control}
+                    name="platform"
+                    render={({ field, fieldState }) => (
+                      <div className="space-y-1.5">
+                        <div className="flex flex-wrap gap-2">
+                          {PLATFORMS.map((p) => {
+                            const active = field.value === p.code;
+                            return (
+                              <button
+                                key={p.code}
+                                type="button"
+                                aria-pressed={active}
+                                onClick={() => {
+                                  // 切换平台时清空旧订单号，避免"换平台但留旧渠道订单号"混淆
+                                  if (!active)
+                                    form.setValue("platformOrderNo", "", {
+                                      shouldValidate: false,
+                                    });
+                                  field.onChange(active ? "" : p.code);
+                                }}
+                                className={cn(
+                                  "inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                                  active
+                                    ? "border-violet-500 bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300"
+                                    : "border-border hover:border-violet-500/50"
+                                )}
+                              >
+                                {p.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {fieldState.error?.message && (
+                          <p className="text-xs text-rose-600">
+                            {fieldState.error.message}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  />
+                </div>
+
+                {/* 渠道订单号：始终显示，未选平台时 disabled；视觉分隔与平台 pills 区分 */}
+                <div className="space-y-1.5 pt-2 border-t border-dashed border-border/60">
+                  <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    渠道订单号（可选）
+                  </Label>
+                  <Controller
+                    control={form.control}
+                    name="platformOrderNo"
+                    render={({ field }) => (
+                      <Input
+                        type="text"
+                        placeholder={
+                          platform
+                            ? "如淘宝订单号 / 小红书订单 ID"
+                            : "请先在上方选择订单来源平台"
+                        }
+                        disabled={!platform}
+                        maxLength={64}
+                        className="text-sm font-mono disabled:opacity-60"
+                        {...field}
+                      />
+                    )}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {platform
+                      ? "用于代理商对账；淘宝订单号约 15~18 位数字"
+                      : "选中平台后才能填写渠道订单号"}
+                  </p>
+                </div>
+              </div>
+            </section>
+          )}
         </form>
 
-        <DialogFooter className="gap-2">
+        <DialogFooter className="px-5 py-3 border-t border-border/60 bg-muted/30 gap-2">
           <Button variant="outline" onClick={onClose} disabled={submitting}>
             取消
           </Button>
