@@ -163,8 +163,10 @@ export function OrderDetailView({ order }: { order: OrderDetail }) {
           现在 candidates 才是 Lingting 生成的 demo 预览图 / 用户选中的 cell）。
           2026-09-12：去掉 max-h-[60vh] —— 之前 max-h 与 aspect-square 同时作用
           让容器变矩形（500×432），composite 1:1 在矩形里被压扁 + hotzone 位置偏移；
-          现在严格 aspect-square 1:1，让 QuadrantGridPicker cell 位置对齐 composite 实际 cell。 */}
-      <div className="relative aspect-square w-full bg-muted overflow-hidden ring-2 ring-emerald-500 ring-inset">
+          现在严格 aspect-square 1:1，让 QuadrantGridPicker cell 位置对齐 composite 实际 cell。
+          2026-09-12：max-w-md mx-auto —— 在宽屏上 1:1 容器宽度 = 右栏宽度，
+          composite 被无意义放大，加 max-w-md（448px）限制合理查看尺寸。 */}
+      <div className="relative aspect-square w-full max-w-md mx-auto bg-muted overflow-hidden ring-2 ring-emerald-500 ring-inset">
         {primaryImageUrl ? (
           isGridMulti ? (
             // 2026-09-11：grid 宫格订单只读 picker——onSelect 是 no-op（disabled 后点击无反应）
