@@ -22,20 +22,21 @@
  * 不传该字段时落 null）。
  *
  * 2026-09-12：UI 重设计 v2 —— 用户反馈「订单信息应该放在弹窗最前面 +
- * 弹窗整体很难看而且不人性」。新版结构：
+ * 弹窗整体很难看而且不人性」。新版结构（v2.4 最终版）：
  *
  *   1. 「订单来源」段 —— platform + 渠道订单号（最前置，原 v1 卡片 3 内容）。
- *   2. 「订单概要」卡 —— 模板预览缩略图 + 模板名 + 产品类型 + 选中分镜
- *      badge + 积分成本 badge，让用户一眼看到在下单什么。
- *   3. 「产品规格」段 —— 尺寸 + 配件（原 v1 卡片 1）。
- *   4. 「定制选项」段 —— 刻字 + 皮革色 + 外露/PVC + 备注（原 v1 卡片 2）。
+ *   2. 「产品规格」段 —— 尺寸 + 配件 + 保护套类型（实物外露 / PVC 保护，
+ *      2 选 1 pill）+ 皮革颜色（色卡 pill）。
+ *   3. 「定制选项」段 —— 刻字 + 备注。
+ *
+ * （v2.4 删除原「订单概要」卡 —— 用户反馈"CM 皮革徽章· 已选第 2 格"冗余，
+ * 用户已从结果卡看过模板预览/产品类型/分镜选择，不再需要再次展示。）
  *
  * 视觉改造要点：
  *   - 去掉硬边框 card 包裹，改用分隔线 + 间距分组（less rigid）
  *   - 字段块标题用大图标 + 中文标题，让人一眼看懂
  *   - 选项 pill 选中态更明显（border + bg + 阴影 + 加粗）
  *   - 文字输入框更宽更大
- *   - 顶部订单概要用浅紫渐变背景强化"商品卡"感
  *
  * SpecSelection 输出 contract 不变：父组件 handleConfirmSpec 调用点不动。
  */
@@ -107,10 +108,6 @@ interface SpecModalProps {
     previewUrl: string;
     productTypeCode: string | null;
     /**
-     * 2026-09-12：模板成本（demo 下单扣减的积分数）。price=0 时弹"免费下单"徽标。
-     */
-    price?: number | null;
-    /**
      * 2026-09-10：模板级可配置尺寸子集（覆盖字典默认）。
      * null/空 → 用字典全量；非空 → 仅这些。
      */
@@ -129,11 +126,6 @@ interface SpecModalProps {
      */
     allowedColors?: string[] | null;
   } | null;
-  /**
-   * 2026-09-12：用户从宫格里选中的 cell（仅 candidateCount>1 + outputMode=grid 时有值）。
-   * 在订单概要上以 badge 形式显示，让用户确认自己下的是哪一张。
-   */
-  selectedCell?: number | null;
   submitting?: boolean;
   onClose: () => void;
   onConfirm: (spec: SpecSelection) => void;
@@ -155,7 +147,6 @@ const EMPTY_DEFAULTS: SpecModalFormValues = {
 export function SpecModal({
   open,
   template,
-  selectedCell,
   submitting,
   onClose,
   onConfirm,
@@ -385,56 +376,6 @@ export function SpecModal({
             </section>
           )}
 
-          {/* 分隔线：订单来源 → 订单概要 */}
-          {canPlatform && productType && template && (
-            <hr className="mx-6 border-border/40" />
-          )}
-
-          {/* ====== 段 2：「订单概要」卡 —— 让用户一眼看到在下单什么 ====== */}
-          {template && (
-            <div className="px-6 pt-5 pb-4 border-b border-border/40 bg-gradient-to-br from-violet-50/30 to-purple-50/20 dark:from-violet-950/15 dark:to-purple-950/10">
-              <div className="flex gap-3.5">
-                {/* 模板预览缩略图 */}
-                <div className="relative shrink-0">
-                  <div className="h-20 w-20 rounded-xl overflow-hidden border-2 border-violet-500/20 bg-gradient-to-br from-sky-100 to-indigo-100 dark:from-sky-950/40 dark:to-indigo-950/40 shadow-sm">
-                    {template.previewUrl ? (
-                      // biome-ignore lint/performance/noImgElement: 模板预览图
-                      <img
-                        src={template.previewUrl}
-                        alt={template.name}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-violet-500 font-bold text-2xl">
-                        {template.name.slice(0, 1)}
-                      </div>
-                    )}
-                  </div>
-                  {selectedCell !== null && selectedCell !== undefined && (
-                    <div className="absolute -bottom-1.5 -right-1.5 h-6 w-6 rounded-full bg-emerald-500 flex items-center justify-center text-white text-[10px] font-bold shadow-md ring-2 ring-background">
-                      {selectedCell + 1}
-                    </div>
-                  )}
-                </div>
-
-                {/* 模板名 + 产品类型 + 选中分镜 */}
-                <div className="flex-1 min-w-0 flex flex-col justify-center">
-                  <div className="text-sm font-semibold truncate">
-                    {template.name}
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-0.5 truncate">
-                    {productType?.name ?? "通用款式"}
-                    {selectedCell !== null && selectedCell !== undefined && (
-                      <span className="ml-1.5 inline-flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400">
-                        · 已选第 {selectedCell + 1} 格
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* 无 productTypeCode（老 ToC 模板）→ 提示「无需选规格」 */}
           {!productType && (
             <div className="mx-6 mt-5 rounded-lg border border-dashed border-border/80 bg-muted/40 px-4 py-6 text-center text-sm text-muted-foreground">
@@ -442,14 +383,14 @@ export function SpecModal({
             </div>
           )}
 
-          {/* 分隔线：订单概要 → 产品规格 */}
-          {template &&
+          {/* 分隔线：订单来源 → 产品规格 */}
+          {canPlatform &&
+            productType &&
             (hasSize ||
               hasAccessory ||
               canLeatherExposed ||
               canPvcProtection ||
-              canLeatherColor) &&
-            productType && <hr className="mx-6 border-border/40" />}
+              canLeatherColor) && <hr className="mx-6 border-border/40" />}
 
           {/* ====== 段 3：产品规格（含尺寸 / 配件 / 保护套类型 / 皮革颜色） ====== */}
           {(hasSize ||
