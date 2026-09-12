@@ -131,13 +131,16 @@ interface SpecModalProps {
   onConfirm: (spec: SpecSelection) => void;
 }
 
-/** 空表单 defaults —— modal 打开时按 template 算出来的 size/accessory 默认项会覆盖这两个字段 */
+/** 空表单 defaults —— modal 打开时按 template 算出来的 size/accessory 默认项会覆盖这两个字段
+ *  2026-09-12：leatherExposed 默认 true（实物外露是 LB 皮革徽章默认表面处理，
+ *  用户开 modal 就已经预选实物外露 pill，避免空白初始态）。
+ */
 const EMPTY_DEFAULTS: SpecModalFormValues = {
   productSize: "",
   accessoryCode: "",
   engravingText: "",
   leatherColor: "",
-  leatherExposed: false,
+  leatherExposed: true,
   pvcProtection: false,
   remarks: "",
   platform: "",
@@ -209,10 +212,14 @@ export function SpecModal({
   // 2026-09-12：直接喂 useForm defaultValues —— Dialog 关→开 时 children unmount/remount
   // → RHF 在 mount 时读 defaultValues 重新初始化；不需要 useEffect reset，
   // 也就不需要 [open] deps 触发的 biome 警告 + lint suppressions。
+  // 2026-09-12：productSize 默认偏好 4cm（若字典有）；无 4cm 则用字典第一个。
+  // 用户原话「默认自动选择 4cm」—— LB 皮革徽章常见尺寸。
   const formDefaults = useMemo<SpecModalFormValues>(
     () => ({
       ...EMPTY_DEFAULTS,
-      productSize: availableSizes[0] ?? "",
+      productSize: availableSizes.includes("4")
+        ? "4"
+        : (availableSizes[0] ?? ""),
       accessoryCode: availableAccessories[0] ?? "",
     }),
     [availableSizes, availableAccessories]
