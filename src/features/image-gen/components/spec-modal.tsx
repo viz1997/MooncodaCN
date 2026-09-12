@@ -42,8 +42,6 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
-  CheckCircle2,
-  Coins,
   CreditCard,
   Loader2,
   Package,
@@ -411,39 +409,18 @@ export function SpecModal({
                   )}
                 </div>
 
-                {/* 模板名 + 产品类型 + 成本 */}
-                <div className="flex-1 min-w-0 flex flex-col justify-between">
-                  <div>
-                    <div className="text-sm font-semibold truncate">
-                      {template.name}
-                    </div>
-                    <div className="text-xs text-muted-foreground mt-0.5 truncate">
-                      {productType?.name ?? "通用款式"}
-                      {selectedCell !== null && selectedCell !== undefined && (
-                        <span className="ml-1.5 inline-flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400">
-                          · 已选第 {selectedCell + 1} 格
-                        </span>
-                      )}
-                    </div>
+                {/* 模板名 + 产品类型 + 选中分镜 */}
+                <div className="flex-1 min-w-0 flex flex-col justify-center">
+                  <div className="text-sm font-semibold truncate">
+                    {template.name}
                   </div>
-                  <div className="mt-2">
-                    {(() => {
-                      const price = template.price ?? 0;
-                      if (price > 0) {
-                        return (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 text-[11px] font-semibold border border-amber-500/20">
-                            <Coins className="h-3 w-3" />
-                            将扣减 {price} 积分
-                          </span>
-                        );
-                      }
-                      return (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-[11px] font-semibold border border-emerald-500/20">
-                          <CheckCircle2 className="h-3 w-3" />
-                          免费下单
-                        </span>
-                      );
-                    })()}
+                  <div className="text-xs text-muted-foreground mt-0.5 truncate">
+                    {productType?.name ?? "通用款式"}
+                    {selectedCell !== null && selectedCell !== undefined && (
+                      <span className="ml-1.5 inline-flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400">
+                        · 已选第 {selectedCell + 1} 格
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -458,12 +435,16 @@ export function SpecModal({
           )}
 
           {/* 分隔线：订单概要 → 产品规格 */}
-          {template && (hasSize || hasAccessory) && productType && (
-            <hr className="mx-6 border-border/40" />
-          )}
+          {template &&
+            (hasSize ||
+              hasAccessory ||
+              canLeatherExposed ||
+              canPvcProtection) &&
+            productType && <hr className="mx-6 border-border/40" />}
 
-          {/* ====== 段 3：产品规格 ====== */}
-          {(hasSize || hasAccessory) && productType && (
+          {/* ====== 段 3：产品规格（含尺寸 / 配件 / 表面处理） ====== */}
+          {(hasSize || hasAccessory || canLeatherExposed || canPvcProtection) &&
+            productType && (
             <section className="px-6 pt-5 pb-1">
               <SectionTitle
                 icon={<Package className="h-4 w-4" />}
@@ -542,25 +523,145 @@ export function SpecModal({
                     )}
                   />
                 )}
+
+                {/* 表面处理：皮革外露 / PVC 保护（互斥，二选一并排成 2 列）
+                    2026-09-12：从「定制选项」挪到「产品规格」段 —— 用户反馈
+                    「外露和 PVC 保护也是规格的另一种」 */}
+                {(canLeatherExposed || canPvcProtection) && (
+                  <div className="space-y-2">
+                    <div className="text-xs font-semibold text-muted-foreground">
+                      表面处理（可选，二选一）
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      {canLeatherExposed && (
+                        <Controller
+                          control={form.control}
+                          name="leatherExposed"
+                          render={({ field }) => (
+                            <label
+                              className={cn(
+                                "flex items-start gap-3 cursor-pointer rounded-xl border p-3.5 transition-all",
+                                field.value
+                                  ? "border-violet-500 bg-violet-500 text-white shadow-md"
+                                  : "border-border bg-background hover:border-violet-500/50 hover:bg-violet-500/5"
+                              )}
+                            >
+                              <input
+                                type="checkbox"
+                                className={cn(
+                                  "mt-0.5 h-4 w-4",
+                                  field.value
+                                    ? "accent-white"
+                                    : "accent-violet-600"
+                                )}
+                                checked={field.value}
+                                onChange={(e) => {
+                                  field.onChange(e.target.checked);
+                                  if (e.target.checked)
+                                    form.setValue("pvcProtection", false, {
+                                      shouldValidate: false,
+                                    });
+                                }}
+                              />
+                              <div className="min-w-0">
+                                <div
+                                  className={cn(
+                                    "text-sm font-semibold leading-tight",
+                                    !field.value && "text-foreground"
+                                  )}
+                                >
+                                  皮革外露
+                                </div>
+                                <p
+                                  className={cn(
+                                    "text-xs mt-1 leading-snug",
+                                    field.value
+                                      ? "text-white/85"
+                                      : "text-muted-foreground"
+                                  )}
+                                >
+                                  开 = 皮革面外露可见
+                                </p>
+                              </div>
+                            </label>
+                          )}
+                        />
+                      )}
+                      {canPvcProtection && (
+                        <Controller
+                          control={form.control}
+                          name="pvcProtection"
+                          render={({ field, fieldState }) => (
+                            <label
+                              className={cn(
+                                "flex items-start gap-3 cursor-pointer rounded-xl border p-3.5 transition-all",
+                                field.value
+                                  ? "border-violet-500 bg-violet-500 text-white shadow-md"
+                                  : "border-border bg-background hover:border-violet-500/50 hover:bg-violet-500/5"
+                              )}
+                            >
+                              <input
+                                type="checkbox"
+                                className={cn(
+                                  "mt-0.5 h-4 w-4",
+                                  field.value
+                                    ? "accent-white"
+                                    : "accent-violet-600"
+                                )}
+                                checked={field.value}
+                                onChange={(e) => {
+                                  field.onChange(e.target.checked);
+                                  if (e.target.checked)
+                                    form.setValue("leatherExposed", false, {
+                                      shouldValidate: false,
+                                    });
+                                }}
+                              />
+                              <div className="min-w-0">
+                                <div
+                                  className={cn(
+                                    "text-sm font-semibold leading-tight",
+                                    !field.value && "text-foreground"
+                                  )}
+                                >
+                                  PVC 保护
+                                </div>
+                                <p
+                                  className={cn(
+                                    "text-xs mt-1 leading-snug",
+                                    field.value
+                                      ? "text-white/85"
+                                      : "text-muted-foreground"
+                                  )}
+                                >
+                                  包一层透明 PVC 膜防刮花
+                                </p>
+                              </div>
+                              {fieldState.error?.message && (
+                                <p className="text-xs text-rose-600 mt-1 col-span-2">
+                                  {fieldState.error.message}
+                                </p>
+                              )}
+                            </label>
+                          )}
+                        />
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </section>
           )}
 
-          {/* 分隔线 */}
-          {(hasSize || hasAccessory) &&
+          {/* 分隔线：产品规格 → 定制选项 */}
+          {(hasSize || hasAccessory || canLeatherExposed || canPvcProtection) &&
             productType &&
-            (canEngrave ||
-              canLeatherColor ||
-              canLeatherExposed ||
-              canPvcProtection ||
-              canHaveRemarks) && <hr className="mx-6 border-border/40" />}
+            (canEngrave || canLeatherColor || canHaveRemarks) && (
+              <hr className="mx-6 border-border/40" />
+            )}
 
           {/* ====== 段 4：定制选项 ====== */}
-          {(canEngrave ||
-            canLeatherColor ||
-            canLeatherExposed ||
-            canPvcProtection ||
-            canHaveRemarks) &&
+          {(canEngrave || canLeatherColor || canHaveRemarks) &&
             productType && (
               <section className="px-6 pt-5 pb-5">
                 <SectionTitle
@@ -651,131 +752,6 @@ export function SpecModal({
                       )}
                     />
                   )}
-
-                  {/* 皮革外露 / PVC 保护（互斥，二选一并排成 2 列） */}
-                  {(canLeatherExposed || canPvcProtection) && (
-                    <div className="space-y-2">
-                      <div className="text-xs font-semibold text-muted-foreground">
-                        表面处理（可选，二选一）
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        {canLeatherExposed && (
-                          <Controller
-                            control={form.control}
-                            name="leatherExposed"
-                            render={({ field }) => (
-                              <label
-                                className={cn(
-                                  "flex items-start gap-3 cursor-pointer rounded-xl border p-3.5 transition-all",
-                                  field.value
-                                    ? "border-violet-500 bg-violet-500 text-white shadow-md"
-                                    : "border-border bg-background hover:border-violet-500/50 hover:bg-violet-500/5"
-                                )}
-                              >
-                                <input
-                                  type="checkbox"
-                                  className={cn(
-                                    "mt-0.5 h-4 w-4",
-                                    field.value
-                                      ? "accent-white"
-                                      : "accent-violet-600"
-                                  )}
-                                  checked={field.value}
-                                  onChange={(e) => {
-                                    field.onChange(e.target.checked);
-                                    if (e.target.checked)
-                                      form.setValue("pvcProtection", false, {
-                                        shouldValidate: false,
-                                      });
-                                  }}
-                                />
-                                <div className="min-w-0">
-                                  <div
-                                    className={cn(
-                                      "text-sm font-semibold leading-tight",
-                                      !field.value && "text-foreground"
-                                    )}
-                                  >
-                                    皮革外露
-                                  </div>
-                                  <p
-                                    className={cn(
-                                      "text-xs mt-1 leading-snug",
-                                      field.value
-                                        ? "text-white/85"
-                                        : "text-muted-foreground"
-                                    )}
-                                  >
-                                    开 = 皮革面外露可见
-                                  </p>
-                                </div>
-                              </label>
-                            )}
-                          />
-                        )}
-                        {canPvcProtection && (
-                          <Controller
-                            control={form.control}
-                            name="pvcProtection"
-                            render={({ field, fieldState }) => (
-                              <label
-                                className={cn(
-                                  "flex items-start gap-3 cursor-pointer rounded-xl border p-3.5 transition-all",
-                                  field.value
-                                    ? "border-violet-500 bg-violet-500 text-white shadow-md"
-                                    : "border-border bg-background hover:border-violet-500/50 hover:bg-violet-500/5"
-                                )}
-                              >
-                                <input
-                                  type="checkbox"
-                                  className={cn(
-                                    "mt-0.5 h-4 w-4",
-                                    field.value
-                                      ? "accent-white"
-                                      : "accent-violet-600"
-                                  )}
-                                  checked={field.value}
-                                  onChange={(e) => {
-                                    field.onChange(e.target.checked);
-                                    if (e.target.checked)
-                                      form.setValue("leatherExposed", false, {
-                                        shouldValidate: false,
-                                      });
-                                  }}
-                                />
-                                <div className="min-w-0">
-                                  <div
-                                    className={cn(
-                                      "text-sm font-semibold leading-tight",
-                                      !field.value && "text-foreground"
-                                    )}
-                                  >
-                                    PVC 保护
-                                  </div>
-                                  <p
-                                    className={cn(
-                                      "text-xs mt-1 leading-snug",
-                                      field.value
-                                        ? "text-white/85"
-                                        : "text-muted-foreground"
-                                    )}
-                                  >
-                                    包一层透明 PVC 膜防刮花
-                                  </p>
-                                </div>
-                                {fieldState.error?.message && (
-                                  <p className="text-xs text-rose-600 mt-1 col-span-2">
-                                    {fieldState.error.message}
-                                  </p>
-                                )}
-                              </label>
-                            )}
-                          />
-                        )}
-                      </div>
-                    </div>
-                  )}
-
                   {/* 备注 */}
                   {canHaveRemarks && (
                     <Controller
