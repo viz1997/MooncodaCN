@@ -48,13 +48,14 @@ import {
   validatePlatform,
   validateProductSpec,
 } from "@/features/gpt-image/lib/product-catalog";
+import { findEffect } from "@/features/image-gen/lib/effects-store";
 import { protectedAction } from "@/lib/safe-action";
 
 const withDemoAction = (name: string) =>
   protectedAction.metadata({ action: `imageGen.demo.${name}` });
 
 const submitDemoSchema = z.object({
-  /** 模板 id（productEffect.id === promptTemplate.id，sync 后对齐） */
+  /** 模板 id（= productEffect.id / maskId；通过 productEffect.promptTemplateId 间接查 prompt_template） */
   templateId: z.string().min(1),
   /**
    * demo 预览用的参考图 R2 publicUrl（必传，且必须已在 R2）。
@@ -106,11 +107,23 @@ const submitDemoSchema = z.object({
 export const submitImageGenDemoAction = withDemoAction("submit")
   .schema(submitDemoSchema)
   .action(async ({ parsedInput, ctx }) => {
-    // 1. 模板存在 + active；同时拉取 allowedSizes/allowedAccessories
-    //    校验提交上来的 size/accessory 必须落在模板允许的子集内。
+    // 1. 2026-09-12：客户端传的 templateId 是 productEffect.id（maskId），不是
+    //    promptTemplate.id。两张表 id 列各自独立，productEffect.promptTemplateId
+    //    才是引用 promptTemplate.id 的外键。必须先查 productEffect 拿
+    //    promptTemplateId，再用它查 promptTemplate —— 直接
+    //    `eq(promptTemplate.id, parsedInput.templateId)` 永远查不到。
+    const effect = await findEffect(parsedInput.templateId);
+    if (!effect || effect.status !== "active") {
+      throw new Error("模板不存在或已停用");
+    }
+    if (!effect.promptTemplateId) {
+      // admin 表单已强制必填 promptTemplateId；这里兜底挡 product_effect
+      // 历史 null 行（没绑的话 prompt_order.templateId FK 也会拒）
+      throw new Error("模板未关联提示词模板，请联系管理员补一个");
+    }
     const template = await db.query.promptTemplate.findFirst({
       where: and(
-        eq(promptTemplate.id, parsedInput.templateId),
+        eq(promptTemplate.id, effect.promptTemplateId),
         eq(promptTemplate.isActive, true)
       ),
       columns: {
@@ -315,7 +328,11 @@ export const submitImageGenDemoAction = withDemoAction("submit")
       .values({
         id: nanoid(),
         orderNo,
-        templateId: parsedInput.templateId,
+        // 2026-09-12：写 prompt_order.templateId 用 promptTemplate.id（FK 指向
+        // prompt_template.id），不是 productEffect.id。原本传 parsedInput.templateId
+        // 等同 productEffect.id，sync 来的行能过 FK；admin 手工录入 + promptTemplateId
+        // 引用 → productEffect.id 不在 prompt_template 表 → FK 校验拒绝。
+        templateId: template.id,
         token,
         status: "SELECTED",
         uploadCount: 1,
