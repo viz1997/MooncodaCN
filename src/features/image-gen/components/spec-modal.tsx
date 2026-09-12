@@ -16,23 +16,43 @@
  * 引用每 render 新建 → useEffect `[clearPoll]` 每 render 跑 cleanup+resubscribe
  * → SpecModal 内部 useEffect reset 被 re-render storm 误触，字段点完就重置。
  *
- * 2026-09-12：UI 重设计 —— 改为 3 分组卡片（产品选项 / 定制选项 / 订单信息），
+ * 2026-09-12：UI 重设计 v1 —— 改为 3 分组卡片（产品选项 / 定制选项 / 订单信息），
  * 每块独立 card 边框视觉分组。同时移除 engravingExposed 字段（用户反馈
  * 「SpecModal 不需要外露开关」，刻字一律默认内刻；DB 列保留，server action
  * 不传该字段时落 null）。
  *
- * RHF 优势：
- * - 字段态在 ref 中，外部 React re-render 不重挂载 field DOM
- * - 跨字段校验（订单号必须有 platform / 皮革外露 ⇄ PVC 互斥）由 zod `.refine` 产出
- * - `form.watch()` 替代 useState 控制条件渲染
+ * 2026-09-12：UI 重设计 v2 —— 用户反馈「订单信息应该放在弹窗最前面 +
+ * 弹窗整体很难看而且不人性」。新版结构：
  *
- * SpecSelection 输出 contract：
- * - 不再包含 engravingExposed（与 submit-image-gen-demo server 端对齐 → 默认 null）
- * - 其余 9 个字段不变；父组件 handleConfirmSpec 调用点不动
+ *   1. 「订单来源」段 —— platform + 渠道订单号（最前置，原 v1 卡片 3 内容）。
+ *   2. 「订单概要」卡 —— 模板预览缩略图 + 模板名 + 产品类型 + 选中分镜
+ *      badge + 积分成本 badge，让用户一眼看到在下单什么。
+ *   3. 「产品规格」段 —— 尺寸 + 配件（原 v1 卡片 1）。
+ *   4. 「定制选项」段 —— 刻字 + 皮革色 + 外露/PVC + 备注（原 v1 卡片 2）。
+ *
+ * 视觉改造要点：
+ *   - 去掉硬边框 card 包裹，改用分隔线 + 间距分组（less rigid）
+ *   - 字段块标题用大图标 + 中文标题，让人一眼看懂
+ *   - 选项 pill 选中态更明显（border + bg + 阴影 + 加粗）
+ *   - 文字输入框更宽更大
+ *   - 顶部订单概要用浅紫渐变背景强化"商品卡"感
+ *
+ * SpecSelection 输出 contract 不变：父组件 handleConfirmSpec 调用点不动。
  */
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Loader2, Sparkles } from "lucide-react";
+import {
+  CheckCircle2,
+  Coins,
+  CreditCard,
+  Loader2,
+  Package,
+  Palette,
+  Pencil,
+  ShoppingBag,
+  Sparkles,
+  Tag,
+} from "lucide-react";
 import { useMemo } from "react";
 import { Controller, useForm } from "react-hook-form";
 
@@ -90,6 +110,10 @@ interface SpecModalProps {
     previewUrl: string;
     productTypeCode: string | null;
     /**
+     * 2026-09-12：模板成本（demo 下单扣减的积分数）。price=0 时弹"免费下单"徽标。
+     */
+    price?: number | null;
+    /**
      * 2026-09-10：模板级可配置尺寸子集（覆盖字典默认）。
      * null/空 → 用字典全量；非空 → 仅这些。
      */
@@ -108,6 +132,11 @@ interface SpecModalProps {
      */
     allowedColors?: string[] | null;
   } | null;
+  /**
+   * 2026-09-12：用户从宫格里选中的 cell（仅 candidateCount>1 + outputMode=grid 时有值）。
+   * 在订单概要上以 badge 形式显示，让用户确认自己下的是哪一张。
+   */
+  selectedCell?: number | null;
   submitting?: boolean;
   onClose: () => void;
   onConfirm: (spec: SpecSelection) => void;
@@ -129,6 +158,7 @@ const EMPTY_DEFAULTS: SpecModalFormValues = {
 export function SpecModal({
   open,
   template,
+  selectedCell,
   submitting,
   onClose,
   onConfirm,
@@ -254,50 +284,202 @@ export function SpecModal({
         if (!o) onClose();
       }}
     >
-      <DialogContent className="max-w-md sm:max-h-[90vh] flex flex-col gap-0 p-0 overflow-hidden">
-        <DialogHeader className="px-5 pt-5 pb-3 border-b border-border/60">
-          <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-violet-500" />
-            选择配件规格
+      <DialogContent className="max-w-lg sm:max-h-[92vh] flex flex-col gap-0 p-0 overflow-hidden">
+        {/* 2026-09-12 v2：极简 header —— 标题 + 副标题，去掉冗余 description */}
+        <DialogHeader className="px-6 pt-5 pb-4 border-b border-border/60 bg-gradient-to-br from-violet-50/40 via-background to-purple-50/30 dark:from-violet-950/20 dark:via-background dark:to-purple-950/10">
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white">
+              <ShoppingBag className="h-4 w-4" />
+            </div>
+            下单信息
           </DialogTitle>
-          <DialogDescription>
-            {template?.name}
-            {productType ? ` · ${productType.name}` : ""}
+          <DialogDescription className="text-xs">
+            填写规格后立即创建订单
           </DialogDescription>
         </DialogHeader>
 
         <form
           id="spec-modal-form"
           onSubmit={handleConfirm}
-          className="flex-1 overflow-y-auto px-5 py-4 space-y-3"
+          className="flex-1 overflow-y-auto"
         >
+          {/* ====== 段 1：订单来源（最前置）—— 用户最关心的"下给谁/哪个渠道"信息 ====== */}
+          {canPlatform && productType && (
+            <section className="px-6 pt-5 pb-1">
+              <SectionTitle icon={<Tag className="h-4 w-4" />} title="订单来源" />
+              <p className="text-xs text-muted-foreground -mt-2 mb-3">
+                从哪个渠道找到我们？用于代理商活动结算（可不填）
+              </p>
+              <Controller
+                control={form.control}
+                name="platform"
+                render={({ field, fieldState }) => (
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap gap-1.5">
+                      {PLATFORMS.map((p) => {
+                        const active = field.value === p.code;
+                        return (
+                          <button
+                            key={p.code}
+                            type="button"
+                            aria-pressed={active}
+                            onClick={() => {
+                              // 切换平台时清空旧订单号，避免"换平台但留旧渠道订单号"混淆
+                              if (!active)
+                                form.setValue("platformOrderNo", "", {
+                                  shouldValidate: false,
+                                });
+                              field.onChange(active ? "" : p.code);
+                            }}
+                            className={cn(
+                              "inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-medium transition-all",
+                              active
+                                ? "border-violet-500 bg-violet-500 text-white shadow-sm"
+                                : "border-border bg-background hover:border-violet-500/50 hover:bg-violet-500/5"
+                            )}
+                          >
+                            {p.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {fieldState.error?.message && (
+                      <p className="text-xs text-rose-600">
+                        {fieldState.error.message}
+                      </p>
+                    )}
+                  </div>
+                )}
+              />
+              <div className="mt-3">
+                <Controller
+                  control={form.control}
+                  name="platformOrderNo"
+                  render={({ field }) => (
+                    <Input
+                      type="text"
+                      placeholder={
+                        platform
+                          ? "如淘宝订单号 / 小红书订单 ID"
+                          : "请先在上方选择订单来源平台"
+                      }
+                      disabled={!platform}
+                      maxLength={64}
+                      className="text-sm font-mono disabled:opacity-50 h-10"
+                      {...field}
+                    />
+                  )}
+                />
+                <p className="text-xs text-muted-foreground mt-1.5">
+                  {platform
+                    ? "用于代理商对账；淘宝订单号约 15~18 位数字"
+                    : "选中平台后才能填写渠道订单号"}
+                </p>
+              </div>
+            </section>
+          )}
+
+          {/* 分隔线：订单来源 → 订单概要 */}
+          {canPlatform && productType && template && (
+            <hr className="mx-6 border-border/40" />
+          )}
+
+          {/* ====== 段 2：「订单概要」卡 —— 让用户一眼看到在下单什么 ====== */}
+          {template && (
+            <div className="px-6 pt-5 pb-4 border-b border-border/40 bg-gradient-to-br from-violet-50/30 to-purple-50/20 dark:from-violet-950/15 dark:to-purple-950/10">
+              <div className="flex gap-3.5">
+                {/* 模板预览缩略图 */}
+                <div className="relative shrink-0">
+                  <div className="h-20 w-20 rounded-xl overflow-hidden border-2 border-violet-500/20 bg-gradient-to-br from-sky-100 to-indigo-100 dark:from-sky-950/40 dark:to-indigo-950/40 shadow-sm">
+                    {template.previewUrl ? (
+                      // biome-ignore lint/performance/noImgElement: 模板预览图
+                      <img
+                        src={template.previewUrl}
+                        alt={template.name}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-violet-500 font-bold text-2xl">
+                        {template.name.slice(0, 1)}
+                      </div>
+                    )}
+                  </div>
+                  {selectedCell !== null && selectedCell !== undefined && (
+                    <div className="absolute -bottom-1.5 -right-1.5 h-6 w-6 rounded-full bg-emerald-500 flex items-center justify-center text-white text-[10px] font-bold shadow-md ring-2 ring-background">
+                      {selectedCell + 1}
+                    </div>
+                  )}
+                </div>
+
+                {/* 模板名 + 产品类型 + 成本 */}
+                <div className="flex-1 min-w-0 flex flex-col justify-between">
+                  <div>
+                    <div className="text-sm font-semibold truncate">
+                      {template.name}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-0.5 truncate">
+                      {productType?.name ?? "通用款式"}
+                      {selectedCell !== null && selectedCell !== undefined && (
+                        <span className="ml-1.5 inline-flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400">
+                          · 已选第 {selectedCell + 1} 格
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    {(() => {
+                      const price = template.price ?? 0;
+                      if (price > 0) {
+                        return (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 text-[11px] font-semibold border border-amber-500/20">
+                            <Coins className="h-3 w-3" />
+                            将扣减 {price} 积分
+                          </span>
+                        );
+                      }
+                      return (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-[11px] font-semibold border border-emerald-500/20">
+                          <CheckCircle2 className="h-3 w-3" />
+                          免费下单
+                        </span>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* 无 productTypeCode（老 ToC 模板）→ 提示「无需选规格」 */}
           {!productType && (
-            <div className="rounded-lg border border-dashed border-border/80 bg-muted/40 px-4 py-6 text-center text-sm text-muted-foreground">
+            <div className="mx-6 mt-5 rounded-lg border border-dashed border-border/80 bg-muted/40 px-4 py-6 text-center text-sm text-muted-foreground">
               此模板为通用款式，无需选择配件规格
             </div>
           )}
 
-          {/* ====== 卡片 1：产品选项 ====== */}
-          {(hasSize || hasAccessory) && (
-            <section className="rounded-lg border border-border/70 bg-card overflow-hidden">
-              <header className="px-4 py-2.5 bg-muted/40 border-b border-border/60 flex items-center gap-2">
-                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-violet-500/10 text-[11px] font-semibold text-violet-600 dark:text-violet-300">
-                  1
-                </span>
-                <h3 className="text-sm font-semibold">产品选项</h3>
-              </header>
-              <div className="p-4 space-y-4">
+          {/* 分隔线：订单概要 → 产品规格 */}
+          {template && (hasSize || hasAccessory) && productType && (
+            <hr className="mx-6 border-border/40" />
+          )}
+
+          {/* ====== 段 3：产品规格 ====== */}
+          {(hasSize || hasAccessory) && productType && (
+            <section className="px-6 pt-5 pb-1">
+              <SectionTitle
+                icon={<Package className="h-4 w-4" />}
+                title="产品规格"
+              />
+              <div className="space-y-4">
                 {/* 尺寸 */}
-                {hasSize && productType && (
+                {hasSize && (
                   <Controller
                     control={form.control}
                     name="productSize"
                     render={({ field }) => (
-                      <fieldset className="space-y-2">
-                        <legend className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      <div className="space-y-2">
+                        <div className="text-xs font-semibold text-muted-foreground">
                           尺寸
-                        </legend>
+                        </div>
                         <div className="flex flex-wrap gap-2">
                           {availableSizes.map((s) => {
                             const active = field.value === s;
@@ -308,10 +490,10 @@ export function SpecModal({
                                 aria-pressed={active}
                                 onClick={() => field.onChange(s)}
                                 className={cn(
-                                  "inline-flex items-center px-3.5 py-1.5 rounded-lg border text-sm font-medium transition-all",
+                                  "inline-flex items-center justify-center min-w-[64px] px-4 py-2.5 rounded-xl border text-sm font-semibold transition-all",
                                   active
-                                    ? "border-violet-500 bg-violet-50 text-violet-700 shadow-sm dark:bg-violet-950/40 dark:text-violet-300"
-                                    : "border-border hover:border-violet-500/50"
+                                    ? "border-violet-500 bg-violet-500 text-white shadow-md"
+                                    : "border-border bg-background hover:border-violet-500/50 hover:bg-violet-500/5"
                                 )}
                               >
                                 {s} cm
@@ -319,21 +501,21 @@ export function SpecModal({
                             );
                           })}
                         </div>
-                      </fieldset>
+                      </div>
                     )}
                   />
                 )}
 
                 {/* 配件 */}
-                {hasAccessory && productType && (
+                {hasAccessory && (
                   <Controller
                     control={form.control}
                     name="accessoryCode"
                     render={({ field }) => (
-                      <fieldset className="space-y-2">
-                        <legend className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      <div className="space-y-2">
+                        <div className="text-xs font-semibold text-muted-foreground">
                           配件
-                        </legend>
+                        </div>
                         <div className="flex flex-wrap gap-2">
                           {availableAccessories.map((a) => {
                             const acc = ACCESSORIES.find((x) => x.code === a);
@@ -345,10 +527,10 @@ export function SpecModal({
                                 aria-pressed={active}
                                 onClick={() => field.onChange(a)}
                                 className={cn(
-                                  "inline-flex items-center px-3.5 py-1.5 rounded-lg border text-sm font-medium transition-all",
+                                  "inline-flex items-center px-4 py-2.5 rounded-xl border text-sm font-medium transition-all",
                                   active
-                                    ? "border-violet-500 bg-violet-50 text-violet-700 shadow-sm dark:bg-violet-950/40 dark:text-violet-300"
-                                    : "border-border hover:border-violet-500/50"
+                                    ? "border-violet-500 bg-violet-500 text-white shadow-md"
+                                    : "border-border bg-background hover:border-violet-500/50 hover:bg-violet-500/5"
                                 )}
                               >
                                 {acc?.name ?? a}
@@ -356,7 +538,7 @@ export function SpecModal({
                             );
                           })}
                         </div>
-                      </fieldset>
+                      </div>
                     )}
                   />
                 )}
@@ -364,300 +546,282 @@ export function SpecModal({
             </section>
           )}
 
-          {/* ====== 卡片 2：定制选项 ====== */}
+          {/* 分隔线 */}
+          {(hasSize || hasAccessory) &&
+            productType &&
+            (canEngrave ||
+              canLeatherColor ||
+              canLeatherExposed ||
+              canPvcProtection ||
+              canHaveRemarks) && <hr className="mx-6 border-border/40" />}
+
+          {/* ====== 段 4：定制选项 ====== */}
           {(canEngrave ||
             canLeatherColor ||
             canLeatherExposed ||
             canPvcProtection ||
-            canHaveRemarks) && (
-            <section className="rounded-lg border border-border/70 bg-card overflow-hidden">
-              <header className="px-4 py-2.5 bg-muted/40 border-b border-border/60 flex items-center gap-2">
-                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-violet-500/10 text-[11px] font-semibold text-violet-600 dark:text-violet-300">
-                  2
-                </span>
-                <h3 className="text-sm font-semibold">定制选项</h3>
-              </header>
-              <div className="p-4 space-y-4">
-                {/* 刻字 */}
-                {canEngrave && (
-                  <Controller
-                    control={form.control}
-                    name="engravingText"
-                    render={({ field, fieldState }) => (
-                      <div className="space-y-2">
-                        <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                          刻字（可选）
-                        </Label>
-                        <Input
-                          type="text"
-                          placeholder="如：Love U / 2026.09.09 / 宝贝 1 岁"
-                          className="text-sm"
-                          maxLength={40}
-                          {...field}
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          最多 40 个字符（中文 / 英文 / 数字 / 空格）；默认内刻
-                        </p>
-                        {fieldState.error?.message && (
-                          <p className="text-xs text-rose-600">
-                            {fieldState.error.message}
+            canHaveRemarks) &&
+            productType && (
+              <section className="px-6 pt-5 pb-5">
+                <SectionTitle
+                  icon={<Sparkles className="h-4 w-4" />}
+                  title="定制选项"
+                />
+                <div className="space-y-4">
+                  {/* 刻字 */}
+                  {canEngrave && (
+                    <Controller
+                      control={form.control}
+                      name="engravingText"
+                      render={({ field, fieldState }) => (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-xs font-semibold text-muted-foreground flex items-center gap-1">
+                              <Pencil className="h-3.5 w-3.5" />
+                              刻字（可选）
+                            </Label>
+                            <span className="text-[10px] text-muted-foreground tabular-nums">
+                              {field.value.length} / 40
+                            </span>
+                          </div>
+                          <Input
+                            type="text"
+                            placeholder="如：Love U / 2026.09.09 / 宝贝 1 岁"
+                            className="text-sm h-10"
+                            maxLength={40}
+                            {...field}
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            最多 40 个字符（中文 / 英文 / 数字 / 空格）；默认内刻
                           </p>
-                        )}
-                      </div>
-                    )}
-                  />
-                )}
+                          {fieldState.error?.message && (
+                            <p className="text-xs text-rose-600">
+                              {fieldState.error.message}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    />
+                  )}
 
-                {/* 皮革颜色色卡 */}
-                {canLeatherColor && (
-                  <Controller
-                    control={form.control}
-                    name="leatherColor"
-                    render={({ field }) => (
-                      <div className="space-y-2">
-                        <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                          皮革颜色
-                        </Label>
-                        <div className="flex flex-wrap gap-2">
-                          {effectiveLeatherColors.map((c) => {
-                            const active = field.value === c.code;
-                            return (
-                              <button
-                                key={c.code}
-                                type="button"
-                                aria-pressed={active}
-                                onClick={() =>
-                                  field.onChange(active ? "" : c.code)
-                                }
-                                className={cn(
-                                  "inline-flex items-center gap-1.5 rounded-full border pl-1 pr-2.5 py-1 text-xs font-medium transition-colors",
-                                  active
-                                    ? "border-violet-500 bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300"
-                                    : "border-border hover:border-violet-500/50"
-                                )}
-                                title={c.name}
-                              >
-                                <span
-                                  aria-hidden
+                  {/* 皮革颜色色卡 */}
+                  {canLeatherColor && (
+                    <Controller
+                      control={form.control}
+                      name="leatherColor"
+                      render={({ field }) => (
+                        <div className="space-y-2">
+                          <Label className="text-xs font-semibold text-muted-foreground flex items-center gap-1">
+                            <Palette className="h-3.5 w-3.5" />
+                            皮革颜色
+                          </Label>
+                          <div className="flex flex-wrap gap-2">
+                            {effectiveLeatherColors.map((c) => {
+                              const active = field.value === c.code;
+                              return (
+                                <button
+                                  key={c.code}
+                                  type="button"
+                                  aria-pressed={active}
+                                  onClick={() =>
+                                    field.onChange(active ? "" : c.code)
+                                  }
                                   className={cn(
-                                    "h-4 w-4 rounded-full border",
-                                    active &&
-                                      "ring-2 ring-violet-500 ring-offset-1"
+                                    "inline-flex items-center gap-2 rounded-full border pl-1 pr-3 py-1.5 text-xs font-medium transition-all",
+                                    active
+                                      ? "border-violet-500 bg-violet-500 text-white shadow-md"
+                                      : "border-border bg-background hover:border-violet-500/50 hover:bg-violet-500/5"
                                   )}
-                                  style={{ backgroundColor: c.swatch }}
-                                />
-                                {c.name}
-                              </button>
-                            );
-                          })}
+                                  title={c.name}
+                                >
+                                  <span
+                                    aria-hidden
+                                    className={cn(
+                                      "h-4 w-4 rounded-full border-2",
+                                      active ? "border-white" : "border-border"
+                                    )}
+                                    style={{ backgroundColor: c.swatch }}
+                                  />
+                                  {c.name}
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
+                      )}
+                    />
+                  )}
+
+                  {/* 皮革外露 / PVC 保护（互斥，二选一并排成 2 列） */}
+                  {(canLeatherExposed || canPvcProtection) && (
+                    <div className="space-y-2">
+                      <div className="text-xs font-semibold text-muted-foreground">
+                        表面处理（可选，二选一）
                       </div>
-                    )}
-                  />
-                )}
-
-                {/* 皮革外露 / PVC 保护（互斥，二选一并排成 2 列） */}
-                {(canLeatherExposed || canPvcProtection) && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {canLeatherExposed && (
-                      <Controller
-                        control={form.control}
-                        name="leatherExposed"
-                        render={({ field }) => (
-                          <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-border/70 p-3 hover:border-violet-500/40 transition-colors">
-                            <input
-                              type="checkbox"
-                              className="mt-0.5 h-4 w-4 accent-violet-600"
-                              checked={field.value}
-                              onChange={(e) => {
-                                field.onChange(e.target.checked);
-                                if (e.target.checked)
-                                  form.setValue("pvcProtection", false, {
-                                    shouldValidate: false,
-                                  });
-                              }}
-                            />
-                            <div className="min-w-0">
-                              <div className="text-sm font-medium leading-tight">
-                                皮革外露
-                              </div>
-                              <p className="text-xs text-muted-foreground mt-1 leading-snug">
-                                开 = 皮革面外露可见
-                              </p>
-                            </div>
-                          </label>
-                        )}
-                      />
-                    )}
-                    {canPvcProtection && (
-                      <Controller
-                        control={form.control}
-                        name="pvcProtection"
-                        render={({ field, fieldState }) => (
-                          <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-border/70 p-3 hover:border-violet-500/40 transition-colors">
-                            <input
-                              type="checkbox"
-                              className="mt-0.5 h-4 w-4 accent-violet-600"
-                              checked={field.value}
-                              onChange={(e) => {
-                                field.onChange(e.target.checked);
-                                if (e.target.checked)
-                                  form.setValue("leatherExposed", false, {
-                                    shouldValidate: false,
-                                  });
-                              }}
-                            />
-                            <div className="min-w-0">
-                              <div className="text-sm font-medium leading-tight">
-                                PVC 保护
-                              </div>
-                              <p className="text-xs text-muted-foreground mt-1 leading-snug">
-                                包一层透明 PVC 膜防刮花
-                              </p>
-                            </div>
-                            {fieldState.error?.message && (
-                              <p className="text-xs text-rose-600 mt-1 col-span-2">
-                                {fieldState.error.message}
-                              </p>
-                            )}
-                          </label>
-                        )}
-                      />
-                    )}
-                  </div>
-                )}
-
-                {/* 备注 */}
-                {canHaveRemarks && (
-                  <Controller
-                    control={form.control}
-                    name="remarks"
-                    render={({ field }) => (
-                      <div className="space-y-2">
-                        <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                          备注（可选）
-                        </Label>
-                        <textarea
-                          rows={3}
-                          placeholder="如：请尽快发货 / 希望礼品包装"
-                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 resize-y"
-                          maxLength={500}
-                          {...field}
-                        />
-                        <p className="text-xs text-muted-foreground text-right tabular-nums">
-                          {field.value.length} / 500
-                        </p>
-                      </div>
-                    )}
-                  />
-                )}
-              </div>
-            </section>
-          )}
-
-          {/* ====== 卡片 3：订单信息 ====== */}
-          {canPlatform && (
-            <section className="rounded-lg border border-border/70 bg-card overflow-hidden">
-              <header className="px-4 py-2.5 bg-muted/40 border-b border-border/60 flex items-center gap-2">
-                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-violet-500/10 text-[11px] font-semibold text-violet-600 dark:text-violet-300">
-                  3
-                </span>
-                <h3 className="text-sm font-semibold">订单信息</h3>
-              </header>
-              <div className="p-4 space-y-4">
-                <div className="space-y-2">
-                  <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                    订单来源（可选）
-                  </Label>
-                  <p className="text-xs text-muted-foreground">
-                    从哪个渠道找到我们？用于代理商活动结算
-                  </p>
-                  <Controller
-                    control={form.control}
-                    name="platform"
-                    render={({ field, fieldState }) => (
-                      <div className="space-y-1.5">
-                        <div className="flex flex-wrap gap-2">
-                          {PLATFORMS.map((p) => {
-                            const active = field.value === p.code;
-                            return (
-                              <button
-                                key={p.code}
-                                type="button"
-                                aria-pressed={active}
-                                onClick={() => {
-                                  // 切换平台时清空旧订单号，避免"换平台但留旧渠道订单号"混淆
-                                  if (!active)
-                                    form.setValue("platformOrderNo", "", {
-                                      shouldValidate: false,
-                                    });
-                                  field.onChange(active ? "" : p.code);
-                                }}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {canLeatherExposed && (
+                          <Controller
+                            control={form.control}
+                            name="leatherExposed"
+                            render={({ field }) => (
+                              <label
                                 className={cn(
-                                  "inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-                                  active
-                                    ? "border-violet-500 bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300"
-                                    : "border-border hover:border-violet-500/50"
+                                  "flex items-start gap-3 cursor-pointer rounded-xl border p-3.5 transition-all",
+                                  field.value
+                                    ? "border-violet-500 bg-violet-500 text-white shadow-md"
+                                    : "border-border bg-background hover:border-violet-500/50 hover:bg-violet-500/5"
                                 )}
                               >
-                                {p.name}
-                              </button>
-                            );
-                          })}
-                        </div>
-                        {fieldState.error?.message && (
-                          <p className="text-xs text-rose-600">
-                            {fieldState.error.message}
-                          </p>
+                                <input
+                                  type="checkbox"
+                                  className={cn(
+                                    "mt-0.5 h-4 w-4",
+                                    field.value
+                                      ? "accent-white"
+                                      : "accent-violet-600"
+                                  )}
+                                  checked={field.value}
+                                  onChange={(e) => {
+                                    field.onChange(e.target.checked);
+                                    if (e.target.checked)
+                                      form.setValue("pvcProtection", false, {
+                                        shouldValidate: false,
+                                      });
+                                  }}
+                                />
+                                <div className="min-w-0">
+                                  <div
+                                    className={cn(
+                                      "text-sm font-semibold leading-tight",
+                                      !field.value && "text-foreground"
+                                    )}
+                                  >
+                                    皮革外露
+                                  </div>
+                                  <p
+                                    className={cn(
+                                      "text-xs mt-1 leading-snug",
+                                      field.value
+                                        ? "text-white/85"
+                                        : "text-muted-foreground"
+                                    )}
+                                  >
+                                    开 = 皮革面外露可见
+                                  </p>
+                                </div>
+                              </label>
+                            )}
+                          />
+                        )}
+                        {canPvcProtection && (
+                          <Controller
+                            control={form.control}
+                            name="pvcProtection"
+                            render={({ field, fieldState }) => (
+                              <label
+                                className={cn(
+                                  "flex items-start gap-3 cursor-pointer rounded-xl border p-3.5 transition-all",
+                                  field.value
+                                    ? "border-violet-500 bg-violet-500 text-white shadow-md"
+                                    : "border-border bg-background hover:border-violet-500/50 hover:bg-violet-500/5"
+                                )}
+                              >
+                                <input
+                                  type="checkbox"
+                                  className={cn(
+                                    "mt-0.5 h-4 w-4",
+                                    field.value
+                                      ? "accent-white"
+                                      : "accent-violet-600"
+                                  )}
+                                  checked={field.value}
+                                  onChange={(e) => {
+                                    field.onChange(e.target.checked);
+                                    if (e.target.checked)
+                                      form.setValue("leatherExposed", false, {
+                                        shouldValidate: false,
+                                      });
+                                  }}
+                                />
+                                <div className="min-w-0">
+                                  <div
+                                    className={cn(
+                                      "text-sm font-semibold leading-tight",
+                                      !field.value && "text-foreground"
+                                    )}
+                                  >
+                                    PVC 保护
+                                  </div>
+                                  <p
+                                    className={cn(
+                                      "text-xs mt-1 leading-snug",
+                                      field.value
+                                        ? "text-white/85"
+                                        : "text-muted-foreground"
+                                    )}
+                                  >
+                                    包一层透明 PVC 膜防刮花
+                                  </p>
+                                </div>
+                                {fieldState.error?.message && (
+                                  <p className="text-xs text-rose-600 mt-1 col-span-2">
+                                    {fieldState.error.message}
+                                  </p>
+                                )}
+                              </label>
+                            )}
+                          />
                         )}
                       </div>
-                    )}
-                  />
-                </div>
+                    </div>
+                  )}
 
-                {/* 渠道订单号：始终显示，未选平台时 disabled；视觉分隔与平台 pills 区分 */}
-                <div className="space-y-1.5 pt-2 border-t border-dashed border-border/60">
-                  <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                    渠道订单号（可选）
-                  </Label>
-                  <Controller
-                    control={form.control}
-                    name="platformOrderNo"
-                    render={({ field }) => (
-                      <Input
-                        type="text"
-                        placeholder={
-                          platform
-                            ? "如淘宝订单号 / 小红书订单 ID"
-                            : "请先在上方选择订单来源平台"
-                        }
-                        disabled={!platform}
-                        maxLength={64}
-                        className="text-sm font-mono disabled:opacity-60"
-                        {...field}
-                      />
-                    )}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {platform
-                      ? "用于代理商对账；淘宝订单号约 15~18 位数字"
-                      : "选中平台后才能填写渠道订单号"}
-                  </p>
+                  {/* 备注 */}
+                  {canHaveRemarks && (
+                    <Controller
+                      control={form.control}
+                      name="remarks"
+                      render={({ field }) => (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-xs font-semibold text-muted-foreground">
+                              备注（可选）
+                            </Label>
+                            <span className="text-[10px] text-muted-foreground tabular-nums">
+                              {field.value.length} / 500
+                            </span>
+                          </div>
+                          <textarea
+                            rows={3}
+                            placeholder="如：请尽快发货 / 希望礼品包装"
+                            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 resize-y"
+                            maxLength={500}
+                            {...field}
+                          />
+                        </div>
+                      )}
+                    />
+                  )}
                 </div>
-              </div>
-            </section>
-          )}
+              </section>
+            )}
         </form>
 
-        <DialogFooter className="px-5 py-3 border-t border-border/60 bg-muted/30 gap-2">
-          <Button variant="outline" onClick={onClose} disabled={submitting}>
+        {/* 2026-09-12 v2：footer 加大字号 + 视觉强化主操作 */}
+        <DialogFooter className="px-6 py-4 border-t border-border/60 bg-muted/20 gap-3">
+          <Button
+            variant="outline"
+            onClick={onClose}
+            disabled={submitting}
+            className="h-11 px-5"
+          >
             取消
           </Button>
           <Button
             type="submit"
             form="spec-modal-form"
             disabled={submitting || !form.formState.isValid}
-            className="bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700"
+            className="h-11 px-6 bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 font-semibold shadow-lg shadow-violet-500/20"
           >
             {submitting ? (
               <>
@@ -666,7 +830,7 @@ export function SpecModal({
               </>
             ) : (
               <>
-                <Sparkles className="h-4 w-4 mr-1.5" />
+                <CreditCard className="h-4 w-4 mr-1.5" />
                 确认下单
               </>
             )}
@@ -674,5 +838,26 @@ export function SpecModal({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * 2026-09-12 v2：内部 SectionTitle —— 段标题统一格式：图标方块 + 标题文字。
+ * 减少 rigid 的 card 包裹，改用「分隔线 + 段标题」分组（less rigid）。
+ */
+function SectionTitle({
+  icon,
+  title,
+}: {
+  icon: React.ReactNode;
+  title: string;
+}) {
+  return (
+    <div className="flex items-center gap-2 mb-3">
+      <div className="h-6 w-6 rounded-md bg-violet-500/10 text-violet-600 dark:text-violet-400 flex items-center justify-center">
+        {icon}
+      </div>
+      <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+    </div>
   );
 }

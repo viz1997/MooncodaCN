@@ -1532,6 +1532,8 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
       <SpecModal
         open={showSpecModal}
         template={selectedMaskData ?? null}
+        // 2026-09-12 v2：把 selectedCell 透传给 SpecModal，订单概要卡显示「已选第 N 格」badge
+        selectedCell={selectedCell}
         submitting={submitting}
         onClose={() => setShowSpecModal(false)}
         onConfirm={(spec) => void handleConfirmSpec(spec)}
