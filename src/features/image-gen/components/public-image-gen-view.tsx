@@ -49,7 +49,7 @@ import {
   Wand2,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { QuadrantGridPicker } from "@/components/quadrant-grid-picker";
 import { Button } from "@/components/ui/button";
@@ -312,13 +312,16 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
     setHistory(loadHistory());
   }, []);
 
-  const pushHistory = (item: HistoryItem) => {
+  // 2026-09-12：useCallback 锁引用 —— finishTask 调用本函数；finishTask 的引用
+  // 稳定是 SpecModal 状态稳定的必要条件（详见 clearPoll 注释）。
+  // deps 全空安全：setHistory 是 stable setter；saveHistory 是模块级稳定函数。
+  const pushHistory = useCallback((item: HistoryItem) => {
     setHistory((prev) => {
       const next = [item, ...prev].slice(0, HISTORY_MAX);
       saveHistory(next);
       return next;
     });
-  };
+  }, []);
 
   const handleClearHistory = () => {
     setHistory([]);
@@ -327,19 +330,27 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
   };
 
   // 清理轮询定时器
-  const clearPoll = () => {
+  // 2026-09-12：useCallback 锁引用 —— 否则下方 useEffect `[clearPoll]` 会因父组件
+  // 任一 state 变化（generating / selectedMask / result）导致 clearPoll 新引用
+  // → effect 每 render 跑 cleanup+resubscribe → SpecModal 内 useEffect reset 误触
+  // → 「点了 6cm 仍 4cm 高亮」用户报告的真凶。配下方 useCallback 的 finishTask /
+  // failTask / pollTask + effect deps 修复一起解 re-render storm。
+  const clearPoll = useCallback(() => {
     if (pollTimerRef.current) {
       clearTimeout(pollTimerRef.current);
       pollTimerRef.current = null;
     }
-  };
+  }, []);
 
   /**
    * 2026-09-11：从 R2 公网 URL 列表还原 uploadedImages（供 history 点击 +
    * finishTask 共用）。blob URL 刷新失效 → 必须用持久 URL；预览图直接复用
    * R2 URL 当 previewUrl，无需 createObjectURL。
+   *
+   * 2026-09-12：useCallback 锁引用 —— 同 pushHistory 注释，finishTask 依赖本函数。
+   * deps 全空安全：setUploadedImages 是 stable setter。
    */
-  const restoreUploadedImagesFromR2 = (publicUrls: string[]) => {
+  const restoreUploadedImagesFromR2 = useCallback((publicUrls: string[]) => {
     if (publicUrls.length === 0) {
       setUploadedImages([]);
       return;
@@ -354,88 +365,106 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
         fileSize: 0,
       }))
     );
-  };
+  }, []);
 
   // 完成任务：入历史、清 task、停止轮询
-  const finishTask = (task: PendingTask, url: string, duration?: number) => {
-    saveTask(null);
-    clearPoll();
-    setGenerating(false);
-    setPendingModelName("");
-    setResult({
-      url,
-      modelName: task.maskName,
-      maskName: task.maskName,
-      duration,
-    });
-    // 2026-09-11：刷新场景下任务完成时也要还原 uploadedImages，否则用户
-    // 直接点「选择此效果下单」会撞「需要参考图」假阳 bug。
-    if (task.refPublicUrls && task.refPublicUrls.length > 0) {
-      restoreUploadedImagesFromR2(task.refPublicUrls);
-    }
-    // 2026-09-11：新生成结果默认 selectedCell=null（picker 待选态），
-    // 持久化 candidateCount/outputMode 让 history 缩略图恢复时知道要不要 picker。
-    pushHistory({
-      id: `gen_${Date.now()}`,
-      url,
-      maskId: task.maskId,
-      maskName: task.maskName,
-      modelName: task.maskName,
-      refPreviewUrls: task.refPreviewUrls,
-      // 2026-09-11：参考图 R2 公网 URL 入 history（点击缩略图时还原 uploadedImages）
-      refPublicUrls: task.refPublicUrls,
-      selectedCell: null,
-      candidateCount: task.candidateCount ?? 1,
-      outputMode: task.outputMode ?? "grid",
-      createdAt: new Date().toISOString(),
-    });
-  };
+  // 2026-09-12：useCallback 锁引用 —— 与 clearPoll 同根因；
+  // deps 全空安全：saveTask/clearPoll 都是 stable（ref + setter），task 是参数。
+  const finishTask = useCallback(
+    (task: PendingTask, url: string, duration?: number) => {
+      saveTask(null);
+      clearPoll();
+      setGenerating(false);
+      setPendingModelName("");
+      setResult({
+        url,
+        modelName: task.maskName,
+        maskName: task.maskName,
+        duration,
+      });
+      // 2026-09-11：刷新场景下任务完成时也要还原 uploadedImages，否则用户
+      // 直接点「选择此效果下单」会撞「需要参考图」假阳 bug。
+      if (task.refPublicUrls && task.refPublicUrls.length > 0) {
+        restoreUploadedImagesFromR2(task.refPublicUrls);
+      }
+      // 2026-09-11：新生成结果默认 selectedCell=null（picker 待选态），
+      // 持久化 candidateCount/outputMode 让 history 缩略图恢复时知道要不要 picker。
+      pushHistory({
+        id: `gen_${Date.now()}`,
+        url,
+        maskId: task.maskId,
+        maskName: task.maskName,
+        modelName: task.maskName,
+        refPreviewUrls: task.refPreviewUrls,
+        // 2026-09-11：参考图 R2 公网 URL 入 history（点击缩略图时还原 uploadedImages）
+        refPublicUrls: task.refPublicUrls,
+        selectedCell: null,
+        candidateCount: task.candidateCount ?? 1,
+        outputMode: task.outputMode ?? "grid",
+        createdAt: new Date().toISOString(),
+      });
+    },
+    [clearPoll, restoreUploadedImagesFromR2, pushHistory]
+  );
 
   // 任务失败：错误提示、清 task、停止轮询
-  const failTask = (msg: string) => {
-    saveTask(null);
-    clearPoll();
-    setGenerating(false);
-    setPendingModelName("");
-    setError(msg);
-    toast.error(msg);
-  };
+  const failTask = useCallback(
+    (msg: string) => {
+      saveTask(null);
+      clearPoll();
+      setGenerating(false);
+      setPendingModelName("");
+      setError(msg);
+      toast.error(msg);
+    },
+    [clearPoll]
+  );
 
   // 持续轮询进行中任务
-  const pollTask = (task: PendingTask, immediate = false) => {
-    const startedAt = new Date(task.startedAt).getTime();
-    const tick = async () => {
-      if (Date.now() - startedAt > POLL_TIMEOUT) {
-        failTask("生成超时，请重试");
-        return;
-      }
-      try {
-        const res = await fetch(`/api/image/task/${task.taskId}`);
-        const data = await res.json();
-        const url = data.images?.[0]?.url;
-        if (
-          data.success &&
-          url &&
-          (data.status === "completed" || data.images?.length)
-        ) {
-          finishTask(task, url, data.duration);
+  // deps：clearPoll + finishTask + failTask 都已经 useCallback 锁稳定 → 引用不变
+  // → 下方 useEffect `[masks]` 不会因 inline pollTask churn 误触恢复逻辑。
+  const pollTask = useCallback(
+    (task: PendingTask, immediate = false) => {
+      const startedAt = new Date(task.startedAt).getTime();
+      const tick = async () => {
+        if (Date.now() - startedAt > POLL_TIMEOUT) {
+          failTask("生成超时，请重试");
           return;
         }
-        if (data.status === "failed") {
-          failTask(data.error || "生成失败");
-          return;
+        try {
+          const res = await fetch(`/api/image/task/${task.taskId}`);
+          const data = await res.json();
+          const url = data.images?.[0]?.url;
+          if (
+            data.success &&
+            url &&
+            (data.status === "completed" || data.images?.length)
+          ) {
+            finishTask(task, url, data.duration);
+            return;
+          }
+          if (data.status === "failed") {
+            failTask(data.error || "生成失败");
+            return;
+          }
+          pollTimerRef.current = setTimeout(tick, POLL_INTERVAL);
+        } catch {
+          pollTimerRef.current = setTimeout(tick, POLL_INTERVAL);
         }
-        pollTimerRef.current = setTimeout(tick, POLL_INTERVAL);
-      } catch {
-        pollTimerRef.current = setTimeout(tick, POLL_INTERVAL);
-      }
-    };
-    clearPoll();
-    pollTimerRef.current = setTimeout(tick, immediate ? 0 : POLL_INTERVAL);
-  };
+      };
+      clearPoll();
+      pollTimerRef.current = setTimeout(tick, immediate ? 0 : POLL_INTERVAL);
+    },
+    [clearPoll, finishTask, failTask]
+  );
 
   // 组件卸载清理
-  useEffect(() => () => clearPoll(), [clearPoll]);
+  // 2026-09-12：deps 改为 [] —— clearPoll 已 useCallback 锁稳定，无须列入 deps。
+  // 旧版 deps=[clearPoll] 在每次父组件 re-render 时（clearPoll 引用更新）都会跑
+  // cleanup（clearPoll()）+ resubscribe，与下方 useEffect [masks, pollTask] 形成
+  // 双向 churn → SpecModal 内 useEffect reset 误触 → 字段态丢失。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only cleanup；clearPoll 已 useCallback 锁稳定
+  useEffect(() => () => clearPoll(), []);
 
   // 加载 mask 列表（2026-09-10：同时取 productLines）
   useEffect(() => {
@@ -475,9 +504,12 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
     setError(null);
     setPendingModelName(task.maskName);
     pollTask(task, true);
-    // 只在 masks 加载完成后恢复一次；pollTask/clearPoll 引用稳定
-    // eslint-disable-next-line react-hooks/correctness/useExhaustiveDependencies
-  }, [masks, pollTask]);
+    // 2026-09-12：deps 缩为 [masks] —— pollTask 已 useCallback 锁稳定，列入 deps
+    // 是噪音且会让 lint 误以为需要重跑；旧版 [masks, pollTask] 在 pollTask 引用
+    // 每 render 更新时 effect 会再跑一次（且中途 setX 形成状态反转），与上面
+    // useEffect `[clearPoll]` 一起把 SpecModal 状态吃掉。
+    // biome-ignore lint/correctness/useExhaustiveDependencies: pollTask 已 stable，列入会触发 false positive
+  }, [masks]);
 
   // ============================================
   // 多张参考图上传（与 V1 工作台对齐）
