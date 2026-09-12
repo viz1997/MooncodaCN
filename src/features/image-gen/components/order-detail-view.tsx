@@ -59,6 +59,13 @@ export interface OrderDetail {
   templateId: string;
   candidateUrls: string[];
   selectedImageIdx: number;
+  /**
+   * 2026-09-12：用户上传的原图列表（"原图"）—— 跟 candidates（效果图）区分。
+   * 详情视图主图下方展示 "原图" 缩略图，让用户看清 AI 在原图基础上做了什么。
+   * demo 流只有 1 张（referenceImageUrl）；多图工作台可能 N 张。
+   * 老订单 / API 兜底 null 时为空数组。
+   */
+  uploadedImageUrls: string[];
   createdAt: string;
   /**
    * 2026-09-10：列表缩略图（服务端从 candidates + selections 提取）；
@@ -151,8 +158,10 @@ export function OrderDetailView({ order }: { order: OrderDetail }) {
 
   return (
     <div className="flex-1 overflow-y-auto bg-zinc-50 dark:bg-zinc-950">
-      {/* 主图 */}
-      <div className="aspect-square w-full max-h-[60vh] bg-muted overflow-hidden">
+      {/* 主图（"已选效果图"）—— emerald 边框 + "已选"徽章标识用户选中的那张
+          2026-09-12：修复 candidates 语义错位（之前 candidates 写的是原图，
+          现在 candidates 才是 Lingting 生成的 demo 预览图 / 用户选中的 cell）。 */}
+      <div className="relative aspect-square w-full max-h-[60vh] bg-muted overflow-hidden ring-2 ring-emerald-500 ring-inset">
         {primaryImageUrl ? (
           isGridMulti ? (
             // 2026-09-11：grid 宫格订单只读 picker——onSelect 是 no-op（disabled 后点击无反应）
@@ -178,7 +187,42 @@ export function OrderDetailView({ order }: { order: OrderDetail }) {
             <ImageIcon className="h-12 w-12 opacity-30" />
           </div>
         )}
+        {/* "已选效果图" 徽章 —— 2026-09-12 统一标识（grid 模式 picker 自带
+            emerald cell 高亮，但单图 / separate 模式无 picker，需要顶部
+            徽章提示哪张是用户选的）。 */}
+        {primaryImageUrl && (
+          <div className="absolute top-2 left-2 inline-flex items-center gap-1 px-2 h-6 rounded-full bg-emerald-500 text-white text-[10px] font-semibold shadow-md">
+            <CheckCircle2 className="h-3 w-3" />
+            已选效果图
+          </div>
+        )}
       </div>
+
+      {/* 2026-09-12：原图参考 —— 与效果图分开展示，让用户看清 AI 在原图基础上
+          做了什么。多图工作台可能 N 张；demo 流 1 张。 */}
+      {order.uploadedImageUrls.length > 0 && (
+        <div className="px-4 sm:px-6 pt-3 pb-1">
+          <div className="text-[11px] font-semibold text-muted-foreground mb-1.5">
+            原图参考（{order.uploadedImageUrls.length}）
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {order.uploadedImageUrls.map((url, idx) => (
+              <div
+                key={url}
+                className="relative shrink-0 h-16 w-16 sm:h-20 sm:w-20 rounded-md overflow-hidden border border-zinc-200 dark:border-zinc-800 opacity-80"
+                title={`原图 ${idx + 1}`}
+              >
+                {/* biome-ignore lint/performance/noImgElement: 原图为远程 URL */}
+                <img
+                  src={url}
+                  alt={`原图 ${idx + 1}`}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="p-4 sm:p-6 space-y-4 max-w-3xl">
         {/* 模板 + 状态 */}

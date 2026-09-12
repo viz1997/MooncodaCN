@@ -33,6 +33,7 @@ import {
   InsufficientCreditsError,
 } from "@/features/credits/core";
 import { generateOrderToken } from "@/features/gpt-image/lib/generation-service";
+import { parseUploadedImages } from "@/features/gpt-image/lib/order-helpers";
 import {
   getAccessory,
   getLeatherColor,
@@ -639,6 +640,9 @@ export const listUserOrdersAction = withOrderAction("listUserOrders")
         creditsCharged: true,
         creditsBreakdown: true,
         candidates: true,
+        // 2026-09-12：用户上传的原图列表（"原图"），跟 candidates（效果图）区分。
+        // 详情视图用这个展示"原图"缩略图，让用户看到 AI 在原图基础上做了什么变化。
+        uploadedImages: true,
         selections: true,
         selectedIndex: true,
         createdAt: true,
@@ -728,6 +732,8 @@ export const listUserOrdersAction = withOrderAction("listUserOrders")
           // 详情用：所有候选图扁平化（[[url1, url2], [url3, url4]] → [url1, url2, url3, url4]）
           candidateUrls: allCandidates,
           selectedImageIdx: selectedIdx,
+          // 2026-09-12：原图列表（"用户上传了什么图"）—— 详情视图展示 "原图" 缩略图
+          uploadedImageUrls: parseUploadedImages(o.uploadedImages),
           createdAt: o.createdAt.toISOString(),
         };
       }),

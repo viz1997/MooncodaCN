@@ -846,6 +846,10 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
         // demo 一键下单：上传图片列表里取第一张作为订单 uploadedImages[0]
         // （多图模式下其他参考图保留在 uploadedImages 里供后续 regenerate 用）
         referenceImageUrl: refImageUrls[0] ?? "",
+        // 2026-09-12：Lingting 生成的 demo 预览图（"效果图"），不是用户上传的原图。
+        // 落 promptOrder.candidates[0][0]；订单详情展示这张图。
+        // 旧版写错了把 referenceImageUrl 当 candidates，结果订单详情显示原图。
+        demoPreviewUrl: result.url,
         productTypeCode: selectedMaskData.productTypeCode,
         productSize: spec.productSize,
         accessoryCode: spec.accessoryCode,

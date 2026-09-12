@@ -61,11 +61,19 @@ const submitDemoSchema = z.object({
   /** 模板 id（= productEffect.id / maskId；通过 productEffect.promptTemplateId 间接查 prompt_template） */
   templateId: z.string().min(1),
   /**
-   * demo 预览用的参考图 R2 publicUrl（必传，且必须已在 R2）。
-   * 走 demo 上传流程时已落到 R2，submit 时直接当 uploadedImages[0]。
-   * 为 null 时不允许——demo 一键下单必须有图（用户看了 demo 预览就要这张）。
+   * 2026-09-12：用户上传的原图 R2 publicUrl（"原图"）。
+   * 落 promptOrder.uploadedImages[0] —— "用户上传了什么图"。
+   * 必传，且必须已在 R2。
    */
   referenceImageUrl: z.string().url(),
+  /**
+   * 2026-09-12：demo 预览图 R2 publicUrl（"效果图"）。
+   * - Lingting 异步生成返回的 URL，是用户在 demo 流看到的「选择此效果下单」那张图
+   * - 落 promptOrder.candidates[0][0] —— 订单详情展示这张"已选效果"，不是原图
+   * - 必传；与 referenceImageUrl 是两张不同的图（一个是用户上传，一个是 AI 生成）
+   * - 旧版写错了把 referenceImageUrl 当 candidates，订单详情显示原图，2026-09-12 修
+   */
+  demoPreviewUrl: z.string().url(),
   /**
    * 模板绑定的 productTypeCode（来自 productEffect.productTypeCode）。
    * null 表示老 ToC 模板，不显示规格窗、订单 spec 全 null。
@@ -353,15 +361,19 @@ export const submitImageGenDemoAction = withDemoAction("submit")
     }
 
     // 6. 写 promptOrder（SELECTED）—— demo 预览图当唯一候选
+    // uploadedImages 写用户上传的原图 referenceImageUrl；candidates 写 demo 预览图 demoPreviewUrl
+    // （两者是不同的图，原图 vs 效果图）。
     const token = generateOrderToken();
     const orderNo = generateOrderNo();
 
-    // candidates 写 [[referenceImageUrl]]：外层 imageIdx=0，内层 candIdx=0。
+    // candidates 写 [[demoPreviewUrl]]：外层 imageIdx=0，内层 candIdx=0。
+    // 2026-09-12：必须是 demo 预览图（AI 生成的图），不是用户上传的 referenceImageUrl
+    // （订单详情展示的是"用户选中的效果图"，不是"用户上传的原图"）。
     // selections = "[finalSelectedCell]"：锁定第 0 张第 finalSelectedCell 个候选 =
     // demo 预览图（composite）的第 N 格。composite 仍为 1 张图存在 R2，cell 索引语义
     // 与 /p/[token] admin 详情（CSS background-position 切 cell）一致。
     // 注：candidates 与 selections 都用 JSON 字符串（与 schema.ts promptOrder.candidates/selections 字段一致）
-    const candidatesJson = JSON.stringify([[parsedInput.referenceImageUrl]]);
+    const candidatesJson = JSON.stringify([[parsedInput.demoPreviewUrl]]);
     const selectionsJson = JSON.stringify([finalSelectedCell]);
 
     const [created] = await db
@@ -379,7 +391,7 @@ export const submitImageGenDemoAction = withDemoAction("submit")
         uploadCount: 1,
         imagesPerUpload: 1,
         regenerateLimit: 5,
-        // uploadedImages 直接写 demo 参考图 URL（已在 R2）
+        // uploadedImages 直接写用户上传的原图 URL（已在 R2）
         uploadedImages: JSON.stringify([parsedInput.referenceImageUrl]),
         uploadedAt: new Date(),
         generatedAt: new Date(),
