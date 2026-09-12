@@ -148,9 +148,14 @@ const productEffectFormSchema = z.object({
   /**
    * 2026-09-10：引用 promptTemplate.id（gpt-image 模块的提示词模板表）。
    * 生成时优先用 promptTemplate.prompt，缺失则 fallback 到本地 prompt 字段。
-   * null = 不引用，提交时校验是否存在（应用层校验，不加 DB FK）。
+   *
+   * 2026-09-12：改为必填 —— 公开 demo 下单 action 写 promptOrder.templateId
+   * 会被 promptTemplate 外键 FK 校验拦下（onDelete restrict），必须先有
+   * promptTemplate 行才能落单；旧 admin 手工录入未绑的 productEffect
+   * 下单时直接 throw「模板不存在或已停用」。强制必填挡住新录入没绑的漏网之鱼，
+   * 旧存量通过 scripts/list-effects-without-template.ts 让 admin 手工补。
    */
-  promptTemplateId: z.string().nullable().default(null),
+  promptTemplateId: z.string().min(1),
   versions: z
     .array(
       z.object({

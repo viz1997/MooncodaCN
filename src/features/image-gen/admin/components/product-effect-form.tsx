@@ -134,9 +134,11 @@ export function ProductEffectForm({
   // 加载失败/未挂载时回退 MOCK，确保 dev 无 DB 也不报错。
   const [productLines, setProductLines] = useState<ProductLine[]>([]);
   // 2026-09-10：引用 prompt_template.id（生成时优先用 promptTemplate.prompt）。
-  // null = 不引用，直接用本表单的 prompt 字段
-  const [promptTemplateId, setPromptTemplateId] = useState<string | null>(
-    initialData?.promptTemplateId ?? null
+  // 2026-09-12：改为必填 —— 没绑的话 /image-gen demo 下单会撞「模板不存在或已停用」
+  // （submit-image-gen-demo 直接拿 maskId 查 promptTemplate 表，admin 手工录入
+  // 没绑的行查不到）。新建模式下默认空串（让用户必须选）；编辑模式沿用旧值。
+  const [promptTemplateId, setPromptTemplateId] = useState<string>(
+    initialData?.promptTemplateId ?? ""
   );
   // promptTemplate 下拉选项（id + name + productTypeCode 三列）
   const [promptTemplateOptions, setPromptTemplateOptions] = useState<
@@ -268,6 +270,12 @@ export function ProductEffectForm({
       message.error("名称和提示词必填");
       return;
     }
+    // 2026-09-12：强制要求绑定 promptTemplate，否则 /image-gen demo 下单会撞
+    // 「模板不存在或已停用」（submit-image-gen-demo 用 maskId 查 promptTemplate 表）。
+    if (!promptTemplateId) {
+      message.error("请选择一个提示词模板（必填）");
+      return;
+    }
 
     const payload = {
       maskId,
@@ -303,7 +311,8 @@ export function ProductEffectForm({
           : null,
       // 2026-09-10：皮革颜色子集；空数组 → null（LEATHER_COLORS 全展示）
       allowedColors: allowedColors.length > 0 ? allowedColors : null,
-      // 2026-09-10：引用 prompt_template.id（null = 不引用，用本地 prompt 字段）
+      // 2026-09-10：引用 prompt_template.id
+      // 2026-09-12：改为必填（已在校验拦截）；传 string 给 server schema
       promptTemplateId,
     };
 
@@ -813,36 +822,40 @@ export function ProductEffectForm({
       </div>
 
       {/* 2026-09-10：关联 prompt_template（下拉单选）。
-         - null = 不引用，提交时 promptTemplateId=null → 生成时走本地 prompt 字段
-         - 非 null = 生成时优先用 promptTemplate.prompt（fallback 到本地）
+         - 2026-09-12：改为必填 —— 不绑的话 /image-gen demo 下单会撞「模板不存在或已停用」
+           （submit-image-gen-demo 直接拿 maskId 查 promptTemplate 表）。
+           旧 admin 手工录入没绑的行 → 跑 scripts/list-effects-without-template.ts
+           看清单，逐个到 /admin/product-effects 编辑页补一个。
          数据源：gpt-image 模块的 listTemplatesAction（含所有 promptTemplate） */}
       <Form.Item
         label={
           <span>
-            引用提示词模板
+            关联提示词模板
+            <span className="ml-1 text-rose-500">*</span>
             <span className="ml-1 text-xs text-muted-foreground">
-              （生成时优先用模板 prompt，缺失则用本表单 prompt 字段）
+              （必填，下单时按此 id 写 prompt_order.templateId 外键）
             </span>
           </span>
         }
+        required
+        {...(!promptTemplateId
+          ? ({ validateStatus: "error", help: "请选择一个提示词模板" } as const)
+          : {})}
       >
         <Select
-          value={promptTemplateId ?? "__none__"}
-          onChange={(v) => setPromptTemplateId(v === "__none__" ? null : v)}
-          options={[
-            { value: "__none__", label: "不引用（直接用本表单 prompt 字段）" },
-            ...promptTemplateOptions.map((t) => ({
-              value: t.id,
-              label: `${t.id} · ${t.name}${
-                t.productTypeCode ? ` · ${t.productTypeCode}` : ""
-              }`,
-            })),
-          ]}
-          placeholder="选择 promptTemplate"
+          value={promptTemplateId || undefined}
+          onChange={(v) => setPromptTemplateId(v ?? "")}
+          options={promptTemplateOptions.map((t) => ({
+            value: t.id,
+            label: `${t.id} · ${t.name}${
+              t.productTypeCode ? ` · ${t.productTypeCode}` : ""
+            }`,
+          }))}
+          placeholder="选择 promptTemplate（必选）"
           allowClear={false}
           showSearch
           optionFilterProp="label"
-          notFoundContent="暂无 promptTemplate"
+          notFoundContent="暂无 promptTemplate，请先去 /admin/templates 创建"
         />
       </Form.Item>
 
