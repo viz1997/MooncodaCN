@@ -35,7 +35,9 @@ import {
   addProductEffectVersionAction,
   createProductEffectAdminAction,
   listProductLinesAdminAction,
+  listPromptTemplatePricesAction,
   updateProductEffectAdminAction,
+  updatePromptTemplatePricesAction,
 } from "@/features/image-gen/admin/actions";
 import { IMAGE_MODEL_LIST } from "@/features/image-gen/lib/image-models/types";
 import type {
@@ -145,6 +147,36 @@ export function ProductEffectForm({
     Array<{ id: string; name: string; productTypeCode: string | null }>
   >([]);
 
+  // 2026-09-12：按规格定价（basePrice + Σ matching rule.delta）。
+  // 价格规则挂在 promptTemplate 上（prompt_template_price），admin 编辑
+  // productEffect 时同时维护绑定模板的规则。priceRules 用 record 是因为
+  // 同一 specKey 唯一，每行直接 specKey 索引；保存时 list<PriceRule> 输出。
+  // 加载时机：mount 时若 initialData.promptTemplateId 有值；切换 promptTemplateId 时。
+  const [priceRules, setPriceRules] = useState<
+    Record<string, { priceDelta: number; label: string }>
+  >({});
+  const [basePriceSnapshot, setBasePriceSnapshot] = useState<number>(0);
+  const [pricesLoaded, setPricesLoaded] = useState(false);
+
+  /**
+   * 按 specKey 拼当前规则 delta（默认 0）。
+   */
+  const getDelta = (specKey: string): number =>
+    priceRules[specKey]?.priceDelta ?? 0;
+
+  /**
+   * 更新某 specKey 的 delta（label 保留，admin 没改 label 时不丢）。
+   */
+  const setDelta = (specKey: string, delta: number) => {
+    setPriceRules((prev) => ({
+      ...prev,
+      [specKey]: {
+        priceDelta: delta,
+        label: prev[specKey]?.label ?? "",
+      },
+    }));
+  };
+
   // 加载产品线 + promptTemplate 列表（mount 一次）
   useEffect(() => {
     let cancelled = false;
@@ -184,45 +216,65 @@ export function ProductEffectForm({
     };
   }, []);
 
+  // 2026-09-12：按 promptTemplateId 加载 / 刷新价格规则。
+  // - initialData.promptTemplateId mount 时回填
+  // - 用户切换 promptTemplateId 时重新加载（防交叉污染）
+  // - 新建模式下 promptTemplateId 为空 → 不加载（用户先选模板后才有规则）
+  useEffect(() => {
+    if (!promptTemplateId) {
+      setPriceRules({});
+      setBasePriceSnapshot(0);
+      setPricesLoaded(false);
+      return;
+    }
+    let cancelled = false;
+    setPricesLoaded(false);
+    (async () => {
+      try {
+        const res = await listPromptTemplatePricesAction({
+          templateId: promptTemplateId,
+        });
+        if (cancelled) return;
+        const rules = res?.data?.rules ?? [];
+        const next: Record<string, { priceDelta: number; label: string }> = {};
+        for (const r of rules) {
+          next[r.specKey] = { priceDelta: r.priceDelta, label: r.label };
+        }
+        setPriceRules(next);
+        setBasePriceSnapshot(res?.data?.basePrice ?? 0);
+      } catch {
+        // 加载失败保留空规则，保存时会写空集（清空模板所有规则 → 退回基础价）
+        if (!cancelled) {
+          setPriceRules({});
+          setBasePriceSnapshot(0);
+        }
+      } finally {
+        if (!cancelled) setPricesLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [promptTemplateId]);
+
   const versions = initialData?.versions ?? [];
   const [newVersionLabel, setNewVersionLabel] = useState("");
   const [newVersionNote, setNewVersionNote] = useState("");
 
-  const { execute: createEffect, isPending: isCreating } = useAction(
-    createProductEffectAdminAction,
-    {
-      onSuccess: () => {
-        message.success("创建成功");
-        if (onSaved) {
-          onSaved();
-        } else {
-          router.push("/admin/product-effects");
-        }
-      },
-      onError: ({ error }) => {
-        message.error(error.serverError ?? "创建失败");
-      },
-    }
+  const { executeAsync: createEffectAsync, isPending: isCreating } = useAction(
+    createProductEffectAdminAction
   );
 
-  const { execute: updateEffect, isPending: isUpdating } = useAction(
-    updateProductEffectAdminAction,
-    {
-      onSuccess: () => {
-        message.success("更新成功");
-        if (onSaved) {
-          onSaved();
-        } else {
-          router.push("/admin/product-effects");
-        }
-      },
-      onError: ({ error }) => {
-        message.error(error.serverError ?? "更新失败");
-      },
-    }
+  const { executeAsync: updateEffectAsync, isPending: isUpdating } = useAction(
+    updateProductEffectAdminAction
   );
 
-  const isPending = isCreating || isUpdating;
+  // 2026-09-12：价格规则独立保存（挂在 promptTemplate 上，与 productEffect 表分离）。
+  // 同样串行 await；失败抛错让 handleSubmit 兜底 toast。
+  const { executeAsync: updatePricesAsync, isPending: isUpdatingPrices } =
+    useAction(updatePromptTemplatePricesAction);
+
+  const isPending = isCreating || isUpdating || isUpdatingPrices;
 
   // 切换产品线选中
   const toggleProductLine = (id: string) => {
@@ -265,7 +317,7 @@ export function ProductEffectForm({
     });
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!name.trim() || !prompt.trim()) {
       message.error("名称和提示词必填");
       return;
@@ -316,10 +368,40 @@ export function ProductEffectForm({
       promptTemplateId,
     };
 
-    if (isEdit) {
-      updateEffect({ maskId, updates: payload });
-    } else {
-      createEffect(payload);
+    // 2026-09-12：价格规则 list（specKey + delta + label）。
+    // - 只存非 0 的 delta 进 list（DB 端 price_delta 默认 0，省点行）
+    // - 全 0 时 rules=[]，updatePromptTemplatePrices 会整体清空该模板规则
+    // - admin 在 UI 没改的 specKey（priceRules 里没记录）也按 0 处理，不写入
+    const rules = Object.entries(priceRules)
+      .filter(([, v]) => v.priceDelta !== 0 || v.label.trim() !== "")
+      .map(([specKey, v]) => ({
+        specKey,
+        priceDelta: v.priceDelta,
+        label: v.label,
+      }));
+
+    try {
+      // 1. productEffect 写入
+      if (isEdit) {
+        await updateEffectAsync({ maskId, updates: payload });
+      } else {
+        await createEffectAsync(payload);
+      }
+      // 2. promptTemplate 价格规则写入（独立表，promptTemplateId 已必填）
+      await updatePricesAsync({ templateId: promptTemplateId, rules });
+      message.success(isEdit ? "更新成功" : "创建成功");
+      if (onSaved) {
+        onSaved();
+      } else {
+        router.push("/admin/product-effects");
+      }
+    } catch (err) {
+      // next-safe-action 把 serverError 挂在 error.serverError 上；
+      // 这里 err 是 Action 错误对象（含 .serverError），提取可读消息
+      const msg =
+        (err as { serverError?: string })?.serverError ??
+        (err instanceof Error ? err.message : String(err));
+      message.error(msg);
     }
   };
 
@@ -599,81 +681,12 @@ export function ProductEffectForm({
               )}
             </div>
           )}
-        </div>
-      )}
 
-      {/* 2026-09-10：加工能力与颜色（覆盖字典默认，仅对 LB 等 4 个 flag 启用）
-         - 4 个 capability Switch：override 语义——打开表示"我要 override 这个 key"
-           （默认跟随 catalog 字典）；不勾 = 该 key 不在 override 里，落库时剔除
-         - 5 个皮革色 chip：勾选 = 子集；空 = 全集
-         - canEngrave 不展示（沿用 catalog，和现有刻字字段绑定避免歧义）
-         - 仅在选了产品型号时显示；切型号时自动清空 */}
-      {productType && (
-        <div className="rounded-lg border bg-emerald-500/5 px-4 py-3 space-y-3">
-          <div className="text-sm font-medium">
-            加工能力与颜色（覆盖字典默认）
-          </div>
-          <div className="text-xs text-muted-foreground">
-            不勾 = /image-gen SpecModal
-            展示字典默认能力；勾选后只展示勾中的能力。已存在的订单不受影响。
-          </div>
-
-          {/* 5 个 capability Switch（2026-09-11 加 canPlatform） */}
-          <div className="space-y-2">
-            {(
-              [
-                ["canLeatherColor", "皮革颜色"],
-                ["canLeatherExposed", "皮革外露"],
-                ["canPvcProtection", "PVC 保护"],
-                ["canHaveRemarks", "备注"],
-                ["canPlatform", "订单来源平台"],
-              ] as Array<[keyof ProductCapabilities, string]>
-            ).map(([key, label]) => {
-              const catalogDefault = productType.capabilities[key];
-              const overrideValue = allowedCapabilities[key];
-              // 覆盖后的有效值：admin 没动 → 字典默认；动了 → override
-              const effective = overrideValue ?? catalogDefault;
-              const isOverride =
-                overrideValue !== undefined && overrideValue !== catalogDefault;
-              return (
-                <label
-                  key={key}
-                  className={cn(
-                    "flex items-center justify-between gap-3 rounded-md border px-3 py-2 cursor-pointer text-xs transition-colors",
-                    effective
-                      ? "bg-emerald-500/15 border-emerald-500/50 text-emerald-700"
-                      : "bg-background hover:bg-muted/50"
-                  )}
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="font-medium">{label}</span>
-                    <span className="text-[10px] text-muted-foreground">
-                      字典默认：
-                      {catalogDefault ? "✓" : "✗"}
-                    </span>
-                    {isOverride && (
-                      <Badge color="default" className="!text-[10px]">
-                        已覆盖
-                      </Badge>
-                    )}
-                  </div>
-                  <Switch
-                    checked={effective}
-                    onChange={(checked) =>
-                      setAllowedCapabilities((prev) => ({
-                        ...prev,
-                        [key]: checked,
-                      }))
-                    }
-                  />
-                </label>
-              );
-            })}
-          </div>
-
-          {/* 皮革色 chips（仅当 catalog 有 canLeatherColor=true 时显示） */}
+          {/* 2026-09-12：皮革色 chips（从原「加工能力与颜色」段挪来，归到规格段）。
+             - 仅当 catalog 有 canLeatherColor=true 时显示
+             - 勾选 = 子集；空 = LEATHER_COLORS 全集 */}
           {productType.capabilities.canLeatherColor && (
-            <div className="pt-2 border-t">
+            <div>
               <div className="text-xs font-medium mb-1.5">皮革颜色</div>
               <div className="text-[10px] text-muted-foreground mb-2">
                 不勾选 = LEATHER_COLORS 全部展示；勾选后只展示勾中的颜色子集。
@@ -716,6 +729,319 @@ export function ProductEffectForm({
                   已选 {allowedColors.length} / {LEATHER_COLORS.length} 个
                 </div>
               )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 2026-09-12：定制能力（覆盖字典默认，仅 LB 型号可用）
+         - 2026-09-12 重构：颜色 / 保护套（实物外露 / PVC 保护）从这一段挪出去，
+           归到「规格」段（与 SpecModal 端规格字段分类对齐）。
+         - 只剩 2 个 capability Switch：备注 + 订单来源平台（capability-gated）。
+         - override 语义：admin 勾选表示 override catalog 默认；不勾 = 沿用 catalog
+         - canEngrave 不展示（沿用 catalog，和现有刻字字段绑定避免歧义）
+         - 仅在选了产品型号时显示；切型号时自动清空 */}
+      {productType && (
+        <div className="rounded-lg border bg-emerald-500/5 px-4 py-3 space-y-3">
+          <div className="text-sm font-medium">定制能力（覆盖字典默认）</div>
+          <div className="text-xs text-muted-foreground">
+            不勾 = /image-gen SpecModal
+            展示字典默认能力；勾选后只展示勾中的能力。已存在的订单不受影响。
+          </div>
+
+          {/* 2 个 capability Switch（2026-09-12：去掉 canLeatherColor / canLeatherExposed / canPvcProtection，
+              三者已挪到「规格」段「保护套类型」段） */}
+          <div className="space-y-2">
+            {(
+              [
+                ["canHaveRemarks", "备注"],
+                ["canPlatform", "订单来源平台"],
+              ] as Array<[keyof ProductCapabilities, string]>
+            ).map(([key, label]) => {
+              const catalogDefault = productType.capabilities[key];
+              const overrideValue = allowedCapabilities[key];
+              const effective = overrideValue ?? catalogDefault;
+              const isOverride =
+                overrideValue !== undefined && overrideValue !== catalogDefault;
+              return (
+                <label
+                  key={key}
+                  className={cn(
+                    "flex items-center justify-between gap-3 rounded-md border px-3 py-2 cursor-pointer text-xs transition-colors",
+                    effective
+                      ? "bg-emerald-500/15 border-emerald-500/50 text-emerald-700"
+                      : "bg-background hover:bg-muted/50"
+                  )}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="font-medium">{label}</span>
+                    <span className="text-[10px] text-muted-foreground">
+                      字典默认：
+                      {catalogDefault ? "✓" : "✗"}
+                    </span>
+                    {isOverride && (
+                      <Badge color="default" className="!text-[10px]">
+                        已覆盖
+                      </Badge>
+                    )}
+                  </div>
+                  <Switch
+                    checked={effective}
+                    onChange={(checked) =>
+                      setAllowedCapabilities((prev) => ({
+                        ...prev,
+                        [key]: checked,
+                      }))
+                    }
+                  />
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 2026-09-12：保护套类型（独立段，从原「加工能力与颜色」段拆出）
+         - 与 SpecModal 端「保护套类型」段同名对齐：实物外露 / PVC 保护
+         - 2 个 capability Switch：admin 决定这个模板允不允许下这 2 种保护套
+         - override 语义：admin 勾选表示 override catalog 默认；不勾 = 沿用 catalog
+         - 仅在选了产品型号 + catalog 有 canLeatherExposed / canPvcProtection 之一时才显示
+         - canLeatherExposed + canPvcProtection 互斥：admin 应只勾一个（数据库列是两个 boolean，
+           UI 不强行互斥；提交后 server action submit-image-gen-demo 会挡二次校验） */}
+      {productType &&
+        (productType.capabilities.canLeatherExposed ||
+          productType.capabilities.canPvcProtection) && (
+          <div className="rounded-lg border bg-violet-500/5 px-4 py-3 space-y-3">
+            <div className="text-sm font-medium">保护套类型</div>
+            <div className="text-xs text-muted-foreground">
+              勾选 = 该模板在 /image-gen SpecModal
+              展示对应保护套选项；不勾 = 沿用产品型号字典默认。
+            </div>
+
+            <div className="space-y-2">
+              {(
+                [
+                  ["canLeatherExposed", "实物外露"],
+                  ["canPvcProtection", "PVC 保护"],
+                ] as Array<[keyof ProductCapabilities, string]>
+              ).map(([key, label]) => {
+                const catalogDefault = productType.capabilities[key];
+                const overrideValue = allowedCapabilities[key];
+                const effective = overrideValue ?? catalogDefault;
+                const isOverride =
+                  overrideValue !== undefined &&
+                  overrideValue !== catalogDefault;
+                return (
+                  <label
+                    key={key}
+                    className={cn(
+                      "flex items-center justify-between gap-3 rounded-md border px-3 py-2 cursor-pointer text-xs transition-colors",
+                      effective
+                        ? "bg-violet-500/15 border-violet-500/50 text-violet-700"
+                        : "bg-background hover:bg-muted/50"
+                    )}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="font-medium">{label}</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        字典默认：
+                        {catalogDefault ? "✓" : "✗"}
+                      </span>
+                      {isOverride && (
+                        <Badge color="default" className="!text-[10px]">
+                          已覆盖
+                        </Badge>
+                      )}
+                    </div>
+                    <Switch
+                      checked={effective}
+                      onChange={(checked) =>
+                        setAllowedCapabilities((prev) => ({
+                          ...prev,
+                          [key]: checked,
+                        }))
+                      }
+                    />
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+      {/* 2026-09-12：定价（对账核心字段，按规格加价）
+         - 挂在 promptTemplate 上（prompt_template_price 表），与 productEffect 表独立
+         - 本单总扣 = basePrice（promptTemplate.price） + Σ(matching rule.delta)
+         - 4 个子区域（按 specKey 维度）：尺寸 / 配件 / 皮革色 / 保护套
+         - 始终展示字典全量（4cm/6cm/8cm/11cm + leather/pvc/bracket + 5 色 +
+           exposed/pvc），与 allowed 子集解耦：admin 即使在「规格」段没勾某个
+           尺寸，也能在这里预填 delta（运行时用户选不到就不命中 = 不影响）
+         - 仅在选了 promptTemplateId 时显示（无模板的 productEffect 无意义）*/}
+      {promptTemplateId && (
+        <div className="rounded-lg border bg-rose-500/5 px-4 py-3 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium">定价（按规格加价）</div>
+            <div className="text-xs text-muted-foreground">
+              基础价 {basePriceSnapshot} 积分 · 当前加价合计{" "}
+              {Object.values(priceRules).reduce(
+                (sum, r) => sum + r.priceDelta,
+                0
+              )}{" "}
+              · 预览{" "}
+              <span className="font-mono font-semibold text-rose-700">
+                {basePriceSnapshot +
+                  Object.values(priceRules).reduce(
+                    (sum, r) => sum + r.priceDelta,
+                    0
+                  )}
+              </span>{" "}
+              积分
+            </div>
+          </div>
+          <div className="text-xs text-muted-foreground">
+            delta = 该规格命中时的加价（可负）。basePrice 在 promptTemplate
+            详情页编辑，本表单只管理加价规则。
+          </div>
+
+          {!pricesLoaded ? (
+            <div className="text-xs text-muted-foreground py-2">
+              正在加载价格规则…
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {/* 尺寸子区 */}
+              <div>
+                <div className="text-xs font-medium mb-1.5">尺寸</div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {["4", "6", "8", "11"].map((s) => {
+                    const specKey = `size:${s}`;
+                    const delta = getDelta(specKey);
+                    return (
+                      <div
+                        key={specKey}
+                        className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5"
+                      >
+                        <span className="text-xs font-mono">{s}cm</span>
+                        <Input
+                          type="number"
+                          size="small"
+                          value={delta}
+                          onChange={(e) =>
+                            setDelta(specKey, Number(e.target.value))
+                          }
+                          className="!w-20"
+                          placeholder="0"
+                        />
+                        <span className="text-[10px] text-muted-foreground">
+                          积分
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 配件子区 */}
+              <div>
+                <div className="text-xs font-medium mb-1.5">配件</div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {ACCESSORIES.map((a) => {
+                    const specKey = `accessory:${a.code}`;
+                    const delta = getDelta(specKey);
+                    return (
+                      <div
+                        key={specKey}
+                        className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5"
+                      >
+                        <span className="text-xs">{a.name}</span>
+                        <Input
+                          type="number"
+                          size="small"
+                          value={delta}
+                          onChange={(e) =>
+                            setDelta(specKey, Number(e.target.value))
+                          }
+                          className="!w-20"
+                          placeholder="0"
+                        />
+                        <span className="text-[10px] text-muted-foreground">
+                          积分
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 皮革色子区 */}
+              <div>
+                <div className="text-xs font-medium mb-1.5">皮革颜色</div>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                  {LEATHER_COLORS.map((c) => {
+                    const specKey = `leather_color:${c.code}`;
+                    const delta = getDelta(specKey);
+                    return (
+                      <div
+                        key={specKey}
+                        className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5"
+                      >
+                        <span
+                          aria-hidden
+                          className="h-3 w-3 rounded-full border shrink-0"
+                          style={{ backgroundColor: c.swatch }}
+                        />
+                        <span className="text-xs truncate">{c.name}</span>
+                        <Input
+                          type="number"
+                          size="small"
+                          value={delta}
+                          onChange={(e) =>
+                            setDelta(specKey, Number(e.target.value))
+                          }
+                          className="!w-16"
+                          placeholder="0"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 保护套子区（始终展示 2 行，admin 可为未开启的能力预配价格） */}
+              <div>
+                <div className="text-xs font-medium mb-1.5">保护套类型</div>
+                <div className="grid grid-cols-2 gap-2">
+                  {(
+                    [
+                      ["protection:exposed", "实物外露"],
+                      ["protection:pvc", "PVC 保护"],
+                    ] as const
+                  ).map(([specKey, label]) => {
+                    const delta = getDelta(specKey);
+                    return (
+                      <div
+                        key={specKey}
+                        className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5"
+                      >
+                        <span className="text-xs">{label}</span>
+                        <Input
+                          type="number"
+                          size="small"
+                          value={delta}
+                          onChange={(e) =>
+                            setDelta(specKey, Number(e.target.value))
+                          }
+                          className="!w-20"
+                          placeholder="0"
+                        />
+                        <span className="text-[10px] text-muted-foreground">
+                          积分
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           )}
         </div>

@@ -6,8 +6,12 @@
  * 供 Admin 面板管理产品效果模板、查看模型配置
  */
 
+import { and, eq } from "drizzle-orm";
+import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { db } from "@/db";
+import { promptTemplatePrice, promptTemplate } from "@/db/schema";
 import type { ProductCapabilities } from "@/features/gpt-image/lib/product-catalog";
 import {
   createEffectInDb,
@@ -332,6 +336,199 @@ export const deleteProductEffectAdminAction = withImageGenAdminAction(
     }
     revalidatePath("/admin/product-effects");
     return { success: true };
+  });
+
+// ============================================
+// 2026-09-12：prompt_template_price admin actions（按规格定价对账核心）
+// ============================================
+//
+// 设计：
+//   - listPromptTemplatePricesAction(templateId)：拉取某模板的全部价格规则
+//     （specKey + priceDelta + label），按 specKey 字母序；admin product-effect-form
+//     mount 时 + promptTemplateId 切换时调用，把规则预填进 UI
+//   - updatePromptTemplatePricesAction(templateId, rules)：整体替换（先删后插）
+//     简化并发：单一来源（admin），避免行级 diff + 部分失败
+//   - 校验 templateId 存在且 active；规则 specKey 用白名单（防止脏数据）
+//
+// 与 productEffectFormSchema 的关系：
+//   价格规则**不**塞进 productEffectFormSchema（productEffect 不存价格规则，
+//   挂在 promptTemplate 上）。admin form 提交时串行调 updateProductEffect
+//   + updatePromptTemplatePrices，两边一致才算保存成功。
+// ============================================
+
+/**
+ * specKey 白名单（与 prompt_template_price migration 注释 + product-catalog.ts 对齐）。
+ * 列表中前段为 size/accessory/leather_color 三种 chip 子集；protection 两条
+ * 写死（admin 可改 delta，但 key 不让 admin 自由加新保护套类型，避免
+ * SPEC 不一致导致 prompt_order.leather_exposed/pvc_protection 落 null）。
+ */
+const ALLOWED_SPEC_KEY_PREFIXES = [
+  "size:",
+  "accessory:",
+  "leather_color:",
+  "protection:",
+] as const;
+
+const ALLOWED_SIZE_VALUES = new Set(["4", "6", "8", "11"]);
+const ALLOWED_ACCESSORY_VALUES = new Set(["leather", "pvc", "bracket"]);
+const ALLOWED_LEATHER_COLOR_VALUES = new Set([
+  "natural",
+  "brown",
+  "black",
+  "red",
+  "navy",
+]);
+const ALLOWED_PROTECTION_VALUES = new Set(["exposed", "pvc"]);
+
+/**
+ * specKey 合法性校验。rule 是 admin 提交上来的 raw 值（{ specKey, priceDelta, label }）。
+ * 非法 → 抛 Error（admin 看到消息后改正）。失败一条 = 整体拒绝写入（事务语义）。
+ */
+function validateSpecKey(specKey: string): void {
+  const [dim, value] = specKey.split(":");
+  if (!dim || !value) {
+    throw new Error(`非法规格 key：${specKey}（格式应为 "dimension:value"）`);
+  }
+  const prefix = `${dim}:`;
+  if (!(ALLOWED_SPEC_KEY_PREFIXES as readonly string[]).includes(prefix)) {
+    throw new Error(
+      `非法规格维度 ${dim}（允许：${ALLOWED_SPEC_KEY_PREFIXES.join(" / ")})`
+    );
+  }
+  switch (dim) {
+    case "size":
+      if (!ALLOWED_SIZE_VALUES.has(value)) {
+        throw new Error(`非法尺寸 ${value}cm（允许：4 / 6 / 8 / 11）`);
+      }
+      return;
+    case "accessory":
+      if (!ALLOWED_ACCESSORY_VALUES.has(value)) {
+        throw new Error(`非法配件 ${value}（允许：leather / pvc / bracket）`);
+      }
+      return;
+    case "leather_color":
+      if (!ALLOWED_LEATHER_COLOR_VALUES.has(value)) {
+        throw new Error(
+          `非法皮革色 ${value}（允许：natural / brown / black / red / navy）`
+        );
+      }
+      return;
+    case "protection":
+      if (!ALLOWED_PROTECTION_VALUES.has(value)) {
+        throw new Error(`非法保护套类型 ${value}（允许：exposed / pvc）`);
+      }
+      return;
+    default:
+      throw new Error(`未实现的规格维度：${dim}`);
+  }
+}
+
+const priceRuleSchema = z.object({
+  specKey: z.string().min(1).max(64),
+  priceDelta: z.number().int().min(-10000).max(100000),
+  label: z.string().max(64).default(""),
+});
+
+/**
+ * 列出某 promptTemplate 的全部价格规则（admin form mount 加载用）。
+ * 模板不存在 / 已停用都抛错，admin form 捕获后转 toast。
+ */
+export const listPromptTemplatePricesAction = withImageGenAdminAction(
+  "listPromptTemplatePrices"
+)
+  .schema(z.object({ templateId: z.string().min(1) }))
+  .action(async ({ parsedInput }) => {
+    const template = await db.query.promptTemplate.findFirst({
+      where: and(
+        eq(promptTemplate.id, parsedInput.templateId),
+        eq(promptTemplate.isActive, true)
+      ),
+      columns: { id: true, price: true },
+    });
+    if (!template) {
+      throw new Error("模板不存在或已停用");
+    }
+    const rows = await db
+      .select({
+        id: promptTemplatePrice.id,
+        specKey: promptTemplatePrice.specKey,
+        priceDelta: promptTemplatePrice.priceDelta,
+        label: promptTemplatePrice.label,
+      })
+      .from(promptTemplatePrice)
+      .where(eq(promptTemplatePrice.templateId, parsedInput.templateId));
+    // 按 specKey 字母序（与 price-calculator 的 breakdown 排序一致）
+    rows.sort((a, b) =>
+      a.specKey < b.specKey ? -1 : a.specKey > b.specKey ? 1 : 0
+    );
+    return {
+      basePrice: template.price ?? 0,
+      rules: rows.map((r) => ({
+        specKey: r.specKey,
+        priceDelta: r.priceDelta,
+        label: r.label,
+      })),
+    };
+  });
+
+/**
+ * 整体替换某 promptTemplate 的价格规则（admin 保存用）。
+ * 流程：先 DELETE WHERE template_id=? → INSERT 新规则（事务内）。
+ * - 模板存在性 + active 校验（与 list 一致）
+ * - 每条 rule specKey / priceDelta 范围校验（白名单见上）
+ * - 同模板 (templateId, specKey) 唯一约束由 DB 保证（unique index ptp_template_spec_unique）
+ */
+export const updatePromptTemplatePricesAction = withImageGenAdminAction(
+  "updatePromptTemplatePrices"
+)
+  .schema(
+    z.object({
+      templateId: z.string().min(1),
+      rules: z.array(priceRuleSchema).max(64),
+    })
+  )
+  .action(async ({ parsedInput }) => {
+    const { templateId, rules } = parsedInput;
+    const template = await db.query.promptTemplate.findFirst({
+      where: and(
+        eq(promptTemplate.id, templateId),
+        eq(promptTemplate.isActive, true)
+      ),
+      columns: { id: true },
+    });
+    if (!template) {
+      throw new Error("模板不存在或已停用");
+    }
+    // 1. specKey 合法性 + 唯一性校验
+    const seenSpecKeys = new Set<string>();
+    for (const rule of rules) {
+      validateSpecKey(rule.specKey);
+      if (seenSpecKeys.has(rule.specKey)) {
+        throw new Error(`重复的规格 key：${rule.specKey}`);
+      }
+      seenSpecKeys.add(rule.specKey);
+    }
+
+    // 2. 事务内整体替换
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(promptTemplatePrice)
+        .where(eq(promptTemplatePrice.templateId, templateId));
+      if (rules.length > 0) {
+        await tx.insert(promptTemplatePrice).values(
+          rules.map((r) => ({
+            id: nanoid(),
+            templateId,
+            specKey: r.specKey,
+            priceDelta: r.priceDelta,
+            label: r.label,
+          }))
+        );
+      }
+    });
+
+    revalidatePath("/admin/product-effects");
+    return { count: rules.length };
   });
 
 // ============================================

@@ -43,12 +43,15 @@ import {
 } from "@/features/credits/core";
 import { generateOrderToken } from "@/features/gpt-image/lib/generation-service";
 import {
+  getAccessory,
+  getLeatherColor,
   getProductType,
   validateLeatherColor,
   validatePlatform,
   validateProductSpec,
 } from "@/features/gpt-image/lib/product-catalog";
 import { findEffect } from "@/features/image-gen/lib/effects-store";
+import { computePromptOrderCredits } from "@/features/image-gen/lib/price-calculator";
 import { protectedAction } from "@/lib/safe-action";
 
 const withDemoAction = (name: string) =>
@@ -287,18 +290,56 @@ export const submitImageGenDemoAction = withDemoAction("submit")
       finalSelectedCell = parsedInput.selectedCell;
     }
 
-    // 5. 扣 credit（template.price=0 跳过；credit 不足抛 InsufficientCreditsError）
-    const price = template.price ?? 0;
-    if (price > 0) {
+    // 5. 2026-09-12：按规格价格计算（basePrice + Σ matching rule.delta）。
+    //    对账核心：单一 template.price 看不出加价明细；totalCredits 与
+    //    breakdown 持久化到 promptOrder.creditsCharged / creditsBreakdown，
+    //    代理商对账 + admin UI 单卡展示都用这套口径。
+    const basePrice = template.price ?? 0;
+    const priceResult = await computePromptOrderCredits(template.id, basePrice, {
+      productTypeCode: parsedInput.productTypeCode ?? null,
+      productSize: finalProductSize,
+      accessoryCode: finalAccessoryCode,
+      leatherColor: finalLeatherColor,
+      leatherExposed: finalLeatherExposed,
+      pvcProtection: finalPvcProtection,
+    });
+    const { totalCredits, breakdown } = priceResult;
+    const creditsBreakdownJson = JSON.stringify(breakdown);
+
+    // 5b. 扣 credit（totalCredits=0 跳过；credit 不足抛 InsufficientCreditsError）
+    if (totalCredits > 0) {
       try {
+        // description 写规格摘要（对账可见）：
+        //   "CM 皮革徽章 6cm + 皮套(已配规则) = 99 积分"
+        //   "CM 钥匙扣 4cm (基础价) = 59 积分"
+        const specSummary = [
+          template.name,
+          finalProductSize ? `${finalProductSize}cm` : null,
+          finalAccessoryCode
+            ? getAccessoryName(finalAccessoryCode)
+            : null,
+          finalLeatherColor
+            ? getLeatherColorName(finalLeatherColor)
+            : null,
+          finalLeatherExposed === true ? "实物外露" : null,
+          finalPvcProtection === true ? "PVC 保护" : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        const description = `${specSummary} = ${totalCredits} 积分`;
+
         await consumeCredits({
           userId: ctx.userId,
-          amount: price,
+          amount: totalCredits,
           serviceName: "image-gen-demo",
-          description: `/image-gen demo 下单 ${parsedInput.templateId}`,
+          description,
           metadata: {
-            templateId: parsedInput.templateId,
+            templateId: template.id,
             templateName: template.name,
+            basePrice,
+            deltaTotal: priceResult.deltaTotal,
+            totalCredits,
+            breakdown,
           },
         });
       } catch (err) {
@@ -363,6 +404,9 @@ export const submitImageGenDemoAction = withDemoAction("submit")
         platform: finalPlatform,
         // 2026-09-11：渠道订单号（与 platform 配对）
         platformOrderNo: finalPlatformOrderNo,
+        // 2026-09-12：本单实际扣减积分（basePrice + Σ(delta)） + 加价明细
+        creditsCharged: totalCredits,
+        creditsBreakdown: creditsBreakdownJson,
       })
       .returning({ id: promptOrder.id });
 
@@ -379,13 +423,28 @@ export const submitImageGenDemoAction = withDemoAction("submit")
       orderId: created.id,
       orderNo,
       token,
-      creditsConsumed: price,
+      creditsConsumed: totalCredits,
     };
   });
 
 // ============================================
 // helpers
 // ============================================
+
+/**
+ * 把 accessory code 翻译成中文名（用于 creditsTransaction.description）。
+ * 不在字典里时直接返回 code（罕见情况：脏数据，server action 已 validateProductSpec 兜过）。
+ */
+function getAccessoryName(code: string): string {
+  return getAccessory(code)?.name ?? code;
+}
+
+/**
+ * 把 leather color code 翻译成中文名（用于 creditsTransaction.description）。
+ */
+function getLeatherColorName(code: string): string {
+  return getLeatherColor(code)?.name ?? code;
+}
 
 /**
  * 生成订单号：IG-YYYYMMDD-XXXXXX（IG = ImageGen，XXXXXX = nanoid 6 位大写）

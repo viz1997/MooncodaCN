@@ -83,6 +83,16 @@ export interface OrderDetail {
    * QuadrantGridPicker 时用此值显示 emerald 边框。
    */
   selectedCell: number | null;
+  /**
+   * 2026-09-12：本单实际扣减积分（basePrice + Σ(matching rule.delta)）。
+   * null = 老订单 / 免扣（price=0）。详情卡「积分扣减」段展示。
+   */
+  creditsCharged: number | null;
+  /**
+   * 2026-09-12：本单扣减明细（JSON：[{ specKey, label, delta }]）。
+   * 解析失败 / null → 不展开明细，只显示总额。
+   */
+  creditsBreakdown: string | null;
 }
 
 export function OrderDetailView({ order }: { order: OrderDetail }) {
@@ -91,6 +101,38 @@ export function OrderDetailView({ order }: { order: OrderDetail }) {
     if (!order.accessoryCode) return null;
     const acc = ACCESSORIES.find((x) => x.code === order.accessoryCode);
     return acc?.name ?? order.accessoryCode;
+  })();
+  // 2026-09-12：解析 creditsBreakdown JSON（[{ specKey, label, delta }]）。
+  // 解析失败 / null → 不展开明细，只显示总额。
+  const breakdownItems = (() => {
+    if (!order.creditsBreakdown) return null;
+    try {
+      const parsed: unknown = JSON.parse(order.creditsBreakdown);
+      if (!Array.isArray(parsed)) return null;
+      const items: Array<{ specKey: string; label: string; delta: number }> = [];
+      for (const item of parsed) {
+        if (
+          item &&
+          typeof item === "object" &&
+          typeof (item as { specKey?: unknown }).specKey === "string" &&
+          typeof (item as { delta?: unknown }).delta === "number"
+        ) {
+          const it = item as {
+            specKey: string;
+            delta: number;
+            label?: unknown;
+          };
+          items.push({
+            specKey: it.specKey,
+            label: typeof it.label === "string" ? it.label : "",
+            delta: it.delta,
+          });
+        }
+      }
+      return items;
+    } catch {
+      return null;
+    }
   })();
   // 主图 = 已选图 > candidates[0]
   const primaryImageUrl =
@@ -292,6 +334,47 @@ export function OrderDetailView({ order }: { order: OrderDetail }) {
               )}
           </div>
         </div>
+
+        {/* 2026-09-12：积分扣减（对账核心字段，代理商看一眼就懂这条订单扣了多少）
+             - 老订单 creditsCharged=null 时整段不渲染
+             - 有总额 + 明细时：rose 段「本单扣 X 积分」+ breakdown 列表 */}
+        {order.creditsCharged !== null && order.creditsCharged > 0 && (
+          <div className="rounded-lg border bg-rose-500/5 overflow-hidden">
+            <div className="px-3 py-2 bg-rose-500/10 border-b border-rose-500/20">
+              <span className="text-xs font-semibold text-rose-700 flex items-center gap-1.5">
+                本单扣 {order.creditsCharged} 积分
+              </span>
+            </div>
+            {breakdownItems && breakdownItems.length > 0 && (
+              <div className="px-3 py-2.5 space-y-1">
+                {breakdownItems.map((item) => (
+                  <div
+                    key={item.specKey}
+                    className="text-[11px] flex items-baseline justify-between gap-2"
+                  >
+                    <span className="text-muted-foreground font-mono">
+                      {item.specKey}
+                      {item.label ? ` · ${item.label}` : ""}
+                    </span>
+                    <span
+                      className={cn(
+                        "font-mono font-medium",
+                        item.delta > 0
+                          ? "text-rose-700"
+                          : item.delta < 0
+                            ? "text-emerald-700"
+                            : "text-muted-foreground"
+                      )}
+                    >
+                      {item.delta > 0 ? "+" : ""}
+                      {item.delta} 积分
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* 候选图 grid */}
         {order.candidateUrls.length > 1 && (

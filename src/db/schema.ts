@@ -1140,6 +1140,20 @@ export const promptOrder = pgTable(
     selectedIndex: integer("selected_index"),
     selections: text("selections"),
     errorMessage: text("error_message"),
+    // 2026-09-12：本单实际扣减的积分（basePrice + Σ(matching rule.delta)）。
+    // 对账核心字段：代理商想知道"这条订单到底扣了多少积分"，写死 promptTemplate.price
+    // 只能给基础价，看不到加价明细。null = 老订单 / 免扣（price=0），新建订单非空。
+    creditsCharged: integer("credits_charged"),
+    /**
+     * 2026-09-12：本单扣减明细（JSON：[{ specKey, label, delta }]）。
+     * 用途：代理商对账 + admin UI 单卡展示「基础价 + 各规格加价」。
+     *   - 数组按 specKey 字母序排序，便于跨订单对比
+     *   - 单条最少字段 { specKey, delta }；label 来自 prompt_template_price.label
+     *     或运行时从字典组装（如 "6cm + 30"）
+     *   - null = 老订单无明细（fallback 用 basePrice 展示）
+     * 不参与生图 / 不进交易逻辑（creditsTransaction.metadata 有镜像）。
+     */
+    creditsBreakdown: text("credits_breakdown"),
     // 2026-08-23：代理商业务（飞书 docx "链接生成管理系统"）—— promptOrder
     // 区分 ToC 店铺单 / ToB 代理商单。ToC 用 platform 字段标识淘宝/小红书/
     // 抖店；ToB 用 agentId 关联 agent 表。互斥：agentId 优先，platform 仅
@@ -1243,6 +1257,70 @@ export const promptOrder = pgTable(
 
 export type PromptTemplate = typeof promptTemplate.$inferSelect;
 export type NewPromptTemplate = typeof promptTemplate.$inferInsert;
+
+// ============================================
+// 2026-09-12：提示词模板按规格定价表 (PromptTemplatePrice)
+// ============================================
+//
+// 历史：之前 promptTemplate.price 是单一固定值（积分单位），同模板所有规格组合
+// 扣一样积分。对账痛点：代理商想知道"6cm + 皮套 + 黑 + PVC"这种规格组合 vs
+// "4cm + 棕"各扣了多少积分，固定价对不上账。
+//
+// 设计：
+// - basePrice 复用 promptTemplate.price（保留不动）
+// - 加价规则存本表：每行 = (templateId, specKey, priceDelta, label)
+// - 本单总价 = basePrice + Σ(matching rule.delta)
+// - 同一 template 下 (templateId, specKey) 唯一约束防重复录入
+//
+// specKey 命名规范（与 product-catalog 字典对齐）：
+//   size:4 / size:6 / size:8 / size:11
+//   accessory:leather / accessory:pvc / accessory:bracket
+//   leather_color:natural / leather_color:brown / leather_color:black /
+//                  leather_color:red / leather_color:navy
+//   protection:exposed / protection:pvc
+//
+// priceDelta 可负数（减价场景）；0 允许（仅占位 / label 展示）。
+// onDelete cascade：模板删 → 价格规则一起删（template 已死规则无意义）。
+// ============================================
+export const promptTemplatePrice = pgTable(
+  "prompt_template_price",
+  {
+    id: text("id").primaryKey(),
+    templateId: text("template_id")
+      .notNull()
+      .references(() => promptTemplate.id, { onDelete: "cascade" }),
+    /**
+     * 规格 key。格式 "dimension:value"。
+     * 字典：见 prompt_template_price_spec_key.sql 末尾注释 + product-catalog.ts。
+     */
+    specKey: text("spec_key").notNull(),
+    /**
+     * 加价积分（可负）。本单总价 = promptTemplate.price + Σ(matching.delta)
+     * 「匹配」规则：specKey 命中当前订单选中的规格项
+     *   - size:6  → 选了 productSize=6
+     *   - accessory:leather → 选了 accessoryCode=leather
+     *   - leather_color:brown → 选了 leatherColor=brown
+     *   - protection:exposed → leatherExposed=true（PVC 保护互斥不命中）
+     */
+    priceDelta: integer("price_delta").notNull().default(0),
+    /**
+     * 给人看的标签（可选）。如「6cm 加 30 积分」「黑色 +15」。
+     * 不参与计算；admin UI 表格展示 + 对账汇总易读。
+     */
+    label: text("label").notNull().default(""),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    // 同一模板同一 specKey 唯一约束（admin 防重复录入）
+    uniqueIndex("ptp_template_spec_unique").on(t.templateId, t.specKey),
+    // 按 template 查全部规则走索引
+    index("ptp_template_idx").on(t.templateId),
+  ]
+);
+
+export type PromptTemplatePriceRow = typeof promptTemplatePrice.$inferSelect;
+export type NewPromptTemplatePriceRow = typeof promptTemplatePrice.$inferInsert;
 
 export type PromptOrder = typeof promptOrder.$inferSelect;
 export type NewPromptOrder = typeof promptOrder.$inferInsert;
@@ -1600,6 +1678,19 @@ export const promptTemplateRelations = relations(
   promptTemplate,
   ({ many }) => ({
     orders: many(promptOrder),
+    // 2026-09-12：模板价格规则（按规格加价）
+    prices: many(promptTemplatePrice),
+  })
+);
+
+// 2026-09-12：价格规则反向引用模板（用于 db.query 嵌套 with: prices）
+export const promptTemplatePriceRelations = relations(
+  promptTemplatePrice,
+  ({ one }) => ({
+    template: one(promptTemplate, {
+      fields: [promptTemplatePrice.templateId],
+      references: [promptTemplate.id],
+    }),
   })
 );
 

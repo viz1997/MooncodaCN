@@ -436,6 +436,16 @@ export function OrdersView({ user }: { user?: OrdersViewUser }) {
                               {o.orderNo}
                             </span>
                             <OrderStatusBadge status={o.status} />
+                            {/* 2026-09-12：本单扣 X 积分（rose 小角标，对账可见） */}
+                            {o.creditsCharged !== null &&
+                              o.creditsCharged > 0 && (
+                                <span
+                                  className="inline-flex items-center px-1.5 h-4 rounded text-[9px] font-medium border bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/20"
+                                  title="本单实际扣减积分"
+                                >
+                                  -{o.creditsCharged} 积分
+                                </span>
+                              )}
                           </div>
                           <p
                             className={cn(

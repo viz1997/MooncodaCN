@@ -34,11 +34,14 @@ import {
 } from "@/features/credits/core";
 import { generateOrderToken } from "@/features/gpt-image/lib/generation-service";
 import {
+  getAccessory,
+  getLeatherColor,
   getProductType,
   validateLeatherColor,
   validatePlatform,
   validateProductSpec,
 } from "@/features/gpt-image/lib/product-catalog";
+import { computePromptOrderCredits } from "@/features/image-gen/lib/price-calculator";
 import { protectedAction } from "@/lib/safe-action";
 
 const withOrderAction = (name: string) =>
@@ -116,6 +119,8 @@ export const createOrderFromImageGenAction = withOrderAction("create")
     // 2. 校验模板存在 + active；同时拉取 allowedSizes/allowedAccessories
     //    校验提交上来的 size/accessory 必须落在模板允许的子集内
     //    （2026-09-10：模板级可配置规格子集，避免选了 4cm 效果图却出 8cm 规格）。
+    //    2026-09-12：拉 price 用于预先算 creditsCharged / creditsBreakdown，
+    //    让用户在 PENDING 阶段就看到价格预估 + submit 时复用同一份定价。
     const template = await db.query.promptTemplate.findFirst({
       where: and(
         eq(promptTemplate.id, parsedInput.templateId),
@@ -127,6 +132,7 @@ export const createOrderFromImageGenAction = withOrderAction("create")
         size: true,
         allowedSizes: true,
         allowedAccessories: true,
+        price: true,
       },
     });
     if (!template) throw new Error("模板不存在或已停用");
@@ -248,6 +254,20 @@ export const createOrderFromImageGenAction = withOrderAction("create")
 
     const token = generateOrderToken();
 
+    // 2026-09-12：PENDING 阶段就预先算好本单定价，submit 时复用同一定价避免对账口径漂移。
+    const priceResult = await computePromptOrderCredits(
+      template.id,
+      template.price ?? 0,
+      {
+        productTypeCode: parsedInput.productTypeCode ?? null,
+        productSize: finalProductSize,
+        accessoryCode: finalAccessoryCode,
+        leatherColor: finalLeatherColor,
+        leatherExposed: finalLeatherExposed,
+        pvcProtection: finalPvcProtection,
+      }
+    );
+
     const [created] = await db
       .insert(promptOrder)
       .values({
@@ -274,6 +294,9 @@ export const createOrderFromImageGenAction = withOrderAction("create")
         platform: finalPlatform,
         // 2026-09-11：渠道订单号（与 platform 配对）
         platformOrderNo: finalPlatformOrderNo,
+        // 2026-09-12：本单价格预估（PENDING 阶段算好，submit 时直接读）
+        creditsCharged: priceResult.totalCredits,
+        creditsBreakdown: JSON.stringify(priceResult.breakdown),
       })
       .returning();
 
@@ -337,20 +360,48 @@ export const submitPublicOrderAction = withOrderAction("submit")
       );
     }
 
-    // 扣个人 credit（template.price === 0 跳过）
-    const price = order.template.price ?? 0;
-    if (price > 0) {
+    // 扣个人 credit。优先读 promptOrder.creditsCharged（PENDING 阶段 createOrder
+    // 已经算好的本单总价，submit 不重算避免对账口径漂移）；老订单该列为 null 时
+    // 回退 template.price（兼容历史数据）。
+    const creditsCharged =
+      order.creditsCharged ?? order.template.price ?? 0;
+    if (creditsCharged > 0) {
       try {
+        // description 写规格摘要（与 submit-image-gen-demo 同口径）：
+        //   "CM 皮革徽章 6cm · 皮套 · 黑色 · PVC 保护 = 164 积分"
+        const specSummary = [
+          order.template.name,
+          order.productSize ? `${order.productSize}cm` : null,
+          order.accessoryCode ? getAccessoryName(order.accessoryCode) : null,
+          order.leatherColor ? getLeatherColorName(order.leatherColor) : null,
+          order.leatherExposed === true ? "实物外露" : null,
+          order.pvcProtection === true ? "PVC 保护" : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        const description = `${specSummary} = ${creditsCharged} 积分`;
+
+        // metadata 解析 creditsBreakdown JSON（对账可见）
+        let breakdownParsed: unknown = null;
+        if (order.creditsBreakdown) {
+          try {
+            breakdownParsed = JSON.parse(order.creditsBreakdown);
+          } catch {
+            // 解析失败不阻塞扣减（极端脏数据）
+          }
+        }
+
         await consumeCredits({
           userId: ctx.userId,
-          amount: price,
+          amount: creditsCharged,
           serviceName: "image-gen-workbench",
-          description: `/image-gen 工作台提交订单 ${order.orderNo}`,
+          description,
           metadata: {
             orderId: order.id,
             orderNo: order.orderNo,
             templateId: order.templateId,
             templateName: order.template.name,
+            breakdown: breakdownParsed,
           },
         });
       } catch (err) {
@@ -380,7 +431,7 @@ export const submitPublicOrderAction = withOrderAction("submit")
       orderNo: order.orderNo,
       status: "SELECTED" as const,
       token: order.token,
-      creditsConsumed: price,
+      creditsConsumed: creditsCharged,
     };
   });
 
@@ -584,6 +635,9 @@ export const listUserOrdersAction = withOrderAction("listUserOrders")
         platform: true,
         // 2026-09-11：渠道订单号（与 platform 配对）
         platformOrderNo: true,
+        // 2026-09-12：本单扣减积分（对账核心字段）+ 加价明细（按规格拆解）
+        creditsCharged: true,
+        creditsBreakdown: true,
         candidates: true,
         selections: true,
         selectedIndex: true,
@@ -655,6 +709,9 @@ export const listUserOrdersAction = withOrderAction("listUserOrders")
           platform: o.platform ?? null,
           // 2026-09-11：渠道订单号（与 platform 配对）
           platformOrderNo: o.platformOrderNo ?? null,
+          // 2026-09-12：本单扣减积分 + 加价明细（对账核心字段）
+          creditsCharged: o.creditsCharged ?? null,
+          creditsBreakdown: o.creditsBreakdown ?? null,
           templateName: tpl?.name ?? "未知模板",
           templateId: o.templateId,
           // 2026-09-11：模板宫格候选数 + 输出模式（让 OrderDetailView 决定要不要 picker）
@@ -806,6 +863,21 @@ function generateOrderNo(): string {
     .slice(0, 8);
   const rand = nanoid(6).toUpperCase();
   return `IG-${ts}-${rand}`;
+}
+
+/**
+ * 把 accessory code 翻译成中文名（用于 creditsTransaction.description）。
+ * 不在字典里时直接返回 code（罕见情况：脏数据）。
+ */
+function getAccessoryName(code: string): string {
+  return getAccessory(code)?.name ?? code;
+}
+
+/**
+ * 把 leather color code 翻译成中文名（用于 creditsTransaction.description）。
+ */
+function getLeatherColorName(code: string): string {
+  return getLeatherColor(code)?.name ?? code;
 }
 
 /**
