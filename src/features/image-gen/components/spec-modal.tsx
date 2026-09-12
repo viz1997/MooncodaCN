@@ -44,6 +44,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   CreditCard,
+  ClipboardPaste,
   Loader2,
   Package,
   Pencil,
@@ -51,7 +52,7 @@ import {
   Sparkles,
   Tag,
 } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 
 import { Button } from "@/components/ui/button";
@@ -78,6 +79,7 @@ import {
   getEffectiveCapabilities,
   getEffectiveLeatherColors,
 } from "@/features/image-gen/lib/product-effect-capabilities";
+import { parseOrderText } from "@/features/image-gen/lib/order-text-parser";
 import { cn } from "@/lib/utils";
 
 import { type SpecModalFormValues, specModalSchema } from "./spec-modal-schema";
@@ -243,6 +245,51 @@ export function SpecModal({
       ? "leather_exposed"
       : "none";
 
+  // 2026-09-12：粘贴订单内容识别状态
+  // 用户在「订单来源」段点击 📋 按钮 → 弹粘贴 textarea → 解析器静默 setValue 表单字段。
+  // inferredFields 是 Set（保持可写），UI 用它给识别字段加「智能识别」小标。
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+  // 2026-09-12：识别命中的字段集合（"platform"/"platformOrderNo"/"productSize"/
+  // "productTypeCode"/"leatherColor"/"accessoryCode"）。UI 用它给对应字段加
+  // 「智能识别」小绿标，用户能一眼看到哪些字段是自动填的。解析器新命中时
+  // 追加（不重置），避免用户手动改后被覆盖；modal 关闭时（useEffect 清理）
+  // 重置为空集。
+  const [inferredFields, setInferredFields] = useState<Set<string>>(new Set());
+
+  const handleParsePaste = () => {
+    if (!pasteText.trim()) return;
+    const parsed = parseOrderText(pasteText);
+    // 静默 setValue —— 不弹 toast、不阻塞；识别失败的字段不动
+    if (parsed.platform) {
+      form.setValue("platform", parsed.platform, { shouldValidate: false });
+    }
+    if (parsed.platformOrderNo) {
+      form.setValue("platformOrderNo", parsed.platformOrderNo, {
+        shouldValidate: false,
+      });
+    }
+    if (parsed.productSize) {
+      form.setValue("productSize", parsed.productSize, {
+        shouldValidate: false,
+      });
+    }
+    if (parsed.accessoryCode) {
+      form.setValue("accessoryCode", parsed.accessoryCode, {
+        shouldValidate: false,
+      });
+    }
+    if (parsed.leatherColor) {
+      form.setValue("leatherColor", parsed.leatherColor, {
+        shouldValidate: false,
+      });
+    }
+    setInferredFields(parsed.inferredFields);
+    // 识别完成后清空粘贴框 + 折叠，避免占用 UI
+    setPasteText("");
+    setPasteOpen(false);
+  };
+
   const handleConfirm = form.handleSubmit((raw) => {
     if (!template) return;
     try {
@@ -311,9 +358,54 @@ export function SpecModal({
           {canPlatform && productType && (
             <section className="px-6 pt-5 pb-1">
               <SectionTitle icon={<Tag className="h-4 w-4" />} title="订单来源" />
-              <p className="text-xs text-muted-foreground -mt-2 mb-3">
-                从哪个渠道找到我们？用于代理商活动结算（可不填）
-              </p>
+              <div className="flex items-center justify-between -mt-2 mb-3">
+                <p className="text-xs text-muted-foreground">
+                  从哪个渠道找到我们？用于代理商活动结算（可不填）
+                </p>
+                {/* 2026-09-12：粘贴订单内容智能识别入口。
+                    折叠式按钮 + textarea，避免占用主 UI 空间；解析后静默 setValue。
+                    inferredFields 命中的字段在 UI 段加「智能识别」小标（绿点提示）。 */}
+                <button
+                  type="button"
+                  onClick={() => setPasteOpen((v) => !v)}
+                  className="inline-flex items-center gap-1 text-[11px] text-violet-600 hover:text-violet-700 px-2 py-0.5 rounded-md hover:bg-violet-500/10 transition-colors"
+                  title="粘贴淘宝/小红书/抖音订单详情，自动填入平台和订单号"
+                >
+                  <ClipboardPaste className="h-3 w-3" />
+                  粘贴订单内容自动识别
+                </button>
+              </div>
+              {pasteOpen && (
+                <div className="mb-3 rounded-lg border border-violet-500/30 bg-violet-500/5 p-2.5 space-y-2">
+                  <textarea
+                    value={pasteText}
+                    onChange={(e) => setPasteText(e.target.value)}
+                    placeholder="粘贴淘宝/小红书/抖音订单详情页文本，自动识别平台、订单号、商品信息"
+                    rows={4}
+                    className="w-full text-xs px-2.5 py-1.5 rounded-md border bg-background resize-none focus:outline-none focus:ring-1 focus:ring-violet-500"
+                  />
+                  <div className="flex justify-end gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPasteText("");
+                        setPasteOpen(false);
+                      }}
+                      className="text-[11px] px-2.5 py-1 rounded-md text-muted-foreground hover:bg-muted"
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleParsePaste}
+                      disabled={!pasteText.trim()}
+                      className="text-[11px] px-3 py-1 rounded-md bg-violet-500 text-white font-medium hover:bg-violet-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      识别
+                    </button>
+                  </div>
+                </div>
+              )}
               <Controller
                 control={form.control}
                 name="platform"
@@ -360,18 +452,29 @@ export function SpecModal({
                   control={form.control}
                   name="platformOrderNo"
                   render={({ field }) => (
-                    <Input
-                      type="text"
-                      placeholder={
-                        platform
-                          ? "如淘宝订单号 / 小红书订单 ID"
-                          : "请先在上方选择订单来源平台"
-                      }
-                      disabled={!platform}
-                      maxLength={64}
-                      className="text-sm font-mono disabled:opacity-50 h-10"
-                      {...field}
-                    />
+                    <div className="relative">
+                      <Input
+                        type="text"
+                        placeholder={
+                          platform
+                            ? "如淘宝订单号 / 小红书订单 ID"
+                            : "请先在上方选择订单来源平台"
+                        }
+                        disabled={!platform}
+                        maxLength={64}
+                        className="text-sm font-mono disabled:opacity-50 h-10 pr-16"
+                        {...field}
+                      />
+                      {/* 2026-09-12：智能识别小标 —— input 右侧绿点 + 文字提示
+                          用户能一眼看到哪些字段是粘贴后自动填的，可放心手动覆盖。 */}
+                      {inferredFields.has("platformOrderNo") &&
+                        field.value && (
+                          <span className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 text-[10px] text-emerald-600 bg-emerald-500/10 px-1.5 py-0.5 rounded-full pointer-events-none">
+                            <Sparkles className="h-2.5 w-2.5" />
+                            识别
+                          </span>
+                        )}
+                    </div>
                   )}
                 />
                 <p className="text-xs text-muted-foreground mt-1.5">
