@@ -117,6 +117,20 @@ export function OrdersView({ user }: { user?: OrdersViewUser }) {
   // ========== 选中状态 ==========
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
 
+  // ========== 2026-09-12：URL ?order=<id> 初始化选中（demo 流历史点击跳转） ==========
+  // demo 流已下单的历史缩略图点「查看订单」按钮 → window.location.href
+  // /image-gen/orders?order=<promptOrder.id>。OrdersView 挂载时读 searchParams
+  // 优先用这个 id 选中（兜底：列表已加载但还没这个 id → 不强制滚动等用户分页）。
+  // 不写 useSearchParams hook（避免强 SSR 依赖 + 简单 window.location.search 解析够用）。
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const orderParam = params.get("order");
+    if (orderParam) {
+      setSelectedOrderId(orderParam);
+    }
+  }, []);
+
   // ========== 滚动观察（底部哨兵） ==========
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);

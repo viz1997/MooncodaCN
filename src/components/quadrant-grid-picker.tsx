@@ -100,7 +100,13 @@ export function QuadrantGridPicker({
 
   return (
     <div ref={containerRef} className={className ?? "relative"}>
-      <div className="relative overflow-hidden rounded-xl border-2 border-zinc-200 bg-zinc-100">
+      {/* 2026-09-12：加 h-full + flex 让 1:1 父容器高度传递下来
+          - 之前内部 div 没 h-full，<img h-full> 退化，img 按 ratio 算自然高度，
+            远小于外层 aspect-square 1:1 emerald ring 容器
+          - 视觉：emerald ring 1:1 框，里面 QuadrantGridPicker 只占左上角一小块
+          - 修：内部 div h-full + flex 居中，img max-h-full/max-w-full
+            撑满父容器同时保持 ratio（不裁剪） */}
+      <div className="relative h-full w-full overflow-hidden rounded-xl border-2 border-zinc-200 bg-zinc-100 flex items-center justify-center">
         {/* 底层拼接图（完整显示，不裁剪 —— 2026-09-12 修「订单详情效果图被遮挡」）
             - w-full h-full object-contain: 容器固定 1:1（OrderDetailView aspect-square），
               composite 任意 ratio 都按 contain 居中完整显示（留白不裁剪）
@@ -112,7 +118,7 @@ export function QuadrantGridPicker({
         <img
           src={compositeUrl}
           alt={ariaLabel}
-          className="block h-full w-full object-contain select-none"
+          className="block max-h-full max-w-full object-contain select-none"
           draggable={false}
         />
 

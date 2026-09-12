@@ -1505,12 +1505,23 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                     </div>
                   )}
                   {h.orderId && (
-                    <div
-                      className="absolute top-1 right-1 h-4 w-4 rounded-full bg-emerald-500 flex items-center justify-center"
-                      title="已下单"
+                    // 2026-09-12：已下单的 history 项加「查看订单」按钮
+                    // - 跳 /image-gen/orders?order=<orderId>，OrdersView 读 URL 参数初始化选中
+                    // - 不再触发父 button 的 onClick（stopPropagation），
+                    //   否则会同时跑"还原 result"流程，UI 双跳转
+                    // - emerald 徽章保留做"已下单"视觉提示
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        window.location.href = `/image-gen/orders?order=${h.orderId}`;
+                      }}
+                      title="查看订单"
+                      className="absolute top-1 right-1 inline-flex items-center gap-0.5 h-5 px-1.5 rounded-full bg-emerald-500 text-white text-[9px] font-semibold hover:bg-emerald-600 shadow-sm"
                     >
-                      <CheckCircle2 className="h-2.5 w-2.5 text-white" />
-                    </div>
+                      <CheckCircle2 className="h-2.5 w-2.5" />
+                      查看订单
+                    </button>
                   )}
                   {/* 2026-09-11：legacy history 项（无 refPublicUrls）→ 提示原图不可恢复。
                       触发场景：用户在修复此 bug 之前生成的历史项，刷新页面后点击会撞
