@@ -27,7 +27,7 @@
  */
 
 import { Loader2, Sparkles } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -123,14 +123,22 @@ export function SpecModal({
     template?.allowedAccessories && template.allowedAccessories.length > 0
       ? new Set(template.allowedAccessories)
       : null;
-  const availableSizes =
-    productType?.sizes?.filter((s) =>
-      allowedSizeSet ? allowedSizeSet.has(s) : true
-    ) ?? [];
-  const availableAccessories =
-    productType?.accessories?.filter((a) =>
-      allowedAccessorySet ? allowedAccessorySet.has(a) : true
-    ) ?? [];
+  // 2026-09-12：useMemo 锁住数组引用——下方 useEffect 依赖 availableSizes/availableAccessories/effectiveLeatherColors；
+  // 不 memoize 时每次父组件重渲染都生成新数组引用，触发 effect 重置 SpecModal 全部本地 state（用户反馈「点了 6cm 仍 4cm 高亮」）
+  const availableSizes = useMemo(
+    () =>
+      productType?.sizes?.filter((s) =>
+        allowedSizeSet ? allowedSizeSet.has(s) : true
+      ) ?? [],
+    [productType, allowedSizeSet]
+  );
+  const availableAccessories = useMemo(
+    () =>
+      productType?.accessories?.filter((a) =>
+        allowedAccessorySet ? allowedAccessorySet.has(a) : true
+      ) ?? [],
+    [productType, allowedAccessorySet]
+  );
   const hasSize = availableSizes.length > 0;
   const hasAccessory = availableAccessories.length > 0;
   // 2026-09-10：effective capability = catalog 默认 ∪ 模板级覆盖
@@ -148,8 +156,9 @@ export function SpecModal({
   // 2026-09-11：订单来源平台（仅 LB 皮革徽章）
   const canPlatform = caps?.canPlatform ?? false;
   // 2026-09-10：皮革色按 allowedColors 子集过滤
-  const effectiveLeatherColors = getEffectiveLeatherColors(
-    template?.allowedColors
+  const effectiveLeatherColors = useMemo(
+    () => getEffectiveLeatherColors(template?.allowedColors),
+    [template?.allowedColors]
   );
 
   // 字段本地态
@@ -462,29 +471,35 @@ export function SpecModal({
                   );
                 })}
               </div>
-              {/* 2026-09-11：渠道订单号输入（platform 选中才出现；max 64 字符）。
-                  跨平台订单号体系：淘宝 15~18 位数字、小红书字母数字混合、抖音 ID 等，
-                  不强制格式校验。 */}
-              {platform && (
-                <div className="pt-1 space-y-1.5">
-                  <Label className="text-xs font-medium text-muted-foreground">
-                    渠道订单号（可选）
-                  </Label>
-                  <Input
-                    type="text"
-                    value={platformOrderNo}
-                    onChange={(e) =>
-                      setPlatformOrderNo(e.target.value.slice(0, 64))
-                    }
-                    maxLength={64}
-                    placeholder="如淘宝订单号 / 小红书订单 ID"
-                    className="text-sm font-mono"
-                  />
-                  <p className="text-[10px] text-muted-foreground">
-                    用于代理商对账；淘宝订单号约 15~18 位数字
-                  </p>
-                </div>
-              )}
+              {/* 2026-09-12：渠道订单号始终显示（即使没选平台），未选平台时 disabled，
+                  避免用户找输入框找不到。跨平台订单号体系：淘宝 15~18 位数字、
+                  小红书字母数字混合、抖音 ID 等，不强制格式校验。
+                  server 端兜底校验「有订单号必须有 platform」（见 submit-image-gen-demo）。 */}
+              <div className="pt-1 space-y-1.5">
+                <Label className="text-xs font-medium text-muted-foreground">
+                  渠道订单号（可选）
+                </Label>
+                <Input
+                  type="text"
+                  value={platformOrderNo}
+                  onChange={(e) =>
+                    setPlatformOrderNo(e.target.value.slice(0, 64))
+                  }
+                  maxLength={64}
+                  disabled={!platform}
+                  placeholder={
+                    platform
+                      ? "如淘宝订单号 / 小红书订单 ID"
+                      : "请先在上方选择订单来源平台"
+                  }
+                  className="text-sm font-mono disabled:opacity-60"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  {platform
+                    ? "用于代理商对账；淘宝订单号约 15~18 位数字"
+                    : "选中平台后才能填写渠道订单号"}
+                </p>
+              </div>
             </div>
           )}
 
