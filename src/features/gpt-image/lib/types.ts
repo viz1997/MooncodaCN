@@ -189,18 +189,9 @@ export interface OrderView {
    * 时建议填，不强校验格式。
    */
   platformOrderNo: string | null;
-  /**
-   * 2026-09-13：代理商 demo 流「分享给客户」凭证标记。
-   * - true  = 代理商点「分享给客户」创建的 promptOrder；客户端 /p/[token]
-   *           客人免登录打开 → 选 cell → /api/orders/[token]/guest-submit
-   *           提交。由代理商 userId 扣 credit。
-   * - false = 普通 promptOrder（demo 流一键下单 / ToC 选 cell 流程单 / admin 工单）。
-   *
-   * 与 status / regenerateLimit / createdBy 三项共同判定 preview 凭证身份；
-   * 单看本字段不能确定。
-   * 老接口字段缺失时按 false 处理（向下兼容）。
-   */
-  isPreviewShare?: boolean;
+  // 2026-09-13 起 preview 凭证已迁移到独立 preview_share 表，promptOrder
+  // 不再有 isPreviewShare 字段（migration 0017 DROP COLUMN）。/p/[token] 入口
+  // 按 token 先查 preview_share 优先；查不到再走 promptOrder 老路径。
   template: {
     id: string;
     name: string;

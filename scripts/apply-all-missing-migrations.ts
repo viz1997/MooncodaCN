@@ -20,6 +20,8 @@
  *   0013  prompt_order platform_order_no 列
  *   0014  prompt_template_price 新表 + prompt_order credits_charged / credits_breakdown 列
  *   0015  prompt_order.is_preview_share 列
+ *   0016  preview_share 独立表（分享链接 ≠ 下单）—— 创建 + 3 个索引
+ *   0017  prompt_order.is_preview_share 列移除（preview_share 独立后不再需要）
  *
  * 所有语句都包了 IF NOT EXISTS（或 SET DEFAULT，本身幂等），
  * 重复跑安全。脚本里直接 embed SQL 而非读 .sql 文件，避免
@@ -194,6 +196,62 @@ async function main() {
     {
       label: "0015 prompt_order.is_preview_share",
       query: `ALTER TABLE "prompt_order" ADD COLUMN IF NOT EXISTS "is_preview_share" boolean NOT NULL DEFAULT false;`,
+    },
+
+    // 0016 preview_share 独立表（分享链接 ≠ 下单实体）
+    {
+      label: "0016 CREATE TABLE preview_share",
+      query: `
+        CREATE TABLE IF NOT EXISTS "preview_share" (
+          "id" text PRIMARY KEY,
+          "order_no" text NOT NULL UNIQUE,
+          "token" text NOT NULL UNIQUE,
+          "template_id" text NOT NULL REFERENCES "prompt_template"("id") ON DELETE RESTRICT,
+          "reference_image_url" text NOT NULL,
+          "demo_preview_url" text NOT NULL,
+          "candidates" text NOT NULL,
+          "selected_cell" integer,
+          "credits_charged" integer NOT NULL DEFAULT 0,
+          "credits_breakdown" text,
+          "product_type_code" text,
+          "product_size" text,
+          "accessory_code" text,
+          "engraving_text" text,
+          "engraving_exposed" boolean,
+          "leather_color" text,
+          "leather_exposed" boolean,
+          "pvc_protection" boolean,
+          "remarks" text,
+          "platform" text,
+          "platform_order_no" text,
+          "status" text NOT NULL DEFAULT 'pending',
+          "created_by" text REFERENCES "user"("id") ON DELETE SET NULL,
+          "linked_order_id" text,
+          "confirmed_at" timestamp,
+          "confirmed_by_ip" text,
+          "expires_at" timestamp NOT NULL,
+          "created_at" timestamp NOT NULL DEFAULT now(),
+          "updated_at" timestamp NOT NULL DEFAULT now()
+        );
+      `,
+    },
+    {
+      label: "0016 preview_share_creator_created_idx",
+      query: `CREATE INDEX IF NOT EXISTS "preview_share_creator_created_idx" ON "preview_share"("created_by", "created_at" DESC);`,
+    },
+    {
+      label: "0016 preview_share_status_expires_idx",
+      query: `CREATE INDEX IF NOT EXISTS "preview_share_status_expires_idx" ON "preview_share"("status", "expires_at");`,
+    },
+    {
+      label: "0016 preview_share_linked_order_idx",
+      query: `CREATE INDEX IF NOT EXISTS "preview_share_linked_order_idx" ON "preview_share"("linked_order_id");`,
+    },
+
+    // 0017 prompt_order.is_preview_share 列移除
+    {
+      label: "0017 DROP prompt_order.is_preview_share",
+      query: `ALTER TABLE "prompt_order" DROP COLUMN IF EXISTS "is_preview_share";`,
     },
   ];
 

@@ -30,7 +30,6 @@ import { FailureNotice } from "./failure-notice";
 import { GenerateStep } from "./generate-step";
 import { InvalidLinkScreen } from "./invalid-link-screen";
 import { LoadingScreen } from "./loading-screen";
-import { PreviewConfirmStep } from "./preview-confirm-step";
 import { ProductConfigSection } from "./product-config-section";
 import { ResultStep } from "./result-step";
 import { SelectStep } from "./select-step";
@@ -116,13 +115,6 @@ function UserOrderContent({
   const isCancelled = status === "CANCELLED";
   const isFailed = status === "FAILED";
 
-  // 2026-09-13：preview 凭证客人确认视图 —— 仅当 isPreviewShare=true +
-  // status=CANDIDATES_READY 时独占主区域。覆盖 SelectStep / UploadStep /
-  // ProductConfigSection 等所有 ToC 阶段（preview 凭证由代理商在分享前已
-  // 完成 spec 填写 + 上传 + 生成，客人只做"确认"）。submitted 后 status →
-  // SELECTED 时退回到标准 ResultStep + ShareCard（同普通订单）。
-  const isPreviewConfirm = !!order.isPreviewShare && isReady;
-
   // 「正在重新生成」的合并视图：`actions.regenerating` 在用户点确认到
   // /regenerate 返回 + refresh 写回 status=GENERATING 之间有 1-2s 窗口
   // 为真。这期间如果只用 `isGenerating` 判断，会出现 SelectStep 仍在渲染
@@ -167,7 +159,7 @@ function UserOrderContent({
   };
 
   // SelectStep 和 ResultStep 自己有 fixed bottom CTA，需要更大的底部 padding 避免遮挡
-  const mainHasFixedCta = showSelectStep || isSelected || isPreviewConfirm;
+  const mainHasFixedCta = showSelectStep || isSelected;
 
   return (
     <div className="flex min-h-screen flex-col bg-[#fafafa]">
@@ -191,30 +183,6 @@ function UserOrderContent({
       >
         {isCancelled ? (
           <CancelledPanel cancelledAt={order.cancelledAt} />
-        ) : isPreviewConfirm ? (
-          // 2026-09-13：preview 凭证独占视图 —— 不渲染 ProductConfigSection /
-          // UploadStep / SelectStep（这些是 ToC 流程轨道；preview 凭证代理商
-          // 已在分享前填好全部字段，客人只确认）。Cancel AlertDialog 仍保留
-          // （客人 / 代理商都能取消）。
-          <PreviewConfirmStep
-            token={token}
-            orderNo={order.orderNo}
-            updatedAt={order.updatedAt}
-            candidateCount={candidateCount}
-            outputMode={order.template.outputMode ?? "grid"}
-            templateName={order.template.name}
-            productTypeCode={order.productTypeCode}
-            productSize={order.productSize}
-            accessoryCode={order.accessoryCode}
-            engravingText={order.engravingText}
-            engravingExposed={order.engravingExposed}
-            leatherColor={order.leatherColor}
-            leatherExposed={order.leatherExposed}
-            pvcProtection={order.pvcProtection}
-            remarks={order.remarks}
-            platform={order.platform}
-            onConfirmed={refreshOrder}
-          />
         ) : (
           <div className="space-y-4">
             {isFailed && (

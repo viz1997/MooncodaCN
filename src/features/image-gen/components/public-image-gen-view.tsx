@@ -925,7 +925,8 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
     try {
       if (specMode === "preview") {
         // ============ 分支 A：preview 凭证 ============
-        // 不扣 credit；写 CANDIDATES_READY + isPreviewShare=true + regenerateLimit=0
+        // 不扣 credit；写 preview_share（status='pending' + expires_at +7 天）——
+        // 分享链接 ≠ 下单，preview 凭证在独立表，不污染 promptOrder 列表。
         const res = await createPreviewShareAction({
           templateId: selectedMaskData.maskId,
           referenceImageUrl: refImageUrls[0] ?? "",
@@ -1465,10 +1466,12 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                   {/* 2026-09-13：「分享给客户预览」—— 给代理商一个"先让客户确认，
                       再决定是否真下单"的中间态。复用同一 SpecModal UI（spec 校验
                       / 字典 / capability-gated 字段完全一致），调 createPreviewShareAction
-                      创建 CANDIDATES_READY + isPreviewShare=true 凭证，不扣代理商
-                      credit。等客人在 /p/{token] 点确认后，由 /api/orders/[token]/
-                      guest-submit 路由扣代理商 credit 转 SELECTED。跟 demo 一键下单
-                      共用 setSubmitted 渲染同一张成功卡，根据 mode 区分文案。 */}
+                      写 preview_share 凭证（status='pending'，不扣代理商 credit）——
+                      分享链接 ≠ 下单，preview 凭证在独立表。等客人在 /p/{token} 点确认后，
+                      由 /api/orders/[token]/guest-submit 路由扣代理商 credit +
+                      NEW INSERT promptOrder(status='SELECTED') + UPDATE preview_share。
+                      跟 demo 一键下单共用 setSubmitted 渲染同一张成功卡，
+                      根据 mode 区分文案。 */}
                   <Button
                     type="button"
                     onClick={handleClickSharePreview}
@@ -1611,9 +1614,10 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                       // 2026-09-12：demo 订单不进 /p/[token]（避免匿名访问撞 404 —
                       // candidates 是单张 composite，candIdx>0 时找不到图）。
                       // 跳 /image-gen/orders 独立列表页（顶栏也跳这）。
-                      // 2026-09-13：preview 凭证也是 promptOrder 行，列表里能看到
-                      // （status=CANDIDATES_READY，客人未确认），代理商在 /image-gen/orders
-                      // 能看到该凭证的当前状态（预览待确认 / 已确认）。
+                      // 2026-09-13：preview 凭证是独立 preview_share 行，**不**进
+                      // /image-gen/orders（避免污染订单列表）—— 客人扫码进 /p/{token}
+                      // 自行确认下单后才产生 promptOrder 行（SELECTED），届时再
+                      // 在 /image-gen/orders 看到。
                       window.location.href = "/image-gen/orders";
                     }}
                   >

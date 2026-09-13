@@ -3,30 +3,33 @@
 /**
  * /p/[token] preview 凭证客人「确认下单」视图（2026-09-13）
  *
- * 适用场景：
- *   - order.isPreviewShare === true
- *   - order.status === "CANDIDATES_READY"
+ * 适用场景：/p/[token] 入口 page.tsx 按 token 查 preview_share 命中后渲染本组件
+ * （PreviewShareView 包装）。preview 凭证已在独立 preview_share 表承载，
+ * 不再混入 promptOrder 行 —— 分享链接 ≠ 下单。
  *
  * 业务流程：代理商在 /image-gen demo 流点「分享给客户预览」→ createPreviewShareAction
- * 创建 CANDIDATES_READY + isPreviewShare=true + regenerateLimit=0 的 promptOrder
- * （不扣 credit）。客户扫码进 /p/{token] → 看到这张卡 → 选 cell（grid + 多候选
- * 时 QuadrantGridPicker；1 candidate 模式直接显示大图） → 点「确认下单」→
- * POST /api/orders/[token]/guest-submit 路由扣代理商 credit 转 SELECTED。
+ * 写 preview_share（status='pending'，不扣 credit）。客户扫码进 /p/{token} →
+ * 看到这张卡 → 选 cell（grid + 多候选时 QuadrantGridPicker；1 candidate 模式
+ * 直接显示大图）→ 点「确认下单」→ POST /api/orders/[token]/guest-submit 路由
+ * 扣代理商 credit + NEW INSERT promptOrder(status='SELECTED') + UPDATE
+ * preview_share.status='confirmed' + linkedOrderId=新订单 id。
  *
  * 与 SelectStep 的差异：
  *   - SelectStep 是 ToC「按批选候选」的 partial select UI（支持 regenerate /
  *     cancel / 多批循环）；本组件是 demo 流 preview 凭证的「一次性确认」UI。
- *   - 没有 regenerate / cancel 按钮（preview 凭证 regenerateLimit=0 + 凭证是占位
- *     订单代理商端在 /image-gen/orders 自己 cancel）。
+ *   - 没有 regenerate / cancel 按钮（preview 凭证 regenerateLimit=0 + 凭证由
+ *     代理商在 /image-gen/orders 自己 cancel）。
  *   - 也没有切批控件（batchCount=1）。
- *   - 提交即终态 SELECTED，调用方 refreshOrder 让外层 UserOrderView 切到
- *     ResultStep + ShareCard（同普通订单的 SELECTED 视图）。
+ *   - 提交成功后 → onConfirmed 回调让 PreviewShareView router.replace(/p/{token})
+ *     → RSC 重跑 page.tsx 的 lookup → status='confirmed' → redirect 到
+ *     linkedOrderId 的 SELECTED 视图。
  *
  * 错误处理：
  *   - 402 代理商积分不足 → 显示「代理商积分不足」提示（不需要 retry 按钮，
  *     这是代理商账户问题，客户无法解决）
  *   - 409 已确认 → 「订单已确认」非阻塞提示（idempotent 防御重提）
- *   - 400 非 preview / 状态异常 / 校验失败 → 服务端 error 字段透传
+ *   - 410 已过期 → 提示客户联系代理商重新分享
+ *   - 400 状态异常 / 校验失败 → 服务端 error 字段透传
  *   - 500 默认「提交失败，请稍后重试」
  */
 

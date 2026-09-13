@@ -9,20 +9,28 @@
  * 默认：302 重定向到效果图 URL（用于 <img src> 直接展示）
  *
  * 带 ?historyId=... 时：从指定历史快照的 candidates JSON 中读图。
- * 校验 historyId 属于该 token 的订单，避免越权读到别人的快照。
+ * 校验 historyId 属于该订单，避免越权读到别人的快照。
+ * 历史快照路径只对 promptOrder 有意义（preview_share 不存历史），
+ * preview 流下忽略 historyId 走主路径。
  *
  * 带 ?download=1 时：服务端 fetch 图二进制 → stream 回前端，
  * 触发 Content-Disposition: attachment 下载。
  * 修公共免登录页 (/p/[token]) 的下载失败：浏览器 fetch(R2 URL)
  * 会被 R2 公共域默认无 CORS 拒绝（与 [[workbench-image-proxy]]
  * 同一根因），服务端 fetch 没有跨域限制。
+ *
+ * 2026-09-13：preview 流独立表后，本路由按 token 先查 preview_share 优先：
+ *   - preview_share.candidates = [[demoPreviewUrl]]，batchCount=1
+ *   - 命中：从 preview_share.candidates 读图，忽略 historyId（preview 不存历史）
+ *   - 查不到：fallback 走 promptOrder 老路径
+ * 不返回 preview_share / promptOrder 实体，只返图 URL / 二进制。
  */
 
 import { and, eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
-import { promptOrder, promptOrderHistory } from "@/db/schema";
+import { previewShare, promptOrder, promptOrderHistory } from "@/db/schema";
 import {
   parseCandidates,
   parseUploadedImages,
@@ -111,6 +119,76 @@ async function getHandler(
       );
     }
     const historyId = req.nextUrl.searchParams.get("historyId");
+
+    // 2026-09-13：先查 preview_share（独立表，分享链接实体）。
+    // 命中：从 preview_share.candidates 读图（忽略 historyId，因为 preview 不存历史快照）。
+    const share = await db.query.previewShare.findFirst({
+      where: eq(previewShare.token, token),
+      columns: { candidates: true },
+    });
+    if (share) {
+      const nested = parseCandidates(share.candidates);
+      // preview_share batchCount=1 永远成立（candidates=[[demoPreviewUrl]]）。
+      // QuadrantGridPicker 在 imageIdx=0 + candIdx=0~N-1 范围调用。
+      // 越界时回退到 [0][0]（preview 只持有 1 张图）。
+      const group = nested[imageIdx] ?? nested[0];
+      const target = Array.isArray(group)
+        ? (group[candIdx] ?? group[0])
+        : undefined;
+      if (typeof target !== "string" || !target) {
+        return NextResponse.json(
+          { success: false, error: "预览图不存在" },
+          { status: 404 }
+        );
+      }
+      if (!/^https?:\/\//i.test(target)) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "预览图字段不是合法 URL",
+          },
+          { status: 500 }
+        );
+      }
+      // 下载模式（preview 流在 ShareCard 自保存 / /p/[token] 终态 ResultStep 下载按钮可能用到）
+      if (req.nextUrl.searchParams.get("download") === "1") {
+        let upstream: Response;
+        try {
+          upstream = await fetch(target, {
+            signal: AbortSignal.timeout(25_000),
+          });
+        } catch (err) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: `下载源失败：${err instanceof Error ? err.message : "unknown"}`,
+            },
+            { status: 502 }
+          );
+        }
+        if (!upstream.ok || !upstream.body) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: `上游返回 ${upstream.status}`,
+              status: upstream.status,
+            },
+            { status: 502 }
+          );
+        }
+        const contentType =
+          upstream.headers.get("Content-Type") ?? "application/octet-stream";
+        const headers: HeadersInit = {
+          "Content-Type": contentType,
+          "Cache-Control": "private, max-age=300",
+        };
+        return new Response(upstream.body, { headers });
+      }
+      return NextResponse.redirect(target, {
+        status: 302,
+        headers: { "Cache-Control": "private, max-age=300" },
+      });
+    }
 
     const order = await db.query.promptOrder.findFirst({
       where: eq(promptOrder.token, token),

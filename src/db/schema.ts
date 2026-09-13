@@ -1154,19 +1154,6 @@ export const promptOrder = pgTable(
      * 不参与生图 / 不进交易逻辑（creditsTransaction.metadata 有镜像）。
      */
     creditsBreakdown: text("credits_breakdown"),
-    /**
-     * 2026-09-13：代理商 demo 流「分享给客户」凭证标记。
-     * - true  = 代理商生成预览图后点「分享给客户」创建的 promptOrder；
-     *           status=CANDIDATES_READY + spec 已默认填好 + regenerateLimit=0 +
-     *           createdBy=代理商。客户端 /p/[token] 客人免登录打开 → 选 cell →
-     *           /api/orders/[token]/guest-submit 提交，由代理商 userId 扣 credit
-     *           创建真实 SELECTED 订单，本凭证锁定防重复提交。
-     * - false = 普通 promptOrder（demo 流一键下单 / ToC 选 cell 流程单 / admin 工单）。
-     *
-     * 与 status / regenerateLimit / createdBy 三项共同判定 preview 凭证身份；
-     * 单看本列不能确定（demo 一键下单的 SELECTED 也是 false）。
-     */
-    isPreviewShare: boolean("is_preview_share").notNull().default(false),
     // 2026-08-23：代理商业务（飞书 docx "链接生成管理系统"）—— promptOrder
     // 区分 ToC 店铺单 / ToB 代理商单。ToC 用 platform 字段标识淘宝/小红书/
     // 抖店；ToB 用 agentId 关联 agent 表。互斥：agentId 优先，platform 仅
@@ -1707,6 +1694,136 @@ export const promptTemplatePriceRelations = relations(
   })
 );
 
+// ============================================
+// 2026-09-13：代理商 demo 流「分享给客户预览」独立凭证表 (PreviewShare)
+// ============================================
+//
+// 分享链接 ≠ 下单。本表承载「分享链接」实体，**不**污染 promptOrder 列表。
+// 之前用 promptOrder.isPreviewShare=true + status=CANDIDATES_READY 共用
+// promptOrder 表达分享链接语义，但 promptOrder 是订单实体（SELECTED 后走
+// 生产排期、占用订单号、扣 credit），混进 promptOrder 会让 /image-gen/orders
+// 列表看到一堆「待确认」凭证而非真实订单。本表专为「分享链接」设计：
+//
+// 状态机：PENDING → CONFIRMED（客人主动确认 / 关联 promptOrder）→ linkedOrderId
+//        写入；PENDING → EXPIRED（cron 清理 expires_at < now）
+//
+// 与 promptOrder 的关系：CONFIRMED 后 guest-submit 路由 NEW INSERT
+// promptOrder(status='SELECTED') 并 UPDATE preview_share.linkedOrderId
+// 反指新建订单。客人后续再访问 /p/{token} 时按 linkedOrderId 跳转 SELECTED 视图。
+//
+// 字段语义：
+//   - token：访问 token（与 promptOrder.token 同生成器 randomBytes(16).hex）
+//   - candidates：[[demoPreviewUrl]] 嵌套数组，与 promptOrder.candidates 对齐，
+//     /api/orders/[token]/candidates/[imageIdx]/[candIdx] 路由按 token 查
+//     preview_share 返图
+//   - selectedCell：客人最终选的分镜（0..N-1），CONFIRMED 时写入；PENDING 时 null
+//   - creditsCharged / creditsBreakdown：创建时由 price-calculator 提前算好
+//     写入，避免客人确认时重算导致预览价 / 实际价漂移
+//   - linkedOrderId：confirmed 时指向新建 promptOrder.id（nullable）
+//   - confirmedByIp：客人确认时的 IP（防滥用 / 审计）
+//   - expiresAt：默认 now + 7 天，超时未确认 → 状态置 expired
+//
+// FK 关系：
+//   - templateId → promptTemplate.id ON DELETE RESTRICT（模板不能删）
+//   - createdBy → user.id ON DELETE SET NULL（删代理商保留审计）
+//   - linkedOrderId：文字字段不绑 FK（promptOrder 与 previewShare 互相反指会
+//     形成循环 FK；删 promptOrder 时由应用层清 preview_share.linked_order_id）
+// ============================================
+export const previewShareStatusEnum = pgEnum("preview_share_status", [
+  "pending",
+  "confirmed",
+  "expired",
+]);
+
+export const previewShare = pgTable(
+  "preview_share",
+  {
+    id: text("id").primaryKey(),
+    /** 凭证号 IG-YYYYMMDD-XXXXXX（与 promptOrder.orderNo 同生成器 IG-XXXXXX 格式）。
+     * 用于代理商「我的分享凭证」列表 + 客人侧 TopBar 展示，与 promptOrder.orderNo
+     * 同语义（业务唯一凭证号），但语义是"分享凭证"而非"订单"。 */
+    orderNo: text("order_no").notNull().unique(),
+    /** 分享链接 token（randomBytes(16).hex，与 promptOrder.token 同生成器） */
+    token: text("token").notNull().unique(),
+    templateId: text("template_id")
+      .notNull()
+      .references(() => promptTemplate.id, { onDelete: "restrict" }),
+    /** 原图 R2 URL（demo 阶段用户上传的参考图，仅展示用） */
+    referenceImageUrl: text("reference_image_url").notNull(),
+    /** 效果图 R2 URL（demo 阶段生成的结果，作为 preview 凭证的预览图） */
+    demoPreviewUrl: text("demo_preview_url").notNull(),
+    /**
+     * 候选集（[[demoPreviewUrl]] 嵌套数组，与 promptOrder.candidates 对齐）。
+     * 写入时 JSON.stringify([[demoPreviewUrl]])。
+     */
+    candidates: text("candidates").notNull(),
+    /** 客人最终选的分镜（0..N-1），CONFIRMED 时由 guest-submit 路由写入 */
+    selectedCell: integer("selected_cell"),
+    /**
+     * 创建时算好的应扣积分（创建时不扣，CONFIRMED 时扣）。
+     * 0 = 免费模板（preview 凭证创建时不再额外收费）。
+     */
+    creditsCharged: integer("credits_charged").notNull().default(0),
+    /** 加价明细 JSON（与 promptOrder.creditsBreakdown 同结构） */
+    creditsBreakdown: text("credits_breakdown"),
+    // ---- 规格字段（与 promptOrder 对齐，CONFIRMED 时镜像写入新建 promptOrder） ----
+    productTypeCode: text("product_type_code"),
+    productSize: text("product_size"),
+    accessoryCode: text("accessory_code"),
+    /** 刻字内容（capability-gated，非 LB 型号始终 null） */
+    engravingText: text("engraving_text"),
+    /** 刻字是否外露（与 engravingText 独立 boolean） */
+    engravingExposed: boolean("engraving_exposed"),
+    // ---- 2026-09-10：LB 皮革徽章扩展定制 ----
+    leatherColor: text("leather_color"),
+    leatherExposed: boolean("leather_exposed"),
+    pvcProtection: boolean("pvc_protection"),
+    /** 备注（仅内部沟通，不参与生图；服务端 max 500） */
+    remarks: text("remarks"),
+    // ---- 2026-09-11：订单来源平台（PLATFORMS 字典 code） ----
+    platform: text("platform"),
+    platformOrderNo: text("platform_order_no"),
+    /** 状态机：pending / confirmed / expired */
+    status: previewShareStatusEnum("status").notNull().default("pending"),
+    /** 创建人（代理商 userId）。删代理商保留审计（set null） */
+    createdBy: text("created_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    /**
+     * CONFIRMED 后指向新建 promptOrder.id（nullable）。
+     * 文字字段不绑 FK —— promptOrder ↔ previewShare 互指会循环；删 promptOrder
+     * 时由应用层清理 preview_share.linked_order_id。
+     */
+    linkedOrderId: text("linked_order_id"),
+    /** CONFIRMED 时刻（nullable；PENDING 时 null） */
+    confirmedAt: timestamp("confirmed_at"),
+    /** CONFIRMED 时客人 IP（防滥用 / 审计） */
+    confirmedByIp: text("confirmed_by_ip"),
+    /** 过期时刻（默认 now + 7 天），超时未确认 → 状态置 expired */
+    expiresAt: timestamp("expires_at").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    // 按 createdBy + createdAt 倒序：代理商「我的分享凭证」列表
+    index("preview_share_creator_created_idx").on(
+      t.createdBy,
+      desc(t.createdAt)
+    ),
+    // cron 清理 expired 凭证：WHERE status='pending' AND expires_at < now()
+    index("preview_share_status_expires_idx").on(t.status, t.expiresAt),
+    // 客人确认后跳 SELECTED 视图：WHERE linked_order_id = ? 反查 promptOrder
+    index("preview_share_linked_order_idx").on(t.linkedOrderId),
+  ]
+);
+
+export type PreviewShare = typeof previewShare.$inferSelect;
+export type NewPreviewShare = typeof previewShare.$inferInsert;
+
+/** preview_share 状态类型 */
+export type PreviewShareStatus =
+  (typeof previewShareStatusEnum.enumValues)[number];
+
 export const promptOrderRelations = relations(promptOrder, ({ one, many }) => ({
   template: one(promptTemplate, {
     fields: [promptOrder.templateId],
@@ -1716,6 +1833,19 @@ export const promptOrderRelations = relations(promptOrder, ({ one, many }) => ({
   agent: one(agent, {
     fields: [promptOrder.agentId],
     references: [agent.id],
+  }),
+}));
+
+// 2026-09-13：preview_share ↔ promptTemplate / user 关联。
+// linkedOrderId 不绑 relation（避免循环 FK + 用 application layer 维护一致性）。
+export const previewShareRelations = relations(previewShare, ({ one }) => ({
+  template: one(promptTemplate, {
+    fields: [previewShare.templateId],
+    references: [promptTemplate.id],
+  }),
+  creator: one(user, {
+    fields: [previewShare.createdBy],
+    references: [user.id],
   }),
 }));
 
