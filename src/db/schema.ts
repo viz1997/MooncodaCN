@@ -1154,6 +1154,19 @@ export const promptOrder = pgTable(
      * 不参与生图 / 不进交易逻辑（creditsTransaction.metadata 有镜像）。
      */
     creditsBreakdown: text("credits_breakdown"),
+    /**
+     * 2026-09-13：代理商 demo 流「分享给客户」凭证标记。
+     * - true  = 代理商生成预览图后点「分享给客户」创建的 promptOrder；
+     *           status=CANDIDATES_READY + spec 已默认填好 + regenerateLimit=0 +
+     *           createdBy=代理商。客户端 /p/[token] 客人免登录打开 → 选 cell →
+     *           /api/orders/[token]/guest-submit 提交，由代理商 userId 扣 credit
+     *           创建真实 SELECTED 订单，本凭证锁定防重复提交。
+     * - false = 普通 promptOrder（demo 流一键下单 / ToC 选 cell 流程单 / admin 工单）。
+     *
+     * 与 status / regenerateLimit / createdBy 三项共同判定 preview 凭证身份；
+     * 单看本列不能确定（demo 一键下单的 SELECTED 也是 false）。
+     */
+    isPreviewShare: boolean("is_preview_share").notNull().default(false),
     // 2026-08-23：代理商业务（飞书 docx "链接生成管理系统"）—— promptOrder
     // 区分 ToC 店铺单 / ToB 代理商单。ToC 用 platform 字段标识淘宝/小红书/
     // 抖店；ToB 用 agentId 关联 agent 表。互斥：agentId 优先，platform 仅

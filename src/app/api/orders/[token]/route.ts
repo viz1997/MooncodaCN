@@ -126,6 +126,9 @@ async function getHandler(
         platform: order.platform ?? null,
         // 2026-09-11：渠道订单号（与 platform 配对）
         platformOrderNo: order.platformOrderNo ?? null,
+        // 2026-09-13：代理商 demo 流「分享给客户」凭证标记。preview 凭证
+        // 客人免登录提交走 /api/orders/[token]/guest-submit；普通订单走 /select。
+        isPreviewShare: order.isPreviewShare ?? false,
         template: {
           id: order.template.id,
           name: order.template.name,

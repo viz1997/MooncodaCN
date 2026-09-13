@@ -19,6 +19,7 @@
  *   0012  prompt_order platform 列
  *   0013  prompt_order platform_order_no 列
  *   0014  prompt_template_price 新表 + prompt_order credits_charged / credits_breakdown 列
+ *   0015  prompt_order.is_preview_share 列
  *
  * 所有语句都包了 IF NOT EXISTS（或 SET DEFAULT，本身幂等），
  * 重复跑安全。脚本里直接 embed SQL 而非读 .sql 文件，避免
@@ -187,6 +188,12 @@ async function main() {
     {
       label: "0014 prompt_order.credits_breakdown",
       query: `ALTER TABLE "prompt_order" ADD COLUMN IF NOT EXISTS "credits_breakdown" text;`,
+    },
+
+    // 0015 prompt_order.is_preview_share
+    {
+      label: "0015 prompt_order.is_preview_share",
+      query: `ALTER TABLE "prompt_order" ADD COLUMN IF NOT EXISTS "is_preview_share" boolean NOT NULL DEFAULT false;`,
     },
   ];
 

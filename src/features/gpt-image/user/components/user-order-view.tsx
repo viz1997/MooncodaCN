@@ -1,7 +1,7 @@
 "use client";
 
 import { Ban, Loader2, MoreHorizontal } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -32,6 +32,7 @@ import { InvalidLinkScreen } from "./invalid-link-screen";
 import { LoadingScreen } from "./loading-screen";
 import { ProductConfigSection } from "./product-config-section";
 import { ResultStep } from "./result-step";
+import { ShareCard } from "./share-card";
 import { SelectStep } from "./select-step";
 import { UploadStep } from "./upload-step";
 import { useOrder } from "./use-order";
@@ -95,6 +96,16 @@ function UserOrderContent({
   quietEndsAt,
 }: UserOrderContentProps) {
   const status = order.status;
+  // 2026-09-13：分享卡片二维码 URL —— 客户端 mounted 后才有 window；
+  // 用 state + useEffect 避免 SSR 阶段 undefined → hydration mismatch。
+  // 默认 fallback 是相对路径，qrcode 包能渲染但扫码只能跳到当前 origin，
+  // 不会跨域；mounted 后替换成 origin + path 才是用户期待的"扫码打开本链接"。
+  const [shareUrl, setShareUrl] = useState<string>(`/p/${token}`);
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setShareUrl(`${window.location.origin}/p/${token}`);
+    }
+  }, [token]);
 
   // 效果图历史快照 —— 传给 SelectStep 用于大图两侧的左右切换箭头。
   // 仅 CANDIDATES_READY / FAILED 状态有意义；其它阶段服务端返回空数组。
@@ -272,21 +283,39 @@ function UserOrderContent({
             )}
 
             {isSelected && (
-              <ResultStep
-                token={token}
-                orderNo={order.orderNo}
-                updatedAt={order.updatedAt}
-                // 2026-09-02：索引语义从 imageCount 改成 batchCount
-                batchCount={
-                  imagesPerUpload > 1
-                    ? Math.ceil(uploadedCount / imagesPerUpload)
-                    : uploadedCount
-                }
-                imagesPerUpload={imagesPerUpload}
-                candidateCount={candidateCount}
-                selections={selection.selections}
-                onDownload={actions.download}
-              />
+              <>
+                <ResultStep
+                  token={token}
+                  orderNo={order.orderNo}
+                  updatedAt={order.updatedAt}
+                  // 2026-09-02：索引语义从 imageCount 改成 batchCount
+                  batchCount={
+                    imagesPerUpload > 1
+                      ? Math.ceil(uploadedCount / imagesPerUpload)
+                      : uploadedCount
+                  }
+                  imagesPerUpload={imagesPerUpload}
+                  candidateCount={candidateCount}
+                  selections={selection.selections}
+                  onDownload={actions.download}
+                />
+                {/* 2026-09-13：分享卡片 —— 终态追加 QR + 自保存。
+                    与 ResultStep 同页 sibling，不替换 ResultStep 已有的下载按钮 /
+                    锁定提示 / 切批 UI。下载走 actions.download 复用 ?download=1
+                    服务端 stream（绕开 R2 CORS，与 ResultStep 同源）。
+                    MVP 默认下载 batchIdx=0 + 已选候选；多批订单后续可加轮播。 */}
+                <ShareCard
+                  shareUrl={shareUrl}
+                  orderNo={order.orderNo}
+                  onDownloadImage={() => {
+                    void actions.download(
+                      order.orderNo,
+                      0,
+                      selection.selections[0] ?? 0
+                    );
+                  }}
+                />
+              </>
             )}
           </div>
         )}

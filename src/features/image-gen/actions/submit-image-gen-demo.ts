@@ -45,12 +45,11 @@ import { generateOrderToken } from "@/features/gpt-image/lib/generation-service"
 import {
   getAccessory,
   getLeatherColor,
-  getProductType,
-  validateLeatherColor,
-  validatePlatform,
-  validateProductSpec,
 } from "@/features/gpt-image/lib/product-catalog";
 import { findEffect } from "@/features/image-gen/lib/effects-store";
+import {
+  fillDefaultsByTemplate,
+} from "@/features/image-gen/lib/preview-helpers";
 import { computePromptOrderCredits } from "@/features/image-gen/lib/price-calculator";
 import { protectedAction } from "@/lib/safe-action";
 
@@ -151,121 +150,39 @@ export const submitImageGenDemoAction = withDemoAction("submit")
     });
     if (!template) throw new Error("模板不存在或已停用");
 
-    // 2. 三件套校验（NULL 全套合法）
-    validateProductSpec(
-      parsedInput.productTypeCode ?? null,
-      parsedInput.productSize ?? null,
-      parsedInput.accessoryCode ?? null
+    // 2-4b. 2026-09-13：按模板默认填 size/accessory + capability-gated 处理
+    // engraving / leather / pvc / remarks / platform + 全部字典/子集校验。
+    // 抽到 preview-helpers.ts 给 create-preview-share.ts / guest-submit 复用。
+    const {
+      finalProductSize,
+      finalAccessoryCode,
+      finalEngravingText,
+      finalEngravingExposed,
+      finalLeatherColor,
+      finalLeatherExposed,
+      finalPvcProtection,
+      finalRemarks,
+      finalPlatform,
+      finalPlatformOrderNo,
+    } = fillDefaultsByTemplate(
+      {
+        allowedSizes: template.allowedSizes,
+        allowedAccessories: template.allowedAccessories,
+      },
+      {
+        productTypeCode: parsedInput.productTypeCode ?? null,
+        productSize: parsedInput.productSize ?? null,
+        accessoryCode: parsedInput.accessoryCode ?? null,
+        engravingText: parsedInput.engravingText ?? null,
+        engravingExposed: parsedInput.engravingExposed ?? null,
+        leatherColor: parsedInput.leatherColor ?? null,
+        leatherExposed: parsedInput.leatherExposed ?? null,
+        pvcProtection: parsedInput.pvcProtection ?? null,
+        remarks: parsedInput.remarks ?? null,
+        platform: parsedInput.platform ?? null,
+        platformOrderNo: parsedInput.platformOrderNo ?? null,
+      }
     );
-
-    // 2026-09-10：解析模板级 allowedSizes/allowedAccessories 子集
-    const allowedSizes = parseJsonStringArray(template.allowedSizes);
-    const allowedAccessories = parseJsonStringArray(
-      template.allowedAccessories
-    );
-
-    // 3. 按 catalog defaults 填 size/accessory（如未传）；同时受 allowed 子集过滤
-    let finalProductSize = parsedInput.productSize ?? null;
-    let finalAccessoryCode = parsedInput.accessoryCode ?? null;
-    if (parsedInput.productTypeCode) {
-      const type = getProductType(parsedInput.productTypeCode);
-      if (type) {
-        // 3a. 计算可用 size/accessory 列表（字典 ∩ 模板子集）
-        const sizesAvailable = type.sizes.filter((s) =>
-          allowedSizes ? allowedSizes.includes(s) : true
-        );
-        const accessoriesAvailable = type.accessories.filter((a) =>
-          allowedAccessories ? allowedAccessories.includes(a) : true
-        );
-        if (!finalProductSize && sizesAvailable.length > 0) {
-          finalProductSize = sizesAvailable[0] ?? null;
-        }
-        if (!finalAccessoryCode && accessoriesAvailable.length > 0) {
-          finalAccessoryCode = accessoriesAvailable[0] ?? null;
-        }
-      }
-    }
-
-    // 2026-09-10：兜底校验——若 client 传了 size/accessory 但不在子集内，直接拒
-    if (
-      finalProductSize &&
-      allowedSizes &&
-      !allowedSizes.includes(finalProductSize)
-    ) {
-      throw new Error(
-        `模板仅允许尺寸：${allowedSizes.join("/")}cm，当前选择了 ${finalProductSize}cm`
-      );
-    }
-    if (
-      finalAccessoryCode &&
-      allowedAccessories &&
-      !allowedAccessories.includes(finalAccessoryCode)
-    ) {
-      throw new Error(`模板不允许该配件：${finalAccessoryCode}`);
-    }
-
-    // 4. engraving 联动校验（canEngrave=false 时强制 null）
-    let finalEngravingText = parsedInput.engravingText ?? null;
-    let finalEngravingExposed = parsedInput.engravingExposed ?? null;
-    if (parsedInput.productTypeCode) {
-      const type = getProductType(parsedInput.productTypeCode);
-      if (!type || !type.capabilities.canEngrave) {
-        finalEngravingText = null;
-        finalEngravingExposed = null;
-      } else if (!finalEngravingText || finalEngravingText.trim() === "") {
-        finalEngravingText = null;
-        finalEngravingExposed = null;
-      }
-    } else {
-      finalEngravingText = null;
-      finalEngravingExposed = null;
-    }
-
-    // 4b. 2026-09-10：LB 皮革徽章定制联动（capability-gated，关闭的字段静默 collapse 为 null）
-    let finalLeatherColor: string | null = null;
-    let finalLeatherExposed: boolean | null = null;
-    let finalPvcProtection: boolean | null = null;
-    let finalRemarks: string | null = null;
-    // 2026-09-11：订单来源平台（仅 LB canPlatform=true 接受）
-    let finalPlatform: string | null = null;
-    // 2026-09-11：渠道订单号（与 platform 配对；capability-gated）
-    let finalPlatformOrderNo: string | null = null;
-    if (parsedInput.productTypeCode) {
-      const capType = getProductType(parsedInput.productTypeCode);
-      if (capType) {
-        if (capType.capabilities.canLeatherColor) {
-          finalLeatherColor = parsedInput.leatherColor ?? null;
-          validateLeatherColor(finalLeatherColor); // 字典外的 code 直接抛
-        }
-        if (capType.capabilities.canLeatherExposed) {
-          finalLeatherExposed = parsedInput.leatherExposed === true;
-        }
-        if (capType.capabilities.canPvcProtection) {
-          finalPvcProtection = parsedInput.pvcProtection === true;
-        }
-        // 2026-09-11：皮革外露 / PVC 保护互斥（二选一）。
-        // UI 层 SpecModal 已经做了互斥，server 再兜一次挡绕过前端的脏请求。
-        if (finalLeatherExposed === true && finalPvcProtection === true) {
-          throw new Error("皮革外露 与 PVC 保护 不能同时勾选");
-        }
-        if (capType.capabilities.canHaveRemarks) {
-          const trimmed = parsedInput.remarks?.trim();
-          finalRemarks = trimmed && trimmed.length > 0 ? trimmed : null;
-        }
-        if (capType.capabilities.canPlatform) {
-          finalPlatform = parsedInput.platform ?? null;
-          if (finalPlatform) validatePlatform(finalPlatform); // 字典外的 code 抛
-          // 渠道订单号：trim 后存；空串视为未填 → null
-          const trimmedOrderNo = parsedInput.platformOrderNo?.trim();
-          finalPlatformOrderNo =
-            trimmedOrderNo && trimmedOrderNo.length > 0 ? trimmedOrderNo : null;
-          // 业务规则：用户填了渠道订单号但没选 platform → 提示配对填写
-          if (finalPlatformOrderNo && !finalPlatform) {
-            throw new Error("填写渠道订单号时需同时选择订单来源平台");
-          }
-        }
-      }
-    }
 
     // 4c. 2026-09-11：selectedCell 校验（demo 流宫格选 cell 提交）
     // 规则：
@@ -473,21 +390,3 @@ function generateOrderNo(): string {
   return `IG-${ts}-${rand}`;
 }
 
-/**
- * 解析 JSON 字符串数组列（与 db-effects.ts 的同名 helper 语义一致）。
- * null/空字符串/解析失败 → null（表示「不限制 / 字典全量」）。
- */
-function parseJsonStringArray(raw: string | null | undefined): string[] | null {
-  if (raw == null) return null;
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-  try {
-    const parsed: unknown = JSON.parse(trimmed);
-    if (Array.isArray(parsed)) {
-      return parsed.filter((x): x is string => typeof x === "string");
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}

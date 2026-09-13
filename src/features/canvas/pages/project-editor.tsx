@@ -309,6 +309,10 @@ function InfiniteCanvasPage() {
     startY: 0,
     initialSelectedNodes: [],
   });
+  // 2026-09-13：image-gen /dashboard/canvas 跳转 seed 防重复 —— 同一项目同一对
+  // (gen, ref) URL 只落地一次；首次落地后 replace 清掉 searchParams，effect 再次触发
+  // 时 signature 不匹配（URL 已变）但 seedHandledRef 已记录，也跳过。
+  const seedHandledRef = useRef<string | null>(null);
 
   const config = useConfigStore((state) => state.config);
   const effectiveConfig = useEffectiveConfig();
@@ -576,6 +580,77 @@ function InfiniteCanvasPage() {
     if (searchParams?.has("agentUrl")) return;
     openAgentPanel();
   }, [openAgentPanel, projectLoaded, searchParams]);
+
+  // 2026-09-13：image-gen 「去画布精修」seed —— /image-gen 结果卡点「去画布精修」
+  // 时把 result.url（效果图）+ refImageUrls[0]（原图）拼成 ?gen=&ref= 跳过来，
+  // 这里把两个 image 节点预置到画布：
+  //   - 效果图）position (0, 0)，画布中心
+  //   - 原图参考）position (-size.width - 40, 0)，效果图左侧
+  //
+  // uploadImage(httpsUrl) 走 R2 直通分支（image-storage.ts:39-49），storageKey
+  // = "r2:{url}"，不写 localforage blob —— 跨刷新 / 跨设备稳定。
+  // grid 模式下 result.url 是 composite 整张，"效果图" 节点是整张宫格图，用户
+  // 在画布里用 crop / split 工具细化；多张参考图 MVP 只 seed 第一张。
+  //
+  // seedHandledRef 防重复：首次落地后 replace 清掉 URL 参数，effect 再触发时
+  // signature 已记录就跳过。seed 失败（URL 失效 / fetch error）只 console.error，
+  // 不弹 toast 干扰用户首次进入画布的体验。
+  useEffect(() => {
+    if (!hydrated || !projectLoaded) return;
+    const sp = searchParams;
+    if (!sp) return;
+    const genUrl = sp.get("gen");
+    const refUrl = sp.get("ref");
+    if (!genUrl && !refUrl) return;
+
+    const signature = `${projectId}|${genUrl ?? ""}|${refUrl ?? ""}`;
+    if (seedHandledRef.current === signature) return;
+    seedHandledRef.current = signature;
+
+    const seed = async () => {
+      try {
+        const newNodes: CanvasNodeData[] = [];
+        if (genUrl) {
+          const uploaded = await uploadImage(genUrl);
+          const size = fitNodeSize(uploaded.width, uploaded.height);
+          newNodes.push({
+            id: `image-seed-gen-${Date.now()}`,
+            type: CanvasNodeType.Image,
+            title: "效果图",
+            position: { x: 0, y: 0 },
+            width: size.width,
+            height: size.height,
+            metadata: imageMetadata(uploaded),
+          });
+        }
+        if (refUrl) {
+          const uploaded = await uploadImage(refUrl);
+          const size = fitNodeSize(uploaded.width, uploaded.height);
+          newNodes.push({
+            id: `image-seed-ref-${Date.now()}`,
+            type: CanvasNodeType.Image,
+            title: "原图参考",
+            position: { x: -size.width - 40, y: 0 },
+            width: size.width,
+            height: size.height,
+            metadata: imageMetadata(uploaded),
+          });
+        }
+        setNodes((prev) => [...prev, ...newNodes]);
+        // 清掉 URL 参数，避免刷新再 seed 一次
+        navigateReplace(`/dashboard/canvas/${projectId}`);
+      } catch (err) {
+        console.error("[canvas] seed from image-gen failed", err);
+      }
+    };
+    void seed();
+  }, [
+    hydrated,
+    projectLoaded,
+    searchParams,
+    projectId,
+    navigateReplace,
+  ]);
 
   useEffect(() => {
     if (

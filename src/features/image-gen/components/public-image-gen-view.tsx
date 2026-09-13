@@ -53,6 +53,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { QuadrantGridPicker } from "@/components/quadrant-grid-picker";
 import { Button } from "@/components/ui/button";
+import { useCanvasStore } from "@/features/canvas/stores/canvas/use-canvas-store";
 import type { ProductCapabilities } from "@/features/gpt-image/lib/product-catalog";
 import { submitImageGenDemoAction } from "@/features/image-gen/actions/submit-image-gen-demo";
 
@@ -60,7 +61,7 @@ import {
   SpecModal,
   type SpecSelection,
 } from "@/features/image-gen/components/spec-modal";
-import { Link } from "@/i18n/routing";
+import { Link, useRouter } from "@/i18n/routing";
 import { resizeImage, wrapBlobAsFile } from "@/lib/image-client-resize";
 import { cn } from "@/lib/utils";
 
@@ -273,6 +274,9 @@ function saveTask(t: PendingTask | null) {
 // ============================================
 
 export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
+  // 2026-09-13：去画布精修跳转 — next-intl 包装的 useRouter 自动加 locale 前缀。
+  // 与文件内 Link 配套使用；直接 push 字符串路径会让画布路由丢 locale 前缀。
+  const router = useRouter();
   // ========== 多张参考图 ==========
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
   const [dragOver, setDragOver] = useState(false);
@@ -773,6 +777,21 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
       a.click();
       toast.success("已开始下载");
     }
+  };
+
+  // 2026-09-13：去画布精修 —— 把当前 result.url（效果图，grid 模式下是 composite 整张）
+  // + 第一张参考图（refImageUrls[0]）塞 URL 参数，让画布编辑器预置 2 个 image 节点。
+  // 走 useCanvasStore.getState().createProject() 客户端生成 localforage 项目 ID，
+  // 跳 /dashboard/canvas/{id} 后画布读 ?gen=?ref= seed。
+  const handleGoToCanvas = () => {
+    if (!result?.url) return;
+    const projectId = useCanvasStore.getState().createProject(
+      `精修: ${selectedMaskData?.name ?? "AI 生图"} · ${new Date().toLocaleString("zh-CN")}`
+    );
+    const params = new URLSearchParams();
+    params.set("gen", result.url);
+    if (refImageUrls[0]) params.set("ref", refImageUrls[0]);
+    router.push(`/dashboard/canvas/${projectId}?${params.toString()}`);
   };
 
   const selectedMaskData = masks.find((m) => m.maskId === selectedMask);
@@ -1325,6 +1344,21 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                   >
                     <Download className="h-4 w-4 mr-1.5" />
                     下载图片
+                  </Button>
+                  {/* 2026-09-13：去画布精修 — 把当前 result.url + 第一张参考图传到
+                      画布编辑器预置 2 个 image 节点（"效果图" + "原图参考"）。
+                      grid 模式下 result.url 是 composite 整张，画布里用户自己裁剪。
+                      refImageUrls 为空时只传 gen，ref 参数省略。 */}
+                  <Button
+                    type="button"
+                    onClick={handleGoToCanvas}
+                    variant="outline"
+                    className="rounded-full"
+                    disabled={!result?.url}
+                    title="把效果图 + 原图带到画布编辑器二次精修"
+                  >
+                    <Wand2 className="h-4 w-4 mr-1.5" />
+                    去画布精修
                   </Button>
                   <Button
                     type="button"
