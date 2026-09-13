@@ -49,11 +49,12 @@ import {
   Wand2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { QuadrantGridPicker } from "@/components/quadrant-grid-picker";
 import { Button } from "@/components/ui/button";
 import { useCanvasStore } from "@/features/canvas/stores/canvas/use-canvas-store";
+import { ShareCard } from "@/features/gpt-image/user/components/share-card";
 import type { ProductCapabilities } from "@/features/gpt-image/lib/product-catalog";
 import { submitImageGenDemoAction } from "@/features/image-gen/actions/submit-image-gen-demo";
 
@@ -310,6 +311,14 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
     token: string;
     creditsConsumed: number;
   } | null>(null);
+  // 2026-09-13：代理商成功卡发给客户 —— 客户端 mounted 后拼绝对 URL；
+  // SSR 阶段 window 未就绪，fallback 用相对路径，mounted 后替换成 origin + path。
+  // 用 useMemo 而非 useState + useEffect 避免一次 re-render。
+  const shareUrl = useMemo(() => {
+    if (!submitted?.token) return "";
+    if (typeof window === "undefined") return `/p/${submitted.token}`;
+    return `${window.location.origin}/p/${submitted.token}`;
+  }, [submitted?.token]);
 
   // 加载历史
   useEffect(() => {
@@ -1449,6 +1458,20 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                       className="w-full h-full object-cover"
                     />
                   </div>
+                )}
+                {/* 2026-09-13：代理商下完单发给客户 —— 复用 gpt-image ShareCard。
+                    QR 编码 `${origin}/p/{token}`（submitted.token），扫码进 /p/[token]
+                    终端用户视图（ResultStep + ShareCard 自保存）。"保存图片"复用
+                    handleDownload 直接下 result.url 给代理商本地存档。
+                    设计要点：代理商下完单 / 重置前这一瞬最自然顺手截图发微信，把
+                    share UI 紧贴预览缩略下方；与"查看订单详情 / 再生成一个"两个
+                    导航动作分开 —— 分享是"对外发送"动作，导航是"对自己"动作。 */}
+                {submitted && (
+                  <ShareCard
+                    shareUrl={shareUrl}
+                    orderNo={submitted.orderNo}
+                    onDownloadImage={handleDownload}
+                  />
                 )}
                 <div className="flex flex-col sm:flex-row gap-2 justify-center">
                   <Button
