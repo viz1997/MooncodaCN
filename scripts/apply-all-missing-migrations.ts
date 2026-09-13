@@ -213,7 +213,9 @@ async function main() {
     }
   }
 
-  console.log(`\n[apply-all] 完成：✓ ${ok} / ✗ ${fail} / 总 ${statements.length}`);
+  console.log(
+    `\n[apply-all] 完成：✓ ${ok} / ✗ ${fail} / 总 ${statements.length}`
+  );
   await client.end();
   if (fail > 0) process.exit(1);
 }

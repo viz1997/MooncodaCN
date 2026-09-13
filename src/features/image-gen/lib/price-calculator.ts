@@ -155,9 +155,7 @@ export async function computePromptOrderCredits(
         and(
           eq(promptTemplatePrice.templateId, templateId),
           // specKey IN (...) —— 用 OR 链（Drizzle 没有 in-array 跨字段便捷 API）
-          ...activeSpecKeys.map((key) =>
-            eq(promptTemplatePrice.specKey, key)
-          )
+          ...activeSpecKeys.map((key) => eq(promptTemplatePrice.specKey, key))
         )
       );
     matched = rows;
@@ -166,7 +164,9 @@ export async function computePromptOrderCredits(
   // 4. 按 specKey 字母序组装 breakdown（跨订单对比易读）
   const breakdown: PriceBreakdownItem[] = matched
     .slice()
-    .sort((a, b) => (a.specKey < b.specKey ? -1 : a.specKey > b.specKey ? 1 : 0))
+    .sort((a, b) =>
+      a.specKey < b.specKey ? -1 : a.specKey > b.specKey ? 1 : 0
+    )
     .map((r) => ({
       specKey: r.specKey,
       // DB label 优先；空则回退运行时组装（"6cm + 30"）

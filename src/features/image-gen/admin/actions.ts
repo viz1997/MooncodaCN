@@ -11,7 +11,7 @@ import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/db";
-import { promptTemplatePrice, promptTemplate } from "@/db/schema";
+import { promptTemplate, promptTemplatePrice } from "@/db/schema";
 import type { ProductCapabilities } from "@/features/gpt-image/lib/product-catalog";
 import {
   createEffectInDb,

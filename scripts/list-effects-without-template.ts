@@ -83,7 +83,9 @@ async function main() {
     console.table(tmpls.rows);
 
     console.log(`\n补法（任选其一）：`);
-    console.log(`  1) 浏览器进 /admin/product-effects/<id> 编辑页，选一个 promptTemplate 提交`);
+    console.log(
+      `  1) 浏览器进 /admin/product-effects/<id> 编辑页，选一个 promptTemplate 提交`
+    );
     console.log(
       `  2) 直接 SQL：UPDATE product_effect SET prompt_template_id = '<选中的id>' WHERE id = '<待补的id>';`
     );

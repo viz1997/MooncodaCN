@@ -814,8 +814,8 @@ export function ProductEffectForm({
           <div className="rounded-lg border bg-violet-500/5 px-4 py-3 space-y-3">
             <div className="text-sm font-medium">保护套类型</div>
             <div className="text-xs text-muted-foreground">
-              勾选 = 该模板在 /image-gen SpecModal
-              展示对应保护套选项；不勾 = 沿用产品型号字典默认。
+              勾选 = 该模板在 /image-gen SpecModal 展示对应保护套选项；不勾 =
+              沿用产品型号字典默认。
             </div>
 
             <div className="space-y-2">

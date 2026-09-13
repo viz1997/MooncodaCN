@@ -38,8 +38,7 @@ if (!process.env.DATABASE_URL) {
 const isRemote =
   process.env.DATABASE_URL.includes("neon.tech") ||
   process.env.DATABASE_URL.includes("supabase");
-const finalUrl = process.env.DATABASE_URL
-  .replace(/[?&]sslmode=[^&]*/g, "")
+const finalUrl = process.env.DATABASE_URL.replace(/[?&]sslmode=[^&]*/g, "")
   .replace(/[?&]ssl=[^&]*/g, "")
   .replace(/[?&]uselibpqcompat=[^&]*/g, "");
 
@@ -136,10 +135,16 @@ async function main() {
     );
 
     if (isDryRun) {
-      console.log(`\n[--dry-run] 将要 INSERT ${before.rows.length} 行到 prompt_template`);
-      console.log(`[--dry-run] 将要 UPDATE ${before.rows.length} 行 product_effect.prompt_template_id`);
+      console.log(
+        `\n[--dry-run] 将要 INSERT ${before.rows.length} 行到 prompt_template`
+      );
+      console.log(
+        `[--dry-run] 将要 UPDATE ${before.rows.length} 行 product_effect.prompt_template_id`
+      );
       console.log("\n去掉 --dry-run 实际跑：");
-      console.log("  pnpm tsx scripts/sync-product-effect-to-prompt-template.ts");
+      console.log(
+        "  pnpm tsx scripts/sync-product-effect-to-prompt-template.ts"
+      );
       return;
     }
 
@@ -158,7 +163,9 @@ async function main() {
       const updated = await client.query<{ id: string; name: string }>(
         UPDATE_SQL
       );
-      console.log(`UPDATE product_effect.prompt_template_id: ${updated.rows.length} 行`);
+      console.log(
+        `UPDATE product_effect.prompt_template_id: ${updated.rows.length} 行`
+      );
       if (updated.rows.length > 0) {
         console.table(updated.rows);
       }
@@ -171,15 +178,21 @@ async function main() {
         `SELECT COUNT(*) AS cnt FROM product_effect
          WHERE prompt_template_id IS NULL OR prompt_template_id = ''`
       );
-      console.log(`\n验证：未绑行剩余 ${after.rows[0]?.cnt ?? "?"} 行（期望 0）`);
+      console.log(
+        `\n验证：未绑行剩余 ${after.rows[0]?.cnt ?? "?"} 行（期望 0）`
+      );
 
       // 4) 提示回滚 SQL
       console.log("\n=== 回滚 SQL（如果效果不对，跑这段） ===");
       console.log(`DELETE FROM prompt_template`);
       console.log(`  WHERE id IN (`);
-      console.log(`    SELECT id FROM product_effect WHERE prompt_template_id = id`);
+      console.log(
+        `    SELECT id FROM product_effect WHERE prompt_template_id = id`
+      );
       console.log(`  );`);
-      console.log(`UPDATE product_effect SET prompt_template_id = NULL WHERE prompt_template_id = id;`);
+      console.log(
+        `UPDATE product_effect SET prompt_template_id = NULL WHERE prompt_template_id = id;`
+      );
     } catch (err) {
       await client.query("ROLLBACK");
       console.error("\n❌ ROLLBACK：sync 失败", err);

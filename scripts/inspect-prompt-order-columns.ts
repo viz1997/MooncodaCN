@@ -28,16 +28,16 @@ async function main() {
   await client.connect();
 
   const cols = await client.query<{
-      column_name: string;
-      data_type: string;
-      is_nullable: string;
-      column_default: string | null;
-    }>(
-      `SELECT column_name, data_type, is_nullable, column_default
+    column_name: string;
+    data_type: string;
+    is_nullable: string;
+    column_default: string | null;
+  }>(
+    `SELECT column_name, data_type, is_nullable, column_default
        FROM information_schema.columns
        WHERE table_name = 'prompt_order'
        ORDER BY ordinal_position`
-    );
+  );
 
   console.log(`[inspect] prompt_order 现有 ${cols.rows.length} 列：\n`);
   console.table(cols.rows);
@@ -83,7 +83,9 @@ async function main() {
   const existing = new Set(cols.rows.map((r) => r.column_name));
   const missing = expected.filter((c) => !existing.has(c));
 
-  console.log(`\n[inspect] schema.ts 期望 ${expected.length} 列，缺：${missing.length}`);
+  console.log(
+    `\n[inspect] schema.ts 期望 ${expected.length} 列，缺：${missing.length}`
+  );
   if (missing.length > 0) {
     console.log("\n⚠️  缺失列（请跑对应 migration）：");
     console.table(missing.map((m) => ({ column: m })));

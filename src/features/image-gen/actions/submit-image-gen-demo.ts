@@ -47,9 +47,7 @@ import {
   getLeatherColor,
 } from "@/features/gpt-image/lib/product-catalog";
 import { findEffect } from "@/features/image-gen/lib/effects-store";
-import {
-  fillDefaultsByTemplate,
-} from "@/features/image-gen/lib/preview-helpers";
+import { fillDefaultsByTemplate } from "@/features/image-gen/lib/preview-helpers";
 import { computePromptOrderCredits } from "@/features/image-gen/lib/price-calculator";
 import { protectedAction } from "@/lib/safe-action";
 
@@ -220,14 +218,18 @@ export const submitImageGenDemoAction = withDemoAction("submit")
     //    breakdown 持久化到 promptOrder.creditsCharged / creditsBreakdown，
     //    代理商对账 + admin UI 单卡展示都用这套口径。
     const basePrice = template.price ?? 0;
-    const priceResult = await computePromptOrderCredits(template.id, basePrice, {
-      productTypeCode: parsedInput.productTypeCode ?? null,
-      productSize: finalProductSize,
-      accessoryCode: finalAccessoryCode,
-      leatherColor: finalLeatherColor,
-      leatherExposed: finalLeatherExposed,
-      pvcProtection: finalPvcProtection,
-    });
+    const priceResult = await computePromptOrderCredits(
+      template.id,
+      basePrice,
+      {
+        productTypeCode: parsedInput.productTypeCode ?? null,
+        productSize: finalProductSize,
+        accessoryCode: finalAccessoryCode,
+        leatherColor: finalLeatherColor,
+        leatherExposed: finalLeatherExposed,
+        pvcProtection: finalPvcProtection,
+      }
+    );
     const { totalCredits, breakdown } = priceResult;
     const creditsBreakdownJson = JSON.stringify(breakdown);
 
@@ -240,12 +242,8 @@ export const submitImageGenDemoAction = withDemoAction("submit")
         const specSummary = [
           template.name,
           finalProductSize ? `${finalProductSize}cm` : null,
-          finalAccessoryCode
-            ? getAccessoryName(finalAccessoryCode)
-            : null,
-          finalLeatherColor
-            ? getLeatherColorName(finalLeatherColor)
-            : null,
+          finalAccessoryCode ? getAccessoryName(finalAccessoryCode) : null,
+          finalLeatherColor ? getLeatherColorName(finalLeatherColor) : null,
           finalLeatherExposed === true ? "实物外露" : null,
           finalPvcProtection === true ? "PVC 保护" : null,
         ]
@@ -389,4 +387,3 @@ function generateOrderNo(): string {
   const rand = nanoid(6).toUpperCase();
   return `IG-${ts}-${rand}`;
 }
-

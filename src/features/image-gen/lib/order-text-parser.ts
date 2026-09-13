@@ -27,8 +27,8 @@
 import {
   LEATHER_COLORS,
   PLATFORMS,
-  PRODUCT_TYPES,
   type PlatformCode,
+  PRODUCT_TYPES,
 } from "@/features/gpt-image/lib/product-catalog";
 
 export interface ParsedOrderText {
@@ -162,7 +162,10 @@ function inferPlatform(text: string): PlatformCode | null {
  * - 抖音：19 位数字 或 "dy" 前缀
  * - 通用兜底：连续 12~20 位字母数字组合（避开中文字符）
  */
-function inferOrderNo(text: string, platform: PlatformCode | null): string | null {
+function inferOrderNo(
+  text: string,
+  platform: PlatformCode | null
+): string | null {
   // 优先看带"订单号"标签的行（淘宝详情页常见 "订单编号：1234567890123456"）
   const labeledMatch = text.match(
     /(?:订单号|订单编号|order[\s_]?(?:no|id|number))[:：\s]*([A-Za-z0-9_-]{8,32})/i

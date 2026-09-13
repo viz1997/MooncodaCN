@@ -88,7 +88,9 @@ async function main() {
       leatherColor: null,
       leatherExposed: null,
       pvcProtection: null,
-      breakdown: [{ specKey: "accessory:leather", label: "皮套 +20", delta: 20 }],
+      breakdown: [
+        { specKey: "accessory:leather", label: "皮套 +20", delta: 20 },
+      ],
     },
     {
       tmpl: tmpls[0],
@@ -150,8 +152,7 @@ async function main() {
   for (const o of fakeOrders) {
     const breakdownJson = JSON.stringify(o.breakdown);
     const totalCredits =
-      (o.tmpl?.price ?? 0) +
-      o.breakdown.reduce((sum, b) => sum + b.delta, 0);
+      (o.tmpl?.price ?? 0) + o.breakdown.reduce((sum, b) => sum + b.delta, 0);
     const orderNo = `FAKE-${nanoid(8).toUpperCase()}`;
     await client.query(
       `INSERT INTO prompt_order

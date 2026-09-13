@@ -63,13 +63,16 @@ async function main() {
     `[seed] 目标模板：${tmpl.id} (${tmpl.name}, basePrice=${tmpl.price})`
   );
 
-  const seedRules: Array<{ specKey: string; priceDelta: number; label: string }> =
-    [
-      { specKey: "size:6", priceDelta: 30, label: "6cm +30" },
-      { specKey: "accessory:leather", priceDelta: 20, label: "皮套 +20" },
-      { specKey: "leather_color:black", priceDelta: 15, label: "黑色 +15" },
-      { specKey: "protection:pvc", priceDelta: 10, label: "PVC 保护 +10" },
-    ];
+  const seedRules: Array<{
+    specKey: string;
+    priceDelta: number;
+    label: string;
+  }> = [
+    { specKey: "size:6", priceDelta: 30, label: "6cm +30" },
+    { specKey: "accessory:leather", priceDelta: 20, label: "皮套 +20" },
+    { specKey: "leather_color:black", priceDelta: 15, label: "黑色 +15" },
+    { specKey: "protection:pvc", priceDelta: 10, label: "PVC 保护 +10" },
+  ];
 
   // 幂等：先删这 4 个 specKey
   for (const r of seedRules) {
@@ -105,7 +108,9 @@ async function main() {
      WHERE template_id = $1 ORDER BY spec_key`,
     [tmpl.id]
   );
-  console.log(`[seed] DB 校验：模板 ${tmpl.name} 共 ${verify.rows.length} 条规则`);
+  console.log(
+    `[seed] DB 校验：模板 ${tmpl.name} 共 ${verify.rows.length} 条规则`
+  );
   for (const r of verify.rows) {
     console.log(`  - ${r.spec_key} = ${r.price_delta} (${r.label})`);
   }

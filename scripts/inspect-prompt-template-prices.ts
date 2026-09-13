@@ -32,31 +32,31 @@ async function main() {
   await client.connect();
 
   const tmpls = await client.query<{
-      id: string;
-      name: string;
-      price: number;
-      is_active: boolean;
-      product_type_code: string | null;
-    }>(
-      `SELECT id, name, price, is_active, product_type_code
+    id: string;
+    name: string;
+    price: number;
+    is_active: boolean;
+    product_type_code: string | null;
+  }>(
+    `SELECT id, name, price, is_active, product_type_code
        FROM prompt_template
        ORDER BY price DESC, id`
-    );
+  );
 
   console.log(`\n[inspect] prompt_template 共 ${tmpls.rows.length} 行：\n`);
   console.table(tmpls.rows);
 
   const effects = await client.query<{
-      id: string;
-      name: string;
-      price: number;
-      status: string;
-      prompt_template_id: string | null;
-    }>(
-      `SELECT id, name, price, status, prompt_template_id
+    id: string;
+    name: string;
+    price: number;
+    status: string;
+    prompt_template_id: string | null;
+  }>(
+    `SELECT id, name, price, status, prompt_template_id
        FROM product_effect
        ORDER BY price DESC, id`
-    );
+  );
 
   console.log(`\n[inspect] product_effect 共 ${effects.rows.length} 行：\n`);
   console.table(effects.rows);

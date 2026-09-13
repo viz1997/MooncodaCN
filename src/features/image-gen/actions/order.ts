@@ -364,8 +364,7 @@ export const submitPublicOrderAction = withOrderAction("submit")
     // 扣个人 credit。优先读 promptOrder.creditsCharged（PENDING 阶段 createOrder
     // 已经算好的本单总价，submit 不重算避免对账口径漂移）；老订单该列为 null 时
     // 回退 template.price（兼容历史数据）。
-    const creditsCharged =
-      order.creditsCharged ?? order.template.price ?? 0;
+    const creditsCharged = order.creditsCharged ?? order.template.price ?? 0;
     if (creditsCharged > 0) {
       try {
         // description 写规格摘要（与 submit-image-gen-demo 同口径）：

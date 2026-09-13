@@ -1,7 +1,7 @@
 "use client";
 
 import { Ban, Loader2, MoreHorizontal } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,9 +30,9 @@ import { FailureNotice } from "./failure-notice";
 import { GenerateStep } from "./generate-step";
 import { InvalidLinkScreen } from "./invalid-link-screen";
 import { LoadingScreen } from "./loading-screen";
+import { PreviewConfirmStep } from "./preview-confirm-step";
 import { ProductConfigSection } from "./product-config-section";
 import { ResultStep } from "./result-step";
-import { ShareCard } from "./share-card";
 import { SelectStep } from "./select-step";
 import { UploadStep } from "./upload-step";
 import { useOrder } from "./use-order";
@@ -96,16 +96,6 @@ function UserOrderContent({
   quietEndsAt,
 }: UserOrderContentProps) {
   const status = order.status;
-  // 2026-09-13：分享卡片二维码 URL —— 客户端 mounted 后才有 window；
-  // 用 state + useEffect 避免 SSR 阶段 undefined → hydration mismatch。
-  // 默认 fallback 是相对路径，qrcode 包能渲染但扫码只能跳到当前 origin，
-  // 不会跨域；mounted 后替换成 origin + path 才是用户期待的"扫码打开本链接"。
-  const [shareUrl, setShareUrl] = useState<string>(`/p/${token}`);
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      setShareUrl(`${window.location.origin}/p/${token}`);
-    }
-  }, [token]);
 
   // 效果图历史快照 —— 传给 SelectStep 用于大图两侧的左右切换箭头。
   // 仅 CANDIDATES_READY / FAILED 状态有意义；其它阶段服务端返回空数组。
@@ -125,6 +115,13 @@ function UserOrderContent({
   const isSelected = status === "SELECTED";
   const isCancelled = status === "CANCELLED";
   const isFailed = status === "FAILED";
+
+  // 2026-09-13：preview 凭证客人确认视图 —— 仅当 isPreviewShare=true +
+  // status=CANDIDATES_READY 时独占主区域。覆盖 SelectStep / UploadStep /
+  // ProductConfigSection 等所有 ToC 阶段（preview 凭证由代理商在分享前已
+  // 完成 spec 填写 + 上传 + 生成，客人只做"确认"）。submitted 后 status →
+  // SELECTED 时退回到标准 ResultStep + ShareCard（同普通订单）。
+  const isPreviewConfirm = !!order.isPreviewShare && isReady;
 
   // 「正在重新生成」的合并视图：`actions.regenerating` 在用户点确认到
   // /regenerate 返回 + refresh 写回 status=GENERATING 之间有 1-2s 窗口
@@ -170,7 +167,7 @@ function UserOrderContent({
   };
 
   // SelectStep 和 ResultStep 自己有 fixed bottom CTA，需要更大的底部 padding 避免遮挡
-  const mainHasFixedCta = showSelectStep || isSelected;
+  const mainHasFixedCta = showSelectStep || isSelected || isPreviewConfirm;
 
   return (
     <div className="flex min-h-screen flex-col bg-[#fafafa]">
@@ -194,6 +191,30 @@ function UserOrderContent({
       >
         {isCancelled ? (
           <CancelledPanel cancelledAt={order.cancelledAt} />
+        ) : isPreviewConfirm ? (
+          // 2026-09-13：preview 凭证独占视图 —— 不渲染 ProductConfigSection /
+          // UploadStep / SelectStep（这些是 ToC 流程轨道；preview 凭证代理商
+          // 已在分享前填好全部字段，客人只确认）。Cancel AlertDialog 仍保留
+          // （客人 / 代理商都能取消）。
+          <PreviewConfirmStep
+            token={token}
+            orderNo={order.orderNo}
+            updatedAt={order.updatedAt}
+            candidateCount={candidateCount}
+            outputMode={order.template.outputMode ?? "grid"}
+            templateName={order.template.name}
+            productTypeCode={order.productTypeCode}
+            productSize={order.productSize}
+            accessoryCode={order.accessoryCode}
+            engravingText={order.engravingText}
+            engravingExposed={order.engravingExposed}
+            leatherColor={order.leatherColor}
+            leatherExposed={order.leatherExposed}
+            pvcProtection={order.pvcProtection}
+            remarks={order.remarks}
+            platform={order.platform}
+            onConfirmed={refreshOrder}
+          />
         ) : (
           <div className="space-y-4">
             {isFailed && (
@@ -283,39 +304,26 @@ function UserOrderContent({
             )}
 
             {isSelected && (
-              <>
-                <ResultStep
-                  token={token}
-                  orderNo={order.orderNo}
-                  updatedAt={order.updatedAt}
-                  // 2026-09-02：索引语义从 imageCount 改成 batchCount
-                  batchCount={
-                    imagesPerUpload > 1
-                      ? Math.ceil(uploadedCount / imagesPerUpload)
-                      : uploadedCount
-                  }
-                  imagesPerUpload={imagesPerUpload}
-                  candidateCount={candidateCount}
-                  selections={selection.selections}
-                  onDownload={actions.download}
-                />
-                {/* 2026-09-13：分享卡片 —— 终态追加 QR + 自保存。
-                    与 ResultStep 同页 sibling，不替换 ResultStep 已有的下载按钮 /
-                    锁定提示 / 切批 UI。下载走 actions.download 复用 ?download=1
-                    服务端 stream（绕开 R2 CORS，与 ResultStep 同源）。
-                    MVP 默认下载 batchIdx=0 + 已选候选；多批订单后续可加轮播。 */}
-                <ShareCard
-                  shareUrl={shareUrl}
-                  orderNo={order.orderNo}
-                  onDownloadImage={() => {
-                    void actions.download(
-                      order.orderNo,
-                      0,
-                      selection.selections[0] ?? 0
-                    );
-                  }}
-                />
-              </>
+              // 2026-09-13：/p/[token] 终态只渲染 ResultStep —— 不再附 ShareCard。
+              // ShareCard 是「把链接发给朋友」的对外发送动作，但客人扫码进来
+              // 已经有这条链接（/p/{token] 即是分享凭证），再展示 QR + 复制按钮
+              // 是冗余。ShareCard 仅在代理商侧 /image-gen 成功卡出现，让代理商
+              // 把链接发给客人（demo 流提交后 / preview 凭证创建后）。
+              <ResultStep
+                token={token}
+                orderNo={order.orderNo}
+                updatedAt={order.updatedAt}
+                // 2026-09-02：索引语义从 imageCount 改成 batchCount
+                batchCount={
+                  imagesPerUpload > 1
+                    ? Math.ceil(uploadedCount / imagesPerUpload)
+                    : uploadedCount
+                }
+                imagesPerUpload={imagesPerUpload}
+                candidateCount={candidateCount}
+                selections={selection.selections}
+                onDownload={actions.download}
+              />
             )}
           </div>
         )}

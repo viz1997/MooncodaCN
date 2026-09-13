@@ -644,13 +644,7 @@ function InfiniteCanvasPage() {
       }
     };
     void seed();
-  }, [
-    hydrated,
-    projectLoaded,
-    searchParams,
-    projectId,
-    navigateReplace,
-  ]);
+  }, [hydrated, projectLoaded, searchParams, projectId, navigateReplace]);
 
   useEffect(() => {
     if (

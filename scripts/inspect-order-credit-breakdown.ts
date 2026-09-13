@@ -111,7 +111,9 @@ async function main() {
      GROUP BY spec_key
      ORDER BY SUM(delta) DESC, COUNT(*) DESC`
   );
-  console.log("\n========== 3. 按 spec_key group by（拆 JSON 明细） ==========");
+  console.log(
+    "\n========== 3. 按 spec_key group by（拆 JSON 明细） =========="
+  );
   console.log("hit_count = 命中次数，total_delta = 总加价积分（绝对值之和）");
   console.table(bySpecKey.rows);
 

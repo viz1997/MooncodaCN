@@ -41,17 +41,19 @@ async function main() {
 
   // 先查一下当前列状态，输出有意义的诊断
   const before = await client.query<{
-      column_name: string;
-      data_type: string;
-      is_nullable: string;
-    }>(
-      `SELECT column_name, data_type, is_nullable
+    column_name: string;
+    data_type: string;
+    is_nullable: string;
+  }>(
+    `SELECT column_name, data_type, is_nullable
        FROM information_schema.columns
        WHERE table_name = 'prompt_order' AND column_name = 'platform_order_no'`
-    );
+  );
 
   if (before.rows.length > 0) {
-    console.log("[apply] ✅ prompt_order.platform_order_no 列已存在，无需 apply");
+    console.log(
+      "[apply] ✅ prompt_order.platform_order_no 列已存在，无需 apply"
+    );
     console.table(before.rows);
     await client.end();
     return;
@@ -79,14 +81,14 @@ async function main() {
 
   // 验证
   const after = await client.query<{
-      column_name: string;
-      data_type: string;
-      is_nullable: string;
-    }>(
-      `SELECT column_name, data_type, is_nullable
+    column_name: string;
+    data_type: string;
+    is_nullable: string;
+  }>(
+    `SELECT column_name, data_type, is_nullable
        FROM information_schema.columns
        WHERE table_name = 'prompt_order' AND column_name = 'platform_order_no'`
-    );
+  );
   console.log("\n[apply] 验证：");
   console.table(after.rows);
 

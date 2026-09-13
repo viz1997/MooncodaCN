@@ -42,6 +42,7 @@ import {
   ImageOff,
   Loader2,
   RefreshCw,
+  Share2,
   ShoppingCart,
   Sparkles,
   Trash2,
@@ -54,8 +55,9 @@ import { toast } from "sonner";
 import { QuadrantGridPicker } from "@/components/quadrant-grid-picker";
 import { Button } from "@/components/ui/button";
 import { useCanvasStore } from "@/features/canvas/stores/canvas/use-canvas-store";
-import { ShareCard } from "@/features/gpt-image/user/components/share-card";
 import type { ProductCapabilities } from "@/features/gpt-image/lib/product-catalog";
+import { ShareCard } from "@/features/gpt-image/user/components/share-card";
+import { createPreviewShareAction } from "@/features/image-gen/actions/create-preview-share";
 import { submitImageGenDemoAction } from "@/features/image-gen/actions/submit-image-gen-demo";
 
 import {
@@ -305,11 +307,23 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
   // ========== demo 下单流程状态 ==========
   const [showSpecModal, setShowSpecModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  /**
+   * 2026-09-13：SpecModal 目标流（demo 下单 vs preview 凭证），用 mode 区分
+   * SpecModal 关掉后 handleConfirmSpec 据此分发到 submitImageGenDemoAction /
+   * createPreviewShareAction。两路共用同一 SpecModal UI（产品 spec 一致 → 对
+   * 账口径统一），仅 server action 不同。
+   */
+  const [specMode, setSpecMode] = useState<"demo" | "preview">("demo");
   const [submitted, setSubmitted] = useState<{
     orderId: string;
     orderNo: string;
     token: string;
     creditsConsumed: number;
+    /** 2026-09-13：区分 demo 下单（已扣 credit，订单进入生产）vs preview 凭证
+     *  （未扣 credit，等客人在 /p/{token] 上确认后由 /api/orders/[token]/
+     *  guest-submit 路由扣代理商 credit 转 SELECTED）。成功卡根据 mode 渲染
+     *  不同文案 + 文案下方 ShareCard 描述一致（都是 /p/{token}）。 */
+    mode: "demo" | "preview";
   } | null>(null);
   // 2026-09-13：代理商成功卡发给客户 —— 客户端 mounted 后拼绝对 URL；
   // SSR 阶段 window 未就绪，fallback 用相对路径，mounted 后替换成 origin + path。
@@ -794,9 +808,11 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
   // 跳 /dashboard/canvas/{id} 后画布读 ?gen=?ref= seed。
   const handleGoToCanvas = () => {
     if (!result?.url) return;
-    const projectId = useCanvasStore.getState().createProject(
-      `精修: ${selectedMaskData?.name ?? "AI 生图"} · ${new Date().toLocaleString("zh-CN")}`
-    );
+    const projectId = useCanvasStore
+      .getState()
+      .createProject(
+        `精修: ${selectedMaskData?.name ?? "AI 生图"} · ${new Date().toLocaleString("zh-CN")}`
+      );
     const params = new URLSearchParams();
     params.set("gen", result.url);
     if (refImageUrls[0]) params.set("ref", refImageUrls[0]);
@@ -805,16 +821,19 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
 
   const selectedMaskData = masks.find((m) => m.maskId === selectedMask);
 
-  // 点「选择此效果下单」
-  const handleClickSubmitOrder = () => {
-    if (!result || !selectedMaskData) return;
+  // 2026-09-13：共用前置校验 —— grid 多 cell 必选 / refImageUrls 非空。无
+  // productTypeCode → 不弹 modal 直接调 handleConfirmSpec（demo 一键 / preview
+  // 凭证都允许免规格下单）。返回 true 表示通过校验可以继续，false 表示已 toast
+  // 阻断。让 handleClickSubmitOrder / handleClickSharePreview 复用这套校验。
+  const preflightForOrderAction = (): boolean => {
+    if (!result || !selectedMaskData) return false;
     // 2026-09-11：grid + 多候选必须先选 cell 才能下单（picker 强制 gate）。
     // 单图（candidateCount=1）/ separate 模式跳过此检查。
     const cc = selectedMaskData.candidateCount ?? 1;
     const om = selectedMaskData.outputMode ?? "grid";
     if (om === "grid" && cc > 1 && selectedCell === null) {
       toast.error("请先在效果图上选一个分镜");
-      return;
+      return false;
     }
     // demo 一键下单必须有 R2 URL（base64 不支持）；多图取第一张的 publicUrl 写订单的 uploadedImages[0]
     if (refImageUrls.length === 0) {
@@ -836,8 +855,16 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
       } else {
         toast.error("下单需要参考图的 R2 URL，请先上传至少一张参考图");
       }
-      return;
+      return false;
     }
+    return true;
+  };
+
+  // 点「选择此效果下单」
+  const handleClickSubmitOrder = () => {
+    if (!preflightForOrderAction()) return;
+    if (!selectedMaskData) return;
+    setSpecMode("demo");
     // 无 productTypeCode → 跳过 modal，直接走免规格下单
     if (!selectedMaskData.productTypeCode) {
       void handleConfirmSpec({
@@ -858,7 +885,34 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
     setShowSpecModal(true);
   };
 
-  // 确认规格 → 调 submitImageGenDemoAction
+  // 2026-09-13：「分享给客户预览」—— 创建 CANDIDATES_READY + isPreviewShare=true
+  // 凭证，不扣 credit，等客人在 /p/{token] 上点确认后由
+  // /api/orders/[token]/guest-submit 路由扣代理商 credit 转 SELECTED。
+  // 入口形态与「选择此效果下单」一致：复用同一 SpecModal UI（保证 spec 校验 /
+  // 字典 / capability-gated 字段跟 demo 下单完全一致，对账口径统一）。
+  const handleClickSharePreview = () => {
+    if (!preflightForOrderAction()) return;
+    if (!selectedMaskData) return;
+    setSpecMode("preview");
+    // 无 productTypeCode → 跳过 modal，直接走免规格建凭证
+    if (!selectedMaskData.productTypeCode) {
+      void handleConfirmSpec({
+        productSize: null,
+        accessoryCode: null,
+        engravingText: null,
+        leatherColor: null,
+        leatherExposed: null,
+        pvcProtection: null,
+        remarks: null,
+        platform: null,
+        platformOrderNo: null,
+      });
+      return;
+    }
+    setShowSpecModal(true);
+  };
+
+  // 确认规格 → 按 specMode 分发到 submitImageGenDemoAction / createPreviewShareAction
   const handleConfirmSpec = async (spec: SpecSelection) => {
     if (!result || !selectedMaskData) return;
     if (refImageUrls.length === 0) {
@@ -869,6 +923,44 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
     setShowSpecModal(false);
     setSubmitting(true);
     try {
+      if (specMode === "preview") {
+        // ============ 分支 A：preview 凭证 ============
+        // 不扣 credit；写 CANDIDATES_READY + isPreviewShare=true + regenerateLimit=0
+        const res = await createPreviewShareAction({
+          templateId: selectedMaskData.maskId,
+          referenceImageUrl: refImageUrls[0] ?? "",
+          demoPreviewUrl: result.url,
+          productTypeCode: selectedMaskData.productTypeCode,
+          productSize: spec.productSize,
+          accessoryCode: spec.accessoryCode,
+          engravingText: spec.engravingText,
+          leatherColor: spec.leatherColor,
+          leatherExposed: spec.leatherExposed,
+          pvcProtection: spec.pvcProtection,
+          remarks: spec.remarks,
+          platform: spec.platform,
+          platformOrderNo: spec.platformOrderNo,
+          selectedCell: selectedCell,
+        });
+        if (!res?.data) throw new Error("创建预览凭证失败");
+        const data = res.data;
+        setSubmitted({
+          orderId: data.orderId,
+          orderNo: data.orderNo,
+          token: data.token,
+          // preview 流创建时不扣 credit（creditsToChargeOnConfirm 是「客人确认时
+          // 应收」的预览价，由代理商支付；创建时点代理商账户不动），用 0 占位让
+          // 成功卡不显示「已扣 X 积分」。实际扣减发生在 /api/orders/[token]/
+          // guest-submit。
+          creditsConsumed: 0,
+          mode: "preview",
+        });
+
+        toast.success("预览凭证已生成，发给客户扫码确认后即下单");
+        return;
+      }
+
+      // ============ 分支 B：demo 一键下单 ============
       const res = await submitImageGenDemoAction({
         templateId: selectedMaskData.maskId,
         // demo 一键下单：上传图片列表里取第一张作为订单 uploadedImages[0]
@@ -903,6 +995,7 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
         orderNo: data.orderNo,
         token: data.token,
         creditsConsumed: data.creditsConsumed,
+        mode: "demo",
       });
 
       // 历史更新：把刚生成的 item 加 orderId + selectedCell（持久化当时选的分镜）
@@ -930,7 +1023,7 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
           : "订单已创建"
       );
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "下单失败");
+      toast.error(err instanceof Error ? err.message : "操作失败");
     } finally {
       setSubmitting(false);
     }
@@ -1369,6 +1462,24 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                     <Wand2 className="h-4 w-4 mr-1.5" />
                     去画布精修
                   </Button>
+                  {/* 2026-09-13：「分享给客户预览」—— 给代理商一个"先让客户确认，
+                      再决定是否真下单"的中间态。复用同一 SpecModal UI（spec 校验
+                      / 字典 / capability-gated 字段完全一致），调 createPreviewShareAction
+                      创建 CANDIDATES_READY + isPreviewShare=true 凭证，不扣代理商
+                      credit。等客人在 /p/{token] 点确认后，由 /api/orders/[token]/
+                      guest-submit 路由扣代理商 credit 转 SELECTED。跟 demo 一键下单
+                      共用 setSubmitted 渲染同一张成功卡，根据 mode 区分文案。 */}
+                  <Button
+                    type="button"
+                    onClick={handleClickSharePreview}
+                    variant="outline"
+                    className="rounded-full"
+                    disabled={!result?.url || submitting}
+                    title="生成预览链接发给客户，客户扫码确认后才正式下单扣积分"
+                  >
+                    <Share2 className="h-4 w-4 mr-1.5" />
+                    分享给客户预览
+                  </Button>
                   <Button
                     type="button"
                     variant="outline"
@@ -1438,14 +1549,31 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                   <CheckCircle2 className="h-8 w-8 text-emerald-600" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-semibold">订单已创建</h2>
-                  <p className="text-sm text-muted-foreground mt-2">
-                    订单号：{submitted.orderNo}
-                  </p>
-                  {submitted.creditsConsumed > 0 && (
-                    <p className="text-sm text-muted-foreground mt-1">
-                      已扣减 {submitted.creditsConsumed} 积分
-                    </p>
+                  {submitted.mode === "preview" ? (
+                    // 2026-09-13：preview 凭证成功卡 ——「预览凭证已生成」，引导
+                    // 代理商用下方 ShareCard 发给客户。
+                    <>
+                      <h2 className="text-xl font-semibold">预览凭证已生成</h2>
+                      <p className="text-sm text-muted-foreground mt-2">
+                        凭证号：{submitted.orderNo}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
+                        下方二维码 /
+                        链接发给客户，客户扫码点确认后才正式下单并扣减积分。
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <h2 className="text-xl font-semibold">订单已创建</h2>
+                      <p className="text-sm text-muted-foreground mt-2">
+                        订单号：{submitted.orderNo}
+                      </p>
+                      {submitted.creditsConsumed > 0 && (
+                        <p className="text-sm text-muted-foreground mt-1">
+                          已扣减 {submitted.creditsConsumed} 积分
+                        </p>
+                      )}
+                    </>
                   )}
                 </div>
                 {/* 预览缩略 */}
@@ -1459,13 +1587,16 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                     />
                   </div>
                 )}
-                {/* 2026-09-13：代理商下完单发给客户 —— 复用 gpt-image ShareCard。
-                    QR 编码 `${origin}/p/{token}`（submitted.token），扫码进 /p/[token]
-                    终端用户视图（ResultStep + ShareCard 自保存）。"保存图片"复用
-                    handleDownload 直接下 result.url 给代理商本地存档。
+                {/* 2026-09-13：代理商下完单 / 创建预览凭证后发给客户 —— 复用
+                    gpt-image ShareCard。QR 编码 `${origin}/p/{token}`（submitted.token），
+                    扫码进 /p/[token] 终端用户视图（ResultStep + ShareCard 自保存）。
+                    "保存图片"复用 handleDownload 直接下 result.url 给代理商本地存档。
                     设计要点：代理商下完单 / 重置前这一瞬最自然顺手截图发微信，把
                     share UI 紧贴预览缩略下方；与"查看订单详情 / 再生成一个"两个
-                    导航动作分开 —— 分享是"对外发送"动作，导航是"对自己"动作。 */}
+                    导航动作分开 —— 分享是"对外发送"动作，导航是"对自己"动作。
+
+                    preview 凭证 / demo 订单共用同一张 ShareCard：两者都生成
+                    /p/{token] URL（preview 给客人扫码确认 / demo 给客人下载终态图）。 */}
                 {submitted && (
                   <ShareCard
                     shareUrl={shareUrl}
@@ -1480,6 +1611,9 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                       // 2026-09-12：demo 订单不进 /p/[token]（避免匿名访问撞 404 —
                       // candidates 是单张 composite，candIdx>0 时找不到图）。
                       // 跳 /image-gen/orders 独立列表页（顶栏也跳这）。
+                      // 2026-09-13：preview 凭证也是 promptOrder 行，列表里能看到
+                      // （status=CANDIDATES_READY，客人未确认），代理商在 /image-gen/orders
+                      // 能看到该凭证的当前状态（预览待确认 / 已确认）。
                       window.location.href = "/image-gen/orders";
                     }}
                   >

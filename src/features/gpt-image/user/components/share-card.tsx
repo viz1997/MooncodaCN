@@ -1,23 +1,32 @@
 "use client";
 
 /**
- * /p/[token] + /image-gen 成功卡通用分享卡片 —— 展示二维码 + 复制链接 + 自保存按钮
+ * 代理商侧分享卡片 —— 展示二维码 + 复制链接 + 自保存按钮
  *
- * 2026-09-13：原 ResultStep 只有"下载全部 N 批"按钮，转发给朋友不方便。
+ * 仅用于 /image-gen 成功卡（public-image-gen-view.tsx），让代理商一键生成
+ * QR / 复制链接发给客户扫码进 /p/[token]。**不**在客人侧 /p/[token] 出现——
+ * 客人扫码进 /p/[token] 时手里已经有这条链接（/p/[token] 本身就是分享凭证），
+ * 再展示「分享给朋友」是冗余动作。
+ *
+ * 2026-09-13：原 /image-gen 结果卡只有"下载图片"按钮，发给客户不方便。
  * 新增这张卡片：
  *  - QR code 用 qrcode 包 toDataURL 生成 240px PNG（深色 #1c1917 兼容深色背景）
- *  - QR 内容 = 当前页面 URL（`/p/{token}`），手机扫码直接打开分享页
+ *  - QR 内容 = `${origin}/p/{token}`（demo 流 token / preview token 都适用），
+ *    手机扫码直接打开分享页
  *  - 「复制链接」/「保存二维码」/「保存图片」三个按钮：
  *    - 复制链接：代理商最常用路径，复制到微信（navigator.clipboard + sonner toast）
  *    - 保存二维码：下载 qr-{orderNo}.png，让客户自己扫
- *    - 保存图片：调 onDownloadImage prop（/p/[token] 走 actions.download 服务端
- *      stream 绕 R2 CORS，/image-gen 走 handleDownload 直接下 result.url）
+ *    - 保存图片：调 onDownloadImage prop（/image-gen 走 handleDownload 直接下
+ *      result.url 给代理商本地存档）
  *  - 移动端长按二维码 / 长按图默认触发系统"保存图片"，免费 fallback
  *  - URL 文本展示在按钮上方（truncate + select-all 友好），方便代理商肉眼校验
  *
- * 两端复用：
- *  - /p/[token] 终态 SELECTED（user-order-view.tsx —— 终端用户看）
- *  - /image-gen 成功卡（public-image-gen-view.tsx —— 代理商下完单截图 / 复制发微信）
+ * 两路 /image-gen 场景：
+ *  - demo 流「选择此效果下单」成功后：token 指向 /p/{demoToken]（demo 流不进
+ *   /p/[token] 是因为 candidates 是单 composite，candIdx>0 找不到图——但
+ *    ShareCard 用 result.url 本地存档）
+ *  - preview 流「分享给客户预览」成功后：token 指向 /p/{previewToken]（客人
+ *    真的会扫码进去确认）
  */
 
 import { Copy, Download, QrCode, Share2 } from "lucide-react";

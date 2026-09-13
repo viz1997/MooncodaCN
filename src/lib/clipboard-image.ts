@@ -31,7 +31,9 @@ export type CopyImageResult = "image" | "url" | "failed";
  * @param url 图片公开 URL（必须同源或 R2 公开域有 CORS 头）
  * @returns 复制结果（用于 toast 差异化文案）
  */
-export async function copyImageToClipboard(url: string): Promise<CopyImageResult> {
+export async function copyImageToClipboard(
+  url: string
+): Promise<CopyImageResult> {
   // SSR 防御：服务端无 navigator / clipboard，直接返 failed
   if (typeof window === "undefined" || typeof navigator === "undefined") {
     return "failed";

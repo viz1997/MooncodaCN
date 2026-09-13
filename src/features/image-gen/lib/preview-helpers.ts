@@ -81,9 +81,7 @@ export interface FilledSpec {
  *   - null/空字符串/解析失败 → null（表示「不限制 / 字典全量」）
  *   - 解析成功返回 string[]
  */
-function parseJsonStringArray(
-  raw: string | null | undefined
-): string[] | null {
+function parseJsonStringArray(raw: string | null | undefined): string[] | null {
   if (raw == null) return null;
   const trimmed = raw.trim();
   if (!trimmed) return null;

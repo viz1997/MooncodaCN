@@ -116,7 +116,8 @@ export function OrderDetailView({ order }: { order: OrderDetail }) {
     try {
       const parsed: unknown = JSON.parse(order.creditsBreakdown);
       if (!Array.isArray(parsed)) return null;
-      const items: Array<{ specKey: string; label: string; delta: number }> = [];
+      const items: Array<{ specKey: string; label: string; delta: number }> =
+        [];
       for (const item of parsed) {
         if (
           item &&
