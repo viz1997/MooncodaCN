@@ -1,20 +1,29 @@
 "use client";
 
 /**
- * /p/[token] 分享卡片 —— 终态展示二维码 + 自保存按钮
+ * /p/[token] + /image-gen 成功卡通用分享卡片 —— 展示二维码 + 复制链接 + 自保存按钮
  *
  * 2026-09-13：原 ResultStep 只有"下载全部 N 批"按钮，转发给朋友不方便。
  * 新增这张卡片：
  *  - QR code 用 qrcode 包 toDataURL 生成 240px PNG（深色 #1c1917 兼容深色背景）
  *  - QR 内容 = 当前页面 URL（`/p/{token}`），手机扫码直接打开分享页
- *  - 「保存二维码」/「保存图片」两个按钮，分别下载 qr-{orderNo}.png 和
- *    候选图 PNG（走 actions.download 复用的服务端 stream，与 ResultStep 同源）
+ *  - 「复制链接」/「保存二维码」/「保存图片」三个按钮：
+ *    - 复制链接：代理商最常用路径，复制到微信（navigator.clipboard + sonner toast）
+ *    - 保存二维码：下载 qr-{orderNo}.png，让客户自己扫
+ *    - 保存图片：调 onDownloadImage prop（/p/[token] 走 actions.download 服务端
+ *      stream 绕 R2 CORS，/image-gen 走 handleDownload 直接下 result.url）
  *  - 移动端长按二维码 / 长按图默认触发系统"保存图片"，免费 fallback
+ *  - URL 文本展示在按钮上方（truncate + select-all 友好），方便代理商肉眼校验
+ *
+ * 两端复用：
+ *  - /p/[token] 终态 SELECTED（user-order-view.tsx —— 终端用户看）
+ *  - /image-gen 成功卡（public-image-gen-view.tsx —— 代理商下完单截图 / 复制发微信）
  */
 
-import { Download, QrCode, Share2 } from "lucide-react";
+import { Copy, Download, QrCode, Share2 } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 interface ShareCardProps {
@@ -54,6 +63,30 @@ export function ShareCard({
     };
   }, [shareUrl]);
 
+  // 2026-09-13：复制分享链接 —— 代理商最常用路径（粘到微信）。fallback 用
+  // 隐藏 textarea + execCommand("copy") 兼容极老浏览器；现代浏览器走
+  // navigator.clipboard.writeText（异步、需 https 或 localhost）。
+  const handleCopy = async () => {
+    if (!shareUrl) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareUrl);
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = shareUrl;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      }
+      toast.success("链接已复制");
+    } catch {
+      toast.error("复制失败，请手动选中链接");
+    }
+  };
+
   return (
     <section className="rounded-2xl border border-stone-100 bg-white p-5 shadow-sm">
       <div className="mb-3 flex items-center gap-2">
@@ -81,8 +114,29 @@ export function ShareCard({
 
         <div className="w-full flex-1 space-y-2">
           <p className="text-xs leading-relaxed text-stone-600">
-            用手机相机扫描二维码，把这张效果图的分享链接发给朋友。
+            用手机相机扫描二维码，或复制链接发给朋友。
           </p>
+          {/* URL 文本展示 —— 方便代理商肉眼校验链接再复制；truncate 防超长
+              撑爆布局，长按可全选（mobile 友好）。复制按钮在右。 */}
+          <div className="flex items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1.5">
+            <span
+              className="flex-1 truncate font-mono text-[11px] text-stone-700 select-all"
+              title={shareUrl}
+            >
+              {shareUrl}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                void handleCopy();
+              }}
+              disabled={!shareUrl}
+              className="inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-md border border-stone-200 bg-white px-2 text-[11px] font-medium text-stone-700 transition-colors hover:bg-stone-50 disabled:opacity-50"
+            >
+              <Copy className="h-3 w-3" />
+              复制
+            </button>
+          </div>
           <div className="flex flex-col gap-2 sm:flex-row">
             <a
               href={qrDataUrl || "#"}
