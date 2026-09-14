@@ -54,6 +54,10 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  formatProductSpec,
+  getLeatherColor,
+} from "@/features/gpt-image/lib/product-catalog";
 import type { OrderStatus, OrderView } from "@/features/gpt-image/lib/types";
 import { Link } from "@/i18n/routing";
 import { CancelledPanel } from "./cancelled-panel";
@@ -61,7 +65,6 @@ import { FailureNotice } from "./failure-notice";
 import { GenerateStep } from "./generate-step";
 import { InvalidLinkScreen } from "./invalid-link-screen";
 import { LoadingScreen } from "./loading-screen";
-import { ProductConfigSection } from "./product-config-section";
 import { ResultStep } from "./result-step";
 import { SelectStep } from "./select-step";
 import { UploadStep } from "./upload-step";
@@ -196,6 +199,15 @@ function PreviewOrderContent({
     regenerateLimit - usedRegenerateCount
   );
 
+  // 规格摘要：用于顶部标题（替代原 templateName）。例如：
+  //   "4cm钥匙扣 · 皮套" + "皮革外露" → "4cm钥匙扣 · 皮套 · 皮革外露"
+  //   "4cm钥匙扣 · 皮套" + "PVC 保护" → "4cm钥匙扣 · 皮套 · PVC 保护"
+  //   "4cm钥匙扣 · 皮套" + leatherColor="brown" → "4cm钥匙扣 · 皮套 · 棕色"
+  //
+  // 用户原话「顶部 title 显示模板换成规格如 4cm·皮革·实物外露」——
+  // 不暴露 ProductConfigSection 给客人，只用单行规格摘要当顶部 title。
+  const specSummary = buildSpecSummary(order);
+
   const mainHasFixedCta = showSelectStep || isSelected;
 
   return (
@@ -204,13 +216,14 @@ function PreviewOrderContent({
       <PreviewBanner
         previewOrderNo={previewOrderNo}
         templateName={templateName}
+        specSummary={specSummary}
         regenerateLimit={regenerateLimit}
         remainingRegenerate={remainingRegenerate}
       />
 
       {/* ── TopBar（mobile-first 单列） ── */}
       <PreviewTopBar
-        templateName={order.template.name}
+        specSummary={specSummary}
         orderNo={order.orderNo}
         status={status}
         canCancel={canCancel}
@@ -237,14 +250,6 @@ function PreviewOrderContent({
                 retrying={actions.retryingAll}
               />
             )}
-
-            <ProductConfigSection
-              order={order}
-              // preview 流在 pending/uploaded/generating/candidates_ready 都允许改规格
-              editable={isPending || isGenerating || isReady}
-              saving={actions.configuring}
-              onSave={actions.configure}
-            />
 
             {showUploadStep && (
               <UploadStep
@@ -311,7 +316,7 @@ function PreviewOrderContent({
                 token={token}
                 order={order}
                 previewOrderNo={previewOrderNo}
-                templateName={templateName}
+                specSummary={specSummary}
                 candidateCount={candidateCount}
                 outputMode={order.template.outputMode ?? "grid"}
                 updatedAt={order.updatedAt}
@@ -384,7 +389,9 @@ function PreviewOrderContent({
 
 interface PreviewBannerProps {
   previewOrderNo: string;
+  /** 保留 templateName 仅作 fallback：specSummary 算不出来时回退 */
   templateName: string;
+  specSummary: string;
   regenerateLimit: number;
   remainingRegenerate: number;
 }
@@ -392,6 +399,7 @@ interface PreviewBannerProps {
 function PreviewBanner({
   previewOrderNo,
   templateName,
+  specSummary,
   regenerateLimit,
   remainingRegenerate,
 }: PreviewBannerProps) {
@@ -401,7 +409,9 @@ function PreviewBanner({
         <Sparkles className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
         <div className="flex-1 min-w-0 text-[11px] leading-tight">
           <span className="font-medium text-stone-700">代理商分享预览</span>
-          <span className="text-stone-400 ml-1">· {templateName}</span>
+          <span className="text-stone-400 ml-1">
+            · {specSummary || templateName}
+          </span>
         </div>
         {regenerateLimit > 0 && (
           <span className="shrink-0 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-medium text-indigo-700 shadow-sm">
@@ -417,7 +427,8 @@ function PreviewBanner({
 }
 
 interface PreviewTopBarProps {
-  templateName: string;
+  /** 顶部主标题：规格摘要（替代原 templateName）。例 "4cm钥匙扣 · 皮套 · 皮革外露" */
+  specSummary: string;
   orderNo: string;
   status: OrderStatus;
   canCancel: boolean;
@@ -438,7 +449,7 @@ const STATUS_PILL: Record<OrderStatus, { label: string; className: string }> = {
 };
 
 function PreviewTopBar({
-  templateName,
+  specSummary,
   orderNo,
   status,
   canCancel,
@@ -451,7 +462,7 @@ function PreviewTopBar({
       <div className="mx-auto flex h-12 max-w-md items-center gap-3 px-5">
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold tracking-tight text-stone-900">
-            {templateName}
+            {specSummary}
           </p>
           <p className="truncate text-[11px] text-stone-400 tabular-nums">
             {orderNo}
@@ -505,7 +516,8 @@ interface PreviewConfirmBlockProps {
   token: string;
   order: OrderView;
   previewOrderNo: string;
-  templateName: string;
+  /** 顶部描述用规格摘要（替代原 templateName） */
+  specSummary: string;
   candidateCount: number;
   outputMode: "grid" | "separate";
   updatedAt: string;
@@ -522,7 +534,7 @@ function PreviewConfirmBlock({
   token,
   order,
   previewOrderNo,
-  templateName,
+  specSummary,
   candidateCount,
   updatedAt,
   onConfirm,
@@ -544,7 +556,7 @@ function PreviewConfirmBlock({
               已选候选，待确认下单
             </h2>
             <p className="text-xs text-stone-600 mt-1 leading-relaxed">
-              {templateName}
+              {specSummary}
               {" · 候选 "}
               {selectedCand + 1}/{candidateCount}
             </p>
@@ -607,4 +619,41 @@ function PreviewConfirmBlock({
       </div>
     </div>
   );
+}
+
+/**
+ * 顶部 title 用规格摘要（2026-09-14 用户原话：
+ * 「顶部 title 显示模板换成规格如 4cm·皮革·实物外露」）。
+ *
+ * 组成优先级：
+ *   1. 基础：formatProductSpec → "4cm钥匙扣 · 皮套"（无配件时只 "4cm钥匙扣"）
+ *   2. leatherExposed=true → 追加 " · 皮革外露"（实物外露）
+ *   3. pvcProtection=true → 追加 " · PVC 保护"
+ *   4. leatherColor 非空 → 追加 " · {色名}"（如 "棕色"）
+ *
+ * 三个后缀字段互斥（spec-modal 已经硬约束）—— 这里按顺序检查，
+ * 第一个为 true 就赢，避免重复堆叠 "皮革外露 · PVC 保护"。
+ *
+ * 全空时返回空串（由 UI fallback 到 templateName）。
+ */
+function buildSpecSummary(order: OrderView): string {
+  const base = formatProductSpec({
+    productTypeCode: order.productTypeCode ?? null,
+    productSize: order.productSize ?? null,
+    accessoryCode: order.accessoryCode ?? null,
+  });
+  // formatProductSpec 在 productTypeCode 为空时返 "-"，避免污染标题
+  const safeBase = base === "-" ? "" : base;
+  if (!safeBase) return "";
+
+  const parts: string[] = [safeBase];
+  if (order.leatherExposed === true) {
+    parts.push("皮革外露");
+  } else if (order.pvcProtection === true) {
+    parts.push("PVC 保护");
+  } else if (order.leatherColor) {
+    const color = getLeatherColor(order.leatherColor);
+    if (color) parts.push(color.name);
+  }
+  return parts.join(" · ");
 }
