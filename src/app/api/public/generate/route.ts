@@ -2,6 +2,7 @@
 // ⚠️ 安全：响应只返回图片 URL + 友好提示，不暴露内部 model/提示词/成本等
 
 import { eq } from "drizzle-orm";
+import { headers } from "next/headers";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { promptTemplate } from "@/db/schema";
@@ -16,10 +17,16 @@ import {
   logImageGen,
 } from "@/features/image-gen";
 import { getActiveLinesFromDb } from "@/features/image-gen/lib/db-lines";
+import {
+  createImageJob,
+  dispatchImageGenerationJob,
+} from "@/features/image-gen/lib/generation-service";
 import type {
   GenerateImageRequest,
+  GenerateImageResult,
   ImageModelId,
 } from "@/features/image-gen/lib/image-models/types";
+import { auth } from "@/lib/auth";
 import {
   checkRateLimit,
   createRateLimitResponse,
@@ -60,6 +67,18 @@ export async function POST(req: NextRequest) {
   const rl = await checkRateLimit(ip ?? "unknown", "ai");
   if (!rl.success) {
     return createRateLimitResponse(rl);
+  }
+
+  // 2026-09-14：已登录用户把 demo 流生图结果入库到 photo 表（source=generation）。
+  // 公共 API 仍允许匿名（保持向后兼容）；/image-gen 页面层强制登录，所以
+  // 走本路由的请求里如果有 session 就直接是「已登录 demo 用户」。无 session
+  // 仍走老路径——不写库，不算失败。
+  let userId: string | null = null;
+  try {
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (session?.user?.id) userId = session.user.id;
+  } catch {
+    // session 取失败也不阻塞主流程
   }
 
   try {
@@ -185,10 +204,42 @@ export async function POST(req: NextRequest) {
       size: (body.size as GenerateImageRequest["size"]) ?? "1024x1024",
       batchSize: 1,
       enableSafetyCheck: true,
+      watermark: false,
       ...(body.maskId !== undefined && { maskId: body.maskId }),
     };
 
-    const result = await dispatchGenerateImage(internalReq);
+    // 已登录 demo 用户走 imageJob + photo 库，匿名用户保持老路径。
+    // 两条路径都要返 GenerateImageResult 兼容形态（response 解构用 success/
+    // status/images/taskId/error）。dispatchImageGenerationJob 缺 model 字段，
+    // 这里手工补上；dispatchGenerateImage 自带 model。
+    // internalReq 同时作为 GenerateImageRequest（adapter 用）和 InternalGenerateInput
+    // （createImageJob / dispatchImageGenerationJob 用）—— 字段一致，TS 上 cast 一下。
+    const result: GenerateImageResult = userId
+      ? await (async () => {
+          const createResult = await createImageJob({
+            userId,
+            input: internalReq as Parameters<typeof createImageJob>[0]["input"],
+            creditsConsumed: 0,
+          });
+          if (!createResult.success) {
+            return {
+              success: false,
+              model: internalReq.model,
+              status: "failed" as const,
+              error: "创建生图任务失败",
+            };
+          }
+          const dispatched = await dispatchImageGenerationJob({
+            jobId: createResult.jobId,
+            input: internalReq as Parameters<typeof dispatchImageGenerationJob>[0]["input"],
+            ip,
+          });
+          return {
+            ...dispatched,
+            model: internalReq.model,
+          } as GenerateImageResult;
+        })()
+      : await dispatchGenerateImage(internalReq);
 
     // 埋点：记录外部用户本次生图的结果（服务端用，不回传客户端）
     logImageGen({

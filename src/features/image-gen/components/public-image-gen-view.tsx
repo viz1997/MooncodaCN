@@ -39,7 +39,6 @@ import {
   Download,
   History,
   Image as ImageIcon,
-  ImageOff,
   Loader2,
   LogOut,
   RefreshCw,
@@ -172,41 +171,12 @@ interface UploadedImage {
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // File API / canvas 内存兜底
 const MAX_REFERENCE_IMAGES = 10; // 与 schema imageUrls.max(10) 对齐
 
-// ============ 本地历史记录（localStorage，不入库） ============
-interface HistoryItem {
-  id: string;
-  url: string;
-  maskId: string;
-  maskName: string;
-  modelName: string;
-  refPreviewUrls?: string[] | undefined;
-  /**
-   * 2026-09-11：参考图 R2 公网 URL（与 refPreviewUrls 一一对应，但 refPreviewUrls
-   * 是 blob URL 刷新即失效）。点击 history 缩略图时用 refPublicUrls 还原
-   * uploadedImages，避免「刷新后下单提示需要参考图」的假阳 bug。
-   * 老 history 项没这字段 → 视为空 → 提示用户重新上传。
-   */
-  refPublicUrls?: string[] | undefined;
-  /** demo 下单成功后写入：用于历史缩略图上的「查看订单」徽章 */
-  orderId?: string | undefined;
-  orderNo?: string | undefined;
-  /** 价格（demo 下单扣减的 credit 数） */
-  creditsConsumed?: number | undefined;
-  /**
-   * 2026-09-11：用户当时在 demo 流里选的 cell（0..N-1）。点击 history 缩略图回填时
-   * 用它复原高亮 cell，避免「刷新历史后看不到当时选的是哪个」的假象。
-   * 老 history 项没这字段 → 视为 null（picker 未选态）。
-   */
-  selectedCell?: number | null;
-  /** 2026-09-11：当时生成结果的模板宫格候选数（决定要不要 picker） */
-  candidateCount?: number;
-  /** 2026-09-11：模板输出模式（grid/separate） */
-  outputMode?: "grid" | "separate";
-  createdAt: string;
-}
-
-const HISTORY_KEY = "mooncoda_public_imagegen_history";
-const HISTORY_MAX = 30;
+// ============ 全部历史效果图（photo 表 source=generation） ============
+//
+// 2026-09-14：去掉 localStorage 本地历史，改为查 /api/image-gen/photos/list?source=generation
+// 取当前用户所有生图结果（跨设备、跨浏览器一致）。photo 行里没有 maskName /
+// refPublicUrls / orderId / selectedCell —— 点击仅切 result.url 作预览，不再还原
+// uploadedImages / selectedCell，不显示「查看订单」徽章。
 
 /**
  * 把 next-safe-action 的 validationErrors 拍扁成可读字符串（schema 验证失败时用）。
@@ -271,29 +241,6 @@ function extractValidationMessage(errors: unknown): string | null {
   const msgs = collect(errors);
   if (msgs.length === 0) return null;
   return msgs.join("；");
-}
-
-function loadHistory(): HistoryItem[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY);
-    if (!raw) return [];
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? (arr as HistoryItem[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveHistory(items: HistoryItem[]) {
-  try {
-    localStorage.setItem(
-      HISTORY_KEY,
-      JSON.stringify(items.slice(0, HISTORY_MAX))
-    );
-  } catch {
-    // 容量超限等异常，静默丢弃
-  }
 }
 
 // ============ 进行中任务持久化（单任务，刷新后可恢复） ============
@@ -367,7 +314,16 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
   // - 切换 mask 时重置；finishTask 写 history 时持久化；刷新后用 PendingTask 复原
   const [selectedCell, setSelectedCell] = useState<number | null>(null);
 
-  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [dbHistory, setDbHistory] = useState<
+    Array<{
+      id: string;
+      fileUrl: string;
+      thumbnailUrl: string | null;
+      model: string | null;
+      format: string | null;
+      createdAt: string | Date;
+    }>
+  >([]);
   const [pendingModelName, setPendingModelName] = useState<string>("");
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -375,53 +331,81 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
   const [showSpecModal, setShowSpecModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   /**
-   * 2026-09-13：SpecModal 目标流（demo 下单 vs preview 凭证），用 mode 区分
-   * SpecModal 关掉后 handleConfirmSpec 据此分发到 submitImageGenDemoAction /
-   * createPreviewShareAction。两路共用同一 SpecModal UI（产品 spec 一致 → 对
-   * 账口径统一），仅 server action 不同。
+   * 2026-09-14：解耦 demo 下单 vs preview 创建分享两条路径。
+   *
+   * 用户原话：「提交订单不需要创建分享，创建分享也不需要提交订单」+「但是
+   * 分享按钮要出现分享弹窗」= 两个按钮（demo 下单 / preview 分享）各自弹
+   * 各的 SpecModal，两条路径**独立**调各自的 server action、独立 setSubmitted
+   * 形态、独立 successCard 渲染。下单的时候不混入分享 UI，分享的时候走自
+   * 己的 SpecModal。
+   *
+   * 实现：用 specOnConfirm 回调函数引用取代 specMode 状态机。点 demo 下单按钮
+   * 时 setSpecOnConfirm(submitDemoOrder)；点 preview 分享按钮时 setSpecOnConfirm
+   * (createSharePreview)。SpecModal onConfirm 只负责把 spec 透传给当前回调；回调
+   * 自己决定调哪个 server action + 写哪个 submitted.kind。两路完全独立，
+   * 单条路径演进不会污染另一路。
    */
-  const [specMode, setSpecMode] = useState<"demo" | "preview">("demo");
-  const [submitted, setSubmitted] = useState<{
-    orderId: string;
-    orderNo: string;
-    token: string;
-    creditsConsumed: number;
-    /** 2026-09-13：区分 demo 下单（已扣 credit，订单进入生产）vs preview 凭证
-     *  （未扣 credit，等客人在 /p/{token] 上确认后由 /api/orders/[token]/
-     *  guest-submit 路由扣代理商 credit 转 SELECTED）。成功卡根据 mode 渲染
-     *  不同文案 + 文案下方 ShareCard 描述一致（都是 /p/{token}）。 */
-    mode: "demo" | "preview";
-  } | null>(null);
-  // 2026-09-13：代理商成功卡发给客户 —— 客户端 mounted 后拼绝对 URL；
+  const [specOnConfirm, setSpecOnConfirm] = useState<
+    ((spec: SpecSelection) => Promise<void>) | null
+  >(null);
+  const [submitted, setSubmitted] = useState<
+    | {
+        kind: "demo";
+        orderId: string;
+        orderNo: string;
+        /** demo 流已扣 credit（个人 credit FIFO + SELECTED 订单转生产）；
+         * 成功卡显示「已扣 X 积分」 */
+        creditsConsumed: number;
+      }
+    | {
+        kind: "preview";
+        orderId: string;
+        orderNo: string;
+        token: string;
+        /** preview 流创建时代理商账户仅锁定 credit（creditsLocked），不在创建时
+         * 扣；「客人确认时扣」语义在 preview 成功卡不显示「已扣积分」。0 占位。 */
+        creditsConsumed: 0;
+      }
+  | null>(null);
+  // 2026-09-13：preview 成功卡发给客户 —— 客户端 mounted 后拼绝对 URL；
   // SSR 阶段 window 未就绪，fallback 用相对路径，mounted 后替换成 origin + path。
+  // demo 路径 token 不存在 → shareUrl 是空串，preview 路径才用。
   // 用 useMemo 而非 useState + useEffect 避免一次 re-render。
   const shareUrl = useMemo(() => {
-    if (!submitted?.token) return "";
+    if (submitted?.kind !== "preview" || !submitted.token) return "";
     if (typeof window === "undefined") return `/p/${submitted.token}`;
     return `${window.location.origin}/p/${submitted.token}`;
-  }, [submitted?.token]);
+  }, [submitted]);
 
-  // 加载历史
+  // 2026-09-14：刷新 DB 历史（photo.source=generation）。成功回填 dbHistory，
+  // 失败静默（不影响主流程）。初始挂载 + finishTask 后都调用。
+  const refreshDbHistory = useCallback(() => {
+    return fetch("/api/image-gen/photos/list?source=generation&limit=30", {
+      cache: "no-store",
+    })
+      .then((r) => r.json() as Promise<{
+        success: boolean;
+        data?: { photos: Array<{
+          id: string;
+          fileUrl: string;
+          thumbnailUrl: string | null;
+          model: string | null;
+          format: string | null;
+          createdAt: string | Date;
+        }> };
+      }>)
+      .then((j) => {
+        if (!j.success || !j.data) return;
+        setDbHistory(j.data.photos);
+      })
+      .catch(() => {
+        // 静默失败 —— 历史栏允许空白
+      });
+  }, []);
+
   useEffect(() => {
-    setHistory(loadHistory());
-  }, []);
-
-  // 2026-09-12：useCallback 锁引用 —— finishTask 调用本函数；finishTask 的引用
-  // 稳定是 SpecModal 状态稳定的必要条件（详见 clearPoll 注释）。
-  // deps 全空安全：setHistory 是 stable setter；saveHistory 是模块级稳定函数。
-  const pushHistory = useCallback((item: HistoryItem) => {
-    setHistory((prev) => {
-      const next = [item, ...prev].slice(0, HISTORY_MAX);
-      saveHistory(next);
-      return next;
-    });
-  }, []);
-
-  const handleClearHistory = () => {
-    setHistory([]);
-    saveHistory([]);
-    toast.success("历史已清空");
-  };
+    void refreshDbHistory();
+  }, [refreshDbHistory]);
 
   // 清理轮询定时器
   // 2026-09-12：useCallback 锁引用 —— 否则下方 useEffect `[clearPoll]` 会因父组件
@@ -481,24 +465,12 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
       if (task.refPublicUrls && task.refPublicUrls.length > 0) {
         restoreUploadedImagesFromR2(task.refPublicUrls);
       }
-      // 2026-09-11：新生成结果默认 selectedCell=null（picker 待选态），
-      // 持久化 candidateCount/outputMode 让 history 缩略图恢复时知道要不要 picker。
-      pushHistory({
-        id: `gen_${Date.now()}`,
-        url,
-        maskId: task.maskId,
-        maskName: task.maskName,
-        modelName: task.maskName,
-        refPreviewUrls: task.refPreviewUrls,
-        // 2026-09-11：参考图 R2 公网 URL 入 history（点击缩略图时还原 uploadedImages）
-        refPublicUrls: task.refPublicUrls,
-        selectedCell: null,
-        candidateCount: task.candidateCount ?? 1,
-        outputMode: task.outputMode ?? "grid",
-        createdAt: new Date().toISOString(),
-      });
+      // 2026-09-14：历史改为 DB（photo.source=generation），不再在客户端
+      // pushHistory。finishTask 完成后顺手 refetch dbHistory（不 await，
+      // 不阻塞 UI；history 栏会异步刷新）。
+      void refreshDbHistory();
     },
-    [clearPoll, restoreUploadedImagesFromR2, pushHistory]
+    [clearPoll, restoreUploadedImagesFromR2, refreshDbHistory]
   );
 
   // 任务失败：错误提示、清 task、停止轮询
@@ -835,17 +807,10 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
           maskName,
           duration: data.duration,
         });
-        pushHistory({
-          id: `gen_${Date.now()}`,
-          url,
-          maskId: selectedMask,
-          maskName,
-          modelName: maskName,
-          refPreviewUrls: uploadedImages.map((i) => i.previewUrl),
-          // 2026-09-11：参考图 R2 公网 URL 入 history
-          refPublicUrls: refImageUrls,
-          createdAt: new Date().toISOString(),
-        });
+        // 2026-09-14：历史改为 DB（photo.source=generation），后台入库
+        // 由 /api/public/generate 自动完成（已登录用户走 createImageJob +
+        // dispatchImageGenerationJob），这里只 refetch。
+        void refreshDbHistory();
         toast.success(`生成完成：${maskName}`);
       } else {
         throw new Error(data.error || "生成失败");
@@ -889,9 +854,10 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
   const selectedMaskData = masks.find((m) => m.maskId === selectedMask);
 
   // 2026-09-13：共用前置校验 —— grid 多 cell 必选 / refImageUrls 非空。无
-  // productTypeCode → 不弹 modal 直接调 handleConfirmSpec（demo 一键 / preview
-  // 凭证都允许免规格下单）。返回 true 表示通过校验可以继续，false 表示已 toast
-  // 阻断。让 handleClickSubmitOrder / handleClickSharePreview 复用这套校验。
+  // productTypeCode → 不弹 modal 直接调 submitDemoOrder / createSharePreview
+  // （demo 一键 / preview 凭证都允许免规格下单）。返回 true 表示通过校验可以
+  // 继续，false 表示已 toast 阻断。让 handleClickSubmitOrder /
+  // handleClickSharePreview 复用这套校验。
   const preflightForOrderAction = (): boolean => {
     if (!result || !selectedMaskData) return false;
     // 2026-09-11：grid + 多候选必须先选 cell 才能下单（picker 强制 gate）。
@@ -904,37 +870,22 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
     }
     // demo 一键下单必须有 R2 URL（base64 不支持）；多图取第一张的 publicUrl 写订单的 uploadedImages[0]
     if (refImageUrls.length === 0) {
-      // 2026-09-11：区分两种「无参考图」场景，给出可操作的提示：
-      //   - 真正的未上传 / 上传失败 → 提示先上传
-      //   - 历史记录无原图（refPublicUrls 缺失，刷新前的老 history 项）→ 提示历史项无原图
-      //     让用户清楚是「这条 history 坏了」而不是「自己没传」。
-      const hasLegacyHistory = history.some(
-        (h) =>
-          h.id !== history[0]?.id &&
-          h.maskId === selectedMask &&
-          h.url === result.url &&
-          (!h.refPublicUrls || h.refPublicUrls.length === 0)
-      );
-      if (hasLegacyHistory) {
-        toast.error(
-          "该历史记录未保存原参考图（旧版本生成），请重新上传参考图后再下单"
-        );
-      } else {
-        toast.error("下单需要参考图的 R2 URL，请先上传至少一张参考图");
-      }
+      // 2026-09-14：历史已迁到 DB photo 表，photo 行没有 refPublicUrls 字段
+      // （参考图不存到 photo 表；本表单无需查 history）。失败提示统一为
+      // 「请先上传参考图」即可。
+      toast.error("下单需要参考图的 R2 URL，请先上传至少一张参考图");
       return false;
     }
     return true;
   };
 
-  // 点「选择此效果下单」
+  // 点「选择此效果下单」—— demo 下单专属 SpecModal（弹窗是 demo 流专用）
   const handleClickSubmitOrder = () => {
     if (!preflightForOrderAction()) return;
     if (!selectedMaskData) return;
-    setSpecMode("demo");
     // 无 productTypeCode → 跳过 modal，直接走免规格下单
     if (!selectedMaskData.productTypeCode) {
-      void handleConfirmSpec({
+      void submitDemoOrder({
         productSize: null,
         accessoryCode: null,
         engravingText: null,
@@ -949,6 +900,11 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
       });
       return;
     }
+    // 2026-09-14：setSpecOnConfirm 把 demo 提交函数绑到 SpecModal.onConfirm 上；
+    // 用户在弹窗选完规格点确认 → SpecModal 直接调 submitDemoOrder(spec)。
+    // 弹窗 = demo 下单专属，与 preview 创建分享的弹窗物理上是同一组件实例但
+    // 回调不同（handleClickSharePreview 替换成 createSharePreview）。
+    setSpecOnConfirm(() => submitDemoOrder);
     setShowSpecModal(true);
   };
 
@@ -956,14 +912,14 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
   // 凭证，不扣 credit，等客人在 /p/{token] 上点确认后由
   // /api/orders/[token]/guest-submit 路由扣代理商 credit 转 SELECTED。
   // 入口形态与「选择此效果下单」一致：复用同一 SpecModal UI（保证 spec 校验 /
-  // 字典 / capability-gated 字段跟 demo 下单完全一致，对账口径统一）。
+  // 字典 / capability-gated 字段跟 demo 下单完全一致，对账口径统一）——
+  // 2026-09-14：通过 specOnConfirm 回调引用切换；不共用 specMode 状态机。
   const handleClickSharePreview = () => {
     if (!preflightForOrderAction()) return;
     if (!selectedMaskData) return;
-    setSpecMode("preview");
     // 无 productTypeCode → 跳过 modal，直接走免规格建凭证
     if (!selectedMaskData.productTypeCode) {
-      void handleConfirmSpec({
+      void createSharePreview({
         productSize: null,
         accessoryCode: null,
         engravingText: null,
@@ -976,11 +932,14 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
       });
       return;
     }
+    setSpecOnConfirm(() => createSharePreview);
     setShowSpecModal(true);
   };
 
-  // 确认规格 → 按 specMode 分发到 submitImageGenDemoAction / createPreviewShareAction
-  const handleConfirmSpec = async (spec: SpecSelection) => {
+  // 2026-09-14：demo 下单提交函数 —— 由 handleClickSubmitOrder 或 SpecModal.onConfirm 调用。
+  // 扣个人 credit + 写 SELECTED promptOrder；成功后 setSubmitted({ kind: "demo", ... })。
+  // 与 createSharePreview 完全独立（不共享 state / 流程 / 成功卡渲染）。
+  const submitDemoOrder = async (spec: SpecSelection) => {
     if (!result || !selectedMaskData) return;
     if (refImageUrls.length === 0) {
       toast.error("参考图丢失，请重新上传");
@@ -990,57 +949,6 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
     setShowSpecModal(false);
     setSubmitting(true);
     try {
-      if (specMode === "preview") {
-        // ============ 分支 A：preview 凭证 ============
-        // 不扣 credit；写 preview_share（status='pending' + expires_at +7 天）——
-        // 分享链接 ≠ 下单，preview 凭证在独立表，不污染 promptOrder 列表。
-        const res = await createPreviewShareAction({
-          templateId: selectedMaskData.maskId,
-          referenceImageUrl: refImageUrls[0] ?? "",
-          demoPreviewUrl: result.url,
-          productTypeCode: selectedMaskData.productTypeCode,
-          productSize: spec.productSize,
-          accessoryCode: spec.accessoryCode,
-          engravingText: spec.engravingText,
-          leatherColor: spec.leatherColor,
-          leatherExposed: spec.leatherExposed,
-          pvcProtection: spec.pvcProtection,
-          remarks: spec.remarks,
-          platform: spec.platform,
-          platformOrderNo: spec.platformOrderNo,
-          selectedCell: selectedCell,
-        });
-        if (!res?.data) {
-          // eslint-disable-next-line no-console
-          console.error("[image-gen] preview share failed", {
-            res,
-            serverError: res?.serverError,
-            validationErrors: res?.validationErrors,
-          });
-          // 把 validationErrors 提取成可读字符串（schema 验证失败时只有这个）
-          const validationMsg = extractValidationMessage(res?.validationErrors);
-          throw new Error(
-            res?.serverError ?? validationMsg ?? "创建预览凭证失败"
-          );
-        }
-        const data = res.data;
-        setSubmitted({
-          orderId: data.orderId,
-          orderNo: data.orderNo,
-          token: data.token,
-          // preview 流创建时不扣 credit（creditsToChargeOnConfirm 是「客人确认时
-          // 应收」的预览价，由代理商支付；创建时点代理商账户不动），用 0 占位让
-          // 成功卡不显示「已扣 X 积分」。实际扣减发生在 /api/orders/[token]/
-          // guest-submit。
-          creditsConsumed: 0,
-          mode: "preview",
-        });
-
-        toast.success("预览凭证已生成，发给客户扫码确认后即下单");
-        return;
-      }
-
-      // ============ 分支 B：demo 一键下单 ============
       const res = await submitImageGenDemoAction({
         templateId: selectedMaskData.maskId,
         // demo 一键下单：上传图片列表里取第一张作为订单 uploadedImages[0]
@@ -1080,31 +988,17 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
       }
       const data = res.data;
       setSubmitted({
+        kind: "demo",
         orderId: data.orderId,
         orderNo: data.orderNo,
-        token: data.token,
         creditsConsumed: data.creditsConsumed,
-        mode: "demo",
       });
 
-      // 历史更新：把刚生成的 item 加 orderId + selectedCell（持久化当时选的分镜）
-      setHistory((prev) => {
-        const next = prev.map((h) =>
-          h.url === result.url && !h.orderId
-            ? {
-                ...h,
-                orderId: data.orderId,
-                orderNo: data.orderNo,
-                creditsConsumed: data.creditsConsumed,
-                // 2026-09-11：把当时选的 cell 持久化到 history，
-                // 用户重开 history 缩略图能复原 picker 高亮
-                selectedCell: selectedCell,
-              }
-            : h
-        );
-        saveHistory(next);
-        return next;
-      });
+      // 2026-09-14：历史已迁到 DB photo 表，photo 行没有 orderId / selectedCell
+      // 字段，「查看订单」徽章 + picker 复原已下线。这里不再 setHistory。
+      // 下单完成后刷新 DB 历史即可（demo 下单不新增 photo，仅更新 photo 与 imageJob
+      // 的关联，本次提交刚返回的就是上一步入库的同一张图）。
+      void refreshDbHistory();
 
       toast.success(
         data.creditsConsumed > 0
@@ -1113,14 +1007,81 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
       );
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.error("[image-gen] submit failed:", err);
-      toast.error(err instanceof Error ? err.message : "操作失败");
+      console.error("[image-gen] demo submit failed:", err);
+      toast.error(err instanceof Error ? err.message : "下单失败");
     } finally {
       setSubmitting(false);
     }
   };
 
-  // 重置 demo（再生成一个）
+  // 2026-09-14：preview 创建分享提交函数 —— 由 handleClickSharePreview 或 SpecModal.onConfirm 调用。
+  // 预扣代理商 credit（creditsLocked）+ 写 preview_share（status='candidates_ready' + expires_at +7 天）——
+  // 分享链接 ≠ 下单，preview 凭证在独立表，不污染 promptOrder 列表。
+  // 客人扫码进 /p/{token} 点确认后由 /api/orders/[token]/guest-confirm 路由扣代理商 credit 转 SELECTED。
+  // 与 submitDemoOrder 完全独立（不共享 state / 流程 / 成功卡渲染）。
+  const createSharePreview = async (spec: SpecSelection) => {
+    if (!result || !selectedMaskData) return;
+    if (refImageUrls.length === 0) {
+      toast.error("参考图丢失，请重新上传");
+      return;
+    }
+
+    setShowSpecModal(false);
+    setSubmitting(true);
+    try {
+      const res = await createPreviewShareAction({
+        templateId: selectedMaskData.maskId,
+        referenceImageUrl: refImageUrls[0] ?? "",
+        demoPreviewUrl: result.url,
+        productTypeCode: selectedMaskData.productTypeCode,
+        productSize: spec.productSize,
+        accessoryCode: spec.accessoryCode,
+        engravingText: spec.engravingText,
+        leatherColor: spec.leatherColor,
+        leatherExposed: spec.leatherExposed,
+        pvcProtection: spec.pvcProtection,
+        remarks: spec.remarks,
+        platform: spec.platform,
+        platformOrderNo: spec.platformOrderNo,
+        selectedCell: selectedCell,
+      });
+      if (!res?.data) {
+        // eslint-disable-next-line no-console
+        console.error("[image-gen] preview share failed", {
+          res,
+          serverError: res?.serverError,
+          validationErrors: res?.validationErrors,
+        });
+        // 把 validationErrors 提取成可读字符串（schema 验证失败时只有这个）
+        const validationMsg = extractValidationMessage(res?.validationErrors);
+        throw new Error(
+          res?.serverError ?? validationMsg ?? "创建预览凭证失败"
+        );
+      }
+      const data = res.data;
+      setSubmitted({
+        kind: "preview",
+        orderId: data.orderId,
+        orderNo: data.orderNo,
+        token: data.token,
+        // preview 流创建时不扣 credit（creditsLocked 是「客人确认时应收」的预览价，
+        // 由代理商支付；创建时点代理商账户不动）。成功卡显示「已锁 X 积分」或
+        // 完全不显示扣减文案。
+        creditsConsumed: 0,
+      });
+
+      toast.success("预览凭证已生成，发给客户扫码确认后即下单");
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[image-gen] preview share failed:", err);
+      toast.error(err instanceof Error ? err.message : "创建预览凭证失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // 重置（demo 下单成功卡 / preview 分享成功卡 共用）—— 清掉成功态 + 结果图
+  // 回到「选择模板重新生成」入口。
   const handleResetDemo = () => {
     setSubmitted(null);
     setResult(null);
@@ -1580,15 +1541,18 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                     <Wand2 className="h-4 w-4 mr-1.5" />
                     去画布精修
                   </Button>
-                  {/* 2026-09-13：「分享给客户预览」—— 给代理商一个"先让客户确认，
-                      再决定是否真下单"的中间态。复用同一 SpecModal UI（spec 校验
-                      / 字典 / capability-gated 字段完全一致），调 createPreviewShareAction
-                      写 preview_share 凭证（status='pending'，不扣代理商 credit）——
-                      分享链接 ≠ 下单，preview 凭证在独立表。等客人在 /p/{token} 点确认后，
-                      由 /api/orders/[token]/guest-submit 路由扣代理商 credit +
-                      NEW INSERT promptOrder(status='SELECTED') + UPDATE preview_share。
-                      跟 demo 一键下单共用 setSubmitted 渲染同一张成功卡，
-                      根据 mode 区分文案。 */}
+                  {/* 2026-09-14：「分享给客户预览」—— 给代理商一个"先让客户确认，
+                      再决定是否真下单"的中间态。点本按钮 → handleClickSharePreview
+                      弹 SpecModal（demo / preview 各自的弹窗是同一组件实例，
+                      但 specOnConfirm 回调不同）→ 用户选规格 → 调 createSharePreview
+                      → createPreviewShareAction 写 preview_share 凭证（status=
+                      'candidates_ready'，预扣代理商 creditsLocked）——
+                      分享链接 ≠ 下单，preview 凭证在独立表。等客人在 /p/{token}
+                      点确认后，由 /api/orders/[token]/guest-confirm 路由扣代理商
+                      credit + NEW INSERT promptOrder(status='SELECTED') +
+                      UPDATE preview_share。
+                      与 demo 下单按钮完全解耦：各自弹各自的 SpecModal、各自 setSubmitted
+                      形态（kind=demo|preview）、各自 successCard 渲染。 */}
                   <Button
                     type="button"
                     onClick={handleClickSharePreview}
@@ -1662,44 +1626,30 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
               </div>
             )}
 
-            {/* 已下单：成功卡（替换结果视图） */}
-            {submitted && (
+            {/* 已下单 / 已分享：成功卡（替换结果视图）—— 2026-09-14 拆 demo / preview
+                两张独立卡片，按 submitted.kind 渲染，不再共享 modal。
+                demo 卡：订单已创建 + 查看订单 / 再生成
+                preview 卡：预览凭证已生成 + ShareCard（QR + 复制链接）+ 再生成一个 */}
+            {submitted?.kind === "demo" && (
               <div className="max-w-md w-full text-center py-12 space-y-5">
                 <div className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-950/40">
                   <CheckCircle2 className="h-8 w-8 text-emerald-600" />
                 </div>
                 <div>
-                  {submitted.mode === "preview" ? (
-                    // 2026-09-13：preview 凭证成功卡 ——「预览凭证已生成」，引导
-                    // 代理商用下方 ShareCard 发给客户。
-                    <>
-                      <h2 className="text-xl font-semibold">预览凭证已生成</h2>
-                      <p className="text-sm text-muted-foreground mt-2">
-                        凭证号：{submitted.orderNo}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
-                        下方二维码 /
-                        链接发给客户，客户扫码点确认后才正式下单并扣减积分。
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <h2 className="text-xl font-semibold">订单已创建</h2>
-                      <p className="text-sm text-muted-foreground mt-2">
-                        订单号：{submitted.orderNo}
-                      </p>
-                      {submitted.creditsConsumed > 0 && (
-                        <p className="text-sm text-muted-foreground mt-1">
-                          已扣减 {submitted.creditsConsumed} 积分
-                        </p>
-                      )}
-                    </>
+                  <h2 className="text-xl font-semibold">订单已创建</h2>
+                  <p className="text-sm text-muted-foreground mt-2">
+                    订单号：{submitted.orderNo}
+                  </p>
+                  {submitted.creditsConsumed > 0 && (
+                    <p className="text-sm text-muted-foreground mt-1">
+                      已扣减 {submitted.creditsConsumed} 积分
+                    </p>
                   )}
                 </div>
                 {/* 预览缩略 */}
                 {result && (
                   <div className="mx-auto w-48 h-48 rounded-xl overflow-hidden border-2 border-emerald-500/20">
-                    {/* biome-ignore lint/performance/noImgElement: 已生成结果预览 */}
+                    {/* biome-ignore lint/performance/noImgElement: 已下单效果预览 */}
                     <img
                       src={result.url}
                       alt="已下单效果"
@@ -1707,34 +1657,11 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                     />
                   </div>
                 )}
-                {/* 2026-09-13：代理商下完单 / 创建预览凭证后发给客户 —— 复用
-                    gpt-image ShareCard。QR 编码 `${origin}/p/{token}`（submitted.token），
-                    扫码进 /p/[token] 终端用户视图（ResultStep + ShareCard 自保存）。
-                    "保存图片"复用 handleDownload 直接下 result.url 给代理商本地存档。
-                    设计要点：代理商下完单 / 重置前这一瞬最自然顺手截图发微信，把
-                    share UI 紧贴预览缩略下方；与"查看订单详情 / 再生成一个"两个
-                    导航动作分开 —— 分享是"对外发送"动作，导航是"对自己"动作。
-
-                    preview 凭证 / demo 订单共用同一张 ShareCard：两者都生成
-                    /p/{token] URL（preview 给客人扫码确认 / demo 给客人下载终态图）。 */}
-                {submitted && (
-                  <ShareCard
-                    shareUrl={shareUrl}
-                    orderNo={submitted.orderNo}
-                    onDownloadImage={handleDownload}
-                  />
-                )}
                 <div className="flex flex-col sm:flex-row gap-2 justify-center">
                   <Button
                     variant="outline"
                     onClick={() => {
-                      // 2026-09-12：demo 订单不进 /p/[token]（避免匿名访问撞 404 —
-                      // candidates 是单张 composite，candIdx>0 时找不到图）。
-                      // 跳 /image-gen/orders 独立列表页（顶栏也跳这）。
-                      // 2026-09-13：preview 凭证是独立 preview_share 行，**不**进
-                      // /image-gen/orders（避免污染订单列表）—— 客人扫码进 /p/{token}
-                      // 自行确认下单后才产生 promptOrder 行（SELECTED），届时再
-                      // 在 /image-gen/orders 看到。
+                      // demo 订单跳 /image-gen/orders 独立列表页（顶栏也跳这）
                       window.location.href = "/image-gen/orders";
                     }}
                   >
@@ -1750,120 +1677,117 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                 </div>
               </div>
             )}
+
+            {submitted?.kind === "preview" && (
+              <div className="max-w-md w-full text-center py-12 space-y-5">
+                <div className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-950/40">
+                  <CheckCircle2 className="h-8 w-8 text-emerald-600" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-semibold">预览凭证已生成</h2>
+                  <p className="text-sm text-muted-foreground mt-2">
+                    凭证号：{submitted.orderNo}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
+                    下方二维码 /
+                    链接发给客户，客户扫码点确认后才正式下单并扣减积分。
+                  </p>
+                </div>
+                {/* 预览缩略 */}
+                {result && (
+                  <div className="mx-auto w-48 h-48 rounded-xl overflow-hidden border-2 border-emerald-500/20">
+                    {/* biome-ignore lint/performance/noImgElement: 已分享效果预览 */}
+                    <img
+                      src={result.url}
+                      alt="已分享效果"
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                )}
+                {/* 2026-09-14：preview 卡专属 ShareCard —— QR 编码 /p/{token} 给
+                    客户扫码。"保存图片"复用 handleDownload 直接下 result.url。 */}
+                <ShareCard
+                  shareUrl={shareUrl}
+                  orderNo={submitted.orderNo}
+                  onDownloadImage={handleDownload}
+                />
+                <div className="flex flex-col sm:flex-row gap-2 justify-center">
+                  <Button
+                    onClick={handleResetDemo}
+                    className="bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700"
+                  >
+                    <Sparkles className="h-4 w-4 mr-1.5" />
+                    再生成一个
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </main>
 
-        {/* ============ 最右侧：本地历史记录栏（竖列） ============ */}
-        {history.length > 0 && (
+        {/* ============ 最右侧：全部历史效果图（photo 表 source=generation） ============ */}
+        {/* 2026-09-14：改自 localStorage 本地历史为 DB 全量历史；photo 行只
+            携带 id/fileUrl/thumbnailUrl/model/format/createdAt，不带 maskName
+            / refPublicUrls / orderId / selectedCell —— 点击只切 result.url 作
+            预览，不还原 uploadedImages / selectedCell，不显示「查看订单」徽章。 */}
+        {dbHistory.length > 0 && (
           <aside className="w-[180px] shrink-0 bg-white dark:bg-zinc-900 border-l flex flex-col overflow-hidden">
             <div className="shrink-0 flex items-center justify-between px-3 py-2 border-b">
               <span className="text-[11px] font-semibold flex items-center gap-1 text-muted-foreground">
                 <History className="h-3 w-3" />
                 历史
                 <span className="text-[9px] font-normal">
-                  ·{history.length}
+                  ·{dbHistory.length}
                 </span>
               </span>
-              <button
-                type="button"
-                onClick={handleClearHistory}
-                className="text-[10px] text-muted-foreground hover:text-rose-600 flex items-center gap-0.5"
-                title="清空历史"
-              >
-                <Trash2 className="h-3 w-3" />
-              </button>
             </div>
             <div className="flex-1 overflow-y-auto p-2 space-y-2">
-              {history.map((h) => (
+              {dbHistory.map((h) => (
                 <button
                   type="button"
                   key={h.id}
                   className="group relative w-full aspect-square rounded-md overflow-hidden border bg-muted cursor-pointer hover:ring-2 hover:ring-violet-500/40 transition"
-                  title={`${h.maskName} · ${new Date(h.createdAt).toLocaleString("zh-CN")}`}
+                  title={new Date(h.createdAt).toLocaleString("zh-CN")}
                   onClick={() => {
-                    // 2026-09-12：所有历史项（已下单 / 未下单）都还原成当前 result，
-                    // 让用户能基于这张图继续选 cell / 换模板继续下单。
-                    // - 已下单的项 = 已有订单，但用户可能想看另一张效果也下单（开新订单）
-                    // - 未下单的项 = 选过的预览图，回看 + 决定要不要提交
-                    // 已下单徽章保留右上角提示，不阻塞新提交；要看订单详情走
-                    // /image-gen/orders 列表（顶栏 Link）。
+                    // 2026-09-14：DB 历史项只承载「效果 URL」，点击仅切预览；
+                    // 不还原 uploadedImages（photo 行无 refPublicUrls），
+                    // 不还原 selectedCell（photo 行无 picker 状态），
+                    // 不显示「查看订单」徽章（photo 行无 orderId）。
                     setSubmitted(null);
                     setError(null);
-                    setSelectedMask(h.maskId);
                     setResult({
-                      url: h.url,
-                      modelName: h.modelName,
-                      maskName: h.maskName,
+                      url: h.fileUrl,
+                      modelName: h.model ?? "AI 生图",
+                      maskName: h.model ?? "AI 生图",
                     });
-                    // 2026-09-11：还原 uploadedImages，避免「刷新后下单提示需要参考图」bug。
-                    // 老 history 项没 refPublicUrls → 留空数组，让用户重新上传。
-                    restoreUploadedImagesFromR2(h.refPublicUrls ?? []);
-                    // 2026-09-11：还原当时选的 cell（picker 高亮复原）
-                    setSelectedCell(h.selectedCell ?? null);
                   }}
                 >
                   {/* biome-ignore lint/performance/noImgElement: 历史图为动态远程 URL */}
                   <img
-                    src={h.url}
-                    alt={h.maskName}
+                    src={h.thumbnailUrl ?? h.fileUrl}
+                    alt={h.model ?? "历史效果图"}
                     className="w-full h-full object-cover"
                   />
-                  <div className="absolute inset-x-0 bottom-0 bg-black/55 text-white text-[9px] px-1 py-0.5 truncate text-center">
-                    {h.maskName}
-                  </div>
-                  {h.refPreviewUrls && h.refPreviewUrls.length > 0 && (
-                    <div className="absolute top-1 left-1 h-4 w-4 rounded-full bg-violet-500/90 flex items-center justify-center text-[9px] font-medium text-white">
-                      {h.refPreviewUrls.length}
-                    </div>
-                  )}
-                  {h.orderId && (
-                    // 2026-09-12：已下单的 history 项加「查看订单」按钮
-                    // - 跳 /image-gen/orders?order=<orderId>，OrdersView 读 URL 参数初始化选中
-                    // - 不再触发父 button 的 onClick（stopPropagation），
-                    //   否则会同时跑"还原 result"流程，UI 双跳转
-                    // - emerald 徽章保留做"已下单"视觉提示
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        window.location.href = `/image-gen/orders?order=${h.orderId}`;
-                      }}
-                      title="查看订单"
-                      className="absolute top-1 right-1 inline-flex items-center gap-0.5 h-5 px-1.5 rounded-full bg-emerald-500 text-white text-[9px] font-semibold hover:bg-emerald-600 shadow-sm"
-                    >
-                      <CheckCircle2 className="h-2.5 w-2.5" />
-                      查看订单
-                    </button>
-                  )}
-                  {/* 2026-09-11：legacy history 项（无 refPublicUrls）→ 提示原图不可恢复。
-                      触发场景：用户在修复此 bug 之前生成的历史项，刷新页面后点击会撞
-                      「需要参考图」错误。让用户提前看到这条 history「下单需重新上传」。 */}
-                  {!h.orderId &&
-                    (!h.refPublicUrls || h.refPublicUrls.length === 0) && (
-                      <div
-                        className="absolute bottom-1 right-1 h-4 w-4 rounded-full bg-amber-500/95 flex items-center justify-center"
-                        title="未保存原参考图（旧版本生成），下单需重新上传"
-                      >
-                        <ImageOff className="h-2.5 w-2.5 text-white" />
-                      </div>
-                    )}
                 </button>
               ))}
-              <p className="text-center text-[9px] text-muted-foreground/70 pt-1">
-                仅存于此浏览器
-              </p>
             </div>
           </aside>
         )}
       </div>
 
-      {/* 规格选择 modal */}
+      {/* 规格选择 modal —— 2026-09-14：弹窗物理上是同一 SpecModal，但通过
+          specOnConfirm 回调区分 demo 下单 vs preview 创建分享。点 demo 按钮 →
+          specOnConfirm = submitDemoOrder；点 preview 按钮 → specOnConfirm =
+          createSharePreview。SpecModal 只负责把 spec 透传给当前回调。 */}
       <SpecModal
         open={showSpecModal}
         template={selectedMaskData ?? null}
         submitting={submitting}
         onClose={() => setShowSpecModal(false)}
-        onConfirm={(spec) => void handleConfirmSpec(spec)}
+        onConfirm={(spec) => {
+          const cb = specOnConfirm;
+          if (cb) void cb(spec);
+        }}
       />
 
       {/* 2026-09-10：「我的订单」独立页面入口已挪到顶栏 Link(/image-gen/orders) */}

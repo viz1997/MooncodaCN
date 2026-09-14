@@ -47,6 +47,13 @@ async function getHandler(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const limitParam = Number(searchParams.get("limit") ?? "50");
   const offsetParam = Number(searchParams.get("offset") ?? "0");
+  // 2026-09-14：source 过滤（"upload" | "generation"）—— /image-gen 历史栏
+  // 只看 generation（生图结果）。不传或非法值 → 不过滤（兼容旧调用方）。
+  const rawSource = searchParams.get("source");
+  const sourceFilter =
+    rawSource === "upload" || rawSource === "generation"
+      ? rawSource
+      : null;
   const limit = Math.max(
     1,
     Math.min(100, Number.isFinite(limitParam) ? limitParam : 50)
@@ -55,7 +62,10 @@ async function getHandler(req: NextRequest) {
 
   try {
     const photos = await db.query.photo.findMany({
-      where: and(eq(photo.userId, session.user.id)),
+      where: and(
+        eq(photo.userId, session.user.id),
+        ...(sourceFilter ? [eq(photo.source, sourceFilter)] : [])
+      ),
       orderBy: [desc(photo.createdAt)],
       limit,
       offset,
