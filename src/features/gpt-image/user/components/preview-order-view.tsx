@@ -212,14 +212,7 @@ function PreviewOrderContent({
 
   return (
     <div className="flex min-h-screen flex-col bg-[#fafafa]">
-      {/* ── 顶部 preview 流提示 banner ── */}
-      <PreviewBanner
-        previewOrderNo={previewOrderNo}
-        templateName={templateName}
-        specSummary={specSummary}
-        regenerateLimit={regenerateLimit}
-        remainingRegenerate={remainingRegenerate}
-      />
+
 
       {/* ── TopBar（mobile-first 单列） ── */}
       <PreviewTopBar
@@ -336,8 +329,6 @@ function PreviewOrderContent({
             <img src="/logo.svg" alt="Mooncoda" className="h-4 w-4 shrink-0" />
             <span className="tracking-tight">Mooncoda梦可达</span>
           </Link>
-          <span className="text-stone-300">·</span>
-          <span>代理商分享预览</span>
         </div>
       </main>
 
@@ -383,48 +374,9 @@ function PreviewOrderContent({
   );
 }
 
-/* ====================================================================== */
-/* Preview 顶部 banner + TopBar + Confirm 块 — 内联组件                    */
-/* ====================================================================== */
 
-interface PreviewBannerProps {
-  previewOrderNo: string;
-  /** 保留 templateName 仅作 fallback：specSummary 算不出来时回退 */
-  templateName: string;
-  specSummary: string;
-  regenerateLimit: number;
-  remainingRegenerate: number;
-}
 
-function PreviewBanner({
-  previewOrderNo,
-  templateName,
-  specSummary,
-  regenerateLimit,
-  remainingRegenerate,
-}: PreviewBannerProps) {
-  return (
-    <div className="border-b border-indigo-100 bg-gradient-to-r from-indigo-50/80 to-violet-50/60">
-      <div className="mx-auto flex max-w-md items-center gap-2 px-5 py-2">
-        <Sparkles className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
-        <div className="flex-1 min-w-0 text-[11px] leading-tight">
-          <span className="font-medium text-stone-700">代理商分享预览</span>
-          <span className="text-stone-400 ml-1">
-            · {specSummary || templateName}
-          </span>
-        </div>
-        {regenerateLimit > 0 && (
-          <span className="shrink-0 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-medium text-indigo-700 shadow-sm">
-            还可重新生成 {remainingRegenerate}/{regenerateLimit} 次
-          </span>
-        )}
-      </div>
-      <div className="mx-auto max-w-md px-5 pb-1.5 text-[10px] text-stone-400 tabular-nums">
-        凭证号：{previewOrderNo}
-      </div>
-    </div>
-  );
-}
+
 
 interface PreviewTopBarProps {
   /** 顶部主标题：规格摘要（替代原 templateName）。例 "4cm钥匙扣 · 皮套 · 皮革外露" */
