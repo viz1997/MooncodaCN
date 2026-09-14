@@ -294,11 +294,27 @@ export function OrdersAdminView() {
     window.open(link, "_blank");
   };
 
-  /** 下载：通过 fetch 取二进制再触发 a[download]，避免被 R2 CORS / 浏览器导航行为干扰 */
+  /**
+   * 下载：走服务端 stream 模式（?download=1），避开 R2 公开域 CORS。
+   *
+   * 历史原因：直接 fetch(url) 会跟随 302 到 R2，R2 默认无 Access-Control-Allow-Origin，
+   * 浏览器拒绝让 JS 读 blob()（opaque response）。改走 ?download=1 让 Next.js 服务端
+   * fetch R2 → binary stream 回前端（与 candidates / image 路由的 download 分支对应），
+   * 同源 fetch 一定能拿到 blob。
+   *
+   * 与用户端 use-order-actions.ts:357 同语义。
+   */
   const handleDownload = async (url: string, filename: string) => {
     try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // 拼接 ?download=1（避免覆盖已有 query param）
+      const downloadUrl = `${url}${url.includes("?") ? "&" : "?"}download=1`;
+      const res = await fetch(downloadUrl);
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        throw new Error(
+          `HTTP ${res.status}${errText ? ` · ${errText.slice(0, 120)}` : ""}`
+        );
+      }
       const blob = await res.blob();
       const objectUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");

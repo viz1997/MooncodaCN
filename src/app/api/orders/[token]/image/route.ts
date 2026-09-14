@@ -1,8 +1,14 @@
 /**
- * 用户端 - 获取原图（URL）
+ * 用户端 - 获取原图（URL / 二进制流）
  * GET /api/orders/[token]/image?index=0
  *
- * 直接 302 重定向到 R2 公开 URL，不再做 base64 解码和字节流回吐。
+ * 默认：302 重定向到 R2 公开 URL（用于 <img src> 直接展示）。
+ * 带 ?download=1：服务端 fetch R2 → binary stream 回前端，触发下载。
+ * 修管理端 orders-admin-view.tsx 原图下载：浏览器 fetch(R2 URL) 会被
+ * R2 公开域默认无 CORS 拒绝，与 candidates 路由同一根因（参考
+ * [[public-order-download-cors]] / [[workbench-image-proxy]]）。
+ *
+ * 2026-09-14：扩 ?download=1 模式（candidates 路由早已有，本次对齐）。
  */
 
 import { eq } from "drizzle-orm";
@@ -85,6 +91,43 @@ async function getHandler(
         },
         { status: 500 }
       );
+    }
+
+    // 2026-09-14：下载模式 — 服务端 fetch 二进制 → stream 回前端，
+    // 与 candidates 路由的 download 分支同语义。避免浏览器 fetch R2 URL
+    // 撞 CORS 拿到 opaque blob（管理端 handleDownload 现在统一加 ?download=1）。
+    if (url.searchParams.get("download") === "1") {
+      let upstream: Response;
+      try {
+        upstream = await fetch(target, {
+          signal: AbortSignal.timeout(25_000),
+        });
+      } catch (err) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `下载源失败：${err instanceof Error ? err.message : "unknown"}`,
+          },
+          { status: 502 }
+        );
+      }
+      if (!upstream.ok || !upstream.body) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `上游返回 ${upstream.status}`,
+            status: upstream.status,
+          },
+          { status: 502 }
+        );
+      }
+      const contentType =
+        upstream.headers.get("Content-Type") ?? "application/octet-stream";
+      const headers: HeadersInit = {
+        "Content-Type": contentType,
+        "Cache-Control": "private, max-age=300",
+      };
+      return new Response(upstream.body, { headers });
     }
 
     return NextResponse.redirect(target, {
