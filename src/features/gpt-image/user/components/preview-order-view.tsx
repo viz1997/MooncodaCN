@@ -57,6 +57,7 @@ import {
 import {
   getAccessory,
   getLeatherColor,
+  getProductType,
 } from "@/features/gpt-image/lib/product-catalog";
 import type { OrderStatus, OrderView } from "@/features/gpt-image/lib/types";
 import { Link } from "@/i18n/routing";
@@ -565,13 +566,15 @@ function PreviewConfirmBlock({
 /**
  * 顶部 title 用规格摘要（2026-09-14 用户原话：
  * 「顶部 title 显示模板换成规格如 4cm·皮革·实物外露」，
- * 「皮革徽章也是模板，不要显示模板给用户」）。
+ * 「皮革徽章也是模板，不要显示模板给用户」，
+ * 「为什么硬编码 cm」—— 单位应来自 productType 字典的 unit 字段）。
  *
  * 故意不拼 productType.name（"皮革徽章" 这种模板名是代理商标的，
  * 客人不需要看）。只输出：尺寸 + 配件 + 皮革状态。
  *
  * 组成：
- *   1. 基础：productSize (e.g. "4cm") + accessory.name (e.g. "皮套"/"皮革")
+ *   1. 基础：productSize (e.g. "4") + productType.unit (e.g. "cm") +
+ *      accessory.name (e.g. "皮套"/"皮革")
  *      → "4cm · 皮套" / "4cm · 皮革"（无配件时只 "4cm"）
  *   2. leatherExposed=true → 追加 " · 皮革外露"（实物外露）
  *   3. pvcProtection=true → 追加 " · PVC 保护"
@@ -584,8 +587,14 @@ function PreviewConfirmBlock({
  */
 function buildSpecSummary(order: OrderView): string {
   const parts: string[] = [];
+  // productSize 在 DB 里存纯数字（"4"/"6"/"8"），单位来自 productType.unit 字典
+  // （2026-09-14 用户原话「为什么硬编码 cm」—— 单位不再 hardcode，
+  // 而是按 productTypeCode 从 PRODUCT_TYPES 里读，后续加"英寸 / 毫米"型号
+  // 直接扩字典，buildSpecSummary 不用改）。
   const size = order.productSize?.trim();
-  if (size) parts.push(size);
+  const productType = getProductType(order.productTypeCode);
+  if (size && productType) parts.push(`${size}${productType.unit}`);
+  else if (size) parts.push(size); // 找不到型号兜底（不显单位，不瞎拼 cm）
   const acc = getAccessory(order.accessoryCode);
   if (acc) parts.push(acc.name);
 

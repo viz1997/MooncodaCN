@@ -52,7 +52,13 @@ export interface ProductCapabilities {
 export interface ProductType {
   code: string;
   name: string;
-  /** 该型号下可选的尺寸（厘米数字字符串） */
+  /**
+   * 尺寸单位（展示用，2026-09-14 用户原话「为什么硬编码 cm」——
+   * 单位应来自型号字典，不是 buildSpecSummary 里硬写）。
+   * 当前所有 SKU 都是 cm；后续如果加"英寸 / 毫米"型号直接扩字典。
+   */
+  unit: string;
+  /** 该型号下可选的尺寸（数字字符串，无单位；单位来自 unit 字段） */
   sizes: readonly string[];
   /** 该型号下可选的配件；null 表示该型号无配件选项 */
   accessories: readonly AccessoryCode[];
@@ -64,6 +70,7 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
   {
     code: "R",
     name: "CM 钥匙扣",
+    unit: "cm",
     sizes: ["4", "6"],
     accessories: ["leather", "pvc"],
     // 钥匙扣常配皮套 / PVC 皮套；皮革徽章是独立型号 LB，不再是 R 的能力
@@ -79,6 +86,7 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
   {
     code: "A",
     name: "CM 异性钥匙扣",
+    unit: "cm",
     sizes: ["4", "6"],
     accessories: ["bracket"],
     // 异性款以支架为主；刻字仍支持
@@ -94,6 +102,7 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
   {
     code: "P",
     name: "CM 冰箱贴",
+    unit: "cm",
     sizes: ["4", "6", "8"],
     accessories: [], // 冰箱贴没配件
     // 冰箱贴不在表面刻字
@@ -109,6 +118,7 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
   {
     code: "RM",
     name: "CM 相框",
+    unit: "cm",
     sizes: ["6", "8", "11"],
     accessories: [],
     // 相框可在底座刻字（祝福语/日期）
@@ -124,6 +134,7 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
   {
     code: "LB",
     name: "CM 皮革徽章",
+    unit: "cm",
     sizes: ["4", "6"],
     // 2026-09-12：LB 皮革徽章加「皮革 / 金属」二选一配件（用户原话"配件要显示对应的而不是默认，皮革还是金属"）。
     // 字典补 metal；老订单 accessoryCode=null 时详情页不再渲染"配件：默认"行。
