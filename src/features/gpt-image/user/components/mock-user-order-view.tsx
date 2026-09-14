@@ -179,7 +179,6 @@ function MockOrderContent({ order }: { order: OrderView }) {
 
             {showUploadStep && (
               <UploadStep
-                templateName={order.template.name}
                 uploadCount={uploadCount}
                 imagesPerUpload={imagesPerUpload}
                 uploadedImageCount={uploadedCount}

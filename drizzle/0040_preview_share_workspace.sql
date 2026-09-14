@@ -28,8 +28,8 @@
 
 -- 2. 状态机列（镜像 promptOrder 字段名）
 ALTER TABLE "preview_share" ADD COLUMN IF NOT EXISTS "uploaded_images" text;
-ALTER TABLE "preview_share" ADD COLUMN IF NOT EXISTS "images_per_upload" integer NOT NULL DEFAULT 3;
-ALTER TABLE "preview_share" ADD COLUMN IF NOT EXISTS "upload_count" integer NOT NULL DEFAULT 0;
+ALTER TABLE "preview_share" ADD COLUMN IF NOT EXISTS "images_per_upload" integer NOT NULL DEFAULT 1;
+ALTER TABLE "preview_share" ADD COLUMN IF NOT EXISTS "upload_count" integer NOT NULL DEFAULT 1;
 ALTER TABLE "preview_share" ADD COLUMN IF NOT EXISTS "uploaded_at" timestamp;
 ALTER TABLE "preview_share" ADD COLUMN IF NOT EXISTS "generated_at" timestamp;
 ALTER TABLE "preview_share" ADD COLUMN IF NOT EXISTS "selections" text;

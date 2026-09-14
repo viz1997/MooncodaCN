@@ -1825,9 +1825,9 @@ export const previewShare = pgTable(
     /** 客人上传的原图 R2 URL 列表（JSON: ["url1","url2"]）。与 promptOrder.uploadedImages 同结构。 */
     uploadedImages: text("uploaded_images"),
     /** 每批参考图张数（preview 流硬编码 1，单张图）。与 promptOrder.imagesPerUpload 对齐。 */
-    imagesPerUpload: integer("images_per_upload").notNull().default(3),
+    imagesPerUpload: integer("images_per_upload").notNull().default(1),
     /** 已上传批次数（preview 流永远 1）。与 promptOrder.uploadCount 对齐。 */
-    uploadCount: integer("upload_count").notNull().default(0),
+    uploadCount: integer("upload_count").notNull().default(1),
     /** 上传时刻（与 promptOrder.uploadedAt 镜像） */
     uploadedAt: timestamp("uploaded_at"),
     /** 首次生成完成时刻（与 promptOrder.generatedAt 镜像） */

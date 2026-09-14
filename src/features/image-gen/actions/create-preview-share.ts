@@ -255,6 +255,10 @@ export const createPreviewShareAction = withPreviewAction("create")
           // 候选集（[[demoPreviewUrl]]）—— /api/orders/[token]/candidates/0/0
           // 路由按 token 查 preview_share 返图
           candidates: candidatesJson,
+          // preview 流硬编码单批单图：imagesPerUpload=1, uploadCount=1
+          // 显式 set 而非依赖 schema default —— 防御 schema migration 默认值漂移
+          imagesPerUpload: 1,
+          uploadCount: 1,
           // 客人确认时由 guest-confirm 路由写入
           selectedCell: null,
           // 规格字段（CONFIRMED 时镜像写入新建 promptOrder）

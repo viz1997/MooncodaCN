@@ -146,8 +146,11 @@ export function projectPreviewToOrderView(
     status,
     hasUploadedImage: uploaded.length > 0,
     uploadedImageCount: uploaded.length,
-    uploadCount: share.uploadCount ?? 1,
-    imagesPerUpload: share.imagesPerUpload ?? 1,
+    // preview 流硬编码单批单图：Math.max(1, ...) 兜底 DB 历史默认值
+    // （migration 0040 旧默认 uploadCount=0 / imagesPerUpload=3 → totalCapacity=0
+    //  → UploadStep 误判 quotaFull=true 显示"本订单已完成"）
+    uploadCount: Math.max(1, share.uploadCount ?? 1),
+    imagesPerUpload: Math.max(1, share.imagesPerUpload ?? 1),
     candidateCount: share.template.candidateCount,
     candidateGroups,
     regenerateLimit: share.regenerateLimit ?? 3,

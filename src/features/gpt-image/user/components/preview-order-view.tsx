@@ -55,7 +55,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
-  formatProductSpec,
+  getAccessory,
   getLeatherColor,
 } from "@/features/gpt-image/lib/product-catalog";
 import type { OrderStatus, OrderView } from "@/features/gpt-image/lib/types";
@@ -236,7 +236,6 @@ function PreviewOrderContent({
 
             {showUploadStep && (
               <UploadStep
-                templateName={order.template.name}
                 uploadCount={uploadCount}
                 imagesPerUpload={imagesPerUpload}
                 uploadedImageCount={uploadedCount}
@@ -565,10 +564,15 @@ function PreviewConfirmBlock({
 
 /**
  * 顶部 title 用规格摘要（2026-09-14 用户原话：
- * 「顶部 title 显示模板换成规格如 4cm·皮革·实物外露」）。
+ * 「顶部 title 显示模板换成规格如 4cm·皮革·实物外露」，
+ * 「皮革徽章也是模板，不要显示模板给用户」）。
  *
- * 组成优先级：
- *   1. 基础：formatProductSpec → "4cm钥匙扣 · 皮套"（无配件时只 "4cm钥匙扣"）
+ * 故意不拼 productType.name（"皮革徽章" 这种模板名是代理商标的，
+ * 客人不需要看）。只输出：尺寸 + 配件 + 皮革状态。
+ *
+ * 组成：
+ *   1. 基础：productSize (e.g. "4cm") + accessory.name (e.g. "皮套"/"皮革")
+ *      → "4cm · 皮套" / "4cm · 皮革"（无配件时只 "4cm"）
  *   2. leatherExposed=true → 追加 " · 皮革外露"（实物外露）
  *   3. pvcProtection=true → 追加 " · PVC 保护"
  *   4. leatherColor 非空 → 追加 " · {色名}"（如 "棕色"）
@@ -579,16 +583,14 @@ function PreviewConfirmBlock({
  * 全空时返回空串（顶部 title 显示为空，让用户感知「尚未配置」）。
  */
 function buildSpecSummary(order: OrderView): string {
-  const base = formatProductSpec({
-    productTypeCode: order.productTypeCode ?? null,
-    productSize: order.productSize ?? null,
-    accessoryCode: order.accessoryCode ?? null,
-  });
-  // formatProductSpec 在 productTypeCode 为空时返 "-"，避免污染标题
-  const safeBase = base === "-" ? "" : base;
-  if (!safeBase) return "";
+  const parts: string[] = [];
+  const size = order.productSize?.trim();
+  if (size) parts.push(size);
+  const acc = getAccessory(order.accessoryCode);
+  if (acc) parts.push(acc.name);
 
-  const parts: string[] = [safeBase];
+  if (parts.length === 0) return "";
+
   if (order.leatherExposed === true) {
     parts.push("皮革外露");
   } else if (order.pvcProtection === true) {

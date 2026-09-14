@@ -11,8 +11,6 @@ const MAX_BYTES = 10 * 1024 * 1024;
 const ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
 
 interface UploadStepProps {
-  /** 订单模板名（标题用） */
-  templateName: string;
   /** 用户可上传的批次次数（默认 1） */
   uploadCount: number;
   /** 每批上传的原图参考图数量（1-3，默认 3） */
@@ -43,7 +41,6 @@ interface UploadStepProps {
  * - 父组件负责 R2 预签名 + PUT + /upload
  */
 export function UploadStep({
-  templateName,
   uploadCount,
   imagesPerUpload,
   uploadedImageCount,
@@ -246,7 +243,7 @@ export function UploadStep({
       <div className="mb-5 text-center">
         <h2 className="text-xl font-bold text-stone-900">{nextLabel}</h2>
         <p className="mt-1 text-sm text-stone-400">
-          {templateName} · 上传后将生成 {candidateCount} 种候选效果图
+          上传后将生成 {candidateCount} 种候选效果图
         </p>
         <p className="mt-1 text-xs text-stone-400">
           一次最多 {imagesPerUpload} 张，共需 {uploadCount} 张效果图
