@@ -1577,7 +1577,15 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                     variant="outline"
                     className="rounded-full"
                     onClick={handleClickSharePreview}
-                    disabled={submitting || !result?.url}
+                    // 2026-09-14：预览/下单都强依赖 refImageUrls 非空（写订单
+                    // uploadedImages[0] + preview_share.referenceImageUrl 都
+                    // 从这里取）。历史栏点击 result-only 场景（刷新后）refImageUrls
+                    // 为空 —— 这里 disabled 直接拦截，避免点击撞 preflight 的
+                    // 「请先上传参考图」toast 让用户困惑。下方 amber warning 已说
+                    // 明「下单需要至少 1 张参考图」。
+                    disabled={
+                      submitting || !result?.url || refImageUrls.length === 0
+                    }
                     title="生成预览凭证发给客户扫码确认后下单（不写 promptOrder）"
                   >
                     <Share2 className="h-4 w-4 mr-1.5" />
@@ -1600,7 +1608,9 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                     type="button"
                     className="rounded-full bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700"
                     onClick={handleClickSubmitOrder}
-                    disabled={submitting}
+                    disabled={
+                      submitting || refImageUrls.length === 0
+                    }
                   >
                     {submitting ? (
                       <>
