@@ -907,7 +907,7 @@
       "productLines": "产品线",
       "providers3d": "3D 引擎",
       "systemLogs": "系统日志",
-      "gptImage": "GPT-Image",
+      "gptImage": "提示词模板",
       "gptImageTemplates": "模板管理",
       "gptImageOrders": "订单管理"
     }

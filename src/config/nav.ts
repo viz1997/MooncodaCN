@@ -294,17 +294,17 @@ export const adminNav: NavGroup[] = [
             href: "/admin/3d-providers",
             icon: Cpu,
           },
+          {
+            title: "提示词模板",
+            href: "/admin/prompt-templates",
+            icon: Sparkles,
+          },
         ],
       },
       {
         title: "外部生图",
         href: "/admin/external-api-keys",
         icon: Globe,
-      },
-      {
-        title: "GPT-Image",
-        href: "/admin/prompt-templates",
-        icon: Sparkles,
       },
       {
         title: "系统日志",

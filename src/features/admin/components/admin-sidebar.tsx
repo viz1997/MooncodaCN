@@ -56,6 +56,7 @@ export function AdminSidebar() {
       "3D 引擎": t("nav.providers3d"),
       系统日志: t("nav.systemLogs"),
       "GPT-Image": t("nav.gptImage"),
+      "提示词模板": t("nav.gptImage"),
       模板管理: t("nav.gptImageTemplates"),
       订单管理: t("nav.gptImageOrders"),
     };

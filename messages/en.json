@@ -910,7 +910,7 @@
       "productLines": "Product Lines",
       "providers3d": "3D Engines",
       "systemLogs": "System Logs",
-      "gptImage": "GPT-Image",
+      "gptImage": "Prompt Templates",
       "gptImageTemplates": "Templates",
       "gptImageOrders": "Orders"
     }
