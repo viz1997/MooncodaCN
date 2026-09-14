@@ -73,7 +73,6 @@ export default async function PublicOrderPage({
       <PreviewOrderView
         token={token}
         previewOrderNo={share.orderNo}
-        templateName={share.template.name}
       />
     );
   }

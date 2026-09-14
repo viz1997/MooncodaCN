@@ -78,15 +78,13 @@ import { useSelections } from "./use-selections";
 
 interface PreviewOrderViewProps {
   token: string;
-  /** preview 流 metadata —— banner / TopBar 显示 */
+  /** preview 流 metadata —— TopBar 显示订单号 */
   previewOrderNo: string;
-  templateName: string;
 }
 
 export function PreviewOrderView({
   token,
   previewOrderNo,
-  templateName,
 }: PreviewOrderViewProps) {
   const { order, loading, notFound, refresh, quietEndsAt } = useOrder(token);
   const actions = useOrderActions({ token, refresh });
@@ -107,7 +105,6 @@ export function PreviewOrderView({
       refreshOrder={refresh}
       quietEndsAt={quietEndsAt}
       previewOrderNo={previewOrderNo}
-      templateName={templateName}
     />
   );
 }
@@ -122,7 +119,6 @@ interface PreviewOrderContentProps {
   refreshOrder: () => Promise<void>;
   quietEndsAt: number | null;
   previewOrderNo: string;
-  templateName: string;
 }
 
 function PreviewOrderContent({
@@ -135,7 +131,6 @@ function PreviewOrderContent({
   refreshOrder,
   quietEndsAt,
   previewOrderNo,
-  templateName,
 }: PreviewOrderContentProps) {
   const status = order.status;
 
@@ -193,11 +188,6 @@ function PreviewOrderContent({
   };
 
   const regenerateLimit = order.regenerateLimit ?? 0;
-  const usedRegenerateCount = order.regenerateUsedByBatch?.[0] ?? 0;
-  const remainingRegenerate = Math.max(
-    0,
-    regenerateLimit - usedRegenerateCount
-  );
 
   // 规格摘要：用于顶部标题（替代原 templateName）。例如：
   //   "4cm钥匙扣 · 皮套" + "皮革外露" → "4cm钥匙扣 · 皮套 · 皮革外露"
@@ -586,7 +576,7 @@ function PreviewConfirmBlock({
  * 三个后缀字段互斥（spec-modal 已经硬约束）—— 这里按顺序检查，
  * 第一个为 true 就赢，避免重复堆叠 "皮革外露 · PVC 保护"。
  *
- * 全空时返回空串（由 UI fallback 到 templateName）。
+ * 全空时返回空串（顶部 title 显示为空，让用户感知「尚未配置」）。
  */
 function buildSpecSummary(order: OrderView): string {
   const base = formatProductSpec({
