@@ -25,6 +25,8 @@ import {
 import type { OrderHistorySnapshotView } from "@/features/gpt-image/lib/types";
 import { withApiLogging } from "@/lib/api-logger";
 
+import { getPreviewShareByToken } from "../../_lib/preview-share-helpers";
+
 export const runtime = "nodejs";
 
 async function getHandler(
@@ -33,6 +35,15 @@ async function getHandler(
 ) {
   try {
     const { token } = await ctx.params;
+
+    // 2026-09-14：preview 流无 promptOrderHistory 表（plan [[p-token-6step-workbench]]
+    // 明确"preview 流无 history 表"）——preview 凭证的 history 永远为空数组。
+    // 必须短路掉否则走 promptOrder 分支会返 404 + 错误文案"订单不存在或链接无效"，
+    // 客户端 useOrderHistory 把它当 toast 弹出，误导客人以为凭证失效。
+    const preview = await getPreviewShareByToken(token);
+    if (preview) {
+      return NextResponse.json({ success: true, data: [] });
+    }
 
     const order = await db
       .select({
