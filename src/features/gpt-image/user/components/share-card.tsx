@@ -125,27 +125,20 @@ export function ShareCard({
           <p className="text-xs leading-relaxed text-stone-600">
             用手机相机扫描二维码，或复制链接发给朋友。
           </p>
-          {/* URL 文本展示 —— 方便代理商肉眼校验链接再复制；truncate 防超长
-              撑爆布局，长按可全选（mobile 友好）。复制按钮在右。 */}
-          <div className="flex items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1.5">
-            <span
-              className="flex-1 truncate font-mono text-[11px] text-stone-700 select-all"
-              title={shareUrl}
-            >
-              {shareUrl}
-            </span>
-            <button
-              type="button"
-              onClick={() => {
-                void handleCopy();
-              }}
-              disabled={!shareUrl}
-              className="inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-md border border-stone-200 bg-white px-2 text-[11px] font-medium text-stone-700 transition-colors hover:bg-stone-50 disabled:opacity-50"
-            >
-              <Copy className="h-3 w-3" />
-              复制
-            </button>
-          </div>
+          {/* 2026-09-14：去 URL 文本显示 —— 只保留一个独立「复制链接」按钮。
+              URL 不再以文本形式外露，避免代理商截图分享时无意暴露 token，
+              也避免长链接撑爆布局。点击按钮复制到剪贴板（toast 提示）。 */}
+          <button
+            type="button"
+            onClick={() => {
+              void handleCopy();
+            }}
+            disabled={!shareUrl}
+            className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-stone-200 bg-white px-3 text-xs font-medium text-stone-700 transition-colors hover:bg-stone-50 disabled:opacity-50"
+          >
+            <Copy className="h-4 w-4" />
+            复制链接
+          </button>
           <div className="flex flex-col gap-2 sm:flex-row">
             <a
               href={qrDataUrl || "#"}
