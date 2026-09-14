@@ -206,6 +206,71 @@ interface HistoryItem {
 const HISTORY_KEY = "mooncoda_public_imagegen_history";
 const HISTORY_MAX = 30;
 
+/**
+ * 把 next-safe-action 的 validationErrors 拍扁成可读字符串（schema 验证失败时用）。
+ * 避免 toast 只看到「创建分享凭证失败 / 下单失败」兜底文案，看不到真正哪个字段不合法。
+ * next-safe-action 5.x 的 validationErrors 是 ZodIssue[][]（按 schema 嵌套层级），这里
+ * 把所有 issue.path.join(".") + issue.message 拼成一行。
+ */
+function extractValidationMessage(errors: unknown): string | null {
+  if (!errors) return null;
+  const collect = (node: unknown, path: string[] = []): string[] => {
+    if (!node) return [];
+    if (Array.isArray(node)) {
+      // 顶层是 ZodIssue[]，每个元素可能再有 _errors 字段或本身就是 issue
+      const out: string[] = [];
+      for (const item of node) {
+        if (item && typeof item === "object" && "message" in item) {
+          const issue = item as {
+            path?: (string | number)[];
+            message?: string;
+          };
+          const key = [...path, ...(issue.path ?? [])].join(".");
+          out.push(`${key || "?"}: ${issue.message ?? "校验失败"}`);
+        } else if (Array.isArray(item)) {
+          out.push(...collect(item, path));
+        } else if (item && typeof item === "object" && "_errors" in item) {
+          // zod flatten() 形态：{ field: { _errors: [...] } }
+          const fieldObj = item as Record<string, unknown>;
+          for (const [k, v] of Object.entries(fieldObj)) {
+            if (k === "_errors") continue;
+            out.push(...collect(v, [...path, k]));
+          }
+          const msgs = (fieldObj as { _errors?: unknown[] })._errors;
+          if (Array.isArray(msgs)) {
+            for (const m of msgs) {
+              if (typeof m === "string") {
+                out.push(`${path.join(".") || "?"}: ${m}`);
+              }
+            }
+          }
+        }
+      }
+      return out;
+    }
+    if (typeof node === "object") {
+      // root 形态：{ _errors: [...], fieldName: { _errors: [...] } }
+      const obj = node as Record<string, unknown>;
+      const out: string[] = [];
+      const rootMsgs = obj._errors;
+      if (Array.isArray(rootMsgs)) {
+        for (const m of rootMsgs) {
+          if (typeof m === "string") out.push(m);
+        }
+      }
+      for (const [k, v] of Object.entries(obj)) {
+        if (k === "_errors") continue;
+        out.push(...collect(v, [...path, k]));
+      }
+      return out;
+    }
+    return [];
+  };
+  const msgs = collect(errors);
+  if (msgs.length === 0) return null;
+  return msgs.join("；");
+}
+
 function loadHistory(): HistoryItem[] {
   if (typeof window === "undefined") return [];
   try {
@@ -943,7 +1008,19 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
           platformOrderNo: spec.platformOrderNo,
           selectedCell: selectedCell,
         });
-        if (!res?.data) throw new Error("创建预览凭证失败");
+        if (!res?.data) {
+          // eslint-disable-next-line no-console
+          console.error("[image-gen] preview share failed", {
+            res,
+            serverError: res?.serverError,
+            validationErrors: res?.validationErrors,
+          });
+          // 把 validationErrors 提取成可读字符串（schema 验证失败时只有这个）
+          const validationMsg = extractValidationMessage(res?.validationErrors);
+          throw new Error(
+            res?.serverError ?? validationMsg ?? "创建预览凭证失败"
+          );
+        }
         const data = res.data;
         setSubmitted({
           orderId: data.orderId,
@@ -989,7 +1066,16 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
         // 2026-09-11：用户从宫格里选的 cell（无 picker 场景下 null → server 强制 0）
         selectedCell: selectedCell,
       });
-      if (!res?.data) throw new Error("下单失败");
+      if (!res?.data) {
+        // eslint-disable-next-line no-console
+        console.error("[image-gen] demo submit failed", {
+          res,
+          serverError: res?.serverError,
+          validationErrors: res?.validationErrors,
+        });
+        const validationMsg = extractValidationMessage(res?.validationErrors);
+        throw new Error(res?.serverError ?? validationMsg ?? "下单失败");
+      }
       const data = res.data;
       setSubmitted({
         orderId: data.orderId,
@@ -1024,6 +1110,8 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
           : "订单已创建"
       );
     } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[image-gen] submit failed:", err);
       toast.error(err instanceof Error ? err.message : "操作失败");
     } finally {
       setSubmitting(false);

@@ -92,9 +92,18 @@ export const createPreviewShareAction = withPreviewAction("create")
     // 1. 查模板（与 submitImageGenDemoAction 同样路径：productEffect → promptTemplate）
     const effect = await findEffect(parsedInput.templateId);
     if (!effect || effect.status !== "active") {
+      // eslint-disable-next-line no-console
+      console.error("[preview-share] effect lookup failed", {
+        templateId: parsedInput.templateId,
+        effect,
+      });
       throw new Error("模板不存在或已停用");
     }
     if (!effect.promptTemplateId) {
+      // eslint-disable-next-line no-console
+      console.error("[preview-share] effect has no promptTemplateId", {
+        templateId: parsedInput.templateId,
+      });
       throw new Error("模板未关联提示词模板，请联系管理员补一个");
     }
     const template = await db.query.promptTemplate.findFirst({
@@ -112,9 +121,45 @@ export const createPreviewShareAction = withPreviewAction("create")
         allowedAccessories: true,
       },
     });
-    if (!template) throw new Error("模板不存在或已停用");
+    if (!template) {
+      // eslint-disable-next-line no-console
+      console.error("[preview-share] template lookup failed", {
+        promptTemplateId: effect.promptTemplateId,
+      });
+      throw new Error("模板不存在或已停用");
+    }
 
     // 2. fillDefaultsByTemplate —— 与 demo 下单共用同套 spec 校验
+    let filledSpec: ReturnType<typeof fillDefaultsByTemplate>;
+    try {
+      filledSpec = fillDefaultsByTemplate(
+        {
+          allowedSizes: template.allowedSizes,
+          allowedAccessories: template.allowedAccessories,
+        },
+        {
+          productTypeCode: parsedInput.productTypeCode ?? null,
+          productSize: parsedInput.productSize ?? null,
+          accessoryCode: parsedInput.accessoryCode ?? null,
+          engravingText: parsedInput.engravingText ?? null,
+          engravingExposed: parsedInput.engravingExposed ?? null,
+          leatherColor: parsedInput.leatherColor ?? null,
+          leatherExposed: parsedInput.leatherExposed ?? null,
+          pvcProtection: parsedInput.pvcProtection ?? null,
+          remarks: parsedInput.remarks ?? null,
+          platform: parsedInput.platform ?? null,
+          platformOrderNo: parsedInput.platformOrderNo ?? null,
+        }
+      );
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[preview-share] fillDefaultsByTemplate failed:", {
+        err: err instanceof Error ? err.message : String(err),
+        parsedInput,
+        template: { id: template.id, name: template.name },
+      });
+      throw err;
+    }
     const {
       finalProductSize,
       finalAccessoryCode,
@@ -126,40 +171,30 @@ export const createPreviewShareAction = withPreviewAction("create")
       finalRemarks,
       finalPlatform,
       finalPlatformOrderNo,
-    } = fillDefaultsByTemplate(
-      {
-        allowedSizes: template.allowedSizes,
-        allowedAccessories: template.allowedAccessories,
-      },
-      {
-        productTypeCode: parsedInput.productTypeCode ?? null,
-        productSize: parsedInput.productSize ?? null,
-        accessoryCode: parsedInput.accessoryCode ?? null,
-        engravingText: parsedInput.engravingText ?? null,
-        engravingExposed: parsedInput.engravingExposed ?? null,
-        leatherColor: parsedInput.leatherColor ?? null,
-        leatherExposed: parsedInput.leatherExposed ?? null,
-        pvcProtection: parsedInput.pvcProtection ?? null,
-        remarks: parsedInput.remarks ?? null,
-        platform: parsedInput.platform ?? null,
-        platformOrderNo: parsedInput.platformOrderNo ?? null,
-      }
-    );
+    } = filledSpec;
 
     // 3. 算积分（仅记录到 preview_share.creditsCharged，preview 暂不扣 credit）
     const basePrice = template.price ?? 0;
-    const priceResult = await computePromptOrderCredits(
-      template.id,
-      basePrice,
-      {
+    let priceResult: Awaited<ReturnType<typeof computePromptOrderCredits>>;
+    try {
+      priceResult = await computePromptOrderCredits(template.id, basePrice, {
         productTypeCode: parsedInput.productTypeCode ?? null,
         productSize: finalProductSize,
         accessoryCode: finalAccessoryCode,
         leatherColor: finalLeatherColor,
         leatherExposed: finalLeatherExposed,
         pvcProtection: finalPvcProtection,
-      }
-    );
+      });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[preview-share] computePromptOrderCredits failed:", {
+        err: err instanceof Error ? err.message : String(err),
+        parsedInput,
+        template: { id: template.id, name: template.name },
+        filledSpec: filledSpec,
+      });
+      throw err;
+    }
     const { totalCredits, breakdown } = priceResult;
     const creditsBreakdownJson = JSON.stringify(breakdown);
 
@@ -172,55 +207,69 @@ export const createPreviewShareAction = withPreviewAction("create")
 
     const candidatesJson = JSON.stringify([[parsedInput.demoPreviewUrl]]);
 
-    const [created] = await db
-      .insert(previewShare)
-      .values({
-        id: nanoid(),
+    try {
+      const [created] = await db
+        .insert(previewShare)
+        .values({
+          id: nanoid(),
+          orderNo,
+          token,
+          templateId: template.id,
+          // 原图 / 效果图 R2 URL（demo 阶段已生成）
+          referenceImageUrl: parsedInput.referenceImageUrl,
+          demoPreviewUrl: parsedInput.demoPreviewUrl,
+          // 候选集（[[demoPreviewUrl]]）—— /api/orders/[token]/candidates/0/0
+          // 路由按 token 查 preview_share 返图
+          candidates: candidatesJson,
+          // 客人确认时由 guest-submit 路由写入
+          selectedCell: null,
+          // 规格字段（CONFIRMED 时镜像写入新建 promptOrder）
+          productTypeCode: parsedInput.productTypeCode ?? null,
+          productSize: finalProductSize,
+          accessoryCode: finalAccessoryCode,
+          engravingText: finalEngravingText,
+          engravingExposed: finalEngravingExposed,
+          leatherColor: finalLeatherColor,
+          leatherExposed: finalLeatherExposed,
+          pvcProtection: finalPvcProtection,
+          remarks: finalRemarks,
+          platform: finalPlatform,
+          platformOrderNo: finalPlatformOrderNo,
+          // 提前算好的应扣积分（客人确认时直接读，避免重算漂移）
+          creditsCharged: totalCredits,
+          creditsBreakdown: creditsBreakdownJson,
+          // 状态机：pending → confirmed（客人确认）/ expired（cron 清理）
+          status: "pending",
+          createdBy: ctx.userId,
+          // CONFIRMED 后指向新建 promptOrder.id（创建时 null）
+          linkedOrderId: null,
+          confirmedAt: null,
+          expiresAt,
+        })
+        .returning({ id: previewShare.id });
+
+      if (!created) throw new Error("创建预览凭证失败");
+
+      revalidatePath("/image-gen");
+
+      return {
+        // preview_share.id —— UI 层不区分"订单/凭证"实体，统一叫 orderId
+        orderId: created.id,
+        orderNo,
+        token,
+        creditsToChargeOnConfirm: totalCredits,
+      };
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[preview-share] insert preview_share failed:", {
+        err: err instanceof Error ? err.message : String(err),
+        // eslint-disable-next-line no-console
+        detail: err instanceof Error ? err.stack : undefined,
         orderNo,
         token,
         templateId: template.id,
-        // 原图 / 效果图 R2 URL（demo 阶段已生成）
-        referenceImageUrl: parsedInput.referenceImageUrl,
-        demoPreviewUrl: parsedInput.demoPreviewUrl,
-        // 候选集（[[demoPreviewUrl]]）—— /api/orders/[token]/candidates/0/0
-        // 路由按 token 查 preview_share 返图
-        candidates: candidatesJson,
-        // 客人确认时由 guest-submit 路由写入
-        selectedCell: null,
-        // 规格字段（CONFIRMED 时镜像写入新建 promptOrder）
-        productTypeCode: parsedInput.productTypeCode ?? null,
-        productSize: finalProductSize,
-        accessoryCode: finalAccessoryCode,
-        engravingText: finalEngravingText,
-        engravingExposed: finalEngravingExposed,
-        leatherColor: finalLeatherColor,
-        leatherExposed: finalLeatherExposed,
-        pvcProtection: finalPvcProtection,
-        remarks: finalRemarks,
-        platform: finalPlatform,
-        platformOrderNo: finalPlatformOrderNo,
-        // 提前算好的应扣积分（客人确认时直接读，避免重算漂移）
-        creditsCharged: totalCredits,
-        creditsBreakdown: creditsBreakdownJson,
-        // 状态机：pending → confirmed（客人确认）/ expired（cron 清理）
-        status: "pending",
         createdBy: ctx.userId,
-        // CONFIRMED 后指向新建 promptOrder.id（创建时 null）
-        linkedOrderId: null,
-        confirmedAt: null,
-        expiresAt,
-      })
-      .returning({ id: previewShare.id });
-
-    if (!created) throw new Error("创建预览凭证失败");
-
-    revalidatePath("/image-gen");
-
-    return {
-      // preview_share.id —— UI 层不区分"订单/凭证"实体，统一叫 orderId
-      orderId: created.id,
-      orderNo,
-      token,
-      creditsToChargeOnConfirm: totalCredits,
-    };
+      });
+      throw err;
+    }
   });
