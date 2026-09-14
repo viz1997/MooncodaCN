@@ -25,7 +25,7 @@
 
 import { Copy, Download, QrCode, Share2, X } from "lucide-react";
 import QRCode from "qrcode";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -76,19 +76,29 @@ export function ShareCard({
   }, [shareUrl]);
 
   // 2026-09-14：弹窗模式 —— ESC 关闭 + body scroll lock，避免背景跟着滚。
+  // onClose 是父组件 inline 函数（`() => setShowShareModal(false)`）每次 render 都新引用；
+  // 不能直接放 deps —— 父组件任一 state 变化（generating / selectedCell / result）都会让
+  // effect cleanup→setup 重跑，把 body overflow 反复设回 "hidden" 导致页面永久锁死。
+  // 用 onCloseRef 解绑依赖，effect 只在 open 切换时跑。
+  const onCloseRef = useRef(onClose);
   useEffect(() => {
-    if (!open || !onClose) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+    onCloseRef.current = onClose;
+  }, [onClose]);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (_e: KeyboardEvent) => {
+      onCloseRef.current?.();
     };
     document.addEventListener("keydown", onKey);
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.removeEventListener("keydown", onKey);
+      // 恢复 overflow —— 不论 prevOverflow 是什么（"hidden" / "" / "auto"），
+      // 都设回原值。如果原值是 "hidden"（说明页面本来就被锁），保持 "hidden"。
       document.body.style.overflow = prevOverflow;
     };
-  }, [open, onClose]);
+  }, [open]);
 
   // 2026-09-13：复制分享链接 —— 代理商最常用路径（粘到微信）。fallback 用
   // 隐藏 textarea + execCommand("copy") 兼容极老浏览器；现代浏览器走
@@ -216,6 +226,9 @@ export function ShareCard({
     );
   }
 
-  // 兼容：作为 inline section 嵌入父级（无 onClose 时）
-  return <section>{body}</section>;
+  // 关闭状态不渲染任何东西 —— 之前 fallback 到 inline `<section>`，导致父组件
+  // 永远挂载 ShareCard 时页面初次加载就有一个「分享给朋友」section 占位（用户
+  // 报告「一直有分享给用户的弹窗」）。inline section 用法已废弃，需要的话父组件
+  // 自己 render body JSX。
+  return null;
 }
