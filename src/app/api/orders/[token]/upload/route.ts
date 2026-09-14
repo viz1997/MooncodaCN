@@ -114,12 +114,20 @@ async function postHandler(
     }
 
     // 2026-09-14：preview 流 6 步工作台 —— preview_share 优先分支。
-    // preview 流只允许 status in ['pending','uploaded','failed'] 上传（首次 + 失败重传），
-    // 不开放 CANDIDATES_READY 增量 append（preview 是单批次：imagesPerUpload=1，
+    // preview 流允许 status in ['pending','uploaded','failed','candidates_ready']
+    // 上传（首次 / 失败重传 / 「代理商生成的效果图不满意，我要传自己的图重新生成」）。
+    // 不开放 SELECTED 增量 append（preview 是单批次：imagesPerUpload=1，
     // 没有"追加新图"语义）。后续再次生成走 /regenerate 路由。
     const preview = await getPreviewShareByToken(token);
     if (preview) {
-      const allowedPreviewStatuses = new Set(["pending", "uploaded", "failed"]);
+      const allowedPreviewStatuses = new Set([
+        "pending",
+        "uploaded",
+        "failed",
+        // 2026-09-14：客人看到代理商 demo 图后想用自己图重新生成 → 走 /upload 覆盖
+        // uploadedImages[0]。后续 status 走 uploaded → generating → candidates_ready。
+        "candidates_ready",
+      ]);
       if (!allowedPreviewStatuses.has(preview.status)) {
         return NextResponse.json(
           {

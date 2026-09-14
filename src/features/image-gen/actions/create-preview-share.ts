@@ -240,6 +240,17 @@ export const createPreviewShareAction = withPreviewAction("create")
     const now = new Date();
 
     const candidatesJson = JSON.stringify([[parsedInput.demoPreviewUrl]]);
+    // 2026-09-14：把代理商 demo 阶段的 referenceImageUrl 当作客人侧 uploadedImages[0]
+    // 写库 —— 让客户打开链接直接看到代理商生成的效果图（SelectStep 渲染时通过
+    // uploadedImages[0] 拿原图缩略图、通过 candidates[0][0] 拿效果图）。
+    //
+    // 历史 bug：之前只写 status="pending" + uploadedImages=null，PreviewOrderContent
+    // 渲染 UploadStep（要求客户上传图），候选图藏在 candidates 列但 PENDING 状态下
+    // 不渲染 SelectStep → 客户根本看不到代理商生成的效果图。
+    //
+    // 客人后续若要传自己的图重新生成：/upload 路由（preview 分支）会按 status=
+    // "uploaded"/"failed" 覆盖 uploadedImages[0]（preview 是单批单图硬编码，无追加）。
+    const initialUploadedImages = JSON.stringify([parsedInput.referenceImageUrl]);
 
     try {
       const [created] = await db
@@ -255,6 +266,10 @@ export const createPreviewShareAction = withPreviewAction("create")
           // 候选集（[[demoPreviewUrl]]）—— /api/orders/[token]/candidates/0/0
           // 路由按 token 查 preview_share 返图
           candidates: candidatesJson,
+          // 2026-09-14：客人侧 uploadedImages[0] 直接填代理商 referenceImageUrl，
+          // 跳过 PENDING + upload 阶段；详见上方注释。
+          uploadedImages: initialUploadedImages,
+          uploadedAt: now,
           // preview 流硬编码单批单图：imagesPerUpload=1, uploadCount=1
           // 显式 set 而非依赖 schema default —— 防御 schema migration 默认值漂移
           imagesPerUpload: 1,
@@ -281,9 +296,12 @@ export const createPreviewShareAction = withPreviewAction("create")
           creditsLockedAt: lockAmount > 0 ? now : null,
           regenerateLimit: REGENERATE_LIMIT,
           usedRegenerateCount: 0,
-          // 状态机：pending → uploaded → generating → candidates_ready →
-          //          selected → confirmed（客人确认）/ expired（cron 清理）
-          status: "pending",
+          // 2026-09-14：状态机直接从 candidates_ready 起步（demo 图已生成），
+          // 客人侧 SelectStep 渲染代理商生成的候选图。后续路径：
+          //   selected → confirmed（客人直接确认）/ 客人上传新图后走
+          //   uploaded → generating → candidates_ready → ...
+          status: "candidates_ready",
+          generatedAt: now,
           createdBy: ctx.userId,
           // CONFIRMED 后指向新建 promptOrder.id（创建时 null）
           linkedOrderId: null,
