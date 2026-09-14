@@ -72,6 +72,7 @@ import {
   PLATFORMS,
   type PlatformCode,
   type ProductCapabilities,
+  SPEC_LABELS,
   validatePlatform,
   validateProductSpec,
 } from "@/features/gpt-image/lib/product-catalog";
@@ -625,7 +626,7 @@ export function SpecModal({
                                 : "border-border bg-background hover:border-violet-500/50 hover:bg-violet-500/5"
                             )}
                           >
-                            实物外露
+                            {SPEC_LABELS.leatherExposed}
                           </button>
                         )}
                         {canPvcProtection && (
@@ -654,7 +655,7 @@ export function SpecModal({
                                 : "border-border bg-background hover:border-violet-500/50 hover:bg-violet-500/5"
                             )}
                           >
-                            PVC 保护
+                            {SPEC_LABELS.pvcProtection}
                           </button>
                         )}
                       </div>

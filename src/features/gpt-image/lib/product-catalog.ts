@@ -289,20 +289,41 @@ export function formatProductSpec(opts: {
 }
 
 /**
+ * Spec 字段展示文案（2026-09-14 用户原话「不要硬编码规格文案，
+ * 按照设置好的来获取」—— 单一来源，spec-modal / formatCustomization /
+ * buildSpecSummary 三处都从这里读，避免文案漂移）。
+ *
+ * - leatherExposed: 保护套类型 pill 的「实物外露」标签
+ *   （spec-modal.tsx:628 客户配置的视觉文案）。
+ * - pvcProtection: 保护套类型 pill 的「PVC 保护」标签
+ *   （spec-modal.tsx:657）。
+ * - leatherColorPrefix: formatCustomization 输出的「皮革色：」前缀。
+ *   注：颜色名走 LEATHER_COLORS 字典 name，不写在这里。
+ */
+export const SPEC_LABELS = {
+  leatherExposed: "实物外露",
+  pvcProtection: "PVC 保护",
+  leatherColorPrefix: "皮革色",
+} as const;
+
+/**
  * 把"产品定制"区渲染成一行可读字符串。仅在用户真的填了值时输出对应片段。
  *
  * - engravingText 非空 → `刻字："Love U"`（短文本原样）
  * - engravingText 非空且 engravingExposed=true → 上面那段尾巴加 "（外露）"
  * - engravingText 非空但 engravingExposed=false → "刻字：…（内刻）"
  * - leatherColor 非空 → `皮革色：棕色`（按 LEATHER_COLORS 字典取中文名）
- * - pvcProtection=true → `带 PVC 保护`
- * - leatherExposed=true → `皮革外露`
+ * - pvcProtection=true → `PVC 保护`（来自 SPEC_LABELS.pvcProtection）
+ * - leatherExposed=true → `实物外露`（来自 SPEC_LABELS.leatherExposed，与
+ *   spec-modal pill 文案对齐；2026-09-14 用户原话「不要硬编码规格文案」）
  * - remarks → **不进 summary**（备注可能很长 / 含换行，单独渲染更合适）
  *
  * 全 null 时返回空字符串（由 UI 决定是否展示"无定制"占位）。
  *
  * 历史：2026-09-07 初版还会渲染"✓ 皮革徽章"，但皮革徽章已重构为独立
  * 产品 LB，hasLeatherBadge 字段已删除。2026-09-10 扩到 LB 全加工维度。
+ * 2026-09-14：文案统一从 SPEC_LABELS 读取；leatherExposed 文案从 "皮革外露"
+ * 改为 "实物外露" 与 spec-modal 对齐。
  */
 export function formatCustomization(opts: {
   engravingText?: string | null;
@@ -320,9 +341,9 @@ export function formatCustomization(opts: {
     parts.push(`刻字：${text}${place}`);
   }
   const color = getLeatherColor(opts.leatherColor);
-  if (color) parts.push(`皮革色：${color.name}`);
-  if (opts.pvcProtection === true) parts.push("带 PVC 保护");
-  if (opts.leatherExposed === true) parts.push("皮革外露");
+  if (color) parts.push(`${SPEC_LABELS.leatherColorPrefix}：${color.name}`);
+  if (opts.pvcProtection === true) parts.push(SPEC_LABELS.pvcProtection);
+  if (opts.leatherExposed === true) parts.push(SPEC_LABELS.leatherExposed);
   // 2026-09-11：平台（仅 LB 业务使用，admin 复盘 / 结算归因）
   const platform = getPlatform(opts.platform);
   if (platform) parts.push(`来源：${platform.name}`);

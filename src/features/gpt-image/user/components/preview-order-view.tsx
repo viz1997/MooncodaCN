@@ -58,6 +58,7 @@ import {
   getAccessory,
   getLeatherColor,
   getProductType,
+  SPEC_LABELS,
 } from "@/features/gpt-image/lib/product-catalog";
 import type { OrderStatus, OrderView } from "@/features/gpt-image/lib/types";
 import { Link } from "@/i18n/routing";
@@ -191,20 +192,19 @@ function PreviewOrderContent({
   const regenerateLimit = order.regenerateLimit ?? 0;
 
   // 规格摘要：用于顶部标题（替代原 templateName）。例如：
-  //   "4cm钥匙扣 · 皮套" + "皮革外露" → "4cm钥匙扣 · 皮套 · 皮革外露"
-  //   "4cm钥匙扣 · 皮套" + "PVC 保护" → "4cm钥匙扣 · 皮套 · PVC 保护"
-  //   "4cm钥匙扣 · 皮套" + leatherColor="brown" → "4cm钥匙扣 · 皮套 · 棕色"
+  //   "4cm · 皮套" + "实物外露" → "4cm · 皮套 · 实物外露"
+  //   "4cm · 皮套" + "PVC 保护" → "4cm · 皮套 · PVC 保护"
+  //   "4cm · 皮套" + leatherColor="brown" → "4cm · 皮套 · 棕色"
   //
   // 用户原话「顶部 title 显示模板换成规格如 4cm·皮革·实物外露」——
-  // 不暴露 ProductConfigSection 给客人，只用单行规格摘要当顶部 title。
+  // 不暴露 ProductConfigSection 给客人，只用单行规格摘要当顶部 title；
+  // 「实物外露」与 spec-modal pill 文案对齐。
   const specSummary = buildSpecSummary(order);
 
   const mainHasFixedCta = showSelectStep || isSelected;
 
   return (
     <div className="flex min-h-screen flex-col bg-[#fafafa]">
-
-
       {/* ── TopBar（mobile-first 单列） ── */}
       <PreviewTopBar
         specSummary={specSummary}
@@ -364,12 +364,8 @@ function PreviewOrderContent({
   );
 }
 
-
-
-
-
 interface PreviewTopBarProps {
-  /** 顶部主标题：规格摘要（替代原 templateName）。例 "4cm钥匙扣 · 皮套 · 皮革外露" */
+  /** 顶部主标题：规格摘要（替代原 templateName）。例 "4cm · 皮套 · 实物外露" */
   specSummary: string;
   orderNo: string;
   status: OrderStatus;
@@ -564,10 +560,12 @@ function PreviewConfirmBlock({
 }
 
 /**
- * 顶部 title 用规格摘要（2026-09-14 用户原话：
+ * 顶部 title 用规格摘要（2026-09-14 用户多次反馈：
  * 「顶部 title 显示模板换成规格如 4cm·皮革·实物外露」，
  * 「皮革徽章也是模板，不要显示模板给用户」，
- * 「为什么硬编码 cm」—— 单位应来自 productType 字典的 unit 字段）。
+ * 「为什么硬编码 cm」—— 单位来自 productType.unit，
+ * 「为什么没有按照规格中的实物外露」—— 文案与 spec-modal 对齐，
+ * 「不要硬编码规格文案，按照设置好的来获取」—— 文案统一从 SPEC_LABELS 读）。
  *
  * 故意不拼 productType.name（"皮革徽章" 这种模板名是代理商标的，
  * 客人不需要看）。只输出：尺寸 + 配件 + 皮革状态。
@@ -576,12 +574,12 @@ function PreviewConfirmBlock({
  *   1. 基础：productSize (e.g. "4") + productType.unit (e.g. "cm") +
  *      accessory.name (e.g. "皮套"/"皮革")
  *      → "4cm · 皮套" / "4cm · 皮革"（无配件时只 "4cm"）
- *   2. leatherExposed=true → 追加 " · 皮革外露"（实物外露）
- *   3. pvcProtection=true → 追加 " · PVC 保护"
- *   4. leatherColor 非空 → 追加 " · {色名}"（如 "棕色"）
+ *   2. leatherExposed=true → 追加 SPEC_LABELS.leatherExposed（即 "实物外露"）
+ *   3. pvcProtection=true → 追加 SPEC_LABELS.pvcProtection（即 "PVC 保护"）
+ *   4. leatherColor 非空 → 追加 " · {色名}"（按 LEATHER_COLORS 字典取）
  *
  * 三个后缀字段互斥（spec-modal 已经硬约束）—— 这里按顺序检查，
- * 第一个为 true 就赢，避免重复堆叠 "皮革外露 · PVC 保护"。
+ * 第一个为 true 就赢，避免重复堆叠。
  *
  * 全空时返回空串（顶部 title 显示为空，让用户感知「尚未配置」）。
  */
@@ -600,10 +598,12 @@ function buildSpecSummary(order: OrderView): string {
 
   if (parts.length === 0) return "";
 
+  // 2026-09-14：保护套/颜色文案统一从 SPEC_LABELS / LEATHER_COLORS 字典读，
+  // 不再硬编码（用户原话「不要硬编码规格文案，按照设置好的来获取」）。
   if (order.leatherExposed === true) {
-    parts.push("皮革外露");
+    parts.push(SPEC_LABELS.leatherExposed);
   } else if (order.pvcProtection === true) {
-    parts.push("PVC 保护");
+    parts.push(SPEC_LABELS.pvcProtection);
   } else if (order.leatherColor) {
     const color = getLeatherColor(order.leatherColor);
     if (color) parts.push(color.name);
