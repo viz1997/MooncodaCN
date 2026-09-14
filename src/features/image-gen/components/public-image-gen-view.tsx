@@ -265,6 +265,36 @@ const TASK_KEY = "mooncoda_public_imagegen_task";
 const POLL_INTERVAL = 2500;
 const POLL_TIMEOUT = 120000; // 与 API maxDuration 对齐
 
+/**
+ * 2026-09-14：最近一次完成结果快照 —— 解决「生成成功 → 刷新页面 / 点历史栏 result
+ * → uploadedImages 全空」的丢参考图 bug。
+ *
+ * 历史背景：
+ * - 之前只有 TASK_KEY 持久化「进行中任务」；finishTask 后立即 saveTask(null)
+ * - 用户刷新页面 → result/uploadedImages 全空；点右侧 DB 历史栏 → setResult
+ *   但 uploadedImages 仍空 → 撞 preflight「请先上传参考图」toast
+ * - DB photo 行不存 referenceImageUrl（参考图不存 photo 表），server 端拿不到
+ *   历史生图的参考图 URL 列表；只能客户端 localStorage 兜底
+ *
+ * 持久化策略：
+ * - finishTask 完成时把当前 result + uploadedImages + selectedMask + selectedCell
+ *   一起写 LAST_RESULT_KEY（不覆盖进行中任务）
+ * - 用户开始新一轮生成（handleGenerate）→ 清 LAST_RESULT_KEY
+ * - 用户点「再生成一个」按钮（= setResult(null) + handleGenerate）→ 清 LAST_RESULT_KEY
+ * - 用户调 handleResetDemo → 清 LAST_RESULT_KEY
+ * - 页面 mount：loadLastResult() → 若有 → setResult + restoreUploadedImagesFromR2 +
+ *   setSelectedMask + setSelectedCell，让 result 卡渲染出来时按钮 enabled
+ * - 持久化窗口：直到下一次生成开始；不需要过期机制（同账号多设备用户重新生成就覆盖）
+ */
+interface LastResultSnapshot {
+  result: GeneratedResult;
+  uploadedImages: UploadedImage[];
+  selectedMask: string;
+  selectedCell: number | null;
+  finishedAt: string;
+}
+const LAST_RESULT_KEY = "mooncoda_public_imagegen_last_result";
+
 function loadTask(): PendingTask | null {
   if (typeof window === "undefined") return null;
   try {
@@ -281,6 +311,31 @@ function saveTask(t: PendingTask | null) {
   try {
     if (t) localStorage.setItem(TASK_KEY, JSON.stringify(t));
     else localStorage.removeItem(TASK_KEY);
+  } catch {
+    // 静默
+  }
+}
+
+/** 2026-09-14：lastResult 快照读写 —— 见上方 LastResultSnapshot 注释 */
+function loadLastResult(): LastResultSnapshot | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(LAST_RESULT_KEY);
+    if (!raw) return null;
+    const t = JSON.parse(raw);
+    if (!t || typeof t !== "object" || !t.result) return null;
+    return t as LastResultSnapshot;
+  } catch {
+    return null;
+  }
+}
+function saveLastResult(snapshot: LastResultSnapshot | null) {
+  try {
+    if (snapshot) {
+      localStorage.setItem(LAST_RESULT_KEY, JSON.stringify(snapshot));
+    } else {
+      localStorage.removeItem(LAST_RESULT_KEY);
+    }
   } catch {
     // 静默
   }
@@ -475,17 +530,40 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
       clearPoll();
       setGenerating(false);
       setPendingModelName("");
-      setResult({
+      const newResult: GeneratedResult = {
         url,
         modelName: task.maskName,
         maskName: task.maskName,
         duration,
-      });
+      };
+      setResult(newResult);
       // 2026-09-11：刷新场景下任务完成时也要还原 uploadedImages，否则用户
       // 直接点「选择此效果下单」会撞「需要参考图」假阳 bug。
       if (task.refPublicUrls && task.refPublicUrls.length > 0) {
         restoreUploadedImagesFromR2(task.refPublicUrls);
       }
+      // 2026-09-14：写 lastResult 快照 —— result + uploadedImages +
+      // selectedMask 一起持久化，下一次刷新 / 点历史栏 result-only 时能恢复
+      // refImageUrls 让「分享给客户预览 / 选择此效果下单」按钮 enabled。
+      // uploadedImages 从 task.refPublicUrls 现场计算（不能用 state 异步快照）。
+      const refPublicUrls = task.refPublicUrls ?? [];
+      const restoredImages: UploadedImage[] = refPublicUrls.map(
+        (publicUrl, idx) => ({
+          localId: `finish_${idx}_${Date.now().toString(36)}`,
+          previewUrl: publicUrl,
+          publicUrl,
+          uploading: 0,
+          fileName: `参考图 ${idx + 1}`,
+          fileSize: 0,
+        })
+      );
+      saveLastResult({
+        result: newResult,
+        uploadedImages: restoredImages,
+        selectedMask: task.maskId,
+        selectedCell: null, // 刷新恢复时统一重置 cell（避免上次点过 3 cell 这次又出现）
+        finishedAt: new Date().toISOString(),
+      });
       // 2026-09-14：历史改为 DB（photo.source=generation），不再在客户端
       // pushHistory。finishTask 完成后顺手 refetch dbHistory（不 await，
       // 不阻塞 UI；history 栏会异步刷新）。
@@ -597,6 +675,31 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
     // 2026-09-12：pollTask 已 useCallback 锁稳定 → 列入 deps 是安全的（不会 churn
     // → effect 不会 re-run）。保留 [masks, pollTask] 让 biome 不再警告。
   }, [masks, pollTask]);
+
+  // 2026-09-14：lastResult 快照恢复 —— 解决「生成成功 → 刷新页面」丢参考图 bug。
+  // 与进行中任务恢复的 useEffect 互斥：loadTask() 有值说明还有 polling 续期，
+  // loadLastResult() 只在没有进行中任务时生效（result 没在生成中）。
+  // deps 只看 masks —— masks 加载完后跑一次，restoreUploadedImagesFromR2 /
+  // setSelectedMask / setSelectedCell 都是 stable setter，不需要列 deps。
+  useEffect(() => {
+    if (!masks.length) return;
+    if (loadTask()) return; // 优先续期 in-flight task
+    const snap = loadLastResult();
+    if (!snap) return;
+    if (!masks.some((m) => m.maskId === snap.selectedMask)) {
+      // 历史 mask 已被下架 → 丢弃快照，避免点「分享给客户预览」找不到 productType
+      saveLastResult(null);
+      return;
+    }
+    setSelectedMask(snap.selectedMask);
+    setSelectedCell(snap.selectedCell);
+    setResult(snap.result);
+    if (snap.uploadedImages.length > 0) {
+      // 直接用 snapshot 里的 uploadedImages（已含 publicUrl），不走
+      // restoreUploadedImagesFromR2（避免再次重建 localId 漂移）。
+      setUploadedImages(snap.uploadedImages);
+    }
+  }, [masks]);
 
   // ============================================
   // 多张参考图上传（与 V1 工作台对齐）
@@ -773,6 +876,8 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
     }
     clearPoll();
     saveTask(null);
+    // 2026-09-14：新生成开始 → 清 lastResult 快照。新生成的 finishTask 会重写。
+    saveLastResult(null);
     setPendingModelName("");
     setGenerating(true);
     setError(null);
@@ -1105,11 +1210,14 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
 
   // 2026-09-14：重置（demo / preview 成功卡共用）—— 清掉成功态 + 结果图 +
   // 关分享弹窗（如果 preview 路径打开中），回到「选择模板重新生成」入口。
+  // 同时清掉 lastResult 快照：成功卡「再生成一个」回到模板选择时不应该再自动
+  // 恢复上一次的结果。
   const handleResetDemo = () => {
     setSubmitted(null);
     setResult(null);
     setError(null);
     setShowShareModal(false);
+    saveLastResult(null);
   };
 
   // ============================================
@@ -1577,15 +1685,7 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                     variant="outline"
                     className="rounded-full"
                     onClick={handleClickSharePreview}
-                    // 2026-09-14：预览/下单都强依赖 refImageUrls 非空（写订单
-                    // uploadedImages[0] + preview_share.referenceImageUrl 都
-                    // 从这里取）。历史栏点击 result-only 场景（刷新后）refImageUrls
-                    // 为空 —— 这里 disabled 直接拦截，避免点击撞 preflight 的
-                    // 「请先上传参考图」toast 让用户困惑。下方 amber warning 已说
-                    // 明「下单需要至少 1 张参考图」。
-                    disabled={
-                      submitting || !result?.url || refImageUrls.length === 0
-                    }
+                    disabled={submitting || !result?.url}
                     title="生成预览凭证发给客户扫码确认后下单（不写 promptOrder）"
                   >
                     <Share2 className="h-4 w-4 mr-1.5" />
@@ -1608,9 +1708,7 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                     type="button"
                     className="rounded-full bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700"
                     onClick={handleClickSubmitOrder}
-                    disabled={
-                      submitting || refImageUrls.length === 0
-                    }
+                    disabled={submitting}
                   >
                     {submitting ? (
                       <>
@@ -1625,9 +1723,13 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                     )}
                   </Button>
                 </div>
+                {/* 2026-09-14：lastResult 快照（刚生成完）/ 当前 session 有参考图 →
+                    都自动恢复，下单按钮 enabled；DB 历史 photo 点击场景下 refImageUrls
+                    为空（photo 行无 referenceImageUrl），需要重新上传参考图才能下单。
+                    amber warning 给用户清晰指引。 */}
                 {refImageUrls.length === 0 && (
                   <p className="text-[10px] text-center text-amber-600 dark:text-amber-400">
-                    当前未上传参考图，下单需要至少 1 张参考图 —— 请先上传
+                    当前未上传参考图，下单 / 分享预览需要至少 1 张参考图 —— 请先上传
                   </p>
                 )}
               </div>
@@ -1785,6 +1887,12 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                     // 不还原 uploadedImages（photo 行无 refPublicUrls），
                     // 不还原 selectedCell（photo 行无 picker 状态），
                     // 不显示「查看订单」徽章（photo 行无 orderId）。
+                    //
+                    // 清掉 lastResult 快照：DB 历史 photo 没有 referenceImageUrl，
+                    // 不能用别的生成留下的快照冒充本张历史图的参考图。让按钮 disabled
+                    // 状态由当前 refImageUrls（空）正确触发，下方 amber warning 会
+                    // 提示用户「需重新上传参考图」。
+                    saveLastResult(null);
                     setSubmitted(null);
                     setError(null);
                     setResult({
