@@ -34,12 +34,14 @@ import { eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
-import { promptOrder } from "@/db/schema";
+import { previewShare, promptOrder } from "@/db/schema";
 import {
   parseSelections,
   parseUploadedImages,
 } from "@/features/gpt-image/lib/order-helpers";
 import { withApiLogging } from "@/lib/api-logger";
+
+import { getPreviewShareByToken } from "../../_lib/preview-share-helpers";
 
 export const runtime = "nodejs";
 
@@ -111,6 +113,83 @@ async function postHandler(
     const body = (await req.json().catch(() => ({}))) as {
       selections?: unknown;
     };
+
+    // 2026-09-14：preview 流 select —— preview_share 优先分支。
+    // preview 流 batchCount=1，selections 形态 {"0": candIdx}；status
+    // 'candidates_ready' → 'selected' 单跳，不开放 partial select（preview
+    // 是单批次决策，没有 partial 语义）。
+    const preview = await getPreviewShareByToken(token);
+    if (preview) {
+      if (preview.status !== "candidates_ready") {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `当前状态为 ${preview.status}，无法选择`,
+          },
+          { status: 400 }
+        );
+      }
+      const raw = body.selections;
+      let candIdx: number;
+      if (typeof raw === "number") {
+        candIdx = raw;
+      } else if (
+        Array.isArray(raw) &&
+        raw.length > 0 &&
+        typeof raw[0] === "number"
+      ) {
+        candIdx = raw[0] as number;
+      } else if (
+        Array.isArray(raw) &&
+        raw.length > 0 &&
+        typeof raw[0] === "object" &&
+        raw[0] !== null &&
+        typeof (raw[0] as Record<string, unknown>).candIdx === "number"
+      ) {
+        candIdx = (raw[0] as Record<string, unknown>).candIdx as number;
+      } else {
+        return NextResponse.json(
+          { success: false, error: "请提交 candIdx" },
+          { status: 400 }
+        );
+      }
+      const candidateCount = preview.template.candidateCount;
+      if (
+        !Number.isInteger(candIdx) ||
+        candIdx < 0 ||
+        candIdx >= candidateCount
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `candIdx ${candIdx} 超出范围（应在 0-${candidateCount - 1} 之间）`,
+          },
+          { status: 400 }
+        );
+      }
+      await db
+        .update(previewShare)
+        .set({
+          selections: JSON.stringify({ "0": candIdx }),
+          selectedIndex: candIdx,
+          selectedAt: new Date(),
+          selectedBatchCount: 1,
+          status: "selected",
+          updatedAt: new Date(),
+        })
+        .where(eq(previewShare.id, preview.id));
+      return NextResponse.json({
+        success: true,
+        message: "已选择候选。",
+        data: {
+          status: "selected",
+          selections: [candIdx],
+          lockedCount: 1,
+          totalCount: 1,
+          allLocked: true,
+        },
+      });
+    }
 
     const order = await db.query.promptOrder.findFirst({
       where: eq(promptOrder.token, token),

@@ -1,75 +1,49 @@
 /**
- * 公共免登录 - preview 凭证客人「确认下单」（2026-09-13）
+ * 公共免登录 - preview 凭证客人「终态确认下单」（2026-09-14）
  *
- * POST /api/orders/[token]/guest-submit
+ * POST /api/orders/[token]/guest-confirm
  *
  * body: `{ selectedCell?: number }` —— 选中的 cell 索引（grid 多 cell 模式）
  *
- * ## 业务定位
+ * ## 业务定位（2026-09-14 preview 流升级）
  *
- * /image-gen 代理商 demo 流「分享给客户预览」创建的凭证（preview_share 表，
- * status='pending' + spec 已默认填好 + createdBy=代理商 userId），客人扫码
- * 进 /p/[token] 看到预览图后点「确认下单」调本路由。本路由做三件事：
+ * 之前 `guest-submit` 是「一次性确认」—— 客人扫码进来只看预览图 + 点确认。
+ * 现在 `/p/[token]` 走完整 6 步工作台（upload → generate → select → regenerate
+ * → configure → confirm）。本路由只承担最后一步「确认下单」。
  *
- *   1. **校验 preview_share 状态机**
- *      - status='pending' + expires_at > now → 可提交
- *      - status='confirmed' → 409（防重提，返回 linkedOrderId 让前端跳 SELECTED 视图）
- *      - status='pending' 但 expires_at < now → 410（链接过期）
- *      - 查不到 → 404
+ * 上传环节走 `POST /api/orders/[token]/upload`（preview 分支已经接好），选择
+ * 环节走 `POST /api/orders/[token]/select`（preview 分支已经接好），配置走
+ * `POST /api/orders/[token]/configure`（preview 分支已经接好）。本路由只在
+ * 终态把 preview_share 转成正式 promptOrder + 释放多余的 credit 锁定。
  *
- *   2. **扣代理商 credit**（amount = preview_share.creditsCharged）
- *      - createPreviewShareAction 已提前算好 creditsCharged 写入 preview_share，
- *        避免客人确认时重算（template.price / matching rule 改动会造成预览价
- *        / 实际价漂移）。这里直接读 preview_share.creditsCharged。
- *      - 扣积分时按 FIFO 批次消耗（consumeCredits）→ 写 creditsTransaction
- *        服务名 "image-gen-preview-confirm"，与 demo 下单 "image-gen-demo" 区分
- *        对账（demo 是代理商主动下单；preview 是代理商被动接受客人确认）。
- *      - 积分不足 → 402 拒绝，preview_share 状态不变（客人看到代理商积分
- *        不够提示，由代理商自行充值后再次分享链接）。注意是代理商的 userId
- *        积分，不是客人的（客人免登录，连账户都没有）。
+ * ## 状态机校验
  *
- *   3. **新建 promptOrder + 锁定 preview_share**
- *      - NEW INSERT promptOrder(status='SELECTED', selections=[selectedCell],
- *        selectedAt=now, orderNo=新生成 IG-XXXXXX, token=新生成, uploadedImages=
- *        [reference_image_url], candidates=[[demo_preview_url]], 上传时间/生成
- *        时间镜像 preview_share 创建时间)
- *      - UPDATE preview_share.status='confirmed' + linked_order_id=新 promptOrder.id
- *        + confirmed_at=now + confirmed_by_ip=clientIp
- *      - 客人后续访问 /p/{token} → page.tsx 按 preview_share.linked_order_id
- *        跳转到新建 promptOrder 的 SELECTED 视图
+ *   - status='selected' + expiresAt > now → 可提交（客人已选 cell）
+ *   - status='confirmed' → 409 防重，返回 linkedOrderId
+ *   - status='pending' / 'uploaded' / 'generating' / 'candidates_ready' →
+ *     400（客人还没走完流程）
+ *   - status='cancelled' / 'expired' → 410（凭证已失效）
+ *   - status='failed' → 400（生成失败，需先 regenerate 复活）
  *
- * ## 与 /api/orders/[token]/select 的关系
+ * ## Credit 处理
  *
- * /select 是 ToC 订单的"按批选择"接口，支持 partial select + 增量提交；本路由
- * 是 demo 流 preview 凭证的"一次性确认"接口，只有一条候选、一批、不支持
- * partial。两套 API 互不影响。
+ * 升级后 createPreviewShareAction 已预扣 `creditsLocked = basePrice × (1 + regenerateLimit)`
+ * （含 regenerate 预算）。本路由终态时：
+ *   - 扣 `basePrice`（用 computePromptOrderCredits 重新算，避免预览价 / 实际价漂移）
+ *   - 释放剩余 = `creditsLocked - basePrice`（grantCredits refund）
  *
- * ## 与 /p/[token] 渲染的关系
- *
- * /p/[token] 入口 page.tsx 先查 preview_share by token → 命中且 status='pending'
- * 渲染 PreviewConfirmStep；status='confirmed' + linked_order_id 跳转 SELECTED
- * 视图。查不到再查 promptOrder 走原有路径。
- *
- * ## 鉴权
- *
- * 不要任何 session / API key —— 客人免登录。token 自身即是"密码"（32 字符
- * 不可猜），下单 / 取消 / 二次访问都靠它。这是公网分享链接的固有模型，参考
- * Google Doc / Dropbox shared link。
+ * 防重：status='confirmed' 直接 409，不重复扣 / 释放。
  *
  * ## 错误码
  *
- * - 404 凭证不存在（preview_share 查不到）
- * - 410 链接已过期（pending 但 expires_at < now）
- * - 409 已确认（confirmed）—— 返回 linkedOrderId，客户端可显示「已下单」
+ * - 404 凭证不存在
+ * - 410 链接已过期
+ * - 409 已确认（confirmed）→ 返回 linkedOrderId
  * - 400 状态异常 / 校验失败
- * - 402 代理商积分不足
+ * - 402 代理商积分不足（理论上不会：createPreviewShare 时已预扣 ≥ basePrice，但
+ *   若 regenerateLimit=0 / 取消后又改价格等边界条件，confirm 时 basePrice 可能
+ *   高于 creditsLocked。此时 402 + "代理商积分不足"）
  * - 500 服务端异常
- *
- * ## 防重策略
- *
- * 同一 token 多次 submit：第二次命中 status='confirmed' 分支 → 409 +
- * 返回 linkedOrderId 让前端跳转 SELECTED 视图。client 看到 409 直接渲染
- * 「已下单」过渡 UI（避免双重扣 credit）。
  */
 
 import { eq } from "drizzle-orm";
@@ -80,8 +54,11 @@ import { db } from "@/db";
 import { previewShare, promptOrder } from "@/db/schema";
 import { consumeCredits } from "@/features/credits/core";
 import { InsufficientCreditsError } from "@/features/credits/errors";
+import { grantCredits } from "@/features/credits/grant";
 import { generateOrderToken } from "@/features/gpt-image/lib/generation-service";
+import { computePromptOrderCredits } from "@/features/image-gen/lib/price-calculator";
 import { withApiLogging } from "@/lib/api-logger";
+import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 
@@ -123,7 +100,7 @@ async function postHandler(
       }
       selectedCell = body.selectedCell;
     } else if (body.selectedCell === undefined || body.selectedCell === null) {
-      // 兼容老客户端：未传 → 默认 0（separate 模式 / 1 candidate 模式强制 0）
+      // 兼容老客户端：未传 → 默认 0（preview 流 batchCount=1，cell 默认第 0 个）
       selectedCell = 0;
     } else {
       return NextResponse.json(
@@ -154,7 +131,7 @@ async function postHandler(
       );
     }
 
-    // 3. 防重：confirmed 终态 → 409 + 返回 linkedOrderId 让前端跳 SELECTED 视图
+    // 3. 防重：confirmed 终态 → 409 + 返回 linkedOrderId
     if (share.status === "confirmed") {
       return NextResponse.json(
         {
@@ -171,7 +148,7 @@ async function postHandler(
       );
     }
 
-    // 4. 已过期（pending 但 expires_at < now）→ 410 Gone
+    // 4. 已过期 → 410
     if (
       share.status === "expired" ||
       (share.expiresAt && share.expiresAt.getTime() < Date.now())
@@ -189,21 +166,18 @@ async function postHandler(
       );
     }
 
-    // 5. 必须是 pending —— 其它 status 拒绝
-    if (share.status !== "pending") {
+    // 5. 必须是 selected —— 客人已走完 6 步
+    if (share.status !== "selected") {
       return NextResponse.json(
         {
           success: false,
-          error: `当前状态为 ${share.status}，无法确认下单`,
+          error: `当前状态为 ${share.status}，请先完成上传与选择`,
         },
         { status: 400 }
       );
     }
 
     // 6. 校验 selectedCell 与 template candidateCount 兼容性
-    //    preview 流 batchCount=1（referenceImageUrl 1 张原图）。candidates 是
-    //    [[demoPreviewUrl]]，所以 batchCount=1，candidateCount（内层）=1。
-    //    如果选了 selectedCell > 0，1 candidate 模式下越界 → 400 拒绝（强制 0）。
     const templateCandidateCount = share.template.candidateCount ?? 1;
     if (templateCandidateCount <= 1 && selectedCell !== 0) {
       return NextResponse.json(
@@ -235,30 +209,47 @@ async function postHandler(
       );
     }
 
-    // 8. 算并扣 credit（读 preview_share.creditsCharged，由 createPreviewShareAction
-    //    提前算好；不重算避免预览价 / 实际价漂移）。creditsCharged 为 0 → 跳过扣减
-    //    直接 SELECTED（与老逻辑一致）。
-    const creditsToCharge = share.creditsCharged ?? 0;
-    if (creditsToCharge > 0) {
+    // 8. 算 basePrice（与 createPromptOrderAction 一致：computePromptOrderCredits
+    //    按 promptTemplate + promptTemplatePrice 加价规则计算）
+    const templateBasePrice = share.template.price ?? 0;
+    const priceCalc = await computePromptOrderCredits(
+      share.template.id,
+      templateBasePrice,
+      {
+        productTypeCode: share.productTypeCode,
+        productSize: share.productSize,
+        accessoryCode: share.accessoryCode,
+        leatherColor: share.leatherColor,
+        leatherExposed: share.leatherExposed,
+        pvcProtection: share.pvcProtection,
+      }
+    );
+    const basePrice = priceCalc.totalCredits;
+    const creditsLocked = share.creditsLocked ?? 0;
+    const refundAmount = Math.max(0, creditsLocked - basePrice);
+
+    // 9. 扣 basePrice（consumeCredits 走 FIFO 真扣 balance）
+    //    理论上不会 InsufficientCredits —— createPreviewShare 时 creditsLocked ≥ basePrice
+    //    （lockAmount = basePrice × (1 + regenerateLimit)）。但 regenerateLimit=0 或
+    //    价格上调等边界 → confirm 时 basePrice > creditsLocked → InsufficientCredits
+    //    暴露给客人。
+    if (basePrice > 0) {
       try {
-        const specSummary = [
-          share.template.name,
-          share.productSize ? `${share.productSize}cm` : null,
-        ]
-          .filter(Boolean)
-          .join(" · ");
-        const description = `${specSummary} = ${creditsToCharge} 积分（预览确认）`;
         await consumeCredits({
           userId: share.createdBy,
-          amount: creditsToCharge,
+          amount: basePrice,
           serviceName: "image-gen-preview-confirm",
-          description,
+          description: `${share.template.name} = ${basePrice} 积分（预览确认）`,
           metadata: {
             previewShareId: share.id,
             previewOrderNo: share.orderNo,
             templateId: share.template.id,
             templateName: share.template.name,
-            trigger: "guest_submit",
+            trigger: "guest_confirm",
+            usedRegenerateCount: share.usedRegenerateCount ?? 0,
+            creditsLocked,
+            basePrice,
+            refundAmount,
           },
         });
       } catch (err) {
@@ -280,16 +271,59 @@ async function postHandler(
       }
     }
 
-    // 9. NEW INSERT promptOrder（status='SELECTED'）—— 分享链接 → 正式订单
-    //    镜像 preview_share 全部规格字段；candidates 是 [[demoPreviewUrl]]
-    //    （preview 凭证持有 1 张效果图）；uploadedImages 是 [referenceImageUrl]
-    //    （demo 阶段用户上传的原图）。
+    // 10. 释放剩余 credit（grantCredits refund）—— 包括未使用的 regenerate 预算
+    if (refundAmount > 0) {
+      try {
+        await grantCredits({
+          userId: share.createdBy,
+          amount: refundAmount,
+          sourceType: "refund",
+          transactionType: "refund",
+          debitAccount: "SYSTEM:preview_release",
+          description: `预览确认完成，释放多余锁定积分（凭证 ${share.orderNo}）`,
+          metadata: {
+            trigger: "preview_release",
+            previewShareId: share.id,
+            previewOrderNo: share.orderNo,
+            creditsLocked,
+            basePrice,
+            refundAmount,
+          },
+        });
+      } catch (err) {
+        logger.error(
+          { err, previewShareId: share.id, refundAmount },
+          "guest-confirm: 释放剩余积分失败"
+        );
+        // 不让 confirm 翻车：释放失败时 creditsLocked 字段置 0 让后续 reconcile 兜底
+      }
+    }
+
+    // 11. NEW INSERT promptOrder（status='SELECTED'）
+    //     preview 流 batchCount=1：uploadedImages = [referenceImageUrl + 客人上传的图]
+    //     candidates = preview 流 4 张生成图（cell 选一）
+    //     selections = [selectedCell]
     const now = new Date();
     const selectionsJson = JSON.stringify([selectedCell]);
     const clientIp =
       req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
       req.headers.get("x-real-ip") ??
       null;
+
+    // 解析客人上传的原图列表（preview_share.uploadedImages 是 JSON 数组）
+    let uploadedImagesArr: string[] = [];
+    if (share.uploadedImages) {
+      try {
+        const parsed = JSON.parse(share.uploadedImages);
+        if (Array.isArray(parsed)) {
+          uploadedImagesArr = parsed.filter(
+            (s): s is string => typeof s === "string"
+          );
+        }
+      } catch {
+        // ignore
+      }
+    }
 
     const [newOrder] = await db
       .insert(promptOrder)
@@ -298,7 +332,7 @@ async function postHandler(
         orderNo: generatePromptOrderNo(),
         token: generateOrderToken(),
         templateId: share.template.id,
-        // preview 阶段代理商已确认规格，直接落 promptOrder
+        // preview 阶段客人已确认规格，直接落 promptOrder
         productTypeCode: share.productTypeCode,
         productSize: share.productSize,
         accessoryCode: share.accessoryCode,
@@ -312,28 +346,25 @@ async function postHandler(
         platformOrderNo: share.platformOrderNo,
         // status=SELECTED：终态，已确认提交
         status: "SELECTED",
-        // preview 流 batchCount=1：uploadedImages=[referenceImageUrl]，
-        // candidates=[[demoPreviewUrl]]
-        uploadCount: 1,
-        imagesPerUpload: 1,
-        regenerateLimit: 0, // preview 流不允许再生图
-        uploadedImages: JSON.stringify([share.referenceImageUrl]),
-        uploadedAt: share.createdAt, // 沿用 preview 凭证创建时间
-        generatedAt: share.createdAt,
-        candidates: share.candidates, // "[[demoPreviewUrl]]"
+        // preview 流 batchCount=1
+        uploadCount: share.uploadCount ?? 1,
+        imagesPerUpload: share.imagesPerUpload ?? 1,
+        regenerateLimit: 0, // preview 流不允许再生图（客人终态已选）
+        uploadedImages: JSON.stringify(uploadedImagesArr),
+        uploadedAt: share.uploadedAt ?? share.createdAt,
+        generatedAt: share.generatedAt,
+        candidates: share.candidates,
         selections: selectionsJson,
         selectedAt: now,
         selectedIndex: selectedCell,
-        // 镜像 creditsCharged / creditsBreakdown（已扣到代理商）
-        creditsCharged: share.creditsCharged,
-        creditsBreakdown: share.creditsBreakdown,
-        // preview 凭证创建的订单 → createdBy=代理商（demo 流同源）
+        // 镜像终态扣款明细
+        creditsCharged: basePrice,
+        creditsBreakdown: priceCalc.breakdown
+          ? JSON.stringify(priceCalc.breakdown)
+          : null,
+        // preview 凭证创建的订单 → createdBy=代理商
         createdBy: share.createdBy,
-        // preview 流不绑代理商（代理商业务已砍，保留 set null 历史兼容）
         agentId: null,
-        // 关键标志：标识此订单来源是 preview 凭证确认（便于对账 + admin 复盘）。
-        // 不再用 promptOrder.isPreviewShare 列 —— 旧列已 drop（0017 migration）。
-        // 关系链靠 preview_share.linked_order_id 反向追溯。
       })
       .returning({ id: promptOrder.id, orderNo: promptOrder.orderNo });
 
@@ -341,7 +372,7 @@ async function postHandler(
       throw new Error("新建订单失败");
     }
 
-    // 10. UPDATE preview_share → confirmed + linkedOrderId
+    // 12. UPDATE preview_share → confirmed + linkedOrderId + 清零 creditsLocked
     await db
       .update(previewShare)
       .set({
@@ -350,6 +381,7 @@ async function postHandler(
         selectedCell,
         confirmedAt: now,
         confirmedByIp: clientIp,
+        creditsLocked: 0,
         updatedAt: now,
       })
       .where(eq(previewShare.id, share.id));
@@ -357,18 +389,19 @@ async function postHandler(
     return NextResponse.json({
       success: true,
       message:
-        creditsToCharge > 0
-          ? `已确认下单，扣除代理商 ${creditsToCharge} 积分。`
+        basePrice > 0
+          ? `已确认下单，扣除代理商 ${basePrice} 积分${refundAmount > 0 ? `，释放 ${refundAmount} 积分` : ""}。`
           : "已确认下单。",
       data: {
         status: "confirmed" as const,
         previewOrderNo: share.orderNo,
         orderId: newOrder.id,
         orderNo: newOrder.orderNo,
-        token: null as string | null, // 见下方备注 —— 新订单的 token 不暴露，客人继续访问原 /p/{token} 即可跳转
+        token: null as string | null,
         selections: [selectedCell],
         selectedAt: now.toISOString(),
-        creditsCharged: creditsToCharge,
+        creditsCharged: basePrice,
+        refundedCredits: refundAmount,
         linkedOrderId: newOrder.id,
       },
     });

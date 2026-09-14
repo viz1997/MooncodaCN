@@ -22,6 +22,7 @@
  *   0015  prompt_order.is_preview_share 列
  *   0016  preview_share 独立表（分享链接 ≠ 下单）—— 创建 + 3 个索引
  *   0017  prompt_order.is_preview_share 列移除（preview_share 独立后不再需要）
+ *   0040  preview_share 升级 6 步工作台 —— 扩 enum 至 9 态 + 16 字段 + 1 索引
  *
  * 所有语句都包了 IF NOT EXISTS（或 SET DEFAULT，本身幂等），
  * 重复跑安全。脚本里直接 embed SQL 而非读 .sql 文件，避免
@@ -252,6 +253,85 @@ async function main() {
     {
       label: "0017 DROP prompt_order.is_preview_share",
       query: `ALTER TABLE "prompt_order" DROP COLUMN IF EXISTS "is_preview_share";`,
+    },
+
+    // 0040 preview_share 升级 6 步工作台（preview 流可走完整 ToC 流程 + credit 锁定）
+    //
+    // 注意：status 字段在 0016 是 text 列（不是 PG enum 类型），所以新状态值
+    // 直接落到 text 上即可，不需要 ALTER TYPE。status 校验由 schema.ts 的
+    // previewShareStatusValues literal union 在 TS 层把关。
+    //
+    // 状态机列（镜像 promptOrder 字段名）
+    {
+      label: "0040 uploaded_images",
+      query: `ALTER TABLE "preview_share" ADD COLUMN IF NOT EXISTS "uploaded_images" text;`,
+    },
+    {
+      label: "0040 images_per_upload",
+      query: `ALTER TABLE "preview_share" ADD COLUMN IF NOT EXISTS "images_per_upload" integer NOT NULL DEFAULT 3;`,
+    },
+    {
+      label: "0040 upload_count",
+      query: `ALTER TABLE "preview_share" ADD COLUMN IF NOT EXISTS "upload_count" integer NOT NULL DEFAULT 0;`,
+    },
+    {
+      label: "0040 uploaded_at",
+      query: `ALTER TABLE "preview_share" ADD COLUMN IF NOT EXISTS "uploaded_at" timestamp;`,
+    },
+    {
+      label: "0040 generated_at",
+      query: `ALTER TABLE "preview_share" ADD COLUMN IF NOT EXISTS "generated_at" timestamp;`,
+    },
+    {
+      label: "0040 selections",
+      query: `ALTER TABLE "preview_share" ADD COLUMN IF NOT EXISTS "selections" text;`,
+    },
+    {
+      label: "0040 selected_index",
+      query: `ALTER TABLE "preview_share" ADD COLUMN IF NOT EXISTS "selected_index" integer;`,
+    },
+    {
+      label: "0040 selected_at",
+      query: `ALTER TABLE "preview_share" ADD COLUMN IF NOT EXISTS "selected_at" timestamp;`,
+    },
+    {
+      label: "0040 selected_batch_count",
+      query: `ALTER TABLE "preview_share" ADD COLUMN IF NOT EXISTS "selected_batch_count" integer NOT NULL DEFAULT 0;`,
+    },
+    // 生成态
+    {
+      label: "0040 generation_task",
+      query: `ALTER TABLE "preview_share" ADD COLUMN IF NOT EXISTS "generation_task" text;`,
+    },
+    {
+      label: "0040 error_message",
+      query: `ALTER TABLE "preview_share" ADD COLUMN IF NOT EXISTS "error_message" text;`,
+    },
+    {
+      label: "0040 cancelled_at",
+      query: `ALTER TABLE "preview_share" ADD COLUMN IF NOT EXISTS "cancelled_at" timestamp;`,
+    },
+    // Credit 锁定
+    {
+      label: "0040 credits_locked",
+      query: `ALTER TABLE "preview_share" ADD COLUMN IF NOT EXISTS "credits_locked" integer NOT NULL DEFAULT 0;`,
+    },
+    {
+      label: "0040 credits_locked_at",
+      query: `ALTER TABLE "preview_share" ADD COLUMN IF NOT EXISTS "credits_locked_at" timestamp;`,
+    },
+    {
+      label: "0040 regenerate_limit",
+      query: `ALTER TABLE "preview_share" ADD COLUMN IF NOT EXISTS "regenerate_limit" integer NOT NULL DEFAULT 3;`,
+    },
+    {
+      label: "0040 used_regenerate_count",
+      query: `ALTER TABLE "preview_share" ADD COLUMN IF NOT EXISTS "used_regenerate_count" integer NOT NULL DEFAULT 0;`,
+    },
+    // 索引
+    {
+      label: "0040 preview_share_uploads_idx",
+      query: `CREATE INDEX IF NOT EXISTS "preview_share_uploads_idx" ON "preview_share"("token", "status");`,
     },
   ];
 

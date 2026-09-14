@@ -51,6 +51,24 @@ export type Events = {
     };
   };
   /**
+   * preview 流提交生图任务（/p/[token] 客人自传图触发的 6 步工作台）
+   *
+   * 由 /api/orders/[token]/upload / regenerate 路由（preview 分支）在写
+   * preview_share.uploadedImages + status='uploaded' 后立即 send。
+   * 与 gpt-image/submit-generation 区分：payload 是 shareId 而非 orderId，
+   * 避免破坏现有事件类型。
+   *
+   * retries: 0 与 promptOrder 一致 —— Lingting 无幂等键，重复提交重复扣配额。
+   */
+  "gpt-image/submit-preview-generation": {
+    data: {
+      shareId: string;
+      fromIdx: number;
+      total: number;
+      candidateCount: number;
+    };
+  };
+  /**
    * image-gen 工作台提交生图任务
    *
    * 由 generateImageAction Server Action 在 createImageJob（落 imageJob

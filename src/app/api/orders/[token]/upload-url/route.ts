@@ -16,6 +16,8 @@ import { promptOrder } from "@/db/schema";
 import { isR2Configured, presignUpload } from "@/features/image-gen/lib/r2";
 import { withApiLogging } from "@/lib/api-logger";
 
+import { getPreviewShareByToken } from "../../_lib/preview-share-helpers";
+
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
@@ -54,6 +56,64 @@ async function postHandler(
         },
         { status: 503 }
       );
+    }
+
+    // 2026-09-14：preview 流 6 步工作台 —— preview_share 优先。
+    // preview 流 R2 objectKey 用 gpt-image/preview/{shareId}/ 命名空间，与
+    // promptOrder 的 gpt-image/orders/{token}/ 隔开。
+    const preview = await getPreviewShareByToken(token);
+    if (preview) {
+      const allowedPreviewStatuses = new Set(["pending", "uploaded", "failed"]);
+      if (!allowedPreviewStatuses.has(preview.status)) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `当前状态为 ${preview.status}，无法上传`,
+          },
+          { status: 400 }
+        );
+      }
+      let body: PresignRequestBody = {};
+      try {
+        body = (await req.json()) as PresignRequestBody;
+      } catch {
+        return NextResponse.json(
+          { success: false, error: "请求体非法" },
+          { status: 400 }
+        );
+      }
+      const contentType = (body.contentType ?? "").toLowerCase();
+      if (!ALLOWED_CONTENT_TYPES.has(contentType)) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "格式不支持，仅 JPG/PNG/WebP/GIF",
+          },
+          { status: 400 }
+        );
+      }
+      if (typeof body.size === "number" && body.size > MAX_BYTES) {
+        return NextResponse.json(
+          { success: false, error: "文件过大，最大 5MB（请先在客户端压缩）" },
+          { status: 400 }
+        );
+      }
+      const ext =
+        body.ext ?? contentType.split("/")[1]?.replace("jpeg", "jpg") ?? "bin";
+      const safeExt = ext
+        .replace(/[^a-z0-9]/gi, "")
+        .toLowerCase()
+        .slice(0, 8);
+      const objectKey = `gpt-image/preview/${preview.id}/${Date.now()}-${nanoid(10)}.${safeExt}`;
+      const presigned = await presignUpload({ objectKey, contentType });
+      return NextResponse.json({
+        success: true,
+        uploadUrl: presigned.uploadUrl,
+        publicUrl: presigned.publicUrl,
+        objectKey: presigned.objectKey,
+        headers: presigned.headers,
+        maxBytes: MAX_BYTES,
+      });
     }
 
     const order = await db.query.promptOrder.findFirst({

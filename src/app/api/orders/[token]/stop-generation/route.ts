@@ -16,8 +16,10 @@ import { eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
-import { promptOrder } from "@/db/schema";
+import { previewShare, promptOrder } from "@/db/schema";
 import { withApiLogging } from "@/lib/api-logger";
+
+import { getPreviewShareByToken } from "../../_lib/preview-share-helpers";
 
 export const runtime = "nodejs";
 
@@ -27,6 +29,36 @@ async function postHandler(
 ) {
   try {
     const { token } = await ctx.params;
+
+    // 2026-09-14：preview 流 stop-generation —— preview_share 优先。
+    const preview = await getPreviewShareByToken(token);
+    if (preview) {
+      if (preview.status !== "generating") {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `当前状态为 ${preview.status}，没有正在进行的生成任务`,
+          },
+          { status: 400 }
+        );
+      }
+      await db
+        .update(previewShare)
+        .set({
+          status: "failed",
+          generationTask: null,
+          errorMessage: "已停止本次生成，可点击重新生成",
+          cancelledAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(previewShare.id, preview.id));
+      return NextResponse.json({
+        success: true,
+        message: "已停止本次生成",
+        data: { signalled: true },
+      });
+    }
+
     const order = await db.query.promptOrder.findFirst({
       where: eq(promptOrder.token, token),
       columns: { id: true, status: true },

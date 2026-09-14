@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { previewShare, promptOrder } from "@/db/schema";
 import { InvalidLinkScreen } from "@/features/gpt-image/user/components/invalid-link-screen";
-import { PreviewShareView } from "@/features/gpt-image/user/components/preview-share-view";
+import { PreviewOrderView } from "@/features/gpt-image/user/components/preview-order-view";
 import { UserOrderView } from "@/features/gpt-image/user/components/user-order-view";
 
 export const dynamic = "force-dynamic";
@@ -12,14 +12,14 @@ export const dynamic = "force-dynamic";
 /**
  * 公共访问 - 通过 token 查看订单或预览凭证（免登录）
  *
- * 2026-09-13：分享链接 ≠ 下单。preview_share 独立表后，本入口按 token 先查
- * preview_share 优先：
- *
- *   - preview_share 命中 + status='pending' → PreviewShareView（客人预览确认）
- *   - preview_share 命中 + status='confirmed' + linkedOrderId →
- *       查 promptOrder by id → redirect 到其 token 走 SELECTED 视图
- *   - preview_share 命中 + status='expired' 或过期 → InvalidLinkScreen
- *   - preview_share 查不到 → 走 promptOrder 老路径（UserOrderView）
+ * 2026-09-14：preview 流升级为完整 6 步工作台（upload → generate → select →
+ * regenerate → configure → confirm）。PreviewShareView 替换为 PreviewOrderView，
+ * 数据源走 preview_share 表（service 层通过 /api/orders/[token] 路由把 preview_share
+ * 投影成 OrderView 形状）。preview 流状态机 9 态全部进 PreviewOrderView：
+ *   pending / uploaded / generating / candidates_ready / selected / failed /
+ *   cancelled 全部走 PreviewOrderView（UI 内部按状态切换步骤）；
+ *   confirmed + linkedOrderId → redirect 到新建 promptOrder token 的 SELECTED 视图；
+ *   expired → InvalidLinkScreen。
  *
  * token 校验由 page 内部分发（preview_share / promptOrder 各自校验），
  * 无效 token 显示 InvalidLinkScreen。
@@ -68,27 +68,12 @@ export default async function PublicOrderPage({
       return <InvalidLinkScreen />;
     }
 
-    // 1c. status='pending' → 渲染 PreviewShareView
+    // 1c. 其余 7 态全部进 PreviewOrderView（6 步工作台）
     return (
-      <PreviewShareView
+      <PreviewOrderView
         token={token}
         previewOrderNo={share.orderNo}
-        updatedAt={share.updatedAt.toISOString()}
-        candidateCount={share.template.candidateCount ?? 1}
-        outputMode={
-          (share.template.outputMode ?? "grid") as "grid" | "separate"
-        }
         templateName={share.template.name}
-        productTypeCode={share.productTypeCode}
-        productSize={share.productSize}
-        accessoryCode={share.accessoryCode}
-        engravingText={share.engravingText}
-        engravingExposed={share.engravingExposed}
-        leatherColor={share.leatherColor}
-        leatherExposed={share.leatherExposed}
-        pvcProtection={share.pvcProtection}
-        remarks={share.remarks}
-        platform={share.platform}
       />
     );
   }

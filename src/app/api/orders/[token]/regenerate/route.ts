@@ -26,7 +26,7 @@
 import { and, count, eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { promptOrder, promptOrderHistory } from "@/db/schema";
+import { previewShare, promptOrder, promptOrderHistory } from "@/db/schema";
 import { submitGeneration } from "@/features/gpt-image/lib/generation-service";
 import {
   parseCandidates,
@@ -36,6 +36,8 @@ import { archiveOrderSnapshot } from "@/features/gpt-image/lib/order-history";
 import { inngest } from "@/inngest";
 import { withApiLogging } from "@/lib/api-logger";
 import { logger } from "@/lib/logger";
+
+import { getPreviewShareByToken } from "../../_lib/preview-share-helpers";
 
 export const runtime = "nodejs";
 // 90s：主路径是 Inngest 异步（路由 30s 内返回 202），但 Inngest send
@@ -94,6 +96,103 @@ async function postHandler(
       return NextResponse.json(
         { success: false, error: "batchIdx 必须是非负整数" },
         { status: 400 }
+      );
+    }
+
+    // 2026-09-14：preview 流 6 步工作台 —— preview_share 优先分支。
+    // preview 流 regenerate 是「整张凭证重生成」（batchCount=1），不接受 batchIdx；
+    // credits 已在 createPreviewShareAction 一次性预扣，这里仅 increment usedRegenerateCount。
+    const preview = await getPreviewShareByToken(token);
+    if (preview) {
+      if (
+        preview.status !== "candidates_ready" &&
+        preview.status !== "failed"
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `当前状态为 ${preview.status}，无法重新生成`,
+          },
+          { status: 400 }
+        );
+      }
+      const limit = preview.regenerateLimit ?? 0;
+      const used = preview.usedRegenerateCount ?? 0;
+      if (used >= limit) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `已用完 ${limit} 次重新生成预算`,
+          },
+          { status: 429 }
+        );
+      }
+      const uploaded = parseUploadedLength(preview.uploadedImages);
+      if (uploaded === 0) {
+        return NextResponse.json(
+          { success: false, error: "尚未上传任何图片" },
+          { status: 400 }
+        );
+      }
+
+      const newCount = used + 1;
+      await db
+        .update(previewShare)
+        .set({
+          status: "generating",
+          // candidates 列 .notNull() → 用空数组而非 null 重置；submitLingtingTask
+          // 启动后会按 batchIdx 写回。submitPreviewGeneration 内部 fillSparseSlotsForPreview
+          // 也兼容 [[]] 形态。
+          candidates: JSON.stringify([]),
+          generationTask: null,
+          selections: null,
+          selectedIndex: null,
+          selectedAt: null,
+          selectedBatchCount: 0,
+          errorMessage: null,
+          cancelledAt: null,
+          generatedAt: null,
+          usedRegenerateCount: newCount,
+          // 锁定列的 expiresAt / 剩余次数不需要改 —— 创建时已锁定总额。
+          updatedAt: new Date(),
+        })
+        .where(eq(previewShare.id, preview.id));
+
+      try {
+        await inngest.send({
+          name: "gpt-image/submit-preview-generation",
+          data: {
+            shareId: preview.id,
+            fromIdx: 0,
+            total: 1,
+            candidateCount: preview.template.candidateCount,
+          },
+        });
+      } catch (err) {
+        logger.warn(
+          { err, shareId: preview.id },
+          "Inngest send 失败（preview regenerate）：状态已置 generating，前端轮询 /poll 看服务端是否已推进"
+        );
+        return NextResponse.json(
+          {
+            success: false,
+            error: "提交生图任务失败，请稍后重试",
+          },
+          { status: 500 }
+        );
+      }
+      return NextResponse.json(
+        {
+          success: true,
+          message: `正在重新生成（剩余 ${limit - newCount} 次）`,
+          data: {
+            status: "generating",
+            usedRegenerateCount: newCount,
+            regenerateLimit: limit,
+            triggerMode: "ingest",
+          },
+        },
+        { status: 202 }
       );
     }
 

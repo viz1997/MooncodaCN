@@ -13,6 +13,8 @@ import { promptOrder } from "@/db/schema";
 import { parseUploadedImages } from "@/features/gpt-image/lib/order-helpers";
 import { withApiLogging } from "@/lib/api-logger";
 
+import { getPreviewShareByToken } from "../../_lib/preview-share-helpers";
+
 export const runtime = "nodejs";
 
 async function getHandler(
@@ -29,6 +31,32 @@ async function getHandler(
         { success: false, error: "index 无效" },
         { status: 400 }
       );
+    }
+
+    // 2026-09-14：preview 流 6 步工作台 —— preview_share 优先。
+    const preview = await getPreviewShareByToken(token);
+    if (preview) {
+      const images = parseUploadedImages(preview.uploadedImages);
+      const target = images[index];
+      if (!target) {
+        return NextResponse.json(
+          { success: false, error: "原图不存在" },
+          { status: 404 }
+        );
+      }
+      if (!/^https?:\/\//i.test(target)) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "原图字段不是合法 URL",
+          },
+          { status: 500 }
+        );
+      }
+      return NextResponse.redirect(target, {
+        status: 302,
+        headers: { "Cache-Control": "private, max-age=60" },
+      });
     }
 
     const order = await db.query.promptOrder.findFirst({

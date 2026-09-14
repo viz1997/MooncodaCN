@@ -16,6 +16,11 @@ import {
 } from "@/features/gpt-image/lib/order-helpers";
 import { withApiLogging } from "@/lib/api-logger";
 
+import {
+  getPreviewShareByToken,
+  projectPreviewToOrderView,
+} from "../_lib/preview-share-helpers";
+
 export const runtime = "nodejs";
 
 async function getHandler(
@@ -24,6 +29,17 @@ async function getHandler(
 ) {
   try {
     const { token } = await ctx.params;
+
+    // 2026-09-14：preview 流 6 步工作台 —— preview_share 优先。
+    // 命中：把 preview_share 投影成 OrderView 形状，客户端 useOrder 无感。
+    const preview = await getPreviewShareByToken(token);
+    if (preview) {
+      return NextResponse.json({
+        success: true,
+        data: projectPreviewToOrderView(preview),
+      });
+    }
+
     const order = await db.query.promptOrder.findFirst({
       where: (o, { eq }) => eq(o.token, token),
       with: {

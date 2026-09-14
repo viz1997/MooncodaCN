@@ -19,13 +19,15 @@ import { eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
-import { promptOrder } from "@/db/schema";
+import { previewShare, promptOrder } from "@/db/schema";
 import {
   getProductType,
   validateLeatherColor,
   validatePlatform,
 } from "@/features/gpt-image/lib/product-catalog";
 import { withApiLogging } from "@/lib/api-logger";
+
+import { getPreviewShareByToken } from "../../_lib/preview-share-helpers";
 
 export const runtime = "nodejs";
 
@@ -47,6 +49,130 @@ const configureSchema = z
   })
   .strict();
 
+/**
+ * 2026-09-14：把 capability 校验抽出（promptOrder + preview_share 两路共用）。
+ * 返回 final fields 或 throw 一个 { status, error }。
+ */
+type ConfigInput = z.infer<typeof configureSchema>;
+
+function validateAndFinalize(
+  productTypeCode: string | null,
+  input: ConfigInput
+):
+  | {
+      ok: true;
+      fields: {
+        engravingText: string | null;
+        engravingExposed: boolean | null;
+        leatherColor: string | null;
+        leatherExposed: boolean | null;
+        pvcProtection: boolean | null;
+        remarks: string | null;
+        platform: string | null;
+        platformOrderNo: string | null;
+      };
+    }
+  | { ok: false; status: number; error: string } {
+  if (!productTypeCode) {
+    return { ok: false, status: 400, error: "此订单无产品型号，不支持定制" };
+  }
+  const type = getProductType(productTypeCode);
+  if (!type) {
+    return {
+      ok: false,
+      status: 400,
+      error: `产品型号不存在：${productTypeCode}`,
+    };
+  }
+
+  const trimmedEngraving =
+    type.capabilities.canEngrave &&
+    typeof input.engravingText === "string" &&
+    input.engravingText.trim().length > 0
+      ? input.engravingText.trim()
+      : null;
+  const finalEngravingExposed =
+    type.capabilities.canEngrave && trimmedEngraving !== null
+      ? input.engravingExposed === true
+      : null;
+
+  const finalLeatherColor = type.capabilities.canLeatherColor
+    ? (input.leatherColor ?? null)
+    : null;
+  try {
+    validateLeatherColor(finalLeatherColor);
+  } catch (e) {
+    return {
+      ok: false,
+      status: 400,
+      error: e instanceof Error ? e.message : "皮革颜色 code 不合法",
+    };
+  }
+  const finalLeatherExposed = type.capabilities.canLeatherExposed
+    ? input.leatherExposed === true
+    : null;
+  const finalPvcProtection = type.capabilities.canPvcProtection
+    ? input.pvcProtection === true
+    : null;
+  if (finalLeatherExposed === true && finalPvcProtection === true) {
+    return {
+      ok: false,
+      status: 400,
+      error: "皮革外露 与 PVC 保护 不能同时勾选",
+    };
+  }
+  const trimmedRemarks =
+    type.capabilities.canHaveRemarks &&
+    typeof input.remarks === "string" &&
+    input.remarks.trim().length > 0
+      ? input.remarks.trim()
+      : null;
+
+  let finalPlatform: string | null = null;
+  let finalPlatformOrderNo: string | null = null;
+  if (type.capabilities.canPlatform) {
+    const rawPlatform = input.platform;
+    if (rawPlatform && rawPlatform.trim().length > 0) {
+      try {
+        validatePlatform(rawPlatform);
+        finalPlatform = rawPlatform;
+      } catch (e) {
+        return {
+          ok: false,
+          status: 400,
+          error: e instanceof Error ? e.message : "平台 code 不合法",
+        };
+      }
+    }
+    const rawOrderNo = input.platformOrderNo;
+    if (typeof rawOrderNo === "string") {
+      const trimmed = rawOrderNo.trim();
+      finalPlatformOrderNo = trimmed.length > 0 ? trimmed : null;
+    }
+    if (finalPlatformOrderNo && !finalPlatform) {
+      return {
+        ok: false,
+        status: 400,
+        error: "填写渠道订单号时需同时选择订单来源平台",
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    fields: {
+      engravingText: trimmedEngraving,
+      engravingExposed: finalEngravingExposed,
+      leatherColor: finalLeatherColor,
+      leatherExposed: finalLeatherExposed,
+      pvcProtection: finalPvcProtection,
+      remarks: trimmedRemarks,
+      platform: finalPlatform,
+      platformOrderNo: finalPlatformOrderNo,
+    },
+  };
+}
+
 async function postHandler(
   req: NextRequest,
   ctx: { params: Promise<{ token: string }> }
@@ -62,6 +188,47 @@ async function postHandler(
       );
     }
     const input = parsed.data;
+
+    // 2026-09-14：preview 流 6 步工作台 —— preview_share 优先。
+    // 允许状态：pending / uploaded / generating / candidates_ready / selected。
+    // preview 流在 confirm 之前 spec 全程可改；confirm 后变终态。
+    const preview = await getPreviewShareByToken(token);
+    if (preview) {
+      const allowedStatuses = new Set([
+        "pending",
+        "uploaded",
+        "generating",
+        "candidates_ready",
+        "selected",
+      ]);
+      if (!allowedStatuses.has(preview.status)) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `当前状态（${preview.status}）不允许修改定制信息`,
+          },
+          { status: 400 }
+        );
+      }
+      const result = validateAndFinalize(preview.productTypeCode, input);
+      if (!result.ok) {
+        return NextResponse.json(
+          { success: false, error: result.error },
+          { status: result.status }
+        );
+      }
+      await db
+        .update(previewShare)
+        .set({
+          ...result.fields,
+          updatedAt: new Date(),
+        })
+        .where(eq(previewShare.id, preview.id));
+      return NextResponse.json({
+        success: true,
+        data: result.fields,
+      });
+    }
 
     const order = await db.query.promptOrder.findFirst({
       where: eq(promptOrder.token, token),
@@ -90,139 +257,25 @@ async function postHandler(
       );
     }
 
-    // ToC 订单（无 productTypeCode）→ 不接受定制
-    if (!order.productTypeCode) {
+    const result = validateAndFinalize(order.productTypeCode, input);
+    if (!result.ok) {
       return NextResponse.json(
-        { success: false, error: "此订单无产品型号，不支持定制" },
-        { status: 400 }
+        { success: false, error: result.error },
+        { status: result.status }
       );
-    }
-
-    const type = getProductType(order.productTypeCode);
-    if (!type) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: `产品型号不存在：${order.productTypeCode}`,
-        },
-        { status: 400 }
-      );
-    }
-
-    // 能力联动校验：与产品 capabilities 严格对齐
-    // engravingText 联动：canEngrave=true 且用户给了非空文本才存
-    const trimmedEngraving =
-      type.capabilities.canEngrave &&
-      typeof input.engravingText === "string" &&
-      input.engravingText.trim().length > 0
-        ? input.engravingText.trim()
-        : null;
-    const finalEngravingExposed =
-      type.capabilities.canEngrave && trimmedEngraving !== null
-        ? input.engravingExposed === true
-        : null;
-
-    // 2026-09-10：LB 皮革徽章扩字段联动。capability 关闭的字段静默 collapse 为 null（与 engraving 同模式）。
-    const finalLeatherColor = type.capabilities.canLeatherColor
-      ? (input.leatherColor ?? null)
-      : null;
-    // 字典白名单 —— 字典外的 code 直接抛 400（避免脏数据落库）
-    validateLeatherColor(finalLeatherColor);
-    const finalLeatherExposed = type.capabilities.canLeatherExposed
-      ? input.leatherExposed === true
-      : null;
-    const finalPvcProtection = type.capabilities.canPvcProtection
-      ? input.pvcProtection === true
-      : null;
-    // 2026-09-11：皮革外露 / PVC 保护互斥（二选一）。
-    // UI 层 ProductConfigSection 已经做了互斥，server 再兜一次挡绕过前端的脏请求。
-    if (finalLeatherExposed === true && finalPvcProtection === true) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "皮革外露 与 PVC 保护 不能同时勾选",
-        },
-        { status: 400 }
-      );
-    }
-    // remarks：capability 关闭 → null；开启但用户没填 → null；否则 trim 后存
-    const trimmedRemarks =
-      type.capabilities.canHaveRemarks &&
-      typeof input.remarks === "string" &&
-      input.remarks.trim().length > 0
-        ? input.remarks.trim()
-        : null;
-
-    // 2026-09-11：订单来源平台。capability 关闭 → null；开启但用户没传 → null；
-    // 否则按 PLATFORMS 字典校验（非法 code 抛 400）。
-    let finalPlatform: string | null = null;
-    // 2026-09-11：渠道订单号（与 platform 配对；trim 后存；空 = null）。
-    let finalPlatformOrderNo: string | null = null;
-    if (type.capabilities.canPlatform) {
-      const raw = input.platform;
-      if (raw && raw.trim().length > 0) {
-        try {
-          validatePlatform(raw);
-          finalPlatform = raw;
-        } catch (e) {
-          return NextResponse.json(
-            {
-              success: false,
-              error: e instanceof Error ? e.message : "平台 code 不合法",
-            },
-            { status: 400 }
-          );
-        }
-      }
-      // 渠道订单号：trim 后存；空串视为未填 → null
-      const rawOrderNo = input.platformOrderNo;
-      if (typeof rawOrderNo === "string") {
-        const trimmed = rawOrderNo.trim();
-        finalPlatformOrderNo = trimmed.length > 0 ? trimmed : null;
-      }
-      // 业务规则：用户填了渠道订单号但没选 platform → 400 提示配对填写
-      if (finalPlatformOrderNo && !finalPlatform) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: "填写渠道订单号时需同时选择订单来源平台",
-          },
-          { status: 400 }
-        );
-      }
     }
 
     await db
       .update(promptOrder)
       .set({
-        engravingText: trimmedEngraving,
-        engravingExposed: finalEngravingExposed,
-        leatherColor: finalLeatherColor,
-        leatherExposed: finalLeatherExposed,
-        pvcProtection: finalPvcProtection,
-        remarks: trimmedRemarks,
-        // 2026-09-11：订单来源平台
-        platform: finalPlatform,
-        // 2026-09-11：渠道订单号（与 platform 配对）
-        platformOrderNo: finalPlatformOrderNo,
+        ...result.fields,
         updatedAt: new Date(),
       })
       .where(eq(promptOrder.id, order.id));
 
     return NextResponse.json({
       success: true,
-      data: {
-        engravingText: trimmedEngraving,
-        engravingExposed: finalEngravingExposed,
-        leatherColor: finalLeatherColor,
-        leatherExposed: finalLeatherExposed,
-        pvcProtection: finalPvcProtection,
-        remarks: trimmedRemarks,
-        // 2026-09-11：订单来源平台（PLATFORMS 字典 code）
-        platform: finalPlatform,
-        // 2026-09-11：渠道订单号
-        platformOrderNo: finalPlatformOrderNo,
-      },
+      data: result.fields,
     });
   } catch (err) {
     return NextResponse.json(

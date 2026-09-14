@@ -14,6 +14,8 @@ import {
 } from "@/features/gpt-image/lib/order-helpers";
 import { withApiLogging } from "@/lib/api-logger";
 
+import { getPreviewShareByToken } from "../../_lib/preview-share-helpers";
+
 export const runtime = "nodejs";
 
 async function getHandler(
@@ -22,6 +24,33 @@ async function getHandler(
 ) {
   try {
     const { token } = await ctx.params;
+
+    // 2026-09-14：preview 流 6 步工作台 —— preview_share 优先。
+    const preview = await getPreviewShareByToken(token);
+    if (preview) {
+      const candidates = parseCandidates(preview.candidates as string | null);
+      const uploaded = parseUploadedImages(
+        preview.uploadedImages as string | null
+      );
+      const selections = parseSelections(preview.selections as string | null);
+      return NextResponse.json({
+        success: true,
+        data: {
+          status: preview.status,
+          errorMessage: preview.errorMessage,
+          uploadedAt: preview.uploadedAt?.toISOString() ?? null,
+          generatedAt: preview.generatedAt?.toISOString() ?? null,
+          selectedAt: preview.selectedAt?.toISOString() ?? null,
+          cancelledAt: preview.cancelledAt?.toISOString() ?? null,
+          candidateGroups: countCandidateGroups(candidates),
+          uploadedImageCount: countUploadedImages(uploaded),
+          selections,
+          updatedAt: preview.updatedAt.toISOString(),
+          hasUploadedImage: uploaded.length > 0,
+        },
+      });
+    }
+
     const order = await db.query.promptOrder.findFirst({
       where: (o, { eq }) => eq(o.token, token),
       columns: {

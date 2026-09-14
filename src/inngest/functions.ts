@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { canvasRemoteJob, imageJob } from "@/db/schema";
 import { generateOnServerSync } from "@/features/canvas/services/canvas-server-generate";
 import { submitGeneration } from "@/features/gpt-image/lib/generation-service";
+import { submitPreviewGeneration } from "@/features/gpt-image/lib/preview-generation";
 import {
   dispatchImageGenerationJob,
   updateImageJobFromTaskResult,
@@ -67,6 +68,36 @@ export const submitGenerationJob = inngest.createFunction(
         "Inngest: 开始提交生图任务"
       );
       await submitGeneration(orderId, fromIdx, total, candidateCount);
+    });
+  }
+);
+
+/**
+ * 2026-09-14：preview 流 6 步工作台 Inngest 事件函数。
+ *
+ * 与 submitGenerationJob 镜像，差异：payload 是 shareId 而非 orderId，操作
+ * preview_share 表而非 promptOrder。retries=0 一致 —— Lingting 无幂等键，
+ * 重复提交重复扣配额。
+ *
+ * 由 /api/orders/[token]/upload / regenerate 路由（preview 分支）触发：
+ *   客人扫码进 /p/{token} → UploadStep 选图 → /upload 写 preview_share +
+ *   send `gpt-image/submit-preview-generation` → 后台 submitPreviewGeneration
+ *   写 status='generating' + generationTask JSON → /poll 路由推进
+ */
+export const submitPreviewGenerationJob = inngest.createFunction(
+  {
+    id: "gpt-image-submit-preview-generation",
+    retries: 0,
+  },
+  { event: "gpt-image/submit-preview-generation" },
+  async ({ event, step }) => {
+    const { shareId, fromIdx, total, candidateCount } = event.data;
+    await step.run("submit-preview-generation", async () => {
+      logger.info(
+        { shareId, fromIdx, total, candidateCount },
+        "Inngest: 开始提交 preview 生图任务"
+      );
+      await submitPreviewGeneration(shareId, fromIdx, total, candidateCount);
     });
   }
 );
@@ -455,6 +486,7 @@ export const reconcileCanvasRemoteJobs = inngest.createFunction(
 export const functions = [
   helloWorld,
   submitGenerationJob,
+  submitPreviewGenerationJob,
   reconcileStaleJobs,
   submitImageGenJob,
   canvasRemoteGenerateJob,

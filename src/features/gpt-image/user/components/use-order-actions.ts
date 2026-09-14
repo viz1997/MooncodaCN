@@ -71,6 +71,22 @@ export interface UseOrderActionsResult {
     /** 2026-09-11：渠道订单号（与 platform 配对；空串/null = 清空） */
     platformOrderNo?: string | null;
   }) => Promise<boolean>;
+  /**
+   * 2026-09-14：preview 流客人「终态确认下单」。
+   *
+   * 与 ToC 的 submit()（partial select 多批提交）语义不同：
+   *   - ToC submit() → POST /api/orders/[token]/select 锁批（每批独立）
+   *   - preview confirmPreview() → POST /api/orders/[token]/guest-confirm 一次性
+   *     把 preview_share 转 SELECTED 终态 + 扣代理商 basePrice + 释放剩余 credit
+   *     + 新建 promptOrder
+   *
+   * preview 流 SELECTED 状态（客人已选 cell）后才会调用；非 preview 流
+   * 下不要调（preview 分支只走 preview_share 路由）。
+   *
+   * 成功 → 服务端 preview_share.status='confirmed' + linkedOrderId
+   * 失败：402 代理商积分不足 / 409 已确认 / 410 过期 / 400 状态异常 / 500 默认
+   */
+  confirmPreview: (selectedCell: number) => Promise<boolean>;
 }
 
 async function readError(res: Response, fallback: string) {
@@ -408,5 +424,38 @@ export function useOrderActions({
     retryAll,
     download,
     configure,
+    confirmPreview: async (selectedCell: number) => {
+      try {
+        const res = await fetch(`/api/orders/${token}/guest-confirm`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ selectedCell }),
+        });
+        if (!res.ok) {
+          const json = (await res.json().catch(() => null)) as {
+            error?: string;
+            data?: {
+              agentHasInsufficientCredits?: boolean;
+              required?: number;
+              available?: number;
+            };
+          } | null;
+          if (json?.data?.agentHasInsufficientCredits) {
+            toast.error(
+              `代理商积分不足（需要 ${json.data.required ?? "?"}，当前可用 ${json.data.available ?? "?"}）`
+            );
+          } else {
+            toast.error(json?.error ?? "确认下单失败");
+          }
+          return false;
+        }
+        toast.success("已确认下单");
+        await refresh();
+        return true;
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "确认下单失败");
+        return false;
+      }
+    },
   };
 }

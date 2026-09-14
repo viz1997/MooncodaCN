@@ -21,7 +21,7 @@ import { eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
-import { promptOrder } from "@/db/schema";
+import { previewShare, promptOrder } from "@/db/schema";
 import { submitGeneration } from "@/features/gpt-image/lib/generation-service";
 import {
   parseSelections,
@@ -32,6 +32,8 @@ import { getR2PublicHosts, isR2Configured } from "@/features/image-gen/lib/r2";
 import { inngest } from "@/inngest";
 import { withApiLogging } from "@/lib/api-logger";
 import { logger } from "@/lib/logger";
+
+import { getPreviewShareByToken } from "../../_lib/preview-share-helpers";
 
 export const runtime = "nodejs";
 // 300s（Vercel Pro 上限）：主路径是 Inngest 异步（路由 30s 内就返回 202），
@@ -109,6 +111,125 @@ async function postHandler(
         { success: false, error: "请至少上传一张图片" },
         { status: 400 }
       );
+    }
+
+    // 2026-09-14：preview 流 6 步工作台 —— preview_share 优先分支。
+    // preview 流只允许 status in ['pending','uploaded','failed'] 上传（首次 + 失败重传），
+    // 不开放 CANDIDATES_READY 增量 append（preview 是单批次：imagesPerUpload=1，
+    // 没有"追加新图"语义）。后续再次生成走 /regenerate 路由。
+    const preview = await getPreviewShareByToken(token);
+    if (preview) {
+      const allowedPreviewStatuses = new Set(["pending", "uploaded", "failed"]);
+      if (!allowedPreviewStatuses.has(preview.status)) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `当前状态为 ${preview.status}，无法上传`,
+          },
+          { status: 400 }
+        );
+      }
+      if (!isR2Configured()) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "R2 未配置，无法接收原图 URL",
+            code: "R2_NOT_CONFIGURED",
+          },
+          { status: 503 }
+        );
+      }
+      const accepted: string[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const item = files[i] as UploadFileItem;
+        const url = typeof item?.publicUrl === "string" ? item.publicUrl : "";
+        if (!url) {
+          return NextResponse.json(
+            { success: false, error: `第 ${i + 1} 张缺少 publicUrl` },
+            { status: 400 }
+          );
+        }
+        if (!isAllowedPublicUrl(url)) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: `第 ${i + 1} 张 publicUrl 不在允许的 R2 域名内`,
+            },
+            { status: 400 }
+          );
+        }
+        accepted.push(url);
+      }
+      // preview 流 imagesPerUpload 硬编码 1：单张图替换/覆盖语义。
+      const existing = parseUploadedImages(preview.uploadedImages);
+      const isRetryAfterFailure = preview.status === "failed";
+      const merged = isRetryAfterFailure
+        ? [accepted[0] ?? existing[0] ?? ""].filter(Boolean)
+        : [accepted[0] ?? ""].filter(Boolean);
+
+      await db
+        .update(previewShare)
+        .set({
+          uploadedImages: JSON.stringify(merged),
+          status: "uploaded",
+          uploadedAt: new Date(),
+          uploadCount: 1,
+          imagesPerUpload: 1,
+          // candidates 列 .notNull() → 用空数组重置；submitPreviewGeneration
+          // 启动后按 batchIdx 写回 [[urls×candidateCount]]。
+          candidates: JSON.stringify([]),
+          generationTask: null,
+          selections: null,
+          selectedIndex: null,
+          selectedAt: null,
+          selectedBatchCount: 0,
+          errorMessage: null,
+          cancelledAt: null,
+          generatedAt: null,
+          usedRegenerateCount: 0, // failed 重传重置 regenerate 计数
+          updatedAt: new Date(),
+        })
+        .where(eq(previewShare.id, preview.id));
+
+      try {
+        await inngest.send({
+          name: "gpt-image/submit-preview-generation",
+          data: {
+            shareId: preview.id,
+            fromIdx: 0,
+            total: 1,
+            candidateCount: preview.template.candidateCount,
+          },
+        });
+        return NextResponse.json(
+          {
+            success: true,
+            message: `${accepted.length} 张图片已上传，正在生成效果图`,
+            data: {
+              status: "generating",
+              uploadedImageCount: merged.length,
+              newImageCount: accepted.length,
+              errorMessage: null,
+              triggerMode: "ingest",
+            },
+          },
+          { status: 202 }
+        );
+      } catch (err) {
+        logger.warn(
+          { err, shareId: preview.id },
+          "Inngest send 失败（preview 流）：当前路由不支持同步降级，请检查 INNGEST_EVENT_KEY"
+        );
+        // preview 流没有同步 fallback（避免 /upload maxDuration=300 但 submitPreviewGeneration
+        // 走 Lingting submit 链路的同步分支）—— 让前端轮询 /poll 看是否已被服务端落库。
+        return NextResponse.json(
+          {
+            success: false,
+            error: "提交生图任务失败，请稍后重试",
+          },
+          { status: 500 }
+        );
+      }
     }
 
     const order = await db.query.promptOrder.findFirst({

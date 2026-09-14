@@ -44,6 +44,8 @@ import { z } from "zod";
 
 import { db } from "@/db";
 import { previewShare, promptTemplate } from "@/db/schema";
+import { consumeCredits } from "@/features/credits/core";
+import { InsufficientCreditsError } from "@/features/credits/errors";
 import { generateOrderToken } from "@/features/gpt-image/lib/generation-service";
 import { findEffect } from "@/features/image-gen/lib/effects-store";
 import {
@@ -58,6 +60,8 @@ const withPreviewAction = (name: string) =>
 
 // preview 凭证 7 天过期（默认）
 const PREVIEW_EXPIRES_DAYS = 7;
+// 重新生成次数上限（2026-09-14 MVP 硬编码 3，PM 拍板后改 admin 可配置）
+const REGENERATE_LIMIT = 3;
 
 const createPreviewSchema = z.object({
   templateId: z.string().min(1),
@@ -185,6 +189,8 @@ export const createPreviewShareAction = withPreviewAction("create")
         leatherExposed: finalLeatherExposed,
         pvcProtection: finalPvcProtection,
       });
+      // 上一步返回的 priceResult.totalCredits 即为本单总价（基础价 + 加价）。
+      // 后续 credit 锁定 = totalCredits × (1 + regenerateLimit)。
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error("[preview-share] computePromptOrderCredits failed:", {
@@ -198,12 +204,40 @@ export const createPreviewShareAction = withPreviewAction("create")
     const { totalCredits, breakdown } = priceResult;
     const creditsBreakdownJson = JSON.stringify(breakdown);
 
-    // 4. 写 preview_share 凭证（**不**写 promptOrder —— 分享链接 ≠ 下单）
+    // 4. 2026-09-14 升级：预扣代理商 credit（creditsLocked = basePrice × (1 + regenerateLimit)）。
+    //    客人走完 6 步 regenerate 不再真扣 balance，终态 confirm 才扣 basePrice。
+    //    totalCredits=0（免费模板）→ lockAmount=0，跳过预扣。
+    const lockAmount = totalCredits * (1 + REGENERATE_LIMIT);
+    if (lockAmount > 0) {
+      try {
+        await consumeCredits({
+          userId: ctx.userId,
+          amount: lockAmount,
+          serviceName: "image-gen-preview-lock",
+          description: `锁定 ${lockAmount} 积分（凭证待创建，含 ${REGENERATE_LIMIT} 次重新生成预算）`,
+          metadata: {
+            trigger: "preview_lock",
+            basePrice: totalCredits,
+            regenerateLimit: REGENERATE_LIMIT,
+          },
+        });
+      } catch (err) {
+        if (err instanceof InsufficientCreditsError) {
+          throw new Error(
+            `代理商积分不足（需要 ${err.required}，当前可用 ${err.available}），无法创建预览凭证`
+          );
+        }
+        throw err;
+      }
+    }
+
+    // 5. 写 preview_share 凭证（**不**写 promptOrder —— 分享链接 ≠ 下单）
     const token = generateOrderToken();
     const orderNo = generatePreviewOrderNo();
     const expiresAt = new Date(
       Date.now() + PREVIEW_EXPIRES_DAYS * 24 * 60 * 60 * 1000
     );
+    const now = new Date();
 
     const candidatesJson = JSON.stringify([[parsedInput.demoPreviewUrl]]);
 
@@ -221,7 +255,7 @@ export const createPreviewShareAction = withPreviewAction("create")
           // 候选集（[[demoPreviewUrl]]）—— /api/orders/[token]/candidates/0/0
           // 路由按 token 查 preview_share 返图
           candidates: candidatesJson,
-          // 客人确认时由 guest-submit 路由写入
+          // 客人确认时由 guest-confirm 路由写入
           selectedCell: null,
           // 规格字段（CONFIRMED 时镜像写入新建 promptOrder）
           productTypeCode: parsedInput.productTypeCode ?? null,
@@ -238,7 +272,13 @@ export const createPreviewShareAction = withPreviewAction("create")
           // 提前算好的应扣积分（客人确认时直接读，避免重算漂移）
           creditsCharged: totalCredits,
           creditsBreakdown: creditsBreakdownJson,
-          // 状态机：pending → confirmed（客人确认）/ expired（cron 清理）
+          // 2026-09-14：credit 锁定字段
+          creditsLocked: lockAmount,
+          creditsLockedAt: lockAmount > 0 ? now : null,
+          regenerateLimit: REGENERATE_LIMIT,
+          usedRegenerateCount: 0,
+          // 状态机：pending → uploaded → generating → candidates_ready →
+          //          selected → confirmed（客人确认）/ expired（cron 清理）
           status: "pending",
           createdBy: ctx.userId,
           // CONFIRMED 后指向新建 promptOrder.id（创建时 null）

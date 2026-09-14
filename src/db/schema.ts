@@ -1729,11 +1729,29 @@ export const promptTemplatePriceRelations = relations(
 //   - linkedOrderId：文字字段不绑 FK（promptOrder 与 previewShare 互相反指会
 //     形成循环 FK；删 promptOrder 时由应用层清 preview_share.linked_order_id）
 // ============================================
-export const previewShareStatusEnum = pgEnum("preview_share_status", [
+// 2026-09-14：preview 流升级为 6 步工作台，扩 status 至 9 态。
+//
+// 状态机：
+//   pending → uploaded → generating → candidates_ready → selected → confirmed
+//   任意状态可逃逸到 failed / cancelled / expired
+// 保留 pending / confirmed / expired 与现有凭证兼容。
+//
+// 实现为 TS literal union（不挂 PG enum 类型）—— 历史原因：0016_preview_share.sql
+// 用 "status" text NOT NULL DEFAULT 'pending' 直接建 text 列，没创建
+// preview_share_status PG enum 类型；后续 ALTER TYPE 加值会撞 "type does not exist"。
+// status 在 schema.ts 改为 text + 应用层 enumValues 校验更稳。
+export const previewShareStatusValues = [
   "pending",
+  "uploaded",
+  "generating",
+  "candidates_ready",
+  "selected",
   "confirmed",
   "expired",
-]);
+  "failed",
+  "cancelled",
+] as const;
+export type PreviewShareStatus = (typeof previewShareStatusValues)[number];
 
 export const previewShare = pgTable(
   "preview_share",
@@ -1783,8 +1801,8 @@ export const previewShare = pgTable(
     // ---- 2026-09-11：订单来源平台（PLATFORMS 字典 code） ----
     platform: text("platform"),
     platformOrderNo: text("platform_order_no"),
-    /** 状态机：pending / confirmed / expired */
-    status: previewShareStatusEnum("status").notNull().default("pending"),
+    /** 状态机：9 态（见 previewShareStatusValues literal union）。text 列而非 PG enum —— 见上方注释 */
+    status: text("status").notNull().default("pending"),
     /** 创建人（代理商 userId）。删代理商保留审计（set null） */
     createdBy: text("created_by").references(() => user.id, {
       onDelete: "set null",
@@ -1803,6 +1821,40 @@ export const previewShare = pgTable(
     expiresAt: timestamp("expires_at").notNull(),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    // ---- 2026-09-14：preview 流升级为 6 步工作台（上传→生成→选 cell→重生成→确认） ----
+    /** 客人上传的原图 R2 URL 列表（JSON: ["url1","url2"]）。与 promptOrder.uploadedImages 同结构。 */
+    uploadedImages: text("uploaded_images"),
+    /** 每批参考图张数（preview 流硬编码 1，单张图）。与 promptOrder.imagesPerUpload 对齐。 */
+    imagesPerUpload: integer("images_per_upload").notNull().default(3),
+    /** 已上传批次数（preview 流永远 1）。与 promptOrder.uploadCount 对齐。 */
+    uploadCount: integer("upload_count").notNull().default(0),
+    /** 上传时刻（与 promptOrder.uploadedAt 镜像） */
+    uploadedAt: timestamp("uploaded_at"),
+    /** 首次生成完成时刻（与 promptOrder.generatedAt 镜像） */
+    generatedAt: timestamp("generated_at"),
+    /** 客人每批选的 cell 索引（JSON: {[fromIdx]:selectedIdx}）。镜像 promptOrder.selections。 */
+    selections: text("selections"),
+    /** 第一个锁定批的 candIdx（订单级最终选择）。镜像 promptOrder.selectedIndex。 */
+    selectedIndex: integer("selected_index"),
+    /** 终态确认时刻（与 promptOrder.selectedAt 镜像）。注意与 confirmedAt 不冲突：
+     * selectedAt 是「客人按 6 步走完 SELECTED 状态」的时刻；confirmedAt 是「preview 流状态机终结点」 */
+    selectedAt: timestamp("selected_at"),
+    /** 已选批数（派字段，避免每次 length(JSON)）。镜像 promptOrder.selectedBatchCount。 */
+    selectedBatchCount: integer("selected_batch_count").notNull().default(0),
+    /** Lingting 任务态（JSON: {tasks:[{imageIdx,taskId,submittedAt}],total}）。与 promptOrder.generationTask 同结构。 */
+    generationTask: text("generation_task"),
+    /** 生成失败原因（前端 FailureNotice 展示）。镜像 promptOrder.errorMessage。 */
+    errorMessage: text("error_message"),
+    /** 客人取消时刻（status='cancelled' 时写入） */
+    cancelledAt: timestamp("cancelled_at"),
+    /** 代理商 credit 锁定总额 = totalCredits × (1 + regenerateLimit)。创建时预扣，终态释放多余。 */
+    creditsLocked: integer("credits_locked").notNull().default(0),
+    /** credit 锁定时刻 */
+    creditsLockedAt: timestamp("credits_locked_at"),
+    /** 整张凭证可重新生成次数上限（preview 流硬编码默认 3）。MVP 不暴露给代理商配置。 */
+    regenerateLimit: integer("regenerate_limit").notNull().default(3),
+    /** 已使用重新生成次数。confirm 时不再增加。 */
+    usedRegenerateCount: integer("used_regenerate_count").notNull().default(0),
   },
   (t) => [
     // 按 createdBy + createdAt 倒序：代理商「我的分享凭证」列表
@@ -1814,15 +1866,13 @@ export const previewShare = pgTable(
     index("preview_share_status_expires_idx").on(t.status, t.expiresAt),
     // 客人确认后跳 SELECTED 视图：WHERE linked_order_id = ? 反查 promptOrder
     index("preview_share_linked_order_idx").on(t.linkedOrderId),
+    // 6 步工作台：/status + /poll 路由按 token + status 查
+    index("preview_share_uploads_idx").on(t.token, t.status),
   ]
 );
 
 export type PreviewShare = typeof previewShare.$inferSelect;
 export type NewPreviewShare = typeof previewShare.$inferInsert;
-
-/** preview_share 状态类型 */
-export type PreviewShareStatus =
-  (typeof previewShareStatusEnum.enumValues)[number];
 
 export const promptOrderRelations = relations(promptOrder, ({ one, many }) => ({
   template: one(promptTemplate, {

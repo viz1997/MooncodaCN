@@ -17,7 +17,7 @@ import { eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
-import { promptOrder } from "@/db/schema";
+import { previewShare, promptOrder } from "@/db/schema";
 import { advanceOrderGeneration } from "@/features/gpt-image/lib/advance-generation";
 import {
   countCandidateGroups,
@@ -26,8 +26,11 @@ import {
   parseSelections,
   parseUploadedImages,
 } from "@/features/gpt-image/lib/order-helpers";
+import { advancePreviewShareGeneration } from "@/features/gpt-image/lib/preview-generation";
 import { withApiLogging } from "@/lib/api-logger";
 import { logger } from "@/lib/logger";
+
+import { getPreviewShareByToken } from "../../_lib/preview-share-helpers";
 
 export const runtime = "nodejs";
 // 90s：覆盖最坏链路——上游查询 8s（Promise.all 并行）+ 每张 persistCandidateToR2
@@ -48,6 +51,54 @@ async function postHandler(
   const { token } = await ctx.params;
 
   try {
+    // 2026-09-14：preview 流 6 步工作台 —— preview_share 优先。
+    const preview = await getPreviewShareByToken(token);
+    if (preview) {
+      await advancePreviewShareGeneration(preview.id);
+      const after = await db.query.previewShare.findFirst({
+        where: eq(previewShare.id, preview.id),
+        columns: {
+          status: true,
+          errorMessage: true,
+          uploadedAt: true,
+          generatedAt: true,
+          selectedAt: true,
+          cancelledAt: true,
+          candidates: true,
+          selections: true,
+          uploadedImages: true,
+          updatedAt: true,
+        },
+      });
+      if (!after) {
+        return NextResponse.json(
+          { success: false, error: "预览凭证不存在" },
+          { status: 404 }
+        );
+      }
+      const candidates = parseCandidates(after.candidates as string | null);
+      const uploaded = parseUploadedImages(
+        after.uploadedImages as string | null
+      );
+      const selections = parseSelections(after.selections as string | null);
+      return NextResponse.json({
+        success: true,
+        data: {
+          status: after.status,
+          errorMessage: after.errorMessage,
+          uploadedAt: after.uploadedAt?.toISOString() ?? null,
+          generatedAt: after.generatedAt?.toISOString() ?? null,
+          selectedAt: after.selectedAt?.toISOString() ?? null,
+          cancelledAt: after.cancelledAt?.toISOString() ?? null,
+          candidateGroups: countCandidateGroups(candidates),
+          uploadedImageCount: countUploadedImages(uploaded),
+          selections,
+          updatedAt: after.updatedAt.toISOString(),
+          hasUploadedImage: uploaded.length > 0,
+        },
+      });
+    }
+
     const found = await db.query.promptOrder.findFirst({
       where: eq(promptOrder.token, token),
       columns: { id: true },
