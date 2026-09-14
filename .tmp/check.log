@@ -1,0 +1,391 @@
+
+> Mooncoda@0.1.0 check D:\123\NextDevTpl-master
+> biome check --write .
+
+scripts\backfill-image-job-to-photo.ts:72:3 suppressions/unused ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Suppression comment has no effect. Remove the suppression or make sure you are suppressing the correct rule.
+  
+    70 │   // 分批拉：避免一次性 SELECT 太多行。imageJob 多数用户量级不大，但留个底线。
+    71 │   // 不强制按 userId 分批 —— 一致性更重要。
+  > 72 │   // biome-ignore lint/correctness/noConstantCondition: offset 由分批推进终止
+       │   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    73 │   while (true) {
+    74 │     const jobs: JobRow[] = await db
+  
+
+src\components\quadrant-grid-picker.tsx:118:9 lint/performance/noImgElement ━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Don't use <img> element.
+  
+    116 │         {/* biome-ignore lint/performance/noImgElement: 外部 R2 公开域，next/image 无法优化 */}
+    117 │         {/* eslint-disable-next-line @next/next/no-img-element */}
+  > 118 │         <img
+        │         ^^^^
+  > 119 │           src={compositeUrl}
+  > 120 │           alt={ariaLabel}
+  > 121 │           className="block max-h-full max-w-full object-contain select-none"
+  > 122 │           draggable={false}
+  > 123 │         />
+        │         ^^
+    124 │ 
+    125 │         {/* 4 / 9 个可点击的热区，覆盖在拼接图上 */}
+  
+  i Using the <img> can lead to slower LCP and higher bandwidth. Consider using <Image /> from next/image to automatically optimize images.
+  
+
+src\components\quadrant-grid-picker.tsx:116:10 suppressions/unused ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Suppression comment has no effect. Remove the suppression or make sure you are suppressing the correct rule.
+  
+    114 │             - 老版本（生成时）也无 h-full：依赖外层 container 的 aspect-square 撑开 img
+    115 │             - 现在强制 h-full 让 img 撑满容器高度，object-contain 居中保持 ratio */}
+  > 116 │         {/* biome-ignore lint/performance/noImgElement: 外部 R2 公开域，next/image 无法优化 */}
+        │          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    117 │         {/* eslint-disable-next-line @next/next/no-img-element */}
+    118 │         <img
+  
+
+src\features\auth\components\auth-logo.tsx:11:7 lint/performance/noImgElement ━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Don't use <img> element.
+  
+     9 │   return (
+    10 │     <div className="flex items-center gap-2">
+  > 11 │       <img src="/logo.svg" alt="Mooncoda" className="h-7 w-7 shrink-0" />
+       │       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    12 │       <span className="text-xl font-bold tracking-tight">
+    13 │         Moon<span className="text-muted-foreground">coda</span>
+  
+  i Using the <img> can lead to slower LCP and higher bandwidth. Consider using <Image /> from next/image to automatically optimize images.
+  
+
+src\features\canvas\components\canvas\asset-picker-modal.tsx:133:9 lint/performance/noImgElement ━━━━━━━━━━
+
+  ! Don't use <img> element.
+  
+    131 │     >
+    132 │       {cover ? (
+  > 133 │         <img
+        │         ^^^^
+  > 134 │           src={thumbnailUrl(cover, 400)}
+  > 135 │           alt={title}
+  > 136 │           className="aspect-[4/3] w-full object-cover"
+  > 137 │         />
+        │         ^^
+    138 │       ) : (
+    139 │         <div className="flex aspect-[4/3] items-center justify-center bg-stone-100 p-3 text-center text-xs leading-5 text-stone-500 dark:bg-stone-800 dark:text-stone-400">
+  
+  i Using the <img> can lead to slower LCP and higher bandwidth. Consider using <Image /> from next/image to automatically optimize images.
+  
+
+scripts\migrate-expired-candidate-urls.ts:39:6 lint/correctness/noUnusedVariables ━━━━━━━━━━━━━━━━━━
+
+  × This type alias Helpers is unused.
+  
+    37 │ type Drizzle = any;
+    38 │ // biome-ignore lint/suspicious/noExplicitAny: 同上
+  > 39 │ type Helpers = any;
+       │      ^^^^^^^
+    40 │ 
+    41 │ const EXPIRED_MSG =
+  
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+  
+
+scripts\setup-r2-cors.ts:63:14 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × This variable err is unused.
+  
+    61 │       console.log("📋 当前 CORS 配置：");
+    62 │       console.log(JSON.stringify(current.CORSRules, null, 2));
+  > 63 │     } catch (err) {
+       │              ^^^
+    64 │       console.log("i�  当前桶无 CORS 配置或读不到（首次配置属正常）");
+    65 │     }
+  
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+  
+  i Unsafe fix: If this is intentional, prepend err with an underscore.
+  
+    61 61 │         console.log("📋 当前 CORS 配置：");
+    62 62 │         console.log(JSON.stringify(current.CORSRules, null, 2));
+    63    │ - ····}·catch·(err)·{
+       63 │ + ····}·catch·(_err)·{
+    64 64 │         console.log("i�  当前桶无 CORS 配置或读不到（首次配置属正常）");
+    65 65 │       }
+  
+
+scripts\sync-prompt-templates-to-effects.ts:50:7 lint/suspicious/noDuplicateObjectKeys  FIXABLE  ━━━━━━━━━━
+
+  × This property is later overwritten by an object member with the same name.
+  
+    48 │       variables: promptTemplate.variables,
+    49 │       model: promptTemplate.model,
+  > 50 │       price: promptTemplate.price,
+       │       ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    51 │       size: promptTemplate.size,
+    52 │       candidateCount: promptTemplate.candidateCount,
+  
+  i Overwritten with this property.
+  
+    53 │       coverUrl: promptTemplate.coverUrl,
+    54 │       productTypeCode: promptTemplate.productTypeCode,
+  > 55 │       price: promptTemplate.price,
+       │       ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    56 │     })
+    57 │     .from(promptTemplate)
+  
+  i If an object property with the same name is defined multiple times (except when combining a getter with a setter), only the last definition makes it into the object and previous definitions are ignored.
+  
+  i Unsafe fix: Remove this property.
+  
+     48  48 │         variables: promptTemplate.variables,
+     49  49 │         model: promptTemplate.model,
+     50     │ - ······price:·promptTemplate.price,
+     51  50 │         size: promptTemplate.size,
+     52  51 │         candidateCount: promptTemplate.candidateCount,
+  
+
+src\app\[locale]\(marketing)\products\[slug]\page.tsx:182:27 lint/suspicious/noArrayIndexKey ━━━━━━━━━━
+
+  × Avoid using the index of an array as key property in an element.
+  
+    180 │               <div className="rounded-xl border bg-muted/30 p-5 text-sm leading-relaxed text-muted-foreground">
+    181 │                 {t.story.map((para, i) => (
+  > 182 │                   <p key={i} className={i > 0 ? "mt-3" : ""}>
+        │                           ^
+    183 │                     {para}
+    184 │                   </p>
+  
+  i This is the source of the key value.
+  
+    179 │             {t.story && t.story.length > 0 && (
+    180 │               <div className="rounded-xl border bg-muted/30 p-5 text-sm leading-relaxed text-muted-foreground">
+  > 181 │                 {t.story.map((para, i) => (
+        │                                     ^
+    182 │                   <p key={i} className={i > 0 ? "mt-3" : ""}>
+    183 │                     {para}
+  
+  i The order of the items may change, and this also affects performances and component state.
+  
+  i Check the React documentation. 
+  
+
+src\components\quadrant-grid-picker.tsx:142:17 lint/a11y/useSemanticElements ━━━━━━━━━━━━━━━━━━━━━━━
+
+  × The elements with this role can be changed to the following elements:
+    <input type="radio">
+  
+    140 │                 id={`${idPrefix}-${idx}`}
+    141 │                 type="button"
+  > 142 │                 role="radio"
+        │                 ^^^^^^^^^^^^
+    143 │                 aria-checked={isSel}
+    144 │                 aria-label={`${cellLabel(idx, candidateCount)}${isSel ? "，已选择" : ""}`}
+  
+  i For examples and more information, see WAI-ARIA Roles
+  
+
+src\components\quadrant-grid-picker.tsx:139:22 lint/suspicious/noArrayIndexKey ━━━━━━━━━━━━━━━━━━━━━
+
+  × Avoid using the index of an array as key property in an element.
+  
+    137 │             return (
+    138 │               <button
+  > 139 │                 key={idx}
+        │                      ^^^
+    140 │                 id={`${idPrefix}-${idx}`}
+    141 │                 type="button"
+  
+  i This is the source of the key value.
+  
+    133 │           }}
+    134 │         >
+  > 135 │           {cells.map((_cell, idx) => {
+        │                              ^^^
+    136 │             const isSel = selectedCell === idx;
+    137 │             return (
+  
+  i The order of the items may change, and this also affects performances and component state.
+  
+  i Check the React documentation. 
+  
+
+src\features\canvas\components\agent\agent-panel-tabs.tsx:36:11 lint/a11y/noNoninteractiveElementToInteractiveRole  FIXABLE  ━━━━━━━━━━
+
+  × The HTML element nav is non-interactive and should not have an interactive role.
+  
+    34 │         <nav
+    35 │           className="@container flex min-w-0 flex-1 items-center justify-center gap-0.5 overflow-hidden text-sm @min-[560px]:gap-3"
+  > 36 │           role="tablist"
+       │           ^^^^^^^^^^^^^^
+    37 │           aria-label={t("agent.panel.content")}
+    38 │         >
+  
+  i Replace nav with a div or a span.
+  
+  i Unsafe fix: Remove the role attribute.
+  
+    34 34 │           <nav
+    35 35 │             className="@container flex min-w-0 flex-1 items-center justify-center gap-0.5 overflow-hidden text-sm @min-[560px]:gap-3"
+    36    │ - ··········role="tablist"
+    37 36 │             aria-label={t("agent.panel.content")}
+    38 37 │           >
+  
+
+src\features\canvas\components\canvas\canvas-audio-settings-popover.tsx:165:5 lint/a11y/noStaticElementInteractions ━━━━━━━━━━
+
+  × Static Elements should not be interactive.
+  
+    164 │   return createPortal(
+  > 165 │     <div
+        │     ^^^^
+  > 166 │       ref={panelRef}
+         ...
+  > 171 │       onClick={(event) => event.stopPropagation()}
+  > 172 │     >
+        │     ^
+    173 │       <AudioSettingsPanel
+    174 │         config={config}
+  
+  i To add interactivity such as a mouse or key event listener to a static element, give the element an appropriate role value.
+  
+
+src\features\canvas\components\canvas\canvas-audio-settings-popover.tsx:165:5 lint/a11y/useKeyWithClickEvents ━━━━━━━━━━
+
+  × Enforce to have the onClick mouse event with the onKeyUp, the onKeyDown, or the onKeyPress keyboard event.
+  
+    164 │   return createPortal(
+  > 165 │     <div
+        │     ^^^^
+  > 166 │       ref={panelRef}
+         ...
+  > 171 │       onClick={(event) => event.stopPropagation()}
+  > 172 │     >
+        │     ^
+    173 │       <AudioSettingsPanel
+    174 │         config={config}
+  
+  i Actions triggered using mouse events should have corresponding keyboard events to account for keyboard-only navigation.
+  
+
+src\features\canvas\components\canvas\canvas-config-node-panel.tsx:98:9 lint/a11y/noStaticElementInteractions ━━━━━━━━━━
+
+  × Static Elements should not be interactive.
+  
+     96 │           {t("canvas.configNode.title")}
+     97 │         </div>
+   > 98 │         <div
+        │         ^^^^
+   > 99 │           className="cursor-default"
+  > 100 │           onMouseDown={(event) => event.stopPropagation()}
+  > 101 │         >
+        │         ^
+    102 │           <Segmented
+    103 │             size="small"
+  
+  i To add interactivity such as a mouse or key event listener to a static element, give the element an appropriate role value.
+  
+
+src\features\canvas\components\canvas\canvas-config-node-panel.tsx:194:7 lint/a11y/noStaticElementInteractions ━━━━━━━━━━
+
+  × Static Elements should not be interactive.
+  
+    192 │       </div>
+    193 │ 
+  > 194 │       <div
+        │       ^^^^
+  > 195 │         className="mb-2 grid min-w-0 cursor-default grid-cols-[minmax(0,1fr)_148px] items-center gap-2"
+  > 196 │         onMouseDown={(event) => event.stopPropagation()}
+  > 197 │       >
+        │       ^
+    198 │         <ModelPicker
+    199 │           className="canvas-compact-control h-10"
+  
+  i To add interactivity such as a mouse or key event listener to a static element, give the element an appropriate role value.
+  
+
+src\features\canvas\components\canvas\canvas-connections.tsx:39:7 lint/a11y/noStaticElementInteractions ━━━━━━━━━━
+
+  × Static Elements should not be interactive.
+  
+    37 │   return (
+    38 │     <g>
+  > 39 │       <path
+       │       ^^^^^
+  > 40 │         data-connection-id={connection.id}
+        ...
+  > 54 │         }}
+  > 55 │       />
+       │       ^^
+    56 │       <path
+    57 │         d={pathD}
+  
+  i To add interactivity such as a mouse or key event listener to a static element, give the element an appropriate role value.
+  
+
+src\features\canvas\components\canvas\canvas-create-menus.tsx:42:5 lint/a11y/noStaticElementInteractions ━━━━━━━━━━
+
+  × Static Elements should not be interactive.
+  
+    40 │   const { t } = useTranslation();
+    41 │   return (
+  > 42 │     <div
+       │     ^^^^
+  > 43 │       className="absolute z-[120] w-[300px] rounded-[18px] border p-3 shadow-2xl backdrop-blur"
+        ...
+  > 53 │       onPointerDown={(event) => event.stopPropagation()}
+  > 54 │     >
+       │     ^
+    55 │       <div className="mb-2 flex items-center justify-between px-1">
+    56 │         <span
+  
+  i To add interactivity such as a mouse or key event listener to a static element, give the element an appropriate role value.
+  
+
+src\features\canvas\components\canvas\canvas-create-menus.tsx:129:10 lint/suspicious/noAssignInExpressions ━━━━━━━━━━
+
+  × The assignment should not be in an expression.
+  
+    127 │       onClick={onClick}
+    128 │       onMouseEnter={(event) =>
+  > 129 │         (event.currentTarget.style.background = theme.node.fill)
+        │          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    130 │       }
+    131 │       onMouseLeave={(event) =>
+  
+  i The use of assignments in expressions is confusing.
+    Expressions are often considered as side-effect free.
+  
+
+src\features\canvas\components\canvas\canvas-create-menus.tsx:132:10 lint/suspicious/noAssignInExpressions ━━━━━━━━━━
+
+  × The assignment should not be in an expression.
+  
+    130 │       }
+    131 │       onMouseLeave={(event) =>
+  > 132 │         (event.currentTarget.style.background = "transparent")
+        │          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    133 │       }
+    134 │     >
+  
+  i The use of assignments in expressions is confusing.
+    Expressions are often considered as side-effect free.
+  
+
+Skipped 110 suggested fixes.
+If you wish to apply the suggested (unsafe) fixes, use the command biome check --write --unsafe
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 264.
+Checked 672 files in 1688ms. Fixed 8 files.
+Found 138 errors.
+Found 142 warnings.
+Found 4 infos.
+check ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Some errors were emitted while applying fixes.
+  
+
+ ELIFECYCLE  Command failed with exit code 1.

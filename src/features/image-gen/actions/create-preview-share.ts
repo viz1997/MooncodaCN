@@ -250,7 +250,9 @@ export const createPreviewShareAction = withPreviewAction("create")
     //
     // 客人后续若要传自己的图重新生成：/upload 路由（preview 分支）会按 status=
     // "uploaded"/"failed" 覆盖 uploadedImages[0]（preview 是单批单图硬编码，无追加）。
-    const initialUploadedImages = JSON.stringify([parsedInput.referenceImageUrl]);
+    const initialUploadedImages = JSON.stringify([
+      parsedInput.referenceImageUrl,
+    ]);
 
     try {
       const [created] = await db

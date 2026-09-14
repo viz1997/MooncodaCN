@@ -1,0 +1,170 @@
+src\features\image-gen\admin\components\product-effect-form.tsx:121:3 lint/correctness/useExhaustiveDependencies  FIXABLE  ━━━━━━━━━━
+
+  ! This hook specifies more dependencies than necessary: productTypeCode.
+  
+    119 │   // 新建模式下有效；编辑模式初次 mount 时不会触发（state 已被 initialData
+    120 │   // 初始化为同值）。
+  > 121 │   useEffect(() => {
+        │   ^^^^^^^^^
+    122 │     setAllowedSizes([]);
+    123 │     setAllowedAccessories([]);
+  
+  i This dependency can be removed from the list.
+  
+    124 │     setAllowedCapabilities({});
+    125 │     setAllowedColors([]);
+  > 126 │   }, [productTypeCode]);
+        │       ^^^^^^^^^^^^^^^
+    127 │   const [variables, setVariables] = useState<PromptVariable[]>(
+    128 │     initialData?.variables ?? []
+  
+  i React relies on hook dependencies to determine when to re-compute Effects.
+    Specifying more dependencies than required can lead to unnecessary re-rendering
+    and degraded performance.
+  
+  i Unsafe fix: Remove the extra dependencies from the list.
+  
+    126 │ ··},·[productTypeCode]);
+        │       ---------------   
+
+src\features\image-gen\admin\components\product-effect-form.tsx:569:21 lint/a11y/noLabelWithoutControl ━━━━━━━━━━
+
+  × A form label must be associated with an input.
+  
+    567 │                   const checked = allowedSizes.includes(s);
+    568 │                   return (
+  > 569 │                     <label
+        │                     ^^^^^^
+  > 570 │                       key={s}
+         ...
+  > 588 │                       {s}cm
+  > 589 │                     </label>
+        │                     ^^^^^^^^
+    590 │                   );
+    591 │                 })}
+  
+  i Consider adding a `for` or `htmlFor` attribute to the label element or moving the input element to inside the label element.
+  
+
+src\features\image-gen\admin\components\product-effect-form.tsx:610:21 lint/a11y/noLabelWithoutControl ━━━━━━━━━━
+
+  × A form label must be associated with an input.
+  
+    608 │                   const checked = allowedAccessories.includes(a);
+    609 │                   return (
+  > 610 │                     <label
+        │                     ^^^^^^
+  > 611 │                       key={a}
+         ...
+  > 629 │                       {acc?.name ?? a}
+  > 630 │                     </label>
+        │                     ^^^^^^^^
+    631 │                   );
+    632 │                 })}
+  
+  i Consider adding a `for` or `htmlFor` attribute to the label element or moving the input element to inside the label element.
+  
+
+src\features\image-gen\admin\components\product-effect-form.tsx:656:21 lint/a11y/noLabelWithoutControl ━━━━━━━━━━
+
+  × A form label must be associated with an input.
+  
+    654 │                   const checked = allowedColors.includes(c.code);
+    655 │                   return (
+  > 656 │                     <label
+        │                     ^^^^^^
+  > 657 │                       key={c.code}
+         ...
+  > 680 │                       {c.name}
+  > 681 │                     </label>
+        │                     ^^^^^^^^
+    682 │                   );
+    683 │                 })}
+  
+  i Consider adding a `for` or `htmlFor` attribute to the label element or moving the input element to inside the label element.
+  
+
+src\features\image-gen\admin\components\product-effect-form.tsx:725:17 lint/a11y/noLabelWithoutControl ━━━━━━━━━━
+
+  × A form label must be associated with an input.
+  
+    723 │                 overrideValue !== undefined && overrideValue !== catalogDefault;
+    724 │               return (
+  > 725 │                 <label
+        │                 ^^^^^^
+  > 726 │                   key={key}
+         ...
+  > 754 │                   />
+  > 755 │                 </label>
+        │                 ^^^^^^^^
+    756 │               );
+    757 │             })}
+  
+  i Consider adding a `for` or `htmlFor` attribute to the label element or moving the input element to inside the label element.
+  
+
+src\features\image-gen\admin\components\product-effect-form.tsx:793:19 lint/a11y/noLabelWithoutControl ━━━━━━━━━━
+
+  × A form label must be associated with an input.
+  
+    791 │                   overrideValue !== catalogDefault;
+    792 │                 return (
+  > 793 │                   <label
+        │                   ^^^^^^
+  > 794 │                     key={key}
+         ...
+  > 822 │                     />
+  > 823 │                   </label>
+        │                   ^^^^^^^^
+    824 │                 );
+    825 │               })}
+  
+  i Consider adding a `for` or `htmlFor` attribute to the label element or moving the input element to inside the label element.
+  
+
+src\features\image-gen\admin\components\product-effect-form.tsx:1184:21 lint/a11y/noLabelWithoutControl ━━━━━━━━━━
+
+  × A form label must be associated with an input.
+  
+    1182 │                   const checked = productLineIds.includes(pl.productLineId);
+    1183 │                   return (
+  > 1184 │                     <label
+         │                     ^^^^^^
+  > 1185 │                       key={pl.productLineId}
+          ...
+  > 1218 │                       </div>
+  > 1219 │                     </label>
+         │                     ^^^^^^^^
+    1220 │                   );
+    1221 │                 })}
+  
+  i Consider adding a `for` or `htmlFor` attribute to the label element or moving the input element to inside the label element.
+  
+
+src\features\image-gen\admin\components\product-effect-form.tsx:1278:11 lint/a11y/noLabelWithoutControl ━━━━━━━━━━
+
+  × A form label must be associated with an input.
+  
+    1276 │         const checked = productLineIds.includes(pl.productLineId);
+    1277 │         return (
+  > 1278 │           <label
+         │           ^^^^^^
+  > 1279 │             key={pl.productLineId}
+          ...
+  > 1306 │             </div>
+  > 1307 │           </label>
+         │           ^^^^^^^^
+    1308 │         );
+    1309 │       })}
+  
+  i Consider adding a `for` or `htmlFor` attribute to the label element or moving the input element to inside the label element.
+  
+
+Checked 3 files in 49ms. No fixes applied.
+Found 7 errors.
+Found 1 warning.
+check ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Some errors were emitted while running checks.
+  
+

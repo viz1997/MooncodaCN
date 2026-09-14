@@ -19,7 +19,7 @@ import {
   Select,
   Switch,
 } from "antd";
-import { History, Plus, Trash2 } from "lucide-react";
+import { ExternalLink, Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useAction } from "next-safe-action/hooks";
 import { useEffect, useState } from "react";
@@ -32,7 +32,6 @@ import {
   type ProductType,
 } from "@/features/gpt-image/lib/product-catalog";
 import {
-  addProductEffectVersionAction,
   createProductEffectAdminAction,
   listProductLinesAdminAction,
   listPromptTemplatePricesAction,
@@ -79,7 +78,6 @@ export function ProductEffectForm({
     initialData?.description ?? ""
   );
   const [previewUrl, setPreviewUrl] = useState(initialData?.previewUrl ?? "");
-  const [prompt, setPrompt] = useState(initialData?.prompt ?? "");
   const [model, setModel] = useState(initialData?.model ?? "");
   const [scene, setScene] = useState<PromptScene>(
     initialData?.scene ?? "generate_2d"
@@ -257,10 +255,6 @@ export function ProductEffectForm({
     };
   }, [promptTemplateId]);
 
-  const versions = initialData?.versions ?? [];
-  const [newVersionLabel, setNewVersionLabel] = useState("");
-  const [newVersionNote, setNewVersionNote] = useState("");
-
   const { executeAsync: createEffectAsync, isPending: isCreating } = useAction(
     createProductEffectAdminAction
   );
@@ -283,43 +277,9 @@ export function ProductEffectForm({
     );
   };
 
-  // 新增版本（编辑时）：立即把当前 prompt 存为新版本并应用为新 prompt
-  const { execute: addVersion, isPending: isAddingVersion } = useAction(
-    addProductEffectVersionAction,
-    {
-      onSuccess: () => {
-        setNewVersionLabel("");
-        setNewVersionNote("");
-        message.success("已新增版本");
-        // 刷新当前编辑数据
-        if (onSaved) {
-          onSaved();
-        } else {
-          router.refresh();
-        }
-      },
-      onError: ({ error }) => {
-        message.error(error.serverError ?? "新增版本失败");
-      },
-    }
-  );
-
-  const handleAddVersion = () => {
-    if (!newVersionLabel.trim()) {
-      message.error("请输入版本号");
-      return;
-    }
-    addVersion({
-      maskId,
-      version: newVersionLabel,
-      content: prompt,
-      ...(newVersionNote ? { note: newVersionNote } : {}),
-    });
-  };
-
   const handleSubmit = async () => {
-    if (!name.trim() || !prompt.trim()) {
-      message.error("名称和提示词必填");
+    if (!name.trim()) {
+      message.error("名称必填");
       return;
     }
     // 2026-09-12：强制要求绑定 promptTemplate，否则 /image-gen demo 下单会撞
@@ -335,7 +295,6 @@ export function ProductEffectForm({
       category,
       description,
       previewUrl,
-      prompt,
       model: model || null,
       scene,
       config: {
@@ -347,7 +306,6 @@ export function ProductEffectForm({
       status,
       variables,
       productLineIds,
-      versions,
       author: initialData?.author ?? "admin",
       productTypeCode: productTypeCode ?? null,
       // 2026-09-10：可配置尺寸 + 配件子集；空数组 → null（不限制 = 字典全量）
@@ -1084,14 +1042,11 @@ export function ProductEffectForm({
         </Form.Item>
       </div>
 
-      <Form.Item label="提示词">
-        <Input.TextArea
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          rows={6}
-          placeholder="使用 {{变量名}} 占位符..."
-        />
-      </Form.Item>
+      {/* 2026-09-14：原 productEffect.prompt textarea 已删除。
+         - 提示词内容由关联的 promptTemplate.prompt 提供（必填）
+         - 在下方 promptTemplateId 下拉右侧加「去编辑提示词」链，直接跳到
+           /admin/prompt-templates/{id} 页面编辑实际提示词
+      */}
 
       <div className="space-y-4 mb-4">
         <div className="flex items-center justify-between">
@@ -1168,21 +1123,37 @@ export function ProductEffectForm({
           ? ({ validateStatus: "error", help: "请选择一个提示词模板" } as const)
           : {})}
       >
-        <Select
-          value={promptTemplateId || undefined}
-          onChange={(v) => setPromptTemplateId(v ?? "")}
-          options={promptTemplateOptions.map((t) => ({
-            value: t.id,
-            label: `${t.id} · ${t.name}${
-              t.productTypeCode ? ` · ${t.productTypeCode}` : ""
-            }`,
-          }))}
-          placeholder="选择 promptTemplate（必选）"
-          allowClear={false}
-          showSearch
-          optionFilterProp="label"
-          notFoundContent="暂无 promptTemplate，请先去 /admin/templates 创建"
-        />
+        <div className="flex items-center gap-2">
+          <Select
+            value={promptTemplateId || undefined}
+            onChange={(v) => setPromptTemplateId(v ?? "")}
+            options={promptTemplateOptions.map((t) => ({
+              value: t.id,
+              label: `${t.id} · ${t.name}${
+                t.productTypeCode ? ` · ${t.productTypeCode}` : ""
+              }`,
+            }))}
+            placeholder="选择 promptTemplate（必选）"
+            allowClear={false}
+            showSearch
+            optionFilterProp="label"
+            notFoundContent="暂无 promptTemplate，请先去 /admin/templates 创建"
+            className="flex-1"
+          />
+          {/* 2026-09-14：跳到 promptTemplate 编辑页改提示词内容（productEffect 不再存 prompt）。
+             不强制外链 absolute URL，用 next/link 即可。 */}
+          {promptTemplateId ? (
+            <a
+              href={`/admin/prompt-templates/${promptTemplateId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-violet-700 dark:text-violet-300 hover:bg-violet-500/10 transition-colors shrink-0"
+            >
+              <ExternalLink className="h-3 w-3" />
+              去编辑提示词
+            </a>
+          ) : null}
+        </div>
       </Form.Item>
 
       {/* 产品线关联（2026-09-10：数据源从 MOCK_PRODUCT_LINES 切到 product_line 表） */}
@@ -1253,80 +1224,6 @@ export function ProductEffectForm({
           </div>
         </div>
       </div>
-
-      {/* 版本历史（编辑模式） */}
-      {isEdit && (
-        <div className="space-y-2 mb-4">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium flex items-center gap-1">
-              <History className="h-3.5 w-3.5" />
-              版本历史（{versions.length}）
-            </span>
-          </div>
-          <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
-            <div className="p-3 space-y-3">
-              {versions.length === 0 ? (
-                <p className="text-xs text-muted-foreground">暂无历史版本</p>
-              ) : (
-                <div className="space-y-1 max-h-40 overflow-y-auto">
-                  {versions.map((ver) => (
-                    <div
-                      key={ver.version}
-                      className="flex items-center justify-between rounded-md border p-2 text-xs bg-muted/30"
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <Badge
-                          color="default"
-                          className="font-mono !text-[10px]"
-                        >
-                          {ver.version}
-                        </Badge>
-                        <span className="text-muted-foreground">
-                          {new Date(ver.createdAt).toLocaleString("zh-CN")}
-                        </span>
-                        {ver.note && (
-                          <span className="text-muted-foreground truncate">
-                            · {ver.note}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* 新增版本 */}
-              <div className="border-t pt-3 space-y-2">
-                <p className="text-xs font-semibold text-muted-foreground">
-                  新增版本（将保存当前 prompt 为新版本）
-                </p>
-                <div className="grid grid-cols-2 gap-2">
-                  <Input
-                    value={newVersionLabel}
-                    onChange={(e) => setNewVersionLabel(e.target.value)}
-                    placeholder="v1.1.0"
-                  />
-                  <Input
-                    value={newVersionNote}
-                    onChange={(e) => setNewVersionNote(e.target.value)}
-                    placeholder="备注（可选）"
-                  />
-                </div>
-                <Button
-                  type="default"
-                  size="small"
-                  onClick={handleAddVersion}
-                  disabled={isAddingVersion || !newVersionLabel.trim()}
-                  loading={isAddingVersion}
-                  icon={<Plus className="h-3.5 w-3.5" />}
-                >
-                  新增版本
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {isEdit && initialData && (
         <div className="grid grid-cols-3 gap-4 rounded-lg border p-4 bg-muted/30 mb-4">

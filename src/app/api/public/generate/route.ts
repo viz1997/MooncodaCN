@@ -83,24 +83,35 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
-      // 2026-09-10：prompt 来源优先级
-      // 1) productEffect.promptTemplateId 命中 promptTemplate 行 → 用其 prompt
-      // 2) fallback 到 productEffect.prompt 本地字段
-      if (mask.promptTemplateId) {
-        try {
-          const tmpl = await db.query.promptTemplate.findFirst({
-            where: eq(promptTemplate.id, mask.promptTemplateId),
-          });
-          if (tmpl?.prompt) {
-            prompt = tmpl.prompt;
-          } else {
-            prompt = mask.prompt;
-          }
-        } catch {
-          prompt = mask.prompt;
-        }
+      // 2026-09-14：prompt 来源单一 → 必绑的 promptTemplate.prompt
+      // productEffect.prompt 本地字段已删除（schema + form UI 同步收口），
+      // 不再走 mask.prompt 兜底。template 不存在/无 prompt 是 500，告知 admin 修复。
+      // promptTemplateId 在 admin form 已必填（2026-09-12 起），findEffect 出来的 mask
+      // 一定有值；type 上是 string | null 仅因为 ProductEffect.promptTemplateId 可选。
+      if (!mask.promptTemplateId) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "效果模板未绑定提示词模板，请联系管理员",
+            code: "MASK_TEMPLATE_NOT_BOUND",
+          },
+          { status: 500 }
+        );
+      }
+      const tmpl = await db.query.promptTemplate.findFirst({
+        where: eq(promptTemplate.id, mask.promptTemplateId),
+      });
+      if (tmpl?.prompt) {
+        prompt = tmpl.prompt;
       } else {
-        prompt = mask.prompt;
+        return NextResponse.json(
+          {
+            success: false,
+            error: "提示词模板缺失或无内容，请联系管理员",
+            code: "PROMPT_TEMPLATE_MISSING",
+          },
+          { status: 500 }
+        );
       }
       // 必填变量校验：required 且无 params 值且无 defaultValue → 拒绝
       const missing = mask.variables.find(

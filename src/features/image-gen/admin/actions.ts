@@ -16,7 +16,6 @@ import type { ProductCapabilities } from "@/features/gpt-image/lib/product-catal
 import {
   createEffectInDb,
   deleteEffectInDb,
-  findEffectInDb,
   getEffectsFromDb,
   updateEffectInDb,
 } from "@/features/image-gen/lib/db-effects";
@@ -34,7 +33,6 @@ import type {
   ProductLinePricing,
   ProductLineSpec,
   PromptScene,
-  PromptVersion,
 } from "@/features/image-gen/lib/product-effect-types";
 import { PROMPT_SCENE_LABELS } from "@/features/image-gen/lib/product-effect-types";
 import { adminAction } from "@/lib/safe-action";
@@ -78,7 +76,8 @@ const productEffectFormSchema = z.object({
   category: z.string().default("其他"),
   description: z.string().default(""),
   previewUrl: z.string().default(""),
-  prompt: z.string().min(1),
+  // 2026-09-14：删除 prompt 字段 —— 提示词内容由 promptTemplateId 关联的 promptTemplate.prompt 提供（必填）。
+  // productEffect 不再独立存提示词文本。
   variables: z
     .array(
       z.object({
@@ -151,59 +150,20 @@ const productEffectFormSchema = z.object({
   allowedColors: z.array(z.string()).nullable().default(null),
   /**
    * 2026-09-10：引用 promptTemplate.id（gpt-image 模块的提示词模板表）。
-   * 生成时优先用 promptTemplate.prompt，缺失则 fallback 到本地 prompt 字段。
+   * 生成时优先用 promptTemplate.prompt。
    *
    * 2026-09-12：改为必填 —— 公开 demo 下单 action 写 promptOrder.templateId
    * 会被 promptTemplate 外键 FK 校验拦下（onDelete restrict），必须先有
    * promptTemplate 行才能落单；旧 admin 手工录入未绑的 productEffect
    * 下单时直接 throw「模板不存在或已停用」。强制必填挡住新录入没绑的漏网之鱼，
    * 旧存量通过 scripts/list-effects-without-template.ts 让 admin 手工补。
+   *
+   * 2026-09-14：移除本地 prompt 兜底（promptTemplateId 必填 → 一定有值）。
    */
   promptTemplateId: z.string().min(1),
-  versions: z
-    .array(
-      z.object({
-        version: z.string().min(1),
-        content: z.string().min(1),
-        createdAt: z.string(),
-        note: z.string().optional(),
-      })
-    )
-    .default([]),
+  // 2026-09-14：删除 versions[] 字段 —— 生成时不读 productEffect.versions[]（仅 promptTemplate.prompt 生效），
+  // form UI 已移除「新增版本」入口，schema 同步收口，避免 admin 通过其它途径塞脏数据。
 });
-
-/**
- * 新增版本
- */
-export const addProductEffectVersionAction = withImageGenAdminAction(
-  "addProductEffectVersion"
-)
-  .schema(
-    z.object({
-      maskId: z.string().min(1),
-      content: z.string().min(1),
-      version: z.string().min(1),
-      note: z.string().optional(),
-    })
-  )
-  .action(async ({ parsedInput }) => {
-    const { maskId, content, version, note } = parsedInput;
-    const existing = await findEffectInDb(maskId);
-    if (!existing) throw new Error("效果模板不存在");
-    const newVersion: PromptVersion = {
-      version,
-      content,
-      createdAt: new Date().toISOString(),
-      ...(note ? { note } : {}),
-    };
-    const updated = await updateEffectInDb(maskId, {
-      prompt: content,
-      versions: [...existing.versions, newVersion],
-    });
-    revalidatePath(`/admin/product-effects/${maskId}`);
-    revalidatePath("/admin/product-effects");
-    return { effect: updated };
-  });
 
 /**
  * 创建产品效果模板
@@ -219,7 +179,9 @@ export const createProductEffectAdminAction = withImageGenAdminAction(
       category: parsedInput.category,
       description: parsedInput.description,
       previewUrl: parsedInput.previewUrl,
-      prompt: parsedInput.prompt,
+      // 2026-09-14：productEffect.prompt 由关联 promptTemplate.prompt 提供，此处留空串占位
+      // （DB 列保留为 NOT NULL default ''，与 ProductEffect 类型仍为 required string 对齐）
+      prompt: "",
       variables: parsedInput.variables.map((v) => ({
         ...v,
         options: v.options ?? [],
@@ -232,7 +194,8 @@ export const createProductEffectAdminAction = withImageGenAdminAction(
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       scene: parsedInput.scene,
-      versions: parsedInput.versions ?? [],
+      // 2026-09-14：productEffect.versions[] 不再维护（生成时不读），留空数组占位
+      versions: [],
       usageCount: 0,
       successRate: 0,
       avgDuration: 0,
@@ -278,7 +241,7 @@ export const updateProductEffectAdminAction = withImageGenAdminAction(
       updatePayload.description = updates.description;
     if (updates.previewUrl !== undefined)
       updatePayload.previewUrl = updates.previewUrl;
-    if (updates.prompt !== undefined) updatePayload.prompt = updates.prompt;
+    // 2026-09-14：删除 updates.prompt 处理（schema 已无 prompt 字段）。
     if (updates.variables !== undefined)
       updatePayload.variables = updates.variables.map((v) => ({
         ...v,
@@ -307,10 +270,10 @@ export const updateProductEffectAdminAction = withImageGenAdminAction(
     if (updates.allowedColors !== undefined)
       updatePayload.allowedColors = updates.allowedColors ?? undefined;
     // 2026-09-10：promptTemplateId 引用更新（null = 解除引用）
+    // 2026-09-12：改为必填（已在校验拦截）；update 仅支持修改引用模板
     if (updates.promptTemplateId !== undefined)
       updatePayload.promptTemplateId = updates.promptTemplateId ?? null;
-    if (updates.versions !== undefined)
-      updatePayload.versions = updates.versions;
+    // 2026-09-14：删除 updates.versions 处理（schema 已无 versions 字段）。
 
     const updated = await updateEffectInDb(maskId, updatePayload);
     if (!updated) {

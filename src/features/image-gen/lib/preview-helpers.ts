@@ -206,6 +206,12 @@ export function fillDefaultsByTemplate(
       if (finalLeatherExposed === true && finalPvcProtection === true) {
         throw new Error("皮革外露 与 PVC 保护 不能同时勾选");
       }
+      // 2026-09-14：金属配件不能配 PVC 保护（用户原话「金属的只有实物外露」）。
+      // capability 是 productType 级开关（钥匙扣 R 把两者都打开），per-accessory
+      // 互斥在这里兜底校验。皮革/无套（accessoryCode=null）允许 PVC 保护。
+      if (finalAccessoryCode === "metal" && finalPvcProtection === true) {
+        throw new Error("金属配件不能选 PVC 保护");
+      }
       if (capType.capabilities.canHaveRemarks) {
         const trimmed = parsedInput.remarks?.trim();
         finalRemarks = trimmed && trimmed.length > 0 ? trimmed : null;

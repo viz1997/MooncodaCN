@@ -598,6 +598,21 @@ function buildSpecSummary(order: OrderView): string {
 
   if (parts.length === 0) return "";
 
+  // 2026-09-14：钥匙扣（productTypeCode='R'）的「龙虾扣」UI 提示。
+  // 用户原话「无套和金属的配件默认是龙虾扣」——龙虾扣不是 accessory code，
+  // 只是 UI 显示。无套 = accessoryCode=null，金属 = accessoryCode='metal'。
+  // 客户打开 /p/[token] 时在规格摘要里看到「无套 · 龙虾扣」/「金属 · 龙虾扣」，
+  // 知道默认硬件。其他产品型号不显示这段文案。
+  if (order.productTypeCode === "R") {
+    if (order.accessoryCode === null || order.accessoryCode === undefined) {
+      parts.push("无套");
+      parts.push("龙虾扣");
+    } else if (order.accessoryCode === "metal") {
+      parts.push("金属");
+      parts.push("龙虾扣");
+    }
+  }
+
   // 2026-09-14：保护套/颜色文案统一从 SPEC_LABELS / LEATHER_COLORS 字典读，
   // 不再硬编码（用户原话「不要硬编码规格文案，按照设置好的来获取」）。
   if (order.leatherExposed === true) {

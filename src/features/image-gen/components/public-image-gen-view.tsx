@@ -41,6 +41,7 @@ import {
   Image as ImageIcon,
   ImageOff,
   Loader2,
+  LogOut,
   RefreshCw,
   Share2,
   ShoppingCart,
@@ -65,6 +66,7 @@ import {
   type SpecSelection,
 } from "@/features/image-gen/components/spec-modal";
 import { Link, useRouter } from "@/i18n/routing";
+import { signOut } from "@/lib/auth/client";
 import { resizeImage, wrapBlobAsFile } from "@/lib/image-client-resize";
 import { cn } from "@/lib/utils";
 
@@ -1152,16 +1154,43 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
             <span className="hidden sm:inline">我的订单</span>
           </Link>
           {user ? (
-            <div
-              className="flex items-center gap-2 pl-2 ml-1"
-              title={user.email ?? user.name ?? user.id}
-            >
-              <div className="h-6 w-6 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white text-[10px] font-semibold">
-                {(user.name ?? user.email ?? user.id).slice(0, 1).toUpperCase()}
+            <div className="flex items-center gap-1 pl-2 ml-1">
+              <div
+                className="flex items-center gap-2"
+                title={user.email ?? user.name ?? user.id}
+              >
+                <div className="h-6 w-6 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white text-[10px] font-semibold">
+                  {(user.name ?? user.email ?? user.id)
+                    .slice(0, 1)
+                    .toUpperCase()}
+                </div>
+                <span className="text-xs font-medium hidden md:inline max-w-[120px] truncate">
+                  {user.name ?? user.email ?? "用户"}
+                </span>
               </div>
-              <span className="text-xs font-medium hidden md:inline max-w-[120px] truncate">
-                {user.name ?? user.email ?? "用户"}
-              </span>
+              {/* 2026-09-14：/image-gen 顶栏加登出按钮（用户原话「/image-gen 页面无法登出」）。
+                  原顶栏只显示头像 + 用户名，没有登出入口；登出是 Better Auth 标准
+                  流程，模式与 (dashboard)/sidebar.tsx handleSignOut 一致 —— 调 signOut
+                  后 router.push("/") 回首页。复用同套 client import 避免重复登录态处理。 */}
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={async () => {
+                  await signOut({
+                    fetchOptions: {
+                      onSuccess: () => {
+                        router.push("/");
+                      },
+                    },
+                  });
+                }}
+                className="!text-muted-foreground hover:!text-red-500"
+                title="登出"
+                aria-label="登出"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                <span className="hidden lg:inline">登出</span>
+              </Button>
             </div>
           ) : (
             <Link

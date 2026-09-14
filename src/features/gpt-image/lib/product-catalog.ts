@@ -71,14 +71,25 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
     code: "R",
     name: "CM 钥匙扣",
     unit: "cm",
-    sizes: ["4", "6"],
-    accessories: ["leather", "pvc"],
-    // 钥匙扣常配皮套 / PVC 皮套；皮革徽章是独立型号 LB，不再是 R 的能力
+    // 2026-09-14：加 5cm（用户原话「钥匙扣规格有 4cm、5cm、6cm」）。
+    // 字典给全集；具体 productEffect 还可以在 allowedSizes 缩窄（皮革 only 4/6，
+    // 金属 only 4）。
+    sizes: ["4", "5", "6"],
+    // 2026-09-14：accessories 从 [leather, pvc] 改成 [leather, metal]
+    // （用户原话「钥匙扣有无套、皮革、金属」）。无套 = accessoryCode=null
+    // （null 永远允许），pvc accessory 移除（PVC 改用 leatherExposed/pvcProtection
+    // 标志位表达，与皮革徽章 LB 对齐）。龙虾扣是 UI 显示提示（见
+    // preview-order-view.tsx buildSpecSummary），不加独立 accessory code。
+    accessories: ["leather", "metal"],
+    // 2026-09-14：开 canLeatherExposed + canPvcProtection（用户原话「皮革的
+    // 有实物外露和 PVC 保护，金属的只有实物外露」—— capability 是
+    // productType 级开关，per-accessory 互斥在 fillDefaultsByTemplate 校验：
+    // accessoryCode='metal' + pvcProtection=true → 拒）。
     capabilities: {
       canEngrave: true,
       canLeatherColor: false,
-      canPvcProtection: false,
-      canLeatherExposed: false,
+      canPvcProtection: true,
+      canLeatherExposed: true,
       canHaveRemarks: false,
       canPlatform: false,
     },
@@ -103,8 +114,14 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
     code: "P",
     name: "CM 冰箱贴",
     unit: "cm",
-    sizes: ["4", "6", "8"],
-    accessories: [], // 冰箱贴没配件
+    // 2026-09-14：加 5cm（用户原话「头部浮雕冰箱贴规格 4cm、5cm、6cm」）。
+    // 字典提供「可做尺寸」全集；具体 productEffect 还可以在 allowedSizes
+    // 进一步缩窄（比如只做 4/5/6 不做 8）。
+    sizes: ["4", "5", "6", "8"],
+    // 2026-09-14：冰箱贴默认带「磁铁」配件（字典档位）。
+    // 实际默认配件仍由 productEffect.allowedAccessories 决定——这里只
+    // 是声明「P 型号可以配磁铁」，具体哪些效果挂磁铁由 admin 配。
+    accessories: ["magnet"],
     // 冰箱贴不在表面刻字
     capabilities: {
       canEngrave: false,
@@ -152,7 +169,7 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
   },
 ];
 
-export type AccessoryCode = "leather" | "pvc" | "bracket" | "metal";
+export type AccessoryCode = "leather" | "pvc" | "bracket" | "metal" | "magnet";
 
 export interface Accessory {
   code: AccessoryCode;
@@ -165,6 +182,11 @@ export const ACCESSORIES: readonly Accessory[] = [
   { code: "bracket", name: "支架" },
   // 2026-09-12：LB 皮革徽章用「金属」配件选项（与皮套二选一）
   { code: "metal", name: "金属" },
+  // 2026-09-14：「头部浮雕冰箱贴」专用配件——背面磁铁槽 + 磁铁。
+  // 2026-09-14 用户原话「默认背面挖磁铁槽配件磁铁」——只挂头部浮雕冰箱贴
+  // 类 productEffect（allowedAccessories=["magnet"]），其他产品效果图的
+  // allowedAccessories 不包含此项就不会出。
+  { code: "magnet", name: "磁铁" },
 ];
 
 // ============================================

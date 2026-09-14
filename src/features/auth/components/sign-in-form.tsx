@@ -14,6 +14,30 @@ import { AuthLogo } from "./auth-logo";
 const LAST_SIGNIN_EMAIL_KEY = "auth:last-signin-email";
 
 /**
+ * 从 window.location 读 callbackUrl 并做白名单校验（防止 open redirect）：
+ * - 必须以 / 开头（相对路径）
+ * - 不允许 // 开头（协议相对 → 外站）
+ * - 不允许 /\ 开头（部分浏览器会 normalize 成 //）
+ * - 不允许带语言前缀的 callbackUrl 重复前缀（/zh/zh/...）—— 后续在硬跳转
+ *   前补语言前缀时需要先剥掉
+ */
+function resolvePostSignInUrl(): string {
+  if (typeof window === "undefined") return "/dashboard";
+  const raw = new URLSearchParams(window.location.search).get("callbackUrl");
+  if (!raw) return "/dashboard";
+  const isSafe =
+    raw.startsWith("/") && !raw.startsWith("//") && !raw.startsWith("/\\");
+  if (!isSafe) return "/dashboard";
+  // 与 src/proxy.ts:147-161 同样的处理：callbackUrl 已带 /zh|/en 直接用，
+  // 否则补上当前语言前缀（避免跳到无前缀路由被 intlMiddleware 二次重定向）
+  const localeMatch = window.location.pathname.match(/^\/(en|zh)/);
+  const locale = localeMatch ? localeMatch[1] : "";
+  const hasLocalePrefix = /^\/(en|zh)(\/|$)/.test(raw);
+  if (hasLocalePrefix) return raw;
+  return locale ? `/${locale}${raw.startsWith("/") ? "" : "/"}${raw}` : raw;
+}
+
+/**
  * 登录表单组件
  *
  * 功能:
@@ -104,7 +128,11 @@ export function SignInForm() {
         // 隐私模式 / 配额满时静默忽略，不阻塞登录
       }
       message.success(t("success"));
-      window.location.href = "/dashboard";
+      // 2026-09-14：登录成功后跳到 callbackUrl（用户原话「为什么又是 /dashboard」——
+      // 之前硬编码 /dashboard 会让 /image-gen → /sign-in?callbackUrl=/image-gen
+      // → 登录 → /dashboard，丢失来源页）。callbackUrl 缺失或非法时
+      // 回退到 /dashboard。代理校验逻辑见 resolvePostSignInUrl。
+      window.location.href = resolvePostSignInUrl();
     } catch {
       setError(t("errors.invalidCredentials"));
       setIsLoading(false);

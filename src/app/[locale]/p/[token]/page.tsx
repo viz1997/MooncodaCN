@@ -69,12 +69,7 @@ export default async function PublicOrderPage({
     }
 
     // 1c. 其余 7 态全部进 PreviewOrderView（6 步工作台）
-    return (
-      <PreviewOrderView
-        token={token}
-        previewOrderNo={share.orderNo}
-      />
-    );
+    return <PreviewOrderView token={token} previewOrderNo={share.orderNo} />;
   }
 
   // 2. 没有 preview_share → 走 promptOrder 老路径

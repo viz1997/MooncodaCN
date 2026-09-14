@@ -78,7 +78,9 @@ async function main() {
        ORDER BY created_at DESC
        LIMIT 5;`
     );
-    console.log("\n[fix-preview-share-defaults] 最近 5 行 preview_share 状态：");
+    console.log(
+      "\n[fix-preview-share-defaults] 最近 5 行 preview_share 状态："
+    );
     for (const row of sample.rows) {
       console.log(
         `    ${row.order_no} status=${row.status} uploadCount=${row.upload_count} imagesPerUpload=${row.images_per_upload}`
