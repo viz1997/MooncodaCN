@@ -1,35 +1,29 @@
 "use client";
 
 /**
- * 代理商侧分享卡片 —— 展示二维码 + 复制链接 + 自保存按钮
+ * 分享弹窗 / 卡片 —— 展示二维码 + 复制链接 + 自保存按钮
  *
- * 仅用于 /image-gen 成功卡（public-image-gen-view.tsx），让代理商一键生成
- * QR / 复制链接发给客户扫码进 /p/[token]。**不**在客人侧 /p/[token] 出现——
- * 客人扫码进 /p/[token] 时手里已经有这条链接（/p/[token] 本身就是分享凭证），
- * 再展示「分享给朋友」是冗余动作。
+ * 2026-09-14 升级：从纯 section 区块升级为可作为 Modal 调用的组件。
+ * 当传 `open` / `onClose` 时：作为弹窗（fixed inset-0 + 关闭按钮 + ESC 关闭）。
+ * 不传 `open`：仍可作为 inline section 嵌入父级（保留向前兼容）。
  *
- * 2026-09-13：原 /image-gen 结果卡只有"下载图片"按钮，发给客户不方便。
- * 新增这张卡片：
+ * 调用方：
+ *  - /image-gen（public-image-gen-view.tsx）—— demo 成功卡点「分享给客户」→ 弹窗
+ *    模式，复用 submitted.token（promptOrder.token）。不再调 createPreviewShareAction
+ *    写 preview_share 行（同一次下单多次点都用同一个 token）。
+ *
+ * 设计要点：
  *  - QR code 用 qrcode 包 toDataURL 生成 240px PNG（深色 #1c1917 兼容深色背景）
- *  - QR 内容 = `${origin}/p/{token}`（demo 流 token / preview token 都适用），
- *    手机扫码直接打开分享页
+ *  - QR 内容 = `${origin}/p/{token}`，手机扫码直接打开分享页
  *  - 「复制链接」/「保存二维码」/「保存图片」三个按钮：
  *    - 复制链接：代理商最常用路径，复制到微信（navigator.clipboard + sonner toast）
  *    - 保存二维码：下载 qr-{orderNo}.png，让客户自己扫
  *    - 保存图片：调 onDownloadImage prop（/image-gen 走 handleDownload 直接下
  *      result.url 给代理商本地存档）
  *  - 移动端长按二维码 / 长按图默认触发系统"保存图片"，免费 fallback
- *  - URL 文本展示在按钮上方（truncate + select-all 友好），方便代理商肉眼校验
- *
- * 两路 /image-gen 场景：
- *  - demo 流「选择此效果下单」成功后：token 指向 /p/{demoToken]（demo 流不进
- *   /p/[token] 是因为 candidates 是单 composite，candIdx>0 找不到图——但
- *    ShareCard 用 result.url 本地存档）
- *  - preview 流「分享给客户预览」成功后：token 指向 /p/{previewToken]（客人
- *    真的会扫码进去确认）
  */
 
-import { Copy, Download, QrCode, Share2 } from "lucide-react";
+import { Copy, Download, QrCode, Share2, X } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -42,12 +36,21 @@ interface ShareCardProps {
   orderNo: string;
   /** 调 actions.download(orderNo, 0, 0) 触发候选图下载 */
   onDownloadImage: () => void | Promise<void>;
+  /**
+   * 2026-09-14：是否作为弹窗打开。传 `onClose` 时同步启用弹窗模式。
+   * 不传 → 当作 inline section 渲染（保留向前兼容）。
+   */
+  open?: boolean;
+  /** 弹窗关闭回调。点 ESC / 点遮罩 / 点关闭按钮都会调。 */
+  onClose?: () => void;
 }
 
 export function ShareCard({
   shareUrl,
   orderNo,
   onDownloadImage,
+  open,
+  onClose,
 }: ShareCardProps) {
   const [qrDataUrl, setQrDataUrl] = useState<string>("");
   const [qrErr, setQrErr] = useState<string>("");
@@ -71,6 +74,21 @@ export function ShareCard({
       cancelled = true;
     };
   }, [shareUrl]);
+
+  // 2026-09-14：弹窗模式 —— ESC 关闭 + body scroll lock，避免背景跟着滚。
+  useEffect(() => {
+    if (!open || !onClose) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [open, onClose]);
 
   // 2026-09-13：复制分享链接 —— 代理商最常用路径（粘到微信）。fallback 用
   // 隐藏 textarea + execCommand("copy") 兼容极老浏览器；现代浏览器走
@@ -96,13 +114,25 @@ export function ShareCard({
     }
   };
 
-  return (
-    <section className="rounded-2xl border border-stone-100 bg-white p-5 shadow-sm">
-      <div className="mb-3 flex items-center gap-2">
-        <Share2 className="h-4 w-4 text-stone-700" />
-        <h3 className="text-sm font-semibold tracking-tight text-stone-900">
-          分享给朋友
-        </h3>
+  const body = (
+    <div className="rounded-2xl border border-stone-100 bg-white p-5 shadow-sm">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Share2 className="h-4 w-4 text-stone-700" />
+          <h3 className="text-sm font-semibold tracking-tight text-stone-900">
+            分享给朋友
+          </h3>
+        </div>
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="关闭分享弹窗"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-full text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-900"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
       <div className="flex flex-col items-center gap-4 sm:flex-row">
@@ -165,6 +195,27 @@ export function ShareCard({
           </div>
         </div>
       </div>
-    </section>
+    </div>
   );
+
+  // 弹窗模式：fixed 全屏 + 关闭按钮 + ESC 关闭 + body scroll lock（见上面 useEffect）
+  if (open && onClose) {
+    return (
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="分享给客户"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+        onClick={(e) => {
+          // 点遮罩关闭（点弹窗本身不冒泡到遮罩）
+          if (e.target === e.currentTarget) onClose();
+        }}
+      >
+        <div className="w-full max-w-md">{body}</div>
+      </div>
+    );
+  }
+
+  // 兼容：作为 inline section 嵌入父级（无 onClose 时）
+  return <section>{body}</section>;
 }

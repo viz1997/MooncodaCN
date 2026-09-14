@@ -51,9 +51,7 @@ async function getHandler(req: NextRequest) {
   // 只看 generation（生图结果）。不传或非法值 → 不过滤（兼容旧调用方）。
   const rawSource = searchParams.get("source");
   const sourceFilter =
-    rawSource === "upload" || rawSource === "generation"
-      ? rawSource
-      : null;
+    rawSource === "upload" || rawSource === "generation" ? rawSource : null;
   const limit = Math.max(
     1,
     Math.min(100, Number.isFinite(limitParam) ? limitParam : 50)

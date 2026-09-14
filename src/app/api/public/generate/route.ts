@@ -231,7 +231,9 @@ export async function POST(req: NextRequest) {
           }
           const dispatched = await dispatchImageGenerationJob({
             jobId: createResult.jobId,
-            input: internalReq as Parameters<typeof dispatchImageGenerationJob>[0]["input"],
+            input: internalReq as Parameters<
+              typeof dispatchImageGenerationJob
+            >[0]["input"],
             ip,
           });
           return {
