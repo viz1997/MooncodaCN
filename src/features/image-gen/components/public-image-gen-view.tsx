@@ -1415,7 +1415,7 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
           <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white">
             <Sparkles className="h-3.5 w-3.5" />
           </div>
-          <span className="font-bold text-sm">AI 生图</span>
+          <span className="font-bold text-sm">Mooncoda</span>
           <span className="text-[11px] text-muted-foreground hidden sm:inline">
             · 3D打印定制 · 一键生成
           </span>
