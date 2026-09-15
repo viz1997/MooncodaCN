@@ -357,6 +357,10 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
   // ========== 多张参考图 ==========
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
   const [dragOver, setDragOver] = useState(false);
+  // 2026-09-15：grid 是多子节点结构（每张图 + <+> 都是独立子元素），cursor 在
+  // 子元素间移动会反复触发 dragenter/dragleave，直接用 dragOver toggle 会闪。
+  // 用 enter/leave 计数只在归零时清状态，避免闪烁。
+  const dragCounter = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 2026-09-XX：用户自由描述提示词。
@@ -1636,11 +1640,80 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                 )}
               </div>
               {uploadedImages.length > 0 ? (
-                <div className="grid grid-cols-3 gap-1.5">
+                // 2026-09-15：grid 容器套上拖拽支持 —— 上传一张后 grid 视图取代了
+                // 原 dropzone，但 grid 没有 onDrop，用户拖其他参考图无处放。
+                // 这里给 grid 整体加 onDragEnter/Leave/Over/Drop（计数器避免闪烁）
+                // + dragOver 时显示「释放即可添加」遮罩 + 紫色高亮，给视觉确认。
+                // 数量已达 MAX_REFERENCE_IMAGES 时整块不可拖（grid 不再显示 <+>）。
+                // biome-ignore lint/a11y/useSemanticElements: 拖拽上传区
+                <div
+                  role="region"
+                  aria-label="参考图网格（拖拽添加更多）"
+                  className={cn(
+                    "relative grid grid-cols-3 gap-1.5 rounded-lg transition-all",
+                    dragOver &&
+                      uploadedImages.length < MAX_REFERENCE_IMAGES &&
+                      "ring-2 ring-violet-500 ring-offset-1 bg-violet-500/5"
+                  )}
+                  onDragEnter={
+                    uploadedImages.length < MAX_REFERENCE_IMAGES
+                      ? (e) => {
+                          e.preventDefault();
+                          dragCounter.current += 1;
+                          if (dragCounter.current === 1) setDragOver(true);
+                        }
+                      : undefined
+                  }
+                  onDragLeave={
+                    uploadedImages.length < MAX_REFERENCE_IMAGES
+                      ? (e) => {
+                          e.preventDefault();
+                          dragCounter.current = Math.max(
+                            0,
+                            dragCounter.current - 1
+                          );
+                          if (dragCounter.current === 0) setDragOver(false);
+                        }
+                      : undefined
+                  }
+                  onDragOver={
+                    uploadedImages.length < MAX_REFERENCE_IMAGES
+                      ? (e) => {
+                          e.preventDefault();
+                        }
+                      : undefined
+                  }
+                  onDrop={
+                    uploadedImages.length < MAX_REFERENCE_IMAGES
+                      ? (e) => {
+                          e.preventDefault();
+                          dragCounter.current = 0;
+                          setDragOver(false);
+                          const files = e.dataTransfer.files
+                            ? Array.from(e.dataTransfer.files)
+                            : [];
+                          for (const f of files) handleFileSelect(f);
+                        }
+                      : undefined
+                  }
+                >
+                  {dragOver && uploadedImages.length < MAX_REFERENCE_IMAGES && (
+                    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg border-2 border-dashed border-violet-500 bg-violet-500/10">
+                      <p className="text-violet-700 dark:text-violet-300 text-xs font-medium">
+                        释放即可添加（可多张）
+                      </p>
+                    </div>
+                  )}
                   {uploadedImages.map((img, idx) => (
+                    // 2026-09-15：单元格 onDragOver preventDefault 让浏览器把
+                    // 这个 div 当成合法 drop target，否则 drop 在 cell 上时浏览器
+                    // 会判定 target（cell）未 preventDefault → 取消 drop 事件，
+                    // grid 容器的 onDrop 收不到 → 第二张图拖拽上传失败。
+                    // dragenter/leave 仍然冒泡到 grid，由 dragCounter 统一计数。
                     <div
                       key={img.localId}
                       className="relative group aspect-square"
+                      onDragOver={(e) => e.preventDefault()}
                     >
                       {/* biome-ignore lint/performance/noImgElement: 本地 blob 参考图预览 */}
                       <img
@@ -1671,9 +1744,13 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                     </div>
                   ))}
                   {uploadedImages.length < MAX_REFERENCE_IMAGES && (
+                    // 2026-09-15：<button> 默认不是 drop target —— 拖到 <+> 按钮上
+                    // 浏览器会判定 button 没 preventDefault → drop 取消。加 onDragOver
+                    // preventDefault 让 button 变成合法 drop target，drop 冒泡到 grid。
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
+                      onDragOver={(e) => e.preventDefault()}
                       className="aspect-square rounded-lg border-2 border-dashed border-muted-foreground/25 hover:border-violet-500/50 flex items-center justify-center text-muted-foreground hover:text-violet-500 transition"
                       title="继续添加（可多选）"
                     >

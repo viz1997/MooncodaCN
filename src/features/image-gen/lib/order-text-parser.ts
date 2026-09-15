@@ -236,6 +236,16 @@ function inferSize(text: string): string | null {
     const num = m[1];
     if (num && VALID_SIZES.has(num)) return num;
   }
+  // 2026-09-15：mm → cm 转换（"40mm" → "4cm"）。
+  // 钥匙扣 / 徽章等小件常用 mm 单位（40/50/60/80/110 mm 落在 cm 字典档位）。
+  // 要求是 10 的倍数 + 换算后落在 VALID_SIZES 才认，避免误中"20mm"=2cm 这种字典外档。
+  const mmMatches = text.matchAll(/\b(\d{2,3})\s*(?:mm|毫米|MM|Mm)\b/g);
+  for (const m of mmMatches) {
+    const raw = Number.parseInt(m[1] ?? "", 10);
+    if (!Number.isFinite(raw) || raw % 10 !== 0) continue;
+    const cm = String(raw / 10);
+    if (VALID_SIZES.has(cm)) return cm;
+  }
   return null;
 }
 
