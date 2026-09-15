@@ -581,9 +581,14 @@ function InfiniteCanvasPage() {
     openAgentPanel();
   }, [openAgentPanel, projectLoaded, searchParams]);
 
-  // 2026-09-13：image-gen 「去画布精修」seed —— /image-gen 结果卡点「去画布精修」
-  // 时把 result.url（效果图）+ refImageUrls[0]（原图）拼成 ?gen=&ref= 跳过来，
-  // 这里把两个 image 节点预置到画布：
+  // 2026-09-15：image-gen 「去画布精修」seed —— /image-gen 把 seed payload
+  // (genUrl + refUrl) 写到 sessionStorage 的 "mooncoda:canvas:seed:{projectId}"
+  // 后跳到本路由；这里读出 → 上传 → 预置 2 个 image 节点 → removeItem 清理。
+  // 旧版用 ?gen=&ref= URL 参数，R2 URL 长 + 含保留字在生产构建下偶发
+  // 「w?.get is not a function」错误（minified chunk 无法定位），改走
+  // sessionStorage 后 URL 干净、payload 隔离、刷新不会重复 seed。
+  //
+  // 两个 image 节点：
   //   - 效果图）position (0, 0)，画布中心
   //   - 原图参考）position (-size.width - 40, 0)，效果图左侧
   //
@@ -592,20 +597,42 @@ function InfiniteCanvasPage() {
   // grid 模式下 result.url 是 composite 整张，"效果图" 节点是整张宫格图，用户
   // 在画布里用 crop / split 工具细化；多张参考图 MVP 只 seed 第一张。
   //
-  // seedHandledRef 防重复：首次落地后 replace 清掉 URL 参数，effect 再触发时
-  // signature 已记录就跳过。seed 失败（URL 失效 / fetch error）只 console.error，
-  // 不弹 toast 干扰用户首次进入画布的体验。
+  // seedHandledRef 防重复：seed 完成后再触发 effect 时 ref 已置 true，直接跳过。
+  // seed 失败（URL 失效 / fetch error / CORS）只 console.error，不弹 toast
+  // 干扰用户首次进入画布的体验。
+  const CANVAS_SEED_KEY_PREFIX = "mooncoda:canvas:seed:";
   useEffect(() => {
     if (!hydrated || !projectLoaded) return;
-    const sp = searchParams;
-    if (!sp) return;
-    const genUrl = sp.get("gen");
-    const refUrl = sp.get("ref");
-    if (!genUrl && !refUrl) return;
-
-    const signature = `${projectId}|${genUrl ?? ""}|${refUrl ?? ""}`;
-    if (seedHandledRef.current === signature) return;
-    seedHandledRef.current = signature;
+    if (seedHandledRef.current) return;
+    let raw: string | null = null;
+    try {
+      raw = window.sessionStorage.getItem(`${CANVAS_SEED_KEY_PREFIX}${projectId}`);
+    } catch {
+      raw = null;
+    }
+    if (!raw) return;
+    let payload: { genUrl?: string; refUrl?: string } = {};
+    try {
+      payload = JSON.parse(raw) as { genUrl?: string; refUrl?: string };
+    } catch {
+      // payload 损坏 → 清掉避免反复撞错
+      try {
+        window.sessionStorage.removeItem(`${CANVAS_SEED_KEY_PREFIX}${projectId}`);
+      } catch {}
+      return;
+    }
+    const genUrl = payload.genUrl ?? "";
+    const refUrl = payload.refUrl ?? "";
+    if (!genUrl && !refUrl) {
+      try {
+        window.sessionStorage.removeItem(`${CANVAS_SEED_KEY_PREFIX}${projectId}`);
+      } catch {}
+      return;
+    }
+    seedHandledRef.current = true;
+    try {
+      window.sessionStorage.removeItem(`${CANVAS_SEED_KEY_PREFIX}${projectId}`);
+    } catch {}
 
     const seed = async () => {
       try {
@@ -637,14 +664,12 @@ function InfiniteCanvasPage() {
           });
         }
         setNodes((prev) => [...prev, ...newNodes]);
-        // 清掉 URL 参数，避免刷新再 seed 一次
-        navigateReplace(`/dashboard/canvas/${projectId}`);
       } catch (err) {
         console.error("[canvas] seed from image-gen failed", err);
       }
     };
     void seed();
-  }, [hydrated, projectLoaded, searchParams, projectId, navigateReplace]);
+  }, [hydrated, projectLoaded, projectId]);
 
   useEffect(() => {
     if (

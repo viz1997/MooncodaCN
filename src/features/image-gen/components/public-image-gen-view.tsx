@@ -926,11 +926,35 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
       setGenerating(false);
       const url = (data.image?.url as string) ?? "";
       if (url) {
-        setResult({
+        const newResult: GeneratedResult = {
           url,
           modelName: maskName,
           maskName,
           duration: data.duration,
+        };
+        setResult(newResult);
+        // 2026-09-15：同步结果分支（无 taskId 轮询，/api/public/generate 直接
+        // 返回 image）也写 lastResult 快照 —— 不写会导致用户刷新后
+        // refImageUrls 仍空（finishTask 不会被调用 → saveLastResult 不触发）。
+        // 用现场 refImageUrls 构造 uploadedImages，与异步分支 finishTask 共用
+        // 同一份 LastResultSnapshot 形态。
+        const refPublicUrls = [...refImageUrls];
+        const restoredImages: UploadedImage[] = refPublicUrls.map(
+          (publicUrl, idx) => ({
+            localId: `sync_${idx}_${Date.now().toString(36)}`,
+            previewUrl: publicUrl,
+            publicUrl,
+            uploading: 0,
+            fileName: `参考图 ${idx + 1}`,
+            fileSize: 0,
+          })
+        );
+        saveLastResult({
+          result: newResult,
+          uploadedImages: restoredImages,
+          selectedMask,
+          selectedCell: null,
+          finishedAt: new Date().toISOString(),
         });
         // 2026-09-14：历史改为 DB（photo.source=generation），后台入库
         // 由 /api/public/generate 自动完成（已登录用户走 createImageJob +
@@ -959,21 +983,45 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
     }
   };
 
-  // 2026-09-13：去画布精修 —— 把当前 result.url（效果图，grid 模式下是 composite 整张）
-  // + 第一张参考图（refImageUrls[0]）塞 URL 参数，让画布编辑器预置 2 个 image 节点。
-  // 走 useCanvasStore.getState().createProject() 客户端生成 localforage 项目 ID，
-  // 跳 /dashboard/canvas/{id} 后画布读 ?gen=?ref= seed。
+  // 2026-09-15：去画布精修 —— 旧版把 result.url + refImageUrls[0] 拼到 URL
+  // 查询串 (?gen=&ref=) 跳画布；R2 URL 通常 200+ 字符 + 含 ? & = 等保留字，
+  // 经 URLSearchParams 编码后整段可能撞到生产构建下某个 chunk 的
+  // 「w?.get is not a function」错误（minified 路径，无法直接定位到我们代码）。
+  // 改走 sessionStorage：写一个一次性的 seed payload（key 带 projectId 隔离），
+  // 画布 seed effect 读后立刻 removeItem —— 不污染 URL、不重复 seed。
+  const CANVAS_SEED_KEY_PREFIX = "mooncoda:canvas:seed:";
   const handleGoToCanvas = () => {
     if (!result?.url) return;
-    const projectId = useCanvasStore
-      .getState()
-      .createProject(
+    let projectId = "";
+    try {
+      projectId = useCanvasStore.getState().createProject(
         `精修: ${selectedMaskData?.name ?? "AI 生图"} · ${new Date().toLocaleString("zh-CN")}`
       );
-    const params = new URLSearchParams();
-    params.set("gen", result.url);
-    if (refImageUrls[0]) params.set("ref", refImageUrls[0]);
-    router.push(`/dashboard/canvas/${projectId}?${params.toString()}`);
+    } catch (e) {
+      console.error("[image-gen] createProject failed", e);
+      toast.error("创建画布项目失败，请稍后重试");
+      return;
+    }
+    if (!projectId) {
+      toast.error("创建画布项目失败，请稍后重试");
+      return;
+    }
+    try {
+      const payload = {
+        genUrl: result.url,
+        refUrl: refImageUrls[0] ?? "",
+        createdAt: Date.now(),
+      };
+      window.sessionStorage.setItem(
+        `${CANVAS_SEED_KEY_PREFIX}${projectId}`,
+        JSON.stringify(payload)
+      );
+    } catch (e) {
+      console.error("[image-gen] write canvas seed failed", e);
+      toast.error("传递精修参数失败，请稍后重试");
+      return;
+    }
+    router.push(`/dashboard/canvas/${projectId}`);
   };
 
   const selectedMaskData = masks.find((m) => m.maskId === selectedMask);
