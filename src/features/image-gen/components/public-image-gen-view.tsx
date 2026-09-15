@@ -36,6 +36,7 @@
 import {
   AlertCircle,
   CheckCircle2,
+  Copy,
   Download,
   Edit3,
   FileText,
@@ -1058,6 +1059,44 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
     toast.success("已开始下载");
   };
 
+  // 2026-09-15：复制图片到剪贴板（PNG 二进制）。
+  // - 同样走 /api/image-gen/download 代理拿同源 blob，避开 R2 CORS（fetch 直接
+  //   打 R2 拿不到 ArrayBuffer；同源代理则一路畅通）。
+  // - 优先 ClipboardItem 二进制复制（QQ/微信/钉钉粘出来是真图）；不支持的浏览器
+  //   降级到 writeText(URL) 复制链接，让用户至少能传 URL。
+  // - ClipboardItem 在 Safari iOS < 13.4 / 部分 WebView 不支持；HTTPS 环境是
+  //   前提（生产 OK）。
+  const handleCopyImage = async () => {
+    if (!result?.url) return;
+    try {
+      const proxyUrl = downloadProxyUrl(
+        result.url,
+        `mooncoda_${Date.now()}.png`
+      );
+      const res = await fetch(proxyUrl);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      // ClipboardItem 需要明确 MIME；服务端返回什么 type 就用什么。
+      const mime = blob.type || "image/png";
+      if (
+        typeof ClipboardItem !== "undefined" &&
+        typeof navigator.clipboard?.write === "function"
+      ) {
+        await navigator.clipboard.write([new ClipboardItem({ [mime]: blob })]);
+        toast.success("已复制图片到剪贴板");
+        return;
+      }
+      // 降级：复制 URL 文本
+      await navigator.clipboard.writeText(result.url);
+      toast.success("已复制图片链接（当前浏览器不支持复制图片二进制）");
+    } catch (err) {
+      console.error("[handleCopyImage] failed", err);
+      toast.error(
+        "复制失败：" + (err instanceof Error ? err.message : "未知错误")
+      );
+    }
+  };
+
   // 2026-09-15：去画布精修 —— 旧版把 result.url + refImageUrls[0] 拼到 URL
   // 查询串 (?gen=&ref=) 跳画布；R2 URL 通常 200+ 字符 + 含 ? & = 等保留字，
   // 经 URLSearchParams 编码后整段可能撞到生产构建下某个 chunk 的
@@ -1948,54 +1987,18 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                   })()}
                 </div>
 
-                {/* 操作：下载 / 再生成 / 选择此效果下单 */}
-                <div className="flex flex-wrap gap-2 justify-center">
-                  <Button
-                    type="button"
-                    onClick={handleDownload}
-                    variant="outline"
-                    className="rounded-full"
-                  >
-                    <Download className="h-4 w-4 mr-1.5" />
-                    下载图片
-                  </Button>
-                  {/* 2026-09-XX：基于此图改 —— 改图场景一键入口。
-                      把 result.url 转 uploadedImages 条目（uploading=0 + publicUrl 直接是 R2 URL，
-                      跳过 handleFileSelect 那条上传路径），同时聚焦描述框让用户写修改意图。
-                      比「去画布精修」更轻量：用户只想微调一张图时不需要进画布编辑器。 */}
-                  <Button
-                    type="button"
-                    onClick={handleRefineFromResult}
-                    variant="outline"
-                    className="rounded-full"
-                    disabled={!result?.url || generating || submitting}
-                    title="把结果图作为参考图，专注写修改描述"
-                  >
-                    <Edit3 className="h-4 w-4 mr-1.5" />
-                    基于此图改
-                  </Button>
-                  {/* 2026-09-13：去画布精修 — 把当前 result.url + 第一张参考图传到
-                      画布编辑器预置 2 个 image 节点（"效果图" + "原图参考"）。
-                      grid 模式下 result.url 是 composite 整张，画布里用户自己裁剪。
-                      refImageUrls 为空时只传 gen，ref 参数省略。 */}
-                  <Button
-                    type="button"
-                    onClick={handleGoToCanvas}
-                    variant="outline"
-                    className="rounded-full"
-                    disabled={!result?.url}
-                    title="把效果图 + 原图带到画布编辑器二次精修"
-                  >
-                    <Wand2 className="h-4 w-4 mr-1.5" />
-                    去画布精修
-                  </Button>
-                  {/* 2026-09-14：preview 流独立按钮 —— 调 createPreviewShareAction
-                      写 preview_share 行（status=candidates_ready + 预扣代理商
-                      creditsLocked），客人扫码进 /p/{token} 确认后才转 SELECTED。
-                      与 demo 下单按钮（→ promptOrder）是两条完全独立的路径
-                      （用户原话「提交订单不需要创建分享，创建分享也不需要提交
-                      订单」）。SpecModal 物理上同一组件，但通过 specOnConfirm
-                      回调函数引用切换到 createSharePreview。 */}
+                {/* 2026-09-15：结果卡操作区分三组（按用户意图分层）—— 解决
+                    「6 个按钮平铺 flex-wrap 太乱」的反馈。结构：
+                      Row 1 主转化（双 CTA 等宽）—— 选择此效果下单（primary
+                          渐变） + 分享给客户预览（次级 outline）
+                      Row 2 图片操作（双按钮） —— 下载 + 复制（都是「把这张
+                          结果图保存到本地」语义）
+                      Row 3 迭代（三按钮，更小字号）—— 基于此图改 + 去画布精修
+                          + 再生成一张（都是「对这张结果不满意，再来」语义）
+                    原 6 按钮全在 flex-wrap 一行，宽度挤压导致文字换行；改 grid
+                    后每个按钮有固定槽位，视觉层级清晰。*/}
+                {/* Row 1：主转化（双 CTA） */}
+                <div className="grid grid-cols-2 gap-2">
                   <Button
                     type="button"
                     variant="outline"
@@ -2005,20 +2008,7 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                     title="生成预览凭证发给客户扫码确认后下单（不写 promptOrder）"
                   >
                     <Share2 className="h-4 w-4 mr-1.5" />
-                    分享给客户预览
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="rounded-full"
-                    onClick={() => {
-                      setResult(null);
-                      void handleGenerate();
-                    }}
-                    disabled={generating || submitting}
-                  >
-                    <RefreshCw className="h-4 w-4 mr-1.5" />
-                    再生成一张
+                    分享给客户
                   </Button>
                   <Button
                     type="button"
@@ -2037,6 +2027,80 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                         选择此效果下单
                       </>
                     )}
+                  </Button>
+                </div>
+
+                {/* Row 2：图片操作（双按钮） */}
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-full"
+                    onClick={handleDownload}
+                    disabled={!result?.url}
+                  >
+                    <Download className="h-4 w-4 mr-1.5" />
+                    下载图片
+                  </Button>
+                  {/* 2026-09-15：复制图片到剪贴板（PNG 二进制）。降级到复制 URL 文本。*/}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-full"
+                    onClick={() => void handleCopyImage()}
+                    disabled={!result?.url}
+                    title="把结果图复制到剪贴板，可直接粘贴到微信 / 钉钉 / 飞书"
+                  >
+                    <Copy className="h-4 w-4 mr-1.5" />
+                    复制图片
+                  </Button>
+                </div>
+
+                {/* Row 3：迭代（三按钮，更小字号） */}
+                <div className="grid grid-cols-3 gap-1.5">
+                  {/* 2026-09-XX：基于此图改 —— 改图场景一键入口。
+                      把 result.url 转 uploadedImages 条目（uploading=0 + publicUrl 直接是 R2 URL，
+                      跳过 handleFileSelect 那条上传路径），同时聚焦描述框让用户写修改意图。
+                      比「去画布精修」更轻量：用户只想微调一张图时不需要进画布编辑器。 */}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-full text-xs h-9 px-2"
+                    onClick={handleRefineFromResult}
+                    disabled={!result?.url || generating || submitting}
+                    title="把结果图作为参考图，专注写修改描述"
+                  >
+                    <Edit3 className="h-3.5 w-3.5 mr-1" />
+                    基于此图改
+                  </Button>
+                  {/* 2026-09-13：去画布精修 — 把当前 result.url + 第一张参考图传到
+                      画布编辑器预置 2 个 image 节点（"效果图" + "原图参考"）。
+                      grid 模式下 result.url 是 composite 整张，画布里用户自己裁剪。
+                      refImageUrls 为空时只传 gen，ref 参数省略。 */}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-full text-xs h-9 px-2"
+                    onClick={handleGoToCanvas}
+                    disabled={!result?.url}
+                    title="把效果图 + 原图带到画布编辑器二次精修"
+                  >
+                    <Wand2 className="h-3.5 w-3.5 mr-1" />
+                    去画布精修
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-full text-xs h-9 px-2"
+                    onClick={() => {
+                      setResult(null);
+                      void handleGenerate();
+                    }}
+                    disabled={generating || submitting}
+                    title="用相同 mask / prompt 重新生成（消耗 credits）"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5 mr-1" />
+                    再生成一张
                   </Button>
                 </div>
                 {/* 2026-09-15：amber warning 已放宽为提示性文案 —— 参考图为空时仍允许下单

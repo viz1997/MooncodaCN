@@ -239,7 +239,10 @@ function inferSize(text: string): string | null {
   // 2026-09-15：mm → cm 转换（"40mm" → "4cm"）。
   // 钥匙扣 / 徽章等小件常用 mm 单位（40/50/60/80/110 mm 落在 cm 字典档位）。
   // 要求是 10 的倍数 + 换算后落在 VALID_SIZES 才认，避免误中"20mm"=2cm 这种字典外档。
-  const mmMatches = text.matchAll(/\b(\d{2,3})\s*(?:mm|毫米|MM|Mm)\b/g);
+  // 前导 \b 防止匹配「1234567890」里的「12」；末尾不挂 \b 是因为「毫米」是 CJK
+  // 非 word char，\b 在中文两侧不构成 word/non-word 边界，会漏掉「40毫米」。
+  // 允许「40mm装」「40毫米款」等中文后缀与 mm 同形态。
+  const mmMatches = text.matchAll(/\b(\d{2,3})\s*(?:mm|毫米|MM|Mm)/g);
   for (const m of mmMatches) {
     const raw = Number.parseInt(m[1] ?? "", 10);
     if (!Number.isFinite(raw) || raw % 10 !== 0) continue;
