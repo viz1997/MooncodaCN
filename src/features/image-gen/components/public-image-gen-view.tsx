@@ -1524,7 +1524,7 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
                       className="aspect-square rounded-lg border-2 border-dashed border-muted-foreground/25 hover:border-violet-500/50 flex items-center justify-center text-muted-foreground hover:text-violet-500 transition"
-                      title="继续添加"
+                      title="继续添加（可多选）"
                     >
                       <Upload className="h-4 w-4" />
                     </button>
@@ -1543,7 +1543,10 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                   onDrop={(e) => {
                     e.preventDefault();
                     setDragOver(false);
-                    handleFileSelect(e.dataTransfer.files?.[0]);
+                    const files = e.dataTransfer.files
+                      ? Array.from(e.dataTransfer.files)
+                      : [];
+                    for (const f of files) handleFileSelect(f);
                   }}
                   onClick={() => fileInputRef.current?.click()}
                   onKeyDown={(e) => {
@@ -1563,8 +1566,16 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                     ref={fileInputRef}
                     type="file"
                     accept="image/jpeg,image/jpg,image/png,image/webp"
+                    multiple
                     className="hidden"
-                    onChange={(e) => handleFileSelect(e.target.files?.[0])}
+                    onChange={(e) => {
+                      const files = e.target.files
+                        ? Array.from(e.target.files)
+                        : [];
+                      for (const f of files) handleFileSelect(f);
+                      // 选完后清空 value —— 否则同名文件二次选择不触发 onChange
+                      e.target.value = "";
+                    }}
                   />
                   <Upload
                     className={cn(
@@ -1573,10 +1584,10 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                     )}
                   />
                   <p className="text-xs font-medium">
-                    {dragOver ? "释放即可上传" : "点击或拖拽图片"}
+                    {dragOver ? "释放即可上传（可多张）" : "点击或拖拽图片（可多张）"}
                   </p>
                   <p className="text-[10px] text-muted-foreground mt-1">
-                    JPG / PNG / WEBP · ≤10MB（自动压缩到 5MB）
+                    JPG / PNG / WEBP · ≤10MB / 张（自动压缩到 5MB） · 最多 {MAX_REFERENCE_IMAGES} 张
                   </p>
                 </div>
               )}
