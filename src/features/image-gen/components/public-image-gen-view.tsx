@@ -1026,9 +1026,10 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
 
   const selectedMaskData = masks.find((m) => m.maskId === selectedMask);
 
-  // 2026-09-13：共用前置校验 —— grid 多 cell 必选 / refImageUrls 非空。无
-  // productTypeCode → 不弹 modal 直接调 submitDemoOrder / createSharePreview
-  // （demo 一键 / preview 凭证都允许免规格下单）。返回 true 表示通过校验可以
+  // 2026-09-15：共用前置校验 —— grid 多 cell 必选；refImageUrls 非空已放宽。
+  // 原「必须先上传参考图」硬卡会把上次生成成功的用户也挡在外面（lastResult 快照
+  // 只存了 result 没存 refPublicUrls，刷新就丢），用户原话「已经有效果图即时没有
+  // 参考图也能提交，因为是你弄丢的」→ 提交权交回用户。返回 true 表示通过校验可以
   // 继续，false 表示已 toast 阻断。让 handleClickSubmitOrder /
   // handleClickSharePreview 复用这套校验。
   const preflightForOrderAction = (): boolean => {
@@ -1039,14 +1040,6 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
     const om = selectedMaskData.outputMode ?? "grid";
     if (om === "grid" && cc > 1 && selectedCell === null) {
       toast.error("请先在效果图上选一个分镜");
-      return false;
-    }
-    // demo 一键下单必须有 R2 URL（base64 不支持）；多图取第一张的 publicUrl 写订单的 uploadedImages[0]
-    if (refImageUrls.length === 0) {
-      // 2026-09-14：历史已迁到 DB photo 表，photo 行没有 refPublicUrls 字段
-      // （参考图不存到 photo 表；本表单无需查 history）。失败提示统一为
-      // 「请先上传参考图」即可。
-      toast.error("下单需要参考图的 R2 URL，请先上传至少一张参考图");
       return false;
     }
     return true;
@@ -1111,19 +1104,19 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
   // 与 createSharePreview 完全独立（不共享 state / 流程 / 成功卡渲染）。
   const submitDemoOrder = async (spec: SpecSelection) => {
     if (!result || !selectedMaskData) return;
-    if (refImageUrls.length === 0) {
-      toast.error("参考图丢失，请重新上传");
-      return;
-    }
+    // 2026-09-15：参考图为空允许提交 —— server schema 已放宽
+    // （referenceImageUrl: z.string().max(2048).optional().default("")）；
+    // 上传图丢失场景写空数组到 uploadedImages，订单详情降级渲染。
 
     setShowSpecModal(false);
     setSubmitting(true);
     try {
       const res = await submitImageGenDemoAction({
         templateId: selectedMaskData.maskId,
-        // demo 一键下单：上传图片列表里取第一张作为订单 uploadedImages[0]
-        // （多图模式下其他参考图保留在 uploadedImages 里供后续 regenerate 用）
-        referenceImageUrl: refImageUrls[0] ?? "",
+        // 2026-09-15：从历史的单数字段 referenceImageUrl 升级为 referenceImageUrls 数组
+        // —— 全量透传用户上传的多张参考图（max 10），落 promptOrder.uploadedImages。
+        // 下游 /p/[token] SelectStep 通过 uploadedImages 渲染多张原图缩略图。
+        referenceImageUrls: refImageUrls,
         // 2026-09-12：Lingting 生成的 demo 预览图（"效果图"），不是用户上传的原图。
         // 落 promptOrder.candidates[0][0]；订单详情展示这张图。
         // 旧版写错了把 referenceImageUrl 当 candidates，结果订单详情显示原图。
@@ -1195,17 +1188,18 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
   // 与 submitDemoOrder 完全独立（不共享 state / 流程 / 成功卡渲染）。
   const createSharePreview = async (spec: SpecSelection) => {
     if (!result || !selectedMaskData) return;
-    if (refImageUrls.length === 0) {
-      toast.error("参考图丢失，请重新上传");
-      return;
-    }
+    // 2026-09-15：与 submitDemoOrder 对齐 —— 参考图为空允许提交，server schema
+    // 已放宽，客人扫码进 /p/{token} 看不到原图缩略图但能看到 demo 预览图。
 
     setShowSpecModal(false);
     setSubmitting(true);
     try {
       const res = await createPreviewShareAction({
         templateId: selectedMaskData.maskId,
-        referenceImageUrl: refImageUrls[0] ?? "",
+        // 2026-09-15：与 submitDemoOrder 对齐 —— 全量透传多张参考图数组，
+        // previewShare.uploadedImages 落全数组；客人扫码进 /p/[token] SelectStep
+        // 渲染多张原图缩略图。
+        referenceImageUrls: refImageUrls,
         demoPreviewUrl: result.url,
         productTypeCode: selectedMaskData.productTypeCode,
         productSize: spec.productSize,
@@ -1772,13 +1766,12 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                     )}
                   </Button>
                 </div>
-                {/* 2026-09-14：lastResult 快照（刚生成完）/ 当前 session 有参考图 →
-                    都自动恢复，下单按钮 enabled；DB 历史 photo 点击场景下 refImageUrls
-                    为空（photo 行无 referenceImageUrl），需要重新上传参考图才能下单。
-                    amber warning 给用户清晰指引。 */}
+                {/* 2026-09-15：amber warning 已放宽为提示性文案 —— 参考图为空时仍允许下单
+                    （用户原话「已经有效果图即时没有参考图也能提交，因为是你弄丢的」），
+                    这里只柔和提示「如需附加原图请上传」，不再硬卡。*/}
                 {refImageUrls.length === 0 && (
-                  <p className="text-[10px] text-center text-amber-600 dark:text-amber-400">
-                    当前未上传参考图，下单 / 分享预览需要至少 1 张参考图 —— 请先上传
+                  <p className="text-[10px] text-center text-muted-foreground">
+                    提示：当前未上传参考图，订单将只附带效果图；如需附原图请先上传
                   </p>
                 )}
               </div>

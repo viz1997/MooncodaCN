@@ -65,7 +65,10 @@ const REGENERATE_LIMIT = 3;
 
 const createPreviewSchema = z.object({
   templateId: z.string().min(1),
-  referenceImageUrl: z.string().url(),
+  // 2026-09-15：升级为多张数组，与 submitImageGenDemoAction 对齐。空数组 =
+  // 参考图丢失场景 —— 客人扫码进 /p/{token} 看不到原图缩略图（降级渲染），
+  // candidates 仍是 demo 预览图。
+  referenceImageUrls: z.array(z.string().url()).max(10).optional().default([]),
   demoPreviewUrl: z.string().url(),
   productTypeCode: z.string().min(1).max(8).nullable().optional(),
   productSize: z.string().min(1).max(8).nullable().optional(),
@@ -240,19 +243,27 @@ export const createPreviewShareAction = withPreviewAction("create")
     const now = new Date();
 
     const candidatesJson = JSON.stringify([[parsedInput.demoPreviewUrl]]);
-    // 2026-09-14：把代理商 demo 阶段的 referenceImageUrl 当作客人侧 uploadedImages[0]
+    // 2026-09-14：把代理商 demo 阶段的 referenceImageUrls 当作客人侧 uploadedImages
     // 写库 —— 让客户打开链接直接看到代理商生成的效果图（SelectStep 渲染时通过
-    // uploadedImages[0] 拿原图缩略图、通过 candidates[0][0] 拿效果图）。
+    // uploadedImages 拿原图缩略图、通过 candidates[0][0] 拿效果图）。
     //
     // 历史 bug：之前只写 status="pending" + uploadedImages=null，PreviewOrderContent
     // 渲染 UploadStep（要求客户上传图），候选图藏在 candidates 列但 PENDING 状态下
     // 不渲染 SelectStep → 客户根本看不到代理商生成的效果图。
     //
     // 客人后续若要传自己的图重新生成：/upload 路由（preview 分支）会按 status=
-    // "uploaded"/"failed" 覆盖 uploadedImages[0]（preview 是单批单图硬编码，无追加）。
-    const initialUploadedImages = JSON.stringify([
-      parsedInput.referenceImageUrl,
-    ]);
+    // "uploaded"/"failed" 覆盖 uploadedImages。
+    //
+    // 2026-09-15：referenceImageUrls 数组落 uploadedImages —— 多张原图一起带走；
+    // 客人扫码进 /p/[token] SelectStep 通过 uploadedImages 渲染原图缩略图列表。
+    // 客人后续若要传自己的图重新生成：/upload 路由（preview 分支）会按 status=
+    // "uploaded"/"failed" 覆盖 uploadedImages。
+    //
+    // previewShare.referenceImageUrl（demo 阶段用户上传的第一张参考图，单 text）
+    // 保留以兼容历史只读路径 —— 取 referenceImageUrls[0] 兜底，DB 列 NOT NULL 仍在。
+    const initialUploadedImages = JSON.stringify(
+      parsedInput.referenceImageUrls ?? []
+    );
 
     try {
       const [created] = await db
@@ -263,7 +274,9 @@ export const createPreviewShareAction = withPreviewAction("create")
           token,
           templateId: template.id,
           // 原图 / 效果图 R2 URL（demo 阶段已生成）
-          referenceImageUrl: parsedInput.referenceImageUrl,
+          // 2026-09-15：referenceImageUrl 兼容字段取 referenceImageUrls[0] 兜底；
+          // DB 列 NOT NULL，缺图时记空串（详情页降级渲染「原图缺失」位）。
+          referenceImageUrl: parsedInput.referenceImageUrls?.[0] ?? "",
           demoPreviewUrl: parsedInput.demoPreviewUrl,
           // 候选集（[[demoPreviewUrl]]）—— /api/orders/[token]/candidates/0/0
           // 路由按 token 查 preview_share 返图

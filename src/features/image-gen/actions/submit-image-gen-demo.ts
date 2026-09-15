@@ -58,11 +58,16 @@ const submitDemoSchema = z.object({
   /** 模板 id（= productEffect.id / maskId；通过 productEffect.promptTemplateId 间接查 prompt_template） */
   templateId: z.string().min(1),
   /**
-   * 2026-09-12：用户上传的原图 R2 publicUrl（"原图"）。
-   * 落 promptOrder.uploadedImages[0] —— "用户上传了什么图"。
-   * 必传，且必须已在 R2。
+   * 用户上传的原图 R2 publicUrl 列表（"原图"，多张）。
+   * 落 promptOrder.uploadedImages —— "用户上传了什么图"。
+   *
+   * 2026-09-15：参考图丢失场景允许空数组 → uploadedImages 写 []（不再硬塞占位）；
+   * 2026-09-15：从历史的单数字段 referenceImageUrl 升级为 referenceImageUrls 数组，
+   * 与 /api/public/generate 的 imageUrls[].max(10) 对齐，UI MAX_REFERENCE_IMAGES=10。
+   * 客人 / 代理商从 candidates 看效果，从 uploadedImages 看原图 —— 原图缺失即空数组，
+   * UI 渲染降级（详情页隐藏「原图缩略图」位）。
    */
-  referenceImageUrl: z.string().url(),
+  referenceImageUrls: z.array(z.string().url()).max(10).optional().default([]),
   /**
    * 2026-09-12：demo 预览图 R2 publicUrl（"效果图"）。
    * - Lingting 异步生成返回的 URL，是用户在 demo 流看到的「选择此效果下单」那张图
@@ -306,8 +311,10 @@ export const submitImageGenDemoAction = withDemoAction("submit")
         uploadCount: 1,
         imagesPerUpload: 1,
         regenerateLimit: 5,
-        // uploadedImages 直接写用户上传的原图 URL（已在 R2）
-        uploadedImages: JSON.stringify([parsedInput.referenceImageUrl]),
+        // 2026-09-15：参考图为空时写空数组而非塞占位串 —— 历史曾因
+        // [parsedInput.referenceImageUrl] 强写 "" / "undefined" 进 JSON 引下游解析炸。
+        // 2026-09-15：升级为全数组写入，原图多张一起落 uploadedImages。
+        uploadedImages: JSON.stringify(parsedInput.referenceImageUrls ?? []),
         uploadedAt: new Date(),
         generatedAt: new Date(),
         // demo 跳过异步生成，候选就是 demo 预览图本身
