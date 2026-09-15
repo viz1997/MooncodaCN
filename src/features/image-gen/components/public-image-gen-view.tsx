@@ -1092,7 +1092,11 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
         refUrl: refImageUrls[0] ?? "",
         createdAt: Date.now(),
       };
-      window.sessionStorage.setItem(
+      // 2026-09-XX：seed 存储改 localStorage —— 配合「去画布精修改新标签页」，
+      // sessionStorage 不跨标签页共享（每个 tab 独立 session），新标签页里
+      // 画布 seed effect 读不到。localStorage 跨标签页 + 画布 seed effect
+      // 读后立即 removeItem，不会污染下次进入同 project。
+      window.localStorage.setItem(
         `${CANVAS_SEED_KEY_PREFIX}${projectId}`,
         JSON.stringify(payload)
       );

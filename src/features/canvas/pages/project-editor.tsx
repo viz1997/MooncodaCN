@@ -600,13 +600,19 @@ function InfiniteCanvasPage() {
   // seedHandledRef 防重复：seed 完成后再触发 effect 时 ref 已置 true，直接跳过。
   // seed 失败（URL 失效 / fetch error / CORS）只 console.error，不弹 toast
   // 干扰用户首次进入画布的体验。
+  //
+  // 2026-09-XX：seed 存储从 sessionStorage 改 localStorage —— 因为
+  // /image-gen 跳画布改 window.open 新标签页（用户原话「image-gen 进入画布
+  // 应该新开标签页」），sessionStorage 不跨标签页共享，新标签页里读不到 seed
+  // payload → canvas 不会预置 image 节点。localStorage 跨标签页共享 + 读后
+  // 立刻 removeItem 不会污染下次进入（同 key 名带 projectId 隔离，互不打架）。
   const CANVAS_SEED_KEY_PREFIX = "mooncoda:canvas:seed:";
   useEffect(() => {
     if (!hydrated || !projectLoaded) return;
     if (seedHandledRef.current) return;
     let raw: string | null = null;
     try {
-      raw = window.sessionStorage.getItem(
+      raw = window.localStorage.getItem(
         `${CANVAS_SEED_KEY_PREFIX}${projectId}`
       );
     } catch {
@@ -619,7 +625,7 @@ function InfiniteCanvasPage() {
     } catch {
       // payload 损坏 → 清掉避免反复撞错
       try {
-        window.sessionStorage.removeItem(
+        window.localStorage.removeItem(
           `${CANVAS_SEED_KEY_PREFIX}${projectId}`
         );
       } catch {}
@@ -629,7 +635,7 @@ function InfiniteCanvasPage() {
     const refUrl = payload.refUrl ?? "";
     if (!genUrl && !refUrl) {
       try {
-        window.sessionStorage.removeItem(
+        window.localStorage.removeItem(
           `${CANVAS_SEED_KEY_PREFIX}${projectId}`
         );
       } catch {}
@@ -637,7 +643,7 @@ function InfiniteCanvasPage() {
     }
     seedHandledRef.current = true;
     try {
-      window.sessionStorage.removeItem(`${CANVAS_SEED_KEY_PREFIX}${projectId}`);
+      window.localStorage.removeItem(`${CANVAS_SEED_KEY_PREFIX}${projectId}`);
     } catch {}
 
     const seed = async () => {
