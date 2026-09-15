@@ -120,8 +120,15 @@ export async function POST(req: NextRequest) {
       const tmpl = await db.query.promptTemplate.findFirst({
         where: eq(promptTemplate.id, mask.promptTemplateId),
       });
+      // 2026-09-XX：模板 prompt 仍是主体；用户 body.prompt（非空时）追加到末尾
+      // 让「选模板风格 + 加自己的修改意图」场景走通。模板无 prompt 且用户
+      // 也没填 → 报错；用户填了但模板没 prompt → 用用户 prompt 兜底（这种
+      // 组合是 admin 配置问题但降级不阻断）。
+      const userPrompt = body.prompt?.trim() ?? "";
       if (tmpl?.prompt) {
-        prompt = tmpl.prompt;
+        prompt = userPrompt ? `${tmpl.prompt}\n\n${userPrompt}` : tmpl.prompt;
+      } else if (userPrompt) {
+        prompt = userPrompt;
       } else {
         return NextResponse.json(
           {

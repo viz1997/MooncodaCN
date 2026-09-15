@@ -37,6 +37,8 @@ import {
   AlertCircle,
   CheckCircle2,
   Download,
+  Edit3,
+  FileText,
   History,
   Image as ImageIcon,
   Loader2,
@@ -54,6 +56,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { QuadrantGridPicker } from "@/components/quadrant-grid-picker";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { useCanvasStore } from "@/features/canvas/stores/canvas/use-canvas-store";
 import type { ProductCapabilities } from "@/features/gpt-image/lib/product-catalog";
 import { ShareCard } from "@/features/gpt-image/user/components/share-card";
@@ -354,6 +357,16 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 2026-09-XX：用户自由描述提示词。
+  // - 选了模板时：append 到 promptTemplate.prompt 末尾（newline 分隔）
+  //   → 走 image_gen 模型（带模板风格 + 用户修改意图）
+  // - 没选模板时：作为唯一 prompt，API 走 text_to_image（无 ref）或
+  //   image_to_image（有 ref）
+  // trim 后判空避免空白占用 UI + 阻断提交。
+  const [customPrompt, setCustomPrompt] = useState("");
+  // 用于「基于此图改」按钮自动滚动 + 聚焦描述框
+  const promptRef = useRef<HTMLTextAreaElement>(null);
 
   const [selectedMask, setSelectedMask] = useState<string>("");
   const [masks, setMasks] = useState<PublicMask[]>([]);
@@ -867,9 +880,41 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
   // 生成 + 下单
   // ============================================
 
+  // 2026-09-XX：「基于此图改」入口 —— 一键把当前 result.url 作为参考图注入
+  // uploadedImages（已 R2 公网 URL，跳过 handleFileSelect 上传路径），同时
+  // 滚动 + 聚焦描述框。改图场景比「去画布精修」轻量：用户只想微调一张图
+  // 时不一定要进画布编辑器，写一句「把背景换成沙滩」直接重跑就行。
+  const handleRefineFromResult = () => {
+    if (!result?.url) return;
+    const localId = `refine-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const newImg: UploadedImage = {
+      localId,
+      previewUrl: result.url,
+      publicUrl: result.url, // 直接是 R2 URL，handleGenerate 不再上传
+      uploading: 0, // 0 = 就绪（handleGenerate 的 some(i=>uploading===1) 检查不会命中）
+      fileName: `基于此图改 ${new Date().toLocaleTimeString("zh-CN")}`,
+      fileSize: 0,
+    };
+    // 替换 uploadedImages（不是叠加）—— 用户说「基于此图改」就是以这张图为基准
+    setUploadedImages([newImg]);
+    // 滚动 + 聚焦描述框
+    requestAnimationFrame(() => {
+      promptRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+      promptRef.current?.focus();
+    });
+    toast.success("结果图已加入参考图，请在描述框填写修改意图");
+  };
+
   const handleGenerate = async () => {
-    if (!selectedMask) {
-      toast.error("请先选择效果");
+    // 2026-09-XX：放宽 mask 必填 —— 选模板 OR 写描述二选一即可。
+    // 不选模板时直接走「无模板纯描述」路径（API 端 mode 自动 = text_to_image
+    // 或 image_to_image）。后端 /api/public/generate 已支持 maskId 可空。
+    const trimmedPrompt = customPrompt.trim();
+    if (!selectedMask && !trimmedPrompt) {
+      toast.error("请选择效果或填写提示词描述");
       return;
     }
     if (uploadedImages.some((i) => i.uploading === 1)) {
@@ -907,7 +952,10 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
         body: JSON.stringify({
           // 多张参考图：imageUrls[] 优先；空数组退化为 text_to_image（mask 没 ref 图也能生成）
           ...(refImageUrls.length > 0 ? { imageUrls: refImageUrls } : {}),
-          maskId: selectedMask,
+          // maskId 可选 —— 不传时后端走纯 prompt 路径
+          ...(selectedMask ? { maskId: selectedMask } : {}),
+          // 用户描述：选模板时拼到模板后，不选模板时作为唯一 prompt
+          ...(trimmedPrompt ? { prompt: trimmedPrompt } : {}),
           size: "1024x1024",
         }),
       });
@@ -988,22 +1036,22 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
   };
 
   // 2026-09-15：修「点击下载图片按钮没反应」。原版直接 `<a href={result.url} download>`
-// 在 R2 跨域 URL 上 `download` 属性被浏览器忽略 + `target="_blank"` 让链接开了新页
-// 而不是下载文件。改走 `/api/image-gen/download` 代理（Content-Disposition:
-// attachment 强制下载 + 服务端无 CORS 限制），data: / blob: 短路由 downloadProxyUrl
-// 内部判断（与生图工作台 V1/V2 走同一模式）。
-const handleDownload = () => {
-  if (!result?.url) return;
-  const a = document.createElement("a");
-  a.href = downloadProxyUrl(result.url, `mooncoda_${Date.now()}.png`);
-  a.download = `mooncoda_${Date.now()}.png`;
-  a.rel = "noopener";
-  a.style.display = "none";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  toast.success("已开始下载");
-};
+  // 在 R2 跨域 URL 上 `download` 属性被浏览器忽略 + `target="_blank"` 让链接开了新页
+  // 而不是下载文件。改走 `/api/image-gen/download` 代理（Content-Disposition:
+  // attachment 强制下载 + 服务端无 CORS 限制），data: / blob: 短路由 downloadProxyUrl
+  // 内部判断（与生图工作台 V1/V2 走同一模式）。
+  const handleDownload = () => {
+    if (!result?.url) return;
+    const a = document.createElement("a");
+    a.href = downloadProxyUrl(result.url, `mooncoda_${Date.now()}.png`);
+    a.download = `mooncoda_${Date.now()}.png`;
+    a.rel = "noopener";
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    toast.success("已开始下载");
+  };
 
   // 2026-09-15：去画布精修 —— 旧版把 result.url + refImageUrls[0] 拼到 URL
   // 查询串 (?gen=&ref=) 跳画布；R2 URL 通常 200+ 字符 + 含 ? & = 等保留字，
@@ -1486,6 +1534,60 @@ const handleDownload = () => {
               )}
             </section>
 
+            {/* 2026-09-XX：提示词描述 —— 让「不选模板也能生图」+ 「改图」场景走通。
+                后端 /api/public/generate 已经支持：maskId + prompt 共存时把
+                prompt append 到模板 prompt 末尾；只有 prompt 没有 maskId 时
+                直接作为唯一 prompt（text_to_image / image_to_image）。
+                选模板与否由用户决定：模板 = 标准化风格 + 用户附加修改；
+                无模板 = 纯用户描述。 */}
+            <section className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold flex items-center gap-1">
+                  <FileText className="h-3.5 w-3.5" />
+                  提示词描述
+                  <span className="text-[10px] text-muted-foreground font-normal">
+                    (
+                    {selectedMask
+                      ? "选模板时拼到模板提示词末尾"
+                      : "不选模板时必填"}
+                    )
+                  </span>
+                </span>
+                {customPrompt && (
+                  <button
+                    type="button"
+                    onClick={() => setCustomPrompt("")}
+                    className="text-[10px] text-muted-foreground hover:text-rose-600 flex items-center gap-0.5"
+                    title="清空描述"
+                  >
+                    <X className="h-3 w-3" />
+                    清空
+                  </button>
+                )}
+              </div>
+              <Textarea
+                ref={promptRef}
+                value={customPrompt}
+                onChange={(e) => setCustomPrompt(e.target.value)}
+                placeholder={
+                  selectedMask
+                    ? "补充修改意图，如：把背景换成沙滩、加一只猫..."
+                    : "描述你想生成的画面，如：一只趴在沙发上的橘猫，油画风格..."
+                }
+                rows={3}
+                maxLength={500}
+                className="text-xs resize-none"
+              />
+              <p className="text-[10px] text-muted-foreground">
+                {customPrompt.length}/500 ·{" "}
+                {selectedMask
+                  ? "已选模板，此描述会追加到模板提示词后"
+                  : refImageUrls.length > 0
+                    ? "无模板 + 有参考图 → image_to_image"
+                    : "无模板 + 无参考图 → text_to_image"}
+              </p>
+            </section>
+
             {/* 参考图上传（多张） */}
             <section className="space-y-2">
               <div className="flex items-center justify-between">
@@ -1630,7 +1732,12 @@ const handleDownload = () => {
             <Button
               type="button"
               onClick={handleGenerate}
-              disabled={generating || submitting || !selectedMask}
+              // 2026-09-XX：放宽到 (mask || prompt)，无 mask 时靠描述提交。
+              disabled={
+                generating ||
+                submitting ||
+                (!selectedMask && !customPrompt.trim())
+              }
               className="w-full bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 rounded-full"
             >
               {generating ? (
@@ -1638,10 +1745,15 @@ const handleDownload = () => {
                   <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
                   生成中...
                 </>
-              ) : (
+              ) : selectedMask ? (
                 <>
                   <Wand2 className="h-4 w-4 mr-1.5" />
                   生成图片
+                </>
+              ) : (
+                <>
+                  <Wand2 className="h-4 w-4 mr-1.5" />
+                  用描述生成图片
                 </>
               )}
             </Button>
@@ -1658,9 +1770,11 @@ const handleDownload = () => {
                   <Sparkles className="h-10 w-10 opacity-30" />
                 </div>
                 <p className="text-sm font-medium">
-                  选择效果后点击「生成图片」
+                  选择效果或填写提示词描述后点击生成
                 </p>
-                <p className="text-xs mt-1">AI 将根据效果风格生成图片</p>
+                <p className="text-xs mt-1">
+                  支持模板风格 + 参考图 + 文字描述组合
+                </p>
               </div>
             )}
 
@@ -1742,6 +1856,21 @@ const handleDownload = () => {
                   >
                     <Download className="h-4 w-4 mr-1.5" />
                     下载图片
+                  </Button>
+                  {/* 2026-09-XX：基于此图改 —— 改图场景一键入口。
+                      把 result.url 转 uploadedImages 条目（uploading=0 + publicUrl 直接是 R2 URL，
+                      跳过 handleFileSelect 那条上传路径），同时聚焦描述框让用户写修改意图。
+                      比「去画布精修」更轻量：用户只想微调一张图时不需要进画布编辑器。 */}
+                  <Button
+                    type="button"
+                    onClick={handleRefineFromResult}
+                    variant="outline"
+                    className="rounded-full"
+                    disabled={!result?.url || generating || submitting}
+                    title="把结果图作为参考图，专注写修改描述"
+                  >
+                    <Edit3 className="h-4 w-4 mr-1.5" />
+                    基于此图改
                   </Button>
                   {/* 2026-09-13：去画布精修 — 把当前 result.url + 第一张参考图传到
                       画布编辑器预置 2 个 image 节点（"效果图" + "原图参考"）。
