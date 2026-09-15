@@ -217,9 +217,12 @@ function inferProductType(text: string): string | null {
 
 /**
  * 尺寸识别：匹配 "4cm / 4 cm / 4厘米 / 6CM" 等格式。
- * 只识别 PRODUCT_TYPES 各型号 sizes 字典里的合法值（4/6/8/11）。
+ * 只识别 PRODUCT_TYPES 各型号 sizes 字典里的合法值。
+ *
+ * 2026-09-15：加手办 M 型号的 5/10/12/15/18cm 尺寸档（M.sizes = 4/5/6/8/10/12/15/18，
+ * 新增 5/10/12/15/18）。字典里的尺寸不动态读取（启动时一次性固化为 Set）。
  */
-const VALID_SIZES = new Set(["4", "6", "8", "11"]);
+const VALID_SIZES = new Set(["4", "5", "6", "8", "10", "11", "12", "15", "18"]);
 
 function inferSize(text: string): string | null {
   const matches = text.matchAll(/\b(\d{1,2})\s*(?:cm|厘米|CM|Cm)\b/g);

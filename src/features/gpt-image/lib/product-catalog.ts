@@ -11,9 +11,11 @@
  * 出现，后端 /configure 路由也会拒。
  *
  * 命名约定：
- * - productTypeCode: 'R' | 'A' | 'P' | 'RM'（单字母，跟 PDF 二维码表格一致）
- * - productSize: '4' | '6' | '8' | '11'（厘米，纯数字字符串，便于拼接）
- * - accessoryCode: 'leather' | 'pvc' | 'bracket' | null
+ * - productTypeCode: 'R' | 'A' | 'P' | 'RM' | 'LB' | 'M'（单字母为主，跟 PDF 二维码表格一致；
+ *   M 是 2026-09-15 新增的手办型号；具体见 PRODUCT_TYPES 字典）
+ * - productSize: '4' | '5' | '6' | '8' | '10' | '11' | '12' | '15' | '18'
+ *   （厘米，纯数字字符串，便于拼接；尺寸档全集由各型号 sizes 字段决定）
+ * - accessoryCode: 'leather' | 'pvc' | 'bracket' | 'metal' | 'magnet' | 'stand' | null
  *
  * 与 promptOrder.product_type_code / product_size / accessory_code 列 1:1 对应。
  */
@@ -29,6 +31,11 @@
  * capability，让用户在 /p/[token] 上勾选。但用户原意是把它作为独立产品型号，
  * 所以 2026-09-07 同日重构：LB（皮革徽章）独立进 PRODUCT_TYPES，R 不再
  * 拥有此能力，hasLeatherBadge 字段从 schema / /configure 路由 / UI 全删。
+ *
+ * 2026-09-15：新增 M（手办 figure）—— 完整尺寸档 4/5/6/8/10/12/15/18cm
+ * （用户原话「手办规格 4cm、5cm、6cm、8cm、10cm、12cm、15cm、18cm」）。
+ * 配件默认底座（stand），不开刻字 / 颜色 / 外露 / PVC / 备注 —— 手办是定制
+ * 造型，刻字和表面处理一律关，保留 canPlatform 给 ToB 渠道订单归因。
  */
 export interface ProductCapabilities {
   canEngrave: boolean;
@@ -167,9 +174,37 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
       canPlatform: true,
     },
   },
+  {
+    code: "M",
+    name: "CM 手办",
+    unit: "cm",
+    // 2026-09-15：手办完整尺寸档（用户原话「手办规格 4cm、5cm、6cm、8cm、
+    // 10cm、12cm、15cm、18cm」）—— 从桌面摆件到中大型收藏件全档。具体
+    // productEffect 仍可在 allowedSizes 缩窄（比如只做 8cm 小摆件）。
+    sizes: ["4", "5", "6", "8", "10", "12", "15", "18"],
+    // 2026-09-15：手办默认带底座（stand）。手办作为定制造型不走刻字 / 颜色 /
+    // 外露 / PVC 表面处理能力，但底座是物理结构上的配件选项。
+    accessories: ["stand"],
+    // 2026-09-15：手办能力开 canPlatform（ToB 渠道订单归因与 LB 对齐），
+    // 关刻字 / 颜色 / 外露 / PVC / 备注。手办是 3D 定制造型，不走表面加工。
+    capabilities: {
+      canEngrave: false,
+      canLeatherColor: false,
+      canPvcProtection: false,
+      canLeatherExposed: false,
+      canHaveRemarks: false,
+      canPlatform: true,
+    },
+  },
 ];
 
-export type AccessoryCode = "leather" | "pvc" | "bracket" | "metal" | "magnet";
+export type AccessoryCode =
+  | "leather"
+  | "pvc"
+  | "bracket"
+  | "metal"
+  | "magnet"
+  | "stand";
 
 export interface Accessory {
   code: AccessoryCode;
@@ -187,6 +222,8 @@ export const ACCESSORIES: readonly Accessory[] = [
   // 类 productEffect（allowedAccessories=["magnet"]），其他产品效果图的
   // allowedAccessories 不包含此项就不会出。
   { code: "magnet", name: "磁铁" },
+  // 2026-09-15：M 手办专用配件——底座/展台。
+  { code: "stand", name: "底座" },
 ];
 
 // ============================================
