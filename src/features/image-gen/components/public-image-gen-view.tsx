@@ -69,6 +69,7 @@ import {
 } from "@/features/image-gen/components/spec-modal";
 import { downloadProxyUrl } from "@/features/image-gen/lib/thumbnail-url";
 import { Link, useRouter } from "@/i18n/routing";
+import { routing } from "@/i18n/routing";
 import { signOut } from "@/lib/auth/client";
 import { resizeImage, wrapBlobAsFile } from "@/lib/image-client-resize";
 import { cn } from "@/lib/utils";
@@ -1060,6 +1061,13 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
   // 改走 sessionStorage：写一个一次性的 seed payload（key 带 projectId 隔离），
   // 画布 seed effect 读后立刻 removeItem —— 不污染 URL、不重复 seed。
   const CANVAS_SEED_KEY_PREFIX = "mooncoda:canvas:seed:";
+  // 2026-09-XX：开新标签页跳画布（用户原话「image-gen 进入画布应该新开标签页」）。
+  // 不用 router.push 是因为它走 SPA 内部导航，会让当前 /image-gen 视图被卸载，
+  // 用户后续回到 /image-gen 时状态全部丢失（selectedMask / uploadedImages /
+  // customPrompt / lastResult 快照等都要重新拉取）。新标签页跳：
+  // 1. 当前 /image-gen 视图继续存活，能继续「再生成一张」「基于此图改」
+  // 2. 画布项目独立独立 localforage 持久化，互不干扰
+  // 3. window.open 走同源新窗口，sessionStorage 仍可读（同源 + 同浏览器进程）
   const handleGoToCanvas = () => {
     if (!result?.url) return;
     let projectId = "";
@@ -1093,7 +1101,20 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
       toast.error("传递精修参数失败，请稍后重试");
       return;
     }
-    router.push(`/dashboard/canvas/${projectId}`);
+    // 拼画布绝对 URL：保留当前 locale 前缀（/image-gen 在 [locale] 路由组下，
+    // 当前 pathname 一定有 locale 段；直接取第一段就行，避免引入 next-intl
+    // pathname 工具带来的额外依赖）。
+    const localeSegment = window.location.pathname.split("/").filter(Boolean)[0];
+    const locale = routing.locales.includes(localeSegment as never)
+      ? localeSegment
+      : routing.defaultLocale;
+    const canvasUrl = `${window.location.origin}/${locale}/dashboard/canvas/${projectId}`;
+    const win = window.open(canvasUrl, "_blank", "noopener,noreferrer");
+    if (!win) {
+      // 浏览器拦截弹窗（用户没主动允许）→ 退化到当前标签页 SPA 导航
+      toast.warning("浏览器拦截了新标签页，请在地址栏允许弹窗后重试");
+      router.push(`/${locale}/dashboard/canvas/${projectId}`);
+    }
   };
 
   const selectedMaskData = masks.find((m) => m.maskId === selectedMask);
