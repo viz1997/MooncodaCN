@@ -25,7 +25,7 @@ import { headers } from "next/headers";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
-import { photo } from "@/db/schema";
+import { imageJob, photo } from "@/db/schema";
 import { withApiLogging } from "@/lib/api-logger";
 import { auth } from "@/lib/auth";
 
@@ -59,17 +59,40 @@ async function getHandler(req: NextRequest) {
   const offset = Math.max(0, Number.isFinite(offsetParam) ? offsetParam : 0);
 
   try {
-    const photos = await db.query.photo.findMany({
-      where: and(
-        eq(photo.userId, session.user.id),
-        ...(sourceFilter ? [eq(photo.source, sourceFilter)] : [])
-      ),
-      orderBy: [desc(photo.createdAt)],
-      limit,
-      offset,
-    });
+    // 2026-09-15：联表 imageJob 拿 maskId（photo 表不存 maskId，4 宫格 picker 需要
+    // 根据当时用的 mask 决定 cc/outputMode —— 否则用户点历史 4 宫格时 picker 渲染不了）。
+    const rows = await db
+      .select({
+        id: photo.id,
+        userId: photo.userId,
+        source: photo.source,
+        imageJobId: photo.imageJobId,
+        prompt: photo.prompt,
+        model: photo.model,
+        fileName: photo.fileName,
+        fileUrl: photo.fileUrl,
+        thumbnailUrl: photo.thumbnailUrl,
+        md5: photo.md5,
+        width: photo.width,
+        height: photo.height,
+        format: photo.format,
+        fileSize: photo.fileSize,
+        createdAt: photo.createdAt,
+        maskId: imageJob.maskId,
+      })
+      .from(photo)
+      .leftJoin(imageJob, eq(photo.imageJobId, imageJob.id))
+      .where(
+        and(
+          eq(photo.userId, session.user.id),
+          ...(sourceFilter ? [eq(photo.source, sourceFilter)] : [])
+        )
+      )
+      .orderBy(desc(photo.createdAt))
+      .limit(limit)
+      .offset(offset);
 
-    return NextResponse.json({ success: true, data: { photos } });
+    return NextResponse.json({ success: true, data: { photos: rows } });
   } catch (err) {
     return NextResponse.json(
       {

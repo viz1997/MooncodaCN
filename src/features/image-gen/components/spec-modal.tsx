@@ -52,7 +52,7 @@ import {
   Sparkles,
   Tag,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 
 import { Button } from "@/components/ui/button";
@@ -233,6 +233,16 @@ export function SpecModal({
     defaultValues: formDefaults,
     mode: "onChange",
   });
+
+  // 2026-09-15：修「分享给客户预览 / 选择此效果下单」点击提交按钮无反应。
+  // 根因：RHF mode="onChange" 下 formState.isValid 在 mount 时默认 false，
+  // 只有用户改了字段后才会触发校验并把 isValid 置为 true。defaultValues
+  // 实际能通过 schema，但按钮因为 !isValid 永久禁用，用户点提交无任何反馈。
+  // 解决：mount 时主动跑一次 trigger()，让 isValid 反映 defaultValues 的真实
+  // 校验结果。form.trigger 是稳定引用，作为 deps 即可。
+  useEffect(() => {
+    void form.trigger();
+  }, [form.trigger]);
 
   // 条件渲染 watch（订单号 disabled 需要 platform 状态；保护套类型 pill 高亮需要两字段）
   const platform = form.watch("platform");

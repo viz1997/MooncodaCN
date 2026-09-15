@@ -377,6 +377,9 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
       model: string | null;
       format: string | null;
       createdAt: string | Date;
+      // 2026-09-15：联表 imageJob 拿 maskId —— 历史点击要 setSelectedMask 让
+      // 4 宫格 picker 正确渲染（否则当前 mask 是 1-候选，看不到 picker）。
+      maskId: string | null;
     }>
   >([]);
   const [pendingModelName, setPendingModelName] = useState<string>("");
@@ -427,7 +430,9 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
   /** 2026-09-15：preview 流专属凭证数据 —— 与 submitted 完全解耦。
    * createSharePreview 成功后 set 这两个 + 自动弹 ShareCard Modal，不替换结果视图。
    * handleResetDemo 时一起清掉（虽然预览流不进 handleResetDemo，但保留兜底）。 */
-  const [previewShareToken, setPreviewShareToken] = useState<string | null>(null);
+  const [previewShareToken, setPreviewShareToken] = useState<string | null>(
+    null
+  );
   const [previewShareOrderNo, setPreviewShareOrderNo] = useState<string | null>(
     null
   );
@@ -460,13 +465,22 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                 model: string | null;
                 format: string | null;
                 createdAt: string | Date;
+                // 2026-09-15：联表 imageJob 拿到的 maskId，用于 4 宫格 picker 渲染
+                maskId?: string | null;
               }>;
             };
           }>
       )
       .then((j) => {
         if (!j.success || !j.data) return;
-        setDbHistory(j.data.photos);
+        // 2026-09-15：归一化 maskId —— 老 photo（无 imageJob）或非 generation source
+        // 没有 maskId，统一 null。picker 不会渲染这些老历史图的 cell 选择。
+        setDbHistory(
+          j.data.photos.map((p) => ({
+            ...p,
+            maskId: p.maskId ?? null,
+          }))
+        );
       })
       .catch(() => {
         // 静默失败 —— 历史栏允许空白
@@ -994,9 +1008,11 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
     if (!result?.url) return;
     let projectId = "";
     try {
-      projectId = useCanvasStore.getState().createProject(
-        `精修: ${selectedMaskData?.name ?? "AI 生图"} · ${new Date().toLocaleString("zh-CN")}`
-      );
+      projectId = useCanvasStore
+        .getState()
+        .createProject(
+          `精修: ${selectedMaskData?.name ?? "AI 生图"} · ${new Date().toLocaleString("zh-CN")}`
+        );
     } catch (e) {
       console.error("[image-gen] createProject failed", e);
       toast.error("创建画布项目失败，请稍后重试");
@@ -1562,21 +1578,6 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                       : "border-muted-foreground/25 hover:border-violet-500/50"
                   )}
                 >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/jpeg,image/jpg,image/png,image/webp"
-                    multiple
-                    className="hidden"
-                    onChange={(e) => {
-                      const files = e.target.files
-                        ? Array.from(e.target.files)
-                        : [];
-                      for (const f of files) handleFileSelect(f);
-                      // 选完后清空 value —— 否则同名文件二次选择不触发 onChange
-                      e.target.value = "";
-                    }}
-                  />
                   <Upload
                     className={cn(
                       "h-8 w-8 mx-auto mb-2",
@@ -1584,13 +1585,35 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                     )}
                   />
                   <p className="text-xs font-medium">
-                    {dragOver ? "释放即可上传（可多张）" : "点击或拖拽图片（可多张）"}
+                    {dragOver
+                      ? "释放即可上传（可多张）"
+                      : "点击或拖拽图片（可多张）"}
                   </p>
                   <p className="text-[10px] text-muted-foreground mt-1">
-                    JPG / PNG / WEBP · ≤10MB / 张（自动压缩到 5MB） · 最多 {MAX_REFERENCE_IMAGES} 张
+                    JPG / PNG / WEBP · ≤10MB / 张（自动压缩到 5MB） · 最多{" "}
+                    {MAX_REFERENCE_IMAGES} 张
                   </p>
                 </div>
               )}
+              {/* 2026-09-15：file input 必须挂在条件分支之外 —— 上传 1 张后
+                  uploadedImages.length > 0 进入 grid 分支，原 dropzone（连同 input）卸载，
+                  fileInputRef.current 变 null，grid 内的 <+> 按钮点击 no-op。
+                  这里提到外层常驻，不影响布局（hidden）。 */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/jpg,image/png,image/webp"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  const files = e.target.files
+                    ? Array.from(e.target.files)
+                    : [];
+                  for (const f of files) handleFileSelect(f);
+                  // 选完后清空 value —— 否则同名文件二次选择不触发 onChange
+                  e.target.value = "";
+                }}
+              />
             </section>
           </div>
 
@@ -1810,7 +1833,7 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
               </div>
             )}
 
-{/* demo 下单成功卡 —— 替换结果视图。
+            {/* demo 下单成功卡 —— 替换结果视图。
     2026-09-15：preview 流不再触发此分支（已搬到独立 state +
     仅弹 ShareCard Modal，不替换视图，详见上方 submitted 类型注释）。
     所以此分支就是 demo 专属成功卡，无 kind 判断。 */}
@@ -1897,6 +1920,10 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                     // 不能用别的生成留下的快照冒充本张历史图的参考图。让按钮 disabled
                     // 状态由当前 refImageUrls（空）正确触发，下方 amber warning 会
                     // 提示用户「需重新上传参考图」。
+                    //
+                    // 2026-09-15：联表拿到的 maskId 用于 setSelectedMask —— 让 4 宫格
+                    // picker 渲染（当前 mask 不同时 picker 不会自动切 cc/outputMode）。
+                    // 没拿到 maskId 时保留当前 selectedMask。
                     saveLastResult(null);
                     setSubmitted(null);
                     setError(null);
@@ -1905,6 +1932,10 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
                       modelName: h.model ?? "AI 生图",
                       maskName: h.model ?? "AI 生图",
                     });
+                    if (h.maskId && h.maskId !== selectedMask) {
+                      setSelectedMask(h.maskId);
+                      setSelectedCell(null);
+                    }
                   }}
                 >
                   {/* biome-ignore lint/performance/noImgElement: 历史图为动态远程 URL */}

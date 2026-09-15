@@ -606,7 +606,9 @@ function InfiniteCanvasPage() {
     if (seedHandledRef.current) return;
     let raw: string | null = null;
     try {
-      raw = window.sessionStorage.getItem(`${CANVAS_SEED_KEY_PREFIX}${projectId}`);
+      raw = window.sessionStorage.getItem(
+        `${CANVAS_SEED_KEY_PREFIX}${projectId}`
+      );
     } catch {
       raw = null;
     }
@@ -617,7 +619,9 @@ function InfiniteCanvasPage() {
     } catch {
       // payload 损坏 → 清掉避免反复撞错
       try {
-        window.sessionStorage.removeItem(`${CANVAS_SEED_KEY_PREFIX}${projectId}`);
+        window.sessionStorage.removeItem(
+          `${CANVAS_SEED_KEY_PREFIX}${projectId}`
+        );
       } catch {}
       return;
     }
@@ -625,7 +629,9 @@ function InfiniteCanvasPage() {
     const refUrl = payload.refUrl ?? "";
     if (!genUrl && !refUrl) {
       try {
-        window.sessionStorage.removeItem(`${CANVAS_SEED_KEY_PREFIX}${projectId}`);
+        window.sessionStorage.removeItem(
+          `${CANVAS_SEED_KEY_PREFIX}${projectId}`
+        );
       } catch {}
       return;
     }
