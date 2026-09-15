@@ -64,6 +64,7 @@ import {
   SpecModal,
   type SpecSelection,
 } from "@/features/image-gen/components/spec-modal";
+import { downloadProxyUrl } from "@/features/image-gen/lib/thumbnail-url";
 import { Link, useRouter } from "@/i18n/routing";
 import { signOut } from "@/lib/auth/client";
 import { resizeImage, wrapBlobAsFile } from "@/lib/image-client-resize";
@@ -986,16 +987,23 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
     }
   };
 
-  const handleDownload = () => {
-    if (result?.url) {
-      const a = document.createElement("a");
-      a.href = result.url;
-      a.download = `mooncoda_${Date.now()}.png`;
-      a.target = "_blank";
-      a.click();
-      toast.success("已开始下载");
-    }
-  };
+  // 2026-09-15：修「点击下载图片按钮没反应」。原版直接 `<a href={result.url} download>`
+// 在 R2 跨域 URL 上 `download` 属性被浏览器忽略 + `target="_blank"` 让链接开了新页
+// 而不是下载文件。改走 `/api/image-gen/download` 代理（Content-Disposition:
+// attachment 强制下载 + 服务端无 CORS 限制），data: / blob: 短路由 downloadProxyUrl
+// 内部判断（与生图工作台 V1/V2 走同一模式）。
+const handleDownload = () => {
+  if (!result?.url) return;
+  const a = document.createElement("a");
+  a.href = downloadProxyUrl(result.url, `mooncoda_${Date.now()}.png`);
+  a.download = `mooncoda_${Date.now()}.png`;
+  a.rel = "noopener";
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  toast.success("已开始下载");
+};
 
   // 2026-09-15：去画布精修 —— 旧版把 result.url + refImageUrls[0] 拼到 URL
   // 查询串 (?gen=&ref=) 跳画布；R2 URL 通常 200+ 字符 + 含 ? & = 等保留字，
