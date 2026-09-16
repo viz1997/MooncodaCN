@@ -38,6 +38,7 @@ import {
   type PendingConnectionCreate,
 } from "@/features/canvas/components/canvas/canvas-create-menus";
 import { Minimap } from "@/features/canvas/components/canvas/canvas-mini-map";
+import { CanvasMultiSelectToolbar } from "@/features/canvas/components/canvas/canvas-multi-select-toolbar";
 import { CanvasNode } from "@/features/canvas/components/canvas/canvas-node";
 import {
   type CanvasImageAngleParams,
@@ -82,6 +83,7 @@ import { CanvasTopBar } from "@/features/canvas/components/canvas/canvas-top-bar
 import { CanvasZoomControls } from "@/features/canvas/components/canvas/canvas-zoom-controls";
 import { InfiniteCanvas } from "@/features/canvas/components/canvas/infinite-canvas";
 import { registerBuiltinNodes } from "@/features/canvas/components/canvas/nodes/builtin-nodes";
+import { registerMeshy3DNodes } from "@/features/canvas/components/canvas/nodes/meshy-3d-node";
 import {
   getNodeSpec,
   NODE_DEFAULT_SIZE,
@@ -196,6 +198,7 @@ import { useRouter as useI18nRouter } from "@/i18n/routing";
 
 // Register built-in nodes in the shared registry once when the module loads.
 registerBuiltinNodes();
+registerMeshy3DNodes();
 
 type CanvasClipboard = {
   nodes: CanvasNodeData[];
@@ -275,6 +278,13 @@ function InfiniteCanvasPage() {
   const openAgentPanel = useAgentStore((state) => state.openPanel);
   const containerRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  // 2026-09-15：convertImageTo3D 在 useCallback 里需要拿 projectId，但避免把
+  // projectId 加进依赖数组（每次 params 变化都会让整个 callback 重建）。
+  // 用 ref 缓存当前值即可。
+  const projectIdRef = useRef(projectId);
+  useEffect(() => {
+    projectIdRef.current = projectId;
+  }, [projectId]);
   const uploadTargetRef = useRef<{
     nodeId?: string;
     position?: Position;
@@ -625,9 +635,7 @@ function InfiniteCanvasPage() {
     } catch {
       // payload 损坏 → 清掉避免反复撞错
       try {
-        window.localStorage.removeItem(
-          `${CANVAS_SEED_KEY_PREFIX}${projectId}`
-        );
+        window.localStorage.removeItem(`${CANVAS_SEED_KEY_PREFIX}${projectId}`);
       } catch {}
       return;
     }
@@ -635,9 +643,7 @@ function InfiniteCanvasPage() {
     const refUrl = payload.refUrl ?? "";
     if (!genUrl && !refUrl) {
       try {
-        window.localStorage.removeItem(
-          `${CANVAS_SEED_KEY_PREFIX}${projectId}`
-        );
+        window.localStorage.removeItem(`${CANVAS_SEED_KEY_PREFIX}${projectId}`);
       } catch {}
       return;
     }
@@ -1057,6 +1063,24 @@ function InfiniteCanvasPage() {
     ? nodeById.get(previewNodeId) || null
     : null;
   const hasMultipleSelectedNodes = selectedNodeIds.size > 1;
+  // 2026-09-16：多图转 3D 触发的源节点列表。筛选条件：
+  //   - selectedNodeIds 数量必须在 [2,4]
+  //   - 节点是 image 类型且 metadata.content 存在
+  // 不满足时返回空数组，让多选工具栏不挂载。
+  const selectedImageNodes = useMemo(() => {
+    if (selectedNodeIds.size < 2 || selectedNodeIds.size > 4) return [];
+    const list: CanvasNodeData[] = [];
+    nodes.forEach((node) => {
+      if (
+        selectedNodeIds.has(node.id) &&
+        node.type === CanvasNodeType.Image &&
+        node.metadata?.content
+      ) {
+        list.push(node);
+      }
+    });
+    return list;
+  }, [nodes, selectedNodeIds]);
   const activeNodeId = hasMultipleSelectedNodes
     ? null
     : hoveredNodeId ||
@@ -2708,6 +2732,481 @@ function InfiniteCanvasPage() {
       startGenerationRequest,
       t,
     ]
+  );
+
+  /**
+   * 2026-09-15：画布 Image-to-3D —— image 节点悬浮工具栏点"转 3D"时触发
+   *
+   * 流程（与 maskEditImageNode 镜像）：
+   *  1. 预建 model3d 子节点（type='meshy-3d:model3d', status='loading'）
+   *  2. 与源 image 节点画 connection
+   *  3. POST /api/canvas/meshy/create → 拿 jobId
+   *  4. 启动 5s 轮询（与 workbench 同周期）
+   *  5. completed → setNodes 更新子节点 metadata（status='success', modelUrl=URL）
+   *  6. failed → toast + setNodes status='failed'
+   *
+   * 失败语义：
+   *  - 积分不足 → toast + 子节点 status=failed（不消耗积分）
+   *  - Meshy 配置缺失 → toast 503
+   *  - API 5xx → toast 500
+   *  - 轮询超时（≈ 8 分钟由 Inngest 完成） → 不在前端处理，reconcile cron 兜底
+   *
+   * 复用：与 maskEditImageNode 同样不依赖 input/output Promise cancellation，
+   * 子节点 status 字段由 Inngest 推进，前端轮询只读。
+   */
+  const convertImageTo3D = useCallback(
+    async (sourceNode: CanvasNodeData) => {
+      const sourceImageUrl = sourceNode.metadata?.storageKey
+        ? // storageKey 已经是 R2 公共 URL（持久化后），直接用
+          undefined
+        : sourceNode.metadata?.content?.startsWith("data:")
+          ? undefined // data URL 也走 server 端持久化
+          : sourceNode.metadata?.content; // 已是 http(s) URL
+      if (
+        !sourceImageUrl &&
+        !sourceNode.metadata?.storageKey &&
+        !sourceNode.metadata?.content
+      ) {
+        message.error(t("canvas.meshy3d.requestFailed") + "源节点无可用图片");
+        return;
+      }
+      // 优先用 storageKey（R2 URL），其次 content（data URL 或 http URL）
+      const imageUrl =
+        sourceNode.metadata?.storageKey ?? sourceNode.metadata?.content;
+      if (!imageUrl) {
+        message.error(
+          t("canvas.meshy3d.requestFailed") + "源节点图片 URL 为空"
+        );
+        return;
+      }
+
+      const childId = nanoid();
+      const spec = { width: 360, height: 320 };
+
+      // 1. 预建子节点（loading 状态）
+      setNodes((prev) => [
+        ...prev,
+        {
+          id: childId,
+          type: "meshy-3d:model3d" as CanvasNodeTypeId,
+          title: "3D 模型",
+          position: {
+            x: sourceNode.position.x + sourceNode.width + 96,
+            y: sourceNode.position.y,
+          },
+          width: spec.width,
+          height: spec.height,
+          metadata: {
+            status: "loading",
+            sourceImageUrl: imageUrl,
+            // jobId 暂时为空；POST 返回后填入
+          },
+        },
+      ]);
+
+      // 2. 建连接
+      setConnections((prev) => [
+        ...prev,
+        { id: nanoid(), fromNodeId: sourceNode.id, toNodeId: childId },
+      ]);
+
+      // 3. 选中
+      setSelectedNodeIds(new Set([childId]));
+      setSelectedConnectionId(null);
+
+      // 4. POST 创建任务
+      let jobId: string;
+      try {
+        const res = await fetch("/api/canvas/meshy/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            imageUrl,
+            sourceNodeId: sourceNode.id,
+            projectId: projectIdRef.current ?? undefined,
+          }),
+        });
+        const json = (await res.json()) as {
+          success?: boolean;
+          jobId?: string;
+          error?: string;
+          code?: string;
+        };
+        if (!res.ok || !json.success || !json.jobId) {
+          const errMsg =
+            json.error ?? `${t("canvas.meshy3d.requestFailed")}${res.status}`;
+          if (json.code === "insufficient_credits") {
+            message.warning(t("canvas.meshy3d.insufficientCredits"));
+          } else if (json.code === "meshy_config") {
+            message.warning(errMsg);
+          } else {
+            message.error(errMsg);
+          }
+          // 标子节点 failed
+          setNodes((prev) =>
+            prev.map((item) =>
+              item.id === childId
+                ? {
+                    ...item,
+                    metadata: {
+                      ...item.metadata,
+                      status: "failed",
+                      errorMessage: errMsg.slice(0, 500),
+                    },
+                  }
+                : item
+            )
+          );
+          return;
+        }
+        jobId = json.jobId;
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : "unknown";
+        message.error(t("canvas.meshy3d.requestFailed") + errMsg);
+        setNodes((prev) =>
+          prev.map((item) =>
+            item.id === childId
+              ? {
+                  ...item,
+                  metadata: {
+                    ...item.metadata,
+                    status: "failed",
+                    errorMessage: errMsg.slice(0, 500),
+                  },
+                }
+              : item
+          )
+        );
+        return;
+      }
+
+      // 填 jobId 到子节点 metadata（让用户能看到任务 id）
+      setNodes((prev) =>
+        prev.map((item) =>
+          item.id === childId
+            ? {
+                ...item,
+                metadata: {
+                  ...item.metadata,
+                  jobId,
+                },
+              }
+            : item
+        )
+      );
+
+      // 5. 启动轮询（5s 间隔，与 workbench 同）
+      const POLL_INTERVAL_MS = 5_000;
+      const pollTimer = window.setInterval(async () => {
+        try {
+          const r = await fetch(`/api/canvas/poll/${jobId}`);
+          const data = (await r.json()) as {
+            success?: boolean;
+            status?: "pending" | "completed" | "failed";
+            items?: Array<{ url: string; mimeType?: string }>;
+            message?: string;
+            durationMs?: number;
+          };
+          if (!data.success || !data.status) return; // 继续轮询
+          if (data.status === "completed") {
+            window.clearInterval(pollTimer);
+            const first = data.items?.[0];
+            if (!first) {
+              message.error("Meshy 返回 completed 但 items 为空");
+              setNodes((prev) =>
+                prev.map((item) =>
+                  item.id === childId
+                    ? {
+                        ...item,
+                        metadata: {
+                          ...item.metadata,
+                          status: "failed",
+                          errorMessage: "completed 但 items 为空",
+                        },
+                      }
+                    : item
+                )
+              );
+              return;
+            }
+            setNodes((prev) =>
+              prev.map((item) =>
+                item.id === childId
+                  ? {
+                      ...item,
+                      metadata: {
+                        ...item.metadata,
+                        status: "success",
+                        modelUrl: first.url,
+                        mimeType: first.mimeType ?? "model/gltf-binary",
+                        ...(data.durationMs
+                          ? { durationMs: data.durationMs }
+                          : {}),
+                      },
+                    }
+                  : item
+              )
+            );
+            return;
+          }
+          if (data.status === "failed") {
+            window.clearInterval(pollTimer);
+            const errMsg = data.message ?? "3D 模型生成失败";
+            message.error(errMsg);
+            setNodes((prev) =>
+              prev.map((item) =>
+                item.id === childId
+                  ? {
+                      ...item,
+                      metadata: {
+                        ...item.metadata,
+                        status: "failed",
+                        errorMessage: errMsg.slice(0, 500),
+                      },
+                    }
+                  : item
+              )
+            );
+            return;
+          }
+          // pending → 继续轮询
+        } catch {
+          // 单次网络错误 → 继续轮询
+        }
+      }, POLL_INTERVAL_MS);
+    },
+    [message, t]
+  );
+
+  // 2026-09-16：多图转 3D。Shift/Ctrl+click 多选 2-4 张 image 节点后，
+  // 由 CanvasMultiSelectToolbar 触发。平行 convertImageTo3D 但消费 400 积分
+  // （2× 单图），调用 /api/canvas/meshy/multi-image/create，并建 N 条
+  // connection 让画布呈现扇形 fan-out 视觉效果。
+  const convertMultiImageTo3D = useCallback(
+    async (sourceNodes: CanvasNodeData[]) => {
+      if (sourceNodes.length < 2 || sourceNodes.length > 4) {
+        message.error(t("canvas.meshy3d.multiImageCountInvalid"));
+        return;
+      }
+      // 1. 解析每张图的可用 URL（storageKey R2 > content dataURL/http）
+      const imageUrls: string[] = [];
+      for (const node of sourceNodes) {
+        const url = node.metadata?.storageKey ?? node.metadata?.content;
+        if (!url) continue;
+        imageUrls.push(url);
+      }
+      if (imageUrls.length !== sourceNodes.length) {
+        message.error(t("canvas.meshy3d.requestFailed") + "部分源图不可用");
+        return;
+      }
+
+      const childId = nanoid();
+      const spec = { width: 360, height: 320 };
+
+      // 2. 计算包围盒 → 把 child 放在最右节点右侧、垂直居中
+      const rightEdge = Math.max(
+        ...sourceNodes.map((s) => s.position.x + s.width)
+      );
+      const minY = Math.min(...sourceNodes.map((s) => s.position.y));
+      const maxY = Math.max(...sourceNodes.map((s) => s.position.y + s.height));
+      const centerY = (minY + maxY) / 2 - spec.height / 2;
+
+      // 3. 预建单个多源 3D 子节点（loading 状态）
+      setNodes((prev) => [
+        ...prev,
+        {
+          id: childId,
+          type: "meshy-3d:model3d" as CanvasNodeTypeId,
+          title: t("canvas.meshy3d.multiNodeTitle"),
+          position: { x: rightEdge + 96, y: centerY },
+          width: spec.width,
+          height: spec.height,
+          metadata: {
+            status: "loading",
+            // 多源 metadata（meshy-3d-node.tsx 2026-09-16 扩展）
+            sourceImageUrls: imageUrls,
+            sourceImageUrl: imageUrls[0],
+            sourceNodeIds: sourceNodes.map((s) => s.id),
+            primarySourceNodeId: sourceNodes[0].id,
+          },
+        },
+      ]);
+
+      // 4. 建 N 条 connection（fan 多个 bezier）
+      setConnections((prev) => [
+        ...prev,
+        ...sourceNodes.map((s) => ({
+          id: nanoid(),
+          fromNodeId: s.id,
+          toNodeId: childId,
+        })),
+      ]);
+
+      // 5. 选中 child（清掉 multi-select 视觉）
+      setSelectedNodeIds(new Set([childId]));
+      setSelectedConnectionId(null);
+
+      // 6. POST 创建任务
+      let jobId: string;
+      try {
+        const res = await fetch("/api/canvas/meshy/multi-image/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            imageUrls,
+            sourceNodeIds: sourceNodes.map((s) => s.id),
+            projectId: projectIdRef.current ?? undefined,
+          }),
+        });
+        const json = (await res.json()) as {
+          success?: boolean;
+          jobId?: string;
+          error?: string;
+          code?: string;
+        };
+        if (!res.ok || !json.success || !json.jobId) {
+          const errMsg =
+            json.error ?? `${t("canvas.meshy3d.requestFailed")}${res.status}`;
+          if (json.code === "insufficient_credits") {
+            message.warning(t("canvas.meshy3d.insufficientCredits"));
+          } else if (json.code === "meshy_config") {
+            message.warning(errMsg);
+          } else {
+            message.error(errMsg);
+          }
+          // 标子节点 failed（保留 sourceImageUrls 用于排查）
+          setNodes((prev) =>
+            prev.map((item) =>
+              item.id === childId
+                ? {
+                    ...item,
+                    metadata: {
+                      ...item.metadata,
+                      status: "failed",
+                      errorMessage: errMsg.slice(0, 500),
+                    },
+                  }
+                : item
+            )
+          );
+          return;
+        }
+        jobId = json.jobId;
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : "unknown";
+        message.error(t("canvas.meshy3d.requestFailed") + errMsg);
+        setNodes((prev) =>
+          prev.map((item) =>
+            item.id === childId
+              ? {
+                  ...item,
+                  metadata: {
+                    ...item.metadata,
+                    status: "failed",
+                    errorMessage: errMsg.slice(0, 500),
+                  },
+                }
+              : item
+          )
+        );
+        return;
+      }
+
+      // 填 jobId 到子节点 metadata（让用户能看到任务 id）
+      setNodes((prev) =>
+        prev.map((item) =>
+          item.id === childId
+            ? {
+                ...item,
+                metadata: {
+                  ...item.metadata,
+                  jobId,
+                },
+              }
+            : item
+        )
+      );
+
+      // 7. 启动轮询（5s 间隔，与单图一致）
+      const POLL_INTERVAL_MS = 5_000;
+      const pollTimer = window.setInterval(async () => {
+        try {
+          const r = await fetch(`/api/canvas/poll/${jobId}`);
+          const data = (await r.json()) as {
+            success?: boolean;
+            status?: "pending" | "completed" | "failed";
+            items?: Array<{ url: string; mimeType?: string }>;
+            message?: string;
+            durationMs?: number;
+          };
+          if (!data.success || !data.status) return;
+          if (data.status === "completed") {
+            window.clearInterval(pollTimer);
+            const first = data.items?.[0];
+            if (!first) {
+              message.error("Meshy 返回 completed 但 items 为空");
+              setNodes((prev) =>
+                prev.map((item) =>
+                  item.id === childId
+                    ? {
+                        ...item,
+                        metadata: {
+                          ...item.metadata,
+                          status: "failed",
+                          errorMessage: "completed 但 items 为空",
+                        },
+                      }
+                    : item
+                )
+              );
+              return;
+            }
+            setNodes((prev) =>
+              prev.map((item) =>
+                item.id === childId
+                  ? {
+                      ...item,
+                      metadata: {
+                        ...item.metadata,
+                        status: "success",
+                        modelUrl: first.url,
+                        mimeType: first.mimeType ?? "model/gltf-binary",
+                        ...(data.durationMs
+                          ? { durationMs: data.durationMs }
+                          : {}),
+                      },
+                    }
+                  : item
+              )
+            );
+            return;
+          }
+          if (data.status === "failed") {
+            window.clearInterval(pollTimer);
+            const errMsg = data.message ?? "3D 模型生成失败";
+            message.error(errMsg);
+            setNodes((prev) =>
+              prev.map((item) =>
+                item.id === childId
+                  ? {
+                      ...item,
+                      metadata: {
+                        ...item.metadata,
+                        status: "failed",
+                        errorMessage: errMsg.slice(0, 500),
+                      },
+                    }
+                  : item
+              )
+            );
+            return;
+          }
+        } catch {
+          // 单次网络错误 → 继续轮询
+        }
+      }, POLL_INTERVAL_MS);
+    },
+    [message, t]
   );
 
   const upscaleImageNode = useCallback(
@@ -5021,7 +5520,8 @@ function InfiniteCanvasPage() {
             isNodeDragging ||
             isNodeResizing ||
             nodeImageSettingsOpen ||
-            expandedImageNodeId
+            expandedImageNodeId ||
+            selectedImageNodes.length >= 2
               ? null
               : toolbarNode
           }
@@ -5060,10 +5560,22 @@ function InfiniteCanvasPage() {
           onAngle={(node) => setAngleNodeId(node.id)}
           onViewImage={(node) => setPreviewNodeId(node.id)}
           onReversePrompt={createImageReversePromptNodes}
+          onImageTo3d={convertImageTo3D}
           onRetry={(node) => void handleRetryNode(node)}
           onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
           onDelete={(node) => deleteNodes(new Set([node.id]))}
         />
+
+        {/* 2026-09-16：多选 2-4 张 image 节点时挂载多图转 3D 工具栏 */}
+        {selectedImageNodes.length >= 2 && selectedImageNodes.length <= 4 && (
+          <CanvasMultiSelectToolbar
+            imageNodes={selectedImageNodes}
+            viewport={viewport}
+            onMultiImageTo3d={convertMultiImageTo3D}
+            onKeep={keepNodeToolbar}
+            onLeave={hideNodeToolbar}
+          />
+        )}
 
         <CanvasToolbar
           selectedCount={selectedNodeIds.size}

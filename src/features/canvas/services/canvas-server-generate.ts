@@ -131,14 +131,21 @@ function extFromMime(mimeType: string): string {
   if (mimeType.includes("aac")) return "aac";
   if (mimeType.includes("opus")) return "opus";
   if (mimeType.includes("mp4")) return "mp4";
+  // 2026-09-15：Meshy Image-to-3D 集成 —— GLB 模型文件落 R2 后缀
+  if (mimeType.includes("gltf-binary") || mimeType.includes("model/gltf"))
+    return "glb";
   return "png";
 }
 
-async function persistBufferToR2(
+/**
+ * 2026-09-15：Meshy Image-to-3D 集成导出 —— GLB 模型落 R2 复用同一份逻辑
+ * （与 image / audio / video 同命名空间 canvas/results/{userId}/{YYYYMM}/{prefix}-*.{ext}）。
+ */
+export async function persistBufferToR2(
   buffer: Buffer,
   mimeType: string,
   userId: string,
-  prefix: "image" | "audio" | "video"
+  prefix: "image" | "audio" | "video" | "3d"
 ): Promise<{
   url: string;
   storageKey: string;
@@ -600,7 +607,11 @@ export async function generateOnServerSync(
   }
 }
 
-async function safeRefund(
+/**
+ * 2026-09-15：从 file-private 改为 export —— 让 meshy-image-to-3d.ts 复用
+ * 同一份 refund 逻辑（预扣积分失败 / 上游抛错时退回）。
+ */
+export async function safeRefund(
   userId: string,
   amount: number,
   transactionId: string,

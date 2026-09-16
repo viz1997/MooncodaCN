@@ -336,6 +336,400 @@ export const canvasRemoteGenerateJob = inngest.createFunction(
 );
 
 /**
+ * 画布内置渠道 Image-to-3D 异步执行（Meshy，2026-09-15）
+ *
+ * 调用链路：
+ *   POST /api/canvas/meshy/create
+ *     → createMeshyImageTo3DOnServer（预扣 200 credits + 创 Meshy 任务 + 写 job 行）
+ *     → inngest.send("canvas/image-to-3d")
+ *     → 立即返 { jobId, pollUrl }
+ *
+ *   Inngest 云端（本函数）：
+ *     1. 读 canvasRemoteJob 行 → 拿 providerJobId（Meshy taskId）
+ *     2. 标 processing
+ *     3. 轮询 getImageTo3DTask 60 次 × 8s = 最多 8 分钟（Meshy 上限）：
+ *        - SUCCEEDED → break
+ *        - FAILED / CANCELED → throw（catch 内 safeRefund + DB failed）
+ *        - PENDING / IN_PROGRESS → 继续 sleep + poll
+ *        - 60 轮仍 PENDING/IN_PROGRESS → throw（catch 同上）
+ *     4. fetch GLB（Meshy 临时签名 URL，约 1 天过期）→ R2 putObject → 永久 URL
+ *     5. 写回 canvasRemoteJob: status=completed, result=[{url, storageKey, mimeType, bytes}]
+ *
+ *   [失败]
+ *     safeRefund 全额退回 200 credits；DB 标 failed；不 rethrow
+ *     （前端轮询能拿到 failed；Inngest run 失败日志仅供排查）
+ *
+ * retries: 0 —— Meshy taskId 不可幂等（重复触发会重复扣 Meshy 配额 + 重复
+ * pre-consume）。任何重试都意味着用户被多扣 200 积分。
+ *
+ * 复用：
+ *   - getImageTo3DTask: src/lib/meshy/client.ts
+ *   - persistBufferToR2 / safeRefund: src/features/canvas/services/canvas-server-generate.ts
+ */
+export const canvasImageTo3DJob = inngest.createFunction(
+  {
+    id: "canvas-image-to-3d",
+    retries: 0,
+  },
+  { event: "canvas/image-to-3d" },
+  async ({ event, step }) => {
+    const { jobId, userId } = event.data;
+
+    await step.run("setup", async () => {
+      logger.info(
+        { jobId, userId },
+        "Inngest: 开始画布 Image-to-3D 生成（Meshy）"
+      );
+      await db
+        .update(canvasRemoteJob)
+        .set({ status: "processing", updatedAt: new Date() })
+        .where(eq(canvasRemoteJob.id, jobId));
+    });
+
+    // 拿 providerJobId（Meshy taskId）—— 由 create*OnServer 阶段写入
+    const providerJobId = await step.run("get-provider-job-id", async () => {
+      const job = await db.query.canvasRemoteJob.findFirst({
+        where: eq(canvasRemoteJob.id, jobId),
+        columns: {
+          providerJobId: true,
+          transactionId: true,
+          creditsConsumed: true,
+        },
+      });
+      if (!job) throw new Error(`canvasRemoteJob 不存在：${jobId}`);
+      if (!job.providerJobId) throw new Error(`providerJobId 缺失：${jobId}`);
+      return {
+        providerJobId: job.providerJobId,
+        transactionId: job.transactionId ?? "",
+        creditsConsumed: job.creditsConsumed ?? 0,
+      };
+    });
+
+    try {
+      // 60 轮 × 8s = 8 分钟上限（与 plan 对齐）
+      const POLL_MAX = 60;
+      const POLL_INTERVAL_S = "8s";
+      let finalTask: {
+        status?: string;
+        model_urls?: { glb?: string };
+        task_error?: { message?: string };
+      } | null = null;
+
+      for (let i = 0; i < POLL_MAX; i++) {
+        await step.sleep(`poll-sleep-${i}`, POLL_INTERVAL_S);
+        const polled = await step.run(`poll-check-${i}`, async () => {
+          const { getImageTo3DTask } = await import("@/lib/meshy/client");
+          return getImageTo3DTask(providerJobId.providerJobId);
+        });
+        if (polled.status === "SUCCEEDED") {
+          finalTask = polled;
+          break;
+        }
+        if (polled.status === "FAILED" || polled.status === "CANCELED") {
+          const errObj = polled.task_error as { message?: unknown } | undefined;
+          throw new Error(
+            `Meshy ${polled.status}: ${errObj?.message ?? "未知错误"}`
+          );
+        }
+        // PENDING / IN_PROGRESS：继续下一轮
+      }
+
+      if (!finalTask) {
+        throw new Error("Meshy 任务超时（8 分钟未完成）");
+      }
+
+      // 落 GLB 到 R2
+      const r2Item = await step.run("persist-glb-to-r2", async () => {
+        const { persistBufferToR2 } = await import(
+          "@/features/canvas/services/canvas-server-generate"
+        );
+        const glbUrl = finalTask!.model_urls?.glb;
+        if (!glbUrl) {
+          throw new Error("Meshy SUCCEEDED 但 model_urls.glb 为空");
+        }
+        const res = await fetch(glbUrl, {
+          signal: AbortSignal.timeout(120_000),
+        });
+        if (!res.ok) {
+          throw new Error(`Meshy GLB 下载失败：HTTP ${res.status}`);
+        }
+        const buffer = Buffer.from(await res.arrayBuffer());
+        return persistBufferToR2(buffer, "model/gltf-binary", userId, "3d");
+      });
+
+      await step.run("write-result", async () => {
+        await db
+          .update(canvasRemoteJob)
+          .set({
+            status: "completed",
+            result: [
+              r2Item as {
+                url: string;
+                storageKey: string;
+                mimeType: string;
+                bytes: number;
+              },
+            ],
+            completedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(canvasRemoteJob.id, jobId));
+        logger.info(
+          { jobId, userId, r2Url: r2Item.url },
+          "Inngest: Meshy Image-to-3D 完成，GLB 已落 R2"
+        );
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      // 失败：safeRefund + DB 标 failed + 不 rethrow
+      try {
+        const { safeRefund } = await import(
+          "@/features/canvas/services/canvas-server-generate"
+        );
+        await safeRefund(
+          userId,
+          providerJobId.creditsConsumed,
+          providerJobId.transactionId,
+          "image-to-3d",
+          message
+        );
+      } catch (refundErr) {
+        logger.error(
+          { err: refundErr, jobId, userId },
+          "Inngest: Image-to-3D safeRefund 失败"
+        );
+      }
+      try {
+        await db
+          .update(canvasRemoteJob)
+          .set({
+            status: "failed",
+            error: message.slice(0, 1000),
+            completedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(canvasRemoteJob.id, jobId));
+      } catch (dbErr) {
+        logger.error(
+          { err: dbErr, jobId },
+          "Inngest: Image-to-3D 写 failed 状态失败"
+        );
+      }
+      logger.error(
+        { err, jobId, userId, message },
+        "Inngest: Meshy Image-to-3D 失败（积分已自动回退）"
+      );
+      // 不 rethrow —— 失败已持久化，让前端轮询拿到 failed 状态
+    }
+  }
+);
+
+/**
+ * 画布内置渠道 Multi-Image to 3D 后台执行（2026-09-16）
+ *
+ * 与 canvasImageTo3DJob 平行的多图版本 —— 2-4 张图合并生成单一 GLB。
+ * capability='multi-image-to-3d'，credits 400（单图 2 倍）。
+ *
+ *   [成功]
+ *     1. 读 canvasRemoteJob 行 → 拿 providerJobId + transactionId + creditsConsumed
+ *     2. 轮询 GET /openapi/v1/multi-image-to-3d/:id（60 轮 × 8s = 8 分钟上限）
+ *     3. SUCCEEDED → 取 model_urls.glb
+ *     4. fetch GLB（Meshy 临时签名 URL，约 1 天过期）→ R2 putObject → 永久 URL
+ *     5. 写回 canvasRemoteJob: status=completed, result=[{url, storageKey, mimeType, bytes}]
+ *
+ *   [失败]
+ *     safeRefund 全额退回 400 credits；DB 标 failed；不 rethrow
+ *     （前端轮询能拿到 failed；Inngest run 失败日志仅供排查）
+ *
+ * retries: 0 —— Meshy taskId 不可幂等（重复触发会重复扣 Meshy 配额 + 重复
+ * pre-consume）。任何重试都意味着用户被多扣 400 积分。
+ *
+ * step 命名优化：
+ *   - 单图函数（canvasImageTo3DJob）每轮一个独立 step.sleep/poll-check，
+ *     60 轮 = 120 个唯一 step 名。Inngest 函数 step 配额紧张。
+ *   - 多图函数**复用** 6 个分组 sleep 名（每组 10 轮 × 8s = 80s）+ 1 个
+ *     共享 step.run 名 → 总 step 数从 ~120 降到 ~8，避免配额风险。
+ *
+ * 复用：
+ *   - getMultiImageTo3DTask: src/lib/meshy/client.ts
+ *   - persistBufferToR2 / safeRefund: src/features/canvas/services/canvas-server-generate.ts
+ */
+export const canvasMultiImageTo3DJob = inngest.createFunction(
+  {
+    id: "canvas-multi-image-to-3d",
+    retries: 0,
+  },
+  { event: "canvas/multi-image-to-3d" },
+  async ({ event, step }) => {
+    const { jobId, userId } = event.data;
+
+    await step.run("setup", async () => {
+      logger.info(
+        { jobId, userId },
+        "Inngest: 开始画布 Multi-Image to 3D 生成（Meshy）"
+      );
+      await db
+        .update(canvasRemoteJob)
+        .set({ status: "processing", updatedAt: new Date() })
+        .where(eq(canvasRemoteJob.id, jobId));
+    });
+
+    // 拿 providerJobId（Meshy taskId）—— 由 create*OnServer 阶段写入
+    const providerJobId = await step.run("get-provider-job-id", async () => {
+      const job = await db.query.canvasRemoteJob.findFirst({
+        where: eq(canvasRemoteJob.id, jobId),
+        columns: {
+          providerJobId: true,
+          transactionId: true,
+          creditsConsumed: true,
+        },
+      });
+      if (!job) throw new Error(`canvasRemoteJob 不存在：${jobId}`);
+      if (!job.providerJobId) throw new Error(`providerJobId 缺失：${jobId}`);
+      return {
+        providerJobId: job.providerJobId,
+        transactionId: job.transactionId ?? "",
+        creditsConsumed: job.creditsConsumed ?? 0,
+      };
+    });
+
+    try {
+      // 60 轮 × 8s = 8 分钟上限（与单图一致 —— Meshy multi-image p95 ~5min）
+      //
+      // step 命名优化：用 6 个分组 sleep 名（每组 10 轮）+ 1 个共享 poll-check
+      // run 名 → 总 ~8 个 step（vs 单图 60 + 60 = 120 个）。Inngest step 配额
+      // 友好，调试面板更清晰。
+      const POLL_MAX = 60;
+      const POLL_INTERVAL_S = "8s";
+      const POLLS_PER_GROUP = 10; // 10 × 8s = 80s/组
+      const POLL_GROUPS = Math.ceil(POLL_MAX / POLLS_PER_GROUP);
+      let finalTask: {
+        status?: string;
+        model_urls?: { glb?: string };
+        task_error?: { message?: string };
+      } | null = null;
+
+      for (let g = 0; g < POLL_GROUPS; g++) {
+        const groupEnd = Math.min(
+          POLLS_PER_GROUP,
+          POLL_MAX - g * POLLS_PER_GROUP
+        );
+        for (let i = 0; i < groupEnd; i++) {
+          await step.sleep(`poll-group-${g}`, POLL_INTERVAL_S);
+          const polled = await step.run("poll-check", async () => {
+            const { getMultiImageTo3DTask } = await import(
+              "@/lib/meshy/client"
+            );
+            return getMultiImageTo3DTask(providerJobId.providerJobId);
+          });
+          if (polled.status === "SUCCEEDED") {
+            finalTask = polled;
+            break;
+          }
+          if (polled.status === "FAILED" || polled.status === "CANCELED") {
+            const errObj = polled.task_error as
+              | { message?: unknown }
+              | undefined;
+            throw new Error(
+              `Meshy ${polled.status}: ${errObj?.message ?? "未知错误"}`
+            );
+          }
+          // PENDING / IN_PROGRESS：继续下一轮
+        }
+        if (finalTask) break;
+      }
+
+      if (!finalTask) {
+        throw new Error("Meshy Multi-Image 任务超时（8 分钟未完成）");
+      }
+
+      // 落 GLB 到 R2
+      const r2Item = await step.run("persist-glb-to-r2", async () => {
+        const { persistBufferToR2 } = await import(
+          "@/features/canvas/services/canvas-server-generate"
+        );
+        const glbUrl = finalTask!.model_urls?.glb;
+        if (!glbUrl) {
+          throw new Error("Meshy SUCCEEDED 但 model_urls.glb 为空");
+        }
+        const res = await fetch(glbUrl, {
+          signal: AbortSignal.timeout(120_000),
+        });
+        if (!res.ok) {
+          throw new Error(`Meshy GLB 下载失败：HTTP ${res.status}`);
+        }
+        const buffer = Buffer.from(await res.arrayBuffer());
+        return persistBufferToR2(buffer, "model/gltf-binary", userId, "3d");
+      });
+
+      await step.run("write-result", async () => {
+        await db
+          .update(canvasRemoteJob)
+          .set({
+            status: "completed",
+            result: [
+              r2Item as {
+                url: string;
+                storageKey: string;
+                mimeType: string;
+                bytes: number;
+              },
+            ],
+            completedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(canvasRemoteJob.id, jobId));
+        logger.info(
+          { jobId, userId, r2Url: r2Item.url },
+          "Inngest: Meshy Multi-Image to 3D 完成，GLB 已落 R2"
+        );
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      // 失败：safeRefund + DB 标 failed + 不 rethrow
+      try {
+        const { safeRefund } = await import(
+          "@/features/canvas/services/canvas-server-generate"
+        );
+        await safeRefund(
+          userId,
+          providerJobId.creditsConsumed,
+          providerJobId.transactionId,
+          "multi-image-to-3d",
+          message
+        );
+      } catch (refundErr) {
+        logger.error(
+          { err: refundErr, jobId, userId },
+          "Inngest: Multi-Image to 3D safeRefund 失败"
+        );
+      }
+      try {
+        await db
+          .update(canvasRemoteJob)
+          .set({
+            status: "failed",
+            error: message.slice(0, 1000),
+            completedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(canvasRemoteJob.id, jobId));
+      } catch (dbErr) {
+        logger.error(
+          { err: dbErr, jobId },
+          "Inngest: Multi-Image to 3D 写 failed 状态失败"
+        );
+      }
+      logger.error(
+        { err, jobId, userId, message },
+        "Inngest: Meshy Multi-Image to 3D 失败（积分已自动回退）"
+      );
+      // 不 rethrow —— 失败已持久化，让前端轮询拿到 failed 状态
+    }
+  }
+);
+
+/**
  * 画布内置渠道（image / audio / video）—— 兜底 reconcile cron。
  *
  * 与 reconcileStaleJobs（image-gen 工作台）同语义：
@@ -404,12 +798,18 @@ export const reconcileCanvasRemoteJobs = inngest.createFunction(
     );
 
     const markFailed = async (
-      rows: Array<{ id: string; userId: string; capability: string }>,
+      rows: Array<{
+        id?: string | null;
+        userId?: string | null;
+        capability?: string | null;
+      }>,
       reason: string
     ) => {
       if (rows.length === 0) return 0;
       let count = 0;
       for (const row of rows) {
+        if (!row.id) continue;
+        const jobId = row.id;
         try {
           await db
             .update(canvasRemoteJob)
@@ -419,18 +819,18 @@ export const reconcileCanvasRemoteJobs = inngest.createFunction(
               completedAt: new Date(),
               updatedAt: new Date(),
             })
-            .where(eq(canvasRemoteJob.id, row.id));
+            .where(eq(canvasRemoteJob.id, jobId));
           count++;
           logger.warn(
             {
-              jobId: row.id,
-              userId: row.userId,
-              capability: row.capability,
+              jobId,
+              userId: row.userId ?? undefined,
+              capability: row.capability ?? undefined,
             },
             `reconcile: canvasRemoteJob 标 failed (${reason})`
           );
         } catch (err) {
-          logger.error({ err, jobId: row.id }, "reconcile: 单条 update 失败");
+          logger.error({ err, jobId }, "reconcile: 单条 update 失败");
         }
       }
       return count;
@@ -490,5 +890,7 @@ export const functions = [
   reconcileStaleJobs,
   submitImageGenJob,
   canvasRemoteGenerateJob,
+  canvasImageTo3DJob,
+  canvasMultiImageTo3DJob,
   reconcileCanvasRemoteJobs,
 ];

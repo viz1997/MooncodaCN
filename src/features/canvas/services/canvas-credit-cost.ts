@@ -10,7 +10,13 @@
  * 这里走固定表格，避免每次调上游拿价。
  */
 
-export type CanvasCapability = "image" | "video" | "audio" | "text";
+export type CanvasCapability =
+  | "image"
+  | "video"
+  | "audio"
+  | "text"
+  | "image-to-3d"
+  | "multi-image-to-3d";
 
 export type CanvasCostInput = {
   capability: CanvasCapability;
@@ -41,6 +47,23 @@ export function calculateCanvasCost(input: CanvasCostInput): number {
     const chars = (input.audioInput || "").length;
     if (chars === 0) return 10;
     return Math.max(10, Math.ceil(chars / 1000) * 10);
+  }
+
+  // 2026-09-15：画布内 Meshy Image-to-3D —— 固定 200 积分/任务。
+  // 定价参考：Meshy 一次 Image-to-3D 任务消耗约 20 credits，
+  // 对标 OpenAI gpt-image-1 单图 4K 80 积分的 2.5x —— 用户获得的是
+  // 「3D 可打印模型 + R2 永久 URL」比单图价值高。
+  // 调价改这一行即可，无需触动其他逻辑。
+  if (capability === "image-to-3d") {
+    return 200;
+  }
+
+  // 2026-09-16：画布内 Meshy Multi-Image to 3D —— 固定 400 积分/任务。
+  // 2-4 张图合并转 3D，单图 200 的 2 倍。多视图一致性 Meshy 上游成本更高，
+  // 用户获得的是「多角度合并的高质量 GLB」比单图价值高。
+  // 调价改这一行即可。
+  if (capability === "multi-image-to-3d") {
+    return 400;
   }
 
   // text（chat / 文本流式）
@@ -87,5 +110,19 @@ export const CANVAS_BUILTIN_MODELS: Array<{
     model: "gpt-4o-mini",
     labelKey: "gpt-4o-mini",
     cost: 5,
+  },
+  // 2026-09-15：画布内 Meshy Image-to-3D 集成
+  {
+    capability: "image-to-3d",
+    model: "meshy-image-to-3d",
+    labelKey: "meshy-image-to-3d",
+    cost: 200,
+  },
+  // 2026-09-16：画布内 Meshy Multi-Image to 3D 集成
+  {
+    capability: "multi-image-to-3d",
+    model: "meshy-multi-image-to-3d",
+    labelKey: "meshy-multi-image-to-3d",
+    cost: 400,
   },
 ];

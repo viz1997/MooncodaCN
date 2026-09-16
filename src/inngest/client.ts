@@ -108,4 +108,42 @@ export type Events = {
       payload: CanvasRemoteGenerateInput;
     };
   };
+  /**
+   * 画布内置渠道 Image-to-3D 提交生成任务（2026-09-15）
+   *
+   * 由 /api/canvas/meshy/create 在写 canvasRemoteJob（capability='image-to-3d'，
+   * status=pending，providerJobId=Meshy taskId）后立即 send。
+   *
+   * payload **不重复** imageUrl / options —— canvasRemoteJob 行已存，
+   * Inngest 函数 canvasImageTo3DJob 读 job 行 providerJobId + 必要时回
+   * 看 payload 即可，无需冗余 data。
+   *
+   * retries: 0 —— Meshy 任务 id 不可幂等（重复触发会重复扣 Meshy 配额）；
+   * canvasRemoteJob 行内 transactionId 已记录供 safeRefund 使用。
+   */
+  "canvas/image-to-3d": {
+    data: {
+      jobId: string;
+      userId: string;
+    };
+  };
+  /**
+   * 画布内置渠道 Multi-Image to 3D 提交生成任务（2026-09-16）
+   *
+   * 由 /api/canvas/meshy/multi-image/create 在写 canvasRemoteJob
+   * （capability='multi-image-to-3d'，status=pending，providerJobId=Meshy taskId）
+   * 后立即 send。
+   *
+   * payload **不重复** imageUrls / options —— canvasRemoteJob 行已存，
+   * Inngest 函数 canvasMultiImageTo3DJob 读 job 行 providerJobId + 必要时回
+   * 看 payload 即可，无需冗余 data。
+   *
+   * retries: 0 —— 与单图一致：Meshy 任务 id 不可幂等。
+   */
+  "canvas/multi-image-to-3d": {
+    data: {
+      jobId: string;
+      userId: string;
+    };
+  };
 };

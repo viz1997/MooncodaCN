@@ -1,6 +1,7 @@
 // @ts-nocheck
 
 import {
+  Box,
   Brush,
   Camera,
   Copy,
@@ -29,7 +30,9 @@ export type ImageNodeActionToolId =
   | "upscale"
   | "superResolve"
   | "angle"
-  | "view";
+  | "view"
+  // 2026-09-15：Meshy Image-to-3D 集成 —— image 节点工具栏新增
+  | "imageTo3d";
 export type ImageQuickToolId =
   | "info"
   | "delete"
@@ -50,6 +53,8 @@ export type ImageToolHandlers = {
   onViewImage: (node: CanvasNodeData) => void;
   onCopyPrompt: (node: CanvasNodeData) => void;
   onReversePrompt: (node: CanvasNodeData) => void;
+  // 2026-09-15：Meshy Image-to-3D —— 在 image 节点悬浮工具栏点"转 3D"时触发
+  onImageTo3d: (node: CanvasNodeData) => void;
 };
 
 export type ImageToolDefinition = {
@@ -181,6 +186,20 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
     title: () => i18n.t("canvas.imageTools.viewTitle"),
     icon: () => <Maximize2 className="size-4" />,
     run: (node, handlers) => handlers.onViewImage(node),
+  },
+  // 2026-09-15：Meshy Image-to-3D —— image 节点悬浮工具栏新增
+  // 点了之后调 onImageTo3d，由 project-editor.tsx 处理：
+  //   1. 预建 model3d 子节点（status=loading）
+  //   2. POST /api/canvas/meshy/create → 拿 jobId
+  //   3. 启动轮询，completed 后更新子节点 metadata
+  // 默认显示（defaultVisible=true）：与 maskEdit / crop / split / upscale 同档
+  {
+    id: "imageTo3d",
+    defaultVisible: true,
+    label: () => i18n.t("canvas.imageTools.imageTo3d"),
+    title: () => i18n.t("canvas.imageTools.imageTo3dTitle"),
+    icon: () => <Box className="size-4" />,
+    run: (node, handlers) => handlers.onImageTo3d(node),
   },
 ];
 

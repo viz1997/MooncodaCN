@@ -15,7 +15,12 @@ import {
   CanvasNodeType,
 } from "@/features/canvas/types/canvas";
 
-export type CanvasResourceKind = "image" | "video" | "audio" | "text";
+export type CanvasResourceKind =
+  | "image"
+  | "video"
+  | "audio"
+  | "text"
+  | "model3d";
 
 export type CanvasResourceReference = {
   id: string;
@@ -168,6 +173,7 @@ function labelResourceNodes(nodes: CanvasNodeData[], active: boolean) {
     video: 0,
     audio: 0,
     text: 0,
+    model3d: 0,
   };
   return nodes.flatMap((node): CanvasResourceReference[] => {
     const kind = resourceKind(node);
@@ -194,6 +200,10 @@ function labelForKind(kind: CanvasResourceKind, index: number) {
   if (kind === "image") return imageReferenceLabel(index);
   if (kind === "video") return seedanceReferenceLabel("video", index);
   if (kind === "audio") return seedanceReferenceLabel("audio", index);
+  // 2026-09-16：画布内 3D 模型节点（Meshy Image-to-3D / Multi-Image to 3D），
+  // 多图视角时节点 metadata 可能是多 source image；model3d 不走 agent reference
+  // 路径，但 counts / union 仍需包含，避免 type 报错。
+  if (kind === "model3d") return `3D ${index + 1}`;
   return i18n.t("canvas.composer.resources.text", { index: index + 1 });
 }
 

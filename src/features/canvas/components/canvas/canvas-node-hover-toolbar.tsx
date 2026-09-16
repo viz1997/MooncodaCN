@@ -68,6 +68,8 @@ type CanvasNodeHoverToolbarProps = {
   onAngle: (node: CanvasNodeData) => void;
   onViewImage: (node: CanvasNodeData) => void;
   onReversePrompt: (node: CanvasNodeData) => void;
+  // 2026-09-15：Meshy Image-to-3D —— image 节点悬浮工具栏点"转 3D"时触发
+  onImageTo3d: (node: CanvasNodeData) => void;
   onRetry: (node: CanvasNodeData) => void;
   onToggleFreeResize: (node: CanvasNodeData) => void;
   onDelete: (node: CanvasNodeData) => void;
@@ -106,6 +108,7 @@ export function CanvasNodeHoverToolbar({
   onAngle,
   onViewImage,
   onReversePrompt,
+  onImageTo3d,
   onRetry,
   onToggleFreeResize,
   onDelete,
@@ -178,6 +181,7 @@ export function CanvasNodeHoverToolbar({
     onViewImage,
     onCopyPrompt: copyImagePrompt,
     onReversePrompt,
+    onImageTo3d,
   });
 
   function openImageToolSettings() {

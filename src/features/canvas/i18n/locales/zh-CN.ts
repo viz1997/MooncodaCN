@@ -688,6 +688,13 @@ export default {
       angleTitle: "生成角度",
       view: "查看大图",
       viewTitle: "查看图片详情",
+      // 2026-09-15：Meshy Image-to-3D 集成 —— image 节点工具栏新增
+      imageTo3d: "转 3D 模型",
+      imageTo3dTitle: "调用 Meshy 把图片转为 3D 模型（GLB）",
+      // 2026-09-16：Meshy Multi-Image to 3D 集成 —— 多选工具栏
+      multiImageTo3d: "多图转 3D",
+      multiImageTo3dTitle: "将选中的 2-4 张图片合并转 3D 模型（400 积分）",
+      selectedImagesCount: "已选 {{count}} 张图",
       more: "更多",
       configure: "配置快捷工具",
       customize: "自定义工具栏",
@@ -696,6 +703,25 @@ export default {
       preview: "节点预览",
       imageNode: "图片节点",
       quickTools: "快捷工具",
+    },
+    // 2026-09-15：Meshy 3D 节点 i18n
+    meshy3d: {
+      nodeTitle: "3D 模型",
+      nodeDescription: "Meshy 生成的 3D 模型（GLB）",
+      generating: "3D 模型生成中…",
+      failed: "3D 模型生成失败",
+      creditsRefunded: "积分已自动回退",
+      modelAlt: "Meshy 生成的 3D 模型",
+      confirmCost: "将消耗 200 积分为此图片生成 3D 模型（约 30s-2min）",
+      insufficientCredits: "积分不足（需要 200 积分），请先充值",
+      requestFailed: "请求失败：",
+      // 2026-09-16：Meshy Multi-Image to 3D i18n（多图视角合并）
+      multiNodeTitle: "3D 模型（多视图）",
+      multiViewSources: "基于 {{count}} 张图生成",
+      multiViewLoading: "正在合并多视图生成 3D 模型…",
+      multiImageCountInvalid: "请选择 2-4 张图片",
+      multiConfirmCost:
+        "将消耗 400 积分合并 {{count}} 张图片为单个 3D 模型（约 1-3min）",
     },
     nodeToolbar: {
       noPrompt: "暂无可复制的提示词",

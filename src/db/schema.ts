@@ -605,14 +605,25 @@ export const canvasRemoteJobStatusEnum = pgEnum("canvas_remote_job_status", [
  * 画布内置渠道 capability 枚举
  *
  * 与 `CanvasCapability` 类型（src/features/canvas/services/canvas-credit-cost.ts）
- * 保持一致：image / video / audio / text。video 当前仍走 VIDEO_JOBS Map，本表预留；
- * text 在 route 层 400 拒绝，本表预留。
+ * 保持一致：image / video / audio / text / image-to-3d。video 当前仍走 VIDEO_JOBS Map，
+ * 本表预留；text 在 route 层 400 拒绝，本表预留。
+ *
+ * 2026-09-15：新增 'image-to-3d' —— 画布内 Meshy Image-to-3D 集成，源 image 节点
+ * → 插件节点，扣用户 200 积分生成 GLB 模型并落 R2。drizzle/0018 添加枚举值，
+ * TS enum literal union 同步更新。
+ *
+ * 2026-09-16：新增 'multi-image-to-3d' —— 画布内 Meshy Multi-Image to 3D 集成，
+ * 2-4 张图合并转 GLB 模型，扣 400 积分（单图 200 的 2 倍）。节点层复用
+ * meshy-3d:model3d，metadata.sourceImageUrls 扩展。drizzle/0019 添加枚举值，
+ * TS enum literal union 同步更新。
  */
 export const canvasRemoteCapabilityEnum = pgEnum("canvas_remote_capability", [
   "image",
   "video",
   "audio",
   "text",
+  "image-to-3d",
+  "multi-image-to-3d",
 ]);
 
 // ============================================
