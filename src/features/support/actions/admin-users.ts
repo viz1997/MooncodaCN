@@ -109,6 +109,7 @@ export const getAllUsersAction = withAdminUsersAction("getAllUsers")
     const query = parsedInput?.query;
 
     // 构建用户选择字段
+    // 2026-09-16：加 phoneNumber / phoneNumberVerified —— admin 表格展示手机号 + 搜索
     const userSelectFields = {
       id: user.id,
       name: user.name,
@@ -119,10 +120,13 @@ export const getAllUsersAction = withAdminUsersAction("getAllUsers")
       bannedReason: user.bannedReason,
       emailVerified: user.emailVerified,
       needsVerification: user.needsVerification,
+      phoneNumber: user.phoneNumber,
+      phoneNumberVerified: user.phoneNumberVerified,
       createdAt: user.createdAt,
     };
 
     // 根据是否有搜索条件构建查询
+    // 2026-09-16：搜索范围扩到手机号（admin 查代理商 / 客服查客诉常用）
     const users = query?.trim()
       ? await db
           .select(userSelectFields)
@@ -130,7 +134,8 @@ export const getAllUsersAction = withAdminUsersAction("getAllUsers")
           .where(
             or(
               ilike(user.email, `%${query.trim()}%`),
-              ilike(user.name, `%${query.trim()}%`)
+              ilike(user.name, `%${query.trim()}%`),
+              ilike(user.phoneNumber, `%${query.trim()}%`)
             )
           )
           .orderBy(user.createdAt)

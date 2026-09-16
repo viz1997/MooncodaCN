@@ -1,5 +1,6 @@
 "use client";
 
+import { phoneNumberClient } from "better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
 
 /**
@@ -8,6 +9,7 @@ import { createAuthClient } from "better-auth/react";
  * 此客户端用于在 React 组件中进行认证操作:
  * - 社交登录 (GitHub, Google)
  * - 邮箱密码登录
+ * - 手机号 + 密码登录（2026-09-16）—— phoneNumberClient 暴露 authClient.phoneNumber.* + authClient.signIn.phoneNumber
  * - 会话管理
  * - 登出
  */
@@ -17,6 +19,7 @@ export const authClient = createAuthClient({
    * 默认指向 /api/auth，与 API 路由匹配
    */
   baseURL: process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+  plugins: [phoneNumberClient()],
 });
 
 /**
@@ -215,4 +218,78 @@ export async function resendVerificationEmail(email: string) {
  */
 export async function reloadSession() {
   return getSession();
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// 手机号登录 helpers（2026-09-16）
+// 镜像 signInWithEmail 模式 + 服务端 phoneNumber 插件端点
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * 手机号 + 密码登录。
+ *
+ * 边界：
+ *   - 用户已 verify 后才能用密码登录（plugin.requireVerification: true）
+ *   - 若返回 PHONE_NUMBER_NOT_VERIFIED → 前端应自动转 OTP 流程
+ *   - 若返回 PHONE_NUMBER_NOT_EXIST → 用户首次注册要走 OTP（不是这个端点）
+ *   - 登录成功后浏览器跳转到 caller 提供的 callbackURL（不在 BA 端点 body）
+ */
+export async function signInWithPhone(phoneNumber: string, password: string) {
+  return signIn.phoneNumber({
+    phoneNumber,
+    password,
+  });
+}
+
+/**
+ * 发送手机号 OTP（登录 / 重置密码前调）。
+ * 不区分场景 —— 服务端根据请求来源决定用途。
+ */
+export async function sendPhoneOtp(phoneNumber: string) {
+  return authClient.phoneNumber.sendOtp({ phoneNumber });
+}
+
+/**
+ * 验证 OTP：
+ *   - disableSession: false（默认）→ 验证成功即建立 session
+ *   - signUpOnVerification 自动创建新用户（首次注册）
+ *   - updatePhoneNumber: true（已登录用户改绑手机号）需要单独传
+ */
+export async function verifyPhoneOtp(
+  phoneNumber: string,
+  code: string,
+  options?: { updatePhoneNumber?: boolean; disableSession?: boolean }
+) {
+  return authClient.phoneNumber.verify({
+    phoneNumber,
+    code,
+    ...(options?.updatePhoneNumber ? { updatePhoneNumber: true } : {}),
+    ...(options?.disableSession !== undefined
+      ? { disableSession: options.disableSession }
+      : {}),
+  });
+}
+
+/**
+ * 请求密码重置 OTP（手机号用户忘了密码时走这条）。
+ * 不需要当前密码 —— 服务端发 OTP 到该手机号。
+ */
+export async function requestPhonePasswordReset(phoneNumber: string) {
+  return authClient.phoneNumber.requestPasswordReset({ phoneNumber });
+}
+
+/**
+ * 用 OTP 重置密码（手机号路径）。
+ * 成功后用户即可用新密码走 signInWithPhone。
+ */
+export async function resetPhonePassword(
+  phoneNumber: string,
+  otp: string,
+  newPassword: string
+) {
+  return authClient.phoneNumber.resetPassword({
+    phoneNumber,
+    otp,
+    newPassword,
+  });
 }

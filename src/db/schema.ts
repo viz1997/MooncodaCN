@@ -72,6 +72,16 @@ export const user = pgTable(
     agentId: text("agent_id").references(() => agent.id, {
       onDelete: "set null",
     }),
+    /**
+     * 2026-09-16：手机号 + 密码登录（Better Auth phoneNumber 插件）。
+     * phone_number 存 E.164 格式（+8613800138000）；unique 允许多个 NULL。
+     * 手机号用户首次 OTP 注册时，email 字段被占位为 `${phoneDigits}@noreply.${APP_DOMAIN}`
+     * —— 见 src/lib/auth/index.ts 的 signUpOnVerification.getTempEmail。
+     */
+    phoneNumber: text("phone_number").unique(),
+    phoneNumberVerified: boolean("phone_number_verified")
+      .notNull()
+      .default(false),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },

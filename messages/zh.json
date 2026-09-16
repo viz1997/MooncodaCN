@@ -234,7 +234,9 @@
     "common": {
       "or": "或",
       "google": "Google",
-      "github": "GitHub"
+      "github": "GitHub",
+      "countryCode": "区号",
+      "phonePlaceholder": "138 0013 8000"
     },
     "signIn": {
       "title": "欢迎回来",
@@ -250,6 +252,40 @@
       "resendCooldown": "{seconds}秒后可重新发送",
       "noAccount": "还没有账号？",
       "signUpLink": "注册",
+      "tabs": {
+        "email": "邮箱",
+        "phone": "手机号"
+      },
+      "phone": {
+        "phoneLabel": "手机号",
+        "phonePlaceholder": "138 0013 8000",
+        "otpLabel": "验证码",
+        "otpHint": "没收到？请检查垃圾箱或重新发送",
+        "resend": "重新发送验证码",
+        "resendCooldown": "{seconds}秒后可重新发送",
+        "sendOtp": "发送验证码",
+        "verifySubmit": "验证并登录",
+        "useOtpInstead": "改用验证码登录",
+        "backToPassword": "改用密码登录",
+        "otpSent": "验证码已发送",
+        "resetSubmit": "重置密码",
+        "resetSuccess": "密码已重置，请用新密码登录",
+        "newPasswordLabel": "新密码",
+        "newPasswordPlaceholder": "至少 8 个字符",
+        "errors": {
+          "phoneRequired": "请输入手机号",
+          "phoneNotExist": "该手机号未注册，将发送验证码以创建账号",
+          "phoneNotVerified": "手机号未验证，将发送验证码",
+          "phoneExist": "该手机号已被注册",
+          "invalidOtp": "验证码错误",
+          "otpExpired": "验证码已过期，请重新发送",
+          "tooManyAttempts": "尝试次数过多，请稍后再试",
+          "passwordRequired": "请输入新密码（至少 8 个字符）",
+          "sendOtpFailed": "发送验证码失败，请重试",
+          "verifyFailed": "验证失败，请重试",
+          "generic": "出错了，请重试"
+        }
+      },
       "errors": {
         "google": "Google 登录失败，请重试",
         "github": "GitHub 登录失败，请重试",
@@ -759,7 +795,40 @@
         "samePassword": "新密码不能与当前密码相同。",
         "wrongPassword": "当前密码不正确。"
       },
-      "success": "密码修改成功。"
+      "success": "密码修改成功。",
+      "phone": {
+        "title": "手机号",
+        "description": "绑定手机号后可使用手机号登录或找回账号。",
+        "bind": "绑定",
+        "change": "更换",
+        "unbind": "解绑",
+        "status": {
+          "verified": "已验证",
+          "unverified": "未验证",
+          "notBound": "未绑定"
+        },
+        "hint": {
+          "emailRequired": "请先绑定并验证邮箱，否则解绑手机号后将无法找回账号。"
+        },
+        "modal": {
+          "bindTitle": "绑定手机号",
+          "changeTitle": "更换手机号",
+          "unbindTitle": "确认解绑手机号？",
+          "unbindDescription": "解绑后仍可使用邮箱登录。请确保邮箱已验证。",
+          "confirmUnbind": "确认解绑",
+          "cancel": "取消"
+        },
+        "success": {
+          "bound": "手机号已绑定",
+          "changed": "手机号已更换",
+          "unbound": "手机号已解绑"
+        },
+        "errors": {
+          "bindFailed": "绑定失败，请重试",
+          "changeFailed": "更换失败，请重试",
+          "unbindFailed": "解绑失败，请重试"
+        }
+      }
     },
     "errors": {
       "unsupportedFileType": "不支持的文件类型。支持：{types}",

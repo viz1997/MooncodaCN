@@ -238,7 +238,9 @@
     "common": {
       "or": "or",
       "google": "Google",
-      "github": "GitHub"
+      "github": "GitHub",
+      "countryCode": "Country code",
+      "phonePlaceholder": "138 0013 8000"
     },
     "signIn": {
       "title": "Welcome back",
@@ -254,6 +256,40 @@
       "resendCooldown": "Resend in {seconds}s",
       "noAccount": "Don\u0027t have an account?",
       "signUpLink": "Sign up",
+      "tabs": {
+        "email": "Email",
+        "phone": "Phone"
+      },
+      "phone": {
+        "phoneLabel": "Phone number",
+        "phonePlaceholder": "138 0013 8000",
+        "otpLabel": "Verification code",
+        "otpHint": "Didn't get the code? Check spam or resend.",
+        "resend": "Resend code",
+        "resendCooldown": "Resend in {seconds}s",
+        "sendOtp": "Send verification code",
+        "verifySubmit": "Verify and sign in",
+        "useOtpInstead": "Use verification code instead",
+        "backToPassword": "Use password instead",
+        "otpSent": "Verification code sent.",
+        "resetSubmit": "Reset password",
+        "resetSuccess": "Password reset. Please sign in with your new password.",
+        "newPasswordLabel": "New password",
+        "newPasswordPlaceholder": "At least 8 characters",
+        "errors": {
+          "phoneRequired": "Please enter your phone number.",
+          "phoneNotExist": "This phone is not registered. We'll send a code to create your account.",
+          "phoneNotVerified": "Phone not verified. We'll send a verification code.",
+          "phoneExist": "This phone is already registered.",
+          "invalidOtp": "Invalid verification code.",
+          "otpExpired": "Verification code expired. Please resend.",
+          "tooManyAttempts": "Too many attempts. Please try again later.",
+          "passwordRequired": "Please enter a new password (8+ characters).",
+          "sendOtpFailed": "Failed to send code. Please try again.",
+          "verifyFailed": "Verification failed. Please try again.",
+          "generic": "Something went wrong. Please try again."
+        }
+      },
       "errors": {
         "google": "Google sign-in failed. Please try again.",
         "github": "GitHub sign-in failed. Please try again.",
@@ -762,7 +798,40 @@
         "samePassword": "New password must be different from current password.",
         "wrongPassword": "Current password is incorrect."
       },
-      "success": "Password updated successfully."
+      "success": "Password updated successfully.",
+      "phone": {
+        "title": "Phone number",
+        "description": "Bind a phone number so you can sign in or recover your account.",
+        "bind": "Bind",
+        "change": "Change",
+        "unbind": "Unbind",
+        "status": {
+          "verified": "Verified",
+          "unverified": "Unverified",
+          "notBound": "Not bound"
+        },
+        "hint": {
+          "emailRequired": "Bind and verify your email first so you can recover the account after unbinding phone."
+        },
+        "modal": {
+          "bindTitle": "Bind phone number",
+          "changeTitle": "Change phone number",
+          "unbindTitle": "Unbind phone number?",
+          "unbindDescription": "After unbinding you can still sign in with email. Make sure your email is verified.",
+          "confirmUnbind": "Unbind",
+          "cancel": "Cancel"
+        },
+        "success": {
+          "bound": "Phone bound",
+          "changed": "Phone updated",
+          "unbound": "Phone unbound"
+        },
+        "errors": {
+          "bindFailed": "Failed to bind phone. Please try again.",
+          "changeFailed": "Failed to change phone. Please try again.",
+          "unbindFailed": "Failed to unbind phone. Please try again."
+        }
+      }
     },
     "errors": {
       "unsupportedFileType": "Unsupported file type. Supported: {types}",

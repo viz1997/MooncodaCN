@@ -50,6 +50,9 @@ interface UserWithDetails {
   bannedReason: string | null;
   emailVerified: boolean;
   needsVerification: boolean;
+  // 2026-09-16：手机号字段（admin 表格展示 + 搜索）
+  phoneNumber: string | null;
+  phoneNumberVerified: boolean;
   createdAt: Date;
   credits: {
     balance: number;
@@ -405,7 +408,7 @@ export default function AdminUsersPage() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="搜索邮箱或用户名..."
+                placeholder="搜索邮箱、用户名或手机号..."
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="!pl-10"
@@ -457,6 +460,7 @@ export default function AdminUsersPage() {
                 <thead className="text-xs uppercase bg-muted/50">
                   <tr>
                     <th className="px-4 py-3">用户</th>
+                    <th className="px-4 py-3">手机号</th>
                     <th className="px-4 py-3">状态</th>
                     <th className="px-4 py-3">积分</th>
                     <th className="px-4 py-3">订阅</th>
@@ -484,6 +488,34 @@ export default function AdminUsersPage() {
                             </p>
                           </div>
                         </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        {u.phoneNumber ? (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="font-mono text-xs">
+                              {u.phoneNumber}
+                            </span>
+                            {u.phoneNumberVerified ? (
+                              <Badge
+                                color="green"
+                                className="!text-[10px] w-fit"
+                              >
+                                已验证
+                              </Badge>
+                            ) : (
+                              <Badge
+                                color="default"
+                                className="!text-[10px] w-fit"
+                              >
+                                未验证
+                              </Badge>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">
+                            —
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-col gap-1">

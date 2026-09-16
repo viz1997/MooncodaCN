@@ -333,6 +333,19 @@ async function main() {
       label: "0040 preview_share_uploads_idx",
       query: `CREATE INDEX IF NOT EXISTS "preview_share_uploads_idx" ON "preview_share"("token", "status");`,
     },
+    // 2026-09-16：Better Auth phoneNumber 插件字段（drizzle/0041_phone_auth.sql）
+    {
+      label: "0041 user.phone_number",
+      query: `ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "phone_number" text;`,
+    },
+    {
+      label: "0041 user.phone_number_verified",
+      query: `ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "phone_number_verified" boolean NOT NULL DEFAULT false;`,
+    },
+    {
+      label: "0041 user_phone_number_key",
+      query: `CREATE UNIQUE INDEX IF NOT EXISTS "user_phone_number_key" ON "user" ("phone_number");`,
+    },
   ];
 
   let ok = 0;

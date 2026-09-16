@@ -8,7 +8,7 @@ import { useState } from "react";
 import { resendVerificationEmail, signInWithEmail } from "@/lib/auth/client";
 
 import { AuthErrorAlert } from "./auth-error-alert";
-import { AuthLogo } from "./auth-logo";
+import { SignInTabs } from "./sign-in-tabs";
 
 /** localStorage 键：上次成功登录的邮箱，下次自动填回输入框 */
 const LAST_SIGNIN_EMAIL_KEY = "auth:last-signin-email";
@@ -38,17 +38,13 @@ function resolvePostSignInUrl(): string {
 }
 
 /**
- * 登录表单组件
+ * 邮箱密码登录（2026-09-16：拆出来单独组件，挂到 SignInTabs 的 email slot）
  *
- * 功能:
- * - 邮箱密码登录
- *
- * 2026-08-20：shadcn → antd 迁移（Phase 1）
- * - Input / Button / Divider 切到 antd
- * - 密码字段用 antd Input.Password（自带眼睑切换，替代 shadcn 绝对定位的 eye 按钮）
- * - 成功提示用 antd App.useApp().message 替代 sonner
+ * 历史：原 SignInForm 把 OAuth + 邮箱 + 登录成功跳转都写在一起，
+ * 现在新增手机号 tab 后需要把 logo + 标题 + error 三件套提到 SignInTabs 层，
+ * 这里只保留邮箱 + 密码 + 忘记密码 + 提交。
  */
-export function SignInForm() {
+function EmailSignInForm() {
   const t = useTranslations("Auth.signIn");
   const tCommon = useTranslations("Auth.common");
   const { message } = App.useApp();
@@ -128,10 +124,6 @@ export function SignInForm() {
         // 隐私模式 / 配额满时静默忽略，不阻塞登录
       }
       message.success(t("success"));
-      // 2026-09-14：登录成功后跳到 callbackUrl（用户原话「为什么又是 /dashboard」——
-      // 之前硬编码 /dashboard 会让 /image-gen → /sign-in?callbackUrl=/image-gen
-      // → 登录 → /dashboard，丢失来源页）。callbackUrl 缺失或非法时
-      // 回退到 /dashboard。代理校验逻辑见 resolvePostSignInUrl。
       window.location.href = resolvePostSignInUrl();
     } catch {
       setError(t("errors.invalidCredentials"));
@@ -140,14 +132,7 @@ export function SignInForm() {
   };
 
   return (
-    <div className="w-full max-w-md space-y-6">
-      {/* Logo 和标题 */}
-      <div className="flex flex-col items-center space-y-2 text-center">
-        <AuthLogo />
-        <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
-        <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
-      </div>
-
+    <div className="space-y-4">
       {/* 错误提示 */}
       <AuthErrorAlert message={error} />
 
@@ -170,7 +155,6 @@ export function SignInForm() {
         {tCommon("or")}
       </Divider>
 
-      {/* 邮箱密码表单 */}
       <form onSubmit={handleEmailSignIn} className="space-y-4">
         {/* 邮箱输入 */}
         <div className="space-y-2">
@@ -227,4 +211,14 @@ export function SignInForm() {
       </form>
     </div>
   );
+}
+
+/**
+ * 登录表单（顶层入口）
+ *
+ * 2026-09-16：拆为 Tabs 结构，外层是 SignInTabs（标题 + Tab 切换），
+ * email tab 复用拆出的 EmailSignInForm；phone tab 是新的 PhoneSignInForm。
+ */
+export function SignInForm() {
+  return <SignInTabs emailForm={<EmailSignInForm />} />;
 }

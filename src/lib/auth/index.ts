@@ -1,6 +1,7 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin } from "better-auth/plugins";
+import { phoneNumber } from "better-auth/plugins/phone-number";
 
 import { db } from "@/db";
 import * as schema from "@/db/schema";
@@ -9,6 +10,7 @@ import {
   VerifyEmailEmail,
 } from "@/features/mail/templates/primary-action-email";
 import { sendEmail } from "@/features/mail/utils";
+import { sendOTP } from "@/features/sms";
 
 export const isResendConfigured = Boolean(process.env.RESEND_API_KEY);
 
@@ -94,6 +96,17 @@ export const auth = betterAuth({
         defaultValue: false,
         input: false, // 仅管理员创建时设置
       },
+      phoneNumber: {
+        type: "string",
+        required: false,
+        input: false, // 通过 OTP 端点修改（plugin phoneNumber）
+      },
+      phoneNumberVerified: {
+        type: "boolean",
+        required: false,
+        defaultValue: false,
+        input: false,
+      },
     },
   },
 
@@ -123,6 +136,9 @@ export const auth = betterAuth({
         emailVerification: {
           sendOnSignUp: true,
           sendVerificationEmail: async ({ user, url }) => {
+            // 2026-09-16：手机号注册用户的占位邮箱（${phone}@noreply.${APP_DOMAIN}）
+            // 不应该真发邮件 —— Resend 会 550 bounce。直接 return。
+            if (user.email.includes("@noreply.")) return;
             await sendEmail({
               to: user.email,
               subject: "Verify your email - Mooncoda",
@@ -137,16 +153,42 @@ export const auth = betterAuth({
     : {}),
 
   /**
-   * 管理员插件
+   * 手机号 + 密码登录（Better Auth phoneNumber 插件，2026-09-16）
    *
-   * 提供 admin 管理接口，允许管理员手动创建用户等操作
-   * - defaultRole: 新用户默认角色 "user"
-   * - adminRoles: 被视为管理员的角色
+   * 与 emailAndPassword 共存：同一 user 可同时绑邮箱 + 手机号，
+   * account 表 providerId="credential" 的 password 哈希被两条路径共用。
+   *
+   * 关键决策：
+   *   - requireVerification: true —— 新用户必须先 OTP 验证才能用密码登录
+   *   - signUpOnVerification: 手机号首次注册自动 createUser；email 用占位 ${phoneDigits}@noreply.${APP_DOMAIN}
+   *   - phoneNumberValidator: E.164 正则，存储格式规范
+   *   - sendOTP: 调 src/features/sms/utils.sendOTP（dev console.log / prod Inngest / fallback 阿里云）
+   *   - sendPasswordResetOTP: 复用 sendOTP，template 切 "reset"
+   *
+   * 关联：drizzle/0041_phone_auth.sql 已加 user.phone_number / user.phone_number_verified 列
    */
   plugins: [
     admin({
       defaultRole: "user",
       adminRoles: ["admin"],
+    }),
+    phoneNumber({
+      sendOTP: async ({ phoneNumber: phone, code }) => {
+        await sendOTP({ phoneNumber: phone, code, template: "login" });
+      },
+      sendPasswordResetOTP: async ({ phoneNumber: phone, code }) => {
+        await sendOTP({ phoneNumber: phone, code, template: "reset" });
+      },
+      phoneNumberValidator: (phone) => /^\+\d{8,15}$/.test(phone),
+      signUpOnVerification: {
+        getTempEmail: (phone) =>
+          `${phone.replace(/\D/g, "")}@noreply.${process.env.NEXT_PUBLIC_APP_DOMAIN ?? "mooncoda.com"}`,
+        // getTempName 缺省默认就是 phoneNumber 本身
+      },
+      requireVerification: true,
+      otpLength: 6,
+      expiresIn: 300, // 5 分钟
+      allowedAttempts: 5,
     }),
   ],
 

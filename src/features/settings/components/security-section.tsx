@@ -5,6 +5,7 @@
  *
  * Settings > Security Tab 的主要内容
  * 包含:
+ * - 手机号绑定 / 解绑（2026-09-16 新增）
  * - 修改密码
  *
  * 2026-08-20：shadcn → antd 迁移（Phase 2.4）
@@ -15,13 +16,22 @@
 import { Alert, App, Button, Input } from "antd";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-
 import { changePassword } from "@/lib/auth/client";
+import { PhoneSection } from "./phone-section";
+
+interface SecuritySectionProps {
+  user: {
+    email: string;
+    emailVerified: boolean;
+    phoneNumber: string | null;
+    phoneNumberVerified: boolean;
+  };
+}
 
 /**
  * 安全设置组件
  */
-export function SecuritySection() {
+export function SecuritySection({ user }: SecuritySectionProps) {
   const t = useTranslations("Settings.security");
   const { message } = App.useApp();
 
@@ -70,6 +80,9 @@ export function SecuritySection() {
 
   return (
     <div className="space-y-8">
+      {/* 手机号绑定 / 解绑（2026-09-16） */}
+      <PhoneSection user={user} />
+
       {/* 修改密码 */}
       <section className="space-y-6">
         <div className="flex items-center justify-between">

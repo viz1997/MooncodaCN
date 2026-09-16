@@ -44,7 +44,10 @@ interface SettingsProfileViewProps {
     id: string;
     name: string;
     email: string;
+    emailVerified: boolean;
     image?: string | null | undefined;
+    phoneNumber: string | null;
+    phoneNumberVerified: boolean;
   };
 }
 
@@ -441,7 +444,14 @@ export function SettingsProfileView({ user }: SettingsProfileViewProps) {
             label: tTabs("security"),
             children: (
               <div className="mt-8 pl-4">
-                <SecuritySection />
+                <SecuritySection
+                  user={{
+                    email: user.email,
+                    emailVerified: user.emailVerified,
+                    phoneNumber: user.phoneNumber,
+                    phoneNumberVerified: user.phoneNumberVerified,
+                  }}
+                />
               </div>
             ),
           },
