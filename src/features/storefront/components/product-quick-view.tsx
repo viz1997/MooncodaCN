@@ -267,13 +267,15 @@ export function ProductQuickView() {
                   <ArrowRight className="size-4 ml-2 transition-transform group-hover:translate-x-0.5" />
                 </Button>
 
-                {/* View full details link */}
+                {/* View full details link —— 跳到 /marketing/products 作品集
+                   (mock catalog 与现有 marketing 路由 slug 不互通,
+                   故引到列表而非具体 handle,见 [[wjp-mock-medusa-storefront]]) */}
                 <Link
-                  href={`/products/${product.handle}`}
+                  href="/marketing/products"
                   onClick={() => setQuickView(null)}
                   className="w-full text-center text-sm text-muted-foreground hover:text-foreground transition-colors mt-2 inline-block"
                 >
-                  查看完整详情 →
+                  查看所有作品 →
                 </Link>
 
                 {/* Perks */}
