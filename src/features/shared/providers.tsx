@@ -1,7 +1,9 @@
 "use client";
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RootProvider } from "fumadocs-ui/provider/next";
 import { ThemeProvider } from "next-themes";
+import * as React from "react";
 
 import { SessionProvider } from "@/lib/auth/session-context";
 
@@ -11,7 +13,9 @@ import { SessionProvider } from "@/lib/auth/session-context";
  * 功能:
  * - 主题管理 (next-themes)
  * - Fumadocs UI 框架支持 (RootProvider)
- * - 可扩展添加其他 Provider (如 QueryClient, SessionProvider 等)
+ * - Session 管理 (SessionProvider)
+ * - TanStack QueryClient (全站统一 client,useState lazy init 避免 SSR 重渲)
+ *   服务 store cart / products + 未来 dashboard/canvas 复用
  */
 
 interface ProvidersProps {
@@ -40,26 +44,42 @@ const zhDocsTranslations = {
 export function Providers({ children, locale = "en" }: ProvidersProps) {
   const docsLocale = locale === "zh" ? "zh" : "en";
 
+  // QueryClient 工厂模式 lazy init —— 避免 SSR 时新建导致 hydration 不一致
+  const [queryClient] = React.useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: 30_000,
+            retry: false,
+            refetchOnWindowFocus: false,
+          },
+        },
+      }),
+  );
+
   return (
     <SessionProvider>
-      <ThemeProvider
-        attribute="class"
-        defaultTheme="system"
-        enableSystem
-        disableTransitionOnChange
-      >
-        <RootProvider
-          i18n={{
-            locale: docsLocale,
-            locales: docsLocales,
-            ...(docsLocale === "zh"
-              ? { translations: zhDocsTranslations }
-              : {}),
-          }}
+      <QueryClientProvider client={queryClient}>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
         >
-          {children}
-        </RootProvider>
-      </ThemeProvider>
+          <RootProvider
+            i18n={{
+              locale: docsLocale,
+              locales: docsLocales,
+              ...(docsLocale === "zh"
+                ? { translations: zhDocsTranslations }
+                : {}),
+            }}
+          >
+            {children}
+          </RootProvider>
+        </ThemeProvider>
+      </QueryClientProvider>
     </SessionProvider>
   );
 }
