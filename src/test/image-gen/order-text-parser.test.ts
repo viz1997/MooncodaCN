@@ -68,9 +68,7 @@ describe("order-text-parser / orderNo 识别", () => {
   });
 
   it("应该匹配淘宝 15-19 位数字", () => {
-    const r = parseOrderText(
-      "淘宝\n订单 123456789012345\n4cm 钥匙扣"
-    );
+    const r = parseOrderText("淘宝\n订单 123456789012345\n4cm 钥匙扣");
     expect(r.platformOrderNo).toBe("123456789012345");
   });
 

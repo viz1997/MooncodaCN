@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import createIntlMiddleware from "next-intl/middleware";
 
 import { routing } from "@/i18n/routing";
+import { getBearerSession } from "@/lib/auth/bearer";
 import {
   checkRateLimit,
   createRateLimitResponse,
@@ -9,6 +10,34 @@ import {
   getRateLimitHeaders,
   type RateLimitType,
 } from "@/lib/rate-limit";
+
+/**
+ * 从 NextRequest 抽「任意形式的 session token」—— Cookie（Web）或
+ * Authorization: Bearer（微信小程序）。Proxy 层只关心「有没有」，
+ * 不读 user 详情（详情留给下游 route 调 auth.api.getSession）。
+ */
+async function hasAnySessionToken(request: NextRequest): Promise<boolean> {
+  // 1. Cookie 路径（Web）—— 与 BA session 配置里的 cookie 名对齐
+  const cookieToken =
+    request.cookies.get("better-auth.session_token")?.value ||
+    request.cookies.get("__Secure-better-auth.session_token")?.value;
+  if (cookieToken) return true;
+
+  // 2. Bearer 路径（微信小程序）。Phase L：getBearerSession 直查 Drizzle
+  // session 表 + 校验 expiresAt。如果想偷懒想避免 DB round-trip 在 proxy，
+  // 也可以只检查「token 形状合法 + 长度 16-128」，把真实校验留给下游 route。
+  // 这里做完整校验：proxy 拿不到合法 session 时保护路由仍会重定向到 /sign-in，
+  // 不让小程序端直跳 /dashboard 这种 page route。
+  const auth = request.headers.get("authorization");
+  if (auth?.toLowerCase().startsWith("bearer ")) {
+    const token = auth.slice(7).trim();
+    if (!token) return false;
+    const session = await getBearerSession(token);
+    return session !== null;
+  }
+
+  return false;
+}
 
 /**
  * 创建国际化中间件
@@ -96,10 +125,9 @@ export async function proxy(request: NextRequest) {
   // 非 API 路由：国际化 + 认证保护
   // ============================================
 
-  // 获取 Better Auth 的 session token
-  const sessionToken =
-    request.cookies.get("better-auth.session_token")?.value ||
-    request.cookies.get("__Secure-better-auth.session_token")?.value;
+  // 获取 session token（Cookie 或 Bearer，二选一）
+  // 2026-09-16：微信小程序走 Authorization: Bearer 模式，proxy 也得认。
+  const hasSession = await hasAnySessionToken(request);
 
   // 从路径中提取不带语言前缀的路径
   // 例如: /en/dashboard -> /dashboard, /zh/sign-in -> /sign-in
@@ -129,7 +157,7 @@ export async function proxy(request: NextRequest) {
   const locale = localeMatch ? localeMatch[1] : routing.defaultLocale;
 
   // 如果访问受保护路由但未登录，重定向到登录页
-  if (isProtectedRoute && !sessionToken) {
+  if (isProtectedRoute && !hasSession) {
     const signInUrl = new URL(`/${locale}/sign-in`, request.url);
     // 保存原始 URL，登录后可以重定向回来
     signInUrl.searchParams.set("callbackUrl", pathname);
@@ -140,7 +168,7 @@ export async function proxy(request: NextRequest) {
   // 2026-09-09：之前无脑跳 /dashboard，会让代理商 / 普通用户从
   //   /image-gen → /sign-in?callbackUrl=/image-gen → 登录 → /dashboard
   //   丢失了原本的来源页。改成 callbackUrl 优先 + 白名单校验防 open redirect。
-  if (isAuthRoute && sessionToken) {
+  if (isAuthRoute && hasSession) {
     const callbackUrl = request.nextUrl.searchParams.get("callbackUrl");
     const fallbackUrl = new URL(`/${locale}/dashboard`, request.url);
 

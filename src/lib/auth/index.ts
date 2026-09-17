@@ -2,15 +2,31 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin } from "better-auth/plugins";
 import { phoneNumber } from "better-auth/plugins/phone-number";
-
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
+import { user } from "@/db/schema";
 import {
   ResetPasswordEmail,
   VerifyEmailEmail,
 } from "@/features/mail/templates/primary-action-email";
 import { sendEmail } from "@/features/mail/utils";
 import { sendOTP } from "@/features/sms";
+import { consumeWechatOtp, hasWechatOtp } from "@/features/wechat";
+
+/**
+ * 微信小程序登录 · magic code
+ *
+ * `/api/auth/wechat-phone-login` 路由把 code2Session 结果 put 到 otp-store 后，
+ * 调 `auth.api.verifyPhoneNumber({ phoneNumber, code: "WECHAT_VERIFIED" })`。
+ * 收到这个 magic code 的 verifyOTP 钩子就在 otp-store 查对应 phone 是否有
+ * 待消费的 payload —— 没有就返 false 拒绝。
+ *
+ * 安全性靠 otp-store 的 5 分钟 TTL + 单一 phoneNumber 绑定（见
+ * `src/features/wechat/otp-store.ts`）；伪造 magic code 但没对应 phone
+ * payload 会被 hasWechatOtp 拦下。
+ */
+const WECHAT_VERIFIED_MAGIC_CODE = "WECHAT_VERIFIED";
 
 export const isResendConfigured = Boolean(process.env.RESEND_API_KEY);
 
@@ -189,6 +205,30 @@ export const auth = betterAuth({
       otpLength: 6,
       expiresIn: 300, // 5 分钟
       allowedAttempts: 5,
+      // 2026-09-16：微信小程序登录 —— `/api/auth/wechat-phone-login` 路由把
+      // code2Session 结果 put 到 wechatOtpStore 后调 verifyPhoneNumber
+      // { code: "WECHAT_VERIFIED" }。这里只信任这个 code，其他 OTP 流不受影响
+      // （sendOTP 仍是真实 6 位数字）。
+      verifyOTP: async ({ phoneNumber, code }) => {
+        if (code !== WECHAT_VERIFIED_MAGIC_CODE) return false;
+        return await hasWechatOtp(phoneNumber);
+      },
+      // 2026-09-16：验证成功后（无论是 OTP 流还是微信流），把 otp-store 里
+      // 的微信 payload 写回 user 表的 wechat_openid / unionid 字段。
+      // 微信流程：consume 拿 payload → UPDATE user SET wechat_openid=...
+      // 常规 OTP 流：otp-store 没东西 → 直接略过，user.wechat_openid 保持 NULL
+      callbackOnVerification: async ({ phoneNumber, user: createdUser }) => {
+        const payload = await consumeWechatOtp(phoneNumber);
+        if (!payload?.openid) return;
+        await db
+          .update(user)
+          .set({
+            wechatOpenid: payload.openid,
+            wechatUnionid: payload.unionid ?? null,
+            lastLoginAt: new Date(),
+          })
+          .where(eq(user.id, createdUser.id));
+      },
     }),
   ],
 

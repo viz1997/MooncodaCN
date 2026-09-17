@@ -346,6 +346,35 @@ async function main() {
       label: "0041 user_phone_number_key",
       query: `CREATE UNIQUE INDEX IF NOT EXISTS "user_phone_number_key" ON "user" ("phone_number");`,
     },
+    // 2026-09-16：微信小程序 openid + Medusa customer 关联（drizzle/0042_user_wechat_medusa.sql）
+    {
+      label: "0042 user.wechat_openid",
+      query: `ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "wechat_openid" text;`,
+    },
+    {
+      label: "0042 user.wechat_unionid",
+      query: `ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "wechat_unionid" text;`,
+    },
+    {
+      label: "0042 user.medusa_customer_id",
+      query: `ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "medusa_customer_id" text;`,
+    },
+    {
+      label: "0042 user.last_login_at",
+      query: `ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "last_login_at" timestamp;`,
+    },
+    {
+      label: "0042 user_wechat_openid_key",
+      query: `CREATE UNIQUE INDEX IF NOT EXISTS "user_wechat_openid_key" ON "user" ("wechat_openid");`,
+    },
+    {
+      label: "0042 user_wechat_unionid_idx",
+      query: `CREATE INDEX IF NOT EXISTS "user_wechat_unionid_idx" ON "user" ("wechat_unionid");`,
+    },
+    {
+      label: "0042 user_medusa_customer_id_idx",
+      query: `CREATE INDEX IF NOT EXISTS "user_medusa_customer_id_idx" ON "user" ("medusa_customer_id");`,
+    },
   ];
 
   let ok = 0;

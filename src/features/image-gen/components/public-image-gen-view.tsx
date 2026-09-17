@@ -69,8 +69,7 @@ import {
   type SpecSelection,
 } from "@/features/image-gen/components/spec-modal";
 import { downloadProxyUrl } from "@/features/image-gen/lib/thumbnail-url";
-import { Link, useRouter } from "@/i18n/routing";
-import { routing } from "@/i18n/routing";
+import { Link, routing, useRouter } from "@/i18n/routing";
 import { signOut } from "@/lib/auth/client";
 import { resizeImage, wrapBlobAsFile } from "@/lib/image-client-resize";
 import { cn } from "@/lib/utils";
@@ -1151,7 +1150,9 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
     // 拼画布绝对 URL：保留当前 locale 前缀（/image-gen 在 [locale] 路由组下，
     // 当前 pathname 一定有 locale 段；直接取第一段就行，避免引入 next-intl
     // pathname 工具带来的额外依赖）。
-    const localeSegment = window.location.pathname.split("/").filter(Boolean)[0];
+    const localeSegment = window.location.pathname
+      .split("/")
+      .filter(Boolean)[0];
     const locale = routing.locales.includes(localeSegment as never)
       ? localeSegment
       : routing.defaultLocale;

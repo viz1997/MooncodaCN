@@ -8,6 +8,20 @@ Mooncoda is a production-ready Next.js SaaS template. It provides a complete fou
 
 **Deployment:** Self-hosted or Vercel + Neon PostgreSQL + Cloudflare R2 (storage)
 
+## 三方系统分工(2026-09-17 最终版)
+
+| 系统 | 职责 | 技术栈 |
+|---|---|---|
+| **NextDevTpl**(本仓库) | AI 生图 SaaS 后端:user / credits / photo / imageJob / AI 路由 / WeChat 小程序登录 | Next.js 16 + Drizzle + PostgreSQL |
+| **Medusa**(独立 server) | **product/market + 订单管理 + 支付管理**(商品 / 购物车 / 订单 / 支付 / 库存 / 客户地址) | Medusa v2 + Node + PostgreSQL + Redis |
+| **微信小程序 / 浏览器访客**(外部客户端) | 调 NextDevTpl AI 接口拿候选图;调 Medusa Store API 浏览商品 + 下单 + 支付 | Taro 4 + React 18(小程序);Next.js Medusa Storefront(浏览器) |
+
+**NextDevTpl 不再做**:**商品列表 / SKU / 购物车 / 结算 / 库存 / 收货地址 / 订单实体** —— 100% 归 Medusa。
+
+**NextDevTpl 仍做**:`/marketing/*` 静态品牌页(博客 / 文档 / 法律页 / 价格页)+ `/marketing/products` 作品集 showcase(只展示真实客户案例,纯静态,外链到 Medusa storefront)。
+
+**集成架构详情**:见 `architecture-medusa-integration.md`(已定稿)+ `architecture-miniprogram-as-client.md`(项目身份定位)。
+
 ## Commands
 
 ```bash

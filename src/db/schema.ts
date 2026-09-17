@@ -82,12 +82,36 @@ export const user = pgTable(
     phoneNumberVerified: boolean("phone_number_verified")
       .notNull()
       .default(false),
+    /**
+     * 2026-09-16：微信小程序登录。
+     * wechat_openid 唯一（小程序单 AppID 下唯一标识），unique 允许多 NULL（绝大多数用户不走微信）。
+     * wechat_unionid 同一微信开放平台下多端打通（小程序 + 公众号 + APP）时用。
+     * 写入路径：/api/auth/wechat-phone-login 端点调 code2Session 后通过 BA
+     * callbackOnVerification 钩子写回（src/lib/auth/index.ts）。
+     */
+    wechatOpenid: text("wechat_openid").unique(),
+    wechatUnionid: text("wechat_unionid"),
+    /**
+     * 2026-09-16：Medusa 订单 customer 关联（架构文档 §1.5）。
+     * 仅在用户首次下单时按需创建 Medusa Customer 然后回填 —— 多数用户为 NULL。
+     * 与 user.customerId（Creem 支付 customer）分开，避免命名冲突。
+     */
+    medusaCustomerId: text("medusa_customer_id"),
+    /**
+     * 2026-09-16：最近一次成功登录时间（含微信 / 邮箱 / 手机号 / OAuth）。
+     * 用户中心 + admin 活跃度分析用。
+     */
+    lastLoginAt: timestamp("last_login_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
   (t) => [
     // 代理商账号列表（按代理商过滤）：WHERE agent_id = ?
     index("user_agent_id_idx").on(t.agentId),
+    // 微信 unionid 索引：WHERE wechat_unionid = ?
+    index("user_wechat_unionid_idx").on(t.wechatUnionid),
+    // Medusa customer 索引：WHERE medusa_customer_id = ?
+    index("user_medusa_customer_id_idx").on(t.medusaCustomerId),
   ]
 );
 
