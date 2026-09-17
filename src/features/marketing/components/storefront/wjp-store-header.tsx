@@ -1,28 +1,23 @@
 "use client";
 
 /**
- * WJP 商店 Header —— 1:1 移植自 atelier `store-header.tsx`,剥离 commerce。
+ * WJP 商店 Header —— 1:1 移植自 atelier `store-header.tsx` + 接通 mock Medusa
+ * commerce(matching [[wjp-mock-medusa-storefront]])。
  *
  * 视觉保留(atelier 1:1):
- *  - sticky 顶部 + 滚动后 backdrop-blur (scrolled state + useEffect)
+ *  - sticky 顶部 + 滚动后 backdrop-blur
  *  - 移动端 Sheet 菜单 (mobile menu + navLinks + series)
- *  - 桌面端 居中 Logo + 左侧 navLinks + 右侧 Search Input + 登录
+ *  - 桌面端 居中 Logo + 左侧 navLinks + 右侧 Search Input + 登录 + Cart
  *
  * 适配差异:
- *  - 删除 useCartStore / useCurrencyStore / useFormatPrice / useHasMounted
- *    (commerce 全部归 Medusa,见 [[mooncada-medusa-integration]])
- *  - 删除 Cart 按钮 (ShoppingBag + itemCount badge)
- *  - 删除 Currency 切换 dropdown
- *  - 删除 Search dropdown results (没有 backing 数据)
- *  - 删除 User icon,改为「登录」按钮 (NextDevTpl `/dashboard`)
- *  - navLinks href 从 atelier `#new #keychain #figure #magnet` 改成 NextDevTpl
- *    现有路由(`/marketing/products` 详情 + 根 `/` 锚点)
- *  - navLinks label 中文化 (全部 / 钥匙扣 / Q版手办 / 冰箱贴 / 工艺故事)
- *  - Logo 文本 ATELIER → WJP 梦可达
- *  - Link 来自 `@/i18n/routing` 走 i18n 路由
+ *  - Cart 按钮 + count badge:从 `use-cart.itemCount` 取数 + `useCartUi.openCart` 打开抽屉
+ *  - Search dropdown:用 `use-products` 拉所有 mock 商品,输入过滤 title / tags,
+ *    点结果项 → `useStorefrontModal.setQuickView(product)` 弹 ProductQuickView
+ *  - 删除 User icon,改为「登录」按钮
+ *  - navLinks href 与中文化保持
  */
 
-import { Menu, Search } from "lucide-react";
+import { Loader2, Menu, Search, ShoppingBag } from "lucide-react";
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";
@@ -34,6 +29,10 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { formatPriceCNY } from "@/features/marketing/components/storefront/wjp-store-data";
+import { useCart, useCartUi } from "@/features/storefront/hooks/use-cart";
+import { useProducts } from "@/features/storefront/hooks/use-products";
+import { useStorefrontModal } from "@/features/storefront/hooks/use-storefront-modal";
 import { Link } from "@/i18n/routing";
 
 import { WJP_SERIES } from "./wjp-store-data";
@@ -50,6 +49,32 @@ export function WjpStoreHeader() {
   const [scrolled, setScrolled] = React.useState(false);
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [searchValue, setSearchValue] = React.useState("");
+  const [searchOpen, setSearchOpen] = React.useState(false);
+  const searchRef = React.useRef<HTMLDivElement>(null);
+
+  const { itemCount } = useCart();
+  const openCart = useCartUi((s) => s.openCart);
+  const setQuickView = useStorefrontModal((s) => s.setQuickView);
+
+  // mock 12 products,limit=50 已覆盖
+  const { data: productsResp, isLoading: productsLoading } = useProducts({
+    limit: 50,
+  });
+
+  const filtered = React.useMemo(() => {
+    if (!productsResp?.products) return [];
+    const q = searchValue.trim().toLowerCase();
+    if (!q) return [];
+    return productsResp.products
+      .filter(
+        (p) =>
+          p.title.toLowerCase().includes(q) ||
+          p.titleEn.toLowerCase().includes(q) ||
+          p.tags.some((t) => t.toLowerCase().includes(q)) ||
+          p.seriesName.toLowerCase().includes(q)
+      )
+      .slice(0, 6);
+  }, [productsResp, searchValue]);
 
   React.useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -57,6 +82,18 @@ export function WjpStoreHeader() {
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+
+  // 点外面关闭 search dropdown
+  React.useEffect(() => {
+    if (!searchOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (!searchRef.current?.contains(e.target as Node)) {
+        setSearchOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [searchOpen]);
 
   return (
     <header
@@ -142,18 +179,71 @@ export function WjpStoreHeader() {
             WJP 梦可达
           </Link>
 
-          {/* Right: search + sign-in (atelier visual 1:1, commerce stripped) */}
+          {/* Right: search + sign-in + cart */}
           <div className="flex items-center gap-1 flex-1 justify-end">
-            {/* Search (visual only —— 没有 backing 数据,见注释) */}
-            <div className="relative hidden sm:block">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+            {/* Search with dropdown */}
+            <div ref={searchRef} className="relative hidden sm:block">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none z-10" />
               <Input
                 value={searchValue}
-                onChange={(event) => setSearchValue(event.target.value)}
+                onChange={(event) => {
+                  setSearchValue(event.target.value);
+                  setSearchOpen(true);
+                }}
+                onFocus={() => setSearchOpen(true)}
                 placeholder="搜索作品"
                 aria-label="搜索作品"
                 className="w-44 lg:w-56 pl-9 pr-3 h-9 bg-muted/50 border-transparent text-sm rounded-md focus-visible:bg-background focus-visible:border-border transition-all"
               />
+
+              {searchOpen && searchValue.trim() && (
+                <div className="absolute top-full right-0 mt-2 w-80 bg-background border rounded-md shadow-lg overflow-hidden z-50">
+                  {productsLoading ? (
+                    <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                      <Loader2 className="inline-block size-4 animate-spin mr-1.5" />
+                      加载中...
+                    </div>
+                  ) : filtered.length === 0 ? (
+                    <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                      没有匹配「{searchValue}」的作品
+                    </div>
+                  ) : (
+                    <ul className="divide-y divide-border max-h-96 overflow-y-auto">
+                      {filtered.map((p) => (
+                        // biome-ignore lint/a11y/useSemanticElements: ul > li > button 复合结构
+                        <li key={p.id}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setQuickView(p);
+                              setSearchOpen(false);
+                              setSearchValue("");
+                            }}
+                            className="w-full flex items-center gap-3 p-3 hover:bg-muted/60 transition-colors text-left"
+                          >
+                            <img
+                              src={p.thumbnail}
+                              alt={p.title}
+                              className="size-12 object-cover rounded-sm bg-muted shrink-0"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium truncate">
+                                {p.title}
+                              </p>
+                              <p className="text-[11px] text-muted-foreground">
+                                {p.seriesName} · {p.typeLabel}
+                              </p>
+                            </div>
+                            <p className="text-sm font-medium shrink-0">
+                              {formatPriceCNY(p.basePriceCents / 100)}
+                            </p>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
             </div>
 
             <Button
@@ -166,7 +256,7 @@ export function WjpStoreHeader() {
               <Search className="size-5" />
             </Button>
 
-            {/* 登录 (替换 atelier 的 User icon + Cart button) */}
+            {/* 登录 */}
             <Button
               asChild
               variant="ghost"
@@ -174,6 +264,23 @@ export function WjpStoreHeader() {
               className="hidden sm:inline-flex h-9 px-3 text-sm font-medium"
             >
               <Link href="/dashboard">登录</Link>
+            </Button>
+
+            {/* Cart */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={openCart}
+              aria-label="购物袋"
+              className="relative size-9"
+              type="button"
+            >
+              <ShoppingBag className="size-5" />
+              {itemCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-foreground text-background text-[10px] font-semibold flex items-center justify-center">
+                  {itemCount > 99 ? "99+" : itemCount}
+                </span>
+              )}
             </Button>
           </div>
         </div>
