@@ -23,7 +23,7 @@
 import { Layers } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { useTranslation } from "@/features/canvas/hooks/use-translation";
+import { useTranslation } from "react-i18next";
 import type {
   CanvasNodeData,
   ViewportTransform,
