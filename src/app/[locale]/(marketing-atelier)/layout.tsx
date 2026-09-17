@@ -25,7 +25,7 @@ export default function MarketingAtelierLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="min-h-screen flex flex-col bg-background">
       <WjpStoreHeader />
       <main className="flex-1">{children}</main>
       <StoreFooter />
