@@ -21,6 +21,9 @@ export function StoreHero() {
     <section className="bg-background border-b">
       <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8">
         <div className="grid lg:grid-cols-2 gap-0 lg:gap-8 py-10 lg:py-16 items-center">
+          {/* eyebrow + h1 + body + CTAs */}
+          {/* (左半) */}
+          {/* Atelier-style: 浅 eyebrow + 大 h1 editorial */}
           {/* Left: copy */}
           <motion.div
             initial={{ opacity: 0, y: 16 }}

@@ -1,6 +1,7 @@
 import { GeistMono } from "geist/font/mono";
 import { GeistSans } from "geist/font/sans";
 import type { Metadata } from "next";
+import { Inter, Playfair_Display } from "next/font/google";
 import { cookies } from "next/headers";
 
 import { siteConfig } from "@/config";
@@ -47,6 +48,21 @@ export const metadata: Metadata = {
   manifest: "/manifest.webmanifest",
 };
 
+// Atelier 字体(只在 (marketing-atelier) 路由组内实际启用 —— 见
+// src/app/[locale]/(marketing-atelier)/layout.tsx 的 .atelier-root CSS 变量)
+const inter = Inter({
+  variable: "--font-atelier-inter",
+  subsets: ["latin"],
+  display: "swap",
+});
+const playfair = Playfair_Display({
+  variable: "--font-atelier-serif",
+  subsets: ["latin"],
+  display: "swap",
+  weight: ["400", "500", "600", "700"],
+  style: ["normal", "italic"],
+});
+
 /**
  * 根布局
  *
@@ -64,7 +80,7 @@ export default async function RootLayout({
   return (
     <html lang={locale} suppressHydrationWarning>
       <body
-        className={`${GeistSans.variable} ${GeistMono.variable} font-sans antialiased`}
+        className={`${GeistSans.variable} ${GeistMono.variable} ${inter.variable} ${playfair.variable} font-sans antialiased`}
       >
         {children}
       </body>

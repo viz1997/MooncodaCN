@@ -27,7 +27,7 @@ export function CommunityWall() {
     .slice(0, 4);
 
   return (
-    <section id="gallery" className="bg-muted/30 py-14 lg:py-20 border-t">
+    <section id="gallery" className="bg-muted/30 py-14 lg:py-20 border-t" data-atelier="true">
       <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8">
         <div className="grid lg:grid-cols-12 gap-6 lg:gap-12 mb-10">
           <div className="lg:col-span-5">

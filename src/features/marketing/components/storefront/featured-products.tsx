@@ -2,39 +2,39 @@
 
 import { AnimatePresence } from "framer-motion";
 import * as React from "react";
-import { Button } from "@/components/ui/button";
-import {
-  PRODUCT_CATEGORY_LABELS,
-  PRODUCTS,
-  type ProductCategory,
-} from "@/features/products/lib/data";
+import { PRODUCTS } from "@/features/products/lib/data";
 import { ProductCard } from "./product-card";
 
-type Filter = { id: ProductCategory | "all"; label: string };
+type Filter = { id: string; label: string };
 
 const filters: Filter[] = [
   { id: "all", label: "全部" },
   { id: "keychain", label: "钥匙扣" },
   { id: "figure", label: "Q版手办" },
-  { id: "fridge-magnet", label: "冰箱贴" },
-  { id: "badge", label: "徽章" },
-  { id: "standee", label: "立牌" },
-  { id: "gift", label: "礼品套装" },
+  { id: "magnet", label: "冰箱贴" },
 ];
+
+const categoryToFilter: Record<string, string> = {
+  keychain: "keychain",
+  "fridge-magnet": "magnet",
+  figure: "figure",
+};
 
 /**
  * WJP 作品集 FeaturedProducts —— 1:1 移植自 atelier `featured-products.tsx`。
  *
  * 适配差异:
- *  - data source 从 atelier `products` 切换到 NextDevTpl `PRODUCTS` (中文产品分类)
- *  - 分类 chips 数量:atelier 4 个 / WJP 7 个(全/钥匙扣/手办/冰箱贴/徽章/立牌/礼品)
+ *  - data source 从 atelier `products` 切换到 NextDevTpl `PRODUCTS`
+ *  - 分类 chips 数量对齐 atelier 4 个:全部 / 钥匙扣 / Q版手办 / 冰箱贴
+ *  - 把现有 7 个 category(keychain / fridge-magnet / figure / badge / standee /
+ *    gift)折叠成 atelier 的 3 个核心:keychain / figure / magnet
  *  - locale prop 下传 ProductCard 用于 i18n 渲染
  */
 export function FeaturedProducts({ locale }: { locale: "zh" | "en" }) {
-  const [active, setActive] = React.useState<ProductCategory | "all">("all");
+  const [active, setActive] = React.useState<string>("all");
   const filtered = React.useMemo(() => {
     if (active === "all") return PRODUCTS;
-    return PRODUCTS.filter((p) => p.category === active);
+    return PRODUCTS.filter((p) => categoryToFilter[p.category] === active);
   }, [active]);
 
   return (
@@ -48,28 +48,15 @@ export function FeaturedProducts({ locale }: { locale: "zh" | "en" }) {
                 全部作品
               </h2>
               <p className="text-sm text-muted-foreground mt-1">
-                {filtered.length} 件可定制
-                {filtered.length === 1 ? "作品" : "作品"}
+                {filtered.length} 件可定制作品
               </p>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="self-start sm:self-end"
-              asChild
-            >
-              <a href="/image-gen">去生图 →</a>
-            </Button>
           </div>
 
-          {/* Filter tabs */}
+          {/* Filter tabs — Medusa style: simple text buttons */}
           <div className="flex flex-wrap items-center gap-1 -mx-1 overflow-x-auto no-scrollbar pb-1">
             {filters.map((f) => {
               const isActive = active === f.id;
-              const label =
-                f.id === "all"
-                  ? "全部"
-                  : (PRODUCT_CATEGORY_LABELS[f.id]?.zh ?? f.label);
               return (
                 <button
                   key={f.id}
@@ -81,7 +68,7 @@ export function FeaturedProducts({ locale }: { locale: "zh" | "en" }) {
                       : "text-foreground/60 hover:text-foreground hover:bg-muted"
                   }`}
                 >
-                  {label}
+                  {f.label}
                 </button>
               );
             })}

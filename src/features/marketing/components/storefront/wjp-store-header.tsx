@@ -171,10 +171,11 @@ export function WjpStoreHeader() {
             </nav>
           </div>
 
-          {/* Center: logo */}
+          {/* Center: logo —— Playfair editorial 字标,atelier 1:1 风格 */}
           <Link
             href="/"
             className="absolute left-1/2 -translate-x-1/2 text-xl font-semibold tracking-tight select-none"
+            style={{ fontFamily: "var(--font-atelier-serif), Georgia, serif" }}
           >
             WJP 梦可达
           </Link>
