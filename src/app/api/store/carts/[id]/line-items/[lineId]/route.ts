@@ -11,13 +11,12 @@
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
-
-import { withApiLogging } from "@/lib/api-logger";
 import {
   getCart,
   removeLineItem,
   updateLineItemQuantity,
 } from "@/features/storefront/lib/cart-store";
+import { withApiLogging } from "@/lib/api-logger";
 
 export const runtime = "nodejs";
 
@@ -27,14 +26,14 @@ const updateQuantitySchema = z.object({
 
 async function handlePut(
   request: Request,
-  context: { params: Promise<{ id: string; lineId: string }> },
+  context: { params: Promise<{ id: string; lineId: string }> }
 ) {
   const { id, lineId } = await context.params;
   const cart = getCart(id);
   if (!cart) {
     return NextResponse.json(
       { error: "CART_NOT_FOUND", message: `cart ${id} 不存在` },
-      { status: 404 },
+      { status: 404 }
     );
   }
 
@@ -44,7 +43,7 @@ async function handlePut(
   } catch {
     return NextResponse.json(
       { error: "INVALID_JSON", message: "请求体不是合法 JSON" },
-      { status: 400 },
+      { status: 400 }
     );
   }
 
@@ -56,7 +55,7 @@ async function handlePut(
         message: "quantity 必须在 0-100 之间(0 等同于删除)",
         issues: parsed.error.issues,
       },
-      { status: 400 },
+      { status: 400 }
     );
   }
 
@@ -69,21 +68,21 @@ async function handlePut(
         error: "UPDATE_FAILED",
         message: error instanceof Error ? error.message : "更新数量失败",
       },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }
 
 async function handleDelete(
   _request: Request,
-  context: { params: Promise<{ id: string; lineId: string }> },
+  context: { params: Promise<{ id: string; lineId: string }> }
 ) {
   const { id, lineId } = await context.params;
   const cart = getCart(id);
   if (!cart) {
     return NextResponse.json(
       { error: "CART_NOT_FOUND", message: `cart ${id} 不存在` },
-      { status: 404 },
+      { status: 404 }
     );
   }
 
@@ -96,7 +95,7 @@ async function handleDelete(
         error: "DELETE_FAILED",
         message: error instanceof Error ? error.message : "删除失败",
       },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }

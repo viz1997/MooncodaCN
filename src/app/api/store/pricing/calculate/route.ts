@@ -7,9 +7,8 @@
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
-
-import { withApiLogging } from "@/lib/api-logger";
 import { calculatePricing } from "@/features/storefront/lib/pricing";
+import { withApiLogging } from "@/lib/api-logger";
 
 export const runtime = "nodejs";
 
@@ -34,7 +33,7 @@ async function handle(request: Request) {
   } catch {
     return NextResponse.json(
       { error: "INVALID_JSON", message: "请求体不是合法 JSON" },
-      { status: 400 },
+      { status: 400 }
     );
   }
 
@@ -46,7 +45,7 @@ async function handle(request: Request) {
         message: "pricing 输入参数不合法",
         issues: parsed.error.issues,
       },
-      { status: 400 },
+      { status: 400 }
     );
   }
 
@@ -59,7 +58,7 @@ async function handle(request: Request) {
         error: "PRICING_FAILED",
         message: error instanceof Error ? error.message : "定价失败",
       },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }

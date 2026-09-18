@@ -17,6 +17,7 @@ import {
   ScrollText,
   Settings,
   Shield,
+  ShoppingBag,
   Sparkles,
   Ticket,
   Users,
@@ -268,6 +269,15 @@ export const adminNav: NavGroup[] = [
         title: "工单管理",
         href: "/admin/tickets",
         icon: Ticket,
+      },
+      // 2026-09-18：新增 /admin/orders 全局订单管理页（admin 全局视角 + 取消 + 改备注）
+      // - 入口与 admin/users 平级（业务管理类）
+      // - title "订单管理" 已在 AdminSidebar.nav.gptImageOrders 字典里
+      // - 老的 /dashboard/prompt-Orders 仍保留给 user 自服务，不删
+      {
+        title: "订单管理",
+        href: "/admin/orders",
+        icon: ShoppingBag,
       },
       {
         title: "商品管理",

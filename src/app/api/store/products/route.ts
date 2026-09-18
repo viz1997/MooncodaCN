@@ -14,13 +14,12 @@
 
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-
-import { withApiLogging } from "@/lib/api-logger";
 import {
   filterBySeries,
   filterByTypeCode,
   MOCK_PRODUCTS,
 } from "@/features/storefront/lib/mock-catalog";
+import { withApiLogging } from "@/lib/api-logger";
 
 export const runtime = "nodejs";
 
@@ -37,7 +36,10 @@ async function handle(request: NextRequest) {
     products = filterBySeries(products, series);
   }
   if (type) {
-    products = filterByTypeCode(products, type as Parameters<typeof filterByTypeCode>[1]);
+    products = filterByTypeCode(
+      products,
+      type as Parameters<typeof filterByTypeCode>[1]
+    );
   }
   if (limit && Number.isInteger(limit) && limit > 0) {
     products = products.slice(0, limit);

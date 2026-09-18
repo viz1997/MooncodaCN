@@ -65,7 +65,7 @@ export default function MarketingAtelierLayout({
           --ring: oklch(0.58 0.09 50);
           --radius: 0.25rem;                     /* 矩形锐角替 1.25rem 圆角 */
         }
-        .atelier-root { font-family: var(--font-atelier-inter), system-ui, sans-serif; }
+        .atelier-root { font-family: var(--font-atelier-inter), system-ui, sans-serif; font-feature-settings: "ss01", "cv11"; }
         .atelier-root h1,
         .atelier-root h2,
         .atelier-root h3,
@@ -75,6 +75,15 @@ export default function MarketingAtelierLayout({
         .atelier-root ::selection {
           background-color: var(--accent);
           color: var(--accent-foreground);
+        }
+        /* Soft float — 给 hero 右侧主图加 6s 缓慢上下漂移,
+           跟 atelier globals.css 的 @keyframes soft-float 一致 */
+        @keyframes soft-float {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-10px); }
+        }
+        .atelier-root .animate-soft-float {
+          animation: soft-float 6s ease-in-out infinite;
         }
       `}</style>
 

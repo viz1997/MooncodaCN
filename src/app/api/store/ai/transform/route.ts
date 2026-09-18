@@ -23,14 +23,13 @@ import { randomBytes } from "node:crypto";
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
-
-import { withApiLogging } from "@/lib/api-logger";
-import { isR2Configured } from "@/features/image-gen/lib/r2";
 import {
   persistBase64ToR2,
   submitLingtingTask,
 } from "@/features/gpt-image/lib/generation-service";
+import { isR2Configured } from "@/features/image-gen/lib/r2";
 import { findAiStyle } from "@/features/storefront/lib/mock-catalog";
+import { withApiLogging } from "@/lib/api-logger";
 
 export const runtime = "nodejs";
 /** AI transform 单次最长 90s(对齐 lingting 8s × retry + cold start) */
@@ -50,7 +49,7 @@ async function handle(request: Request) {
         error: "R2_NOT_CONFIGURED",
         message: "R2 未配置,无法持久化 AI transform 输出",
       },
-      { status: 503 },
+      { status: 503 }
     );
   }
 
@@ -60,7 +59,7 @@ async function handle(request: Request) {
   } catch {
     return NextResponse.json(
       { error: "INVALID_JSON", message: "请求体不是合法 JSON" },
-      { status: 400 },
+      { status: 400 }
     );
   }
 
@@ -72,7 +71,7 @@ async function handle(request: Request) {
         message: "imageDataUrl 必须 data URL + aiStyleId + productTypeCode",
         issues: parsed.error.issues,
       },
-      { status: 400 },
+      { status: 400 }
     );
   }
 
@@ -81,7 +80,7 @@ async function handle(request: Request) {
   if (!aiStyle) {
     return NextResponse.json(
       { error: "UNKNOWN_AI_STYLE", message: `AI 风格 ${aiStyleId} 不存在` },
-      { status: 400 },
+      { status: 400 }
     );
   }
 
@@ -92,14 +91,19 @@ async function handle(request: Request) {
   if (!match || !match[1] || !match[2]) {
     return NextResponse.json(
       { error: "INVALID_DATA_URL", message: "imageDataUrl 格式错误" },
-      { status: 400 },
+      { status: 400 }
     );
   }
   const contentType = match[1];
   const b64 = match[2];
 
   const orderId = `store_${randomBytes(8).toString("hex")}`;
-  const originalImageUrl = await persistBase64ToR2(b64, contentType, orderId, 0);
+  const originalImageUrl = await persistBase64ToR2(
+    b64,
+    contentType,
+    orderId,
+    0
+  );
 
   // 2. ai_original 短路:不调 AI,直接返回原图
   if (aiStyleId === "ai_original") {
@@ -119,7 +123,7 @@ async function handle(request: Request) {
       aiStyle.prompt,
       aiStyle.outputSize,
       1, // imageIdx
-      1, // n=1(transform 不是 batch 生图)
+      1 // n=1(transform 不是 batch 生图)
     );
 
     if (result.kind === "url") {
@@ -127,7 +131,7 @@ async function handle(request: Request) {
       if (!previewUrl) {
         return NextResponse.json(
           { error: "NO_URL_RETURNED", message: "lingting 返回了空 url" },
-          { status: 502 },
+          { status: 502 }
         );
       }
       return NextResponse.json({
@@ -146,7 +150,7 @@ async function handle(request: Request) {
         message: "lingting 返回了 async task,本 mock 不支持轮询",
         taskId: result.taskId,
       },
-      { status: 502 },
+      { status: 502 }
     );
   } catch (error) {
     return NextResponse.json(
@@ -154,7 +158,7 @@ async function handle(request: Request) {
         error: "LINGTING_FAILED",
         message: error instanceof Error ? error.message : "lingting 调用失败",
       },
-      { status: 502 },
+      { status: 502 }
     );
   }
 }

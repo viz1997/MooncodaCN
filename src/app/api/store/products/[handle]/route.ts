@@ -7,18 +7,17 @@
  */
 
 import { NextResponse } from "next/server";
-
-import { withApiLogging } from "@/lib/api-logger";
 import {
   findProductByHandle,
   findRelatedProducts,
 } from "@/features/storefront/lib/mock-catalog";
+import { withApiLogging } from "@/lib/api-logger";
 
 export const runtime = "nodejs";
 
 async function handle(
   _request: Request,
-  context: { params: Promise<{ handle: string }> },
+  context: { params: Promise<{ handle: string }> }
 ) {
   const { handle } = await context.params;
   const product = findProductByHandle(handle);
@@ -26,7 +25,7 @@ async function handle(
   if (!product) {
     return NextResponse.json(
       { error: "PRODUCT_NOT_FOUND", message: `产品 ${handle} 不存在` },
-      { status: 404 },
+      { status: 404 }
     );
   }
 

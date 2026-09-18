@@ -8,6 +8,8 @@
  *  - sticky 顶部 + 滚动后 backdrop-blur
  *  - 移动端 Sheet 菜单 (mobile menu + navLinks + series)
  *  - 桌面端 居中 Logo + 左侧 navLinks + 右侧 Search Input + 登录 + Cart
+ *  - framer-motion 微动效:search dropdown opacity+y=8 fade-in、
+ *    cart badge scale 弹跳
  *
  * 适配差异:
  *  - Cart 按钮 + count badge:从 `use-cart.itemCount` 取数 + `useCartUi.openCart` 打开抽屉
@@ -15,8 +17,10 @@
  *    点结果项 → `useStorefrontModal.setQuickView(product)` 弹 ProductQuickView
  *  - 删除 User icon,改为「登录」按钮
  *  - navLinks href 与中文化保持
+ *  - 用 mounted flag 延迟读 use-cart.itemCount(防 SSR/hydration flash)
  */
 
+import { AnimatePresence, motion } from "framer-motion";
 import { Loader2, Menu, Search, ShoppingBag } from "lucide-react";
 import * as React from "react";
 
@@ -39,9 +43,9 @@ import { WJP_SERIES } from "./wjp-store-data";
 
 const navLinks = [
   { label: "全部", href: "/#new" },
-  { label: "钥匙扣", href: "/marketing/products" },
-  { label: "Q版手办", href: "/marketing/products" },
-  { label: "冰箱贴", href: "/marketing/products" },
+  { label: "钥匙扣", href: "/#keychain" },
+  { label: "Q版手办", href: "/#figure" },
+  { label: "冰箱贴", href: "/#magnet" },
   { label: "工艺故事", href: "/#craft" },
 ] as const;
 
@@ -50,11 +54,16 @@ export function WjpStoreHeader() {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [searchValue, setSearchValue] = React.useState("");
   const [searchOpen, setSearchOpen] = React.useState(false);
+  const [mounted, setMounted] = React.useState(false);
   const searchRef = React.useRef<HTMLDivElement>(null);
 
   const { itemCount } = useCart();
   const openCart = useCartUi((s) => s.openCart);
   const setQuickView = useStorefrontModal((s) => s.setQuickView);
+
+  // mounted flag —— 防 cart count 在 SSR(0) vs client(cookie 持久化)之间 hydration flash
+  React.useEffect(() => setMounted(true), []);
+  const displayItemCount = mounted ? itemCount : 0;
 
   // mock 12 products,limit=50 已覆盖
   const { data: productsResp, isLoading: productsLoading } = useProducts({
@@ -197,54 +206,62 @@ export function WjpStoreHeader() {
                 className="w-44 lg:w-56 pl-9 pr-3 h-9 bg-muted/50 border-transparent text-sm rounded-md focus-visible:bg-background focus-visible:border-border transition-all"
               />
 
-              {searchOpen && searchValue.trim() && (
-                <div className="absolute top-full right-0 mt-2 w-80 bg-background border rounded-md shadow-lg overflow-hidden z-50">
-                  {productsLoading ? (
-                    <div className="px-4 py-6 text-center text-sm text-muted-foreground">
-                      <Loader2 className="inline-block size-4 animate-spin mr-1.5" />
-                      加载中...
-                    </div>
-                  ) : filtered.length === 0 ? (
-                    <div className="px-4 py-6 text-center text-sm text-muted-foreground">
-                      没有匹配「{searchValue}」的作品
-                    </div>
-                  ) : (
-                    <ul className="divide-y divide-border max-h-96 overflow-y-auto">
-                      {filtered.map((p) => (
-                        // biome-ignore lint/a11y/useSemanticElements: ul > li > button 复合结构
-                        <li key={p.id}>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setQuickView(p);
-                              setSearchOpen(false);
-                              setSearchValue("");
-                            }}
-                            className="w-full flex items-center gap-3 p-3 hover:bg-muted/60 transition-colors text-left"
-                          >
-                            <img
-                              src={p.thumbnail}
-                              alt={p.title}
-                              className="size-12 object-cover rounded-sm bg-muted shrink-0"
-                            />
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium truncate">
-                                {p.title}
+              <AnimatePresence>
+                {searchOpen && searchValue.trim() && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 8 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute top-full right-0 mt-2 w-80 bg-popover border rounded-md shadow-lg overflow-hidden z-50"
+                  >
+                    {productsLoading ? (
+                      <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                        <Loader2 className="inline-block size-4 animate-spin mr-1.5" />
+                        加载中...
+                      </div>
+                    ) : filtered.length === 0 ? (
+                      <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                        没有匹配「{searchValue}」的作品
+                      </div>
+                    ) : (
+                      <ul className="divide-y divide-border max-h-96 overflow-y-auto">
+                        {filtered.map((p) => (
+                          // biome-ignore lint/a11y/useSemanticElements: ul > li > button 复合结构
+                          <li key={p.id}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setQuickView(p);
+                                setSearchOpen(false);
+                                setSearchValue("");
+                              }}
+                              className="w-full flex items-center gap-3 p-3 hover:bg-muted/60 transition-colors text-left"
+                            >
+                              <img
+                                src={p.thumbnail}
+                                alt={p.title}
+                                className="size-12 object-cover rounded-sm bg-muted shrink-0"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate">
+                                  {p.title}
+                                </p>
+                                <p className="text-[11px] text-muted-foreground">
+                                  {p.seriesName} · {p.typeLabel}
+                                </p>
+                              </div>
+                              <p className="text-sm font-medium shrink-0">
+                                {formatPriceCNY(p.basePriceCents / 100)}
                               </p>
-                              <p className="text-[11px] text-muted-foreground">
-                                {p.seriesName} · {p.typeLabel}
-                              </p>
-                            </div>
-                            <p className="text-sm font-medium shrink-0">
-                              {formatPriceCNY(p.basePriceCents / 100)}
-                            </p>
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
             <Button
@@ -277,11 +294,20 @@ export function WjpStoreHeader() {
               type="button"
             >
               <ShoppingBag className="size-5" />
-              {itemCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-foreground text-background text-[10px] font-semibold flex items-center justify-center">
-                  {itemCount > 99 ? "99+" : itemCount}
-                </span>
-              )}
+              <AnimatePresence>
+                {displayItemCount > 0 && (
+                  <motion.span
+                    key={displayItemCount}
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    exit={{ scale: 0 }}
+                    transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                    className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-foreground text-background text-[10px] font-semibold flex items-center justify-center"
+                  >
+                    {displayItemCount > 99 ? "99+" : displayItemCount}
+                  </motion.span>
+                )}
+              </AnimatePresence>
             </Button>
           </div>
         </div>

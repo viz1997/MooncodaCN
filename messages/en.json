@@ -984,6 +984,89 @@
       "gptImageOrders": "Orders"
     }
   },
+  "AdminOrders": {
+    "title": "Orders",
+    "subtitle": "View all orders submitted by users (including agents); supports cancel and remark editing.",
+    "filters": {
+      "status": "Order status",
+      "statusAll": "All statuses",
+      "platform": "Source platform",
+      "platformAll": "All platforms",
+      "createdBy": "Created by",
+      "createdByAll": "All users",
+      "dateFrom": "Start date",
+      "dateTo": "End date",
+      "search": "Search order no.",
+      "searchPlaceholder": "Type order no. for fuzzy match",
+      "reset": "Reset filters",
+      "apply": "Apply filters"
+    },
+    "table": {
+      "orderNo": "Order No.",
+      "templateName": "Template",
+      "createdBy": "Created by",
+      "platform": "Source",
+      "platformOrderNo": "Channel order no.",
+      "status": "Status",
+      "credits": "Credits",
+      "createdAt": "Submitted at",
+      "cancelledAt": "Cancelled at",
+      "remarks": "Remarks",
+      "actions": "Actions"
+    },
+    "actions": {
+      "viewDetail": "View detail",
+      "editRemarks": "Edit remarks",
+      "cancelOrder": "Cancel order",
+      "refresh": "Refresh"
+    },
+    "cancelDialog": {
+      "title": "Confirm cancel order?",
+      "warning": "Once cancelled the order cannot be recovered; charged credits will be refunded to the creator automatically.",
+      "reasonLabel": "Cancel reason (optional)",
+      "reasonPlaceholder": "Short note, e.g. \"customer request\", \"internal review\"",
+      "confirm": "Confirm cancel & refund",
+      "cancel": "Don't cancel"
+    },
+    "remarksDialog": {
+      "title": "Edit remarks",
+      "placeholder": "Enter order remarks (max 500 chars)",
+      "save": "Save",
+      "cancel": "Cancel",
+      "emptyTip": "Saving empty content will clear the remarks"
+    },
+    "messages": {
+      "loadMore": "Load more",
+      "loading": "Loading...",
+      "empty": "No orders",
+      "endReached": "—— End ——",
+      "loadFailed": "Failed to load, please retry",
+      "cancelSuccess": "Order cancelled, {credits} credits refunded",
+      "cancelSuccessNoRefund": "Order cancelled",
+      "cancelFailed": "Cancel failed: {error}",
+      "remarksUpdated": "Remarks updated",
+      "remarksCleared": "Remarks cleared",
+      "remarksFailed": "Update remarks failed: {error}"
+    },
+    "platforms": {
+      "taobao": "Taobao",
+      "xiaohongshu": "Xiaohongshu",
+      "douyin": "Douyin",
+      "independent_site": "Independent site",
+      "domestic_influencer": "Domestic influencer",
+      "foreign_influencer": "Foreign influencer",
+      "partner": "Partner",
+      "marketing": "Marketing"
+    },
+    "statuses": {
+      "PENDING": "Pending",
+      "GENERATING": "Generating",
+      "CANDIDATES_READY": "Awaiting selection",
+      "SELECTED": "Submitted",
+      "CANCELLED": "Cancelled",
+      "FAILED": "Failed"
+    }
+  },
   "Footer": {
     "description": "Mooncoda — WJP full-color 3D printing expert. Pet badges, keychains, fridge magnets, figures — single-piece customization & shipping.",
     "product": "Gallery",

@@ -61,12 +61,12 @@ export function StoreHero() {
             </div>
           </motion.div>
 
-          {/* Right: featured image */}
+          {/* Right: featured image —— 6s soft-float (atelier globals.css keyframe) */}
           <motion.div
             initial={{ opacity: 0, scale: 0.97 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.7, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}
-            className="relative aspect-[4/3] lg:aspect-[5/4] overflow-hidden rounded-lg bg-muted mt-8 lg:mt-0"
+            className="relative aspect-[4/3] lg:aspect-[5/4] overflow-hidden rounded-lg bg-muted mt-8 lg:mt-0 animate-soft-float"
           >
             <img
               src={figure.cover}

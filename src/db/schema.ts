@@ -1293,6 +1293,22 @@ export const promptOrder = pgTable(
       desc(t.createdAt),
       desc(t.id)
     ),
+    // 2026-09-18：/admin/orders 全局视角无限滚动 keyset cursor 索引。
+    // 0006 的索引开头是 created_by，对 admin skipCreatorFilter=true 场景无用。
+    // - 状态过滤：WHERE status = ? AND (created_at < ? OR (created_at = ? AND id < ?))
+    //   ORDER BY created_at DESC, id DESC → 走 prompt_order_admin_cursor_idx
+    // - 无状态：WHERE (created_at < ? OR (created_at = ? AND id < ?))
+    //   ORDER BY created_at DESC, id DESC → 走 prompt_order_admin_all_cursor_idx
+    // 对应 migration 见 drizzle/0043_admin_prompt_order_indexes.sql。
+    index("prompt_order_admin_cursor_idx").on(
+      t.status,
+      desc(t.createdAt),
+      desc(t.id)
+    ),
+    index("prompt_order_admin_all_cursor_idx").on(
+      desc(t.createdAt),
+      desc(t.id)
+    ),
   ]
 );
 

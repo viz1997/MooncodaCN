@@ -981,6 +981,89 @@
       "gptImageOrders": "订单管理"
     }
   },
+  "AdminOrders": {
+    "title": "订单管理",
+    "subtitle": "查看所有用户提交的订单（含代理商），支持取消与备注编辑",
+    "filters": {
+      "status": "订单状态",
+      "statusAll": "全部状态",
+      "platform": "订单来源",
+      "platformAll": "全部来源",
+      "createdBy": "创建者",
+      "createdByAll": "全部用户",
+      "dateFrom": "起始日期",
+      "dateTo": "结束日期",
+      "search": "搜索订单号",
+      "searchPlaceholder": "输入订单号模糊匹配",
+      "reset": "重置筛选",
+      "apply": "应用筛选"
+    },
+    "table": {
+      "orderNo": "订单号",
+      "templateName": "模板",
+      "createdBy": "创建者",
+      "platform": "来源",
+      "platformOrderNo": "渠道单号",
+      "status": "状态",
+      "credits": "扣分",
+      "createdAt": "提交时间",
+      "cancelledAt": "取消时间",
+      "remarks": "备注",
+      "actions": "操作"
+    },
+    "actions": {
+      "viewDetail": "查看详情",
+      "editRemarks": "编辑备注",
+      "cancelOrder": "取消订单",
+      "refresh": "刷新"
+    },
+    "cancelDialog": {
+      "title": "确认取消订单？",
+      "warning": "订单取消后不可恢复，已扣除的积分将自动退还至创建者账户。",
+      "reasonLabel": "取消原因（可选）",
+      "reasonPlaceholder": "简要说明，例如「客户要求取消」「内部审核」等",
+      "confirm": "确认取消并退款",
+      "cancel": "不取消"
+    },
+    "remarksDialog": {
+      "title": "编辑备注",
+      "placeholder": "填写订单备注，最多 500 字符",
+      "save": "保存",
+      "cancel": "取消",
+      "emptyTip": "保存空内容将清空备注"
+    },
+    "messages": {
+      "loadMore": "加载更多",
+      "loading": "加载中...",
+      "empty": "暂无订单",
+      "endReached": "—— 已到底 ——",
+      "loadFailed": "加载失败，请重试",
+      "cancelSuccess": "订单已取消，已退还 {credits} 积分",
+      "cancelSuccessNoRefund": "订单已取消",
+      "cancelFailed": "取消失败：{error}",
+      "remarksUpdated": "备注已更新",
+      "remarksCleared": "备注已清空",
+      "remarksFailed": "更新备注失败：{error}"
+    },
+    "platforms": {
+      "taobao": "淘宝",
+      "xiaohongshu": "小红书",
+      "douyin": "抖音",
+      "independent_site": "独立站",
+      "domestic_influencer": "国内达人",
+      "foreign_influencer": "海外达人",
+      "partner": "合作伙伴",
+      "marketing": "市场推广"
+    },
+    "statuses": {
+      "PENDING": "待上传",
+      "GENERATING": "生成中",
+      "CANDIDATES_READY": "待选择",
+      "SELECTED": "已提交",
+      "CANCELLED": "已取消",
+      "FAILED": "生成失败"
+    }
+  },
   "Footer": {
     "description": "Mooncoda 梦可达 — WJP 全彩 3D 打印专家，宠物徽章、钥匙扣、冰箱贴、手办等一件定制、一件发货。",
     "product": "作品",

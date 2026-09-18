@@ -6,13 +6,12 @@
  */
 
 import { NextResponse } from "next/server";
-
-import { withApiLogging } from "@/lib/api-logger";
 import {
   getCartId,
   getOrCreateCart,
   setCartId,
 } from "@/features/storefront/lib/cart-store";
+import { withApiLogging } from "@/lib/api-logger";
 
 export const runtime = "nodejs";
 

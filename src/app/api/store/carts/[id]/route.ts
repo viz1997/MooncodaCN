@@ -6,15 +6,14 @@
  */
 
 import { NextResponse } from "next/server";
-
-import { withApiLogging } from "@/lib/api-logger";
 import { getCart } from "@/features/storefront/lib/cart-store";
+import { withApiLogging } from "@/lib/api-logger";
 
 export const runtime = "nodejs";
 
 async function handle(
   _request: Request,
-  context: { params: Promise<{ id: string }> },
+  context: { params: Promise<{ id: string }> }
 ) {
   const { id } = await context.params;
   const cart = getCart(id);
@@ -22,7 +21,7 @@ async function handle(
   if (!cart) {
     return NextResponse.json(
       { error: "CART_NOT_FOUND", message: `cart ${id} 不存在` },
-      { status: 404 },
+      { status: 404 }
     );
   }
 

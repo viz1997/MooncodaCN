@@ -7,9 +7,8 @@
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
-
-import { withApiLogging } from "@/lib/api-logger";
 import { addLineItem, getCart } from "@/features/storefront/lib/cart-store";
+import { withApiLogging } from "@/lib/api-logger";
 
 export const runtime = "nodejs";
 
@@ -34,14 +33,14 @@ const lineItemSchema = z.object({
 
 async function handle(
   request: Request,
-  context: { params: Promise<{ id: string }> },
+  context: { params: Promise<{ id: string }> }
 ) {
   const { id } = await context.params;
   const cart = getCart(id);
   if (!cart) {
     return NextResponse.json(
       { error: "CART_NOT_FOUND", message: `cart ${id} 不存在` },
-      { status: 404 },
+      { status: 404 }
     );
   }
 
@@ -51,7 +50,7 @@ async function handle(
   } catch {
     return NextResponse.json(
       { error: "INVALID_JSON", message: "请求体不是合法 JSON" },
-      { status: 400 },
+      { status: 400 }
     );
   }
 
@@ -63,7 +62,7 @@ async function handle(
         message: "line item 输入不合法",
         issues: parsed.error.issues,
       },
-      { status: 400 },
+      { status: 400 }
     );
   }
 
@@ -71,7 +70,7 @@ async function handle(
     const result = await addLineItem(id, parsed.data);
     return NextResponse.json(
       { cart: result.cart, lineItem: result.lineItem },
-      { status: 201 },
+      { status: 201 }
     );
   } catch (error) {
     return NextResponse.json(
@@ -79,7 +78,7 @@ async function handle(
         error: "ADD_LINE_ITEM_FAILED",
         message: error instanceof Error ? error.message : "加入购物车失败",
       },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }
