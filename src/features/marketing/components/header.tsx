@@ -9,10 +9,35 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { mainNav, productsNav } from "@/config/nav";
 import { LanguageSwitcher, ModeToggle } from "@/features/shared";
-import { Link } from "@/i18n/routing";
+import { Link, usePathname } from "@/i18n/routing";
 import { useSession } from "@/lib/auth/client";
 
 import { NavMenu } from "./nav-menu";
+
+/**
+ * 2026-09-20：拼登录链接 —— 把当前路径作为 callbackUrl，让用户登录后回到
+ * 自己原本想看的页面（而非 /dashboard）。
+ *
+ * 注意点：
+ * - usePathname() 拿到的是 **去掉 locale 前缀** 的内部路径（next-intl
+ *   设计如此），但 callbackUrl 期望带语言前缀才不会被 intlMiddleware
+ *   二次重定向 —— 这里手动拼 /zh|/en 前缀。
+ * - 排除 /sign-in / /sign-up 自身（避免从登录页点登录按钮）
+ */
+function useSignInUrl(): string {
+  const pathname = usePathname();
+  if (
+    typeof window === "undefined" ||
+    pathname === "/sign-in" ||
+    pathname === "/sign-up"
+  ) {
+    return "/sign-in";
+  }
+  const localeSegment = window.location.pathname.match(/^\/(en|zh)/)?.[1];
+  const target = pathname.startsWith("/") ? pathname : `/${pathname}`;
+  const prefix = localeSegment ? `/${localeSegment}` : "";
+  return `/sign-in?callbackUrl=${encodeURIComponent(`${prefix}${target}`)}`;
+}
 
 /**
  * Products 下拉菜单翻译映射 key (移动端复用)
@@ -42,6 +67,8 @@ export function Header() {
   const tNav = useTranslations("Navigation");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [productsExpanded, setProductsExpanded] = useState(false);
+  // 2026-09-20：登录按钮拼 callbackUrl（详见 hook 定义）
+  const signInHref = useSignInUrl();
 
   /**
    * 获取用户名首字母作为头像回退
@@ -123,7 +150,7 @@ export function Header() {
                 variant="ghost"
                 className="hidden text-muted-foreground hover:text-foreground md:inline-flex"
               >
-                <Link href="/sign-in">{t("login")}</Link>
+                <Link href={signInHref}>{t("login")}</Link>
               </Button>
               <Button asChild className="hidden md:inline-flex">
                 <Link href="/sign-up">{t("getStarted")}</Link>
@@ -214,7 +241,10 @@ export function Header() {
               ) : (
                 <>
                   <Button asChild variant="outline" className="w-full">
-                    <Link href="/sign-in" onClick={() => setMobileOpen(false)}>
+                    <Link
+                      href={signInHref}
+                      onClick={() => setMobileOpen(false)}
+                    >
                       {t("login")}
                     </Link>
                   </Button>

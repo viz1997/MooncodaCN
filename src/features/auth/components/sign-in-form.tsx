@@ -14,27 +14,75 @@ import { SignInTabs } from "./sign-in-tabs";
 const LAST_SIGNIN_EMAIL_KEY = "auth:last-signin-email";
 
 /**
- * 从 window.location 读 callbackUrl 并做白名单校验（防止 open redirect）：
+ * 安全 callbackUrl 校验（防 open redirect）：
  * - 必须以 / 开头（相对路径）
  * - 不允许 // 开头（协议相对 → 外站）
  * - 不允许 /\ 开头（部分浏览器会 normalize 成 //）
  * - 不允许带语言前缀的 callbackUrl 重复前缀（/zh/zh/...）—— 后续在硬跳转
  *   前补语言前缀时需要先剥掉
  */
-function resolvePostSignInUrl(): string {
-  if (typeof window === "undefined") return "/dashboard";
-  const raw = new URLSearchParams(window.location.search).get("callbackUrl");
-  if (!raw) return "/dashboard";
-  const isSafe =
-    raw.startsWith("/") && !raw.startsWith("//") && !raw.startsWith("/\\");
-  if (!isSafe) return "/dashboard";
-  // 与 src/proxy.ts:147-161 同样的处理：callbackUrl 已带 /zh|/en 直接用，
-  // 否则补上当前语言前缀（避免跳到无前缀路由被 intlMiddleware 二次重定向）
+function isSafeCallbackPath(raw: string): boolean {
+  return raw.startsWith("/") && !raw.startsWith("//") && !raw.startsWith("/\\");
+}
+
+/**
+ * 给路径补上语言前缀（避免跳到无前缀路由被 intlMiddleware 二次重定向）。
+ * 已带 /en|/zh 前缀直接用。
+ */
+function withLocalePrefix(raw: string): string {
   const localeMatch = window.location.pathname.match(/^\/(en|zh)/);
   const locale = localeMatch ? localeMatch[1] : "";
   const hasLocalePrefix = /^\/(en|zh)(\/|$)/.test(raw);
   if (hasLocalePrefix) return raw;
   return locale ? `/${locale}${raw.startsWith("/") ? "" : "/"}${raw}` : raw;
+}
+
+/**
+ * 登录后跳转目标 —— 优先级：
+ * 1. ?callbackUrl=...（中间件踢过来 / 业务侧动态拼）
+ * 2. document.referrer 同源相对路径（用户在公开页点登录按钮时来自哪里回哪里）
+ * 3. /dashboard（兜底）
+ *
+ * 2026-09-20：旧版 fallback 写死 /dashboard，导致从根 `/`、`/products`、
+ * (marketing-atelier) 等公开页点登录按钮后被甩到 dashboard —— 跟用户
+ * 原本想看的页（/image-gen 等）断了。改成读 referrer 后用户回到点登录前
+ * 那一页，体验跟 callbackUrl 一致。
+ *
+ * referrer 校验走与 callbackUrl 同一套白名单：
+ * - 同源（document.referrer startsWith window.location.origin）
+ * - 路径必须过 isSafeCallbackPath
+ */
+function resolvePostSignInUrl(): string {
+  if (typeof window === "undefined") return "/dashboard";
+
+  // 1) callbackUrl 优先
+  const rawCallback = new URLSearchParams(window.location.search).get(
+    "callbackUrl"
+  );
+  if (rawCallback && isSafeCallbackPath(rawCallback)) {
+    return withLocalePrefix(rawCallback);
+  }
+
+  // 2) referrer 兜底
+  const referrer = document.referrer;
+  if (referrer) {
+    try {
+      const refUrl = new URL(referrer);
+      if (refUrl.origin === window.location.origin) {
+        // 同源 → 用 refUrl.pathname + search + hash（带 query 跳回去，
+        // 比如 /image-gen?xxx 也保留）
+        const pathWithQuery = refUrl.pathname + refUrl.search + refUrl.hash;
+        if (isSafeCallbackPath(refUrl.pathname)) {
+          return withLocalePrefix(pathWithQuery);
+        }
+      }
+    } catch {
+      // referrer 解析失败 → 跳过
+    }
+  }
+
+  // 3) 兜底
+  return "/dashboard";
 }
 
 /**

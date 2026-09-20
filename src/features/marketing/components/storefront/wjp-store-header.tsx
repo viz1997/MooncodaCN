@@ -37,7 +37,7 @@ import { formatPriceCNY } from "@/features/marketing/components/storefront/wjp-s
 import { useCart, useCartUi } from "@/features/storefront/hooks/use-cart";
 import { useProducts } from "@/features/storefront/hooks/use-products";
 import { useStorefrontModal } from "@/features/storefront/hooks/use-storefront-modal";
-import { Link } from "@/i18n/routing";
+import { Link, usePathname } from "@/i18n/routing";
 
 import { WJP_SERIES } from "./wjp-store-data";
 
@@ -64,6 +64,24 @@ export function WjpStoreHeader() {
   // mounted flag —— 防 cart count 在 SSR(0) vs client(cookie 持久化)之间 hydration flash
   React.useEffect(() => setMounted(true), []);
   const displayItemCount = mounted ? itemCount : 0;
+
+  // 2026-09-20：登录按钮拼 callbackUrl，登录后回到当前页（而非 /dashboard）
+  // 旧版硬编码 href="/dashboard"：未登录用户点登录直接被甩到 dashboard，
+  // 跟原本想看的 atelier 商品页断链。改成动态 callbackUrl 透传 pathname。
+  const pathname = usePathname();
+  const signInHref = React.useMemo(() => {
+    if (
+      typeof window === "undefined" ||
+      pathname === "/sign-in" ||
+      pathname === "/sign-up"
+    ) {
+      return "/sign-in";
+    }
+    const localeSegment = window.location.pathname.match(/^\/(en|zh)/)?.[1];
+    const target = pathname.startsWith("/") ? pathname : `/${pathname}`;
+    const prefix = localeSegment ? `/${localeSegment}` : "";
+    return `/sign-in?callbackUrl=${encodeURIComponent(`${prefix}${target}`)}`;
+  }, [pathname]);
 
   // mock 12 products,limit=50 已覆盖
   const { data: productsResp, isLoading: productsLoading } = useProducts({
@@ -281,7 +299,7 @@ export function WjpStoreHeader() {
               size="sm"
               className="hidden sm:inline-flex h-9 px-3 text-sm font-medium"
             >
-              <Link href="/dashboard">登录</Link>
+              <Link href={signInHref}>登录</Link>
             </Button>
 
             {/* Cart */}
