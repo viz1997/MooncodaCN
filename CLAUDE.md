@@ -155,6 +155,7 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 - **Data fetching in RSC** — Server Components call Drizzle directly; mutations use Server Actions
 - **i18n navigation** — Import `Link`, `redirect`, `usePathname`, `useRouter` from `@/i18n/routing` (not `next/link` or `next/navigation`)
 - **API route wrapping** — Use `withApiLogging(handler)` from `@/lib/api-logger.ts`
+- **API route runtime + maxDuration** — Every new route handler in `src/app/api/**/route.ts` MUST explicitly export `runtime` and `maxDuration` (e.g. `export const runtime = "nodejs"; export const maxDuration = 60;`). Vercel default is `10s` (Hobby) / `60s` (Pro) when unset, but the cold-start budget is silently hidden — a route that chains DB + upstream fetch + BA verifyOTP can easily exceed 10s on first invocation. Pick `maxDuration` by IO cost: short CRUD `30`, polling `60-90`, AI generation `120-300`. See `src/app/api/canvas/poll/[jobId]/route.ts:29` for `10s` polling case.
 - **Optional services degrade gracefully** — Rate limiting, Axiom logging, Sentry monitoring all check env vars and silently skip when unconfigured
 
 ## Environment Variables

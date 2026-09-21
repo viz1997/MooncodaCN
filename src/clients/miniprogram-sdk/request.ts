@@ -12,29 +12,90 @@
  *  - 支持 AbortSignal(轮询场景 cancel 用)
  *  - 支持 multipart/form-data(上传场景)
  *  - 默认 30s 超时,长轮询路由(/image/task)单独 override
+ *
+ * Token 持久化（2026-09-21）：
+ *   - setSdkToken 写 wx.setStorageSync(TOKEN_STORAGE_KEY = "miniprogram-sdk:v1:token")，
+ *     让小程序杀掉重开后 setupSdk 启动时能从 storage 读回,避免每次冷启动都
+ *     要用户重新授权手机号（getPhoneNumber 是用户主动点,体验断裂）。
+ *   - 退出登录 (logout) 同步清 storage。
+ *   - 存储 key 加 SDK 版本前缀("miniprogram-sdk:v1:token"),未来 schema
+ *     变更时可整体迁移/弃旧 key,不影响线上用户。
+ *   - wx 全局 typeof 守卫:H5 / Node 调试环境(没 wx)静默跳过,只在真小
+ *     程序环境生效。
  */
 
 import type { ApiError, SdkConfig } from "./types";
+
+/** wx 全局类型守卫 —— 真小程序有 wx,H5 / Node 没 wx */
+type WxStorage = {
+  setStorageSync: (key: string, data: string) => void;
+  getStorageSync: (key: string) => string;
+  removeStorageSync: (key: string) => void;
+};
+
+function getWx(): WxStorage | null {
+  // 走 globalThis 访问 wx 全局 —— TS 不需要 declare global,真小程序编译
+  // 命中(微信开发者工具 / Taro 编译产物自带 wx 全局),H5 / Node 调试
+  // 走 fallback(null)。
+  const w = (globalThis as { wx?: WxStorage }).wx;
+  if (!w || typeof w.setStorageSync !== "function") return null;
+  return w;
+}
 
 /** 当前 SDK 配置(全局唯一,setupSdk 调用后写入) */
 let currentConfig: SdkConfig | null = null;
 
 /**
  * 初始化 SDK(程序入口调一次)
+ *
+ * 启动时优先读 wx.storage 里上次持久化的 token,避免冷启动跳登录页
+ * (用户感知:杀掉重开就要重授权手机号,体验差)。
  */
 export function setupSdk(config: SdkConfig): void {
-  currentConfig = { timeoutMs: 30_000, ...config };
+  // 1) 持久化 token 优先(用户上次登录态) → 2) 调用方传入 token(显式覆盖) → 3) 都没有 undefined
+  const persistedToken = readPersistedToken();
+  const initialToken = persistedToken ?? config.token;
+  currentConfig = { timeoutMs: 30_000, ...config, token: initialToken };
 }
 
 /**
  * 更新 token(登录后调用,或 token 刷新)
+ *
+ * 同时写 wx.storage 持久化,小程序杀掉重开仍能恢复登录态。
  */
 export function setSdkToken(token: string | undefined): void {
   if (!currentConfig) {
     throw new Error("setupSdk() must be called before setSdkToken()");
   }
   currentConfig = { ...currentConfig, token };
+  // 持久化:真小程序走 wx.setStorageSync;H5 / Node 静默跳过
+  const wx = getWx();
+  if (wx) {
+    try {
+      if (token) wx.setStorageSync(TOKEN_STORAGE_KEY, token);
+      else wx.removeStorageSync(TOKEN_STORAGE_KEY);
+    } catch {
+      // 隐私模式 / 配额满 / storage 被禁用 —— 静默忽略,不影响内存 token
+    }
+  }
 }
+
+/**
+ * 读持久化的 token(供 setupSdk 启动恢复用)
+ */
+function readPersistedToken(): string | undefined {
+  const wx = getWx();
+  if (!wx) return undefined;
+  try {
+    const value = wx.getStorageSync(TOKEN_STORAGE_KEY);
+    return value ? String(value) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** SDK token 在 wx.storage 里的 key。版本前缀防未来 schema 变更。 */
+const TOKEN_STORAGE_KEY = "miniprogram-sdk:v1:token";
 
 /** 读取当前 token */
 export function getSdkToken(): string | undefined {

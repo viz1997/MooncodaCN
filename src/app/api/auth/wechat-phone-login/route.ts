@@ -50,8 +50,15 @@ const requestSchema = z.object({
 /**
  * Response 形状：
  *   - 200: { token, user }
- *   - 400: { error, message }
- *   - 500: { error, message }
+ *   - 400: { error, message }                       INVALID_JSON / INVALID_INPUT
+ *                                                 / WECHAT_CODE_INVALID
+ *                                                 / PHONE_DECRYPT_FAILED
+ *                                                 / PHONE_PARSE_FAILED
+ *   - 500: { error, message }                       VERIFY_PHONE_FAILED
+ *   - 502: { error, message }                       WECHAT_CONFIG_MISSING
+ *                                                 / WECHAT_API_TIMEOUT
+ *                                                 / WECHAT_API_UNREACHABLE
+ *                                                 / WECHAT_API_FAILED
  *
  * user 字段挑 BA parseUserOutput 返回的子集给小程序端，
  * 不泄露额外字段（如 banned / needsVerification 等内部状态）。
@@ -69,6 +76,80 @@ type WeChatLoginResponse = {
   token: string;
   user: WeChatLoginUser;
 };
+
+// ============================================
+// code2Session 错误分类（2026-09-21）
+// ============================================
+
+/**
+ * code2Session 抛非 WeChatApiError 时的兜底分类。
+ *
+ * 旧版统一返 "调用微信 code2Session 失败" 太模糊 —— 用户 / 客服排查
+ * 502 时没法区分是「服务端没配 WECHAT_APP_ID/SECRET」还是「微信服务
+ * 挂了 / 网络层 timeout / 上游 5xx」。
+ *
+ * 实际触发场景：
+ *   - WECHAT_APP_ID / SECRET 未配 → src/features/wechat/api.ts:55 抛
+ *     `Error("WECHAT_APP_ID / WECHAT_APP_SECRET not configured")`
+ *   - 微信 api.weixin.qq.com 网络层失败（DNS / TLS / RST）→ fetch 抛
+ *     `TypeError: fetch failed`（Node 18+ undici）
+ *   - AbortSignal.timeout(5000) 触发 → DOMException { name: "TimeoutError" }
+ *     或 AbortError
+ */
+type WeChatCode2SessionFallback = {
+  code:
+    | "WECHAT_CONFIG_MISSING" // 服务端配置缺失（env 没配）
+    | "WECHAT_API_TIMEOUT" // 等微信超时（5s 撞 AbortSignal.timeout）
+    | "WECHAT_API_UNREACHABLE" // 网络层失败（DNS / TLS / RST）
+    | "WECHAT_API_FAILED"; // 其他未知 error
+  message: string;
+};
+
+function classifyWechatCode2SessionError(
+  err: unknown
+): WeChatCode2SessionFallback {
+  if (err instanceof Error) {
+    // 配置缺失 —— 提示用户联系客服 + 后端运维
+    if (
+      err.message.includes("WECHAT_APP_ID") ||
+      err.message.includes("WECHAT_APP_SECRET")
+    ) {
+      return {
+        code: "WECHAT_CONFIG_MISSING",
+        message: "服务端微信配置缺失，请稍后重试或联系客服",
+      };
+    }
+    // AbortSignal.timeout —— DOMException name="TimeoutError" 或 AbortError
+    if (
+      err.name === "TimeoutError" ||
+      err.name === "AbortError" ||
+      err.message.includes("aborted") ||
+      err.message.includes("timeout")
+    ) {
+      return {
+        code: "WECHAT_API_TIMEOUT",
+        message: "微信服务响应超时，请稍后重试",
+      };
+    }
+    // undici / Node fetch 网络层失败（DNS / TLS / RST）
+    if (
+      err.message.includes("fetch failed") ||
+      err.message.includes("ENOTFOUND") ||
+      err.message.includes("ECONNREFUSED") ||
+      err.message.includes("ECONNRESET")
+    ) {
+      return {
+        code: "WECHAT_API_UNREACHABLE",
+        message: "无法连接微信服务器，请稍后重试",
+      };
+    }
+  }
+  // 兜底 —— 仍返 502 但保留一个 unknown code 方便日志关联
+  return {
+    code: "WECHAT_API_FAILED",
+    message: "调用微信 code2Session 失败",
+  };
+}
 
 // ============================================
 // Route handler
@@ -122,10 +203,13 @@ async function postHandler(request: Request): Promise<Response> {
         { status: 400 }
       );
     }
+    // 非 WeChatApiError 的兜底：区分配置缺失 / 网络层 error / timeout，
+    // 给用户和客服更明确的提示（2026-09-21）
+    const fallback = classifyWechatCode2SessionError(err);
     return NextResponse.json(
       {
-        error: "WECHAT_API_FAILED",
-        message: "调用微信 code2Session 失败",
+        error: fallback.code,
+        message: fallback.message,
       },
       { status: 502 }
     );
@@ -231,5 +315,26 @@ async function postHandler(request: Request): Promise<Response> {
   };
   return NextResponse.json(response);
 }
+
+/**
+ * Runtime 配置（2026-09-21 修复 502）：
+ *
+ * 历史：此路由没声明 runtime / maxDuration，Vercel 默认 10s（Hobby）。
+ * 整链路有 4 段外部 IO，最坏组合：
+ *   - Vercel 函数冷启动 1-3s
+ *   - code2Session 等微信 5s（AbortSignal.timeout(5000)）
+ *   - putWechatOtp 等 Upstash 3s（AbortSignal.timeout(3000)）
+ *   - auth.api.verifyPhoneNumber 调 BA + Neon：3 次 DB 往返 + Neon
+ *     cold start 3-8s，合计 6-15s
+ *
+ * 总耗时最坏 1+5+3+15 = 24s，必超 10s → Vercel 在还没拿到 route handler
+ * 返回前就 502。
+ *
+ * 修复：显式声明 nodejs runtime + maxDuration=60（Pro 计划上限）。
+ * Hobby 卡在 10s 的话单凭 maxDuration 救不回来，需要另外把 BA verify
+ * 阶段拆成异步步骤（不在本 PR 范围）。
+ */
+export const runtime = "nodejs";
+export const maxDuration = 60;
 
 export const POST = withApiLogging(postHandler);
