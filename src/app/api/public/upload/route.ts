@@ -92,7 +92,7 @@ function runMiddleware(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   res: any,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  fn: (req: any, res: any, cb: (err?: any) => void) => void,
+  fn: (req: any, res: any, cb: (err?: any) => void) => void
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     fn(req, res, (err) => (err ? reject(err) : resolve()));
@@ -121,7 +121,7 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json(
       { success: false, error: "R2 未配置", code: "R2_NOT_CONFIGURED" },
-      { status: 503, headers: getRateLimitHeaders(rl) },
+      { status: 503, headers: getRateLimitHeaders(rl) }
     );
   }
 
@@ -143,11 +143,7 @@ export async function POST(req: NextRequest) {
   };
 
   try {
-    await runMiddleware(
-      nodeReq,
-      fakeRes,
-      upload.single("file"),
-    );
+    await runMiddleware(nodeReq, fakeRes, upload.single("file"));
   } catch (e: unknown) {
     // multer MulterError.code:
     //   LIMIT_FILE_SIZE / LIMIT_PART_COUNT / LIMIT_UNEXPECTED_FILE
@@ -179,16 +175,20 @@ export async function POST(req: NextRequest) {
         error: errorMap[code] ?? "请求体非法",
         code,
       },
-      { status: 400, headers: getRateLimitHeaders(rl) },
+      { status: 400, headers: getRateLimitHeaders(rl) }
     );
   }
 
-  const file = (nodeReq as { file?: {
-    buffer: Buffer;
-    mimetype: string;
-    size: number;
-    originalname: string;
-  } }).file;
+  const file = (
+    nodeReq as {
+      file?: {
+        buffer: Buffer;
+        mimetype: string;
+        size: number;
+        originalname: string;
+      };
+    }
+  ).file;
 
   if (!file) {
     logImageGen({
@@ -202,7 +202,7 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json(
       { success: false, error: "缺 file 字段", code: "BAD_BODY" },
-      { status: 400, headers: getRateLimitHeaders(rl) },
+      { status: 400, headers: getRateLimitHeaders(rl) }
     );
   }
 
@@ -223,7 +223,7 @@ export async function POST(req: NextRequest) {
         error: "格式不支持,仅 JPG/PNG/WEBP",
         code: "INVALID_TYPE",
       },
-      { status: 400, headers: getRateLimitHeaders(rl) },
+      { status: 400, headers: getRateLimitHeaders(rl) }
     );
   }
 
@@ -260,7 +260,7 @@ export async function POST(req: NextRequest) {
         size: file.size,
         mime: file.mimetype,
       },
-      { headers: getRateLimitHeaders(rl) },
+      { headers: getRateLimitHeaders(rl) }
     );
   } catch (error) {
     console.error("[Upload → R2 Error]", error);
@@ -280,7 +280,7 @@ export async function POST(req: NextRequest) {
         error: `上传 R2 失败: ${msg}`,
         code: "R2_PUT_FAILED",
       },
-      { status: 500, headers: getRateLimitHeaders(rl) },
+      { status: 500, headers: getRateLimitHeaders(rl) }
     );
   }
 }
