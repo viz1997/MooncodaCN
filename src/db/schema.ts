@@ -1,0 +1,2058 @@
+import { desc, relations } from "drizzle-orm";
+import {
+  type AnyPgColumn,
+  boolean,
+  index,
+  integer,
+  json,
+  pgEnum,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
+
+/**
+ * Better Auth 核心表 Schema
+ *
+ * 这些表是 Better Auth 认证系统所必需的核心表结构
+ * 参考: https://www.better-auth.com/docs/concepts/database
+ */
+
+// ============================================
+// 用户角色枚举
+// ============================================
+
+/**
+ * 用户角色枚举
+ */
+export const userRoleEnum = pgEnum("user_role", ["user", "admin"]);
+
+// ============================================
+// 用户表 (User)
+// ============================================
+/**
+ * 用户表 - 存储用户基本信息
+ *
+ * @field id - 用户唯一标识符
+ * @field name - 用户显示名称
+ * @field email - 用户邮箱 (唯一)
+ * @field emailVerified - 邮箱是否已验证
+ * @field image - 用户头像 URL
+ * @field role - 用户角色 (user/admin)
+ * @field banned - 是否被封禁
+ * @field bannedReason - 封禁原因
+ * @field needsVerification - 是否需要邮箱验证（管理员手动创建时指定；无密码账户必须为 true）
+ * @field customerId - 支付提供商客户 ID (Creem)
+ * @field agentId - 2026-09-03 起：代理商账号所属代理商（null = 普通用户）。
+ *   userAgentId IS NOT NULL 即为代理商；走 `(agent)` route group 与 agentAction 中间件。
+ *   agent 删除时 set null（agent 退出不影响该 user 继续用 ToC 业务）
+ * @field createdAt - 创建时间
+ * @field updatedAt - 更新时间
+ */
+export const user = pgTable(
+  "user",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    email: text("email").notNull().unique(),
+    emailVerified: boolean("email_verified").notNull().default(false),
+    image: text("image"),
+    role: userRoleEnum("role").notNull().default("user"),
+    banned: boolean("banned").notNull().default(false),
+    bannedReason: text("banned_reason"),
+    needsVerification: boolean("needs_verification").notNull().default(false),
+    customerId: text("customer_id").unique(),
+    /**
+     * 2026-09-03：代理商归属（ToB 自下单用）。
+     * null = 普通 ToC 用户；非空 = 该 user 是 agent.{id} 下的代理商员工/管理员。
+     * 不放在 userRoleEnum 是为了保持 role 枚举简洁（"user"/"admin" 两档够用）。
+     */
+    agentId: text("agent_id").references(() => agent.id, {
+      onDelete: "set null",
+    }),
+    /**
+     * 2026-09-16：手机号 + 密码登录（Better Auth phoneNumber 插件）。
+     * phone_number 存 E.164 格式（+8613800138000）；unique 允许多个 NULL。
+     * 手机号用户首次 OTP 注册时，email 字段被占位为 `${phoneDigits}@noreply.${APP_DOMAIN}`
+     * —— 见 src/lib/auth/index.ts 的 signUpOnVerification.getTempEmail。
+     */
+    phoneNumber: text("phone_number").unique(),
+    phoneNumberVerified: boolean("phone_number_verified")
+      .notNull()
+      .default(false),
+    /**
+     * 2026-09-16：微信小程序登录。
+     * wechat_openid 唯一（小程序单 AppID 下唯一标识），unique 允许多 NULL（绝大多数用户不走微信）。
+     * wechat_unionid 同一微信开放平台下多端打通（小程序 + 公众号 + APP）时用。
+     * 写入路径：/api/auth/wechat-phone-login 端点调 code2Session 后通过 BA
+     * callbackOnVerification 钩子写回（src/lib/auth/index.ts）。
+     */
+    wechatOpenid: text("wechat_openid").unique(),
+    wechatUnionid: text("wechat_unionid"),
+    /**
+     * 2026-09-16：Medusa 订单 customer 关联（架构文档 §1.5）。
+     * 仅在用户首次下单时按需创建 Medusa Customer 然后回填 —— 多数用户为 NULL。
+     * 与 user.customerId（Creem 支付 customer）分开，避免命名冲突。
+     */
+    medusaCustomerId: text("medusa_customer_id"),
+    /**
+     * 2026-09-16：最近一次成功登录时间（含微信 / 邮箱 / 手机号 / OAuth）。
+     * 用户中心 + admin 活跃度分析用。
+     */
+    lastLoginAt: timestamp("last_login_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    // 代理商账号列表（按代理商过滤）：WHERE agent_id = ?
+    index("user_agent_id_idx").on(t.agentId),
+    // 微信 unionid 索引：WHERE wechat_unionid = ?
+    index("user_wechat_unionid_idx").on(t.wechatUnionid),
+    // Medusa customer 索引：WHERE medusa_customer_id = ?
+    index("user_medusa_customer_id_idx").on(t.medusaCustomerId),
+  ]
+);
+
+// ============================================
+// 会话表 (Session)
+// ============================================
+/**
+ * 会话表 - 存储用户登录会话
+ *
+ * @field id - 会话唯一标识符
+ * @field expiresAt - 会话过期时间
+ * @field token - 会话令牌 (用于验证)
+ * @field createdAt - 创建时间
+ * @field updatedAt - 更新时间
+ * @field ipAddress - 登录 IP 地址
+ * @field userAgent - 用户代理 (浏览器信息)
+ * @field userId - 关联的用户 ID
+ */
+export const session = pgTable("session", {
+  id: text("id").primaryKey(),
+  expiresAt: timestamp("expires_at").notNull(),
+  token: text("token").notNull().unique(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+});
+
+// ============================================
+// 账户表 (Account)
+// ============================================
+/**
+ * 账户表 - 存储 OAuth 提供商关联信息
+ *
+ * 当用户使用 GitHub、Google 等第三方登录时，
+ * 此表存储该提供商的账户信息
+ *
+ * @field id - 账户唯一标识符
+ * @field accountId - 提供商返回的账户 ID
+ * @field providerId - 提供商标识符 (如 "github", "google")
+ * @field userId - 关联的用户 ID
+ * @field accessToken - 访问令牌
+ * @field refreshToken - 刷新令牌
+ * @field idToken - ID 令牌 (OpenID Connect)
+ * @field accessTokenExpiresAt - 访问令牌过期时间
+ * @field refreshTokenExpiresAt - 刷新令牌过期时间
+ * @field scope - 授权范围
+ * @field password - 密码哈希 (用于邮箱密码登录)
+ * @field createdAt - 创建时间
+ * @field updatedAt - 更新时间
+ */
+export const account = pgTable("account", {
+  id: text("id").primaryKey(),
+  accountId: text("account_id").notNull(),
+  providerId: text("provider_id").notNull(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  accessToken: text("access_token"),
+  refreshToken: text("refresh_token"),
+  idToken: text("id_token"),
+  accessTokenExpiresAt: timestamp("access_token_expires_at"),
+  refreshTokenExpiresAt: timestamp("refresh_token_expires_at"),
+  scope: text("scope"),
+  password: text("password"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// ============================================
+// 验证表 (Verification)
+// ============================================
+/**
+ * 验证表 - 存储邮箱验证和密码重置令牌
+ *
+ * @field id - 验证记录唯一标识符
+ * @field identifier - 标识符 (通常是邮箱地址)
+ * @field value - 验证值/令牌
+ * @field expiresAt - 过期时间
+ * @field createdAt - 创建时间
+ * @field updatedAt - 更新时间
+ */
+export const verification = pgTable("verification", {
+  id: text("id").primaryKey(),
+  identifier: text("identifier").notNull(),
+  value: text("value").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// ============================================
+// 订阅表 (Subscription)
+// ============================================
+/**
+ * 订阅表 - 存储用户的订阅信息
+ *
+ * @field id - 订阅记录唯一标识符
+ * @field userId - 关联的用户 ID
+ * @field subscriptionId - 支付提供商订阅 ID (唯一)
+ * @field priceId - 支付提供商价格/产品 ID
+ * @field status - 订阅状态 (active, canceled, past_due, etc.)
+ * @field currentPeriodStart - 当前计费周期开始时间
+ * @field currentPeriodEnd - 当前计费周期结束时间
+ * @field cancelAtPeriodEnd - 是否在周期结束时取消
+ * @field createdAt - 创建时间
+ * @field updatedAt - 更新时间
+ */
+export const subscription = pgTable("subscription", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  subscriptionId: text("subscription_id").notNull().unique(),
+  priceId: text("price_id").notNull(),
+  status: text("status").notNull().default("incomplete"),
+  currentPeriodStart: timestamp("current_period_start"),
+  currentPeriodEnd: timestamp("current_period_end"),
+  cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// ============================================
+// 类型导出
+// ============================================
+/**
+ * 从 Schema 推断的类型
+ * 用于在应用中保持类型安全
+ */
+export type User = typeof user.$inferSelect;
+export type NewUser = typeof user.$inferInsert;
+
+export type Session = typeof session.$inferSelect;
+export type NewSession = typeof session.$inferInsert;
+
+export type Account = typeof account.$inferSelect;
+export type NewAccount = typeof account.$inferInsert;
+
+export type Verification = typeof verification.$inferSelect;
+export type NewVerification = typeof verification.$inferInsert;
+
+export type Subscription = typeof subscription.$inferSelect;
+export type NewSubscription = typeof subscription.$inferInsert;
+
+// ============================================
+// 积分系统枚举
+// ============================================
+
+/**
+ * 积分账户状态枚举
+ */
+export const creditsBalanceStatusEnum = pgEnum("credits_balance_status", [
+  "active",
+  "frozen",
+]);
+
+/**
+ * 积分批次状态枚举
+ */
+export const creditsBatchStatusEnum = pgEnum("credits_batch_status", [
+  "active",
+  "consumed",
+  "expired",
+]);
+
+/**
+ * 积分批次来源类型枚举
+ */
+export const creditsBatchSourceEnum = pgEnum("credits_batch_source", [
+  "purchase",
+  "subscription",
+  "bonus",
+  "refund",
+]);
+
+/**
+ * 积分交易类型枚举
+ */
+export const creditsTransactionTypeEnum = pgEnum("credits_transaction_type", [
+  "purchase",
+  "consumption",
+  "monthly_grant",
+  "registration_bonus",
+  "admin_grant",
+  "expiration",
+  "refund",
+]);
+
+// ============================================
+// 积分余额表 (Credits Balances)
+// ============================================
+/**
+ * 积分余额表 - 存储用户的积分账户信息
+ *
+ * 采用预计算余额模式，避免每次查询都需要聚合计算
+ *
+ * @field id - 记录唯一标识符
+ * @field userId - 关联的用户 ID（唯一）
+ * @field balance - 当前可用积分余额
+ * @field totalEarned - 累计获得积分
+ * @field totalSpent - 累计消费积分
+ * @field status - 账户状态（active/frozen）
+ * @field createdAt - 创建时间
+ * @field updatedAt - 更新时间
+ */
+export const creditsBalance = pgTable("credits_balance", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .unique()
+    .references(() => user.id, { onDelete: "cascade" }),
+  balance: integer("balance").notNull().default(0),
+  totalEarned: integer("total_earned").notNull().default(0),
+  totalSpent: integer("total_spent").notNull().default(0),
+  status: creditsBalanceStatusEnum("status").notNull().default("active"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// ============================================
+// 积分批次表 (Credits Batches)
+// ============================================
+/**
+ * 积分批次表 - 积分库存管理
+ *
+ * 每次获得积分都会创建一个批次记录
+ * 用于实现 FIFO (先进先出) 过期机制
+ *
+ * @field id - 批次唯一标识符
+ * @field userId - 关联的用户 ID
+ * @field amount - 原始积分数量
+ * @field remaining - 剩余积分数量
+ * @field issuedAt - 发放时间
+ * @field expiresAt - 过期时间（可为空，表示永不过期）
+ * @field status - 批次状态（active/consumed/expired）
+ * @field sourceType - 来源类型（purchase/subscription/bonus/refund）
+ * @field sourceRef - 来源引用（如订单ID、订阅ID等）
+ * @field createdAt - 创建时间
+ * @field updatedAt - 更新时间
+ */
+export const creditsBatch = pgTable("credits_batch", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  amount: integer("amount").notNull(),
+  remaining: integer("remaining").notNull(),
+  issuedAt: timestamp("issued_at").notNull().defaultNow(),
+  expiresAt: timestamp("expires_at"),
+  status: creditsBatchStatusEnum("status").notNull().default("active"),
+  sourceType: creditsBatchSourceEnum("source_type").notNull(),
+  sourceRef: text("source_ref"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// ============================================
+// 积分交易表 (Credits Transactions)
+// ============================================
+/**
+ * 积分交易表 - 双重记账账本
+ *
+ * 记录所有积分变动，采用借贷记账法
+ * 每笔交易都有明确的借方(debit)和贷方(credit)账户
+ *
+ * @field id - 交易唯一标识符
+ * @field userId - 关联的用户 ID
+ * @field type - 交易类型
+ * @field amount - 交易积分数量（始终为正数）
+ * @field debitAccount - 借方账户（资金来源）
+ * @field creditAccount - 贷方账户（资金去向）
+ * @field description - 交易描述
+ * @field metadata - 扩展元数据（JSON）
+ * @field createdAt - 创建时间
+ */
+export const creditsTransaction = pgTable("credits_transaction", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  type: creditsTransactionTypeEnum("type").notNull(),
+  amount: integer("amount").notNull(),
+  debitAccount: text("debit_account").notNull(),
+  creditAccount: text("credit_account").notNull(),
+  description: text("description"),
+  metadata: json("metadata").$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// ============================================
+// 积分系统类型导出
+// ============================================
+
+export type CreditsBalance = typeof creditsBalance.$inferSelect;
+export type NewCreditsBalance = typeof creditsBalance.$inferInsert;
+
+export type CreditsBatch = typeof creditsBatch.$inferSelect;
+export type NewCreditsBatch = typeof creditsBatch.$inferInsert;
+
+export type CreditsTransaction = typeof creditsTransaction.$inferSelect;
+export type NewCreditsTransaction = typeof creditsTransaction.$inferInsert;
+
+/** 积分账户状态类型 */
+export type CreditsBalanceStatus =
+  (typeof creditsBalanceStatusEnum.enumValues)[number];
+
+/** 积分批次状态类型 */
+export type CreditsBatchStatus =
+  (typeof creditsBatchStatusEnum.enumValues)[number];
+
+/** 积分批次来源类型 */
+export type CreditsBatchSource =
+  (typeof creditsBatchSourceEnum.enumValues)[number];
+
+/** 积分交易类型 */
+export type CreditsTransactionType =
+  (typeof creditsTransactionTypeEnum.enumValues)[number];
+
+// ============================================
+// Newsletter 订阅表
+// ============================================
+/**
+ * Newsletter 订阅者表 - 存储邮件订阅信息
+ *
+ * @field id - 记录唯一标识符
+ * @field email - 订阅者邮箱 (唯一)
+ * @field isSubscribed - 是否订阅中 (用于取消订阅而不删除记录)
+ * @field subscribedAt - 订阅时间
+ * @field unsubscribedAt - 取消订阅时间 (可为空)
+ * @field createdAt - 创建时间
+ * @field updatedAt - 更新时间
+ */
+export const newsletterSubscriber = pgTable("newsletter_subscriber", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  isSubscribed: boolean("is_subscribed").notNull().default(true),
+  subscribedAt: timestamp("subscribed_at").notNull().defaultNow(),
+  unsubscribedAt: timestamp("unsubscribed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// ============================================
+// Newsletter 类型导出
+// ============================================
+
+export type NewsletterSubscriber = typeof newsletterSubscriber.$inferSelect;
+export type NewNewsletterSubscriber = typeof newsletterSubscriber.$inferInsert;
+
+// ============================================
+// 工单系统枚举
+// ============================================
+
+/**
+ * 工单类别枚举
+ */
+export const ticketCategoryEnum = pgEnum("ticket_category", [
+  "billing",
+  "technical",
+  "bug",
+  "feature",
+  "other",
+]);
+
+/**
+ * 工单优先级枚举
+ */
+export const ticketPriorityEnum = pgEnum("ticket_priority", [
+  "low",
+  "medium",
+  "high",
+]);
+
+/**
+ * 工单状态枚举
+ */
+export const ticketStatusEnum = pgEnum("ticket_status", [
+  "open",
+  "in_progress",
+  "resolved",
+  "closed",
+]);
+
+// ============================================
+// 工单表 (Tickets)
+// ============================================
+/**
+ * 工单表 - 存储用户支持工单
+ *
+ * @field id - 工单唯一标识符
+ * @field userId - 创建工单的用户 ID
+ * @field subject - 工单主题
+ * @field category - 工单类别 (billing/technical/bug/feature/other)
+ * @field priority - 优先级 (low/medium/high)
+ * @field status - 状态 (open/in_progress/resolved/closed)
+ * @field createdAt - 创建时间
+ * @field updatedAt - 更新时间
+ */
+export const ticket = pgTable("ticket", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  subject: text("subject").notNull(),
+  category: ticketCategoryEnum("category").notNull().default("other"),
+  priority: ticketPriorityEnum("priority").notNull().default("medium"),
+  status: ticketStatusEnum("status").notNull().default("open"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// ============================================
+// 工单消息表 (Ticket Messages)
+// ============================================
+/**
+ * 工单消息表 - 存储工单对话记录
+ *
+ * @field id - 消息唯一标识符
+ * @field ticketId - 关联的工单 ID
+ * @field userId - 发送者用户 ID
+ * @field content - 消息内容
+ * @field isAdminResponse - 是否为管理员回复 (用于 UI 样式区分)
+ * @field createdAt - 创建时间
+ */
+export const ticketMessage = pgTable("ticket_message", {
+  id: text("id").primaryKey(),
+  ticketId: text("ticket_id")
+    .notNull()
+    .references(() => ticket.id, { onDelete: "cascade" }),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  content: text("content").notNull(),
+  isAdminResponse: boolean("is_admin_response").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// ============================================
+// 工单系统类型导出
+// ============================================
+
+export type Ticket = typeof ticket.$inferSelect;
+export type NewTicket = typeof ticket.$inferInsert;
+
+export type TicketMessage = typeof ticketMessage.$inferSelect;
+export type NewTicketMessage = typeof ticketMessage.$inferInsert;
+
+/** 用户角色类型 */
+export type UserRole = (typeof userRoleEnum.enumValues)[number];
+
+/** 工单类别类型 */
+export type TicketCategory = (typeof ticketCategoryEnum.enumValues)[number];
+
+/** 工单优先级类型 */
+export type TicketPriority = (typeof ticketPriorityEnum.enumValues)[number];
+
+/** 工单状态类型 */
+export type TicketStatus = (typeof ticketStatusEnum.enumValues)[number];
+
+// ============================================
+// 生图系统枚举
+// ============================================
+
+/**
+ * 生图任务状态枚举
+ */
+export const imageJobStatusEnum = pgEnum("image_job_status", [
+  "pending",
+  "processing",
+  "completed",
+  "failed",
+]);
+
+/**
+ * 生图生成模式枚举
+ */
+export const generationModeEnum = pgEnum("generation_mode", [
+  "text_to_image",
+  "image_to_image",
+  "image_editing",
+  "inpainting",
+  "upscaling",
+]);
+
+/**
+ * 资产来源枚举（photo 表）
+ *
+ * - upload: 用户本地上传（createPhotoAction 写入）
+ * - generation: 生图结果入库（saveGenerationResultsAsAssets 写入，
+ *   2026-08-23 起由 generation-service.ts 在生图完成回调里自动落库）
+ *
+ * 之所以不另开"asset"表直接合并 imageJob.resultUrls —— 后者是生图任务的
+ * 状态机权威来源，resultUrls JSON 数组是它的产物；photo 只是资产索引，
+ * 拆表 + source 区分是最低耦合的方案。
+ */
+export const photoSourceEnum = pgEnum("photo_source", ["upload", "generation"]);
+
+/**
+ * 画布内置渠道生成任务状态枚举
+ *
+ * Phase 4 起，`/api/canvas/generate` 对 image/audio 改异步 send + 轮询，
+ * 任务状态持久化在本表里供前端 GET /api/canvas/poll/[jobId] 查。
+ *
+ * 状态机：
+ *   pending → processing → completed
+ *                    \    → failed
+ *
+ * - `pending`：路由已写 job 行、inngest.send 已发出，Inngest 函数还没接管
+ * - `processing`：Inngest 函数已 step.run("generate")，正在调上游 + R2
+ * - `completed`：items 已落库 + R2 永久 URL 已写入 result
+ * - `failed`：上游失败，积分已 refund，error 字段已写入
+ */
+export const canvasRemoteJobStatusEnum = pgEnum("canvas_remote_job_status", [
+  "pending",
+  "processing",
+  "completed",
+  "failed",
+]);
+
+/**
+ * 画布内置渠道 capability 枚举
+ *
+ * 与 `CanvasCapability` 类型（src/features/canvas/services/canvas-credit-cost.ts）
+ * 保持一致：image / video / audio / text / image-to-3d。video 当前仍走 VIDEO_JOBS Map，
+ * 本表预留；text 在 route 层 400 拒绝，本表预留。
+ *
+ * 2026-09-15：新增 'image-to-3d' —— 画布内 Meshy Image-to-3D 集成，源 image 节点
+ * → 插件节点，扣用户 200 积分生成 GLB 模型并落 R2。drizzle/0018 添加枚举值，
+ * TS enum literal union 同步更新。
+ *
+ * 2026-09-16：新增 'multi-image-to-3d' —— 画布内 Meshy Multi-Image to 3D 集成，
+ * 2-4 张图合并转 GLB 模型，扣 400 积分（单图 200 的 2 倍）。节点层复用
+ * meshy-3d:model3d，metadata.sourceImageUrls 扩展。drizzle/0019 添加枚举值，
+ * TS enum literal union 同步更新。
+ */
+export const canvasRemoteCapabilityEnum = pgEnum("canvas_remote_capability", [
+  "image",
+  "video",
+  "audio",
+  "text",
+  "image-to-3d",
+  "multi-image-to-3d",
+]);
+
+// ============================================
+// 照片表 (Photo)
+// ============================================
+
+/**
+ * 产品效果状态枚举（保留：/admin/product-effects 与 productEffect 表未退役，作为 image-gen 工作台的旧数据源回退）
+ */
+export const productEffectStatusEnum = pgEnum("product_effect_status", [
+  "active",
+  "inactive",
+]);
+
+/**
+ * 提示词场景枚举（保留：productEffect.scene 字段依赖）
+ */
+export const promptSceneEnum = pgEnum("prompt_scene", [
+  "generate_2d",
+  "generate_3d",
+  "translate",
+  "stylize",
+  "enhance",
+  "custom",
+]);
+
+/**
+ * 照片表 - 用户上传的参考图
+ *
+ * @field id - 照片唯一标识符
+ * @field userId - 关联的用户 ID
+ * @field fileName - 原始文件名
+ * @field fileUrl - 文件公共访问 URL
+ * @field thumbnailUrl - 缩略图 URL
+ * @field md5 - 文件 MD5（去重）
+ * @field width - 宽度
+ * @field height - 高度
+ * @field format - 图片格式
+ * @field fileSize - 文件大小（字节）
+ * @field createdAt - 创建时间
+ */
+export const photo = pgTable("photo", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  // 2026-08-23：资产统一为 photo 表，加 source 区分"本地上传"和"生图结果"
+  source: photoSourceEnum("source").notNull().default("upload"),
+  // source=generation 时关联的生图任务；onDelete: "set null" 防止 imageJob 误删连带删资产
+  // 用 AnyPgColumn 打破 photo ↔ imageJob 的循环 FK 推导（Drizzle 官方推荐做法）
+  imageJobId: text("image_job_id").references((): AnyPgColumn => imageJob.id, {
+    onDelete: "set null",
+  }),
+  // 生图时的 prompt / model（source=upload 时为 null）
+  prompt: text("prompt"),
+  model: text("model"),
+  fileName: text("file_name").notNull(),
+  fileUrl: text("file_url").notNull(),
+  thumbnailUrl: text("thumbnail_url"),
+  md5: text("md5"),
+  width: integer("width"),
+  height: integer("height"),
+  format: text("format"),
+  fileSize: integer("file_size"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// ============================================
+// 生图任务表 (ImageJob)
+// ============================================
+/**
+ * 生图任务表 - 持久化生图任务与历史
+ *
+ * 记录每次生图请求的输入参数、状态、结果与计费
+ *
+ * @field id - 任务唯标识符
+ * @field userId - 关联的用户 ID
+ * @field photoId - 关联的参考照片 ID（可空，纯文生图时为空）
+ * @field maskId - 关联的产品效果 ID（可空，自定义提示词时为空）
+ * @field model - 生图模型 id（doubao/flux1 等）
+ * @field mode - 生成模式
+ * @field prompt - 实际发送给模型的提示词（已渲染变量）
+ * @field negativePrompt - 反向提示词
+ * @field imageUrl - 输入参考图 URL
+ * @field size - 输出尺寸
+ * @field batchSize - 生成数量
+ * @field seed - 随机种子
+ * @field guidanceScale - 引导系数
+ * @field numInferenceSteps - 推理步数
+ * @field status - 任务状态
+ * @field resultUrls - 生成结果图 URL 数组（JSON）
+ * @field revisedPrompt - 模型重写的提示词（DALL-E 3 特性）
+ * @field errorMsg - 失败原因
+ * @field generateDuration - 生成耗时（ms）
+ * @field cost - 生成成本
+ * @field currency - 成本币种
+ * @field creditsConsumed - 本次消耗的积分
+ * @field taskId - 异步任务 id（异步模型用）
+ * @field createdAt - 创建时间
+ * @field completedAt - 完成时间
+ */
+export const imageJob = pgTable("image_job", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  photoId: text("photo_id").references((): AnyPgColumn => photo.id, {
+    onDelete: "set null",
+  }),
+  maskId: text("mask_id"),
+  model: text("model").notNull(),
+  mode: generationModeEnum("mode").notNull(),
+  prompt: text("prompt").notNull(),
+  negativePrompt: text("negative_prompt"),
+  imageUrl: text("image_url"),
+  size: text("size").notNull().default("1024x1024"),
+  batchSize: integer("batch_size").notNull().default(1),
+  seed: integer("seed"),
+  guidanceScale: integer("guidance_scale"),
+  numInferenceSteps: integer("num_inference_steps"),
+  status: imageJobStatusEnum("status").notNull().default("pending"),
+  resultUrls: json("result_urls").$type<string[]>().notNull().default([]),
+  revisedPrompt: text("revised_prompt"),
+  errorMsg: text("error_msg"),
+  generateDuration: integer("generate_duration"),
+  cost: integer("cost"),
+  currency: text("currency"),
+  creditsConsumed: integer("credits_consumed"),
+  taskId: text("task_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  completedAt: timestamp("completed_at"),
+});
+
+// ============================================
+// 产品效果表 (ProductEffect)
+// ============================================
+/**
+ * 产品效果表 - AI 效果模版（提示词 + 变量 + 关联生图模型）
+ *
+ * Phase C 起 image-gen 工作台主数据源已切到 promptTemplate 表；本表保留作为
+ * legacy —— /admin/product-effects 仍可访问，generateImageJob.imageJob.maskId
+ * 列仍接受两种来源的 id。
+ *
+ * @field id - 效果唯一标识符（maskId，如 MASK_001）
+ * @field name - 效果名称
+ * @field category - 分类
+ * @field description - 描述
+ * @field previewUrl - 预览图 URL
+ * @field prompt - 提示词（支持 {{变量}} 占位符）
+ * @field variables - 提示词变量定义（JSON）
+ * @field model - 推荐生图模型 id
+ * @field config - 配置（风格/颜色/材质，JSON）
+ * @field price - 价格
+ * @field status - 状态
+ * @field author - 创建者
+ * @field createdAt - 创建时间
+ * @field updatedAt - 更新时间
+ */
+export const productEffect = pgTable("product_effect", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  category: text("category").notNull().default("其他"),
+  description: text("description").notNull().default(""),
+  previewUrl: text("preview_url").notNull(),
+  prompt: text("prompt").notNull(),
+  variables: json("variables")
+    .$type<import("./image-gen-types").PromptVariable[]>()
+    .notNull()
+    .default([]),
+  model: text("model").notNull().default("qwen"),
+  config: json("config")
+    .$type<{
+      style: string;
+      color?: string;
+      material?: string;
+    }>()
+    .notNull()
+    .default({ style: "custom" }),
+  scene: promptSceneEnum("scene").notNull().default("generate_2d"),
+  // 2026-09-10：引用 prompt_template.id（gpt-image 模块的提示词模板表）
+  // 可空：NULL = 用本地 prompt 字段（非空 = 优先用 promptTemplate.prompt）
+  // 不加 DB FK，与现有 product_line_ids json 一致（应用层校验合法性）
+  promptTemplateId: text("prompt_template_id"),
+  versions: json("versions")
+    .$type<import("./image-gen-types").PromptVersion[]>()
+    .notNull()
+    .default([]),
+  price: integer("price").notNull().default(0),
+  status: productEffectStatusEnum("status").notNull().default("active"),
+  usageCount: integer("usage_count").notNull().default(0),
+  successRate: integer("success_rate").notNull().default(0),
+  avgDuration: integer("avg_duration").notNull().default(0),
+  author: text("author").notNull().default("admin"),
+  productLineIds: json("product_line_ids")
+    .$type<string[]>()
+    .notNull()
+    .default([]),
+  /**
+   * 2026-09-09：/image-gen 升级为下单工作台后，前端 SpecStep 渲染
+   * productSize/accessoryCode/engraving 表单时要按这个 code 查 PRODUCT_TYPES 字典。
+   * promptTemplate.productTypeCode 通过 sync-from-promptTemplate 同步到此处；
+   * admin 手工录入的 productEffect 仍可空（兼容旧数据）。
+   */
+  productTypeCode: text("product_type_code"),
+  /**
+   * 2026-09-10：该模板允许的尺寸子集（JSON 字符串数组，单位 cm 数字字符串）。
+   * - null/[] → 不限制，按 productTypeCode 对应 PRODUCT_TYPES 字典里的 sizes 全量提供
+   * - ["6"] → 只允许 6cm，下单时 SpecModal 仅渲染这一个选项
+   *
+   * 为什么允许子集：同一个产品型号（如 R = 钥匙扣）可以多个 productEffect 共用
+   * （「复古钥匙扣」「简约钥匙扣」），但每个效果图只展示部分尺寸 + 配件，避免
+   * 客户选了 4cm 钥匙扣效果图后弹规格窗却看到 8cm（冰箱贴尺寸）的尴尬。
+   */
+  allowedSizes: text("allowed_sizes"),
+  /**
+   * 2026-09-10：该模板允许的配件子集（JSON 字符串数组，code 字符串）。
+   * - null/[] → 不限制，按 productTypeCode 对应字典里的 accessories 全量提供
+   * - ["leather"] → 只允许皮套
+   */
+  allowedAccessories: text("allowed_accessories"),
+  // ============================================
+  // 2026-09-10：模板级 capability 覆盖 + 皮革色子集（仅 productEffect 表）
+  // ============================================
+  /**
+   * 模板级 capability 覆盖（JSON 字符串，Partial<ProductCapabilities>）。
+   * - null → 继承 catalog 默认（productType.capabilities）
+   * - 非 null → 仅对 override 里出现的 key 应用；canEngrave 不在覆盖范围
+   *   （沿用 catalog，避免和现有刻字字段冲突）
+   * 例子：{"canLeatherColor":true,"canPvcProtection":true}
+   * → admin 关掉 canLeatherExposed / canHaveRemarks，保留 canLeatherColor / canPvcProtection。
+   */
+  allowedCapabilities: text("allowed_capabilities"),
+  /**
+   * 皮革颜色子集（JSON 字符串数组，code 字符串）。
+   * - null/[] → LEATHER_COLORS 全展示
+   * - ["brown","black"] → 只允许棕/黑
+   */
+  allowedColors: text("allowed_colors"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// ============================================
+// 生图系统类型导出
+// ============================================
+
+export type Photo = typeof photo.$inferSelect;
+export type NewPhoto = typeof photo.$inferInsert;
+
+export type ImageJob = typeof imageJob.$inferSelect;
+export type NewImageJob = typeof imageJob.$inferInsert;
+
+export type ProductEffectRow = typeof productEffect.$inferSelect;
+export type NewProductEffectRow = typeof productEffect.$inferInsert;
+
+// 2026-09-10：产品线独立表（替代 productEffect.product_line_ids JSON 列做关联）
+// productLineId 用业务主键 text，不用 uuid（便于 seed/迁移对齐 MOCK_PRODUCT_LINES.id）
+// spec / pricing 用 JSON 字符串列（沿用 db-effects.ts 解析模式）
+// status enum 复用 active / inactive / draft 三态（与 productEffect 一致）
+// 不加 DB FK，应用层校验合法性
+export const productLine = pgTable(
+  "product_line",
+  {
+    productLineId: text("product_line_id").primaryKey(),
+    name: text("name").notNull(),
+    category: text("category").notNull(),
+    description: text("description").notNull().default(""),
+    coverUrl: text("cover_url").notNull().default(""),
+    spec: text("spec").notNull().default(""),
+    pricing: text("pricing").notNull().default(""),
+    status: text("status", {
+      enum: ["active", "inactive", "draft"],
+    })
+      .notNull()
+      .default("active"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    statusIdx: index("product_line_status_idx").on(t.status),
+  })
+);
+
+export type ProductLineRow = typeof productLine.$inferSelect;
+export type NewProductLineRow = typeof productLine.$inferInsert;
+
+/** 生图任务状态类型 */
+export type ImageJobStatus = (typeof imageJobStatusEnum.enumValues)[number];
+
+/** 生图生成模式类型 */
+export type GenerationMode = (typeof generationModeEnum.enumValues)[number];
+
+/** 产品效果状态类型 */
+export type ProductEffectStatus =
+  (typeof productEffectStatusEnum.enumValues)[number];
+
+/** 提示词场景类型 */
+export type PromptScene = (typeof promptSceneEnum.enumValues)[number];
+
+// ============================================
+// GPT-Image-2 提示词生图业务
+// ============================================
+
+/**
+ * 提示词订单状态枚举
+ *
+ * 状态机：PENDING → GENERATING → CANDIDATES_READY → (SELECTED | CANCELLED | FAILED)
+ * 允许从 CANDIDATES_READY / FAILED 重新追加原图回到 GENERATING（增量追加）
+ */
+export const promptOrderStatusEnum = pgEnum("prompt_order_status", [
+  "PENDING",
+  "GENERATING",
+  "CANDIDATES_READY",
+  "SELECTED",
+  "CANCELLED",
+  "FAILED",
+]);
+
+/**
+ * 效果图历史快照触发原因枚举
+ *
+ * 标识这一轮快照是因为什么 destructive 写入而创建的：
+ * - regenerate_single：单图"重新生成"前
+ * - regenerate_all：批量重跑 / FAILED 一键重试前
+ * - failed_reupload：FAILED 状态下重传图片前
+ * - restore：用户主动"恢复历史版本"前（先归档当前再恢复）
+ */
+export const promptOrderHistoryTriggerEnum = pgEnum(
+  "prompt_order_history_trigger",
+  ["regenerate_single", "regenerate_all", "failed_reupload", "restore"]
+);
+
+/**
+ * 订单来源平台枚举（历史遗留，未挂任何列）
+ *
+ * 2026-09-11：平台字典从 5 项扩到 8 项（移至 src/features/gpt-image/lib/
+ * product-catalog.ts 的 PLATFORMS / PlatformCode）。prompt_order 表的
+ * platform 列是 text（无 CHECK），DB 端不再绑 enum。
+ *
+ * 此处仅保留历史 enum 定义以便老 migrate 不报错；PromptOrderPlatform
+ * type alias 已删除（无人引用）。
+ */
+export const promptOrderPlatformEnum = pgEnum("prompt_order_platform", [
+  "taobao",
+  "douyin",
+  "xiaohongshu",
+  "kol",
+  "partner",
+]);
+
+// ============================================
+// 提示词模板表 (PromptTemplate)
+// ============================================
+/**
+ * 提示词模板 - 每条模板对应一种生图场景，prompt 对用户端隐藏
+ *
+ * @field id - 模板唯一标识符
+ * @field name - 模板名称（管理端可见）
+ * @field description - 模板描述（用户端可见，不含提示词内容）
+ * @field prompt - 隐藏的提示词内容（用户端不展示）
+ * @field size - 默认图片尺寸（WxH 字符串）
+ * @field candidateCount - 单次生图候选数（1/2/4/9）
+ * @field coverUrl - 模板封面图
+ * @field isActive - 是否启用（停用后不能创建新订单）
+ */
+export const promptTemplate = pgTable("prompt_template", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull(),
+  prompt: text("prompt").notNull(),
+  /**
+   * 提示词变量定义（JSON）。
+   * 支持模板里 {{key}} 占位符 —— 与 image-gen 工作台共用同一份 schema，
+   * 让 image-gen 和 gpt-image 都消费同一张表，不再维护两份模板。
+   */
+  variables: json("variables")
+    .$type<import("./image-gen-types").PromptVariable[]>()
+    .notNull()
+    .default([]),
+  /**
+   * 推荐生图模型 id（如 qwen / gpt_image_2 / nano_banana2）。
+   * image-gen 工作台选中模板时会锁定这个模型；为空时允许用户在 UI 里手动选。
+   * 2026-09-11：精简后仅这三个值，旧 doubao 已下线。
+   */
+  model: text("model").default("qwen"),
+  /**
+   * 模板价格（分）。仅作展示用，单位元，0 = 免费。
+   */
+  price: integer("price").notNull().default(0),
+  size: text("size").notNull().default("1024x1024"),
+  candidateCount: integer("candidate_count").notNull().default(4),
+  coverUrl: text("cover_url"),
+  isActive: boolean("is_active").notNull().default(true),
+  /**
+   * 2026-09-01：候选输出模式。两种都保留，让模板作者按风格选：
+   * - "grid"（默认，兼容旧模板）：n=1 + prompt 末尾追加宫格指令，
+   *   让 Lingting 一次返 1 张拼接图，candidates[imageIdx] = [compositeUrl]，
+   *   UI 用 QuadrantGrid CSS overlay 切分候选
+   * - "separate"：n=candidateCount + 不追加指令，让 Lingting 一次返 N 张独立图，
+   *   candidates[imageIdx] = [url1, ..., urlN]，UI 直接遍历渲染
+   *
+   * 加列默认值 "grid"，老模板一行不动；新建模板时可在 admin UI 切到 separate。
+   * 详见 [[gpt-image-output-mode]]
+   */
+  outputMode: text("output_mode").notNull().default("grid"),
+  /**
+   * 2026-09-07：关联商品类别（与 PRODUCT_TYPES 字典对齐，运行时校验）。
+   * agent workbench 流程里模板即商品类别：模板选完后产品型号由本字段决定，
+   * SpecSelectStep 据此渲染 productSize / accessoryCode / engraving 等表单。
+   * nullable 允许 admin 临时创建"未绑定商品"的模板（workbench 不可用但 ToC 仍可用）。
+   */
+  productTypeCode: text("product_type_code"),
+  /**
+   * 2026-09-10：该模板允许的尺寸子集（JSON 字符串数组，单位 cm 数字字符串）。
+   * - null/[] → 不限制，按 productTypeCode 对应 PRODUCT_TYPES 字典里的 sizes 全量提供
+   * - ["6"] → 只允许 6cm，下单时 SpecModal 仅渲染这一个选项
+   *
+   * 为什么允许子集：同一个产品型号（如 R = 钥匙扣）可以多个 productEffect 共用
+   * （「复古钥匙扣」「简约钥匙扣」），但每个效果图只展示部分尺寸 + 配件，避免
+   * 客户选了 4cm 钥匙扣效果图后弹规格窗却看到 8cm（冰箱贴尺寸）的尴尬。
+   */
+  allowedSizes: text("allowed_sizes"),
+  /**
+   * 2026-09-10：该模板允许的配件子集（JSON 字符串数组，code 字符串）。
+   * - null/[] → 不限制，按 productTypeCode 对应字典里的 accessories 全量提供
+   * - ["leather"] → 只允许皮套
+   */
+  allowedAccessories: text("allowed_accessories"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// ============================================
+// 提示词订单表 (PromptOrder)
+// ============================================
+/**
+ * 提示词订单 - 关联模板与指定用户，通过 token 公开访问
+ *
+ * @field id - 订单唯一标识符
+ * @field orderNo - 业务唯一订单号
+ * @field templateId - 关联模板
+ * @field recipientName - 接收用户标识（仅展示用，非登录用户）
+ * @field token - 访问令牌（防止 orderNo 被枚举；32 字符 hex）
+ * @field status - 当前状态
+ * @field uploadedImages - 已上传原图（dataUrl 字符串数组，JSON）
+ * @field uploadCount - 用户可上传的批次次数（默认 1）。每批最多 imagesPerUpload 张参考图，总容量 = uploadCount × imagesPerUpload
+ * @field imagesPerUpload - 每批上传的原图参考图数量（1-3，默认 3）
+ * @field regenerateLimit - 每批效果图可重新生成的次数上限（默认 5）。
+ *   按批次独立计数：5 个效果图的订单下单时设为 5，每批都有 5 次重新
+ *   生成机会，互不挤占；批量重跑 / FAILED 一键重试不计。
+ * @field candidates - 效果图（嵌套数组 [[b64,...],[b64,...]]，外层索引 = 原图索引）
+ * @field selectedIndex - 兼容字段（旧模型：取 selections[0]）
+ * @field selections - 每张原图的候选选择（长度 = uploadedImages.length，未选为 null）
+ * @field errorMessage - 失败原因
+ */
+export const promptOrder = pgTable(
+  "prompt_order",
+  {
+    id: text("id").primaryKey(),
+    /**
+     * 业务唯一订单号。
+     * schema 这里丢了 .unique()（drizzle/0001_orange_joystick.sql 行 21-22
+     * 仍带 prompt_order_order_no_unique UNIQUE 约束）—— 顺手补回避免
+     * drizzle-kit generate 误删 DB 端的唯一性。
+     */
+    orderNo: text("order_no").notNull().unique(),
+    templateId: text("template_id")
+      .notNull()
+      .references(() => promptTemplate.id, { onDelete: "restrict" }),
+    // 接收用户标识，可空（创建订单时选填）。旧记录可能为空字符串。
+    recipientName: text("recipient_name").notNull().default(""),
+    /**
+     * 2026-09-11：订单来源平台（仅 LB 皮革徽章能力门控；业务侧 ToB 渠道归因）。
+     * 存 PLATFORMS 字典里的 code（taobao / xiaohongshu / douyin / independent_site /
+     * domestic_influencer / foreign_influencer / partner / marketing）。
+     * null = 未知 / 用户未选；admin 复盘 + 活动结算按这个 group by。
+     *
+     * 列类型是 text 而非 prompt_order_platform enum —— 历史 enum 5 项
+     * （taobao/douyin/xiaohongshu/kol/partner）已废弃，新字典 8 项直接走
+     * 应用层 PLATFORMS 校验。drizzle/0012_prompt_order_platform.sql 已加 text 列。
+     */
+    platform: text("platform"),
+    /**
+     * 2026-09-11：渠道订单号（仅 LB 皮革徽章能力门控；与 platform 配对）。
+     * 用户在淘宝 / 小红书 / 抖音 / 独立站 / 国内红人 / 国外红人 / 合作方 /
+     * 营销推广 等渠道下单时填入的"渠道侧订单号"，用于代理商对账。
+     *
+     * 字段语义：
+     *   - text：跨平台编号体系（淘宝 15~18 位数字 / 小红书字母数字混合 /
+     *     抖音 ID 等），不强制结构化
+     *   - nullable：null = 用户未选 platform / 渠道订单号不知道 / 单纯走代理商统计
+     *   - capability-gated：canPlatform=false 的型号此列保持 null
+     *
+     * 与 platform 字段的关系：platform 是"哪来的"（字典 code），platform_order_no
+     * 是"在那边的具体订单号"（free text）。可以 platform=null 但 platform_order_no
+     * 有值（理论上不该发生，但 server 端不强行绑死）。
+     *
+     * 列类型是 text 而非独立 enum —— 渠道订单号是异构字符串（数字 / 字母 /
+     * 横线 / 时间戳），上 enum 不合理。应用层只在 LB canPlatform=true 且
+     * platform 有值时建议填，不强校验格式。
+     */
+    platformOrderNo: text("platform_order_no"),
+    token: text("token").notNull().unique(),
+    status: promptOrderStatusEnum("status").notNull().default("PENDING"),
+    uploadedImages: text("uploaded_images"),
+    /** 用户可上传的批次次数（默认 1）。总容量 = uploadCount × imagesPerUpload */
+    uploadCount: integer("upload_count").notNull().default(1),
+    /**
+     * 每批上传的原图参考图数量（1-3，默认 3）。
+     * 一次上传会话内用户最多塞 imagesPerUpload 张参考图，全部塞进去
+     * 才算占满一批；总容量 = uploadCount × imagesPerUpload。
+     */
+    imagesPerUpload: integer("images_per_upload").notNull().default(3),
+    /**
+     * 每批效果图可主动"重新生成"的次数上限（默认 5）。
+     * 按批次独立计数：每个 batchIdx 都有 N 次机会，互不挤占。
+     * 仅 imageIdx 传入（即 batchIdx）的单批路径计数（trigger=regenerate_single）；
+     * 批量重跑（regenerate_all / FAILED 重试）不消耗次数。
+     * 实际已用次数 = promptOrderHistory 中 trigger='regenerate_single'
+     * AND imageIdx=batchIdx 的行数。
+     */
+    regenerateLimit: integer("regenerate_limit").notNull().default(5),
+    candidates: text("candidates"),
+    selectedIndex: integer("selected_index"),
+    selections: text("selections"),
+    errorMessage: text("error_message"),
+    // 2026-09-12：本单实际扣减的积分（basePrice + Σ(matching rule.delta)）。
+    // 对账核心字段：代理商想知道"这条订单到底扣了多少积分"，写死 promptTemplate.price
+    // 只能给基础价，看不到加价明细。null = 老订单 / 免扣（price=0），新建订单非空。
+    creditsCharged: integer("credits_charged"),
+    /**
+     * 2026-09-12：本单扣减明细（JSON：[{ specKey, label, delta }]）。
+     * 用途：代理商对账 + admin UI 单卡展示「基础价 + 各规格加价」。
+     *   - 数组按 specKey 字母序排序，便于跨订单对比
+     *   - 单条最少字段 { specKey, delta }；label 来自 prompt_template_price.label
+     *     或运行时从字典组装（如 "6cm + 30"）
+     *   - null = 老订单无明细（fallback 用 basePrice 展示）
+     * 不参与生图 / 不进交易逻辑（creditsTransaction.metadata 有镜像）。
+     */
+    creditsBreakdown: text("credits_breakdown"),
+    // 2026-08-23：代理商业务（飞书 docx "链接生成管理系统"）—— promptOrder
+    // 区分 ToC 店铺单 / ToB 代理商单。ToC 用 platform 字段标识淘宝/小红书/
+    // 抖店；ToB 用 agentId 关联 agent 表。互斥：agentId 优先，platform 仅
+    // 用于 ToC。isAgentOrder 视图层根据 agentId 是否 null 计算。
+    //
+    // 为什么不在 platform enum 加 'agent'：platform 语义是"订单从哪个分发
+    // 渠道来"（外部渠道），代理商是内部角色，不是渠道。混在一起后期统计
+    // "各平台来源订单数"会被污染。
+    //
+    // onDelete: "set null" —— 删代理商时保留历史订单，但 UI 显示"已删除代理"
+    productTypeCode: text("product_type_code"),
+    productSize: text("product_size"),
+    accessoryCode: text("accessory_code"),
+    // ============================================
+    // 2026-09-07：终端用户定制（/p/[token] 上由用户填）
+    // 2 个字段全部 nullable：
+    // - ToC 订单（无 productTypeCode）：始终 null
+    // - 产品 capabilities 不支持刻字的型号：始终 null（例如冰箱贴 P）
+    // - 用户没填：null
+    // 与 capabilities 的联动校验在 /api/orders/[token]/configure 路由
+    // + promptOrderCreateSchema 同步处理。
+    //
+    // 历史：初版还有 has_leather_badge 字段 + R 钥匙扣的 hasLeatherBadge
+    // capability；同日下午重构为 LB（皮革徽章）独立产品型号，已删除。
+    // ============================================
+    /** 刻字内容（仅 canEngrave=true 的型号可填） */
+    engravingText: text("engraving_text"),
+    /** 刻字是否外露（与 engravingText 独立 boolean，按用户决定） */
+    engravingExposed: boolean("engraving_exposed"),
+    // ============================================
+    // 2026-09-10：LB 皮革徽章扩展定制（capability-gated，其他型号保持 null）
+    // 4 个字段全部 nullable：
+    // - 非 LB 型号：始终 null（capability 在 /configure 路由被静默 collapse）
+    // - LB 但用户没填：null
+    // 与 capabilities 的联动校验在 /api/orders/[token]/configure 路由同步处理。
+    //
+    // 与 engravingExposed 独立语义：leatherExposed = "皮革实物是否外露"，
+    // engravingExposed = "刻字文字是否外露"，两者解耦。
+    // ============================================
+    /** 皮革颜色 code（仅 canLeatherColor=true 可填，对应 LEATHER_COLORS 字典） */
+    leatherColor: text("leather_color"),
+    /** 皮革实物是否外露（与 engravingExposed 独立） */
+    leatherExposed: boolean("leather_exposed"),
+    /** 是否带 PVC 透明保护膜 */
+    pvcProtection: boolean("pvc_protection"),
+    /** 备注（仅内部沟通，不参与生图；服务端 max 500） */
+    remarks: text("remarks"),
+    // platform 字段在表头 recipientName 后已声明（text 类型），见 line ~1089。
+    agentId: text("agent_id").references((): AnyPgColumn => agent.id, {
+      onDelete: "set null",
+    }),
+    /**
+     * 本轮生图的 Lingting 任务态（JSON，见 features/gpt-image/lib/generation-task.ts）。
+     * null = 无进行中任务。服务端只做 submit 拿 task_id 存这里，
+     * 轮询由前端调 /api/orders/[token]/poll 驱动（Serverless 无长时后台）。
+     */
+    generationTask: text("generation_task"),
+    uploadedAt: timestamp("uploaded_at"),
+    generatedAt: timestamp("generated_at"),
+    selectedAt: timestamp("selected_at"),
+    cancelledAt: timestamp("cancelled_at"),
+    /**
+     * 订单创建者 —— 关联 user.id。
+     * 可空：迁移前的老订单没有归属记录，创建时由服务端从 session 写入。
+     * 列表接口按 createdBy 过滤，每个登录用户只能看到自己创建的订单。
+     */
+    createdBy: text("created_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("prompt_order_template_idx").on(t.templateId),
+    index("prompt_order_status_idx").on(t.status),
+    index("prompt_order_created_by_idx").on(t.createdBy),
+    // 2026-09-03：代理商订单查询加速（agent 维度过滤）。
+    // WHERE agent_id = ? ORDER BY created_at DESC 走 (agentId) 索引。
+    index("prompt_order_agent_id_idx").on(t.agentId),
+    // 2026-09-10：/image-gen/orders 无限滚动 keyset cursor 索引。
+    // 排序规则 (created_at DESC, id DESC) 走索引直接定位，无需 filesort。
+    // - 全部：WHERE created_by = ? AND (created_at < ? OR (created_at = ? AND id < ?))
+    // - 过滤状态：WHERE created_by = ? AND status = ? AND (same cursor expr)
+    index("prompt_order_cursor_idx").on(
+      t.createdBy,
+      desc(t.createdAt),
+      desc(t.id)
+    ),
+    index("prompt_order_cursor_status_idx").on(
+      t.createdBy,
+      t.status,
+      desc(t.createdAt),
+      desc(t.id)
+    ),
+    // 2026-09-18：/admin/orders 全局视角无限滚动 keyset cursor 索引。
+    // 0006 的索引开头是 created_by，对 admin skipCreatorFilter=true 场景无用。
+    // - 状态过滤：WHERE status = ? AND (created_at < ? OR (created_at = ? AND id < ?))
+    //   ORDER BY created_at DESC, id DESC → 走 prompt_order_admin_cursor_idx
+    // - 无状态：WHERE (created_at < ? OR (created_at = ? AND id < ?))
+    //   ORDER BY created_at DESC, id DESC → 走 prompt_order_admin_all_cursor_idx
+    // 对应 migration 见 drizzle/0043_admin_prompt_order_indexes.sql。
+    index("prompt_order_admin_cursor_idx").on(
+      t.status,
+      desc(t.createdAt),
+      desc(t.id)
+    ),
+    index("prompt_order_admin_all_cursor_idx").on(
+      desc(t.createdAt),
+      desc(t.id)
+    ),
+  ]
+);
+
+// ============================================
+// GPT-Image 业务类型导出
+// ============================================
+
+export type PromptTemplate = typeof promptTemplate.$inferSelect;
+export type NewPromptTemplate = typeof promptTemplate.$inferInsert;
+
+// ============================================
+// 2026-09-12：提示词模板按规格定价表 (PromptTemplatePrice)
+// ============================================
+//
+// 历史：之前 promptTemplate.price 是单一固定值（积分单位），同模板所有规格组合
+// 扣一样积分。对账痛点：代理商想知道"6cm + 皮套 + 黑 + PVC"这种规格组合 vs
+// "4cm + 棕"各扣了多少积分，固定价对不上账。
+//
+// 设计：
+// - basePrice 复用 promptTemplate.price（保留不动）
+// - 加价规则存本表：每行 = (templateId, specKey, priceDelta, label)
+// - 本单总价 = basePrice + Σ(matching rule.delta)
+// - 同一 template 下 (templateId, specKey) 唯一约束防重复录入
+//
+// specKey 命名规范（与 product-catalog 字典对齐）：
+//   size:4 / size:6 / size:8 / size:11
+//   accessory:leather / accessory:pvc / accessory:bracket
+//   leather_color:natural / leather_color:brown / leather_color:black /
+//                  leather_color:red / leather_color:navy
+//   protection:exposed / protection:pvc
+//
+// priceDelta 可负数（减价场景）；0 允许（仅占位 / label 展示）。
+// onDelete cascade：模板删 → 价格规则一起删（template 已死规则无意义）。
+// ============================================
+export const promptTemplatePrice = pgTable(
+  "prompt_template_price",
+  {
+    id: text("id").primaryKey(),
+    templateId: text("template_id")
+      .notNull()
+      .references(() => promptTemplate.id, { onDelete: "cascade" }),
+    /**
+     * 规格 key。格式 "dimension:value"。
+     * 字典：见 prompt_template_price_spec_key.sql 末尾注释 + product-catalog.ts。
+     */
+    specKey: text("spec_key").notNull(),
+    /**
+     * 加价积分（可负）。本单总价 = promptTemplate.price + Σ(matching.delta)
+     * 「匹配」规则：specKey 命中当前订单选中的规格项
+     *   - size:6  → 选了 productSize=6
+     *   - accessory:leather → 选了 accessoryCode=leather
+     *   - leather_color:brown → 选了 leatherColor=brown
+     *   - protection:exposed → leatherExposed=true（PVC 保护互斥不命中）
+     */
+    priceDelta: integer("price_delta").notNull().default(0),
+    /**
+     * 给人看的标签（可选）。如「6cm 加 30 积分」「黑色 +15」。
+     * 不参与计算；admin UI 表格展示 + 对账汇总易读。
+     */
+    label: text("label").notNull().default(""),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    // 同一模板同一 specKey 唯一约束（admin 防重复录入）
+    uniqueIndex("ptp_template_spec_unique").on(t.templateId, t.specKey),
+    // 按 template 查全部规则走索引
+    index("ptp_template_idx").on(t.templateId),
+  ]
+);
+
+export type PromptTemplatePriceRow = typeof promptTemplatePrice.$inferSelect;
+export type NewPromptTemplatePriceRow = typeof promptTemplatePrice.$inferInsert;
+
+export type PromptOrder = typeof promptOrder.$inferSelect;
+export type NewPromptOrder = typeof promptOrder.$inferInsert;
+
+/** 提示词订单状态类型 */
+export type PromptOrderStatus =
+  (typeof promptOrderStatusEnum.enumValues)[number];
+
+// ============================================
+// 效果图历史快照表 (PromptOrderHistory)
+// ============================================
+/**
+ * 效果图历史快照 —— 每次 destructive 写入前自动归档
+ *
+ * 用户在右栏点缩略图就能恢复那一轮的"原图 + 候选集 + 已选候选"。
+ * 一次 destructive 写入 = 一条快照；round 每订单独立递增。
+ *
+ * @field id - 快照唯一标识符（nanoid）
+ * @field orderId - 关联订单（级联删除）
+ * @field round - 每订单递增 1..N；与 orderId 组成唯一索引
+ * @field trigger - 触发原因（regenerate_single/regenerate_all/failed_reupload/restore）
+ * @field imageIdx - 归档聚焦的原图索引（批量归档时取 0）
+ * @field candidateIdx - 归档时该原图已选候选；恢复时一并选中
+ * @field candidates - 不可变嵌套候选 URL 数组（与 promptOrder 同步语义）
+ * @field selections - 不可变选择数组（可能为 null 表示从未选过）
+ * @field uploadedImages - 不可变已上传原图 URL 数组
+ * @field templateId - 当时使用的模板 id（兼容性检查用）
+ * @field candidateCount - 当时每张原图的候选数（兼容性检查用）
+ * @field imageCount - 当时已上传原图张数（兼容性检查用）
+ * @field size - 当时使用的输出尺寸（兼容性检查用）
+ * @field generatedAt - 当时的生成时间戳（用于 restore 时回填）
+ * @field createdAt - 快照创建时间（默认 now）
+ */
+export const promptOrderHistory = pgTable(
+  "prompt_order_history",
+  {
+    id: text("id").primaryKey(),
+    orderId: text("order_id")
+      .notNull()
+      .references(() => promptOrder.id, { onDelete: "cascade" }),
+    round: integer("round").notNull(),
+    trigger: promptOrderHistoryTriggerEnum("trigger").notNull(),
+    imageIdx: integer("image_idx"),
+    candidateIdx: integer("candidate_idx").notNull().default(0),
+    candidates: text("candidates").notNull(),
+    selections: text("selections"),
+    uploadedImages: text("uploaded_images").notNull(),
+    templateId: text("template_id").notNull(),
+    candidateCount: integer("candidate_count").notNull(),
+    imageCount: integer("image_count").notNull(),
+    size: text("size").notNull(),
+    generatedAt: timestamp("generated_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    orderRoundUnique: uniqueIndex("poh_order_round_unique").on(
+      t.orderId,
+      t.round
+    ),
+    orderCreatedAtIdx: index("poh_order_created_at_idx").on(
+      t.orderId,
+      t.createdAt
+    ),
+    // 2026-09-03：按 batchIdx 重新生成次数查询用。
+    // WHERE orderId=? AND trigger='regenerate_single' AND imageIdx=?
+    // → 命中 (orderId, trigger, imageIdx) 前缀；GROUP BY imageIdx 也走索引。
+    orderTriggerImageIdxIdx: index("poh_order_trigger_image_idx_idx").on(
+      t.orderId,
+      t.trigger,
+      t.imageIdx
+    ),
+  })
+);
+
+export type PromptOrderHistory = typeof promptOrderHistory.$inferSelect;
+export type NewPromptOrderHistory = typeof promptOrderHistory.$inferInsert;
+
+/** 效果图历史快照触发原因类型 */
+export type PromptOrderHistoryTrigger =
+  (typeof promptOrderHistoryTriggerEnum.enumValues)[number];
+
+// ============================================
+// 代理商表 (Agent) —— 飞书 docx「链接生成管理系统」ToB 业务
+// ============================================
+//
+// ⚠️ 2026-09-08：(agent) 业务已砍掉，以下表 / 列保留**仅为历史数据可查**，
+// 业务代码不再读也不再写。后续清理（DROP 表 / 列）放到 schema cleanup PR。
+//   - agent
+//   - agentPromptTemplate (M2M：代理商 ↔ 模板)
+//   - agentCreditTransaction + agentCreditTxnTypeEnum
+//   - user.agentId
+//   - promptOrder.agentId
+//
+// 2026-09-03 改造（ToB 业务独立化）：
+// 代理商从「admin 替代理商店代下单」演化为「代理商自己登录 + 自下单 +
+// 自己上传参考图 + 自己挑候选」。新建 (agent) route group + agentAction
+// 中间件 + /agent/orders 新建入口，详见 `crystalline-cooking-flask.md`。
+// user.agentId 字段承担"账号属于哪个代理商"的归属关系；userRoleEnum 不
+// 扩展，靠 agentId IS NOT NULL 判断代理商身份。
+//
+// 历史背景（2026-08-23 起）：代理商档案表，没有登录态；
+// admin 在 /admin/prompt-orders 替代理商店发链接、user 在 /p/[token] 上传
+// 参考图。本轮把 agent 用户化、portal 化。
+//
+// 字段：
+// - id: 业务可读 ID（A001 / zhangsan 都行，nanoid 生成也行）
+// - name: 代理商名称（管理端 / 链接生成管理后台显示）
+// - contact / phone / email: 联系信息，订单链接分发用
+// - isActive: 停用后不能再被新订单选择（已有订单不受影响）
+// - remark: 内部备注
+//
+// 与 user 的关系（userAgentId 字段）：FK set null —— 删代理商时把该代理
+// 商下的 user.agentId 清空（user 本身不删，转为普通 ToC 账号）。一对多
+// agent → users 走 agentRelations.users。
+export const agent = pgTable("agent", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  contact: text("contact"),
+  phone: text("phone"),
+  email: text("email"),
+  remark: text("remark"),
+  isActive: boolean("is_active").notNull().default(true),
+  /**
+   * 2026-09-07：代理商 workbench 入口 token。
+   * URL = /p/agent/{imageGenToken}，per-agent 持久 token，admin 可在
+   * agent 编辑页查看 / 复制链接发给代理商。迁移时用 nanoid 回填已存在的
+   * active agent。nullable 允许"暂未发放"的代理商暂时无链接。
+   */
+  imageGenToken: text("image_gen_token").unique(),
+  /**
+   * 2026-09-07：代理商专属账本余额（与 user 账本物理隔离）。
+   * 单位"元"，与 promptTemplate.price 同单位。workbench 提交订单时按
+   * template.price 一次性扣减；不足则拒绝提交。
+   * 不使用双表账本（FIFO 批次 / 过期），依赖 agent_credit_transaction
+   * 追加日志做审计对账。top-up / 手动调整走 admin 端 action。
+   */
+  creditBalance: integer("credit_balance").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export type Agent = typeof agent.$inferSelect;
+export type NewAgent = typeof agent.$inferInsert;
+
+// ============================================
+// 2026-09-07：代理商专属账本 —— agent ↔ promptTemplate 多对多 + 流水日志
+// ============================================
+//
+// agentPromptTemplate：代理商可服务的"商品类别"白名单。
+// - 与 promptOrder.agentId 的区别：promptOrder.agentId 记录"这单归哪个代理
+//   商"，本表记录"这个代理商能服务哪些模板"。前者是订单归属，后者是能力授予。
+// - onDelete: cascade：删 agent / 删 template 时中间表行失去意义。
+//
+// agentCreditTransaction：账本流水日志。
+// - amount 字段带符号：topup 写正数，debit 写负数；求和即可对账。
+// - orderId 可选：topup 时为 null，debit 时指向对应订单。
+// - 不做双表镜像（不引入 FIFO 批次 / 过期）：代理商无套餐过期业务。
+// ============================================
+
+/**
+ * 代理商 ↔ 提示词模板 多对多中间表。
+ * 物理意义：代理商"代理的商品类别"白名单。
+ * 决策记录：见 [[agent-workbench-plan]]。
+ */
+export const agentPromptTemplate = pgTable(
+  "agent_prompt_template",
+  {
+    agentId: text("agent_id")
+      .notNull()
+      .references((): AnyPgColumn => agent.id, { onDelete: "cascade" }),
+    promptTemplateId: text("prompt_template_id")
+      .notNull()
+      .references(() => promptTemplate.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.agentId, t.promptTemplateId] }),
+    agentIdx: index("apt_agent_idx").on(t.agentId),
+    templateIdx: index("apt_template_idx").on(t.promptTemplateId),
+  })
+);
+
+export type AgentPromptTemplate = typeof agentPromptTemplate.$inferSelect;
+export type NewAgentPromptTemplate = typeof agentPromptTemplate.$inferInsert;
+
+/**
+ * 账本流水类型枚举：topup（充值）/ debit（消费）。
+ * amount 字段带符号：topup 存正整数，debit 存负整数；
+ * 对账时 SUM(amount) WHERE agent_id = ? 应等于当前 creditBalance。
+ */
+export const agentCreditTxnTypeEnum = pgEnum("agent_credit_txn_type", [
+  "topup",
+  "debit",
+]);
+
+/**
+ * 代理商账本流水日志。
+ *
+ * @field id - 流水 ID（nanoid）
+ * @field agentId - 归属代理商（FK，级联删）
+ * @field type - topup / debit
+ * @field amount - 金额（topup 正数 / debit 负数）
+ * @field orderId - 关联订单（可选，topup 时为 null）
+ * @field note - 备注（充值时 admin 填的备注 / 消费时为模板名）
+ * @field createdAt - 流水时间
+ */
+export const agentCreditTransaction = pgTable(
+  "agent_credit_transaction",
+  {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id")
+      .notNull()
+      .references((): AnyPgColumn => agent.id, { onDelete: "cascade" }),
+    type: agentCreditTxnTypeEnum("type").notNull(),
+    amount: integer("amount").notNull(),
+    /**
+     * 关联订单。可空：topup 时无订单归属。
+     * onDelete set null：订单删除后保留审计流水但解除关联。
+     */
+    orderId: text("order_id").references(() => promptOrder.id, {
+      onDelete: "set null",
+    }),
+    note: text("note"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("act_agent_created_idx").on(t.agentId, t.createdAt),
+    index("act_order_idx").on(t.orderId),
+  ]
+);
+
+export type AgentCreditTransaction = typeof agentCreditTransaction.$inferSelect;
+export type NewAgentCreditTransaction =
+  typeof agentCreditTransaction.$inferInsert;
+
+/** 代理商账本流水类型 */
+export type AgentCreditTxnType =
+  (typeof agentCreditTxnTypeEnum.enumValues)[number];
+
+// ============================================
+// 画布内置渠道生成任务表 (CanvasRemoteJob)
+// ============================================
+//
+// Phase 4 起 `/api/canvas/generate` 对 image/audio 走 Inngest send + 轮询，
+// job 状态持久化在本表里。video 仍走 VIDEO_JOBS Map（向后兼容），
+// 后续可统一迁过来。
+//
+// 设计要点：
+// - payload 存完整 `CanvasRemoteGenerateInput`（含 references/mask data URL）
+//   Inngest 函数直接拿 payload 调 generateOnServerSync，无需再回前端取
+// - result 存 `{url, storageKey, mimeType, bytes}[]`，前端 poll 拿到后直接渲染
+// - creditsConsumed + transactionId 由 Inngest 函数写回（与 generateOnServerSync
+//   的 consumeCredits 返回值对齐），失败时由 service 内的 safeRefund 兜底，
+//   本表只记"花出去了多少"用于审计
+// - error 字段存失败原因（最多 1000 字符）
+// - `providerJobId` 预留：video 若迁过来存 OpenAI `/v1/videos` 返的 id；当前 image
+//   不用
+// - `inngestEventId` 预留：用于 reconcile cron 排查"事件已发但函数没跑"的情况
+
+export const canvasRemoteJob = pgTable(
+  "canvas_remote_job",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    capability: canvasRemoteCapabilityEnum("capability").notNull(),
+    mode: text("mode").notNull(), // "generation" | "edit" | "text"
+    payload: json("payload").$type<unknown>().notNull(),
+    status: canvasRemoteJobStatusEnum("status").notNull().default("pending"),
+    result:
+      json("result").$type<
+        Array<{
+          url: string;
+          storageKey: string;
+          mimeType: string;
+          width?: number;
+          height?: number;
+          bytes: number;
+        }>
+      >(),
+    error: text("error"),
+    creditsConsumed: integer("credits_consumed"),
+    transactionId: text("transaction_id"),
+    providerJobId: text("provider_job_id"),
+    inngestEventId: text("inngest_event_id"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    completedAt: timestamp("completed_at"),
+  },
+  (t) => [
+    index("crj_user_created_idx").on(t.userId, t.createdAt),
+    index("crj_status_idx").on(t.status),
+  ]
+);
+
+export type CanvasRemoteJob = typeof canvasRemoteJob.$inferSelect;
+export type NewCanvasRemoteJob = typeof canvasRemoteJob.$inferInsert;
+export type CanvasRemoteJobStatus =
+  (typeof canvasRemoteJobStatusEnum.enumValues)[number];
+export type CanvasRemoteCapability =
+  (typeof canvasRemoteCapabilityEnum.enumValues)[number];
+
+// ============================================
+// Better Auth 关联关系（启用 experimental.joins 后必填）
+// ============================================
+//
+// 这些 relations 让 Better Auth 的 drizzle 适配器走
+// db.query.<model>.findFirst({ with: ... }) 路径，
+// 否则 findSession 等带 join 的查询会走"fallback join"二次查询，
+// 并把内部失败吞成日志噪音（Failed to query fallback join for model user）。
+
+export const userRelations = relations(user, ({ many, one }) => ({
+  sessions: many(session),
+  accounts: many(account),
+  subscriptions: many(subscription),
+  creditsBalances: many(creditsBalance),
+  creditsBatches: many(creditsBatch),
+  creditsTransactions: many(creditsTransaction),
+  photos: many(photo),
+  imageJobs: many(imageJob),
+  canvasRemoteJobs: many(canvasRemoteJob),
+  tickets: many(ticket),
+  ticketMessages: many(ticketMessage),
+  // 2026-09-03：代理商归属（ToB 自下单 / (agent) route group）
+  agent: one(agent, {
+    fields: [user.agentId],
+    references: [agent.id],
+  }),
+}));
+
+export const sessionRelations = relations(session, ({ one }) => ({
+  user: one(user, {
+    fields: [session.userId],
+    references: [user.id],
+  }),
+}));
+
+export const accountRelations = relations(account, ({ one }) => ({
+  user: one(user, {
+    fields: [account.userId],
+    references: [user.id],
+  }),
+}));
+
+// verification 表没有 userId 外键；保留空 relations 让 Drizzle
+// 把 verification 注册到 db.query，避免 experimental.joins 报错。
+export const verificationRelations = relations(verification, () => ({}));
+
+// ============================================
+// GPT-Image 业务关联关系（用于 db.query 嵌套 with）
+// ============================================
+
+export const promptTemplateRelations = relations(
+  promptTemplate,
+  ({ many }) => ({
+    orders: many(promptOrder),
+    // 2026-09-12：模板价格规则（按规格加价）
+    prices: many(promptTemplatePrice),
+  })
+);
+
+// 2026-09-12：价格规则反向引用模板（用于 db.query 嵌套 with: prices）
+export const promptTemplatePriceRelations = relations(
+  promptTemplatePrice,
+  ({ one }) => ({
+    template: one(promptTemplate, {
+      fields: [promptTemplatePrice.templateId],
+      references: [promptTemplate.id],
+    }),
+  })
+);
+
+// ============================================
+// 2026-09-13：代理商 demo 流「分享给客户预览」独立凭证表 (PreviewShare)
+// ============================================
+//
+// 分享链接 ≠ 下单。本表承载「分享链接」实体，**不**污染 promptOrder 列表。
+// 之前用 promptOrder.isPreviewShare=true + status=CANDIDATES_READY 共用
+// promptOrder 表达分享链接语义，但 promptOrder 是订单实体（SELECTED 后走
+// 生产排期、占用订单号、扣 credit），混进 promptOrder 会让 /image-gen/orders
+// 列表看到一堆「待确认」凭证而非真实订单。本表专为「分享链接」设计：
+//
+// 状态机：PENDING → CONFIRMED（客人主动确认 / 关联 promptOrder）→ linkedOrderId
+//        写入；PENDING → EXPIRED（cron 清理 expires_at < now）
+//
+// 与 promptOrder 的关系：CONFIRMED 后 guest-submit 路由 NEW INSERT
+// promptOrder(status='SELECTED') 并 UPDATE preview_share.linkedOrderId
+// 反指新建订单。客人后续再访问 /p/{token} 时按 linkedOrderId 跳转 SELECTED 视图。
+//
+// 字段语义：
+//   - token：访问 token（与 promptOrder.token 同生成器 randomBytes(16).hex）
+//   - candidates：[[demoPreviewUrl]] 嵌套数组，与 promptOrder.candidates 对齐，
+//     /api/orders/[token]/candidates/[imageIdx]/[candIdx] 路由按 token 查
+//     preview_share 返图
+//   - selectedCell：客人最终选的分镜（0..N-1），CONFIRMED 时写入；PENDING 时 null
+//   - creditsCharged / creditsBreakdown：创建时由 price-calculator 提前算好
+//     写入，避免客人确认时重算导致预览价 / 实际价漂移
+//   - linkedOrderId：confirmed 时指向新建 promptOrder.id（nullable）
+//   - confirmedByIp：客人确认时的 IP（防滥用 / 审计）
+//   - expiresAt：默认 now + 7 天，超时未确认 → 状态置 expired
+//
+// FK 关系：
+//   - templateId → promptTemplate.id ON DELETE RESTRICT（模板不能删）
+//   - createdBy → user.id ON DELETE SET NULL（删代理商保留审计）
+//   - linkedOrderId：文字字段不绑 FK（promptOrder 与 previewShare 互相反指会
+//     形成循环 FK；删 promptOrder 时由应用层清 preview_share.linked_order_id）
+// ============================================
+// 2026-09-14：preview 流升级为 6 步工作台，扩 status 至 9 态。
+//
+// 状态机：
+//   pending → uploaded → generating → candidates_ready → selected → confirmed
+//   任意状态可逃逸到 failed / cancelled / expired
+// 保留 pending / confirmed / expired 与现有凭证兼容。
+//
+// 实现为 TS literal union（不挂 PG enum 类型）—— 历史原因：0016_preview_share.sql
+// 用 "status" text NOT NULL DEFAULT 'pending' 直接建 text 列，没创建
+// preview_share_status PG enum 类型；后续 ALTER TYPE 加值会撞 "type does not exist"。
+// status 在 schema.ts 改为 text + 应用层 enumValues 校验更稳。
+export const previewShareStatusValues = [
+  "pending",
+  "uploaded",
+  "generating",
+  "candidates_ready",
+  "selected",
+  "confirmed",
+  "expired",
+  "failed",
+  "cancelled",
+] as const;
+export type PreviewShareStatus = (typeof previewShareStatusValues)[number];
+
+export const previewShare = pgTable(
+  "preview_share",
+  {
+    id: text("id").primaryKey(),
+    /** 凭证号 IG-YYYYMMDD-XXXXXX（与 promptOrder.orderNo 同生成器 IG-XXXXXX 格式）。
+     * 用于代理商「我的分享凭证」列表 + 客人侧 TopBar 展示，与 promptOrder.orderNo
+     * 同语义（业务唯一凭证号），但语义是"分享凭证"而非"订单"。 */
+    orderNo: text("order_no").notNull().unique(),
+    /** 分享链接 token（randomBytes(16).hex，与 promptOrder.token 同生成器） */
+    token: text("token").notNull().unique(),
+    templateId: text("template_id")
+      .notNull()
+      .references(() => promptTemplate.id, { onDelete: "restrict" }),
+    /** 原图 R2 URL（demo 阶段用户上传的参考图，仅展示用） */
+    referenceImageUrl: text("reference_image_url").notNull(),
+    /** 效果图 R2 URL（demo 阶段生成的结果，作为 preview 凭证的预览图） */
+    demoPreviewUrl: text("demo_preview_url").notNull(),
+    /**
+     * 候选集（[[demoPreviewUrl]] 嵌套数组，与 promptOrder.candidates 对齐）。
+     * 写入时 JSON.stringify([[demoPreviewUrl]])。
+     */
+    candidates: text("candidates").notNull(),
+    /** 客人最终选的分镜（0..N-1），CONFIRMED 时由 guest-submit 路由写入 */
+    selectedCell: integer("selected_cell"),
+    /**
+     * 创建时算好的应扣积分（创建时不扣，CONFIRMED 时扣）。
+     * 0 = 免费模板（preview 凭证创建时不再额外收费）。
+     */
+    creditsCharged: integer("credits_charged").notNull().default(0),
+    /** 加价明细 JSON（与 promptOrder.creditsBreakdown 同结构） */
+    creditsBreakdown: text("credits_breakdown"),
+    // ---- 规格字段（与 promptOrder 对齐，CONFIRMED 时镜像写入新建 promptOrder） ----
+    productTypeCode: text("product_type_code"),
+    productSize: text("product_size"),
+    accessoryCode: text("accessory_code"),
+    /** 刻字内容（capability-gated，非 LB 型号始终 null） */
+    engravingText: text("engraving_text"),
+    /** 刻字是否外露（与 engravingText 独立 boolean） */
+    engravingExposed: boolean("engraving_exposed"),
+    // ---- 2026-09-10：LB 皮革徽章扩展定制 ----
+    leatherColor: text("leather_color"),
+    leatherExposed: boolean("leather_exposed"),
+    pvcProtection: boolean("pvc_protection"),
+    /** 备注（仅内部沟通，不参与生图；服务端 max 500） */
+    remarks: text("remarks"),
+    // ---- 2026-09-11：订单来源平台（PLATFORMS 字典 code） ----
+    platform: text("platform"),
+    platformOrderNo: text("platform_order_no"),
+    /** 状态机：9 态（见 previewShareStatusValues literal union）。text 列而非 PG enum —— 见上方注释 */
+    status: text("status").notNull().default("pending"),
+    /** 创建人（代理商 userId）。删代理商保留审计（set null） */
+    createdBy: text("created_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    /**
+     * CONFIRMED 后指向新建 promptOrder.id（nullable）。
+     * 文字字段不绑 FK —— promptOrder ↔ previewShare 互指会循环；删 promptOrder
+     * 时由应用层清理 preview_share.linked_order_id。
+     */
+    linkedOrderId: text("linked_order_id"),
+    /** CONFIRMED 时刻（nullable；PENDING 时 null） */
+    confirmedAt: timestamp("confirmed_at"),
+    /** CONFIRMED 时客人 IP（防滥用 / 审计） */
+    confirmedByIp: text("confirmed_by_ip"),
+    /** 过期时刻（默认 now + 7 天），超时未确认 → 状态置 expired */
+    expiresAt: timestamp("expires_at").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    // ---- 2026-09-14：preview 流升级为 6 步工作台（上传→生成→选 cell→重生成→确认） ----
+    /** 客人上传的原图 R2 URL 列表（JSON: ["url1","url2"]）。与 promptOrder.uploadedImages 同结构。 */
+    uploadedImages: text("uploaded_images"),
+    /** 每批参考图张数（preview 流硬编码 1，单张图）。与 promptOrder.imagesPerUpload 对齐。 */
+    imagesPerUpload: integer("images_per_upload").notNull().default(1),
+    /** 已上传批次数（preview 流永远 1）。与 promptOrder.uploadCount 对齐。 */
+    uploadCount: integer("upload_count").notNull().default(1),
+    /** 上传时刻（与 promptOrder.uploadedAt 镜像） */
+    uploadedAt: timestamp("uploaded_at"),
+    /** 首次生成完成时刻（与 promptOrder.generatedAt 镜像） */
+    generatedAt: timestamp("generated_at"),
+    /** 客人每批选的 cell 索引（JSON: {[fromIdx]:selectedIdx}）。镜像 promptOrder.selections。 */
+    selections: text("selections"),
+    /** 第一个锁定批的 candIdx（订单级最终选择）。镜像 promptOrder.selectedIndex。 */
+    selectedIndex: integer("selected_index"),
+    /** 终态确认时刻（与 promptOrder.selectedAt 镜像）。注意与 confirmedAt 不冲突：
+     * selectedAt 是「客人按 6 步走完 SELECTED 状态」的时刻；confirmedAt 是「preview 流状态机终结点」 */
+    selectedAt: timestamp("selected_at"),
+    /** 已选批数（派字段，避免每次 length(JSON)）。镜像 promptOrder.selectedBatchCount。 */
+    selectedBatchCount: integer("selected_batch_count").notNull().default(0),
+    /** Lingting 任务态（JSON: {tasks:[{imageIdx,taskId,submittedAt}],total}）。与 promptOrder.generationTask 同结构。 */
+    generationTask: text("generation_task"),
+    /** 生成失败原因（前端 FailureNotice 展示）。镜像 promptOrder.errorMessage。 */
+    errorMessage: text("error_message"),
+    /** 客人取消时刻（status='cancelled' 时写入） */
+    cancelledAt: timestamp("cancelled_at"),
+    /** 代理商 credit 锁定总额 = totalCredits × (1 + regenerateLimit)。创建时预扣，终态释放多余。 */
+    creditsLocked: integer("credits_locked").notNull().default(0),
+    /** credit 锁定时刻 */
+    creditsLockedAt: timestamp("credits_locked_at"),
+    /** 整张凭证可重新生成次数上限（preview 流硬编码默认 3）。MVP 不暴露给代理商配置。 */
+    regenerateLimit: integer("regenerate_limit").notNull().default(3),
+    /** 已使用重新生成次数。confirm 时不再增加。 */
+    usedRegenerateCount: integer("used_regenerate_count").notNull().default(0),
+  },
+  (t) => [
+    // 按 createdBy + createdAt 倒序：代理商「我的分享凭证」列表
+    index("preview_share_creator_created_idx").on(
+      t.createdBy,
+      desc(t.createdAt)
+    ),
+    // cron 清理 expired 凭证：WHERE status='pending' AND expires_at < now()
+    index("preview_share_status_expires_idx").on(t.status, t.expiresAt),
+    // 客人确认后跳 SELECTED 视图：WHERE linked_order_id = ? 反查 promptOrder
+    index("preview_share_linked_order_idx").on(t.linkedOrderId),
+    // 6 步工作台：/status + /poll 路由按 token + status 查
+    index("preview_share_uploads_idx").on(t.token, t.status),
+  ]
+);
+
+export type PreviewShare = typeof previewShare.$inferSelect;
+export type NewPreviewShare = typeof previewShare.$inferInsert;
+
+export const promptOrderRelations = relations(promptOrder, ({ one, many }) => ({
+  template: one(promptTemplate, {
+    fields: [promptOrder.templateId],
+    references: [promptTemplate.id],
+  }),
+  history: many(promptOrderHistory),
+  agent: one(agent, {
+    fields: [promptOrder.agentId],
+    references: [agent.id],
+  }),
+}));
+
+// 2026-09-13：preview_share ↔ promptTemplate / user 关联。
+// linkedOrderId 不绑 relation（避免循环 FK + 用 application layer 维护一致性）。
+export const previewShareRelations = relations(previewShare, ({ one }) => ({
+  template: one(promptTemplate, {
+    fields: [previewShare.templateId],
+    references: [promptTemplate.id],
+  }),
+  creator: one(user, {
+    fields: [previewShare.createdBy],
+    references: [user.id],
+  }),
+}));
+
+export const agentRelations = relations(agent, ({ many }) => ({
+  orders: many(promptOrder),
+  // 2026-09-03：反向 user → 代理商下挂的所有账号（按 agentId 过滤）
+  users: many(user),
+  // 2026-09-03：可选归属账号（agent 表的 owner 概念，nullable）
+  // 当前不启用，先把 relations 留位以免后续添加时 relation 找不到 user 表
+  // owner: one(user, { fields: [agent.ownerUserId], references: [user.id] }),
+}));
+
+export const promptOrderHistoryRelations = relations(
+  promptOrderHistory,
+  ({ one }) => ({
+    order: one(promptOrder, {
+      fields: [promptOrderHistory.orderId],
+      references: [promptOrder.id],
+    }),
+  })
+);
+
+export const canvasRemoteJobRelations = relations(
+  canvasRemoteJob,
+  ({ one }) => ({
+    user: one(user, {
+      fields: [canvasRemoteJob.userId],
+      references: [user.id],
+    }),
+  })
+);
+
+// ============================================
+// 外部生图 API Key 表 (External API Keys) - 2026-10-12
+// ============================================
+/**
+ * 外部生图 API Key —— 给小程序 / 浏览器访客 / 第三方合作伙伴调用
+ * /api/public/generate 时使用的服务端预配置 Key。
+ *
+ * 设计要点：
+ * - 安全：DB 只存 SHA-256(keyHash)，明文 rawKey 仅在 admin 新建时一次性返回，
+ *   之后任何 UI / API 都只能看脱敏 keyPrefix（首 4 + 尾 4）。
+ * - 独立配额：monthlyQuota + monthlyCalls + monthlyCallsResetAt，每月 1 号自动重置
+ *   （由 service 层在 verify 时按需触发，不是 cron 依赖）。
+ * - 允许效果：allowedMasks（JSON 字符串数组）。空数组 = 不允许任何 mask，只走默认 prompt 流；
+ *   实际业务中 admin 通常给合作伙伴白名单几个效果以收敛风格。
+ * - status 软删除：admin 调 disable 时改 status="disabled"，不全删以便审计。
+ *
+ * 索引：keyHash 必须 unique（验证时按 hash 查）；userId 列冗余索引便于排查；
+ * status + deletedAt 复合索引利于按状态过滤（admin 列表按 active 排序时常用）。
+ */
+export const externalApiKeyStatusEnum = pgEnum("external_api_key_status", [
+  "active",
+  "disabled",
+]);
+
+export const externalApiKey = pgTable(
+  "external_api_key",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    // SHA-256(rawKey) 64 字符 hex —— 用于 verifyExternalApiKey 时按 hash 查
+    keyHash: text("key_hash").notNull(),
+    // 脱敏显示：首 4 + "****" + 尾 4，例如 "mk_p****abcd"
+    keyPrefix: text("key_prefix").notNull(),
+    status: externalApiKeyStatusEnum("status").notNull().default("active"),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => user.id, { onDelete: "restrict" }),
+    // 月配额：≤0 视为无限配额（service 层处理）
+    monthlyQuota: integer("monthly_quota").notNull().default(100),
+    // 当月已调用次数；跨月时 service 层按 monthlyCallsResetAt 触发重置
+    monthlyCalls: integer("monthly_calls").notNull().default(0),
+    monthlyCallsResetAt: timestamp("monthly_calls_reset_at")
+      .notNull()
+      .defaultNow(),
+    // 累计调用：永远累加，只增不减
+    totalCalls: integer("total_calls").notNull().default(0),
+    lastUsedAt: timestamp("last_used_at"),
+    // 允许使用的 maskId 列表（JSON 字符串数组）；空数组 = 仅允许默认 prompt 流
+    allowedMasks: text("allowed_masks").notNull().default("[]"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    // 软删除：admin "删除" 时不真删，标记 deletedAt 便于审计
+    deletedAt: timestamp("deleted_at"),
+  },
+  (table) => ({
+    keyHashUnique: uniqueIndex("external_api_key_hash_unique").on(
+      table.keyHash
+    ),
+    statusIdx: index("external_api_key_status_idx").on(
+      table.status,
+      table.deletedAt
+    ),
+  })
+);
+
+export type ExternalApiKey = typeof externalApiKey.$inferSelect;
+export type NewExternalApiKey = typeof externalApiKey.$inferInsert;

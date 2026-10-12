@@ -1,0 +1,1076 @@
+{
+  "HomePage": {
+    "title": "Mooncoda",
+    "subtitle": "WJP 全彩 3D 打印专家",
+    "description": "宠物徽章、钥匙扣、冰箱贴、手办等一件定制、一件发货。"
+  },
+  "Hero": {
+    "badge": "支持一件定制 · 一件发货",
+    "eyebrow": "WJP 全彩 3D 打印 · 宠物周边 · 礼品定制",
+    "featuredLabel": "精选",
+    "title1": "你的想象，",
+    "titleHighlight": "一件就能打印。",
+    "subtitle": "Mooncoda 梦可达专注 WJP 全彩 3D 打印——宠物徽章、钥匙扣、冰箱贴、手办、礼品模型。从一张照片到手中实物，最快 24 小时，一件起定、一件发货，把每一份心意都做成限量款。",
+    "getStarted": "上传图片定制",
+    "seeDemo": "查看作品集",
+    "trustPromise": "一件起印 · 7 天到家 · 不满意免费重做",
+    "trustLine": "已为数千位创作者定制",
+    "stats": {
+      "cards": "已交付订单",
+      "users": "合作创作者",
+      "rating": "复购率"
+    },
+    "meta": {
+      "modules": "类定制产品",
+      "tests": "全彩精度 · 微米级",
+      "errors": "件起定 · 无最小量",
+      "license": "一件发货 · 全程速运"
+    },
+    "products": {
+      "label": "产品系列",
+      "allLink": "查看全部",
+      "keychain": {
+        "name": "钥匙扣",
+        "size": "40-60mm",
+        "price": "¥89 起"
+      },
+      "badge": {
+        "name": "宠物徽章",
+        "size": "30-50mm",
+        "price": "¥49 起"
+      },
+      "magnet": {
+        "name": "冰箱贴",
+        "size": "70-100mm",
+        "price": "¥89 起"
+      },
+      "figure": {
+        "name": "手办",
+        "size": "100-200mm",
+        "price": "¥299 起"
+      }
+    }
+  },
+  "Features": {
+    "label": "为什么选我们",
+    "title": "你的照片，一件实物，七天到家",
+    "subtitle": "为想拥有一件独一无二作品的人设计。从上传到收货，每一步都是为单件定制而造，不是为批量生产而生。",
+    "items": {
+      "ai": {
+        "title": "AI 自动 3D 化",
+        "description": "上传宠物照、人物照、插画，AI 几分钟就能生成 3D 模型。不用学 Blender，不用懂建模。"
+      },
+      "multiSource": {
+        "title": "多角度预览",
+        "description": "打印前 360° 环绕看效果，每一个角度、每一处渐变都先确认，所见即所得。"
+      },
+      "outline": {
+        "title": "全彩细节还原",
+        "description": "WJP 一件直出 1600 万色，毛发、织物、眼神、阴影——你照片里的细节，都能保留。"
+      },
+      "export": {
+        "title": "一件起印",
+        "description": "不设起订量、不凑批量。想要一枚徽章，就下一枚。一件和一千件都是工厂级质量。"
+      },
+      "batch": {
+        "title": "7 天到家",
+        "description": "24 小时出建模稿，48-72 小时打印，全程速运，从上传到收货 7 天搞定。"
+      },
+      "multilingual": {
+        "title": "全球直邮",
+        "description": "覆盖 100+ 国家与地区的速运服务。独立礼盒 + 定制编号，收到即可送人。"
+      }
+    }
+  },
+  "HowItWorks": {
+    "label": "定制流程",
+    "title": "三步搞定，把想象变成实物",
+    "subtitle": "从一张照片到送到家——不用懂设计，不用学建模。",
+    "steps": {
+      "upload": {
+        "title": "挑一张你喜欢的照片",
+        "description": "宠物照、人物照、OC 立绘、婚纱照……只要主体清晰就行。一张能下单，多角度效果更好。"
+      },
+      "generate": {
+        "title": "确认 3D 预览",
+        "description": "我们把照片变成 3D 模型，24 小时内出多角度渲染图。免费改一次稿，不满意可全额退款。"
+      },
+      "export": {
+        "title": "投入打印 + 寄送",
+        "description": "确认后进入工业 WJP 产线，全彩打印 + 固化 + 抛光，48-72 小时完成。"
+      }
+    },
+    "completion": {
+      "title": "7 天到家",
+      "description": "独立礼盒 + 定制编号 + 全球速运，绝大部分订单 5-7 个工作日送达。"
+    }
+  },
+  "ImageToObject": {
+    "label": "来图定制 · 看见魔法",
+    "title": "一张照片 → 一个真东西",
+    "subtitle": "AI 帮你建模，WJP 帮你打印。从你按下快门的那一刻，到拿到手上的实物，大概就是看完一部电影的时间。",
+    "photoLabel": "你的照片",
+    "photoMeta": "JPG · 1080p",
+    "transformLabel": "AI 渲染",
+    "productBadge": "3D 实拍",
+    "productName": "宠物定制徽章",
+    "productMeta": "WJP · 全彩",
+    "caption": "同一张照片，两种身份——左边是你手机里的照片，右边是你能握在手里的实物。",
+    "steps": {
+      "s1": "上传照片",
+      "s2": "AI 自动建模",
+      "s3": "全彩打印发货"
+    }
+  },
+  "UseCases": {
+    "label": "产品系列",
+    "title": "四种方式，让想象落地",
+    "subtitle": "挑一个最适合你的形式，所有系列都用同一套 WJP 全彩工艺——只有尺寸和配件不同。",
+    "items": {
+      "badge": {
+        "title": "宠物徽章",
+        "subtitle": "30-50mm 可佩戴的小心思",
+        "description": "把毛孩子、角色、回忆随身携带。夹在外套、包包、帽子上，永远不离身。",
+        "examples": ["宠物纪念", "角色徽章", "小礼物挂件"]
+      },
+      "keychain": {
+        "title": "钥匙扣 / 冰箱贴",
+        "subtitle": "40-100mm 挂或贴的小物",
+        "description": "挂在钥匙上、冰箱上、手机上。价格友好的入门款，也是 ToB 周边的高频选项。",
+        "examples": ["日常钥匙扣", "冰箱贴", "手机挂件"]
+      },
+      "figure": {
+        "title": "手办 / 立牌",
+        "subtitle": "100-200mm 桌面收藏摆件",
+        "description": "你的 OC、你的婚纱照、你的品牌 IP——全彩桌面摆件，附赠展示底座。",
+        "examples": ["OC / 角色手办", "婚礼立牌", "品牌 IP 形象"]
+      },
+      "gift": {
+        "title": "礼品套装",
+        "subtitle": "高级礼盒精包装",
+        "description": "一件定制 + 精挑礼盒 + 定制卡片 + 丝带，可加刻字。婚礼、周年、里程碑生日的仪式感。",
+        "examples": ["婚礼伴手礼", "周年纪念", "里程碑生日"]
+      }
+    }
+  },
+  "Testimonials": {
+    "label": "客户评价",
+    "title": "听听他们怎么说",
+    "subtitle": "从个人用户到企业客户，从宠物纪念到企业伴手礼。",
+    "items": [
+      {
+        "content": "把我家金毛的照片做成了徽章和钥匙扣，颜色还原度惊艳，连眉毛上的小绒毛都清晰可见，毛孩子走了一年了还能摸到它。",
+        "author": "小柚",
+        "role": "宠物纪念 · 北京"
+      },
+      {
+        "content": "公司 30 人年会伴手礼，logo 全彩定制 + 个性化名字，从下单到收货 7 天，同事们都说像在拆盲盒，仪式感拉满。",
+        "author": "Mark",
+        "role": "企业活动 · 上海"
+      },
+      {
+        "content": "插画师的 OC 角色终于做成实体手办了，全彩细节把我画的渐变色和阴影都打出来了，200mm 大货拿在手里非常有分量。",
+        "author": "Yuki",
+        "role": "插画师 · 杭州"
+      },
+      {
+        "content": "婚礼做了 50 份新人 Q 版立牌当伴手礼，每对来宾都收到自己专属的那份，全彩打印的礼服褶皱都看得见，宾客好评率 100%。",
+        "author": "阿楠 & 小七",
+        "role": "婚礼纪念 · 成都"
+      },
+      {
+        "content": "做文创产品最怕起定量，这家一件也接，让我能用最低成本验证市场，爆款打样后才上大货，省了大笔开模费。",
+        "author": "Studio MoMo",
+        "role": "文创设计师 · 苏州"
+      },
+      {
+        "content": "服务态度特别好，模型稿反复改了三次都没收费，最后成品的颜色和质感都超出预期，是会回购的店。",
+        "author": "Daniel",
+        "role": "收藏玩家 · 深圳"
+      }
+    ]
+  },
+  "FAQ": {
+    "label": "常见问题",
+    "title": "你可能想了解的",
+    "subtitle": "关于 WJP 全彩 3D 打印定制服务。",
+    "morePrompt": "还有别的想问？欢迎来信 →",
+    "items": [
+      {
+        "question": "WJP 全彩 3D 打印是什么？",
+        "answer": "WJP (Wax Jet Printing) 是工业级全彩 3D 打印工艺，使用喷蜡 + 固化成型，可以直接打印 1600 万色真彩模型，无需后处理上色。色彩还原度高、纹理细腻，特别适合人像、宠物、二次元角色等需要保留色彩与细节的场景。"
+      },
+      {
+        "question": "一件真的可以下单吗？有没有最小量？",
+        "answer": "完全可以。一件起定，不设最小量。我们的产线专为单件 / 小批量定制设计，从下单到收货全流程单件独立处理。批量订单（30 件以上）可享团购价，详见定价页面。"
+      },
+      {
+        "question": "下单后多久能收到？",
+        "answer": "常规定制 5-7 个工作日送达（偏远地区除外）。流程：建模稿 24 小时 → 客户确认 → WJP 打印 48-72 小时 → 立即发出。加急服务请联系客服。"
+      },
+      {
+        "question": "我只有一张照片可以吗？需要专业图吗？",
+        "answer": "一张正面照也能做，但效果可能略逊。建议提供 3-5 张不同角度照片（正面 + 侧面 + 背面 / 俯视），或一张正面照 + 文字描述。AI 生成的图、插画、二次元立绘都可以。"
+      },
+      {
+        "question": "可以做哪些产品？尺寸有上限吗？",
+        "answer": "宠物徽章（约 30-50mm）、钥匙扣（约 40-60mm）、冰箱贴（约 60-100mm）、手办（约 100-200mm）、立牌（约 150-300mm）都能做。超过 200mm 或复杂造型请联系客服评估。"
+      },
+      {
+        "question": "模型文件版权归谁？",
+        "answer": "版权归你。建模完成后我们会同步提供 STL / OBJ 文件下载，你可以用于个人收藏、二次打印或商业再授权。我们不保留版权，不二次销售你的作品。"
+      },
+      {
+        "question": "如果我对成品不满意怎么办？",
+        "answer": "建模稿阶段可免费修改一次；不满意建模可直接全额退款。打印阶段如出现工艺瑕疵（缺色、断裂等），免费重做或全额退款。运输破损凭包装照片免费补发。"
+      },
+      {
+        "question": "支持哪些付款方式？可以开发票吗？",
+        "answer": "支持微信、支付宝、对公转账。企业用户可申请增值税普通发票 / 专用发票，联系客服登记即可。"
+      }
+    ]
+  },
+  "Auth": {
+    "common": {
+      "or": "或",
+      "google": "Google",
+      "github": "GitHub",
+      "countryCode": "区号",
+      "phonePlaceholder": "138 0013 8000"
+    },
+    "signIn": {
+      "title": "欢迎回来",
+      "subtitle": "请输入你的账号信息以继续登录。",
+      "emailLabel": "邮箱",
+      "emailPlaceholder": "you@example.com",
+      "passwordLabel": "密码",
+      "forgotPassword": "忘记密码",
+      "loading": "登录中...",
+      "submit": "继续",
+      "success": "登录成功！",
+      "resendVerification": "重新发送验证邮件",
+      "resendCooldown": "{seconds}秒后可重新发送",
+      "noAccount": "还没有账号？",
+      "signUpLink": "注册",
+      "tabs": {
+        "email": "邮箱",
+        "phone": "手机号"
+      },
+      "phone": {
+        "phoneLabel": "手机号",
+        "phonePlaceholder": "138 0013 8000",
+        "otpLabel": "验证码",
+        "otpHint": "没收到？请检查垃圾箱或重新发送",
+        "resend": "重新发送验证码",
+        "resendCooldown": "{seconds}秒后可重新发送",
+        "sendOtp": "发送验证码",
+        "verifySubmit": "验证并登录",
+        "useOtpInstead": "改用验证码登录",
+        "backToPassword": "改用密码登录",
+        "otpSent": "验证码已发送",
+        "resetSubmit": "重置密码",
+        "resetSuccess": "密码已重置，请用新密码登录",
+        "newPasswordLabel": "新密码",
+        "newPasswordPlaceholder": "至少 8 个字符",
+        "errors": {
+          "phoneRequired": "请输入手机号",
+          "phoneNotExist": "该手机号未注册，将发送验证码以创建账号",
+          "phoneNotVerified": "手机号未验证，将发送验证码",
+          "phoneExist": "该手机号已被注册",
+          "invalidOtp": "验证码错误",
+          "otpExpired": "验证码已过期，请重新发送",
+          "tooManyAttempts": "尝试次数过多，请稍后再试",
+          "passwordRequired": "请输入新密码（至少 8 个字符）",
+          "sendOtpFailed": "发送验证码失败，请重试",
+          "verifyFailed": "验证失败，请重试",
+          "generic": "出错了，请重试"
+        }
+      },
+      "errors": {
+        "google": "Google 登录失败，请重试",
+        "github": "GitHub 登录失败，请重试",
+        "missingFields": "请填写邮箱和密码",
+        "invalidCredentials": "邮箱或密码错误",
+        "emailNotVerified": "请先验证邮箱后再登录。请查看收件箱中的验证链接。"
+      }
+    },
+    "signUp": {
+      "title": "创建账号",
+      "subtitle": "填写信息即可开始使用。",
+      "nameLabel": "姓名",
+      "namePlaceholder": "张三",
+      "emailLabel": "邮箱",
+      "emailPlaceholder": "you@example.com",
+      "passwordLabel": "密码",
+      "passwordPlaceholder": "至少 8 个字符",
+      "confirmPasswordLabel": "确认密码",
+      "confirmPasswordPlaceholder": "再次输入密码",
+      "loading": "正在创建...",
+      "submit": "创建账号",
+      "success": "注册成功！",
+      "haveAccount": "已有账号？",
+      "signInLink": "登录",
+      "errors": {
+        "google": "Google 注册失败，请重试",
+        "github": "GitHub 注册失败，请重试",
+        "missingFields": "请填写所有字段",
+        "passwordTooShort": "密码至少需要 8 个字符",
+        "passwordMismatch": "两次输入的密码不一致",
+        "emailInUse": "注册失败，该邮箱可能已被使用"
+      },
+      "verifyEmail": {
+        "title": "请查收邮件",
+        "description": "我们已向 {email} 发送了一封验证邮件，请点击邮件中的链接完成验证。",
+        "hint": "没有收到邮件？请检查垃圾邮件文件夹。",
+        "resend": "重新发送验证邮件",
+        "resendCooldown": "{seconds}秒后可重新发送",
+        "backToSignIn": "返回登录"
+      }
+    },
+    "footer": {
+      "copyright": "© {year} {name}。保留所有权利。",
+      "privacy": "隐私政策",
+      "terms": "服务条款",
+      "cookies": "Cookie 设置"
+    },
+    "brand": {
+      "headline": "把你的想象，变成手中的实物。",
+      "sub": "Mooncoda 梦可达专注 WJP 全彩 3D 打印——宠物徽章、钥匙扣、冰箱贴、手办等，一件定制、一件发货。",
+      "points": {
+        "onePiece": "一件定制 · 一件发货 · 无最小量",
+        "fullColor": "WJP 全彩工艺 · 1600 万色还原",
+        "shipping": "全程速运 · 独立礼盒包装",
+        "copyright": ""
+      },
+      "rights": "保留所有权利。"
+    }
+  },
+  "CTA": {
+    "badge": "一件起定 · 一件发货",
+    "title": "一张照片，把想象摆上桌面",
+    "subtitle": "不需要设计技能，没有起订量，不用等几周。上传一张照片，24 小时拿到全彩 3D 建模稿，7 天收到实物。",
+    "getStarted": "上传我的照片",
+    "seeDemo": "看看大家做的"
+  },
+  "Stats": {
+    "label": "信任",
+    "title": "用订单堆出来的数字",
+    "subtitle": "下面每一个数字都是真正做出来、发出去的作品——不是营销话术。",
+    "items": {
+      "units": {
+        "value": "5,000+",
+        "label": "件定制交付"
+      },
+      "rating": {
+        "value": "4.9",
+        "suffix": "/5",
+        "label": "客户好评"
+      },
+      "shipping": {
+        "value": "7",
+        "suffix": "天",
+        "label": "平均交付"
+      },
+      "countries": {
+        "value": "100+",
+        "label": "国家与地区"
+      }
+    }
+  },
+  "LogoCloud": {
+    "label": "在哪能找到我们",
+    "title": "覆盖创作者聚集的主要平台",
+    "subtitle": "创作者与送礼人在哪里，我们就在哪里。下方为占位 logo，后续可替换为真实合作品牌。",
+    "items": {
+      "taobao": { "name": "淘宝" },
+      "xiaohongshu": { "name": "小红书" },
+      "douyin": { "name": "抖音" },
+      "weibo": { "name": "微博" },
+      "bilibili": { "name": "哔哩哔哩" },
+      "pdd": { "name": "拼多多" },
+      "jd": { "name": "京东" },
+      "tmall": { "name": "天猫" }
+    }
+  },
+  "Comparison": {
+    "label": "对比",
+    "title": "自己动手 vs. 交给 Mooncoda",
+    "subtitle": "跳过建模工具，跳过工厂起订量，跳过几周来回沟通。",
+    "header": {
+      "diy": "自己 DIY",
+      "us": "Mooncoda 帮你做"
+    },
+    "rows": {
+      "modeling": {
+        "aspect": "3D 建模",
+        "diy": "自学 Blender 数周",
+        "us": "AI 一键自动生成"
+      },
+      "color": {
+        "aspect": "色彩",
+        "diy": "手涂上色难均匀",
+        "us": "WJP 1600 万色直出"
+      },
+      "moq": {
+        "aspect": "起订量",
+        "diy": "工厂一般 50 件起",
+        "us": "1 件就能下单"
+      },
+      "delivery": {
+        "aspect": "交付",
+        "diy": "沟通打样 2-4 周",
+        "us": "7 天一件到家"
+      },
+      "revision": {
+        "aspect": "改稿",
+        "diy": "自己重画",
+        "us": "免费重新生成"
+      }
+    }
+  },
+  "DashboardPages": {
+    "dashboard": {
+      "title": "控制台",
+      "subtitle": "欢迎回来！这里是你的概览。",
+      "stats": {
+        "credits": {
+          "title": "积分余额",
+          "description": "可用余额"
+        },
+        "plan": {
+          "title": "订阅计划",
+          "description": "当前订阅"
+        },
+        "earned": {
+          "title": "累计获得",
+          "description": "历史总收入"
+        },
+        "spent": {
+          "title": "累计消费",
+          "description": "历史总支出"
+        }
+      },
+      "actions": {
+        "credits": "获取积分",
+        "settings": "账号设置",
+        "support": "获取支持"
+      },
+      "transactions": {
+        "title": "最近动态",
+        "viewAll": "查看全部",
+        "empty": "还没有交易记录——你的积分动态会显示在这里。"
+      },
+      "planCard": {
+        "free": "免费计划",
+        "renews": "{date} 续期",
+        "cancels": "{date} 到期取消",
+        "manage": "管理订阅",
+        "upgrade": "升级计划"
+      }
+    },
+    "generate": {
+      "title": "生图工作台",
+      "subtitle": "选择模型与效果，生成你的 2D 效果图。"
+    },
+    "photos": {
+      "title": "照片库",
+      "subtitle": "管理你上传的参考照片。"
+    },
+    "effects": {
+      "title": "效果图历史",
+      "subtitle": "查看你生成的所有 2D 效果图。"
+    },
+    "models": {
+      "title": "3D 模型",
+      "subtitle": "管理从效果图生成的 3D 打印模型。"
+    }
+  },
+  "CreditTransactions": {
+    "anonymous_migration": "迁移 {cardCount} 条匿名生成的数据",
+    "anonymous_migration_bonus": "新用户福利：免费保存 {cardCount} 条数据"
+  },
+  "Common": {
+    "getStarted": "开始使用",
+    "login": "登录",
+    "dashboard": "控制台",
+    "products": "产品",
+    "pricing": "定价",
+    "blog": "博客",
+    "docs": "文档",
+    "features": "功能",
+    "changelog": "更新日志",
+    "relativeTime": {
+      "justNow": "刚刚",
+      "minutesAgo": "{count} 分钟前",
+      "hoursAgo": "{count} 小时前",
+      "daysAgo": "{count} 天前",
+      "monthsAgo": "{count} 个月前",
+      "yearsAgo": "{count} 年前"
+    }
+  },
+  "Cookie": {
+    "title": "Cookie 设置",
+    "description": "我们使用 Cookie 来确保您在我们网站上获得最佳体验。继续使用本网站即表示您同意我们的",
+    "privacyPolicy": "隐私政策",
+    "acceptAll": "接受全部",
+    "rejectAll": "仅必要",
+    "managePreferences": "管理偏好",
+    "back": "返回",
+    "preferencesTitle": "Cookie 偏好设置",
+    "dialog": {
+      "title": "管理 Cookie 偏好",
+      "heading": "您的隐私选择",
+      "description": "您可以在此面板中随时查看并修改 Cookie 偏好。若不希望我们使用可选类别，请关闭对应开关；若只接受必要 Cookie，也可以直接选择“仅必要”。",
+      "acceptCurrentSelection": "接受当前选择"
+    },
+    "card": {
+      "title": "Cookie 设置",
+      "description": "在这里管理您的 Cookie 设置。",
+      "savePreferences": "保存偏好"
+    },
+    "essential": {
+      "title": "必要 Cookie",
+      "description": "这些 Cookie 是网站正常运行所必需的，无法关闭。"
+    },
+    "functional": {
+      "title": "功能性 Cookie",
+      "description": "这些 Cookie 用于启用个性化功能与体验。"
+    },
+    "analytics": {
+      "title": "分析 Cookie",
+      "description": "帮助我们了解访问者如何与网站互动，以便改进用户体验。"
+    },
+    "performance": {
+      "title": "性能 Cookie",
+      "description": "这些 Cookie 帮助我们了解访问者如何与网站互动。"
+    },
+    "marketing": {
+      "title": "营销 Cookie",
+      "description": "用于向您展示相关广告和营销内容。"
+    },
+    "alwaysEnabled": "始终启用",
+    "saveSettings": "保存设置"
+  },
+  "Pricing": {
+    "label": "定价",
+    "title": "透明定价，一件起定",
+    "subtitle": "按<strong>产品类型与尺寸</strong>定价，<strong>无最小起订量</strong>。批量订单享团购价，30 件以上 9 折。",
+    "creditsUpfront": "一件起印",
+    "creditsPerYear": "件 / 套",
+    "monthly": "单件",
+    "yearly": "套装",
+    "save": "团购",
+    "mostPopular": "人气款",
+    "currentPlan": "已选",
+    "alreadySubscribed": "已下单",
+    "manageSubscription": "再下一单",
+    "booksNote": "≈ 适用场景 {count}",
+    "cardsNote": "≈ 单件价 {count}",
+    "plans": {
+      "free": {
+        "name": "宠物徽章",
+        "description": "30-50mm，全彩胸针 / 徽章",
+        "cta": "立即定制",
+        "creditsAmount": "¥49",
+        "creditsLabel": "/ 件",
+        "creditsNote": "一件起印",
+        "features": {
+          "creditsNeverExpire": "全彩 WJP 工艺打印",
+          "credits": "1 件 30-50mm 徽章",
+          "input": "上传图 → 3D 建模稿",
+          "characters": "全国包邮 · 独立包装",
+          "fileSize": "附赠定制卡片",
+          "export": "高清原图归档下载",
+          "history": "成品专属编号"
+        }
+      },
+      "starter": {
+        "name": "钥匙扣 / 冰箱贴",
+        "description": "40-100mm，挂件 / 冰箱贴系列",
+        "cta": "立即定制",
+        "creditsAmount": "¥89",
+        "creditsLabel": "/ 件",
+        "booksCount": "2",
+        "features": {
+          "creditsNeverExpire": "全彩 WJP 工艺打印",
+          "credits": "1 件 40-100mm 挂件",
+          "input": "上传图 → 3D 建模稿",
+          "characters": "全国包邮 · 礼盒包装",
+          "fileSize": "附赠定制卡片",
+          "export": "高清原图归档下载",
+          "history": "成品专属编号",
+          "support": "可加金属挂扣 / 磁贴底"
+        }
+      },
+      "pro": {
+        "name": "手办 / 立牌",
+        "description": "100-200mm，桌面级收藏摆件",
+        "cta": "立即定制",
+        "creditsAmount": "¥299",
+        "creditsLabel": "/ 件",
+        "booksCount": "3",
+        "features": {
+          "creditsNeverExpire": "全彩 WJP 工艺打印",
+          "credits": "1 件 100-200mm 手办",
+          "input": "上传图 → 3D 建模稿 → 修改",
+          "characters": "全国包邮 · 高档礼盒",
+          "fileSize": "附赠定制贺卡 + 丝带",
+          "queue": "建模优先处理",
+          "export": "高清原图 + STL 模型文件",
+          "history": "成品专属编号 + 展示底座",
+          "customCards": "支持 OC / 角色三视图",
+          "support": "1 对 1 设计师对接"
+        }
+      },
+      "ultra": {
+        "name": "团购 / 企业定制",
+        "description": "30 件起，企业 logo + 批量交付",
+        "cta": "联系商务",
+        "creditsAmount": "9 折",
+        "creditsLabel": "团购价",
+        "booksCount": "30+",
+        "features": {
+          "creditsNeverExpire": "全彩 WJP 工艺批量打印",
+          "credits": "30 件起，logo 定制",
+          "input": "统一设计稿 / 来图定制",
+          "characters": "全国包邮 · 统一礼盒",
+          "fileSize": "可定制丝带 / 卡片 / 包装",
+          "queue": "专属优先排期",
+          "export": "STL + 设计源文件归档",
+          "history": "企业专属编号体系",
+          "customCards": "可开增值税专用发票",
+          "aiAssist": "一对一项目对接",
+          "support": "专属客户经理"
+        }
+      }
+    }
+  },
+  "Header": {
+    "dashboard": "控制台",
+    "login": "登录",
+    "getStarted": "上传定制",
+    "docs": "工艺介绍"
+  },
+  "Navigation": {
+    "products": "产品",
+    "imageGen": "生图",
+    "docs": "文档",
+    "pseo": "PSEO",
+    "pricing": "定价",
+    "blog": "博客",
+    "about": "关于",
+    "productsMenu": {
+      "wearables": {
+        "title": "周边配饰",
+        "keychain": "钥匙扣",
+        "keychainDesc": "30-80mm 全彩挂件",
+        "badge": "徽章",
+        "badgeDesc": "30-50mm 胸针佩戴"
+      },
+      "desk": {
+        "title": "桌面展示",
+        "magnet": "冰箱贴",
+        "magnetDesc": "40-60mm 磁吸贴",
+        "standee": "立牌",
+        "standeeDesc": "80-150mm 桌面立牌"
+      },
+      "collectibles": {
+        "title": "收藏礼品",
+        "figure": "手办",
+        "figureDesc": "100-200mm 桌面摆件",
+        "gift": "礼品套装",
+        "giftDesc": "礼盒包装 + 定制卡片"
+      }
+    }
+  },
+  "Subscription": {
+    "plans": {
+      "free": "免费版",
+      "starter": "入门版",
+      "pro": "专业版",
+      "ultra": "旗舰版"
+    }
+  },
+  "Dashboard": {
+    "nav": {
+      "dashboard": "控制面板",
+      "generate": "生图工作台",
+      "generateV2": "生图工作台 V2",
+      "publicImageGen": "公开生图",
+      "photos": "照片库",
+      "effects": "效果图",
+      "models": "3D 模型",
+      "credits": "积分",
+      "orders": "订单管理",
+      "canvas": "画布",
+      "settings": "设置",
+      "support": "支持",
+      "newTicket": "新建工单",
+      "admin": "管理",
+      "adminConsole": "管理后台",
+      "promptLibrary": "提示词库",
+      "myAssets": "我的资产"
+    },
+    "pages": {
+      "dashboard": "控制面板",
+      "generate": "生图工作台",
+      "generateV2": "生图工作台 V2",
+      "photos": "照片库",
+      "effects": "效果图历史",
+      "models": "3D 模型",
+      "tasks": "任务列表",
+      "myDecks": "我的卡组",
+      "canvas": "画布",
+      "support": "支持中心",
+      "newTicket": "新建工单",
+      "settings": "设置",
+      "profile": "个人资料",
+      "security": "安全设置",
+      "billing": "账单管理",
+      "notifications": "通知设置",
+      "deckDetails": "卡组详情",
+      "ticketDetails": "工单详情"
+    },
+    "sidebar": {
+      "settings": "设置",
+      "logout": "退出登录"
+    }
+  },
+  "Settings": {
+    "tabs": {
+      "account": "账户",
+      "security": "安全",
+      "billing": "账单",
+      "usage": "用量"
+    },
+    "general": {
+      "title": "基本信息",
+      "description": "更新您的个人信息和账户设置。",
+      "save": "保存",
+      "name": "姓名",
+      "namePlaceholder": "请输入您的姓名",
+      "nameDescription": "姓名为必填项，至少需要 2 个字符。",
+      "email": "邮箱",
+      "emailDescription": "如需更改邮箱，请联系客服。"
+    },
+    "avatar": {
+      "title": "头像",
+      "description": "上传头像以个性化您的账户。",
+      "uploading": "上传中...",
+      "supportedFormats": "支持 JPG、PNG、GIF、WebP，最大 {size}MB"
+    },
+    "language": {
+      "title": "语言设置",
+      "description": "选择您偏好的界面语言。",
+      "placeholder": "选择语言"
+    },
+    "deleteAccount": {
+      "title": "删除账户",
+      "description": "永久删除您的账户及所有相关数据。此操作无法撤销。",
+      "button": "删除账户",
+      "warning": "此操作不可逆，请谨慎操作。",
+      "confirmTitle": "确认删除当前账户？",
+      "confirmDescription": "您的账户及所有相关数据将被永久删除，此操作无法撤销。",
+      "cancel": "取消",
+      "confirm": "确认删除",
+      "error": "删除账户失败，请稍后重试。"
+    },
+    "security": {
+      "changePassword": {
+        "title": "修改密码",
+        "description": "更新密码以确保账户安全。",
+        "currentPassword": "当前密码",
+        "currentPasswordPlaceholder": "输入当前密码",
+        "newPassword": "新密码",
+        "newPasswordPlaceholder": "输入新密码",
+        "confirmPassword": "确认新密码",
+        "confirmPasswordPlaceholder": "再次输入新密码",
+        "submit": "更新密码",
+        "updating": "更新中..."
+      },
+      "errors": {
+        "missingFields": "请填写所有密码字段。",
+        "passwordTooShort": "新密码至少需要 8 个字符。",
+        "passwordMismatch": "两次输入的新密码不一致。",
+        "samePassword": "新密码不能与当前密码相同。",
+        "wrongPassword": "当前密码不正确。"
+      },
+      "success": "密码修改成功。",
+      "phone": {
+        "title": "手机号",
+        "description": "绑定手机号后可使用手机号登录或找回账号。",
+        "bind": "绑定",
+        "change": "更换",
+        "unbind": "解绑",
+        "status": {
+          "verified": "已验证",
+          "unverified": "未验证",
+          "notBound": "未绑定"
+        },
+        "hint": {
+          "emailRequired": "请先绑定并验证邮箱，否则解绑手机号后将无法找回账号。"
+        },
+        "modal": {
+          "bindTitle": "绑定手机号",
+          "changeTitle": "更换手机号",
+          "unbindTitle": "确认解绑手机号？",
+          "unbindDescription": "解绑后仍可使用邮箱登录。请确保邮箱已验证。",
+          "confirmUnbind": "确认解绑",
+          "cancel": "取消"
+        },
+        "success": {
+          "bound": "手机号已绑定",
+          "changed": "手机号已更换",
+          "unbound": "手机号已解绑"
+        },
+        "errors": {
+          "bindFailed": "绑定失败，请重试",
+          "changeFailed": "更换失败，请重试",
+          "unbindFailed": "解绑失败，请重试"
+        }
+      }
+    },
+    "errors": {
+      "unsupportedFileType": "不支持的文件类型。支持：{types}",
+      "fileTooLarge": "文件过大。最大支持：{size}MB",
+      "uploadFailed": "获取上传 URL 失败",
+      "fileUploadFailed": "文件上传失败",
+      "avatarUploadError": "头像上传失败",
+      "validationFailed": "验证失败"
+    },
+    "success": {
+      "avatarUpdated": "头像更新成功"
+    },
+    "billing": {
+      "currentPlan": {
+        "title": "当前套餐",
+        "description": "管理您的订阅和账单周期。",
+        "freePlan": "免费版",
+        "current": "当前",
+        "basicFeatures": "基础功能，积分有限",
+        "premiumFeatures": "完整访问所有高级功能",
+        "upgradePlan": "升级套餐",
+        "managePlan": "管理套餐",
+        "monthlyCredits": "每月积分",
+        "renewalDate": "续费日期",
+        "notApplicable": "无",
+        "price": "价格",
+        "perMonth": "月",
+        "perYear": "年",
+        "cancelSubscription": "取消订阅",
+        "cancelPending": "将于 {date} 到期取消",
+        "cancelDialog": {
+          "title": "确认取消订阅？",
+          "description": "订阅将在当前计费周期结束时（{date}）自动取消，届时套餐将恢复为免费版。",
+          "keepBenefits": "在 {date} 之前，您仍可享受当前套餐的全部权益",
+          "confirm": "确认取消",
+          "cancel": "保留订阅"
+        }
+      },
+      "paymentMethods": {
+        "title": "支付方式",
+        "description": "添加或管理您的支付方式，用于订阅和购买。",
+        "addMethod": "添加支付方式",
+        "noMethods": "暂无支付方式",
+        "noMethodsHint": "添加支付方式以升级套餐或购买积分"
+      },
+      "history": {
+        "title": "账单历史",
+        "description": "查看和下载您的历史发票。",
+        "date": "日期",
+        "historyDescription": "描述",
+        "amount": "金额",
+        "status": "状态",
+        "invoice": "发票",
+        "noHistory": "暂无账单记录",
+        "noHistoryHint": "首次购买后，发票将显示在此处"
+      }
+    },
+    "usage": {
+      "title": "积分使用情况",
+      "description": "用于各项服务的积分消耗概览。",
+      "availableCredits": "可用积分",
+      "creditsAvailable": "积分可用",
+      "getMoreCredits": {
+        "title": "获取更多积分",
+        "description": "订阅套餐以获取每月积分并解锁高级功能",
+        "viewPlans": "查看订阅套餐"
+      },
+      "expiringSoon": {
+        "title": "积分即将过期",
+        "message": "{count} 积分将于 {date} 过期"
+      },
+      "transactions": {
+        "title": "交易记录",
+        "description": "查看所有积分交易，包括发放和消耗",
+        "date": "日期",
+        "type": "类型",
+        "transactionDescription": "描述",
+        "transactionAmount": "数量",
+        "noTransactions": "暂无交易记录",
+        "noTransactionsHint": "您的积分交易将显示在此处",
+        "loading": "加载中...",
+        "showing": "显示第 {from} 至 {to} 条，共 {total} 条交易",
+        "rowsPerPage": "每页显示",
+        "pageOf": "第 {page} 页，共 {total} 页",
+        "types": {
+          "registration_bonus": "注册奖励",
+          "admin_grant": "管理员发放",
+          "monthly_grant": "每月发放",
+          "purchase": "购买",
+          "consumption": "消耗",
+          "expiration": "已过期",
+          "refund": "退款"
+        },
+        "descriptions": {
+          "registration_bonus": "新用户注册奖励",
+          "monthly_grant": "{plan} 月度订阅积分",
+          "yearly_grant": "{plan} 年度订阅积分 ({monthly} x 12)",
+          "consumption": "服务消耗",
+          "expiration": "积分已过期",
+          "admin_grant": "管理员发放积分",
+          "refund": "积分退款"
+        }
+      }
+    }
+  },
+  "Support": {
+    "enterMessage": "请输入消息内容",
+    "messageSent": "消息发送成功",
+    "sendFailed": "发送失败，请重试",
+    "replyUser": "回复用户",
+    "addReply": "添加回复",
+    "inputPlaceholder": "输入您的消息...",
+    "characters": "字符",
+    "send": "发送",
+    "enterReplyContent": "请输入回复内容",
+    "replySuccess": "回复成功",
+    "replyFailed": "回复失败，请重试",
+    "ticketClosedNotice": "此工单已关闭，无法添加新回复",
+    "inputReplyPlaceholder": "输入您的回复...",
+    "sendReply": "发送回复",
+    "statusUpdateFailed": "状态更新失败",
+    "updating": "更新中...",
+    "selectNewStatus": "选择新状态",
+    "roleUpdateFailed": "角色更新失败",
+    "admin": "管理员",
+    "user": "普通用户"
+  },
+  "AdminSidebar": {
+    "badge": "管理",
+    "roleBadge": "管理员",
+    "returnToUser": "返回用户端",
+    "lightMode": "浅色模式",
+    "darkMode": "深色模式",
+    "followSystem": "跟随系统",
+    "signOut": "退出登录",
+    "nav": {
+      "controlPanel": "管理中心",
+      "dashboard": "控制面板",
+      "userManagement": "用户管理",
+      "ticketManagement": "工单管理",
+      "agentManagement": "代理商管理",
+      "productEffects": "效果模板",
+      "imageModels": "生图模型",
+      "externalApiKeys": "外部生图",
+      "productLines": "产品线",
+      "providers3d": "3D 引擎",
+      "systemLogs": "系统日志",
+      "gptImage": "提示词模板",
+      "gptImageTemplates": "模板管理",
+      "gptImageOrders": "订单管理"
+    }
+  },
+  "AdminOrders": {
+    "title": "订单管理",
+    "subtitle": "查看所有用户提交的订单（含代理商），支持取消与备注编辑",
+    "filters": {
+      "status": "订单状态",
+      "statusAll": "全部状态",
+      "platform": "订单来源",
+      "platformAll": "全部来源",
+      "createdBy": "创建者",
+      "createdByAll": "全部用户",
+      "dateFrom": "起始日期",
+      "dateTo": "结束日期",
+      "search": "搜索订单号",
+      "searchPlaceholder": "输入订单号模糊匹配",
+      "reset": "重置筛选",
+      "apply": "应用筛选"
+    },
+    "table": {
+      "orderNo": "订单号",
+      "templateName": "模板",
+      "createdBy": "创建者",
+      "platform": "来源",
+      "platformOrderNo": "渠道单号",
+      "status": "状态",
+      "credits": "扣分",
+      "createdAt": "提交时间",
+      "cancelledAt": "取消时间",
+      "remarks": "备注",
+      "actions": "操作"
+    },
+    "actions": {
+      "viewDetail": "查看详情",
+      "editRemarks": "编辑备注",
+      "cancelOrder": "取消订单",
+      "refresh": "刷新"
+    },
+    "cancelDialog": {
+      "title": "确认取消订单？",
+      "warning": "订单取消后不可恢复，已扣除的积分将自动退还至创建者账户。",
+      "reasonLabel": "取消原因（可选）",
+      "reasonPlaceholder": "简要说明，例如「客户要求取消」「内部审核」等",
+      "confirm": "确认取消并退款",
+      "cancel": "不取消"
+    },
+    "remarksDialog": {
+      "title": "编辑备注",
+      "placeholder": "填写订单备注，最多 500 字符",
+      "save": "保存",
+      "cancel": "取消",
+      "emptyTip": "保存空内容将清空备注"
+    },
+    "messages": {
+      "loadMore": "加载更多",
+      "loading": "加载中...",
+      "empty": "暂无订单",
+      "endReached": "—— 已到底 ——",
+      "loadFailed": "加载失败，请重试",
+      "cancelSuccess": "订单已取消，已退还 {credits} 积分",
+      "cancelSuccessNoRefund": "订单已取消",
+      "cancelFailed": "取消失败：{error}",
+      "remarksUpdated": "备注已更新",
+      "remarksCleared": "备注已清空",
+      "remarksFailed": "更新备注失败：{error}"
+    },
+    "platforms": {
+      "taobao": "淘宝",
+      "xiaohongshu": "小红书",
+      "douyin": "抖音",
+      "kol": "KOL（历史值）",
+      "independent_site": "独立站",
+      "domestic_influencer": "国内达人",
+      "foreign_influencer": "海外达人",
+      "partner": "合作伙伴",
+      "marketing": "市场推广"
+    },
+    "statuses": {
+      "PENDING": "待上传",
+      "GENERATING": "生成中",
+      "CANDIDATES_READY": "待选择",
+      "SELECTED": "已提交",
+      "CANCELLED": "已取消",
+      "FAILED": "生成失败"
+    }
+  },
+  "Footer": {
+    "description": "Mooncoda 梦可达 — WJP 全彩 3D 打印专家，宠物徽章、钥匙扣、冰箱贴、手办等一件定制、一件发货。",
+    "product": "作品",
+    "legal": "条款",
+    "copyright": "© {year} {name}。保留所有权利。",
+    "twitter": "微博",
+    "github": "小红书"
+  }
+}

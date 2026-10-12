@@ -1,0 +1,1079 @@
+{
+  "HomePage": {
+    "title": "Mooncoda",
+    "subtitle": "WJP Full-Color 3D Printing Expert",
+    "description": "Pet badges, keychains, fridge magnets, figures — single-piece customization & shipping."
+  },
+  "Hero": {
+    "badge": "Single-piece custom · Single-piece shipping",
+    "eyebrow": "WJP Full-Color 3D Printing · Pet Goods · Gift Customization",
+    "featuredLabel": "Featured",
+    "title1": "Your imagination,",
+    "titleHighlight": "printed one piece at a time.",
+    "subtitle": "Mooncoda specializes in WJP full-color 3D printing — pet badges, keychains, fridge magnets, figures, gift models. From a single photo to a tangible object in as little as 24 hours. One-piece minimums, single-piece shipping — every idea becomes a limited edition.",
+    "getStarted": "Upload to customize",
+    "seeDemo": "See the gallery",
+    "trustPromise": "1 piece min. · 7-day delivery · Free remake if unsatisfied",
+    "trustLine": "Trusted by thousands of creators",
+    "stats": {
+      "cards": "Orders Delivered",
+      "users": "Creator Partners",
+      "rating": "Repeat Rate"
+    },
+    "meta": {
+      "modules": "product categories",
+      "tests": "full-color · micron-level",
+      "errors": "min. 1 piece · no MOQ",
+      "license": "single shipping · Express shipping"
+    },
+    "products": {
+      "label": "Product Lines",
+      "allLink": "View all",
+      "keychain": {
+        "name": "Keychain",
+        "size": "40-60mm",
+        "price": "from $13"
+      },
+      "badge": {
+        "name": "Pet Badge",
+        "size": "30-50mm",
+        "price": "from $7"
+      },
+      "magnet": {
+        "name": "Fridge Magnet",
+        "size": "70-100mm",
+        "price": "from $13"
+      },
+      "figure": {
+        "name": "Figure",
+        "size": "100-200mm",
+        "price": "from $43"
+      }
+    }
+  },
+  "Features": {
+    "label": "Why Choose Us",
+    "title": "Your Photo. A Real Object. In 7 Days.",
+    "subtitle": "Designed for individuals who want one-of-a-kind keepsakes. From upload to doorstep — every step is built around a single piece, not a factory batch.",
+    "items": {
+      "ai": {
+        "title": "AI Auto 3D",
+        "description": "Upload any photo — pet, portrait, illustration — our AI turns it into a 3D model in minutes. No Blender, no modeling skills needed."
+      },
+      "multiSource": {
+        "title": "Multi-View Preview",
+        "description": "Spin around your custom piece before printing — see every angle, every gradient, every texture before you say yes."
+      },
+      "outline": {
+        "title": "Full-Color Detail",
+        "description": "WJP prints 16 million colors in a single piece. Fur, fabric, eyes, shadows — everything in your photo, faithfully reproduced."
+      },
+      "export": {
+        "title": "One-Piece Start",
+        "description": "No MOQ, no batch-up. Want just one badge? Order one. Factory-grade quality whether you order 1 or 1,000."
+      },
+      "batch": {
+        "title": "7-Day Delivery",
+        "description": "From upload to your doorstep in 7 days. Proof in 24h, print in 48-72h, Express ship the rest of the way."
+      },
+      "multilingual": {
+        "title": "Worldwide Shipping",
+        "description": "Express shipping to 100+ countries. Individual gift box, custom serial number, ready to gift on arrival."
+      }
+    }
+  },
+  "HowItWorks": {
+    "label": "How It Works",
+    "title": "Three Steps. One Real Object.",
+    "subtitle": "From a single photo to your doorstep — no design skills needed.",
+    "steps": {
+      "upload": {
+        "title": "Pick a photo you love",
+        "description": "A pet portrait, your OC, a wedding photo — anything with clear features. One image is enough, more angles = better result."
+      },
+      "generate": {
+        "title": "Confirm your 3D preview",
+        "description": "We turn the photo into a 3D model and render every angle within 24 hours. One free revision. Full refund if you don't like it."
+      },
+      "export": {
+        "title": "We print and ship",
+        "description": "After approval, the piece enters our WJP line: full-color printing, curing, polishing — 48-72 hours."
+      }
+    },
+    "completion": {
+      "title": "On your desk in 7 days",
+      "description": "Individual gift box, custom serial, Express shipping worldwide. Most orders arrive within 5-7 working days."
+    }
+  },
+  "ImageToObject": {
+    "label": "From Photo · See the Magic",
+    "title": "One photo → one real object",
+    "subtitle": "AI handles the modeling, WJP handles the printing. From the moment you snap the photo to the moment you hold it — about the length of a movie.",
+    "photoLabel": "Your Photo",
+    "photoMeta": "JPG · 1080p",
+    "transformLabel": "AI Render",
+    "productBadge": "3D Real",
+    "productName": "Custom Pet Badge",
+    "productMeta": "WJP · Full Color",
+    "caption": "Same photo, two identities — left is what's on your phone, right is what you can hold in your hand.",
+    "steps": {
+      "s1": "Upload photo",
+      "s2": "AI auto-modeling",
+      "s3": "Full-color print & ship"
+    }
+  },
+  "UseCases": {
+    "label": "Product Lines",
+    "title": "Four Ways to Make It Real",
+    "subtitle": "Pick your favorite format. Every line uses the same WJP full-color process — just different sizes and accessories.",
+    "items": {
+      "badge": {
+        "title": "Pet Badge",
+        "subtitle": "30-50mm wearable keepsake",
+        "description": "The most loved way to carry your pet, character, or memory. Pin it on a jacket, a bag, a hat — always close.",
+        "examples": ["Pet memorial", "Character pin", "Mini gift tag"]
+      },
+      "keychain": {
+        "title": "Keychain / Magnet",
+        "subtitle": "40-100mm hanging or sticking",
+        "description": "Carry them on your keys, your fridge, your phone. Great gifts at a sweet price point — also a popular ToB merch format.",
+        "examples": ["Daily keychain", "Fridge magnet", "Phone charm"]
+      },
+      "figure": {
+        "title": "Figure / Standee",
+        "subtitle": "100-200mm desktop collectible",
+        "description": "Your OC, your wedding portrait, your brand mascot — as a full-color desktop piece. Comes with display base.",
+        "examples": ["OC / character figure", "Wedding standee", "Brand mascot"]
+      },
+      "gift": {
+        "title": "Gift Set",
+        "subtitle": "Premium gift box packaging",
+        "description": "A custom piece wrapped in a curated gift box — custom card, ribbon, optional engraving. Perfect for weddings, anniversaries, milestone birthdays.",
+        "examples": [
+          "Wedding favors",
+          "Anniversary gifts",
+          "Milestone birthdays"
+        ]
+      }
+    }
+  },
+  "Testimonials": {
+    "label": "Testimonials",
+    "title": "What Customers Say",
+    "subtitle": "From individuals to enterprises — pet memorials, corporate gifts, and more.",
+    "items": [
+      {
+        "content": "I had my Golden Retriever's photo made into a badge and keychain. The color reproduction is stunning — even the fine hairs on the eyebrows are visible. My pup has been gone a year, but I can still touch them.",
+        "author": "Xiao You",
+        "role": "Pet Memorial · Beijing"
+      },
+      {
+        "content": "30-piece year-end corporate favors with custom logo and individual names. From order to delivery in 7 days — colleagues said it felt like unboxing a mystery gift. Maximum ceremony.",
+        "author": "Mark",
+        "role": "Corporate Event · Shanghai"
+      },
+      {
+        "content": "My OC character is finally a real figure! The full-color detail preserved the gradients and shadows I drew. The 200mm piece has serious weight in hand.",
+        "author": "Yuki",
+        "role": "Illustrator · Hangzhou"
+      },
+      {
+        "content": "We ordered 50 Q-version standees as wedding favors. Every guest received their own version. The full-color print even shows the folds of the dress — 100% approval from guests.",
+        "author": "Anan & Xiaoqi",
+        "role": "Wedding Memorial · Chengdu"
+      },
+      {
+        "content": "The biggest fear with cultural products is MOQ. This shop takes one piece, letting me validate the market at minimum cost. The hot-seller is sampled first, then I scale up — saved a fortune on mold fees.",
+        "author": "Studio MoMo",
+        "role": "Cultural Goods Designer · Suzhou"
+      },
+      {
+        "content": "The customer service was great — they revised the 3D proof three times without charging. The final product's color and texture exceeded expectations. Will definitely reorder.",
+        "author": "Daniel",
+        "role": "Collector · Shenzhen"
+      }
+    ]
+  },
+  "FAQ": {
+    "label": "FAQ",
+    "title": "Questions You Might Have",
+    "subtitle": "About our WJP full-color 3D printing customization service.",
+    "morePrompt": "Got other questions? Drop us a line →",
+    "items": [
+      {
+        "question": "What is WJP full-color 3D printing?",
+        "answer": "WJP (Wax Jet Printing) is an industrial-grade full-color 3D printing process using wax-jet + curing. It directly prints 16-million-color models with no post-processing coloring needed. High color fidelity and fine texture — perfect for portraits, pets, anime characters, and any scene that needs color and detail preserved."
+      },
+      {
+        "question": "Can I really order just one piece? Any minimum?",
+        "answer": "Absolutely. One-piece minimum, no MOQ. Our production line is purpose-built for single-piece / small-batch customization — every order handled individually from start to finish. Bulk orders (30+) enjoy group pricing — see the Pricing page."
+      },
+      {
+        "question": "How long until I receive my order?",
+        "answer": "Standard orders deliver in 5-7 working days (excluding remote areas). Process: 24h 3D proof → customer approval → 48-72h WJP printing → Express shipping dispatch. Rush service: contact customer support."
+      },
+      {
+        "question": "Is one photo enough? Do I need professional images?",
+        "answer": "A single front photo works, but the result may be slightly less ideal. We recommend 3-5 photos from different angles (front + side + back / top). AI-generated images, illustrations, and anime reference sheets are all accepted."
+      },
+      {
+        "question": "What products can I order? Any size limits?",
+        "answer": "Pet badges (~30-50mm), keychains (~40-60mm), fridge magnets (~60-100mm), figures (~100-200mm), standees (~150-300mm) all supported. For over 200mm or complex shapes, please contact customer support for evaluation."
+      },
+      {
+        "question": "Who owns the 3D model files?",
+        "answer": "You do. After modeling is complete, we provide STL / OBJ files for download. You can use them for personal collection, re-printing, or commercial sublicensing. We retain no copyright and will not resell your work."
+      },
+      {
+        "question": "What if I'm not satisfied with the final product?",
+        "answer": "At the 3D proof stage, one free revision; full refund if you reject the proof entirely. At the printing stage, defects (color loss, breakage, etc.) are remade free or refunded in full. Shipping damage is replaced free with packaging photos."
+      },
+      {
+        "question": "Which payment methods are supported? Invoices available?",
+        "answer": "WeChat Pay, Alipay, and corporate bank transfer. Business customers can apply for VAT ordinary invoices or special invoices — contact customer support to register."
+      }
+    ]
+  },
+  "Auth": {
+    "common": {
+      "or": "or",
+      "google": "Google",
+      "github": "GitHub",
+      "countryCode": "Country code",
+      "phonePlaceholder": "138 0013 8000"
+    },
+    "signIn": {
+      "title": "Welcome back",
+      "subtitle": "Please enter your credentials to sign in.",
+      "emailLabel": "Email address",
+      "emailPlaceholder": "jane@example.com",
+      "passwordLabel": "Password",
+      "forgotPassword": "Forgot my password",
+      "loading": "Signing in...",
+      "submit": "Continue",
+      "success": "Signed in successfully!",
+      "resendVerification": "Resend verification email",
+      "resendCooldown": "Resend in {seconds}s",
+      "noAccount": "Don\u0027t have an account?",
+      "signUpLink": "Sign up",
+      "tabs": {
+        "email": "Email",
+        "phone": "Phone"
+      },
+      "phone": {
+        "phoneLabel": "Phone number",
+        "phonePlaceholder": "138 0013 8000",
+        "otpLabel": "Verification code",
+        "otpHint": "Didn't get the code? Check spam or resend.",
+        "resend": "Resend code",
+        "resendCooldown": "Resend in {seconds}s",
+        "sendOtp": "Send verification code",
+        "verifySubmit": "Verify and sign in",
+        "useOtpInstead": "Use verification code instead",
+        "backToPassword": "Use password instead",
+        "otpSent": "Verification code sent.",
+        "resetSubmit": "Reset password",
+        "resetSuccess": "Password reset. Please sign in with your new password.",
+        "newPasswordLabel": "New password",
+        "newPasswordPlaceholder": "At least 8 characters",
+        "errors": {
+          "phoneRequired": "Please enter your phone number.",
+          "phoneNotExist": "This phone is not registered. We'll send a code to create your account.",
+          "phoneNotVerified": "Phone not verified. We'll send a verification code.",
+          "phoneExist": "This phone is already registered.",
+          "invalidOtp": "Invalid verification code.",
+          "otpExpired": "Verification code expired. Please resend.",
+          "tooManyAttempts": "Too many attempts. Please try again later.",
+          "passwordRequired": "Please enter a new password (8+ characters).",
+          "sendOtpFailed": "Failed to send code. Please try again.",
+          "verifyFailed": "Verification failed. Please try again.",
+          "generic": "Something went wrong. Please try again."
+        }
+      },
+      "errors": {
+        "google": "Google sign-in failed. Please try again.",
+        "github": "GitHub sign-in failed. Please try again.",
+        "missingFields": "Please enter email and password.",
+        "invalidCredentials": "Invalid email or password.",
+        "emailNotVerified": "Please verify your email before signing in. Check your inbox for the verification link."
+      }
+    },
+    "signUp": {
+      "title": "Create an account",
+      "subtitle": "Enter your details to get started.",
+      "nameLabel": "Full name",
+      "namePlaceholder": "Jane Doe",
+      "emailLabel": "Email address",
+      "emailPlaceholder": "jane@example.com",
+      "passwordLabel": "Password",
+      "passwordPlaceholder": "At least 8 characters",
+      "confirmPasswordLabel": "Confirm password",
+      "confirmPasswordPlaceholder": "Re-enter your password",
+      "loading": "Creating account...",
+      "submit": "Create account",
+      "success": "Account created successfully!",
+      "haveAccount": "Already have an account?",
+      "signInLink": "Sign in",
+      "errors": {
+        "google": "Google sign-up failed. Please try again.",
+        "github": "GitHub sign-up failed. Please try again.",
+        "missingFields": "Please fill in all fields.",
+        "passwordTooShort": "Password must be at least 8 characters.",
+        "passwordMismatch": "Passwords do not match.",
+        "emailInUse": "Sign-up failed. This email may already be in use."
+      },
+      "verifyEmail": {
+        "title": "Check your email",
+        "description": "We've sent a verification link to {email}. Please click the link to verify your account.",
+        "hint": "Didn't receive the email? Check your spam folder.",
+        "resend": "Resend verification email",
+        "resendCooldown": "Resend in {seconds}s",
+        "backToSignIn": "Back to sign in"
+      }
+    },
+    "footer": {
+      "copyright": "\u00a9 {year} {name}. All rights reserved.",
+      "privacy": "Privacy Policy",
+      "terms": "Terms of Service",
+      "cookies": "Cookie Settings"
+    },
+    "brand": {
+      "headline": "Turn your imagination into a real object.",
+      "sub": "Mooncoda specializes in WJP full-color 3D printing \u2014 pet badges, keychains, fridge magnets, figures, and more. One-piece custom, single-piece shipping.",
+      "points": {
+        "onePiece": "1 piece MOQ \u00b7 single-piece shipping",
+        "fullColor": "WJP full-color \u00b7 16-million-color reproduction",
+        "shipping": "Express shipping delivery \u00b7 individual gift box",
+        "copyright": ""
+      },
+      "rights": "All rights reserved."
+    }
+  },
+  "CTA": {
+    "badge": "Single-piece custom · Single-piece shipping",
+    "title": "Your One Photo. A Real Object on Your Desk.",
+    "subtitle": "No design skills, no MOQ, no waiting weeks. Upload a photo, get a full-color 3D proof in 24 hours, hold it in your hand in 7 days.",
+    "getStarted": "Upload my photo",
+    "seeDemo": "See what others made"
+  },
+  "Stats": {
+    "label": "Trust",
+    "title": "Built on Real Orders",
+    "subtitle": "Every number below is a real piece that went out the door — not a marketing claim.",
+    "items": {
+      "units": {
+        "value": "5,000+",
+        "label": "Pieces delivered"
+      },
+      "rating": {
+        "value": "4.9",
+        "suffix": "/5"
+      },
+      "shipping": {
+        "value": "7",
+        "suffix": "days",
+        "label": "Avg. delivery"
+      },
+      "countries": {
+        "value": "100+",
+        "label": "Countries served"
+      }
+    }
+  },
+  "LogoCloud": {
+    "label": "Where to Find Us",
+    "title": "Trusted Across China's Creator Platforms",
+    "subtitle": "We're where creators and gift-givers already are. Logo placeholders — swap in real partner brands anytime.",
+    "items": {
+      "taobao": { "name": "Taobao" },
+      "xiaohongshu": { "name": "Xiaohongshu" },
+      "douyin": { "name": "Douyin" },
+      "weibo": { "name": "Weibo" },
+      "bilibili": { "name": "Bilibili" },
+      "pdd": { "name": "PDD" },
+      "jd": { "name": "JD" },
+      "tmall": { "name": "Tmall" }
+    }
+  },
+  "Comparison": {
+    "label": "Comparison",
+    "title": "DIY vs. Mooncoda",
+    "subtitle": "Skip the modeling tools. Skip the factory MOQ. Skip the weeks of back-and-forth.",
+    "header": {
+      "diy": "DIY Yourself",
+      "us": "Mooncoda for You"
+    },
+    "rows": {
+      "modeling": {
+        "aspect": "3D Modeling",
+        "diy": "Weeks of self-taught Blender",
+        "us": "AI auto-generates from photo"
+      },
+      "color": {
+        "aspect": "Color",
+        "diy": "Hand-paint, hard to match",
+        "us": "WJP 16M-color direct print"
+      },
+      "moq": {
+        "aspect": "Minimum Order",
+        "diy": "Factories need 50+",
+        "us": "1 piece is enough"
+      },
+      "delivery": {
+        "aspect": "Delivery",
+        "diy": "2-4 weeks of sampling",
+        "us": "7 days, door to door"
+      },
+      "revision": {
+        "aspect": "Revision",
+        "diy": "Redo it yourself",
+        "us": "Free re-generation"
+      }
+    }
+  },
+  "DashboardPages": {
+    "dashboard": {
+      "title": "Dashboard",
+      "subtitle": "Welcome back! Here's an overview of your account.",
+      "stats": {
+        "credits": {
+          "title": "Credits",
+          "description": "Available balance"
+        },
+        "plan": {
+          "title": "Plan",
+          "description": "Current subscription"
+        },
+        "earned": {
+          "title": "Total earned",
+          "description": "All-time credits in"
+        },
+        "spent": {
+          "title": "Total spent",
+          "description": "All-time credits out"
+        }
+      },
+      "actions": {
+        "credits": "Get credits",
+        "settings": "Account settings",
+        "support": "Get support"
+      },
+      "transactions": {
+        "title": "Recent activity",
+        "viewAll": "View all",
+        "empty": "No transactions yet — your activity will appear here."
+      },
+      "planCard": {
+        "free": "Free plan",
+        "renews": "Renews {date}",
+        "cancels": "Cancels {date}",
+        "manage": "Manage subscription",
+        "upgrade": "Upgrade plan"
+      }
+    },
+    "generate": {
+      "title": "Generate",
+      "subtitle": "Choose a model and effect to generate your 2D render."
+    },
+    "photos": {
+      "title": "Photos",
+      "subtitle": "Manage your uploaded reference photos."
+    },
+    "effects": {
+      "title": "Effects",
+      "subtitle": "View all your generated 2D effects."
+    },
+    "models": {
+      "title": "3D Models",
+      "subtitle": "Manage 3D print models generated from effects."
+    }
+  },
+  "CreditTransactions": {
+    "anonymous_migration": "Migrated {cardCount} items from anonymous session",
+    "anonymous_migration_bonus": "New user bonus: Saved {cardCount} items for free"
+  },
+  "Header": {
+    "dashboard": "My Orders",
+    "login": "Login",
+    "getStarted": "Upload to Customize",
+    "docs": "Process"
+  },
+  "Navigation": {
+    "products": "Products",
+    "imageGen": "Image Gen",
+    "docs": "Docs",
+    "pseo": "PSEO",
+    "pricing": "Pricing",
+    "blog": "Blog",
+    "about": "About",
+    "productsMenu": {
+      "wearables": {
+        "title": "Wearables",
+        "keychain": "Keychain",
+        "keychainDesc": "30-80mm full-color charm",
+        "badge": "Badge",
+        "badgeDesc": "30-50mm pin to wear"
+      },
+      "desk": {
+        "title": "Desk",
+        "magnet": "Fridge Magnet",
+        "magnetDesc": "40-60mm magnetic",
+        "standee": "Standee",
+        "standeeDesc": "80-150mm desk stand"
+      },
+      "collectibles": {
+        "title": "Collectibles",
+        "figure": "Figure",
+        "figureDesc": "100-200mm desk piece",
+        "gift": "Gift Set",
+        "giftDesc": "Gift box + custom card"
+      }
+    }
+  },
+  "Common": {
+    "getStarted": "Get Started",
+    "login": "Log in",
+    "dashboard": "Dashboard",
+    "products": "Products",
+    "pricing": "Pricing",
+    "blog": "Blog",
+    "docs": "Documentation",
+    "features": "Features",
+    "changelog": "Changelog",
+    "relativeTime": {
+      "justNow": "Just now",
+      "minutesAgo": "{count, plural, one {# minute ago} other {# minutes ago}}",
+      "hoursAgo": "{count, plural, one {# hour ago} other {# hours ago}}",
+      "daysAgo": "{count, plural, one {# day ago} other {# days ago}}",
+      "monthsAgo": "{count, plural, one {# month ago} other {# months ago}}",
+      "yearsAgo": "{count, plural, one {# year ago} other {# years ago}}"
+    }
+  },
+  "Cookie": {
+    "title": "Cookie Settings",
+    "description": "We use cookies to ensure you get the best experience on our website. By continuing to use this site, you agree to our",
+    "privacyPolicy": "Privacy Policy",
+    "acceptAll": "Accept all",
+    "rejectAll": "Essential only",
+    "managePreferences": "Manage preferences",
+    "back": "Back",
+    "preferencesTitle": "Cookie Preferences",
+    "dialog": {
+      "title": "Manage cookie preferences",
+      "heading": "Your Privacy Choices",
+      "description": "In this panel you can review and change your cookie preferences at any time. Turn optional categories off if you do not want us to use them, or choose essential only to keep strictly necessary cookies enabled.",
+      "acceptCurrentSelection": "Accept current selection"
+    },
+    "card": {
+      "title": "Cookie Settings",
+      "description": "Manage your cookie settings here.",
+      "savePreferences": "Save preferences"
+    },
+    "essential": {
+      "title": "Essential Cookies",
+      "description": "These cookies are necessary for the website to function and cannot be disabled."
+    },
+    "functional": {
+      "title": "Functional Cookies",
+      "description": "These cookies enable personalized features and functionality."
+    },
+    "analytics": {
+      "title": "Analytics Cookies",
+      "description": "Help us understand how visitors interact with our website to improve user experience."
+    },
+    "performance": {
+      "title": "Performance Cookies",
+      "description": "These cookies help us understand how visitors interact with the website."
+    },
+    "marketing": {
+      "title": "Marketing Cookies",
+      "description": "Used to show you relevant ads and marketing content."
+    },
+    "alwaysEnabled": "Always enabled",
+    "saveSettings": "Save settings"
+  },
+  "Pricing": {
+    "label": "Pricing",
+    "title": "Transparent pricing, single-piece start",
+    "subtitle": "Pricing by <strong>product type and size</strong>, <strong>no minimum order</strong>. Bulk orders enjoy group pricing — 10% off for 30+ pieces.",
+    "creditsUpfront": "1 piece min.",
+    "creditsPerYear": "pcs / set",
+    "monthly": "Single",
+    "yearly": "Bundle",
+    "save": "Bulk",
+    "mostPopular": "Most Popular",
+    "currentPlan": "Selected",
+    "alreadySubscribed": "Ordered",
+    "manageSubscription": "Order another",
+    "booksNote": "≈ {count} use cases",
+    "cardsNote": "≈ {count} / piece",
+    "plans": {
+      "free": {
+        "name": "Pet Badge",
+        "description": "30-50mm full-color pin / badge",
+        "cta": "Customize Now",
+        "creditsAmount": "$7",
+        "creditsLabel": "/ piece",
+        "creditsNote": "1 piece min.",
+        "features": {
+          "creditsNeverExpire": "WJP full-color printing",
+          "credits": "1 piece 30-50mm badge",
+          "input": "Photo upload → 3D proof",
+          "characters": "Express shipping · individual pack",
+          "fileSize": "Custom card included",
+          "export": "HD source archive",
+          "history": "Unique product serial"
+        }
+      },
+      "starter": {
+        "name": "Keychain / Fridge Magnet",
+        "description": "40-100mm charms / fridge magnets",
+        "cta": "Customize Now",
+        "creditsAmount": "$13",
+        "creditsLabel": "/ piece",
+        "booksCount": "2",
+        "features": {
+          "creditsNeverExpire": "WJP full-color printing",
+          "credits": "1 piece 40-100mm charm",
+          "input": "Photo upload → 3D proof",
+          "characters": "Express shipping · gift box pack",
+          "fileSize": "Custom card included",
+          "export": "HD source archive",
+          "history": "Unique product serial",
+          "support": "Optional metal hook / magnet base"
+        }
+      },
+      "pro": {
+        "name": "Figure / Standee",
+        "description": "100-200mm desktop collectible",
+        "cta": "Customize Now",
+        "creditsAmount": "$43",
+        "creditsLabel": "/ piece",
+        "booksCount": "3",
+        "features": {
+          "creditsNeverExpire": "WJP full-color printing",
+          "credits": "1 piece 100-200mm figure",
+          "input": "Photo → 3D proof → revision",
+          "characters": "Express shipping · premium gift box",
+          "fileSize": "Custom card + ribbon included",
+          "queue": "Priority modeling",
+          "export": "HD source + STL files",
+          "history": "Unique serial + display base",
+          "customCards": "OC / character reference sheets",
+          "support": "1-on-1 designer pairing"
+        }
+      },
+      "ultra": {
+        "name": "Bulk / Enterprise",
+        "description": "30+ pieces, custom logo, bulk delivery",
+        "cta": "Contact Sales",
+        "creditsAmount": "10% off",
+        "creditsLabel": "bulk pricing",
+        "booksCount": "30+",
+        "features": {
+          "creditsNeverExpire": "WJP full-color batch printing",
+          "credits": "30+ pieces, logo customization",
+          "input": "Unified design / source image",
+          "characters": "Express shipping · unified gift box",
+          "fileSize": "Custom ribbon / card / packaging",
+          "queue": "Dedicated priority schedule",
+          "export": "STL + design source archive",
+          "history": "Enterprise serial system",
+          "customCards": "VAT special invoice available",
+          "aiAssist": "1-on-1 project lead",
+          "support": "Dedicated account manager"
+        }
+      }
+    }
+  },
+  "Subscription": {
+    "plans": {
+      "free": "Free",
+      "starter": "Starter",
+      "pro": "Pro",
+      "ultra": "Ultra"
+    }
+  },
+  "Dashboard": {
+    "nav": {
+      "dashboard": "Dashboard",
+      "generate": "Generate",
+      "generateV2": "Generate V2",
+      "publicImageGen": "Public Image Gen",
+      "photos": "Photos",
+      "effects": "Effects",
+      "models": "3D Models",
+      "credits": "Credits",
+      "orders": "Orders",
+      "canvas": "Canvas",
+      "settings": "Settings",
+      "support": "Support",
+      "newTicket": "New Ticket",
+      "admin": "Admin",
+      "adminConsole": "Admin Console",
+      "promptLibrary": "Prompt Library",
+      "myAssets": "My Assets"
+    },
+    "pages": {
+      "dashboard": "Dashboard",
+      "generate": "Generate",
+      "generateV2": "Generate V2",
+      "photos": "Photos",
+      "effects": "Effect History",
+      "models": "3D Models",
+      "tasks": "Tasks",
+      "myDecks": "My Decks",
+      "canvas": "Canvas",
+      "support": "Support Center",
+      "newTicket": "New Ticket",
+      "settings": "Settings",
+      "profile": "Profile",
+      "security": "Security",
+      "billing": "Billing",
+      "notifications": "Notifications",
+      "deckDetails": "Deck Details",
+      "ticketDetails": "Ticket Details"
+    },
+    "sidebar": {
+      "settings": "Settings",
+      "logout": "Sign out"
+    }
+  },
+  "Settings": {
+    "tabs": {
+      "account": "Account",
+      "security": "Security",
+      "billing": "Billing",
+      "usage": "Usage"
+    },
+    "general": {
+      "title": "General",
+      "description": "Update your personal information and account settings.",
+      "save": "Save",
+      "name": "Name",
+      "namePlaceholder": "Enter your name",
+      "nameDescription": "Name is required and must be at least 2 characters.",
+      "email": "Email",
+      "emailDescription": "To change your email, please contact support."
+    },
+    "avatar": {
+      "title": "Avatar",
+      "description": "Upload a profile picture to personalize your account.",
+      "uploading": "Uploading...",
+      "supportedFormats": "Supports JPG, PNG, GIF, WebP, max {size}MB"
+    },
+    "language": {
+      "title": "Language Settings",
+      "description": "Select your preferred language for the interface.",
+      "placeholder": "Select language"
+    },
+    "deleteAccount": {
+      "title": "Delete Account",
+      "description": "Permanently delete your account and all associated data. This action cannot be undone.",
+      "button": "Delete Account",
+      "warning": "This action is irreversible. Please proceed with caution.",
+      "confirmTitle": "Delete this account?",
+      "confirmDescription": "Your account and all associated data will be permanently deleted. This action cannot be undone.",
+      "cancel": "Cancel",
+      "confirm": "Yes, delete account",
+      "error": "Failed to delete account. Please try again later."
+    },
+    "security": {
+      "changePassword": {
+        "title": "Change Password",
+        "description": "Update your password to keep your account secure.",
+        "currentPassword": "Current Password",
+        "currentPasswordPlaceholder": "Enter current password",
+        "newPassword": "New Password",
+        "newPasswordPlaceholder": "Enter new password",
+        "confirmPassword": "Confirm New Password",
+        "confirmPasswordPlaceholder": "Confirm new password",
+        "submit": "Update Password",
+        "updating": "Updating..."
+      },
+      "errors": {
+        "missingFields": "Please fill in all password fields.",
+        "passwordTooShort": "New password must be at least 8 characters.",
+        "passwordMismatch": "New passwords do not match.",
+        "samePassword": "New password must be different from current password.",
+        "wrongPassword": "Current password is incorrect."
+      },
+      "success": "Password updated successfully.",
+      "phone": {
+        "title": "Phone number",
+        "description": "Bind a phone number so you can sign in or recover your account.",
+        "bind": "Bind",
+        "change": "Change",
+        "unbind": "Unbind",
+        "status": {
+          "verified": "Verified",
+          "unverified": "Unverified",
+          "notBound": "Not bound"
+        },
+        "hint": {
+          "emailRequired": "Bind and verify your email first so you can recover the account after unbinding phone."
+        },
+        "modal": {
+          "bindTitle": "Bind phone number",
+          "changeTitle": "Change phone number",
+          "unbindTitle": "Unbind phone number?",
+          "unbindDescription": "After unbinding you can still sign in with email. Make sure your email is verified.",
+          "confirmUnbind": "Unbind",
+          "cancel": "Cancel"
+        },
+        "success": {
+          "bound": "Phone bound",
+          "changed": "Phone updated",
+          "unbound": "Phone unbound"
+        },
+        "errors": {
+          "bindFailed": "Failed to bind phone. Please try again.",
+          "changeFailed": "Failed to change phone. Please try again.",
+          "unbindFailed": "Failed to unbind phone. Please try again."
+        }
+      }
+    },
+    "errors": {
+      "unsupportedFileType": "Unsupported file type. Supported: {types}",
+      "fileTooLarge": "File too large. Maximum size: {size}MB",
+      "uploadFailed": "Failed to get upload URL",
+      "fileUploadFailed": "File upload failed",
+      "avatarUploadError": "Avatar upload failed",
+      "validationFailed": "Validation failed"
+    },
+    "success": {
+      "avatarUpdated": "Avatar updated successfully"
+    },
+    "billing": {
+      "currentPlan": {
+        "title": "Current Plan",
+        "description": "Manage your subscription and billing cycle.",
+        "freePlan": "Free Plan",
+        "current": "Current",
+        "basicFeatures": "Basic features with limited credits",
+        "premiumFeatures": "Full access to all premium features",
+        "upgradePlan": "Upgrade Plan",
+        "managePlan": "Manage Plan",
+        "monthlyCredits": "Monthly Credits",
+        "renewalDate": "Renewal Date",
+        "notApplicable": "N/A",
+        "price": "Price",
+        "perMonth": "month",
+        "perYear": "year",
+        "cancelSubscription": "Cancel Subscription",
+        "cancelPending": "Cancels on {date}",
+        "cancelDialog": {
+          "title": "Cancel Subscription?",
+          "description": "Your subscription will remain active until the end of your current billing period ({date}). After that, your plan will revert to Free.",
+          "keepBenefits": "You'll keep all your current plan benefits until {date}",
+          "confirm": "Yes, Cancel Subscription",
+          "cancel": "Keep Subscription"
+        }
+      },
+      "paymentMethods": {
+        "title": "Payment Methods",
+        "description": "Add or manage your payment methods for subscriptions and purchases.",
+        "addMethod": "Add Payment Method",
+        "noMethods": "No payment methods added",
+        "noMethodsHint": "Add a payment method to upgrade your plan or purchase credits"
+      },
+      "history": {
+        "title": "Billing History",
+        "description": "View and download your past invoices.",
+        "date": "Date",
+        "historyDescription": "Description",
+        "amount": "Amount",
+        "status": "Status",
+        "invoice": "Invoice",
+        "noHistory": "No billing history",
+        "noHistoryHint": "Your invoices will appear here after your first purchase"
+      }
+    },
+    "usage": {
+      "title": "Compute Credit Usage",
+      "description": "Credits used for AI dialogue, image and etc.",
+      "availableCredits": "Available Credits",
+      "creditsAvailable": "credits available",
+      "getMoreCredits": {
+        "title": "Get More Credits",
+        "description": "Subscribe to a plan to get monthly credits and unlock advanced features",
+        "viewPlans": "View Subscription Plans"
+      },
+      "expiringSoon": {
+        "title": "Credits Expiring Soon",
+        "message": "{count} credits will expire on {date}"
+      },
+      "transactions": {
+        "title": "Transaction History",
+        "description": "View all your credit transactions including grants and consumption",
+        "date": "Date",
+        "type": "Type",
+        "transactionDescription": "Description",
+        "transactionAmount": "Amount",
+        "noTransactions": "No transactions yet",
+        "noTransactionsHint": "Your credit transactions will appear here",
+        "loading": "Loading...",
+        "showing": "Showing {from} to {to} of {total} transactions",
+        "rowsPerPage": "Rows per page",
+        "pageOf": "Page {page} of {total}",
+        "types": {
+          "registration_bonus": "Registration Bonus",
+          "admin_grant": "Admin Grant",
+          "monthly_grant": "Monthly Grant",
+          "purchase": "Purchase",
+          "consumption": "Usage",
+          "expiration": "Expired",
+          "refund": "Refund"
+        },
+        "descriptions": {
+          "registration_bonus": "New user registration bonus",
+          "monthly_grant": "{plan} monthly subscription credits",
+          "yearly_grant": "{plan} yearly subscription credits ({monthly} x 12)",
+          "consumption": "Credit consumption",
+          "expiration": "Credits expired",
+          "admin_grant": "Admin granted credits",
+          "refund": "Credits refund"
+        }
+      }
+    }
+  },
+  "Support": {
+    "enterMessage": "Please enter a message",
+    "messageSent": "Message sent",
+    "sendFailed": "Failed to send, please retry",
+    "replyUser": "Reply to user",
+    "addReply": "Add reply",
+    "inputPlaceholder": "Enter your message...",
+    "characters": "characters",
+    "send": "Send",
+    "enterReplyContent": "Please enter reply content",
+    "replySuccess": "Reply sent",
+    "replyFailed": "Reply failed, please retry",
+    "ticketClosedNotice": "This ticket is closed, no new replies can be added",
+    "inputReplyPlaceholder": "Enter your reply...",
+    "sendReply": "Send reply",
+    "statusUpdateFailed": "Status update failed",
+    "updating": "Updating...",
+    "selectNewStatus": "Select new status",
+    "roleUpdateFailed": "Role update failed",
+    "admin": "Admin",
+    "user": "User"
+  },
+  "AdminSidebar": {
+    "badge": "ADMIN",
+    "roleBadge": "Admin",
+    "returnToUser": "Return to dashboard",
+    "lightMode": "Light mode",
+    "darkMode": "Dark mode",
+    "followSystem": "Follow system",
+    "signOut": "Sign out",
+    "nav": {
+      "controlPanel": "Control Panel",
+      "dashboard": "Dashboard",
+      "userManagement": "User Management",
+      "ticketManagement": "Ticket Management",
+      "agentManagement": "Agent Management",
+      "productEffects": "Product Effects",
+      "imageModels": "Image Models",
+      "externalApiKeys": "External API Keys",
+      "productLines": "Product Lines",
+      "providers3d": "3D Engines",
+      "systemLogs": "System Logs",
+      "gptImage": "Prompt Templates",
+      "gptImageTemplates": "Templates",
+      "gptImageOrders": "Orders"
+    }
+  },
+  "AdminOrders": {
+    "title": "Orders",
+    "subtitle": "View all orders submitted by users (including agents); supports cancel and remark editing.",
+    "filters": {
+      "status": "Order status",
+      "statusAll": "All statuses",
+      "platform": "Source platform",
+      "platformAll": "All platforms",
+      "createdBy": "Created by",
+      "createdByAll": "All users",
+      "dateFrom": "Start date",
+      "dateTo": "End date",
+      "search": "Search order no.",
+      "searchPlaceholder": "Type order no. for fuzzy match",
+      "reset": "Reset filters",
+      "apply": "Apply filters"
+    },
+    "table": {
+      "orderNo": "Order No.",
+      "templateName": "Template",
+      "createdBy": "Created by",
+      "platform": "Source",
+      "platformOrderNo": "Channel order no.",
+      "status": "Status",
+      "credits": "Credits",
+      "createdAt": "Submitted at",
+      "cancelledAt": "Cancelled at",
+      "remarks": "Remarks",
+      "actions": "Actions"
+    },
+    "actions": {
+      "viewDetail": "View detail",
+      "editRemarks": "Edit remarks",
+      "cancelOrder": "Cancel order",
+      "refresh": "Refresh"
+    },
+    "cancelDialog": {
+      "title": "Confirm cancel order?",
+      "warning": "Once cancelled the order cannot be recovered; charged credits will be refunded to the creator automatically.",
+      "reasonLabel": "Cancel reason (optional)",
+      "reasonPlaceholder": "Short note, e.g. \"customer request\", \"internal review\"",
+      "confirm": "Confirm cancel & refund",
+      "cancel": "Don't cancel"
+    },
+    "remarksDialog": {
+      "title": "Edit remarks",
+      "placeholder": "Enter order remarks (max 500 chars)",
+      "save": "Save",
+      "cancel": "Cancel",
+      "emptyTip": "Saving empty content will clear the remarks"
+    },
+    "messages": {
+      "loadMore": "Load more",
+      "loading": "Loading...",
+      "empty": "No orders",
+      "endReached": "—— End ——",
+      "loadFailed": "Failed to load, please retry",
+      "cancelSuccess": "Order cancelled, {credits} credits refunded",
+      "cancelSuccessNoRefund": "Order cancelled",
+      "cancelFailed": "Cancel failed: {error}",
+      "remarksUpdated": "Remarks updated",
+      "remarksCleared": "Remarks cleared",
+      "remarksFailed": "Update remarks failed: {error}"
+    },
+    "platforms": {
+      "taobao": "Taobao",
+      "xiaohongshu": "Xiaohongshu",
+      "douyin": "Douyin",
+      "kol": "KOL (legacy)",
+      "independent_site": "Independent site",
+      "domestic_influencer": "Domestic influencer",
+      "foreign_influencer": "Foreign influencer",
+      "partner": "Partner",
+      "marketing": "Marketing"
+    },
+    "statuses": {
+      "PENDING": "Pending",
+      "GENERATING": "Generating",
+      "CANDIDATES_READY": "Awaiting selection",
+      "SELECTED": "Submitted",
+      "CANCELLED": "Cancelled",
+      "FAILED": "Failed"
+    }
+  },
+  "Footer": {
+    "description": "Mooncoda — WJP full-color 3D printing expert. Pet badges, keychains, fridge magnets, figures — single-piece customization & shipping.",
+    "product": "Gallery",
+    "legal": "Legal",
+    "copyright": "© {year} {name}. All rights reserved.",
+    "twitter": "Weibo",
+    "github": "Xiaohongshu"
+  }
+}

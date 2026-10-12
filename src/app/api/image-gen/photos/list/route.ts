@@ -1,0 +1,107 @@
+/**
+ * GET /api/image-gen/photos/list
+ *
+ * 列出当前用户上传的图片（photo 表，仅本人可见）。
+ *
+ * 鉴权：仅要求登录。
+ * 数据源：photo.userId = ctx.userId（与 listPhotosAction 同源）。
+ *
+ * 用途：
+ *   - ImageWorkbench V2 的「AssetPickerModal → 我的图片」Tab
+ *   - 移动端 / 第三方调用入口（与 /dashboard/generate 的 Photo 库对等）
+ *
+ * Query 参数：
+ *   - limit：1-100，默认 50
+ *   - offset：默认 0
+ *
+ * 与 listPhotosAction（Server Action）的差异：本路由走 fetch，给客户端组件用；
+ * Server Action 仍保留供 /dashboard/photos 直接调用。
+ *
+ * maxDuration = 30s：单次 DB 查询。
+ */
+
+import { and, desc, eq } from "drizzle-orm";
+import { headers } from "next/headers";
+import { type NextRequest, NextResponse } from "next/server";
+
+import { db } from "@/db";
+import { imageJob, photo } from "@/db/schema";
+import { withApiLogging } from "@/lib/api-logger";
+import { auth } from "@/lib/auth";
+
+export const runtime = "nodejs";
+export const maxDuration = 30;
+
+async function getHandler(req: NextRequest) {
+  // 鉴权：仅要求登录
+  const headersList = await headers();
+  const session = await auth.api.getSession({ headers: headersList });
+  if (!session?.user) {
+    return NextResponse.json(
+      { success: false, error: "请先登录" },
+      { status: 401 }
+    );
+  }
+
+  // query 参数解析
+  const { searchParams } = new URL(req.url);
+  const limitParam = Number(searchParams.get("limit") ?? "50");
+  const offsetParam = Number(searchParams.get("offset") ?? "0");
+  // 2026-09-14：source 过滤（"upload" | "generation"）—— /image-gen 历史栏
+  // 只看 generation（生图结果）。不传或非法值 → 不过滤（兼容旧调用方）。
+  const rawSource = searchParams.get("source");
+  const sourceFilter =
+    rawSource === "upload" || rawSource === "generation" ? rawSource : null;
+  const limit = Math.max(
+    1,
+    Math.min(100, Number.isFinite(limitParam) ? limitParam : 50)
+  );
+  const offset = Math.max(0, Number.isFinite(offsetParam) ? offsetParam : 0);
+
+  try {
+    // 2026-09-15：联表 imageJob 拿 maskId（photo 表不存 maskId，4 宫格 picker 需要
+    // 根据当时用的 mask 决定 cc/outputMode —— 否则用户点历史 4 宫格时 picker 渲染不了）。
+    const rows = await db
+      .select({
+        id: photo.id,
+        userId: photo.userId,
+        source: photo.source,
+        imageJobId: photo.imageJobId,
+        prompt: photo.prompt,
+        model: photo.model,
+        fileName: photo.fileName,
+        fileUrl: photo.fileUrl,
+        thumbnailUrl: photo.thumbnailUrl,
+        md5: photo.md5,
+        width: photo.width,
+        height: photo.height,
+        format: photo.format,
+        fileSize: photo.fileSize,
+        createdAt: photo.createdAt,
+        maskId: imageJob.maskId,
+      })
+      .from(photo)
+      .leftJoin(imageJob, eq(photo.imageJobId, imageJob.id))
+      .where(
+        and(
+          eq(photo.userId, session.user.id),
+          ...(sourceFilter ? [eq(photo.source, sourceFilter)] : [])
+        )
+      )
+      .orderBy(desc(photo.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    return NextResponse.json({ success: true, data: { photos: rows } });
+  } catch (err) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: err instanceof Error ? err.message : "获取图片失败",
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export const GET = withApiLogging(getHandler);

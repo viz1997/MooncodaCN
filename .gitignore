@@ -59,3 +59,12 @@ deploy.tgz
 
 .vercel
 .env*
+
+# 2026-10-12：本地开发临时文件（biome / typecheck / check 日志），不该入库
+.tmp/
+# git bundle 打包（一次性产物）
+*.bundle
+# 私人备忘
+秘密.md
+# claude code 临时
+.mcp_config*

@@ -1,0 +1,222 @@
+import { type NextRequest, NextResponse } from "next/server";
+import createIntlMiddleware from "next-intl/middleware";
+
+import { routing } from "@/i18n/routing";
+import { getBearerSession } from "@/lib/auth/bearer";
+import {
+  checkRateLimit,
+  createRateLimitResponse,
+  getClientIp,
+  getRateLimitHeaders,
+  type RateLimitType,
+} from "@/lib/rate-limit";
+
+/**
+ * 从 NextRequest 抽「任意形式的 session token」—— Cookie（Web）或
+ * Authorization: Bearer（微信小程序）。Proxy 层只关心「有没有」，
+ * 不读 user 详情（详情留给下游 route 调 auth.api.getSession）。
+ */
+async function hasAnySessionToken(request: NextRequest): Promise<boolean> {
+  // 1. Cookie 路径（Web）—— 与 BA session 配置里的 cookie 名对齐
+  const cookieToken =
+    request.cookies.get("better-auth.session_token")?.value ||
+    request.cookies.get("__Secure-better-auth.session_token")?.value;
+  if (cookieToken) return true;
+
+  // 2. Bearer 路径（微信小程序）。Phase L：getBearerSession 直查 Drizzle
+  // session 表 + 校验 expiresAt。如果想偷懒想避免 DB round-trip 在 proxy，
+  // 也可以只检查「token 形状合法 + 长度 16-128」，把真实校验留给下游 route。
+  // 这里做完整校验：proxy 拿不到合法 session 时保护路由仍会重定向到 /sign-in，
+  // 不让小程序端直跳 /dashboard 这种 page route。
+  const auth = request.headers.get("authorization");
+  if (auth?.toLowerCase().startsWith("bearer ")) {
+    const token = auth.slice(7).trim();
+    if (!token) return false;
+    const session = await getBearerSession(token);
+    return session !== null;
+  }
+
+  return false;
+}
+
+/**
+ * 创建国际化中间件
+ */
+const intlMiddleware = createIntlMiddleware(routing);
+
+/**
+ * API 路由限流配置（白名单模式）
+ *
+ * 只对敏感接口做限流，其余放行
+ * 未匹配到的路由不触发 Redis 调用
+ */
+const API_RATE_LIMITS: Array<{ pattern: RegExp; type: RateLimitType }> = [
+  // 认证相关 - 严格限流防暴力破解
+  { pattern: /^\/api\/auth\/sign-in/, type: "auth" },
+  { pattern: /^\/api\/auth\/sign-up/, type: "auth" },
+  { pattern: /^\/api\/auth\/forgot-password/, type: "auth" },
+  { pattern: /^\/api\/auth\/reset-password/, type: "auth" },
+  // 上传相关
+  { pattern: /^\/api\/upload/, type: "upload" },
+  // GPT-Image 用户端上传（公开 token 接口）
+  { pattern: /^\/api\/orders\/[^/]+\/upload/, type: "upload" },
+  { pattern: /^\/api\/orders\/[^/]+\/upload-url/, type: "upload" },
+];
+
+/**
+ * 获取 API 路由的限流类型
+ *
+ * @returns 限流类型，未匹配返回 null（不限流）
+ */
+function getApiRateLimitType(pathname: string): RateLimitType | null {
+  for (const { pattern, type } of API_RATE_LIMITS) {
+    if (pattern.test(pathname)) {
+      return type;
+    }
+  }
+  return null;
+}
+
+/**
+ * Proxy 配置（Next.js 16 起取代 middleware.ts）
+ *
+ * 功能:
+ * 1. API 限流（全局 + 路由级别）
+ * 2. 国际化路由处理 (next-intl)
+ * 3. 认证保护 (Better Auth)
+ *    - /dashboard/* 需要登录才能访问
+ *    - 未登录用户将被重定向到 /sign-in
+ */
+export async function proxy(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  // ============================================
+  // API 路由限流
+  // ============================================
+  if (pathname.startsWith("/api/")) {
+    // 跳过健康检查和 webhook（webhook 需要验证签名，不应被限流阻断）
+    if (pathname === "/api/health" || pathname.startsWith("/api/webhooks/")) {
+      return NextResponse.next();
+    }
+
+    // 白名单模式：只对匹配的敏感路由做限流
+    const rateLimitType = getApiRateLimitType(pathname);
+    if (rateLimitType) {
+      const ip = getClientIp(request);
+      const result = await checkRateLimit(ip, rateLimitType);
+
+      if (!result.success) {
+        return createRateLimitResponse(result);
+      }
+
+      const response = NextResponse.next();
+      const headers = getRateLimitHeaders(result);
+      for (const [key, value] of Object.entries(headers)) {
+        response.headers.set(key, value);
+      }
+      return response;
+    }
+
+    // 未匹配的 API 路由直接放行，不触发 Redis
+    return NextResponse.next();
+  }
+
+  // ============================================
+  // 非 API 路由：国际化 + 认证保护
+  // ============================================
+
+  // 获取 session token（Cookie 或 Bearer，二选一）
+  // 2026-09-16：微信小程序走 Authorization: Bearer 模式，proxy 也得认。
+  const hasSession = await hasAnySessionToken(request);
+
+  // 从路径中提取不带语言前缀的路径
+  // 例如: /en/dashboard -> /dashboard, /zh/sign-in -> /sign-in
+  const pathnameWithoutLocale = pathname.replace(/^\/(en|zh)/, "") || "/";
+
+  // 定义需要保护的路由
+  // 2026-09-08：(agent) route group 已删，不再需要把 /agent 加进 protectedRoutes。
+  const protectedRoutes = ["/", "/dashboard", "/admin"];
+
+  // 定义认证页面路由 (已登录用户不应访问)
+  const authRoutes = ["/sign-in", "/sign-up"];
+
+  // 检查当前路径是否是受保护的路由
+  const isProtectedRoute = protectedRoutes.some(
+    (route) =>
+      pathnameWithoutLocale === route ||
+      pathnameWithoutLocale.startsWith(`${route}/`)
+  );
+
+  // 检查当前路径是否是认证页面
+  const isAuthRoute = authRoutes.some(
+    (route) => pathnameWithoutLocale === route
+  );
+
+  // 获取当前语言前缀 (用于重定向)
+  const localeMatch = pathname.match(/^\/(en|zh)/);
+  const locale = localeMatch ? localeMatch[1] : routing.defaultLocale;
+
+  // 如果访问受保护路由但未登录，重定向到登录页
+  if (isProtectedRoute && !hasSession) {
+    const signInUrl = new URL(`/${locale}/sign-in`, request.url);
+    // 保存原始 URL，登录后可以重定向回来
+    signInUrl.searchParams.set("callbackUrl", pathname);
+    return NextResponse.redirect(signInUrl);
+  }
+
+  // 如果已登录用户访问认证页面，重定向到 callbackUrl（无则 Dashboard）
+  // 2026-09-09：之前无脑跳 /dashboard，会让代理商 / 普通用户从
+  //   /image-gen → /sign-in?callbackUrl=/image-gen → 登录 → /dashboard
+  //   丢失了原本的来源页。改成 callbackUrl 优先 + 白名单校验防 open redirect。
+  if (isAuthRoute && hasSession) {
+    const callbackUrl = request.nextUrl.searchParams.get("callbackUrl");
+    const fallbackUrl = new URL(`/${locale}/dashboard`, request.url);
+
+    if (callbackUrl) {
+      // callbackUrl 必须是同源相对路径（不允许绝对 URL / 协议相对 / 双斜杠）
+      // 防止恶意 redirect 到外站。
+      const isSafePath =
+        callbackUrl.startsWith("/") &&
+        !callbackUrl.startsWith("//") &&
+        !callbackUrl.startsWith("/\\");
+      if (isSafePath) {
+        // 路径已包含语言前缀（如 /en/image-gen 或 /image-gen 都有）
+        // - 已有 /en|zh 前缀：直接用
+        // - 无语言前缀：补上前缀
+        const hasLocalePrefix = /^\/(en|zh)(\/|$)/.test(callbackUrl);
+        const targetPath = hasLocalePrefix
+          ? callbackUrl
+          : `/${locale}${callbackUrl.startsWith("/") ? "" : "/"}${callbackUrl}`;
+        return NextResponse.redirect(new URL(targetPath, request.url));
+      }
+    }
+    return NextResponse.redirect(fallbackUrl);
+  }
+
+  // 执行国际化中间件
+  return intlMiddleware(request);
+}
+
+/**
+ * Proxy 匹配配置
+ *
+ * 现在也匹配 API 路由，以便进行全局限流
+ */
+export const config = {
+  matcher: [
+    /*
+     * 匹配所有路径除了:
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico (favicon file)
+     * - site.webmanifest (PWA manifest，由 src/app/manifest.ts 约定产出 /manifest.webmanifest，
+     *   不走 intlMiddleware 避免 next-intl 把 /manifest.webmanifest 重定向到 /zh/manifest.webmanifest)
+     * - sitemap.xml / robots.txt (Next.js MetadataRoute 文件)
+     * - /plugins/* (画布本地插件清单 public/plugins/index.json，避开 locale 前缀重定向)
+     * - 静态图片扩展
+     *
+     * 注意: 现在包含 /api 路由以便进行限流
+     */
+    "/((?!_next/static|_next/image|favicon.ico|manifest\\.webmanifest|sitemap\\.xml|robots\\.txt|plugins(?:/.*)?|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+  ],
+};
