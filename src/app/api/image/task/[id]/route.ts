@@ -1,9 +1,11 @@
 // 查询异步生图任务状态（公共 + 内部共用）
-// 任务 ID 不可猜测作为安全边界；model 从 taskId 解析，不要求客户端传 ?model=
+// 任务 ID 不可猜测作为安全边界；model 优先从 taskId 解析，
+// 不在客户端 ?model= 上暴露；不支持的 taskId 形态走 404
 import { type NextRequest, NextResponse } from "next/server";
 import {
   dispatchQueryImageTask,
   getClientIp,
+  type ImageModelId,
   logImageGen,
   parseTaskModel,
 } from "@/features/image-gen";
@@ -13,6 +15,12 @@ import {
   createRateLimitResponse,
   getRateLimitHeaders,
 } from "@/lib/rate-limit";
+
+/** apimart 上游 taskId 形态（ULID-like）。parseTaskModel 只认 imgtask_<model>_...
+ * 形态，要把 apimart 也接进来 —— 两条 apimart adapter (flare / sunburst)
+ * 共享 queryApimartTask，轮询端点不依赖具体上游 model，挑一个即可。
+ */
+const APIMART_TASK_ID_RE = /^task_[A-Za-z0-9_-]+$/;
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -29,8 +37,11 @@ export async function GET(
     );
   }
 
-  // 从 taskId 解析 model，避免客户端传 ?model= 暴露内部模型
-  const model = parseTaskModel(taskId);
+  // 优先从 taskId 解析 model。apimart 的 ULID 形态兜底指向 apimart_gpt_image。
+  let model: ImageModelId | null = parseTaskModel(taskId);
+  if (!model && APIMART_TASK_ID_RE.test(taskId)) {
+    model = "apimart_gpt_image";
+  }
   if (!model) {
     return NextResponse.json(
       { success: false, error: "任务不存在或已过期" },
