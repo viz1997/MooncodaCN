@@ -25,6 +25,7 @@ import {
   type GenerateImageResult,
   IMAGE_MODELS,
   type ImageModelAdapter,
+  type ImageModelConfig,
   type ImageModelId,
 } from "./types";
 
@@ -584,31 +585,37 @@ export const nanoBanana2Adapter: ImageModelAdapter = {
   },
 };
 
-// ============ 4. Apimart gpt-image-2.5-ext 适配器（flare/sunburst 异步任务模式） ============
-// 2026-10-12：接入 apimart.ai gpt-image-2.5-ext。submit → poll → R2 持久化
-// 路径与 gpt_image_2 adapter 同形态，但用 apimart 自己的 REST API（不是 lingting）
-// 也不复用 submitLingtingTask，避免一次性耦合过多上游差异。
+// ============ 4. Apimart gpt-image-2.5 适配器（flare / sunburst 异步任务模式） ============
+// 2026-10-XX：gpt-image-2.5-ext 弃用 → 官方文档列 gpt-image-2.5-flare 与
+// gpt-image-2.5-sunburst 两个并列 model 字段（不再有 version 子字段）。
+// adapter 改成工厂模式 createApimartAdapter({ upstreamModel, config })，
+// 同一套 submit / poll / R2 持久化路径给两个 IMAGE_MODELS 条目复用。
 //
 // 关键设计决策：
 // - 每提交带 Idempotency-Key（UUID v4）：apimart 强要求 + 我们重试安全
-// - X-APIMart-Response-Version 头固定 2026-07-27：apimart 文档要求，
-//   未传会返 400
-// - size 映射：apimart 接受 aspect ratio（"1:1" 等 10 种）或 "auto"，
-//   不接受 pixel 形式 —— adapter 内做 pixelToRatio 计算
-// - resolution 映射：从 schema.quality（low/medium/high/auto）映到
-//   1K/2K/4K；未传时默认 1K
+// - X-APIMart-Response-Version 头固定 2026-07-27：apimart 文档要求
+// - size 映射：apimart 接受 aspect ratio（"1:1" / "16:9" 等 15 种）或 "auto"
+//   或精确像素（"1600x1200"，文档示例）；pixelToRatio 仅当「WxH 不被 apimart
+//   接受」时降级兜底（当前 apimart 接受精确像素，所以多半直接透传）
+// - resolution 默认 1K；quality 默认 auto（apimart 按尺寸最高档预留额度，
+//   任务完成按真实 token 用量结算）
 // - R2 持久化：queryTask 拿到 url 时立即 persistCandidateToR2（wellapi URL
-//   TTL 1-24h 教训：参考 src/features/image-gen/lib/image-models/adapters.ts
-//   gpt_image_2 注释 + persistCandidateToR2 的实现约定）
+//   TTL 1-24h 教训：参考本文件 gpt_image_2 adapter 注释 +
+//   persistCandidateToR2 的实现约定）
 // - taskId 格式："task_<id>"（apimart 真实任务 id），不进 legacy
 //   /api/image/task/[id] parseTaskModel 解析路径 —— 与 gpt_image_2 一致，
 //   新工作台靠 imageJob.model 列 dispatch（见 generation-service.advanceImageGenJob）
 // - 上限：n=1..4（与 schema 一致），imageUrls 1..16（schema 现约束 10，
 //   adapter 内防御性再校验到 16，超出返 400 错误）
+// - mask_url：apimart 接受透明 PNG 局部重绘蒙版（与 image_urls 联用），
+//   adapter 透传 req.maskUrl → body.mask_url
 
-/** 像素 → 比例 映射。apimart 的 size 不接受 "WxH"，必须转 aspect ratio */
+/** 像素 → 比例 映射。apimart 文档现接受 "1:1"、"16:9" 等 15 种 ratio + 精确像素（"1600x1200"），
+ * 这里只在下游 schema 给的 WxH 不被 apimart 直白认（即 W/H 不在 ratio 表里）时降级
+ * 兜底。最近 15 种 ratio。 */
 function pixelToRatio(width: number, height: number): string {
-  // 计算最近 10 种 ratio（EPS=0.02，约 ±2%）
+  // 2026-10-XX：扩为 15 种（加 2:1 / 1:2 / 3:1 / 1:3 / 9:21）
+  // 计算最近 ratio（EPS=0.02，约 ±2%）
   const ratio = width / height;
   const ratios: Array<[string, number]> = [
     ["1:1", 1],
@@ -621,6 +628,11 @@ function pixelToRatio(width: number, height: number): string {
     ["5:4", 5 / 4], // 1.25
     ["4:5", 4 / 5], // 0.8
     ["21:9", 21 / 9], // 2.333
+    ["2:1", 2],
+    ["1:2", 0.5],
+    ["3:1", 3],
+    ["1:3", 1 / 3],
+    ["9:21", 9 / 21], // 0.4286
   ];
   let best: { ratio: string; diff: number } = { ratio: "1:1", diff: Infinity };
   for (const [r, v] of ratios) {
@@ -630,11 +642,13 @@ function pixelToRatio(width: number, height: number): string {
   return best.ratio;
 }
 
-/** schema.quality → apimart resolution（1K/2K/4K） */
-function qualityToResolution(quality?: string): "1K" | "2K" | "4K" {
-  if (quality === "high") return "4K";
-  if (quality === "medium") return "2K";
-  return "1K"; // low / auto / undefined 一律 1K
+/** schema.quality → apimart resolution（1K/2K/4K）。当前 quality 不在 GenerateImageRequest 暴露，
+ * 一律走 1K（最低成本档）；UI 后续接 quality 字段时同步扩此处 */
+function qualityToResolution(_quality?: string): "1K" | "2K" | "4K" {
+  // 2026-10-XX：gpt-image-2.5 文档 quality 五档 low/medium/high/xhigh/max，
+  // 适配档用最高档 max 留预占，4K 我们不主动送 —— 保守走 1K。
+  // 留两个分支给未来 UI 扩 quality 切换时用。
+  return "1K";
 }
 
 /** GenerateImageRequest.size → apimart size string */
@@ -647,20 +661,26 @@ function resolveApimartSize(req: GenerateImageRequest): string {
     const h = req.customHeight ?? 1024;
     return pixelToRatio(w, h);
   }
-  // 标准像素 → 直接算
+  // 标准像素 → 优先透传（apimart 文档示例接受 "1600x1200"），
+  // 不在 apimart 文档 16 的倍数 + ≤3840 单边规则附近时才降级到 ratio
   const parts = size.split("x");
   if (parts.length === 2) {
     const w = Number(parts[0]);
     const h = Number(parts[1]);
     if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
-      return pixelToRatio(w, h);
+      const bothMultipleOf16 = w % 16 === 0 && h % 16 === 0;
+      const withinLimit = w <= 3840 && h <= 3840;
+      // 直接透传精确像素；不满足尺寸规则时降级到 ratio
+      return bothMultipleOf16 && withinLimit
+        ? size
+        : pixelToRatio(w, h);
     }
   }
   return "auto";
 }
 
-/** apimart task 类型字符串 */
-type ApimartVersion = "flare" | "sunburst";
+/** apimart 上游 model 字符串（提交请求 body.model 用） */
+type ApimartUpstreamModel = "gpt-image-2.5-flare" | "gpt-image-2.5-sunburst";
 
 /**
  * 提交生图任务（apimart POST /v1/images/generations）。
@@ -673,6 +693,10 @@ type ApimartVersion = "flare" | "sunburst";
  * "每次新的生成操作创建一次；重试同一操作时保留原值"。
  * 我们的 retry 模式是"外层自己重试"（与 gpt_image_2 同语义），所以
  * 每次都生成新 key —— 重试确实视为新操作。
+ *
+ * 2026-10-XX：submit 响应格式从 { data: { id } } 改为 { data: [{ task_id }] }
+ * （apimart 文档明示 "data 是数组，请读取 data[0].task_id"）。此处同时兼容
+ * 旧的 object 形态（防御性 fallback），未来全面切新格式后可删。
  */
 async function submitApimartTask(
   body: Record<string, unknown>,
@@ -698,19 +722,27 @@ async function submitApimartTask(
   }
   const data = (await res.json()) as {
     code?: number;
-    data?: { id?: string; status?: string };
+    // 新文档：data 是数组 [{ task_id, status }]
+    // 旧/保险：data 也可能是对象 { id, status }
+    data?:
+      | Array<{ task_id?: string; id?: string; status?: string }>
+      | { task_id?: string; id?: string; status?: string }
+      | undefined;
     error?: { message?: string };
   };
-  // apimart 错误格式：{ error: { message, type, code } }
-  if (
-    data.error?.message ||
-    (typeof data.code === "number" && data.code !== 200 && data.code !== 202)
-  ) {
-    throw new Error(
-      `apimart submit 业务错误: ${data.error?.message ?? `code ${data.code}`}`
-    );
+  // apimart 业务错误：{ error: { message, type, code } }
+  if (data.error?.message) {
+    throw new Error(`apimart submit 业务错误: ${data.error.message}`);
   }
-  const taskId = data.data?.id;
+  // 抽 task_id —— 优先新文档数组形态
+  let taskId: string | undefined;
+  if (Array.isArray(data.data) && data.data.length > 0) {
+    const first = data.data[0] as { task_id?: string; id?: string };
+    taskId = first.task_id ?? first.id;
+  } else if (data.data && typeof data.data === "object") {
+    const obj = data.data as { task_id?: string; id?: string };
+    taskId = obj.task_id ?? obj.id;
+  }
   if (!taskId) {
     throw new Error(
       `apimart submit 响应缺 taskId: ${JSON.stringify(data).slice(0, 200)}`
@@ -819,145 +851,177 @@ async function queryApimartTask(
 }
 
 /**
- * Apimart gpt-image-2.5-ext 适配器（2026-10-12 新增）
+ * Apimart gpt-image-2.5 适配器工厂（2026-10-XX 重构）
+ *
+ * 替旧的单 apimartGptImageAdapter 常量 —— 现在 flare / sunburst 两个并列
+ * IMAGE_MODELS 条目复用同一套 submit / poll / R2 持久化代码，靠 closure 捕获
+ * 上游 model 字符串 + 下游 ImageModelId。
  *
  * 异步任务模式：generate 返回 taskId，由前端 /api/image-gen/jobs/[id]/poll
  * → advanceImageGenJob → dispatchQueryImageTask → queryTask 三段式推进。
  */
-export const apimartGptImageAdapter: ImageModelAdapter = {
-  config: IMAGE_MODELS.apimart_gpt_image,
-  validate(req) {
-    if (!req.prompt) return "Apimart GPT-Image 需要 prompt";
-    // 防御性：schema 已限 imageUrls 最多 10，apimart 上限 16 —— 留作底线
-    if (req.imageUrls && req.imageUrls.length > 16)
-      return "Apimart 单次最多 16 张参考图";
-    // batchSize 上限 4（schema 已限，adapter 防御性再校）
-    if (req.batchSize && req.batchSize > 4) return "Apimart 单次最多 4 张";
-    // 反向提示词 apimart 不支持
-    if (req.negativePrompt) return "Apimart 不支持反向提示词";
-    if (!isApimartConfigured()) return "APIMART_API_KEY 未配置";
-    return null;
-  },
-  async generate(req) {
-    const apiKey = getApimartApiKey();
-    if (!apiKey) {
-      return {
-        success: false,
-        model: "apimart_gpt_image",
-        status: "failed",
-        error: "APIMART_API_KEY 未配置，请在环境变量中设置",
+function createApimartAdapter(opts: {
+  upstreamModel: ApimartUpstreamModel;
+  config: ImageModelConfig;
+}): ImageModelAdapter {
+  const { upstreamModel, config } = opts;
+  const downstreamId = config.id;
+
+  return {
+    config,
+    validate(req) {
+      if (!req.prompt) return `${config.name} 需要 prompt`;
+      // 防御性：schema 已限 imageUrls 最多 10，apimart 上限 16 —— 留作底线
+      if (req.imageUrls && req.imageUrls.length > 16)
+        return `${config.name} 单次最多 16 张参考图`;
+      // batchSize 上限 4（schema 已限，adapter 防御性再校）
+      if (req.batchSize && req.batchSize > 4)
+        return `${config.name} 单次最多 4 张`;
+      // 反向提示词 apimart 不支持
+      if (req.negativePrompt) return `${config.name} 不支持反向提示词`;
+      // inpainting 必须带 maskUrl
+      if (req.mode === "inpainting" && !req.maskUrl)
+        return `${config.name} 局部重绘需要 maskUrl`;
+      if (!isApimartConfigured()) return "APIMART_API_KEY 未配置";
+      return null;
+    },
+    async generate(req) {
+      const apiKey = getApimartApiKey();
+      if (!apiKey) {
+        return {
+          success: false,
+          model: downstreamId,
+          status: "failed",
+          error: "APIMART_API_KEY 未配置，请在环境变量中设置",
+        };
+      }
+
+      const refUrls = req.imageUrls ?? [];
+      const size = resolveApimartSize(req);
+      const n = Math.min(Math.max(req.batchSize ?? 1, 1), 4);
+
+      const body: Record<string, unknown> = {
+        model: upstreamModel,
+        prompt: req.prompt,
+        size,
+        resolution: qualityToResolution(undefined), // 默认 1K；后续接 quality 字段
+        n,
       };
-    }
+      // 图生图：传 image_urls（apimart 文档用 image_urls 复数）
+      if (refUrls.length > 0) {
+        body.image_urls = refUrls;
+      }
+      // 局部重绘：mask_url 与 image_urls 联用。apimart 文档要求蒙版是
+      // 带 Alpha 通道的 PNG，与 image_urls[0] 尺寸一致 —— 调用方负责。
+      if (req.maskUrl && refUrls.length > 0) {
+        body.mask_url = req.maskUrl;
+      }
 
-    const refUrls = req.imageUrls ?? [];
-    const size = resolveApimartSize(req);
-    const n = Math.min(Math.max(req.batchSize ?? 1, 1), 4);
-
-    // version 暂走 flare 默认。未来若 UI 暴露 version 切换，可在 req 上
-    // 加 meta.version 字段后读取；当前阶段为单版本 + 未来扩展占位
-    const version: ApimartVersion = "flare";
-
-    const body: Record<string, unknown> = {
-      model: "gpt-image-2.5-ext",
-      version,
-      prompt: req.prompt,
-      size,
-      resolution: qualityToResolution(undefined), // 默认 1K；后续接 quality 字段
-      n,
-    };
-    // 图生图：传 image_urls（apimart 文档用 image_urls 复数）
-    if (refUrls.length > 0) {
-      body.image_urls = refUrls;
-    }
-
-    try {
-      const { taskId } = await submitApimartTask(body, apiKey);
-      return {
-        success: true,
-        model: "apimart_gpt_image",
-        taskId,
-        status: "processing",
-      };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "未知错误";
-      return {
-        success: false,
-        model: "apimart_gpt_image",
-        status: "failed",
-        error: `提交生图失败：${msg}`,
-      };
-    }
-  },
-  async queryTask(taskId) {
-    const apiKey = getApimartApiKey();
-    if (!apiKey) {
-      return {
-        success: false,
-        model: "apimart_gpt_image",
-        taskId,
-        status: "failed",
-        error: "APIMART_API_KEY 未配置",
-      };
-    }
-
-    const traceHint = `apimart-${taskId}-${seededRandom().toString(36).slice(2, 8)}`;
-    try {
-      const q = await queryApimartTask(taskId, apiKey, traceHint);
-      if (q.state === "pending") {
+      try {
+        const { taskId } = await submitApimartTask(body, apiKey);
         return {
           success: true,
-          model: "apimart_gpt_image",
+          model: downstreamId,
           taskId,
           status: "processing",
         };
-      }
-      if (q.state === "failed") {
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "未知错误";
         return {
           success: false,
-          model: "apimart_gpt_image",
-          taskId,
+          model: downstreamId,
           status: "failed",
-          error: q.error,
+          error: `提交生图失败：${msg}`,
         };
       }
-      // done —— urls 已落 R2
-      if (q.urls.length === 0) {
+    },
+    async queryTask(taskId) {
+      const apiKey = getApimartApiKey();
+      if (!apiKey) {
         return {
           success: false,
-          model: "apimart_gpt_image",
+          model: downstreamId,
           taskId,
           status: "failed",
-          error: "Apimart 完成任务但未返回图片 URL",
+          error: "APIMART_API_KEY 未配置",
         };
       }
-      return {
-        success: true,
-        model: "apimart_gpt_image",
-        taskId,
-        status: "completed",
-        images: q.urls.map((u) => ({ url: u })),
-        cost: q.cost ?? 0.2,
-        currency: "USD",
-      };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "未知错误";
-      return {
-        success: false,
-        model: "apimart_gpt_image",
-        taskId,
-        status: "failed",
-        error: `任务查询失败：${msg}`,
-      };
-    }
-  },
-};
+
+      const traceHint = `apimart-${upstreamModel}-${taskId}-${seededRandom().toString(36).slice(2, 8)}`;
+      try {
+        const q = await queryApimartTask(taskId, apiKey, traceHint);
+        if (q.state === "pending") {
+          return {
+            success: true,
+            model: downstreamId,
+            taskId,
+            status: "processing",
+          };
+        }
+        if (q.state === "failed") {
+          return {
+            success: false,
+            model: downstreamId,
+            taskId,
+            status: "failed",
+            error: q.error,
+          };
+        }
+        // done —— urls 已落 R2
+        if (q.urls.length === 0) {
+          return {
+            success: false,
+            model: downstreamId,
+            taskId,
+            status: "failed",
+            error: `${config.name} 完成任务但未返回图片 URL`,
+          };
+        }
+        return {
+          success: true,
+          model: downstreamId,
+          taskId,
+          status: "completed",
+          images: q.urls.map((u) => ({ url: u })),
+          cost: q.cost ?? 0.2,
+          currency: "USD",
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "未知错误";
+        return {
+          success: false,
+          model: downstreamId,
+          taskId,
+          status: "failed",
+          error: `任务查询失败：${msg}`,
+        };
+      }
+    },
+  };
+}
+
+/** Apimart GPT-Image-2.5 Flare —— 默认款，速度优先 */
+export const apimartGptImageAdapter: ImageModelAdapter = createApimartAdapter({
+  upstreamModel: "gpt-image-2.5-flare",
+  config: IMAGE_MODELS.apimart_gpt_image,
+});
+
+/** Apimart GPT-Image-2.5 Sunburst —— 精度优先款，与 flare 并列条目 */
+export const apimartGptImageSunburstAdapter: ImageModelAdapter =
+  createApimartAdapter({
+    upstreamModel: "gpt-image-2.5-sunburst",
+    config: IMAGE_MODELS.apimart_gpt_image_sunburst,
+  });
+
 // 2026-09-11：精简为 3 个核心 adapter（qwen / gpt_image_2 / nano_banana2）。
 // 2026-10-12：新增 apimart_gpt_image adapter（接入 apimart.ai gpt-image-2.5-ext）。
+// 2026-10-XX：apimart_gpt_image 改指 flare；新增 apimart_gpt_image_sunburst 并列条目。
 export const IMAGE_ADAPTERS: Record<ImageModelId, ImageModelAdapter> = {
   qwen: qwenAdapter,
   gpt_image_2: gptImage2Adapter,
   nano_banana2: nanoBanana2Adapter,
   apimart_gpt_image: apimartGptImageAdapter,
+  apimart_gpt_image_sunburst: apimartGptImageSunburstAdapter,
 };
 
 // ============ 统一调度入口 ============

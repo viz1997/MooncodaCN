@@ -127,9 +127,12 @@ export const maxDuration = 120;
 // 外部用户可用全部模型（服务端控制，前端不感知具体模型）
 // 2026-09-11：精简为 3 个核心模型（qwen / gpt_image_2 / nano_banana2）。
 // 2026-10-12：接入 apimart_gpt_image 后扩为 4 个。apimart 是本公共 API 的默认模型。
+// 2026-10-XX：apimart 拆为 flare（apimart_gpt_image，默认）与
+// sunburst（apimart_gpt_image_sunburst）并列条目，扩为 5 个。
 // 旧即梦 / DALL-E / SD / Flux / Midjourney / 通义万相 / 文心一格 / CogView / Nano Banana Pro 全部下线。
 const PUBLIC_ALLOWED_MODELS: ImageModelId[] = [
   "apimart_gpt_image",
+  "apimart_gpt_image_sunburst",
   "qwen",
   "gpt_image_2",
   "nano_banana2",

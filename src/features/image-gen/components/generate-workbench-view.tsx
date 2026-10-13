@@ -865,7 +865,7 @@ interface V1PersistedSettings {
 }
 
 const DEFAULT_V1_SETTINGS: V1PersistedSettings = {
-  // 2026-10-12：默认模型切到 apimart_gpt_image（apimart.ai gpt-image-2.5-ext）。
+  // 2026-10-XX：默认模型切到 apimart_gpt_image（apimart.ai gpt-image-2.5-flare）。
   // 原因：apimart 支持 text_to_image / image_to_image / image_editing 全模式，
   // 文生图也能直出，比 gpt_image_2（只能图生图）更适合作默认入口。
   // 用户已选过的 selectedModel 持久化在 localStorage，不会被新默认值覆盖。
@@ -935,7 +935,7 @@ export function GenerateWorkbenchView({
 
   // 参考图模式 + 数据
   // 2026-08-18：默认从 "none" 改为 "upload"。
-  // 原因：默认模型 apimart_gpt_image（2026-10-12 接入）支持文生图 + 图生图 + 图像编辑，
+  // 原因：默认模型 apimart_gpt_image（2026-10-XX 接入 flare，2026-10-12 接入 ext）支持文生图 + 图生图 + 图像编辑，
   // 文生图场景无需参考图也能跑；保留 upload 作为默认入口是 UX 偏好（多数用户
   // 进入工作台就想发参考图），不影响无图直接点生成。
   // 2026-09-03 V1 多图：uploadedImage 单数 → uploadedImages 数组（最多 10 张）。
@@ -975,7 +975,7 @@ export function GenerateWorkbenchView({
 
   // 模型与提示词模板（Phase C：mask → template 语义重命名，但 selectedMask 状态名保留
   // 以兼容 WorkbenchEffect.maskId 字段与 generateImageAction({ maskId }) 调用）
-  // 2026-10-12：默认切到 apimart_gpt_image（apimart.ai gpt-image-2.5-ext）。
+  // 2026-10-XX：默认切到 apimart_gpt_image（apimart.ai gpt-image-2.5-flare）。
   // 见 DEFAULT_V1_SETTINGS.selectedModel 注释。
   const [selectedModel, setSelectedModel] = useState<ImageModelId>(
     DEFAULT_V1_SETTINGS.selectedModel

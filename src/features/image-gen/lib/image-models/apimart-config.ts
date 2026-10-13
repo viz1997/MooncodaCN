@@ -1,5 +1,5 @@
 // Apimart 生图模型配置 - 从环境变量读取
-// 2026-10-12：接入 apimart.ai gpt-image-2.5-ext（flare / sunburst 双版本）
+// 2026-10-XX：接入 apimart.ai gpt-image-2.5-flare / -sunburst（ext 已弃用）
 // 未配置 APIMART_API_KEY 时，apimart adapter 返友好错误而非崩溃
 
 export const APIMART_CONFIG = {
