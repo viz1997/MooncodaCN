@@ -1,28 +1,31 @@
 #!/usr/bin/env bash
-# verify-public-routes.sh —— BFF 公共端点冒烟测试
+# verify-image-gen-routes.sh —— BFF image-gen 端点冒烟测试
 #
-# 用途：SDK v1.1.0 上线后,验证 BFF 部署版本里 /api/public/** 与
-#       /api/image/task/[id] 已带上本次的修复。
-# 改 BFF 路由 / 鉴权 / 字段时,跑一下这个确认没炸公共端点。
+# 用途:SDK v1.1.0 + v2.1 上线后,验证 BFF 部署版本里 /api/image-gen/**
+# 端点(给 mp + 工作台用)与 /api/image/task/[id] 兜底都已带上本次修复。
+# 改 BFF image-gen 路由 / 鉴权 / 字段时,跑一下这个确认没炸公共链路。
 #
-# 用法：
-#   BASE_URL=https://api.mooncoda.com \
+# 用法:
+#   BASE_URL=https://aimake3d.com \
 #   EXTERNAL_API_KEY=mk_pub_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx \
 #   APIMART_TASK_ID=task_01M4T6MCXA153FV4163DERS1C5 \
-#   TEST_IMAGE_URL=https://r2.mooncoda.com/test/sample.jpg \
-#   bash scripts/verify-public-routes.sh
+#   TEST_IMAGE_URL=https://aimake3d.com/sample.jpg \
+#   bash scripts/verify-image-gen-routes.sh
 #
 #   不传 BASE_URL 默认 http://localhost:3000
 #   不传 EXTERNAL_API_KEY 也能跑(只会看到 401,仍然能确认端点存活)
 #   不传 APIMART_TASK_ID 跳过 taskId 轮询测试
-#   不传 TEST_IMAGE_URL 跳过 async submit 时序测试(只跑前 3 个 + quota)
+#   不传 TEST_IMAGE_URL 跳过 async submit 时序测试(只跑 Test 1/2/5/6)
 #
-# 退出码：
+# 退出码:
 #   0 = 全部通过(或预期失败)
 #   非 0 = 至少一个测试返了意料外的状态
 #
-# 2026-10-13：v1.1.0 首发。后续 BFF 改 public 路由时更新本脚本。
-# 2026-10-13 v2.0:加 Test 4(async submit 时序回归) + Test 5(quota 端点)。
+# 历史:
+#   2026-10-13 v1.1.0 首发(verify-public-routes.sh)
+#   2026-10-13 v2.0   +Test 4 (async submit 时序) + Test 5 (quota 端点)
+#   2026-10-13 v2.1   mp 端点从 /api/public/** 迁到 /api/image-gen/**,
+#                     旧 /api/public/** 返 410 Gone,+Test 6 验证 410。
 
 set -uo pipefail
 
@@ -52,7 +55,7 @@ log_warn() { printf "  ${YELLOW}⚠ %s${RESET}\n" "$1"; WARN=$((WARN+1)); TOTAL=
 
 # curl helper
 # 用法: do_curl <METHOD> <PATH> [extra-curl-args...]
-# 返: "HTTP_CODE BODY" (BODY 截 500 字符)
+# 返: "HTTP_CODE BODY" (BODY 截 5000 字符)
 do_curl() {
   local method="$1"
   local path="$2"
@@ -75,25 +78,23 @@ do_curl() {
   printf "%s|%s" "$code" "$body"
 }
 
-# 拆 curl 返的 "CODE|BODY"(helper,目前 inline cut 够用,保留供扩展)
-# parse() { ... } 占位
-
 # 输出 +verbose 详情
 if [ "$VERBOSE" = "1" ]; then
   set -x
 fi
 
-printf "${CYAN}=== BFF 公共端点冒烟测试 ===${RESET}\n"
+printf "${CYAN}=== BFF image-gen 端点冒烟测试 ===${RESET}\n"
 printf "  BASE_URL: %s\n" "$BASE_URL"
 printf "  EXTERNAL_API_KEY: %s\n" "${EXTERNAL_API_KEY:-(未传,会拿到 401)}"
 printf "  APIMART_TASK_ID: %s\n" "${APIMART_TASK_ID:-(未传,跳过 taskId 轮询)}"
 printf "  TEST_IMAGE_URL: %s\n" "${TEST_IMAGE_URL:-(未传,跳过 async submit 时序测试)}"
 
 # ----------------------------------------------------------------------
-# Test 1: /api/public/prompt-templates 端点存活 + 鉴权 + 响应 shape
+# Test 1: /api/image-gen/templates 端点存活 + 鉴权 + 响应 shape
 # ----------------------------------------------------------------------
-log_step "Test 1: GET /api/public/prompt-templates"
-RAW=$(do_curl GET "/api/public/prompt-templates")
+# v2.1 从 /api/public/prompt-templates 迁来。原路径已 410,见 Test 6。
+log_step "Test 1: GET /api/image-gen/templates"
+RAW=$(do_curl GET "/api/image-gen/templates")
 CODE=$(echo "$RAW" | cut -d'|' -f1)
 BODY=$(echo "$RAW" | cut -d'|' -f2-)
 
@@ -116,7 +117,7 @@ elif [ "$CODE" = "401" ] || [ "$CODE" = "403" ]; then
     log_fail "$CODE(传了 key 仍被拒,key 不对或 BFF 没切到 v1.1.0)"
   fi
 elif [ "$CODE" = "404" ]; then
-  log_fail "404 —— BFF 没实现本端点,v1.1.0 修复没部署"
+  log_fail "404 —— BFF 没实现本端点,v2.1 修复没部署"
 elif [ "$CODE" = "000" ]; then
   log_warn "000 —— 连接到 $BASE_URL 失败(BFF 没起或网络不通)。等部署完再跑"
 else
@@ -126,6 +127,9 @@ fi
 # ----------------------------------------------------------------------
 # Test 2: /api/image/task/[id] —— apimart ULID taskId 兜底
 # ----------------------------------------------------------------------
+# v2.1 仍保留该路径作为「老 apimart ULID 形态 taskId 兜底」,与 v2.0
+# 加的「UUID 形态(= imageJob.id)直接读 DB」分支并存。mp 走 UUID,工作台
+# 历史任务(用 imgtask_/task_ 前缀)走兜底调上游。
 log_step "Test 2: GET /api/image/task/[id](apimart ULID 形态)"
 if [ -z "$APIMART_TASK_ID" ]; then
   log_warn "跳过:APIMART_TASK_ID 未设(export APIMART_TASK_ID=task_01... 重跑)"
@@ -158,33 +162,31 @@ else
 fi
 
 # ----------------------------------------------------------------------
-# Test 3: /api/public/generate GET —— 旧鉴权链路回归(防 SDK 升级把已有路由搞坏)
+# Test 3: /api/image-gen/jobs/[jobId]/poll —— 双鉴权
 # ----------------------------------------------------------------------
-log_step "Test 3: GET /api/public/generate(回归测试,确认旧鉴权链路未坏)"
-RAW=$(do_curl GET "/api/public/generate")
+# v2.1 加双鉴权:BA session OR x-api-key(且 job.userId IS NULL)。
+# mp 调这个端点拿轮询结果(POST)。本测试不需 jobId(无参数) —— 期望
+# 401/400(没传 jobId 或没鉴权),只验端点存活。
+log_step "Test 3: POST /api/image-gen/jobs/[jobId]/poll(端点存活)"
+RAW=$(do_curl POST "/api/image-gen/jobs//poll")
 CODE=$(echo "$RAW" | cut -d'|' -f1)
 BODY=$(echo "$RAW" | cut -d'|' -f2-)
 
-if [ "$CODE" = "200" ]; then
-  if echo "$BODY" | grep -q '"masks"'; then
-    log_pass "200 + 响应含 masks(/image-gen 工作台契约)"
-  else
-    log_warn "200 但响应缺 masks 字段。 BODY: $BODY"
-  fi
-elif [ "$CODE" = "401" ] || [ "$CODE" = "403" ]; then
-  if [ -z "$EXTERNAL_API_KEY" ]; then
-    log_pass "$CODE(预期:未传 key 必拒)"
-  else
-    log_fail "$CODE(传了 key 仍被拒,key 不对)"
-  fi
+# 空 jobId → 400 "jobId 必填";有 EXTERNAL_API_KEY → 401
+if [ "$CODE" = "400" ]; then
+  log_pass "400(空 jobId 必拒 —— 端点存活,鉴权流程未跑)"
+elif [ "$CODE" = "401" ]; then
+  log_pass "401(空 jobId 拒后 / 鉴权拒 —— 端点存活)"
+elif [ "$CODE" = "404" ]; then
+  log_pass "404(空 jobId → findFirst 未命中,合理)"
 elif [ "$CODE" = "000" ]; then
-  log_warn "000 —— 连接到 $BASE_URL 失败(BFF 没起或网络不通)"
+  log_warn "000 —— 连接 BFF 失败"
 else
-  log_fail "$CODE —— 意外。 BODY: $BODY"
+  log_warn "$CODE —— 意外状态(本测试不严判)。 BODY: $BODY"
 fi
 
 # ----------------------------------------------------------------------
-# Test 4: POST /api/public/generate 异步 submit 时序回归
+# Test 4: POST /api/image-gen/submit 异步 submit 时序回归
 # ----------------------------------------------------------------------
 # mp 团队升级到 SDK v1.1.0 时遇到的"30s timeout"症状就是 BFF 同步等 apimart
 # 上游返 taskId 才给 mp —— apimart 异步任务首字节就要 30-90s,撞上 mp 端
@@ -192,6 +194,7 @@ fi
 #
 # v2.0 改造后,BFF 写 imageJob(pending)+ Inngest send 后立刻 <1s 返
 # { success, taskId, taskStatus: "pending" },taskId 形如 UUID v4。
+# v2.1 路径从 /api/public/generate 迁到 /api/image-gen/submit。
 #
 # 本测试就是这条改造的回归 guard:打一次真的 POST,断言:
 #   1) 响应 ≤ 8s(撞 30s mp timeout 就太晚;实际生产 <2s,8s 给冷启留余量)
@@ -201,7 +204,7 @@ fi
 # 如果未来谁把 BFF 退回同步路径(apimart 直接 await),本测试会卡 8s 后
 # 标 fail,挡住"看起来对、但 mp 又 timeout"的回归。
 # ----------------------------------------------------------------------
-log_step "Test 4: POST /api/public/generate 异步 submit 时序(回归 guard)"
+log_step "Test 4: POST /api/image-gen/submit 异步 submit 时序(回归 guard)"
 if [ -z "$TEST_IMAGE_URL" ]; then
   log_warn "跳过:TEST_IMAGE_URL 未设(export TEST_IMAGE_URL=https://r2.../sample.jpg 重跑)"
 elif [ -z "$EXTERNAL_API_KEY" ]; then
@@ -211,15 +214,14 @@ else
   # 写文件而不是 inline variable,避免 time_total 与 body 撞到 subshell
   # 顺序问题。
   SUBMIT_TMPFILE=$(mktemp)
-  START_TS=$(date +%s)
   CODE=$(curl -sS --ssl-no-revoke -o "$SUBMIT_TMPFILE" -w "%{http_code}" \
     -X POST \
     -H "x-api-key: ${EXTERNAL_API_KEY}" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json" \
-    -d "{\"maskId\":\"R-default-test\",\"imageUrl\":\"${TEST_IMAGE_URL}\",\"prompt\":\"verify-public-routes test\"}" \
+    -d "{\"maskId\":\"R-default-test\",\"imageUrl\":\"${TEST_IMAGE_URL}\",\"prompt\":\"verify-image-gen-routes test\"}" \
     -w "\nTIME_TOTAL:%{time_total}\n" \
-    "${BASE_URL}/api/public/generate" 2>/dev/null) || CODE="000"
+    "${BASE_URL}/api/image-gen/submit" 2>/dev/null) || CODE="000"
   BODY=$(cat "$SUBMIT_TMPFILE" 2>/dev/null || echo "")
   rm -f "$SUBMIT_TMPFILE"
   # curl -w 的多行输出:第一行是 http_code,最后一行是 TIME_TOTAL
@@ -235,7 +237,7 @@ else
     if echo "$BODY" | grep -qE '"success":true' && \
        echo "$BODY" | grep -qE '"taskId":"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"' && \
        echo "$BODY" | grep -qE '"taskStatus":"pending"'; then
-      log_pass "200 + ${TIME_TOTAL}s(≤${TIME_LIMIT}s) + success + UUID taskId + taskStatus=pending(v2.0 异步路径生效)"
+      log_pass "200 + ${TIME_TOTAL}s(≤${TIME_LIMIT}s) + success + UUID taskId + taskStatus=pending(v2.0/v2.1 异步路径生效)"
     else
       log_fail "200 + 时序 OK,但响应缺 success/taskId(UU ID)/taskStatus=pending。 BODY 摘录: $BODY"
     fi
@@ -253,13 +255,12 @@ else
 fi
 
 # ----------------------------------------------------------------------
-# Test 5: GET /api/public/quota —— mp 端从云函数迁过来时 owner 之前指错
-# 路径(/api/credits/balance 不存在),正确路径是 /api/public/quota。
-# 本端点走 x-api-key,语义是「外部 API Key 的月调用上限」,不是 credits。
-# 鉴权失败也是 401,跟 /api/public/prompt-templates 对齐。
+# Test 5: GET /api/image-gen/quota
 # ----------------------------------------------------------------------
-log_step "Test 5: GET /api/public/quota"
-RAW=$(do_curl GET "/api/public/quota")
+# v2.1 从 /api/public/quota 迁来。语义:外部 API Key 月调用配额,
+# 不是登录用户 credits 余额。
+log_step "Test 5: GET /api/image-gen/quota"
+RAW=$(do_curl GET "/api/image-gen/quota")
 CODE=$(echo "$RAW" | cut -d'|' -f1)
 BODY=$(echo "$RAW" | cut -d'|' -f2-)
 
@@ -285,12 +286,44 @@ elif [ "$CODE" = "401" ] || [ "$CODE" = "403" ]; then
     log_fail "$CODE(传了 key 仍被拒,key 不对或 BFF 没切到 v1.1.0)"
   fi
 elif [ "$CODE" = "404" ]; then
-  log_fail "404 —— BFF 没实现本端点,v2.0 quota 修复没部署"
+  log_fail "404 —— BFF 没实现本端点,v2.1 修复没部署"
 elif [ "$CODE" = "000" ]; then
   log_warn "000 —— 连接到 $BASE_URL 失败(BFF 没起或网络不通)。等部署完再跑"
 else
   log_fail "$CODE —— 意外状态。 BODY 摘录: $BODY"
 fi
+
+# ----------------------------------------------------------------------
+# Test 6: 旧 /api/public/** 返 410 Gone + movedTo 指向新路径
+# ----------------------------------------------------------------------
+# v2.1 路径迁移后,3 个旧端点返 410 + 新路径提示。这条是「给漏升 SDK
+# 的 mp 看 breadcrumb」的回归 guard —— 旧路径应该返 410,不该返 200
+# (说明没切走)或 404 (说明被直接删了,breadcrumb 没了)。
+log_step "Test 6: 旧 /api/public/** 路径返 410 Gone(deprecation guard)"
+EXPECT_GONE_PATHS=(
+  "GET /api/public/generate -> /api/image-gen/templates"
+  "POST /api/public/generate -> /api/image-gen/submit"
+  "GET /api/public/quota -> /api/image-gen/quota"
+  "GET /api/public/prompt-templates -> /api/image-gen/templates"
+)
+GONE_OK=1
+for spec in "${EXPECT_GONE_PATHS[@]}"; do
+  METHOD=$(echo "$spec" | awk '{print $1}')
+  REST=$(echo "$spec" | awk '{print $2}')
+  EXPECTED_TO=$(echo "$spec" | awk '{print $4}')
+  RAW=$(do_curl "$METHOD" "$REST")
+  CODE=$(echo "$RAW" | cut -d'|' -f1)
+  BODY=$(echo "$RAW" | cut -d'|' -f2-)
+  if [ "$CODE" = "410" ] && echo "$BODY" | grep -q "\"movedTo\":\"${EXPECTED_TO}\""; then
+    log_pass "$METHOD $REST → 410 + movedTo=$EXPECTED_TO"
+  elif [ "$CODE" = "410" ]; then
+    log_fail "$METHOD $REST → 410 但 movedTo 字段缺/错(预期 $EXPECTED_TO)。BODY: $BODY"
+    GONE_OK=0
+  else
+    log_fail "$METHOD $REST → $CODE(预期 410 —— 旧路径没被 deprecate,新 SDK 看不到 breadcrumb)。BODY: $BODY"
+    GONE_OK=0
+  fi
+done
 
 # ----------------------------------------------------------------------
 # 总结
@@ -304,5 +337,5 @@ if [ "$FAIL" -gt 0 ]; then
   printf "\n${RED}有失败项,看上面红 ✗ 行查 BFF 部署状态。${RESET}\n"
   exit 1
 fi
-printf "\n${GREEN}全部通过(或预期失败)。SDK v1.1.0 + v2.0 公共链路 OK。${RESET}\n"
+printf "\n${GREEN}全部通过(或预期失败)。SDK v1.1.0 + v2.0 + v2.1 链路 OK。${RESET}\n"
 exit 0

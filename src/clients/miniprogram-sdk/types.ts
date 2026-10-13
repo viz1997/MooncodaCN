@@ -133,9 +133,9 @@ export interface PublicGenerateRequest {
   params?: Record<string, string>;
 }
 
-/** POST /api/public/generate 响应 */
+/** POST /api/image-gen/submit 响应 */
 export interface PublicGenerateResponse {
-  /** 异步任务 ID,前端轮询 /api/image/task/[taskId] 用 */
+  /** 异步任务 ID,前端轮询 /api/image-gen/jobs/[jobId]/poll 用 */
   taskId: string;
   /** 已登录用户关联的内部 jobId(可选) */
   jobId?: string;
@@ -145,7 +145,7 @@ export interface PublicGenerateResponse {
   success: boolean;
 }
 
-/** GET /api/image/task/[id] 响应 */
+/** GET /api/image-gen/jobs/[jobId]/poll 响应(SDK 端映射) */
 export interface ImageTaskStatusResponse {
   status: "pending" | "processing" | "completed" | "failed";
   /** 候选图 R2 URL 列表(完成时存在) */

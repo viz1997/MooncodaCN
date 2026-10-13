@@ -1,154 +1,24 @@
 /**
- * GET /api/public/prompt-templates
+ * 410 Gone —— /api/public/prompt-templates 已迁走
  *
- * 2026-10-13 新建：给小程序 / 第三方集成用的产品线 + 模板列表端点。
- *
- * 与 /api/public/generate (GET) 的区别：
- * - 本端点响应 shape 对齐小程序 SDK 的 PromptTemplatesResponse 契约
- *   （{ productLines, templates } 顶层 + 字段重命名 maskId→id, previewUrl→cover,
- *   price→costCredits, status 用 active/inactive）。原 /api/public/generate GET
- *   返 masks + productLines 是为 /image-gen 内部工作台，命名不一致。
- * - 不暴露内部 model 字段（仅在小程序选 maskId 后服务端按 mask.model 锁模）
- *
- * 鉴权：与 /api/public/generate 一致，强制外部 API Key
- * （x-api-key > Authorization: Bearer <key>），dev 模式 EXTERNAL_API_KEY_REQUIRED=0 关。
- * 白名单：allowedMasks 非空时只返白名单内的模板，productLines 仅含过滤后仍有
- * 可见 mask 的 productLineId。
+ * 2026-10-13 v2.1:mp 端点统一迁到 /api/image-gen/templates。
+ * 此路由返 410 + 指向新路径。删除计划:2026-11-15 之后。
  */
 
 import { type NextRequest, NextResponse } from "next/server";
-import { db } from "@/db";
-import { getEffects, getClientIp, logImageGen } from "@/features/image-gen";
-import { getActiveLinesFromDb } from "@/features/image-gen/lib/db-lines";
-import {
-  checkRateLimit,
-  createRateLimitResponse,
-  getRateLimitHeaders,
-} from "@/lib/rate-limit";
-import { requireExternalApiKey } from "@/lib/require-external-api-key";
 
 export const runtime = "nodejs";
-// 30s：纯 DB 读，无上游；上限对齐 image/task poll
-export const maxDuration = 30;
+export const maxDuration = 10;
 
-export async function GET(req: NextRequest) {
-  const ip = getClientIp(req.headers);
-
-  // 限流：与 /api/public/generate GET 一致，用 ai 限流配置（20/min）
-  // 小程序启动时拉一次，正常不会撞；防止有人拿到 key 狂拉
-  const rl = await checkRateLimit(ip ?? "unknown", "ai");
-  if (!rl.success) {
-    return createRateLimitResponse(rl);
-  }
-
-  // API Key 鉴权：复用 /api/public/generate 同款 helper
-  const { verify: externalKeyVerify, errorResponse: keyError } =
-    await requireExternalApiKey(req, ip, rl);
-  if (keyError) return keyError;
-
-  try {
-    const effects = await getEffects();
-    const allActiveEffects = effects.filter((m) => m.status === "active");
-
-    // 白名单过滤：空数组 = 不限制；dev 模式（verify=null）也不限制
-    const whitelist =
-      externalKeyVerify?.ok && externalKeyVerify.allowedMasks.length > 0
-        ? new Set(externalKeyVerify.allowedMasks)
-        : null;
-    const activeEffects = whitelist
-      ? allActiveEffects.filter((m) => whitelist.has(m.maskId))
-      : allActiveEffects;
-
-    // 取上架产品线（active），按 sortOrder 升序；
-    // maskCount = 该 productLineId 命中**当前可见**的 active mask 数（白名单过滤后）
-    const lines = await getActiveLinesFromDb();
-    const productLines = lines
-      .map((l) => ({
-        id: l.productLineId,
-        name: l.name,
-        // handle 与 id 同值；保留字段为未来稳定 slug 留位（不改协议可演进）
-        handle: l.productLineId,
-        cover: l.coverUrl ?? "",
-        description: l.description ?? "",
-        sortOrder: l.sortOrder,
-        maskCount: activeEffects.filter((m) =>
-          (m.productLineIds ?? []).includes(l.productLineId)
-        ).length,
-      }))
-      // 白名单过滤后某 productLine 已无可见 mask → 整条隐藏，前端不显示空组
-      .filter((l) => l.maskCount > 0);
-
-    // 一次性取所有关联 promptTemplate（outputMode + candidateCount），
-    // 避免 N+1。mask 没绑 template → 走兜底（candidateCount=1, outputMode=grid）
-    const templateIds = Array.from(
-      new Set(
-        activeEffects
-          .map((m) => m.promptTemplateId ?? null)
-          .filter((id): id is string => Boolean(id))
-      )
-    );
-    const templates =
-      templateIds.length > 0
-        ? await db.query.promptTemplate.findMany({
-            where: (t, { inArray }) => inArray(t.id, templateIds),
-            columns: { id: true, candidateCount: true, outputMode: true },
-          })
-        : [];
-    const templateMap = new Map(templates.map((t) => [t.id, t] as const));
-
-    const templatesOut = activeEffects.map((m) => {
-      const tmpl = m.promptTemplateId
-        ? templateMap.get(m.promptTemplateId)
-        : null;
-      const candidateCount = tmpl?.candidateCount ?? 1;
-      const outputMode = (tmpl?.outputMode ?? "grid") as "grid" | "separate";
-      return {
-        id: m.maskId,
-        name: m.name,
-        productTypeCode: m.productTypeCode ?? null,
-        productLineIds: m.productLineIds ?? [],
-        outputMode,
-        candidateCount,
-        // ProductEffect.allowedSizes 是 string[] cm，SDK 也按 string[] 对齐
-        allowedSizes: m.allowedSizes ?? [],
-        allowedAccessories: m.allowedAccessories ?? [],
-        cover: m.previewUrl,
-        // price 列单位 cents —— 与 SDK 「金额为 cents(整数)」约定一致
-        costCredits: m.price ?? 0,
-        // ProductEffect.status 仅 active/inactive；SDK 类型扩到 archived 但当前
-        // 数据源没有 archived 状态，需要时再扩 productEffect.status enum
-        status: m.status as "active" | "inactive",
-      };
-    });
-
-    return NextResponse.json(
-      {
-        success: true,
-        keyScope: externalKeyVerify?.ok
-          ? {
-              keyName: externalKeyVerify.name,
-              allowedMasks: externalKeyVerify.allowedMasks,
-            }
-          : null,
-        productLines,
-        templates: templatesOut,
-      },
-      { headers: getRateLimitHeaders(rl) }
-    );
-  } catch (error) {
-    console.error("[Public Prompt Templates Error]", error);
-    logImageGen({
-      event: "submit",
-      outcome: "failed",
-      source: "public",
-      model: "unknown",
-      errorCode: "INTERNAL_ERROR",
-      errorMessage: error instanceof Error ? error.message : "未知错误",
-      ip,
-    });
-    return NextResponse.json(
-      { success: false, error: "加载模板失败，请稍后重试" },
-      { status: 500, headers: getRateLimitHeaders(rl) }
-    );
-  }
+export async function GET(_req: NextRequest) {
+  return NextResponse.json(
+    {
+      success: false,
+      error:
+        "GET /api/public/prompt-templates 已迁到 GET /api/image-gen/templates(2026-10-13 v2.1)",
+      code: "GONE",
+      movedTo: "/api/image-gen/templates",
+    },
+    { status: 410 }
+  );
 }
