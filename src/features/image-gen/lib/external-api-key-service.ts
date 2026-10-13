@@ -20,7 +20,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { externalApiKey, type ExternalApiKey } from "@/db/schema";
@@ -235,32 +235,37 @@ function resolveMonthlyQuota(row: {
  */
 export async function recordExternalApiKeyCall(keyId: string): Promise<void> {
   const now = new Date();
-  await db.execute(
-    // drizzle-orm 不支持 UPDATE ... SET x = CASE WHEN ... 的清爽语法，
-    // 直接 raw SQL 反而最短：
-    //   - 跨月：monthlyCalls=1, monthlyCallsResetAt=now
-    //   - 同月：monthlyCalls=monthlyCalls+1, monthlyCallsResetAt 不变
-    //   - totalCalls 永远 +1, lastUsedAt 永远 = now
-    // 月份比较用 date_trunc('month', ...) 把两侧都截到自然月首日，再比 <。
-    /* sql */ `
-      UPDATE external_api_key
-      SET
-        total_calls = total_calls + 1,
-        last_used_at = ${now.toISOString()},
-        monthly_calls = CASE
-          WHEN date_trunc('month', monthly_calls_reset_at) < date_trunc('month', now())
-            THEN 1
-          ELSE monthly_calls + 1
-        END,
-        monthly_calls_reset_at = CASE
-          WHEN date_trunc('month', monthly_calls_reset_at) < date_trunc('month', now())
-            THEN ${now.toISOString()}
-          ELSE monthly_calls_reset_at
-        END
-      WHERE id = ${keyId}
-        AND deleted_at IS NULL
-    `
-  );
+  // 2026-10-13 hotfix：把 JS Date 改成 Drizzle 参数化,不再当字符串拼进 SQL。
+  // 之前 ${now.toISOString()} 直接拼 → PG 把 "2026-10-13T10:48:53.739Z" 解析成
+  // 数值 2026-10-13(=2003)+ 后续 "T10" 抛 trailing junk (SQLSTATE 42601)。
+  // 副作用:整条 UPDATE 静默失败(/api/public/generate 的 try-catch 兜住),
+  // monthlyCalls / totalCalls 永远不递增,key 管理后台看到一直是 0。
+  //
+  // 语义保持:
+  //   - 跨月 → monthlyCalls=1, monthlyCallsResetAt=now
+  //   - 同月 → monthlyCalls=monthlyCalls+1, monthlyCallsResetAt 不变
+  //   - totalCalls 永远 +1, lastUsedAt 永远 = now
+  // 月份比较用 date_trunc('month', ...),DB 端 now() 与 JS Date 都在 UTC 同一时区。
+  // Drizzle 的 sql 模板自动把 Date 参数序列化为 timestamptz literal,
+  // 免去手写引号 / 转义,也杜绝后续 SQL 注入面。
+  await db.execute(sql`
+    UPDATE external_api_key
+    SET
+      total_calls = total_calls + 1,
+      last_used_at = ${now},
+      monthly_calls = CASE
+        WHEN date_trunc('month', monthly_calls_reset_at) < date_trunc('month', now())
+          THEN 1
+        ELSE monthly_calls + 1
+      END,
+      monthly_calls_reset_at = CASE
+        WHEN date_trunc('month', monthly_calls_reset_at) < date_trunc('month', now())
+          THEN ${now}
+        ELSE monthly_calls_reset_at
+      END
+    WHERE id = ${keyId}
+      AND deleted_at IS NULL
+  `);
 }
 
 // ============================================
