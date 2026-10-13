@@ -145,7 +145,7 @@ export interface PublicGenerateResponse {
   success: boolean;
 }
 
-/** GET /api/image-gen/jobs/[jobId]/poll 响应(SDK 端映射) */
+/** POST /api/image-gen/jobs/[jobId]/poll 响应(SDK 端映射) */
 export interface ImageTaskStatusResponse {
   status: "pending" | "processing" | "completed" | "failed";
   /** 候选图 R2 URL 列表(完成时存在) */

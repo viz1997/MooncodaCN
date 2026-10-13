@@ -6,7 +6,7 @@ NextDevTpl 暴露给小程序的 TypeScript SDK 参考实现。把本目录(`src
 
 ## 当前版本
 
-`VERSION` 文件 — 详见文末 [Changelog](#changelog)。
+`VERSION` 文件 — `1.2.0`,详见文末 [Changelog](#changelog)。
 
 ## 文件清单
 
@@ -15,12 +15,29 @@ NextDevTpl 暴露给小程序的 TypeScript SDK 参考实现。把本目录(`src
 | `VERSION` | SDK 版本号(纯文本),发版时改 |
 | `types.ts` | 全量请求/响应类型(零依赖) |
 | `request.ts` | fetch 内核:Bearer + x-api-key 自动加 + 401 回调 + 超时 + multipart |
-| `auth.ts` | WeChat 登录 |
+| `auth.ts` | WeChat 登录(走 mp 自己的微信云,BFF 不参与) |
 | `upload.ts` | 公共桶 / 订单桶上传(formData + presigned PUT) |
-| `image-gen.ts` | 提交生图 + 轮询 + 模板 + 我的资产 |
+| `image-gen.ts` | 提交生图 + 轮询 + 模板 + 配额 + 我的资产 |
 | `orders.ts` | `/orders/[token]/**` 公共预览流(12 端点) |
 | `index.ts` | 统一出口 |
 | `MEDUSA_INTEGRATION.md` | **小程序 commerce 走真 Medusa 的接入指南** |
+
+## ⚠️ 鉴权模型澄清(2026-10-13 v1.2.0 必读)
+
+**本 SDK 的所有 BFF 调用只走 `x-api-key`,不走 BA session。**
+
+| 维度 | 处理方 |
+|---|---|
+| 小程序用户身份登录 | **mp 自己的微信云**(不在本 SDK 范围) |
+| 调用 BFF 接口 | **x-api-key**(`mk_pub_*` 前缀,admin 给合作伙伴发) |
+| Bearer session | 不使用(本 SDK 不调任何要登录的端点) |
+
+后果:
+- `/api/credits/balance` 等 credits 端点要 BA session → **本 SDK 不调**,要走自己查积分
+- `/api/image-gen/photos/list` 要 BA session → **本 SDK 不调**(本 SDK 只暴露 `listPhotos`,那是要登录的「我的资产」,mp 端可以走 mp 自己的用户中心 API)
+- `/api/image-gen/jobs/[jobId]/poll` 服务端支持双鉴权,mp 端走 x-api-key 分支(自动,SDK 内部处理)
+
+---
 
 ## 集成步骤
 
@@ -39,47 +56,48 @@ import { setupSdk, setSdkApiKey } from "@/api/sdk";
 setupSdk({
   baseUrl: process.env.TARO_APP_API_BASE_URL ?? "https://api.mooncoda.com",
   timeoutMs: 30_000,
+  // onUnauthorized 永远不会被触发(本 SDK 不走 BA session)
+  // 留这个回调仅为未来万一扩展时兜底
   onUnauthorized: () => {
-    // 业务层跳登录页(token 失效 / 7 天过期)
     Taro.navigateTo({ url: "/pages/login/index" });
   },
 });
 
-// 2026-10-13 新增：外部 API Key(mk_pub_* 前缀,admin 给合作伙伴发的那种)
+// 必须:外部 API Key(mk_pub_* 前缀,admin 给合作伙伴发的那种)
 // 启动时若已存到 wx.storage,setupSdk 会自动恢复;若需要主动 set:
-const apiKey = process.env.TARO_APP_EXTERNAL_API_KEY; // 编译期注入或后端拉
+const apiKey = process.env.TARO_APP_EXTERNAL_API_KEY;
 if (apiKey) setSdkApiKey(apiKey);
 ```
 
-### 3. 登录
+### 3. (可选) 拉配额显示「本月剩余 N 次」
 
 ```ts
-import Taro from "@tarojs/taro";
-import { loginWithWechat } from "@/api/sdk";
+import { getQuota } from "@/api/sdk";
 
-async function handleLogin() {
-  // 1. wx.login 拿 code
-  const { code } = await Taro.login();
-
-  // 2. 用户点「授权手机号」按钮 → 拿 encryptedData/iv
-  // 注意:getPhoneNumber 必须 Taro 按钮 + open-type="getPhoneNumber"
-  // 然后在 onGetPhoneNumber 事件回调里调用下面的 loginWithWechat
-  return { code };
-}
-
-async function onGetPhoneNumber(e) {
-  if (!e.detail.encryptedData) return; // 用户拒绝授权
-  const { code } = await Taro.login();
-  const { user } = await loginWithWechat({
-    code,
-    encryptedData: e.detail.encryptedData,
-    iv: e.detail.iv,
-  });
-  Taro.setStorageSync("mp_user", user);
-}
+const quota = await getQuota();
+// quota = { keyName, used, limit, remaining, unlimited, resetAt }
+// - limit=0 → unlimited=true, remaining=-1(无限配额,UI 隐藏剩余数)
+// - limit>0 → unlimited=false, remaining=Math.max(0, limit-used)
+// - resetAt:下月 1 号 0:00 UTC(ISO 8601),UI 可算"距离恢复还剩多久"
+Taro.setStorageSync("mp_quota_cache", { quota, cachedAt: Date.now() });
 ```
 
-### 4. 提交生图
+配额语义:**「外部 API Key 的月调用上限」**,不是登录用户的 credits 余额。两个不同的概念:
+- 配额 = apiKey 维度,admin 在后台给合作伙伴发 key 时配
+- credits = 用户维度,要 BA session 才查,本 SDK 不查
+
+### 4. 拉产品线 + 模板(mp 启动时拉一次)
+
+```ts
+import { listTemplates } from "@/api/sdk";
+
+const { productLines, templates, keyScope } = await listTemplates();
+// productLines / templates 用作 maskId 下拉 / 产品线 Tab
+// keyScope.allowedMasks 是当前 key 的白名单(空数组 = 不限),UI 可据此
+// 灰掉白名单外的 mask
+```
+
+### 5. 提交生图 + 轮询(核心流程)
 
 ```ts
 import {
@@ -89,19 +107,21 @@ import {
   proxyImageUrl,
 } from "@/api/sdk";
 
-// 4.1 上传参考图
+// 5.1 上传参考图
 const file = await chooseImageFile(); // Taro.chooseImage + file
 const { url } = await publicUpload(file);
 
-// 4.2 提交生图(可选 maskId 从 listTemplates 拉)
-const { taskId, costCredits } = await submitGenerate({
-  maskId: "R-cute-001",
+// 5.2 提交生图(<1s 返 taskId,不阻塞等模型)
+const { taskId } = await submitGenerate({
+  maskId: "R-cute-001",  // 从 listTemplates 拿
   imageUrls: [url],
   size: 6,
   count: 1,
+  // model 选填:不传按 mask 推荐;"apimart_gpt_image" = flare 默认;
+  // "apimart_gpt_image_sunburst" = sunburst 高质档
 });
 
-// 4.3 轮询(递减间隔)
+// 5.3 轮询(递减间隔;taskId 是 UUID,不可枚举,免登录安全)
 const schedule = [15, 12, 10, 8, 6, 5, 4, 3];
 for (const s of schedule) {
   await new Promise((r) => setTimeout(r, s * 1000));
@@ -111,10 +131,13 @@ for (const s of schedule) {
     break;
   }
   if (status.status === "failed") throw new Error(status.errorMessage);
+  // pending / processing:继续轮询
 }
 ```
 
-### 5. 6 步工作台(代理商 demo / 客户预览)
+**为什么 submit 不阻塞等模型**:BFF 写 imageJob(pending)+ Inngest send 后立刻 <1s 返 taskId,模型在 Inngest cloud 后台跑(30-90s)。mp 30s timeout 永远不会被撞。
+
+### 6. 6 步工作台(代理商 demo / 客户预览)
 
 ```ts
 import {
@@ -126,21 +149,23 @@ import {
   guestConfirmOrder,
 } from "@/api/sdk";
 
-// 5.1 建订单
+// 6.1 建订单
 const { token } = await createOrder({
   productTypeCode: "R",
   channel: "miniprogram",
   spec: { sizeCm: 6, accessoryCode: "leather", quantity: 1 },
 });
 
-// 5.2 上传参考图
+// 6.2 上传参考图
 const { url: refUrl } = await orderUpload(token, file);
 
-// 5.3 调 generate(走 image-gen 模块,但 candidate 入订单由服务端后台驱动)
-// 实际业务可直接走 submitGenerate({ maskId, imageUrls: [refUrl] })
-// 拿到 taskId 后,服务端推进订单 generationTask
+// 6.3 调生图(submitGenerate 同流程,taskId 服务端关联到订单 generationTask)
+const { taskId } = await submitGenerate({
+  maskId: "R-default",
+  imageUrls: [refUrl],
+});
 
-// 5.4 轮询订单状态
+// 6.4 轮询订单状态(订单层轮询,不是 imageJob 轮询)
 while (true) {
   const { status } = await pollOrder(token);
   if (status === "COMPLETED") break;
@@ -148,14 +173,14 @@ while (true) {
   await new Promise((r) => setTimeout(r, 3000));
 }
 
-// 5.5 选候选
+// 6.5 选候选
 await selectCandidate(token, 0, 0);
 
-// 5.6 客户确认(代理商 demo)
+// 6.6 客户确认(代理商 demo)
 await guestConfirmOrder(token);
 ```
 
-### 6. 错误处理
+### 7. 错误处理
 
 ```ts
 import { SdkRequestError } from "@/api/sdk";
@@ -165,10 +190,18 @@ try {
 } catch (err) {
   if (err instanceof SdkRequestError) {
     // err.status / err.code / err.message 可用
-    if (err.code === "INSUFFICIENT_CREDITS") {
-      Taro.showToast({ title: "积分不足", icon: "none" });
-    } else if (err.status === 401) {
-      // onUnauthorized 已触发,这里通常不需要再处理
+    if (err.code === "API_KEY_QUOTA_EXCEEDED") {
+      // 月配额用尽,引导用户联系 admin 重置
+      Taro.showToast({ title: "本月生成次数已用完", icon: "none" });
+    } else if (err.code === "API_KEY_DISABLED") {
+      // key 被 admin 停用
+      Taro.showToast({ title: "API Key 已停用", icon: "none" });
+    } else if (err.code === "API_KEY_MISSING") {
+      // 没设 x-api-key(setupSdk 漏了)
+      Taro.showToast({ title: "API Key 未配置", icon: "none" });
+    } else if (err.status === 429) {
+      // 限流(可能是 IP 维度,可能是 key 维度,看 code)
+      Taro.showToast({ title: "请求过于频繁,请稍后重试", icon: "none" });
     } else {
       Taro.showToast({ title: err.message, icon: "none" });
     }
@@ -178,7 +211,7 @@ try {
 }
 ```
 
-### 7. 取消轮询(进入后台 / 切换页面)
+### 8. 取消轮询(进入后台 / 切换页面)
 
 ```ts
 const controller = new AbortController();
@@ -190,21 +223,89 @@ pollImageTask(taskId, { signal: controller.signal }).catch(() => {
 controller.abort();
 ```
 
-## 鉴权矩阵
+---
 
-| 端点 | 鉴权 |
-|---|---|
-| `/api/auth/wechat-phone-login` | 免登录 |
-| `/api/public/upload` `/api/public/generate` `/api/public/prompt-templates` | **x-api-key**(外部 API Key,`mk_pub_*` 前缀) |
-| `/api/image/task/[id]` | 免登录(taskId 不可猜测) |
-| `/api/image-gen/photos/list` `/api/image-gen/jobs/[id]/poll` | **Bearer** |
-| `/api/orders/[token]/**` | 免登录(token 即凭证) |
-| `/api/image-gen/thumbnail` `/api/image-gen/download` | 免登录(代理不分子) |
-| `/api/store/**` | ❌ **不在本 SDK —— commerce 走真 Medusa** |
+## 鉴权矩阵(2026-10-13 v1.2.0)
 
-> **2026-10-13 变更**:`/api/image-gen/prompt-templates`(原 Bearer)已废弃,统一走 `/api/public/prompt-templates`(x-api-key)。小程序无需登录就能拉产品线 + 模板。
+| 端点 | 鉴权 | SDK 函数 |
+|---|---|---|
+| `POST /api/image-gen/submit` | **x-api-key** | `submitGenerate()` |
+| `POST /api/image-gen/jobs/[jobId]/poll` | **x-api-key**(taskId 不可枚举) | `pollImageTask()` |
+| `GET /api/image-gen/quota` | **x-api-key** | `getQuota()` |
+| `GET /api/image-gen/templates` | **x-api-key** | `listTemplates()` |
+| `POST /api/public/upload` | **x-api-key** | `publicUpload()` |
+| `GET /api/image/task/[id]` | 免登录(taskId 不可枚举) | (兜底层,mp 一般用不到) |
+| `GET /api/image-gen/thumbnail` `/api/image-gen/download` | 免登录(代理不分子) | `proxyImageUrl()` |
+
+**已废弃(返 410 Gone + movedTo 提示)**:
+- ~~`/api/public/generate`~~ → `POST /api/image-gen/submit`
+- ~~`/api/public/prompt-templates`~~ → `GET /api/image-gen/templates`
+- ~~`/api/public/quota`~~ → `GET /api/image-gen/quota`
+
+**不在本 SDK 范围**(要走 BA session 或 commerce API):
+- `/api/image-gen/photos/list` — 「我的资产」,要 BA session
+- `/api/credits/*` — 积分余额,mp 走自己的用户中心
+- `/api/store/**` — commerce,走真 Medusa(见 `MEDUSA_INTEGRATION.md`)
+
+---
+
+## 错误码速查
+
+| code | HTTP | 含义 | 处理建议 |
+|---|---|---|---|
+| `API_KEY_MISSING` | 401 | 没传 x-api-key(SDK 未 set) | 检查 `setSdkApiKey()` 是否调用 |
+| `API_KEY_MALFORMED` | 401 | key 格式错(无 `mk_pub_` 前缀) | 重新拿 key |
+| `API_KEY_NOT_FOUND` | 401 | hash 没命中 | key 已删,联系 admin |
+| `API_KEY_DISABLED` | 403 | key 被 admin 停用 | 联系 admin |
+| `API_KEY_QUOTA_EXCEEDED` | 429 | 月配额用尽 | 等下月 1 号重置,或联系 admin 提额 |
+| `MASK_NOT_ALLOWED` | 403 | 当前 key 不在白名单内 | UI 灰掉该 mask,提示「无权限」 |
+| `INVALID_MASK` | 400 | maskId 不存在或已下架 | 重新拉 listTemplates |
+| `MISSING_PARAM` | 400 | 模板必填参数未传 | 检查 mask.variables |
+| `MODEL_NOT_ALLOWED` | 403 | 显式指定的 model 不在白名单 | 删 model 字段或换 BFF 支持的 model |
+| `MODEL_MAINTENANCE` | 503 | 模型维护中 | 提示稍后重试 |
+| `INTERNAL_ERROR` | 500 | 服务端异常 | 重试,持续失败联系 admin |
+| (no code) | 429 | IP 维度限流撞了 | 等几秒重试,无需特殊处理 |
+
+---
+
+## 集成 checklist
+
+- [ ] `setSdkApiKey("mk_pub_...")` 在 App 启动时调用
+- [ ] (可选)App 启动时调 `getQuota()` 缓存到 wx.storage,UI 显示配额
+- [ ] (可选)App 启动时调 `listTemplates()` 缓存到 wx.storage,UI 显示 mask 下拉
+- [ ] 用户进生图页时:
+  1. `publicUpload(file)` → 拿 R2 URL
+  2. `submitGenerate({ maskId, imageUrls: [url] })` → 拿 taskId
+  3. 立刻显示 loading,按 schedule 调 `pollImageTask(taskId)`
+  4. completed:展示候选;failed:toast 错误信息
+- [ ] 错误处理:catch `SdkRequestError`,按 code 分支
+- [ ] 用户切后台:abort 轮询 controller
+
+---
 
 ## Changelog
+
+### v1.2.0 — 2026-10-13
+
+**Breaking(端点路径迁移)**
+- 全部 mp 端点从 `/api/public/**` 迁到 `/api/image-gen/**`:
+  - `POST /api/public/generate` → `POST /api/image-gen/submit`
+  - `GET /api/public/prompt-templates` → `GET /api/image-gen/templates`
+  - `GET /api/public/quota` → `GET /api/image-gen/quota`
+- 轮询从 `GET /api/image/task/[id]` → `POST /api/image-gen/jobs/[jobId]/poll`
+- 旧路径返 410 Gone + movedTo 文案(SDK 调用方无感,内部已切)
+
+**新增**
+- `getQuota()` —— 拉外部 API Key 月配额(`keyName / used / limit / remaining / unlimited / resetAt`)
+- `QuotaResponse` 类型 —— 配额响应契约
+- 异步 submit 模式(POST 立刻返 taskId,模型在 Inngest 后台跑;mp 30s timeout 永远不会被撞)
+
+**变更**
+- `pollImageTask` 端点从 `GET /api/image/task/[id]` 改 `POST /api/image-gen/jobs/[jobId]/poll`
+- `pollImageTask` 内部把 `{success, data: {job: <imageJob>}}` 响应映射到 `ImageTaskStatusResponse` 契约(`status / candidates / errorMessage / durationMs / finishedAt`),mp 端无感
+
+**修复**
+- 之前 owner 错指 `/api/credits/balance`(404),正确路径是 `getQuota()` —— 见上面「鉴权模型澄清」,两个概念不同
 
 ### v1.1.0 — 2026-10-13
 
@@ -227,11 +328,12 @@ controller.abort();
 
 初版:auth / upload / image-gen / orders 四大模块全量上线。
 
+---
+
 ## 已知限制 / TODO
 
-- **credits 端点(`/api/credits/balance`, `/api/credits/daily-claim`, `/api/credits/ledger`)**:docs 有、代码未实现。Phase P1 上线后会在此 SDK 增补 `credits.ts` 模块。
+- **Token 刷新**:本 SDK 不走 BA session,`onUnauthorized` 永远不触发。mp 端如需查积分/我的资产,走 mp 自己的用户中心 API
 - **微信支付(`/api/pay/wechat/*`)**:Phase P2。会增补 `payment.ts` 模块。
-- **Token 刷新**:BA session 7 天过期,SDK 不自动 refresh —— 业务层在 onUnauthorized 跳登录页重走 loginWithWechat 即可。
 
 ## 版本同步
 
