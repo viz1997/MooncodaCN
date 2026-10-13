@@ -761,9 +761,11 @@ export const photo = pgTable("photo", {
  */
 export const imageJob = pgTable("image_job", {
   id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => user.id, { onDelete: "cascade" }),
+  // 2026-10-13：/api/public/generate 改异步后,匿名 / 外部 API Key 调用方
+  // 没有 BA session,userId 改 nullable。onDelete 改 set null —— 匿名任务
+  // 生命周期里 userId 永远 null,cascade 会让匿名任务被误删,set null 才安全。
+  // 已有数据全 NOT NULL,迁移用默认值 '' + 移除 NOT NULL 一步完成。
+  userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
   photoId: text("photo_id").references((): AnyPgColumn => photo.id, {
     onDelete: "set null",
   }),

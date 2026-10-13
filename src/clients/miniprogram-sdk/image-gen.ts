@@ -22,6 +22,7 @@ import type {
   PromptTemplatesResponse,
   PublicGenerateRequest,
   PublicGenerateResponse,
+  QuotaResponse,
 } from "./types";
 
 /**
@@ -58,6 +59,23 @@ export async function pollImageTask(
       timeoutMs: 30_000,
     }
   );
+}
+
+/**
+ * 查询外部 API Key 配额(走 x-api-key,登录态无关)
+ *
+ * 2026-10-13 新增:之前 owner 错指 /api/credits/balance(404),正确路径
+ * 是 /api/public/quota。语义是「外部 API Key 的月调用上限」,不是登录
+ * 用户的 credits 余额——两个是不同的概念,前端展示时记得区分。
+ *
+ * 用法:进入生图页时拉一次,显示"本月剩余 N 次"提示;生成失败时也可以
+ * 再次拉一下,确认是不是配额超了(429 quota_exceeded)。
+ */
+export async function getQuota(): Promise<QuotaResponse> {
+  return sdkRequest<QuotaResponse>("/api/public/quota", {
+    method: "GET",
+    timeoutMs: 10_000,
+  });
 }
 
 /**

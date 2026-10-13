@@ -207,7 +207,10 @@ export async function generateImageJob(
  * 与 gpt-image /upload 路由的 triggerSubmit 模式对齐。
  */
 export async function createImageJob(options: {
-  userId: string;
+  // 2026-10-13：/api/public/generate 异步改造后,匿名 / 外部 API Key 提交
+  // 任务时 userId=null。schema 已把 imageJob.userId 改 nullable,下游
+  // dispatchImageGenerationJob 对 null userId 跳过 photo 资产落库。
+  userId: string | null;
   input: InternalGenerateInput;
   creditsConsumed: number;
 }): Promise<GenerateImageJobResult> {
@@ -329,6 +332,8 @@ export async function dispatchImageGenerationJob(options: {
   // 2026-08-23：生图结果入库到 photo 表（source=generation）—— 让"我的资产"
   // 统一承载本地上传 + 生图结果。仅在 completed + 有图时入库；非致命（imageJob
   // 写入已成功），失败只 warn 不抛。userId 不在 input 里，事后从 imageJob 行取。
+  // 2026-10-13：userId=null（匿名 / 外部 API Key 任务）跳过 photo 落库 —— 没
+  // 有归属用户就没法挂到「我的资产」里,且 photo.user_id 是 NOT NULL FK 强约束。
   if (
     result.status === "completed" &&
     result.images &&
@@ -339,7 +344,7 @@ export async function dispatchImageGenerationJob(options: {
         where: eq(imageJob.id, jobId),
         columns: { id: true, userId: true, prompt: true, model: true },
       });
-      if (jobRow) {
+      if (jobRow?.userId) {
         await saveGenerationResultsAsAssets({
           jobId: jobRow.id,
           userId: jobRow.userId,
@@ -451,15 +456,20 @@ export async function updateImageJobFromTaskResult(
 
   // 2026-08-23：生图结果入库到 photo 表（source=generation），与同步路径对齐。
   // 失败非致命，仅 warn —— imageJob.resultUrls 是前端可见结果的权威来源。
+  // 2026-10-13：userId=null（匿名任务）跳过 photo 落库，与同步路径 guard 对齐。
+  // 局部 const 收 userId —— TS 不 narrow 对象属性访问,直接传 job.userId 仍
+  // 报 "string | null not assignable to string"。
+  const jobUserId = job.userId;
   if (
     result.status === "completed" &&
     result.images &&
-    result.images.length > 0
+    result.images.length > 0 &&
+    jobUserId
   ) {
     try {
       await saveGenerationResultsAsAssets({
         jobId: job.id,
-        userId: job.userId,
+        userId: jobUserId,
         resultUrls: result.images.map((img) => img.url),
         prompt: job.prompt,
         model: job.model,

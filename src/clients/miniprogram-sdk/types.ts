@@ -205,6 +205,26 @@ export interface PromptTemplatesResponse {
   }>;
 }
 
+/**
+ * GET /api/public/quota 响应
+ *
+ * 2026-10-13：mp 端从云函数迁 BFF 时 owner 之前指错路径(/api/credits/balance
+ * 404),正确路径是 /api/public/quota。
+ *
+ * 语义:外部 API Key 的月调用配额,不是登录用户的 credits 余额。
+ * - limit=0 → 无限配额(服务端 externalApiKey.monthlyQuota ≤ 0 视为无限)
+ * - remaining=-1 → 无限配额的占位(mp 端 UI 可据此隐藏"剩余 N 次"提示)
+ * - resetAt:下月 1 号 0:00 UTC 的 ISO 8601 字符串
+ */
+export interface QuotaResponse {
+  keyName: string;
+  used: number;
+  limit: number;
+  remaining: number;
+  unlimited: boolean;
+  resetAt: string;
+}
+
 /** GET /api/image-gen/photos/list 响应(登录态) */
 export interface PhotosListResponse {
   photos: Array<{

@@ -13,8 +13,13 @@ import type {
 export interface ImageGenLogEntry {
   /** 事件类型：submit（提交生图）| query（异步任务轮询） */
   event: "submit" | "query";
-  /** 成功或失败 */
-  outcome: "success" | "failed";
+  /**
+   * 成功或失败。
+   * 2026-10-13 加 pending —— 异步 submit 路径返 taskId 时 imageJob 还在
+   * pending 状态(Inngest 还没跑),用 pending 与真正的 success(generate 完成)区分。
+   * 后续 /api/image/task/[id] 轮询终态时还是 success/failed。
+   */
+  outcome: "success" | "failed" | "pending";
   /** 生图模型 id */
   model: ImageModelId | string;
   /** 入口：internal（登录用户）| public（外部用户） */
@@ -29,6 +34,12 @@ export interface ImageGenLogEntry {
   size?: string | undefined;
   /** 批量数 */
   batchSize?: number | undefined;
+  /**
+   * submit 实际走的执行模式(inngest | sync-fallback)。
+   * 2026-10-13 加:异步路径返 pending 时记录,诊断 Inngest 不可用时
+   * 是否真的走了 sync fallback,业务行为不依赖此字段。
+   */
+  submitMode?: string | undefined;
   /** 服务端耗时（ms） */
   durationMs?: number | undefined;
   /** 异步任务 id */

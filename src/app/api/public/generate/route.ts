@@ -8,8 +8,6 @@ import { db } from "@/db";
 import { promptTemplate } from "@/db/schema";
 import type { ProductCapabilities } from "@/features/gpt-image/lib/product-catalog";
 import {
-  buildResultFields,
-  dispatchGenerateImage,
   findEffect,
   getClientIp,
   getEffects,
@@ -19,11 +17,10 @@ import {
 import { getActiveLinesFromDb } from "@/features/image-gen/lib/db-lines";
 import {
   createImageJob,
-  dispatchImageGenerationJob,
 } from "@/features/image-gen/lib/generation-service";
+import { triggerImageGenSubmit } from "@/features/image-gen/lib/submit";
 import type {
   GenerateImageRequest,
-  GenerateImageResult,
   ImageModelId,
 } from "@/features/image-gen/lib/image-models/types";
 import { auth } from "@/lib/auth";
@@ -122,7 +119,10 @@ async function requireExternalApiKey(
 }
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+// 2026-10-13：异步改造后 HTTP 路径不再等 apimart,createImageJob + Inngest
+// send 是 <1s。Vercel 函数预算 10s 已绰绰有余,还给 Vercel 函数冷启动预算
+// 留余量(同请求链还有 BA verifyOTP / DB 写入)。
+export const maxDuration = 10;
 
 // 外部用户可用全部模型（服务端控制，前端不感知具体模型）
 // 2026-09-11：精简为 3 个核心模型（qwen / gpt_image_2 / nano_banana2）。
@@ -350,44 +350,41 @@ export async function POST(req: NextRequest) {
       ...(body.maskId !== undefined && { maskId: body.maskId }),
     };
 
-    // 已登录 demo 用户走 imageJob + photo 库，匿名用户保持老路径。
-    // 两条路径都要返 GenerateImageResult 兼容形态（response 解构用 success/
-    // status/images/taskId/error）。dispatchImageGenerationJob 缺 model 字段，
-    // 这里手工补上；dispatchGenerateImage 自带 model。
-    // internalReq 同时作为 GenerateImageRequest（adapter 用）和 InternalGenerateInput
-    // （createImageJob / dispatchImageGenerationJob 用）—— 字段一致，TS 上 cast 一下。
-    const result: GenerateImageResult = userId
-      ? await (async () => {
-          const createResult = await createImageJob({
-            userId,
-            input: internalReq as Parameters<typeof createImageJob>[0]["input"],
-            creditsConsumed: 0,
-          });
-          if (!createResult.success) {
-            return {
-              success: false,
-              model: internalReq.model,
-              status: "failed" as const,
-              error: "创建生图任务失败",
-            };
-          }
-          const dispatched = await dispatchImageGenerationJob({
-            jobId: createResult.jobId,
-            input: internalReq as Parameters<
-              typeof dispatchImageGenerationJob
-            >[0]["input"],
-            ip,
-          });
-          return {
-            ...dispatched,
-            model: internalReq.model,
-          } as GenerateImageResult;
-        })()
-      : await dispatchGenerateImage(internalReq);
+    // 2026-10-13：异步改造 —— createImageJob + triggerImageGenSubmit + 立即返。
+    //
+    // 改前：await dispatchGenerateImage（匿名）/ createImageJob + dispatchImageGenerationJob
+    //       （登录）—— 同步等 apimart 30-90s,BFF 函数挂死 + mp 30s timeout。
+    // 改后：写 imageJob (pending) + Inngest send,立刻 <1s 返 taskId。
+    //       apimart 在 Inngest cloud 后台跑,失败由 reconcileStaleJobs cron 兜底。
+    //
+    // 关键点：
+    //   - internalReq 同时作为 GenerateImageRequest(adapter 用)和
+    //     InternalGenerateInput(createImageJob / dispatchImageGenerationJob 用)
+    //   - createImageJob 现在接 userId: string | null（schema 已 nullable）
+    //   - triggerImageGenSubmit 有 sync fallback(Inngest 不可用时降级,
+    //     dev 友好);返回 mode 仅用于诊断,业务行为不依赖
+    //   - recordExternalApiKeyCall 改在 submit 成功时记一次(原逻辑是
+    //     result.success 时记,异步后我们立刻返 pending 不再 result.success,
+    //     改为"被接受 = 计 1 次配额",语义更符合"提交配额"直觉)
 
-    // 埋点：记录外部用户本次生图的结果（服务端用，不回传客户端）
+    const createResult = await createImageJob({
+      userId, // string | null
+      input: internalReq as Parameters<typeof createImageJob>[0]["input"],
+      creditsConsumed: 0,
+    });
+    if (!createResult.success) {
+      throw new Error(createResult.error ?? "创建生图任务失败");
+    }
+
+    const { mode: submitMode } = await triggerImageGenSubmit(
+      createResult.jobId,
+      internalReq as Parameters<typeof triggerImageGenSubmit>[1]
+    );
+
+    // 埋点：submit 阶段
     logImageGen({
       event: "submit",
+      outcome: "pending",
       source: "public",
       model: selectedModel,
       mode: internalReq.mode,
@@ -395,15 +392,14 @@ export async function POST(req: NextRequest) {
       maskId: body.maskId,
       size: internalReq.size,
       batchSize: 1,
-      ...buildResultFields(result),
+      // 异步路径无 images / taskId(taskId 在 Inngest dispatch 时由 apimart adapter
+      // 写入 imageJob.taskId 列);埋点仅记 submit 维度
+      submitMode,
       ip,
     });
 
-    // 2026-10-12：外部 API Key 自增 + 跨月重置
-    // 仅在 result.success 时记一次（拒绝 / 失败请求不消耗配额）。
-    // 包 try-catch 防止 quota 写入失败把生图成功响应也带翻车 —— 配额只是统计，
-    // 优先保证用户拿到图。
-    if (externalKeyVerify?.ok && result.success) {
+    // 外部 API Key 配额自增(被 accept 即记 1 次)
+    if (externalKeyVerify?.ok) {
       try {
         await recordExternalApiKeyCall(externalKeyVerify.keyId);
       } catch (e) {
@@ -411,31 +407,15 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 响应只回传必要字段：图片 / 任务 id + 友好状态，不暴露 model/cost/currency
-    if (result.success && result.taskId && result.status === "processing") {
-      return NextResponse.json(
-        {
-          success: true,
-          image: null,
-          maskName,
-          taskId: result.taskId,
-          taskStatus: "processing",
-        },
-        { headers: getRateLimitHeaders(rl) }
-      );
-    }
-
+    // 立即返:imageJob.id 作为 taskId 返给 mp,mongo 后续调 /api/image/task/[id]
+    // 轮询,端点已经支持 imageJob.id 查询
     return NextResponse.json(
       {
-        success: result.success,
-        image: result.images?.[0] ?? null,
+        success: true,
+        taskId: createResult.jobId,
+        jobId: createResult.jobId, // 双返兼容旧 mp 调用方
+        taskStatus: "pending" as const,
         maskName,
-        taskId: result.taskId,
-        taskStatus: result.status,
-        // 把上游真实错误透传给用户（之前 catch-all 文案掩盖了根因）
-        error: result.success
-          ? undefined
-          : (result.error ?? "生成失败，请稍后重试"),
       },
       { headers: getRateLimitHeaders(rl) }
     );

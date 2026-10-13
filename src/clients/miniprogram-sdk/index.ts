@@ -13,6 +13,7 @@
 export { loginWithWechat, logout } from "./auth";
 // AI 生图
 export {
+  getQuota,
   listPhotos,
   listTemplates,
   pollImageTask,
@@ -82,6 +83,7 @@ export type {
   // 上传
   PublicUploadRequest,
   PublicUploadResponse,
+  QuotaResponse,
   SdkConfig,
   // 图片代理
   ThumbnailQuery,
