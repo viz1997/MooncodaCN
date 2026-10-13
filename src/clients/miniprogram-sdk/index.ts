@@ -36,11 +36,13 @@ export {
 } from "./orders";
 // 配置 & 错误
 export {
+  getSdkApiKey,
   getSdkBaseUrl,
   getSdkToken,
   isSdkRequestError,
   SdkRequestError,
   sdkRequest,
+  setSdkApiKey,
   setSdkToken,
   setupSdk,
 } from "./request";

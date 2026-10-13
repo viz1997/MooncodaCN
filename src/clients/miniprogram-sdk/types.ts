@@ -118,8 +118,17 @@ export interface PublicGenerateRequest {
   size?: number;
   /** 生成数量 1-10;默认 1 */
   count?: number;
-  /** 模型 ID 锁定(默认 qwen);不传服务端按 mask 推荐 */
-  model?: "qwen" | "gpt_image_2" | "nano_banana2";
+  /**
+   * 模型 ID 锁定(默认 apimart_gpt_image,2026-10-XX 切换)
+   * 不传服务端按 mask 推荐
+   * 2026-10-XX：apimart 拆 flare + sunburst 两条模型可选,显式指定可走 sunburst 高质档
+   */
+  model?:
+    | "qwen"
+    | "gpt_image_2"
+    | "nano_banana2"
+    | "apimart_gpt_image"
+    | "apimart_gpt_image_sunburst";
   /** 模板 prompt 中的变量取值(模板定义的 form 字段);可选 */
   params?: Record<string, string>;
 }
@@ -149,30 +158,50 @@ export interface ImageTaskStatusResponse {
   finishedAt?: string;
 }
 
-/** GET /api/image-gen/prompt-templates 响应(登录态) */
+/**
+ * GET /api/public/prompt-templates 响应(2026-10-13 切到 public 鉴权)
+ *
+ * 字段命名对齐小程序 SDK 契约(不是 DB 原始字段):
+ *   - productLineId → id / handle
+ *   - coverUrl → cover
+ *   - previewUrl → cover
+ *   - price(cents) → costCredits
+ *   - status(active/inactive)
+ *
+ * 历史变更:2026-10-13 之前叫 /api/image-gen/prompt-templates 且要 Bearer,
+ *          现改到 /api/public/prompt-templates 走 x-api-key,响应 shape 同步对齐。
+ */
 export interface PromptTemplatesResponse {
-  /** 产品线列表 */
+  /** 产品线列表(按 sortOrder 升序;maskCount=0 的 productLine 已被服务端过滤) */
   productLines: Array<{
     id: string;
     name: string;
+    /** 与 id 同值;保留字段供未来稳定 slug 演进(协议不变可演进) */
     handle: string;
     cover: string;
     description: string;
+    /** 服务端排序(asc),前端可不读,按返回顺序展示即可 */
+    sortOrder: number;
+    /** 该产品线下,当前 API Key 白名单过滤后可见的 active 模板数 */
+    maskCount: number;
   }>;
   /** 模板(产品效果)列表 */
   templates: Array<{
+    /** 等同 maskId,提交生图时用 */
     id: string;
     name: string;
-    productTypeCode: string;
-    productLineId: string;
+    productTypeCode: string | null;
+    /** 多对多:一个模板可挂多个 productLine */
+    productLineIds: string[];
     outputMode: "grid" | "separate";
     candidateCount: number;
-    allowedSizes: number[];
+    /** 单位 cm 的字符串数组;空 = 字典全量 */
+    allowedSizes: string[];
     allowedAccessories: string[];
     cover: string;
+    /** cents(整数,展示时 /100) */
     costCredits: number;
-    tags: string[];
-    status: "active" | "draft" | "archived";
+    status: "active" | "inactive";
   }>;
 }
 
@@ -402,6 +431,13 @@ export interface SdkConfig {
   baseUrl: string;
   /** 当前 token(loginWithWechat 成功后 SDK 自动写入;也可手动 set) */
   token?: string | undefined;
+  /**
+   * 外部 API Key(mk_pub_* 前缀,admin 给合作伙伴发的那种)。
+   * 走 x-api-key header,用于 /api/public/** 系列端点。
+   * 业务侧拿到 key 后调 setSdkApiKey() 写入。
+   * 与 token(Bearer)并存:同时设置时服务端优先 x-api-key(配额走 key)。
+   */
+  apiKey?: string | undefined;
   /** 默认 fetch 超时 ms,默认 30000 */
   timeoutMs?: number | undefined;
   /** 自定义 fetch 实现(Taro.request 包装) */
