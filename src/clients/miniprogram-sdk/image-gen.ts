@@ -61,13 +61,17 @@ export async function pollImageTask(
 }
 
 /**
- * 列产品线 + 模板(需 Bearer,已登录用户)
+ * 列产品线 + 模板(走 x-api-key,小程序/第三方集成用)
+ *
+ * 2026-10-13 切到 /api/public/prompt-templates:
+ *   - 之前走 /api/image-gen/prompt-templates 要 BA session(登录态)
+ *   - 现在外部 API Key(mk_pub_*)友好,小程序启动 setSdkApiKey 后自动注入 x-api-key
  *
  * 用法:进入生图页时拉一次,用作 maskId 下拉 / 产品线 Tab
  */
 export async function listTemplates(): Promise<PromptTemplatesResponse> {
   return sdkRequest<PromptTemplatesResponse>(
-    "/api/image-gen/prompt-templates",
+    "/api/public/prompt-templates",
     {
       method: "GET",
       timeoutMs: 30_000,

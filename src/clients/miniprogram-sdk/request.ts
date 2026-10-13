@@ -48,14 +48,22 @@ let currentConfig: SdkConfig | null = null;
 /**
  * 初始化 SDK(程序入口调一次)
  *
- * 启动时优先读 wx.storage 里上次持久化的 token,避免冷启动跳登录页
- * (用户感知:杀掉重开就要重授权手机号,体验差)。
+ * 启动时优先读 wx.storage 里上次持久化的 token + apiKey,避免冷启动跳登录页
+ * (用户感知:杀掉重开就要重授权手机号,体验差) + 合作伙伴 key 也无须每次手填。
  */
 export function setupSdk(config: SdkConfig): void {
   // 1) 持久化 token 优先(用户上次登录态) → 2) 调用方传入 token(显式覆盖) → 3) 都没有 undefined
   const persistedToken = readPersistedToken();
   const initialToken = persistedToken ?? config.token;
-  currentConfig = { timeoutMs: 30_000, ...config, token: initialToken };
+  // apiKey 同理:持久化优先
+  const persistedApiKey = readPersistedApiKey();
+  const initialApiKey = persistedApiKey ?? config.apiKey;
+  currentConfig = {
+    timeoutMs: 30_000,
+    ...config,
+    token: initialToken,
+    apiKey: initialApiKey,
+  };
 }
 
 /**
@@ -84,10 +92,46 @@ export function setSdkToken(token: string | undefined): void {
  * 读持久化的 token(供 setupSdk 启动恢复用)
  */
 function readPersistedToken(): string | undefined {
+  return readStorageValue(TOKEN_STORAGE_KEY);
+}
+
+/**
+ * 设置外部 API Key(mk_pub_* 前缀)
+ *
+ * 与 token(Bearer)并存:
+ * - 同时设置时,服务端优先 x-api-key(配额走 key,key 管理后台能看到调用计数)
+ * - 单独设置 apiKey 而无 token → /api/public/** 端点可用
+ * - 单独设置 token 无 apiKey → 仍是登录用户身份,公共端点会 401
+ *
+ * 持久化到 wx.storage(同 token 模式),小程序杀掉重开仍能恢复。
+ */
+export function setSdkApiKey(apiKey: string | undefined): void {
+  if (!currentConfig) {
+    throw new Error("setupSdk() must be called before setSdkApiKey()");
+  }
+  currentConfig = { ...currentConfig, apiKey };
+  const wx = getWx();
+  if (wx) {
+    try {
+      if (apiKey) wx.setStorageSync(API_KEY_STORAGE_KEY, apiKey);
+      else wx.removeStorageSync(API_KEY_STORAGE_KEY);
+    } catch {
+      // 同 setSdkToken:静默忽略
+    }
+  }
+}
+
+/** 读持久化的 apiKey(供 setupSdk 启动恢复用) */
+function readPersistedApiKey(): string | undefined {
+  return readStorageValue(API_KEY_STORAGE_KEY);
+}
+
+/** 通用 storage 读;与 setSdkToken 复用 try-catch 兜底 */
+function readStorageValue(key: string): string | undefined {
   const wx = getWx();
   if (!wx) return undefined;
   try {
-    const value = wx.getStorageSync(TOKEN_STORAGE_KEY);
+    const value = wx.getStorageSync(key);
     return value ? String(value) : undefined;
   } catch {
     return undefined;
@@ -96,10 +140,17 @@ function readPersistedToken(): string | undefined {
 
 /** SDK token 在 wx.storage 里的 key。版本前缀防未来 schema 变更。 */
 const TOKEN_STORAGE_KEY = "miniprogram-sdk:v1:token";
+/** SDK apiKey 在 wx.storage 里的 key。版本前缀同上。 */
+const API_KEY_STORAGE_KEY = "miniprogram-sdk:v1:apiKey";
 
 /** 读取当前 token */
 export function getSdkToken(): string | undefined {
   return currentConfig?.token;
+}
+
+/** 读取当前外部 API Key */
+export function getSdkApiKey(): string | undefined {
+  return currentConfig?.apiKey;
 }
 
 /** 读取当前 baseUrl */
@@ -193,11 +244,18 @@ export async function sdkRequest<T>(
     body = formData;
   }
 
-  // 拼 Bearer
+  // 拼鉴权 header
+  // 1) Bearer(BA session token,登录态) → Authorization: Bearer <token>
+  // 2) x-api-key(外部 API Key, mk_pub_* 合作伙伴) → x-api-key: <key>
+  // 同时设置时两个 header 都发,服务端优先 x-api-key(配额走 key,key 管理后台
+  // 能看到调用计数)。允许单设其一。
   if (!skipAuth) {
     const bearerToken = token ?? currentConfig.token;
     if (bearerToken) {
       headers.Authorization = `Bearer ${bearerToken}`;
+    }
+    if (currentConfig.apiKey) {
+      headers["x-api-key"] = currentConfig.apiKey;
     }
   }
 

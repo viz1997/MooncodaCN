@@ -8,7 +8,8 @@ export type ImageModelId =
   | "qwen" // 阿里 通义千问 qwen-image（原 wanx 重命名）
   | "gpt_image_2" // OpenAI GPT-Image-2 via WellAPI
   | "nano_banana2" // Google Nano Banana 2 (gemini-3.1-flash-image-preview)
-  | "apimart_gpt_image"; // 2026-10-12：apimart.ai gpt-image-2.5-ext（flare/sunburst）
+  | "apimart_gpt_image" // 2026-10-XX：apimart.ai gpt-image-2.5-flare（默认款）
+  | "apimart_gpt_image_sunburst"; // 2026-10-XX：apimart.ai gpt-image-2.5-sunburst（精度优先）
 
 // 生成模式
 export type GenerationMode =
@@ -281,22 +282,25 @@ export const IMAGE_MODELS: Record<ImageModelId, ImageModelConfig> = {
     isAvailable: true,
   },
 
-  // 4. 2026-10-12：Apimart gpt-image-2.5-ext（flare / sunburst 双版本异步生图）
+  // 4. 2026-10-XX：Apimart gpt-image-2.5-flare（默认款，速度优先）
   // 接入 apimart.ai，统一接口、异步任务模式 + R2 持久化路径与
   // gpt_image_2 adapter 同形态（submit → poll → persistCandidateToR2）。
-  // 关键差异：apimart 接受 aspect ratio（"1:1" / "16:9" 等共 10 种 + auto），
-  // 不直接接 "WxH" 像素形式 —— adapter 内部做 pixel → ratio 映射。
-  // resolution 由 schema.quality 映射：low/auto → 1K，medium → 2K，high → 4K。
+  // 关键差异：apimart 接受 aspect ratio（"1:1" / "16:9" 等共 15 种 + auto），
+  // 也可直接接精确像素（"1600x1200"）；pixelToRatio 兜底 + apimart 文档示
+  // 例支持 WxH。resolution 默认 1K；quality 默认 auto（apimart 按尺寸最高档预留）。
   // 限制：
   // - maxBatchSize=4（apimart 上限 4；与现有 validation 约束对齐）
   // - maxImageUrls=16（apimart 上限；schema 现约 10，adapter 内再校验防御）
-  // - taskId 是上游真实 id "task_xxx" 格式，不是 imgtask_<model>_xxx —— 不支持
-  //   legacy /api/image/task/[id] parseTaskModel 路径，新工作台用 imageJob.model
-  //   直接 dispatch（与 gpt_image_2 一致，进 generation-service.advanceImageGenJob）
+  // - taskId 是上游真实 id "task_<id>" 格式（"task_01K..."），不是
+  //   imgtask_<model>_xxx —— 不支持 legacy /api/image/task/[id] parseTaskModel
+  //   路径，新工作台用 imageJob.model 直接 dispatch（与 gpt_image_2 一致，
+  //   进 generation-service.advanceImageGenJob）
+  // - 局部重绘（inpainting）：apimart 用 mask_url（透明 PNG）；image_urls 与
+  //   mask_url 必须同时给出，adapter 已透传 req.maskUrl → body.mask_url。
   apimart_gpt_image: {
     id: "apimart_gpt_image",
-    name: "Apimart GPT-Image-2.5",
-    fullName: "Apimart gpt-image-2.5-ext（flare / sunburst）",
+    name: "Apimart GPT-Image-2.5 (Flare)",
+    fullName: "Apimart gpt-image-2.5-flare",
     vendor: "Apimart",
     vendorUrl: "https://apimart.ai",
     color: "#7c3aed",
@@ -309,7 +313,7 @@ export const IMAGE_MODELS: Record<ImageModelId, ImageModelConfig> = {
     // n=4 + 4K 慢场景实测可达 60s+，留 180s 给单次轮询循环
     maxPollingTime: 180000,
     capabilities: {
-      modes: ["text_to_image", "image_to_image", "image_editing"],
+      modes: ["text_to_image", "image_to_image", "image_editing", "inpainting"],
       sizes: [
         "512x512",
         "1024x1024",
@@ -342,8 +346,67 @@ export const IMAGE_MODELS: Record<ImageModelId, ImageModelConfig> = {
     freeQuota: 0,
     status: "active",
     description:
-      "Apimart gpt-image-2.5-ext 提供 flare / sunburst 双版本（flare 默认），异步任务模式，支持 1K/2K/4K 三档分辨率与 10 种画面比例 + auto，最多 16 张参考图，按版本/分辨率/张数计费",
-    bestFor: ["双版本切换", "4K 出图", "多参考图融合", "商品广告图"],
+      "Apimart gpt-image-2.5-flare 默认款，异步任务模式，速度优先；支持 1K/2K/4K 三档分辨率与 15 种画面比例 + auto，最多 16 张参考图，支持 mask_url 局部重绘，按版本/分辨率/张数计费",
+    bestFor: ["社媒内容", "商品图", "视觉搜索", "快速原型", "大批量生成"],
+    totalGenerated: 0,
+    successRate: 95,
+    isDomestic: false,
+    isAvailable: true,
+  },
+
+  // 5. 2026-10-XX：Apimart gpt-image-2.5-sunburst（精度优先，与 flare 并列条目）
+  // 与 flare 同供应商同 API，单价相同；调用方按精度需求二选一。
+  // capabilities / sizes / 限制与 flare 完全一致；Future：当 UI 暴露
+  // "精度 vs 速度"开关时，advanceImageGenJob 读到 imageJob.model 即可
+  // 直接 dispatch 到对应 adapter，无需再行表层切。
+  apimart_gpt_image_sunburst: {
+    id: "apimart_gpt_image_sunburst",
+    name: "Apimart GPT-Image-2.5 (Sunburst)",
+    fullName: "Apimart gpt-image-2.5-sunburst",
+    vendor: "Apimart",
+    vendorUrl: "https://apimart.ai",
+    color: "#a855f7",
+    gradient: "from-purple-500 to-fuchsia-600",
+    apiEndpoint: "https://api.apimart.ai/v1/images/generations",
+    apiKeyEnv: "APIMART_API_KEY",
+    authType: "bearer",
+    asyncMode: true,
+    pollingInterval: 3000,
+    maxPollingTime: 180000,
+    capabilities: {
+      modes: ["text_to_image", "image_to_image", "image_editing", "inpainting"],
+      sizes: [
+        "512x512",
+        "1024x1024",
+        "1024x1536",
+        "1536x1024",
+        "1024x1792",
+        "1792x1024",
+        "2048x2048",
+        "720x1280",
+        "1280x720",
+        "768x1024",
+        "1024x768",
+        "auto",
+      ],
+      maxBatchSize: 4,
+      supportsNegativePrompt: false,
+      supportsSeed: false,
+      supportsGuidance: false,
+      supportsStyle: true,
+      supportsSafetyCheck: true,
+      maxInferenceSteps: 0,
+    },
+    avgDuration: 28000, // sunburst 比 flare 稍慢（约 +10-15%）
+    qualityScore: 95, // sunburst 比 flare 高 1 分（精度优先档）
+    stabilityScore: 92,
+    pricePerImage: 0.2,
+    currency: "USD",
+    freeQuota: 0,
+    status: "active",
+    description:
+      "Apimart gpt-image-2.5-sunburst 精度优先款，编辑精度优秀；与 flare 同 API 同单价，速度稍慢但出图更精细，适合成品级商品图与多轮精细编辑",
+    bestFor: ["投放级创意", "成品级商品图", "多轮精细编辑", "高精度海报"],
     totalGenerated: 0,
     successRate: 95,
     isDomestic: false,
