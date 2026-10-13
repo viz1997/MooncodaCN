@@ -117,8 +117,10 @@ const { taskId } = await submitGenerate({
   imageUrls: [url],
   size: 6,
   count: 1,
-  // model 选填:不传按 mask 推荐;"apimart_gpt_image" = flare 默认;
-  // "apimart_gpt_image_sunburst" = sunburst 高质档
+  // model 选填:不传按 mask 推荐(默认 apimart_gpt_image)
+  // - "apimart_gpt_image"            → 上游 gpt-image-2.5-flare(速度/成本优先)
+  // - "apimart_gpt_image_sunburst"  → 上游 gpt-image-2.5-sunburst(质量优先,贵一档)
+  // - 其他:qwen / gpt_image_2 / nano_banana2(详见 types.ts:PublicGenerateRequest.model)
 });
 
 // 5.3 轮询(递减间隔;taskId 是 UUID,不可枚举,免登录安全)
@@ -316,7 +318,7 @@ controller.abort();
 
 **变更**
 - `image-gen.ts:listTemplates()` URL 从 `/api/image-gen/prompt-templates` 切到 `/api/public/prompt-templates`。
-- `types.ts:PublicGenerateRequest.model` union 新增 `"apimart_gpt_image" | "apimart_gpt_image_sunburst"` —— 小程序可显式指定走 sunburst 高质档。
+- `types.ts:PublicGenerateRequest.model` union 新增 `"apimart_gpt_image" | "apimart_gpt_image_sunburst"` —— 小程序可显式指定走 sunburst 高质档。**这两个 SDK 端 model 字段对应 apimart 上游 `gpt-image-2.5-flare` / `gpt-image-2.5-sunburst` 两个子型号**(apimart 2026-10 弃用 -ext,只列 flare + sunburst)。
 - `types.ts:PromptTemplatesResponse` 重塑:加 `sortOrder` / `maskCount` 到 productLines,`productLineIds` 改数组(原单数),`status` 改 `"active" | "inactive"`(原 draft/archived 不在数据源中),`allowedSizes` 改 `string[]`(cm,原 `number[]` 不匹配)。**`tags` 字段删除**(数据源无 tags 列)。
 - `request.ts`:`x-api-key` header 注入,Bearer + x-api-key 可同时设置。
 - README 鉴权表 + 复制路径 typo 修正(`miniprogramgram-sdk` → `miniprogram-sdk`)。

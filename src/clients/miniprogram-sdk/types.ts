@@ -121,7 +121,11 @@ export interface PublicGenerateRequest {
   /**
    * 模型 ID 锁定(默认 apimart_gpt_image,2026-10-XX 切换)
    * 不传服务端按 mask 推荐
+   *
    * 2026-10-XX：apimart 拆 flare + sunburst 两条模型可选,显式指定可走 sunburst 高质档
+   * - apimart_gpt_image           → apimart 上游 gpt-image-2.5-flare(速度/成本优先)
+   * - apimart_gpt_image_sunburst  → apimart 上游 gpt-image-2.5-sunburst(质量优先,贵一档)
+   * 注:apimart.ai 2026-10 弃用了 gpt-image-2.5-ext,现只列 flare + sunburst 两个子型号
    */
   model?:
     | "qwen"
