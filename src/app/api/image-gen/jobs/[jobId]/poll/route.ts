@@ -32,6 +32,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { imageJob } from "@/db/schema";
 import { advanceImageGenJob } from "@/features/image-gen/lib/generation-service";
+import { toPublicJobView } from "@/features/image-gen/lib/poll-public-view";
 import { getClientIp, logImageGen } from "@/features/image-gen";
 import { withApiLogging } from "@/lib/api-logger";
 import { auth } from "@/lib/auth";
@@ -82,6 +83,9 @@ async function postHandler(
   // 路径 1: BA session —— 工作台登录用户(原行为,零回归)
   const headersList = await headers();
   const session = await auth.api.getSession({ headers: headersList });
+  // 2026-10-14:标记走的是哪条鉴权路径,决定 response shape —— owner 拿全行,
+  // external 拿 toPublicJobView 投影(避免泄露上游 fingerprint + 内部字段)。
+  let authMode: "owner" | "external" = "external";
   if (session?.user) {
     if (found.userId !== session.user.id) {
       // 不告诉前端"存在但无权",统一 404 防枚举(原逻辑保留)
@@ -90,6 +94,7 @@ async function postHandler(
         { status: 404 }
       );
     }
+    authMode = "owner";
     // session owner 校验通过,落到下面统一推进逻辑
   } else {
     // 路径 2: x-api-key —— mp / 外部集成方
@@ -125,17 +130,21 @@ async function postHandler(
         { status: 404, headers: getRateLimitHeaders(rl) }
       );
     }
+    // authMode 保持默认 "external"
   }
 
   try {
     // 推进(幂等:无 taskId / 终态时不动)
     const job = await advanceImageGenJob(jobId);
+    // 2026-10-14:owner 路径返全行(零回归);external 路径用投影避免泄露
+    // 上游 fingerprint(例 apimart request_id)+ 内部 model/prompt/cost。
+    const jobView = authMode === "owner" ? job : toPublicJobView(job);
 
     return NextResponse.json(
       {
         success: true,
         data: {
-          job,
+          job: jobView,
         },
       },
       { headers: getRateLimitHeaders(rl) }

@@ -63,9 +63,14 @@ export async function pollImageTask(
   taskId: string,
   options?: { signal?: AbortSignal }
 ): Promise<ImageTaskStatusResponse> {
-  // 新端点返 { success, data: { job: <imageJob row> } };映射到 SDK
+  // 新端点返 { success, data: { job: <projection | imageJob row> } };映射到 SDK
   // 老的 ImageTaskStatusResponse 契约(只暴露 status / candidates / error)
   // 避免 mp 端改业务代码。
+  //
+  // 2026-10-14:外部路径(x-api-key,匿名 jobId)服务端走 toPublicJobView 投影,
+  // 字段名 errorMessage(已 sanitize),不再有 errorMsg。
+  // 工作台 owner 路径仍走 imageJob 全行(零回归),errorMsg 仍在。SDK 两边
+  // 都兼容,优先读 errorMessage(投影),fallback 到 errorMsg(全行)。
   const raw = await sdkRequest<{
     success: boolean;
     data?: {
@@ -74,7 +79,10 @@ export async function pollImageTask(
         status: "pending" | "processing" | "completed" | "failed";
         resultUrls: string[] | null;
         generateDuration: number | null;
-        errorMsg: string | null;
+        /** 外部投影专用字段,服务端已脱敏上游 fingerprint */
+        errorMessage?: string | null;
+        /** 全行路径(工作台)字段,2026-10-14 前所有响应都走这里 */
+        errorMsg?: string | null;
         completedAt: string | Date | null;
       };
     };
@@ -95,10 +103,11 @@ export async function pollImageTask(
     job.completedAt instanceof Date
       ? job.completedAt.toISOString()
       : (job.completedAt ?? null);
+  const errMsg = job.errorMessage ?? job.errorMsg ?? null;
   return {
     status: job.status,
     candidates: job.resultUrls ?? [],
-    ...(job.errorMsg && { errorMessage: job.errorMsg }),
+    ...(errMsg && { errorMessage: errMsg }),
     ...(job.generateDuration !== null && {
       durationMs: job.generateDuration,
     }),
