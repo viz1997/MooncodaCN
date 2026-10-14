@@ -660,14 +660,72 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
   useEffect(() => () => clearPoll(), [clearPoll]);
 
   // 加载 mask 列表（2026-09-10：同时取 productLines）
+  //
+  // 2026-10-14：v2.1 迁移漏改 /image-gen 公开页客户端组件。本 view 用旧的
+  // PublicMask 字段名（maskId / previewUrl / productLineId / coverUrl），
+  // 而新 /api/image-gen/templates 返的是小程序 SDK 契约的 id / cover / costCredits。
+  // 这里做适配映射，保持 PublicMask / PublicProductLine 类型不变（SpecModal 等
+  // 子组件继续用 maskId / previewUrl，零侵入）。
+  //
+  // 新 API 响应少了几个字段（description / model / allowedCapabilities /
+  // allowedColors / promptTemplateId / mask.price），SpecModal 走 catalog 默认能力
+  // 时对这些缺失字段无感知（getEffectiveCapabilities/getEffectiveLeatherColors
+  // 自身 fallback）。
   useEffect(() => {
-    fetch("/api/public/generate")
+    fetch("/api/image-gen/templates")
       .then((r) => r.json())
       .then((data) => {
-        if (data.success && Array.isArray(data.masks))
-          setMasks(data.masks as PublicMask[]);
-        if (data.success && Array.isArray(data.productLines))
-          setProductLines(data.productLines as PublicProductLine[]);
+        if (data.success && Array.isArray(data.templates)) {
+          const adaptedMasks: PublicMask[] = data.templates.map(
+            (t: {
+              id: string;
+              name: string;
+              cover: string;
+              productTypeCode: string | null;
+              productLineIds?: string[];
+              candidateCount?: number;
+              outputMode?: "grid" | "separate";
+              allowedSizes?: string[] | null;
+              allowedAccessories?: string[] | null;
+              status?: string;
+            }) => ({
+              maskId: t.id,
+              name: t.name,
+              previewUrl: t.cover,
+              productTypeCode: t.productTypeCode,
+              price: 0, // 新 API 用 costCredits，公开 demo 流暂不展示价格
+              description: "",
+              model: "",
+              productLineIds: t.productLineIds ?? [],
+              candidateCount: t.candidateCount ?? 1,
+              outputMode: t.outputMode ?? "grid",
+              allowedSizes: t.allowedSizes ?? null,
+              allowedAccessories: t.allowedAccessories ?? null,
+              allowedCapabilities: null,
+              allowedColors: null,
+              promptTemplateId: null,
+            }),
+          );
+          setMasks(adaptedMasks);
+        }
+        if (data.success && Array.isArray(data.productLines)) {
+          const adaptedLines: PublicProductLine[] = data.productLines.map(
+            (l: {
+              id: string;
+              name: string;
+              cover: string;
+              sortOrder: number;
+              maskCount: number;
+            }) => ({
+              productLineId: l.id,
+              name: l.name,
+              coverUrl: l.cover,
+              sortOrder: l.sortOrder,
+              maskCount: l.maskCount,
+            }),
+          );
+          setProductLines(adaptedLines);
+        }
       })
       .catch(() => {})
       .finally(() => setLoadingMasks(false));
@@ -951,7 +1009,11 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
     setSelectedCell(null);
 
     try {
-      const res = await fetch("/api/public/generate", {
+      // 2026-10-14：v2.1 路径迁移。旧 POST /api/public/generate 已 410。
+      // 新 POST /api/image-gen/submit 强制 API key（即便已登录用户），
+      // /image-gen 是登录 demo 流页面 → 鉴权策略需要单独处理,见
+      // scripts/verify-image-gen-routes.sh 注释与 requireExternalApiKey helper。
+      const res = await fetch("/api/image-gen/submit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -969,7 +1031,10 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
 
       const maskName = (data.maskName as string) || "AI 生图";
 
-      if (data.taskId && data.taskStatus === "processing") {
+      // 2026-10-14：新 /api/image-gen/submit 是异步模式 —— submit 立即返 pending，
+      // 不再等同步图。所以判断从「taskStatus === "processing"」放宽到「有 taskId 即视为异步」。
+      // 同步图分支(data.image?.url)保留兼容:老客户端/mp SDK 不会走到这里,但不影响。
+      if (data.taskId) {
         // 2026-09-11：当前 mask 的 candidateCount/outputMode 入 PendingTask，
         // 刷新后 finishTask 写 history 时拿得到（picker 决策依据）。
         const currentMask = masks.find((m) => m.maskId === selectedMask);

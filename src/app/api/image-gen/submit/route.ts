@@ -92,8 +92,13 @@ export async function POST(req: NextRequest) {
 
   // 2026-10-12:外部 API Key 校验(小程序 / 第三方集成等走本路由必须带 key)
   // 默认强制;本地 dev 可在 .env.local 设 EXTERNAL_API_KEY_REQUIRED=0 关闭。
-  // 即使是已登录 demo 用户也校验(admin 给合作伙伴发 key 时绑白名单/限额,
-  // 走公共路由的请求统一记账)。
+  //
+  // 2026-10-14:已登录 demo 流放行由 requireExternalApiKey helper 统一处理
+  // —— BA session 命中则 verify=null 跳过,x-api-key 通道留给合作伙伴 / 小程序。
+  // 这里拿到 verify=null 走原 dev 跳过同形态:不查 allowedMasks 白名单、不计
+  // 外部 key 月配额,只把 userId 写到 imageJob 走 demo 流用户归属。
+  // 合作伙伴路径(匿名 / mp 集成)无 BA session,会进 helper 的 x-api-key
+  // 通道,白名单与配额自增在下方逻辑里照常生效。
   const { verify: externalKeyVerify, errorResponse: keyError } =
     await requireExternalApiKey(req, ip, rl);
   if (keyError) return keyError;

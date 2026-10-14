@@ -4,8 +4,13 @@
  * 2026-10-13 v2.1:从 /api/public/prompt-templates 迁过来。
  * 原路径已 410 Gone(指向本路径)。迁移动机见 scripts/verify-image-gen-routes.sh。
  *
- * 鉴权:与 /api/public/prompt-templates 一致,强制外部 API Key
+ * 鉴权:与 /api/public/prompt-templates 一致,默认强制外部 API Key
  * (x-api-key > Authorization: Bearer <key>),dev 模式 EXTERNAL_API_KEY_REQUIRED=0 关。
+ *
+ * 2026-10-14:已登录 BA session 也可访问(/image-gen 页面强制登录后 fetch
+ * 本路由),由 requireExternalApiKey helper 统一处理 —— 命中 session 即
+ * verify=null 跳过,本路由的 allowedMasks 白名单也自然不生效(demo 用户
+ * 看全量 active 模板)。
  *
  * 与 /api/image-gen/submit (POST) 的关系:
  *   templates → 拿 maskId 下拉 + productLine 分组
