@@ -12,8 +12,11 @@ import { Input as AntdInput, App, Modal } from "antd";
  *
  * 数据走真实 action（generateImageAction），历史为前端 state。
  *
- * Phase C：模板数据源从 productEffect 表迁移到 promptTemplate 表（与 gpt-image 共用），
- * 所以 props 类型是 PromptTemplateView[]，不再依赖 ProductEffect 类型。
+ * 2026-10-14：模板数据源从 promptTemplate 表回切到 productEffect 表（与
+ * /api/image-gen/templates v2.1 对齐），原因:prompt_template 与 product_effect
+ * 双轨存储导致 RSC 工作台"暂无模板"但小程序能看到同一模板。props 类型改成
+ * ProductEffect[],字段访问同步替换:t.id→t.maskId、t.isActive→t.status==='active'、
+ * tpl.coverUrl→tpl.previewUrl。
  */
 
 import localforage from "localforage";
@@ -76,7 +79,16 @@ import { AssetPickerModal } from "@/features/canvas/components/canvas/asset-pick
 import { PromptSelectDialog } from "@/features/canvas/components/prompts/prompt-select-dialog";
 import { stitchToGrid } from "@/features/canvas/lib/stitch-images";
 import { useMyPromptStore } from "@/features/canvas/stores/use-my-prompt-store";
-import type { PromptTemplateView } from "@/features/gpt-image/lib/types";
+import type { ProductEffect } from "@/features/image-gen/lib/product-effect-types";
+
+/**
+ * 2026-10-14：workbench 模板类型 = ProductEffect + 关联 prompt_template 的
+ * candidateCount / outputMode。page.tsx 在 RSC 里 join 后传入。
+ */
+type WorkbenchTemplate = ProductEffect & {
+  candidateCount: number;
+  outputMode?: "grid" | "separate";
+};
 import {
   generateImageAction,
   listImageJobsAction,
@@ -825,8 +837,9 @@ function buildDownloadFilename(
 }
 
 interface GenerateWorkbenchViewProps {
-  /** 启用的提示词模板列表（来自 promptTemplate 表，与 gpt-image 共用同一数据源） */
-  templates: PromptTemplateView[];
+  // 2026-10-14：模板数据从 prompt_template 表切回 product_effect 表,
+  // 与 /api/image-gen/templates (v2.1) 对齐。详见 generate/page.tsx 注释。
+  templates: WorkbenchTemplate[];
 }
 
 /**
@@ -980,7 +993,7 @@ export function GenerateWorkbenchView({
   const [selectedModel, setSelectedModel] = useState<ImageModelId>(
     DEFAULT_V1_SETTINGS.selectedModel
   );
-  const activeTemplates = templates.filter((t) => t.isActive);
+  const activeTemplates = templates.filter((t) => t.status === "active");
   // 初始为 ""，mount-load effect 会按持久化值 / 首个 active 模板补全
   const [selectedMask, setSelectedMask] = useState<string>(
     DEFAULT_V1_SETTINGS.selectedMask
@@ -1119,9 +1132,9 @@ export function GenerateWorkbenchView({
   // derived 一个 effectiveSelectedMask 兜底首个 active 模板 —— 不需要把
   // templates prop 当 useEffect 依赖（避免 mount-load effect 被 deps 推着
   // 重跑，破坏"只读一次 localStorage"语义）。
-  const effectiveSelectedMask = selectedMask || activeTemplates[0]?.id || "";
+  const effectiveSelectedMask = selectedMask || activeTemplates[0]?.maskId || "";
   const selectedTemplate = activeTemplates.find(
-    (t) => t.id === effectiveSelectedMask
+    (t) => t.maskId === effectiveSelectedMask
   );
   /**
    * 当前模板推荐的模型 id（Phase：模板 model 字段允许为空，模板可选 doubao 等
@@ -1149,7 +1162,7 @@ export function GenerateWorkbenchView({
   // 选择提示词模板时初始化变量默认值 + 切到指定模型
   const handleSelectMask = (templateId: string) => {
     setSelectedMask(templateId);
-    const tpl = activeTemplates.find((t) => t.id === templateId);
+    const tpl = activeTemplates.find((t) => t.maskId === templateId);
     if (!tpl) return;
     if (tpl.model) {
       // 模板指定的 model 若已下线（isAvailable=false），自动回退到第一个可用模型，
@@ -2853,12 +2866,12 @@ export function GenerateWorkbenchView({
                         <>
                           <div className="-mx-1 px-1 flex gap-1.5 overflow-x-auto pb-1 snap-x">
                             {activeTemplates.map((tpl) => {
-                              const selected = tpl.id === effectiveSelectedMask;
+                              const selected = tpl.maskId === effectiveSelectedMask;
                               return (
                                 <button
-                                  key={tpl.id}
+                                  key={tpl.maskId}
                                   type="button"
-                                  onClick={() => handleSelectMask(tpl.id)}
+                                  onClick={() => handleSelectMask(tpl.maskId)}
                                   className={cn(
                                     "snap-start shrink-0 w-24 h-14 rounded-md overflow-hidden text-left transition-all relative",
                                     selected
@@ -2867,10 +2880,10 @@ export function GenerateWorkbenchView({
                                   )}
                                   title={tpl.description ?? tpl.name}
                                 >
-                                  {tpl.coverUrl ? (
+                                  {tpl.previewUrl ? (
                                     // biome-ignore lint/performance/noImgElement: 模板封面用原生 img
                                     <img
-                                      src={tpl.coverUrl}
+                                      src={tpl.previewUrl}
                                       alt={tpl.name}
                                       className="w-full h-full object-cover"
                                       loading="lazy"

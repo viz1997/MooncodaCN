@@ -17,6 +17,8 @@ import {
   logImageGen,
 } from "@/features/image-gen";
 import { createImageJob } from "@/features/image-gen/lib/generation-service";
+import { resolveSelectedModel } from "@/features/image-gen/lib/submit-model-resolver";
+import type { ResolveSelectedModelResult } from "@/features/image-gen/lib/submit-model-resolver";
 import { triggerImageGenSubmit } from "@/features/image-gen/lib/submit";
 import type {
   GenerateImageRequest,
@@ -64,6 +66,19 @@ interface PublicGenerateRequest {
   prompt?: string;
   size?: string;
   params?: Record<string, string>; // 用户填入的变量取值,优先于 defaultValue
+  /**
+   * 用户显式指定的模型(选填)。
+   * 2026-10-14:优先级高于 mask.model —— mask.model 只是「模板推荐默认」,
+   * 用户在 body 里显式传 model 表示「我知道我在做什么,绕过 mask 推荐」,
+   * 服务端仅做 PUBLIC_ALLOWED_MODELS 白名单校验。
+   *
+   * - apimart_gpt_image           → apimart 上游 gpt-image-2.5-flare(速度/成本优先)
+   * - apimart_gpt_image_sunburst  → apimart 上游 gpt-image-2.5-sunburst(质量优先,贵一档)
+   * - qwen / gpt_image_2 / nano_banana2 仍可指定(白名单内)
+   *
+   * 不传:服务端按 mask.model → apimart_gpt_image 兜底。
+   */
+  model?: ImageModelId;
 }
 
 export async function POST(req: NextRequest) {
@@ -109,6 +124,9 @@ export async function POST(req: NextRequest) {
     // qwen / gpt_image_2 / nano_banana2 仍在 PUBLIC_ALLOWED_MODELS 中可被模板显式指定。
     let selectedModel: ImageModelId = "apimart_gpt_image";
     let maskName = "自定义";
+    // 2026-10-14:resolveResult 提到 if 块外,统一 403 判断时需要区分
+    // 「用户显式传了非法 model」vs「系统兜底后还不在白名单」。
+    let resolveResult: ResolveSelectedModelResult | null = null;
 
     if (body.maskId) {
       const mask = await findEffect(body.maskId);
@@ -202,15 +220,25 @@ export async function POST(req: NextRequest) {
         prompt = prompt.replace(new RegExp(`\\{\\{${v.key}\\}\\}`, "g"), val);
       });
       maskName = mask.name;
-      // 优先使用产品效果指定的生图模型(降级到 apimart_gpt_image)
-      // 2026-09-11:精简后旧 mask.model === "doubao" 也会被 isPublicAllowed 过滤掉,
-      // 自动落到默认模型。2026-10-12:默认从 qwen 切到 apimart_gpt_image,
-      // 模板配置无效 / 模型下线都走 apimart(多模式 + 高质量兜底)。
-      const preferredModel =
-        (mask.model as ImageModelId) || "apimart_gpt_image";
-      selectedModel = PUBLIC_ALLOWED_MODELS.includes(preferredModel)
-        ? preferredModel
-        : "apimart_gpt_image";
+      // 2026-10-14:model 优先级 —— body.model(用户显式) > mask.model(模板推荐) > 默认
+      //
+      // 旧逻辑(mask.model 硬约束)的问题:mask 是「模板作者认为该场景最适合的模型」,
+      // 只是一个推荐默认,不是硬约束。leather badge 写死 gpt_image_2 是 admin 当下
+      // 决定,用户显式传 apimart_gpt_image_sunburst 应当能被尊重(不要反向被 mask
+      // 推荐覆盖)。详见 src/features/image-gen/lib/submit-model-resolver.ts。
+      //
+      // 语义:
+      //   - 用户在 body 传了 model → 用用户传的;不在白名单则 selectedModel = undefined,
+      //     交给下方统一 403 MODEL_NOT_ALLOWED
+      //   - 用户没传 → mask.model(过白名单) → apimart_gpt_image 兜底
+      const resolveResultLocal = resolveSelectedModel({
+        bodyModel: body.model,
+        maskModel: mask.model,
+        allowedModels: PUBLIC_ALLOWED_MODELS,
+        fallback: "apimart_gpt_image",
+      });
+      resolveResult = resolveResultLocal;
+      selectedModel = resolveResultLocal.selectedModel ?? "apimart_gpt_image";
     }
 
     if (!prompt) {
@@ -227,6 +255,29 @@ export async function POST(req: NextRequest) {
     if (!PUBLIC_ALLOWED_MODELS.includes(selectedModel)) {
       return NextResponse.json(
         { success: false, error: "模型不可用", code: "MODEL_NOT_ALLOWED" },
+        { status: 403 }
+      );
+    }
+    // 2026-10-14:用户显式传了不在白名单的 model → 403(不掩盖用户意图,
+    // 否则前端看到「我传了 X 怎么出来的是 Y」会困惑)。mask 推荐路径兜底
+    // 到 fallback 后必在白名单,不会触发这里。
+    if (resolveResult?.fromUserOverride && !resolveResult.selectedModel) {
+      logImageGen({
+        event: "submit",
+        outcome: "failed",
+        source: "public",
+        model: body.model ?? "unknown",
+        maskId: body.maskId,
+        errorCode: "MODEL_NOT_ALLOWED",
+        errorMessage: `用户显式指定的模型 ${body.model} 不在公共白名单`,
+        ip,
+      });
+      return NextResponse.json(
+        {
+          success: false,
+          error: "模型不可用",
+          code: "MODEL_NOT_ALLOWED",
+        },
         { status: 403 }
       );
     }

@@ -21,11 +21,20 @@
 import { AntdProvider } from "@/components/antd-provider";
 import { CanvasI18nProvider } from "@/features/canvas/components/canvas-i18n-provider";
 import { CanvasQueryProvider } from "@/features/canvas/components/layout/canvas-query-provider";
-import type { PromptTemplateView } from "@/features/gpt-image/lib/types";
 import { GenerateWorkbenchView } from "@/features/image-gen/components/generate-workbench-view";
+import type { ProductEffect } from "@/features/image-gen/lib/product-effect-types";
+
+/**
+ * 2026-10-14：workbench 用的模板类型 = ProductEffect + 关联 prompt_template 的
+ * candidateCount / outputMode。page.tsx 已经 join 过,这里只是类型声明。
+ */
+export interface WorkbenchTemplate extends ProductEffect {
+  candidateCount: number;
+  outputMode?: "grid" | "separate";
+}
 
 interface Props {
-  templates: PromptTemplateView[];
+  templates: WorkbenchTemplate[];
 }
 
 export function ImageWorkbenchV1Client({ templates }: Props) {
