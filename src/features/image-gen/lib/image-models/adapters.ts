@@ -13,6 +13,11 @@ import {
   queryLingtingTask,
   submitLingtingTask,
 } from "@/features/gpt-image/lib/generation-service";
+// 2026-10-14：apimart.ai 上游 fetch 输入图时偶发 403(典型:客户端传第三方
+// 临时签名 URL 如 *.tcb.qcloud.la/?sign=...&t=...,跨服务商网络不通或
+// 签名过期)。在构造 body 前先把 image_urls / mask_url 全部代理到 R2,
+// R2 永久公开 + 全网可达,上游一定能拿到。
+import { proxyImageInputsToR2 } from "@/features/image-gen/lib/image-models/input-url-proxy";
 import { seededRandom } from "../providers/random";
 import {
   APIMART_CONFIG,
@@ -900,6 +905,21 @@ function createApimartAdapter(opts: {
       const size = resolveApimartSize(req);
       const n = Math.min(Math.max(req.batchSize ?? 1, 1), 4);
 
+      // 2026-10-14：上游 fetch 外部 URL 偶发 403（见 input-url-proxy.ts
+      // 顶部注释），构造 body 前把 image_urls + mask_url 全部代理到 R2。
+      // proxyImageInputsToR2 内部已 R2 URL 跳过 / data: 透传 / 失败抛错。
+      // 用下游id + 当前时间作 traceHint,R2 objectKey 唯一可读。
+      const traceHint = `${downstreamId}-${Date.now()}`;
+      const proxiedRefUrls =
+        refUrls.length > 0
+          ? await proxyImageInputsToR2(refUrls, traceHint)
+          : [];
+      const proxiedMaskUrl = req.maskUrl
+        ? (
+            await proxyImageInputsToR2([req.maskUrl], traceHint)
+          )[0]
+        : undefined;
+
       const body: Record<string, unknown> = {
         model: upstreamModel,
         prompt: req.prompt,
@@ -908,13 +928,16 @@ function createApimartAdapter(opts: {
         n,
       };
       // 图生图：传 image_urls（apimart 文档用 image_urls 复数）
-      if (refUrls.length > 0) {
-        body.image_urls = refUrls;
+      const validRefUrls = proxiedRefUrls.filter(
+        (u): u is string => typeof u === "string",
+      );
+      if (validRefUrls.length > 0) {
+        body.image_urls = validRefUrls;
       }
       // 局部重绘：mask_url 与 image_urls 联用。apimart 文档要求蒙版是
       // 带 Alpha 通道的 PNG，与 image_urls[0] 尺寸一致 —— 调用方负责。
-      if (req.maskUrl && refUrls.length > 0) {
-        body.mask_url = req.maskUrl;
+      if (proxiedMaskUrl && validRefUrls.length > 0) {
+        body.mask_url = proxiedMaskUrl;
       }
 
       try {
