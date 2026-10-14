@@ -156,4 +156,107 @@ describe("resolveSelectedModel", () => {
       expect(result.selectedModel).toBe("apimart_gpt_image");
     });
   });
+
+  describe("2026-10-14 别名归一化(营销名 → 规范 ImageModelId)", () => {
+    it("body.model = '2.5-fast' → 归一化为 apimart_gpt_image,带 aliasUsed 标记", () => {
+      const result = resolveSelectedModel({
+        bodyModel: "2.5-fast",
+        maskModel: undefined,
+        allowedModels: ALLOWED,
+        fallback: "apimart_gpt_image",
+      });
+      expect(result.selectedModel).toBe("apimart_gpt_image");
+      expect(result.fromUserOverride).toBe(true);
+      expect(result.aliasUsed).toEqual({
+        alias: "2.5-fast",
+        canonical: "apimart_gpt_image",
+      });
+    });
+
+    it("body.model = '2.5-plus' → 归一化为 apimart_gpt_image_sunburst", () => {
+      const result = resolveSelectedModel({
+        bodyModel: "2.5-plus",
+        maskModel: undefined,
+        allowedModels: ALLOWED,
+        fallback: "apimart_gpt_image",
+      });
+      expect(result.selectedModel).toBe("apimart_gpt_image_sunburst");
+      expect(result.aliasUsed).toEqual({
+        alias: "2.5-plus",
+        canonical: "apimart_gpt_image_sunburst",
+      });
+    });
+
+    it("别名大小写不敏感('2.5-FAST'、带前后空格都能命中)", () => {
+      const resultUpper = resolveSelectedModel({
+        bodyModel: "2.5-FAST",
+        maskModel: undefined,
+        allowedModels: ALLOWED,
+        fallback: "apimart_gpt_image",
+      });
+      expect(resultUpper.selectedModel).toBe("apimart_gpt_image");
+      expect(resultUpper.aliasUsed?.alias).toBe("2.5-fast");
+
+      const resultPadded = resolveSelectedModel({
+        bodyModel: "  2.5-fast  ",
+        maskModel: undefined,
+        allowedModels: ALLOWED,
+        fallback: "apimart_gpt_image",
+      });
+      expect(resultPadded.selectedModel).toBe("apimart_gpt_image");
+      expect(resultPadded.aliasUsed?.alias).toBe("2.5-fast");
+    });
+
+    it("别名路径不被 mask.model 反向覆盖(用户显式 = alias + mask 写错值,用户 alias 胜)", () => {
+      const result = resolveSelectedModel({
+        bodyModel: "2.5-plus",
+        maskModel: "gpt_image_2",
+        allowedModels: ALLOWED,
+        fallback: "apimart_gpt_image",
+      });
+      expect(result.selectedModel).toBe("apimart_gpt_image_sunburst");
+      expect(result.aliasUsed?.alias).toBe("2.5-plus");
+    });
+
+    it("用户传不在白名单也不在 alias 表的字符串 → 403,不掩盖客户端 bug", () => {
+      // 关键:typo / 任意字符串不能因 alias 表而悄悄通过。
+      // '2.5fast' 看起来像 '2.5-fast' 但不是同一个 key —— 必须 403。
+      const result = resolveSelectedModel({
+        bodyModel: "2.5fast",
+        maskModel: undefined,
+        allowedModels: ALLOWED,
+        fallback: "apimart_gpt_image",
+      });
+      expect(result.selectedModel).toBeUndefined();
+      expect(result.aliasUsed).toBeUndefined();
+    });
+
+    it("用户传规范 ImageModelId(非 alias)→ aliasUsed 为 undefined,不影响正常路径", () => {
+      const result = resolveSelectedModel({
+        bodyModel: "apimart_gpt_image",
+        maskModel: undefined,
+        allowedModels: ALLOWED,
+        fallback: "apimart_gpt_image",
+      });
+      expect(result.selectedModel).toBe("apimart_gpt_image");
+      expect(result.aliasUsed).toBeUndefined();
+    });
+
+    it("mask.model 是 '2.5-fast' 且用户未传 → 归一化后用 mask 推荐,带 aliasUsed", () => {
+      // 场景:admin 在 mask 配置里误写营销名,也走归一化兜底,
+      // 不悄悄落到 fallback,埋点能看到「mask 推荐被 alias 救回」。
+      const result = resolveSelectedModel({
+        bodyModel: undefined,
+        maskModel: "2.5-fast",
+        allowedModels: ALLOWED,
+        fallback: "apimart_gpt_image",
+      });
+      expect(result.selectedModel).toBe("apimart_gpt_image");
+      expect(result.fromUserOverride).toBe(false);
+      expect(result.aliasUsed).toEqual({
+        alias: "2.5-fast",
+        canonical: "apimart_gpt_image",
+      });
+    });
+  });
 });

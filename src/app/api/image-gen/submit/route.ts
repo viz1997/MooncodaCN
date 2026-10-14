@@ -365,6 +365,9 @@ export async function POST(req: NextRequest) {
       // 异步路径无 images / taskId(taskId 在 Inngest dispatch 时由 apimart adapter
       // 写入 imageJob.taskId 列);埋点仅记 submit 维度
       submitMode,
+      // 2026-10-14:若 body.model 或 mask.model 命中别名(如 `2.5-fast`),
+      // 记录原始 alias + 归一化后的规范 id,统计客户端迁移进度。
+      aliasUsed: resolveResult?.aliasUsed,
       ip,
     });
 

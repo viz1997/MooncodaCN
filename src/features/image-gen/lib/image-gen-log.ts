@@ -56,6 +56,13 @@ export interface ImageGenLogEntry {
   upstreamStatus?: number | undefined;
   /** 请求来源 IP */
   ip?: string | undefined;
+  /**
+   * 2026-10-14:用户或模板用了别名(如 `2.5-fast`)而非规范 ImageModelId,
+   * 路由已通过 MODEL_ALIASES 归一化。这里记原始 alias + 归一化后的规范 id,
+   * 用于统计发送频率 → 驱动客户端迁移 → 后续从别名表移除。
+   * 未命中别名时为 undefined。
+   */
+  aliasUsed?: { alias: string; canonical: ImageModelId } | undefined;
   /** 时间戳 ISO */
   timestamp: string;
 }
