@@ -3,15 +3,20 @@
  *
  * 三种上传路径(按场景选):
  *   1. publicUpload()                — 公共桶,免登录,生图前临时上传(formData 走 BFF)
- *   2. publicUploadDirect()          — 公共桶直传 R2(2026-10-15 v1.3.0 推荐,跳 BFF)
+ *   2. publicUploadDirect()          — 公共桶直传 R2(v1.3.0 起推荐,跳 BFF)
  *   3. orderUploadUrl() + 自己 PUT   — 订单专用桶(走 R2 presigned PUT,免服务端中转)
  *   4. orderUpload()                 — 订单桶表单直传(简单,文件小时可用)
+ *
+ * v1.4.0 起:mp 端不再有 SDK 内部格式归一化(helper `publicUploadDirectFromMp`
+ * 已删除)。iOS 微信用户选 sizeType:['compressed'],微信内置 HEIC→JPG,
+ * 链路 0 风险;任何不在白名单的格式由 server 端
+ * proxyImageInputsToR2.normalizeToSupported 兜底,落 image-gen/input/
+ * 时附带 x-moon-normalized metadata,后续 submit 走 fast-path skip。
  *
  * 微信小程序 uploadFile 域名白名单严,上传后只能拿 R2 URL 在 downloadFile 白名单
  * 内访问,所以 R2 URL 不直连,展示统一走 /api/image-gen/{thumbnail,download} 代理。
  */
 
-import { prepareMpFileForUpload } from "./image-utils";
 import { sdkRequest } from "./request";
 import type {
   OrderUploadResponse,
@@ -67,7 +72,7 @@ export async function publicUploadUrl(
 }
 
 /**
- * 公共上传直传 R2(2026-10-15 v1.3.0)
+ * 公共上传直传 R2(v1.3.0 起推荐)
  *
  * 一步完成:sniff content-type → 拿 presigned URL → 用 fetch PUT
  * 原图字节到 R2 → 返回 publicUrl。publicUpload() 的 drop-in 替换。
@@ -75,20 +80,19 @@ export async function publicUploadUrl(
  * 关键收益(相对 publicUpload):
  *   - 不再被 Vercel 4.5MB body cap 卡住(R2 单次 PUT 可到 5GB)
  *   - mp → R2 直传,Content-Type 不会跨段丢,后续 proxyImageInputsToR2
- *     不依赖外部上游的 Content-Type,format 归一化分支触发概率大幅下降
+ *     不依赖外部上游的 Content-Type
  *   - BFF 永远不碰字节,服务端攻击面变小
  *
- * **HEIC / BMP / TIFF 警告(2026-10-15 v1.3.1 补)**:本函数不
- * 做格式归一化,file.type 是啥就传啥给 R2。iOS 微信选原图(HEIC)
- * 调本函数会让 HEIC 原图落 R2,后续 submitGenerate.proxyImageInputsToR2
- * 看到 R2 URL 直接跳过(不再 fetch + normalize),apimart 拿
- * HEIC 报错。
- *
- * **mp 推荐用 publicUploadDirectFromMp(filePath)**:它在 PUT 之前
- * 用 Taro.compressImage 把任何格式压成 JPG,链路 0 风险。
- * 本函数(publicUploadDirect)保留给:
- *   - 业务方已经知道 file 是 PNG/JPG/WebP 的场景
- *   - 浏览器 / RN 等已经做过客户端归一化的环境
+ * v1.4.0 起 HEIC / BMP / TIFF 等非常规格式由 server 端接管:
+ *   - 本函数不预先归一化,file.type 是啥就传啥给 R2
+ *   - mp 端 iOS 微信用户:用 sizeType:['compressed'](微信内置 HEIC→JPG),
+ *     链路 0 风险
+ *   - mp 端必须 sizeType:['original'] 拿 HEIC:server 端
+ *     normalizeToSupported 兜底(BMP/TIFF/GIF 转 PNG,SVG resvg 渲染);
+ *     HEIC server 解不开,会抛 ImageFormatError,提示用户改用
+ *     sizeType:['compressed']
+ *   - 业务侧已经做过客户端归一化的场景(浏览器 / RN / 自定义 mp 链路)
+ *     直接用,无需特殊处理
  *
  * 兼容性:依赖 globalThis.fetch 支持 method:'PUT' + body:Blob。
  * 现代浏览器、Taro H5、React Native 都没问题。**老版本 WeChat
@@ -129,42 +133,6 @@ export async function publicUploadDirect(
     skipAuth: true,
   });
   return { url: presign.publicUrl };
-}
-
-/**
- * mp 端 filePath 一键直传 R2 + 格式归一化(2026-10-15 v1.3.1 推荐)
- *
- * 完整链路:compressImage(HEIC/BMP/TIFF/PNG/... → JPG) →
- * readFile → Blob → publicUploadDirect(直传 R2)。
- *
- * 解决 v1.3.0 漏掉的场景:iOS 微信选 sizeType:'original' 拿到
- * HEIC filePath,直接走 publicUploadDirect 会把 HEIC 原图落 R2,
- * 后续 server normalize 被 R2 URL skip 规则短路,apimart 拿
- * HEIC 报错。本函数在 PUT 之前先把 HEIC 压成 JPG,从源头杜绝。
- *
- * 用法:
- *   const { tempFilePath } = await Taro.chooseImage({
- *     count: 1,
- *     sizeType: ['original'],  // important: original 才能拿到 HEIC 源
- *   });
- *   const { url } = await publicUploadDirectFromMp(tempFilePath);
- *   // url 是 R2 永久 URL,喂给 submitGenerate.imageUrls
- *
- * 兼容性:仅 Taro 编译环境(mp / H5 / RN)有效;非 Taro 调它会
- * throw "Taro.compressImage 不可用",业务 catch 后 fallback 到
- * publicUpload(file) 走 BFF multipart。
- *
- * @param filePath Taro.chooseImage / Taro.chooseMessageFile 返回的 tempFilePath
- * @param options.quality 0-100,默认 90(iOS HEIC 用 90+ 视觉无差,体积小一半)
- */
-export async function publicUploadDirectFromMp(
-  filePath: string,
-  options?: { quality?: number }
-): Promise<PublicUploadResponse> {
-  const blob = await prepareMpFileForUpload(filePath, options);
-  // 归一化目标固定 image/jpeg,contentType 显式传避免 blob.type
-  // 拿到 'application/octet-stream' 之类(部分 mp 平台 Blob.type 不准)
-  return publicUploadDirect(blob, "image/jpeg");
 }
 
 /**

@@ -6,7 +6,7 @@ NextDevTpl 暴露给小程序的 TypeScript SDK 参考实现。把本目录(`src
 
 ## 当前版本
 
-`VERSION` 文件 — `1.3.1`,详见文末 [Changelog](#changelog)。
+`VERSION` 文件 — `1.4.0`,详见文末 [Changelog](#changelog)。
 
 ## 文件清单
 
@@ -101,20 +101,36 @@ const { productLines, templates, keyScope } = await listTemplates();
 
 ```ts
 import {
-  publicUploadDirectFromMp,
+  publicUploadDirect,
   submitGenerate,
   pollImageTask,
   proxyImageUrl,
 } from "@/api/sdk";
 
-// 5.1 上传参考图(mp 一键直传 R2 + HEIC→JPG 归一化 —— v1.3.1 推荐)
-//    Taro.chooseImage 用 sizeType:['original'] 拿真原图(HEIC on iOS),
-//    SDK 内部自动 Taro.compressImage 压成 JPG 再直传 R2,链路 0 风险
+// 5.1 上传参考图(mp 直传 R2,v1.4.0 推荐)
+//    sizeType:['compressed'] 让 iOS 微信内置 HEIC→JPG(走 system
+//    imageIO,无需任何 SDK 内部归一化);任何白名单外格式由 server
+//    端 proxyImageInputsToR2.normalizeToSupported 兜底。
 const { tempFilePath } = await Taro.chooseImage({
   count: 1,
-  sizeType: ["original"],
+  sizeType: ["compressed"],   // ← v1.4.0 起强制:避开 iOS HEIC
 });
-const { url } = await publicUploadDirectFromMp(tempFilePath);
+
+// 业务侧读 tempFilePath → Blob;简单场景直接用 Taro FileSystemManager
+// import { readTaroFileAsArrayBuffer } from "@/api/sdk";  // 也可
+const fsm = Taro.getFileSystemManager();
+const readRes = await new Promise<{ data: ArrayBuffer | Uint8Array }>(
+  (resolve, reject) => {
+    fsm.readFile({
+      filePath: tempFilePath,
+      success: resolve,
+      fail: reject,
+    });
+  }
+);
+const blob = new Blob([readRes.data as BlobPart], { type: "image/jpeg" });
+
+const { url } = await publicUploadDirect(blob, "image/jpeg");
 
 // 5.2 提交生图(<1s 返 taskId,不阻塞等模型)
 const { taskId } = await submitGenerate({
@@ -282,8 +298,8 @@ controller.abort();
 - [ ] (可选)App 启动时调 `getQuota()` 缓存到 wx.storage,UI 显示配额
 - [ ] (可选)App 启动时调 `listTemplates()` 缓存到 wx.storage,UI 显示 mask 下拉
 - [ ] 用户进生图页时:
-  1. `Taro.chooseImage({ sizeType: ['original'] })` → `tempFilePath`
-  2. `publicUploadDirectFromMp(tempFilePath)` → 拿 R2 URL(自动 HEIC→JPG 归一化 + 直传 R2)
+  1. `Taro.chooseImage({ sizeType: ['compressed'] })` → `tempFilePath`(iOS 微信内置 HEIC→JPG)
+  2. `getFileSystemManager().readFile()` → `ArrayBuffer` → `Blob` → `publicUploadDirect(blob, 'image/jpeg')` 拿 R2 URL
   3. `submitGenerate({ maskId, imageUrls: [url] })` → 拿 taskId
   4. 立刻显示 loading,按 schedule 调 `pollImageTask(taskId)`
   5. completed:展示候选;failed:toast 错误信息
@@ -293,6 +309,69 @@ controller.abort();
 ---
 
 ## Changelog
+
+### v1.4.0 — 2026-10-15
+
+**Breaking(归一化责任后移 server 端)**
+
+v1.3.1 时代的 `publicUploadDirectFromMp(filePath)` 在 Taro base lib
+3.17.3+ 上 100% 失败(`taroReadFileAsArrayBuffer` 卡 `instanceof
+ArrayBuffer`,Taro 改返 `Uint8Array`);即使绕过 SDK 自己在 mp 端
+做压缩,`proxyImageInputsToR2` 看到 R2 URL 直接 skip,server 端永远
+碰不到字节,apimart 拿 HEIC 报错 —— **mp 端 SDK 内部做格式归一化
+这条路整体走不通**。
+
+v1.4.0 重新设计:归一化责任完整后移到 server 端,mp 端零依赖
+Taro.compressImage。
+
+**变更**
+- 🗑️ 删除 `publicUploadDirectFromMp(filePath, options?)` —— mp 端
+  不要再做格式归一化;调用方代码用 `publicUploadDirect(blob, mime)` 替代
+- 🗑️ 删除 `image-utils.ts` 内 `prepareMpFileForUpload()` 和
+  `taroCompressImage()` —— SDK 内部不再需要 client-side 压缩
+- 🆕 导出 `readTaroFileAsArrayBuffer(filePath)` —— mp 业务可自取
+  Taro tempFilePath → ArrayBuffer;内部修了 Taro 3.17.3+ Uint8Array
+  返回的兼容(`ArrayBuffer.isView` 分支,`.buffer.slice()` 出独立副本)
+- 📝 Section 5 用法从 `publicUploadDirectFromMp` 换到
+  `publicUploadDirect(blob) + sizeType:['compressed']`(iOS 微信内置
+  HEIC→JPG,链路 0 风险)
+- 🔢 集成 checklist 同步:Step 1 强制 `sizeType:['compressed']`
+
+**Server 端配套**
+- `/api/public/upload-url` MIME 白名单从 `{png, jpeg, webp}` 放宽到
+  `image/*` —— mp 可以传任何 image 类 mime,server 端 sniff 兜底
+- `proxyImageInputsToR2` R2 URL skip 规则改为 HeadObject 查
+  `x-moon-normalized` metadata 标记 fast-path;未标记走 fetch + sniff
+  + 必要时归一化(SVG resvg-js / BMP / TIFF / GIF jimp 转 PNG)
+- HEIC 仍由 mp 端处理(server 端 jimp 不支持、装 sharp 违反 CLAUDE.md
+  约束;iOS 微信 `sizeType:['compressed']` 已内置 HEIC→JPG)
+
+**迁移指南**(从 v1.3.1 升级)
+```diff
+- import { publicUploadDirectFromMp } from "@/api/sdk";
++ import { publicUploadDirect } from "@/api/sdk";
+
+  const { tempFilePath } = await Taro.chooseImage({
+    count: 1,
+-   sizeType: ["original"],
++   sizeType: ["compressed"],   // ← v1.4.0 起强制
+  });
+- const { url } = await publicUploadDirectFromMp(tempFilePath);
++ // 业务侧自取 tempFilePath → Blob
++ const fsm = Taro.getFileSystemManager();
++ const { data } = await new Promise<{ data: ArrayBuffer | Uint8Array }>(
++   (resolve, reject) => fsm.readFile({ filePath: tempFilePath, success: resolve, fail: reject })
++ );
++ const blob = new Blob([data as BlobPart], { type: "image/jpeg" });
++ const { url } = await publicUploadDirect(blob, "image/jpeg");
+```
+
+**兼容性**
+- `publicUploadDirect(file, mime)` 不变,旧业务代码无需改 upload 逻辑
+- `publicUpload(file)` 不变,继续作为 wx.request 不支持 PUT 的环境 fallback
+- `readTaroFileAsArrayBuffer` 是新增 public API,旧 SDK 升级后可用
+- 业务方如果还在用 `publicUploadDirectFromMp`,会得到 "no exported member"
+  编译错 —— 这是预期的破坏性变更提醒升级
 
 ### v1.3.1 — 2026-10-15
 

@@ -94,11 +94,17 @@ export type {
   WeChatLoginResponse,
 } from "./types";
 // 上传
+// v1.4.0 起 publicUploadDirectFromMp 已删除(server 端接管归一化,mp 端
+// 用 sizeType:['compressed'] 即可)。mp 业务代码如果还在 import,会得到
+// "no exported member" 编译错 —— 这是预期的破坏性变更,提醒升级。
 export {
   orderUpload,
   orderUploadUrl,
   publicUpload,
   publicUploadDirect,
-  publicUploadDirectFromMp,
   publicUploadUrl,
 } from "./upload";
+// v1.4.0 起 SDK 暴露 readTaroFileAsArrayBuffer 给 mp 业务自取 Taro
+// tempFilePath → ArrayBuffer。原 publicUploadDirectFromMp 内部用的就是
+// 这个逻辑,现在不再包成"上传助手",让业务自己组合 Blob + publicUploadDirect。
+export { readTaroFileAsArrayBuffer } from "./image-utils";
