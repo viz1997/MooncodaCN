@@ -34,8 +34,23 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_APP_VERSION: appVersion,
   },
-  // Exclude packages with webpack-specific syntax from server bundling
-  serverExternalPackages: ["pino", "pino-pretty"],
+  // Exclude packages with webpack-specific syntax / native bindings from server bundling.
+  //
+  // - @resvg/resvg-js:含 .node 原生 addon,js-binding.js 用动态 require("./resvgjs.*.node")
+  //   加载平台相关二进制,Turbopack 静态分析不到 → "non-ecmascript placeable asset"。
+  //   必须走 serverExternalPackages 让 Node 原生 require 接管。
+  // - jimp / image-type:纯 JS 但依赖很多内置资产,server 侧 externalize 后冷启动更稳。
+  // - pino / pino-pretty:典型 server-only 包,externalize 避免双拷贝。
+  // - @aws-sdk/*:客户端和 SDK 体积都大,server 侧留作 external 让运行时单例。
+  serverExternalPackages: [
+    "@resvg/resvg-js",
+    "jimp",
+    "image-type",
+    "pino",
+    "pino-pretty",
+    "@aws-sdk/client-s3",
+    "@aws-sdk/s3-request-presigner",
+  ],
   // webpack 别名：把画布里 `motion/react` 与 `radix-ui` 指向项目内的 shim 文件
   // （避免画布代码大量改动：motion 12 与 framer-motion 12 是同库不同发布线，
   //  radix-ui umbrella package 已不在我们的依赖里）
