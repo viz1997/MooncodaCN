@@ -17,6 +17,9 @@
  *     upstream Content-Type 是 hint 但不可信(代理 / 签名 URL / CDN
  *     rewrite 经常误标为 image/octet-stream)。
  *   - 真实 mime ∈ 上游白名单 → 原 buffer 直通,零开销、零视觉损失。
+ *   - 真实 mime 是 image/svg+xml(SVG 是 XML 不是光栅,jimp/image-type
+ *     都打不开)→ @resvg/resvg-js 光栅化为 PNG 后返回。线上已观察到
+ *     mask 模板链路命中这种情况,2026-10-15 加进来。
  *   - 真实 mime ∉ 白名单,且 jimp 能解码(BMP/TIFF/GIF 等) → jimp
  *     转 PNG 后返回。目标固定 PNG:png 是所有上游语言里最不被怀疑
  *     的格式,gpt-image-2 OpenAI 协议严格只接 png。
@@ -33,6 +36,7 @@
  *   - generation-service.ts:gpt-image-2 路径每张参图逐张调用
  *   - adapters.ts:Gemini 路径(走放宽白名单)
  */
+import { Resvg } from "@resvg/resvg-js";
 import imageType from "image-type";
 import { Jimp } from "jimp";
 
@@ -148,6 +152,37 @@ export async function normalizeToSupported(
   }
 
   // 3. 不可直通的格式 → 试图 jimp 转 PNG
+  // SVG 走 resvg-js 光栅化(SVG 是 XML 不是光栅,jimp 没法直接
+  //    decode)。命中条件:header 明确为 image/svg+xml。
+  //    输出固定 image/png。
+  const headerLooksSvg =
+    typeof mimeFromHeader === "string" &&
+    mimeFromHeader.toLowerCase().split(";")[0]?.trim() ===
+      "image/svg+xml";
+  if (headerLooksSvg) {
+    try {
+      const resvg = new Resvg(asBuffer(buffer));
+      const rendered = resvg.render();
+      const pngBuf = rendered.asPng();
+      const pngBytes =
+        pngBuf instanceof Uint8Array ? pngBuf : new Uint8Array(pngBuf);
+      return {
+        buffer: pngBytes,
+        mime: NORMALIZED_MIME,
+        converted: true,
+        detectedMime: "image/svg+xml",
+      };
+    } catch (svgErr) {
+      const msg =
+        svgErr instanceof Error ? svgErr.message : "未知 SVG 解析错误";
+      throw new ImageFormatError(
+        "image/svg+xml",
+        `SVG 图片解析失败:${msg}`,
+      );
+    }
+  }
+
+  // 不可直通的格式 → 试图 jimp 转 PNG
   try {
     const jimpImg = await Jimp.read(asBuffer(buffer));
     const pngBuf = await jimpImg.getBuffer(NORMALIZED_MIME);
@@ -161,10 +196,16 @@ export async function normalizeToSupported(
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "未知解码错误";
-    const originalDesc = detectedMime ?? mimeFromHeader ?? "未知";
+    // 错误诊断:嗅探结果 / 真实 header / buffer 长度都报出来,
+    // 线上排查"明明是 JPG 为什么不支持"这种迷惑场景时有迹可循。
+    const normalizedHeader =
+      mimeFromHeader?.split(";")[0]?.trim().toLowerCase() ?? null;
+    const headerDesc = normalizedHeader ?? mimeFromHeader ?? "未知";
+    const detectedDesc = detectedMime ?? "未识别";
+    const bytesDesc = `${buffer.byteLength}B`;
     throw new ImageFormatError(
       detectedMime,
-      `图片格式不支持(${originalDesc})且无法自动转换:${msg}`
+      `图片格式不支持(嗅探:${detectedDesc}, header:${headerDesc}, ${bytesDesc})且无法自动转换:${msg}`,
     );
   }
 }
