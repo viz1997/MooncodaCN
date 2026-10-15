@@ -99,5 +99,6 @@ export {
   orderUploadUrl,
   publicUpload,
   publicUploadDirect,
+  publicUploadDirectFromMp,
   publicUploadUrl,
 } from "./upload";

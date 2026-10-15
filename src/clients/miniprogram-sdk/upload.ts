@@ -11,6 +11,7 @@
  * 内访问,所以 R2 URL 不直连,展示统一走 /api/image-gen/{thumbnail,download} 代理。
  */
 
+import { prepareMpFileForUpload } from "./image-utils";
 import { sdkRequest } from "./request";
 import type {
   OrderUploadResponse,
@@ -66,7 +67,7 @@ export async function publicUploadUrl(
 }
 
 /**
- * 公共上传直传 R2(2026-10-15 v1.3.0 推荐)
+ * 公共上传直传 R2(2026-10-15 v1.3.0)
  *
  * 一步完成:sniff content-type → 拿 presigned URL → 用 fetch PUT
  * 原图字节到 R2 → 返回 publicUrl。publicUpload() 的 drop-in 替换。
@@ -76,6 +77,18 @@ export async function publicUploadUrl(
  *   - mp → R2 直传,Content-Type 不会跨段丢,后续 proxyImageInputsToR2
  *     不依赖外部上游的 Content-Type,format 归一化分支触发概率大幅下降
  *   - BFF 永远不碰字节,服务端攻击面变小
+ *
+ * **HEIC / BMP / TIFF 警告(2026-10-15 v1.3.1 补)**:本函数不
+ * 做格式归一化,file.type 是啥就传啥给 R2。iOS 微信选原图(HEIC)
+ * 调本函数会让 HEIC 原图落 R2,后续 submitGenerate.proxyImageInputsToR2
+ * 看到 R2 URL 直接跳过(不再 fetch + normalize),apimart 拿
+ * HEIC 报错。
+ *
+ * **mp 推荐用 publicUploadDirectFromMp(filePath)**:它在 PUT 之前
+ * 用 Taro.compressImage 把任何格式压成 JPG,链路 0 风险。
+ * 本函数(publicUploadDirect)保留给:
+ *   - 业务方已经知道 file 是 PNG/JPG/WebP 的场景
+ *   - 浏览器 / RN 等已经做过客户端归一化的环境
  *
  * 兼容性:依赖 globalThis.fetch 支持 method:'PUT' + body:Blob。
  * 现代浏览器、Taro H5、React Native 都没问题。**老版本 WeChat
@@ -116,6 +129,42 @@ export async function publicUploadDirect(
     skipAuth: true,
   });
   return { url: presign.publicUrl };
+}
+
+/**
+ * mp 端 filePath 一键直传 R2 + 格式归一化(2026-10-15 v1.3.1 推荐)
+ *
+ * 完整链路:compressImage(HEIC/BMP/TIFF/PNG/... → JPG) →
+ * readFile → Blob → publicUploadDirect(直传 R2)。
+ *
+ * 解决 v1.3.0 漏掉的场景:iOS 微信选 sizeType:'original' 拿到
+ * HEIC filePath,直接走 publicUploadDirect 会把 HEIC 原图落 R2,
+ * 后续 server normalize 被 R2 URL skip 规则短路,apimart 拿
+ * HEIC 报错。本函数在 PUT 之前先把 HEIC 压成 JPG,从源头杜绝。
+ *
+ * 用法:
+ *   const { tempFilePath } = await Taro.chooseImage({
+ *     count: 1,
+ *     sizeType: ['original'],  // important: original 才能拿到 HEIC 源
+ *   });
+ *   const { url } = await publicUploadDirectFromMp(tempFilePath);
+ *   // url 是 R2 永久 URL,喂给 submitGenerate.imageUrls
+ *
+ * 兼容性:仅 Taro 编译环境(mp / H5 / RN)有效;非 Taro 调它会
+ * throw "Taro.compressImage 不可用",业务 catch 后 fallback 到
+ * publicUpload(file) 走 BFF multipart。
+ *
+ * @param filePath Taro.chooseImage / Taro.chooseMessageFile 返回的 tempFilePath
+ * @param options.quality 0-100,默认 90(iOS HEIC 用 90+ 视觉无差,体积小一半)
+ */
+export async function publicUploadDirectFromMp(
+  filePath: string,
+  options?: { quality?: number }
+): Promise<PublicUploadResponse> {
+  const blob = await prepareMpFileForUpload(filePath, options);
+  // 归一化目标固定 image/jpeg,contentType 显式传避免 blob.type
+  // 拿到 'application/octet-stream' 之类(部分 mp 平台 Blob.type 不准)
+  return publicUploadDirect(blob, "image/jpeg");
 }
 
 /**

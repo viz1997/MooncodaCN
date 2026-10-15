@@ -6,7 +6,7 @@ NextDevTpl 暴露给小程序的 TypeScript SDK 参考实现。把本目录(`src
 
 ## 当前版本
 
-`VERSION` 文件 — `1.3.0`,详见文末 [Changelog](#changelog)。
+`VERSION` 文件 — `1.3.1`,详见文末 [Changelog](#changelog)。
 
 ## 文件清单
 
@@ -101,15 +101,20 @@ const { productLines, templates, keyScope } = await listTemplates();
 
 ```ts
 import {
-  publicUploadDirect,
+  publicUploadDirectFromMp,
   submitGenerate,
   pollImageTask,
   proxyImageUrl,
 } from "@/api/sdk";
 
-// 5.1 上传参考图(直传 R2,跳 BFF —— v1.3.0 推荐)
-const file = await chooseImageFile(); // Taro.chooseImage + file
-const { url } = await publicUploadDirect(file);
+// 5.1 上传参考图(mp 一键直传 R2 + HEIC→JPG 归一化 —— v1.3.1 推荐)
+//    Taro.chooseImage 用 sizeType:['original'] 拿真原图(HEIC on iOS),
+//    SDK 内部自动 Taro.compressImage 压成 JPG 再直传 R2,链路 0 风险
+const { tempFilePath } = await Taro.chooseImage({
+  count: 1,
+  sizeType: ["original"],
+});
+const { url } = await publicUploadDirectFromMp(tempFilePath);
 
 // 5.2 提交生图(<1s 返 taskId,不阻塞等模型)
 const { taskId } = await submitGenerate({
@@ -277,16 +282,52 @@ controller.abort();
 - [ ] (可选)App 启动时调 `getQuota()` 缓存到 wx.storage,UI 显示配额
 - [ ] (可选)App 启动时调 `listTemplates()` 缓存到 wx.storage,UI 显示 mask 下拉
 - [ ] 用户进生图页时:
-  1. `publicUploadDirect(file)` → 拿 R2 URL(直传,跳 BFF;老版本 mp 仍可走 `publicUpload()`)
-  2. `submitGenerate({ maskId, imageUrls: [url] })` → 拿 taskId
-  3. 立刻显示 loading,按 schedule 调 `pollImageTask(taskId)`
-  4. completed:展示候选;failed:toast 错误信息
+  1. `Taro.chooseImage({ sizeType: ['original'] })` → `tempFilePath`
+  2. `publicUploadDirectFromMp(tempFilePath)` → 拿 R2 URL(自动 HEIC→JPG 归一化 + 直传 R2)
+  3. `submitGenerate({ maskId, imageUrls: [url] })` → 拿 taskId
+  4. 立刻显示 loading,按 schedule 调 `pollImageTask(taskId)`
+  5. completed:展示候选;failed:toast 错误信息
 - [ ] 错误处理:catch `SdkRequestError`,按 code 分支
 - [ ] 用户切后台:abort 轮询 controller
 
 ---
 
 ## Changelog
+
+### v1.3.1 — 2026-10-15
+
+**修复(mp 端格式归一化)**
+
+v1.3.0 上线后被用户当场发现的问题:mp 端 iOS 微信选原图
+(`Taro.chooseImage({ sizeType: ['original'] })`)拿到的 filePath
+是 HEIC,直传 R2 落的是 HEIC;后续 `submitGenerate.proxyImageInputsToR2`
+看到 R2 URL 直接跳过(已有 R2 跳过是幂等设计),server 端
+`normalizeToSupported` 根本不会跑,apimart 拿 HEIC 报错。
+
+**修复**:新增 `publicUploadDirectFromMp(filePath, options?)` —
+内部走 `Taro.compressImage(src, 90, 'jpg')` 把 HEIC/BMP/TIFF/PNG
+/任何 format 压成标准 JPG,再 `getFileSystemManager().readFile` 读
+为 ArrayBuffer,包 Blob 走 `publicUploadDirect` 直传 R2。链路 0
+风险,mp 开发者**一行调用即可**,不用关心 iOS HEIC。
+
+**新增**
+- `publicUploadDirectFromMp(filePath, options?)` —— mp 一键:HEIC→JPG + 直传 R2
+- `image-utils.ts` 内部模块:
+  - `prepareMpFileForUpload(filePath, options?)` —— Taro 适配层,
+    暴露 `compressImage` + `readFile` 给 SDK 内部复用
+  - `TaroGlobal` 类型(运行时探测,无编译期 Taro 依赖)
+
+**变更**
+- `publicUploadDirect` JSDoc 加 HEIC 警告 + 推荐改用 `publicUploadDirectFromMp`
+  - 本函数仍然有效(适用于已知是 PNG/JPG/WebP 的场景 / 浏览器 / RN)
+  - 不自动归一化,因为浏览器环境无 Taro 探测,跨平台兜底复杂
+- README Section 5 用法从 `publicUploadDirect` 换到 `publicUploadDirectFromMp`
+- 鉴权表 / 集成 checklist 同步
+
+**兼容性**
+- `publicUploadDirectFromMp` 仅 Taro 编译环境有效(WeChat mp / H5 / RN)
+- 非 Taro 环境(纯浏览器测试 / Node 调试)调它会 throw,
+  fallback 到 `publicUpload(file)` 走 BFF multipart 即可
 
 ### v1.3.0 — 2026-10-15
 
