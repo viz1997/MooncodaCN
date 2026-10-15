@@ -1,6 +1,7 @@
 // Cloudflare R2 / S3 直传工具（公共生图参考图上传）
 // 与 Mooncoda 现有 /api/upload/presigned 独立，使用 R2_* 环境变量，免登录场景适用
 import {
+  CopyObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
   S3Client,
@@ -95,11 +96,17 @@ export async function objectExists(objectKey: string): Promise<boolean> {
  *
  * 用于 fallback 占位图等场景：服务端生成 buffer 后直接 PUT。
  * 返回公开访问 URL。
+ *
+ * metadata 可选:写入 user-defined metadata(S3/R2 在 HeadObject 时
+ * 能读回)。proxyImageInputsToR2 用它标记"该对象已经过 server 端格式
+ * 归一化",后续 submit 走 fast-path skip(详见 architecture-mp-server-
+ * side-normalize.md §2.2)。
  */
 export async function putObject(opts: {
   objectKey: string;
   body: Buffer | Uint8Array;
   contentType: string;
+  metadata?: Record<string, string>;
 }): Promise<string> {
   const client = getR2Client();
   await client.send(
@@ -108,9 +115,87 @@ export async function putObject(opts: {
       Key: opts.objectKey,
       Body: opts.body,
       ContentType: opts.contentType,
+      Metadata: opts.metadata,
     })
   );
   return getPublicUrl(opts.objectKey);
+}
+
+/**
+ * HEAD R2 对象,返回 metadata / content-type。
+ *
+ * 用于 input-url-proxy 的 fast-path skip:
+ * proxyImageInputsToR2 看到 R2 URL 时,先 HeadObject 拿 metadata;
+ *   - x-moon-normalized === "true" → 已知合规,直接 skip 后续 fetch+sniff
+ *   - 其他 / 失败 → 走 slow path
+ *
+ * 失败语义:
+ *   - 404 NotFound → exists=false,metadata=null
+ *   - 其它错误(S3 5xx / 网络)→ 抛出,调用方决定是否 fallback
+ */
+export interface HeadObjectResult {
+  exists: boolean;
+  /** user-defined metadata(S3 内部会 lowercase key,这里保持原大小写) */
+  metadata: Record<string, string> | null;
+  contentType: string | null;
+}
+
+export async function headObject(opts: {
+  objectKey: string;
+}): Promise<HeadObjectResult> {
+  const client = getR2Client();
+  try {
+    const res = await client.send(
+      new HeadObjectCommand({ Bucket: bucket, Key: opts.objectKey })
+    );
+    // res.Metadata 是 user-defined metadata(key 已被 S3 强制 lowercase)
+    const metadata: Record<string, string> = {};
+    if (res.Metadata) {
+      for (const [k, v] of Object.entries(res.Metadata)) {
+        if (typeof v === "string") metadata[k] = v;
+      }
+    }
+    return {
+      exists: true,
+      metadata: Object.keys(metadata).length > 0 ? metadata : null,
+      contentType: res.ContentType ?? null,
+    };
+  } catch (e: unknown) {
+    if (
+      e !== null &&
+      typeof e === "object" &&
+      "name" in e &&
+      (e as { name?: unknown }).name === "NotFound"
+    ) {
+      return { exists: false, metadata: null, contentType: null };
+    }
+    throw e;
+  }
+}
+
+/**
+ * In-place 更新 R2 对象的 user-defined metadata(不动 body)。
+ *
+ * 实现:S3 CopyObject 同源 + MetadataDirective:REPLACE。
+ * CopySource 必须 URL-encode objectKey(原 key 含 `/` 没问题但保险起见 encode)。
+ * 该命令在 R2 上不会重传 bytes,只是把 metadata 替换,比 PutObject 重传快。
+ *
+ * 失败语义:调用方 catch 后自行决定 fallback(不影响主流程)。
+ */
+export async function updateObjectMetadata(opts: {
+  objectKey: string;
+  metadata: Record<string, string>;
+}): Promise<void> {
+  const client = getR2Client();
+  await client.send(
+    new CopyObjectCommand({
+      Bucket: bucket,
+      Key: opts.objectKey,
+      CopySource: `${bucket}/${encodeURIComponent(opts.objectKey)}`,
+      Metadata: opts.metadata,
+      MetadataDirective: "REPLACE",
+    })
+  );
 }
 
 export const R2_BUCKET = bucket;

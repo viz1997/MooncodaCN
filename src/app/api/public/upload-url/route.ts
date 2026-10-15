@@ -41,12 +41,26 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-const ALLOWED_CONTENT_TYPES = new Set([
-  "image/png",
-  "image/jpeg",
-  "image/jpg",
-  "image/webp",
-]);
+// v1.4.0 起白名单放宽:接受所有 image/* mime。
+//
+// 历史背景:v1.3.x 时代 mp 端必须在 PUT 之前把 HEIC / BMP / TIFF /
+// SVG 等转成 PNG/JPG/WebP(SDK image-utils.ts + publicUploadDirectFromMp
+// 走的就是这条路径)。这条 presign 白名单是配套硬卡:不在 {png, jpeg,
+// webp} 内就拒签,逼迫客户端先归一化。
+//
+// v1.4.0 重新设计:归一化责任完整后移到 server 端 proxyImageInputsToR2
+// (mp 端零归一化逻辑,iOS 微信走 sizeType:['compressed'] 内置 HEIC→JPG),
+// 这里只做最弱的 image/* 头校验,具体子类型交给 server 端 sniff +
+// normalizeToSupported 处理;normalize 失败的抛 ImageFormatError 给用户。
+//
+// 拒绝的场景只有"完全不是图":text/* / application/* / octet-stream
+// 等伪装图攻击。SVG / HEIC / AVIF 等怪 mime 允许 PUT,但落 R2 后
+// server 端会尝试归一化(成功落 image-gen/input/、失败抛 ImageFormatError)。
+//
+// 详见 architecture-mp-server-side-normalize.md §2.1。
+function isImageMime(mime: string): boolean {
+  return /^image\//i.test(mime);
+}
 // 与 /api/public/upload (multer)、/api/orders/[token]/upload-url 一致:
 const MAX_BYTES = 5 * 1024 * 1024;
 const EXPIRES_IN = 300; // 5 分钟,够 mp wx.uploadFile 走完
@@ -98,13 +112,16 @@ async function postHandler(req: NextRequest) {
     );
   }
 
-  // ============ MIME 白名单 ============
+  // ============ MIME 校验 ============
+  // v1.4.0 起放宽:任何 image/* 都可签发。具体子类型交给 server 端
+  // proxyImageInputsToR2.normalizeToSupported 处理;normalize 失败的
+  // 抛 ImageFormatError 给用户。
   const contentType = (body.contentType ?? "").toLowerCase();
-  if (!ALLOWED_CONTENT_TYPES.has(contentType)) {
+  if (!isImageMime(contentType)) {
     return NextResponse.json(
       {
         success: false,
-        error: "格式不支持,仅 JPG/PNG/WebP",
+        error: "格式不支持,仅 image/* (图片类)",
         code: "INVALID_TYPE",
       },
       { status: 400, headers: getRateLimitHeaders(rl) }

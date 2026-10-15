@@ -17,27 +17,34 @@
  * 持"卡住。HEIC/AVIF 等 jimp 解不开的格式抛 ImageFormatError 给外层
  * 翻译成可读提示。
  *
- * 设计:
- *   - 已 R2 的 URL 直接跳过(幂等,多次调用不会重复下载)
- *   - data: URL → base64 解码 → normalize → 落 R2(必须:apimart 只
- *     接 https URL,data: 无法直传)
- *   - 其它 http(s) URL → fetch + normalize + 落 R2
- *   - 其它协议(ws/file 等) → 抛错
+ * 2026-10-15 v1.4.0 改造:R2 URL 不再无条件 skip。
+ *   历史(v1.3.x):mp / browser 直传 R2 的图被 assume 已合规 → 直接
+ *     skip,server 永远碰不到字节 → mp 端必须自己做格式归一化
+ *     (publicUploadDirectFromMp / Taro.compressImage)。
+ *   新版:mp 端零归一化逻辑(iOS 微信走 sizeType:['compressed'] 内置
+ *     HEIC→JPG),允许任意 image/* 上传 R2;submit 时 server 通过
+ *     HeadObject 查 x-moon-normalized metadata 走 fast-path skip;
+ *     未标记的 URL 走 fetch + sniff + normalize,把归一化结果落
+ *     image-gen/input/{traceHint}/,完成后写 metadata 标记。
  *
  * 复用约定:persistCandidateToR2(generation-service.ts)是给"上游已
  * 生成的图片 URL 转存 R2"用的(输出侧,模型产物格式已天然合规);
  * 本文件是给"客户端原始输入"用的(输入侧,可能含乱七八糟的格式),
  * 因此各自走不同 helper,不混用。
  *
- * dedup 语义:同一 URL 多次调用安全(已 R2 跳过)。不同 URL 并行下载,
- * wall-clock ≈ 单张 + ε。
+ * dedup 语义:同一 URL 多次调用安全(已 R2 走 fast-path,HEAD metadata
+ * 命中即返回)。不同 URL 并行下载,wall-clock ≈ 单张 + ε。
+ *
+ * 详见 architecture-mp-server-side-normalize.md §2.2。
  */
 import { randomBytes } from "node:crypto";
 
 import {
   getR2PublicHosts,
+  headObject,
   isR2Configured,
   putObject,
+  updateObjectMetadata,
 } from "@/features/image-gen/lib/r2";
 import {
   DEFAULT_SUPPORTED_MIMES,
@@ -47,6 +54,35 @@ import {
 } from "./image-normalize";
 
 const INPUT_PROXY_TIMEOUT_MS = 60_000;
+
+/** v1.4.0 R2 fast-path metadata key:值为 "true" 表示已 server 端归一化过 */
+const METADATA_NORMALIZED_KEY = "x-moon-normalized";
+/** 上游原始 mime(sniff 结果或 header hint),用于日志 / 排查 */
+const METADATA_SOURCE_MIME_KEY = "x-moon-source-mime";
+/** 上游 URL(截断 256 字符,防 R2 metadata 单 key 2KB 上限),仅留痕 */
+const METADATA_SOURCE_URL_KEY = "x-moon-source-url";
+const METADATA_SOURCE_URL_MAX_LEN = 256;
+
+/**
+ * 把 R2 公开 URL 解析回 objectKey。
+ * host 必须落在 R2_PUBLIC_BASE_URL / *.r2.cloudflarestorage.com 内,
+ * 否则返回 null(调用方应当走 fetch 路径而不是 HeadObject 路径)。
+ */
+function urlToR2ObjectKey(publicUrl: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(publicUrl);
+  } catch {
+    return null;
+  }
+  const hosts = getR2PublicHosts();
+  if (!hosts.some((h) => parsed.host.toLowerCase() === h.toLowerCase())) {
+    return null;
+  }
+  // pathname 以 / 开头,slice(1) 去前缀
+  const key = parsed.pathname.replace(/^\/+/, "");
+  return key.length > 0 ? key : null;
+}
 
 /**
  * 是否已是 R2 公开域 URL(host 在 R2_PUBLIC_BASE_URL / *.r2.cloudflarestorage.com 之内)。
@@ -65,8 +101,54 @@ export function isR2Url(url: string | null | undefined): boolean {
 }
 
 /**
+ * v1.4.0 fast-path 检查:R2 URL 是否已经被 server 端归一化过?
+ *
+ * 流程:解析 URL → HeadObject → 看 user-defined metadata
+ *   x-moon-normalized === "true" 则返回 true,proxyImageInputsToR2
+ *   直接用原 URL 不再 fetch+sniff。
+ *
+ * 失败语义:
+ *   - URL 不是 R2 公开域(host 不匹配) → false(应当走 persist 路径)
+ *   - HeadObject 404 / 任意错误 → false(走 slow path,fallback 行为)
+ *   - metadata 不存在 / key 不存在 → false
+ */
+async function tryR2NormalizedSkip(url: string): Promise<boolean> {
+  const key = urlToR2ObjectKey(url);
+  if (!key) return false;
+  try {
+    const head = await headObject({ objectKey: key });
+    return head.metadata?.[METADATA_NORMALIZED_KEY] === "true";
+  } catch {
+    // HEAD 失败(network / 5xx / 鉴权)保守走 slow path,
+    // 不要因为 metadata 检查而 break 主流程
+    return false;
+  }
+}
+
+/** 构造 R2 metadata,标 "x-moon-normalized=true" + 留痕源 mime / URL */
+function buildNormalizedMetadata(
+  detectedMime: string | null,
+  mimeFromHeader: string | null,
+  sourceUrl: string
+): Record<string, string> {
+  return {
+    [METADATA_NORMALIZED_KEY]: "true",
+    [METADATA_SOURCE_MIME_KEY]: detectedMime ?? mimeFromHeader ?? "unknown",
+    [METADATA_SOURCE_URL_KEY]: sourceUrl.slice(0, METADATA_SOURCE_URL_MAX_LEN),
+  };
+}
+
+/**
  * 把 http(s) URL 的图片下载 → 白名单校验/转换 → 持久化 R2,返回
  * 永久 R2 URL。
+ *
+ * v1.4.0 起,3 条进入分支:
+ *   1. R2 URL + 已归一化(metadata 命中)→ fast-path,return 原 URL
+ *      (由调用方 proxyImageInputsToR2 处理,本函数不参与)
+ *   2. R2 URL + 未归一化 + fetch 后白名单内 → in-place metadata
+ *      标记(走 updateObjectMetadata,不动 bytes)→ return 原 URL
+ *   3. R2 URL / 外部 URL + fetch 后白名单外 / 外部 URL → putObject
+ *      到 image-gen/input/{traceHint}/,metadata 随 put 一起写
  *
  * 失败抛错:
  *   - 网络/HTTP 错误 → 上层走网络错误分支
@@ -96,12 +178,36 @@ async function persistHttpInputToR2(
     DEFAULT_SUPPORTED_MIMES,
     mimeFromHeader
   );
+  const metadata = buildNormalizedMetadata(
+    normalized.detectedMime,
+    mimeFromHeader,
+    url
+  );
+
+  // 路径 2:R2 URL + 已合规(in-place 写 metadata,不动 bytes)
+  // 命中条件:normalize 后未转换 + 源 URL 在 R2 公开域内
+  // 失败兜底:CopyObject 失败不影响主流程,fall through 到路径 3
+  if (!normalized.converted && isR2Url(url)) {
+    const key = urlToR2ObjectKey(url);
+    if (key) {
+      try {
+        await updateObjectMetadata({ objectKey: key, metadata });
+        return url;
+      } catch {
+        // in-place 标记失败不致命,继续走路径 3 兜底(让归一化版本至少有标记)
+      }
+    }
+  }
+
+  // 路径 3:外部 URL / R2 URL 但需要转换 → putObject 到 traceHint 命名空间
+  // 元数据一并写入(PutObject + Metadata),后续 submit HEAD 命中走 fast-path
   const ext = mimeToExt(normalized.mime);
   const objectKey = `image-gen/input/${traceHint}/${idx}-${Date.now()}-${randomBytes(4).toString("hex")}.${ext}`;
   return putObject({
     objectKey,
     body: normalized.buffer,
     contentType: normalized.mime,
+    metadata,
   });
 }
 
@@ -115,6 +221,8 @@ async function persistHttpInputToR2(
  * 这里 normalize 出的 buffer/mime 直接落 R2,gpt-image 也复用这条
  * 路径(它最终也从 R2 URL 拉 bytes 进 multipart,见
  * generation-service.ts)。
+ *
+ * v1.4.0 起:putObject 时附带 metadata 标记,后续 submit 走 fast-path。
  */
 async function persistDataUrlInputToR2(
   rawDataUrl: string,
@@ -145,17 +253,24 @@ async function persistDataUrlInputToR2(
     objectKey,
     body: normalized.buffer,
     contentType: normalized.mime,
+    metadata: buildNormalizedMetadata(
+      normalized.detectedMime,
+      sourceMime,
+      "data:url"
+    ),
   });
 }
 
 /**
  * 把一组 URL 代理到 R2,保留原顺序与长度(undefined / null 元素保留)。
  *
- * 规则:
+ * v1.4.0 规则:
  *   - undefined / null / 空串 → 保留(原样返回)
- *   - data: URL → base64 解码 + normalize + 落 R2
- *   - 已是 R2 URL(host 匹配)→ 保留(去重 + 幂等)
- *   - 其它 http(s) URL → fetch + normalize + 落 R2
+ *   - data: URL → base64 解码 + normalize + 落 R2(必须,apimart 只接 https)
+ *   - 已是 R2 URL(host 匹配)
+ *     ├─ HeadObject 命中 x-moon-normalized=true → 保留(fast-path skip)
+ *     └─ 未命中 / 失败 → fetch + sniff + 必要时归一化 + 落 R2 + 写 metadata
+ *   - 其它 http(s) URL → fetch + sniff + normalize + 落 R2
  *   - 其它协议(ws/file 等) → 抛错
  *
  * 每张图片的格式会在落地前被 normalize 到
@@ -184,7 +299,12 @@ export async function proxyImageInputsToR2(
         return;
       }
       if (isR2Url(raw)) {
-        result[idx] = raw;
+        // v1.4.0 fast-path:已归一化直接 skip,未命中走 slow path
+        if (await tryR2NormalizedSkip(raw)) {
+          result[idx] = raw;
+          return;
+        }
+        result[idx] = await persistHttpInputToR2(raw, traceHint, idx);
         return;
       }
       if (!/^https?:\/\//i.test(raw)) {
