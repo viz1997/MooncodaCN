@@ -6,7 +6,7 @@ NextDevTpl 暴露给小程序的 TypeScript SDK 参考实现。把本目录(`src
 
 ## 当前版本
 
-`VERSION` 文件 — `1.2.0`,详见文末 [Changelog](#changelog)。
+`VERSION` 文件 — `1.3.0`,详见文末 [Changelog](#changelog)。
 
 ## 文件清单
 
@@ -101,15 +101,15 @@ const { productLines, templates, keyScope } = await listTemplates();
 
 ```ts
 import {
-  publicUpload,
+  publicUploadDirect,
   submitGenerate,
   pollImageTask,
   proxyImageUrl,
 } from "@/api/sdk";
 
-// 5.1 上传参考图
+// 5.1 上传参考图(直传 R2,跳 BFF —— v1.3.0 推荐)
 const file = await chooseImageFile(); // Taro.chooseImage + file
-const { url } = await publicUpload(file);
+const { url } = await publicUploadDirect(file);
 
 // 5.2 提交生图(<1s 返 taskId,不阻塞等模型)
 const { taskId } = await submitGenerate({
@@ -227,7 +227,7 @@ controller.abort();
 
 ---
 
-## 鉴权矩阵(2026-10-13 v1.2.0)
+## 鉴权矩阵(2026-10-15 v1.3.0)
 
 | 端点 | 鉴权 | SDK 函数 |
 |---|---|---|
@@ -235,7 +235,8 @@ controller.abort();
 | `POST /api/image-gen/jobs/[jobId]/poll` | **x-api-key**(taskId 不可枚举) | `pollImageTask()` |
 | `GET /api/image-gen/quota` | **x-api-key** | `getQuota()` |
 | `GET /api/image-gen/templates` | **x-api-key** | `listTemplates()` |
-| `POST /api/public/upload` | **x-api-key** | `publicUpload()` |
+| `POST /api/public/upload-url` | IP 限流(免登录,R2 直传签名) | `publicUploadUrl()` + 自己 PUT,或 `publicUploadDirect()` 一键 |
+| `POST /api/public/upload` | IP 限流(免登录,BFF multipart 中转) | `publicUpload()`(历史路径,小图仍可用) |
 | `GET /api/image/task/[id]` | 免登录(taskId 不可枚举) | (兜底层,mp 一般用不到) |
 | `GET /api/image-gen/thumbnail` `/api/image-gen/download` | 免登录(代理不分子) | `proxyImageUrl()` |
 
@@ -276,7 +277,7 @@ controller.abort();
 - [ ] (可选)App 启动时调 `getQuota()` 缓存到 wx.storage,UI 显示配额
 - [ ] (可选)App 启动时调 `listTemplates()` 缓存到 wx.storage,UI 显示 mask 下拉
 - [ ] 用户进生图页时:
-  1. `publicUpload(file)` → 拿 R2 URL
+  1. `publicUploadDirect(file)` → 拿 R2 URL(直传,跳 BFF;老版本 mp 仍可走 `publicUpload()`)
   2. `submitGenerate({ maskId, imageUrls: [url] })` → 拿 taskId
   3. 立刻显示 loading,按 schedule 调 `pollImageTask(taskId)`
   4. completed:展示候选;failed:toast 错误信息
@@ -286,6 +287,47 @@ controller.abort();
 ---
 
 ## Changelog
+
+### v1.3.0 — 2026-10-15
+
+**新增(直传 R2,跳 BFF)**
+
+线上事故复盘后加的关键能力。2026-10-15 凌晨生产环境出现"用户传 JPG
+却被报格式不支持"的诡异错误,根因链是:
+1. mp 端 `wx.uploadFile` → BFF `/api/public/upload`(multipart)
+2. BFF 拿 buffer 上传 R2,Content-Type 走 multer 解析(可能错)
+3. mp 拿 R2 URL → `submitGenerate.imageUrls`
+4. BFF `proxyImageInputsToR2` fetch 这个 R2 URL
+5. fetch 拿到的 Content-Type 是 R2 自己存的 mime(R2 会保留上传时的
+   Content-Type,这里是 multer 解析出来的那个),如果中途被人改过 /
+   上游 CDN 误标,白名单校验就会拒
+
+**新方案**:`publicUploadDirect(file)` 一步完成
+- mp → BFF `/api/public/upload-url`(只拿 presigned URL,**不传字节**)
+- mp → R2 用 PUT 直传,Content-Type 由 presign 阶段锁定,R2 拿到的
+  就是 mp 端真实声明的 mime
+- mp → BFF `submitGenerate.imageUrls` 拿到的 URL,R2 metadata Content-Type
+  就是原始声明的 mime,**不再依赖任何代理 / CDN 的重写**
+
+**SDK 变更**
+- `publicUploadDirect(file, contentType?)` —— 直传 R2 一键(推荐,2026-10-15 起)
+- `publicUploadUrl(payload)` —— 单独拿 presigned URL,业务自己 PUT
+- `PublicUploadUrlRequest` / `PublicUploadUrlResponse` 类型
+- `request.ts` 新增 `rawBody` + `customHeaders` 选项,支持 PUT 直传场景
+
+**BFF 变更**
+- 新端点 `POST /api/public/upload-url` —— 返回 R2 presigned PUT URL,
+  鉴权与 `/api/public/upload` 一致(IP 限流,无 x-api-key 校验,与
+  sibling 端点保持对称;后续要加 API Key 校验两条一起改)
+- 旧 `/api/public/upload` 仍保留,小图 / 老版本 mp 仍可用
+
+**兼容性**
+- `publicUpload()` 保留为旧路径,继续工作。新代码用 `publicUploadDirect()`
+- 依赖 `globalThis.fetch` 支持 `method: 'PUT'` + `body: Blob`。现代
+  浏览器、Taro H5、React Native 都 OK;老版本 WeChat 原生 `wx.request`
+  不支持 PUT,这种环境继续用 `publicUpload()`(走 BFF multipart)
+- 鉴权表加新端点,SDK 函数表加 `publicUploadDirect` / `publicUploadUrl`
+- Section 5 用法示例从 `publicUpload` 换到 `publicUploadDirect`
 
 ### v1.2.0 — 2026-10-13
 

@@ -157,8 +157,7 @@ export async function normalizeToSupported(
   //    输出固定 image/png。
   const headerLooksSvg =
     typeof mimeFromHeader === "string" &&
-    mimeFromHeader.toLowerCase().split(";")[0]?.trim() ===
-      "image/svg+xml";
+    mimeFromHeader.toLowerCase().split(";")[0]?.trim() === "image/svg+xml";
   if (headerLooksSvg) {
     try {
       const resvg = new Resvg(asBuffer(buffer));
@@ -175,10 +174,7 @@ export async function normalizeToSupported(
     } catch (svgErr) {
       const msg =
         svgErr instanceof Error ? svgErr.message : "未知 SVG 解析错误";
-      throw new ImageFormatError(
-        "image/svg+xml",
-        `SVG 图片解析失败:${msg}`,
-      );
+      throw new ImageFormatError("image/svg+xml", `SVG 图片解析失败:${msg}`);
     }
   }
 
@@ -205,7 +201,7 @@ export async function normalizeToSupported(
     const bytesDesc = `${buffer.byteLength}B`;
     throw new ImageFormatError(
       detectedMime,
-      `图片格式不支持(嗅探:${detectedDesc}, header:${headerDesc}, ${bytesDesc})且无法自动转换:${msg}`,
+      `图片格式不支持(嗅探:${detectedDesc}, header:${headerDesc}, ${bytesDesc})且无法自动转换:${msg}`
     );
   }
 }

@@ -83,6 +83,8 @@ export type {
   // 上传
   PublicUploadRequest,
   PublicUploadResponse,
+  PublicUploadUrlRequest,
+  PublicUploadUrlResponse,
   QuotaResponse,
   SdkConfig,
   // 图片代理
@@ -92,4 +94,10 @@ export type {
   WeChatLoginResponse,
 } from "./types";
 // 上传
-export { orderUpload, orderUploadUrl, publicUpload } from "./upload";
+export {
+  orderUpload,
+  orderUploadUrl,
+  publicUpload,
+  publicUploadDirect,
+  publicUploadUrl,
+} from "./upload";

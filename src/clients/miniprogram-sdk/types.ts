@@ -102,6 +102,38 @@ export interface OrderUploadUrlResponse {
   expiresIn: number;
 }
 
+/**
+ * POST /api/public/upload-url 请求(2026-10-15 v1.3.0)
+ *
+ * 与 /api/orders/[token]/upload-url 同形态,但不绑订单,用于
+ * 公共生图参考图直传 R2。mp → R2 一跳,跳过 BFF 4.5MB body
+ * 限制 + Vercel 60s timeout。
+ */
+export interface PublicUploadUrlRequest {
+  /** 文件 MIME,后端白名单校验(PNG/JPEG/WebP) */
+  contentType: string;
+  /** 字节数(可选;如果传了后端会卡 5MB cap,挡住"声明 2MB 实际 100MB"恶意) */
+  size?: number;
+  /** 文件扩展名(可选,默认从 contentType 推导) */
+  ext?: string;
+}
+
+/** POST /api/public/upload-url 响应 */
+export interface PublicUploadUrlResponse {
+  /** R2 presigned PUT URL —— mp 用 wx.request/Taro.request PUT 这个 URL */
+  uploadUrl: string;
+  /** 上传成功后访问的永久 URL —— 喂给 submitGenerate.imageUrls */
+  publicUrl: string;
+  /** 后端生成的 R2 objectKey(用于日志对账) */
+  objectKey: string;
+  /** 必须在 PUT 时带的 header,后端签名时锁定了 Content-Type */
+  headers: Record<string, string>;
+  /** 业务层 cap(当前 5MB),mp 端做客户端预压缩 */
+  maxBytes: number;
+  /** URL 有效期(秒),默认 300 */
+  expiresIn: number;
+}
+
 // ============================================================================
 // 3. AI 生图
 // ============================================================================

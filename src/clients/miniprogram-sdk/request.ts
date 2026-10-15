@@ -167,6 +167,17 @@ interface RequestOptions {
   json?: unknown;
   /** FormData body(上传场景) */
   formData?: FormData | undefined;
+  /**
+   * 原始 body(2026-10-15 v1.3.0 增):用于 PUT 直传 R2 等场景,
+   * 业务方自己设 Content-Type(放 customHeaders 里)。优先级高于 json/formData。
+   */
+  rawBody?: BodyInit | null | undefined;
+  /**
+   * 业务自定义 headers(2026-10-15 v1.3.0 增):与 auth headers 合并,
+   * 业务字段同名时覆盖 auth。用于 PUT 直传 R2 时携带 presign 锁定的
+   * Content-Type。
+   */
+  customHeaders?: Record<string, string> | undefined;
   /** URL search params */
   query?: Record<string, string | number | boolean | undefined | null>;
   /** Bearer token 覆盖(罕见场景:多账号切换) */
@@ -217,6 +228,8 @@ export async function sdkRequest<T>(
     method = "GET",
     json,
     formData,
+    rawBody,
+    customHeaders,
     query,
     token,
     signal,
@@ -236,12 +249,23 @@ export async function sdkRequest<T>(
   // 拼 headers
   const headers: Record<string, string> = {};
   let body: BodyInit | undefined;
-  if (json !== undefined) {
+  if (rawBody !== undefined && rawBody !== null) {
+    // 调用方用 customHeaders 携带 Content-Type 等(presign 锁定)
+    body = rawBody;
+  } else if (json !== undefined) {
     headers["Content-Type"] = "application/json";
     body = JSON.stringify(json);
   } else if (formData !== undefined) {
     // multipart/form-data 由 fetch 自动加 boundary,不要手动设
     body = formData;
+  }
+
+  // 业务自定义 header 合并(在 auth header 之前 merge,后面 auth 阶段
+  // 仍可覆盖,顺序可控)
+  if (customHeaders) {
+    for (const [k, v] of Object.entries(customHeaders)) {
+      headers[k] = v;
+    }
   }
 
   // 拼鉴权 header
