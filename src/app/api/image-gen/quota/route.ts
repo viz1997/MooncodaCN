@@ -16,8 +16,8 @@
 
 import { type NextRequest, NextResponse } from "next/server";
 import { getClientIp } from "@/features/image-gen";
-import { requireExternalApiKey } from "@/lib/require-external-api-key";
 import { checkRateLimit, getRateLimitHeaders } from "@/lib/rate-limit";
+import { requireExternalApiKey } from "@/lib/require-external-api-key";
 
 export const runtime = "nodejs";
 export const maxDuration = 10;

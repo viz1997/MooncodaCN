@@ -23,7 +23,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { and, eq, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { externalApiKey, type ExternalApiKey } from "@/db/schema";
+import { type ExternalApiKey, externalApiKey } from "@/db/schema";
 
 /** API Key 前缀 —— 标识"这是 Mooncoda 发出的外部 Key" */
 export const API_KEY_PREFIX = "mk_pub_";
@@ -282,7 +282,11 @@ export function isExternalApiKeyRequired(): boolean {
   const raw = process.env.EXTERNAL_API_KEY_REQUIRED;
   if (raw === undefined) return true;
   // 接受 0 / false / FALSE / off 等
-  return !(raw === "0" || raw.toLowerCase() === "false" || raw.toLowerCase() === "off");
+  return !(
+    raw === "0" ||
+    raw.toLowerCase() === "false" ||
+    raw.toLowerCase() === "off"
+  );
 }
 
 // ============================================

@@ -29,11 +29,11 @@ import { type NextRequest, NextResponse } from "next/server";
 import { logImageGen } from "@/features/image-gen";
 import {
   isExternalApiKeyRequired,
-  verifyExternalApiKey,
   type VerifyRejectReason,
+  verifyExternalApiKey,
 } from "@/features/image-gen/lib/external-api-key-service";
 import { auth } from "@/lib/auth";
-import { type RateLimitResult, getRateLimitHeaders } from "@/lib/rate-limit";
+import { getRateLimitHeaders, type RateLimitResult } from "@/lib/rate-limit";
 
 /** verify 完整 ok 结果的 type alias(便于多处复用) */
 type KeyVerifyResult = Awaited<ReturnType<typeof verifyExternalApiKey>>;

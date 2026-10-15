@@ -307,12 +307,16 @@ export function AdminSidebar() {
               </Avatar>
               <div className="flex-1 truncate text-left">
                 <div className="flex items-center gap-2">
-                  <p className="text-sm font-medium text-sidebar-foreground">{user.name}</p>
+                  <p className="text-sm font-medium text-sidebar-foreground">
+                    {user.name}
+                  </p>
                   <span className="rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-300">
                     {t("roleBadge")}
                   </span>
                 </div>
-                <p className="truncate text-xs text-muted-foreground">{user.email}</p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {user.email}
+                </p>
               </div>
               <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
             </button>

@@ -16,15 +16,15 @@ import {
   IMAGE_MODELS,
   logImageGen,
 } from "@/features/image-gen";
+import { recordExternalApiKeyCall } from "@/features/image-gen/lib/external-api-key-service";
 import { createImageJob } from "@/features/image-gen/lib/generation-service";
-import { resolveSelectedModel } from "@/features/image-gen/lib/submit-model-resolver";
-import type { ResolveSelectedModelResult } from "@/features/image-gen/lib/submit-model-resolver";
-import { triggerImageGenSubmit } from "@/features/image-gen/lib/submit";
 import type {
   GenerateImageRequest,
   ImageModelId,
 } from "@/features/image-gen/lib/image-models/types";
-import { recordExternalApiKeyCall } from "@/features/image-gen/lib/external-api-key-service";
+import { triggerImageGenSubmit } from "@/features/image-gen/lib/submit";
+import type { ResolveSelectedModelResult } from "@/features/image-gen/lib/submit-model-resolver";
+import { resolveSelectedModel } from "@/features/image-gen/lib/submit-model-resolver";
 import { auth } from "@/lib/auth";
 import {
   checkRateLimit,

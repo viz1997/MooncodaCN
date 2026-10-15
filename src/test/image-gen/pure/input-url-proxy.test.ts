@@ -38,13 +38,13 @@ const persistSpy = vi.fn(
     void _traceHint;
     void _idx;
     return `https://cdn.example.com/proxied/${encodeURIComponent(url)}`;
-  },
+  }
 );
 vi.mock("@/features/gpt-image/lib/generation-service", () => ({
   persistCandidateToR2: (
     url: string,
     _traceHint: string,
-    _idx: number,
+    _idx: number
   ): Promise<string> => persistSpy(url, _traceHint, _idx),
 }));
 
@@ -84,23 +84,23 @@ describe("isR2Url", () => {
     expect(isR2Url("https://cdn.example.com/uploads/foo.png")).toBe(true);
     expect(
       isR2Url(
-        "https://cdn.example.com/uploads/foo.png?response-content-disposition=attachment",
-      ),
+        "https://cdn.example.com/uploads/foo.png?response-content-disposition=attachment"
+      )
     ).toBe(true);
   });
 
   it("*.r2.cloudflarestorage.com → true", () => {
     expect(
       isR2Url(
-        "https://test-account-id.r2.cloudflarestorage.com/mooncada-public/abc.png",
-      ),
+        "https://test-account-id.r2.cloudflarestorage.com/mooncada-public/abc.png"
+      )
     ).toBe(true);
   });
 
   it("大小写不敏感(host 部分)", () => {
     expect(isR2Url("https://CDN.EXAMPLE.COM/foo.png")).toBe(true);
     expect(
-      isR2Url("https://Test-Account-Id.r2.CloudflareStorage.com/x.png"),
+      isR2Url("https://Test-Account-Id.r2.CloudflareStorage.com/x.png")
     ).toBe(true);
   });
 });
@@ -109,7 +109,7 @@ describe("proxyImageInputsToR2", () => {
   it("undefined / null / 空串 → 原样保留", async () => {
     const result = await proxyImageInputsToR2(
       [undefined, null, "", "https://cdn.example.com/a.png"],
-      "trace",
+      "trace"
     );
     expect(result[0]).toBeUndefined();
     expect(result[1]).toBeNull();
@@ -163,7 +163,7 @@ describe("proxyImageInputsToR2", () => {
   it("保留输入顺序 + 长度(并行下载不乱序)", async () => {
     const urls = Array.from(
       { length: 8 },
-      (_, i) => `https://external-${i}.tcb.qcloud.la/${i}.webp`,
+      (_, i) => `https://external-${i}.tcb.qcloud.la/${i}.webp`
     );
     const out = await proxyImageInputsToR2(urls, "trace");
     expect(out).toHaveLength(8);
@@ -176,19 +176,16 @@ describe("proxyImageInputsToR2", () => {
   it("persistCandidateToR2 抛错 → 冒泡,不静默", async () => {
     persistSpy.mockRejectedValueOnce(new Error("下载失败:HTTP 403"));
     await expect(
-      proxyImageInputsToR2(
-        ["https://external.tcb.qcloud.la/x.webp"],
-        "trace",
-      ),
+      proxyImageInputsToR2(["https://external.tcb.qcloud.la/x.webp"], "trace")
     ).rejects.toThrow(/下载失败.*403/);
   });
 
   it("非 http(s) 协议(ws://, file://)→ 抛错,不穿透", async () => {
     await expect(
-      proxyImageInputsToR2(["ws://example.com/socket"], "trace"),
+      proxyImageInputsToR2(["ws://example.com/socket"], "trace")
     ).rejects.toThrow(/不支持的协议/);
     await expect(
-      proxyImageInputsToR2(["file:///etc/passwd"], "trace"),
+      proxyImageInputsToR2(["file:///etc/passwd"], "trace")
     ).rejects.toThrow(/不支持的协议/);
     // 都没走到 persistCandidateToR2
     expect(persistSpy).not.toHaveBeenCalled();

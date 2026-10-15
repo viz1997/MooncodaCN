@@ -38,8 +38,7 @@ export type PublicJobView = {
   errorMessage: string | null;
 };
 
-export const EXTERNAL_GENERIC_FAILURE_MESSAGE =
-  "生成失败,请稍后重试或联系客服";
+export const EXTERNAL_GENERIC_FAILURE_MESSAGE = "生成失败,请稍后重试或联系客服";
 export const EXTERNAL_EMPTY_FAILURE_MESSAGE = "生成失败,请稍后重试";
 
 export function toPublicJobView(job: ImageJobRow): PublicJobView {
@@ -72,7 +71,7 @@ export function toPublicJobView(job: ImageJobRow): PublicJobView {
  * 「出」防线的东西,不丢上下文。
  */
 export function sanitizeExternalFailureMessage(
-  raw: string | null | undefined,
+  raw: string | null | undefined
 ): string {
   if (!raw) return EXTERNAL_EMPTY_FAILURE_MESSAGE;
   const trimmed = raw.trim();

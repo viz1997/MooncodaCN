@@ -18,9 +18,9 @@ import { describe, expect, it } from "vitest";
 import {
   EXTERNAL_EMPTY_FAILURE_MESSAGE,
   EXTERNAL_GENERIC_FAILURE_MESSAGE,
+  type ImageJobRow,
   sanitizeExternalFailureMessage,
   toPublicJobView,
-  type ImageJobRow,
 } from "@/features/image-gen/lib/poll-public-view";
 
 // imageJob $inferSelect 是 timestamp(string|...),测试 fixture 简化
@@ -63,13 +63,11 @@ describe("toPublicJobView", () => {
         resultUrls: ["https://r2.example.com/out/1.webp"],
         completedAt: new Date("2026-10-14T00:01:00Z"),
         generateDuration: 1234,
-      }),
+      })
     );
     expect(view.id).toBe("job-1");
     expect(view.status).toBe("completed");
-    expect(view.resultUrls).toEqual([
-      "https://r2.example.com/out/1.webp",
-    ]);
+    expect(view.resultUrls).toEqual(["https://r2.example.com/out/1.webp"]);
     expect(view.generateDuration).toBe(1234);
     expect(view.completedAt).toEqual(new Date("2026-10-14T00:01:00Z"));
     expect(view.errorMessage).toBeNull();
@@ -106,7 +104,7 @@ describe("toPublicJobView", () => {
         // 2026-10-14 用户上报的真实污染字符串
         errorMsg:
           '提交生图失败：apimart submit 500: {"error":{"code":"build_request_failed","message":"prepare image_urls[0] failed: failed to download image: HTTP 403","param":"","type":"build_request_failed"},"request_id":"20261014145519621188625rL5j5av5"}',
-      }),
+      })
     );
     expect(view.status).toBe("failed");
     expect(view.resultUrls).toEqual([]);
@@ -126,7 +124,7 @@ describe("toPublicJobView", () => {
 
   it("UX 字段透传(mode / size / batchSize)", () => {
     const view = toPublicJobView(
-      makeJob({ mode: "inpainting", size: "2048x2048", batchSize: 4 }),
+      makeJob({ mode: "inpainting", size: "2048x2048", batchSize: 4 })
     );
     expect(view.mode).toBe("inpainting");
     expect(view.size).toBe("2048x2048");
@@ -137,16 +135,16 @@ describe("toPublicJobView", () => {
 describe("sanitizeExternalFailureMessage", () => {
   it("null / undefined / 空串 → 通用文案", () => {
     expect(sanitizeExternalFailureMessage(null)).toBe(
-      EXTERNAL_EMPTY_FAILURE_MESSAGE,
+      EXTERNAL_EMPTY_FAILURE_MESSAGE
     );
     expect(sanitizeExternalFailureMessage(undefined)).toBe(
-      EXTERNAL_EMPTY_FAILURE_MESSAGE,
+      EXTERNAL_EMPTY_FAILURE_MESSAGE
     );
     expect(sanitizeExternalFailureMessage("")).toBe(
-      EXTERNAL_EMPTY_FAILURE_MESSAGE,
+      EXTERNAL_EMPTY_FAILURE_MESSAGE
     );
     expect(sanitizeExternalFailureMessage("   ")).toBe(
-      EXTERNAL_EMPTY_FAILURE_MESSAGE,
+      EXTERNAL_EMPTY_FAILURE_MESSAGE
     );
   });
 
@@ -154,7 +152,7 @@ describe("sanitizeExternalFailureMessage", () => {
     const polluted =
       '{"error":{"code":"build_request_failed","request_id":"abc"}}';
     expect(sanitizeExternalFailureMessage(polluted)).toBe(
-      EXTERNAL_GENERIC_FAILURE_MESSAGE,
+      EXTERNAL_GENERIC_FAILURE_MESSAGE
     );
   });
 
@@ -169,20 +167,20 @@ describe("sanitizeExternalFailureMessage", () => {
     ];
     for (const raw of cases) {
       expect(sanitizeExternalFailureMessage(raw)).toBe(
-        EXTERNAL_GENERIC_FAILURE_MESSAGE,
+        EXTERNAL_GENERIC_FAILURE_MESSAGE
       );
     }
   });
 
   it("业务文案(用户友好的中文)→ 原文透传", () => {
     expect(sanitizeExternalFailureMessage("积分不足,请充值")).toBe(
-      "积分不足,请充值",
+      "积分不足,请充值"
     );
     expect(sanitizeExternalFailureMessage("文件过大,超过 20MB 上限")).toBe(
-      "文件过大,超过 20MB 上限",
+      "文件过大,超过 20MB 上限"
     );
     expect(sanitizeExternalFailureMessage("已超过本月免费次数")).toBe(
-      "已超过本月免费次数",
+      "已超过本月免费次数"
     );
   });
 
@@ -192,13 +190,13 @@ describe("sanitizeExternalFailureMessage", () => {
 
   it("关键检测对大小写不敏感", () => {
     expect(sanitizeExternalFailureMessage("APIMART fail")).toBe(
-      EXTERNAL_GENERIC_FAILURE_MESSAGE,
+      EXTERNAL_GENERIC_FAILURE_MESSAGE
     );
     expect(sanitizeExternalFailureMessage("REQUEST_ID present")).toBe(
-      EXTERNAL_GENERIC_FAILURE_MESSAGE,
+      EXTERNAL_GENERIC_FAILURE_MESSAGE
     );
     expect(sanitizeExternalFailureMessage("BUILD_REQUEST_FAILED")).toBe(
-      EXTERNAL_GENERIC_FAILURE_MESSAGE,
+      EXTERNAL_GENERIC_FAILURE_MESSAGE
     );
   });
 });

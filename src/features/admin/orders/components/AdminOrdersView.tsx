@@ -477,10 +477,9 @@ export function AdminOrdersView() {
         render: (_: unknown, record) =>
           record.platform ? (
             <Tag color="blue" className="!text-[10px]">
-              {t(
-                `platforms.${record.platform}` as `platforms.${PlatformKey}`,
-                { defaultValue: record.platform }
-              )}
+              {t(`platforms.${record.platform}` as `platforms.${PlatformKey}`, {
+                defaultValue: record.platform,
+              })}
             </Tag>
           ) : (
             <span className="text-[10px] text-muted-foreground">—</span>

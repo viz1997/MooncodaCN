@@ -30,6 +30,12 @@ import { eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import { promptOrder } from "@/db/schema";
+import {
+  DEFAULT_SUPPORTED_MIMES,
+  ImageFormatError,
+  mimeToExt,
+  normalizeToSupported,
+} from "@/features/image-gen/lib/image-models/image-normalize";
 import { isR2Configured, putObject } from "@/features/image-gen/lib/r2";
 import { logger } from "@/lib/logger";
 
@@ -281,6 +287,12 @@ export async function submitLingtingTask(
   // 预算内。
   //
   // 多张参考图时并行下载（每张独立 120s），wall-clock ≈ 单张时长 + ε。
+  //
+  // 2026-10-15 加 normalize：wellapi gpt-image-2（OpenAI 协议严格只
+  // 接 png）易在 mp 客户传 HEIC/TIFF/BMP/GIF 时炸 4xx。白名单内
+  // （png/jpeg/webp）原 buffer 直通，零开销；白名单外 jimp 自动转
+  // PNG；jimp 解不开的格式（HEIC/AVIF）抛 ImageFormatError，由外层
+  // /upload handler 翻成"请转 PNG/JPG/WebP"提示。
   const downloaded = await Promise.all(
     imageUrls.map(async (url, i) => {
       try {
@@ -292,12 +304,31 @@ export async function submitLingtingTask(
             `下载原图失败：HTTP ${imgRes.status} ${imgRes.statusText}`
           );
         }
-        const ct = imgRes.headers.get("content-type");
-        const mime = ct?.startsWith("image/") ? ct : "image/png";
-        const buf = await imgRes.arrayBuffer();
-        return { buf, mime };
+        const mimeFromHeader = imgRes.headers.get("content-type");
+        const bytes = new Uint8Array(await imgRes.arrayBuffer());
+        if (bytes.byteLength === 0) {
+          throw new Error("原图为空");
+        }
+        const normalized = await normalizeToSupported(
+          bytes,
+          DEFAULT_SUPPORTED_MIMES,
+          mimeFromHeader
+        );
+        // 缓冲区复用 normalized.buffer（passthrough 时 === 原 bytes，
+        // 转换时是新 PNG bytes）。multipart Blob type + filename 都用
+        // normalized.mime/扩展名以保证 wellapi 侧 OpenAI 协议解析正确。
+        const buf = normalized.buffer.buffer.slice(
+          normalized.buffer.byteOffset,
+          normalized.buffer.byteOffset + normalized.buffer.byteLength
+        ) as ArrayBuffer;
+        return { buf, mime: normalized.mime };
       } catch (err) {
         const msg = err instanceof Error ? err.message : "未知错误";
+        // ImageFormatError 直接透传（已带格式诊断），外层翻译成用户
+        // 提示；其它错误包成统一的"第 N 张：xxx"格式。
+        if (err instanceof ImageFormatError) {
+          throw new Error(`第 ${i + 1} 张：${msg}`);
+        }
         throw new Error(`下载原图失败（第 ${i + 1} 张）：${msg}`);
       }
     })
@@ -305,15 +336,17 @@ export async function submitLingtingTask(
 
   // 2. 构造 multipart/form-data —— 同 key `image` 重复 append。
   // wellapi 把多次 `image` 字段当 image[] 多图参考处理（主图在 image[0]，
-  // 其余按顺序 image[1..N-1]）。文件名 ref-1.png / ref-2.png 仅供调试，
-  // 上游不解析。
+  // 其余按顺序 image[1..N-1]）。文件名 ref-1.png / ref-2.<ext> 与 Blob
+  // type 同源（normalize 后），保证 OpenAI / wellapi 协议按 mime 解析。
+  // 上游不严格解析文件名后缀，仅作调试。
   const form = new FormData();
   for (let i = 0; i < downloaded.length; i++) {
     const { buf, mime } = downloaded[i] as { buf: ArrayBuffer; mime: string };
+    const ext = mimeToExt(mime);
     form.append(
       "image",
       new Blob([new Uint8Array(buf)], { type: mime }),
-      `ref-${i + 1}.${mime.split("/")[1] ?? "png"}`
+      `ref-${i + 1}.${ext}`
     );
   }
   form.append("model", "gpt-image-2");

@@ -128,7 +128,9 @@ export default async function AdminTicketsPage() {
             <h3 className="text-sm font-medium">待处理</h3>
           </div>
           <div className="p-6 pt-0">
-            <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{openCount}</div>
+            <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+              {openCount}
+            </div>
           </div>
         </div>
         <div className="rounded-lg border bg-card text-card-foreground shadow-sm">

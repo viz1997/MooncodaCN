@@ -378,7 +378,9 @@ export default function AdminUsersPage() {
             <h3 className="text-sm font-medium">管理员</h3>
           </div>
           <div className="p-6 pt-0">
-            <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{adminCount}</div>
+            <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+              {adminCount}
+            </div>
           </div>
         </div>
         <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
@@ -396,7 +398,9 @@ export default function AdminUsersPage() {
             <h3 className="text-sm font-medium">已封禁</h3>
           </div>
           <div className="p-6 pt-0">
-            <div className="text-2xl font-bold text-red-600 dark:text-red-400">{bannedCount}</div>
+            <div className="text-2xl font-bold text-red-600 dark:text-red-400">
+              {bannedCount}
+            </div>
           </div>
         </div>
       </div>

@@ -31,9 +31,9 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
 import { imageJob } from "@/db/schema";
+import { getClientIp, logImageGen } from "@/features/image-gen";
 import { advanceImageGenJob } from "@/features/image-gen/lib/generation-service";
 import { toPublicJobView } from "@/features/image-gen/lib/poll-public-view";
-import { getClientIp, logImageGen } from "@/features/image-gen";
 import { withApiLogging } from "@/lib/api-logger";
 import { auth } from "@/lib/auth";
 import {
@@ -98,11 +98,7 @@ async function postHandler(
     // session owner 校验通过,落到下面统一推进逻辑
   } else {
     // 路径 2: x-api-key —— mp / 外部集成方
-    const { verify, errorResponse } = await requireExternalApiKey(
-      _req,
-      ip,
-      rl
-    );
+    const { verify, errorResponse } = await requireExternalApiKey(_req, ip, rl);
     if (errorResponse) return errorResponse;
     // requireExternalApiKey 在 dev 关校验(isExternalApiKeyRequired=false)时
     // 返 verify=null。本端点是 production 必校验,verify=null 视为无 key → 401

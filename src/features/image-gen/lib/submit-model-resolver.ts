@@ -44,10 +44,11 @@ import type { ImageModelId } from "./image-models/types";
  *   - `2.5-fast`  → apimart_gpt_image            (apimart 速度/成本档,营销名「快」)
  *   - `2.5-plus`  → apimart_gpt_image_sunburst   (apimart 质量档,营销名「PLUS」)
  */
-export const MODEL_ALIASES: Readonly<Record<string, ImageModelId>> = Object.freeze({
-  "2.5-fast": "apimart_gpt_image",
-  "2.5-plus": "apimart_gpt_image_sunburst",
-});
+export const MODEL_ALIASES: Readonly<Record<string, ImageModelId>> =
+  Object.freeze({
+    "2.5-fast": "apimart_gpt_image",
+    "2.5-plus": "apimart_gpt_image_sunburst",
+  });
 
 /**
  * 把任意输入字符串归一化为规范 ImageModelId(可能命中 alias,也可能本身就在白名单)。
@@ -59,7 +60,7 @@ export const MODEL_ALIASES: Readonly<Record<string, ImageModelId>> = Object.free
  */
 export function normalizeModelAlias(
   input: string,
-  allowedModels: readonly ImageModelId[],
+  allowedModels: readonly ImageModelId[]
 ): {
   canonical: ImageModelId | null;
   alias: string | null;
@@ -112,7 +113,7 @@ export interface ResolveSelectedModelResult {
 }
 
 export function resolveSelectedModel(
-  input: ResolveSelectedModelInput,
+  input: ResolveSelectedModelInput
 ): ResolveSelectedModelResult {
   const { bodyModel, maskModel, allowedModels, fallback } = input;
 

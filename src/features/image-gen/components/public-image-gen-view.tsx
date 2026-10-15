@@ -704,7 +704,7 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
               allowedCapabilities: null,
               allowedColors: null,
               promptTemplateId: null,
-            }),
+            })
           );
           setMasks(adaptedMasks);
         }
@@ -722,7 +722,7 @@ export function PublicImageGenView({ user }: { user?: PublicImageGenUser }) {
               coverUrl: l.cover,
               sortOrder: l.sortOrder,
               maskCount: l.maskCount,
-            }),
+            })
           );
           setProductLines(adaptedLines);
         }

@@ -89,6 +89,7 @@ type WorkbenchTemplate = ProductEffect & {
   candidateCount: number;
   outputMode?: "grid" | "separate";
 };
+
 import {
   generateImageAction,
   listImageJobsAction,
@@ -1132,7 +1133,8 @@ export function GenerateWorkbenchView({
   // derived 一个 effectiveSelectedMask 兜底首个 active 模板 —— 不需要把
   // templates prop 当 useEffect 依赖（避免 mount-load effect 被 deps 推着
   // 重跑，破坏"只读一次 localStorage"语义）。
-  const effectiveSelectedMask = selectedMask || activeTemplates[0]?.maskId || "";
+  const effectiveSelectedMask =
+    selectedMask || activeTemplates[0]?.maskId || "";
   const selectedTemplate = activeTemplates.find(
     (t) => t.maskId === effectiveSelectedMask
   );
@@ -2866,7 +2868,8 @@ export function GenerateWorkbenchView({
                         <>
                           <div className="-mx-1 px-1 flex gap-1.5 overflow-x-auto pb-1 snap-x">
                             {activeTemplates.map((tpl) => {
-                              const selected = tpl.maskId === effectiveSelectedMask;
+                              const selected =
+                                tpl.maskId === effectiveSelectedMask;
                               return (
                                 <button
                                   key={tpl.maskId}

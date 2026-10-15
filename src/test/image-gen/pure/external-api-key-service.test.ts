@@ -251,20 +251,22 @@ describe("parseAllowedMasks", () => {
 // 6. verifyExternalApiKey —— 6 条拒绝路径 + 1 条 ok
 // ============================================
 
-function seedRow(overrides: Partial<{
-  id: string;
-  name: string;
-  keyHash: string;
-  keyPrefix: string;
-  status: "active" | "disabled";
-  monthlyQuota: number;
-  monthlyCalls: number;
-  monthlyCallsResetAt: Date;
-  totalCalls: number;
-  lastUsedAt: Date | null;
-  allowedMasks: string;
-  deletedAt: Date | null;
-}>): void {
+function seedRow(
+  overrides: Partial<{
+    id: string;
+    name: string;
+    keyHash: string;
+    keyPrefix: string;
+    status: "active" | "disabled";
+    monthlyQuota: number;
+    monthlyCalls: number;
+    monthlyCallsResetAt: Date;
+    totalCalls: number;
+    lastUsedAt: Date | null;
+    allowedMasks: string;
+    deletedAt: Date | null;
+  }>
+): void {
   const id = overrides.id ?? "eak_test";
   dbState.rows.set(id, {
     id,

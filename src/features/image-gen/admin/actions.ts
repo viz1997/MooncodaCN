@@ -805,7 +805,12 @@ export const updateExternalApiKeyAdminAction = withImageGenAdminAction(
   .action(async ({ parsedInput }) => {
     const { id, ...rest } = parsedInput;
     // 没传任何修改字段时拒绝（service 层 silent noop 不友好）
-    const updatableKeys = ["name", "status", "monthlyQuota", "allowedMasks"] as const;
+    const updatableKeys = [
+      "name",
+      "status",
+      "monthlyQuota",
+      "allowedMasks",
+    ] as const;
     if (!updatableKeys.some((k) => rest[k] !== undefined)) {
       throw new Error("至少要修改一个字段");
     }

@@ -1,11 +1,10 @@
 /* 一次性验证脚本 —— 确认 0044 migration 已落库 */
+
+import { resolve } from "node:path";
 import { config as dotenvConfig } from "dotenv";
 import { expand as dotenvExpand } from "dotenv-expand";
-import { resolve } from "node:path";
 
-dotenvExpand(
-  dotenvConfig({ path: resolve(process.cwd(), ".env.local") })
-);
+dotenvExpand(dotenvConfig({ path: resolve(process.cwd(), ".env.local") }));
 dotenvExpand(dotenvConfig({ path: resolve(process.cwd(), ".env") }));
 
 async function main() {

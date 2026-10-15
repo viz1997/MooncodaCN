@@ -72,10 +72,7 @@ interface QuotaStat {
   level: "ok" | "amber" | "red";
 }
 
-function computeQuota(
-  monthlyCalls: number,
-  monthlyQuota: number
-): QuotaStat {
+function computeQuota(monthlyCalls: number, monthlyQuota: number): QuotaStat {
   // monthlyQuota ≤ 0 表示无限（admin 给的语义）
   if (monthlyQuota <= 0) {
     return { percent: 0, level: "ok" };
@@ -456,7 +453,9 @@ export function ExternalApiKeysAdminView() {
                           </code>
                           <button
                             type="button"
-                            onClick={() => handleCopyText(k.keyPrefix, "脱敏 Key")}
+                            onClick={() =>
+                              handleCopyText(k.keyPrefix, "脱敏 Key")
+                            }
                             className="text-muted-foreground hover:text-foreground p-1"
                             aria-label="copy masked"
                             title="复制脱敏形式"
@@ -738,9 +737,7 @@ export function ExternalApiKeysAdminView() {
               </button>
               <button
                 type="button"
-                onClick={() =>
-                  handleCopyText(freshlyCreated.rawKey, "API Key")
-                }
+                onClick={() => handleCopyText(freshlyCreated.rawKey, "API Key")}
                 className="text-muted-foreground hover:text-foreground p-1"
                 aria-label="copy"
               >
@@ -761,8 +758,8 @@ export function ExternalApiKeysAdminView() {
             <div className="bg-rose-500/5 border border-rose-500/20 rounded-lg p-3 flex items-start gap-2">
               <AlertCircle className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
               <p className="text-xs text-muted-foreground">
-                警告：DB
-                只存明文的 SHA-256 哈希，原始 key 一旦丢失无法找回。如客户遗失，请删除后重新创建。
+                警告：DB 只存明文的 SHA-256 哈希，原始 key
+                一旦丢失无法找回。如客户遗失，请删除后重新创建。
               </p>
             </div>
           </div>

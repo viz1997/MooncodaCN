@@ -355,6 +355,33 @@ export const gptImage2Adapter: ImageModelAdapter = {
 // 2026-09-11：Nano Banana Pro 已精简移除；callGeminiImageAPI 现在只为 Nano Banana 2 服务。
 // 保留 helper 命名结构（modelId/model 参数化）以便后续若再扩展 Gemini 系列时复用。
 
+/**
+ * HEAD 嗅探 HTTPS URL 的真实 Content-Type，失败时回退 image/png。
+ *
+ * 修复早期版本硬编码 image/png 的 bug:mp 上传 webp / jpg 时
+ * Gemini 偶发按 image/png 解码失败。HEAD 8s 超时——参照 gpt-image
+ * poll 的保守策略,避免签名 URL / 跨网 URL 拖死 generate 调用。
+ *
+ * 返回值永远是 image/* 字符串(失败时降级 image/png),调用方无需
+ * 再判空。
+ */
+async function sniffHttpsContentType(url: string): Promise<string> {
+  try {
+    const headRes = await fetch(url, {
+      method: "HEAD",
+      signal: AbortSignal.timeout(8_000),
+    });
+    const ct = headRes.headers.get("content-type");
+    if (ct) {
+      const main = ct.split(";")[0]?.trim().toLowerCase();
+      if (main?.startsWith("image/")) return main;
+    }
+  } catch {
+    // HEAD 不支持 / 超时 / 跨域拒绝 → 降级返回
+  }
+  return "image/png";
+}
+
 async function callGeminiImageAPI(
   modelId: ImageModelId,
   model: string,
@@ -380,6 +407,13 @@ async function callGeminiImageAPI(
   // 参考图：data URI 抽 base64 走 inline_data；https URL 走 file_data。
   // 2026-09-03 V1 多图：取 imageUrls[]（兼容旧 imageUrl 单数）；
   // 多张按顺序拼 parts，Gemini 支持 inline_data/file_data 多个。
+  //
+  // 2026-10-15：HTTPS URL 不再硬编码 image/png——mp 客户端上传 webp
+  // 时 Gemini 偶发按 image/png 解码失败。改为 HEAD 嗅探真实
+  // Content-Type（8s 超时）；HEAD 失败或非 image/ mime 时回退
+  // image/png（保留向后兼容）。Gemini 宽容度本来就比 apimart /
+  // gpt-image-2 高（接受 HEIC/HEIF/GIF 等），所以这里只要"诚实标
+  // 注 mime"就能让 mp 走通的 webp/jpg 直接通过，无需强制转码。
   const refUrls =
     req.imageUrls && req.imageUrls.length > 0
       ? req.imageUrls
@@ -395,8 +429,9 @@ async function callGeminiImageAPI(
         });
       }
     } else if (/^https?:\/\//.test(refUrl)) {
+      const sniffedMime = await sniffHttpsContentType(refUrl);
       parts.push({
-        file_data: { file_uri: refUrl, mime_type: "image/png" },
+        file_data: { file_uri: refUrl, mime_type: sniffedMime },
       });
     }
   }
@@ -676,9 +711,7 @@ function resolveApimartSize(req: GenerateImageRequest): string {
       const bothMultipleOf16 = w % 16 === 0 && h % 16 === 0;
       const withinLimit = w <= 3840 && h <= 3840;
       // 直接透传精确像素；不满足尺寸规则时降级到 ratio
-      return bothMultipleOf16 && withinLimit
-        ? size
-        : pixelToRatio(w, h);
+      return bothMultipleOf16 && withinLimit ? size : pixelToRatio(w, h);
     }
   }
   return "auto";
@@ -915,9 +948,7 @@ function createApimartAdapter(opts: {
           ? await proxyImageInputsToR2(refUrls, traceHint)
           : [];
       const proxiedMaskUrl = req.maskUrl
-        ? (
-            await proxyImageInputsToR2([req.maskUrl], traceHint)
-          )[0]
+        ? (await proxyImageInputsToR2([req.maskUrl], traceHint))[0]
         : undefined;
 
       const body: Record<string, unknown> = {
@@ -929,7 +960,7 @@ function createApimartAdapter(opts: {
       };
       // 图生图：传 image_urls（apimart 文档用 image_urls 复数）
       const validRefUrls = proxiedRefUrls.filter(
-        (u): u is string => typeof u === "string",
+        (u): u is string => typeof u === "string"
       );
       if (validRefUrls.length > 0) {
         body.image_urls = validRefUrls;

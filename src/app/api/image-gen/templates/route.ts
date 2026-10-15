@@ -27,7 +27,7 @@
 
 import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { getEffects, getClientIp, logImageGen } from "@/features/image-gen";
+import { getClientIp, getEffects, logImageGen } from "@/features/image-gen";
 import { getActiveLinesFromDb } from "@/features/image-gen/lib/db-lines";
 import {
   checkRateLimit,
