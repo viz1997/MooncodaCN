@@ -35,9 +35,9 @@ interface TaroCompressImageOptions {
 interface TaroFileSystemManager {
   readFile: (opts: {
     filePath: string;
-    /** 不传 → ArrayBuffer;传 'base64' → base64 字符串 */
+    /** 不传 → ArrayBuffer / Uint8Array(视 base lib 版本);传 'base64' → base64 字符串 */
     encoding?: "" | "base64";
-    success?: (res: { data: ArrayBuffer | string }) => void;
+    success?: (res: { data: ArrayBuffer | ArrayBufferView | string }) => void;
     fail?: (err: unknown) => void;
   }) => void;
 }
@@ -87,11 +87,26 @@ function taroReadFileAsArrayBuffer(filePath: string): Promise<ArrayBuffer> {
     fsm.readFile({
       filePath,
       success: (res) => {
+        // 1. 老版本 Taro base lib(<3.17.3):res.data 直接是 ArrayBuffer
         if (res.data instanceof ArrayBuffer) {
           resolve(res.data);
           return;
         }
-        // Taro RN 偶尔返 base64 字符串(encoding 被外部设过),兜底解码
+        // 2. 新版本 Taro base lib(≥3.17.3):res.data 是 Uint8Array 等
+        //    typed array。ArrayBuffer.isView 同时识别 Uint8Array / Int8Array
+        //    / DataView 等。必须 .slice() 出独立副本,否则 shared underlying
+        //    buffer 可能被 view 之外的代码复用时回收 / 写入。
+        if (ArrayBuffer.isView(res.data)) {
+          const view = res.data;
+          resolve(
+            view.buffer.slice(
+              view.byteOffset,
+              view.byteOffset + view.byteLength,
+            ) as ArrayBuffer
+          );
+          return;
+        }
+        // 3. Taro RN 偶尔返 base64 字符串(encoding 被外部设过),兜底解码
         if (typeof res.data === "string") {
           try {
             const bin = atob(res.data);
@@ -105,7 +120,9 @@ function taroReadFileAsArrayBuffer(filePath: string): Promise<ArrayBuffer> {
           }
           return;
         }
-        reject(new Error("readFile 返回类型非 ArrayBuffer/string"));
+        reject(
+          new Error("readFile 返回类型非 ArrayBuffer/ArrayBufferView/string")
+        );
       },
       fail: (err) =>
         reject(
