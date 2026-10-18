@@ -176,6 +176,12 @@ export interface ProductCapability {
   description: { zh: string; en: string };
   /** 产品封面图 URL */
   cover: string;
+  /**
+   * 产品基价（分）—— 来自 product-catalog.ts 的 BASE_PRICE_CENTS。
+   * 前端拼 totalPrice = basePriceCents + sizes[].priceDeltaCents +
+   * accessories[].variants[].priceDeltaCents + style.surchargeCents。
+   */
+  basePriceCents: number;
   /** 该产品可选尺寸档 */
   sizes: ProductSizeDef[];
   /** 该产品聚合自 templates[].visualStyles 的去重集合（仅展示用） */

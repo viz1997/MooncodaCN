@@ -6,7 +6,7 @@ NextDevTpl 暴露给小程序的 TypeScript SDK 参考实现。把本目录(`src
 
 ## 当前版本
 
-`VERSION` 文件 — `1.6.0`,详见文末 [Changelog](#changelog)。
+`VERSION` 文件 — `1.6.1`,详见文末 [Changelog](#changelog)。
 
 ## 文件清单
 
@@ -499,6 +499,27 @@ const total =
 ---
 
 ## Changelog
+
+### v1.6.1 — 2026-10-18
+
+**新增(产品基价字段)**
+
+- 🆕 `ProductCapability.basePriceCents: number` —— 产品基价(分)。
+  来自 server 端 `BASE_PRICE_CENTS` 字典,与 `mock-catalog.ts` 对齐。
+  前端拼 totalPrice = base + size.delta + variant.delta + style.surcharge。
+
+**Server 端配套**
+
+- 后端:`src/features/gpt-image/lib/product-catalog.ts` 新增
+  `BASE_PRICE_CENTS` + `getBasePriceCents(code)` helper
+- 后端:`src/db/image-gen-types.ts` `ProductCapability` 接口加
+  `basePriceCents: number` 字段
+- 后端:`src/features/image-gen/lib/product-capability.ts` `assemble`
+  阶段填充 `basePriceCents: BASE_PRICE_CENTS[code] ?? 0`
+- 后端:`src/features/storefront/lib/mock-catalog.ts` 改 import 真理
+  源(消除本地副本,避免漂移)
+
+> 兼容性:纯加法变更,旧业务代码忽略 `basePriceCents` 字段无影响。
 
 ### v1.6.0 — 2026-10-18
 

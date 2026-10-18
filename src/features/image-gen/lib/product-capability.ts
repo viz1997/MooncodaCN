@@ -42,6 +42,7 @@ import {
   getProductMeta,
   getProductType,
   PRODUCT_META,
+  BASE_PRICE_CENTS,
 } from "@/features/gpt-image/lib/product-catalog";
 
 /* -------------------------------------------------------------------------- */
@@ -363,6 +364,7 @@ export function assembleProductCapabilities(
       displayName: productMeta.displayName,
       description: productMeta.description,
       cover: templates[0]?.cover ?? "",
+      basePriceCents: BASE_PRICE_CENTS[code] ?? 0,
       sizes,
       visualStyles: Array.from(visualStylesSet.values()),
       accessories,

@@ -677,6 +677,21 @@ describe("assembleProductCapabilities", () => {
     const r = out.find((p) => p.productTypeCode === "R")!;
     expect(r.cover).toBe("https://example.com/r.png");
   });
+
+  it("basePriceCents 来自硬编码字典,前端可拼 totalPrice = base + size.delta + variant.delta", () => {
+    const out = assembleProductCapabilities(
+      effects,
+      variantsByProduct,
+      null,
+      null
+    );
+    const r = out.find((p) => p.productTypeCode === "R")!;
+    // R 钥匙扣 ¥19
+    expect(r.basePriceCents).toBe(1900);
+    const m = out.find((p) => p.productTypeCode === "M")!;
+    // M 手办 ¥199
+    expect(m.basePriceCents).toBe(19900);
+  });
 });
 
 // ----------------------------------------------------------------------

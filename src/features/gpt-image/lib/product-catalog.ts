@@ -599,3 +599,29 @@ export function getAccessoryMeta(
   if (!code) return null;
   return ACCESSORY_META[code as AccessoryCode] ?? null;
 }
+
+// ============================================
+// 产品基价字典 —— 2026-10-18 v1.6.1
+// ============================================
+//
+// 用途：/api/image-gen/products 在 ProductCapability.basePriceCents 上暴露，
+// 前端拼 totalPrice = base + size.delta + variant.delta + style.surcharge。
+// 与 mock-catalog.ts 的 BASE_PRICE_CENTS 对齐；这里是真理源，mock-catalog
+// 反向 import（避免两处漂移）。Medusa 接管商品后这里改成读 Medusa 价格即可。
+//
+// 单位：分。改值需同步 PR 描述（订单归因 + admin 后台依赖此字典）。
+// ============================================
+export const BASE_PRICE_CENTS: Readonly<Record<string, number>> = {
+  R: 1900, // ¥19 钥匙扣
+  A: 2400, // ¥24 异性钥匙扣
+  P: 3900, // ¥39 冰箱贴
+  RM: 4900, // ¥49 相框
+  LB: 5900, // ¥59 皮革徽章
+  M: 19900, // ¥199 手办
+};
+
+/** 找产品码的基价（分）；找不到返 null（前端按 0 处理） */
+export function getBasePriceCents(code: string | null | undefined): number | null {
+  if (!code) return null;
+  return BASE_PRICE_CENTS[code] ?? null;
+}

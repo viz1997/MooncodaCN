@@ -446,6 +446,15 @@ export interface ProductCapability {
   description: { zh: string; en: string };
   /** 产品封面图 URL */
   cover: string;
+  /**
+   * 产品基价（分）—— 来自 server 端 BASE_PRICE_CENTS 字典（R=1900 / A=2400 /
+   * P=3900 / RM=4900 / LB=5900 / M=19900）。前端拼 totalPrice：
+   *   basePriceCents
+   *   + sizes[i].priceDeltaCents
+   *   + accessories[k].variants[v].priceDeltaCents
+   *   + visualStyles[j].surchargeCents（如果选了非默认风格）
+   */
+  basePriceCents: number;
   /** 该产品可选尺寸档 */
   sizes: ProductSizeDef[];
   /** 该产品聚合自 templates[].visualStyles 的去重集合（仅展示用） */

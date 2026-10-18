@@ -13,6 +13,7 @@
 
 import {
   type AccessoryCode,
+  BASE_PRICE_CENTS,
   getProductType,
   PRODUCT_TYPES,
 } from "@/features/gpt-image/lib/product-catalog";
@@ -169,17 +170,8 @@ const SIZES_BY_TYPE: Record<ProductTypeCode, Size[]> = {
 /*  12 个 mock products(对齐 atelier 4+4+4)                                 */
 /* -------------------------------------------------------------------------- */
 
-/**
- * 产品基价(分)字典
- */
-const BASE_PRICE_CENTS: Record<ProductTypeCode, number> = {
-  R: 1900, // ¥19 钥匙扣
-  A: 2400, // ¥24 异性钥匙扣
-  P: 3900, // ¥39 冰箱贴
-  RM: 4900, // ¥49 相框
-  LB: 5900, // ¥59 皮革徽章
-  M: 19900, // ¥199 手办
-};
+// 产品基价(分)字典 —— 真理源在 product-catalog.ts 的 BASE_PRICE_CENTS,
+// 这里直接 import 用(切真 Medusa 时统一改成读 Medusa 价格)。
 
 interface MockProductSeed {
   handle: string;
@@ -492,7 +484,7 @@ function buildTypeLabel(code: ProductTypeCode, lang: "zh" | "en"): string {
 function buildMockProducts(): StorefrontProduct[] {
   return SEEDS.map((seed) => {
     const series = findSeries(seed.seriesHandle);
-    const basePriceCents = BASE_PRICE_CENTS[seed.productTypeCode];
+    const basePriceCents = BASE_PRICE_CENTS[seed.productTypeCode] ?? 0;
     return {
       id: `prod_${seed.handle}`,
       handle: seed.handle,
