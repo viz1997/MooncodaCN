@@ -20,6 +20,10 @@ export {
   proxyImageUrl,
   submitGenerate,
 } from "./image-gen";
+// v1.4.0 起 SDK 暴露 readTaroFileAsArrayBuffer 给 mp 业务自取 Taro
+// tempFilePath → ArrayBuffer。原 publicUploadDirectFromMp 内部用的就是
+// 这个逻辑,现在不再包成"上传助手",让业务自己组合 Blob + publicUploadDirect。
+export { readTaroFileAsArrayBuffer } from "./image-utils";
 // 订单预览流
 export {
   cancelOrder,
@@ -35,6 +39,8 @@ export {
   selectCandidate,
   stopOrderGeneration,
 } from "./orders";
+// 产品能力接口(v1.6.0 起)
+export { getProduct, listProducts } from "./products";
 // 配置 & 错误
 export {
   getSdkApiKey,
@@ -51,6 +57,9 @@ export {
 // 走独立部署的 Medusa Store API + 官方 @medusajs/medusa-js SDK。
 // 类型
 export type {
+  AccessoryCategory,
+  AccessoryDef,
+  AccessoryVariantDef,
   ApiEnvelope,
   // 公共
   ApiError,
@@ -76,6 +85,12 @@ export type {
   OrderUploadUrlRequest,
   OrderUploadUrlResponse,
   PhotosListResponse,
+  ProductCapabilities,
+  ProductCapability,
+  ProductCategory,
+  ProductListResponse,
+  ProductSizeDef,
+  ProductTemplateSummary,
   PromptTemplatesResponse,
   // 生图
   PublicGenerateRequest,
@@ -87,6 +102,8 @@ export type {
   PublicUploadUrlResponse,
   QuotaResponse,
   SdkConfig,
+  // 模板样式(v1.5.0 起,templates[i].styles 元素类型)
+  TemplateStyle,
   // 图片代理
   ThumbnailQuery,
   // 认证
@@ -104,7 +121,3 @@ export {
   publicUploadDirect,
   publicUploadUrl,
 } from "./upload";
-// v1.4.0 起 SDK 暴露 readTaroFileAsArrayBuffer 给 mp 业务自取 Taro
-// tempFilePath → ArrayBuffer。原 publicUploadDirectFromMp 内部用的就是
-// 这个逻辑,现在不再包成"上传助手",让业务自己组合 Blob + publicUploadDirect。
-export { readTaroFileAsArrayBuffer } from "./image-utils";

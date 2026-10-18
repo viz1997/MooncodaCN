@@ -1089,6 +1089,21 @@ export const promptTemplate = pgTable("prompt_template", {
    * - ["leather"] → 只允许皮套
    */
   allowedAccessories: text("allowed_accessories"),
+  /**
+   * 2026-10-16 v1.5.0：模板视觉风格（JSON 数组，每个 TemplateStyle 一项）。
+   * - 空数组 / null → 该模板无样式选项，小程序 SDK 不渲染风格 chip
+   * - 非空 → 用户在生图页可选；提交时 aiStyleId 必须命中本数组之一
+   *
+   * 与 productEffect.config.style（工艺风格）正交：前者存「关键提示词」
+   * （Q 版 / 写实 / 动漫），后者存「工艺类型」（浮雕 / 雕刻 / 注塑）。
+   *
+   * 字段类型从 image-gen-types 导入，保持 TypeScript strict 下 schema
+   * 字段类型与持久化类型一致（避免手写 struct drift）。
+   */
+  styles: json("styles")
+    .$type<import("./image-gen-types").TemplateStyle[]>()
+    .notNull()
+    .default([]),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -2058,3 +2073,70 @@ export const externalApiKey = pgTable(
 
 export type ExternalApiKey = typeof externalApiKey.$inferSelect;
 export type NewExternalApiKey = typeof externalApiKey.$inferInsert;
+
+// ============================================
+// 产品配件变体表 (ProductAccessoryVariant) — 2026-10-18 v1.6.0
+// ============================================
+//
+// 用途：每个 (productTypeCode, accessoryCode) 下挂一组变体 —— 例如
+// R + leather 挂 5 色（棕/黑/红/白/原色），R + braided_rope 挂 8 色，
+// M + glass_cover 挂 3 个尺寸。供 /api/image-gen/products 接口暴露给
+// 小程序 / 网页端做配置 UI；价格按 priceDeltaCents 累加。
+//
+// 与硬编码字典的关系：
+// - 硬编码字典（PRODUCT_TYPES / ACCESSORIES）存「哪些产品码 + 哪些配件
+//   code」是合法组合 —— 应用层校验用。
+// - 本表存「配件 code 下面挂哪些变体」—— UI 渲染 + 价差展示用。
+// - 无变体的配件（pvc / bracket / metal / magnet）不在本表里，调用方按
+//   「variants: []」语义处理。
+//
+// 设计要点：
+// - (productTypeCode, accessoryCode, variantCode) 复合 unique 防重复 seed
+// - isActive=false 用于软下架某个变体（不删行）
+// - swatch 可空 —— 尺寸类变体（如 glass_4）无颜色 hex
+// - sortOrder 用于 UI 顺序展示
+// - 不加 DB FK（productTypeCode / accessoryCode 都是 string code，与
+//   现有 productEffect.productTypeCode / allowedAccessories JSON 列模式
+//   一致）
+//
+export const productAccessoryVariant = pgTable(
+  "product_accessory_variant",
+  {
+    id: text("id").primaryKey(),
+    /** 产品码（R / A / P / RM / LB / M），与 PRODUCT_TYPES.code 对齐 */
+    productTypeCode: text("product_type_code").notNull(),
+    /** 配件 code（leather / braided_rope / glass_cover 等），与 ACCESSORIES 对齐 */
+    accessoryCode: text("accessory_code").notNull(),
+    /** 变体 code，如 "leather_brown" / "rope_red" / "glass_4" */
+    variantCode: text("variant_code").notNull(),
+    /** 中文名 */
+    name: text("name").notNull(),
+    /** 英文名 */
+    nameEn: text("name_en").notNull(),
+    /** 颜色 hex（如 "#C0392B"），尺寸类变体可空 */
+    swatch: text("swatch"),
+    /** 加价（分）；0 = 不加价 */
+    priceDeltaCents: integer("price_delta_cents").notNull().default(0),
+    /** UI 排序；asc */
+    sortOrder: integer("sort_order").notNull().default(0),
+    /** 软下架（false = 隐藏） */
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    // 同 (productTypeCode, accessoryCode, variantCode) 唯一
+    uniqueIndex("pav_uniq_idx").on(
+      t.productTypeCode,
+      t.accessoryCode,
+      t.variantCode
+    ),
+    // 路由层按 (productTypeCode, accessoryCode, isActive) 查，加速
+    index("pav_lookup_idx").on(t.productTypeCode, t.accessoryCode, t.isActive),
+  ]
+);
+
+export type ProductAccessoryVariantRow =
+  typeof productAccessoryVariant.$inferSelect;
+export type NewProductAccessoryVariantRow =
+  typeof productAccessoryVariant.$inferInsert;

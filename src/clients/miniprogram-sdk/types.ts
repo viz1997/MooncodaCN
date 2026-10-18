@@ -167,6 +167,21 @@ export interface PublicGenerateRequest {
     | "apimart_gpt_image_sunburst";
   /** 模板 prompt 中的变量取值(模板定义的 form 字段);可选 */
   params?: Record<string, string>;
+  /**
+   * 2026-10-16 v1.5.0:视觉风格 ID(可选,从 listStyles() 拿)。
+   * 例 "ai_qversion" / "ai_anime" / "ai_watercolor" / "ai_lineart" /
+   * "ai_original"。
+   *
+   * 不传或传 "ai_original" → 等价于无风格,服务端不注入 prompt prefix;
+   * 传有效 id → 服务端把对应风格 prompt 拼到模板 prompt 之前(用户
+   * 自定义 prompt 仍追加在末尾)。无效 id 返 400 INVALID_STYLE。
+   *
+   * 计费:不影响 costCredits(风格仅 prompt 前缀,mp UI 自己用
+   * styles[i].surchargeCents / 100 显示「+¥15」提示)。
+   * 提示词内容(prompt 字段)是服务端 private,客户端拿不到 —— 也别尝试
+   * 从本字段或任何 field 拼出来。
+   */
+  aiStyleId?: string;
 }
 
 /** POST /api/image-gen/submit 响应 */
@@ -238,7 +253,54 @@ export interface PromptTemplatesResponse {
     /** cents(整数,展示时 /100) */
     costCredits: number;
     status: "active" | "inactive";
+    /**
+     * 2026-10-16 v1.5.0:该模板自带的视觉样式选项(每条模板独立)。空数
+     * 组 = 老模板未配 styles,mp 不渲染 chip。提交生图时 aiStyleId 必
+     * 须命中当前选中模板 styles 之一。
+     */
+    styles: TemplateStyle[];
   }>;
+}
+
+/**
+ * 模板视觉样式(2026-10-16 v1.5.0 新增,存在 templates[i].styles)
+ *
+ * 每个 promptTemplate 自带一组 TemplateStyle。用户选样式 = 选
+ * TemplateStyle.id,提交后服务端用对应 TemplateStyle.prompt 替换模板
+ * prompt 里的 `{{style}}` 占位符 —— 「替换关键提示词」语义。
+ *
+ * 字段挑选原则 —— 服务端 TemplateStyle 全字段为:
+ *   id / name / nameEn / prompt / surchargeCents / outputSize /
+ *   swatch / estimatedLatencySec
+ *
+ * SDK 端把 `prompt` 也暴露了(不同于早先设计的 private 隐藏),理由:
+ * 替换语义需要 SDK 知道自己选的是哪个 prompt(虽然不展示给用户)。后续
+ * 若 prompt 涉及商业秘密,可单独加 `promptPreview` 字段(管理员编辑过
+ * 的简介)替换暴露,不要直接隐藏。
+ *
+ * Taro UI 用法:用 swatch 做 chip 配色,surchargeCents / 100 显示「+¥15」
+ * 加价提示。
+ */
+export interface TemplateStyle {
+  /** 模板内唯一,如 "ai_qversion" / "ai_anime" / "ai_watercolor" / "ai_lineart" / "ai_original" */
+  id: string;
+  /** 中文名,如 "Q 版萌系" */
+  name: string;
+  /** 英文名,如 "Q-Version" */
+  nameEn: string;
+  /**
+   * 关键提示词 —— 服务端会用这个 prompt 替换模板 prompt 里的 `{{style}}`
+   * 占位符(详见 submitGenerate.aiStyleId 注释)。
+   */
+  prompt: string;
+  /** 加价(分);0 = 不加价,如 ai_original=0,ai_anime=2000。 */
+  surchargeCents: number;
+  /** 输出尺寸(server 端参考,目前所有样式都用 1024x1024) */
+  outputSize: "1024x1024" | "1536x1024" | "1024x1536";
+  /** UI swatch 颜色 hex,如 "#7A5A8C"。 */
+  swatch: string;
+  /** 预计耗时(秒);ai_original=0(直通) */
+  estimatedLatencySec: number;
 }
 
 /**
@@ -276,7 +338,138 @@ export interface PhotosListResponse {
 }
 
 // ============================================================================
-// 4. 订单预览流(/p/[token] 公开流,token 即凭证)
+// 4. 产品能力接口(/api/image-gen/products)—— 2026-10-18 v1.6.0 新增
+// ============================================================================
+
+/**
+ * 配件维度
+ * - material: 材质（皮/金属）
+ * - protection: 保护（PVC 罩/玻璃罩）
+ * - mount: 装配（支架/磁铁/底座）
+ * - decor: 装饰（编织绳）
+ */
+export type AccessoryCategory = "material" | "protection" | "mount" | "decor";
+
+/** 产品分类（与 mock-catalog STOREFRONT 概念对齐） */
+export type ProductCategory =
+  | "keychain"
+  | "shape-keychain"
+  | "magnet"
+  | "frame"
+  | "leather-badge"
+  | "figure";
+
+/** 配件变体（如 leather 棕色 / 编织绳红色 / 玻璃罩 4cm） */
+export interface AccessoryVariantDef {
+  /** 变体 code，模板内唯一，如 "leather_brown" / "rope_red" / "glass_4" */
+  code: string;
+  /** i18n 名称 */
+  name: { zh: string; en: string };
+  /** swatch hex（颜色类变体）；尺寸类变体为 null */
+  swatch?: string | null;
+  /** 加价（分）；0 = 不加价 */
+  priceDeltaCents: number;
+}
+
+/** 配件定义 */
+export interface AccessoryDef {
+  /** 配件 code（leather / pvc / bracket / metal / magnet / stand / glass_cover / braided_rope） */
+  code: string;
+  /** i18n 名称 */
+  name: { zh: string; en: string };
+  /** 配件维度分类 */
+  category: AccessoryCategory;
+  /** 默认加价（分）；变体可覆盖 */
+  priceDeltaCents: number;
+  /** 该配件要求的产品能力（启用门控；未定义 = 无门控） */
+  requiresCapability?:
+    | "canEngrave"
+    | "canLeatherColor"
+    | "canPvcProtection"
+    | "canLeatherExposed"
+    | "canHaveRemarks"
+    | "canPlatform"
+    | null;
+  /** 该配件的变体列表；空数组 = 无变体（如 magnet） */
+  variants: AccessoryVariantDef[];
+}
+
+/** 产品能力位 */
+export interface ProductCapabilities {
+  canEngrave: boolean;
+  canLeatherColor: boolean;
+  canPvcProtection: boolean;
+  canLeatherExposed: boolean;
+  canHaveRemarks: boolean;
+  canPlatform: boolean;
+}
+
+/** 产品尺寸档 */
+export interface ProductSizeDef {
+  /** 尺寸 code（cm 数字字符串，如 "4" / "6"） */
+  code: string;
+  /** i18n 标签 */
+  label: { zh: string; en: string };
+  /** 加价（分）；0 = 基准价 */
+  priceDeltaCents: number;
+}
+
+/** 产品下的 AI 模板摘要（嵌套在 ProductCapability.templates[]） */
+export interface ProductTemplateSummary {
+  /** 等同 maskId（productEffect.id），喂给 submitGenerate.maskId */
+  templateId: string;
+  /** i18n 名称 */
+  name: { zh: string; en: string };
+  /** 封面图 URL */
+  cover: string;
+  /** 模板基础积分（cents）；ui 展示时 /100 */
+  costCredits: number;
+  /** 候选输出模式 */
+  outputMode: "grid" | "separate";
+  /** 单次生图候选数（1/2/4/9） */
+  candidateCount: number;
+  /** 该模板自带的视觉风格数组（来自 promptTemplate.styles） */
+  visualStyles: TemplateStyle[];
+  /** 该模板允许的配件子集（来自 productEffect.allowedAccessories）；空 = 全量 */
+  allowedAccessories: string[];
+}
+
+/** 单个产品的完整能力定义（/api/image-gen/products 顶层数组元素） */
+export interface ProductCapability {
+  /** 产品码（R / A / P / RM / LB / M） */
+  productTypeCode: string;
+  /** 产品分类（与 mock-catalog 一致） */
+  category: ProductCategory;
+  /** i18n 显示名 */
+  displayName: { zh: string; en: string };
+  /** i18n 描述 */
+  description: { zh: string; en: string };
+  /** 产品封面图 URL */
+  cover: string;
+  /** 该产品可选尺寸档 */
+  sizes: ProductSizeDef[];
+  /** 该产品聚合自 templates[].visualStyles 的去重集合（仅展示用） */
+  visualStyles: TemplateStyle[];
+  /** 该产品可选配件（含变体） */
+  accessories: AccessoryDef[];
+  /** 该产品能力位（catalog + 模板覆盖合并后） */
+  capabilities: ProductCapabilities;
+  /** 该产品可用的 AI 模板列表 */
+  templates: ProductTemplateSummary[];
+}
+
+/** GET /api/image-gen/products 响应 */
+export interface ProductListResponse {
+  success: true;
+  /** 当前 API key 作用域（无 key = null）；前端可据此灰掉白名单外的产品 */
+  keyScope?: { keyName: string; allowedMasks: string[] } | null;
+  /** 响应 locale（"zh" | "en"），便于客户端核对 */
+  locale: "zh" | "en";
+  products: ProductCapability[];
+}
+
+// ============================================================================
+// 5. 订单预览流(/p/[token] 公开流,token 即凭证)
 // ============================================================================
 
 /** 订单状态机(与 promptOrder.status + previewShare.status 共享) */

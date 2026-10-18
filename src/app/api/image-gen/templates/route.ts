@@ -13,8 +13,8 @@
  * 看全量 active 模板)。
  *
  * 与 /api/image-gen/submit (POST) 的关系:
- *   templates → 拿 maskId 下拉 + productLine 分组
- *   submit    → 拿到的 maskId 提交生图
+ *   templates → 拿 maskId 下拉 + productLine 分组 + 每条模板的 styles
+ *   submit    → 拿到的 maskId + 选中的 aiStyleId 提交生图
  *
  * 白名单:allowedMasks 非空时只返白名单内的模板,productLines 仅含过滤后仍有
  * 可见 mask 的 productLineId。
@@ -23,6 +23,10 @@
  *   ({ productLines, templates } 顶层 + 字段重命名 maskId→id, previewUrl→cover,
  *    price→costCredits, status 用 active/inactive)。原 /api/public/generate GET
  *   返 masks + productLines 是为 /image-gen 内部工作台,命名不一致。
+ *
+ * 2026-10-16 v1.5.0:每条模板携带自有 `styles: TemplateStyle[]`
+ * (来自 promptTemplate.styles JSON 列)。SDK 据此渲染"风格 chip"。
+ * 没有 styles 的老模板(空数组)→ mp 不渲染 chip,等同于 v1.4.0 行为。
  */
 
 import { type NextRequest, NextResponse } from "next/server";
@@ -87,8 +91,9 @@ export async function GET(req: NextRequest) {
       // 白名单过滤后某 productLine 已无可见 mask → 整条隐藏,前端不显示空组
       .filter((l) => l.maskCount > 0);
 
-    // 一次性取所有关联 promptTemplate(outputMode + candidateCount),
-    // 避免 N+1。mask 没绑 template → 走兜底(candidateCount=1, outputMode=grid)
+    // 一次性取所有关联 promptTemplate(outputMode + candidateCount + styles),
+    // 避免 N+1。mask 没绑 template → 走兜底(candidateCount=1, outputMode=grid,
+    // styles=[])
     const templateIds = Array.from(
       new Set(
         activeEffects
@@ -100,7 +105,15 @@ export async function GET(req: NextRequest) {
       templateIds.length > 0
         ? await db.query.promptTemplate.findMany({
             where: (t, { inArray }) => inArray(t.id, templateIds),
-            columns: { id: true, candidateCount: true, outputMode: true },
+            columns: {
+              id: true,
+              candidateCount: true,
+              outputMode: true,
+              // 2026-10-16 v1.5.0:模板自带 styles(JSON 列),提交生图时
+              // aiStyleId 必须命中 mask 对应模板 styles 之一。这里一次
+              // 性拉出来,避免 N+1。
+              styles: true,
+            },
           })
         : [];
     const templateMap = new Map(templates.map((t) => [t.id, t] as const));
@@ -127,6 +140,12 @@ export async function GET(req: NextRequest) {
         // ProductEffect.status 仅 active/inactive;SDK 类型扩到 archived 但当前
         // 数据源没有 archived 状态,需要时再扩 productEffect.status enum
         status: m.status as "active" | "inactive",
+        // 2026-10-16 v1.5.0:模板自有样式数组,可能为空(老模板/未配)。
+        // 数组里每个 TemplateStyle 有 id / name / nameEn / prompt /
+        // surchargeCents / outputSize / swatch / estimatedLatencySec。
+        // mp SDK 端拿这里做 chip 渲染,submit 时把 aiStyleId 透传过来
+        // 做 {{style}} 占位符替换。
+        styles: tmpl?.styles ?? [],
       };
     });
 

@@ -6,7 +6,7 @@ NextDevTpl 暴露给小程序的 TypeScript SDK 参考实现。把本目录(`src
 
 ## 当前版本
 
-`VERSION` 文件 — `1.4.0`,详见文末 [Changelog](#changelog)。
+`VERSION` 文件 — `1.6.0`,详见文末 [Changelog](#changelog)。
 
 ## 文件清单
 
@@ -17,7 +17,7 @@ NextDevTpl 暴露给小程序的 TypeScript SDK 参考实现。把本目录(`src
 | `request.ts` | fetch 内核:Bearer + x-api-key 自动加 + 401 回调 + 超时 + multipart |
 | `auth.ts` | WeChat 登录(走 mp 自己的微信云,BFF 不参与) |
 | `upload.ts` | 公共桶 / 订单桶上传(formData + presigned PUT) |
-| `image-gen.ts` | 提交生图 + 轮询 + 模板 + 配额 + 我的资产 |
+| `image-gen.ts` | 提交生图 + 轮询 + 模板 + 风格类型 + 配额 + 我的资产 |
 | `orders.ts` | `/orders/[token]/**` 公共预览流(12 端点) |
 | `index.ts` | 统一出口 |
 | `MEDUSA_INTEGRATION.md` | **小程序 commerce 走真 Medusa 的接入指南** |
@@ -105,6 +105,7 @@ import {
   submitGenerate,
   pollImageTask,
   proxyImageUrl,
+  listTemplates,
 } from "@/api/sdk";
 
 // 5.1 上传参考图(mp 直传 R2,v1.4.0 推荐)
@@ -132,12 +133,38 @@ const blob = new Blob([readRes.data as BlobPart], { type: "image/jpeg" });
 
 const { url } = await publicUploadDirect(blob, "image/jpeg");
 
-// 5.2 提交生图(<1s 返 taskId,不阻塞等模型)
+// 5.2 拉产品线 + 模板 + 模板样式(进入生图页时一次)
+//     v1.5.0 起 templates[i].styles 是每条模板自带的视觉样式数组 ——
+//     用于生图页"风格 chip"渲染(Q版/动漫/水彩/线稿/原图)。
+//     选完 chip 后把对应的 templates[i].styles[j].id 作为 aiStyleId 透传。
+const { productLines, templates } = await listTemplates();
+const myTemplate = templates.find((t) => t.id === "R-cute-001");
+if (!myTemplate) throw new Error("没找到模板 R-cute-001");
+// myTemplate.styles = [
+//   { id: "ai_original",   name: "原图保留", surchargeCents: 0,    swatch: "#9CA3AF", ... },
+//   { id: "ai_qversion",   name: "Q 版萌系", surchargeCents: 1500, swatch: "#7A5A8C", ... },
+//   { id: "ai_anime",      name: "日漫风",   surchargeCents: 2000, swatch: "#E879F9", ... },
+//   { id: "ai_watercolor", name: "水彩手绘", surchargeCents: 1500, swatch: "#60A5FA", ... },
+//   { id: "ai_lineart",    name: "线稿简笔", surchargeCents: 1000, swatch: "#1F2937", ... },
+// ]
+
+// 5.3 提交生图(<1s 返 taskId,不阻塞等模型)
 const { taskId } = await submitGenerate({
-  maskId: "R-cute-001",  // 从 listTemplates 拿
+  maskId: "R-cute-001",  // 与 listTemplates() 拉出的模板 id 对齐
   imageUrls: [url],
   size: 6,
   count: 1,
+  // aiStyleId? v1.5.0 起可选,从 templates[i].styles[j].id 选,例:
+  //   "ai_original"   → 直通,不注入样式 prompt(默认行为)
+  //   "ai_qversion"   → Q 版萌系
+  //   "ai_anime"      → 日漫风
+  //   "ai_watercolor" → 水彩手绘
+  //   "ai_lineart"    → 线稿简笔
+  // 服务端会用此 id 对应的 styles[j].prompt 替换模板 prompt 里
+  // 的 `{{style}}` 占位符(替换关键提示词);模板 prompt 不含
+  // {{style}} 时 fallback 到 prepend。
+  // 不传或传 "ai_original" → 等价于无样式,行为与 v1.4.0 一致
+  aiStyleId: "ai_qversion",
   // model 选填:不传按 mask 推荐(默认 apimart_gpt_image)
   // - "apimart_gpt_image"            → 上游 gpt-image-2.5-flare(速度/成本优先)
   // - "apimart_gpt_image_sunburst"  → 上游 gpt-image-2.5-sunburst(质量优先,贵一档)
@@ -246,6 +273,167 @@ pollImageTask(taskId, { signal: controller.signal }).catch(() => {
 controller.abort();
 ```
 
+### 9. 模板视觉样式(Q版/动漫/水彩/线稿 —— v1.5.0 起)
+
+```ts
+import { listTemplates, submitGenerate } from "@/api/sdk";
+
+// 9.1 进入生图页时,先拉 mask 列表(listTemplates 一次到位):
+//     - productLines[i] 做产品线 Tab
+//     - templates[i]    做 mask 下拉 —— 同时每条模板自带 styles[]
+//                       用作"风格 chip"渲染
+const { productLines, templates } = await listTemplates();
+
+// 9.2 用户选 maskId 之后,从其 styles[] 数组里挑 id 当 aiStyleId
+const myMask = templates.find((t) => t.id === "R-cute-001");
+if (!myMask) throw new Error("没找到模板 R-cute-001");
+// myMask.steps 看 Section 5.2 注,这里继续。
+// 用户在 chip 上点 "Q 版萌系" → 拿其 id "ai_qversion":
+
+// 9.3 提交生图
+const { taskId } = await submitGenerate({
+  maskId: "R-cute-001",
+  imageUrls: [refUrl],
+  aiStyleId: "ai_qversion",      // ← 来自 myMask.styles[].id
+  size: 6,
+  count: 1,
+});
+```
+
+**样式如何应用到 prompt(服务端做的事,客户端不用关心)**
+
+每个 promptTemplate 自带 `styles: TemplateStyle[]`(后端存在
+`promptTemplate.styles` JSON 列)。提交生图时:
+
+1. 服务端校验 aiStyleId ∈ mask.styles(不在即 400 INVALID_STYLE)
+2. 取 mask.styles[i].prompt,替换模板 prompt 里的 `{{style}}` 占位符
+3. 模板 prompt 不含 `{{style}}` 占位符 → 服务端 fallback 把样式 prompt
+   prepend 到模板 prompt 之前(行为类似旧版,业务方写模板时建议显式加
+   `{{style}}` 占位符以更精确控制拼接位置)
+4. 不传 aiStyleId / 选了 `ai_original`(直通,prompt 空)→ 不注入样式,
+   行为与 v1.4.0 完全一致(零回归)
+
+**为什么做这个(背景)**
+
+产品模板 = 产品(mp 端选 mask 的语义就是选产品)。模板内分 N 种样式
+(Q版 / 写实 / 动漫 / 水彩 / 线稿),用户点哪个就把对应关键提示词替换
+到模板 prompt 里去 —— "替换关键提示词"语义,直接对齐。
+
+`productEffect.config.style`(工艺风格,relief/engraving/3d-figurine)
+和这些"视觉样式"是两回事,不要混淆。前者是生产工艺标注,后者是用户
+可见的视觉风格 chip。
+
+**兼容性**
+
+v1.4.0 不传 `aiStyleId` 行为零变化。v1.5.0 给已有 mp 升级是加性变更,
+业务代码不传 `aiStyleId` / 不读 `templates[i].styles` 都能继续工作;
+不返 `styles` 的老版本 SDK(≤ v1.4.0)拉到的响应会被忽略多余字段,不
+出错。
+
+---
+
+## 产品能力接口(`/api/image-gen/products` —— v1.6.0)
+
+v1.5.0 的 `listTemplates()` 以 maskId 维度组织,适合工作台视角。
+v1.6.0 新增 `listProducts()` 以 **产品** 维度组织 —— 更贴近小程序
+新品 UI 的心智模型:
+
+```
+产品 (R 钥匙扣)
+  ├─ sizes:        ["4", "5", "6"] cm
+  ├─ accessories:
+  │   ├─ leather        (5 色:棕/黑/红/白/原色)
+  │   ├─ metal          (无变体)
+  │   └─ braided_rope   (8 色:红/黑/蓝/绿/黄/紫/白/棕)
+  ├─ capabilities:  canEngrave / canLeatherExposed / canPvcProtection / ...
+  └─ templates:
+      ├─ templateId: "R-cute-001"
+      │   visualStyles: ["ai_original", "ai_qversion", "ai_anime", ...]
+      │   allowedAccessories: [...]
+      └─ templateId: "R-pixar-002"
+          ...
+```
+
+**典型流程**(v1.6.0 起推荐):
+
+```ts
+import { listProducts, submitGenerate, publicUploadDirect } from "@/api/sdk";
+
+// 1. 启动时拉一次(进入生图页前)
+const { products } = await listProducts();
+// products[0].productTypeCode === "R"
+// products[0].accessories  // [{ code: "leather", variants: [{code: "leather_brown", ...}, ...] }, ...]
+
+// 2. 用户在 UI 上选:产品 R + 尺寸 6cm + 配件 leather + 变体 leather_brown
+//    + 模板 templateId="R-cute-001" + 风格 aiStyleId="ai_qversion"
+const myProduct = products.find(p => p.productTypeCode === "R");
+const myTemplate = myProduct.templates.find(t => t.templateId === "R-cute-001");
+const myLeather = myProduct.accessories.find(a => a.code === "leather");
+const myColor = myLeather.variants.find(v => v.code === "leather_brown");
+
+// 3. 上传参考图 + 提交(同 v1.5.0)
+const { url } = await publicUploadDirect(blob, "image/jpeg");
+const { taskId } = await submitGenerate({
+  maskId: myTemplate.templateId,
+  imageUrls: [url],
+  aiStyleId: "ai_qversion",     // ← 来自 myTemplate.visualStyles[].id
+  size: 6,
+  count: 1,
+});
+```
+
+**字段语义**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `productTypeCode` | `"R"\|"A"\|"P"\|"RM"\|"LB"\|"M"` | 产品码 |
+| `category` | `ProductCategory` | 分类(UI 分组用) |
+| `displayName` | `{zh, en}` | i18n 名称 |
+| `description` | `{zh, en}` | i18n 描述 |
+| `sizes[]` | `ProductSizeDef[]` | 尺寸档;每个含 priceDeltaCents |
+| `visualStyles[]` | `TemplateStyle[]` | 该产品聚合自所有模板的视觉风格(去重) |
+| `accessories[]` | `AccessoryDef[]` | 配件清单;每个含 `variants[]`(空数组=无变体) |
+| `capabilities` | `ProductCapabilities` | 6 个能力位(刻字/皮革色/PVC/外露/备注/平台) |
+| `templates[]` | `ProductTemplateSummary[]` | 该产品可用的 AI 模板 |
+| `accessories[i].code` | `string` | 配件 code(leather/metal/braided_rope/glass_cover/...) |
+| `accessories[i].category` | `material\|protection\|mount\|decor` | 维度分类 |
+| `accessories[i].variants[].code` | `string` | 变体 code,如 `leather_brown` / `rope_red` / `glass_4` |
+| `accessories[i].variants[].swatch` | `string\|null` | 颜色 hex(尺寸类变体为 null) |
+| `accessories[i].variants[].priceDeltaCents` | `number` | 加价(分) |
+
+**新配件**(v1.6.0):
+
+- `braided_rope`(编织绳)—— 挂在 R 钥匙扣上,8 色变体(`rope_red/black/blue/green/yellow/purple/white/brown`)
+- `glass_cover`(玻璃罩)—— 挂在 M 手办上,3 种尺寸变体(`glass_4/6/8`)
+
+**价格计算**(前端做)
+
+```ts
+const total =
+  product.sizes.find(s => s.code === selectedSize)?.priceDeltaCents +
+  (selectedAccessoryVariant?.priceDeltaCents ?? 0) +
+  (selectedStyle?.surchargeCents ?? 0) +
+  template.costCredits;
+// UI 展示时 /100 显示「¥XX」
+```
+
+**缓存**:服务端 `Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=600`。
+产品字典变更后最长 10 分钟生效;若需立即生效,前端 query 加 `?cacheBust=<ts>` 兜底。
+
+**鉴权**:与 `listTemplates()` 一致 —— x-api-key > Bearer<key>,dev 模式关;已登录 BA session 也可走。
+
+**SDK 函数**
+
+- `listProducts({ productTypeCodes?, locale? })` —— 返回 `ProductListResponse`
+- `getProduct(code, locale?)` —— 单产品便利函数;不存在时返 `null`
+
+**类型导出**(`from "@/api/sdk"`):
+
+- `ProductListResponse`
+- `ProductCapability` / `ProductCategory` / `ProductCapabilities`
+- `ProductSizeDef` / `ProductTemplateSummary`
+- `AccessoryCategory` / `AccessoryDef` / `AccessoryVariantDef`
+
 ---
 
 ## 鉴权矩阵(2026-10-15 v1.3.0)
@@ -255,7 +443,7 @@ controller.abort();
 | `POST /api/image-gen/submit` | **x-api-key** | `submitGenerate()` |
 | `POST /api/image-gen/jobs/[jobId]/poll` | **x-api-key**(taskId 不可枚举) | `pollImageTask()` |
 | `GET /api/image-gen/quota` | **x-api-key** | `getQuota()` |
-| `GET /api/image-gen/templates` | **x-api-key** | `listTemplates()` |
+| `GET /api/image-gen/templates` | **x-api-key** | `listTemplates()`(也携带每个模板的 `styles: TemplateStyle[]`)|
 | `POST /api/public/upload-url` | IP 限流(免登录,R2 直传签名) | `publicUploadUrl()` + 自己 PUT,或 `publicUploadDirect()` 一键 |
 | `POST /api/public/upload` | IP 限流(免登录,BFF multipart 中转) | `publicUpload()`(历史路径,小图仍可用) |
 | `GET /api/image/task/[id]` | 免登录(taskId 不可枚举) | (兜底层,mp 一般用不到) |
@@ -284,6 +472,7 @@ controller.abort();
 | `API_KEY_QUOTA_EXCEEDED` | 429 | 月配额用尽 | 等下月 1 号重置,或联系 admin 提额 |
 | `MASK_NOT_ALLOWED` | 403 | 当前 key 不在白名单内 | UI 灰掉该 mask,提示「无权限」 |
 | `INVALID_MASK` | 400 | maskId 不存在或已下架 | 重新拉 listTemplates |
+| `INVALID_STYLE` | 400 | aiStyleId 不存在(非 5 项有效 ID 之一) | 重新拉 listStyles() |
 | `MISSING_PARAM` | 400 | 模板必填参数未传 | 检查 mask.variables |
 | `MODEL_NOT_ALLOWED` | 403 | 显式指定的 model 不在白名单 | 删 model 字段或换 BFF 支持的 model |
 | `MODEL_MAINTENANCE` | 503 | 模型维护中 | 提示稍后重试 |
@@ -297,6 +486,7 @@ controller.abort();
 - [ ] `setSdkApiKey("mk_pub_...")` 在 App 启动时调用
 - [ ] (可选)App 启动时调 `getQuota()` 缓存到 wx.storage,UI 显示配额
 - [ ] (可选)App 启动时调 `listTemplates()` 缓存到 wx.storage,UI 显示 mask 下拉
+- [ ] (可选)v1.5.0 起:`listTemplates()` 响应里 `templates[i].styles` 即"风格 chip"数据,无需单独拉
 - [ ] 用户进生图页时:
   1. `Taro.chooseImage({ sizeType: ['compressed'] })` → `tempFilePath`(iOS 微信内置 HEIC→JPG)
   2. `getFileSystemManager().readFile()` → `ArrayBuffer` → `Blob` → `publicUploadDirect(blob, 'image/jpeg')` 拿 R2 URL
@@ -309,6 +499,173 @@ controller.abort();
 ---
 
 ## Changelog
+
+### v1.6.0 — 2026-10-18
+
+**新增(产品能力接口)**
+
+面向小程序 / 网页端的「产品 + 配件 + 视觉风格 + 模板」一站式元数据接口。
+v1.5.0 的 `listTemplates()` 以 maskId 维度组织,适合工作台;v1.6.0 新增
+`listProducts()` 以 **产品** 维度组织,贴近小程序新品 UI 心智模型。
+
+**背景**:
+- 用户原话「3D手办里面设置了Q版、写实,3D手办配件可选底座、玻璃罩等,
+  钥匙扣配件可选编织绳颜色等」—— 产品要按「类型」分组展示,配件含
+  颜色变体
+- 硬编码字典 PRODUCT_TYPES / ACCESSORIES 已有产品 × 配件数据,但只
+  在 server 内部使用,小程序拿不到
+
+**变更**
+
+- 🆕 `GET /api/image-gen/products` 路由 —— 鉴权与 `listTemplates()`
+  一致(3-tier: dev / BA session / x-api-key);限流 ai tier(20/min);
+  缓存 60s 客户端 + 300s CDN + 600s SWR
+- 🆕 SDK 函数 `listProducts({ productTypeCodes?, locale? })` 返
+  `ProductListResponse`;`getProduct(code, locale?)` 单产品便利函数
+- 🆕 SDK 类型(全部从 `@/api/sdk` re-export):`ProductListResponse` /
+  `ProductCapability` / `ProductCategory` / `ProductCapabilities` /
+  `ProductSizeDef` / `ProductTemplateSummary` / `AccessoryCategory` /
+  `AccessoryDef` / `AccessoryVariantDef`
+- 🆕 `ai_realistic` 视觉风格 seed —— 写实摄影风格(`surchargeCents=2500`)
+- 🆕 新配件 code:`braided_rope`(编织绳,R 用)/ `glass_cover`(玻璃罩,M 用)
+- 🆕 DB 表 `product_accessory_variant` —— 配件变体持久化(颜色 / 尺寸)
+  - 复合 unique index `(product_type_code, accessory_code, variant_code)`
+  - seed 脚本 `src/db/seed-product-accessory-variants.ts`(19 行变体数据:
+    R leather 5 色 / R braided_rope 8 色 / M stand 3 种 / M glass_cover 3 种)
+- 🆕 mock-catalog.ts 新增 `BRAIDED_ROPE_COLORS` / `STAND_TYPES` /
+  `GLASS_COVER_SIZES` mock 常量(与 DB seed 对齐,storefront mock 流兜底)
+
+**Server 端配套**
+
+- 后端:`src/db/schema.ts` 加 `productAccessoryVariant` 表
+- 后端:`src/db/image-gen-types.ts` 加 9 个新接口(`ProductCapability`
+  / `AccessoryDef` 等)
+- 后端:`src/features/image-gen/lib/ai-styles.ts` 加 `ai_realistic` seed
+- 后端:`src/features/gpt-image/lib/product-catalog.ts`:
+  - `AccessoryCode` union 加 `glass_cover` / `braided_rope`
+  - `ACCESSORIES` 数组追加 2 项
+  - R 钥匙扣 `accessories[]` 加 `braided_rope`;M 手办加 `glass_cover`
+  - 新增 `PRODUCT_META` / `ACCESSORY_META` 字典(category + i18n 名称)
+  - 新增 `getProductMeta` / `getAccessoryMeta` helpers
+- 后端:`src/features/image-gen/lib/product-capability.ts` 新模块
+  - `loadProductCapabilities` / `assembleProductCapabilities` /
+    `parseProductTypeCodes` / `resolveLocale`
+- 后端:`src/app/api/image-gen/products/route.ts` 新路由
+
+**兼容性**
+
+- 加性变更 —— v1.5.0 的 `listTemplates()` 行为零变化,继续可用
+- 老 SDK(≤ v1.5.0)拿到 `/api/image-gen/products` 响应会忽略多余字段,
+  无破坏
+- 不传新参数(query 全部不传)行为零变化
+- DB 迁移:`pnpm db:push`(新增 product_accessory_variant 表)
+- DB seed:`pnpm tsx src/db/seed-product-accessory-variants.ts`(幂等)
+
+**迁移指南**(从 v1.5.0 升级)
+
+```diff
+- import { listTemplates, submitGenerate } from "@/api/sdk";
++ import { listProducts, submitGenerate } from "@/api/sdk";
+
+  // 老 SDK:从 listTemplates 推 productTypeCode,自己算 accessories
+- const { templates } = await listTemplates();
+- const myTemplate = templates.find(t => t.productTypeCode === "R");
++ // v1.6.0:listProducts() 直接按 productTypeCode 组织,带完整配件 + 变体
++ const { products } = await listProducts();
++ const myProduct = products.find(p => p.productTypeCode === "R");
++ const myTemplate = myProduct?.templates.find(t => t.templateId === "R-cute-001");
++
++ // 新增:配件颜色变体(v1.5.0 之前没有)
++ const myLeather = myProduct?.accessories.find(a => a.code === "leather");
++ const myColor = myLeather?.variants.find(v => v.code === "leather_brown");
++
+  // submitGenerate 行为零变化 —— 仍传 maskId / aiStyleId / imageUrls
+- const { taskId } = await submitGenerate({
+-   maskId: "R-cute-001", imageUrls: [url], aiStyleId: "ai_qversion",
+- });
++ const { taskId } = await submitGenerate({
++   maskId: myTemplate!.templateId,
++   imageUrls: [url],
++   aiStyleId: "ai_qversion",  // 来自 myTemplate.visualStyles[].id
++ });
+```
+
+### v1.5.0 — 2026-10-16
+
+**新增(additive only —— 不传 aiStyleId 行为零变化)**
+
+模板视觉样式(Q版 / 动漫 / 水彩 / 线稿 / 原图):每条 mask 自带一组
+样式选项,提交生图时把对应样式的关键 prompt 替换到模板 prompt 的
+`{{style}}` 占位符里 ——「替换关键提示词」语义,直接对齐「产品模板 =
+产品,里面再分风格」的业务语义。
+
+**新增**
+- 🆕 `PromptTemplatesResponse.templates[i].styles: TemplateStyle[]` —
+  每条 mask 自带的视觉样式数组。后端数据源:`promptTemplate.styles`
+  JSON 列(无 Drizzle 迁移 —— 已有行 default `[]`)。
+- 🆕 SDK 类型 `TemplateStyle`(id / name / nameEn / prompt /
+  surchargeCents / outputSize / swatch / estimatedLatencySec)—— SDK
+  把 prompt 也暴露,是为了支持后端的占位符替换语义,SDK 端可显式
+  看到自己选的是哪个关键提示词
+- 🆕 `submitGenerate.aiStyleId?: string` —— 选 mask 后从
+  `mask.styles[j].id` 选 id 透传;服务端校验 aiStyleId ∈ mask.styles
+  后,用 `styles[j].prompt` **替换**模板 prompt 里的 `{{style}}` 占位符
+  (替换关键提示词)
+- 🆕 业务错误码 `INVALID_STYLE` —— aiStyleId 不在该 mask.styles 内
+  时 400 拒绝,不兜底
+
+**变更**
+- 🔨 不再有独立的 `GET /api/image-gen/style-types` 端点 —— 样式跟着
+  mask 走,listTemplates() 一次到位,少一个端点开销、少一轮拉取。SDK
+  端去掉 `listStyles()` 函数与 `StyleTypesResponse` 类型(mp 仓库里
+  老引用编译报"no exported member"是预期的破坏性变化,提醒升级)
+- 🔨 不再有全局样式字典(早先设计过)—— 真理源是每个模板自带的
+  `promptTemplate.styles`,默认 5 项种子放在
+  `src/features/image-gen/lib/ai-styles.ts`(`DEFAULT_TEMPLATE_STYLES`)
+  供新建模板时一键填入
+
+**不变 —— 兼容性**
+- 计费:`costCredits` 不变,样式仅 prompt 替换,未动 credits 数学。
+  加价信息位于 `mask.styles[i].surchargeCents`,mp UI 自己展示「+¥15」
+- 行为:不传 aiStyleId / 传 `ai_original`(直通)= 等价于 v1.4.0 行为,
+  现有 mp 业务 0 回归
+- 不传 aiStyleId 时 prompt 拼接与今日完全一致;模板不含 `{{style}}` 占位
+  符时,服务端会把样式 prompt prepend 到模板 prompt 之前(兜底)
+- 工作台路径(`generateImageJob` action)未动 —— 本次只改外部 SDK 链路
+
+**SDK 迁移指南**(从 v1.4.0 升级)
+```diff
+- import { listStyles } from "@/api/sdk";
++ // v1.5.0 起 listStyles() 移除,样式跟随 templates[i].styles 走
+
+  // 启动时拉一次,styles 自动跟着 listTemplates() 一起到
+- const { styles } = await listStyles();
+  const { templates } = await listTemplates();
+
+  // 提交生图时可选 aiStyleId(不传 = 今日行为)
+  const { taskId } = await submitGenerate({
+    maskId: "R-cute-001",
+    imageUrls: [url],
++   aiStyleId: templates.find((t) => t.id === "R-cute-001")
++                ?.styles.find((s) => s.id === "ai_qversion")
++                ?.id,  // ← 选 Q 版,可选字段
+  });
+```
+
+**Server 端配套**
+- 后端:`src/db/schema.ts` 给 `promptTemplate` 加 `styles: json`
+  (默认 `[]`,无数据迁移)
+- 新类型:`src/db/image-gen-types.ts` 加 `TemplateStyle`
+- 新模块:`src/features/image-gen/lib/ai-styles.ts` 改 exports 为
+  `DEFAULT_TEMPLATE_STYLES` + `findStyleInList(styles, id)`
+- `templates/route.ts` 每条 mask 拼上 `styles: TemplateStyle[]`
+- `submit/route.ts` prompt 拼接改为「替换 `{{style}}` 占位符优先,
+  缺失则 prepend 兜底」
+- 删除旧端点:`src/app/api/image-gen/style-types/route.ts`
+- storefront:`src/features/storefront/lib/mock-catalog.ts` 改 import
+  新模块,`AI_STYLES` 与 `findAiStyle` helper 内部重映射,storefront 旧
+  消费方(`/api/store/ai/transform`、`pricing.ts`、`customization-spec.ts`)
+  签名不破
 
 ### v1.4.0 — 2026-10-15
 

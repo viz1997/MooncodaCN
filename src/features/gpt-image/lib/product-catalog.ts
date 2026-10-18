@@ -20,6 +20,8 @@
  * 与 promptOrder.product_type_code / product_size / accessory_code 列 1:1 对应。
  */
 
+import type { AccessoryCategory, ProductCategory } from "@/db/image-gen-types";
+
 /**
  * 产品能力标记 —— 决定 /p/[token] 上"产品定制"区哪些输入项渲染。
  * - canEngrave：是否支持刻字（皮革徽章 / 钥匙扣 / 异性钥匙扣 / 相框都支持）
@@ -87,7 +89,10 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
     // （null 永远允许），pvc accessory 移除（PVC 改用 leatherExposed/pvcProtection
     // 标志位表达，与皮革徽章 LB 对齐）。龙虾扣是 UI 显示提示（见
     // preview-order-view.tsx buildSpecSummary），不加独立 accessory code。
-    accessories: ["leather", "metal"],
+    //
+    // 2026-10-18 v1.6.0：加 "braided_rope" —— 用户原话「钥匙扣配件可选编
+    // 织绳颜色」。挂在 R 钥匙扣上，给 8 色变体（红/黑/蓝/绿/黄/紫/白/棕）。
+    accessories: ["leather", "metal", "braided_rope"],
     // 2026-09-14：开 canLeatherExposed + canPvcProtection（用户原话「皮革的
     // 有实物外露和 PVC 保护，金属的只有实物外露」—— capability 是
     // productType 级开关，per-accessory 互斥在 fillDefaultsByTemplate 校验：
@@ -184,7 +189,10 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
     sizes: ["4", "5", "6", "8", "10", "12", "15", "18"],
     // 2026-09-15：手办默认带底座（stand）。手办作为定制造型不走刻字 / 颜色 /
     // 外露 / PVC 表面处理能力，但底座是物理结构上的配件选项。
-    accessories: ["stand"],
+    //
+    // 2026-10-18 v1.6.0：加 "glass_cover" —— 用户原话「3D手办配件可选
+    // 底座、玻璃罩等」。挂在 M 上，给 3 个尺寸变体（4cm / 6cm / 8cm）。
+    accessories: ["stand", "glass_cover"],
     // 2026-09-15：手办能力开 canPlatform（ToB 渠道订单归因与 LB 对齐），
     // 关刻字 / 颜色 / 外露 / PVC / 备注。手办是 3D 定制造型，不走表面加工。
     capabilities: {
@@ -204,7 +212,11 @@ export type AccessoryCode =
   | "bracket"
   | "metal"
   | "magnet"
-  | "stand";
+  | "stand"
+  // 2026-10-18 v1.6.0：M 手办配件——玻璃罩（3 种尺寸变体：4/6/8cm）
+  | "glass_cover"
+  // 2026-10-18 v1.6.0：R 钥匙扣配件——编织绳（8 色变体）
+  | "braided_rope";
 
 export interface Accessory {
   code: AccessoryCode;
@@ -224,6 +236,12 @@ export const ACCESSORIES: readonly Accessory[] = [
   { code: "magnet", name: "磁铁" },
   // 2026-09-15：M 手办专用配件——底座/展台。
   { code: "stand", name: "底座" },
+  // 2026-10-18 v1.6.0：M 手办配件——玻璃罩（用户原话「3D手办配件可选
+  // 底座、玻璃罩等」）。3 种尺寸变体由 productAccessoryVariant 表驱动。
+  { code: "glass_cover", name: "玻璃罩" },
+  // 2026-10-18 v1.6.0：R 钥匙扣配件——编织绳（用户原话「钥匙扣配件
+  // 可选编织绳颜色」）。8 色变体由 productAccessoryVariant 表驱动。
+  { code: "braided_rope", name: "编织绳" },
 ];
 
 // ============================================
@@ -450,4 +468,134 @@ export function validateProductSpec(
       `产品型号 ${type.code} 不支持配件 ${accessoryCode}（可选：${type.accessories.join("/") || "无"}）`
     );
   }
+}
+
+// ============================================
+// 2026-10-18 v1.6.0：产品能力接口 i18n 字典
+// ============================================
+//
+// 给 /api/image-gen/products 暴露给小程序 / 网页端用的展示文案。硬编码在
+// 代码里（与 LEATHER_COLORS / PLATFORMS 模式一致）：量小、改动少、不上 DB。
+//
+// 与现有 ProductType.name 的区别：现有 name 是单字符串（zh），新 API 要双
+// 语对照（{ zh, en }），所以额外维护一个映射表，不污染 ProductType 接口。
+// ============================================
+
+/** 产品码 → i18n 元数据 */
+export interface ProductMeta {
+  category: ProductCategory;
+  displayName: { zh: string; en: string };
+  description: { zh: string; en: string };
+}
+
+/** 配件维度 + i18n 展示名 + 分类（与 AccessoryCategory 对齐） */
+export interface AccessoryMeta {
+  category: AccessoryCategory;
+  name: { zh: string; en: string };
+}
+
+/** 全部产品码的展示元数据（用于 /api/image-gen/products） */
+export const PRODUCT_META: Readonly<Record<string, ProductMeta>> = {
+  R: {
+    category: "keychain",
+    displayName: { zh: "钥匙扣", en: "Keychain" },
+    description: {
+      zh: "便携随身小件,激光切割全彩树脂,可挂书包 / 钥匙 / 拉链",
+      en: "Portable resin keychain with laser-cut full-color print",
+    },
+  },
+  A: {
+    category: "shape-keychain",
+    displayName: { zh: "异形钥匙扣", en: "Shape Keychain" },
+    description: {
+      zh: "按轮廓剪切的不规则钥匙扣,支架配件,送礼个性之选",
+      en: "Contour-cut keychain with bracket accessory",
+    },
+  },
+  P: {
+    category: "magnet",
+    displayName: { zh: "冰箱贴", en: "Fridge Magnet" },
+    description: {
+      zh: "全彩树脂冰箱贴,磁铁配件,适合合影 / 宠物 / 孩子画作",
+      en: "Full-color resin magnet for fridge decor",
+    },
+  },
+  RM: {
+    category: "frame",
+    displayName: { zh: "相框", en: "Photo Frame" },
+    description: {
+      zh: "桌面纪念摆件,可在底座刻祝福语或日期",
+      en: "Desktop frame with base engraving option",
+    },
+  },
+  LB: {
+    category: "leather-badge",
+    displayName: { zh: "皮革徽章", en: "Leather Badge" },
+    description: {
+      zh: "真皮徽章,皮套 / 金属配件,可刻字,适合企业 logo / 团队纪念",
+      en: "Genuine leather badge with engraving, ideal for team branding",
+    },
+  },
+  M: {
+    category: "figure",
+    displayName: { zh: "3D 手办", en: "3D Figurine" },
+    description: {
+      zh: "全彩树脂 3D 打印定制造型,底座 / 玻璃罩配件可选",
+      en: "Full-color 3D-printed figurine with stand & glass cover options",
+    },
+  },
+};
+
+/** 全部配件 code 的展示元数据（用于 /api/image-gen/products） */
+export const ACCESSORY_META: Readonly<Record<AccessoryCode, AccessoryMeta>> = {
+  leather: {
+    category: "material",
+    name: { zh: "皮套", en: "Leather Sleeve" },
+  },
+  pvc: {
+    category: "protection",
+    name: { zh: "PVC 皮套", en: "PVC Sleeve" },
+  },
+  bracket: {
+    category: "mount",
+    name: { zh: "支架", en: "Bracket" },
+  },
+  metal: {
+    category: "material",
+    name: { zh: "金属扣", en: "Metal Buckle" },
+  },
+  magnet: {
+    category: "mount",
+    name: { zh: "磁铁", en: "Magnet" },
+  },
+  stand: {
+    category: "mount",
+    name: { zh: "底座", en: "Stand" },
+  },
+  // 2026-10-18 v1.6.0：M 手办玻璃罩（3 种尺寸变体由 productAccessoryVariant 表驱动）
+  glass_cover: {
+    category: "protection",
+    name: { zh: "玻璃罩", en: "Glass Cover" },
+  },
+  // 2026-10-18 v1.6.0：R 钥匙扣编织绳（8 色变体由 productAccessoryVariant 表驱动）
+  braided_rope: {
+    category: "decor",
+    name: { zh: "编织绳", en: "Braided Rope" },
+  },
+};
+
+/** 找产品码的展示元数据；找不到返 null */
+export function getProductMeta(
+  code: string | null | undefined
+): ProductMeta | null {
+  if (!code) return null;
+  return PRODUCT_META[code] ?? null;
+}
+
+/** 找配件 code 的展示元数据；找不到返 null */
+export function getAccessoryMeta(
+  code: string | null | undefined
+): AccessoryMeta | null {
+  if (!code) return null;
+  return ACCESSORY_META[code as AccessoryCode] ?? null;
 }

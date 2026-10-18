@@ -33,7 +33,22 @@ import type {
  * 提交生图任务
  *
  * 必传:imageUrls(至少 1 张 R2 URL,先调 publicUpload 拿到)
- * 选填:maskId(关联模板,从 listTemplates 拿)、prompt(自定义追加)、size、count、model
+ * 选填:
+ *   - maskId       关联模板 —— v1.6.0 起推荐从 `listProducts().products[*].templates[*].templateId`
+ *                  取(产品维度组织,适合新 UI),旧版可继续从 `listTemplates().templates[i].id`
+ *                  取(模板维度组织,适合老 SDK / 工作台)。
+ *   - aiStyleId    视觉样式 ID(从模板的 styles[] 数组里挑 id,
+ *                  例 "ai_qversion" / "ai_anime" / "ai_watercolor" /
+ *                  "ai_lineart" / "ai_original" / "ai_realistic"),
+ *                  v1.5.0 起。
+ *                  服务端会用此 id 对应的 styles[i].prompt 替换模板 prompt
+ *                  里的 `{{style}}` 占位符(替换关键提示词)。
+ *   - prompt       用户追加 prompt(拼在末尾)
+ *   - size / count / model / params
+ *
+ * 计费:costCredits 仅算 maskId 对应模板价;aiStyleId 是 prompt 替换
+ * 不影响积分(若需按样式加价后续单独排期)。mp UI 自己用
+ * templates[i].styles[j].surchargeCents / 100 显示「+¥15」加价提示。
  */
 export async function submitGenerate(
   payload: PublicGenerateRequest
@@ -137,7 +152,21 @@ export async function getQuota(): Promise<QuotaResponse> {
  *
  * v2.1 起调 /api/image-gen/templates(原 /api/public/prompt-templates)。
  *
- * 用法:进入生图页时拉一次,用作 maskId 下拉 / 产品线 Tab
+ * 用法:进入生图页时拉一次,用作 maskId 下拉 / 产品线 Tab —— 2026-10-16
+ * v1.5.0 起每条模板还带 `styles: TemplateStyle[]`(该模板自带的视觉
+ * 样式选项),用作生图页"风格 chip"(Q版/动漫/水彩/线稿)选择。用户在
+ * chip 上点某个样式,就把对应 styles[i].id 作为 submitGenerate 的
+ * aiStyleId 透传给服务端。
+ *
+ * 鉴权:与 /api/public/prompt-templates 一致(x-api-key > Authorization:
+ * Bearer <key>),dev 模式 EXTERNAL_API_KEY_REQUIRED=0 关;已登录 BA
+ * session 也可访问(走 requireExternalApiKey helper 的已登录=忽略 key
+ * 分支)。
+ *
+ * 注:早先 v1.5.0 设计过单独的 GET /api/image-gen/style-types 端点 +
+ * listStyles() SDK 函数。后改为「每个模板自带 styles」更符合业务语义,
+ * styles 跟着 listTemplates() 一起拉,无需额外端点 —— 详见 README
+ * Section 9 + Changelog v1.5.0。
  */
 export async function listTemplates(): Promise<PromptTemplatesResponse> {
   return sdkRequest<PromptTemplatesResponse>("/api/image-gen/templates", {

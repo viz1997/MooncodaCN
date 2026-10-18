@@ -16,6 +16,7 @@ import {
   IMAGE_MODELS,
   logImageGen,
 } from "@/features/image-gen";
+import { findStyleInList } from "@/features/image-gen/lib/ai-styles";
 import { recordExternalApiKeyCall } from "@/features/image-gen/lib/external-api-key-service";
 import { createImageJob } from "@/features/image-gen/lib/generation-service";
 import type {
@@ -79,6 +80,28 @@ interface PublicGenerateRequest {
    * 不传:服务端按 mask.model → apimart_gpt_image 兜底。
    */
   model?: ImageModelId;
+  /**
+   * 2026-10-16 v1.5.0:模板视觉样式 ID(选填,小程序 SDK 透传)。
+   * 从 listTemplates() 拿到每个模板自带的 styles 数组,从数组里选一个
+   * id 填到这里。例 "ai_qversion" / "ai_anime" / "ai_watercolor" /
+   * "ai_lineart" / "ai_original"(最后一个是直通)。
+   *
+   * 服务端行为:
+   *   - aiStyleId 必须命中 mask 对应 promptTemplate.styles 数组之一;
+   *     否则 400 INVALID_STYLE(不兜底,前端要看到「我选错了」信号)
+   *   - 找到后,style.prompt 用来替换模板 prompt 里的 `{{style}}` 占位
+   *     符(语义:替换关键提示词)
+   *   - 模板 prompt 不含 `{{style}}` 占位符 → 服务端 fallback 把 style
+   *     prompt prepend 到模板 prompt 之前,行为类似历史 prepend 实现;
+   *     业务方写模板时建议显式加 `{{style}}` 占位符以更精确控制拼接位置
+   *   - 不传 / 传直通类(style.prompt 空,如 ai_original)→ 不注入样式
+   *     prompt,行为与 v1.4.0 完全一致(零回归)
+   *
+   * 计费:样式仅 prompt 替换,不改 costCredits。如需按样式加价,后续
+   * 再单独排期(改 credits 数学会动到 credits/service,超出本次范围)。
+   * 加价信息位于 mask.styles[i].surchargeCents,mp UI 自己展示「+¥15」。
+   */
+  aiStyleId?: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -167,11 +190,69 @@ export async function POST(req: NextRequest) {
       // 让「选模板风格 + 加自己的修改意图」场景走通。模板无 prompt 且用户
       // 也没填 → 报错;用户填了但模板没 prompt → 用用户 prompt 兜底(这种
       // 组合是 admin 配置问题但降级不阻断)。
+      //
+      // 2026-10-16 v1.5.0:视觉样式 prompt 通过「替换关键提示词占位符」的
+      // 方式注入到模板 prompt 里 —— 模板 prompt 里若有 `{{style}}` 占位符
+      // 则替换;没有则把样式 prompt prepend 到模板 prompt 之前(兜底,行为
+      // 类似旧版)。aiStyleId 必须在 mask 对应 template.styles 数组里,不
+      // 在则 400 INVALID_STYLE。
+      //
+      // 拼接顺序(最终):
+      //   1) 模板 prompt 主体(若含 {{style}} 占位符,被对应 style.prompt 替换)
+      //   2) 用户 body.prompt(非空时)追加在末尾
+      //
+      // 不变 zero-regression:不传 aiStyleId + 模板 prompt 无 {{style}} 占位
+      // 符 → 行为与 v1.4.0 完全一致(`${tmpl.prompt}\n\n${userPrompt}`)。
       const userPrompt = body.prompt?.trim() ?? "";
-      if (tmpl?.prompt) {
-        prompt = userPrompt ? `${tmpl.prompt}\n\n${userPrompt}` : tmpl.prompt;
+      const basePrompt = tmpl?.prompt?.trim() ?? "";
+
+      // aiStyleId 处理:在模板自己的 styles 列表里找,找不到 400 拒绝。
+      // aiStyleId 不传 / 找到了 style 但 style.prompt 为空(直通)→ 跳过
+      // 替换,等价于不传 aiStyleId。空样式仍要从模板列里查,是为了在模板
+      // 不允许此 id 时也能 400 拒掉,前端要看到「我选错了」信号。
+      let stylePrompt = "";
+      if (body.aiStyleId) {
+        const styles = tmpl?.styles ?? [];
+        const matched = findStyleInList(styles, body.aiStyleId);
+        if (!matched) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: `无效的 aiStyleId: ${body.aiStyleId}(不在模板 ${mask.maskId} 的 styles 内)`,
+              code: "INVALID_STYLE",
+            },
+            { status: 400 }
+          );
+        }
+        // 直通类(如 ai_original)prompt 为空 → 跳过替换,等价不传。
+        stylePrompt = matched.prompt?.trim() ?? "";
+      }
+
+      // 拼接:替换占位符优先,无占位符或无样式则 fallback prepend。
+      if (basePrompt) {
+        let resolvedPrompt = basePrompt;
+        if (stylePrompt && /\{\{style\}\}/.test(resolvedPrompt)) {
+          // 命中关键占位符 → 替换,与 mask.variables 替换走同一思路。
+          resolvedPrompt = resolvedPrompt.replace(
+            /\{\{style\}\}/g,
+            stylePrompt
+          );
+        } else if (stylePrompt) {
+          // 没占位符 → prepend 兜底,保持向后兼容(老模板不写
+          // {{style}} 也能蒙混用样式)。
+          resolvedPrompt = `${stylePrompt}\n\n${resolvedPrompt}`;
+        }
+        prompt = userPrompt
+          ? `${resolvedPrompt}\n\n${userPrompt}`
+          : resolvedPrompt;
       } else if (userPrompt) {
-        prompt = userPrompt;
+        // 模板无 prompt 但用户填了 → 用用户 prompt 兜底;若同时带了
+        // stylePrompt 也保留为前置(同上 prepend 兜底逻辑)。
+        prompt = stylePrompt ? `${stylePrompt}\n\n${userPrompt}` : userPrompt;
+      } else if (stylePrompt) {
+        // 极端兜底:模板没 prompt、用户也没填、但有 stylePrompt → 仅用风
+        // 格 prompt 出图(罕见,降级不阻断)
+        prompt = stylePrompt;
       } else {
         return NextResponse.json(
           {

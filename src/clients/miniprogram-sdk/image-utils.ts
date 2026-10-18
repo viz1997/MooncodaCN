@@ -87,7 +87,7 @@ export async function readTaroFileAsArrayBuffer(
           resolve(
             view.buffer.slice(
               view.byteOffset,
-              view.byteOffset + view.byteLength,
+              view.byteOffset + view.byteLength
             ) as ArrayBuffer
           );
           return;

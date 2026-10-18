@@ -16,7 +16,10 @@ import {
   getProductType,
   PRODUCT_TYPES,
 } from "@/features/gpt-image/lib/product-catalog";
-
+import {
+  DEFAULT_TEMPLATE_STYLES,
+  findStyleInList,
+} from "@/features/image-gen/lib/ai-styles";
 import {
   WJP_SERIES,
   type WjpSeries,
@@ -35,65 +38,30 @@ import type {
 /* -------------------------------------------------------------------------- */
 
 /**
- * AI 风格字典(对齐 atelier `pricing.config.aiStyles`)
- * `ai_original` 短路(不调 AI);其他 4 种委托 lingting/wellapi
+ * 2026-10-16 v1.5.0:AI 视觉字典的设计改为「每个 promptTemplate 自带
+ * styles 数组」(语义对齐「替换关键提示词」)。原 AiStyle 真理源
+ * DEFAULT_TEMPLATE_STYLES 现在落在 src/features/image-gen/lib/ai-styles.ts
+ * 当默认种子使用。
+ *
+ * 这里 re-export 保持 storefront mock 流的所有调用(`AI_STYLES` 全局数组、
+ * `findAiStyle` 查询函数)不断。注意:storefront mock 出的 aiStyles 用
+ * 的是同一份 5 项种子,但概念上 storefront 这边是「mock commerce
+ * product 的可叠加 AI 风格」,与 image-gen 那边的「生图替换关键提示词」
+ * 不是一回事 —— 切真 Medusa 时 storefront 这条链路会独立走 Medusa
+ * metadata,届时一起清理。
  */
-export const AI_STYLES: AiStyle[] = [
-  {
-    id: "ai_original",
-    name: "原图保留",
-    nameEn: "Original",
-    surchargeCents: 0,
-    prompt: "", // 不调用 AI
-    outputSize: "1024x1024",
-    swatch: "#9CA3AF",
-    estimatedLatencySec: 0,
-  },
-  {
-    id: "ai_qversion",
-    name: "Q 版萌系",
-    nameEn: "Q-Version",
-    surchargeCents: 1500, // +¥15
-    prompt:
-      "Transform the photo into a cute Q-version anime-style figurine with simplified features, big eyes, and soft pastel tones. Keep the subject's identity recognizable.",
-    outputSize: "1024x1024",
-    swatch: "#7A5A8C",
-    estimatedLatencySec: 25,
-  },
-  {
-    id: "ai_anime",
-    name: "日漫风",
-    nameEn: "Anime",
-    surchargeCents: 2000, // +¥20
-    prompt:
-      "Convert the photo into a Japanese anime illustration style with vibrant colors, clean line art, and detailed shading. Preserve facial features and hairstyle.",
-    outputSize: "1024x1024",
-    swatch: "#E879F9",
-    estimatedLatencySec: 28,
-  },
-  {
-    id: "ai_watercolor",
-    name: "水彩手绘",
-    nameEn: "Watercolor",
-    surchargeCents: 1500, // +¥15
-    prompt:
-      "Render the photo as a soft watercolor painting with visible brushstrokes, gentle color bleeds, and warm light. Maintain recognizable silhouette.",
-    outputSize: "1024x1024",
-    swatch: "#60A5FA",
-    estimatedLatencySec: 22,
-  },
-  {
-    id: "ai_lineart",
-    name: "线稿简笔",
-    nameEn: "Line Art",
-    surchargeCents: 1000, // +¥10
-    prompt:
-      "Convert the photo into clean black-and-white line art suitable for engraving. Bold outlines, no shading, simplified details for laser-cut reproduction.",
-    outputSize: "1024x1024",
-    swatch: "#1F2937",
-    estimatedLatencySec: 18,
-  },
-];
+const AI_STYLES: AiStyle[] = DEFAULT_TEMPLATE_STYLES.map((s) => ({
+  id: s.id,
+  name: s.name,
+  nameEn: s.nameEn,
+  prompt: s.prompt,
+  surchargeCents: s.surchargeCents,
+  outputSize: s.outputSize,
+  swatch: s.swatch,
+  estimatedLatencySec: s.estimatedLatencySec,
+}));
+export { AI_STYLES };
+export type { AiStyle };
 
 /**
  * 材质字典(按 productTypeCode 过滤)
@@ -573,7 +541,23 @@ export function findProductById(id: string): StorefrontProduct | null {
 }
 
 export function findAiStyle(aiStyleId: string): AiStyle | null {
-  return AI_STYLES.find((s) => s.id === aiStyleId) ?? null;
+  // 2026-10-16 v1.5.0:字典源已迁到 image-gen/lib/ai-styles.ts 的
+  // DEFAULT_TEMPLATE_STYLES,通过 findStyleInList 查找(返回
+  // TemplateStyle | undefined)。这里 wrap 一层 undefined → null 保持
+  // storefront 旧消费方(`/api/store/ai/transform`、`pricing.ts`、
+  // `customization-spec.ts` 等)签名兼容。切真 Medusa 时一并清理。
+  const found = findStyleInList(DEFAULT_TEMPLATE_STYLES, aiStyleId);
+  if (!found) return null;
+  return {
+    id: found.id,
+    name: found.name,
+    nameEn: found.nameEn,
+    prompt: found.prompt,
+    surchargeCents: found.surchargeCents,
+    outputSize: found.outputSize,
+    swatch: found.swatch,
+    estimatedLatencySec: found.estimatedLatencySec,
+  };
 }
 
 export function findMaterial(materialId: string): Material | null {
@@ -628,3 +612,74 @@ export function findRelatedProducts(
     (p) => p.seriesId === product.seriesId && p.handle !== handle
   ).slice(0, limit);
 }
+
+/* -------------------------------------------------------------------------- */
+/*  2026-10-18 v1.6.0:配件变体字典                                            */
+/* -------------------------------------------------------------------------- */
+// 与 /api/image-gen/products 路由 + productAccessoryVariant DB 行对齐的
+// mock 数据,供 storefront UI（如未来想展示「编织绳 8 色」「玻璃罩 3 尺寸」）
+// 直接消费。真数据从 /api/image-gen/products 拉,这里只是 mock 兜底。
+//
+// 不并入 MATERIALS_BY_TYPE —— 那是「材质」单选项（一件钥匙扣只能选皮或
+// 金属），新加的「变体」是多选项（一件钥匙扣选 braided_rope 后还要再选
+// 8 个颜色）。语义不同,分开维护。
+
+/** R 钥匙扣 + 编织绳 8 色 mock(与 DB seed 一致) */
+export const BRAIDED_ROPE_COLORS: Array<{
+  code: string;
+  name: { zh: string; en: string };
+  swatch: string;
+}> = [
+  { code: "rope_red", name: { zh: "正红", en: "Red" }, swatch: "#C0392B" },
+  { code: "rope_black", name: { zh: "墨黑", en: "Black" }, swatch: "#1A1A1A" },
+  {
+    code: "rope_blue",
+    name: { zh: "宝蓝", en: "Royal Blue" },
+    swatch: "#1F4E79",
+  },
+  {
+    code: "rope_green",
+    name: { zh: "森林绿", en: "Forest Green" },
+    swatch: "#2E5E3A",
+  },
+  {
+    code: "rope_yellow",
+    name: { zh: "明黄", en: "Yellow" },
+    swatch: "#E8C547",
+  },
+  {
+    code: "rope_purple",
+    name: { zh: "丁香紫", en: "Lilac" },
+    swatch: "#8B5A9F",
+  },
+  {
+    code: "rope_white",
+    name: { zh: "米白", en: "Off-White" },
+    swatch: "#F5F0E8",
+  },
+  {
+    code: "rope_brown",
+    name: { zh: "焦糖棕", en: "Caramel" },
+    swatch: "#A0734A",
+  },
+];
+
+/** M 手办 + 底座 3 种材质 mock(与 DB seed 一致) */
+export const STAND_TYPES: Array<{
+  code: string;
+  name: { zh: string; en: string };
+}> = [
+  { code: "stand_magnetic", name: { zh: "磁性底座", en: "Magnetic" } },
+  { code: "stand_wooden", name: { zh: "木质底座", en: "Wooden" } },
+  { code: "stand_clear", name: { zh: "透明亚克力底座", en: "Clear Acrylic" } },
+];
+
+/** M 手办 + 玻璃罩 3 种尺寸 mock(与 DB seed 一致) */
+export const GLASS_COVER_SIZES: Array<{
+  code: string;
+  name: { zh: string; en: string };
+}> = [
+  { code: "glass_4", name: { zh: "4cm 玻璃罩", en: "4cm Glass Cover" } },
+  { code: "glass_6", name: { zh: "6cm 玻璃罩", en: "6cm Glass Cover" } },
+  { code: "glass_8", name: { zh: "8cm 玻璃罩", en: "8cm Glass Cover" } },
+];
