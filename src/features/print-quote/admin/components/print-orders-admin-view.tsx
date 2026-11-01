@@ -3,7 +3,8 @@
 /**
  * 打印订单后台 —— /admin/print-orders
  *
- * 打印服务是匿名下单,所以这一页没有「按用户筛」,只有「按状态筛」。
+ * 打印服务改成登录下单之后,每张工单都挂在 `user_id` 下,但后台仍然是
+ * **全局视角** —— 这里看得到所有人的单,只有「按状态筛」,没有「按用户筛」。
  * 工作室的日常动作就两个:看这单要多少钱 / 把状态往前推一格。
  *
  * ## 为什么金额直接显示,不显示「等报价」
@@ -149,7 +150,7 @@ export function PrintOrdersAdminView() {
     <div className="space-y-6">
       <ModuleHeader
         title="打印订单"
-        description="按克重计价的 3D 打印工单 —— 官网 /quote 页匿名下单,金额为服务端重算后的报价"
+        description="按克重计价的 3D 打印工单 —— 官网 /quote 页登录下单,金额为服务端重算后的报价"
         actions={
           <Button icon={<RefreshCw className="h-4 w-4" />} onClick={reload}>
             刷新
@@ -433,6 +434,9 @@ export function PrintOrdersAdminView() {
               <p className="text-xs">
                 {detail.contactName} · {detail.contactEmail}
                 {detail.contactPhone ? ` · ${detail.contactPhone}` : ""}
+              </p>
+              <p className="text-[11px] text-muted-foreground font-mono">
+                用户:{detail.userId}
               </p>
               {detail.note ? (
                 <p className="text-xs text-muted-foreground whitespace-pre-wrap">

@@ -18,6 +18,7 @@ function getPageTitleKey(pathname: string): string {
     "/dashboard/effects": "effects",
     "/dashboard/models": "models",
     "/dashboard/tasks": "tasks",
+    "/dashboard/print-orders": "printOrders",
     "/dashboard/decks": "myDecks",
     "/dashboard/support": "support",
     "/dashboard/support/new": "newTicket",

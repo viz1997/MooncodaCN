@@ -97,24 +97,30 @@ export type PrintOrderRequest = {
   /** 模型文件字节数 */
   modelSizeBytes: number | null;
   contactName: string;
-  contactEmail: string;
   contactPhone: string | null;
   /** 用户留言(材质、颜色、特殊要求…) */
   note: string | null;
 };
 
-/** 下单结果 */
+/**
+ * 下单结果
+ *
+ * 2026-11-01:不再有 `token` —— 订单挂在账号名下,登录后按 userId 查,
+ * 不需要「订单号 + 令牌」那套匿名查询机制了。
+ */
 export type PrintOrderCreated = {
   orderNo: string;
-  /** 匿名查询令牌 —— 查订单状态要 orderNo + token 双因子 */
-  token: string;
   /** 服务端重算后的报价(客户端显示的是这个,不是自己算的) */
   quote: PrintQuote;
   createdAt: string;
 };
 
-/** 订单查询结果 —— 只暴露用户自己该看到的字段 */
-export type PrintOrderView = {
+/**
+ * 用户侧看到的订单 —— 「我的打印订单」列表里的一行
+ *
+ * 只暴露用户自己该看到的字段:不含内部 id、不含模型 URL(那是工作室取件用的)。
+ */
+export type UserPrintOrder = {
   orderNo: string;
   status: PrintOrderStatus;
   modelFileName: string;
@@ -122,7 +128,5 @@ export type PrintOrderView = {
   supportWeightG: number | null;
   dims: [number, number, number];
   totalPriceCents: number;
-  contactName: string;
-  contactEmail: string;
   createdAt: string;
 };

@@ -10,10 +10,14 @@
  * 不用 `ai` 桶(20/min):这个接口只做算术,不调任何付费上游,开销跟 AI
  * 推理没法比;而且客户端有 400ms 防抖 + 定时器重置,连续拖动期间根本不会
  * 发请求,真正发出的请求数远低于「拖动频率」。
+ *
+ * 2026-11-01:要登录。整个打印服务改成「登录后下单」,报价接口同步收口 ——
+ * 页面本身已经拦了未登录的人,接口不留后门。
  */
 
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { getPrintOrderUser } from "@/features/print-quote/lib/auth";
 import { computePrintQuote } from "@/features/print-quote/lib/quote-server";
 import type { PrintQuoteInput } from "@/features/print-quote/lib/quote-types";
 import { withApiLogging } from "@/lib/api-logger";
@@ -54,6 +58,15 @@ async function handle(request: NextRequest) {
   const rl = await checkRateLimit(ip, "polling");
   if (!rl.success) {
     return createRateLimitResponse(rl);
+  }
+
+  // 打印服务要登录 —— 未登录直接拒
+  const user = await getPrintOrderUser();
+  if (!user) {
+    return NextResponse.json(
+      { success: false, error: "请先登录" },
+      { status: 401, headers: getRateLimitHeaders(rl) }
+    );
   }
 
   let body: unknown;

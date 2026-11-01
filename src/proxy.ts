@@ -146,7 +146,11 @@ export async function proxy(request: NextRequest) {
   //  3. `/` 与 `/dashboard` 的匹配用的是 pathnameWithoutLocale === route，
   //     保留 `"/"` 时 `"/".startsWith("//")` 为假但 `""` 之外的任何子路径都不会误伤，
   //     风险只在根路径本身 —— 所以移除它不会放宽 `/product/*` 等公开页面的边界。
-  const protectedRoutes = ["/dashboard", "/admin"];
+  // 2026-11-01：`/quote` 加进来 —— 打印服务改成「登录后下单」。整页都要登录态，
+  // 不只是下单那一步：报价台本身要算价、要传模型，匿名访客看到的只会是登录墙。
+  // 未登录访问会 307 到 /sign-in?callbackUrl=<原路径>（NextResponse.redirect
+  // 的默认码，跟 /dashboard 一致），登录后自动跳回报价页。
+  const protectedRoutes = ["/dashboard", "/admin", "/quote"];
 
   // 定义认证页面路由 (已登录用户不应访问)
   const authRoutes = ["/sign-in", "/sign-up"];

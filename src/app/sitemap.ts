@@ -28,8 +28,8 @@ export default function sitemap(): MetadataRoute.Sitemap {
     "/tools",
     "/tools/weight",
     "/tools/model-check",
-    // 打印服务报价页(2026-11-01)—— 官网侧的「上传模型 → 报价 → 下单」入口
-    "/quote",
+    // 打印服务报价页(/quote)**不进 sitemap** —— 2026-11-01 起整页要登录,
+    // 爬虫拿到的是 sign-in 重定向。给一个登录墙的页面发索引信号没有意义。
   ];
 
   // Generate static routes for each locale

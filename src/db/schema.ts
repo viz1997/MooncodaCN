@@ -2294,6 +2294,12 @@ export const printOrderStatusEnum = pgEnum("print_order_status", [
  *
  * 全部用**分**(integer),跟 `product.basePriceCents` / `product_variant.priceCents`
  * 一致。克重用 numeric(浮点克重四舍五入到分会有累积误差)。
+ *
+ * ## 订单归属
+ *
+ * 2026-11-01:改成**登录后下单** —— 每张工单都挂在 `user_id` 下,用户在自己的
+ * dashboard 页看进度。之前是匿名下单 + 订单号/令牌双因子查单,订单不归属任何人,
+ * 换设备就查不到,工作室也没法从工单回到客户。
  */
 export const printOrder = pgTable(
   "print_order",
@@ -2302,12 +2308,14 @@ export const printOrder = pgTable(
     /** 业务订单号,用户可见,如 "PO-20261101-3F7K2A" */
     orderNo: text("order_no").notNull().unique(),
     /**
-     * 匿名查询令牌
+     * 下单人 —— 订单挂在账号名下
      *
-     * 打印服务是匿名可下的单(和商城的匿名定制一致),所以查订单状态不能靠
-     * 登录态 —— 用 orderNo + accessToken 双因子,避免订单号被枚举。
+     * 删账号时工单一并删掉(onDelete cascade):工单是这次交易的从属记录,
+     * 主体没了它就没有意义了。
      */
-    accessToken: text("access_token").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
     status: printOrderStatusEnum("status").notNull().default("PENDING"),
     /** 模型文件名(用户上传时的原名) */
     modelFileName: text("model_file_name").notNull(),
@@ -2365,6 +2373,8 @@ export const printOrder = pgTable(
     // 后台列表按状态 + 时间倒序翻页
     index("print_order_status_idx").on(t.status),
     index("print_order_created_at_idx").on(t.createdAt),
+    // 用户侧「我的打印订单」按 user_id 过滤 + 时间倒序
+    index("print_order_user_id_idx").on(t.userId),
   ]
 );
 

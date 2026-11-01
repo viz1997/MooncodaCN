@@ -71,6 +71,7 @@ export function DashboardSidebar() {
       Models: t("nav.models"),
       Credits: t("nav.credits"),
       Orders: t("nav.orders"),
+      "My Print Orders": t("nav.myPrintOrders"),
       Canvas: t("nav.canvas"),
       "Prompt Library": t("nav.promptLibrary"),
       "My Assets": t("nav.myAssets"),

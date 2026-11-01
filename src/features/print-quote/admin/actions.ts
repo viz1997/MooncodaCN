@@ -3,8 +3,9 @@
 /**
  * /admin/print-orders —— 打印订单后台 server actions（2026-11-01）
  *
- * 打印服务是**匿名**下单(没有 user id),所以这里的鉴权只有一层:
- * `adminAction` 确认调用者是 admin。
+ * 打印服务改成**登录后下单**之后,每张工单都挂在 `user_id` 下 —— 后台是
+ * 全局视角,能看到所有人的单;用户侧只看自己的(`/dashboard/print-orders`)。
+ * 鉴权还是 `adminAction` 这一层:确认调用者是 admin。
  *
  * 数据流跟商城的 `/admin/orders` 完全分开:
  *  - 商城订单 = `promptOrder` 表(gpt-image 生图订单)

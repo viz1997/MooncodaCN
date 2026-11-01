@@ -217,6 +217,13 @@ export const dashboardNav: NavGroup[] = [
         href: "/dashboard/prompt-orders",
         icon: ListOrdered,
       },
+      // 2026-11-01：打印服务的工单（print_order 表）—— 跟上面的「订单管理」
+      // （promptOrder 表，gpt-image 生图订单）是两套独立数据
+      {
+        title: "My Print Orders",
+        href: "/dashboard/print-orders",
+        icon: Scale,
+      },
       {
         title: "Canvas",
         href: "/dashboard/canvas",

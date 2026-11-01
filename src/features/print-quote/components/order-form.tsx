@@ -11,7 +11,7 @@
  * R2 + 建单),这里只管收集和校验。
  */
 
-import { AlertCircle, Loader2, Package, Upload } from "lucide-react";
+import { AlertCircle, Loader2, Lock, Package, Upload } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
@@ -20,7 +20,6 @@ import type { PrintQuote } from "@/features/print-quote/lib/quote-types";
 
 export type OrderContact = {
   name: string;
-  email: string;
   phone: string;
   note: string;
 };
@@ -29,6 +28,8 @@ export type OrderFormProps = {
   quote: PrintQuote | null;
   /** 模型文件名(下单时上传的那个) */
   modelName: string;
+  /** 当前登录用户 —— 称呼预填,邮箱只读展示 */
+  user: { name: string; email: string };
   /** 提交进度 */
   phase: "idle" | "uploading" | "submitting";
   error: string | null;
@@ -36,11 +37,10 @@ export type OrderFormProps = {
   onCancel: () => void;
 };
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 export function OrderForm({
   quote,
   modelName,
+  user,
   phase,
   error,
   onSubmit,
@@ -48,8 +48,9 @@ export function OrderForm({
 }: OrderFormProps) {
   const t = useTranslations("PrintQuote");
 
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  // 称呼预填账号名(用户可以改),邮箱用账号邮箱且**不可改** ——
+  // 服务端也只认账号邮箱,这里只是让用户看清工单会发到哪。
+  const [name, setName] = useState(user.name);
   const [phone, setPhone] = useState("");
   const [note, setNote] = useState("");
   const [fieldError, setFieldError] = useState<string | null>(null);
@@ -64,14 +65,9 @@ export function OrderForm({
       setFieldError(t("order.errors.name"));
       return;
     }
-    if (!EMAIL_RE.test(email.trim())) {
-      setFieldError(t("order.errors.email"));
-      return;
-    }
     setFieldError(null);
     onSubmit({
       name: name.trim(),
-      email: email.trim(),
       phone: phone.trim(),
       note: note.trim(),
     });
@@ -127,16 +123,24 @@ export function OrderForm({
           />
         </Field>
 
-        <Field id="pq-email" label={t("order.email")} required>
-          <input
-            id="pq-email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            maxLength={200}
-            disabled={busy}
-            className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm outline-none transition-colors focus:border-stone-900 disabled:bg-stone-50"
-          />
+        <Field id="pq-email" label={t("order.email")}>
+          <div className="relative">
+            <input
+              id="pq-email"
+              type="email"
+              value={user.email}
+              readOnly
+              disabled={busy}
+              className="w-full rounded-md border border-stone-200 bg-stone-50 px-3 py-2 pr-9 text-sm text-stone-500 outline-none"
+            />
+            <Lock
+              aria-hidden
+              className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-stone-400"
+            />
+          </div>
+          <p className="mt-1 text-[11px] text-stone-400">
+            {t("order.emailLockedHint")}
+          </p>
         </Field>
 
         <Field id="pq-phone" label={t("order.phone")}>

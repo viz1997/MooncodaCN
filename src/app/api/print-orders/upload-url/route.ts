@@ -18,13 +18,17 @@
  * Content-Type 统一用 `application/octet-stream`:它参与 R2 签名,客户端
  * 必须原样带回,固定成一个值最省事(不同浏览器对 .obj 给什么 mime 并不
  * 一致)。
+ *
+ * 2026-11-01:要登录,并且签出来的对象键**按用户分区**
+ * (`print-orders/<用户作用域>/…`)—— 下单时只能引用自己分区里的文件。
  */
 
-import { nanoid } from "nanoid";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { isR2Configured, presignUpload } from "@/features/image-gen/lib/r2";
+import { getPrintOrderUser } from "@/features/print-quote/lib/auth";
+import { buildPrintOrderObjectKey } from "@/features/print-quote/lib/upload-key";
 import { withApiLogging } from "@/lib/api-logger";
 import {
   checkRateLimit,
@@ -70,6 +74,15 @@ async function handle(request: NextRequest) {
   const rl = await checkRateLimit(ip, "upload");
   if (!rl.success) {
     return createRateLimitResponse(rl);
+  }
+
+  // 打印服务要登录 —— 签 URL 等于给桶发一张写权限的通行证,不能匿名发
+  const user = await getPrintOrderUser();
+  if (!user) {
+    return NextResponse.json(
+      { success: false, error: "请先登录", code: "UNAUTHORIZED" },
+      { status: 401, headers: getRateLimitHeaders(rl) }
+    );
   }
 
   if (!isR2Configured()) {
@@ -119,9 +132,8 @@ async function handle(request: NextRequest) {
     );
   }
 
-  const objectKey =
-    `print-orders/${new Date().toISOString().slice(0, 10)}/` +
-    `${Date.now()}-${nanoid(10)}.${rawExt}`;
+  // 对象键按用户分区 —— 下单时只能引用自己目录下的文件
+  const objectKey = buildPrintOrderObjectKey(user.id, rawExt);
 
   try {
     const presigned = await presignUpload({

@@ -175,11 +175,3 @@ export function generatePrintOrderNo(now = new Date()): string {
   const rand = randomBytes(3).toString("hex").toUpperCase();
   return `PO-${ymd}-${rand}`;
 }
-
-/**
- * 生成匿名查询令牌 —— 查订单状态要 orderNo + token 双因子,
- * 避免订单号被枚举后把别人的订单翻出来。
- */
-export function generatePrintOrderToken(): string {
-  return randomBytes(24).toString("hex");
-}

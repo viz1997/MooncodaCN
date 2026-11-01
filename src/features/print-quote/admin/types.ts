@@ -12,6 +12,8 @@ import type { PrintOrderStatus } from "@/features/print-quote/lib/quote-types";
 export type AdminPrintOrder = {
   id: string;
   orderNo: string;
+  /** 下单人 —— 2026-11-01 起订单挂在账号名下 */
+  userId: string;
   status: PrintOrderStatus;
   modelFileName: string;
   modelUrl: string;
@@ -44,6 +46,7 @@ export function toAdminPrintOrder(row: PrintOrderRow): AdminPrintOrder {
   return {
     id: row.id,
     orderNo: row.orderNo,
+    userId: row.userId,
     status: row.status,
     modelFileName: row.modelFileName,
     modelUrl: row.modelUrl,

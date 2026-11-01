@@ -12,7 +12,7 @@ Mooncoda is a production-ready Next.js SaaS template. It provides a complete fou
 
 | 系统 | 职责 | 技术栈 |
 |---|---|---|
-| **NextDevTpl**(本仓库) | AI 生图 SaaS 后端:user / credits / photo / imageJob / AI 路由 / WeChat 小程序登录 **+ 商品目录(商品 / SKU 变体 / 价格)** | Next.js 16 + Drizzle + PostgreSQL |
+| **NextDevTpl**(本仓库) | AI 生图 SaaS 后端:user / credits / photo / imageJob / AI 路由 / WeChat 小程序登录 **+ 商品目录(商品 / SKU 变体 / 价格)** **+ 打印工单(`/quote` 报价 → `print_order`,按 `user_id` 归属,登录后下单)** | Next.js 16 + Drizzle + PostgreSQL |
 | **Medusa**(独立 server) | **购物车 + 订单管理 + 支付管理**(购物车 / 订单 / 支付 / 库存 / 客户地址) | Medusa v2 + Node + PostgreSQL + Redis |
 | **微信小程序 / 浏览器访客**(外部客户端) | 调 NextDevTpl AI 接口拿候选图 **+ 调 `/api/image-gen/products` 拿商品与 SKU**;调 Medusa Store API 加购 + 下单 + 支付 | Taro 4 + React 18(小程序);Next.js Medusa Storefront(浏览器) |
 
@@ -142,11 +142,15 @@ Uses Drizzle ORM with typed enums. Key tables: `user`, `session`, `account`, `ve
 
 All tables use `text` primary keys with `nanoid()` defaults.
 
-### Middleware (`src/middleware.ts`)
+### Middleware (`src/proxy.ts`)
+
+> Next.js 16 把 `middleware.ts` 改名成了 `proxy.ts` —— 本仓库里是
+> `src/proxy.ts`,**没有** `src/middleware.ts`。找不到 `middleware.ts` 不是你走错了
+> 地方,是这个版本的框架改了名字。
 
 Handles three concerns in order:
 1. **API rate limiting** — Pattern-matched per-route (auth, upload)
-2. **Auth protection** — `/dashboard/**` requires session token cookie, auth routes redirect if logged in
+2. **Auth protection** — `/dashboard/**`、`/admin/**`、`/quote` require session token cookie, auth routes redirect if logged in
 3. **i18n routing** — next-intl locale prefix handling
 
 ### AI Provider Abstraction (`src/lib/ai/openai.ts`)

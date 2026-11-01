@@ -1,14 +1,21 @@
 /**
  * POST /api/print-orders —— 打印服务下单
  *
- * 匿名可下(跟商城的匿名定制一致)。用户带自己的 3D 模型来,按克重计价,
- * 工作室按这份工单生产。
+ * 2026-11-01:改成**登录后下单**。订单挂在账号名下(`user_id`),用户在自己的
+ * dashboard 页看进度。之前是匿名下单 + 「订单号 + 令牌」双因子查单。
+ *
+ * 用户带自己的 3D 模型来,按克重计价,工作室按这份工单生产。
  *
  * ## 服务端重算价格
  *
  * 客户端会带着它自己算的报价来,但**这里不信** —— 只取几何和支撑信息,
  * 用 `computePrintQuote()` 重算一遍,落库的是重算结果。跟商城购物车
  * 每次加购都重算 `calculatePricing()` 是同一个道理:客户端能被改。
+ *
+ * ## 联系邮箱不采信客户端
+ *
+ * 邮箱一律取登录用户的账号邮箱。订单已经归属账号,没理由让客户端随便填 ——
+ * 否则这个接口就成了一条「给任意邮箱发信」的通道。
  *
  * ## 模型文件
  *
@@ -19,18 +26,15 @@
 
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import {
-  getPublicUrl,
-  isR2Configured,
-  objectExists,
-} from "@/features/image-gen/lib/r2";
+import { isR2Configured, objectExists } from "@/features/image-gen/lib/r2";
+import { getPrintOrderUser } from "@/features/print-quote/lib/auth";
 import { createPrintOrder } from "@/features/print-quote/lib/order-store";
 import {
   computePrintQuote,
   generatePrintOrderNo,
-  generatePrintOrderToken,
 } from "@/features/print-quote/lib/quote-server";
 import type { PrintOrderRequest } from "@/features/print-quote/lib/quote-types";
+import { isOwnModelUrl } from "@/features/print-quote/lib/upload-key";
 import { withApiLogging } from "@/lib/api-logger";
 import {
   checkRateLimit,
@@ -42,36 +46,6 @@ import {
 export const runtime = "nodejs";
 /** 一次 DB 写,30s 够 */
 export const maxDuration = 30;
-
-/**
- * R2 公共桶里的对象路径前缀 —— 模型文件必须落在自己的目录下。
- *
- * 不校验的话,这个接口能存任意链接,工作室照着链接去取件会打到站外。
- */
-const MODEL_URL_PREFIX = "print-orders/";
-
-/**
- * 校验「模型文件确实是我们自己签发的那一个」。
- *
- * ## 为什么不能只查 modelUrl 里有 "print-orders/" 这段字符串
- *
- * `includes` 是子串匹配 —— `https://attacker.example.com/print-orders/x.zip`
- * 一样能过。所以这里反过来做:**服务端自己把 objectKey 拼成 URL**,
- * 要求客户端交上来的 modelUrl 跟它**逐字符相等**。
- *
- * 这样一来:
- *  - 域名不用单独判(拼出来的就是自己的桶)
- *  - 路径不用单独判(拼出来的就是 print-orders/ 下面)
- *  - 客户端就算伪造 modelUrl,也对不上服务端算出来的那个
- */
-function isOwnModelUrl(modelUrl: string, objectKey: string): boolean {
-  if (!objectKey.startsWith(MODEL_URL_PREFIX)) return false;
-  // objectKey 只能由我们自己生成:`print-orders/<日期>/<时间戳>-<nanoid>.<ext>`
-  // 不允许出现 `..` / 空段 / 反斜杠 —— 这些是路径穿越的原料
-  if (!/^print-orders\/[\w-]+\/[\w.-]+\.[a-z0-9]+$/.test(objectKey))
-    return false;
-  return getPublicUrl(objectKey) === modelUrl;
-}
 
 const orderSchema = z.object({
   quote: z.object({
@@ -99,7 +73,6 @@ const orderSchema = z.object({
     .max(50 * 1024 * 1024)
     .nullish(),
   contactName: z.string().min(1).max(60),
-  contactEmail: z.string().email().max(200),
   contactPhone: z.string().max(40).nullish(),
   note: z.string().max(1000).nullish(),
 });
@@ -111,6 +84,15 @@ async function handle(request: NextRequest) {
   const rl = await checkRateLimit(ip, "strict");
   if (!rl.success) {
     return createRateLimitResponse(rl);
+  }
+
+  // 打印服务要登录
+  const user = await getPrintOrderUser();
+  if (!user) {
+    return NextResponse.json(
+      { success: false, error: "请先登录" },
+      { status: 401, headers: getRateLimitHeaders(rl) }
+    );
   }
 
   // 没配 R2 就没法收模型文件 —— 整条链路不可用,直接拒,
@@ -160,12 +142,12 @@ async function handle(request: NextRequest) {
     modelUrl: parsed.data.modelUrl,
     modelSizeBytes: parsed.data.modelSizeBytes ?? null,
     contactName: parsed.data.contactName,
-    contactEmail: parsed.data.contactEmail,
     contactPhone: parsed.data.contactPhone ?? null,
     note: parsed.data.note ?? null,
   };
 
-  if (!isOwnModelUrl(input.modelUrl, input.objectKey)) {
+  // 模型文件必须是自己分区里的那一个 —— 别人的文件、伪造的 URL 都不行
+  if (!isOwnModelUrl(input.modelUrl, input.objectKey, user.id)) {
     return NextResponse.json(
       {
         error: "INVALID_MODEL_URL",
@@ -200,18 +182,18 @@ async function handle(request: NextRequest) {
   }
 
   const orderNo = generatePrintOrderNo();
-  const token = generatePrintOrderToken();
 
   try {
     await createPrintOrder({
       orderNo,
-      accessToken: token,
+      userId: user.id,
       modelFileName: input.modelFileName,
       modelUrl: input.modelUrl,
       modelSizeBytes: input.modelSizeBytes,
       quote,
       contactName: input.contactName,
-      contactEmail: input.contactEmail,
+      // 联系邮箱以账号邮箱为准,不采信客户端
+      contactEmail: user.email,
       contactPhone: input.contactPhone,
       note: input.note,
     });
@@ -239,7 +221,6 @@ async function handle(request: NextRequest) {
   return NextResponse.json(
     {
       orderNo,
-      token,
       quote,
       createdAt: new Date().toISOString(),
     },

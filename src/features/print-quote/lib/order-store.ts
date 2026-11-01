@@ -6,18 +6,23 @@
  * 当成非法导出。
  */
 
-import { and, desc, eq, type SQL, sql } from "drizzle-orm";
+import { desc, eq, type SQL, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 
 import { db } from "@/db";
 import { type PrintOrderRow, printOrder } from "@/db/schema";
 
-import type { PrintOrderStatus, PrintQuote } from "./quote-types";
+import type {
+  PrintOrderStatus,
+  PrintQuote,
+  UserPrintOrder,
+} from "./quote-types";
 
 /** 下单要写进库的字段 */
 export type CreatePrintOrderInput = {
   orderNo: string;
-  accessToken: string;
+  /** 下单人 —— 订单挂在账号名下 */
+  userId: string;
   modelFileName: string;
   modelUrl: string;
   modelSizeBytes: number | null;
@@ -37,7 +42,7 @@ export async function createPrintOrder(
     .values({
       id: nanoid(),
       orderNo: input.orderNo,
-      accessToken: input.accessToken,
+      userId: input.userId,
       status: "PENDING",
       modelFileName: input.modelFileName,
       modelUrl: input.modelUrl,
@@ -71,24 +76,22 @@ export async function createPrintOrder(
 }
 
 /**
- * 按订单号 + 令牌查订单
+ * 某个用户自己的订单 —— 按提交时间倒序
  *
- * 两个条件都是 AND —— 订单号可能被猜到,令牌才是防枚举的那一半。
- * 对不上就当不存在(不区分「订单不存在」和「令牌不对」,免得被用来
- * 探测哪些订单号存在)。
+ * `userId` 是**唯一**的过滤条件:用户侧只看自己的单,后台的全局视角走
+ * `listPrintOrders()`。
  */
-export async function findPrintOrder(
-  orderNo: string,
-  token: string
-): Promise<PrintOrderRow | null> {
-  const rows = await db
+export async function listUserPrintOrders(
+  userId: string,
+  limit = 50
+): Promise<PrintOrderRow[]> {
+  const capped = Math.min(Math.max(limit, 1), 200);
+  return db
     .select()
     .from(printOrder)
-    .where(
-      and(eq(printOrder.orderNo, orderNo), eq(printOrder.accessToken, token))
-    )
-    .limit(1);
-  return rows[0] ?? null;
+    .where(eq(printOrder.userId, userId))
+    .orderBy(desc(printOrder.createdAt))
+    .limit(capped);
 }
 
 /** 后台列表:按状态筛 + 时间倒序 */
@@ -119,6 +122,26 @@ export async function updatePrintOrderStatus(
     .where(eq(printOrder.orderNo, orderNo))
     .returning();
   return rows[0] ?? null;
+}
+
+/**
+ * DB 行 → 用户侧视图
+ *
+ * numeric 列从 pg 出来是字符串,这里统一转成数字 —— 别让每个组件各写一遍
+ * `Number(row.materialWeightG)`。
+ */
+export function toUserPrintOrder(row: PrintOrderRow): UserPrintOrder {
+  return {
+    orderNo: row.orderNo,
+    status: row.status,
+    modelFileName: row.modelFileName,
+    materialWeightG: Number(row.materialWeightG),
+    supportWeightG:
+      row.supportWeightG === null ? null : Number(row.supportWeightG),
+    dims: [Number(row.dimX), Number(row.dimY), Number(row.dimZ)],
+    totalPriceCents: row.totalPriceCents,
+    createdAt: row.createdAt.toISOString(),
+  };
 }
 
 /** 后台统计 */

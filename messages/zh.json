@@ -720,6 +720,7 @@
       "models": "3D 模型",
       "credits": "积分",
       "orders": "订单管理",
+      "myPrintOrders": "我的打印订单",
       "canvas": "画布",
       "settings": "设置",
       "support": "支持",
@@ -747,7 +748,8 @@
       "billing": "账单管理",
       "notifications": "通知设置",
       "deckDetails": "卡组详情",
-      "ticketDetails": "工单详情"
+      "ticketDetails": "工单详情",
+      "printOrders": "我的打印订单"
     },
     "sidebar": {
       "settings": "设置",
@@ -1477,7 +1479,7 @@
       "subtitle": "解析模型体积与表面积,按克重实时算价。调整尺寸、加跑智能摆盘,价格跟着变;确定要做就下单,工作室一个工作日内联系你。",
       "bulletUpload": "模型只在浏览器里解析,报价阶段不上传",
       "bulletPrice": "价格由服务器算,明细加起来等于合计",
-      "bulletOrder": "匿名下单,订单号 + 令牌查进度"
+      "bulletOrder": "登录后下单,进度在「我的打印订单」里看"
     },
     "quote": {
       "title": "报价明细",
@@ -1498,7 +1500,8 @@
       "formSubtitle": "我们会在 1 个工作日内联系你,确认材质、颜色与交期。",
       "modelUploadHint": "点提交后模型文件才会打包上传 —— 仅用于生产,不会用于训练。",
       "name": "称呼",
-      "email": "邮箱",
+      "email": "联系邮箱",
+      "emailLockedHint": "工单确认邮件会发到这个账号邮箱",
       "phone": "电话(选填)",
       "note": "备注(选填)",
       "notePlaceholder": "材质、颜色、数量等特殊要求",
@@ -1510,22 +1513,19 @@
       "successTitle": "订单已提交",
       "successBody": "我们收到你的模型和报价请求了。",
       "orderNo": "订单号",
-      "successHint": "订单号已存在本机浏览器,可在下方「我的订单」里查进度。",
+      "successHint": "订单已挂在你的账号下,可在「我的打印订单」里随时查进度。",
+      "successLink": "去我的打印订单",
       "errors": {
         "name": "请填写称呼",
-        "email": "请填写有效的邮箱地址",
         "noModel": "还没有可下单的模型",
         "submit": "提交失败,请稍后重试",
         "quoteStale": "尺寸改过了,价格已更新 —— 请返回重新确认报价"
       }
     },
     "list": {
-      "title": "我的订单",
-      "empty": "本机还没有订单记录",
-      "loading": "查询中…",
-      "refresh": "刷新",
-      "remove": "移除",
-      "failed": "查询失败"
+      "title": "我的打印订单",
+      "empty": "还没有下单记录",
+      "viewAll": "查看全部"
     },
     "status": {
       "PENDING": "待确认",

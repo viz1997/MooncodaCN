@@ -37,18 +37,28 @@ import {
   type OrderContact,
   OrderForm,
 } from "@/features/print-quote/components/order-form";
-import { OrderList } from "@/features/print-quote/components/order-list";
+import { PrintOrderList } from "@/features/print-quote/components/print-order-list";
 import { QuoteSummary } from "@/features/print-quote/components/quote-summary";
-import { saveLocalOrder } from "@/features/print-quote/lib/local-orders";
+import { formatCents } from "@/features/print-quote/lib/format";
 import type {
   PrintOrderCreated,
   PrintQuote,
   PrintQuoteInput,
+  UserPrintOrder,
 } from "@/features/print-quote/lib/quote-types";
+import { Link } from "@/i18n/routing";
 
 type Stage = "quote" | "form" | "done";
 
-export function QuoteWorkbench() {
+export function QuoteWorkbench({
+  user,
+  initialOrders,
+}: {
+  /** 当前登录用户 —— 表单用它预填称呼和邮箱 */
+  user: { name: string; email: string };
+  /** 这个用户最近的订单(页面 RSC 查好传进来) */
+  initialOrders: UserPrintOrder[];
+}) {
   const t = useTranslations("PrintQuote");
 
   const [quoteInput, setQuoteInput] = useState<PrintQuoteInput | null>(null);
@@ -93,6 +103,13 @@ export function QuoteWorkbench() {
   );
   const [orderError, setOrderError] = useState<string | null>(null);
   const [order, setOrder] = useState<PrintOrderCreated | null>(null);
+  /**
+   * 我的订单
+   *
+   * 首屏由页面 RSC 查好传进来(这个登录用户最近的订单);下单成功后新单
+   * 插到最上面 —— 不用等刷新就能看到。
+   */
+  const [orders, setOrders] = useState<UserPrintOrder[]>(initialOrders);
 
   const handleQuoteInput = useCallback((input: PrintQuoteInput | null) => {
     setQuoteInput(input);
@@ -197,7 +214,6 @@ export function QuoteWorkbench() {
             modelUrl: uploaded.url,
             modelSizeBytes: uploaded.size,
             contactName: contact.name,
-            contactEmail: contact.email,
             contactPhone: contact.phone || null,
             note: contact.note || null,
           }),
@@ -216,11 +232,20 @@ export function QuoteWorkbench() {
         setOrder(created);
         setStage("done");
         setPhase("idle");
-        saveLocalOrder({
-          orderNo: created.orderNo,
-          token: created.token,
-          createdAt: created.createdAt,
-        });
+        // 新单插到列表顶部 —— 订单挂在账号名下,列表本身就是「我的订单」
+        setOrders((prev) => [
+          {
+            orderNo: created.orderNo,
+            status: "PENDING",
+            modelFileName: uploaded.fileName,
+            materialWeightG: created.quote.materialWeightG,
+            supportWeightG: created.quote.supportWeightG,
+            dims: created.quote.dims,
+            totalPriceCents: created.quote.totalPriceCents,
+            createdAt: created.createdAt,
+          },
+          ...prev,
+        ]);
       } catch (error) {
         console.error("[PrintQuote] 下单失败", error);
         setOrderError(t("order.errors.submit"));
@@ -263,6 +288,7 @@ export function QuoteWorkbench() {
         <OrderForm
           quote={quote}
           modelName={modelPayload?.model.objFileName ?? ""}
+          user={user}
           phase={phase}
           error={orderError}
           onSubmit={handleSubmitOrder}
@@ -295,20 +321,23 @@ export function QuoteWorkbench() {
                 {t("quote.total")}
               </dt>
               <dd className="mt-0.5 font-mono text-sm font-medium text-emerald-900">
-                {new Intl.NumberFormat("zh-CN", {
-                  style: "currency",
-                  currency: "CNY",
-                }).format(order.quote.totalPriceCents / 100)}
+                {formatCents(order.quote.totalPriceCents)}
               </dd>
             </div>
           </dl>
           <p className="mt-4 text-xs text-emerald-800/70">
             {t("order.successHint")}
           </p>
+          <Link
+            href="/dashboard/print-orders"
+            className="mt-2 inline-block text-xs font-medium text-emerald-800 underline underline-offset-4 hover:text-emerald-900"
+          >
+            {t("order.successLink")}
+          </Link>
         </div>
       )}
 
-      <OrderList />
+      <PrintOrderList orders={orders} />
     </div>
   );
 }

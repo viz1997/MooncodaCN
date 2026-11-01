@@ -1,7 +1,14 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 
 import { QuoteWorkbench } from "@/features/print-quote/components/quote-workbench";
+import {
+  listUserPrintOrders,
+  toUserPrintOrder,
+} from "@/features/print-quote/lib/order-store";
+import { auth } from "@/lib/auth";
 
 /**
  * 打印服务报价页 —— `/quote`
@@ -23,7 +30,20 @@ import { QuoteWorkbench } from "@/features/print-quote/components/quote-workbenc
  *
  * 跟 `/tools/weight` 的区别只有一处:那个页面是**工具**(只算不存、不显示价格),
  * 这个页面是**服务**(能报价、能下单)。
+ *
+ * ## 2026-11-01:整页要登录
+ *
+ * 打印服务从匿名下单改成登录后下单 —— 订单挂在账号名下,用户在自己的
+ * dashboard 页看进度。所以整个 `/quote` 页面都在登录墙后面:
+ *  - proxy.ts 的 `protectedRoutes` 里加了 `/quote` —— 未登录访问会 302 到
+ *    `/sign-in?callbackUrl=…`,登录后跳回本页
+ *  - 这里再兜一层 RSC 校验(proxy 只看 cookie 在不在,这里是真的查库)
+ *
+ * 页面顺手把这个用户的最近订单查出来给报价台当首屏数据 —— 下单成功后
+ * 列表能立刻多出一行,不用等刷新。
  */
+export const dynamic = "force-dynamic";
+
 export async function generateMetadata({
   params,
 }: {
@@ -36,8 +56,8 @@ export async function generateMetadata({
     ? "打印报价 — 上传模型,按克重实时算价"
     : "Print Quote — Upload a model, priced by weight";
   const description = isZh
-    ? "上传 3D 模型,本地解析体积与表面积,按克重实时算出打印报价。调整尺寸、加跑智能摆盘,价格跟着变;确定要做就匿名下单,工作室一个工作日内联系你。"
-    : "Upload a 3D model and get an instant print quote based on weight. Adjust the size or run smart orientation and the price follows — then place an order without an account.";
+    ? "上传 3D 模型,本地解析体积与表面积,按克重实时算出打印报价。调整尺寸、加跑智能摆盘,价格跟着变;确定要做就登录下单,工作室一个工作日内联系你。"
+    : "Upload a 3D model and get an instant print quote based on weight. Adjust the size or run smart orientation and the price follows — then sign in to place the order.";
 
   return {
     title,
@@ -74,6 +94,15 @@ export default async function QuotePage({
   const { locale } = await params;
   const t = await getTranslations({ locale, namespace: "PrintQuote" });
 
+  // 登录墙 —— proxy 已经拦了一道,这里是真的查库
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session?.user) {
+    redirect("/sign-in?callbackUrl=/quote");
+  }
+
+  // 首屏就带上这个用户的最近订单 —— 报价台下单后能把新单插到列表顶部
+  const rows = await listUserPrintOrders(session.user.id, 10);
+
   const bullets = [
     t("page.bulletUpload"),
     t("page.bulletPrice"),
@@ -108,7 +137,13 @@ export default async function QuotePage({
 
       {/* 报价台 */}
       <div className="mt-10 md:mt-12">
-        <QuoteWorkbench />
+        <QuoteWorkbench
+          user={{
+            name: session.user.name ?? "",
+            email: session.user.email ?? "",
+          }}
+          initialOrders={rows.map(toUserPrintOrder)}
+        />
       </div>
     </div>
   );

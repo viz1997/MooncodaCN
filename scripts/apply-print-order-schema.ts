@@ -5,7 +5,21 @@
  *
  * - CREATE TYPE print_order_status（6 态）
  * - CREATE TABLE print_order
- * - 3 个索引：order_no 唯一 / status / created_at
+ * - 4 个索引：order_no 唯一 / status / created_at / user_id
+ *
+ * ## 2026-11-01 改成「登录后下单」
+ *
+ * 表结构跟着变了两处:
+ *   - 加 `user_id`(NOT NULL,REFERENCES "user"(id) ON DELETE CASCADE)
+ *   - 删 `access_token`(登录后不需要查询令牌了)
+ *
+ * 已经跑过老脚本的库上是**旧结构**(有 access_token / 无 user_id),所以下面除了
+ * `CREATE TABLE IF NOT EXISTS`(新结构),还跟了一段 ALTER 升级路径:
+ *   ADD COLUMN IF NOT EXISTS user_id → 检查有没有归属不到的旧行 → SET NOT NULL
+ *   → DROP COLUMN IF EXISTS access_token
+ *
+ * 旧行(如果有)没有归属用户,这一步会**报错而不是静默删** —— 工单是业务记录,
+ * 该怎么处理得人来定。报的行数会打在错误信息里。
  *
  * ## 为什么不用 drizzle-kit migrate
  *
@@ -64,7 +78,7 @@ async function main() {
       query: `CREATE TABLE IF NOT EXISTS "print_order" (
         "id" text PRIMARY KEY,
         "order_no" text NOT NULL,
-        "access_token" text NOT NULL,
+        "user_id" text NOT NULL REFERENCES "user" ("id") ON DELETE CASCADE,
         "status" "print_order_status" NOT NULL DEFAULT 'PENDING',
         "model_file_name" text NOT NULL,
         "model_url" text NOT NULL,
@@ -91,6 +105,39 @@ async function main() {
       );`,
     },
     {
+      label: "ADD COLUMN print_order.user_id（旧库升级）",
+      query: `ALTER TABLE "print_order"
+        ADD COLUMN IF NOT EXISTS "user_id" text REFERENCES "user" ("id") ON DELETE CASCADE;`,
+    },
+    {
+      label: "CHECK print_order.user_id 没有归属不到的旧行",
+      // 旧结构是匿名的 —— 那批工单没有 user_id。SET NOT NULL 之前先把数量报出来,
+      // 让「该怎么处理」变成一个要人决定的决定,而不是脚本偷偷删数据。
+      query: `DO $$
+      DECLARE
+        orphan_count integer;
+      BEGIN
+        SELECT count(*) INTO orphan_count
+        FROM "print_order"
+        WHERE "user_id" IS NULL;
+        IF orphan_count > 0 THEN
+          RAISE EXCEPTION
+            'print_order 里有 % 条匿名工单没有 user_id，请先手动处理（补归属或删除）再重跑本脚本',
+            orphan_count;
+        END IF;
+      END $$;`,
+    },
+    {
+      label: "SET NOT NULL print_order.user_id",
+      query: `ALTER TABLE "print_order"
+        ALTER COLUMN "user_id" SET NOT NULL;`,
+    },
+    {
+      label: "DROP COLUMN print_order.access_token（登录后不需要查询令牌）",
+      query: `ALTER TABLE "print_order"
+        DROP COLUMN IF EXISTS "access_token";`,
+    },
+    {
       label: 'UNIQUE INDEX print_order_no_uniq_idx ON print_order("order_no")',
       query: `CREATE UNIQUE INDEX IF NOT EXISTS "print_order_no_uniq_idx"
         ON "print_order" ("order_no");`,
@@ -104,6 +151,11 @@ async function main() {
       label: 'INDEX print_order_created_at_idx ON print_order("created_at")',
       query: `CREATE INDEX IF NOT EXISTS "print_order_created_at_idx"
         ON "print_order" ("created_at");`,
+    },
+    {
+      label: 'INDEX print_order_user_id_idx ON print_order("user_id")',
+      query: `CREATE INDEX IF NOT EXISTS "print_order_user_id_idx"
+        ON "print_order" ("user_id");`,
     },
   ];
 
