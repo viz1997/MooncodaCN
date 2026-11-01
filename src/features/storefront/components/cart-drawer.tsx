@@ -31,6 +31,7 @@ import {
 import { formatPriceCNY } from "@/features/marketing/components/storefront/wjp-store-data";
 import { useToast } from "@/hooks/use-toast";
 
+import { useAtelierContainer } from "../hooks/use-atelier-container";
 import { useCart, useCartUi } from "../hooks/use-cart";
 
 const FREE_SHIPPING_THRESHOLD_CNY = 99;
@@ -39,6 +40,7 @@ export function CartDrawer() {
   const { toast } = useToast();
   const isOpen = useCartUi((s) => s.isOpen);
   const closeCart = useCartUi((s) => s.closeCart);
+  const container = useAtelierContainer();
   const {
     items,
     isLoading,
@@ -69,6 +71,9 @@ export function CartDrawer() {
     <Sheet open={isOpen} onOpenChange={(open) => !open && closeCart()}>
       <SheetContent
         side="right"
+        // portal 指回 .atelier-root —— 否则抽屉落在 atelier 的 token 子树外,
+        // 配色和圆角退回全站默认主题(见 use-atelier-container.ts)
+        portalContainer={container}
         className="w-full sm:max-w-md p-0 flex flex-col"
       >
         <SheetHeader className="px-5 py-5 border-b">

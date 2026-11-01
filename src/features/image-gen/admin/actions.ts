@@ -13,6 +13,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { promptTemplate, promptTemplatePrice } from "@/db/schema";
 import type { ProductCapabilities } from "@/features/gpt-image/lib/product-catalog";
+import { getProductType } from "@/features/gpt-image/lib/product-catalog";
 import {
   createEffectInDb,
   deleteEffectInDb,
@@ -27,6 +28,16 @@ import {
   getLinesFromDb,
   updateLineInDb,
 } from "@/features/image-gen/lib/db-lines";
+import {
+  bulkUpdateVariantsInDb,
+  createProductInDb,
+  deleteProductInDb,
+  findProductInDb,
+  generateVariantsForProductInDb,
+  getProductsFromDb,
+  getVariantsFromDb,
+  updateProductInDb,
+} from "@/features/image-gen/lib/db-products";
 import {
   createExternalApiKey as createExternalApiKeyInDb,
   listExternalApiKeys as listExternalApiKeysInDb,
@@ -830,4 +841,171 @@ export const deleteExternalApiKeyAdminAction = withImageGenAdminAction(
     await softDeleteExternalApiKeyInDb(parsedInput.id);
     revalidatePath("/admin/external-api-keys");
     return { success: true };
+  });
+
+// ============================================
+// 2026-10-21：商品目录 admin actions
+//
+// 商品资料（名称 / 描述 / 封面 / 基础价 / 上下架）+ SKU 变体（真 SKU 绝对价）
+// 从 product-catalog.ts 的硬编码常量搬到 product / product_variant 两张表，
+// 运营在这里改，不再需要发版。
+//
+// 注意 /api/image-gen/products 有 CDN 缓存（s-maxage=300, swr=600），
+// 这里 revalidatePath 只清 Next 自身的缓存；对外生效仍可能有最长 10 分钟
+// 延迟，保存成功的 toast 里已提示。
+// ============================================
+
+const productFormSchema = z.object({
+  code: z
+    .string()
+    .min(1)
+    // 产品码同时是 SKU 前缀，锁死大写字母 + 数字，避免拼出歧义 SKU
+    .regex(/^[A-Z][A-Z0-9]*$/, "产品码只能是大写字母和数字（如 R / RM / M）"),
+  name: z.string().min(1, "请输入商品名称"),
+  nameEn: z.string().default(""),
+  category: z.string().default("keychain"),
+  description: z.string().default(""),
+  coverUrl: z.union([z.literal(""), z.string().url("封面必须是合法 URL")]),
+  /** 基础价，单位「分」；表单里也是分，展示时才 /100 */
+  basePriceCents: z.number().int().min(0).default(0),
+  leadTimeDays: z.number().int().min(0).max(365).default(7),
+  accent: z.string().default(""),
+  status: z.enum(["active", "inactive"]).default("active"),
+  sortOrder: z.number().int().default(0),
+});
+
+/** 商品列表（含 SKU / 配件变体统计） */
+export const listProductsAdminAction = withImageGenAdminAction("listProducts")
+  .schema(z.void().optional())
+  .action(async () => {
+    const products = await getProductsFromDb();
+    return { products };
+  });
+
+/** 单个商品 + 其 SKU 列表 */
+export const getProductAdminAction = withImageGenAdminAction("getProduct")
+  .schema(z.object({ code: z.string().min(1) }))
+  .action(async ({ parsedInput }) => {
+    const [product, variants] = await Promise.all([
+      findProductInDb(parsedInput.code),
+      getVariantsFromDb(parsedInput.code),
+    ]);
+    if (!product) throw new Error("商品不存在");
+    return { product, variants };
+  });
+
+/**
+ * 新建商品。
+ *
+ * code 必须在 PRODUCT_TYPES 字典里 —— 尺寸 / 配件清单目前还是代码常量，
+ * 不在字典里的 code 对外接口不会返回它。db 层已做校验，这里再拦一道给
+ * 明确的 toast 文案。
+ */
+export const createProductAdminAction = withImageGenAdminAction("createProduct")
+  .schema(productFormSchema)
+  .action(async ({ parsedInput }) => {
+    if (!getProductType(parsedInput.code)) {
+      throw new Error(
+        `产品码 ${parsedInput.code} 不在 PRODUCT_TYPES 字典里，新增型号需要改 product-catalog.ts`
+      );
+    }
+    const existing = await findProductInDb(parsedInput.code);
+    if (existing) throw new Error(`商品 ${parsedInput.code} 已存在`);
+
+    const created = await createProductInDb(parsedInput);
+    if (!created) throw new Error("创建失败");
+
+    revalidatePath("/admin/products");
+    return { product: created };
+  });
+
+/** 更新商品资料（不含 SKU —— SKU 走 bulkUpdateProductVariants） */
+export const updateProductAdminAction = withImageGenAdminAction("updateProduct")
+  .schema(
+    z.object({
+      code: z.string().min(1),
+      updates: productFormSchema.partial(),
+    })
+  )
+  .action(async ({ parsedInput }) => {
+    // code 是主键不可改，updates 里那份 code 丢掉
+    const { code: _ignored, ...updates } = parsedInput.updates;
+    const updated = await updateProductInDb(parsedInput.code, updates);
+    if (!updated) throw new Error("商品不存在");
+
+    revalidatePath("/admin/products");
+    revalidatePath(`/admin/products/${parsedInput.code}`);
+    return { product: updated };
+  });
+
+/** 删除商品（连带其全部 SKU 行） */
+export const deleteProductAdminAction = withImageGenAdminAction("deleteProduct")
+  .schema(z.object({ code: z.string().min(1) }))
+  .action(async ({ parsedInput }) => {
+    const ok = await deleteProductInDb(parsedInput.code);
+    if (!ok) throw new Error("商品不存在");
+
+    revalidatePath("/admin/products");
+    return { success: true };
+  });
+
+/** 某商品的 SKU 行（含已下架） */
+export const listProductVariantsAdminAction = withImageGenAdminAction(
+  "listProductVariants"
+)
+  .schema(z.object({ productCode: z.string().min(1) }))
+  .action(async ({ parsedInput }) => {
+    const variants = await getVariantsFromDb(parsedInput.productCode);
+    return { variants };
+  });
+
+/**
+ * 批量改 SKU 价 / 上下架。
+ *
+ * 前端一次提交所有改动行（对比初始值后只发变化了的），避免逐行往返。
+ */
+export const bulkUpdateProductVariantsAction = withImageGenAdminAction(
+  "bulkUpdateProductVariants"
+)
+  .schema(
+    z.object({
+      productCode: z.string().min(1),
+      updates: z
+        .array(
+          z.object({
+            id: z.string().min(1),
+            priceCents: z.number().int().min(0).optional(),
+            isActive: z.boolean().optional(),
+          })
+        )
+        .max(1000),
+    })
+  )
+  .action(async ({ parsedInput }) => {
+    const count = await bulkUpdateVariantsInDb(
+      parsedInput.updates.map((u) => ({
+        id: u.id,
+        priceCents: u.priceCents,
+        isActive: u.isActive,
+      }))
+    );
+    revalidatePath(`/admin/products/${parsedInput.productCode}`);
+    return { count };
+  });
+
+/**
+ * 按当前字典重新生成该商品的 SKU 行。
+ *
+ * 只 INSERT 不 UPDATE —— 运营改过的价不会被冲掉，已有行会被唯一索引挡下。
+ */
+export const generateProductVariantsAction = withImageGenAdminAction(
+  "generateProductVariants"
+)
+  .schema(z.object({ productCode: z.string().min(1) }))
+  .action(async ({ parsedInput }) => {
+    const created = await generateVariantsForProductInDb(
+      parsedInput.productCode
+    );
+    revalidatePath(`/admin/products/${parsedInput.productCode}`);
+    return { created };
   });

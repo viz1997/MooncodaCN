@@ -2,6 +2,7 @@ import {
   Award,
   BookOpen,
   Box,
+  Boxes,
   Cpu,
   Frame,
   Globe,
@@ -287,6 +288,13 @@ export const adminNav: NavGroup[] = [
         href: "/admin/product-effects",
         icon: Package,
         children: [
+          {
+            // 2026-10-21：商品目录（名称/描述/封面/基础价 + SKU 变体绝对价）
+            // 从 product-catalog.ts 硬编码搬到 product / product_variant 表
+            title: "商品",
+            href: "/admin/products",
+            icon: Boxes,
+          },
           {
             title: "效果模板",
             href: "/admin/product-effects",

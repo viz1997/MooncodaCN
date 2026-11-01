@@ -1,7 +1,7 @@
 import { GeistMono } from "geist/font/mono";
 import { GeistSans } from "geist/font/sans";
 import type { Metadata } from "next";
-import { Inter, Playfair_Display } from "next/font/google";
+import { Inter, Noto_Serif_SC, Playfair_Display } from "next/font/google";
 import { cookies } from "next/headers";
 
 import { siteConfig } from "@/config";
@@ -62,6 +62,24 @@ const playfair = Playfair_Display({
   weight: ["400", "500", "600", "700"],
   style: ["normal", "italic"],
 });
+/**
+ * 中文衬线 —— 只在 atelier 子树的标题里当 Playfair 的**字形级回退**用。
+ *
+ * Playfair Display 没有汉字,所以字体栈写成
+ * `Playfair → Noto Serif SC → Georgia → serif`,
+ * 浏览器逐字形回退:拉丁字母走 Playfair,汉字走 Noto Serif SC。
+ * 不需要按 locale 切 CSS —— zh 页上夹的英文单词仍是 Playfair,这是
+ * 中文编辑排版的常规做法。
+ *
+ * 体积:只取 500/600 两档(标题用不到 400/700),`subsets: ["latin"]`
+ * 让 next/font 只下发需要的子集。
+ */
+const notoSerifSC = Noto_Serif_SC({
+  variable: "--font-atelier-serif-sc",
+  subsets: ["latin"],
+  display: "swap",
+  weight: ["500", "600"],
+});
 
 /**
  * 根布局
@@ -80,7 +98,7 @@ export default async function RootLayout({
   return (
     <html lang={locale} suppressHydrationWarning>
       <body
-        className={`${GeistSans.variable} ${GeistMono.variable} ${inter.variable} ${playfair.variable} font-sans antialiased`}
+        className={`${GeistSans.variable} ${GeistMono.variable} ${inter.variable} ${playfair.variable} ${notoSerifSC.variable} font-sans antialiased`}
       >
         {children}
       </body>

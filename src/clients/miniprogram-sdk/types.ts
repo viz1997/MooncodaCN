@@ -434,6 +434,27 @@ export interface ProductTemplateSummary {
   allowedAccessories: string[];
 }
 
+/**
+ * 可售 SKU 变体（2026-10-21 / 接口 v1.7.0 新增）
+ *
+ * 对外是 add-only 字段：用 SDK 1.6.1 的老代码不受影响，多一个 key 而已。
+ * 老代码继续按 basePriceCents + 各项 priceDeltaCents 拼价也能跑。
+ */
+export interface ProductVariantSummary {
+  /** SKU 编码，如 "R-6-LEATHER-BROWN"；无配件的段为 "N-A" */
+  sku: string;
+  /** 尺寸 code（"6"）；无尺寸概念时 "N-A" */
+  sizeCode: string;
+  /** 配件 code（leather / braided_rope …）；无配件时 "N-A" */
+  accessoryCode: string;
+  /** 配件下的具体变体 code（leather_brown …）；无变体时 "N-A" */
+  variantCode: string;
+  /** 绝对价（分）—— 不是价差，可直接当单价用 */
+  priceCents: number;
+  /** 是否在售 */
+  isActive: boolean;
+}
+
 /** 单个产品的完整能力定义（/api/image-gen/products 顶层数组元素） */
 export interface ProductCapability {
   /** 产品码（R / A / P / RM / LB / M） */
@@ -447,12 +468,16 @@ export interface ProductCapability {
   /** 产品封面图 URL */
   cover: string;
   /**
-   * 产品基价（分）—— 来自 server 端 BASE_PRICE_CENTS 字典（R=1900 / A=2400 /
-   * P=3900 / RM=4900 / LB=5900 / M=19900）。前端拼 totalPrice：
+   * 产品基价（分）。2026-10-21 起优先取服务端 product 表，未 seed 时回退
+   * BASE_PRICE_CENTS 字典（R=1900 / A=2400 / P=3900 / RM=4900 / LB=5900 / M=19900）。
+   * 旧拼价方式：
    *   basePriceCents
    *   + sizes[i].priceDeltaCents
    *   + accessories[k].variants[v].priceDeltaCents
    *   + visualStyles[j].surchargeCents（如果选了非默认风格）
+   *
+   * @deprecated 新代码请用 variants[] 匹配 (sizeCode, accessoryCode, variantCode)
+   *   拿绝对价，别再自己拼价差。
    */
   basePriceCents: number;
   /** 该产品可选尺寸档 */
@@ -465,6 +490,11 @@ export interface ProductCapability {
   capabilities: ProductCapabilities;
   /** 该产品可用的 AI 模板列表 */
   templates: ProductTemplateSummary[];
+  /**
+   * 可售 SKU 列表。商品未 seed 或全部下架时为空数组 —— 此时前端应退回
+   * 旧的 basePriceCents + priceDeltaCents 拼价逻辑。
+   */
+  variants: ProductVariantSummary[];
 }
 
 /** GET /api/image-gen/products 响应 */

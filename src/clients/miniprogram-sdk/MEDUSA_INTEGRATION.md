@@ -1,15 +1,35 @@
 # Medusa Commerce 集成指南(小程序侧)
 
 > ⚠️ **本文档优先级高于其他任何 commerce 相关代码/文档**。
+>
+> ⚠️ **2026-10-21 部分失效**:「本仓库不做 commerce」这一条**只对购物车 / 订单 / 支付 / 收货地址成立**。
+> **商品目录(商品 / SKU / 价格)已收回本仓库** —— 小程序读商品走
+> `GET /api/image-gen/products`(即 `products.ts` 的 `listProducts()`),
+> 不再走 Medusa。详见下方「2026-10-21 变更」。
 
-## TL;DR
+## 2026-10-21 变更:商品目录回到本仓库
 
-- **本仓库 NextDevTpl 不做 commerce**(商品 / SKU / 购物车 / 订单 / 支付 / 库存 / 收货地址 —— 100% 归 Medusa)
+| 数据 | 谁是单一权威 | 小程序怎么读 |
+|---|---|---|
+| **商品资料 / 基础价 / SKU 变体** | **NextDevTpl**(新 `product` + `product_variant` 表) | `listProducts()` → `ProductCapability[]` 里的 `variants[]` |
+| 购物车 / 订单 / 支付 / 收货地址 | Medusa(不变) | `medusa.carts.*` / `medusa.orders.*` |
+
+- 后台:`/admin/products`(商品列表)+ `/admin/products/[code]`(SKU 明细)
+- 响应**新增** `ProductCapability.variants[]`(真 SKU 绝对价);旧字段全部保留,
+  SDK 1.6.1 的老代码运行时零改动。
+- 老的 `MEDUSA_INTEGRATION.md` 下文里「小程序要调 `medusa.products.list()` 拿商品」
+  **已经不适用** —— 商品在 NextDevTpl,不要再从 Medusa 拉。
+- Medusa 侧的商品表现在成了未使用的空壳,可以从三方分工里划掉。
+
+## TL;DR(购物车 / 订单 / 支付部分,仍然有效)
+
+- **本仓库 NextDevTpl 不做 cart / order / payment / 地址**(这些 100% 归 Medusa)
 - **真 commerce 后端是独立部署的 Medusa v2**(`MEDUSA_BASE_URL`,与 NextDevTpl 域名不同)
 - **小程序不要调用 NextDevTpl 的 `/api/store/**` 路由**(那是给根 `/` 站点用的临时 mock,只在 mock 阶段有意义)
-- **小程序 commerce 集成 = 直接用 Medusa 官方 SDK** `@medusajs/medusa-js`
+- **小程序加购 / 下单集成 = 直接用 Medusa 官方 SDK** `@medusajs/medusa-js`
+- **商品列表另说**:走 NextDevTpl 的 `/api/image-gen/products`,见上方变更章节
 
-## 三方分工(2026-09-17 拍板)
+## 三方分工(2026-09-17 拍板 / 2026-10-21 商品部分已变更)
 
 | 系统 | 职责 | 给小程序暴露什么 |
 |---|---|---|

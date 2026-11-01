@@ -40,6 +40,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatPriceCNY } from "@/features/marketing/components/storefront/wjp-store-data";
 import { Link } from "@/i18n/routing";
 
+import { useAtelierContainer } from "../hooks/use-atelier-container";
 import { useStorefrontModal } from "../hooks/use-storefront-modal";
 
 const perks = [
@@ -52,6 +53,9 @@ export function ProductQuickView() {
   const product = useStorefrontModal((s) => s.quickViewProduct);
   const setQuickView = useStorefrontModal((s) => s.setQuickView);
   const setCustomize = useStorefrontModal((s) => s.setCustomize);
+  // portal 指回 .atelier-root —— 否则这个 Dialog 落在 atelier 的 token 子树外,
+  // 配色和圆角退回全站默认主题(见 use-atelier-container.ts)
+  const container = useAtelierContainer();
 
   const [activeImage, setActiveImage] = React.useState(0);
   const [showingBefore, setShowingBefore] = React.useState(false);
@@ -74,7 +78,11 @@ export function ProductQuickView() {
       open={Boolean(product)}
       onOpenChange={(open) => !open && setQuickView(null)}
     >
-      <DialogContent className="w-full sm:max-w-5xl max-h-[92vh] sm:max-h-[88vh] p-0 overflow-hidden flex flex-col">
+      <DialogContent
+        portalContainer={container}
+        showCloseButton={false}
+        className="w-full sm:max-w-5xl max-h-[92vh] sm:max-h-[88vh] p-0 overflow-hidden flex flex-col"
+      >
         {product && (
           <>
             <DialogTitle className="sr-only">

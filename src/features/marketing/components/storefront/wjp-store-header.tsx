@@ -16,12 +16,30 @@
  *  - Search dropdown:用 `use-products` 拉所有 mock 商品,输入过滤 title / tags,
  *    点结果项 → `useStorefrontModal.setQuickView(product)` 弹 ProductQuickView
  *  - 删除 User icon,改为「登录」按钮
- *  - navLinks href 与中文化保持
  *  - 用 mounted flag 延迟读 use-cart.itemCount(防 SSR/hydration flash)
+ *
+ * 导航 IA(2026-10-31 精简到 4 项):作品 / 流程 / 工艺 / 定制。
+ * 标签按 next-intl 的 useLocale() 取 zh / en —— 之前全文件硬编码中文。
+ * 桌面端与移动端共用同一份 STORE_NAV,不要在两处各写一遍文案。
+ *
+ * 2026-10-31 加了第 5 项「克重」(`/pricing` 3D 打印克重计算器):
+ * 它是独立路由而不是首页锚点,所以 `kind` 是 `"route"` 而不是 `"anchor"`。
+ * 渲染分支不用改 —— header 里是 `kind === "customize" ? button : link`,
+ * route 走 link 分支。
+ *
+ * 原来这里是六项(生日 / 毕业 / 纪念 / 节日 / 定制 / 全部),移动端 Sheet 里还
+ * 挂着一个「按形态」三项的二级列表 —— 一共九个可点的去处,导航本身成了首页
+ * 最复杂的东西。场合四段色带还在首页上(各有自己的锚点),只是不再各占一个
+ * 导航位;品类筛选则整个搬到作品集页去了。
+ *
+ * 「定制」不是链接(2026-10-22):渲染成 `<button>` 开品类选择层,不再跳
+ * `/image-gen`(那是登录后的 SaaS 工作台,未登录访客会被 proxy 弹去登录墙)。
+ * STORE_NAV 用 `kind` 区分两种渲染分支,桌面 / 移动两处都要跟着分支。
  */
 
 import { AnimatePresence, motion } from "framer-motion";
 import { Loader2, Menu, Search, ShoppingBag } from "lucide-react";
+import { useLocale } from "next-intl";
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";
@@ -39,17 +57,22 @@ import { useProducts } from "@/features/storefront/hooks/use-products";
 import { useStorefrontModal } from "@/features/storefront/hooks/use-storefront-modal";
 import { Link, usePathname } from "@/i18n/routing";
 
-import { WJP_SERIES } from "./wjp-store-data";
+import { STORE_NAV } from "./occasion-data";
 
-const navLinks = [
-  { label: "全部", href: "/#new" },
-  { label: "钥匙扣", href: "/#keychain" },
-  { label: "Q版手办", href: "/#figure" },
-  { label: "冰箱贴", href: "/#magnet" },
-  { label: "工艺故事", href: "/#craft" },
-] as const;
+/**
+ * 导航标签按 locale 取。
+ *
+ * navLinks 原本硬编码中文(全文件唯一的 i18n 缺口)——这里用 next-intl 的
+ * useLocale() 补上,桌面端与移动端 Sheet 共用同一份结果。
+ */
+function navLabel(item: { label: string; labelEn: string }, isZh: boolean) {
+  return isZh ? item.label : item.labelEn;
+}
 
 export function WjpStoreHeader() {
+  const locale = useLocale();
+  const isZh = locale === "zh";
+
   const [scrolled, setScrolled] = React.useState(false);
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [searchValue, setSearchValue] = React.useState("");
@@ -60,6 +83,9 @@ export function WjpStoreHeader() {
   const { itemCount } = useCart();
   const openCart = useCartUi((s) => s.openCart);
   const setQuickView = useStorefrontModal((s) => s.setQuickView);
+  // 「定制」导航项 —— 开品类选择层(CustomizeEntry → CustomWorkshop),
+  // 不再跳 /image-gen(那是登录后的 SaaS 工作台,访客点会撞登录墙)
+  const openCustomizePicker = useStorefrontModal((s) => s.openCustomizePicker);
 
   // mounted flag —— 防 cart count 在 SSR(0) vs client(cookie 持久化)之间 hydration flash
   React.useEffect(() => setMounted(true), []);
@@ -68,20 +94,25 @@ export function WjpStoreHeader() {
   // 2026-09-20：登录按钮拼 callbackUrl，登录后回到当前页（而非 /dashboard）
   // 旧版硬编码 href="/dashboard"：未登录用户点登录直接被甩到 dashboard，
   // 跟原本想看的 atelier 商品页断链。改成动态 callbackUrl 透传 pathname。
+  //
+  // 2026-11-01 修 hydration mismatch：原实现用 `typeof window === "undefined"`
+  // 让服务端走 `/sign-in` 分支、客户端走带 callbackUrl 的分支 —— 服务端吐出的
+  // HTML（/zh/sign-in）和客户端首帧渲染（/zh/sign-in?callbackUrl=%2Fzh%2Fpricing）
+  // 不一致，React 报 "A tree hydrated but some attributes didn't match"。
+  //
+  // 现在两端算的是同一份值，全程不碰 window：
+  //  - locale 用 next-intl 的 useLocale()（NextIntlClientProvider 在 [locale]
+  //    layout 层，服务端/客户端都拿得到）
+  //  - pathname 用 next-intl 的 usePathname()（SSR 可见，且已去掉 locale 前缀）
   const pathname = usePathname();
   const signInHref = React.useMemo(() => {
-    if (
-      typeof window === "undefined" ||
-      pathname === "/sign-in" ||
-      pathname === "/sign-up"
-    ) {
+    if (pathname === "/sign-in" || pathname === "/sign-up") {
       return "/sign-in";
     }
-    const localeSegment = window.location.pathname.match(/^\/(en|zh)/)?.[1];
     const target = pathname.startsWith("/") ? pathname : `/${pathname}`;
-    const prefix = localeSegment ? `/${localeSegment}` : "";
+    const prefix = locale ? `/${locale}` : "";
     return `/sign-in?callbackUrl=${encodeURIComponent(`${prefix}${target}`)}`;
-  }, [pathname]);
+  }, [pathname, locale]);
 
   // mock 12 products,limit=50 已覆盖
   const { data: productsResp, isLoading: productsLoading } = useProducts({
@@ -149,62 +180,73 @@ export function WjpStoreHeader() {
               <SheetContent side="left" className="w-[320px] sm:w-[380px] p-0">
                 <SheetHeader className="px-6 pt-6 pb-4 border-b">
                   <SheetTitle className="text-xl font-semibold tracking-tight">
-                    WJP 梦可达
+                    Mooncoda 梦可达
                   </SheetTitle>
                 </SheetHeader>
                 <nav className="flex flex-col px-2 py-4">
-                  {navLinks.map((link) => (
-                    <Link
-                      key={link.href}
-                      href={link.href}
-                      onClick={() => setMobileOpen(false)}
-                      className="px-4 py-3 text-sm font-medium hover:bg-muted transition-colors rounded-md"
-                    >
-                      {link.label}
-                    </Link>
-                  ))}
-                  <div className="border-t my-3" />
-                  <p className="px-4 py-2 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                    系列
-                  </p>
-                  {WJP_SERIES.map((s) => (
-                    <Link
-                      key={s.id}
-                      href={`/#${s.id}`}
-                      onClick={() => setMobileOpen(false)}
-                      className="px-4 py-3 text-sm hover:bg-muted transition-colors rounded-md flex items-center gap-2"
-                    >
-                      <span
-                        className="size-2 rounded-full"
-                        style={{ backgroundColor: s.accent }}
-                      />
-                      {s.name}
-                    </Link>
-                  ))}
+                  {STORE_NAV.map((link) =>
+                    link.kind === "customize" ? (
+                      // 「定制」是动作不是链接 —— 开品类选择层,不跳页(见 occasion-data.ts)
+                      <button
+                        key={link.id}
+                        type="button"
+                        onClick={() => {
+                          setMobileOpen(false);
+                          openCustomizePicker();
+                        }}
+                        className="px-4 py-3 text-sm font-medium text-left hover:bg-muted transition-colors rounded-md"
+                      >
+                        {navLabel(link, isZh)}
+                      </button>
+                    ) : (
+                      <Link
+                        key={link.id}
+                        href={link.href}
+                        onClick={() => setMobileOpen(false)}
+                        className="px-4 py-3 text-sm font-medium hover:bg-muted transition-colors rounded-md"
+                      >
+                        {navLabel(link, isZh)}
+                      </Link>
+                    )
+                  )}
                 </nav>
               </SheetContent>
             </Sheet>
 
             <nav className="hidden lg:flex items-center gap-6">
-              {navLinks.map((link) => (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  className="text-sm font-medium text-foreground/70 hover:text-foreground transition-colors"
-                >
-                  {link.label}
-                </Link>
-              ))}
+              {STORE_NAV.map((link) =>
+                link.kind === "customize" ? (
+                  <button
+                    key={link.id}
+                    type="button"
+                    onClick={openCustomizePicker}
+                    className="text-sm font-medium text-foreground/70 hover:text-[var(--primary)] transition-colors"
+                  >
+                    {navLabel(link, isZh)}
+                  </button>
+                ) : (
+                  <Link
+                    key={link.id}
+                    href={link.href}
+                    className="text-sm font-medium text-foreground/70 hover:text-[var(--primary)] transition-colors"
+                  >
+                    {navLabel(link, isZh)}
+                  </Link>
+                )
+              )}
             </nav>
           </div>
 
-          {/* Center: logo —— Playfair editorial 字标,atelier 1:1 风格 */}
+          {/* Center: logo —— Playfair editorial 字标,汉字回退到 Noto Serif SC */}
           <Link
             href="/"
-            className="absolute left-1/2 -translate-x-1/2 text-xl font-semibold tracking-tight select-none"
-            style={{ fontFamily: "var(--font-atelier-serif), Georgia, serif" }}
+            className="absolute left-1/2 -translate-x-1/2 text-xl font-medium tracking-tight select-none"
+            style={{
+              fontFamily:
+                "var(--font-atelier-serif), var(--font-atelier-serif-sc), Georgia, serif",
+            }}
           >
-            WJP 梦可达
+            Mooncoda 梦可达
           </Link>
 
           {/* Right: search + sign-in + cart */}
@@ -245,7 +287,6 @@ export function WjpStoreHeader() {
                     ) : (
                       <ul className="divide-y divide-border max-h-96 overflow-y-auto">
                         {filtered.map((p) => (
-                          // biome-ignore lint/a11y/useSemanticElements: ul > li > button 复合结构
                           <li key={p.id}>
                             <button
                               type="button"
@@ -320,7 +361,7 @@ export function WjpStoreHeader() {
                     animate={{ scale: 1 }}
                     exit={{ scale: 0 }}
                     transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                    className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-foreground text-background text-[10px] font-semibold flex items-center justify-center"
+                    className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[var(--primary)] text-[var(--primary-foreground)] text-[10px] font-semibold flex items-center justify-center"
                   >
                     {displayItemCount > 99 ? "99+" : displayItemCount}
                   </motion.span>

@@ -135,6 +135,13 @@ const nextConfig = {
   // antd 全量 import 时按需打包（drawer/button/select 等）
   experimental: {
     optimizePackageImports: ["antd", "@ant-design/icons", "lucide-react"],
+    // 构建 worker 按「可用内存」而非「CPU 核数」分配。
+    // 默认按核数开 worker（16 核机器 = 16 个 Turbopack worker），
+    // 在内存 <16GB 的机器 / CI runner 上会直接 OOM：
+    //   "Worker terminated due to reaching memory limit: JS heap out of memory"
+    //   "Zone Allocation failed - process out of memory"
+    // 打开后 Next.js 按 totalmem 折算 worker 数，内存小的机器自动少开。
+    memoryBasedWorkersCount: true,
   },
   // 客户端 import.meta.env.VITE_* / __APP_VERSION__ 兜底策略：
   // Next.js 16 Turbopack 的 `turbopack` 选项 schema 没有 `define` 字段

@@ -31,8 +31,12 @@ import { describe, expect, it, vi } from "vitest";
 // 链式方法,装配阶段不用 db)。
 vi.mock("@/db", () => ({ db: {} }));
 
-import type { AccessoryVariantDef } from "@/db/image-gen-types";
 import type {
+  AccessoryVariantDef,
+  ProductVariantSummary,
+} from "@/db/image-gen-types";
+import type {
+  ProductRow,
   productAccessoryVariant,
   productEffect,
   promptTemplate,
@@ -733,5 +737,173 @@ describe("product-capability _internals", () => {
     expect(
       parseAllowedCapabilities(JSON.stringify({ canBraidedRopeColor: true }))
     ).toEqual({});
+  });
+});
+
+// ----------------------------------------------------------------------
+// 2026-10-21：商品目录 DB 化（product / product_variant）
+//
+// 覆盖 assembleProductCapabilities 新增的两个可选尾参：
+//  - productRows 覆盖 displayName / basePriceCents / cover，status=inactive
+//    把整个产品从响应里剔掉
+//  - skuRowsByProduct 挂载 variants[]
+// 以及「没有 DB 行时行为与改造前逐字一致」这条最关键的回归保证。
+// ----------------------------------------------------------------------
+
+describe("assembleProductCapabilities —— 商品目录 DB 化(2026-10-21)", () => {
+  function makeProductRow(overrides: Partial<ProductRow> = {}): ProductRow {
+    return {
+      code: "R",
+      name: "钥匙扣",
+      nameEn: "Keychain",
+      category: "keychain",
+      description: "admin 改过的描述",
+      coverUrl: "",
+      basePriceCents: 2100,
+      leadTimeDays: 7,
+      accent: "",
+      status: "active",
+      sortOrder: 10,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      ...overrides,
+    };
+  }
+
+  function makeSku(
+    overrides: Partial<ProductVariantSummary> = {}
+  ): ProductVariantSummary {
+    return {
+      sku: "R-6-LEATHER-BROWN",
+      sizeCode: "6",
+      accessoryCode: "leather",
+      variantCode: "leather_brown",
+      priceCents: 5700,
+      isActive: true,
+      ...overrides,
+    };
+  }
+
+  const effect = makeEffect({ productTypeCode: "R" });
+
+  it("无 DB 行时逐字退回旧行为(字典名 + BASE_PRICE_CENTS + 空 variants)", () => {
+    const out = assembleProductCapabilities(
+      [{ effect, template: makeTemplate() }],
+      new Map(),
+      null,
+      null
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0]?.displayName).toEqual(PRODUCT_META.R?.displayName);
+    expect(out[0]?.description).toEqual(PRODUCT_META.R?.description);
+    expect(out[0]?.basePriceCents).toBe(1900); // BASE_PRICE_CENTS.R
+    expect(out[0]?.variants).toEqual([]);
+  });
+
+  it("传空 Map(表已 push 但没 seed)同样退回旧行为", () => {
+    const out = assembleProductCapabilities(
+      [{ effect, template: makeTemplate() }],
+      new Map(),
+      null,
+      null,
+      new Map(),
+      new Map()
+    );
+    expect(out[0]?.basePriceCents).toBe(1900);
+    expect(out[0]?.variants).toEqual([]);
+  });
+
+  it("DB 行覆盖 displayName / description / basePriceCents", () => {
+    const out = assembleProductCapabilities(
+      [{ effect, template: makeTemplate() }],
+      new Map(),
+      null,
+      null,
+      new Map([["R", makeProductRow()]])
+    );
+    expect(out[0]?.displayName).toEqual({ zh: "钥匙扣", en: "Keychain" });
+    expect(out[0]?.description.zh).toBe("admin 改过的描述");
+    expect(out[0]?.basePriceCents).toBe(2100);
+  });
+
+  it("nameEn 为空时回退字典英文名(小程序 en 端不显示空)", () => {
+    const out = assembleProductCapabilities(
+      [{ effect, template: makeTemplate() }],
+      new Map(),
+      null,
+      null,
+      new Map([["R", makeProductRow({ nameEn: "" })]])
+    );
+    expect(out[0]?.displayName.en).toBe(PRODUCT_META.R?.displayName.en);
+  });
+
+  it("DB 的 coverUrl 优先于模板封面;留空则沿用模板封面", () => {
+    const tpl = makeTemplate({ coverUrl: "https://cdn/tpl.png" });
+    const withCover = assembleProductCapabilities(
+      [{ effect, template: tpl }],
+      new Map(),
+      null,
+      null,
+      new Map([["R", makeProductRow({ coverUrl: "https://cdn/admin.png" })]])
+    );
+    expect(withCover[0]?.cover).toBe("https://cdn/admin.png");
+
+    const withoutCover = assembleProductCapabilities(
+      [{ effect, template: tpl }],
+      new Map(),
+      null,
+      null,
+      new Map([["R", makeProductRow({ coverUrl: "" })]])
+    );
+    // ProductTemplateSummary.cover 来自 effect.previewUrl，不是 tpl.coverUrl
+    expect(withoutCover[0]?.cover).toBe(effect.previewUrl);
+  });
+
+  it("status=inactive 的商品整条不进响应", () => {
+    const out = assembleProductCapabilities(
+      [{ effect, template: makeTemplate() }],
+      new Map(),
+      null,
+      null,
+      new Map([["R", makeProductRow({ status: "inactive" })]])
+    );
+    expect(out).toEqual([]);
+  });
+
+  it("variants[] 挂载对应 productCode 的 SKU 行", () => {
+    const skus = [
+      makeSku(),
+      makeSku({
+        sku: "R-6-METAL",
+        accessoryCode: "metal",
+        variantCode: "N-A",
+        priceCents: 4900,
+      }),
+    ];
+    const out = assembleProductCapabilities(
+      [{ effect, template: makeTemplate() }],
+      new Map(),
+      null,
+      null,
+      new Map([["R", makeProductRow()]]),
+      new Map([["R", skus]])
+    );
+    expect(out[0]?.variants).toEqual(skus);
+    // 老字段不受影响
+    expect(out[0]?.basePriceCents).toBe(2100);
+    expect(out[0]?.sizes[0]?.priceDeltaCents).toBe(0);
+  });
+
+  it("只有别的商品有 SKU 时,当前商品 variants 为空数组", () => {
+    const out = assembleProductCapabilities(
+      [{ effect, template: makeTemplate() }],
+      new Map(),
+      null,
+      null,
+      new Map([["R", makeProductRow()]]),
+      // SKU 挂在 M 下,R 不该捡到
+      new Map([["M", [makeSku({ sku: "M-8-STAND" })]]])
+    );
+    expect(out[0]?.variants).toEqual([]);
   });
 });

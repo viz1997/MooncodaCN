@@ -135,7 +135,18 @@ export async function proxy(request: NextRequest) {
 
   // 定义需要保护的路由
   // 2026-09-08：(agent) route group 已删，不再需要把 /agent 加进 protectedRoutes。
-  const protectedRoutes = ["/", "/dashboard", "/admin"];
+  // 2026-10-21：`"/"` 从 protectedRoutes 移除。这个 entry 是 SaaS 模板 initial commit
+  // 的遗留（那时 `/` 还是 dashboard 落地页），2026-09-17 起根 URL 换成公开的
+  // atelier 商店首页后一直没跟着改 —— 结果未登录访客访问 `/zh` 被 307 到 /sign-in，
+  // 整个商店改版对外是不可见的。移除的三条依据：
+  //  1. Header 里保留着「登录」按钮和 callbackUrl 回跳 —— 登录态下这个按钮无意义，
+  //     说明设计上就是要让匿名访客能逛。
+  //  2. 根页 generateMetadata 带了 canonical / alternates / openGraph，登录重定向
+  //     会让这些全部失效，SEO 上等于首页不存在。
+  //  3. `/` 与 `/dashboard` 的匹配用的是 pathnameWithoutLocale === route，
+  //     保留 `"/"` 时 `"/".startsWith("//")` 为假但 `""` 之外的任何子路径都不会误伤，
+  //     风险只在根路径本身 —— 所以移除它不会放宽 `/product/*` 等公开页面的边界。
+  const protectedRoutes = ["/dashboard", "/admin"];
 
   // 定义认证页面路由 (已登录用户不应访问)
   const authRoutes = ["/sign-in", "/sign-up"];

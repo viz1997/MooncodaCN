@@ -3,6 +3,7 @@
  *
  * 给 /api/image-gen/products 路由用的核心逻辑：把硬编码字典
  * (PRODUCT_TYPES / ACCESSORIES / PRODUCT_META / ACCESSORY_META)
+ * + product / product_variant DB 行（2026-10-21 商品目录 DB 化）
  * + productAccessoryVariant DB 行
  * + productEffect + promptTemplate 数据
  * 拼成对外暴露的 ProductCapability[] 响应。
@@ -10,6 +11,8 @@
  * 设计要点：
  * - 单次请求内 in-memory join,DB 读全部走 SQL 层一次拿完
  * - productAccessoryVariant 用 Map 索引,O(1) 查变体
+ * - product / product_variant 同样用 Map 索引；**查不到就回退字典**，
+ *   所以 seed 之前线上行为跟改造前逐字一致（零迁移风险）
  * - productEffect 的 allowedCapabilities 覆盖合并到 catalog 默认上
  *   (parseJsonCapabilities 只识别 4 个 LB flag,这里只覆盖 LB 关心的 flag;
  *    新加的 flag 如 canBraidedRopeColor 走 catalog 默认)
@@ -28,21 +31,25 @@ import type {
   ProductCategory,
   ProductSizeDef,
   ProductTemplateSummary,
+  ProductVariantSummary,
   TemplateStyle,
 } from "@/db/image-gen-types";
 import {
+  type ProductRow,
+  product,
   productAccessoryVariant,
   productEffect,
+  productVariant,
   type promptTemplate,
 } from "@/db/schema";
 import {
   ACCESSORY_META,
   type AccessoryCode,
+  BASE_PRICE_CENTS,
   getAccessoryMeta,
   getProductMeta,
   getProductType,
   PRODUCT_META,
-  BASE_PRICE_CENTS,
 } from "@/features/gpt-image/lib/product-catalog";
 
 /* -------------------------------------------------------------------------- */
@@ -89,6 +96,54 @@ export async function getActiveVariantsByProduct(): Promise<
     arr.push(mapVariantRow(row));
     // sortOrder 升序
     arr.sort((a, b) => a.code.localeCompare(b.code));
+  }
+  return out;
+}
+
+/**
+ * 拉 product 表全量行（含 inactive）—— 2026-10-21 商品目录 DB 化
+ *
+ * 拉全量而不是只拉 active，是为了让装配层能区分两种语义：
+ *  - 有行且 status=active  → 用 DB 的资料 / 价格
+ *  - 有行但 status=inactive → 整个产品下线，不进响应
+ *  - 没有行                → 回退到 product-catalog.ts 的硬编码字典
+ *
+ * @returns Map<code, row>；key 即 productTypeCode
+ */
+export async function getProductRowsByCode(): Promise<Map<string, ProductRow>> {
+  const rows = await db.select().from(product);
+  return new Map(rows.map((r) => [r.code, r]));
+}
+
+/**
+ * 拉 product_variant 表的 active 行，按 productCode 分组 —— 2026-10-21
+ *
+ * 只拉 isActive=true：下架的 SKU 不该出现在对外接口里。
+ * 组内按 sortOrder → sku 排序，保证响应稳定（便于 CDN 缓存命中）。
+ */
+export async function getActiveSkuRowsByProduct(): Promise<
+  Map<string, ProductVariantSummary[]>
+> {
+  const rows = await db
+    .select()
+    .from(productVariant)
+    .where(eq(productVariant.isActive, true));
+
+  const out = new Map<string, ProductVariantSummary[]>();
+  for (const row of rows) {
+    const list = out.get(row.productCode) ?? [];
+    list.push({
+      sku: row.sku,
+      sizeCode: row.sizeCode,
+      accessoryCode: row.accessoryCode,
+      variantCode: row.variantCode,
+      priceCents: row.priceCents,
+      isActive: row.isActive,
+    });
+    out.set(row.productCode, list);
+  }
+  for (const list of out.values()) {
+    list.sort((a, b) => a.sku.localeCompare(b.sku));
   }
   return out;
 }
@@ -240,13 +295,18 @@ function sanitizeStyles(raw: unknown): TemplateStyle[] {
  * @param variantsByProduct  productAccessoryVariant 按 (product, accessory) 索引
  * @param filterCodes      query 过滤;null = 全量
  * @param keyScope         externalApiKey 白名单(maskId 列表);null = 不过滤
+ * @param productRows      product 表行按 code 索引(2026-10-21);null = 全部走字典回退
+ * @param skuRowsByProduct product_variant active 行按 productCode 索引(2026-10-21);
+ *                          null = variants[] 一律空数组
  * @returns                按 productTypeCode 升序的产品数组
  */
 export function assembleProductCapabilities(
   effects: Awaited<ReturnType<typeof getActiveProductEffectsWithTemplates>>,
   variantsByProduct: Awaited<ReturnType<typeof getActiveVariantsByProduct>>,
   filterCodes: string[] | null,
-  keyScope: string[] | null
+  keyScope: string[] | null,
+  productRows: Map<string, ProductRow> | null = null,
+  skuRowsByProduct: Map<string, ProductVariantSummary[]> | null = null
 ): ProductCapability[] {
   // 按 productTypeCode 分组 effects
   const grouped = new Map<
@@ -279,6 +339,11 @@ export function assembleProductCapabilities(
   for (const code of sortedCodes) {
     if (filterCodes && !filterCodes.includes(code)) continue;
 
+    // 2026-10-21:admin 把整个产品设为 inactive → 对外下线。
+    // 放在最前面,避免为一个即将下线的产品做后续拼装工作。
+    const productRow = productRows?.get(code) ?? null;
+    if (productRow && productRow.status !== "active") continue;
+
     const productType = getProductType(code);
     const productMeta = getProductMeta(code);
     if (!productType || !productMeta) continue; // 字典过期,跳过
@@ -294,6 +359,9 @@ export function assembleProductCapabilities(
       },
       // 与 mock-catalog.ts:buildSizesForType 同款加价规则(>基准 cm ×¥5),
       // 统一在 /api/store/products 也有此模式。
+      //
+      // @deprecated 2026-10-21 起这只是给老客户端的兼容字段,真 SKU 价看
+      // ProductCapability.variants[].priceCents。改这里不影响新逻辑。
       priceDeltaCents: idx * 500,
     }));
 
@@ -360,16 +428,34 @@ export function assembleProductCapabilities(
 
     out.push({
       productTypeCode: code,
-      category: productMeta.category as ProductCategory,
-      displayName: productMeta.displayName,
-      description: productMeta.description,
-      cover: templates[0]?.cover ?? "",
-      basePriceCents: BASE_PRICE_CENTS[code] ?? 0,
+      // 2026-10-21:有 DB 行时以 admin 配置为准,无行回退字典。
+      // category 也一样 —— product.category 非空就覆盖。
+      category: (productRow?.category ||
+        productMeta.category) as ProductCategory,
+      displayName: productRow
+        ? {
+            zh: productRow.name,
+            // admin 没填英文名时回退字典英文名,避免小程序 en 端显示空
+            en: productRow.nameEn || productMeta.displayName.en,
+          }
+        : productMeta.displayName,
+      description: productRow
+        ? {
+            zh: productRow.description,
+            en: productRow.description,
+          }
+        : productMeta.description,
+      // 封面：admin 填了 coverUrl 就用,否则沿用首个模板封面(旧行为)
+      cover: productRow?.coverUrl || templates[0]?.cover || "",
+      // 2026-10-21:DB 价优先,无 DB 行回退 BASE_PRICE_CENTS 字典
+      basePriceCents: productRow?.basePriceCents ?? BASE_PRICE_CENTS[code] ?? 0,
       sizes,
       visualStyles: Array.from(visualStylesSet.values()),
       accessories,
       capabilities: merged,
       templates,
+      // 2026-10-21:真 SKU 列表;未 seed 或全部下架时为空数组
+      variants: skuRowsByProduct?.get(code) ?? [],
     });
   }
 
@@ -383,20 +469,28 @@ export function assembleProductCapabilities(
 /**
  * 路由层调用入口:一次拿 DB 数据 + 拼装 + 过滤。
  * 避免路由层处理两阶段(先 await 再调 assemble)。
+ *
+ * 2026-10-21:新增 product / product_variant 两张表的查询。四个查询全部
+ * 并行 —— 都是简单主键扫描,实测都在 10ms 以内,串起来没必要。
  */
 export async function loadProductCapabilities(opts: {
   filterCodes: string[] | null;
   keyScope: string[] | null;
 }): Promise<ProductCapability[]> {
-  const [effects, variantsByProduct] = await Promise.all([
-    getActiveProductEffectsWithTemplates(),
-    getActiveVariantsByProduct(),
-  ]);
+  const [effects, variantsByProduct, productRows, skuRowsByProduct] =
+    await Promise.all([
+      getActiveProductEffectsWithTemplates(),
+      getActiveVariantsByProduct(),
+      getProductRowsByCode(),
+      getActiveSkuRowsByProduct(),
+    ]);
   return assembleProductCapabilities(
     effects,
     variantsByProduct,
     opts.filterCodes,
-    opts.keyScope
+    opts.keyScope,
+    productRows,
+    skuRowsByProduct
   );
 }
 

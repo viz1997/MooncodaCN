@@ -6,22 +6,29 @@ import { Link } from "@/i18n/routing";
 import { formatPriceCNY, WJP_SERIES } from "./wjp-store-data";
 
 /**
- * WJP 系列展示 —— 1:1 移植自 atelier `series-showcase.tsx`。
+ * WJP 系列展示(品类 —— **二级**)。
  *
- * 适配差异:
- *  - 文案中文化(Section 标题 / 副标题)
- *  - atelier 用 `#categories` 锚点 + 跳到对应系列(`#${s.handle}`)
- *  - WJP 3 个系列(钥匙扣/手办/冰箱贴)替代 atelier 3 个系列
+ * 2026-10-21:信息架构改成「场合为主」之后,品类从顶部导航的主轴降级成
+ * 这一段。所以视觉权重刻意压低 —— eyebrow 小标题替代原来的 h2 大标题,
+ * 卡片缩小、去掉大图渐变遮罩,不再跟上面的 OccasionShelf 色带抢戏。
+ *
+ * 锚点说明:每张卡的 `id={s.handle}`(#keychain / #figure / #magnet)是
+ * header 移动端「按形态」二级列表的落点,不能删。
+ *
+ * 链接说明:原来链 `/products?s=${handle}`,但 `/products` 的 page.tsx 从来
+ * 不读 searchParams —— 点了不会过滤。现改指 `/#all` 网格,品类信息以卡片上
+ * 的色点呈现,不再假装能筛选。
  */
 export function SeriesShowcase() {
   return (
-    <section id="categories" className="bg-muted/30 py-12 lg:py-16 border-y">
+    <section
+      id="categories"
+      className="bg-muted/40 py-12 lg:py-16 border-y scroll-mt-16"
+    >
       <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8">
-        <div className="mb-8">
-          <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight">
-            按品类逛
-          </h2>
-          <p className="text-sm text-muted-foreground mt-1">
+        <div className="mb-7 flex flex-col sm:flex-row sm:items-end justify-between gap-2">
+          <p className="eyebrow text-muted-foreground">按形态 · 按品类逛</p>
+          <p className="text-sm text-muted-foreground">
             三种形态,全部由你的照片定制。
           </p>
         </div>
@@ -38,25 +45,31 @@ export function SeriesShowcase() {
               className="group relative scroll-mt-20"
             >
               <Link
-                href={`/products?s=${s.handle}`}
-                className="block relative aspect-[4/3] overflow-hidden rounded-md bg-muted"
+                href="/#all"
+                className="flex items-center gap-4 p-3 rounded-lg bg-background border border-border/60 hover:border-[var(--primary)]/40 transition-colors"
               >
                 <img
                   src={s.cover}
                   alt={s.name}
-                  className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+                  className="size-20 lg:size-24 object-cover rounded-md shrink-0"
                   loading="lazy"
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
-                <div className="absolute bottom-0 inset-x-0 p-4 text-white">
-                  <h3 className="text-lg font-semibold">{s.name}</h3>
-                  <p className="text-xs text-white/80 mt-0.5">
-                    起 {formatPriceCNY(s.fromPriceCNY)}
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span
+                      className="size-1.5 rounded-full"
+                      style={{ backgroundColor: s.accent }}
+                    />
+                    <h3 className="text-base font-medium">{s.name}</h3>
+                  </div>
+                  <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
+                    {s.tagline}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    起 {formatPriceCNY(s.fromPriceCNY)} · {s.count} 款
                   </p>
                 </div>
-                <span className="absolute top-3 right-3 size-8 rounded-full bg-white/15 backdrop-blur flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity">
-                  <ArrowRight className="size-4" />
-                </span>
+                <ArrowRight className="size-4 shrink-0 ml-auto text-muted-foreground/50 group-hover:text-[var(--accent)] group-hover:translate-x-0.5 transition-all" />
               </Link>
             </motion.div>
           ))}

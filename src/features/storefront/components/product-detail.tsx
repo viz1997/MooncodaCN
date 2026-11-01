@@ -11,6 +11,13 @@
  *
  * Customize CTA 行为:setCustomize(product) + router.push("/"),让根 layout 挂载的
  * <CustomWorkshop /> 自动弹出。完全对齐 atelier 行为。
+ *
+ * 2026-10-21 换肤(参考 The Foggy Dog):
+ *  - 主图落在该商品所属场合的柔和色带上(washForHandle),不匹配则 bone 暖纸底
+ *  - 新增「也适合这些场合」chips —— 场合为主的信息架构在详情页的落点,
+ *    点 chip 回首页对应色带
+ *  - 价格走玫瑰 --accent,主 CTA 走墨绿 --primary,标题字重降到 medium
+ *    (衬线大字在 600 以上显笨)
  */
 
 "use client";
@@ -33,6 +40,10 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  occasionsForHandle,
+  washForHandle,
+} from "@/features/marketing/components/storefront/occasion-data";
 import { formatPriceCNY } from "@/features/marketing/components/storefront/wjp-store-data";
 import { Link, useRouter } from "@/i18n/routing";
 
@@ -54,6 +65,10 @@ export function ProductDetail({ handle }: { handle: string }) {
 
   const product = query.data?.product ?? null;
   const related = query.data?.related ?? [];
+
+  // 场合色带 —— 主图底色 + 「也适合这些场合」chips 都从这里取。
+  // 用 handle 而不是 product.handle:查询还没回来时也能出占位底色。
+  const occasions = React.useMemo(() => occasionsForHandle(handle), [handle]);
 
   const [activeImage, setActiveImage] = React.useState(0);
 
@@ -147,9 +162,9 @@ export function ProductDetail({ handle }: { handle: string }) {
                     onClick={() => {
                       setActiveImage(i);
                     }}
-                    className={`relative size-16 sm:size-20 shrink-0 overflow-hidden rounded-sm border-2 transition-colors ${
+                    className={`relative size-16 sm:size-20 shrink-0 overflow-hidden rounded-md border-2 transition-colors ${
                       isActive
-                        ? "border-foreground"
+                        ? "border-[var(--primary)]"
                         : "border-transparent opacity-70 hover:opacity-100"
                     }`}
                   >
@@ -157,6 +172,7 @@ export function ProductDetail({ handle }: { handle: string }) {
                       src={img}
                       alt=""
                       className="w-full h-full object-cover"
+                      loading="lazy"
                     />
                     {isBefore && (
                       <span className="absolute bottom-0.5 left-0.5 px-1 py-0 text-[8px] font-medium uppercase rounded bg-background/85">
@@ -173,8 +189,11 @@ export function ProductDetail({ handle }: { handle: string }) {
               })}
             </div>
 
-            {/* Main image */}
-            <div className="relative flex-1 aspect-square overflow-hidden rounded-sm bg-muted">
+            {/* Main image —— 落在该商品所属场合的色带上(Foggy Dog 商品页的标志布局) */}
+            <div
+              className="relative flex-1 aspect-square overflow-hidden rounded-lg p-3 sm:p-5"
+              style={{ backgroundColor: washForHandle(handle) }}
+            >
               <motion.img
                 key={activeImage}
                 initial={{ opacity: 0 }}
@@ -182,7 +201,7 @@ export function ProductDetail({ handle }: { handle: string }) {
                 transition={{ duration: 0.3 }}
                 src={gallery[activeImage]}
                 alt={`${product.title} — 第 ${activeImage + 1} 张`}
-                className="w-full h-full object-cover"
+                className="w-full h-full object-cover rounded-md"
               />
               {/* Navigation arrows */}
               <button
@@ -222,18 +241,38 @@ export function ProductDetail({ handle }: { handle: string }) {
 
           {/* Info */}
           <div className="flex flex-col">
-            <p
-              className="text-[11px] uppercase tracking-[0.18em] font-medium mb-2"
-              style={{ color: product.accent }}
-            >
+            <p className="eyebrow mb-2" style={{ color: product.accent }}>
               {product.seriesName}
             </p>
-            <h1 className="font-serif text-3xl sm:text-4xl tracking-tight text-balance">
+            <h1 className="font-serif text-3xl sm:text-4xl font-medium tracking-tight text-balance">
               {product.title}
             </h1>
             <p className="text-sm text-muted-foreground mt-2 text-pretty">
               {product.subtitle}
             </p>
+
+            {/* 「也适合这些场合」—— 场合为主的信息架构在详情页的落点,
+                点 chip 回首页对应色带。这是新品唯一的反向曝光入口。 */}
+            {occasions.length > 0 ? (
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <span className="text-xs text-muted-foreground">
+                  也适合这些场合:
+                </span>
+                {occasions.map((o) => (
+                  <Link
+                    key={o.id}
+                    href={`/#${o.id}`}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full border border-border/70 hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
+                  >
+                    <span
+                      className="size-1.5 rounded-full"
+                      style={{ backgroundColor: o.wash }}
+                    />
+                    {o.label}
+                  </Link>
+                ))}
+              </div>
+            ) : null}
 
             <div className="flex items-center gap-3 mt-3">
               <div className="flex items-center gap-1">
@@ -256,7 +295,7 @@ export function ProductDetail({ handle }: { handle: string }) {
             </div>
 
             <div className="flex items-baseline gap-2 mt-5">
-              <span className="font-serif text-3xl">
+              <span className="font-serif text-3xl text-[var(--accent)]">
                 {formatPriceCNY(product.basePriceCents / 100)}
               </span>
               <span className="text-xs text-muted-foreground uppercase tracking-[0.12em]">
@@ -265,12 +304,10 @@ export function ProductDetail({ handle }: { handle: string }) {
             </div>
 
             {/* Custom options summary */}
-            <div className="mt-6 p-4 bg-secondary/60 rounded-sm border border-border/60">
+            <div className="mt-6 p-4 bg-secondary/60 rounded-lg border border-border/60">
               <div className="flex items-center gap-2 mb-3">
-                <Wand2 className="size-4 text-accent" />
-                <p className="text-[11px] uppercase tracking-[0.16em] font-medium">
-                  自定义能力
-                </p>
+                <Wand2 className="size-4 text-[var(--accent)]" />
+                <p className="eyebrow">自定义能力</p>
               </div>
               <ul className="space-y-2 text-sm text-pretty">
                 <li className="flex items-start gap-2">
@@ -318,7 +355,7 @@ export function ProductDetail({ handle }: { handle: string }) {
             <Button
               onClick={handleCustomize}
               size="lg"
-              className="w-full h-12 rounded-sm text-sm font-medium group"
+              className="w-full h-12 rounded-md text-sm font-medium bg-[var(--primary)] text-[var(--primary-foreground)] hover:bg-[var(--primary)]/90 group"
               type="button"
             >
               <Wand2 className="size-4 mr-2" />
@@ -467,7 +504,7 @@ function RelatedCard({
     >
       <Link
         href={`/product/${product.handle}`}
-        className="relative aspect-square bg-muted overflow-hidden rounded-sm block"
+        className="relative aspect-square bg-muted overflow-hidden rounded-lg block"
         aria-label={product.title}
       >
         <img
@@ -477,28 +514,15 @@ function RelatedCard({
           loading="lazy"
         />
         {product.badge && (
-          <span className="absolute top-3 left-3 inline-flex items-center px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] rounded-sm bg-foreground text-background">
+          <span className="absolute top-3 left-3 inline-flex items-center px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] rounded bg-background/85 backdrop-blur text-foreground/80">
             {product.badge}
           </span>
         )}
-        {/* Quick view 触发 */}
-        <div className="absolute inset-x-2 bottom-2 translate-y-2 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-300">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              onQuickView();
-            }}
-            className="w-full bg-background/95 backdrop-blur text-foreground py-2 text-xs font-medium rounded-sm hover:bg-background transition-colors"
-          >
-            快速预览
-          </button>
-        </div>
       </Link>
-      <div className="pt-3 flex flex-col gap-0.5">
+      <div className="pt-3 flex flex-col gap-1">
         <Link
           href={`/product/${product.handle}`}
-          className="text-sm font-medium hover:text-accent transition-colors line-clamp-2 text-pretty"
+          className="text-sm font-medium hover:text-[var(--accent)] transition-colors line-clamp-2 text-pretty"
         >
           {product.title}
         </Link>
@@ -509,6 +533,15 @@ function RelatedCard({
             </span>
             <span className="ml-1.5 text-xs">起</span>
           </p>
+          {/* 快速预览 —— 独立按钮,不叠在上面的 <Link> 里(旧版是按钮套链接,
+              靠 e.preventDefault() 兜底,在某些浏览器里点击会同时触发跳转) */}
+          <button
+            type="button"
+            onClick={onQuickView}
+            className="text-[11px] font-medium text-[var(--primary)] hover:text-[var(--accent)] transition-colors"
+          >
+            快速预览
+          </button>
         </div>
       </div>
     </motion.article>

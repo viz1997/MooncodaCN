@@ -8,19 +8,27 @@ Mooncoda is a production-ready Next.js SaaS template. It provides a complete fou
 
 **Deployment:** Self-hosted or Vercel + Neon PostgreSQL + Cloudflare R2 (storage)
 
-## 三方系统分工(2026-09-17 最终版)
+## 三方系统分工(2026-10-21 更新)
 
 | 系统 | 职责 | 技术栈 |
 |---|---|---|
-| **NextDevTpl**(本仓库) | AI 生图 SaaS 后端:user / credits / photo / imageJob / AI 路由 / WeChat 小程序登录 | Next.js 16 + Drizzle + PostgreSQL |
-| **Medusa**(独立 server) | **product/market + 订单管理 + 支付管理**(商品 / 购物车 / 订单 / 支付 / 库存 / 客户地址) | Medusa v2 + Node + PostgreSQL + Redis |
-| **微信小程序 / 浏览器访客**(外部客户端) | 调 NextDevTpl AI 接口拿候选图;调 Medusa Store API 浏览商品 + 下单 + 支付 | Taro 4 + React 18(小程序);Next.js Medusa Storefront(浏览器) |
+| **NextDevTpl**(本仓库) | AI 生图 SaaS 后端:user / credits / photo / imageJob / AI 路由 / WeChat 小程序登录 **+ 商品目录(商品 / SKU 变体 / 价格)** | Next.js 16 + Drizzle + PostgreSQL |
+| **Medusa**(独立 server) | **购物车 + 订单管理 + 支付管理**(购物车 / 订单 / 支付 / 库存 / 客户地址) | Medusa v2 + Node + PostgreSQL + Redis |
+| **微信小程序 / 浏览器访客**(外部客户端) | 调 NextDevTpl AI 接口拿候选图 **+ 调 `/api/image-gen/products` 拿商品与 SKU**;调 Medusa Store API 加购 + 下单 + 支付 | Taro 4 + React 18(小程序);Next.js Medusa Storefront(浏览器) |
 
-**NextDevTpl 不再做**:**商品列表 / SKU / 购物车 / 结算 / 库存 / 收货地址 / 订单实体** —— 100% 归 Medusa。
+**NextDevTpl 不再做**:**购物车 / 结算 / 库存 / 收货地址 / 订单实体** —— 归 Medusa。
 
-**NextDevTpl 仍做**:`/marketing/*` 静态品牌页(博客 / 文档 / 法律页 / 价格页)+ `/marketing/products` 作品集 showcase(只展示真实客户案例,纯静态,外链到 Medusa storefront)。
+**NextDevTpl 现在做商品目录**(2026-10-21 变更,推翻了原「商品 100% 归 Medusa」的决定):
+- `product` 表 = 商品资料(名称/描述/封面/基础价/上下架),主键复用 `productTypeCode`(R/A/P/RM/LB/M)
+- `product_variant` 表 = 真 SKU(`CODE-SIZE-ACCESSORY-VARIANT` + **绝对价** + 上下架)
+- 管理后台 `/admin/products`(列表)+ `/admin/products/[code]`(SKU 明细)
+- 对外接口 `GET /api/image-gen/products`,在 `ProductCapability` 上**新增** `variants[]` 字段;旧字段(`basePriceCents` / `sizes[].priceDeltaCents` / `accessories[].variants[]`)全部保留,小程序 SDK 运行时零改动
+- 种子脚本 `pnpm tsx src/db/seed-products.ts`(幂等,不覆盖 admin 改过的价)
+- **仍然不在 DB 里**:`PRODUCT_TYPES`(每个型号的尺寸 / 配件清单)—— 新增型号仍需改 `src/features/gpt-image/lib/product-catalog.ts`
 
-**集成架构详情**:见 `architecture-medusa-integration.md`(已定稿)+ `architecture-miniprogram-as-client.md`(项目身份定位)。
+**NextDevTpl 仍做**:`/marketing/*` 静态品牌页(博客 / 文档 / 法律页 / 价格页)+ `/marketing/products` 作品集 showcase(纯静态作品集,与商品目录无关)。
+
+**集成架构详情**:见 `architecture-medusa-integration.md`(**§〇/§二 的商品归属结论已被 2026-10-21 变更覆盖**)+ `architecture-miniprogram-as-client.md`(项目身份定位)。
 
 ## Commands
 

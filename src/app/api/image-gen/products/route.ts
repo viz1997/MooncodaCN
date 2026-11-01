@@ -21,6 +21,10 @@
  * 产品字典变更后最长 10 分钟生效(与 admin 改 promptTemplate 后的视觉一
  * 致;若需立即生效可手动 purge 或调 query 加 cache-busting)。
  *
+ * 2026-10-21:商品资料 / 基础价 / SKU 变体改由 product + product_variant
+ * 表驱动(/admin/products 可编辑),同样受上面的缓存窗口约束 —— admin 保存
+ * 后最长 10 分钟才对外生效,保存成功的 toast 里已提示。
+ *
  * 限流:ai tier(20/min),与 templates / submit 一致。
  *
  * 白名单:externalApiKey.allowedMasks 非空时,只返回白名单内 productEffect

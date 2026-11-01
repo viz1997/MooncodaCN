@@ -1,9 +1,24 @@
 # NextDevTpl × Medusa · 集成架构说明
 
 > **Mooncoda · 小梦定制馆**
-> 状态:方案稿 · 2026-09-17 初版
+> 状态:方案稿 · 2026-09-17 初版 · **2026-10-21 商品归属已变更**(见下方提示)
 > 目标读者:技术负责人 / 后端 / 前端 / DevOps
 > 前置阅读:[architecture-miniprogram-as-client.md](./architecture-miniprogram-as-client.md)（项目身份定位）
+
+> 🔴 **本文档的商品归属结论已作废(2026-10-21)**
+>
+> §〇 和 §二 里「**产品目录(商品/规格/价格)单一权威 = Medusa**」「NextDevTpl
+> 不做商品列表 / SKU」的结论**不再成立**。商品目录已收回 NextDevTpl:
+>
+> | 数据 | 现在的单一权威 | 落地方式 |
+> |---|---|---|
+> | **商品资料 / 基础价 / SKU 变体** | **NextDevTpl** | `product` + `product_variant` 表,`/admin/products` 管理,`GET /api/image-gen/products` 对外 |
+> | 购物车 / 订单 / 支付 / 库存 / 收货地址 | Medusa | 不变 |
+>
+> §三 的 `productTypeCode ↔ Medusa Product.type` 对齐矩阵仍然有效 —— 本仓库
+> 的 `product.code` 直接复用了 `productTypeCode` 作为主键,所以这套 code 体系
+> 没变,只是权威方从 Medusa 换成了 NextDevTpl。
+> 其余章节(用户身份映射 / 订单时序 / webhook / 分阶段落地)按原计划继续。
 
 ---
 
@@ -14,10 +29,12 @@
 | 系统 | 职责范围 |
 |---|---|
 | **NextDevTpl** | AI 生图 SaaS 后端。user / credits / photo / imageJob / AI 路由 / WeChat 小程序登录。BFF 单体,Next.js 16 + Drizzle + PostgreSQL。 |
-| **Medusa** | **product/market** + **订单管理** + **支付管理**(商品 / 购物车 / 订单 / 支付 / 库存 / 客户地址)。独立 server(Medusa v2 + Node + PostgreSQL + Redis)。 |
-| **微信小程序 / 浏览器访客** | 调用 NextDevTpl AI 接口拿候选图;调用 Medusa Store API 浏览商品 + 下单 + 支付。**商品 / 订单全部走 Medusa**。 |
+| **Medusa** | **订单管理** + **支付管理**(购物车 / 订单 / 支付 / 库存 / 客户地址)。独立 server(Medusa v2 + Node + PostgreSQL + Redis)。~~product/market~~(2026-10-21 已划归 NextDevTpl)。 |
+| **微信小程序 / 浏览器访客** | 调用 NextDevTpl AI 接口拿候选图;**商品列表走 NextDevTpl 的 `GET /api/image-gen/products`**;调用 Medusa Store API 加购 + 下单 + 支付。 |
 
-**NextDevTpl 不再做**:商品列表 / SKU / 购物车 / 结算 / 库存 / 收货地址 / 订单实体。这些 100% 归 Medusa。
+**NextDevTpl 不再做**:购物车 / 结算 / 库存 / 收货地址 / 订单实体。这些 100% 归 Medusa。
+
+**NextDevTpl 已收回(2026-10-21)**:商品资料 + SKU 变体 + 商品价。新增 `product` / `product_variant` 两张表 + `/admin/products` 后台 + `GET /api/image-gen/products` 对外(`variants[]` 为真 SKU 绝对价)。Medusa 侧的商品表现在是未使用的空壳。
 
 **NextDevTpl 仍做**:`/marketing/*` 静态品牌页(博客 / 文档 / 法律页 / 价格页)+ `/marketing/products` **作品集 showcase**(只展示真实客户案例,纯静态,**不是商品列表**,外链到 Medusa storefront)。
 
@@ -92,7 +109,7 @@
 | 数据 | 单一权威 | NextDevTpl 角色 | Medusa 角色 |
 |---|---|---|---|
 | **用户身份** (user / customer) | **NextDevTpl** | Better Auth 持有凭证(邮箱/手机/微信 openid)、`user.medusaCustomerId` 写 Medusa customer_id |
-| **产品目录** (商品/规格/价格) | **Medusa** | `promptTemplate.productTypeCode` 字典对齐 Medusa `Product.type.value`;价格不复制 | 唯一来源 |
+| **产品目录** (商品/规格/价格) | ~~Medusa~~ → **NextDevTpl**(2026-10-21 变更) | `product` / `product_variant` 表;`product.code` 复用 `productTypeCode`,字典对齐规则不变(§三 仍有效);`/admin/products` 管理,`GET /api/image-gen/products` 对外 | 不持有(原 `Product` 空壳可下线) |
 | **AI 渲染模板** | **NextDevTpl** | `promptTemplate` / `promptTemplatePrice` / `productLine` | 不持有 |
 | **AI 渲染结果** (候选图 R2 URLs) | **NextDevTpl** | `imageJob.resultUrls` / `photo.fileUrl` / `promptOrder.candidates`;`order.metadata.candidates` 镜像到 Medusa line_item | 仅镜像引用 |
 | **订单 / 支付 / 物流** | **Medusa** | `promptOrder.medusaOrderId` 字段记录关联;`/api/webhooks/medusa/order-placed` 接收入站事件 | 唯一来源 |
@@ -105,6 +122,15 @@
 ---
 
 ## 三、productTypeCode ↔ Medusa Product.type 对齐矩阵
+
+> ✅ **本章仍然有效**(2026-10-21)。6 个 code、`sizes` / `accessories` 字典、
+> 以及 `productTypeCode` 的对齐规则一个字都没改 —— 只是「谁持有这张字典」
+> 从 Medusa 换成了 NextDevTpl(现在落在 `product` / `product_variant` 两张表,
+> 主键 `product.code` 直接就是 `productTypeCode`)。
+> 实际 SKU 由 `buildSku()` 拼成 4 段 `CODE-SIZE-ACCESSORY-VARIANT`
+> (见 `src/features/image-gen/lib/product-variant-sku.ts`),比本章示例的
+> 3 段多一个配件变体段 —— 因为 `leather` 有 5 个颜色变体,3 段会撞。
+> 下表的「Medusa 落地方式」列保留作历史决策记录,Medusa 侧商品表已空置。
 
 ### 3.1 字段对齐
 
@@ -193,6 +219,11 @@
 ---
 
 ## 五、调用时序图(从选商品到 Medusa 完成支付)
+
+> 🔸 **步骤 1「浏览商品」2026-10-21 起改道**:下图仍按原计划写「GET
+> `/store/products`(Medusa)」。实际已落地为 **`GET /api/image-gen/products`
+> (NextDevTpl)**,返回 `ProductCapability[]` 且新增 `variants[]`(真 SKU 绝对价)。
+> 下面从步骤 2 起(加购 / 下单 / 支付)全部不变,仍走 Medusa。
 
 ### 5.1 V1 流程(Guest Cart,零 Medusa 鉴权)
 
@@ -320,7 +351,7 @@
 
 | 方法 | 路径 | 鉴权 | 用途 | 备注 |
 |---|---|---|---|---|
-| GET | `/api/products/by-code/:code` | 公开 (IP 限流) | 按 productTypeCode 拉商品列表(含 variant + 价格 + SKU + 渲染价) | 返回聚合 Medusa catalog + NextDevTpl metadata |
+| GET | `/api/products/by-code/:code` | 公开 (IP 限流) | 按 productTypeCode 拉商品列表(含 variant + 价格 + SKU + 渲染价) | ⚠️ **已被取代**:商品目录 2026-10-21 起由 `GET /api/image-gen/products`(公开,无需新增鉴权)提供,含 `variants[]` 真 SKU 与绝对价。**本行不再需要实现。** |
 | POST | `/api/prompt-templates/resolve` | 公开 (IP 限流) | `{ sku }` 或 `{ productTypeCode, sizeCm, accessoryCode }` → `{ promptTemplateId, renderPriceCredits, renderPriceCny, candidateCount, outputMode }` | 反查模板 + 算 SaaS 价 |
 | POST | `/api/webhooks/medusa/order-placed` | HMAC-SHA256(`X-Medusa-Signature`) | Medusa subscriber 入站 | 新增 |
 
@@ -431,6 +462,11 @@
 - **HMAC 共享 secret**:`MEDUSA_WEBHOOK_SECRET` 服务端 env,Medusa subscriber + NextDevTpl webhook handler 共用
 
 ### 8.3 catalog 对账
+
+> 🟡 2026-10-21:商品目录已收回 NextDevTpl,本节前两条的**对账方向已反转** ——
+> 现在要防的是「`/admin/products` 里改了 `code` 以外的字段却撞上
+> `PRODUCT_TYPES` 字典里不存在的型号」;`code` 是主键且不允许改,所以风险面变小。
+> 但下面的 CHECK 约束 / 对账脚本思路仍可复用(等 Medusa 侧商品表决定是否彻底下线)。
 
 - Medusa 端若 admin 手工改 `Product.type.value`(从 R 改成 RB),会导致 NextDevTpl 字典查不到 → `/api/prompt-templates/resolve` 返 400
 - 建议 Medusa 端给 `ProductType.value` 加数据库 CHECK 约束 `CHECK (value IN ('R','A','P','RM','LB','M'))`,或写脚本定期对账

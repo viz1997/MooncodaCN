@@ -2140,3 +2140,116 @@ export type ProductAccessoryVariantRow =
   typeof productAccessoryVariant.$inferSelect;
 export type NewProductAccessoryVariantRow =
   typeof productAccessoryVariant.$inferInsert;
+
+// ============================================================================
+//  商品目录（2026-10-21）
+//
+//  背景：/api/image-gen/products 原本的商品资料（名称 / 描述 / 封面 / 基础价）
+//  全部来自 product-catalog.ts 的硬编码常量 PRODUCT_META / BASE_PRICE_CENTS，
+//  运营改价要发版。现在搬到 DB，由 /admin/products 管理。
+//
+//  与 productAccessoryVariant 的分工：
+//  - product_accessory_variant = 「某产品的某配件有哪些颜色/尺寸变体」
+//    （偏 AI 生图的规格枚举）
+//  - product_variant          = 「可售 SKU」，带绝对价 + 上下架
+//    （偏 commerce）
+//  两者共用 productTypeCode 作为外键语义，都是 code 字符串，不加 DB FK。
+//
+//  设计要点：
+//  - 主键复用 productTypeCode（R / A / P / RM / LB / M），与 productEffect
+//    .productTypeCode、product_accessory_variant.product_type_code 天然对齐，
+//    不再引入中间层 id 映射
+//  - 金额统一「分」，与 productEffect.price / promptTemplate.price 一致
+//  - status=inactive = 整个产品从对外接口下线；productVariant.isActive=false
+//    = 单个 SKU 下架（软删，不丢行）
+//  - 新增 code 目前仍需改 product-catalog.ts 的 PRODUCT_TYPES（尺寸 / 配件
+//    清单还是代码常量），但资料和价格不再需要发版
+// ============================================================================
+
+/**
+ * 商品主表
+ */
+export const product = pgTable(
+  "product",
+  {
+    /** 产品码（R / A / P / RM / LB / M），= productTypeCode */
+    code: text("code").primaryKey(),
+    /** 中文名（对外 displayName） */
+    name: text("name").notNull(),
+    /** 英文名 */
+    nameEn: text("name_en").notNull().default(""),
+    /** 分类（keychain / figure / magnet，对齐 ProductCategory） */
+    category: text("category").notNull().default("keychain"),
+    /** 商品描述（对外 description） */
+    description: text("description").notNull().default(""),
+    /** 封面图 URL；空字符串时对外接口回退到首个模板的封面 */
+    coverUrl: text("cover_url").notNull().default(""),
+    /** 基础价（分）；对外 ProductCapability.basePriceCents */
+    basePriceCents: integer("base_price_cents").notNull().default(0),
+    /** 交期（天），对外商品卡展示 */
+    leadTimeDays: integer("lead_time_days").notNull().default(7),
+    /** 主题色（hex），营销页卡片用 */
+    accent: text("accent").notNull().default(""),
+    /** active = 上架；inactive = 整个产品从对外接口下线 */
+    status: text("status", { enum: ["active", "inactive"] })
+      .notNull()
+      .default("active"),
+    /** UI 排序；asc */
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    statusIdx: index("product_status_idx").on(t.status),
+  })
+);
+
+export type ProductRow = typeof product.$inferSelect;
+export type NewProductRow = typeof product.$inferInsert;
+
+/**
+ * 可售 SKU 变体
+ *
+ * 四元组 (productCode, sizeCode, accessoryCode, variantCode) 唯一。
+ * 由 seed-products.ts 按 PRODUCT_TYPES.sizes × accessories ×
+ * product_accessory_variant 笛卡尔积生成，运营在 /admin/products/[code] 改价。
+ */
+export const productVariant = pgTable(
+  "product_variant",
+  {
+    id: text("id").primaryKey(),
+    /** 商品码，= product.code */
+    productCode: text("product_code").notNull(),
+    /** SKU 编码，如 "R-6-LEATHER-BROWN"；无配件的段用 "N-A" */
+    sku: text("sku").notNull(),
+    /** 尺寸 code（"6"），无尺寸概念时用 "N-A" */
+    sizeCode: text("size_code").notNull(),
+    /** 配件 code（leather / braided_rope …），无配件时用 "N-A" */
+    accessoryCode: text("accessory_code").notNull(),
+    /** 配件下的具体变体 code（leather_brown …），无变体时用 "N-A" */
+    variantCode: text("variant_code").notNull(),
+    /** 绝对价（分），不是价差 */
+    priceCents: integer("price_cents").notNull(),
+    /** 软下架（false = 不进对外接口） */
+    isActive: boolean("is_active").notNull().default(true),
+    /** UI 排序；asc */
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("product_variant_uniq_idx").on(
+      t.productCode,
+      t.sizeCode,
+      t.accessoryCode,
+      t.variantCode
+    ),
+    // 接口层按 productCode + isActive 查
+    index("product_variant_lookup_idx").on(t.productCode, t.isActive),
+    // SKU 全局唯一（防手工改坏编码）
+    uniqueIndex("product_variant_sku_uniq_idx").on(t.sku),
+  ]
+);
+
+export type ProductVariantRow = typeof productVariant.$inferSelect;
+export type NewProductVariantRow = typeof productVariant.$inferInsert;

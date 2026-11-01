@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronDown, Menu } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -23,19 +23,20 @@ import { NavMenu } from "./nav-menu";
  *   设计如此），但 callbackUrl 期望带语言前缀才不会被 intlMiddleware
  *   二次重定向 —— 这里手动拼 /zh|/en 前缀。
  * - 排除 /sign-in / /sign-up 自身（避免从登录页点登录按钮）
+ * - 2026-11-01：**不要用 `typeof window === "undefined"` 分支**。它会让服务端
+ *   渲染出 `/sign-in`、客户端首帧渲染出 `/sign-in?callbackUrl=...`，两端 HTML
+ *   不一致 → React hydration mismatch 警告。locale 改用 next-intl 的
+ *   useLocale()（SSR 可见），pathname 用 usePathname()（SSR 可见），
+ *   两端算出同一个 href。wjp-store-header.tsx 同样修过。
  */
 function useSignInUrl(): string {
+  const locale = useLocale();
   const pathname = usePathname();
-  if (
-    typeof window === "undefined" ||
-    pathname === "/sign-in" ||
-    pathname === "/sign-up"
-  ) {
+  if (pathname === "/sign-in" || pathname === "/sign-up") {
     return "/sign-in";
   }
-  const localeSegment = window.location.pathname.match(/^\/(en|zh)/)?.[1];
   const target = pathname.startsWith("/") ? pathname : `/${pathname}`;
-  const prefix = localeSegment ? `/${localeSegment}` : "";
+  const prefix = locale ? `/${locale}` : "";
   return `/sign-in?callbackUrl=${encodeURIComponent(`${prefix}${target}`)}`;
 }
 
@@ -90,6 +91,7 @@ export function Header() {
     "Image Gen": tNav("imageGen"),
     Docs: tNav("docs"),
     Pricing: tNav("pricing"),
+    "Weight Tool": tNav("weightTool"),
     Blog: tNav("blog"),
   };
 

@@ -41,6 +41,7 @@ import { Input } from "@/components/ui/input";
 import { formatPriceCNY } from "@/features/marketing/components/storefront/wjp-store-data";
 import { useToast } from "@/hooks/use-toast";
 
+import { useAtelierContainer } from "../hooks/use-atelier-container";
 import { useCart, useCartUi } from "../hooks/use-cart";
 import { useStorefrontModal } from "../hooks/use-storefront-modal";
 import type { AiStyle, CustomizationSpec, PricingResult } from "../types";
@@ -75,6 +76,9 @@ export function CustomWorkshop() {
   const setCustomize = useStorefrontModal((s) => s.setCustomize);
   const openCart = useCartUi((s) => s.openCart);
   const { addLineItem } = useCart();
+  // portal 指回 .atelier-root —— 否则工作台落在 atelier 的 token 子树外,
+  // 配色和圆角退回全站默认主题(见 use-atelier-container.ts)
+  const container = useAtelierContainer();
 
   const [phase, setPhase] = React.useState<Phase>("upload");
   const [uploadedImage, setUploadedImage] = React.useState<string | null>(null);
@@ -331,7 +335,11 @@ export function CustomWorkshop() {
       open={Boolean(product)}
       onOpenChange={(open) => !open && setCustomize(null)}
     >
-      <DialogContent className="w-full sm:max-w-5xl max-h-[94vh] sm:max-h-[90vh] p-0 overflow-hidden flex flex-col">
+      <DialogContent
+        portalContainer={container}
+        showCloseButton={false}
+        className="w-full sm:max-w-5xl max-h-[94vh] sm:max-h-[90vh] p-0 overflow-hidden flex flex-col"
+      >
         <DialogTitle className="sr-only">定制 {product.title}</DialogTitle>
 
         {/* Header + stepper */}

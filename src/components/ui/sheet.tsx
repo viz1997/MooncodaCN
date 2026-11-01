@@ -51,13 +51,24 @@ const sheetVariants = cva(
 
 interface SheetContentProps
   extends React.ComponentPropsWithoutRef<typeof SheetPrimitive.Content>,
-    VariantProps<typeof sheetVariants> {}
+    VariantProps<typeof sheetVariants> {
+  /**
+   * Portal 挂载点。默认 `document.body`。
+   *
+   * 路由组把主题 token(CSS 变量)重定义在包裹 div 上时,portal 到 body 的 Sheet
+   * 落在那个 div 外面,拿不到 token —— 视觉上退回全站默认主题。atelier 路由组的
+   * 购物袋用这个 prop 把 portal 指回 `.atelier-root`(见 use-atelier-container.ts)。
+   *
+   * 不传 = 原有行为,全站其他 Sheet 不受影响。
+   */
+  portalContainer?: HTMLElement | null;
+}
 
 const SheetContent = React.forwardRef<
   React.ElementRef<typeof SheetPrimitive.Content>,
   SheetContentProps
->(({ side = "right", className, children, ...props }, ref) => (
-  <SheetPortal>
+>(({ side = "right", className, children, portalContainer, ...props }, ref) => (
+  <SheetPortal container={portalContainer}>
     <SheetOverlay />
     <SheetPrimitive.Content
       ref={ref}

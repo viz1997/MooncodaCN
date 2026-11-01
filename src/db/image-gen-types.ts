@@ -164,6 +164,29 @@ export interface ProductTemplateSummary {
   allowedAccessories: string[];
 }
 
+/**
+ * 可售 SKU 变体（product_variant 表行，2026-10-21 新增）
+ *
+ * 与 AccessoryVariantDef 的区别：那边是「配件有哪些颜色」偏 AI 规格枚举、
+ * 加价制；这边是「这个组合能卖多少钱」，绝对价制、能上下架。
+ *
+ * 对外是 add-only 字段：老客户端只读 sizes[] / accessories[] 不受影响。
+ */
+export interface ProductVariantSummary {
+  /** SKU 编码，如 "R-6-LEATHER-BROWN"；无配件的段为 "N-A" */
+  sku: string;
+  /** 尺寸 code（"6"）；无尺寸概念时 "N-A" */
+  sizeCode: string;
+  /** 配件 code（leather / braided_rope …）；无配件时 "N-A" */
+  accessoryCode: string;
+  /** 配件下的具体变体 code（leather_brown …）；无变体时 "N-A" */
+  variantCode: string;
+  /** 绝对价（分）—— 不是价差，可直接当单价用 */
+  priceCents: number;
+  /** 是否在售（对应 product_variant.is_active） */
+  isActive: boolean;
+}
+
 /** 单个产品的完整能力定义（/api/image-gen/products 顶层数组元素） */
 export interface ProductCapability {
   /** 产品码（R / A / P / RM / LB / M） */
@@ -177,9 +200,11 @@ export interface ProductCapability {
   /** 产品封面图 URL */
   cover: string;
   /**
-   * 产品基价（分）—— 来自 product-catalog.ts 的 BASE_PRICE_CENTS。
-   * 前端拼 totalPrice = basePriceCents + sizes[].priceDeltaCents +
-   * accessories[].variants[].priceDeltaCents + style.surchargeCents。
+   * 产品基价（分）—— 2026-10-21 起优先取 product 表的 base_price_cents，
+   * 无 DB 行时回退到 product-catalog.ts 的 BASE_PRICE_CENTS。
+   *
+   * @deprecated 下单请用 variants[].priceCents（真 SKU 绝对价）。
+   *   这里的「基价 + 各维度价差」拼法保留只为兼容老客户端，新代码别用。
    */
   basePriceCents: number;
   /** 该产品可选尺寸档 */
@@ -192,6 +217,12 @@ export interface ProductCapability {
   capabilities: ProductCapabilities;
   /** 该产品可用的 AI 模板列表 */
   templates: ProductTemplateSummary[];
+  /**
+   * 可售 SKU 列表（product_variant 表，2026-10-21 新增）。
+   * 商品未 seed 或全部下架时为空数组 —— 此时前端应退回旧的
+   * basePriceCents + priceDeltaCents 拼价逻辑。
+   */
+  variants: ProductVariantSummary[];
 }
 
 /** GET /api/image-gen/products 响应 */

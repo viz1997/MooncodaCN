@@ -292,10 +292,12 @@ const SEEDS: MockProductSeed[] = [
     subtitle: "照片雕塑,8cm 标准款",
     description:
       "WJP 全彩树脂 3D 打印,真人照片雕塑化,8cm 高,手工上色,底座配件,送礼最个性。",
+    // 主图原本用的 photo-1558997767-920fa5b75e6e 已 404(2026-10-21 核查),
+    // 改用本商品自己那张已验证的肖像图。没另找替代图是因为无法离线判断新
+    // photo ID 拍的是什么 —— 不编 ID。上线前建议换成真实产品照。
     thumbnail:
-      "https://images.unsplash.com/photo-1558997767-920fa5b75e6e?auto=format&fit=crop&w=800&q=80",
+      "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=800&q=80",
     images: [
-      "https://images.unsplash.com/photo-1558997767-920fa5b75e6e?auto=format&fit=crop&w=1200&q=80",
       "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=1200&q=80",
     ],
     productTypeCode: "M",
@@ -383,10 +385,11 @@ const SEEDS: MockProductSeed[] = [
     titleEn: "Pet Fridge Magnet",
     subtitle: "每天都能看到",
     description: "WJP 全彩树脂冰箱贴 5cm,适合合影/宠物照/孩子画作,磁铁配件。",
+    // 主图原本用的 photo-1611923134239-b9be5816e23d 已 404(2026-10-21 核查),
+    // 改用本商品自己那张已验证的宠物图。同上,不另造 ID。
     thumbnail:
-      "https://images.unsplash.com/photo-1611923134239-b9be5816e23d?auto=format&fit=crop&w=800&q=80",
+      "https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=800&q=80",
     images: [
-      "https://images.unsplash.com/photo-1611923134239-b9be5816e23d?auto=format&fit=crop&w=1200&q=80",
       "https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=1200&q=80",
     ],
     productTypeCode: "P",
