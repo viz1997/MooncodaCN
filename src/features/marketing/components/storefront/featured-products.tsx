@@ -13,9 +13,9 @@
  *    `/products?s=` 页面根本不读 searchParams)。现在它是一个真的二级轴:
  *    点 chip 就地过滤滚动条里的卡片。
  *
- * 筛选值存在 zustand(`useSeriesFilter`)而不是本地 useState:移动端菜单里
+ * 筛选值存在 zustand(`useShopFilter`)而不是本地 useState:移动端菜单里
  * 也有一个「按形态」二级列表,它点完直接滚到这里并预设好 chip —— 两棵子树
- * 共享同一个值。见 `@/features/storefront/hooks/use-series-filter.ts`。
+ * 共享同一个值。见 `@/features/storefront/hooks/use-shop-filter.ts`。
  *
  * 滚动实现:snap-x + scrollBy 按钮(桌面端没有可见滚动条,必须有按钮
  * 才知道下面还有东西)。卡片宽度固定,容器 overflow-x-auto。
@@ -24,7 +24,7 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import * as React from "react";
 
-import { useSeriesFilter } from "@/features/storefront/hooks/use-series-filter";
+import { useShopFilter } from "@/features/storefront/hooks/use-shop-filter";
 import { MOCK_PRODUCTS } from "@/features/storefront/lib/mock-catalog";
 import type { StorefrontProduct } from "@/features/storefront/types";
 
@@ -35,8 +35,8 @@ type SeriesFilter = "all" | string;
 
 export function FeaturedProducts({ locale }: { locale: "zh" | "en" }) {
   const isZh = locale === "zh";
-  const series = useSeriesFilter((s) => s.series);
-  const selectSeries = useSeriesFilter((s) => s.select);
+  const series = useShopFilter((s) => s.series);
+  const selectSeries = useShopFilter((s) => s.selectSeries);
   const railRef = React.useRef<HTMLDivElement>(null);
   const [atStart, setAtStart] = React.useState(true);
   const [atEnd, setAtEnd] = React.useState(false);
@@ -78,7 +78,7 @@ export function FeaturedProducts({ locale }: { locale: "zh" | "en" }) {
     { id: "all", label: isZh ? "全部" : "All" },
     ...WJP_SERIES.map((s) => ({
       id: s.id,
-      label: isZh ? s.name : `${s.name}`.replace("Q版", "Q-Version "),
+      label: isZh ? s.name : s.nameEn,
     })),
   ];
 

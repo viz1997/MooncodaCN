@@ -65,7 +65,7 @@ export default async function MarketingProductsPage({
       />
 
       {/* atelier-style 品牌 store 页面 (5 段拼装) */}
-      <StoreHero />
+      <StoreHero locale={isZh ? "zh" : "en"} />
       <SeriesShowcase />
       <HowItWorks />
       <FeaturedProducts locale={isZh ? "zh" : "en"} />

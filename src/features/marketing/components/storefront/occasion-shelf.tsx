@@ -1,38 +1,36 @@
 "use client";
 
 /**
- * 场合色带(锚点 #birthday / #graduation / #anniversary / #seasonal)
+ * 场合促销行(锚点 #birthday / #graduation / #anniversary / #seasonal)
  *
- * 这是整站信息架构的主轴:用户先问「送什么场合」,再看到钥匙扣 / 手办 /
- * 冰箱贴混排。
+ * ## 2026-11-01:从「陈列商品」改成「导购入口」
  *
- * 配色手法(The Foggy Dog 的招牌):每一段**整屏铺自己的柔和底色** `wash`
- * (粉彩 / 天蓝 / 薄荷 / 麦色),滚动一屏换一个颜色。
+ * 原来这四段每段摆 3 件商品卡(左大右二的 FeatureSplit),首页因此有两份目录:
+ * 四段色带里的 12 件 + 底部一条横向滚动条里的 12 件。
  *
- * ## 四段用同一种版式(2026-10-31)
+ * 现在商品目录只有一个 —— `ShopGrid`(#works)的 12 件网格,首屏就能看到
+ * 价格和「同款定制」。这四段退成商场的**促销位**:一张海报图 + 场合名 +
+ * 一句文案 + 一个 CTA,点 CTA 设场合筛选并滚回商品网格。
  *
- * 原来四段各用一种栅格(feature-left / triptych / wide-rows / feature-right),
- * 加上页尾还有一条「全部作品」横向滚动条 —— 整页五套并排栅格在打架,
- * 12 件 unique 商品被摊成 24 次展示,读起来就是「商品列表堆了 5 遍」。
+ * 场合仍然是首页的一条真实信息轴 —— 「送什么场合」是定制礼品最常见的
+ * 入口 —— 只是不再用它重复陈列商品。
  *
- * 现在:**四段一律用 FeatureSplit**(左大图 + 右侧两张小卡上下叠),节奏只靠
- * 一屏一换的底色走,不再靠换栅格。四段的 handles 互不重复,12 件商品每件
- * 只出现一次 —— 首页不再有第二份目录。
+ * ## 版式
+ *
+ * 四段统一:左海报右文案,两列 12 栅格。海报占 5 列,文案 7 列。
+ * 底色仍然一屏一换(wash 来自 occasion-data.ts),节奏靠颜色走。
  */
 
 import { motion } from "framer-motion";
 import { ArrowRight } from "lucide-react";
 
-import { findProductByHandle } from "@/features/storefront/lib/mock-catalog";
-import type { StorefrontProduct } from "@/features/storefront/types";
-import { Link } from "@/i18n/routing";
+import { useShopFilter } from "@/features/storefront/hooks/use-shop-filter";
 
 import type { Occasion } from "./occasion-data";
 import { OCCASIONS } from "./occasion-data";
-import { ProductCard } from "./product-card";
 
-/** 卡片方格底色 —— 比色带再浅一档,让图从色带上「浮」起来 */
-const CARD_WASH = "oklch(0.985 0.008 85)";
+/** 商品网格的锚点 —— 场合筛选完滚回去 */
+const SHOP_ANCHOR = "works";
 
 /** 滚动入场 —— 与页面其余 section 同一套配方 */
 const reveal = (delay = 0) => ({
@@ -43,115 +41,66 @@ const reveal = (delay = 0) => ({
   transition: { duration: 0.5, delay, ease: [0.16, 1, 0.3, 1] as const },
 });
 
-/** 段头 —— 四段共用:eyebrow + 衬线大标题 + tagline,右侧「看全部」 */
-function BandHeader({ occasion, isZh }: { occasion: Occasion; isZh: boolean }) {
-  return (
-    <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-5 lg:gap-10 mb-10 lg:mb-14">
-      <div className="max-w-2xl">
-        <p className="eyebrow text-foreground/50 mb-4">
-          {isZh ? occasion.eyebrow : `Gifts for ${occasion.labelEn}`}
-        </p>
-        <h2 className="text-4xl sm:text-5xl lg:text-6xl font-medium tracking-tight leading-[1.05] text-balance">
-          {isZh ? occasion.label : occasion.labelEn}
-        </h2>
-        <p className="mt-4 text-base text-foreground/65 leading-relaxed text-pretty max-w-xl">
-          {isZh ? occasion.tagline : occasion.taglineEn}
-        </p>
-      </div>
-      {/* 首页不再有第二份目录(横向滚动条已删),「看全部」指向作品集页 ——
-          那里才有全部 12 件 + 品类筛选。 */}
-      <Link
-        href="/marketing/products"
-        className="inline-flex items-center gap-2 shrink-0 text-sm font-medium text-foreground/70 hover:text-[var(--accent)] transition-colors group"
-      >
-        {isZh ? "看全部作品" : "See all"}
-        <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
-      </Link>
-    </div>
-  );
-}
-
-/**
- * FeatureSplit —— 四段唯一的版式:一张横幅大卡 + 两张紧凑小卡(右侧上下叠)。
- *
- * ## 为什么是 `lg:grid-rows-2` 而不是自然高度(2026-10-21 修正)
- *
- * 第一版大卡用 `aspect-[4/3]` 定高、右侧两张方形卡自然堆叠,结果右侧
- * (2 × 方形 ≈ 1000px)比左侧(横幅 ≈ 540px)高出近一倍,而容器是
- * `items-start`,于是大卡底下空出半个版位 —— 整段看着是「没排完」,
- * 不是设计出来的留白。
- *
- * 现在父栅格显式分两行:大卡 `row-span-2` + `aspect="fill"` 撑满两行,
- * 右侧容器也 `grid-rows-2` 各占一行。两列高度由同一组行高决定,
- * 数学上必然相等,不存在空洞。
- */
-function FeatureSplit({
-  products,
-  isZh,
-}: {
-  products: StorefrontProduct[];
-  isZh: boolean;
-}) {
-  const [hero, ...rest] = products;
-  // occasion-data.ts 保证每段 3 件,但解构出来仍是 T | undefined
-  if (!hero) return null;
-  return (
-    <div className="grid lg:grid-cols-12 lg:grid-rows-2 gap-5 lg:gap-7">
-      <div className="lg:col-span-7 lg:row-span-2">
-        <ProductCard
-          product={hero}
-          locale={isZh ? "zh" : "en"}
-          wash={CARD_WASH}
-          aspect="fill"
-          priority
-        />
-      </div>
-      <div className="grid sm:grid-cols-2 lg:grid-cols-1 lg:grid-rows-2 gap-5 lg:gap-7 lg:col-span-5 lg:row-span-2">
-        {rest.map((p, i) => (
-          <ProductCard
-            key={p.handle}
-            product={p}
-            index={i + 1}
-            locale={isZh ? "zh" : "en"}
-            wash={CARD_WASH}
-            aspect="fill"
-            dense
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export function OccasionShelf({ locale }: { locale: "zh" | "en" }) {
   const isZh = locale === "zh";
+  const selectOccasion = useShopFilter((s) => s.selectOccasion);
+
+  const goToShop = (occasion: Occasion) => {
+    selectOccasion(occasion.id);
+    document
+      .getElementById(SHOP_ANCHOR)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   return (
-    // id="works" —— 顶部导航「作品」的落点:四段色带的整体入口。
-    // scroll-mt-16 = sticky header 高度,锚点跳转不被遮。
-    <div id="works" className="scroll-mt-16">
-      {OCCASIONS.map((occasion, bandIndex) => {
-        const products = occasion.handles
-          .map((h) => findProductByHandle(h))
-          .filter((p) => p !== null);
-
-        return (
-          <motion.section
-            key={occasion.id}
-            id={occasion.id}
-            // scroll-mt-16 = sticky header 高度,锚点跳转不被遮
-            // min-h-[88vh] = 整屏色块:滚动一屏换一个颜色
-            className="scroll-mt-16 min-h-[88vh] flex flex-col justify-center py-20 lg:py-28"
-            style={{ backgroundColor: occasion.wash }}
-            {...reveal(bandIndex * 0.02)}
-          >
-            <div className="mx-auto w-full max-w-[1280px] px-4 sm:px-6 lg:px-8">
-              <BandHeader occasion={occasion} isZh={isZh} />
-              <FeatureSplit products={products} isZh={isZh} />
+    <div id="occasions">
+      {OCCASIONS.map((occasion, bandIndex) => (
+        <motion.section
+          key={occasion.id}
+          id={occasion.id}
+          // scroll-mt-16 = sticky header 高度,锚点跳转不被遮
+          className="scroll-mt-16 py-16 lg:py-24"
+          style={{ backgroundColor: occasion.wash }}
+          {...reveal(bandIndex * 0.02)}
+        >
+          <div className="mx-auto grid w-full max-w-[1280px] items-center gap-8 px-4 sm:px-6 lg:grid-cols-12 lg:gap-10 lg:px-8">
+            {/* 海报 */}
+            <div className="lg:col-span-5">
+              <div className="overflow-hidden rounded-lg bg-muted/40">
+                <img
+                  src={occasion.poster}
+                  alt={isZh ? occasion.label : occasion.labelEn}
+                  className="aspect-[4/3] w-full object-cover"
+                  loading="lazy"
+                />
+              </div>
             </div>
-          </motion.section>
-        );
-      })}
+
+            {/* 文案 + CTA */}
+            <div className="lg:col-span-7 lg:pl-4">
+              <p className="eyebrow text-foreground/50 mb-4">
+                {isZh ? occasion.eyebrow : `Gifts for ${occasion.labelEn}`}
+              </p>
+              <h2 className="text-4xl sm:text-5xl font-medium tracking-tight leading-[1.05] text-balance">
+                {isZh ? occasion.label : occasion.labelEn}
+              </h2>
+              <p className="mt-4 text-base text-foreground/65 leading-relaxed text-pretty max-w-xl">
+                {isZh ? occasion.tagline : occasion.taglineEn}
+              </p>
+              <button
+                type="button"
+                onClick={() => goToShop(occasion)}
+                className="mt-7 inline-flex items-center gap-2 text-sm font-medium text-[var(--accent)] hover:opacity-80 transition-opacity group"
+              >
+                {isZh
+                  ? `看${occasion.label}的 ${occasion.handles.length} 款`
+                  : `See the ${occasion.handles.length} ${occasion.labelEn.toLowerCase()} pieces`}
+                <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+              </button>
+            </div>
+          </div>
+        </motion.section>
+      ))}
     </div>
   );
 }

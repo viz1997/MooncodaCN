@@ -16,6 +16,9 @@ export interface WjpSeries {
   id: string;
   handle: string;
   name: string;
+  /** 英文名 —— 2026-11-01 补:首页改商城后品类名出现在首屏,en locale
+   *  再显示「钥匙扣 / Q版手办 / 冰箱贴」就露馅了。 */
+  nameEn: string;
   tagline: string;
   description: string;
   cover: string;
@@ -29,6 +32,7 @@ export const WJP_SERIES: WjpSeries[] = [
     id: "s_keychain",
     handle: "keychain",
     name: "钥匙扣",
+    nameEn: "Keychain",
     tagline: "照片裁形,随身携带",
     description:
       "WJP 全彩树脂钥匙扣,激光切割按照片轮廓,支持透明/磨砂底板、单双面印图,送礼最受欢迎。",
@@ -42,6 +46,7 @@ export const WJP_SERIES: WjpSeries[] = [
     id: "s_figure",
     handle: "figure",
     name: "Q版手办",
+    nameEn: "Q-Version Figure",
     tagline: "照片雕塑,3D 打印手办",
     description:
       "WJP 全彩树脂 3D 打印,真人照片雕塑化,约 8cm 高,手工上色,最个性礼物。",
@@ -57,6 +62,7 @@ export const WJP_SERIES: WjpSeries[] = [
     id: "s_magnet",
     handle: "magnet",
     name: "冰箱贴",
+    nameEn: "Fridge Magnet",
     tagline: "小记忆,贴在你每天看的地方",
     description:
       "WJP 全彩树脂冰箱贴 4-7cm,适合合影、宠物照、孩子画作,每天早上都能看见。",

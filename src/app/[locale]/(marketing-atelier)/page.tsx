@@ -1,34 +1,46 @@
 import type { Metadata } from "next";
 import { siteConfig } from "@/config";
+import { CategoryStrip } from "@/features/marketing/components/storefront/category-strip";
 import { CraftGallery } from "@/features/marketing/components/storefront/craft-gallery";
 import { HowItWorks } from "@/features/marketing/components/storefront/how-it-works";
 import { OccasionShelf } from "@/features/marketing/components/storefront/occasion-shelf";
+import { ShopAnnouncement } from "@/features/marketing/components/storefront/shop-announcement";
+import { ShopGrid } from "@/features/marketing/components/storefront/shop-grid";
 import { StoreHero } from "@/features/marketing/components/storefront/store-hero";
 
 /**
  * 生成首页 Metadata
  *
- * 根 URL `/` 2026-09-17 改为 atelier 首页;2026-10-31 精简为 4 段:
- * StoreHero → OccasionShelf → HowItWorks → CraftGallery。
+ * 根 URL `/` 2026-09-17 改为 atelier 首页;2026-11-01 改成商城的动线:
  *
- * ## 2026-10-31:从 6 段收到 4 段
+ * ```
+ * 公告条 → Hero(商品拼贴 + 价格锚点) → 品类导航 → 全部商品网格
+ *        → 场合促销行 → 流程 → 工艺 + 真实订单
+ * ```
  *
- * 上一版是 6 段,读起来像「商品列表堆了 5 遍」:
- *  - 四段场合色带各用一种栅格(feature-left / triptych / wide-rows /
- *    feature-right),四套并排栅格在打架;
- *  - 四段色带已经把 12 件商品各展示了一遍,页尾的 FeaturedProducts 横向滚动条
- *    又把同样 12 件展示第二遍 —— unique 12 件摊成 24 次;
- *  - 顶部导航六项 + 移动端「按形态」三项,共九个去处。
+ * ## 2026-11-01:「不像商城」的改法
  *
- * 现在:
- *  - 四段色带**统一版式**(大图 + 两张小卡),节奏只靠一屏一换的底色走;
- *  - 页尾那条重复的横向滚动条整段删掉 —— 首页不再有第二份目录,12 件商品
- *    各出现一次。全量目录 + 品类筛选留在作品集页 `/marketing/products`;
- *  - 「工艺故事」和「真实订单」两段合成一段 CraftGallery,页面上只出现一套
- *    标题栏;
- *  - 顶部导航收到 4 项:作品 / 流程 / 工艺 / 定制。
+ * 上一版是「品牌叙事页」:首屏一句 slogan + 一张生活照,往下四段整屏色带,
+ * 每段摆 3 件商品。读起来像四篇图文,不像一个店 —— 想比价的人得滚四屏,
+ * 想看全部的人得滚到最底下,首屏连一个价格都没有。
  *
- * 顺序的意思:先看是什么场合的礼物,再决定怎么做,最后建立信任。
+ * 现在的动线按商场的标准顺序排:
+ *  - **公告条** —— 先说清楚怎么买(免运费门槛 / 一件也发货 / 工期);
+ *  - **Hero 右侧换成 2×2 商品拼贴**,每块角上写价格,首屏就摆货;
+ *  - **品类导航** —— 每格写清楚「做什么的 / 多少钱起 / 有几件」;
+ *  - **全部商品网格**(#works)—— 12 件的唯一直录,带品类筛选,价格和
+ *    「同款定制」都在卡上;顶部导航「作品」和 hero 的「看全部商品」都落这儿;
+ *  - **场合促销行** —— 从「再陈列一遍商品」改成导购入口,点 CTA 设场合筛选
+ *    并滚回商品网格。
+ *
+ * 商品因此只出现一次(网格里 12 件),加上首屏拼贴里的 4 件 —— 拼贴是
+ * 商城的常规做法,不重复目录。
+ *
+ * ## 2026-10-31:从 6 段收到 4 段(已被上面覆盖,但结论还在)
+ *
+ *  - 四段色带曾各用一种栅格,四套并排栅格在打架;
+ *  - 四段色带 + 页尾 FeaturedProducts 横向滚动条 = 12 件摊成 24 次;
+ *  - 「工艺故事」和「真实订单」合成一段 CraftGallery,页面上只出现一套标题栏。
  *
  * 不做的事:
  *  - 不引入 atelier 的 StoreHeader / StoreFooter —— `(marketing-atelier)/layout.tsx`
@@ -110,10 +122,14 @@ export default async function HomePage({
 
   return (
     <>
-      {/* atelier 首页 4 段(2026-10-31):
-          hero → 四屏场合色带(同一版式,一屏一换底色)→ 流程 → 工艺 + 真实订单。
-          12 件商品各出现一次,页面上没有第二份目录。 */}
-      <StoreHero />
+      {/* 商城动线(2026-11-01):
+          公告条 → hero(商品拼贴 + 价格) → 品类导航 → 12 件商品网格
+          → 场合促销行 → 流程 → 工艺 + 真实订单。
+          商品目录只有网格这一处,场合色带只做导购入口。 */}
+      <ShopAnnouncement locale={isZh ? "zh" : "en"} />
+      <StoreHero locale={isZh ? "zh" : "en"} />
+      <CategoryStrip locale={isZh ? "zh" : "en"} />
+      <ShopGrid locale={isZh ? "zh" : "en"} />
       <OccasionShelf locale={isZh ? "zh" : "en"} />
       <HowItWorks />
       <CraftGallery />

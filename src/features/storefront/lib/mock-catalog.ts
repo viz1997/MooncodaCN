@@ -178,6 +178,7 @@ interface MockProductSeed {
   title: string;
   titleEn: string;
   subtitle: string;
+  subtitleEn: string;
   description: string;
   thumbnail: string;
   images: string[];
@@ -199,6 +200,7 @@ const SEEDS: MockProductSeed[] = [
     title: "萌宠肖像钥匙扣",
     titleEn: "Pet Portrait Keychain",
     subtitle: "把爱宠挂在书包上",
+    subtitleEn: "Clip your pet onto their bag",
     description:
       "WJP 全彩树脂钥匙扣,激光切割按照片轮廓,5cm 标准款,支持皮套/金属配件,适合日常随身携带。",
     thumbnail:
@@ -223,6 +225,7 @@ const SEEDS: MockProductSeed[] = [
     title: "情侣合影钥匙扣",
     titleEn: "Couple Portrait Keychain",
     subtitle: "两个人的日常",
+    subtitleEn: "The everyday of two",
     description:
       "WJP 全彩树脂钥匙扣,4cm 紧凑款,适合情侣互换佩戴,激光切割双面印图,金属配件质感。",
     thumbnail:
@@ -245,6 +248,7 @@ const SEEDS: MockProductSeed[] = [
     title: "宝宝异形钥匙扣",
     titleEn: "Baby Silhouette Keychain",
     subtitle: "按轮廓剪切,独一无二",
+    subtitleEn: "Cut to the outline, one of a kind",
     description: "异性款钥匙扣,按宝宝/宠物照片轮廓激光切割,支架配件,适合送礼。",
     thumbnail:
       "https://images.unsplash.com/photo-1519689680058-324335c77eba?auto=format&fit=crop&w=800&q=80",
@@ -267,6 +271,7 @@ const SEEDS: MockProductSeed[] = [
     title: "旅行纪念钥匙扣",
     titleEn: "Travel Memory Keychain",
     subtitle: "把旅行记忆随身带",
+    subtitleEn: "Keep a trip on hand",
     description: "风景照钥匙扣,4cm 紧凑款,皮套配件,适合旅行纪念。",
     thumbnail:
       "https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=800&q=80",
@@ -290,6 +295,7 @@ const SEEDS: MockProductSeed[] = [
     title: "真人 Q 版手办",
     titleEn: "Portrait Q-Version Figure",
     subtitle: "照片雕塑,8cm 标准款",
+    subtitleEn: "Your photo, sculpted at 8cm",
     description:
       "WJP 全彩树脂 3D 打印,真人照片雕塑化,8cm 高,手工上色,底座配件,送礼最个性。",
     // 主图原本用的 photo-1558997767-920fa5b75e6e 已 404(2026-10-21 核查),
@@ -316,6 +322,7 @@ const SEEDS: MockProductSeed[] = [
     title: "情侣雕塑手办",
     titleEn: "Couple Statue Figure",
     subtitle: "两个人的纪念",
+    subtitleEn: "A keepsake for two",
     description: "WJP 全彩树脂 3D 打印,情侣合影雕塑化,10cm 标准款,底座配件。",
     thumbnail:
       "https://images.unsplash.com/photo-1525338078858-d762b5e32f2c?auto=format&fit=crop&w=800&q=80",
@@ -337,6 +344,7 @@ const SEEDS: MockProductSeed[] = [
     title: "宠物雕塑手办",
     titleEn: "Pet Statue Figure",
     subtitle: "爱宠永远陪在身边",
+    subtitleEn: "Your pet, always beside you",
     description: "WJP 全彩树脂 3D 打印,宠物照片雕塑化,8cm 标准款,底座配件。",
     thumbnail:
       "https://images.unsplash.com/photo-1543465077-db45d34b88a5?auto=format&fit=crop&w=800&q=80",
@@ -359,6 +367,7 @@ const SEEDS: MockProductSeed[] = [
     title: "宝宝周岁雕塑",
     titleEn: "Baby First-Year Statue",
     subtitle: "周岁纪念礼物",
+    subtitleEn: "A first-year keepsake",
     description:
       "WJP 全彩树脂 3D 打印,宝宝周岁照雕塑化,12cm 标准款,底座刻字配件。",
     thumbnail:
@@ -384,6 +393,7 @@ const SEEDS: MockProductSeed[] = [
     title: "萌宠冰箱贴",
     titleEn: "Pet Fridge Magnet",
     subtitle: "每天都能看到",
+    subtitleEn: "Every single morning",
     description: "WJP 全彩树脂冰箱贴 5cm,适合合影/宠物照/孩子画作,磁铁配件。",
     // 主图原本用的 photo-1611923134239-b9be5816e23d 已 404(2026-10-21 核查),
     // 改用本商品自己那张已验证的宠物图。同上,不另造 ID。
@@ -408,6 +418,7 @@ const SEEDS: MockProductSeed[] = [
     title: "情侣合影冰箱贴",
     titleEn: "Couple Fridge Magnet",
     subtitle: "记录每个纪念日",
+    subtitleEn: "Mark every anniversary",
     description: "WJP 全彩树脂冰箱贴 6cm,适合情侣/夫妻合影,磁铁配件。",
     thumbnail:
       "https://images.unsplash.com/photo-1516589178581-6cd7833ae3b2?auto=format&fit=crop&w=800&q=80",
@@ -429,6 +440,7 @@ const SEEDS: MockProductSeed[] = [
     title: "相框摆件",
     titleEn: "Photo Frame Magnet",
     subtitle: "桌面纪念摆件",
+    subtitleEn: "A keepsake on the desk",
     description: "WJP 全彩树脂相框 8cm,无配件,适合桌面摆放,刻字祝福。",
     thumbnail:
       "https://images.unsplash.com/photo-1503454537195-1dcabb73ffb9?auto=format&fit=crop&w=800&q=80",
@@ -450,6 +462,7 @@ const SEEDS: MockProductSeed[] = [
     title: "真皮徽章",
     titleEn: "Leather Badge Magnet",
     subtitle: "皮具工艺纪念",
+    subtitleEn: "Leather, hand-finished",
     description:
       "WJP 真皮徽章 6cm,皮套/金属配件,可刻字,适合企业 logo / 团队纪念。",
     thumbnail:
@@ -494,6 +507,7 @@ function buildMockProducts(): StorefrontProduct[] {
       title: seed.title,
       titleEn: seed.titleEn,
       subtitle: seed.subtitle,
+      subtitleEn: seed.subtitleEn,
       description: seed.description,
       thumbnail: seed.thumbnail,
       images: seed.images,
@@ -502,6 +516,7 @@ function buildMockProducts(): StorefrontProduct[] {
       productTypeCode: seed.productTypeCode,
       seriesId: series?.id ?? "",
       seriesName: series?.name ?? "",
+      seriesNameEn: series?.nameEn ?? "",
       accent: seed.accent,
       tags: seed.tags,
       rating: seed.rating,

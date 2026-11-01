@@ -77,6 +77,10 @@ export interface StorefrontProduct {
   title: string;
   titleEn: string;
   subtitle: string;
+  /** 英文副标题 —— 2026-11-01 补:商城网格的卡片副标题在 en locale
+   *  之前一直是中文(标题有 titleEn,副标题没有),首页改网格后这行在
+   *  en 页上刺眼得没法忽略。 */
+  subtitleEn: string;
   description: string;
   /** 主图(URL) */
   thumbnail: string;
@@ -90,6 +94,8 @@ export interface StorefrontProduct {
   /** 所属系列(钥匙扣 / 手办 / 冰箱贴) */
   seriesId: string;
   seriesName: string;
+  /** 英文系列名 */
+  seriesNameEn: string;
   /** 系列强调色(用于 chip / accent) */
   accent: string;
   /** 标签(用于搜索) */

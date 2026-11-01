@@ -133,7 +133,7 @@ export function ProductCard({
             style={{ backgroundColor: product.accent }}
           />
           <span className="text-[11px] text-muted-foreground truncate">
-            {product.seriesName}
+            {isZh ? product.seriesName : product.seriesNameEn}
           </span>
         </div>
         <Link
@@ -144,7 +144,7 @@ export function ProductCard({
         </Link>
         {dense ? null : (
           <p className="text-xs text-muted-foreground line-clamp-1">
-            {product.subtitle}
+            {isZh ? product.subtitle : product.subtitleEn}
           </p>
         )}
         <div className="flex items-center justify-between gap-2 pt-0.5">

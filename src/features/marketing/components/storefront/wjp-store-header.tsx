@@ -132,7 +132,8 @@ export function WjpStoreHeader() {
           p.title.toLowerCase().includes(q) ||
           p.titleEn.toLowerCase().includes(q) ||
           p.tags.some((t) => t.toLowerCase().includes(q)) ||
-          p.seriesName.toLowerCase().includes(q)
+          p.seriesName.toLowerCase().includes(q) ||
+          p.seriesNameEn.toLowerCase().includes(q)
       )
       .slice(0, 6);
   }, [productsResp, searchValue]);
@@ -264,8 +265,8 @@ export function WjpStoreHeader() {
                   setSearchOpen(true);
                 }}
                 onFocus={() => setSearchOpen(true)}
-                placeholder="搜索作品"
-                aria-label="搜索作品"
+                placeholder={isZh ? "搜索作品" : "Search pieces"}
+                aria-label={isZh ? "搜索作品" : "Search pieces"}
                 className="w-44 lg:w-56 pl-9 pr-3 h-9 bg-muted/50 border-transparent text-sm rounded-md focus-visible:bg-background focus-visible:border-border transition-all"
               />
 
@@ -281,11 +282,13 @@ export function WjpStoreHeader() {
                     {productsLoading ? (
                       <div className="px-4 py-6 text-center text-sm text-muted-foreground">
                         <Loader2 className="inline-block size-4 animate-spin mr-1.5" />
-                        加载中...
+                        {isZh ? "加载中..." : "Loading..."}
                       </div>
                     ) : filtered.length === 0 ? (
                       <div className="px-4 py-6 text-center text-sm text-muted-foreground">
-                        没有匹配「{searchValue}」的作品
+                        {isZh
+                          ? `没有匹配「${searchValue}」的作品`
+                          : `No pieces match "${searchValue}"`}
                       </div>
                     ) : (
                       <ul className="divide-y divide-border max-h-96 overflow-y-auto">
@@ -302,19 +305,23 @@ export function WjpStoreHeader() {
                             >
                               <img
                                 src={p.thumbnail}
-                                alt={p.title}
+                                alt={isZh ? p.title : p.titleEn}
                                 className="size-12 object-cover rounded-sm bg-muted shrink-0"
                               />
                               <div className="flex-1 min-w-0">
                                 <p className="text-sm font-medium truncate">
-                                  {p.title}
+                                  {isZh ? p.title : p.titleEn}
                                 </p>
                                 <p className="text-[11px] text-muted-foreground">
-                                  {p.seriesName} · {p.typeLabel}
+                                  {isZh ? p.seriesName : p.seriesNameEn} ·{" "}
+                                  {isZh ? p.typeLabel : p.typeLabelEn}
                                 </p>
                               </div>
                               <p className="text-sm font-medium shrink-0">
-                                {formatPriceCNY(p.basePriceCents / 100)}
+                                {formatPriceCNY(
+                                  p.basePriceCents / 100,
+                                  isZh ? "zh-CN" : "en"
+                                )}
                               </p>
                             </button>
                           </li>
@@ -330,7 +337,7 @@ export function WjpStoreHeader() {
               variant="ghost"
               size="icon"
               className="sm:hidden"
-              aria-label="搜索"
+              aria-label={isZh ? "搜索" : "Search"}
               type="button"
             >
               <Search className="size-5" />
@@ -343,7 +350,7 @@ export function WjpStoreHeader() {
               size="sm"
               className="hidden sm:inline-flex h-9 px-3 text-sm font-medium"
             >
-              <Link href={signInHref}>登录</Link>
+              <Link href={signInHref}>{isZh ? "登录" : "Sign in"}</Link>
             </Button>
 
             {/* Cart */}
@@ -351,7 +358,7 @@ export function WjpStoreHeader() {
               variant="ghost"
               size="icon"
               onClick={openCart}
-              aria-label="购物袋"
+              aria-label={isZh ? "购物袋" : "Shopping bag"}
               className="relative size-9"
               type="button"
             >
