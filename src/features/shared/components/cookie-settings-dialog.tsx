@@ -213,7 +213,9 @@ export function CookieSettingsDialog({ children }: CookieSettingsDialogProps) {
         }
         closeIcon={null}
         destroyOnHidden={false}
-        maskClosable
+        // antd 6:maskClosable 已废弃,改成 mask.closable(默认值本来就是 true,
+        // 写死 true 是为了保留「点遮罩关闭」的原有行为)
+        mask={{ closable: true }}
       >
         <div className="max-h-[60vh] overflow-y-auto px-6 py-4">
           {/* Description */}
