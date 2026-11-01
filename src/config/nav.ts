@@ -139,6 +139,8 @@ export const mainNav: NavItem[] = [
   { title: "Image Gen", href: "/image-gen" },
   { title: "Docs", href: "/docs" },
   { title: "Pricing", href: "/#pricing" },
+  // 3D 打印克重计算器 —— 公开工具页,浏览器本地算,不需登录
+  { title: "Weight Tool", href: "/pricing" },
   { title: "Blog", href: "/blog" },
 ];
 
@@ -149,6 +151,7 @@ export const footerNav = {
   /** 产品 (Product) */
   product: [
     { title: "Pricing", href: "/#pricing" },
+    { title: "Weight Tool", href: "/pricing" },
     { title: "Changelog", href: "/blog" },
     {
       title: "Contact Us",

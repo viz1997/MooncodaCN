@@ -657,6 +657,7 @@
     "docs": "文档",
     "pseo": "PSEO",
     "pricing": "定价",
+    "weightTool": "克重工具",
     "blog": "博客",
     "about": "关于",
     "productsMenu": {
@@ -1072,5 +1073,259 @@
     "copyright": "© {year} {name}。保留所有权利。",
     "twitter": "微博",
     "github": "小红书"
+  },
+  "MaterialPricing": {
+    "header": {
+      "title": "3D 打印克重计算器",
+      "subtitle": "PolyJet 光敏树脂 · 耗材用量预估"
+    },
+    "intro": {
+      "title": "上传模型，直接得到克重",
+      "body": "解析 3D 模型的包围盒与体积，套用光敏树脂密度换算耗材克重，并给出最佳打印摆盘角度与支撑克重估算。<strong>全部计算都在你的浏览器里完成</strong> —— 模型文件不会上传服务器，计算结果也不会入库。"
+    },
+    "modes": {
+      "upload": "上传模型",
+      "manual": "手动尺寸",
+      "batch": "批量克重"
+    },
+    "common": {
+      "reset": "重置",
+      "cancel": "取消",
+      "loading": "加载中…"
+    },
+    "footer": {
+      "tagline": "计算在本地浏览器完成 —— 不上传模型，不保存结果",
+      "version": "Mooncoda 克重计算器"
+    },
+    "unit": {
+      "yuan": "元",
+      "perGram": "元/克"
+    },
+    "upload": {
+      "reading": "正在读取文件…",
+      "parsing": "正在解析模型…",
+      "extracting": "正在解压…",
+      "parsingProgress": "正在解析",
+      "rendering": "正在生成 3D 预览…",
+      "failed": "解析失败：",
+      "loadingPreview": "正在加载 3D 预览…",
+      "dropTitle": "拖入模型文件",
+      "dropHint": "支持 ZIP / RAR / OBJ / STL / PLY / GLB，可直接拖入",
+      "dropNow": "松手即可加载",
+      "dropSoon": "文件将在本地解析，不会上传服务器",
+      "pickFile": "选择文件",
+      "scaledBy": "缩放 ×{k}",
+      "reupload": "换文件",
+      "removeModel": "移除模型"
+    },
+    "stats": {
+      "materialWeight": "耗材克重",
+      "supportWeight": "支撑克重",
+      "supportWeightHint": "运行智能摆盘后显示",
+      "supportNeedsModel": "需上传模型后计算",
+      "weightFormula": "克重 = 体积 × 材料密度",
+      "density": "材料密度",
+      "totalVolume": "总体积",
+      "materialFee": "材料费用",
+      "weightFee": "材料费",
+      "realVolume": "实体体积",
+      "surfaceArea": "表面积",
+      "vertexCount": "顶点",
+      "triangleCount": "三角面"
+    },
+    "price": {
+      "repair": "修模",
+      "varnish": "光油",
+      "notCounted": "不计入",
+      "support": "支撑",
+      "supportNotCounted": "预计 {weight} g，未计入",
+      "supportNeedsModel": "需上传模型后计算",
+      "total": "合计",
+      "details": "明细",
+      "breakdown": "计价明细",
+      "modelVolume": "模型体积",
+      "density": "材料密度",
+      "unitPrice": "材料单价",
+      "weightFee": "材料费",
+      "varnishFee": "光油费",
+      "repairFee": "修模费"
+    },
+    "angle": {
+      "best": "最佳摆盘 X {x}° Y {y}° Z {z}°",
+      "selfSupport": "本体支撑 {ratio}%",
+      "supportWeight": "支撑 {weight} g",
+      "height": "层高 {h} mm",
+      "laidFlat": "已躺平",
+      "savingTitle": "原摆放 {before} g → 优化后 {after} g，节省 {pct}%",
+      "savingBadge": "省 {pct}% 支撑",
+      "exportModel": "导出模型",
+      "reset": "重置角度",
+      "summary": "X {x}° Y {y}° Z {z}° · 支撑 {ratio}% · {weight} g · 层高 {height} mm",
+      "toggleSupport": "显示支撑预览",
+      "support": "支撑",
+      "optimize": "智能摆盘",
+      "manualTune": "手动微调",
+      "reoptimize": "重新优化",
+      "resetAngle": "重置角度"
+    },
+    "calibration": {
+      "fillRate": "蜂窝填充率",
+      "shellThickness": "外壳厚度 (mm)",
+      "density": "支撑密度 (g/cm³)",
+      "hint": "支撑克重 = 外壳包裹体积 + 底部填充体积。填充率是底部蜂窝的实心比例，密度是支撑树脂本身的克重。",
+      "collapseLabel": "支撑克重校准",
+      "oneClickTitle": "一键校准",
+      "oneClickDesc": "填入实测支撑克重，自动反算蜂窝填充率。",
+      "placeholder": "实测克重",
+      "calibrate": "校准",
+      "ratioHint": "当前 {current} g → 目标 {target} g（比值 {ratio}）"
+    },
+    "axis": {
+      "length": "长 X",
+      "width": "宽 Y",
+      "height": "高 Z",
+      "lengthFull": "长度 (mm)",
+      "widthFull": "宽度 (mm)",
+      "heightFull": "高度 (mm)"
+    },
+    "manual": {
+      "dimsLabel": "外包尺寸",
+      "solidRatio": "实心比例",
+      "weightTitle": "预估克重",
+      "weightHint": "按外包尺寸与实心比例估算实体体积，再乘以材料密度得到耗材克重。"
+    },
+    "presets": {
+      "hollow": "空心",
+      "halfHollow": "半空心",
+      "normal": "常规",
+      "functional": "功能件",
+      "dense": "实心"
+    },
+    "dialog": {
+      "title": "模型设置 · {name}",
+      "titlePlain": "模型设置",
+      "description": "查看 3D 预览、调整外形尺寸，或运行智能摆盘。",
+      "readingFile": "正在读取文件…",
+      "parsingObj": "正在解析 OBJ…",
+      "pleaseWait": "请稍候…",
+      "loadFailed": "模型加载失败",
+      "reselectFile": "重新选择文件",
+      "preview3d": "3D 预览",
+      "vertices": "顶点",
+      "loadingPreview": "正在加载预览…",
+      "dimensionAdjust": "尺寸调整",
+      "originalSize": "原始尺寸",
+      "customSize": "自选尺寸",
+      "switchToCustom": "改为自选尺寸",
+      "linkedScale": "三轴联动",
+      "independentScale": "各轴独立",
+      "uniformScale": "统一缩放",
+      "restoreOriginal": "恢复原始",
+      "scaleSummaryUniform": "缩放 ×{s} → 体积 ×{v}，表面积 ×{a}",
+      "scaleSummaryAxis": "缩放 X {sx} / Y {sy} / Z {sz} → 体积 ×{v}",
+      "adjustHint": "改动尺寸会按比例同步体积与表面积，克重随之更新。",
+      "exportRotatedTitle": "导出已摆盘模型（OBJ）",
+      "exportPlainTitle": "导出模型（OBJ）",
+      "exportRotated": "导出已摆盘",
+      "exportModel": "导出模型"
+    },
+    "info": {
+      "algorithm": {
+        "title": "克重算法",
+        "p1": "耗材克重 = 实体体积 × 材料密度。实体体积来自模型包围盒按实心比例折算；手动模式下用外包尺寸 × 实心比例估算。",
+        "formula": "克重 = 实体体积 (cm³) × 材料密度 ({density} g/cm³)",
+        "varnishFee": " + 光油费",
+        "repairFee": " + 修模费",
+        "supportFee": " + 支撑费",
+        "p2": "支撑克重按蜂窝填充率、外壳厚度与支撑树脂密度估算，可用「支撑克重校准」按实测值反算；智能摆盘会在多个角度里挑选支撑最少、层高最低的姿态。"
+      },
+      "products": {
+        "title": "产品类型预设",
+        "colProduct": "产品类型",
+        "colRatio": "实心比例",
+        "colDesc": "说明",
+        "hint": "点击任意一行即可套用该预设的实心比例与覆盖率。"
+      },
+      "materials": {
+        "title": "材料参数",
+        "unlocked": "材料参数已解锁",
+        "lock": "重新锁定",
+        "density": "材料密度",
+        "densityLabel": "密度",
+        "unitPrice": "材料单价",
+        "supportPrice": "支撑单价",
+        "supportHint": "支撑材料按克重单独计价，低于 1:1 阈值的部分不额外收费。",
+        "varnish": "光油",
+        "varnishHint": "光油为固定附加费，每个模型 {fee} 元。",
+        "lockedTitle": "材料参数已锁定",
+        "lockedHint": "输入密码后可调整材料密度。",
+        "passwordPlaceholder": "请输入密码",
+        "passwordError": "密码不正确",
+        "verifying": "校验中…",
+        "verify": "解锁"
+      }
+    },
+    "products": {
+      "pet": {
+        "name": "宠物手办",
+        "desc": "立体写实件，半空心结构，表面图案覆盖 50%"
+      },
+      "badge": {
+        "name": "浮雕徽章",
+        "desc": "扁平板状，正面浮雕图案覆盖 80%"
+      },
+      "keychain": {
+        "name": "浮雕钥匙扣",
+        "desc": "小型扁平板，正反面图案覆盖 80%"
+      },
+      "magnet": {
+        "name": "冰箱贴",
+        "desc": "薄板磁吸件，正面图案覆盖 70%"
+      }
+    },
+    "batch": {
+      "title": "批量克重",
+      "intro": "一次选多个 ZIP / OBJ，本地并行解析、智能摆盘并汇总克重，不上传服务器。",
+      "addFiles": "添加文件",
+      "concurrency": "并发数",
+      "smartAngle": "智能摆盘",
+      "enabled": "开启",
+      "disabled": "关闭",
+      "materialDensity": "材料密度",
+      "unitPrice": "材料单价",
+      "supportPrice": "支撑单价",
+      "summaryLine": "共 <b>{total}</b> 个 · 完成 <bOk>{done}</bOk> · 失败 <bErr>{errors}</bErr> · 待处理 <b>{pending}</b>",
+      "clear": "清空",
+      "cancel": "取消",
+      "retry": "重试 {n} 个",
+      "start": "开始（{n}）",
+      "emptyTitle": "拖入多个模型文件",
+      "emptyHint": "支持 ZIP / RAR / OBJ / STL / PLY / GLB，可一次选多个",
+      "dropHint": "松手即可加入队列",
+      "dropPending": "文件将在本地解析，不会上传服务器",
+      "totalWeight": "总克重",
+      "totalPrice": "总报价",
+      "doneCount": "完成数",
+      "avgTime": "平均耗时",
+      "settingsReminder": "批量沿用当前参数：实心比例 <b>{solidRatio}%</b>、材料密度 <b>{density} g/cm³</b>、智能摆盘 <b>{angle}</b>",
+      "varnishOn": "开启",
+      "varnishOff": "关闭",
+      "supportOn": "开启",
+      "yuan": "元",
+      "selfSupport": "本体支撑 {ratio}% · {weight} g",
+      "laidFlat": "已躺平",
+      "exportRotated": "导出已摆盘 OBJ",
+      "remove": "移除",
+      "status": {
+        "pending": "待处理",
+        "extracting": "解压中",
+        "parsing": "解析中",
+        "optimizing": "摆盘中",
+        "pricing": "计算中",
+        "done": "完成",
+        "error": "失败",
+        "skipped": "已跳过"
+      }
+    }
   }
 }

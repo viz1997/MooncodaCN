@@ -22,6 +22,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     "", // homepage
     "/blog",
     "/pseo",
+    "/pricing", // 3D 打印克重计算器(公开工具页)
   ];
 
   // Generate static routes for each locale

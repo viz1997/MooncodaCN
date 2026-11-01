@@ -504,6 +504,7 @@
     "docs": "Docs",
     "pseo": "PSEO",
     "pricing": "Pricing",
+    "weightTool": "Weight Tool",
     "blog": "Blog",
     "about": "About",
     "productsMenu": {
@@ -1075,5 +1076,259 @@
     "copyright": "© {year} {name}. All rights reserved.",
     "twitter": "Weibo",
     "github": "Xiaohongshu"
+  },
+  "MaterialPricing": {
+    "header": {
+      "title": "3D Print Weight Calculator",
+      "subtitle": "PolyJet photopolymer · resin usage estimator"
+    },
+    "intro": {
+      "title": "Upload a model, get its weight",
+      "body": "Parses the model's bounding box and volume, converts them to resin weight with the material density, and suggests the best print orientation together with a support weight estimate. <strong>Everything runs in your browser</strong> — model files are never uploaded and results are never stored."
+    },
+    "modes": {
+      "upload": "Upload model",
+      "manual": "Manual size",
+      "batch": "Batch weight"
+    },
+    "common": {
+      "reset": "Reset",
+      "cancel": "Cancel",
+      "loading": "Loading…"
+    },
+    "footer": {
+      "tagline": "Calculated locally in your browser — no uploads, no stored results",
+      "version": "Mooncoda Weight Calculator"
+    },
+    "unit": {
+      "yuan": "CNY",
+      "perGram": "CNY/g"
+    },
+    "upload": {
+      "reading": "Reading file…",
+      "parsing": "Parsing model…",
+      "extracting": "Extracting archive…",
+      "parsingProgress": "Parsing",
+      "rendering": "Building 3D preview…",
+      "failed": "Failed: ",
+      "loadingPreview": "Loading 3D preview…",
+      "dropTitle": "Drop a model file",
+      "dropHint": "ZIP / RAR / OBJ / STL / PLY / GLB — just drag it in",
+      "dropNow": "Release to load",
+      "dropSoon": "The file is parsed locally and never uploaded",
+      "pickFile": "Choose file",
+      "scaledBy": "Scaled ×{k}",
+      "reupload": "Replace",
+      "removeModel": "Remove model"
+    },
+    "stats": {
+      "materialWeight": "Material weight",
+      "supportWeight": "Support weight",
+      "supportWeightHint": "Shown after the orientation optimizer runs",
+      "supportNeedsModel": "Upload a model to compute it",
+      "weightFormula": "Weight = volume × material density",
+      "density": "Material density",
+      "totalVolume": "Total volume",
+      "materialFee": "Material cost",
+      "weightFee": "Material cost",
+      "realVolume": "Solid volume",
+      "surfaceArea": "Surface area",
+      "vertexCount": "vertices",
+      "triangleCount": "triangles"
+    },
+    "price": {
+      "repair": "Model repair",
+      "varnish": "Varnish",
+      "notCounted": "not counted",
+      "support": "Support",
+      "supportNotCounted": "est. {weight} g, not counted",
+      "supportNeedsModel": "upload a model to compute",
+      "total": "Total",
+      "details": "Breakdown",
+      "breakdown": "Price breakdown",
+      "modelVolume": "Model volume",
+      "density": "Density",
+      "unitPrice": "Material unit price",
+      "weightFee": "Material cost",
+      "varnishFee": "Varnish fee",
+      "repairFee": "Repair fee"
+    },
+    "angle": {
+      "best": "Best orientation X {x}° Y {y}° Z {z}°",
+      "selfSupport": "Self-support {ratio}%",
+      "supportWeight": "Support {weight} g",
+      "height": "Height {h} mm",
+      "laidFlat": "Laid flat",
+      "savingTitle": "{before} g original → {after} g optimized, {pct}% saved",
+      "savingBadge": "{pct}% less support",
+      "exportModel": "Export model",
+      "reset": "Reset angle",
+      "summary": "X {x}° Y {y}° Z {z}° · support {ratio}% · {weight} g · height {height} mm",
+      "toggleSupport": "Toggle support preview",
+      "support": "Support",
+      "optimize": "Optimize orientation",
+      "manualTune": "Fine tune",
+      "reoptimize": "Re-optimize",
+      "resetAngle": "Reset angle"
+    },
+    "calibration": {
+      "fillRate": "Honeycomb fill rate",
+      "shellThickness": "Shell thickness (mm)",
+      "density": "Support density (g/cm³)",
+      "hint": "Support weight = shell wrap volume + bottom fill volume. The fill rate is the solid fraction of the bottom honeycomb; density is the support resin's own weight.",
+      "collapseLabel": "Support weight calibration",
+      "oneClickTitle": "One-click calibration",
+      "oneClickDesc": "Enter the measured support weight to back-solve the honeycomb fill rate.",
+      "placeholder": "Measured weight",
+      "calibrate": "Calibrate",
+      "ratioHint": "{current} g now → {target} g target (ratio {ratio})"
+    },
+    "axis": {
+      "length": "L X",
+      "width": "W Y",
+      "height": "H Z",
+      "lengthFull": "Length (mm)",
+      "widthFull": "Width (mm)",
+      "heightFull": "Height (mm)"
+    },
+    "manual": {
+      "dimsLabel": "Envelope size",
+      "solidRatio": "Solid ratio",
+      "weightTitle": "Estimated weight",
+      "weightHint": "The solid volume is estimated from the envelope size and the solid ratio, then multiplied by the material density."
+    },
+    "presets": {
+      "hollow": "Hollow",
+      "halfHollow": "Half hollow",
+      "normal": "Standard",
+      "functional": "Functional",
+      "dense": "Solid"
+    },
+    "dialog": {
+      "title": "Model settings · {name}",
+      "titlePlain": "Model settings",
+      "description": "Inspect the 3D preview, adjust the bounding size, or run the orientation optimizer.",
+      "readingFile": "Reading file…",
+      "parsingObj": "Parsing OBJ…",
+      "pleaseWait": "Please wait…",
+      "loadFailed": "Model failed to load",
+      "reselectFile": "Choose another file",
+      "preview3d": "3D preview",
+      "vertices": "vertices",
+      "loadingPreview": "Loading preview…",
+      "dimensionAdjust": "Size adjustment",
+      "originalSize": "Original size",
+      "customSize": "Custom size",
+      "switchToCustom": "Switch to custom size",
+      "linkedScale": "Linked axes",
+      "independentScale": "Per axis",
+      "uniformScale": "Uniform scale",
+      "restoreOriginal": "Restore original",
+      "scaleSummaryUniform": "Scale ×{s} → volume ×{v}, area ×{a}",
+      "scaleSummaryAxis": "Scale X {sx} / Y {sy} / Z {sz} → volume ×{v}",
+      "adjustHint": "Changing a dimension scales volume and surface area proportionally, and the weight follows.",
+      "exportRotatedTitle": "Export the laid-out model (OBJ)",
+      "exportPlainTitle": "Export the model (OBJ)",
+      "exportRotated": "Export laid out",
+      "exportModel": "Export model"
+    },
+    "info": {
+      "algorithm": {
+        "title": "How the weight is calculated",
+        "p1": "Resin weight = solid volume × material density. The solid volume comes from the model's bounding box scaled by the fill ratio; in manual mode it is estimated from the envelope size × fill ratio.",
+        "formula": "Weight = solid volume (cm³) × material density ({density} g/cm³)",
+        "varnishFee": " + varnish",
+        "repairFee": " + repair",
+        "supportFee": " + support",
+        "p2": "Support weight is estimated from the honeycomb fill rate, the shell thickness and the support resin density; use “Support weight calibration” to back-solve it from a measured weight. The optimizer picks the pose with the least support and the lowest layer height."
+      },
+      "products": {
+        "title": "Product presets",
+        "colProduct": "Product",
+        "colRatio": "Fill ratio",
+        "colDesc": "Description",
+        "hint": "Click any row to apply that preset's fill ratio and coverage."
+      },
+      "materials": {
+        "title": "Material parameters",
+        "unlocked": "Material parameters unlocked",
+        "lock": "Lock again",
+        "density": "Material density",
+        "densityLabel": "Density",
+        "unitPrice": "Material unit price",
+        "supportPrice": "Support unit price",
+        "supportHint": "Support resin is priced per gram; the portion below the 1:1 threshold is not charged extra.",
+        "varnish": "Varnish",
+        "varnishHint": "Varnish is a flat fee of {fee} per model.",
+        "lockedTitle": "Material parameters locked",
+        "lockedHint": "Enter the password to adjust the material density.",
+        "passwordPlaceholder": "Password",
+        "passwordError": "Wrong password",
+        "verifying": "Verifying…",
+        "verify": "Unlock"
+      }
+    },
+    "products": {
+      "pet": {
+        "name": "Pet figurine",
+        "desc": "Realistic 3D figure, half-hollow, artwork covers 50% of the surface"
+      },
+      "badge": {
+        "name": "Relief badge",
+        "desc": "Flat plate, raised artwork covers 80% of the face"
+      },
+      "keychain": {
+        "name": "Relief keychain",
+        "desc": "Small flat plate, artwork covers 80% on both sides"
+      },
+      "magnet": {
+        "name": "Fridge magnet",
+        "desc": "Thin magnetic sheet, artwork covers 70% of the face"
+      }
+    },
+    "batch": {
+      "title": "Batch weight",
+      "intro": "Pick several ZIP / OBJ files at once — parsed, optimized and totalled in parallel, entirely in your browser.",
+      "addFiles": "Add files",
+      "concurrency": "Concurrency",
+      "smartAngle": "Smart orientation",
+      "enabled": "On",
+      "disabled": "Off",
+      "materialDensity": "Density",
+      "unitPrice": "Unit price",
+      "supportPrice": "Support price",
+      "summaryLine": "<b>{total}</b> total · <bOk>{done}</bOk> done · <bErr>{errors}</bErr> failed · <b>{pending}</b> pending",
+      "clear": "Clear",
+      "cancel": "Cancel",
+      "retry": "Retry {n}",
+      "start": "Start ({n})",
+      "emptyTitle": "Drop several model files",
+      "emptyHint": "ZIP / RAR / OBJ / STL / PLY / GLB — select multiple at once",
+      "dropHint": "Release to queue them",
+      "dropPending": "Files are parsed locally and never uploaded",
+      "totalWeight": "Total weight",
+      "totalPrice": "Total price",
+      "doneCount": "Completed",
+      "avgTime": "Avg. time",
+      "settingsReminder": "Batch uses the current parameters: fill ratio <b>{solidRatio}%</b>, material density <b>{density} g/cm³</b>, orientation optimization <b>{angle}</b>",
+      "varnishOn": "on",
+      "varnishOff": "off",
+      "supportOn": "on",
+      "yuan": "CNY",
+      "selfSupport": "Self-support {ratio}% · {weight} g",
+      "laidFlat": "Laid flat",
+      "exportRotated": "Export laid-out OBJ",
+      "remove": "Remove",
+      "status": {
+        "pending": "Pending",
+        "extracting": "Extracting",
+        "parsing": "Parsing",
+        "optimizing": "Optimizing",
+        "pricing": "Calculating",
+        "done": "Done",
+        "error": "Failed",
+        "skipped": "Skipped"
+      }
+    }
   }
 }

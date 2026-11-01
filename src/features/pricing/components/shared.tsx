@@ -1,0 +1,307 @@
+"use client";
+
+import { KeyRound, Magnet, Medal, PawPrint } from "lucide-react";
+/**
+ * 移植自 wjp-source-code/src/app/page.tsx 的共享常量与小组件。
+ *
+ * 与源实现保持一致；移植时仅做类型严格化与 i18n 改造（文案改为 t() 调用），
+ * 未改变任何数值行为。
+ */
+import type { ComponentType, ReactNode } from "react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+
+// ---------------------------------------------------------------------------
+// 产品类型预设
+// ---------------------------------------------------------------------------
+
+export type ProductType = {
+  id: string;
+  /** i18n key 后缀：MaterialPricing.products.<id>.name */
+  nameKey: string;
+  icon: "paw" | "medal" | "key" | "magnet";
+  solidRatio: number;
+  coverage: number;
+  /** i18n key：MaterialPricing.products.<id>.desc */
+  descKey: string;
+  color: string;
+};
+
+export const PRODUCT_TYPES: ProductType[] = [
+  {
+    id: "pet",
+    nameKey: "products.pet.name",
+    icon: "paw",
+    solidRatio: 30,
+    coverage: 50,
+    descKey: "products.pet.desc",
+    color: "#f59e0b",
+  },
+  {
+    id: "badge",
+    nameKey: "products.badge.name",
+    icon: "medal",
+    solidRatio: 60,
+    coverage: 80,
+    descKey: "products.badge.desc",
+    color: "#a78bfa",
+  },
+  {
+    id: "keychain",
+    nameKey: "products.keychain.name",
+    icon: "key",
+    solidRatio: 60,
+    coverage: 80,
+    descKey: "products.keychain.desc",
+    color: "#22d3ee",
+  },
+  {
+    id: "magnet",
+    nameKey: "products.magnet.name",
+    icon: "magnet",
+    solidRatio: 50,
+    coverage: 70,
+    descKey: "products.magnet.desc",
+    color: "#84cc16",
+  },
+];
+
+export const PRODUCT_ICONS: Record<
+  ProductType["icon"],
+  ComponentType<{ className?: string; style?: React.CSSProperties }>
+> = {
+  paw: PawPrint,
+  medal: Medal,
+  key: KeyRound,
+  magnet: Magnet,
+};
+
+/** 实心比例快捷预设 */
+export const SOLID_PRESETS: { labelKey: string; ratio: number }[] = [
+  { labelKey: "presets.hollow", ratio: 10 },
+  { labelKey: "presets.halfHollow", ratio: 20 },
+  { labelKey: "presets.normal", ratio: 30 },
+  { labelKey: "presets.functional", ratio: 60 },
+  { labelKey: "presets.dense", ratio: 100 },
+];
+
+// ---------------------------------------------------------------------------
+// 数字格式化
+// ---------------------------------------------------------------------------
+
+/**
+ * 数字格式化（固定小数位，千分位）
+ *
+ * 注意：源实现硬编码 `zh-CN` locale。这里保持不变 —— 报价数字的排版
+ * 在中英两个 locale 下保持一致，避免同一份报价出现两种千分位写法。
+ */
+export const fmt = (v: number, digits = 2): string => {
+  if (!Number.isFinite(v)) return "—";
+  return v.toLocaleString("zh-CN", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+};
+
+// ---------------------------------------------------------------------------
+// 几何缩放
+// ---------------------------------------------------------------------------
+
+/**
+ * 按 XYZ 缩放因子计算新的体积、表面积、尺寸
+ *
+ * 移植自源实现（page.tsx 的 `scaleGeometryXYZ`）—— 源实现没有把这段逻辑放进
+ * pricing-engine，所以在此处原样保留。
+ */
+export function scaleGeometryXYZ(
+  volume: number,
+  surface: number,
+  dims: [number, number, number],
+  sx: number,
+  sy: number,
+  sz: number
+): {
+  volumeCM3: number;
+  surfaceAreaCM2: number;
+  dims: [number, number, number];
+} {
+  const safeSx = Number.isFinite(sx) && sx > 0 ? sx : 1;
+  const safeSy = Number.isFinite(sy) && sy > 0 ? sy : 1;
+  const safeSz = Number.isFinite(sz) && sz > 0 ? sz : 1;
+  return {
+    volumeCM3: volume * safeSx * safeSy * safeSz,
+    // 表面积近似按平均缩放因子²计算（非均匀缩放无法精确解析）
+    surfaceAreaCM2:
+      surface * Math.sqrt(safeSx * safeSy * safeSz) ** 2 * 0.5 +
+      ((surface * (safeSx * safeSy + safeSy * safeSz + safeSx * safeSz)) / 3) *
+        0.5,
+    dims: [dims[0] * safeSx, dims[1] * safeSy, dims[2] * safeSz],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 小组件
+// ---------------------------------------------------------------------------
+
+/** 数字输入框（手动模式外形尺寸） */
+export function DimInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs text-stone-500">{label}</Label>
+      <Input
+        type="number"
+        min="0"
+        step="0.1"
+        value={Number.isFinite(value) ? value : ""}
+        onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+        className="font-mono"
+        placeholder="0.0"
+      />
+    </div>
+  );
+}
+
+/** 统计块（克重 / 体积 / 费用等） */
+export function StatBlock({
+  label,
+  value,
+  icon,
+  highlight,
+  muted,
+}: {
+  label: string;
+  value: string;
+  icon: ReactNode;
+  highlight?: boolean;
+  muted?: boolean;
+}) {
+  return (
+    <div
+      className={`rounded-lg border p-3 ${highlight ? "border-amber-300 bg-amber-50/60" : muted ? "border-stone-200 bg-stone-50/40" : "border-stone-200 bg-white"}`}
+    >
+      <div
+        className={`flex items-center gap-1.5 text-xs ${muted ? "text-stone-400" : "text-stone-500"}`}
+      >
+        {icon}
+        <span>{label}</span>
+      </div>
+      <div
+        className={`mt-1 font-mono ${highlight ? "text-amber-700 font-semibold text-base" : "text-stone-800 text-sm"}`}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+/** 只读尺寸显示（原始尺寸模式） */
+export function DimDisplay({
+  axis,
+  axisColor,
+  label,
+  value,
+}: {
+  axis: string;
+  axisColor: string;
+  label: string;
+  value: number;
+}) {
+  return (
+    <div className="rounded-lg border border-stone-200 bg-white p-3 h-[78px] flex flex-col">
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <span
+          className="size-3 rounded-sm"
+          style={{ backgroundColor: axisColor }}
+        />
+        <span className="text-xs font-medium text-stone-600">{axis}</span>
+        <span className="text-xs text-stone-400 ml-auto">{label}</span>
+      </div>
+      <div className="font-mono text-lg text-stone-800 flex items-center gap-1 flex-1">
+        <span>{fmt(value, 1)}</span>
+        <span className="text-xs text-stone-400">mm</span>
+      </div>
+    </div>
+  );
+}
+
+/** 可编辑尺寸（自选尺寸模式） */
+export function DimEditor({
+  axis,
+  axisColor,
+  label,
+  value,
+  onChange,
+}: {
+  axis: string;
+  axisColor: string;
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-stone-300 bg-white p-3 h-[78px] flex flex-col focus-within:border-amber-400 focus-within:ring-1 focus-within:ring-amber-200 transition-colors">
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <span
+          className="size-3 rounded-sm"
+          style={{ backgroundColor: axisColor }}
+        />
+        <span className="text-xs font-medium text-stone-600">{axis}</span>
+        <span className="text-xs text-stone-400 ml-auto">{label}</span>
+      </div>
+      <div className="flex items-center gap-1 flex-1">
+        <Input
+          type="number"
+          min="0.1"
+          step="0.1"
+          value={Number.isFinite(value) ? Math.round(value * 100) / 100 : ""}
+          onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+          className="font-mono text-lg h-7 px-2 py-0 border-0 focus-visible:ring-0"
+          placeholder="0.0"
+        />
+        <span className="text-xs text-stone-400 shrink-0">mm</span>
+      </div>
+    </div>
+  );
+}
+
+/** 角度输入框（手动微调摆盘角度） */
+export function AngleInput({
+  label,
+  value,
+  onChange,
+  color,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+  color: string;
+}) {
+  return (
+    <div className="flex items-center gap-1.5 flex-1">
+      <span
+        className="size-2.5 rounded-sm shrink-0"
+        style={{ backgroundColor: color }}
+      />
+      <span className="text-[10px] font-medium text-stone-600 shrink-0">
+        {label}
+      </span>
+      <Input
+        type="number"
+        step="1"
+        value={Number.isFinite(value) ? Math.round(value) : 0}
+        onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+        className="font-mono text-xs h-6 px-1.5 py-0 border-stone-200 focus-visible:ring-violet-200 focus-visible:border-violet-400"
+        placeholder="0"
+      />
+      <span className="text-[10px] text-stone-400 shrink-0">°</span>
+    </div>
+  );
+}
