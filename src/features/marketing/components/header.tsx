@@ -91,6 +91,7 @@ export function Header() {
     "Image Gen": tNav("imageGen"),
     Docs: tNav("docs"),
     Pricing: tNav("pricing"),
+    Quote: tNav("quote"),
     Tools: tNav("tools"),
     Blog: tNav("blog"),
   };

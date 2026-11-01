@@ -38,7 +38,7 @@ import { useTranslations } from "next-intl";
  *  - 材料参数密码校验改为服务端环境变量（源实现把哈希硬编码在客户端）；
  *  - 文案全部改为 t() 调用（i18n）。
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -102,14 +102,30 @@ import {
   extractModelZip,
   type ModelFile,
 } from "@/features/pricing/lib/zip-extractor";
+import type { PrintQuoteInput } from "@/features/print-quote/lib/quote-types";
 
 type Mode = "upload" | "manual" | "batch";
+
+/**
+ * 报价模式下抛给父组件的模型载荷（2026-11-01 新增）
+ *
+ * `scales` 是当前生效的缩放因子 —— 下单重新打包模型时要按它缩放，
+ * 否则工作室拿到的文件和报价单上的尺寸对不上。
+ */
+export type PricingModelPayload = {
+  model: ModelFile;
+  scales: [number, number, number];
+};
 
 const yieldToUI = (): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, 0));
 
 export function PricingCalculator({
   showChrome = true,
+  quoteMode = false,
+  onQuoteInput,
+  quoteSlot,
+  onModelChange,
 }: {
   /**
    * 是否渲染工具自带的页头 / 页脚。
@@ -120,6 +136,43 @@ export function PricingCalculator({
    *         重复出现一遍标题。
    */
   showChrome?: boolean;
+
+  /**
+   * 报价模式（2026-11-01 新增，给打印服务报价页用）。
+   *
+   * false（默认）= **工具模式**：只算不存、不显示任何价格、模型不上传服务器。
+   *                 这是 `/tools/weight` 的行为，本次改动不能动它。
+   * true          = **报价模式**：把几何数据通过 `onQuoteInput` 抛给父组件，
+   *                 由父组件去服务端要报价，并把 `quoteSlot` 渲染在右栏
+   *                 克重下方。
+   *
+   * 为什么价格不在这儿算：报价必须是**服务端算的**（客户端能改）。
+   * 所以这里只负责把「几何 + 支撑」交出去,价格由父组件拿服务端返回的
+   * 结果渲染。
+   */
+  quoteMode?: boolean;
+
+  /**
+   * 几何变化回调（报价模式）。
+   *
+   * 传 null 表示「当前没有可报价的模型」。父组件拿到就防抖去调
+   * `POST /api/print-quote`。
+   */
+  onQuoteInput?: (input: PrintQuoteInput | null) => void;
+
+  /**
+   * 报价条插槽（报价模式）—— 父组件渲染价格明细 + 合计 + 下单入口。
+   * 渲染位置：右栏克重下方。
+   */
+  quoteSlot?: ReactNode;
+
+  /**
+   * 模型就绪回调（报价模式）—— 父组件要用模型文件本体打包上传。
+   *
+   * 带上 `scales`:下单时要按用户调过的尺寸重新打包模型,否则工作室拿到的
+   * 文件尺寸和报价单上的尺寸对不上。
+   */
+  onModelChange?: (payload: PricingModelPayload | null) => void;
 }) {
   const t = useTranslations("MaterialPricing");
 
@@ -303,6 +356,51 @@ export function PricingCalculator({
     optimalAngle,
     supportEnabled,
   ]);
+
+  // ---- 报价模式：把几何交给父组件（2026-11-01 新增）----
+  //
+  // 只抛**输入**（几何 + 支撑），不抛价格 —— 价格必须服务端算，客户端
+  // 算的价不能信（见 print-quote/lib/quote-server.ts 的说明）。
+  //
+  // 回调放进 ref：父组件每次渲染都会新建这个函数，直接进依赖数组会让
+  // 这个 effect 每渲染一次就跑一次，父组件 setState → 再渲染 → 死循环。
+  const onQuoteInputRef = useRef(onQuoteInput);
+  useEffect(() => {
+    onQuoteInputRef.current = onQuoteInput;
+  }, [onQuoteInput]);
+
+  useEffect(() => {
+    if (!quoteMode) return;
+    const notify = onQuoteInputRef.current;
+    if (!notify) return;
+    if (!geometry) {
+      notify(null);
+      return;
+    }
+    notify({
+      volumeCM3: geometry.volumeCM3,
+      surfaceAreaCM2: geometry.surfaceAreaCM2,
+      dims: geometry.dims,
+      // 没跑智能摆盘就没有支撑数据 —— 跟 UI 上「运行智能摆盘后显示」一致
+      supportWeightG: optimalAngle
+        ? Math.ceil(optimalAngle.totalSupportWeight)
+        : null,
+      selfSupportRatio: optimalAngle ? optimalAngle.selfSupportRatio : null,
+    });
+  }, [quoteMode, geometry, optimalAngle]);
+
+  // 模型本体也要抛给父组件 —— 下单时要把文件打包上传到 R2
+  const onModelChangeRef = useRef(onModelChange);
+  useEffect(() => {
+    onModelChangeRef.current = onModelChange;
+  }, [onModelChange]);
+
+  useEffect(() => {
+    if (!quoteMode) return;
+    const notify = onModelChangeRef.current;
+    if (!notify) return;
+    notify(model ? { model, scales: appliedScales } : null);
+  }, [quoteMode, model, appliedScales]);
 
   // ---- 文件上传 ----
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1235,6 +1333,7 @@ export function PricingCalculator({
                     uploadError={uploadError}
                     header={modelHeader}
                     weight={weightPanel}
+                    quote={quoteMode ? quoteSlot : null}
                     dimMode={dimMode}
                     uniformScale={uniformScale}
                     scaleFactor={scaleFactor}

@@ -134,21 +134,25 @@ export function exportRotatedObj(
   const transformedZ: number[] = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
-    if (line.length < 2) {
-      out.push(line);
-      continue;
-    }
-    const c = line.charAt(0);
-    if (c === "v" && line.charAt(1) === " ") {
+    // 顶点行的判定必须跟 obj-parser.ts 的切词方式一致：
+    // 去空白后按空白切，第一个 token 正好是 "v"。
+    //
+    // 之前只认「行首是 `v `」（v 后面必须是一个空格），漏掉了缩进过的
+    // 和用制表符分隔的顶点行 —— 那种模型量出来是缩放后的尺寸（报价按
+    // 缩放算），导出的文件却没缩放，工作室拿到的模型跟报价单对不上。
+    const trimmed = line.trim();
+    const parts = trimmed.length > 0 ? trimmed.split(/\s+/) : [];
+    if (parts[0] === "v" && parts.length >= 4) {
       // v x y z [w]
-      const parts = line.substring(2).trim().split(/\s+/);
-      const x = parseFloat(parts[0] ?? "") || 0;
-      const y = parseFloat(parts[1] ?? "") || 0;
-      const z = parseFloat(parts[2] ?? "") || 0;
+      const x = parseFloat(parts[1] ?? "") || 0;
+      const y = parseFloat(parts[2] ?? "") || 0;
+      const z = parseFloat(parts[3] ?? "") || 0;
       // 先按 XYZ 缩放（OBJ 原始坐标系）
       const scaledX = x * sx;
       const scaledY = y * sy;
       const scaledZ = z * sz;
+      // 第 5 个 token 是可选的 w 分量，原样带过去
+      const extra = parts.length > 4 ? ` ${parts.slice(4).join(" ")}` : "";
       if (hasRotation) {
         // 有旋转时：旋转顶点
         const [tx, ty, tz] = rotateVertex(
@@ -160,15 +164,11 @@ export function exportRotatedObj(
           rotZ
         );
         transformedZ.push(tz);
-        out.push(
-          `__V__ ${tx} ${ty} ${tz}${parts.length > 3 ? ` ${parts.slice(3).join(" ")}` : ""}`
-        );
+        out.push(`__V__ ${tx} ${ty} ${tz}${extra}`);
       } else {
         // 无旋转时：仅缩放，保留原始精度格式
         transformedZ.push(scaledZ);
-        out.push(
-          `__V__ ${scaledX} ${scaledY} ${scaledZ}${parts.length > 3 ? ` ${parts.slice(3).join(" ")}` : ""}`
-        );
+        out.push(`__V__ ${scaledX} ${scaledY} ${scaledZ}${extra}`);
       }
     } else {
       out.push(line);
@@ -220,20 +220,18 @@ export function downloadObjFile(objText: string, filename: string): void {
 }
 
 /**
- * 下载 ZIP 包（含 OBJ + MTL + 纹理），保留原始格式。
+ * 打包 ZIP Blob（含 OBJ + MTL + 纹理），保留原始格式。
  *
- * 动态导入 JSZip（避免首屏加载时打包），把修改后的 OBJ 文本和原始 MTL/纹理打包。
+ * 只打包、不下载 —— 打印服务下单时要把模型文件直传到 R2,得先有字节。
+ * JSZip 动态导入（避免首屏加载时把压缩库打进 bundle）。
  */
-export async function downloadModelZip(
+export async function buildModelZipBlob(
   objText: string,
   mtlText: string | undefined,
   textureBlobs: { name: string; blob: Blob }[] | undefined,
   objFileName: string,
-  mtlFileName: string | undefined,
-  zipFilename: string
-): Promise<void> {
-  if (typeof window === "undefined" || typeof document === "undefined") return;
-
+  mtlFileName: string | undefined
+): Promise<Blob> {
   const JSZip = (await import("jszip")).default;
   const zip = new JSZip();
 
@@ -253,11 +251,33 @@ export async function downloadModelZip(
     }
   }
 
-  // 生成 ZIP 并下载
-  const zipBlob = await zip.generateAsync({
+  return zip.generateAsync({
     type: "blob",
     compression: "DEFLATE",
   });
+}
+
+/**
+ * 下载 ZIP 包（含 OBJ + MTL + 纹理），保留原始格式。
+ */
+export async function downloadModelZip(
+  objText: string,
+  mtlText: string | undefined,
+  textureBlobs: { name: string; blob: Blob }[] | undefined,
+  objFileName: string,
+  mtlFileName: string | undefined,
+  zipFilename: string
+): Promise<void> {
+  if (typeof window === "undefined" || typeof document === "undefined") return;
+
+  const zipBlob = await buildModelZipBlob(
+    objText,
+    mtlText,
+    textureBlobs,
+    objFileName,
+    mtlFileName
+  );
+
   const url = URL.createObjectURL(zipBlob);
   const a = document.createElement("a");
   a.href = url;

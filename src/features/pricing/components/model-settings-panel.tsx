@@ -80,6 +80,15 @@ export type ModelSettingsPanelProps = {
    */
   weight?: ReactNode;
 
+  /**
+   * 右栏最底部的内容 —— 报价条（价格明细 + 合计 + 下单入口）。
+   *
+   * 2026-11-01 新增:打印服务报价页要把价格接在克重下面,所以这里开了个
+   * 插槽。**工具模式不传这个 prop** —— 克重工具仍然只显示克重,不显示
+   * 任何价格(见 pricing-calculator.tsx 的边界说明)。
+   */
+  quote?: ReactNode;
+
   /** 尺寸调节状态 —— 父组件持有，改动即时生效 */
   dimMode: DimMode;
   uniformScale: boolean;
@@ -130,6 +139,7 @@ export function ModelSettingsPanel({
   uploadError,
   header,
   weight,
+  quote,
   dimMode,
   uniformScale,
   scaleFactor,
@@ -557,6 +567,9 @@ export function ModelSettingsPanel({
 
             {/* 克重 —— 尺寸调完之后的结果，放最后 */}
             {weight}
+
+            {/* 报价条 —— 只在报价模式传进来，工具模式下是 null */}
+            {quote}
           </div>
         </div>
       )}

@@ -545,7 +545,8 @@
         "gift": "Gift Set",
         "giftDesc": "Gift box + custom card"
       }
-    }
+    },
+    "quote": "Quote"
   },
   "Common": {
     "getStarted": "Get Started",
@@ -998,7 +999,8 @@
       "systemLogs": "System Logs",
       "gptImage": "Prompt Templates",
       "gptImageTemplates": "Templates",
-      "gptImageOrders": "Orders"
+      "gptImageOrders": "Orders",
+      "printOrders": "Print Orders"
     }
   },
   "AdminOrders": {
@@ -1469,6 +1471,72 @@
       "thickness": "Measuring walls…",
       "overhang": "Analysing overhangs…",
       "done": "Done"
+    }
+  },
+  "PrintQuote": {
+    "page": {
+      "eyebrow": "Print Service",
+      "title": "Upload a model, get an instant quote",
+      "subtitle": "We measure your model's volume and surface area, then price it by weight. Adjust the size or run smart orientation and the price follows — place the order and the studio will reach out within one business day.",
+      "bulletUpload": "Models are parsed in your browser — nothing is uploaded while quoting",
+      "bulletPrice": "Pricing is computed server-side, and the line items always add up to the total",
+      "bulletOrder": "No account needed — track progress with your order number and token"
+    },
+    "quote": {
+      "title": "Quote breakdown",
+      "quoting": "Calculating…",
+      "empty": "Upload a model to get a quote",
+      "error": "Quote failed, please try again",
+      "materialWeight": "Material weight",
+      "supportFee": "Support surcharge",
+      "weightFee": "Weight fee",
+      "varnishFee": "Finishing",
+      "total": "Total",
+      "stale": "Price updating, please wait"
+    },
+    "order": {
+      "start": "Enter order details",
+      "continueEditing": "Order details open",
+      "formTitle": "Enter order details",
+      "formSubtitle": "We'll contact you within one business day to confirm material, colour and lead time.",
+      "modelUploadHint": "Your model file is packaged and uploaded only after you submit — for production only, never for training.",
+      "name": "Name",
+      "email": "Email",
+      "phone": "Phone (optional)",
+      "note": "Notes (optional)",
+      "notePlaceholder": "Material, colour, quantity, anything else",
+      "submit": "Place order",
+      "uploading": "Uploading model…",
+      "submitting": "Submitting…",
+      "cancel": "Back",
+      "payHint": "Nothing is charged now — the studio confirms the quote and settles separately.",
+      "successTitle": "Order submitted",
+      "successBody": "We have your model and quote request.",
+      "orderNo": "Order number",
+      "successHint": "The order number is saved in this browser — track it under \"My orders\" below.",
+      "errors": {
+        "name": "Please enter your name",
+        "email": "Please enter a valid email address",
+        "noModel": "No model to order yet",
+        "submit": "Submission failed, please try again",
+        "quoteStale": "The size changed and the price was updated — go back and confirm it again"
+      }
+    },
+    "list": {
+      "title": "My orders",
+      "empty": "No orders on this device yet",
+      "loading": "Checking…",
+      "refresh": "Refresh",
+      "remove": "Remove",
+      "failed": "Lookup failed"
+    },
+    "status": {
+      "PENDING": "Pending",
+      "CONFIRMED": "Confirmed",
+      "IN_PRODUCTION": "In production",
+      "SHIPPED": "Shipped",
+      "COMPLETED": "Completed",
+      "CANCELLED": "Cancelled"
     }
   }
 }

@@ -5,6 +5,7 @@ import {
   index,
   integer,
   json,
+  numeric,
   pgEnum,
   pgTable,
   primaryKey,
@@ -2253,3 +2254,119 @@ export const productVariant = pgTable(
 
 export type ProductVariantRow = typeof productVariant.$inferSelect;
 export type NewProductVariantRow = typeof productVariant.$inferInsert;
+
+// ============================================
+// 打印服务订单 (PrintOrder)
+// ============================================
+
+/**
+ * 打印订单状态
+ *
+ * - PENDING       —— 用户刚下单,待工作室确认(确认前报价可能因人工复核调整)
+ * - CONFIRMED     —— 工作室已确认报价与工期
+ * - IN_PRODUCTION —— 生产中
+ * - SHIPPED       —— 已发货
+ * - COMPLETED     —— 已签收
+ * - CANCELLED     —— 已取消
+ */
+export const printOrderStatusEnum = pgEnum("print_order_status", [
+  "PENDING",
+  "CONFIRMED",
+  "IN_PRODUCTION",
+  "SHIPPED",
+  "COMPLETED",
+  "CANCELLED",
+]);
+
+/**
+ * 打印服务订单(克重报价 → 下单)
+ *
+ * ## 这张表为什么在本仓库而不是 Medusa
+ *
+ * Medusa 管的是「成品商品」的购物车 / 订单 / 支付:价格来自 SKU 目录,买什么
+ * 是确定的。而打印服务是**来料加工**——用户自带 3D 模型,按克重计价,SKU 目录
+ * 里没有对应商品,Medusa 的 variant 模型套不上(没有 variant_id 可填)。
+ * 所以这条链路在自己的表里落一份「工单」:模型文件 + 几何 + 克重 + 报价明细。
+ *
+ * 支付仍然归 Medusa / 线下 —— 本表**没有** payment 字段,只记录订单事实。
+ *
+ * ## 金额单位
+ *
+ * 全部用**分**(integer),跟 `product.basePriceCents` / `product_variant.priceCents`
+ * 一致。克重用 numeric(浮点克重四舍五入到分会有累积误差)。
+ */
+export const printOrder = pgTable(
+  "print_order",
+  {
+    id: text("id").primaryKey(),
+    /** 业务订单号,用户可见,如 "PO-20261101-3F7K2A" */
+    orderNo: text("order_no").notNull().unique(),
+    /**
+     * 匿名查询令牌
+     *
+     * 打印服务是匿名可下的单(和商城的匿名定制一致),所以查订单状态不能靠
+     * 登录态 —— 用 orderNo + accessToken 双因子,避免订单号被枚举。
+     */
+    accessToken: text("access_token").notNull(),
+    status: printOrderStatusEnum("status").notNull().default("PENDING"),
+    /** 模型文件名(用户上传时的原名) */
+    modelFileName: text("model_file_name").notNull(),
+    /** 模型文件在 R2 上的永久 URL —— 工作室按这个链接取件 */
+    modelUrl: text("model_url").notNull(),
+    /** 模型文件字节数 */
+    modelSizeBytes: integer("model_size_bytes"),
+    // ---- 几何(客户端解析 + 尺寸调整后的结果)----
+    /** 体积 cm³ */
+    volumeCM3: numeric("volume_cm3", { precision: 12, scale: 4 }).notNull(),
+    /** 表面积 cm² */
+    surfaceAreaCM2: numeric("surface_area_cm2", {
+      precision: 12,
+      scale: 4,
+    }).notNull(),
+    /** 成品尺寸 mm:X=长 Y=宽 Z=高 */
+    dimX: numeric("dim_x", { precision: 12, scale: 3 }).notNull(),
+    dimY: numeric("dim_y", { precision: 12, scale: 3 }).notNull(),
+    dimZ: numeric("dim_z", { precision: 12, scale: 3 }).notNull(),
+    // ---- 克重 ----
+    /** 耗材克重 g */
+    materialWeightG: numeric("material_weight_g", {
+      precision: 12,
+      scale: 3,
+    }).notNull(),
+    /** 支撑克重 g(未跑智能摆盘时为 null) */
+    supportWeightG: numeric("support_weight_g", { precision: 12, scale: 3 }),
+    // ---- 报价(分)----
+    /** 材料密度 g/cm³,下单时的取值(留档,防止日后改参数对不上账) */
+    materialDensity: numeric("material_density", {
+      precision: 8,
+      scale: 4,
+    }).notNull(),
+    /** 单价 分/g */
+    unitPriceCentsPerGram: integer("unit_price_cents_per_gram").notNull(),
+    /** 克重费 = 克重 × 单价 */
+    weightFeeCents: integer("weight_fee_cents").notNull(),
+    /** 光油 / 后处理固定费 */
+    varnishFeeCents: integer("varnish_fee_cents").notNull(),
+    /** 超出 1:1 阈值的支撑加价 */
+    supportFeeCents: integer("support_fee_cents").notNull(),
+    /** 合计 */
+    totalPriceCents: integer("total_price_cents").notNull(),
+    // ---- 联系方式 ----
+    contactName: text("contact_name").notNull(),
+    contactEmail: text("contact_email").notNull(),
+    contactPhone: text("contact_phone"),
+    /** 用户留言(材质、颜色、特殊要求…) */
+    note: text("note"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("print_order_no_uniq_idx").on(t.orderNo),
+    // 后台列表按状态 + 时间倒序翻页
+    index("print_order_status_idx").on(t.status),
+    index("print_order_created_at_idx").on(t.createdAt),
+  ]
+);
+
+export type PrintOrderRow = typeof printOrder.$inferSelect;
+export type NewPrintOrderRow = typeof printOrder.$inferInsert;

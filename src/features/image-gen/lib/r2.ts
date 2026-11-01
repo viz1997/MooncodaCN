@@ -61,12 +61,25 @@ export async function presignUpload(opts: {
   objectKey: string;
   contentType: string;
   expiresIn?: number;
+  /**
+   * 精确的字节数 —— 传了就把它签进签名里。
+   *
+   * 客户端必须原样带回这个 Content-Length,否则 R2 判定签名不符。
+   * 这就是「声明多大就最多能传多大」的强制手段:光校验声明值没用,
+   * 客户端可以声明 1KB 然后 PUT 1GB。
+   *
+   * 浏览器 fetch 传 Blob 时会自动带上正确的 Content-Length,不用手动设。
+   */
+  contentLength?: number;
 }): Promise<PresignResult> {
   const client = getR2Client();
   const cmd = new PutObjectCommand({
     Bucket: bucket,
     Key: opts.objectKey,
     ContentType: opts.contentType,
+    ...(opts.contentLength !== undefined
+      ? { ContentLength: opts.contentLength }
+      : {}),
   });
   const uploadUrl = await getSignedUrl(client, cmd, {
     expiresIn: opts.expiresIn ?? 300,

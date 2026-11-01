@@ -15,6 +15,7 @@ import {
   type LucideIcon,
   Magnet,
   Package,
+  Scale,
   ScrollText,
   Settings,
   Shield,
@@ -140,6 +141,8 @@ export const mainNav: NavItem[] = [
   { title: "Image Gen", href: "/image-gen" },
   { title: "Docs", href: "/docs" },
   { title: "Pricing", href: "/#pricing" },
+  // 打印服务报价 —— 2026-11-01 新增。官网侧(不在商城里)的「上传模型 → 报价 → 下单」入口
+  { title: "Quote", href: "/quote" },
   // 工具中心 —— 公开工具页(克重计算器 / 模型检查),浏览器本地算,不需登录
   // 2026-11-01：导航只留一个「工具」位,工具清单在 /tools 里列
   { title: "Tools", href: "/tools" },
@@ -154,6 +157,8 @@ export const footerNav = {
   product: [
     { title: "Pricing", href: "/#pricing" },
     { title: "Tools", href: "/tools" },
+    // 打印服务报价 —— 2026-11-01 新增
+    { title: "Quote", href: "/quote" },
     { title: "Changelog", href: "/blog" },
     {
       title: "Contact Us",
@@ -283,6 +288,13 @@ export const adminNav: NavGroup[] = [
         title: "订单管理",
         href: "/admin/orders",
         icon: ShoppingBag,
+      },
+      // 2026-11-01：打印服务工单（print_order 表）—— 跟上面的「订单管理」
+      // （promptOrder 表,gpt-image 生图订单）是两套独立数据
+      {
+        title: "打印订单",
+        href: "/admin/print-orders",
+        icon: Scale,
       },
       {
         title: "商品管理",

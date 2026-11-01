@@ -60,6 +60,7 @@ export function AdminSidebar() {
       提示词模板: t("nav.gptImage"),
       模板管理: t("nav.gptImageTemplates"),
       订单管理: t("nav.gptImageOrders"),
+      打印订单: t("nav.printOrders"),
     };
     return titleMap[title] || title;
   };

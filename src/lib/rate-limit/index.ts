@@ -106,6 +106,16 @@ export const RateLimitConfig = {
   polling: { requests: 60, window: "1m" as const },
   /** 严格限流: 3 请求/分钟（用于敏感操作）*/
   strict: { requests: 3, window: "1m" as const },
+  /**
+   * 打印订单查询: 120 请求/分钟。
+   *
+   * 「我的订单」列表会把本地存的每一笔订单各发一次查询请求（最多 20 笔），
+   * 加上用户自己刷新 —— 一次列表加载就能吃掉 global 桶（100/分钟）的一大半，
+   * 连带把同 IP 的其它接口一起拖下水。
+   *
+   * 所以单开一个桶。120 ≈ 6 次满额列表加载，比 global 宽，但仍是有界的。
+   */
+  printOrder: { requests: 120, window: "1m" as const },
 } as const;
 
 export type RateLimitType = keyof typeof RateLimitConfig;

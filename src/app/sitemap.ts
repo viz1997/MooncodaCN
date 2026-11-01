@@ -28,6 +28,8 @@ export default function sitemap(): MetadataRoute.Sitemap {
     "/tools",
     "/tools/weight",
     "/tools/model-check",
+    // 打印服务报价页(2026-11-01)—— 官网侧的「上传模型 → 报价 → 下单」入口
+    "/quote",
   ];
 
   // Generate static routes for each locale

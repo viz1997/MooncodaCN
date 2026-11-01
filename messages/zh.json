@@ -698,7 +698,8 @@
         "gift": "礼品套装",
         "giftDesc": "礼盒包装 + 定制卡片"
       }
-    }
+    },
+    "quote": "报价"
   },
   "Subscription": {
     "plans": {
@@ -995,7 +996,8 @@
       "systemLogs": "系统日志",
       "gptImage": "提示词模板",
       "gptImageTemplates": "模板管理",
-      "gptImageOrders": "订单管理"
+      "gptImageOrders": "订单管理",
+      "printOrders": "打印订单"
     }
   },
   "AdminOrders": {
@@ -1466,6 +1468,72 @@
       "thickness": "测量壁厚…",
       "overhang": "分析悬空…",
       "done": "完成"
+    }
+  },
+  "PrintQuote": {
+    "page": {
+      "eyebrow": "打印服务",
+      "title": "上传模型,秒出报价",
+      "subtitle": "解析模型体积与表面积,按克重实时算价。调整尺寸、加跑智能摆盘,价格跟着变;确定要做就下单,工作室一个工作日内联系你。",
+      "bulletUpload": "模型只在浏览器里解析,报价阶段不上传",
+      "bulletPrice": "价格由服务器算,明细加起来等于合计",
+      "bulletOrder": "匿名下单,订单号 + 令牌查进度"
+    },
+    "quote": {
+      "title": "报价明细",
+      "quoting": "计算中…",
+      "empty": "上传模型后自动出价",
+      "error": "报价失败,请稍后重试",
+      "materialWeight": "耗材克重",
+      "supportFee": "支撑加价",
+      "weightFee": "克重费",
+      "varnishFee": "后处理",
+      "total": "合计",
+      "stale": "价格正在更新,请稍候"
+    },
+    "order": {
+      "start": "填写下单信息",
+      "continueEditing": "已展开下单信息",
+      "formTitle": "填写下单信息",
+      "formSubtitle": "我们会在 1 个工作日内联系你,确认材质、颜色与交期。",
+      "modelUploadHint": "点提交后模型文件才会打包上传 —— 仅用于生产,不会用于训练。",
+      "name": "称呼",
+      "email": "邮箱",
+      "phone": "电话(选填)",
+      "note": "备注(选填)",
+      "notePlaceholder": "材质、颜色、数量等特殊要求",
+      "submit": "提交订单",
+      "uploading": "上传模型中…",
+      "submitting": "提交中…",
+      "cancel": "返回",
+      "payHint": "提交不扣款,工作室确认报价后另行结算。",
+      "successTitle": "订单已提交",
+      "successBody": "我们收到你的模型和报价请求了。",
+      "orderNo": "订单号",
+      "successHint": "订单号已存在本机浏览器,可在下方「我的订单」里查进度。",
+      "errors": {
+        "name": "请填写称呼",
+        "email": "请填写有效的邮箱地址",
+        "noModel": "还没有可下单的模型",
+        "submit": "提交失败,请稍后重试",
+        "quoteStale": "尺寸改过了,价格已更新 —— 请返回重新确认报价"
+      }
+    },
+    "list": {
+      "title": "我的订单",
+      "empty": "本机还没有订单记录",
+      "loading": "查询中…",
+      "refresh": "刷新",
+      "remove": "移除",
+      "failed": "查询失败"
+    },
+    "status": {
+      "PENDING": "待确认",
+      "CONFIRMED": "已确认",
+      "IN_PRODUCTION": "生产中",
+      "SHIPPED": "已发货",
+      "COMPLETED": "已完成",
+      "CANCELLED": "已取消"
     }
   }
 }

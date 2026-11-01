@@ -57,6 +57,7 @@ export function NavMenu() {
     Docs: t("docs"),
     PSEO: t("pseo"),
     Pricing: t("pricing"),
+    Quote: t("quote"),
     Tools: t("tools"),
     Blog: t("blog"),
   };
