@@ -19,9 +19,10 @@ import { Link } from "@/i18n/routing";
  *    色带仍在首页上 —— footer 是它们最自然的入口。
  *  - 「工作流程」「工艺故事」指向当前页面自己的锚点(#how / #craft)。这个
  *    footer 只出现在 atelier 路由组(首页 + 商品详情页),两处都有这两个段。
- *  - 「3D 打印克重工具」指向公开页 `/pricing`(2026-10-31 随 wjp-source-code
- *    移植进来的克重计算器)。放在 footer 而不是顶部导航 —— 顶部导航
- *    2026-10-31 已精简到 4 项(作品 / 流程 / 工艺 / 定制),不再加第 5 项。
+ *  - 「工具中心」指向公开页 `/tools`(2026-11-01 起克重计算器 + 模型检查
+ *    都收在工具中心里)。放在 footer 而不是顶部导航 —— 顶部导航已经有一个
+ *    「工具」位(wjp-store-header 的 STORE_NAV),footer 再列一份是死链接
+ *    的复制品。
  */
 const footerLinks = [
   {
@@ -38,7 +39,7 @@ const footerLinks = [
     title: "帮助",
     links: [
       { label: "工作流程", href: "/#how" },
-      { label: "3D 打印克重工具", href: "/pricing" },
+      { label: "工具中心", href: "/tools" },
       { label: "运费与售后", href: "/legal/shipping" },
       { label: "联系客服", href: "/dashboard/support" },
     ],

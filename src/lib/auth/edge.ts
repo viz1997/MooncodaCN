@@ -77,6 +77,9 @@ export const publicRoutes = [
   "/",
   "/about",
   "/pricing",
+  // 工具中心(2026-11-01):克重计算器 + 模型检查,都在浏览器本地算
+  "/tools",
+  "/tools/:path*",
   "/blog",
   "/blog/:path*",
   "/docs",

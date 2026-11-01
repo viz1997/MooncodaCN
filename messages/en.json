@@ -254,7 +254,7 @@
       "success": "Signed in successfully!",
       "resendVerification": "Resend verification email",
       "resendCooldown": "Resend in {seconds}s",
-      "noAccount": "Don\u0027t have an account?",
+      "noAccount": "Don't have an account?",
       "signUpLink": "Sign up",
       "tabs": {
         "email": "Email",
@@ -332,18 +332,18 @@
       }
     },
     "footer": {
-      "copyright": "\u00a9 {year} {name}. All rights reserved.",
+      "copyright": "© {year} {name}. All rights reserved.",
       "privacy": "Privacy Policy",
       "terms": "Terms of Service",
       "cookies": "Cookie Settings"
     },
     "brand": {
       "headline": "Turn your imagination into a real object.",
-      "sub": "Mooncoda specializes in WJP full-color 3D printing \u2014 pet badges, keychains, fridge magnets, figures, and more. One-piece custom, single-piece shipping.",
+      "sub": "Mooncoda specializes in WJP full-color 3D printing — pet badges, keychains, fridge magnets, figures, and more. One-piece custom, single-piece shipping.",
       "points": {
-        "onePiece": "1 piece MOQ \u00b7 single-piece shipping",
-        "fullColor": "WJP full-color \u00b7 16-million-color reproduction",
-        "shipping": "Express shipping delivery \u00b7 individual gift box",
+        "onePiece": "1 piece MOQ · single-piece shipping",
+        "fullColor": "WJP full-color · 16-million-color reproduction",
+        "shipping": "Express shipping delivery · individual gift box",
         "copyright": ""
       },
       "rights": "All rights reserved."
@@ -385,14 +385,30 @@
     "title": "Trusted Across China's Creator Platforms",
     "subtitle": "We're where creators and gift-givers already are. Logo placeholders — swap in real partner brands anytime.",
     "items": {
-      "taobao": { "name": "Taobao" },
-      "xiaohongshu": { "name": "Xiaohongshu" },
-      "douyin": { "name": "Douyin" },
-      "weibo": { "name": "Weibo" },
-      "bilibili": { "name": "Bilibili" },
-      "pdd": { "name": "PDD" },
-      "jd": { "name": "JD" },
-      "tmall": { "name": "Tmall" }
+      "taobao": {
+        "name": "Taobao"
+      },
+      "xiaohongshu": {
+        "name": "Xiaohongshu"
+      },
+      "douyin": {
+        "name": "Douyin"
+      },
+      "weibo": {
+        "name": "Weibo"
+      },
+      "bilibili": {
+        "name": "Bilibili"
+      },
+      "pdd": {
+        "name": "PDD"
+      },
+      "jd": {
+        "name": "JD"
+      },
+      "tmall": {
+        "name": "Tmall"
+      }
     }
   },
   "Comparison": {
@@ -504,7 +520,7 @@
     "docs": "Docs",
     "pseo": "PSEO",
     "pricing": "Pricing",
-    "weightTool": "Weight Tool",
+    "tools": "Tools",
     "blog": "Blog",
     "about": "About",
     "productsMenu": {
@@ -1329,6 +1345,130 @@
         "error": "Failed",
         "skipped": "Skipped"
       }
+    }
+  },
+  "ToolsCenter": {
+    "eyebrow": "Tools",
+    "title": "Tools",
+    "subtitle": "Get the numbers straight before you order — every tool runs in your browser. Models are never uploaded, results are never stored.",
+    "open": "Open tool",
+    "privacy": "Privacy: every tool computes locally in your browser. Model files are never uploaded to our servers and results are never written to the database. Close the tab and nothing is left behind.",
+    "tools": {
+      "weight": {
+        "title": "Weight Calculator",
+        "description": "Upload a 3D model to get resin weight, support weight and the best print orientation — plus how much material that angle saves.",
+        "tag1": "Resin weight",
+        "tag2": "Support weight",
+        "tag3": "Best orientation",
+        "tag4": "OBJ export"
+      },
+      "modelCheck": {
+        "title": "Model Inspector",
+        "description": "Pre-print check for broken faces (degenerate, duplicate, open edges, non-manifold), thin walls and overhangs — problems are flagged in red in 3D.",
+        "tag1": "Broken faces",
+        "tag2": "Wall thickness",
+        "tag3": "Overhang angle",
+        "tag4": "Watertight"
+      }
+    }
+  },
+  "ModelInspector": {
+    "page": {
+      "eyebrow": "Model inspector",
+      "title": "Before you print, make sure the mesh has no holes",
+      "description": "Degenerate faces, duplicate faces, open edges, non-manifold edges, flipped normals, duplicate vertices — all found in one pass. Then sweep the wall thickness against your own limit and get a straight answer: can this go to the slicer?"
+    },
+    "title": "Model inspector",
+    "description": "Upload a 3D model and check it locally for broken faces, thin walls and overhangs.",
+    "analyzing": "Checking…",
+    "error": {
+      "noGeometry": "No geometry found in this file (no vertices or faces).",
+      "parseFailed": "Could not parse the file — try a different one."
+    },
+    "upload": {
+      "dropzone": "Click to choose, or drop a model file here",
+      "hint": "OBJ / STL / PLY / GLB / GLTF / ZIP — files are never uploaded, the check runs locally in your browser",
+      "reupload": "Replace file",
+      "removeModel": "Remove model"
+    },
+    "stats": {
+      "triangleCount": "Triangles",
+      "vertexCount": "Vertices",
+      "volume": "Volume"
+    },
+    "preview": {
+      "highlight": "Highlight",
+      "modes": {
+        "all": "All",
+        "topology": "Topology",
+        "thin": "Thin",
+        "overhang": "Overhang"
+      },
+      "legend": {
+        "problem": "Problem faces",
+        "normal": "Normal"
+      }
+    },
+    "verdict": {
+      "ok": {
+        "title": "Ready for the slicer",
+        "hint": "No broken faces and nothing below your thickness limit."
+      },
+      "warn": {
+        "title": "A few things to look at",
+        "hint": "Nothing fatal, but the flagged areas are worth fixing — thin sections are the first thing to snap."
+      },
+      "error": {
+        "title": "Broken mesh — repair it first",
+        "hint": "Open edges / duplicate faces / non-manifold edges found. Slicing this will most likely fail or produce a holed model."
+      }
+    },
+    "thickness": {
+      "title": "Wall thickness",
+      "threshold": "Thin limit",
+      "min": "Min",
+      "p05": "P05",
+      "median": "Median",
+      "thinArea": "Thin areas cover {ratio}% of the surface ({count} sampled faces)",
+      "unreliable": "{miss}/{total} rays hit nothing — the mesh is not closed, so treat these numbers as a rough guide.",
+      "unavailable": "Thickness could not be measured: the mesh is not closed, or has too few faces."
+    },
+    "checks": {
+      "title": "Checks",
+      "clean": "Nothing found."
+    },
+    "watertight": {
+      "yes": "Closed",
+      "no": "Not closed"
+    },
+    "issues": {
+      "degenerate": "Degenerate faces",
+      "degenerateHint": "Three points almost collinear, so the area is zero — slicers usually skip these or throw an error.",
+      "duplicateFace": "Duplicate faces",
+      "duplicateFaceHint": "The same triangle appears more than once, which shows up as a double layer on the surface.",
+      "openEdge": "Open edges",
+      "openEdgeHint": "This edge is shared by only one face — the mesh is not closed and the slice will have holes.",
+      "nonManifoldEdge": "Non-manifold edges",
+      "nonManifoldEdgeHint": "Three or more faces share one edge — most slicers simply fail on this.",
+      "duplicateVertex": "Duplicate vertices",
+      "duplicateVertexHint": "Same coordinates but treated as different vertices, so the mesh was never welded. This usually causes the open edges.",
+      "flippedNormal": "Flipped normals",
+      "flippedNormalHint": "Neighbouring faces point in opposite directions, which flips the shading and can make the computed volume negative.",
+      "thinWall": "Thin areas",
+      "thinWallHint": "Walls below the thin limit — 1.0-1.2mm is a reasonable floor for photo-resin.",
+      "overhang": "Overhangs",
+      "overhangHint": "Faces angled more than {angle}° downwards, which need supports to print."
+    },
+    "overhang": {
+      "title": "Overhangs",
+      "hint": "Faces angled more than {angle}° downwards need supports — the smaller the share, the easier it prints."
+    },
+    "phases": {
+      "parse": "Parsing model…",
+      "topology": "Checking topology…",
+      "thickness": "Measuring walls…",
+      "overhang": "Analysing overhangs…",
+      "done": "Done"
     }
   }
 }

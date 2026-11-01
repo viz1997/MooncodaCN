@@ -22,7 +22,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
     "", // homepage
     "/blog",
     "/pseo",
-    "/pricing", // 3D 打印克重计算器(公开工具页)
+    // 工具中心(2026-11-01):克重计算器 + 模型检查
+    // `/pricing` 不再进 sitemap —— 它 308 跳到 `/tools/weight`,留旧地址在
+    // sitemap 里等于告诉搜索引擎「这个页面也是正式页面」。
+    "/tools",
+    "/tools/weight",
+    "/tools/model-check",
   ];
 
   // Generate static routes for each locale

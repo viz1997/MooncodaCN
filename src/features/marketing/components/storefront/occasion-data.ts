@@ -145,8 +145,10 @@ export type StoreNavItem =
       /**
        * 渲染成 `<Link>`,跳站内独立路由(不是首页锚点)
        *
-       * 目前只有一项:`/pricing` 3D 打印克重计算器 —— 它是独立页面
+       * 目前只有一项:`/tools` 工具中心 —— 它是独立页面
        * (route group `(marketing-atelier)`),浏览器本地算,不需要登录。
+       * 2026-11-01:原来是 `/pricing` 克重计算器,现在工具多了(模型检查),
+       * 导航位只留一个「工具」,具体清单在 `/tools` 里列。
        * 与「anchor」分开是因为两者语义不同:anchor 是首页内滚动,
        * route 是换页,后续给 route 加「当前页高亮」时不用动 anchor 分支。
        */
@@ -184,11 +186,11 @@ export const STORE_NAV: readonly StoreNavItem[] = [
     href: "/#craft",
   },
   {
-    id: "weight",
-    label: "克重",
-    labelEn: "Weight",
+    id: "tools",
+    label: "工具",
+    labelEn: "Tools",
     kind: "route",
-    href: "/pricing",
+    href: "/tools",
   },
   { id: "custom", label: "定制", labelEn: "Customize", kind: "customize" },
 ];

@@ -382,14 +382,30 @@
     "title": "覆盖创作者聚集的主要平台",
     "subtitle": "创作者与送礼人在哪里，我们就在哪里。下方为占位 logo，后续可替换为真实合作品牌。",
     "items": {
-      "taobao": { "name": "淘宝" },
-      "xiaohongshu": { "name": "小红书" },
-      "douyin": { "name": "抖音" },
-      "weibo": { "name": "微博" },
-      "bilibili": { "name": "哔哩哔哩" },
-      "pdd": { "name": "拼多多" },
-      "jd": { "name": "京东" },
-      "tmall": { "name": "天猫" }
+      "taobao": {
+        "name": "淘宝"
+      },
+      "xiaohongshu": {
+        "name": "小红书"
+      },
+      "douyin": {
+        "name": "抖音"
+      },
+      "weibo": {
+        "name": "微博"
+      },
+      "bilibili": {
+        "name": "哔哩哔哩"
+      },
+      "pdd": {
+        "name": "拼多多"
+      },
+      "jd": {
+        "name": "京东"
+      },
+      "tmall": {
+        "name": "天猫"
+      }
     }
   },
   "Comparison": {
@@ -657,7 +673,7 @@
     "docs": "文档",
     "pseo": "PSEO",
     "pricing": "定价",
-    "weightTool": "克重工具",
+    "tools": "工具",
     "blog": "博客",
     "about": "关于",
     "productsMenu": {
@@ -1326,6 +1342,130 @@
         "error": "失败",
         "skipped": "已跳过"
       }
+    }
+  },
+  "ToolsCenter": {
+    "eyebrow": "工具",
+    "title": "工具中心",
+    "subtitle": "下单前先把模型和用料算清楚 —— 所有工具都在你的浏览器里跑,模型不上传,结果不入库。",
+    "open": "打开工具",
+    "privacy": "隐私:所有工具都在浏览器本地计算,模型文件不会上传到服务器,计算结果也不会写进数据库。关掉页面,什么都没留下。",
+    "tools": {
+      "weight": {
+        "title": "克重计算器",
+        "description": "上传 3D 模型,算出耗材克重、支撑克重,并搜索最佳打印摆盘角度 —— 顺带告诉你这个角度能省多少料。",
+        "tag1": "耗材克重",
+        "tag2": "支撑克重",
+        "tag3": "最优摆盘",
+        "tag4": "导出 OBJ"
+      },
+      "modelCheck": {
+        "title": "模型检查",
+        "description": "打印前的自检:破面(退化 / 重复 / 开放边 / 非流形边)、过薄区域、悬空面积,问题面在 3D 里直接标红。",
+        "tag1": "破面检测",
+        "tag2": "壁厚扫描",
+        "tag3": "悬空角度",
+        "tag4": "封闭性"
+      }
+    }
+  },
+  "ModelInspector": {
+    "page": {
+      "eyebrow": "模型检查",
+      "title": "打印前,先确认模型没有破面",
+      "description": "退化面、重复面、开放边、非流形边、翻面、重复顶点 —— 一次全查出来;再按你给的过薄线扫一遍壁厚,给出能不能直接进切片的结论。"
+    },
+    "title": "模型检查",
+    "description": "上传 3D 模型,本地检查破面 / 过薄 / 悬空。",
+    "analyzing": "正在检查…",
+    "error": {
+      "noGeometry": "这个文件里没有读到几何数据(没有顶点或面)。",
+      "parseFailed": "解析失败,请换一个文件试试。"
+    },
+    "upload": {
+      "dropzone": "点击选择,或把模型文件拖进来",
+      "hint": "支持 OBJ / STL / PLY / GLB / GLTF / ZIP —— 模型不上传,检查在浏览器本地完成",
+      "reupload": "换文件",
+      "removeModel": "移除模型"
+    },
+    "stats": {
+      "triangleCount": "三角面",
+      "vertexCount": "顶点",
+      "volume": "体积"
+    },
+    "preview": {
+      "highlight": "高亮",
+      "modes": {
+        "all": "全部",
+        "topology": "破面",
+        "thin": "过薄",
+        "overhang": "悬空"
+      },
+      "legend": {
+        "problem": "问题面",
+        "normal": "正常"
+      }
+    },
+    "verdict": {
+      "ok": {
+        "title": "模型可以进切片",
+        "hint": "没有发现破面,也没有低于过薄线的区域。"
+      },
+      "warn": {
+        "title": "有需要留意的地方",
+        "hint": "没有致命问题,但下面标出的位置建议改一下 —— 尤其过薄的地方容易印断。"
+      },
+      "error": {
+        "title": "有破面,建议先修模型",
+        "hint": "存在开放边 / 重复面 / 非流形边。直接切片大概率失败,或者切出带洞的模型。"
+      }
+    },
+    "thickness": {
+      "title": "壁厚",
+      "threshold": "过薄线",
+      "min": "最薄",
+      "p05": "P05",
+      "median": "中位",
+      "thinArea": "过薄区域占表面积 {ratio}%({count} 个采样面)",
+      "unreliable": "有 {miss}/{total} 条射线打空 —— 模型不封闭,壁厚结果仅供参考。",
+      "unavailable": "测不了壁厚:模型不封闭,或者面数太少。"
+    },
+    "checks": {
+      "title": "检查项",
+      "clean": "没有发现问题。"
+    },
+    "watertight": {
+      "yes": "封闭",
+      "no": "不封闭"
+    },
+    "issues": {
+      "degenerate": "退化面",
+      "degenerateHint": "三个点几乎共线,面积为零 —— 切片器可能直接跳过或报错。",
+      "duplicateFace": "重复面",
+      "duplicateFaceHint": "同一个三角形出现了多次,表面会出现双层。",
+      "openEdge": "开放边",
+      "openEdgeHint": "这条边只被一个面共用 —— 模型没封闭,切片会有洞。",
+      "nonManifoldEdge": "非流形边",
+      "nonManifoldEdgeHint": "一条边被三个以上的面共用 —— 切片器基本会直接失败。",
+      "duplicateVertex": "重复顶点",
+      "duplicateVertexHint": "坐标相同却是不同的顶点,说明模型没焊上,开放边多半由此而来。",
+      "flippedNormal": "法线翻面",
+      "flippedNormalHint": "相邻两个面的朝向相反,着色会翻面,体积也可能算成负数。",
+      "thinWall": "过薄区域",
+      "thinWallHint": "壁厚低于过薄线的位置,光敏树脂建议不低于 1.0-1.2mm。",
+      "overhang": "悬空面",
+      "overhangHint": "朝下角度超过 {angle}° 的面,需要支撑才能印出来。"
+    },
+    "overhang": {
+      "title": "悬空",
+      "hint": "朝下角度超过 {angle}° 的面需要支撑,占比越低越好打印。"
+    },
+    "phases": {
+      "parse": "解析模型…",
+      "topology": "检查破面…",
+      "thickness": "测量壁厚…",
+      "overhang": "分析悬空…",
+      "done": "完成"
     }
   }
 }

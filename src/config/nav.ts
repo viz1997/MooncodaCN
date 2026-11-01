@@ -140,8 +140,9 @@ export const mainNav: NavItem[] = [
   { title: "Image Gen", href: "/image-gen" },
   { title: "Docs", href: "/docs" },
   { title: "Pricing", href: "/#pricing" },
-  // 3D 打印克重计算器 —— 公开工具页,浏览器本地算,不需登录
-  { title: "Weight Tool", href: "/pricing" },
+  // 工具中心 —— 公开工具页(克重计算器 / 模型检查),浏览器本地算,不需登录
+  // 2026-11-01：导航只留一个「工具」位,工具清单在 /tools 里列
+  { title: "Tools", href: "/tools" },
   { title: "Blog", href: "/blog" },
 ];
 
@@ -152,7 +153,7 @@ export const footerNav = {
   /** 产品 (Product) */
   product: [
     { title: "Pricing", href: "/#pricing" },
-    { title: "Weight Tool", href: "/pricing" },
+    { title: "Tools", href: "/tools" },
     { title: "Changelog", href: "/blog" },
     {
       title: "Contact Us",
