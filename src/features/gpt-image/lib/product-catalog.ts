@@ -80,10 +80,14 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
     code: "R",
     name: "CM 钥匙扣",
     unit: "cm",
-    // 2026-09-14：加 5cm（用户原话「钥匙扣规格有 4cm、5cm、6cm」）。
+    // 2026-11-02：尺寸档收敛为 4cm / 6cm（用户原话「钥匙扣是 4cm、6cm」）。
+    // 原 5cm 档撤掉 —— 它既不在实际可做尺寸里，商品文案里的「5cm 标准款」
+    // 也一并改成 4cm（见 mock-catalog.ts 的 SEEDS）。
+    //
+    // 2026-09-14 历史：加 5cm（用户原话「钥匙扣规格有 4cm、5cm、6cm」）。
     // 字典给全集；具体 productEffect 还可以在 allowedSizes 缩窄（皮革 only 4/6，
     // 金属 only 4）。
-    sizes: ["4", "5", "6"],
+    sizes: ["4", "6"],
     // 2026-09-14：accessories 从 [leather, pvc] 改成 [leather, metal]
     // （用户原话「钥匙扣有无套、皮革、金属」）。无套 = accessoryCode=null
     // （null 永远允许），pvc accessory 移除（PVC 改用 leatherExposed/pvcProtection
@@ -126,10 +130,13 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
     code: "P",
     name: "CM 冰箱贴",
     unit: "cm",
+    // 2026-11-02：尺寸档收敛为 4cm / 6cm / 8cm（用户原话「冰箱贴是 4cm、
+    // 6cm、8cm」）。原 5cm 档撤掉，商品文案里的「5cm」一并改成 4cm。
+    //
     // 2026-09-14：加 5cm（用户原话「头部浮雕冰箱贴规格 4cm、5cm、6cm」）。
     // 字典提供「可做尺寸」全集；具体 productEffect 还可以在 allowedSizes
     // 进一步缩窄（比如只做 4/5/6 不做 8）。
-    sizes: ["4", "5", "6", "8"],
+    sizes: ["4", "6", "8"],
     // 2026-09-14：冰箱贴默认带「磁铁」配件（字典档位）。
     // 实际默认配件仍由 productEffect.allowedAccessories 决定——这里只
     // 是声明「P 型号可以配磁铁」，具体哪些效果挂磁铁由 admin 配。
@@ -183,10 +190,14 @@ export const PRODUCT_TYPES: readonly ProductType[] = [
     code: "M",
     name: "CM 手办",
     unit: "cm",
-    // 2026-09-15：手办完整尺寸档（用户原话「手办规格 4cm、5cm、6cm、8cm、
+    // 2026-11-02：尺寸档收敛为 6cm / 8cm / 10cm / 12cm / 15cm（用户原话
+    // 「手办尺寸是 6cm、8cm、10cm、12cm、15cm」）。原 4/5/18cm 撤掉 ——
+    // 4cm 手办和钥匙扣同尺寸没有区分度，18cm 超出 WJP 打印与包装能力。
+    //
+    // 2026-09-15 历史：手办完整尺寸档（用户原话「手办规格 4cm、5cm、6cm、8cm、
     // 10cm、12cm、15cm、18cm」）—— 从桌面摆件到中大型收藏件全档。具体
     // productEffect 仍可在 allowedSizes 缩窄（比如只做 8cm 小摆件）。
-    sizes: ["4", "5", "6", "8", "10", "12", "15", "18"],
+    sizes: ["6", "8", "10", "12", "15"],
     // 2026-09-15：手办默认带底座（stand）。手办作为定制造型不走刻字 / 颜色 /
     // 外露 / PVC 表面处理能力，但底座是物理结构上的配件选项。
     //
@@ -621,7 +632,9 @@ export const BASE_PRICE_CENTS: Readonly<Record<string, number>> = {
 };
 
 /** 找产品码的基价（分）；找不到返 null（前端按 0 处理） */
-export function getBasePriceCents(code: string | null | undefined): number | null {
+export function getBasePriceCents(
+  code: string | null | undefined
+): number | null {
   if (!code) return null;
   return BASE_PRICE_CENTS[code] ?? null;
 }

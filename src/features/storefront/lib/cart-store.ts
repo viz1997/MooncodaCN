@@ -125,6 +125,16 @@ export interface AddLineItemInput {
 }
 
 /**
+ * 两份配件选择是否一致(配件是数组,顺序无关 —— 比对前先排序)。
+ */
+function sameAccessories(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const sa = [...a].sort();
+  const sb = [...b].sort();
+  return sa.every((v, i) => v === sb[i]);
+}
+
+/**
  * 加 line item 到 cart
  * - 同 spec 完全一致的 item 合并 quantity
  * - 不一致则新增
@@ -151,6 +161,7 @@ export async function addLineItem(
     aiStyleId: input.spec.aiStyleId,
     engravingText: input.spec.engravingText,
     rushOrder: input.spec.rushOrder,
+    accessoryVariantIds: input.spec.accessoryVariantIds ?? [],
     quantity,
     previewImageUrl: input.spec.previewImage,
     originalImageUrl: input.spec.originalImage,
@@ -165,6 +176,10 @@ export async function addLineItem(
       item.metadata.aiStyleId === input.spec.aiStyleId &&
       item.metadata.engravingText === input.spec.engravingText &&
       item.metadata.rushOrder === input.spec.rushOrder &&
+      sameAccessories(
+        item.metadata.accessoryVariantIds ?? [],
+        input.spec.accessoryVariantIds ?? []
+      ) &&
       item.metadata.previewImage === input.spec.previewImage
   );
 

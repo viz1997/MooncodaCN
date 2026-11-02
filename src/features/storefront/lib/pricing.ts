@@ -7,6 +7,7 @@
 
 import type { CustomizationSpec, PricingResult } from "../types";
 import {
+  findAccessoryVariant,
   findAiStyle,
   findMaterial,
   findProductById,
@@ -52,7 +53,7 @@ export const QUANTITY_TIERS = [
 /**
  * 计算 custom line item 价格
  *
- * unit = base + material + size + aiStyle + engraving + rush
+ * unit = base + material + size + aiStyle + accessory + engraving + rush
  * total = unit * quantity * (1 - quantityTierDiscount)
  */
 export function calculatePricing(spec: CustomizationSpec): PricingResult {
@@ -74,7 +75,9 @@ export function calculatePricing(spec: CustomizationSpec): PricingResult {
     );
   }
 
-  const material = findMaterial(spec.materialId);
+  // 材质 id 在多个型号下重名("mat_resin" 挂在 R/A/P/RM 上),
+  // 必须按型号限定查找范围,否则 A/P/RM 商品会拿到 R 的材质而被判不适用
+  const material = findMaterial(spec.materialId, spec.productTypeCode);
   const size = findSize(spec.sizeId);
   const aiStyle = findAiStyle(spec.aiStyleId);
 
@@ -99,6 +102,14 @@ export function calculatePricing(spec: CustomizationSpec): PricingResult {
   if (!product) throw new Error(`未知产品: ${spec.productId}`);
   const baseCents = product.basePriceCents;
 
+  // 刻字能力按型号走 —— 手办(M)/冰箱贴(P)不做表面刻字,前端不渲染刻字框,
+  // 这里再挡一道:有人直接调 API 塞刻字文本也不能收进钱。
+  if (spec.engravingText.length > 0 && !product.canEngrave) {
+    throw new Error(
+      `${product.typeLabel}不支持刻字(该型号的 capabilities.canEngrave = false)`
+    );
+  }
+
   const materialCents = material.surchargeCents;
   const sizeCents = size.surchargeCents;
   const aiStyleCents = aiStyle.surchargeCents;
@@ -108,11 +119,43 @@ export function calculatePricing(spec: CustomizationSpec): PricingResult {
     ? PRICING_CONSTANTS.RUSH_ORDER_FEE_CENTS
     : 0;
 
+  // 配件加价 + 校验(2026-11-02 新增):
+  //  - 变体必须存在、必须属于该商品的配件分组
+  //  - 同一分组只能选一个(底座要么木质要么磁性,不能都要)
+  //  - 玻璃罩这类按尺寸限定的变体,主体尺寸必须匹配(8cm 罩配 8cm 手办)
+  const accessoryIds = spec.accessoryVariantIds ?? [];
+  let accessoryCents = 0;
+  const pickedGroups = new Set<string>();
+  for (const variantId of accessoryIds) {
+    const variant = findAccessoryVariant(variantId);
+    if (!variant) throw new Error(`未知配件: ${variantId}`);
+    const group = product.accessoryGroups.find((g) =>
+      g.variants.some((v) => v.id === variantId)
+    );
+    if (!group) {
+      throw new Error(
+        `配件 ${variant.name} 不适用于产品型号 ${spec.productTypeCode}`
+      );
+    }
+    if (pickedGroups.has(group.code)) {
+      throw new Error(`配件 ${group.name} 只能选一个`);
+    }
+    pickedGroups.add(group.code);
+    if (
+      variant.appliesToSizesCm.length > 0 &&
+      !variant.appliesToSizesCm.includes(size.cm)
+    ) {
+      throw new Error(`配件 ${variant.name} 不适用于 ${size.cm}cm 尺寸`);
+    }
+    accessoryCents += variant.surchargeCents;
+  }
+
   const unitPriceCents =
     baseCents +
     materialCents +
     sizeCents +
     aiStyleCents +
+    accessoryCents +
     engravingFeeCents +
     rushOrderCents;
 
@@ -140,6 +183,7 @@ export function calculatePricing(spec: CustomizationSpec): PricingResult {
       materialCents,
       sizeCents,
       aiStyleCents,
+      accessoryCents,
       engravingFeeCents,
       rushOrderCents,
       quantityTierDiscountCents,

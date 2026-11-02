@@ -6,7 +6,7 @@
  *  - Transform:5 种 AI 风格(Original / Q-Version / Anime / Watercolor / Line Art),
  *    调 /api/store/ai/transform(委托 lingting/wellapi),返回 R2 URL
  *  - Configure:选材质(按 productType 过滤)+ 尺寸(按 productType 过滤)
- *    + 刻字(≤30 chars)+ 数量(1-100)
+ *    + 配件(底座 / 玻璃罩 / 皮套 / 编织绳)+ 刻字(按型号能力开合)+ 加急 + 数量
  *  - Review:Before/After 对比 + spec 摘要 + 服务端定价 + Add to Bag
  *
  * 适配差异:
@@ -18,6 +18,16 @@
  *  - 用 shadcn Dialog 而非 raw framer-motion
  *
  * 服务端定价权威:cart 存 server 算的 unitPriceCents,client 不自己算。
+ *
+ * ── 2026-11-02 规格屏改版 ──────────────────────────────────────────
+ *  - 左预览图 / 右规格(桌面端并排,手机端上下)
+ *  - 尺寸 chip 改胶囊 + 选中态填色,第二行显示英寸(不再显示尺寸加价)
+ *  - 默认选中「标准款」(product.defaultSizeCm),不再是列表第一项
+ *  - 材质只有一种时内联展示,不再占半格空网格
+ *  - 新增配件选择器(按 product.accessoryGroups,组内单选)
+ *  - 新增加急开关(+¥15,发货天数减半)
+ *  - 刻字输入框按 product.canEngrave 开合(手办 / 冰箱贴不刻字)
+ *  - 数量 / 单价 / 合计 / CTA 收进底部固定条,规格区独立滚动
  */
 
 "use client";
@@ -32,6 +42,7 @@ import {
   Upload,
   Wand2,
   X,
+  Zap,
 } from "lucide-react";
 import * as React from "react";
 
@@ -44,7 +55,14 @@ import { useToast } from "@/hooks/use-toast";
 import { useAtelierContainer } from "../hooks/use-atelier-container";
 import { useCart, useCartUi } from "../hooks/use-cart";
 import { useStorefrontModal } from "../hooks/use-storefront-modal";
-import type { AiStyle, CustomizationSpec, PricingResult } from "../types";
+import { PRICING_CONSTANTS } from "../lib/pricing";
+import { formatInches, formatSizeWithInches } from "../lib/size-format";
+import type {
+  AccessoryGroup,
+  AiStyle,
+  CustomizationSpec,
+  PricingResult,
+} from "../types";
 
 type Phase = "upload" | "transform" | "configure" | "review";
 
@@ -69,6 +87,18 @@ const STEPS: { id: Phase; label: string; num: string }[] = [
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const ENGRAVING_MAX_LENGTH = 30;
 const MAX_QUANTITY = 100;
+
+/** 刻字输入的防抖 —— 每敲一个字都打一次定价接口没必要 */
+const ENGRAVING_DEBOUNCE_MS = 300;
+
+/** 规格区的小节标题 */
+function SpecLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="text-[11px] uppercase tracking-[0.16em] font-medium block mb-2">
+      {children}
+    </span>
+  );
+}
 
 export function CustomWorkshop() {
   const { toast } = useToast();
@@ -99,7 +129,13 @@ export function CustomWorkshop() {
   const [selectedSizeId, setSelectedSizeId] = React.useState<string | null>(
     null
   );
+  /** 选中的配件变体 id(组内单选、组间可多选) */
+  const [selectedAccessoryIds, setSelectedAccessoryIds] = React.useState<
+    string[]
+  >([]);
   const [engraving, setEngraving] = React.useState("");
+  const [debouncedEngraving, setDebouncedEngraving] = React.useState("");
+  const [rushOrder, setRushOrder] = React.useState(false);
   const [qty, setQty] = React.useState(1);
 
   const [pricing, setPricing] = React.useState<PricingResult | null>(null);
@@ -107,6 +143,9 @@ export function CustomWorkshop() {
   const [pricingError, setPricingError] = React.useState<string | null>(null);
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  // 配件数组当依赖会每次渲染都变引用 —— 用 join 出来的字符串当 key
+  const accessoryKey = selectedAccessoryIds.join("|");
 
   // 初始化/重置:打开新 product 时
   React.useEffect(() => {
@@ -118,13 +157,50 @@ export function CustomWorkshop() {
       setAiStyle(product.aiStyles[0] ?? null);
       setTransformError(null);
       setSelectedMaterialId(product.materials[0]?.id ?? null);
-      setSelectedSizeId(product.sizes[0]?.id ?? null);
+      // 默认选中「标准款」,不是列表第一项 —— 以前默认 4cm,跟文案说的
+      // 8cm / 12cm 标准款对不上,用户一进来看到的价就是错的
+      const defaultSize =
+        product.sizes.find((s) => s.cm === product.defaultSizeCm) ??
+        product.sizes[0];
+      setSelectedSizeId(defaultSize?.id ?? null);
+      setSelectedAccessoryIds([]);
       setEngraving("");
+      setDebouncedEngraving("");
+      setRushOrder(false);
       setQty(1);
       setPricing(null);
       setPricingError(null);
     }
   }, [product]);
+
+  // 刻字防抖:输入框每敲一下都触发定价请求,300ms 内的输入合并成一次
+  React.useEffect(() => {
+    const timer = setTimeout(
+      () => setDebouncedEngraving(engraving),
+      ENGRAVING_DEBOUNCE_MS
+    );
+    return () => clearTimeout(timer);
+  }, [engraving]);
+
+  // 尺寸变了,配不上的配件(玻璃罩按尺寸限定)自动摘掉
+  React.useEffect(() => {
+    if (!product || !selectedSizeId) return;
+    const cm = product.sizes.find((s) => s.id === selectedSizeId)?.cm;
+    if (cm == null) return;
+    setSelectedAccessoryIds((prev) => {
+      const next = prev.filter((id) => {
+        const variant = product.accessoryGroups
+          .flatMap((g) => g.variants)
+          .find((v) => v.id === id);
+        if (!variant) return false;
+        return (
+          variant.appliesToSizesCm.length === 0 ||
+          variant.appliesToSizesCm.includes(cm)
+        );
+      });
+      return next.length === prev.length ? prev : next;
+    });
+  }, [product, selectedSizeId]);
 
   // 调 pricing(进入 configure/review 时,spec 变化时也重算)
   React.useEffect(() => {
@@ -147,8 +223,9 @@ export function CustomWorkshop() {
       materialId: selectedMaterialId,
       sizeId: selectedSizeId,
       aiStyleId: aiStyle.id,
-      engravingText: engraving,
-      rushOrder: false,
+      engravingText: debouncedEngraving,
+      rushOrder,
+      accessoryVariantIds: accessoryKey ? accessoryKey.split("|") : [],
       quantity: qty,
       previewImageUrl: previewUrl,
       originalImageUrl,
@@ -192,7 +269,9 @@ export function CustomWorkshop() {
     selectedMaterialId,
     selectedSizeId,
     aiStyle,
-    engraving,
+    debouncedEngraving,
+    rushOrder,
+    accessoryKey,
     qty,
     previewUrl,
     originalImageUrl,
@@ -287,6 +366,22 @@ export function CustomWorkshop() {
     }
   };
 
+  /* --------------------------- Spec handlers --------------------------- */
+
+  // 配件组内单选:再点一次同一个 = 取消;换一款 = 顶掉同组的那款
+  const toggleAccessory = React.useCallback(
+    (group: AccessoryGroup, variantId: string) => {
+      setSelectedAccessoryIds((prev) => {
+        if (prev.includes(variantId)) {
+          return prev.filter((id) => id !== variantId);
+        }
+        const groupVariantIds = new Set(group.variants.map((v) => v.id));
+        return [...prev.filter((id) => !groupVariantIds.has(id)), variantId];
+      });
+    },
+    []
+  );
+
   /* --------------------------- Add to cart --------------------------- */
 
   const handleAddToBag = async () => {
@@ -306,7 +401,8 @@ export function CustomWorkshop() {
           sizeCm: product.sizes.find((s) => s.id === selectedSizeId)?.cm ?? 0,
           aiStyleId: aiStyle.id,
           engravingText: engraving,
-          rushOrder: false,
+          rushOrder,
+          accessoryVariantIds: selectedAccessoryIds,
           previewImage: previewUrl,
           originalImage: originalImageUrl,
         },
@@ -329,6 +425,15 @@ export function CustomWorkshop() {
   };
 
   if (!product) return null;
+
+  const selectedSizeCm =
+    product.sizes.find((s) => s.id === selectedSizeId)?.cm ?? 0;
+  const selectedAccessories = product.accessoryGroups
+    .flatMap((g) => g.variants.map((v) => ({ group: g, variant: v })))
+    .filter(({ variant }) => selectedAccessoryIds.includes(variant.id));
+
+  /** 刻字有防抖 —— 输入还没算完价时,屏幕上的单价是旧的,先别让人点下一步 */
+  const pricingStale = engraving !== debouncedEngraving;
 
   return (
     <Dialog
@@ -531,173 +636,249 @@ export function CustomWorkshop() {
           )}
 
           {phase === "configure" && (
-            <div className="p-5 sm:p-8 space-y-6">
-              {previewUrl && (
-                <div className="bg-muted rounded-sm overflow-hidden aspect-square max-w-md mx-auto">
-                  <img
-                    src={previewUrl}
-                    alt="预览"
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-              )}
-
-              <div className="grid sm:grid-cols-2 gap-5 max-w-2xl mx-auto">
-                {/* 尺寸 */}
-                <div>
-                  <span className="text-[11px] uppercase tracking-[0.16em] font-medium block mb-2">
-                    尺寸
-                  </span>
-                  <div className="grid grid-cols-3 gap-2">
-                    {product.sizes.map((size) => (
-                      <button
-                        key={size.id}
-                        type="button"
-                        onClick={() => setSelectedSizeId(size.id)}
-                        className={`px-3 py-2.5 text-sm rounded-sm border transition-colors ${
-                          selectedSizeId === size.id
-                            ? "border-foreground bg-secondary/60"
-                            : "border-border hover:border-foreground/40"
-                        }`}
-                      >
-                        {size.cm}cm
-                        {size.surchargeCents > 0 && (
-                          <span className="block text-[10px] text-muted-foreground">
-                            +{formatPriceCNY(size.surchargeCents / 100)}
-                          </span>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* 材质 */}
-                <div>
-                  <span className="text-[11px] uppercase tracking-[0.16em] font-medium block mb-2">
-                    材质
-                  </span>
-                  <div className="grid grid-cols-2 gap-2">
-                    {product.materials.map((mat) => (
-                      <button
-                        key={mat.id}
-                        type="button"
-                        onClick={() => setSelectedMaterialId(mat.id)}
-                        className={`px-3 py-2.5 text-sm rounded-sm border transition-colors ${
-                          selectedMaterialId === mat.id
-                            ? "border-foreground bg-secondary/60"
-                            : "border-border hover:border-foreground/40"
-                        }`}
-                      >
-                        {mat.name}
-                        {mat.surchargeCents > 0 && (
-                          <span className="block text-[10px] text-muted-foreground">
-                            +{formatPriceCNY(mat.surchargeCents / 100)}
-                          </span>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* 刻字 */}
-                <div className="sm:col-span-2">
-                  <label
-                    htmlFor="engraving-input"
-                    className="text-[11px] uppercase tracking-[0.16em] font-medium block mb-2"
-                  >
-                    刻字(可选,≤{ENGRAVING_MAX_LENGTH} 字符)
-                  </label>
-                  <Input
-                    id="engraving-input"
-                    value={engraving}
-                    onChange={(e) =>
-                      setEngraving(
-                        e.target.value.slice(0, ENGRAVING_MAX_LENGTH)
-                      )
-                    }
-                    placeholder="Love U / 生日快乐 / 宝宝名"
-                    maxLength={ENGRAVING_MAX_LENGTH}
-                    className="rounded-sm"
-                  />
-                  <p className="text-[11px] text-muted-foreground mt-1">
-                    {engraving.length}/{ENGRAVING_MAX_LENGTH}
-                    {engraving.length > 0 && (
-                      <span className="ml-2">+{formatPriceCNY(3)}</span>
-                    )}
-                  </p>
-                </div>
-
-                {/* 数量 */}
-                <div>
-                  <span className="text-[11px] uppercase tracking-[0.16em] font-medium block mb-2">
-                    数量
-                  </span>
-                  <div className="flex items-center border rounded-full w-fit">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setQty(Math.max(1, qty - 1))}
-                      disabled={qty <= 1}
-                      aria-label="减少数量"
-                      className="size-9 rounded-l-full"
-                      type="button"
-                    >
-                      <Minus className="size-3" />
-                    </Button>
-                    <span className="w-10 text-center text-sm font-medium">
-                      {qty}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setQty(Math.min(MAX_QUANTITY, qty + 1))}
-                      disabled={qty >= MAX_QUANTITY}
-                      aria-label="增加数量"
-                      className="size-9 rounded-r-full"
-                      type="button"
-                    >
-                      <Plus className="size-3" />
-                    </Button>
-                  </div>
-                  {qty >= 10 && (
-                    <p className="text-[11px] text-accent mt-2">
-                      数量阶梯折扣:{qty >= 50 ? "20% off" : "10% off"}
-                    </p>
+            <div className="p-5 sm:p-8">
+              <div className="mx-auto max-w-4xl grid gap-6 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:gap-10">
+                {/* 左:预览图(桌面端 sticky,滚动规格时不跟着跑) */}
+                <div className="lg:sticky lg:top-0 self-start">
+                  {previewUrl && (
+                    <div className="bg-muted rounded-sm overflow-hidden aspect-square max-w-[260px] mx-auto lg:max-w-none">
+                      <img
+                        src={previewUrl}
+                        alt="预览"
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
                   )}
-                </div>
-
-                {/* 价格 */}
-                <div className="flex flex-col justify-end items-end">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-                    单价
-                  </p>
-                  {pricingLoading ? (
-                    <Loader2 className="size-5 animate-spin text-muted-foreground mt-1" />
-                  ) : pricingError ? (
-                    <p className="text-sm text-destructive mt-1">
-                      {pricingError}
-                    </p>
-                  ) : pricing ? (
-                    <p className="font-serif text-2xl">
-                      {formatPriceCNY(pricing.unitPriceCents / 100)}
-                    </p>
-                  ) : null}
-                  <p className="text-[11px] text-muted-foreground mt-1">
-                    预计 {product.leadTimeDays} 天发货
+                  <p className="text-[11px] text-muted-foreground mt-2 leading-relaxed text-center lg:text-left">
+                    预览是 AI 生成的效果图,实物以收到的为准。
                   </p>
                 </div>
-              </div>
 
-              <div className="flex justify-center pt-2">
-                <Button
-                  size="lg"
-                  onClick={() => setPhase("review")}
-                  disabled={!pricing || pricingLoading}
-                  className="rounded-full px-8"
-                  type="button"
-                >
-                  下一步:确认
-                </Button>
+                {/* 右:规格 */}
+                <div className="space-y-5">
+                  {/* 尺寸 */}
+                  <div>
+                    <SpecLabel>尺寸</SpecLabel>
+                    <div className="flex flex-wrap gap-2">
+                      {product.sizes.map((size) => {
+                        const active = selectedSizeId === size.id;
+                        return (
+                          <button
+                            key={size.id}
+                            type="button"
+                            onClick={() => setSelectedSizeId(size.id)}
+                            aria-pressed={active}
+                            className={`min-w-[4.5rem] px-3 py-2 rounded-sm border text-sm transition-colors ${
+                              active
+                                ? "border-foreground bg-foreground text-background"
+                                : "border-border hover:border-foreground/40"
+                            }`}
+                          >
+                            <span className="block font-medium leading-tight">
+                              {size.cm}cm
+                            </span>
+                            <span
+                              className={`block text-[10px] leading-tight mt-0.5 ${
+                                active
+                                  ? "text-background/70"
+                                  : "text-muted-foreground"
+                              }`}
+                            >
+                              {formatInches(size.cm)}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* 材质 —— 只有一种时内联,不留半格空网格 */}
+                  <div>
+                    <SpecLabel>材质</SpecLabel>
+                    {product.materials.length === 1 ? (
+                      <div className="inline-flex items-center gap-2 px-3 py-2 rounded-sm border border-border bg-secondary/40 text-sm">
+                        <span className="font-medium">
+                          {product.materials[0]?.name}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {product.materials.map((mat) => {
+                          const active = selectedMaterialId === mat.id;
+                          return (
+                            <button
+                              key={mat.id}
+                              type="button"
+                              onClick={() => setSelectedMaterialId(mat.id)}
+                              aria-pressed={active}
+                              className={`inline-flex items-center gap-2 px-3 py-2 rounded-sm border text-sm transition-colors ${
+                                active
+                                  ? "border-foreground bg-foreground text-background"
+                                  : "border-border hover:border-foreground/40"
+                              }`}
+                            >
+                              <span className="font-medium">{mat.name}</span>
+                              {mat.surchargeCents > 0 && (
+                                <span
+                                  className={`text-[10px] ${
+                                    active
+                                      ? "text-background/70"
+                                      : "text-muted-foreground"
+                                  }`}
+                                >
+                                  +{formatPriceCNY(mat.surchargeCents / 100)}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 配件 —— 底座 / 玻璃罩 / 皮套 / 编织绳 */}
+                  {product.accessoryGroups.map((group) => {
+                    // 玻璃罩这类按尺寸限定的变体,当前尺寸配不上就不显示
+                    const available = group.variants.filter(
+                      (v) =>
+                        v.appliesToSizesCm.length === 0 ||
+                        v.appliesToSizesCm.includes(selectedSizeCm)
+                    );
+                    if (available.length === 0) return null;
+                    return (
+                      <div key={group.code}>
+                        <SpecLabel>{group.name}</SpecLabel>
+                        <div className="flex flex-wrap gap-2">
+                          {available.map((variant) => {
+                            const active = selectedAccessoryIds.includes(
+                              variant.id
+                            );
+                            return (
+                              <button
+                                key={variant.id}
+                                type="button"
+                                onClick={() =>
+                                  toggleAccessory(group, variant.id)
+                                }
+                                aria-pressed={active}
+                                className={`inline-flex items-center gap-2 px-3 py-2 rounded-sm border text-sm transition-colors ${
+                                  active
+                                    ? "border-foreground bg-foreground text-background"
+                                    : "border-border hover:border-foreground/40"
+                                }`}
+                              >
+                                {variant.swatch && (
+                                  <span
+                                    className="size-3 rounded-full shrink-0 border border-black/10"
+                                    style={{ backgroundColor: variant.swatch }}
+                                  />
+                                )}
+                                <span className="font-medium leading-tight">
+                                  {variant.name}
+                                </span>
+                                {variant.surchargeCents > 0 && (
+                                  <span
+                                    className={`text-[10px] ${
+                                      active
+                                        ? "text-background/70"
+                                        : "text-muted-foreground"
+                                    }`}
+                                  >
+                                    +
+                                    {formatPriceCNY(
+                                      variant.surchargeCents / 100
+                                    )}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {/* 刻字 —— 只给支持的型号(手办 / 冰箱贴不做表面刻字) */}
+                  {product.canEngrave && (
+                    <div>
+                      <label
+                        htmlFor="engraving-input"
+                        className="text-[11px] uppercase tracking-[0.16em] font-medium block mb-2"
+                      >
+                        刻字(可选,≤{ENGRAVING_MAX_LENGTH} 字符)
+                      </label>
+                      <Input
+                        id="engraving-input"
+                        value={engraving}
+                        onChange={(e) =>
+                          setEngraving(
+                            e.target.value.slice(0, ENGRAVING_MAX_LENGTH)
+                          )
+                        }
+                        placeholder="Love U / 生日快乐 / 宝宝名"
+                        maxLength={ENGRAVING_MAX_LENGTH}
+                        className="rounded-sm"
+                      />
+                      <p className="text-[11px] text-muted-foreground mt-1">
+                        {engraving.length}/{ENGRAVING_MAX_LENGTH}
+                        {engraving.length > 0 && (
+                          <span className="ml-2">
+                            +
+                            {formatPriceCNY(
+                              PRICING_CONSTANTS.ENGRAVING_FEE_CENTS / 100
+                            )}
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* 加急 */}
+                  <div>
+                    <SpecLabel>发货</SpecLabel>
+                    <button
+                      type="button"
+                      onClick={() => setRushOrder((v) => !v)}
+                      aria-pressed={rushOrder}
+                      className={`w-full flex items-center justify-between gap-3 px-3.5 py-3 rounded-sm border text-left transition-colors ${
+                        rushOrder
+                          ? "border-foreground bg-foreground text-background"
+                          : "border-border hover:border-foreground/40"
+                      }`}
+                    >
+                      <span className="flex items-center gap-2.5 min-w-0">
+                        <Zap className="size-4 shrink-0" />
+                        <span className="min-w-0">
+                          <span className="block text-sm font-medium">
+                            加急制作
+                          </span>
+                          <span
+                            className={`block text-[11px] mt-0.5 ${
+                              rushOrder
+                                ? "text-background/70"
+                                : "text-muted-foreground"
+                            }`}
+                          >
+                            加{" "}
+                            {formatPriceCNY(
+                              PRICING_CONSTANTS.RUSH_ORDER_FEE_CENTS / 100
+                            )}
+                            ,发货天数减半
+                          </span>
+                        </span>
+                      </span>
+                      <span
+                        className={`text-[11px] px-2 py-1 rounded-full shrink-0 ${
+                          rushOrder
+                            ? "bg-background/20"
+                            : "bg-secondary text-muted-foreground"
+                        }`}
+                      >
+                        {rushOrder ? "已选" : "选"}
+                      </span>
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -736,20 +917,19 @@ export function CustomWorkshop() {
                   定制规格
                 </p>
                 <dl className="space-y-1.5 text-sm">
-                  <div className="flex justify-between">
+                  <div className="flex justify-between gap-4">
                     <dt className="text-muted-foreground">产品</dt>
-                    <dd>{product.title}</dd>
+                    <dd className="text-right">{product.title}</dd>
                   </div>
-                  <div className="flex justify-between">
+                  <div className="flex justify-between gap-4">
                     <dt className="text-muted-foreground">尺寸</dt>
-                    <dd>
-                      {product.sizes.find((s) => s.id === selectedSizeId)?.cm}
-                      cm
+                    <dd className="text-right">
+                      {formatSizeWithInches(selectedSizeCm)}
                     </dd>
                   </div>
-                  <div className="flex justify-between">
+                  <div className="flex justify-between gap-4">
                     <dt className="text-muted-foreground">材质</dt>
-                    <dd>
+                    <dd className="text-right">
                       {
                         product.materials.find(
                           (m) => m.id === selectedMaterialId
@@ -757,24 +937,75 @@ export function CustomWorkshop() {
                       }
                     </dd>
                   </div>
-                  <div className="flex justify-between">
+                  {selectedAccessories.map(({ group, variant }) => (
+                    <div
+                      key={variant.id}
+                      className="flex justify-between gap-4"
+                    >
+                      <dt className="text-muted-foreground">{group.name}</dt>
+                      <dd className="text-right">{variant.name}</dd>
+                    </div>
+                  ))}
+                  <div className="flex justify-between gap-4">
                     <dt className="text-muted-foreground">AI 风格</dt>
-                    <dd>{aiStyle?.name}</dd>
+                    <dd className="text-right">{aiStyle?.name}</dd>
                   </div>
                   {engraving && (
-                    <div className="flex justify-between">
+                    <div className="flex justify-between gap-4">
                       <dt className="text-muted-foreground">刻字</dt>
-                      <dd>&ldquo;{engraving}&rdquo;</dd>
+                      <dd className="text-right">&ldquo;{engraving}&rdquo;</dd>
                     </div>
                   )}
-                  <div className="flex justify-between">
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">发货</dt>
+                    <dd className="text-right">
+                      {rushOrder ? "加急(发货天数减半)" : "标准"}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-4">
                     <dt className="text-muted-foreground">数量</dt>
-                    <dd>{qty}</dd>
+                    <dd className="text-right">{qty}</dd>
                   </div>
                 </dl>
 
                 {pricing && (
                   <div className="border-t pt-3 space-y-1.5">
+                    {/* 加选项的费用单独列出来 —— 尺寸加价按用户要求不在
+                        规格屏展示,但配件 / 刻字 / 加急是用户自己点的,
+                        钱花在哪儿得说清楚 */}
+                    {pricing.breakdown.accessoryCents > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">配件</span>
+                        <span>
+                          +
+                          {formatPriceCNY(
+                            pricing.breakdown.accessoryCents / 100
+                          )}
+                        </span>
+                      </div>
+                    )}
+                    {pricing.breakdown.engravingFeeCents > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">刻字</span>
+                        <span>
+                          +
+                          {formatPriceCNY(
+                            pricing.breakdown.engravingFeeCents / 100
+                          )}
+                        </span>
+                      </div>
+                    )}
+                    {pricing.breakdown.rushOrderCents > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">加急</span>
+                        <span>
+                          +
+                          {formatPriceCNY(
+                            pricing.breakdown.rushOrderCents / 100
+                          )}
+                        </span>
+                      </div>
+                    )}
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">单价</span>
                       <span>
@@ -814,7 +1045,12 @@ export function CustomWorkshop() {
                 <Button
                   size="lg"
                   onClick={handleAddToBag}
-                  disabled={addLineItem.isPending || !pricing || pricingLoading}
+                  disabled={
+                    addLineItem.isPending ||
+                    !pricing ||
+                    pricingLoading ||
+                    pricingStale
+                  }
                   className="rounded-full group"
                   type="button"
                 >
@@ -834,6 +1070,99 @@ export function CustomWorkshop() {
             </div>
           )}
         </div>
+
+        {/* 底部固定结算条 —— 只在规格这步,规格区独立滚动 */}
+        {phase === "configure" && (
+          <div className="shrink-0 border-t bg-background/95 backdrop-blur px-5 sm:px-6 py-3">
+            <div className="mx-auto max-w-4xl flex items-center gap-4 flex-wrap">
+              {/* 数量 */}
+              <div className="flex items-center gap-2.5">
+                <span className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                  数量
+                </span>
+                <div className="flex items-center border rounded-full">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setQty(Math.max(1, qty - 1))}
+                    disabled={qty <= 1}
+                    aria-label="减少数量"
+                    className="size-9 rounded-l-full"
+                    type="button"
+                  >
+                    <Minus className="size-3" />
+                  </Button>
+                  <span className="w-10 text-center text-sm font-medium">
+                    {qty}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setQty(Math.min(MAX_QUANTITY, qty + 1))}
+                    disabled={qty >= MAX_QUANTITY}
+                    aria-label="增加数量"
+                    className="size-9 rounded-r-full"
+                    type="button"
+                  >
+                    <Plus className="size-3" />
+                  </Button>
+                </div>
+                {qty >= 10 && (
+                  <span className="text-[11px] text-accent">
+                    {qty >= 50 ? "20% off" : "10% off"}
+                  </span>
+                )}
+              </div>
+
+              {/* 价格 + CTA */}
+              <div className="ml-auto flex items-end gap-5">
+                <div className="text-right">
+                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                    单价
+                  </p>
+                  {pricingLoading ? (
+                    <Loader2 className="size-5 animate-spin text-muted-foreground mt-1" />
+                  ) : pricingError ? (
+                    <p className="text-sm text-destructive mt-1">
+                      {pricingError}
+                    </p>
+                  ) : pricing ? (
+                    <p className="font-serif text-xl leading-none mt-1">
+                      {formatPriceCNY(pricing.unitPriceCents / 100)}
+                    </p>
+                  ) : null}
+                </div>
+                {pricing && qty > 1 && (
+                  <div className="text-right">
+                    <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                      合计
+                    </p>
+                    <p className="font-serif text-xl leading-none mt-1">
+                      {formatPriceCNY(pricing.totalPriceCents / 100)}
+                    </p>
+                  </div>
+                )}
+                <div className="text-right">
+                  <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                    预计发货
+                  </p>
+                  <p className="text-sm leading-none mt-1.5 whitespace-nowrap">
+                    {pricing?.estimatedShipDays ?? product.leadTimeDays} 天
+                  </p>
+                </div>
+                <Button
+                  size="lg"
+                  onClick={() => setPhase("review")}
+                  disabled={!pricing || pricingLoading || pricingStale}
+                  className="rounded-full px-7"
+                  type="button"
+                >
+                  下一步:确认
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

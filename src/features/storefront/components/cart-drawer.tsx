@@ -19,7 +19,7 @@
 
 "use client";
 
-import { Minus, Plus, ShoppingBag, Trash2, X } from "lucide-react";
+import { Minus, Plus, ShoppingBag, Trash2, X, Zap } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -33,6 +33,8 @@ import { useToast } from "@/hooks/use-toast";
 
 import { useAtelierContainer } from "../hooks/use-atelier-container";
 import { useCart, useCartUi } from "../hooks/use-cart";
+import { findAccessoryVariant } from "../lib/mock-catalog";
+import { formatSizeWithInches } from "../lib/size-format";
 
 const FREE_SHIPPING_THRESHOLD_CNY = 99;
 
@@ -155,6 +157,10 @@ export function CartDrawer() {
             <ul className="divide-y divide-border">
               {items.map((item) => {
                 const itemTotalCents = item.unitPriceCents * item.quantity;
+                // 配件名从字典反查 —— metadata 只存 id,改名/下架不用迁移存量 cart
+                const accessoryNames = (item.metadata.accessoryVariantIds ?? [])
+                  .map((id) => findAccessoryVariant(id)?.name)
+                  .filter((n): n is string => Boolean(n));
                 return (
                   <li key={item.id} className="flex gap-4 px-5 py-4">
                     <img
@@ -171,12 +177,23 @@ export function CartDrawer() {
                           </p>
                           {item.metadata.sizeCm > 0 && (
                             <p className="text-[11px] text-muted-foreground mt-0.5">
-                              {item.metadata.sizeCm}cm
+                              {formatSizeWithInches(item.metadata.sizeCm)}
+                            </p>
+                          )}
+                          {accessoryNames.length > 0 && (
+                            <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                              {accessoryNames.join(" · ")}
                             </p>
                           )}
                           {item.metadata.engravingText && (
                             <p className="text-[11px] text-muted-foreground mt-0.5 italic truncate">
                               &ldquo;{item.metadata.engravingText}&rdquo;
+                            </p>
+                          )}
+                          {item.metadata.rushOrder && (
+                            <p className="text-[10px] uppercase tracking-[0.12em] text-accent mt-1 inline-flex items-center gap-1">
+                              <Zap className="size-3" />
+                              加急
                             </p>
                           )}
                           {item.metadata.previewImage && (

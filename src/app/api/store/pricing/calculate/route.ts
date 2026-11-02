@@ -21,6 +21,8 @@ const pricingInputSchema = z.object({
   aiStyleId: z.string().min(1),
   engravingText: z.string().max(30).default(""),
   rushOrder: z.boolean().default(false),
+  /** 选中的配件变体 id(2026-11-02 新增) */
+  accessoryVariantIds: z.array(z.string().min(1)).default([]),
   quantity: z.number().int().min(1).max(100),
   previewImageUrl: z.string().url(),
   originalImageUrl: z.string().url(),

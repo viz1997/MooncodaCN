@@ -25,6 +25,8 @@ const lineItemSchema = z.object({
     aiStyleId: z.string().min(1),
     engravingText: z.string().max(30).default(""),
     rushOrder: z.boolean().default(false),
+    /** 选中的配件变体 id(2026-11-02 新增) */
+    accessoryVariantIds: z.array(z.string().min(1)).default([]),
     previewImage: z.string().url(),
     originalImage: z.string().url(),
   }),

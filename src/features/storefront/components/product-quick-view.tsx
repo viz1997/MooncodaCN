@@ -42,6 +42,7 @@ import { Link } from "@/i18n/routing";
 
 import { useAtelierContainer } from "../hooks/use-atelier-container";
 import { useStorefrontModal } from "../hooks/use-storefront-modal";
+import { formatSizeCompact } from "../lib/size-format";
 
 const perks = [
   { icon: Truck, label: "¥99 以上免运费" },
@@ -244,13 +245,19 @@ export function ProductQuickView() {
                         <span className="font-medium">
                           {product.sizes.length} 种尺寸
                         </span>{" "}
-                        — {product.sizes.map((s) => `${s.cm}cm`).join(" / ")}
+                        —{" "}
+                        {product.sizes
+                          .map((s) => formatSizeCompact(s.cm))
+                          .join(" / ")}
                       </span>
                     </li>
-                    <li className="flex items-start gap-2">
-                      <span className="size-1 rounded-full bg-accent mt-1.5 shrink-0" />
-                      <span>可选背面刻字(+{formatPriceCNY(3)})</span>
-                    </li>
+                    {/* 刻字按型号能力开合 —— 手办 / 冰箱贴是 3D 造型件,不做表面刻字 */}
+                    {product.canEngrave && (
+                      <li className="flex items-start gap-2">
+                        <span className="size-1 rounded-full bg-accent mt-1.5 shrink-0" />
+                        <span>可选背面刻字(+{formatPriceCNY(3)})</span>
+                      </li>
+                    )}
                   </ul>
                 </div>
 

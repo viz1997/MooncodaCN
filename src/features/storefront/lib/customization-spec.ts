@@ -15,6 +15,7 @@ import type {
   ProductTypeCode,
   StorefrontProduct,
 } from "../types";
+import { findAccessoryVariant, findProductById } from "./mock-catalog";
 
 /**
  * 把 CustomizationSpec 压缩成 CartLineItemMetadata
@@ -35,6 +36,7 @@ export function specToMetadata(
     aiStyleId: spec.aiStyleId,
     engravingText: spec.engravingText,
     rushOrder: spec.rushOrder,
+    accessoryVariantIds: spec.accessoryVariantIds ?? [],
     previewImage: spec.previewImageUrl,
     originalImage: spec.originalImageUrl,
   };
@@ -65,6 +67,7 @@ export function metadataToSpec(
     aiStyleId: metadata.aiStyleId,
     engravingText: metadata.engravingText,
     rushOrder: metadata.rushOrder,
+    accessoryVariantIds: metadata.accessoryVariantIds ?? [],
     quantity: overrides?.quantity ?? 1,
     previewImageUrl: metadata.previewImage,
     originalImageUrl: metadata.originalImage,
@@ -90,5 +93,19 @@ export function validateSpec(spec: CustomizationSpec): void {
   }
   if (spec.engravingText.length > 30) {
     throw new Error("刻字长度不能超过 30 字符");
+  }
+  // 刻字能力按型号走 —— 手办(M)/冰箱贴(P)不做表面刻字
+  if (spec.engravingText.length > 0) {
+    const product = findProductById(spec.productId);
+    if (product && !product.canEngrave) {
+      throw new Error(`${product.typeLabel}不支持刻字`);
+    }
+  }
+  if (spec.accessoryVariantIds?.length) {
+    for (const id of spec.accessoryVariantIds) {
+      if (!findAccessoryVariant(id)) {
+        throw new Error(`未知配件: ${id}`);
+      }
+    }
   }
 }

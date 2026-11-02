@@ -49,6 +49,40 @@ export interface Size {
   appliesTo: ProductTypeCode[];
 }
 
+/**
+ * 配件变体(底座 / 玻璃罩 / 皮套 / 编织绳 的具体款)
+ *
+ * 与「材质」维度不同:材质是**本体材料**(一件只能一种),配件是**加购项**
+ * (可以同时要一个底座和一个玻璃罩),每组内单选、组间可多选。
+ *
+ * 数据源:product-accessory-variants.ts 的 PRODUCT_ACCESSORY_VARIANTS
+ * (与 product_accessory_variant 表同源)。
+ */
+export interface AccessoryVariant {
+  /** 全局唯一 id(存进 cart metadata) */
+  id: string;
+  /** 变体 code,如 "stand_wooden" */
+  code: string;
+  name: string;
+  nameEn: string;
+  /** 色卡 hex;非颜色类变体(尺寸 / 材质款)为 null */
+  swatch: string | null;
+  /** 加价(分) */
+  surchargeCents: number;
+  /** 适用的主体尺寸(cm);空数组 = 不限 */
+  appliesToSizesCm: number[];
+}
+
+/** 配件分组(同一 accessoryCode 下的可选款,组内单选) */
+export interface AccessoryGroup {
+  /** 配件 code(stand / glass_cover / leather / braided_rope) */
+  code: string;
+  name: string;
+  nameEn: string;
+  /** 可选变体(按 sortOrder 升序) */
+  variants: AccessoryVariant[];
+}
+
 /** AI 风格(对齐 atelier AiStyle) */
 export interface AiStyle {
   id: string; // "ai_original" | "ai_qversion" | "ai_anime" | "ai_watercolor" | "ai_lineart"
@@ -110,10 +144,27 @@ export interface StorefrontProduct {
   basePriceCents: number;
   /** 制作天数 */
   leadTimeDays: number;
+  /**
+   * 该型号是否支持刻字。
+   *
+   * 取自 PRODUCT_TYPES[code].capabilities.canEngrave —— 真理源在
+   * product-catalog.ts。定制工作台的刻字输入框按它开合:手办(M)与
+   * 冰箱贴(P)是 3D 造型件,不做表面刻字;钥匙扣 / 相框 / 皮革徽章支持。
+   */
+  canEngrave: boolean;
+  /**
+   * 默认选中尺寸(cm)—— 商品文案里的「标准款」。
+   *
+   * 以前规格屏默认选 sizes[0](最小档),跟文案说的标准款对不上;
+   * 现在按商品实际标准款选,没有标准款的取最小档。
+   */
+  defaultSizeCm: number;
   /** 关联材质 */
   materials: Material[];
   /** 关联尺寸 */
   sizes: Size[];
+  /** 可选配件分组(底座 / 玻璃罩 / 皮套 / 编织绳);无数据的型号是空数组 */
+  accessoryGroups: AccessoryGroup[];
   /** 关联 AI 风格 */
   aiStyles: AiStyle[];
   /** typeLabel(用于 UI 显示 "钥匙扣" / "手办" / "冰箱贴") */
@@ -139,8 +190,10 @@ export interface CartLineItemMetadata {
   sizeCm: number;
   aiStyleId: string;
   engravingText: string;
-  /** 加急(暂未启用,保留字段) */
+  /** 加急(2026-11-02 起工作台有开关:+¥15,发货天数减半) */
   rushOrder: boolean;
+  /** 选中的配件变体 id(空数组 = 不加配件) */
+  accessoryVariantIds: string[];
   /** 渲染后图 URL(R2) */
   previewImage: string;
   /** 渲染前原图 URL(R2) */
@@ -190,6 +243,8 @@ export interface CustomizationSpec {
   aiStyleId: string;
   engravingText: string;
   rushOrder: boolean;
+  /** 选中的配件变体 id(可空数组 = 不加配件) */
+  accessoryVariantIds: string[];
   quantity: number;
   /** R2 URL(transform 后) */
   previewImageUrl: string;
@@ -208,6 +263,7 @@ export interface PricingResult {
     materialCents: number;
     sizeCents: number;
     aiStyleCents: number;
+    accessoryCents: number;
     engravingFeeCents: number;
     rushOrderCents: number;
     quantityTierDiscountCents: number;

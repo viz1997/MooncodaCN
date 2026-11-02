@@ -11,7 +11,9 @@
  *  - WJP_SERIES: src/features/marketing/components/storefront/wjp-store-data.ts
  */
 
+import { PRODUCT_ACCESSORY_VARIANTS } from "@/features/gpt-image/lib/product-accessory-variants";
 import {
+  ACCESSORY_META,
   type AccessoryCode,
   BASE_PRICE_CENTS,
   getProductType,
@@ -27,6 +29,8 @@ import {
 } from "@/features/marketing/components/storefront/wjp-store-data";
 
 import type {
+  AccessoryGroup,
+  AccessoryVariant,
   AiStyle,
   Material,
   ProductTypeCode,
@@ -147,7 +151,7 @@ function buildSizesForType(code: ProductTypeCode): Size[] {
   if (!type) return [];
   return type.sizes.map((sizeStr, idx) => {
     const cm = Number(sizeStr);
-    const surchargeCents = idx * 500; // 4cm 基准 +0, 5cm +¥5, 6cm +¥10 ...
+    const surchargeCents = idx * 500; // 每个型号的最小尺寸 +0,往后每档 +¥5
     return {
       id: `size_${code}_${cm}`,
       cm,
@@ -165,6 +169,48 @@ const SIZES_BY_TYPE: Record<ProductTypeCode, Size[]> = {
   LB: buildSizesForType("LB"),
   M: buildSizesForType("M"),
 };
+
+/**
+ * 配件分组构建 —— 取「型号声明的配件」∩「有变体数据的配件」。
+ *
+ * 型号声明在 PRODUCT_TYPES[code].accessories,变体数据(带加价)在
+ * PRODUCT_ACCESSORY_VARIANTS。两者交集才有得选:
+ *  - M 手办   → 底座(3 款)+ 玻璃罩(3 款)
+ *  - R 钥匙扣 → 皮套(5 色)+ 编织绳(8 色)
+ *  - A / P / RM / LB → 声明了配件但没有变体数据(支架 / 磁铁 / 皮套·金属),
+ *    不渲染空分组 —— 宁可少一个选择器,也不要一个点了没反应的框。
+ *
+ * 玻璃罩的变体带 appliesToSizesCm(4cm 罩配 4cm 主体),前端按当前尺寸过滤。
+ */
+function buildAccessoryGroups(code: ProductTypeCode): AccessoryGroup[] {
+  const type = getProductType(code);
+  if (!type) return [];
+  const groups: AccessoryGroup[] = [];
+  for (const accCode of type.accessories) {
+    const variants = PRODUCT_ACCESSORY_VARIANTS.filter(
+      (v) => v.productTypeCode === code && v.accessoryCode === accCode
+    )
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map((v) => ({
+        id: `acc_${v.variantCode}`,
+        code: v.variantCode,
+        name: v.name,
+        nameEn: v.nameEn,
+        swatch: v.swatch,
+        surchargeCents: v.priceDeltaCents,
+        appliesToSizesCm: v.appliesToSizesCm,
+      }));
+    if (variants.length === 0) continue;
+    const meta = ACCESSORY_META[accCode];
+    groups.push({
+      code: accCode,
+      name: meta?.name.zh ?? accCode,
+      nameEn: meta?.name.en ?? accCode,
+      variants,
+    });
+  }
+  return groups;
+}
 
 /* -------------------------------------------------------------------------- */
 /*  12 个 mock products(对齐 atelier 4+4+4)                                 */
@@ -190,6 +236,13 @@ interface MockProductSeed {
   ratingCount: number;
   badge?: string;
   leadTimeDays: number;
+  /**
+   * 默认选中尺寸(cm)—— 商品文案里的「标准款」。
+   *
+   * 规格屏以前默认选 sizes[0](最小档),与文案说的标准款对不上;
+   * 这里显式声明每件商品的标准款,让默认选中跟文案一致。
+   */
+  defaultSizeCm: number;
   cover: string;
 }
 
@@ -202,7 +255,7 @@ const SEEDS: MockProductSeed[] = [
     subtitle: "把爱宠挂在书包上",
     subtitleEn: "Clip your pet onto their bag",
     description:
-      "WJP 全彩树脂钥匙扣,激光切割按照片轮廓,5cm 标准款,支持皮套/金属配件,适合日常随身携带。",
+      "WJP 全彩树脂钥匙扣,激光切割按照片轮廓,4cm 标准款,支持皮套/金属配件,适合日常随身携带。",
     thumbnail:
       "https://images.unsplash.com/photo-1624222247344-550fb60583dc?auto=format&fit=crop&w=800&q=80",
     images: [
@@ -217,6 +270,7 @@ const SEEDS: MockProductSeed[] = [
     ratingCount: 1280,
     badge: "Best Seller",
     leadTimeDays: 5,
+    defaultSizeCm: 4,
     cover:
       "https://images.unsplash.com/photo-1552053831-71594a27632d?auto=format&fit=crop&w=600&q=80",
   },
@@ -240,6 +294,7 @@ const SEEDS: MockProductSeed[] = [
     rating: 4.8,
     ratingCount: 956,
     leadTimeDays: 5,
+    defaultSizeCm: 4,
     cover:
       "https://images.unsplash.com/photo-1518621736915-f3b1c41bfd00?auto=format&fit=crop&w=600&q=80",
   },
@@ -263,6 +318,7 @@ const SEEDS: MockProductSeed[] = [
     ratingCount: 612,
     badge: "New",
     leadTimeDays: 5,
+    defaultSizeCm: 4,
     cover:
       "https://images.unsplash.com/photo-1519689680058-324335c77eba?auto=format&fit=crop&w=600&q=80",
   },
@@ -285,6 +341,7 @@ const SEEDS: MockProductSeed[] = [
     rating: 4.7,
     ratingCount: 423,
     leadTimeDays: 5,
+    defaultSizeCm: 4,
     cover:
       "https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=600&q=80",
   },
@@ -314,6 +371,7 @@ const SEEDS: MockProductSeed[] = [
     ratingCount: 743,
     badge: "Best Seller",
     leadTimeDays: 10,
+    defaultSizeCm: 8,
     cover:
       "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=600&q=80",
   },
@@ -336,6 +394,7 @@ const SEEDS: MockProductSeed[] = [
     rating: 4.9,
     ratingCount: 512,
     leadTimeDays: 10,
+    defaultSizeCm: 10,
     cover:
       "https://images.unsplash.com/photo-1525338078858-d762b5e32f2c?auto=format&fit=crop&w=600&q=80",
   },
@@ -359,6 +418,7 @@ const SEEDS: MockProductSeed[] = [
     ratingCount: 389,
     badge: "Limited",
     leadTimeDays: 10,
+    defaultSizeCm: 8,
     cover:
       "https://images.unsplash.com/photo-1543465077-db45d34b88a5?auto=format&fit=crop&w=600&q=80",
   },
@@ -368,8 +428,7 @@ const SEEDS: MockProductSeed[] = [
     titleEn: "Baby First-Year Statue",
     subtitle: "周岁纪念礼物",
     subtitleEn: "A first-year keepsake",
-    description:
-      "WJP 全彩树脂 3D 打印,宝宝周岁照雕塑化,12cm 标准款,底座刻字配件。",
+    description: "WJP 全彩树脂 3D 打印,宝宝周岁照雕塑化,12cm 标准款,底座配件。",
     thumbnail:
       "https://images.unsplash.com/photo-1492725764893-90b379c2b6e7?auto=format&fit=crop&w=800&q=80",
     images: [
@@ -383,6 +442,7 @@ const SEEDS: MockProductSeed[] = [
     ratingCount: 267,
     badge: "New",
     leadTimeDays: 10,
+    defaultSizeCm: 12,
     cover:
       "https://images.unsplash.com/photo-1492725764893-90b379c2b6e7?auto=format&fit=crop&w=600&q=80",
   },
@@ -394,7 +454,7 @@ const SEEDS: MockProductSeed[] = [
     titleEn: "Pet Fridge Magnet",
     subtitle: "每天都能看到",
     subtitleEn: "Every single morning",
-    description: "WJP 全彩树脂冰箱贴 5cm,适合合影/宠物照/孩子画作,磁铁配件。",
+    description: "WJP 全彩树脂冰箱贴 4cm,适合合影/宠物照/孩子画作,磁铁配件。",
     // 主图原本用的 photo-1611923134239-b9be5816e23d 已 404(2026-10-21 核查),
     // 改用本商品自己那张已验证的宠物图。同上,不另造 ID。
     thumbnail:
@@ -410,6 +470,7 @@ const SEEDS: MockProductSeed[] = [
     ratingCount: 832,
     badge: "Best Seller",
     leadTimeDays: 4,
+    defaultSizeCm: 4,
     cover:
       "https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=600&q=80",
   },
@@ -432,6 +493,7 @@ const SEEDS: MockProductSeed[] = [
     rating: 4.75,
     ratingCount: 421,
     leadTimeDays: 4,
+    defaultSizeCm: 6,
     cover:
       "https://images.unsplash.com/photo-1516589178581-6cd7833ae3b2?auto=format&fit=crop&w=600&q=80",
   },
@@ -454,6 +516,7 @@ const SEEDS: MockProductSeed[] = [
     rating: 4.7,
     ratingCount: 234,
     leadTimeDays: 6,
+    defaultSizeCm: 8,
     cover:
       "https://images.unsplash.com/photo-1503454537195-1dcabb73ffb9?auto=format&fit=crop&w=600&q=80",
   },
@@ -478,6 +541,7 @@ const SEEDS: MockProductSeed[] = [
     ratingCount: 187,
     badge: "Limited",
     leadTimeDays: 7,
+    defaultSizeCm: 6,
     cover:
       "https://images.unsplash.com/photo-1606760227091-3dd870d97f1d?auto=format&fit=crop&w=600&q=80",
   },
@@ -524,8 +588,12 @@ function buildMockProducts(): StorefrontProduct[] {
       badge: seed.badge,
       basePriceCents,
       leadTimeDays: seed.leadTimeDays,
+      canEngrave:
+        getProductType(seed.productTypeCode)?.capabilities.canEngrave ?? false,
+      defaultSizeCm: seed.defaultSizeCm,
       materials: MATERIALS_BY_TYPE[seed.productTypeCode],
       sizes: SIZES_BY_TYPE[seed.productTypeCode],
+      accessoryGroups: buildAccessoryGroups(seed.productTypeCode),
       aiStyles: AI_STYLES,
       typeLabel: buildTypeLabel(seed.productTypeCode, "zh"),
       typeLabelEn: buildTypeLabel(seed.productTypeCode, "en"),
@@ -570,7 +638,28 @@ export function findAiStyle(aiStyleId: string): AiStyle | null {
   };
 }
 
-export function findMaterial(materialId: string): Material | null {
+/**
+ * 按 id 找材质。
+ *
+ * ⚠️ 材质 id 不是全局唯一的 —— "mat_resin" 同时挂在 R / A / P / RM 四个
+ * 型号上(树脂是这几个型号的默认材质)。所以必须按 productTypeCode 限定
+ * 查找范围:不限定的话,A / P / RM 的商品会拿到 R 那份
+ * (appliesTo: ["R"]),定价直接抛「材质 树脂 不适用于产品型号 A」——
+ * 12 件 mock 商品里有 5 件(A×2 / P×2 / RM×1)根本走不到结算。
+ *
+ * 限定范围内找不到就退回全局查:这样「拿错型号的材质」这种请求还能给出
+ * 准确报错(「材质 金属 不适用于产品型号 A」)而不是干巴巴一句「未知材质」。
+ */
+export function findMaterial(
+  materialId: string,
+  productTypeCode?: ProductTypeCode
+): Material | null {
+  if (productTypeCode) {
+    const scoped = MATERIALS_BY_TYPE[productTypeCode].find(
+      (mat) => mat.id === materialId
+    );
+    if (scoped) return scoped;
+  }
   for (const list of Object.values(MATERIALS_BY_TYPE)) {
     const m = list.find((mat) => mat.id === materialId);
     if (m) return m;
@@ -584,6 +673,30 @@ export function findSize(sizeId: string): Size | null {
     if (s) return s;
   }
   return null;
+}
+
+/**
+ * 按配件变体 id 找变体(定价 / 校验用)。
+ *
+ * id 形如 "acc_stand_wooden",与 buildAccessoryGroups 生成的 id 同源 ——
+ * 变体 code 在字典里全局唯一,所以直接查表,不用遍历每个商品。
+ */
+export function findAccessoryVariant(
+  variantId: string
+): AccessoryVariant | null {
+  const v = PRODUCT_ACCESSORY_VARIANTS.find(
+    (x) => `acc_${x.variantCode}` === variantId
+  );
+  if (!v) return null;
+  return {
+    id: `acc_${v.variantCode}`,
+    code: v.variantCode,
+    name: v.name,
+    nameEn: v.nameEn,
+    swatch: v.swatch,
+    surchargeCents: v.priceDeltaCents,
+    appliesToSizesCm: v.appliesToSizesCm,
+  };
 }
 
 /**
