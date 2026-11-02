@@ -1369,111 +1369,317 @@
       },
       "modelCheck": {
         "title": "Model Inspector",
-        "description": "Pre-print check for broken faces (degenerate, duplicate, open edges, non-manifold), thin walls and overhangs — problems are flagged in red in 3D.",
-        "tag1": "Broken faces",
-        "tag2": "Wall thickness",
-        "tag3": "Overhang angle",
-        "tag4": "Watertight"
+        "description": "Pre-print check for inverted normals, broken edges and faces, and shell watertightness — judged against WJP full-color rules, with problems marked in 3D.",
+        "tag1": "Inverted normals",
+        "tag2": "Broken edges",
+        "tag3": "Shell integrity",
+        "tag4": "WJP assessment"
       }
     }
   },
   "ModelInspector": {
     "page": {
-      "eyebrow": "Model inspector",
-      "title": "Before you print, make sure the mesh has no holes",
-      "description": "Degenerate faces, duplicate faces, open edges, non-manifold edges, flipped normals, duplicate vertices — all found in one pass. Then sweep the wall thickness against your own limit and get a straight answer: can this go to the slicer?"
+      "eyebrow": "Model Inspector",
+      "title": "Check the mesh before it hits the printer",
+      "description": "Inverted normals, gaps and planar holes, degenerate and non-manifold faces, stray shells and sealed cavities — all judged against WJP full-color rules, with every problem highlighted in 3D."
     },
-    "title": "Model inspector",
-    "description": "Upload a 3D model and check it locally for broken faces, thin walls and overhangs.",
-    "analyzing": "Checking…",
-    "error": {
-      "noGeometry": "No geometry found in this file (no vertices or faces).",
-      "parseFailed": "Could not parse the file — try a different one."
+    "app": {
+      "title": "Model Inspector",
+      "subtitle": "Pre-print check (WJP full color)",
+      "upload": "Upload model",
+      "demo": "Demo models",
+      "demoLabel": "Choose a demo model",
+      "resetView": "Reset view",
+      "analyzing": "Analyzing…",
+      "fileLabel": "Choose a model file"
     },
     "upload": {
-      "dropzone": "Click to choose, or drop a model file here",
-      "hint": "OBJ / STL / PLY / GLB / GLTF / ZIP — files are never uploaded, the check runs locally in your browser",
-      "reupload": "Replace file",
-      "removeModel": "Remove model"
+      "dropOverlay": "Drop to load the model"
     },
-    "stats": {
-      "triangleCount": "Triangles",
-      "vertexCount": "Vertices",
-      "volume": "Volume"
-    },
-    "preview": {
-      "highlight": "Highlight",
-      "modes": {
-        "all": "All",
-        "topology": "Topology",
-        "thin": "Thin",
-        "overhang": "Overhang"
-      },
-      "legend": {
-        "problem": "Problem faces",
-        "normal": "Normal"
-      }
-    },
-    "verdict": {
-      "ok": {
-        "title": "Ready for the slicer",
-        "hint": "No broken faces and nothing below your thickness limit."
-      },
-      "warn": {
-        "title": "A few things to look at",
-        "hint": "Nothing fatal, but the flagged areas are worth fixing — thin sections are the first thing to snap."
-      },
-      "error": {
-        "title": "Broken mesh — repair it first",
-        "hint": "Open edges / duplicate faces / non-manifold edges found. Slicing this will most likely fail or produce a holed model."
-      }
-    },
-    "thickness": {
-      "title": "Wall thickness",
-      "threshold": "Thin limit",
-      "min": "Min",
-      "p05": "P05",
-      "median": "Median",
-      "thinArea": "Thin areas cover {ratio}% of the surface ({count} sampled faces)",
-      "unreliable": "{miss}/{total} rays hit nothing — the mesh is not closed, so treat these numbers as a rough guide.",
-      "unavailable": "Thickness could not be measured: the mesh is not closed, or has too few faces."
-    },
-    "checks": {
-      "title": "Checks",
-      "clean": "Nothing found."
-    },
-    "watertight": {
-      "yes": "Closed",
-      "no": "Not closed"
-    },
-    "issues": {
-      "degenerate": "Degenerate faces",
-      "degenerateHint": "Three points almost collinear, so the area is zero — slicers usually skip these or throw an error.",
-      "duplicateFace": "Duplicate faces",
-      "duplicateFaceHint": "The same triangle appears more than once, which shows up as a double layer on the surface.",
-      "openEdge": "Open edges",
-      "openEdgeHint": "This edge is shared by only one face — the mesh is not closed and the slice will have holes.",
-      "nonManifoldEdge": "Non-manifold edges",
-      "nonManifoldEdgeHint": "Three or more faces share one edge — most slicers simply fail on this.",
-      "duplicateVertex": "Duplicate vertices",
-      "duplicateVertexHint": "Same coordinates but treated as different vertices, so the mesh was never welded. This usually causes the open edges.",
-      "flippedNormal": "Flipped normals",
-      "flippedNormalHint": "Neighbouring faces point in opposite directions, which flips the shading and can make the computed volume negative.",
-      "thinWall": "Thin areas",
-      "thinWallHint": "Walls below the thin limit — 1.0-1.2mm is a reasonable floor for photo-resin.",
-      "overhang": "Overhangs",
-      "overhangHint": "Faces angled more than {angle}° downwards, which need supports to print."
-    },
-    "overhang": {
-      "title": "Overhangs",
-      "hint": "Faces angled more than {angle}° downwards need supports — the smaller the share, the easier it prints."
+    "errors": {
+      "parseFailed": "Could not parse the file. Try another one.",
+      "noGeometry": "No geometry found in this file (no vertices or faces).",
+      "unsupportedType": "Unsupported file type. Please upload one of: {accept}.",
+      "analysisFailed": "Analysis failed: {detail}"
     },
     "phases": {
-      "parse": "Parsing model…",
-      "topology": "Checking topology…",
-      "thickness": "Measuring walls…",
-      "overhang": "Analysing overhangs…",
+      "loading": "Reading model…",
+      "weld": "Welding vertices / building topology",
+      "shells": "Classifying shells",
+      "cluster": "Clustering issues",
+      "support": "Building support geometry",
       "done": "Done"
+    },
+    "legend": {
+      "flipped": "Flipped normals",
+      "degenerate": "Degenerate faces",
+      "duplicate": "Duplicate faces",
+      "shellExtra": "Extra shells",
+      "shellNoise": "Noise shells",
+      "openEdge": "Gaps (open edges)",
+      "planarHole": "Planar holes",
+      "nonManifoldEdge": "Non-manifold edges",
+      "outline": "Outline",
+      "clean": "No issues found",
+      "support": "Wrap-around support",
+      "supportTitle": "The model drops onto the platform; shows the translucent support shell wrapped around it, the platform footprint, and all the support material between platform and model (WJP jets layer by layer, so there is no overhang to support; the support is washed off after printing)"
+    },
+    "tooltip": {
+      "flipped": "Flipped normal (winding differs from its neighbours, easy to break when slicing)",
+      "degenerate": "Degenerate face (zero area)",
+      "duplicate": "Duplicate face (coincides with another face)",
+      "shellNoise": "Noise shell (tiny fragment, delete it)",
+      "shellExtra": "Extra shell (separate part / surplus geometry)"
+    },
+    "status": {
+      "pass": "Pass",
+      "warn": "Needs attention",
+      "fail": "Issues found",
+      "idle": "Not checked"
+    },
+    "severity": {
+      "critical": "Critical",
+      "warning": "Warning",
+      "info": "Note",
+      "pass": "Pass"
+    },
+    "value": {
+      "none": "None ✓",
+      "count": "{count}",
+      "edges": "{count}",
+      "pairs": "{count}",
+      "places": "{count}",
+      "faces": "{count}",
+      "fail": "{count} ✗",
+      "warn": "{count} ⚠"
+    },
+    "cluster": {
+      "focus": "Focus"
+    },
+    "sidebar": {
+      "wjpTitle": "WJP full-color assessment",
+      "normalsTitle": "Inverted normals",
+      "badEdgesTitle": "Bad edges & faces",
+      "shellsTitle": "Shells",
+      "overviewTitle": "Model overview",
+      "warningsTitle": "Notes",
+      "analyzing": "Analyzing…",
+      "idle": "Load a model and the pre-print results will appear here",
+      "normals": {
+        "globalInverted": "Whole shell inverted (closed shell)",
+        "localFlipped": "Locally flipped faces",
+        "volume": "Volume",
+        "empty": "No inverted normals found",
+        "clusterMeta": "{count} faces with inconsistent winding",
+        "note": "Slicers rely on normals to tell inside from outside. Inverted normals make slicing fail or produce a hollow part — run a “recalculate normals” pass to fix it."
+      },
+      "badEdges": {
+        "openEdges": "Gaps (open edges)",
+        "planarHoles": "Planar holes (patchable)",
+        "cracks": "Cracks / tears (unclosed chains)",
+        "degenerate": "Degenerate faces (zero area)",
+        "duplicate": "Duplicate faces (overlapping)",
+        "nonManifold": "Non-manifold edges",
+        "note": "An open mesh cannot be sliced correctly: planar holes can be filled with a flat patch, cracks need bridging. Keep the normals pointing outward after repairing."
+      },
+      "shells": {
+        "total": "Total shells",
+        "cavity": "Extra closed inner shells (sealed cavities)",
+        "enclosed": "Enclosed fragment shells",
+        "noise": "Noise shells (tiny fragments)",
+        "watertight": "Watertight",
+        "watertightYes": "Closed ✓",
+        "watertightNo": "Not closed ✗",
+        "cavityNote": "Support inside a sealed cavity can never be washed out completely; the residue ruins the finish and can burst thin walls as it swells. WJP full color does not support hollow designs — delete the inner shell and make the model solid.",
+        "noiseNote": "Noise shells are usually modelling leftovers or tessellation artefacts. They print as loose blobs — delete them and re-export (toggle “noise shells” under the viewport to locate them).",
+        "item": "{kind} · {faces} faces · {state}",
+        "kind": {
+          "noise": "Noise fragment",
+          "cavity": "Sealed inner shell",
+          "debris": "Fragment shell",
+          "independent": "Separate part"
+        },
+        "state": {
+          "closed": "Closed",
+          "open": "{count} open edges"
+        }
+      },
+      "overview": {
+        "file": "File",
+        "trisVerts": "Triangles / welded vertices",
+        "dims": "Bounding size",
+        "elapsed": "Analysis time",
+        "note": "Turn on “wrap-around support” below the viewport to preview the water-soluble support shell and the platform footprint: the model drops onto the platform and everything between platform and model is support material (WJP jets layer by layer, so there is no overhang). It is washed off after printing. Issue legend entries only appear when that issue was actually detected."
+      },
+      "unitsNote": "Coordinates are in mm (the 3D printing convention); the print direction is +Z."
+    },
+    "wjp": {
+      "scope": "Scope: inverted normals / broken edges and faces / shells and watertightness. Overhangs are carried by the water-soluble support and wall thickness is guaranteed by solid infill, so neither is checked.",
+      "tone": {
+        "fail": {
+          "verdict": "Not printable as-is",
+          "summary": "{critical} critical issue(s) found — repair them before slicing."
+        },
+        "risk": {
+          "verdict": "Needs attention",
+          "summary": "No critical issues, but {warning} item(s) need attention."
+        },
+        "pass": {
+          "verdict": "Ready to print",
+          "summary": "No inverted normals, broken faces or shell problems found — you can slice this straight away."
+        }
+      },
+      "findings": {
+        "normals": {
+          "critical": {
+            "globalInverted": {
+              "title": "{count} closed shell(s) are inverted inside-out",
+              "detail": "The whole shell faces inward, so the slicer reads inside and outside as swapped and cuts a hollow part.",
+              "advice": "Run “recalculate / unify normals” on the whole model in your modelling software, then export again."
+            },
+            "localFlipped": {
+              "title": "{count} face(s) wound against their neighbours",
+              "detail": "Faces with reversed winding produce broken or self-intersecting slices.",
+              "advice": "Fix with “unify normals”; if they persist, look for zero-thickness or overlapping faces at that spot."
+            }
+          },
+          "pass": {
+            "ok": {
+              "title": "Normals look correct",
+              "detail": "No inverted shells and no locally flipped faces were detected."
+            }
+          }
+        },
+        "gaps": {
+          "critical": {
+            "notClosed": {
+              "title": "Mesh is not closed: {openEdges} open edge(s) ({planarHoles} planar hole(s), {cracks} crack(s) / tear(s))",
+              "detail": "The mesh has unclosed boundaries. WJP slicing needs a watertight mesh: open borders are cut into notches or break volume computation, so the part cannot be printed. Planar holes can be filled with a flat patch; cracks and tears need bridging.",
+              "advice": "Run “close holes / fill holes” in a mesh repair tool and re-export — keep the normals pointing outward while you do it."
+            }
+          },
+          "pass": {
+            "ok": {
+              "title": "Mesh is closed",
+              "detail": "No open edges — the model is watertight."
+            }
+          }
+        },
+        "badfaces": {
+          "warning": {
+            "issues": {
+              "title": "Bad faces: {degenerate} degenerate, {duplicate} duplicate pair(s), {nonManifold} non-manifold edge(s)",
+              "detail": "Degenerate faces (zero area), duplicate faces (coinciding with another face) and non-manifold edges (an edge shared by three or more faces) skew volume and surface area, and slicers often fail on them outright.",
+              "advice": "Run a “check / repair mesh” pass in your modelling software (merge duplicate vertices, delete duplicate faces, re-triangulate), then export."
+            }
+          },
+          "pass": {
+            "ok": {
+              "title": "No bad faces",
+              "detail": "No degenerate faces, duplicate faces or non-manifold edges were detected."
+            }
+          }
+        },
+        "shells": {
+          "critical": {
+            "sealedHollow": {
+              "title": "{count} sealed cavity/cavities inside the model",
+              "detail": "A closed inner shell is trapped inside the outer one. Water-soluble support cannot be washed out of a sealed cavity — the residue bursts thin walls as it swells.",
+              "advice": "WJP full color is solid infill and does not support hollow designs: delete the inner shell and leave a single solid shell."
+            }
+          },
+          "warning": {
+            "enclosedOpen": {
+              "title": "{count} enclosed fragment shell(s)",
+              "detail": "Unclosed leftover geometry is trapped inside the outer shell — support will be left behind there too.",
+              "advice": "Delete the inner fragments and export again."
+            },
+            "noise": {
+              "title": "{count} noise fragment shell(s)",
+              "detail": "The model contains {components} disconnected shells, {count} of them tiny relative to the whole. These are usually modelling leftovers or tessellation noise, and they print as loose blobs.",
+              "advice": "Toggle “noise shells” under the viewport to locate them, delete them and re-export."
+            }
+          },
+          "pass": {
+            "ok": {
+              "title": "Shell structure looks correct",
+              "detail": "No sealed cavities and no enclosed fragment geometry were detected."
+            }
+          }
+        },
+        "assembly": {
+          "info": {
+            "multiple": {
+              "title": "{count} separate part(s)",
+              "detail": "The model is made of {count} disconnected shells. Leave about {assemblyGap} mm clearance on static assembly faces and {movingGap} mm on moving or sliding fits.",
+              "advice": "Confirm this is intentional multi-part design; if the parts only came apart during export, merge them into one shell."
+            }
+          }
+        },
+        "precision": {
+          "info": {
+            "size": {
+              "title": "Bounding size {dx} × {dy} × {dz} mm",
+              "detail": "At this size the WJP full-color tolerance is roughly ±{tol} mm. The material deflects between {heatMin} and {heatMax} °C, so slender parts should be stiffened.",
+              "advice": "Leave tolerance margin on critical fit dimensions instead of ordering to nominal size."
+            }
+          }
+        }
+      }
+    },
+    "warnings": {
+      "openEdges": "The mesh is not closed: {openEdges} open edge(s), {planarHoles} planar hole(s), {cracks} crack(s) / tear(s).",
+      "globalInverted": "{count} closed shell(s) are inverted inside-out.",
+      "flippedFaces": "{count} face(s) are wound against their neighbours.",
+      "sealedHollow": "{count} sealed cavity/cavities detected — support inside them cannot be washed out.",
+      "enclosedOpenShells": "{count} fragment shell(s) trapped inside the outer shell.",
+      "noiseShells": "{count} noise fragment shell(s) — they print as loose blobs.",
+      "multipleShells": "The model is made of {count} separate shells."
+    },
+    "demo": {
+      "perfect": {
+        "label": "Perfect cube",
+        "desc": "Nothing wrong"
+      },
+      "broken": {
+        "label": "Broken model",
+        "desc": "Hole + crack + bad faces"
+      },
+      "thin": {
+        "label": "Hollow shell",
+        "desc": "Sealed cavity"
+      },
+      "inverted": {
+        "label": "Fully inverted",
+        "desc": "Normals inside-out"
+      },
+      "local-flip": {
+        "label": "Local flip",
+        "desc": "One face wound backwards"
+      },
+      "shells": {
+        "label": "Multiple shells",
+        "desc": "Separate part + noise fragment"
+      }
+    },
+    "empty": {
+      "title": "Before you print: take a look",
+      "desc": "Automatically detects inverted normals, bad edges (gaps / planar holes / degenerate / duplicate faces / non-manifold edges) and shell problems (extra shells / noise fragments / sealed cavities), judges them against WJP full-color rules, and marks every problem in the 3D view — click a list entry to fly to it.",
+      "drop": "Drop a model file here, or click to choose one",
+      "local": "Files are parsed in your browser — nothing is uploaded to the server",
+      "demoHint": "No file at hand? Try a built-in demo model:"
+    },
+    "stats": {
+      "notLoaded": "No model loaded",
+      "triangles": "Triangles",
+      "vertices": "Vertices",
+      "watertight": "Watertight",
+      "watertightYes": "Yes",
+      "watertightNo": "No",
+      "volume": "Volume",
+      "analysisMs": "Analysis",
+      "viewHint": "Drag to orbit · scroll to zoom · right-drag to pan · print direction +Z",
+      "localHint": "ZIP / RAR / OBJ / STL / PLY / GLB / GLTF · everything is analysed locally in your browser"
     }
   },
   "PrintQuote": {

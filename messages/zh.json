@@ -1366,11 +1366,11 @@
       },
       "modelCheck": {
         "title": "模型检查",
-        "description": "打印前的自检:破面(退化 / 重复 / 开放边 / 非流形边)、过薄区域、悬空面积,问题面在 3D 里直接标红。",
-        "tag1": "破面检测",
-        "tag2": "壁厚扫描",
-        "tag3": "悬空角度",
-        "tag4": "封闭性"
+        "description": "打印前的自检:反转法向、坏边与破面、壳体与封闭性,按 WJP 全彩工艺标准给出结论,问题位置在 3D 里直接标色。",
+        "tag1": "反转法向",
+        "tag2": "坏边破面",
+        "tag3": "壳体封闭性",
+        "tag4": "WJP 工艺评估"
       }
     }
   },
@@ -1378,99 +1378,305 @@
     "page": {
       "eyebrow": "模型检查",
       "title": "打印前,先确认模型没有破面",
-      "description": "退化面、重复面、开放边、非流形边、翻面、重复顶点 —— 一次全查出来;再按你给的过薄线扫一遍壁厚,给出能不能直接进切片的结论。"
+      "description": "反转法向、缝隙与平面孔洞、退化面与非流形边、多余壳体与密封内腔 —— 按 WJP 全彩工艺标准一次查完,问题位置在 3D 里直接标色。"
     },
-    "title": "模型检查",
-    "description": "上传 3D 模型,本地检查破面 / 过薄 / 悬空。",
-    "analyzing": "正在检查…",
-    "error": {
-      "noGeometry": "这个文件里没有读到几何数据(没有顶点或面)。",
-      "parseFailed": "解析失败,请换一个文件试试。"
+    "app": {
+      "title": "模型检查",
+      "subtitle": "打印前自检(WJP 全彩)",
+      "upload": "上传模型",
+      "demo": "演示模型",
+      "demoLabel": "选择演示模型",
+      "resetView": "重置视角",
+      "analyzing": "正在分析…",
+      "fileLabel": "选择模型文件"
     },
     "upload": {
-      "dropzone": "点击选择,或把模型文件拖进来",
-      "hint": "支持 OBJ / STL / PLY / GLB / GLTF / ZIP —— 模型不上传,检查在浏览器本地完成",
-      "reupload": "换文件",
-      "removeModel": "移除模型"
+      "dropOverlay": "松开以载入模型"
     },
-    "stats": {
-      "triangleCount": "三角面",
-      "vertexCount": "顶点",
-      "volume": "体积"
-    },
-    "preview": {
-      "highlight": "高亮",
-      "modes": {
-        "all": "全部",
-        "topology": "破面",
-        "thin": "过薄",
-        "overhang": "悬空"
-      },
-      "legend": {
-        "problem": "问题面",
-        "normal": "正常"
-      }
-    },
-    "verdict": {
-      "ok": {
-        "title": "模型可以进切片",
-        "hint": "没有发现破面,也没有低于过薄线的区域。"
-      },
-      "warn": {
-        "title": "有需要留意的地方",
-        "hint": "没有致命问题,但下面标出的位置建议改一下 —— 尤其过薄的地方容易印断。"
-      },
-      "error": {
-        "title": "有破面,建议先修模型",
-        "hint": "存在开放边 / 重复面 / 非流形边。直接切片大概率失败,或者切出带洞的模型。"
-      }
-    },
-    "thickness": {
-      "title": "壁厚",
-      "threshold": "过薄线",
-      "min": "最薄",
-      "p05": "P05",
-      "median": "中位",
-      "thinArea": "过薄区域占表面积 {ratio}%({count} 个采样面)",
-      "unreliable": "有 {miss}/{total} 条射线打空 —— 模型不封闭,壁厚结果仅供参考。",
-      "unavailable": "测不了壁厚:模型不封闭,或者面数太少。"
-    },
-    "checks": {
-      "title": "检查项",
-      "clean": "没有发现问题。"
-    },
-    "watertight": {
-      "yes": "封闭",
-      "no": "不封闭"
-    },
-    "issues": {
-      "degenerate": "退化面",
-      "degenerateHint": "三个点几乎共线,面积为零 —— 切片器可能直接跳过或报错。",
-      "duplicateFace": "重复面",
-      "duplicateFaceHint": "同一个三角形出现了多次,表面会出现双层。",
-      "openEdge": "开放边",
-      "openEdgeHint": "这条边只被一个面共用 —— 模型没封闭,切片会有洞。",
-      "nonManifoldEdge": "非流形边",
-      "nonManifoldEdgeHint": "一条边被三个以上的面共用 —— 切片器基本会直接失败。",
-      "duplicateVertex": "重复顶点",
-      "duplicateVertexHint": "坐标相同却是不同的顶点,说明模型没焊上,开放边多半由此而来。",
-      "flippedNormal": "法线翻面",
-      "flippedNormalHint": "相邻两个面的朝向相反,着色会翻面,体积也可能算成负数。",
-      "thinWall": "过薄区域",
-      "thinWallHint": "壁厚低于过薄线的位置,光敏树脂建议不低于 1.0-1.2mm。",
-      "overhang": "悬空面",
-      "overhangHint": "朝下角度超过 {angle}° 的面,需要支撑才能印出来。"
-    },
-    "overhang": {
-      "title": "悬空",
-      "hint": "朝下角度超过 {angle}° 的面需要支撑,占比越低越好打印。"
+    "errors": {
+      "parseFailed": "解析失败,请换一个文件试试。",
+      "noGeometry": "这个文件里没有读到几何数据(没有顶点或面)。",
+      "unsupportedType": "不支持的文件类型,请上传 {accept} 文件。",
+      "analysisFailed": "分析失败:{detail}"
     },
     "phases": {
-      "parse": "解析模型…",
-      "topology": "检查破面…",
-      "thickness": "测量壁厚…",
-      "overhang": "分析悬空…",
+      "loading": "读取模型…",
+      "weld": "焊接顶点 / 构建拓扑",
+      "shells": "壳体分类",
+      "cluster": "问题聚类",
+      "support": "包裹支撑几何",
       "done": "完成"
+    },
+    "legend": {
+      "flipped": "法线翻转",
+      "degenerate": "退化面",
+      "duplicate": "重复面",
+      "shellExtra": "非主壳体",
+      "shellNoise": "噪声壳体",
+      "openEdge": "缝隙",
+      "planarHole": "平面孔洞",
+      "nonManifoldEdge": "非流形边",
+      "outline": "轮廓",
+      "clean": "未发现问题",
+      "support": "包裹支撑",
+      "supportTitle": "模型自动落至平台;显示包裹模型的半透明支撑外壳、平台占地区域,以及平台到模型之间全部的支撑材料填充(WJP 逐层喷射不存在悬空,打印后水洗去除)"
+    },
+    "tooltip": {
+      "flipped": "法线翻转(绕向与周围不一致,切片易破面)",
+      "degenerate": "退化面(零面积)",
+      "duplicate": "重复面(与另一面重合)",
+      "shellNoise": "噪声壳体(微小碎片,建议删除)",
+      "shellExtra": "非主壳体(独立部件 / 多余壳体)"
+    },
+    "status": {
+      "pass": "通过",
+      "warn": "需注意",
+      "fail": "发现问题",
+      "idle": "待检查"
+    },
+    "severity": {
+      "critical": "严重",
+      "warning": "注意",
+      "info": "提示",
+      "pass": "通过"
+    },
+    "value": {
+      "none": "无 ✓",
+      "count": "{count} 个",
+      "edges": "{count} 条",
+      "pairs": "{count} 对",
+      "places": "{count} 处",
+      "faces": "{count} 面",
+      "fail": "{count} 个 ✗",
+      "warn": "{count} 个 ⚠"
+    },
+    "cluster": {
+      "focus": "聚焦"
+    },
+    "sidebar": {
+      "wjpTitle": "WJP 全彩工艺评估",
+      "normalsTitle": "反转法向",
+      "badEdgesTitle": "坏边与破面",
+      "shellsTitle": "壳体",
+      "overviewTitle": "模型概览",
+      "warningsTitle": "提示",
+      "analyzing": "正在分析…",
+      "idle": "加载模型后,这里会给出打印前检查结果",
+      "normals": {
+        "globalInverted": "整体法线朝内(封闭壳)",
+        "localFlipped": "局部翻转面片",
+        "volume": "体积",
+        "empty": "未检出法线翻转问题",
+        "clusterMeta": "{count} 个面片绕向不一致",
+        "note": "切片软件依赖法线区分内外:翻转法向会导致切片失败或输出空心件,建议用「统一法线」一键修复。"
+      },
+      "badEdges": {
+        "openEdges": "缝隙(开放边)",
+        "planarHoles": "平面孔洞(可平面填补)",
+        "cracks": "裂缝 / 破口(未闭合链)",
+        "degenerate": "退化面(零面积)",
+        "duplicate": "重复面(重合片)",
+        "nonManifold": "非流形边",
+        "note": "不封闭模型无法正确切片:平面孔洞可用平面补丁填补,裂缝需桥接修复,修复后注意保持法线朝外。"
+      },
+      "shells": {
+        "total": "壳体总数",
+        "cavity": "多余封闭内壳(密封内腔)",
+        "enclosed": "被包裹碎片壳",
+        "noise": "噪声壳体(微小碎片)",
+        "watertight": "水密性",
+        "watertightYes": "封闭 ✓",
+        "watertightNo": "不封闭 ✗",
+        "cavityNote": "封闭内腔内的水溶性支撑无法彻底清除,残留支撑会严重影响品质;WJP 全彩不支持空心 / 镂空设计,建议删除内壳改为实心。",
+        "noiseNote": "噪声壳体通常是建模残留或网格化噪声,会生成游离料点,建议删除后重新导出(可在视图下方开关「噪声壳体」显示)。",
+        "item": "{kind} · {faces} 面 · {state}",
+        "kind": {
+          "noise": "噪声碎片",
+          "cavity": "封闭内壳",
+          "debris": "碎片壳体",
+          "independent": "独立部件"
+        },
+        "state": {
+          "closed": "封闭",
+          "open": "开放 {count} 边"
+        }
+      },
+      "overview": {
+        "file": "文件",
+        "trisVerts": "三角形 / 焊接顶点",
+        "dims": "外形尺寸",
+        "elapsed": "分析耗时",
+        "note": "开启视图下方的「包裹支撑」,可预览打印时包住模型的水溶性支撑外壳与平台占地区域:模型自动落至平台,平台到模型之间全部由支撑材料填充(WJP 逐层喷射,不存在悬空),打印后水洗去除;问题图例仅在检出对应问题时显示。"
+      },
+      "unitsNote": "坐标单位按 mm 计算(3D 打印惯例),打印方向为 +Z。"
+    },
+    "wjp": {
+      "scope": "检测范围:反转法向 / 破面与坏边 / 壳体与封闭性;悬空由水溶性支撑承托、壁厚由实心填充保障,均不在检测范围。",
+      "tone": {
+        "fail": {
+          "verdict": "不可直接打印",
+          "summary": "发现 {critical} 项严重问题,建议修复后再送切片。"
+        },
+        "risk": {
+          "verdict": "需注意",
+          "summary": "没有致命问题,但有 {warning} 项需要注意。"
+        },
+        "pass": {
+          "verdict": "可以打印",
+          "summary": "未发现反转法向 / 破面 / 壳体类问题,可直接进入切片。"
+        }
+      },
+      "findings": {
+        "normals": {
+          "critical": {
+            "globalInverted": {
+              "title": "{count} 个封闭壳的法线整体朝内",
+              "detail": "整壳法线朝内,切片软件会判定模型内外颠倒,直接切出来会是空心件。",
+              "advice": "在建模软件里对整个模型执行「统一法线 / 重新计算法线」,再导出一次。"
+            },
+            "localFlipped": {
+              "title": "{count} 个面片法线与周围不一致",
+              "detail": "局部绕向相反的面片会让切片结果出现破面或自相交。",
+              "advice": "用「统一法线」修复;若修复后仍有问题,检查该处是否有零厚度面或重叠面。"
+            }
+          },
+          "pass": {
+            "ok": {
+              "title": "法线方向正常",
+              "detail": "没有检测到整体朝内或局部翻转的面片。"
+            }
+          }
+        },
+        "gaps": {
+          "critical": {
+            "notClosed": {
+              "title": "网格不封闭:{openEdges} 条开放边({planarHoles} 处平面孔洞,{cracks} 处裂缝 / 破口)",
+              "detail": "模型存在未闭合的边界,WJP 切片要求水密网格:开放边界会被切出豁口或导致体积计算失败,无法正常打印。平面孔洞可用平面补丁直接填补;裂缝与破口需要桥接修复。",
+              "advice": "用网格修复软件执行「封闭孔洞 / 补洞」后重新导出;修复时注意保持法线朝外。"
+            }
+          },
+          "pass": {
+            "ok": {
+              "title": "网格封闭",
+              "detail": "没有开放边,模型是水密的。"
+            }
+          }
+        },
+        "badfaces": {
+          "warning": {
+            "issues": {
+              "title": "存在坏面:{degenerate} 个退化面、{duplicate} 对重复面、{nonManifold} 条非流形边",
+              "detail": "退化面(零面积)、重复面(与另一面重合)、非流形边(一条边被三个以上的面共用)都会让体积与表面积算不准,切片器也可能直接报错。",
+              "advice": "在建模软件里做一次「检查网格 / 修复网格」(合并重复点、删除重复面、重新三角化),再导出。"
+            }
+          },
+          "pass": {
+            "ok": {
+              "title": "没有坏面",
+              "detail": "没有检测到退化面、重复面或非流形边。"
+            }
+          }
+        },
+        "shells": {
+          "critical": {
+            "sealedHollow": {
+              "title": "存在 {count} 个密封内腔",
+              "detail": "外壳里面还包着封闭的内壳。WJP 的水溶性支撑无法从密封腔体里洗出来,残留支撑会顶裂薄壁、吸水涨裂。",
+              "advice": "WJP 全彩是实心填充,不做空心 / 镂空设计:删除内壳,让模型变成一个实心壳体。"
+            }
+          },
+          "warning": {
+            "enclosedOpen": {
+              "title": "{count} 个被包裹的碎片壳",
+              "detail": "外壳内部还有没封闭的碎片几何,同样会残留支撑。",
+              "advice": "删除内部碎片几何后重新导出。"
+            },
+            "noise": {
+              "title": "{count} 个噪声碎片壳体",
+              "detail": "模型里混进了 {components} 个互相分离的壳体,其中 {count} 个相对整体非常小 —— 通常是建模残留或网格化噪声,打印时会变成游离料点。",
+              "advice": "在视图下方打开「噪声壳体」开关定位它们,删除后重新导出。"
+            }
+          },
+          "pass": {
+            "ok": {
+              "title": "壳体结构正常",
+              "detail": "没有密封内腔,也没有被包裹的碎片几何。"
+            }
+          }
+        },
+        "assembly": {
+          "info": {
+            "multiple": {
+              "title": "{count} 个独立部件",
+              "detail": "模型由 {count} 个互相分离的壳体组成。静态装配面建议留 {assemblyGap} mm 间隙,活动 / 转动配合留 {movingGap} mm。",
+              "advice": "确认这是有意的分件设计;如果只是导出时脱开了,需要合并成一个壳体。"
+            }
+          }
+        },
+        "precision": {
+          "info": {
+            "size": {
+              "title": "外形 {dx} × {dy} × {dz} mm",
+              "detail": "该尺寸下 WJP 全彩的尺寸公差约 ±{tol} mm;材料在 {heatMin}–{heatMax}℃ 之间会有热变形,细长件建议适当加筋。",
+              "advice": "关键配合尺寸请留出公差余量,别按理论尺寸直接下单。"
+            }
+          }
+        }
+      }
+    },
+    "warnings": {
+      "openEdges": "模型未封闭:{openEdges} 条开放边、{planarHoles} 处平面孔洞、{cracks} 处裂缝 / 破口。",
+      "globalInverted": "{count} 个封闭壳的法线整体朝内。",
+      "flippedFaces": "{count} 个面片的法线与周围不一致。",
+      "sealedHollow": "检测到 {count} 个密封内腔,内部支撑无法洗净。",
+      "enclosedOpenShells": "{count} 个被外壳包裹的碎片壳。",
+      "noiseShells": "{count} 个噪声碎片壳体,打印时会变成游离料点。",
+      "multipleShells": "模型由 {count} 个独立壳体组成。"
+    },
+    "demo": {
+      "perfect": {
+        "label": "完整立方体",
+        "desc": "一切正常"
+      },
+      "broken": {
+        "label": "破损模型",
+        "desc": "孔洞 + 裂缝 + 坏面"
+      },
+      "thin": {
+        "label": "薄壁空心",
+        "desc": "密封内腔"
+      },
+      "inverted": {
+        "label": "整体反转",
+        "desc": "法线朝内"
+      },
+      "local-flip": {
+        "label": "局部翻转",
+        "desc": "单面绕向相反"
+      },
+      "shells": {
+        "label": "多壳体",
+        "desc": "独立部件 + 噪声碎片"
+      }
+    },
+    "empty": {
+      "title": "打印前自检:先看一眼,再上打印机",
+      "desc": "自动检测反转法向、坏边(缝隙 / 平面孔洞 / 退化面 / 重复面 / 非流形边)与壳体问题(多余壳体 / 噪声碎片 / 密封内腔),按 WJP 全彩工艺标准给出评估,问题位置直接在 3D 视图里标色,点击列表即可聚焦。",
+      "drop": "拖入或点击选择模型文件",
+      "local": "文件仅在本地浏览器中解析,不会上传服务器",
+      "demoHint": "没有文件?试试内置演示模型:"
+    },
+    "stats": {
+      "notLoaded": "未加载模型",
+      "triangles": "三角形",
+      "vertices": "顶点",
+      "watertight": "水密",
+      "watertightYes": "是",
+      "watertightNo": "否",
+      "volume": "体积",
+      "analysisMs": "分析",
+      "viewHint": "拖动旋转 · 滚轮缩放 · 右键平移 · 打印方向 +Z",
+      "localHint": "支持 ZIP / RAR / OBJ / STL / PLY / GLB / GLTF · 所有分析均在浏览器本地完成"
     }
   },
   "PrintQuote": {
