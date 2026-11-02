@@ -6,11 +6,14 @@
  * 导航和 Hero 的「定制」是**无商品入口**,但 `CustomWorkshop` 是商品作用域的
  * (`if (!product) return null`)。这两者之前链 `/image-gen` —— 那是登录后的
  * SaaS 工作台,`proxy.ts` 会把未登录访客弹到 `/sign-in?callbackUrl=/image-gen`,
- * 于是公开店铺的访客点「定制」直接撞登录墙,而匿名本来就能用的
- * `/api/store/*` 定制链路被白白绕开。
+ * 于是公开店铺的访客点「定制」直接撞登录墙,而 `/api/store/*` 定制链路
+ * 被白白绕开。
  *
- * 现在:点「定制」→ 选一个品类 → 该品类的代表商品交给 `CustomWorkshop`,
- * 全程不登录、不离开当前页。
+ * 现在:点「定制」→ 选一个品类 → 该品类的代表商品交给 `CustomWorkshop`。
+ *
+ * 2026-11-02:生图要登录。品类选择层本身照常开着(逛品类不花钱),
+ * 但选完品类要进 `CustomWorkshop` 传照片生成时,未登录会被送去
+ * `/sign-in`(见 `use-require-sign-in.ts`)。
  *
  * ## 为什么按「品类」而不是「场合」在这里选
  *
@@ -43,6 +46,7 @@ import {
 } from "@/features/marketing/components/storefront/wjp-store-data";
 
 import { useAtelierContainer } from "../hooks/use-atelier-container";
+import { useRequireSignIn } from "../hooks/use-require-sign-in";
 import { useStorefrontModal } from "../hooks/use-storefront-modal";
 import { MOCK_PRODUCTS } from "../lib/mock-catalog";
 
@@ -53,6 +57,8 @@ export function CustomizeEntry() {
   const open = useStorefrontModal((s) => s.customizePickerOpen);
   const closePicker = useStorefrontModal((s) => s.closeCustomizePicker);
   const setCustomize = useStorefrontModal((s) => s.setCustomize);
+  // 2026-11-02:生图要登录 —— 未登录选完品类,先去登录页再回来
+  const requireSignIn = useRequireSignIn();
   const container = useAtelierContainer();
 
   // 每个品类的代表商品。filter 保持 WJP_SERIES 的顺序,找不到的品类不渲染 ——
@@ -68,9 +74,11 @@ export function CustomizeEntry() {
 
   const pick = (product: (typeof entries)[number]["product"]) => {
     if (!product) return;
-    // setCustomize 内部会把 customizePickerOpen 关掉并打开 Workshop,
-    // 两层 Dialog 不会叠着
-    setCustomize(product);
+    requireSignIn(() => {
+      // setCustomize 内部会把 customizePickerOpen 关掉并打开 Workshop,
+      // 两层 Dialog 不会叠着
+      setCustomize(product);
+    });
   };
 
   return (
@@ -104,8 +112,8 @@ export function CustomizeEntry() {
           </h2>
           <p className="mt-2.5 text-sm text-muted-foreground leading-relaxed text-pretty">
             {isZh
-              ? "先选一个品类,接着上传照片、选尺寸和风格、定规格。不需要注册。"
-              : "Pick a form, then upload a photo, choose a size and style, set the specs. No sign-up."}
+              ? "先选一个品类,接着上传照片、选尺寸和风格、定规格。登录后即可开始定制。"
+              : "Pick a form, then upload a photo, choose a size and style, set the specs. Sign in to start."}
           </p>
         </div>
 

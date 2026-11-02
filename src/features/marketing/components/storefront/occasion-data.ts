@@ -141,9 +141,12 @@ export const OCCASIONS: readonly Occasion[] = [
  *
  * 「定制」之前写的是 `href: "/image-gen"`。那是登录后的 SaaS 工作台,
  * `proxy.ts` 会把未登录访客弹到 `/sign-in?callbackUrl=/image-gen` —— 公开
- * 店铺的访客点「定制」会撞登录墙,而匿名本来就能用的 `/api/store/*` 定制链路
+ * 店铺的访客点「定制」会撞登录墙,而 `/api/store/*` 定制链路
  * 被绕开。也没有编造 `#custom` 锚点:`CustomWorkshop` 是 Dialog(没选中商品时
  * 整个组件 `return null`),页面上根本没有可以挂 id 的 DOM 节点。
+ *
+ * 2026-11-02:生图链路(`/api/store/ai/transform`)本身也改成要登录了 ——
+ * 选完品类进 Workshop 时会过登录门槛。
  *
  * 场合(生日 / 毕业 / 纪念 / 节日)不再占导航位,但四段促销位本身还在首页上,
  * 每段有自己的标题和锚点 —— footer 的「作品集」栏直接链过去。

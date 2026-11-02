@@ -41,6 +41,7 @@ import { formatPriceCNY } from "@/features/marketing/components/storefront/wjp-s
 import { Link } from "@/i18n/routing";
 
 import { useAtelierContainer } from "../hooks/use-atelier-container";
+import { useRequireSignIn } from "../hooks/use-require-sign-in";
 import { useStorefrontModal } from "../hooks/use-storefront-modal";
 import { formatSizeCompact } from "../lib/size-format";
 
@@ -54,6 +55,8 @@ export function ProductQuickView() {
   const product = useStorefrontModal((s) => s.quickViewProduct);
   const setQuickView = useStorefrontModal((s) => s.setQuickView);
   const setCustomize = useStorefrontModal((s) => s.setCustomize);
+  // 2026-11-02:生图要登录 —— 未登录点「定制」先去登录页
+  const requireSignIn = useRequireSignIn();
   // portal 指回 .atelier-root —— 否则这个 Dialog 落在 atelier 的 token 子树外,
   // 配色和圆角退回全站默认主题(见 use-atelier-container.ts)
   const container = useAtelierContainer();
@@ -70,8 +73,10 @@ export function ProductQuickView() {
 
   const startCustomize = () => {
     if (!product) return;
-    setQuickView(null);
-    setCustomize(product);
+    requireSignIn(() => {
+      setQuickView(null);
+      setCustomize(product);
+    });
   };
 
   return (

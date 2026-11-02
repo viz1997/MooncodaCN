@@ -9,6 +9,7 @@
  * Medusa 端图像处理 service。
  *
  * 实现:
+ *  0. 缺会话 → 401(2026-11-02:生图必须登录)
  *  1. base64 data URL → buffer → persistBase64ToR2(原图)
  *  2. aiStyleId === "ai_original" → 直接返回原图 URL(短路)
  *  3. 否则调 submitLingtingTask → 返回 transform 后 R2 URL
@@ -30,6 +31,7 @@ import {
 import { isR2Configured } from "@/features/image-gen/lib/r2";
 import { findAiStyle } from "@/features/storefront/lib/mock-catalog";
 import { withApiLogging } from "@/lib/api-logger";
+import { getServerSession } from "@/lib/auth/server";
 
 export const runtime = "nodejs";
 /** AI transform 单次最长 90s(对齐 lingting 8s × retry + cold start) */
@@ -43,6 +45,20 @@ const aiTransformInputSchema = z.object({
 });
 
 async function handle(request: Request) {
+  // 2026-11-02:生图要登录。transform 是一次真实的上游 AI 调用(真花钱),
+  // 匿名访客不许白嫖。**放在所有业务校验之前** —— 未登录的人连「你的 R2 配没配」
+  // 都不该知道。客户端有前置拦截(use-require-sign-in),这里是权威闸门。
+  const session = await getServerSession();
+  if (!session?.user) {
+    return NextResponse.json(
+      {
+        error: "UNAUTHORIZED",
+        message: "请先登录后再生成图片",
+      },
+      { status: 401 }
+    );
+  }
+
   if (!isR2Configured()) {
     return NextResponse.json(
       {

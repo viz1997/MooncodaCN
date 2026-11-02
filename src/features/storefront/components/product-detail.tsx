@@ -48,6 +48,7 @@ import { formatPriceCNY } from "@/features/marketing/components/storefront/wjp-s
 import { Link, useRouter } from "@/i18n/routing";
 
 import { useProduct } from "../hooks/use-products";
+import { useRequireSignIn } from "../hooks/use-require-sign-in";
 import { useStorefrontModal } from "../hooks/use-storefront-modal";
 import { formatSizeCompact } from "../lib/size-format";
 import type { StorefrontProduct } from "../types";
@@ -62,6 +63,8 @@ export function ProductDetail({ handle }: { handle: string }) {
   const router = useRouter();
   const setCustomize = useStorefrontModal((s) => s.setCustomize);
   const setQuickView = useStorefrontModal((s) => s.setQuickView);
+  // 2026-11-02:生图要登录 —— 未登录点「定制」先去登录页
+  const requireSignIn = useRequireSignIn();
   const query = useProduct(handle);
 
   const product = query.data?.product ?? null;
@@ -91,9 +94,12 @@ export function ProductDetail({ handle }: { handle: string }) {
 
   const handleCustomize = () => {
     if (!product) return;
-    setCustomize(product);
-    // 跳回根 / 让 layout 挂载的 <CustomWorkshop /> 自动弹出
-    router.push("/");
+    // 2026-11-02:生图要登录 —— 未登录先去 /sign-in,登录后回本页再点一次
+    requireSignIn(() => {
+      setCustomize(product);
+      // 跳回根 / 让 layout 挂载的 <CustomWorkshop /> 自动弹出
+      router.push("/");
+    });
   };
 
   const handleRelatedQuickView = (p: StorefrontProduct) => {

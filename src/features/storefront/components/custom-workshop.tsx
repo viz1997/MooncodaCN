@@ -43,6 +43,11 @@
  * 关键不变式:**能进第 3 步 ⟺ 有预览图,且 previewStyleId === aiStyle.id**。
  * 「进第 3 步」的唯一入口是第 2 步的 CTA(stepper 只允许往回点),
  * CTA 按 styleStale 分支,所以图和风格 id 永远配对,不会写错购物袋。
+ *
+ * ── 2026-11-02 生图要登录 ───────────────────────────────────────────
+ * `/api/store/ai/transform` 现在缺会话一律 401。入口(商品卡 / 品类层 /
+ * 详情页 / 快速预览)在开工作台之前就拦一道(`use-require-sign-in.ts`),
+ * 这里再兜一层底:发请求前看会话、收到 401 也送登录页。
  */
 
 "use client";
@@ -66,9 +71,12 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { formatPriceCNY } from "@/features/marketing/components/storefront/wjp-store-data";
 import { useToast } from "@/hooks/use-toast";
+import { useRouter } from "@/i18n/routing";
+import { useSession } from "@/lib/auth/client";
 
 import { useAtelierContainer } from "../hooks/use-atelier-container";
 import { useCart, useCartUi } from "../hooks/use-cart";
+import { useSignInUrl } from "../hooks/use-require-sign-in";
 import { useStorefrontModal } from "../hooks/use-storefront-modal";
 import { PRICING_CONSTANTS } from "../lib/pricing";
 import { formatInches, formatSizeWithInches } from "../lib/size-format";
@@ -121,6 +129,12 @@ export function CustomWorkshop() {
   const setCustomize = useStorefrontModal((s) => s.setCustomize);
   const openCart = useCartUi((s) => s.openCart);
   const { addLineItem } = useCart();
+  // 2026-11-02:生图要登录 —— 兜底闸门。进工作台的入口已经拦了一道
+  // (use-require-sign-in),这里防的是「会话过期」和「入口放行时 session 还在
+  // pending 没查完」这两种漏网情况。
+  const { data: session, isPending: sessionPending } = useSession();
+  const router = useRouter();
+  const signInUrl = useSignInUrl();
   // portal 指回 .atelier-root —— 否则工作台落在 atelier 的 token 子树外,
   // 配色和圆角退回全站默认主题(见 use-atelier-container.ts)
   const container = useAtelierContainer();
@@ -403,6 +417,17 @@ export function CustomWorkshop() {
     if (!uploadedImage || !aiStyle) return false;
     const style = aiStyle;
 
+    // 2026-11-02:生图要登录。会话已经查完且没有用户 → 直接送登录页,
+    // 免得白跑一趟(照片还在内存里,登录后回来再传一次不现实,所以留在原地)
+    if (!sessionPending && !session?.user) {
+      toast({
+        title: "请先登录",
+        description: "登录后即可继续生成预览",
+      });
+      router.push(signInUrl);
+      return false;
+    }
+
     const seq = ++transformSeqRef.current;
     setIsTransforming(true);
     setTransformError(null);
@@ -417,6 +442,17 @@ export function CustomWorkshop() {
           productTypeCode: product?.productTypeCode ?? "R",
         }),
       });
+
+      // 401 = 会话没了(过期 / 被登出)。不当普通错误处理 —— 抛出去会弹一个
+      // 「AI 转换失败」的红色 toast,吓人且没用。
+      if (res.status === 401) {
+        toast({
+          title: "请先登录",
+          description: "登录状态已失效,重新登录后即可继续生成预览",
+        });
+        router.push(signInUrl);
+        return false;
+      }
 
       const data = await res.json();
       if (!res.ok) {

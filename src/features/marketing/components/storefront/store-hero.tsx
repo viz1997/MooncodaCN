@@ -38,6 +38,13 @@ import { formatPriceCNY } from "./wjp-store-data";
  *    `/image-gen` 是登录后的 SaaS 工作台,`proxy.ts` 会把未登录访客弹到
  *    `/sign-in?callbackUrl=/image-gen`。Hero 是访客的第一入口,不该一上来就要登录
  *    —— 匿名本来就能跑 `/api/store/*` 的定制链路。
+ *
+ * ## 2026-11-02:生图要登录
+ *
+ * 上面那段「匿名本来就能跑 `/api/store/*` 的定制链路」已经作废 ——
+ * `/api/store/ai/transform` 现在缺会话一律 401(那是一次真花钱的上游 AI 调用)。
+ * Hero CTA **仍然只开品类选择层**(逛品类不花钱),但选完品类进工作台时
+ * 会先过登录门槛(`use-require-sign-in.ts`)。
  */
 
 /**

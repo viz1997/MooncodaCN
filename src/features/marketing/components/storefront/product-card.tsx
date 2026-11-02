@@ -26,6 +26,7 @@
 
 import { motion } from "framer-motion";
 import { Wand2 } from "lucide-react";
+import { useRequireSignIn } from "@/features/storefront/hooks/use-require-sign-in";
 import { useStorefrontModal } from "@/features/storefront/hooks/use-storefront-modal";
 import type { StorefrontProduct } from "@/features/storefront/types";
 import { Link } from "@/i18n/routing";
@@ -72,6 +73,8 @@ export function ProductCard({
   const title = isZh ? product.title : product.titleEn;
   // 「同款定制」直接开 CustomWorkshop(带当前商品),不跳 /image-gen
   const setCustomize = useStorefrontModal((s) => s.setCustomize);
+  // 2026-11-02:生图要登录,未登录点了「同款定制」先去登录页
+  const requireSignIn = useRequireSignIn();
   // 成品图是主图,原图 hover 才露出 —— 跟 atelier 的 before/after 叙事一致
   const beforeImage =
     product.originalPhoto || product.images[0] || product.thumbnail;
@@ -169,11 +172,12 @@ export function ProductCard({
         {/* 同款定制 —— 独立按钮,不叠在图片链接上(旧版是嵌套 <Link>)
             2026-10-22:从链 `/image-gen` 改成直接开 CustomWorkshop。卡片本身就
             带着商品,商品作用域天然成立,不用先过品类选择层。`/image-gen` 是登录后
-            的 SaaS 工作台,游客点它会被 proxy 弹去登录页。 */}
+            的 SaaS 工作台,游客点它会被 proxy 弹去登录页。
+            2026-11-02:生图要登录 —— 未登录点击先去 /sign-in,登录后回本页。 */}
         {dense ? null : (
           <button
             type="button"
-            onClick={() => setCustomize(product)}
+            onClick={() => requireSignIn(() => setCustomize(product))}
             className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-[var(--primary)] hover:text-[var(--accent)] transition-colors"
           >
             <Wand2 className="size-3.5" />
