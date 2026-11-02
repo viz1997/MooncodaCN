@@ -599,7 +599,7 @@ export function CustomWorkshop() {
                           <p className="text-[11px] text-muted-foreground">
                             {style.id === "ai_original"
                               ? "不应用 AI"
-                              : `约 ${style.estimatedLatencySec}s · +${formatPriceCNY(style.surchargeCents / 100)}`}
+                              : `约 ${style.estimatedLatencySec}s`}
                           </p>
                         </div>
                         {aiStyle?.id === style.id && (
