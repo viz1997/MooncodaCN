@@ -8,7 +8,7 @@
 // @ts-nocheck —— 本仓库 tsconfig 开了 noUncheckedIndexedAccess,而这个数值内核
 // 全是 `typedArray[i]` 形式的下标访问(索引在数学上必然合法),逐个加 `!` 会把
 // 300+ 处噪声灌进移植 diff 里。行为由 src/test/tools/pure/wjp-mesh.test.ts 的
-// 6 个演示模型夹具守住(见 [[wjp-model-checker-port]])。
+// 6 个网格夹具守住(见 [[wjp-model-checker-port]])。
 import { FACE_FLAG } from "./types";
 
 export interface WeldedMesh {

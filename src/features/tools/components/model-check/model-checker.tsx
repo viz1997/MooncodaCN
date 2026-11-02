@@ -24,7 +24,6 @@ import { useTranslations } from "next-intl";
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { DEMO_MODELS } from "@/features/tools/lib/mesh/demo";
 import {
   ISSUE_COLORS,
   ISSUE_LABEL_KEYS,
@@ -123,21 +122,6 @@ export function ModelChecker() {
     }
   }, []);
 
-  const loadDemo = useCallback(
-    (key: string) => {
-      const demo = DEMO_MODELS.find((d) => d.key === key);
-      if (!demo) return;
-      setLoadError(null);
-      const built = demo.build();
-      setVisibility(ALL_VISIBILITY);
-      setModel({
-        positions: built.positions,
-        fileName: t(`demo.${key}.label`),
-      });
-    },
-    [t]
-  );
-
   const focusCluster = useCallback((c: IssueCluster) => {
     focusSeq.current += 1;
     setFocusRequest({
@@ -211,27 +195,6 @@ export function ModelChecker() {
               e.target.value = "";
             }}
           />
-          <label className="sr-only" htmlFor="demo-select">
-            {t("app.demoLabel")}
-          </label>
-          <select
-            id="demo-select"
-            value=""
-            onChange={(e) => {
-              if (e.target.value) loadDemo(e.target.value);
-              e.target.value = "";
-            }}
-            className="h-8 rounded-md border border-zinc-700 bg-zinc-900 px-2 text-xs text-zinc-300 outline-none hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-emerald-500/40"
-          >
-            <option value="" disabled>
-              {t("app.demo")}
-            </option>
-            {DEMO_MODELS.map((d) => (
-              <option key={d.key} value={d.key}>
-                {t(`demo.${d.key}.label`)} · {t(`demo.${d.key}.desc`)}
-              </option>
-            ))}
-          </select>
           <Button
             size="sm"
             variant="outline"
@@ -416,26 +379,6 @@ export function ModelChecker() {
                     {t("empty.local")}
                   </span>
                 </button>
-                <p className="mt-4 mb-2 text-xs text-zinc-500">
-                  {t("empty.demoHint")}
-                </p>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  {DEMO_MODELS.map((d) => (
-                    <button
-                      key={d.key}
-                      type="button"
-                      onClick={() => loadDemo(d.key)}
-                      className="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-2 text-left transition-colors hover:border-emerald-500/40 hover:bg-zinc-800"
-                    >
-                      <span className="block text-xs font-semibold text-zinc-200">
-                        {t(`demo.${d.key}.label`)}
-                      </span>
-                      <span className="mt-0.5 block text-[11px] leading-snug text-zinc-500">
-                        {t(`demo.${d.key}.desc`)}
-                      </span>
-                    </button>
-                  ))}
-                </div>
               </div>
             </div>
           )}

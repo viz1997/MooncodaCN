@@ -1,8 +1,19 @@
 /**
- * 内置演示模型:覆盖各类打印缺陷,单位 mm,Z-up。
- * 检测范围:反转法向 / 坏边(缝隙、平面孔洞)/ 壳体;不检测悬空,不做壁厚检测。
+ * 网格夹具 —— WJP 模型检查算法的测试输入
+ *
+ * 覆盖各类打印缺陷,单位 mm,Z-up。检测范围:反转法向 / 坏边(缝隙、平面孔洞)/
+ * 壳体;不检测悬空,不做壁厚检测。
+ *
+ * ## 为什么住在 src/test/ 下
+ *
+ * 这几个网格原先是产品里的「演示模型」(顶栏下拉框 + 空状态卡片网格,给访客
+ * 点着看效果)。产品侧不需要演示入口,但几何本身是 `wjp-mesh.test.ts` 的
+ * 断言基准 —— 删掉就没法验证 weld / analyze / wjp 三层算法了。
+ *
+ * 所以:**产品里删掉演示 UI,夹具挪到测试目录**,只服务测试。
+ * 几何与断言都没动过,搬家不改行为。
  */
-import type { RawMesh } from "./types";
+import type { RawMesh } from "@/features/tools/lib/mesh/types";
 
 type Push = (
   a: readonly number[],
@@ -97,12 +108,12 @@ function uvSphere(
 }
 
 /** 1. 完整立方体:一切正常 */
-export function demoPerfect(): RawMesh {
+export function perfectCube(): RawMesh {
   return toMesh("perfect", [boxTriangles([0, 0, 0], [20, 20, 20])]);
 }
 
 /** 2. 破损模型:平面孔洞(顶面缺失)+ 裂缝 + 退化面 + 重复面 + 非流形边 */
-export function demoBroken(): RawMesh {
+export function brokenMesh(): RawMesh {
   // 顶面缺失 → 顶面正方形边界 = 平面孔洞
   const base = boxTriangles([0, 0, 0], [20, 20, 20], new Set(["pz"]));
   const tris: number[] = Array.from(base);
@@ -119,7 +130,7 @@ export function demoBroken(): RawMesh {
 
 /** 3. 薄壁空心立方体:外壳 + 密封内腔。验证密封内腔(多余内壳)检出:
  * 内壳面法线朝腔体内部,不误报翻转;内腔被外壳包裹,判为阻塞问题。 */
-export function demoThinWall(): RawMesh {
+export function hollowShell(): RawMesh {
   const t = 0.5,
     s = 20;
   const outer = boxTriangles([0, 0, 0], [s, s, s]);
@@ -135,7 +146,7 @@ export function demoThinWall(): RawMesh {
 }
 
 /** 4. 法线翻转(整体):几何完好但全部绕向相反(体积为负) */
-export function demoInverted(): RawMesh {
+export function invertedNormals(): RawMesh {
   const cube = boxTriangles([0, 0, 0], [20, 20, 20]);
   const flipped = new Float32Array(cube.length);
   for (let f = 0; f < cube.length / 9; f++) {
@@ -148,7 +159,7 @@ export function demoInverted(): RawMesh {
 }
 
 /** 5. 局部法线翻转:仅 x+ 侧面第一片绕向相反(其余正常) */
-export function demoLocalFlip(): RawMesh {
+export function localFlip(): RawMesh {
   const cube = boxTriangles([0, 0, 0], [20, 20, 20]);
   const flipped = new Float32Array(cube);
   // px 面最先写入:三角形 0 = (100,110,111),交换后两个顶点反转绕向
@@ -161,7 +172,7 @@ export function demoLocalFlip(): RawMesh {
 }
 
 /** 6. 壳体与噪声壳体:30mm 立方体 + Ø5mm 正常小球(第二个部件)+ Ø1.4mm 噪声碎片 */
-export function demoShells(): RawMesh {
+export function multiShell(): RawMesh {
   const cube = boxTriangles([0, 0, 0], [30, 30, 30]);
   const ballTris: number[][] = [];
   uvSphere(ballTris, 38, 15, 15, 2.5);
@@ -175,16 +186,19 @@ export function demoShells(): RawMesh {
 }
 
 /**
- * 演示模型清单
+ * 夹具清单
  *
- * 名称与说明不写在这里 —— UI 层按 `demo.${key}.label` / `demo.${key}.desc`
- * 从 next-intl 取,中英文各一份。
+ * `key` 是夹具的稳定标识(断言用),`build` 每次调用都重新生成一份几何 ——
+ * 别复用同一份 Float32Array,weld 过程会原地改顶点。
  */
-export const DEMO_MODELS: { key: string; build: () => RawMesh }[] = [
-  { key: "perfect", build: demoPerfect },
-  { key: "broken", build: demoBroken },
-  { key: "thin", build: demoThinWall },
-  { key: "inverted", build: demoInverted },
-  { key: "local-flip", build: demoLocalFlip },
-  { key: "shells", build: demoShells },
+export const MESH_FIXTURES: {
+  key: string;
+  build: () => RawMesh;
+}[] = [
+  { key: "perfect", build: perfectCube },
+  { key: "broken", build: brokenMesh },
+  { key: "thin", build: hollowShell },
+  { key: "inverted", build: invertedNormals },
+  { key: "local-flip", build: localFlip },
+  { key: "shells", build: multiShell },
 ];

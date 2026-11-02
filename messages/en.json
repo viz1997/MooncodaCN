@@ -1387,8 +1387,6 @@
       "title": "Model Inspector",
       "subtitle": "Pre-print check (WJP full color)",
       "upload": "Upload model",
-      "demo": "Demo models",
-      "demoLabel": "Choose a demo model",
       "resetView": "Reset view",
       "analyzing": "Analyzing…",
       "fileLabel": "Choose a model file"
@@ -1636,38 +1634,11 @@
       "noiseShells": "{count} noise fragment shell(s) — they print as loose blobs.",
       "multipleShells": "The model is made of {count} separate shells."
     },
-    "demo": {
-      "perfect": {
-        "label": "Perfect cube",
-        "desc": "Nothing wrong"
-      },
-      "broken": {
-        "label": "Broken model",
-        "desc": "Hole + crack + bad faces"
-      },
-      "thin": {
-        "label": "Hollow shell",
-        "desc": "Sealed cavity"
-      },
-      "inverted": {
-        "label": "Fully inverted",
-        "desc": "Normals inside-out"
-      },
-      "local-flip": {
-        "label": "Local flip",
-        "desc": "One face wound backwards"
-      },
-      "shells": {
-        "label": "Multiple shells",
-        "desc": "Separate part + noise fragment"
-      }
-    },
     "empty": {
       "title": "Before you print: take a look",
       "desc": "Automatically detects inverted normals, bad edges (gaps / planar holes / degenerate / duplicate faces / non-manifold edges) and shell problems (extra shells / noise fragments / sealed cavities), judges them against WJP full-color rules, and marks every problem in the 3D view — click a list entry to fly to it.",
       "drop": "Drop a model file here, or click to choose one",
-      "local": "Files are parsed in your browser — nothing is uploaded to the server",
-      "demoHint": "No file at hand? Try a built-in demo model:"
+      "local": "Files are parsed in your browser — nothing is uploaded to the server"
     },
     "stats": {
       "notLoaded": "No model loaded",

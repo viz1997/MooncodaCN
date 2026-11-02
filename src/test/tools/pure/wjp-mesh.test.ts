@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { analyzeNewMesh } from "@/features/tools/lib/mesh/analyze";
-import {
-  DEMO_MODELS,
-  demoBroken,
-  demoInverted,
-  demoLocalFlip,
-  demoPerfect,
-  demoShells,
-  demoThinWall,
-} from "@/features/tools/lib/mesh/demo";
 import type { AnalysisResult, RawMesh } from "@/features/tools/lib/mesh/types";
 import { evaluateWjp } from "@/features/tools/lib/mesh/wjp";
+import {
+  brokenMesh,
+  hollowShell,
+  invertedNormals,
+  localFlip,
+  MESH_FIXTURES,
+  multiShell,
+  perfectCube,
+} from "@/test/tools/fixtures/mesh-fixtures";
 
 /**
  * WJP 模型检查的算法测试。
@@ -18,8 +18,8 @@ import { evaluateWjp } from "@/features/tools/lib/mesh/wjp";
  * 全部是**纯计算**:不需要 DB、不需要网络、不需要浏览器。跑在 unit project 里
  * (`pnpm test:run --project=unit`)。
  *
- * 夹具用移植过来的 6 个内置演示模型 —— 几何是确定性的,免去造模型的功夫;
- * 每个模型对应一类典型缺陷,断言写死期望检出项。
+ * 夹具用移植过来的 6 个内置网格 —— 几何是确定性的,免去造模型的功夫;
+ * 每个网格对应一类典型缺陷,断言写死期望检出项。
  */
 
 function analyze(mesh: RawMesh): {
@@ -33,9 +33,9 @@ function analyze(mesh: RawMesh): {
   return { result, stages };
 }
 
-describe("analyzeNewMesh —— 演示模型", () => {
+describe("analyzeNewMesh —— 网格夹具", () => {
   it("完整立方体:水密、无坏面、无问题", () => {
-    const { result, stages } = analyze(demoPerfect());
+    const { result, stages } = analyze(perfectCube());
     const s = result.stats;
 
     expect(stages).toEqual(["weld", "shells", "cluster", "support", "done"]);
@@ -54,7 +54,7 @@ describe("analyzeNewMesh —— 演示模型", () => {
   });
 
   it("破损模型:平面孔洞 + 裂缝 + 退化面 + 重复面 + 非流形边", () => {
-    const { result } = analyze(demoBroken());
+    const { result } = analyze(brokenMesh());
     const s = result.stats;
 
     expect(s.planarHoleCount).toBeGreaterThan(0);
@@ -67,7 +67,7 @@ describe("analyzeNewMesh —— 演示模型", () => {
   });
 
   it("薄壁空心:检出密封内腔", () => {
-    const { result } = analyze(demoThinWall());
+    const { result } = analyze(hollowShell());
     const s = result.stats;
 
     expect(s.sealedHollow).toBe(true);
@@ -76,7 +76,7 @@ describe("analyzeNewMesh —— 演示模型", () => {
   });
 
   it("整体反转:法线朝内,体积为负", () => {
-    const { result } = analyze(demoInverted());
+    const { result } = analyze(invertedNormals());
     const s = result.stats;
 
     expect(s.globalInvertedShellCount).toBeGreaterThanOrEqual(1);
@@ -84,7 +84,7 @@ describe("analyzeNewMesh —— 演示模型", () => {
   });
 
   it("局部翻转:只有局部翻转面,没有整体朝内的壳", () => {
-    const { result } = analyze(demoLocalFlip());
+    const { result } = analyze(localFlip());
     const s = result.stats;
 
     expect(s.flippedFaceCount).toBeGreaterThanOrEqual(1);
@@ -92,7 +92,7 @@ describe("analyzeNewMesh —— 演示模型", () => {
   });
 
   it("多壳体:独立部件 + 噪声碎片", () => {
-    const { result } = analyze(demoShells());
+    const { result } = analyze(multiShell());
     const s = result.stats;
 
     expect(s.componentCount).toBeGreaterThanOrEqual(3);
@@ -100,8 +100,8 @@ describe("analyzeNewMesh —— 演示模型", () => {
     expect(s.extraShellCount).toBeGreaterThanOrEqual(1);
   });
 
-  it("演示模型清单:6 个,key 唯一", () => {
-    const keys = DEMO_MODELS.map((d) => d.key);
+  it("夹具清单:6 个,key 唯一", () => {
+    const keys = MESH_FIXTURES.map((d) => d.key);
     expect(keys).toEqual([
       "perfect",
       "broken",
@@ -111,15 +111,15 @@ describe("analyzeNewMesh —— 演示模型", () => {
       "shells",
     ]);
     expect(new Set(keys).size).toBe(keys.length);
-    for (const demo of DEMO_MODELS) {
-      expect(demo.build().positions.length % 9).toBe(0);
+    for (const fixture of MESH_FIXTURES) {
+      expect(fixture.build().positions.length % 9).toBe(0);
     }
   });
 });
 
 describe("evaluateWjp —— 工艺评估", () => {
   it("完整立方体:pass", () => {
-    const { result } = analyze(demoPerfect());
+    const { result } = analyze(perfectCube());
     const report = evaluateWjp(result);
 
     expect(report.tone).toBe("pass");
@@ -134,7 +134,7 @@ describe("evaluateWjp —— 工艺评估", () => {
   });
 
   it("破损模型:fail,坏边与破面各报一条", () => {
-    const { result } = analyze(demoBroken());
+    const { result } = analyze(brokenMesh());
     const report = evaluateWjp(result);
 
     expect(report.tone).toBe("fail");
@@ -160,7 +160,7 @@ describe("evaluateWjp —— 工艺评估", () => {
   });
 
   it("密封内腔:critical", () => {
-    const { result } = analyze(demoThinWall());
+    const { result } = analyze(hollowShell());
     const report = evaluateWjp(result);
 
     expect(report.tone).toBe("fail");
@@ -172,7 +172,7 @@ describe("evaluateWjp —— 工艺评估", () => {
   });
 
   it("整体反转:法向结论为 critical", () => {
-    const { result } = analyze(demoInverted());
+    const { result } = analyze(invertedNormals());
     const report = evaluateWjp(result);
 
     expect(report.tone).toBe("fail");
@@ -183,7 +183,7 @@ describe("evaluateWjp —— 工艺评估", () => {
   });
 
   it("局部翻转:法向结论为 critical", () => {
-    const { result } = analyze(demoLocalFlip());
+    const { result } = analyze(localFlip());
     const report = evaluateWjp(result);
 
     const flipped = report.findings.find(
@@ -194,7 +194,7 @@ describe("evaluateWjp —— 工艺评估", () => {
   });
 
   it("多壳体:给出装配间隙提示", () => {
-    const { result } = analyze(demoShells());
+    const { result } = analyze(multiShell());
     const report = evaluateWjp(result);
 
     const assembly = report.findings.find(
