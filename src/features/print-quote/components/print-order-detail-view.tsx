@@ -1,0 +1,236 @@
+"use client";
+
+/**
+ * 工单详情页 —— `/dashboard/print-orders/[orderNo]`
+ *
+ * ## 这一页要回答四个问题
+ *
+ *   1. 现在到哪一步了?   → 状态 chip + 时间线
+ *   2. 当时按什么价收的? → 报价明细(服务端重算后落库的那个数)
+ *   3. 模型是哪个?       → 模型文件信息
+ *   4. 我留过什么话?     → 联系方式 + 下单留言
+ *
+ * ## 状态是轮询来的,不是刷新来的
+ *
+ * 工作室在后台改状态是**外部**写入的。这里接 `usePrintOrderDetailPolling`,
+ * 30s 一次;用户切走再切回来会立刻刷一次。
+ *
+ * ## 取消按钮只对「待确认」出现
+ *
+ * 能不能取消由 `isUserCancellable()` 说了算 —— 规则在数据层也守着,
+ * 这里只是**不给用户看一个点了会失败的按钮**。
+ */
+
+import { ArrowLeft, Box, FileText, Mail, Phone, User } from "lucide-react";
+import { useFormatter, useTranslations } from "next-intl";
+
+import { OrderCancelButton } from "@/features/print-quote/components/order-cancel-button";
+import { OrderTimeline } from "@/features/print-quote/components/order-timeline";
+import { QuoteBreakdown } from "@/features/print-quote/components/quote-breakdown";
+import { usePrintOrderDetailPolling } from "@/features/print-quote/hooks/use-print-order-polling";
+import { formatCents, formatDims } from "@/features/print-quote/lib/format";
+import type {
+  PrintOrderEventView,
+  UserPrintOrderDetail,
+} from "@/features/print-quote/lib/quote-types";
+import { isUserCancellable } from "@/features/print-quote/lib/status-machine";
+import { PRINT_ORDER_STATUS_CHIP } from "@/features/print-quote/lib/status-ui";
+import { Link } from "@/i18n/routing";
+
+export function PrintOrderDetailView({
+  order: initialOrder,
+  events: initialEvents,
+}: {
+  order: UserPrintOrderDetail;
+  events: PrintOrderEventView[];
+}) {
+  const t = useTranslations("PrintQuote");
+  const format = useFormatter();
+
+  const { order, events, refresh } = usePrintOrderDetailPolling(
+    initialOrder.orderNo,
+    { order: initialOrder, events: initialEvents }
+  );
+
+  const cancellable = isUserCancellable(order.status);
+
+  return (
+    <div className="space-y-6">
+      <Link
+        href="/dashboard/print-orders"
+        className="inline-flex items-center gap-1.5 text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+      >
+        <ArrowLeft className="size-3.5" />
+        {t("detail.back")}
+      </Link>
+
+      {/* 头部:订单号 / 状态 / 时间 */}
+      <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="space-y-1.5">
+            <h1 className="font-mono text-base font-semibold text-foreground">
+              {order.orderNo}
+            </h1>
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`rounded-full px-2 py-0.5 text-[11px] ring-1 ring-inset ${
+                  PRINT_ORDER_STATUS_CHIP[order.status]
+                }`}
+              >
+                {t(`status.${order.status}`)}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {t("detail.placedAt")}:{" "}
+                {format.dateTime(new Date(order.createdAt), {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                })}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {t("detail.updatedAt")}:{" "}
+                {format.dateTime(new Date(order.updatedAt), {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                })}
+              </span>
+            </div>
+          </div>
+
+          {cancellable ? (
+            <OrderCancelButton
+              orderNo={order.orderNo}
+              onCancelled={async () => {
+                await refresh();
+              }}
+            />
+          ) : null}
+        </div>
+      </section>
+
+      {/* 时间线 */}
+      <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+        <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-foreground">
+          <FileText className="size-4 text-muted-foreground" />
+          {t("timeline.title")}
+        </h2>
+        <OrderTimeline events={events} viewer="user" />
+      </section>
+
+      {/* 报价明细 */}
+      <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+        <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Box className="size-4 text-muted-foreground" />
+          {t("quote.title")}
+        </h2>
+        <div className="space-y-2">
+          <QuoteBreakdown values={order} totalSize="sm" />
+        </div>
+      </section>
+
+      {/* 模型文件 */}
+      <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+        <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Box className="size-4 text-muted-foreground" />
+          {t("detail.model.title")}
+        </h2>
+        <dl className="grid gap-3 sm:grid-cols-2">
+          <Fact
+            label={t("detail.model.fileName")}
+            value={order.modelFileName}
+            mono
+          />
+          <Fact
+            label={t("detail.model.size")}
+            value={
+              order.modelSizeBytes === null
+                ? "—"
+                : `${(order.modelSizeBytes / 1024 / 1024).toFixed(2)} MB`
+            }
+          />
+          <Fact
+            label={t("detail.model.volume")}
+            value={`${order.volumeCM3.toFixed(2)} cm³`}
+          />
+          <Fact
+            label={t("detail.model.surfaceArea")}
+            value={`${order.surfaceAreaCM2.toFixed(2)} cm²`}
+          />
+          <Fact label={t("detail.model.dims")} value={formatDims(order.dims)} />
+          <Fact
+            label={t("detail.model.weight")}
+            value={`${order.materialWeightG.toFixed(1)} g`}
+          />
+          <Fact
+            label={t("detail.model.supportWeight")}
+            value={
+              order.supportWeightG === null
+                ? "—"
+                : `${order.supportWeightG.toFixed(1)} g`
+            }
+          />
+          <Fact
+            label={t("quote.total")}
+            value={formatCents(order.totalPriceCents)}
+          />
+        </dl>
+      </section>
+
+      {/* 联系方式 */}
+      <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+        <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-foreground">
+          <User className="size-4 text-muted-foreground" />
+          {t("detail.contact.title")}
+        </h2>
+        <dl className="grid gap-3 sm:grid-cols-2">
+          <Fact label={t("detail.contact.name")} value={order.contactName} />
+          <Fact
+            label={t("detail.contact.email")}
+            value={order.contactEmail}
+            icon={<Mail className="size-3" />}
+          />
+          <Fact
+            label={t("detail.contact.phone")}
+            value={order.contactPhone ?? "—"}
+            icon={<Phone className="size-3" />}
+          />
+        </dl>
+        {order.note ? (
+          <div className="mt-4 rounded-md border border-border bg-muted/40 px-3 py-2">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              {t("detail.contact.note")}
+            </p>
+            <p className="mt-0.5 whitespace-pre-line text-xs text-foreground">
+              {order.note}
+            </p>
+          </div>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
+function Fact({
+  label,
+  value,
+  mono,
+  icon,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  icon?: React.ReactNode;
+}) {
+  return (
+    <div>
+      <dt className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        {icon}
+        {label}
+      </dt>
+      <dd
+        className={`mt-0.5 text-sm text-foreground ${mono ? "font-mono break-all" : ""}`}
+      >
+        {value}
+      </dd>
+    </div>
+  );
+}

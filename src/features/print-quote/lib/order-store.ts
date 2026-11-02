@@ -4,19 +4,36 @@
  * 单独一个模块,不写在 route 文件里 —— Next.js 的 route 文件只该导出
  * HTTP 方法处理器和 runtime/maxDuration,多导出一个函数就可能被框架
  * 当成非法导出。
+ *
+ * ## 状态变更只有一个入口:`transitionPrintOrderStatus()`
+ *
+ * 以前这里是 `updatePrintOrderStatus(orderNo, status)` —— 传什么状态就写什么,
+ * 不校验、不留痕。它是一条**绕过时间线的后门**:状态变了但用户的时间线上
+ * 什么都看不到,工作室也无法追责。现在这个函数已经删掉,所有状态变更都必须
+ * 走 `transitionPrintOrderStatus()`,它把「锁行 → 判状态机 → 改状态 → 写
+ * 时间线」放在一个事务里。
  */
 
-import { desc, eq, type SQL, sql } from "drizzle-orm";
+import { and, desc, eq, type SQL, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 
 import { db } from "@/db";
-import { type PrintOrderRow, printOrder } from "@/db/schema";
+import {
+  type PrintOrderEventRow,
+  type PrintOrderRow,
+  printOrder,
+} from "@/db/schema";
 
+import { appendPrintOrderEvent } from "./order-events";
 import type {
+  PrintOrderEventActor,
+  PrintOrderLocale,
   PrintOrderStatus,
   PrintQuote,
   UserPrintOrder,
+  UserPrintOrderDetail,
 } from "./quote-types";
+import { classifyTransition } from "./status-machine";
 
 /** 下单要写进库的字段 */
 export type CreatePrintOrderInput = {
@@ -31,48 +48,69 @@ export type CreatePrintOrderInput = {
   contactEmail: string;
   contactPhone: string | null;
   note: string | null;
+  /** 这单的邮件通知语言 */
+  locale: PrintOrderLocale;
 };
 
-/** 落库一条新订单 */
+/**
+ * 落库一条新订单
+ *
+ * **事务**:插订单 + 插第一条时间线事件(`from=null` → `to=PENDING`,actor=user)。
+ * 两条要一起成功 —— 只有订单没有事件,时间线就是空的,用户看到一张空白的
+ * 流水,根本不知道工单是从哪来的。
+ */
 export async function createPrintOrder(
   input: CreatePrintOrderInput
 ): Promise<PrintOrderRow> {
-  const [row] = await db
-    .insert(printOrder)
-    .values({
-      id: nanoid(),
-      orderNo: input.orderNo,
-      userId: input.userId,
-      status: "PENDING",
-      modelFileName: input.modelFileName,
-      modelUrl: input.modelUrl,
-      modelSizeBytes: input.modelSizeBytes,
-      volumeCM3: String(input.quote.volumeCM3),
-      surfaceAreaCM2: String(input.quote.surfaceAreaCM2),
-      dimX: String(input.quote.dims[0]),
-      dimY: String(input.quote.dims[1]),
-      dimZ: String(input.quote.dims[2]),
-      materialWeightG: String(input.quote.materialWeightG),
-      supportWeightG:
-        input.quote.supportWeightG === null
-          ? null
-          : String(input.quote.supportWeightG),
-      materialDensity: String(input.quote.density),
-      unitPriceCentsPerGram: input.quote.unitPriceCentsPerGram,
-      weightFeeCents: input.quote.weightFeeCents,
-      varnishFeeCents: input.quote.varnishFeeCents,
-      supportFeeCents: input.quote.supportFeeCents,
-      totalPriceCents: input.quote.totalPriceCents,
-      contactName: input.contactName,
-      contactEmail: input.contactEmail,
-      contactPhone: input.contactPhone,
-      note: input.note,
-    })
-    .returning();
-  if (!row) {
-    throw new Error("insert print_order 没有返回行");
-  }
-  return row;
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(printOrder)
+      .values({
+        id: nanoid(),
+        orderNo: input.orderNo,
+        userId: input.userId,
+        status: "PENDING",
+        modelFileName: input.modelFileName,
+        modelUrl: input.modelUrl,
+        modelSizeBytes: input.modelSizeBytes,
+        volumeCM3: String(input.quote.volumeCM3),
+        surfaceAreaCM2: String(input.quote.surfaceAreaCM2),
+        dimX: String(input.quote.dims[0]),
+        dimY: String(input.quote.dims[1]),
+        dimZ: String(input.quote.dims[2]),
+        materialWeightG: String(input.quote.materialWeightG),
+        supportWeightG:
+          input.quote.supportWeightG === null
+            ? null
+            : String(input.quote.supportWeightG),
+        materialDensity: String(input.quote.density),
+        unitPriceCentsPerGram: input.quote.unitPriceCentsPerGram,
+        weightFeeCents: input.quote.weightFeeCents,
+        varnishFeeCents: input.quote.varnishFeeCents,
+        supportFeeCents: input.quote.supportFeeCents,
+        totalPriceCents: input.quote.totalPriceCents,
+        contactName: input.contactName,
+        contactEmail: input.contactEmail,
+        contactPhone: input.contactPhone,
+        note: input.note,
+        locale: input.locale,
+      })
+      .returning();
+    if (!row) {
+      throw new Error("insert print_order 没有返回行");
+    }
+
+    // 建单事件:时间线的第一格
+    await appendPrintOrderEvent(tx, {
+      orderId: row.id,
+      fromStatus: null,
+      toStatus: "PENDING",
+      actor: "user",
+      note: null,
+    });
+
+    return row;
+  });
 }
 
 /**
@@ -111,17 +149,205 @@ export async function listPrintOrders(opts?: {
     .limit(limit);
 }
 
-/** 后台改订单状态 */
-export async function updatePrintOrderStatus(
-  orderNo: string,
-  status: PrintOrderStatus
+/**
+ * 按订单号 + 用户取一单 —— 用户的订单详情页用
+ *
+ * 归属校验写在 WHERE 里:别人的单查出来就是 null(上层转 404,不是 403 ——
+ * 403 等于告诉别人「这个订单号存在」,订单号是可以被枚举的)。
+ */
+export async function getUserPrintOrderByOrderNo(
+  userId: string,
+  orderNo: string
 ): Promise<PrintOrderRow | null> {
   const rows = await db
-    .update(printOrder)
-    .set({ status, updatedAt: new Date() })
+    .select()
+    .from(printOrder)
     .where(eq(printOrder.orderNo, orderNo))
-    .returning();
+    .limit(1);
+  const row = rows[0];
+  if (!row || row.userId !== userId) return null;
+  return row;
+}
+
+/** 按订单号取一单 —— 后台用(不校验归属) */
+export async function getPrintOrderByOrderNo(
+  orderNo: string
+): Promise<PrintOrderRow | null> {
+  const rows = await db
+    .select()
+    .from(printOrder)
+    .where(eq(printOrder.orderNo, orderNo))
+    .limit(1);
   return rows[0] ?? null;
+}
+
+// ============================================
+// 状态流转
+// ============================================
+
+/**
+ * 状态流转失败的机器可读原因
+ *
+ * action 层拿这个 code 去 i18n 找对应文案 —— **不要 throw 字符串**,生产环境
+ * next-safe-action 的 `handleServerError` 会把异常统一糊成「服务器错误」,
+ * 用户等于没被告知原因。
+ */
+export type PrintOrderTransitionErrorCode =
+  /** 订单不存在,或者不是当前用户的 */
+  | "ORDER_NOT_FOUND"
+  /** 状态机不认这个跳转(终态无出边 / 越权) */
+  | "INVALID_TRANSITION"
+  /** 回退必须写备注 */
+  | "NOTE_REQUIRED"
+  /** 目标状态 = 当前状态(空转) */
+  | "SAME_STATUS";
+
+export class PrintOrderTransitionError extends Error {
+  readonly code: PrintOrderTransitionErrorCode;
+
+  constructor(code: PrintOrderTransitionErrorCode, message?: string) {
+    super(message ?? code);
+    this.name = "PrintOrderTransitionError";
+    this.code = code;
+  }
+}
+
+/** 状态流转的入参 */
+export type TransitionPrintOrderInput = {
+  orderNo: string;
+  /** 目标状态 */
+  to: PrintOrderStatus;
+  /** 谁改的 —— 决定时间线上这句话怎么写 */
+  actor: PrintOrderEventActor;
+  /** 人工备注;回退时必填 */
+  note: string | null;
+  /**
+   * 归属用户 —— **用户自助操作时必须传**
+   *
+   * 传了就写进 WHERE:查不到就是 ORDER_NOT_FOUND(别人的单按不存在处理)。
+   * 后台改状态时不传(不限归属)。
+   */
+  userId: string | null;
+};
+
+/**
+ * 状态流转 —— **唯一的状态写入口**
+ *
+ * 事务内四步:
+ *   1. `SELECT … FOR UPDATE` 锁住这一行(并发改同一单时串行化)
+ *   2. 状态机判定:非法 → 抛 INVALID_TRANSITION;同状态 → SAME_STATUS;
+ *      回退没备注 → NOTE_REQUIRED
+ *   3. 更新 `status` + `updated_at`
+ *   4. 追加一条时间线事件
+ *
+ * 第 3、4 步必须在同一个事务里:状态改了事件没写,或反过来,都是坏数据。
+ *
+ * ## 用户自助操作的两条额外限制
+ *
+ * `actor="user"` 时只允许「取消」,且只允许从 `PENDING` 取消:
+ *   - 不能自己推进状态 —— 否则用户可以把单子标成「已签收」,绕过结算
+ *   - 确认之后不能撤单 —— 工作室已经投入产能了
+ *
+ * 这两条在**这里**兜住,而不是只写在 action 里 —— action 层的判断是 UI 便利,
+ * 这里是服务端授权边界。
+ */
+export async function transitionPrintOrderStatus(
+  input: TransitionPrintOrderInput
+): Promise<{ order: PrintOrderRow; event: PrintOrderEventRow }> {
+  const note = input.note?.trim() ? input.note.trim() : null;
+
+  return db.transaction(async (tx) => {
+    // 1. 锁行。归属过滤放在 WHERE 里 —— 查不到就是「不存在或不是你的」。
+    //    用 `and()` 拼条件,别用 `&&`:drizzle 的 SQL 对象是普通对象,
+    //    `a && b` 求值出来是 `b` —— 第一个条件会被静默丢掉。
+    const where = input.userId
+      ? and(
+          eq(printOrder.orderNo, input.orderNo),
+          eq(printOrder.userId, input.userId)
+        )
+      : eq(printOrder.orderNo, input.orderNo);
+
+    const locked = await tx
+      .select({ id: printOrder.id, status: printOrder.status })
+      .from(printOrder)
+      .where(where)
+      .limit(1)
+      .for("update");
+
+    const current = locked[0];
+    if (!current) {
+      throw new PrintOrderTransitionError(
+        "ORDER_NOT_FOUND",
+        `找不到工单 ${input.orderNo}`
+      );
+    }
+
+    const from = current.status;
+
+    // 2. 状态机判定
+    if (from === input.to) {
+      throw new PrintOrderTransitionError(
+        "SAME_STATUS",
+        `工单 ${input.orderNo} 已经是 ${from} 了`
+      );
+    }
+
+    const kind = classifyTransition(from, input.to);
+    if (!kind) {
+      throw new PrintOrderTransitionError(
+        "INVALID_TRANSITION",
+        `工单 ${input.orderNo} 不能从 ${from} 改到 ${input.to}`
+      );
+    }
+
+    // 回退必须写备注 —— 用户得知道为什么被退回来
+    if (kind === "backward" && !note) {
+      throw new PrintOrderTransitionError(
+        "NOTE_REQUIRED",
+        `工单 ${input.orderNo} 回退到 ${input.to} 必须写备注`
+      );
+    }
+
+    // 用户自助操作只允许取消
+    if (input.actor === "user") {
+      if (input.to !== "CANCELLED") {
+        throw new PrintOrderTransitionError(
+          "INVALID_TRANSITION",
+          "用户不能自己推进工单状态"
+        );
+      }
+      if (from !== "PENDING") {
+        throw new PrintOrderTransitionError(
+          "INVALID_TRANSITION",
+          "只有待确认的工单可以自己取消"
+        );
+      }
+    }
+
+    // 3. 改状态
+    const [updated] = await tx
+      .update(printOrder)
+      .set({ status: input.to, updatedAt: new Date() })
+      .where(eq(printOrder.id, current.id))
+      .returning();
+    if (!updated) {
+      throw new PrintOrderTransitionError(
+        "ORDER_NOT_FOUND",
+        `更新工单 ${input.orderNo} 失败`
+      );
+    }
+
+    // 4. 写时间线
+    const event = await appendPrintOrderEvent(tx, {
+      orderId: current.id,
+      fromStatus: from,
+      toStatus: input.to,
+      actor: input.actor,
+      note,
+    });
+
+    return { order: updated, event };
+  });
 }
 
 /**
@@ -141,6 +367,33 @@ export function toUserPrintOrder(row: PrintOrderRow): UserPrintOrder {
     dims: [Number(row.dimX), Number(row.dimY), Number(row.dimZ)],
     totalPriceCents: row.totalPriceCents,
     createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+/**
+ * DB 行 → 用户侧详情视图
+ *
+ * 比列表多的是报价明细和联系方式。仍然**不含模型 URL** —— 那是工作室取件用的。
+ */
+export function toUserPrintOrderDetail(
+  row: PrintOrderRow
+): UserPrintOrderDetail {
+  return {
+    ...toUserPrintOrder(row),
+    modelSizeBytes: row.modelSizeBytes,
+    volumeCM3: Number(row.volumeCM3),
+    surfaceAreaCM2: Number(row.surfaceAreaCM2),
+    materialDensity: Number(row.materialDensity),
+    unitPriceCentsPerGram: row.unitPriceCentsPerGram,
+    weightFeeCents: row.weightFeeCents,
+    varnishFeeCents: row.varnishFeeCents,
+    supportFeeCents: row.supportFeeCents,
+    contactName: row.contactName,
+    contactEmail: row.contactEmail,
+    contactPhone: row.contactPhone,
+    note: row.note,
+    locale: row.locale === "en" ? "en" : "zh",
   };
 }
 

@@ -12,18 +12,41 @@
  *  - 打印订单 = `print_order` 表(按克重计价的 3D 打印工单)
  *
  * 两张表、两个后台页,互不干涉。
+ *
+ * ## 改状态走状态机,不是随便写
+ *
+ * 2026-11-02 之前这里是 `updatePrintOrderStatus(orderNo, status)` —— 传什么
+ * 写什么,不校验、不留痕。现在统一走 `transitionPrintOrderStatus()`:
+ * 锁行 → 状态机判定 → 改状态 → **写时间线**,全在一个事务里。
+ *
+ * 后台的 `<Select>` 只是给人看的便利,真正的拒绝发生在数据层:
+ *   - 终态(已完成/已取消)没有出边
+ *   - 回退必须写备注(用户得知道为什么被退回来)
  */
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { z } from "zod";
-
 import {
+  notifyPrintOrderStatusChanged,
+  toPrintOrderMailInfo,
+} from "@/features/print-quote/lib/notifications";
+import {
+  listPrintOrderEvents,
+  toPrintOrderEventView,
+} from "@/features/print-quote/lib/order-events";
+import {
+  getPrintOrderByOrderNo,
   getPrintOrderStats,
   listPrintOrders,
   type PrintOrderStats,
-  updatePrintOrderStatus,
+  PrintOrderTransitionError,
+  transitionPrintOrderStatus,
 } from "@/features/print-quote/lib/order-store";
-import { PRINT_ORDER_STATUSES } from "@/features/print-quote/lib/quote-types";
+import {
+  PRINT_ORDER_STATUSES,
+  type PrintOrderStatus,
+} from "@/features/print-quote/lib/quote-types";
 import { adminAction } from "@/lib/safe-action";
 
 import { type AdminPrintOrder, toAdminPrintOrder } from "./types";
@@ -62,32 +85,94 @@ export const adminListPrintOrdersAction = withAdminPrintOrderAction("list")
 const updateStatusSchema = z.object({
   orderNo: z.string().min(1).max(64),
   status: z.enum(PRINT_ORDER_STATUSES),
+  /**
+   * 备注 —— 回退时**必填**(服务端强校验)
+   *
+   * 前端也会拦一道(选了回退目标就展开输入框,不填不让提交),但那只是
+   * 便利:这里才是权威。
+   */
+  note: z.string().max(1000).nullish(),
 });
+
+/** 改状态的返回 */
+export type AdminUpdateStatusResult =
+  | { ok: true; orderNo: string; status: PrintOrderStatus }
+  | { ok: false; code: string };
 
 /**
  * 改订单状态 —— 工作室推进工单用。
  *
- * 状态只往前进,不自动回退:改成更早的状态要人工确认,这里不拦
- * (运营偶尔要纠错),但至少得是合法状态值。
+ * 允许推进,也允许回退(跨级也允许)—— 但**回退必须写备注**。
+ * 非法跳转返回 `{ok:false, code}`,不 throw:抛出去会被 next-safe-action
+ * 糊成「服务器错误」,工作室根本不知道是哪儿错了。
  */
 export const adminUpdatePrintOrderStatusAction = withAdminPrintOrderAction(
   "updateStatus"
 )
   .schema(updateStatusSchema)
-  .action(async ({ parsedInput }) => {
-    const row = await updatePrintOrderStatus(
-      parsedInput.orderNo,
-      parsedInput.status
-    );
-    if (!row) {
-      throw new Error(`订单不存在:${parsedInput.orderNo}`);
+  .action(async ({ parsedInput }): Promise<AdminUpdateStatusResult> => {
+    try {
+      const { order } = await transitionPrintOrderStatus({
+        orderNo: parsedInput.orderNo,
+        to: parsedInput.status,
+        actor: "admin",
+        note: parsedInput.note ?? null,
+        // 后台不限归属 —— 工作室看得到所有人的单
+        userId: null,
+      });
+
+      // 通知用户 —— 邮件按**订单的语言**发,不是按后台界面的语言
+      after(async () => {
+        await notifyPrintOrderStatusChanged({
+          order: toPrintOrderMailInfo(order),
+          toStatus: parsedInput.status,
+          note: parsedInput.note ?? null,
+        });
+      });
+
+      revalidatePath("/[locale]/admin/print-orders", "page");
+
+      return { ok: true, orderNo: order.orderNo, status: order.status };
+    } catch (error) {
+      if (error instanceof PrintOrderTransitionError) {
+        return { ok: false, code: error.code };
+      }
+      throw error;
     }
+  });
 
-    revalidatePath("/admin/print-orders");
+const detailSchema = z.object({
+  orderNo: z.string().min(1).max(64),
+});
 
+/** 详情(订单 + 时间线)—— 后台弹窗用 */
+export type AdminPrintOrderDetailResult =
+  | {
+      ok: true;
+      order: AdminPrintOrder;
+      events: ReturnType<typeof toPrintOrderEventView>[];
+    }
+  | { ok: false; code: "ORDER_NOT_FOUND" };
+
+/**
+ * 取一张工单的详情 + 完整时间线
+ *
+ * 弹窗打开时拉一次:时间线是这条链路新加的东西,后台也得看得见 ——
+ * 「工作室改了什么、什么时候改的、为什么回退」全在这儿。
+ */
+export const adminGetPrintOrderDetailAction = withAdminPrintOrderAction(
+  "detail"
+)
+  .schema(detailSchema)
+  .action(async ({ parsedInput }): Promise<AdminPrintOrderDetailResult> => {
+    const row = await getPrintOrderByOrderNo(parsedInput.orderNo);
+    if (!row) {
+      return { ok: false, code: "ORDER_NOT_FOUND" };
+    }
+    const events = await listPrintOrderEvents(row.id);
     return {
-      orderNo: row.orderNo,
-      status: row.status,
-      message: "状态已更新",
+      ok: true,
+      order: toAdminPrintOrder(row),
+      events: events.map(toPrintOrderEventView),
     };
   });

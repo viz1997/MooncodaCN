@@ -752,7 +752,8 @@
       "notifications": "Notifications",
       "deckDetails": "Deck Details",
       "ticketDetails": "Ticket Details",
-      "printOrders": "My Print Orders"
+      "printOrders": "My Print Orders",
+      "printOrderDetail": "Print Order Details"
     },
     "sidebar": {
       "settings": "Settings",
@@ -1528,7 +1529,9 @@
     "list": {
       "title": "My print orders",
       "empty": "No orders yet",
-      "viewAll": "View all"
+      "viewAll": "View all",
+      "viewDetail": "View details",
+      "loading": "Loading…"
     },
     "status": {
       "PENDING": "Pending",
@@ -1537,6 +1540,137 @@
       "SHIPPED": "Shipped",
       "COMPLETED": "Completed",
       "CANCELLED": "Cancelled"
+    },
+    "email": {
+      "common": {
+        "greeting": "Hi {name},",
+        "orderNo": "Order number",
+        "total": "Total",
+        "model": "Model",
+        "customer": "Customer",
+        "status": "Status: {status}",
+        "action": "View order",
+        "noteLabel": "Note from the studio",
+        "yourNoteLabel": "Your note",
+        "customerNoteLabel": "Customer note"
+      },
+      "created": {
+        "subject": "Print order {orderNo} submitted",
+        "preview": "We received your print order {orderNo}",
+        "heading": "Your order is in",
+        "body": "We got your model and quote request. The studio will confirm material, colour and lead time within one business day, and you will get an email as soon as it is confirmed.",
+        "body2": "Nothing is charged now — the studio confirms the quote and settles separately."
+      },
+      "statusChanged": {
+        "subject": "Print order {orderNo}: {status}",
+        "preview": "Order {orderNo} is now “{status}”",
+        "heading": "Your print order moved along",
+        "body": "The studio moved order {orderNo} to “{status}”.",
+        "body2": "You can see the full timeline on the order page."
+      },
+      "cancelled": {
+        "subject": "Print order {orderNo} cancelled",
+        "preview": "Order {orderNo} was cancelled",
+        "heading": "Your order was cancelled",
+        "body": "Order {orderNo} has been cancelled.",
+        "body2": "If this was a mistake, just place a new order — the quote can be recalculated any time."
+      },
+      "studioNewOrder": {
+        "subject": "New print order {orderNo}",
+        "preview": "New print order {orderNo} needs confirmation",
+        "heading": "A new print order came in",
+        "body": "{name} submitted print order {orderNo}.",
+        "body2": "When you change the status in the admin, the customer is emailed automatically."
+      },
+      "studioCancelled": {
+        "subject": "Print order {orderNo} cancelled by the customer",
+        "preview": "Order {orderNo} was cancelled by the customer",
+        "heading": "The customer cancelled their order",
+        "body": "{name} cancelled print order {orderNo}.",
+        "bodyWithNote": "Customer note: {note}"
+      }
+    },
+    "timeline": {
+      "title": "Order timeline",
+      "created": "Submitted the order",
+      "transition": "{actor} moved the order from “{from}” to “{to}”",
+      "noteLabel": "Note",
+      "actorUser": {
+        "self": "You",
+        "other": "The customer"
+      },
+      "actorAdmin": {
+        "self": "The studio",
+        "other": "The studio"
+      },
+      "actorSystem": {
+        "self": "System",
+        "other": "System"
+      },
+      "empty": "No status changes yet"
+    },
+    "detail": {
+      "title": "Order details",
+      "back": "Back to my print orders",
+      "orderNo": "Order number",
+      "placedAt": "Placed at",
+      "updatedAt": "Last updated",
+      "model": {
+        "title": "Model file",
+        "fileName": "File name",
+        "size": "File size",
+        "volume": "Volume",
+        "surfaceArea": "Surface area",
+        "dims": "Finished size",
+        "weight": "Material weight",
+        "supportWeight": "Support weight"
+      },
+      "contact": {
+        "title": "Contact",
+        "name": "Name",
+        "email": "Email",
+        "phone": "Phone",
+        "note": "Order note"
+      },
+      "cancel": {
+        "button": "Cancel order",
+        "confirmTitle": "Cancel this order?",
+        "confirmBody": "The studio will not start production. You can place a new order any time.",
+        "noteLabel": "Reason (optional)",
+        "notePlaceholder": "Tell the studio why you are cancelling",
+        "submitting": "Cancelling…",
+        "success": "Order cancelled",
+        "errors": {
+          "ORDER_NOT_FOUND": "Order not found",
+          "ORDER_NOT_CANCELLABLE": "This order can no longer be cancelled",
+          "INVALID_TRANSITION": "This order cannot be cancelled in its current state",
+          "NOTE_REQUIRED": "Please give a reason",
+          "SAME_STATUS": "This order is already cancelled",
+          "FAILED": "Cancel failed, please try again"
+        }
+      }
+    },
+    "admin": {
+      "statusTitle": "Order status",
+      "selectPlaceholder": "Pick the new status",
+      "groups": {
+        "forward": "Move forward",
+        "backward": "Roll back",
+        "cancel": "Cancel"
+      },
+      "noteRequired": "Rolling back needs a note",
+      "noteOptional": "Note (optional)",
+      "notePlaceholder": "Tell the customer what happened",
+      "timelineTitle": "Order timeline",
+      "localeLabel": "Notification language",
+      "errors": {
+        "ORDER_NOT_FOUND": "Order not found",
+        "INVALID_TRANSITION": "This status change is not allowed",
+        "NOTE_REQUIRED": "Rolling back needs a note",
+        "SAME_STATUS": "The status did not change"
+      },
+      "submit": "Apply change",
+      "discard": "Cancel"
     }
   }
 }

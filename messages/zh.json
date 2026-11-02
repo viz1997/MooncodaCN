@@ -749,7 +749,8 @@
       "notifications": "通知设置",
       "deckDetails": "卡组详情",
       "ticketDetails": "工单详情",
-      "printOrders": "我的打印订单"
+      "printOrders": "我的打印订单",
+      "printOrderDetail": "工单详情"
     },
     "sidebar": {
       "settings": "设置",
@@ -1525,7 +1526,9 @@
     "list": {
       "title": "我的打印订单",
       "empty": "还没有下单记录",
-      "viewAll": "查看全部"
+      "viewAll": "查看全部",
+      "viewDetail": "查看详情",
+      "loading": "加载中…"
     },
     "status": {
       "PENDING": "待确认",
@@ -1534,6 +1537,137 @@
       "SHIPPED": "已发货",
       "COMPLETED": "已完成",
       "CANCELLED": "已取消"
+    },
+    "email": {
+      "common": {
+        "greeting": "{name},你好",
+        "orderNo": "订单号",
+        "total": "合计",
+        "model": "模型",
+        "customer": "客户",
+        "status": "当前状态:{status}",
+        "action": "查看工单",
+        "noteLabel": "工作室备注",
+        "yourNoteLabel": "你的留言",
+        "customerNoteLabel": "客户留言"
+      },
+      "created": {
+        "subject": "打印订单 {orderNo} 已提交",
+        "preview": "我们收到了你的打印订单 {orderNo}",
+        "heading": "订单已提交",
+        "body": "我们收到了你的模型和报价请求。工作室会在 1 个工作日内确认材质、颜色与交期,确认后你会收到邮件。",
+        "body2": "提交时不扣款 —— 工作室确认报价后另行结算。"
+      },
+      "statusChanged": {
+        "subject": "打印订单 {orderNo}:{status}",
+        "preview": "工单 {orderNo} 的状态更新为「{status}」",
+        "heading": "你的打印订单有进展",
+        "body": "工作室把工单 {orderNo} 的状态改成了「{status}」。",
+        "body2": "你可以在工单详情页看到完整的时间线。"
+      },
+      "cancelled": {
+        "subject": "打印订单 {orderNo} 已取消",
+        "preview": "工单 {orderNo} 已取消",
+        "heading": "订单已取消",
+        "body": "工单 {orderNo} 已经取消。",
+        "body2": "如果这是误操作,重新下一单就行 —— 报价随时可以重算。"
+      },
+      "studioNewOrder": {
+        "subject": "新的打印订单 {orderNo}",
+        "preview": "有新的打印订单 {orderNo} 待确认",
+        "heading": "有新的打印订单",
+        "body": "客户 {name} 提交了打印订单 {orderNo}。",
+        "body2": "在后台改状态时,客户会自动收到邮件通知。"
+      },
+      "studioCancelled": {
+        "subject": "打印订单 {orderNo} 被用户取消",
+        "preview": "工单 {orderNo} 被用户取消",
+        "heading": "用户取消了打印订单",
+        "body": "客户 {name} 取消了打印订单 {orderNo}。",
+        "bodyWithNote": "客户留言:{note}"
+      }
+    },
+    "timeline": {
+      "title": "工单进度",
+      "created": "提交了工单",
+      "transition": "{actor}把状态从「{from}」改成了「{to}」",
+      "noteLabel": "备注",
+      "actorUser": {
+        "self": "你",
+        "other": "客户"
+      },
+      "actorAdmin": {
+        "self": "工作室",
+        "other": "工作室"
+      },
+      "actorSystem": {
+        "self": "系统",
+        "other": "系统"
+      },
+      "empty": "还没有状态变更记录"
+    },
+    "detail": {
+      "title": "工单详情",
+      "back": "返回我的打印订单",
+      "orderNo": "订单号",
+      "placedAt": "下单时间",
+      "updatedAt": "最后更新",
+      "model": {
+        "title": "模型文件",
+        "fileName": "文件名",
+        "size": "文件大小",
+        "volume": "体积",
+        "surfaceArea": "表面积",
+        "dims": "成品尺寸",
+        "weight": "耗材克重",
+        "supportWeight": "支撑克重"
+      },
+      "contact": {
+        "title": "联系方式",
+        "name": "称呼",
+        "email": "邮箱",
+        "phone": "电话",
+        "note": "下单留言"
+      },
+      "cancel": {
+        "button": "取消工单",
+        "confirmTitle": "确认取消这张工单?",
+        "confirmBody": "取消之后工作室不会开始生产。需要的话可以重新下单。",
+        "noteLabel": "取消原因(选填)",
+        "notePlaceholder": "告诉工作室为什么取消",
+        "submitting": "取消中…",
+        "success": "工单已取消",
+        "errors": {
+          "ORDER_NOT_FOUND": "找不到这张工单",
+          "ORDER_NOT_CANCELLABLE": "这张工单已经不能取消了",
+          "INVALID_TRANSITION": "当前状态不能取消",
+          "NOTE_REQUIRED": "请填写取消原因",
+          "SAME_STATUS": "这张工单已经取消了",
+          "FAILED": "取消失败,请稍后重试"
+        }
+      }
+    },
+    "admin": {
+      "statusTitle": "工单状态",
+      "selectPlaceholder": "选择要改成的状态",
+      "groups": {
+        "forward": "推进",
+        "backward": "回退",
+        "cancel": "取消"
+      },
+      "noteRequired": "回退必须写备注",
+      "noteOptional": "备注(选填)",
+      "notePlaceholder": "告诉用户发生了什么",
+      "timelineTitle": "工单时间线",
+      "localeLabel": "邮件通知语言",
+      "errors": {
+        "ORDER_NOT_FOUND": "工单不存在",
+        "INVALID_TRANSITION": "当前状态不能改成这个状态",
+        "NOTE_REQUIRED": "回退必须写备注",
+        "SAME_STATUS": "状态没有变化"
+      },
+      "submit": "确认修改",
+      "discard": "取消"
     }
   }
 }

@@ -1,10 +1,13 @@
 /**
- * POST /api/print-orders —— 打印服务下单
+ * /api/print-orders —— 打印服务的下单 + 我的工单列表
  *
  * 2026-11-01:改成**登录后下单**。订单挂在账号名下(`user_id`),用户在自己的
  * dashboard 页看进度。之前是匿名下单 + 「订单号 + 令牌」双因子查单。
  *
  * 用户带自己的 3D 模型来,按克重计价,工作室按这份工单生产。
+ *
+ * - `POST` —— 下单
+ * - `GET`  —— 当前用户的工单列表(给「我的打印订单」页轮询用)
  *
  * ## 服务端重算价格
  *
@@ -22,18 +25,30 @@
  * 模型已经由客户端直传到 R2(`/api/print-orders/upload-url` 签的 URL),
  * 这里只收 `modelUrl`。不收字节 —— Vercel function 4.5MB 请求体上限
  * 装不下模型文件。
+ *
+ * ## GET 的限流桶是 `printOrder`(120/min)
+ *
+ * 轮询比下单宽松得多:下单走 `strict`(3/min),轮询走 `printOrder`。
+ * 同账号开 4 个标签页 ≈ 72/min,在限内 —— 但余量不大,看日志再调。
  */
 
-import { type NextRequest, NextResponse } from "next/server";
+import { after, type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import type { PrintOrderRow } from "@/db/schema";
 import { isR2Configured, objectExists } from "@/features/image-gen/lib/r2";
 import { getPrintOrderUser } from "@/features/print-quote/lib/auth";
-import { createPrintOrder } from "@/features/print-quote/lib/order-store";
+import { notifyPrintOrderCreated } from "@/features/print-quote/lib/notifications";
+import {
+  createPrintOrder,
+  listUserPrintOrders,
+  toUserPrintOrder,
+} from "@/features/print-quote/lib/order-store";
 import {
   computePrintQuote,
   generatePrintOrderNo,
 } from "@/features/print-quote/lib/quote-server";
 import type { PrintOrderRequest } from "@/features/print-quote/lib/quote-types";
+import { normalizePrintOrderLocale } from "@/features/print-quote/lib/quote-types";
 import { isOwnModelUrl } from "@/features/print-quote/lib/upload-key";
 import { withApiLogging } from "@/lib/api-logger";
 import {
@@ -44,7 +59,7 @@ import {
 } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
-/** 一次 DB 写,30s 够 */
+/** 一次 DB 写 + 一次(异步)邮件,30s 够 */
 export const maxDuration = 30;
 
 const orderSchema = z.object({
@@ -75,7 +90,40 @@ const orderSchema = z.object({
   contactName: z.string().min(1).max(60),
   contactPhone: z.string().max(40).nullish(),
   note: z.string().max(1000).nullish(),
+  /**
+   * 这单的邮件通知语言
+   *
+   * 客户端传当前界面语言(`useLocale()`)。服务端兜底 zh ——
+   * 传 "zh-CN" 这种别的值也会落到 zh。
+   */
+  locale: z.string().max(10).nullish(),
 });
+
+async function handleList(request: NextRequest) {
+  const ip = getClientIp(request);
+
+  // 轮询桶:比下单(strict,3/min)宽松得多
+  const rl = await checkRateLimit(ip, "printOrder");
+  if (!rl.success) {
+    return createRateLimitResponse(rl);
+  }
+
+  const user = await getPrintOrderUser();
+  if (!user) {
+    return NextResponse.json(
+      { success: false, error: "请先登录" },
+      { status: 401, headers: getRateLimitHeaders(rl) }
+    );
+  }
+
+  // 归属写在 where 里 —— 这里只能拿到当前用户自己的单
+  const rows = await listUserPrintOrders(user.id, 50);
+
+  return NextResponse.json(
+    { orders: rows.map(toUserPrintOrder) },
+    { headers: getRateLimitHeaders(rl) }
+  );
+}
 
 async function handle(request: NextRequest) {
   const ip = getClientIp(request);
@@ -182,9 +230,13 @@ async function handle(request: NextRequest) {
   }
 
   const orderNo = generatePrintOrderNo();
+  // 订单语言钉在订单上 —— 之后工作室改状态发的通知邮件用这个语言,
+  // 不是「谁点的那个按钮」的语言
+  const locale = normalizePrintOrderLocale(parsed.data.locale);
 
+  let row: PrintOrderRow;
   try {
-    await createPrintOrder({
+    row = await createPrintOrder({
       orderNo,
       userId: user.id,
       modelFileName: input.modelFileName,
@@ -196,6 +248,7 @@ async function handle(request: NextRequest) {
       contactEmail: user.email,
       contactPhone: input.contactPhone,
       note: input.note,
+      locale,
     });
   } catch (error) {
     // 23505 = unique_violation —— orderNo 撞车(极小概率)
@@ -218,11 +271,26 @@ async function handle(request: NextRequest) {
     );
   }
 
+  // 通知邮件挂到响应之后发 —— 响应先出去,serverless 冻结也不会丢信,
+  // 也不会拖慢下单接口。邮件失败只记日志,不影响订单本身。
+  after(async () => {
+    await notifyPrintOrderCreated({
+      orderNo: row.orderNo,
+      contactName: row.contactName,
+      contactEmail: row.contactEmail,
+      totalPriceCents: row.totalPriceCents,
+      modelFileName: row.modelFileName,
+      locale: row.locale === "en" ? "en" : "zh",
+    });
+  });
+
   return NextResponse.json(
     {
       orderNo,
       quote,
-      createdAt: new Date().toISOString(),
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+      locale: row.locale,
     },
     { status: 201, headers: getRateLimitHeaders(rl) }
   );
@@ -238,4 +306,5 @@ function isUniqueViolation(error: unknown): boolean {
   );
 }
 
+export const GET = withApiLogging(handleList);
 export const POST = withApiLogging(handle);

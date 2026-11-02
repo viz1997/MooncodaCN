@@ -22,7 +22,7 @@
  * 都没出过浏览器 —— 跟克重工具「只算不存」的边界一致,只是多了一条出口。
  */
 
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -39,6 +39,7 @@ import {
 } from "@/features/print-quote/components/order-form";
 import { PrintOrderList } from "@/features/print-quote/components/print-order-list";
 import { QuoteSummary } from "@/features/print-quote/components/quote-summary";
+import { usePrintOrderPolling } from "@/features/print-quote/hooks/use-print-order-polling";
 import { formatCents } from "@/features/print-quote/lib/format";
 import type {
   PrintOrderCreated,
@@ -60,6 +61,13 @@ export function QuoteWorkbench({
   initialOrders: UserPrintOrder[];
 }) {
   const t = useTranslations("PrintQuote");
+  /**
+   * 当前界面语言 —— 跟着订单一起落库
+   *
+   * 之后工作室改状态发的通知邮件用**订单的语言**,不是「谁点的那个按钮」
+   * 的语言:改状态的是工作室(中文界面),但邮件是发给下单用户的。
+   */
+  const locale = useLocale();
 
   const [quoteInput, setQuoteInput] = useState<PrintQuoteInput | null>(null);
   const [modelPayload, setModelPayload] = useState<PricingModelPayload | null>(
@@ -107,9 +115,11 @@ export function QuoteWorkbench({
    * 我的订单
    *
    * 首屏由页面 RSC 查好传进来(这个登录用户最近的订单);下单成功后新单
-   * 插到最上面 —— 不用等刷新就能看到。
+   * 乐观插到最上面 —— 不用等刷新就能看到。
+   *
+   * 之后靠轮询保持新鲜:工作室在后台改了状态,这个页面开着也会跟着变。
    */
-  const [orders, setOrders] = useState<UserPrintOrder[]>(initialOrders);
+  const { orders, upsertOrder } = usePrintOrderPolling(initialOrders);
 
   const handleQuoteInput = useCallback((input: PrintQuoteInput | null) => {
     setQuoteInput(input);
@@ -216,6 +226,8 @@ export function QuoteWorkbench({
             contactName: contact.name,
             contactPhone: contact.phone || null,
             note: contact.note || null,
+            // 这单的邮件通知语言 —— 落库,之后改状态时按它发信
+            locale,
           }),
         });
 
@@ -232,27 +244,26 @@ export function QuoteWorkbench({
         setOrder(created);
         setStage("done");
         setPhase("idle");
-        // 新单插到列表顶部 —— 订单挂在账号名下,列表本身就是「我的订单」
-        setOrders((prev) => [
-          {
-            orderNo: created.orderNo,
-            status: "PENDING",
-            modelFileName: uploaded.fileName,
-            materialWeightG: created.quote.materialWeightG,
-            supportWeightG: created.quote.supportWeightG,
-            dims: created.quote.dims,
-            totalPriceCents: created.quote.totalPriceCents,
-            createdAt: created.createdAt,
-          },
-          ...prev,
-        ]);
+        // 新单乐观插到列表顶部 —— 订单挂在账号名下,列表本身就是「我的订单」。
+        // 服务端下一轮拉到这张单之后,以服务端为准。
+        upsertOrder({
+          orderNo: created.orderNo,
+          status: "PENDING",
+          modelFileName: uploaded.fileName,
+          materialWeightG: created.quote.materialWeightG,
+          supportWeightG: created.quote.supportWeightG,
+          dims: created.quote.dims,
+          totalPriceCents: created.quote.totalPriceCents,
+          createdAt: created.createdAt,
+          updatedAt: created.updatedAt,
+        });
       } catch (error) {
         console.error("[PrintQuote] 下单失败", error);
         setOrderError(t("order.errors.submit"));
         setPhase("idle");
       }
     },
-    [quoteInput, modelPayload, quoteFresh, t]
+    [quoteInput, modelPayload, quoteFresh, t, locale, upsertOrder]
   );
 
   const quoteSlot = useMemo(

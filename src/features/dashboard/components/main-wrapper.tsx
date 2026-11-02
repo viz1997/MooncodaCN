@@ -41,6 +41,9 @@ function getPageTitleKey(pathname: string): string {
   if (path.startsWith("/dashboard/support/")) {
     return "ticketDetails";
   }
+  if (path.startsWith("/dashboard/print-orders/")) {
+    return "printOrderDetail";
+  }
 
   return "dashboard";
 }

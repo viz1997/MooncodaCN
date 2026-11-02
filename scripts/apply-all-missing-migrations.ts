@@ -28,6 +28,13 @@
  * 重复跑安全。脚本里直接 embed SQL 而非读 .sql 文件，避免
  * dev 环境 drizzle/ 路径解析不一致。
  *
+ * ## 打印服务相关不在本脚本里
+ *
+ * print_order / print_order_event / print_order.locale 走各自的独立脚本：
+ *   - scripts/apply-print-order-schema.ts
+ *   - scripts/apply-print-order-event-schema.ts
+ * 复制一份进来只会让两份 SQL 漂移。
+ *
  * 用法：
  *   pnpm tsx scripts/apply-all-missing-migrations.ts
  *

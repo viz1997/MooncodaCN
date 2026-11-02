@@ -5,7 +5,7 @@
  *
  * 两处共用:
  *  - 报价台 `/quote` 底部(下单成功后新单会插到最上面)
- *  - dashboard `/dashboard/print-orders` 整页
+ *  - dashboard `/dashboard/print-orders` 整页(经 `PrintOrdersDashboardView`)
  *
  * ## 只读,没有「移除」
  *
@@ -13,109 +13,120 @@
  * 那时候它只是「本机的一个快捷方式」,删了不影响订单本身(订单在库里)。
  * 现在订单挂在账号名下,是正式的记录,没有「从列表里删掉」这回事。
  *
- * 数据每次都是现查的:报价台那部分由页面 RSC 查好传进来,dashboard 页
- * 由页面自己查。这里不缓存报价明细,免得改了尺寸之后本地还显示着旧价。
+ * ## 配色走语义 token
+ *
+ * 报价台在 marketing 布局(暖色 stone 底),dashboard 在 shadcn 主题里 ——
+ * 两边的 `--card` / `--border` / `--muted-foreground` 都是同一套暖灰,
+ * 用语义 token 一份代码两处都对。状态 chip 是例外:它有自己的语义色,
+ * 统一放在 `lib/status-ui.ts`,用户侧和后台共用一份。
  */
 
 import { PackageSearch } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "next-intl";
 
 import {
   formatCents,
   formatDims,
   formatGrams,
 } from "@/features/print-quote/lib/format";
-import type {
-  PrintOrderStatus,
-  UserPrintOrder,
-} from "@/features/print-quote/lib/quote-types";
+import type { UserPrintOrder } from "@/features/print-quote/lib/quote-types";
+import { PRINT_ORDER_STATUS_CHIP } from "@/features/print-quote/lib/status-ui";
 import { Link } from "@/i18n/routing";
-
-/** 状态标签样式 —— 文案走 i18n(`PrintQuote.status.*`) */
-const STATUS_CHIP: Record<PrintOrderStatus, string> = {
-  PENDING: "bg-amber-50 text-amber-700 ring-amber-600/20",
-  CONFIRMED: "bg-sky-50 text-sky-700 ring-sky-600/20",
-  IN_PRODUCTION: "bg-violet-50 text-violet-700 ring-violet-600/20",
-  SHIPPED: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
-  COMPLETED: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
-  CANCELLED: "bg-stone-100 text-stone-500 ring-stone-500/20",
-};
 
 export function PrintOrderList({
   orders,
   showAllLink = true,
+  loading = false,
 }: {
   orders: UserPrintOrder[];
   /** 报价台里显示「查看全部」;dashboard 页自己就是全部,不显示 */
   showAllLink?: boolean;
+  /** 首屏还在拉 —— 别急着显示「还没有下单记录」 */
+  loading?: boolean;
 }) {
   const t = useTranslations("PrintQuote");
+  const format = useFormatter();
 
   if (orders.length === 0) {
     return (
-      <section className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-stone-900">
-          <PackageSearch className="size-4 text-stone-400" />
+      <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <PackageSearch className="size-4 text-muted-foreground" />
           {t("list.title")}
         </h3>
-        <p className="mt-3 text-xs text-stone-400">{t("list.empty")}</p>
+        <p className="mt-3 text-xs text-muted-foreground">
+          {loading ? t("list.loading") : t("list.empty")}
+        </p>
       </section>
     );
   }
 
   return (
-    <section className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm">
+    <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
       <div className="mb-4 flex items-center justify-between gap-3">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-stone-900">
-          <PackageSearch className="size-4 text-stone-400" />
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <PackageSearch className="size-4 text-muted-foreground" />
           {t("list.title")}
         </h3>
         {showAllLink && (
           <Link
             href="/dashboard/print-orders"
-            className="text-xs text-stone-500 underline-offset-4 transition-colors hover:text-stone-900 hover:underline"
+            className="text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
           >
             {t("list.viewAll")}
           </Link>
         )}
       </div>
 
-      <ul className="divide-y divide-stone-100">
+      <ul className="divide-y divide-border">
         {orders.map((order) => (
           <li
             key={order.orderNo}
             className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3 first:pt-0 last:pb-0"
           >
-            <span className="font-mono text-xs font-medium text-stone-800">
+            <Link
+              href={`/dashboard/print-orders/${order.orderNo}`}
+              className="font-mono text-xs font-medium text-foreground underline-offset-4 hover:underline"
+            >
               {order.orderNo}
-            </span>
+            </Link>
 
             <span
               className={`rounded-full px-2 py-0.5 text-[11px] ring-1 ring-inset ${
-                STATUS_CHIP[order.status]
+                PRINT_ORDER_STATUS_CHIP[order.status]
               }`}
             >
               {t(`status.${order.status}`)}
             </span>
 
-            <span className="font-mono text-xs text-stone-600">
+            <span className="font-mono text-xs text-muted-foreground">
               {formatGrams(order.materialWeightG)}
               {order.supportWeightG !== null
                 ? ` + ${formatGrams(order.supportWeightG)}`
                 : null}
             </span>
 
-            <span className="font-mono text-xs text-stone-500">
+            <span className="font-mono text-xs text-muted-foreground">
               {formatDims(order.dims)}
             </span>
 
-            <span className="font-mono text-xs font-medium text-stone-800">
+            <span className="font-mono text-xs font-medium text-foreground">
               {formatCents(order.totalPriceCents)}
             </span>
 
-            <span className="text-[11px] text-stone-400">
-              {new Date(order.createdAt).toLocaleDateString("zh-CN")}
+            <span className="text-[11px] text-muted-foreground">
+              {format.dateTime(new Date(order.createdAt), {
+                dateStyle: "medium",
+                timeStyle: "short",
+              })}
             </span>
+
+            <Link
+              href={`/dashboard/print-orders/${order.orderNo}`}
+              className="ml-auto text-[11px] text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+            >
+              {t("list.viewDetail")}
+            </Link>
           </li>
         ))}
       </ul>

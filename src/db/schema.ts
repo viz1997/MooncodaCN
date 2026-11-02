@@ -2365,6 +2365,17 @@ export const printOrder = pgTable(
     contactPhone: text("contact_phone"),
     /** 用户留言(材质、颜色、特殊要求…) */
     note: text("note"),
+    /**
+     * 订单语言 —— 决定这单的邮件通知用中文还是英文
+     *
+     * 落库而不是取「当前请求的 locale」:改状态的邮件是**工作室**触发的,
+     * 那时请求 locale 是 admin 的语言,不是下单用户的语言。`user` 表又
+     * 没有 locale 列可以反推,所以语言偏好钉在**订单**上 —— 用户之后
+     * 改语言,不应该改写历史工单该用哪种语言通知。
+     *
+     * 默认 'zh':站点默认 locale 就是 zh,老订单(加列之前下的)也是中文单。
+     */
+    locale: text("locale").notNull().default("zh"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
@@ -2380,3 +2391,85 @@ export const printOrder = pgTable(
 
 export type PrintOrderRow = typeof printOrder.$inferSelect;
 export type NewPrintOrderRow = typeof printOrder.$inferInsert;
+
+/**
+ * 工单事件的操作者
+ *
+ * - user   —— 用户下单 / 用户自己取消
+ * - admin  —— 工作室改状态
+ * - system —— 预留(自动超时取消之类),当前没有用到
+ */
+export const printOrderEventActorEnum = pgEnum("print_order_event_actor", [
+  "user",
+  "admin",
+  "system",
+]);
+
+/**
+ * 打印工单事件(时间线)
+ *
+ * 每一次状态变化写一行 —— 用户侧工单详情页按时间顺序渲染它,后台详情
+ * 弹窗也看它。`print_order.status` 只记**当前**状态,记不住过程:用户问
+ * 「我上周那单改到哪了」,光看当前值是答不上来的。
+ *
+ * ## 为什么单独一张表而不是在 print_order 上挂个 jsonb
+ *
+ * 时间线是**只追加**的:查的时候按 (order_id, created_at) 顺序读,写的时候
+ * 只 INSERT。jsonb 数组每次改状态都要「读出来 → 改 → 写回去」,两笔并发
+ * 的状态变更会互相覆盖。行式存储天然没这个问题。
+ *
+ * ## from_status 可空
+ *
+ * 创建事件没有「原状态」—— from_status = NULL,to_status = 'PENDING'。
+ *
+ * ## 系统句子不落库
+ *
+ * 库里只存**人工写的自由文本**(note)。「工作室把工单从待确认改成了已确认」
+ * 这种句子由前端按 (actor, from, to) 用 i18n 现场渲染 —— 库里不存需要
+ * 翻译的字符串,用户中途切语言,老事件也能正确显示。
+ */
+export const printOrderEvent = pgTable(
+  "print_order_event",
+  {
+    id: text("id").primaryKey(),
+    /**
+     * 所属工单 —— 引用**内部主键**而不是 order_no
+     *
+     * 跟 `prompt_order_history.order_id` 一个口径:order_no 是给用户看的
+     * 业务号(会被截图、会被转发),不适合当外键。
+     */
+    orderId: text("order_id")
+      .notNull()
+      .references(() => printOrder.id, { onDelete: "cascade" }),
+    /** 原状态;创建事件为 null */
+    fromStatus: printOrderStatusEnum("from_status"),
+    /** 新状态 */
+    toStatus: printOrderStatusEnum("to_status").notNull(),
+    /** 谁改的 */
+    actor: printOrderEventActorEnum("actor").notNull(),
+    /** 人工备注;回退时必填 */
+    note: text("note"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    // 时间线读取模式:WHERE order_id = ? ORDER BY created_at —— 一条索引全覆盖
+    index("print_order_event_order_created_idx").on(t.orderId, t.createdAt),
+  ]
+);
+
+export type PrintOrderEventRow = typeof printOrderEvent.$inferSelect;
+export type NewPrintOrderEventRow = typeof printOrderEvent.$inferInsert;
+
+export const printOrderRelations = relations(printOrder, ({ many }) => ({
+  events: many(printOrderEvent),
+}));
+
+export const printOrderEventRelations = relations(
+  printOrderEvent,
+  ({ one }) => ({
+    order: one(printOrder, {
+      fields: [printOrderEvent.orderId],
+      references: [printOrder.id],
+    }),
+  })
+);

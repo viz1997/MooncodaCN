@@ -11,9 +11,24 @@
  *
  * 落库的 `total_price_cents` 是**服务端重算过的**报价(下单时重算,不信任
  * 客户端)。所以这一列就是用户当时看到的那个数,可以直接拿来对账。
+ *
+ * ## 改状态走状态机
+ *
+ * `<Select>` 的选项不是「所有状态随便挑」,而是 `allowedNextStatuses(当前)`
+ * 算出来的:推进 / 回退 / 取消分三组,终态的工单一组都没有(锁死)。
+ *
+ * 回退**必须写备注** —— 「把已发货的工单退回生产中」是个需要解释的动作,
+ * 用户得知道为什么。前端拦一道(必填框),数据层再强校验一道(真正的
+ * 授权边界)。
+ *
+ * ## 状态词走 i18n
+ *
+ * 后台其余文案还是硬编码中文(全量 i18n 化后台是另一个 PR),但**状态词**
+ * 必须跟用户侧一致 —— 同一个状态在两边叫两个名字,用户来问的时候没法
+ * 对上话。统一读 `PrintQuote.status.*`。
  */
 
-import { App, Button, Modal, Select } from "antd";
+import { App, Button, Input, Modal, Select } from "antd";
 import {
   AlertTriangle,
   Boxes,
@@ -23,8 +38,9 @@ import {
   Scale,
   Wallet,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { useAction } from "next-safe-action/hooks";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   EmptyState,
   formatCurrency,
@@ -32,61 +48,40 @@ import {
   ModuleHeader,
 } from "@/features/mooncada/components/shared";
 import {
+  adminGetPrintOrderDetailAction,
   adminListPrintOrdersAction,
   adminUpdatePrintOrderStatusAction,
 } from "@/features/print-quote/admin/actions";
 import type { AdminPrintOrder } from "@/features/print-quote/admin/types";
+import { OrderTimeline } from "@/features/print-quote/components/order-timeline";
 import type { PrintOrderStats } from "@/features/print-quote/lib/order-store";
-import type { PrintOrderStatus } from "@/features/print-quote/lib/quote-types";
+import {
+  PRINT_ORDER_STATUSES,
+  type PrintOrderEventView,
+  type PrintOrderStatus,
+} from "@/features/print-quote/lib/quote-types";
+import {
+  allowedNextStatuses,
+  classifyTransition,
+  transitionRequiresNote,
+} from "@/features/print-quote/lib/status-machine";
+import {
+  PRINT_ORDER_STATUS_ADMIN_CHIP,
+  PRINT_ORDER_STATUS_DOT,
+} from "@/features/print-quote/lib/status-ui";
 import { cn } from "@/lib/utils";
 
-const STATUS_META: Record<
-  PrintOrderStatus,
-  { label: string; dot: string; chip: string }
-> = {
-  PENDING: {
-    label: "待确认",
-    dot: "bg-amber-500",
-    chip: "border-amber-500/30 text-amber-700 dark:text-amber-300",
-  },
-  CONFIRMED: {
-    label: "已确认",
-    dot: "bg-sky-500",
-    chip: "border-sky-500/30 text-sky-700 dark:text-sky-300",
-  },
-  IN_PRODUCTION: {
-    label: "生产中",
-    dot: "bg-violet-500",
-    chip: "border-violet-500/30 text-violet-700 dark:text-violet-300",
-  },
-  SHIPPED: {
-    label: "已发货",
-    dot: "bg-emerald-500",
-    chip: "border-emerald-500/30 text-emerald-700 dark:text-emerald-300",
-  },
-  COMPLETED: {
-    label: "已完成",
-    dot: "bg-emerald-600",
-    chip: "border-emerald-600/30 text-emerald-700 dark:text-emerald-300",
-  },
-  CANCELLED: {
-    label: "已取消",
-    dot: "bg-zinc-500",
-    chip: "border-zinc-500/30 text-zinc-600 dark:text-zinc-300",
-  },
-};
-
-const STATUS_ORDER: PrintOrderStatus[] = [
-  "PENDING",
-  "CONFIRMED",
-  "IN_PRODUCTION",
-  "SHIPPED",
-  "COMPLETED",
-  "CANCELLED",
-];
+/** 后台错误码 → i18n key(认不出来的码一律当「非法跳转」) */
+const ADMIN_ERROR_CODES = new Set([
+  "ORDER_NOT_FOUND",
+  "INVALID_TRANSITION",
+  "NOTE_REQUIRED",
+  "SAME_STATUS",
+]);
 
 export function PrintOrdersAdminView() {
   const { message } = App.useApp();
+  const t = useTranslations("PrintQuote");
   const [orders, setOrders] = useState<AdminPrintOrder[]>([]);
   /**
    * 统计 —— 服务端单独查的,**不跟筛选走**
@@ -105,6 +100,16 @@ export function PrintOrdersAdminView() {
     "all"
   );
   const [detail, setDetail] = useState<AdminPrintOrder | null>(null);
+  /** 详情里的时间线 */
+  const [detailEvents, setDetailEvents] = useState<PrintOrderEventView[]>([]);
+  /** 选中的目标状态 —— 还没提交 */
+  const [pendingStatus, setPendingStatus] = useState<PrintOrderStatus | null>(
+    null
+  );
+  /** 备注(回退时必填) */
+  const [note, setNote] = useState("");
+  /** 改状态的错误文案 */
+  const [statusError, setStatusError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -128,23 +133,102 @@ export function PrintOrdersAdminView() {
     void reload();
   }, [reload]);
 
+  /** 拉一张工单的详情 + 时间线 */
+  const loadDetail = useCallback(async (orderNo: string) => {
+    const res = await adminGetPrintOrderDetailAction({ orderNo });
+    const data = res?.data;
+    if (!data?.ok) return;
+    setDetail(data.order);
+    setDetailEvents(data.events);
+  }, []);
+
+  /** 打开详情 */
+  const openDetail = useCallback(
+    (order: AdminPrintOrder) => {
+      setDetail(order);
+      setDetailEvents([]);
+      setPendingStatus(null);
+      setNote("");
+      setStatusError(null);
+      void loadDetail(order.orderNo);
+    },
+    [loadDetail]
+  );
+
   const { execute: updateStatus, isPending } = useAction(
     adminUpdatePrintOrderStatusAction,
     {
-      onSuccess: ({ data }) => {
-        message.success(data?.message ?? "状态已更新");
-        setDetail((prev) =>
-          prev && prev.orderNo === data?.orderNo
-            ? { ...prev, status: data.status }
-            : prev
-        );
+      onSuccess: async ({ data }) => {
+        if (!data) return;
+        if (!data.ok) {
+          const code = ADMIN_ERROR_CODES.has(data.code)
+            ? data.code
+            : "INVALID_TRANSITION";
+          setStatusError(t(`admin.errors.${code}`));
+          return;
+        }
+        message.success("状态已更新");
+        setPendingStatus(null);
+        setNote("");
+        setStatusError(null);
+        void loadDetail(data.orderNo);
         void reload();
       },
       onError: ({ error }) => {
-        message.error(error.serverError ?? "改状态失败");
+        setStatusError(error.serverError ?? "改状态失败");
       },
     }
   );
+
+  /** Select 的选项:推进 / 回退 / 取消 三组 */
+  const statusOptions = useMemo(() => {
+    if (!detail) return [];
+    const forward: { value: PrintOrderStatus; label: string }[] = [];
+    const backward: { value: PrintOrderStatus; label: string }[] = [];
+    const cancel: { value: PrintOrderStatus; label: string }[] = [];
+
+    for (const next of allowedNextStatuses(detail.status)) {
+      const kind = classifyTransition(detail.status, next);
+      const item = { value: next, label: t(`status.${next}`) };
+      if (kind === "forward") forward.push(item);
+      else if (kind === "backward") backward.push(item);
+      else cancel.push(item);
+    }
+
+    const groups: {
+      label: string;
+      options: { value: PrintOrderStatus; label: string }[];
+    }[] = [];
+    if (forward.length > 0) {
+      groups.push({ label: t("admin.groups.forward"), options: forward });
+    }
+    if (backward.length > 0) {
+      groups.push({ label: t("admin.groups.backward"), options: backward });
+    }
+    if (cancel.length > 0) {
+      groups.push({ label: t("admin.groups.cancel"), options: cancel });
+    }
+    return groups;
+  }, [detail, t]);
+
+  /** 这次改动要不要写备注 */
+  const noteRequired =
+    detail !== null &&
+    pendingStatus !== null &&
+    transitionRequiresNote(detail.status, pendingStatus);
+
+  const submitStatusChange = useCallback(() => {
+    if (!detail || !pendingStatus) return;
+    if (noteRequired && note.trim().length === 0) {
+      setStatusError(t("admin.errors.NOTE_REQUIRED"));
+      return;
+    }
+    void updateStatus({
+      orderNo: detail.orderNo,
+      status: pendingStatus,
+      note: note.trim() || null,
+    });
+  }, [detail, pendingStatus, noteRequired, note, t, updateStatus]);
 
   return (
     <div className="space-y-6">
@@ -221,7 +305,7 @@ export function PrintOrdersAdminView() {
         >
           全部
         </button>
-        {STATUS_ORDER.map((s) => (
+        {PRINT_ORDER_STATUSES.map((s) => (
           <button
             key={s}
             type="button"
@@ -233,8 +317,10 @@ export function PrintOrdersAdminView() {
                 : "hover:bg-muted"
             )}
           >
-            <span className={cn("size-1.5 rounded-full", STATUS_META[s].dot)} />
-            {STATUS_META[s].label}
+            <span
+              className={cn("size-1.5 rounded-full", PRINT_ORDER_STATUS_DOT[s])}
+            />
+            {t(`status.${s}`)}
           </button>
         ))}
       </div>
@@ -304,23 +390,23 @@ export function PrintOrdersAdminView() {
                       <span
                         className={cn(
                           "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px]",
-                          STATUS_META[o.status].chip
+                          PRINT_ORDER_STATUS_ADMIN_CHIP[o.status]
                         )}
                       >
                         <span
                           className={cn(
                             "size-1.5 rounded-full",
-                            STATUS_META[o.status].dot
+                            PRINT_ORDER_STATUS_DOT[o.status]
                           )}
                         />
-                        {STATUS_META[o.status].label}
+                        {t(`status.${o.status}`)}
                       </span>
                     </td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       <Button
                         size="small"
                         type="text"
-                        onClick={() => setDetail(o)}
+                        onClick={() => openDetail(o)}
                         aria-label="详情"
                         icon={<Eye className="h-3.5 w-3.5" />}
                       />
@@ -343,28 +429,102 @@ export function PrintOrdersAdminView() {
             关闭
           </Button>,
         ]}
-        width={640}
+        width={720}
       >
         {detail ? (
           <div className="space-y-4 text-sm">
             {/* 状态推进 */}
             <div className="rounded-lg border bg-muted/30 p-3">
-              <p className="text-xs text-muted-foreground mb-2">工单状态</p>
-              <Select
-                value={detail.status}
-                disabled={isPending}
-                onChange={(next: PrintOrderStatus) =>
-                  updateStatus({
-                    orderNo: detail.orderNo,
-                    status: next,
-                  })
-                }
-                options={STATUS_ORDER.map((s) => ({
-                  value: s,
-                  label: STATUS_META[s].label,
-                }))}
+              <p className="text-xs text-muted-foreground mb-2">
+                {t("admin.statusTitle")}
+              </p>
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px]",
+                    PRINT_ORDER_STATUS_ADMIN_CHIP[detail.status]
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "size-1.5 rounded-full",
+                      PRINT_ORDER_STATUS_DOT[detail.status]
+                    )}
+                  />
+                  {t(`status.${detail.status}`)}
+                </span>
+                {/* 这单的邮件通知语言 —— 提醒工作室这单是英文单 */}
+                <span className="text-[11px] text-muted-foreground">
+                  {t("admin.localeLabel")}:{" "}
+                  {detail.locale === "en" ? "English" : "中文"}
+                </span>
+              </div>
+
+              <Select<PrintOrderStatus>
+                value={pendingStatus}
+                placeholder={t("admin.selectPlaceholder")}
+                disabled={isPending || statusOptions.length === 0}
+                onChange={(next) => {
+                  setPendingStatus(next);
+                  setStatusError(null);
+                }}
+                options={statusOptions}
                 className="w-full"
               />
+
+              {pendingStatus ? (
+                <div className="mt-3">
+                  <span className="block text-xs font-medium text-foreground">
+                    {noteRequired
+                      ? t("admin.noteRequired")
+                      : t("admin.noteOptional")}
+                  </span>
+                  <Input.TextArea
+                    value={note}
+                    onChange={(e) => setNote(e.target.value)}
+                    rows={3}
+                    maxLength={1000}
+                    aria-label={
+                      noteRequired
+                        ? t("admin.noteRequired")
+                        : t("admin.noteOptional")
+                    }
+                    placeholder={t("admin.notePlaceholder")}
+                    className="mt-1"
+                  />
+                  <div className="mt-2 flex items-center gap-2">
+                    <Button
+                      type="primary"
+                      loading={isPending}
+                      onClick={submitStatusChange}
+                    >
+                      {t("admin.submit")}
+                    </Button>
+                    <Button
+                      disabled={isPending}
+                      onClick={() => {
+                        setPendingStatus(null);
+                        setNote("");
+                        setStatusError(null);
+                      }}
+                    >
+                      {t("admin.discard")}
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+
+              {statusError ? (
+                <p className="mt-2 text-xs text-destructive">{statusError}</p>
+              ) : null}
+            </div>
+
+            {/* 时间线 */}
+            <div className="rounded-lg border p-3">
+              <p className="mb-3 text-xs text-muted-foreground">
+                {t("admin.timelineTitle")}
+              </p>
+              <OrderTimeline events={detailEvents} viewer="admin" />
             </div>
 
             {/* 报价明细 */}

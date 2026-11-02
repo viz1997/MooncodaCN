@@ -7,7 +7,10 @@
  */
 
 import type { PrintOrderRow } from "@/db/schema";
-import type { PrintOrderStatus } from "@/features/print-quote/lib/quote-types";
+import type {
+  PrintOrderLocale,
+  PrintOrderStatus,
+} from "@/features/print-quote/lib/quote-types";
 
 export type AdminPrintOrder = {
   id: string;
@@ -32,8 +35,16 @@ export type AdminPrintOrder = {
   contactEmail: string;
   contactPhone: string | null;
   note: string | null;
+  /**
+   * 这单的邮件通知语言
+   *
+   * 工作室改状态时通知用户的邮件用这个语言 —— 后台界面的语言跟它没关系。
+   */
+  locale: PrintOrderLocale;
   /** ISO 时间串 */
   createdAt: string;
+  /** 最后一次状态变更时间 */
+  updatedAt: string;
 };
 
 function num(value: string | null): number {
@@ -65,6 +76,8 @@ export function toAdminPrintOrder(row: PrintOrderRow): AdminPrintOrder {
     contactEmail: row.contactEmail,
     contactPhone: row.contactPhone,
     note: row.note,
+    locale: row.locale === "en" ? "en" : "zh",
     createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
   };
 }

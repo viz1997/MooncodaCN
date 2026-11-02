@@ -113,6 +113,10 @@ export type PrintOrderCreated = {
   /** 服务端重算后的报价(客户端显示的是这个,不是自己算的) */
   quote: PrintQuote;
   createdAt: string;
+  /** 建单时的 updatedAt —— 乐观插入的那一行要带上,轮询才认得出它 */
+  updatedAt: string;
+  /** 这单的邮件通知语言 */
+  locale: PrintOrderLocale;
 };
 
 /**
@@ -129,4 +133,88 @@ export type UserPrintOrder = {
   dims: [number, number, number];
   totalPriceCents: number;
   createdAt: string;
+  /**
+   * 最后一次变更时间
+   *
+   * 轮询的变更检测靠它:状态变了 `updatedAt` 一定跟着变(改状态时一起更新)。
+   * 没有它的话,「状态没变但别的东西变了」和「什么都没变」分不开。
+   */
+  updatedAt: string;
 };
+
+/**
+ * 用户侧看到的订单详情 —— 工单详情页用
+ *
+ * 比列表多的是报价明细和联系方式。仍然**不含模型 URL**:那是工作室取件用的,
+ * 用户自己不需要看那条直链。
+ */
+export type UserPrintOrderDetail = UserPrintOrder & {
+  modelSizeBytes: number | null;
+  volumeCM3: number;
+  surfaceAreaCM2: number;
+  /** 材料密度 g/cm³(留档值) */
+  materialDensity: number;
+  /** 单价 分/g */
+  unitPriceCentsPerGram: number;
+  /** 克重费(分) */
+  weightFeeCents: number;
+  /** 后处理(分) */
+  varnishFeeCents: number;
+  /** 支撑加价(分) */
+  supportFeeCents: number;
+  contactName: string;
+  contactEmail: string;
+  contactPhone: string | null;
+  /** 用户留言 */
+  note: string | null;
+  /** 这单的邮件通知语言 */
+  locale: PrintOrderLocale;
+};
+
+/**
+ * 工单事件的操作者 —— 与 `print_order_event_actor` enum 一一对应
+ */
+export type PrintOrderEventActor = "user" | "admin" | "system";
+
+/**
+ * 工单时间线上的一条事件
+ *
+ * 系统句子不落库:「工作室把工单从待确认改成了已确认」由前端按
+ * (actor, from, to) 用 i18n 现场渲染,库里只存人工写的 note。
+ */
+export type PrintOrderEventView = {
+  id: string;
+  /** 原状态;创建事件为 null */
+  fromStatus: PrintOrderStatus | null;
+  toStatus: PrintOrderStatus;
+  actor: PrintOrderEventActor;
+  /** 人工备注;回退时必填 */
+  note: string | null;
+  createdAt: string;
+};
+
+/**
+ * 工单语言 —— 决定这单的邮件通知用中文还是英文
+ *
+ * 只有两个值(站点的两个 locale)。落库而不是取「当前请求的 locale」:
+ * 改状态的邮件是工作室触发的,那时请求 locale 是 admin 的语言,不是
+ * 下单用户的语言。
+ */
+export type PrintOrderLocale = "zh" | "en";
+
+/** 站点支持的 locale 里,打印服务认的这两个 */
+export const PRINT_ORDER_LOCALES: readonly PrintOrderLocale[] = ["zh", "en"];
+
+/** 默认工单语言(站点默认 locale 就是 zh) */
+export const DEFAULT_PRINT_ORDER_LOCALE: PrintOrderLocale = "zh";
+
+/**
+ * 把任意字符串收敛成合法的工单语言
+ *
+ * 用户下单时传的 locale 只认这两个,别的(比如 "zh-CN")落到默认。
+ */
+export function normalizePrintOrderLocale(
+  locale: string | null | undefined
+): PrintOrderLocale {
+  return locale === "en" ? "en" : DEFAULT_PRINT_ORDER_LOCALE;
+}
