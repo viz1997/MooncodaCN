@@ -22,7 +22,7 @@ type Push = (
 ) => void;
 
 /** 生成轴对齐盒子(可选择性去掉某些面),Z-up,返回三角汤 */
-function boxTriangles(
+export function boxTriangles(
   min: [number, number, number],
   max: [number, number, number],
   skipFaces: Set<"px" | "nx" | "py" | "ny" | "pz" | "nz"> = new Set()
@@ -75,7 +75,7 @@ function toMesh(name: string, parts: Float32Array[]): RawMesh {
 }
 
 /** UV 球(经纬分段),法线朝外,Z-up */
-function uvSphere(
+export function uvSphere(
   tris: number[][],
   cx: number,
   cy: number,

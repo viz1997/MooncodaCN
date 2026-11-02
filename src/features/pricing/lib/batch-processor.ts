@@ -20,7 +20,11 @@
  * All processing happens client-side; no files are uploaded to a server.
  */
 
-import { findOptimalAngle, type OptimalAngle } from "./angle-optimizer";
+import {
+  findOptimalAngle,
+  type OptimalAngle,
+  prepareSupportModel,
+} from "./angle-optimizer";
 import { parseObjInWorker } from "./obj-worker-client";
 import {
   calculatePrice,
@@ -303,8 +307,9 @@ export async function processBatch(
           const modelWeightG =
             model.parseResult.volumeCM3 * pricingConfig.materialDensity;
           try {
+            // 焊接一次(2026-11-02):支撑算法跟模型检查工具共用同一套网格准备
             optimalAngle = findOptimalAngle(
-              positions,
+              prepareSupportModel(positions),
               model.parseResult.surfaceAreaMM2,
               (p) => {
                 const pct = 70 + Math.floor(p * 0.2);

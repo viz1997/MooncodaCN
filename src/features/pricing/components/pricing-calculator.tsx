@@ -69,14 +69,14 @@ import {
   SOLID_PRESETS,
   scaleGeometryXYZ,
 } from "@/features/pricing/components/shared";
-import {
-  SupportCalibration,
-  type SupportParams,
-} from "@/features/pricing/components/support-calibration";
+import { SupportCalibration } from "@/features/pricing/components/support-calibration";
 import {
   computeSupportAtAngle,
+  DEFAULT_SUPPORT_PARAMS,
   findOptimalAngle,
   type OptimalAngle,
+  prepareSupportModel,
+  type SupportParams,
 } from "@/features/pricing/lib/angle-optimizer";
 import {
   type BatchItem,
@@ -103,6 +103,7 @@ import {
   type ModelFile,
 } from "@/features/pricing/lib/zip-extractor";
 import type { PrintQuoteInput } from "@/features/print-quote/lib/quote-types";
+import type { SupportModel } from "@/features/tools/lib/mesh/support-shell";
 
 type Mode = "upload" | "manual" | "batch";
 
@@ -225,11 +226,9 @@ export function PricingCalculator({
   const [productId, setProductId] = useState("pet");
 
   // ---- 支撑校准参数 ----
-  const [supportParams, setSupportParams] = useState<SupportParams>({
-    fillRate: 0.37,
-    shellThickness: 1.0,
-    density: 1.15,
-  });
+  const [supportParams, setSupportParams] = useState<SupportParams>(
+    DEFAULT_SUPPORT_PARAMS
+  );
   const [realWeightInput, setRealWeightInput] = useState("");
 
   // ---- 智能摆盘 ----
@@ -243,7 +242,9 @@ export function PricingCalculator({
   const [manualRotX, setManualRotX] = useState(0);
   const [manualRotY, setManualRotY] = useState(0);
   const [manualRotZ, setManualRotZ] = useState(0);
-  const positionsRef = useRef<Float32Array | null>(null);
+  // 摆盘用的焊接模型(2026-11-02):焊接 + 拓扑是姿态无关的,只做一次;
+  // 拖动角度滑块时每次只旋转,不重焊
+  const supportModelRef = useRef<SupportModel | null>(null);
 
   // ---- 批量 ----
   const [batchItems, setBatchItems] = useState<BatchItem[]>([]);
@@ -422,7 +423,6 @@ export function PricingCalculator({
     setManualRotX(0);
     setManualRotY(0);
     setManualRotZ(0);
-    positionsRef.current = null;
     setLoadStatus("uploading");
     setLoadProgress(t("upload.reading"));
     await yieldToUI();
@@ -479,7 +479,6 @@ export function PricingCalculator({
     setScaleY(1);
     setScaleZ(1);
     setOptimalAngle(null);
-    positionsRef.current = null;
   };
 
   const applyProduct = (id: string) => {
@@ -502,25 +501,24 @@ export function PricingCalculator({
         onProgress: (p) => setAngleProgress(Math.round(p.percent * 0.5)),
       });
       if (outcome.positions) {
-        positionsRef.current = outcome.positions;
         await yieldToUI();
+        // 焊接一次,之后每个候选姿态只旋转(2026-11-02)
+        const supportModel = prepareSupportModel(outcome.positions);
+        supportModelRef.current = supportModel;
         const [sx, sy, sz] = pendingScales;
         const modelVolumeCM3 = model.parseResult.volumeCM3 * sx * sy * sz;
         const modelWeightG = modelVolumeCM3 * materialDensity;
         const avgK = Math.cbrt(sx * sy * sz);
         const result = findOptimalAngle(
-          outcome.positions,
+          supportModel,
           model.parseResult.surfaceAreaMM2,
           (p) => setAngleProgress(50 + Math.round(p * 0.5)),
           50,
           modelWeightG,
           avgK,
-          model.parseResult.volumeMM3,
           undefined,
           false,
-          supportParams.fillRate,
-          supportParams.shellThickness,
-          supportParams.density
+          supportParams
         );
         setOptimalAngle(result);
         setViewerRotX(result.rotX);
@@ -564,7 +562,7 @@ export function PricingCalculator({
       setManualRotZ(value);
       setViewerRotZ(value);
     }
-    if (positionsRef.current && optimalAngle) {
+    if (supportModelRef.current && optimalAngle) {
       const [sx, sy, sz] = scales;
       const modelVolumeCM3 = model.parseResult.volumeCM3 * sx * sy * sz;
       const modelWeightG = modelVolumeCM3 * materialDensity;
@@ -573,17 +571,14 @@ export function PricingCalculator({
       const newRotY = axis === "Y" ? value : manualRotY;
       const newRotZ = axis === "Z" ? value : manualRotZ;
       const { supportWeight, supportRatio } = computeSupportAtAngle(
-        positionsRef.current,
+        supportModelRef.current,
         newRotX,
         newRotY,
         modelWeightG,
         avgK,
         newRotZ,
-        model.parseResult.volumeMM3,
         undefined,
-        supportParams.fillRate,
-        supportParams.shellThickness,
-        supportParams.density
+        supportParams
       );
       setOptimalAngle({
         ...optimalAngle,
@@ -602,23 +597,20 @@ export function PricingCalculator({
     scales: [number, number, number]
   ) => {
     setSupportParams(params);
-    if (!positionsRef.current || !optimalAngle || !model) return;
+    if (!supportModelRef.current || !optimalAngle || !model) return;
     const [sx, sy, sz] = scales;
     const modelVolumeCM3 = model.parseResult.volumeCM3 * sx * sy * sz;
     const modelWeightG = modelVolumeCM3 * materialDensity;
     const avgK = Math.cbrt(sx * sy * sz);
     const { supportWeight, supportRatio } = computeSupportAtAngle(
-      positionsRef.current,
+      supportModelRef.current,
       manualRotX,
       manualRotY,
       modelWeightG,
       avgK,
       manualRotZ,
-      model.parseResult.volumeMM3,
       undefined,
-      params.fillRate,
-      params.shellThickness,
-      params.density
+      params
     );
     setOptimalAngle((prev) =>
       prev
@@ -638,7 +630,7 @@ export function PricingCalculator({
     if (
       !Number.isFinite(realG) ||
       realG <= 0 ||
-      !positionsRef.current ||
+      !supportModelRef.current ||
       !model ||
       !optimalAngle
     ) {
@@ -649,17 +641,14 @@ export function PricingCalculator({
     const ak = Math.cbrt(sx * sy * sz);
     // 先用 fillRate=1 计算最大理论克重
     const { supportWeight: maxW } = computeSupportAtAngle(
-      positionsRef.current,
+      supportModelRef.current,
       manualRotX,
       manualRotY,
       mW,
       ak,
       manualRotZ,
-      model.parseResult.volumeMM3,
       undefined,
-      1.0,
-      supportParams.shellThickness,
-      supportParams.density
+      { ...supportParams, fillRate: 1 }
     );
     if (!(maxW > 0)) return;
     const newRate = Math.max(0.05, Math.min(0.95, realG / maxW));
@@ -816,11 +805,7 @@ export function PricingCalculator({
     setProductId("pet");
     setSupportEnabled(false);
     setSupportPrice(DEFAULT_CONFIG.supportPrice);
-    setSupportParams({
-      fillRate: 0.37,
-      shellThickness: 1.0,
-      density: 1.15,
-    });
+    setSupportParams(DEFAULT_SUPPORT_PARAMS);
     setRealWeightInput("");
     setMode("upload");
     setDimMode("original");
@@ -1157,7 +1142,9 @@ export function PricingCalculator({
                   <button
                     type="button"
                     disabled={
-                      !realWeightInput || !positionsRef.current || !optimalAngle
+                      !realWeightInput ||
+                      !supportModelRef.current ||
+                      !optimalAngle
                     }
                     onClick={calibrateFromMeasured}
                     className="text-[10px] px-2 py-1 rounded bg-amber-500 text-white hover:bg-amber-600 disabled:bg-stone-300 disabled:cursor-not-allowed"

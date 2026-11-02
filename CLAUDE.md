@@ -157,6 +157,23 @@ Handles three concerns in order:
 
 Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optional Cloudflare AI Gateway proxying. Provides a generic `chatCompletion()` function for LLM calls.
 
+### 包裹支撑算法(检测工具 + 克重工具共用)
+
+`src/features/tools/lib/mesh/support-shell.ts` —— **两个工具算/画的是同一块支撑**:
+模型检查工具(`/tools/model-check`)画它,克重工具(`/tools/weight`)按它算克重。
+
+- `prepareSupportModel(positions)` → 焊接 + 拓扑(**姿态无关**,只做一次)
+- `rotateSupportMesh(mesh, rotX, rotY, rotZ)` → 刚体旋转顶点与法线(拓扑不变)
+- `buildSupportShell(mesh, faceEnclosed, options?, gapScale?)` → 外壳 / 支撑顶面 / 外壁 / 平台投影
+- `computeSupportVolume(shell, mesh, options?)` → 按 XY 列(height field)算支撑体积
+
+**旋转口径**:一律「先 X 后 Y 后 Z」(外旋,R = Rz·Ry·Rx)。three.js 里对应
+`rotation.order = "ZYX"`(默认的 `"XYZ"` 是 Rx·Ry·Rz,对不上)。摆盘算法
+(`angle-optimizer.ts`)、OBJ 导出(`obj-exporter.ts`)、3D 预览(`obj-viewer.tsx`)
+三处必须一致,否则画面里的姿态跟算出来的克重对不上。
+
+行为由 `src/test/tools/pure/support-shell.test.ts` 守住。
+
 ## Coding Conventions
 
 - **Language:** Chinese comments throughout the codebase (code itself in English)

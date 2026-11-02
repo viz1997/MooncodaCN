@@ -1194,9 +1194,9 @@
     },
     "calibration": {
       "fillRate": "Honeycomb fill rate",
-      "shellThickness": "Shell thickness (mm)",
+      "gapScale": "Wrap gap multiplier",
       "density": "Support density (g/cm³)",
-      "hint": "Support weight = shell wrap volume + bottom fill volume. The fill rate is the solid fraction of the bottom honeycomb; density is the support resin's own weight.",
+      "hint": "Support weight = wrap-support volume × fill rate × density. The wrap support is the material between the platform and the model's underside — the same thing the model checker draws; the fill rate is the solid fraction of the support, and the gap multiplier scales the wrap clearance.",
       "collapseLabel": "Support weight calibration",
       "oneClickTitle": "One-click calibration",
       "oneClickDesc": "Enter the measured support weight to back-solve the honeycomb fill rate.",
@@ -1261,7 +1261,7 @@
         "varnishFee": " + varnish",
         "repairFee": " + repair",
         "supportFee": " + support",
-        "p2": "Support weight is estimated from the honeycomb fill rate, the shell thickness and the support resin density; use “Support weight calibration” to back-solve it from a measured weight. The optimizer picks the pose with the least support and the lowest layer height."
+        "p2": "Support weight is estimated from the honeycomb fill rate, the wrap gap multiplier and the support resin density (the wrap support volume is the same one the model checker computes); use “Support weight calibration” to back-solve it from a measured weight. The optimizer picks the pose with the least support and the lowest layer height."
       },
       "products": {
         "title": "Product presets",

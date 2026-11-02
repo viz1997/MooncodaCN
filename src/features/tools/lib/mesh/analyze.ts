@@ -7,6 +7,7 @@
  */
 // @ts-nocheck —— 同 weld.ts:全是 typedArray 下标访问,逐个加 `!` 会淹没移植 diff。
 // 行为由 src/test/tools/pure/wjp-mesh.test.ts 守住。
+import { buildSupportShell } from "./support-shell";
 import {
   type AnalysisResult,
   FACE_FLAG,
@@ -14,13 +15,8 @@ import {
   type MessageRef,
   type ProgressStage,
   type ShellInfo,
-  type SupportShellData,
 } from "./types";
-import {
-  type TopologyResult,
-  type WeldedMesh,
-  weldAndAnalyzeTopology,
-} from "./weld";
+import { type TopologyResult, weldAndAnalyzeTopology } from "./weld";
 
 export interface WorkerState {
   topo: TopologyResult;
@@ -28,168 +24,6 @@ export interface WorkerState {
 }
 
 type ProgressFn = (stage: ProgressStage, pct: number) => void;
-
-/**
- * 包裹支撑几何:焊接顶点按相邻面面积加权平均出平滑法线,再沿法线整体外扩固定间隙。
- * WJP 全彩打印的水溶性支撑为整体包裹式(逐层喷射、包住模型),此几何即其包裹范围示意。
- * 间隙随模型尺寸自适应:对角线的 2%,限制在 0.8~5mm,保证任何尺寸下都看得清。
- *
- * 支撑体积(平台到模型之间全部为支撑材料)由三部分共同围合:
- * - underside:下朝向面片(支撑材料的上边界,贴着模型底面);
- * - curtain:下朝向区域的边界边竖直向下挤出至平台平面(支撑体外壁),内部共享边不挤出;
- * - 平台投影(主线程把全部面片压平到平台生成,支撑体的底面 / 占地区域)。
- *
- * 坐标基准:groundZ 取模型自身最低点略下方(非世界原点),主线程把整组几何再平移
- * -bboxMin.z 后,模型最低点恰好落在打印平台上。外壳顶点 z 不低于 groundZ:
- * 支撑材料落在平台上,不会下探到平台以下。
- *
- * faceEnclosed:被外壳包裹的内腔 / 碎片壳面片标记(1 = 封闭内部)。这些面片朝下也
- * 不生成支撑体(内部支撑无法清除的问题已由密封内腔告警覆盖),避免在模型实心内部
- * 出现误导性的支撑墙面。
- */
-function buildSupportShell(
-  mesh: WeldedMesh,
-  faceEnclosed: Uint8Array
-): SupportShellData {
-  const vc = mesh.vertexCount;
-  const normals = new Float32Array(vc * 3);
-  for (let f = 0; f < mesh.faceCount; f++) {
-    const w = mesh.faceAreas[f];
-    const nx = mesh.faceNormals[f * 3] * w;
-    const ny = mesh.faceNormals[f * 3 + 1] * w;
-    const nz = mesh.faceNormals[f * 3 + 2] * w;
-    if (nx === 0 && ny === 0 && nz === 0) continue; // 退化面不参与
-    for (let k = 0; k < 3; k++) {
-      const v = mesh.faceVertex[f * 3 + k];
-      normals[v * 3] += nx;
-      normals[v * 3 + 1] += ny;
-      normals[v * 3 + 2] += nz;
-    }
-  }
-  // 平台平面(模型坐标):模型最低点略下方,主线程整组平移后即为打印平台
-  const groundZ = mesh.bboxMin[2] - Math.max(0.05, mesh.diag * 0.002);
-  const gap = Math.min(5, Math.max(0.8, mesh.diag * 0.02));
-  const positions = new Float32Array(vc * 3);
-  for (let v = 0; v < vc; v++) {
-    let nx = normals[v * 3],
-      ny = normals[v * 3 + 1],
-      nz = normals[v * 3 + 2];
-    const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
-    if (len > 1e-12) {
-      nx /= len;
-      ny /= len;
-      nz /= len;
-    } else {
-      nx = 0;
-      ny = 0;
-      nz = 1;
-    }
-    positions[v * 3] = mesh.vertices[v * 3] + nx * gap;
-    positions[v * 3 + 1] = mesh.vertices[v * 3 + 1] + ny * gap;
-    const pz = mesh.vertices[v * 3 + 2] + nz * gap;
-    positions[v * 3 + 2] = pz < groundZ ? groundZ : pz; // 支撑落在平台上,不下探到平台以下
-  }
-
-  // ---- 下朝向面判定:z 分量略小于 0 即视为朝下(阈值贴近 0,使支撑体侧壁上沿
-  // 贴到模型最宽轮廓,支撑填充看起来包裹到侧面中部);封闭内腔 / 包裹碎片除外 ----
-  const DOWN_NZ = -1e-3;
-  const isDownFace = (f: number) =>
-    faceEnclosed[f] === 0 && mesh.faceNormals[f * 3 + 2] < DOWN_NZ;
-  const GROUND_EPS = 0.02; // 贴地阈值:压平到平台的几何由平台投影负责,不再重复生成
-
-  const topIndex: number[] = [];
-  const underside: number[] = [];
-  const curtain: number[] = [];
-  const BUILD_CAP = 5_400_000; // ≈60 万面片,防御异常网格
-  let capped = false;
-  for (let f = 0; f < mesh.faceCount; f++) {
-    const a = mesh.faceVertex[f * 3],
-      b = mesh.faceVertex[f * 3 + 1],
-      c = mesh.faceVertex[f * 3 + 2];
-    if (!isDownFace(f)) {
-      topIndex.push(a, b, c); // 外壳渲染索引:下朝向面由支撑体负责,避免两层面片叠加
-      continue;
-    }
-    if (capped) continue;
-    const za = positions[a * 3 + 2],
-      zb = positions[b * 3 + 2],
-      zc = positions[c * 3 + 2];
-    // 支撑体顶面:下朝向面本身(贴着模型底面的支撑上边界)
-    if (
-      za - groundZ > GROUND_EPS ||
-      zb - groundZ > GROUND_EPS ||
-      zc - groundZ > GROUND_EPS
-    ) {
-      underside.push(
-        positions[a * 3],
-        positions[a * 3 + 1],
-        za,
-        positions[b * 3],
-        positions[b * 3 + 1],
-        zb,
-        positions[c * 3],
-        positions[c * 3 + 1],
-        zc
-      );
-    }
-    // 支撑体外壁:下朝向区域的边界边竖直向下挤出至平台,内部共享边不挤出
-    const edges: [number, number][] = [
-      [a, b],
-      [b, c],
-      [c, a],
-    ];
-    for (const [u, v] of edges) {
-      if (u === v) continue;
-      const key = u < v ? u * vc + v : v * vc + u;
-      const list = mesh.edgeFaceMap.get(key);
-      let boundary = true;
-      if (list) {
-        for (const e of list) {
-          const g = e >>> 1;
-          if (g !== f && isDownFace(g)) {
-            boundary = false;
-            break;
-          }
-        }
-      }
-      if (!boundary) continue;
-      const uz = positions[u * 3 + 2],
-        vz = positions[v * 3 + 2];
-      if (uz - groundZ < GROUND_EPS && vz - groundZ < GROUND_EPS) continue; // 贴地边,无侧壁
-      curtain.push(
-        positions[u * 3],
-        positions[u * 3 + 1],
-        uz,
-        positions[v * 3],
-        positions[v * 3 + 1],
-        vz,
-        positions[v * 3],
-        positions[v * 3 + 1],
-        groundZ,
-        positions[u * 3],
-        positions[u * 3 + 1],
-        uz,
-        positions[v * 3],
-        positions[v * 3 + 1],
-        groundZ,
-        positions[u * 3],
-        positions[u * 3 + 1],
-        groundZ
-      );
-    }
-    if (curtain.length >= BUILD_CAP || underside.length >= BUILD_CAP)
-      capped = true;
-  }
-
-  return {
-    positions,
-    index: mesh.faceVertex,
-    topIndex: new Uint32Array(topIndex),
-    underside: new Float32Array(underside),
-    gap,
-    curtain: new Float32Array(curtain),
-  };
-}
 
 export function analyzeNewMesh(
   positions: Float32Array,

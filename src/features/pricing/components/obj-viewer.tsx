@@ -6,6 +6,12 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { MTLLoader } from "three/examples/jsm/loaders/MTLLoader.js";
 import { parseObjInWorker } from "@/features/pricing/lib/obj-worker-client";
+import {
+  buildSupportShell,
+  prepareSupportModel,
+  rotateSupportMesh,
+  type SupportModel,
+} from "@/features/tools/lib/mesh/support-shell";
 
 /**
  * 移植自 wjp-source-code/src/components/obj-viewer.tsx —— 耗材报价计算器的 3D 预览。
@@ -13,6 +19,10 @@ import { parseObjInWorker } from "@/features/pricing/lib/obj-worker-client";
  * 渲染逻辑与源实现保持一致；移植时仅做类型严格化（noUncheckedIndexedAccess /
  * exactOptionalPropertyTypes）、去除 `any` 断言、Biome 格式化调整，
  * 未改变任何渲染行为。
+ *
+ * 2026-11-02:支撑可视化改用**模型检查工具的包裹支撑几何**
+ * (`src/features/tools/lib/mesh/support-shell.ts`)——跟克重算法同一套算出来的,
+ * 画面里的支撑体就是报价里算克重的那块支撑。
  */
 
 type Props = {
@@ -76,10 +86,13 @@ export function ObjViewer({
   const bboxHelperRef = useRef<THREE.Object3D | null>(null);
   const axisAnnotationRef = useRef<THREE.Group | null>(null);
   const frameIdRef = useRef<number | null>(null);
-  // Support shell mesh (semi-transparent shell around model)
-  const supportShellRef = useRef<THREE.Mesh | null>(null);
-  // Support fill mesh (bottom support columns, InstancedMesh)
-  const supportFillRef = useRef<THREE.Object3D | null>(null);
+  // 支撑可视化组(包裹支撑:外壳 + 顶面 + 外壁 + 平台投影)
+  const supportGroupRef = useRef<THREE.Group | null>(null);
+  // 摆盘用的焊接模型(支撑几何的输入)——OBJ 解析时备一次,之后每个姿态只旋转
+  const supportModelRef = useRef<SupportModel | null>(null);
+  // 支撑开关(给异步的建模流程读)
+  const showSupportRef = useRef(showSupport);
+  showSupportRef.current = showSupport;
   // Use refs for callbacks so the parse effect doesn't re-run on every parent render
   const onReadyRef = useRef(onReady);
   const onProgressRef = useRef(onProgress);
@@ -250,6 +263,12 @@ export function ObjViewer({
     model.scale.set(sx, sy, sz);
 
     // 应用用户旋转（不需要基础 -90° X 旋转了，因为场景已经是 Z-up）
+    //
+    // 旋转顺序必须是 "ZYX"(即 Rz·Ry·Rx)：跟摆盘算法(rotateSupportMesh)和
+    // OBJ 导出(obj-exporter.rotateVertex)的「先 X 后 Y 后 Z」口径一致。
+    // three.js 默认的 "XYZ"(Rx·Ry·Rz)跟它对不上 —— 画面里的姿态会跟算出来的
+    // 支撑克重对不上号。
+    model.rotation.order = "ZYX";
     const rx = ((rotationXRef.current ?? 0) * Math.PI) / 180;
     const ry = ((rotationYRef.current ?? 0) * Math.PI) / 180;
     const rz = ((rotationZRef.current ?? 0) * Math.PI) / 180;
@@ -334,36 +353,27 @@ export function ObjViewer({
     }
   };
 
-  // 更新支撑可视化（PolyJet 多材料喷射全彩打印支撑模型）
-  //
-  // 核心改进：
-  //   1. 外壳包裹层：基于「面法线」(非顶点法线) 沿法线方向外扩 1mm
-  //      - 仅对 nz ≤ 0 的面进行包裹（侧面、悬垂面、朝下面）
-  //      - 平顶朝上的面（nz > 0）不参与
-  //      - 面法线外扩避免顶点法线在尖锐角处的自交问题
-  //
-  //   2. 底部填充：按模型 XY 投影轮廓生成 InstancedMesh（+1mm 膨胀）
-  //      - 不再用方方正正的包围盒，跟随模型外轮廓
+  /**
+   * 更新支撑可视化 —— 包裹支撑(与模型检查工具同一套几何)
+   *
+   * 2026-11-02:原来是本文件自己搭的一套「1mm 面法线外壳 + 8mm 膨胀栅格柱」,
+   * 跟克重算法算出来的支撑体对不上 —— 画面里画的和报价里算的不是同一块东西。
+   * 现在直接用模型检查工具的包裹支撑几何(`support-shell.ts`):
+   *
+   *   ① 外壳(浅琥珀,半透明):沿平滑法线外扩间隙后的模型表面(已剔除下朝向面)
+   *   ② 支撑顶面(琥珀):模型的下朝向面 —— 支撑材料的上边界
+   *   ③ 支撑外壁(琥珀):下朝向区域的边界边竖直挤到平台
+   *   ④ 平台投影(琥珀):全部面片压平到平台 —— 支撑体的底面 / 占地区域
+   *
+   * 焊接后的模型在 OBJ 解析时备一次,之后每个姿态只旋转顶点(刚体旋转),
+   * 拓扑不变,不用重算。
+   */
   const updateSupportShell = (show: boolean) => {
     // 移除旧的支撑可视化
-    const oldShell = supportShellRef.current;
-    if (oldShell) {
-      oldShell.parent?.remove(oldShell);
-      oldShell.geometry.dispose();
-      const shellMat = oldShell.material;
-      if (Array.isArray(shellMat)) {
-        shellMat.forEach((m) => {
-          m.dispose();
-        });
-      } else {
-        shellMat.dispose();
-      }
-      supportShellRef.current = null;
-    }
-    const oldFill = supportFillRef.current;
-    if (oldFill) {
-      oldFill.parent?.remove(oldFill);
-      oldFill.traverse((child) => {
+    const old = supportGroupRef.current;
+    if (old) {
+      old.parent?.remove(old);
+      old.traverse((child) => {
         const mesh = child as THREE.Mesh;
         if (mesh.geometry) mesh.geometry.dispose();
         if (mesh.material) {
@@ -376,419 +386,139 @@ export function ObjViewer({
           }
         }
       });
-      supportFillRef.current = null;
+      supportGroupRef.current = null;
     }
 
     const scene = sceneRef.current;
     const model = modelRef.current;
-    if (!show || !model || !scene) return;
+    const supportModel = supportModelRef.current;
+    if (!show || !model || !scene || !supportModel) return;
 
-    // 找到模型的 Mesh
-    const meshes: THREE.Mesh[] = [];
-    model.traverse((child) => {
-      if (child instanceof THREE.Mesh) meshes.push(child);
-    });
-    const modelMesh = meshes[0];
-    if (!modelMesh) return;
-    const meshGeometry = modelMesh.geometry;
-    if (!meshGeometry) return;
+    // 旋转到当前打印姿态(口径跟 obj-exporter / 摆盘算法一致:先 X 后 Y 后 Z)
+    const rotated = rotateSupportMesh(
+      supportModel.mesh,
+      rotationXRef.current ?? 0,
+      rotationYRef.current ?? 0,
+      rotationZRef.current ?? 0
+    );
+    const shell = buildSupportShell(rotated, supportModel.faceEnclosed);
+    if (shell.positions.length < 9) return;
 
-    if (!meshGeometry.attributes.normal) {
-      meshGeometry.computeVertexNormals();
-    }
-    if (!meshGeometry.attributes.position) return;
-
-    const posAttr = meshGeometry.attributes.position;
-    const index = meshGeometry.index;
-
-    // 获取模型世界矩阵（包含旋转/缩放/平移）
-    const matrix = model.matrixWorld.clone();
-
-    // 计算模型世界坐标包围盒
-    const box2 = new THREE.Box3().setFromObject(model, true);
-    if (box2.isEmpty()) return;
-    const boxSize2 = box2.getSize(new THREE.Vector3());
-    const zOffset = -box2.min.z; // 使底板位于 Z=0
-
-    // 计算 wrapTopZ：接近模型顶部（仅留 1-2 层给模型本身的最终封顶层）
-    // 与算法层 angle-optimizer.ts 的 computePolyJetSupport 保持一致
-    // PolyJet 工艺：支撑逐层与模型同步沉积，打印完成时支撑延伸到接近模型顶部
-    // 不存在「顶部 10% 不需要支撑」——只要还有悬垂或侧面需要包裹，支撑就跟着堆
-    const TOP_RESERVE_LAYERS = 0.2; // 顶部预留 0.2mm（约 10 层，PolyJet 层厚 16-30μm）
-    let wrapTopZ = Math.max(0, boxSize2.z - TOP_RESERVE_LAYERS);
-    if (wrapTopZ < 1 && boxSize2.z > 0) wrapTopZ = Math.min(boxSize2.z, 1);
-
-    const v0 = new THREE.Vector3();
-    const v1 = new THREE.Vector3();
-    const v2 = new THREE.Vector3();
-    const edge1 = new THREE.Vector3();
-    const edge2 = new THREE.Vector3();
-    const faceNormal = new THREE.Vector3();
-    const triCount = index
-      ? Math.floor(index.count / 3)
-      : Math.floor(posAttr.count / 3);
-
-    // 收集下半部分（Z ≤ wrapTopZ）的所有面顶点，沿面法线外扩 1mm 形成壳层
-    // PolyJet 工艺：整个下半部分都被支撑材料包裹（包括朝上的面，不只是悬垂面）
-    const shellPositions: number[] = [];
-    const shellNormals: number[] = [];
-    const SHELL_THICKNESS = 1.0; // 1mm 外壳（与算法默认值对齐，用户可调）
-
-    for (let t = 0; t < triCount; t++) {
-      let i0: number;
-      let i1: number;
-      let i2: number;
-      if (index) {
-        i0 = index.getX(t * 3);
-        i1 = index.getX(t * 3 + 1);
-        i2 = index.getX(t * 3 + 2);
-      } else {
-        i0 = t * 3;
-        i1 = t * 3 + 1;
-        i2 = t * 3 + 2;
+    // 局部坐标(OBJ 的 mm,已按打印姿态旋转) → 世界坐标:
+    // 只应用缩放 + 平移 —— 旋转已经烘进几何里了
+    const toWorld = new THREE.Matrix4()
+      .makeScale(model.scale.x, model.scale.y, model.scale.z)
+      .setPosition(model.position.x, model.position.y, model.position.z);
+    const tmp = new THREE.Vector3();
+    const toWorldPositions = (src: Float32Array): Float32Array => {
+      const out = new Float32Array(src.length);
+      for (let i = 0; i < src.length; i += 3) {
+        tmp
+          .set(src[i] ?? 0, src[i + 1] ?? 0, src[i + 2] ?? 0)
+          .applyMatrix4(toWorld);
+        out[i] = tmp.x;
+        out[i + 1] = tmp.y;
+        out[i + 2] = tmp.z;
       }
-      if (i0 >= posAttr.count || i1 >= posAttr.count || i2 >= posAttr.count) {
-        continue;
-      }
+      return out;
+    };
 
-      v0.set(posAttr.getX(i0), posAttr.getY(i0), posAttr.getZ(i0)).applyMatrix4(
-        matrix
-      );
-      v1.set(posAttr.getX(i1), posAttr.getY(i1), posAttr.getZ(i1)).applyMatrix4(
-        matrix
-      );
-      v2.set(posAttr.getX(i2), posAttr.getY(i2), posAttr.getZ(i2)).applyMatrix4(
-        matrix
-      );
+    const group = new THREE.Group();
 
-      // 跳过完全在 wrapTopZ 上方的面（顶部一小段不需要壳层）
-      const faceMinZ = Math.min(v0.z, v1.z, v2.z) + zOffset;
-      if (faceMinZ > wrapTopZ) continue;
-
-      // 面法线（世界坐标）
-      edge1.subVectors(v1, v0);
-      edge2.subVectors(v2, v0);
-      faceNormal.crossVectors(edge1, edge2).normalize();
-
-      // 用户要求：
-      //   1) 「模型法线正面只需要沿着表面覆盖，不需要和底下对称覆盖」
-      //      → 所有朝下面（faceNormal.z < 0）都不生成薄壳
-      //   2) 「不是悬垂薄壳，是一直有支撑下去」
-      //      → 悬空朝下面下方的支撑由「填充柱」负责
-      //
-      // 规则：
-      //   - faceNormal.z >= 0（朝上/侧面）：保留，沿法线外扩 1mm 形成表面薄壳
-      //   - faceNormal.z < 0（所有朝下面，包括贴底板和悬空）：跳过
-      if (faceNormal.z < -0.01) continue;
-
-      // 沿面法线外扩 SHELL_THICKNESS 距离
-      const offsetX = faceNormal.x * SHELL_THICKNESS;
-      const offsetY = faceNormal.y * SHELL_THICKNESS;
-      const offsetZ = faceNormal.z * SHELL_THICKNESS;
-
-      shellPositions.push(
-        v0.x + offsetX,
-        v0.y + offsetY,
-        v0.z + offsetZ,
-        v1.x + offsetX,
-        v1.y + offsetY,
-        v1.z + offsetZ,
-        v2.x + offsetX,
-        v2.y + offsetY,
-        v2.z + offsetZ
-      );
-      // 三角面 3 个顶点共享同一个面法线
-      for (let k = 0; k < 3; k++) {
-        shellNormals.push(faceNormal.x, faceNormal.y, faceNormal.z);
-      }
-    }
-
-    // 创建壳层 Mesh（使用标准 MeshStandardMaterial，比 ShaderMaterial 更可靠）
-    if (shellPositions.length > 0) {
-      const shellGeo = new THREE.BufferGeometry();
-      shellGeo.setAttribute(
+    // ① 外壳(半透明):沿平滑法线外扩后的模型表面
+    //    下朝向面已剔除 —— 那块由支撑顶面负责,避免两层面片叠加
+    if (shell.topIndex.length >= 3) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute(
         "position",
-        new THREE.Float32BufferAttribute(shellPositions, 3)
+        new THREE.BufferAttribute(toWorldPositions(shell.positions), 3)
       );
-      shellGeo.setAttribute(
-        "normal",
-        new THREE.Float32BufferAttribute(shellNormals, 3)
-      );
-      shellGeo.computeBoundingSphere();
+      geo.setIndex(new THREE.BufferAttribute(shell.topIndex, 1));
+      geo.computeVertexNormals();
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0xfde68a,
+        transparent: true,
+        opacity: 0.28,
+        roughness: 0.9,
+        metalness: 0,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.renderOrder = 1;
+      group.add(mesh);
+    }
 
-      // 使用标准材质，透明度 0.65，琥珀色
-      const shellMat = new THREE.MeshStandardMaterial({
+    // ② 支撑顶面:模型的下朝向面 —— 支撑材料的上边界
+    if (shell.underside.length >= 9) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute(
+        "position",
+        new THREE.BufferAttribute(toWorldPositions(shell.underside), 3)
+      );
+      const mat = new THREE.MeshBasicMaterial({
         color: 0xf59e0b,
         transparent: true,
-        opacity: 0.65,
-        roughness: 0.9,
-        metalness: 0.0,
+        opacity: 0.45,
         side: THREE.DoubleSide,
         depthWrite: false,
       });
-
-      const shellMesh = new THREE.Mesh(shellGeo, shellMat);
-      // 壳层顶点已在世界坐标，不跟随 Group 变换
-      scene.add(shellMesh);
-      supportShellRef.current = shellMesh;
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.renderOrder = 0;
+      group.add(mesh);
     }
 
-    // === 底部填充：水溶性支撑包裹式（按模型 XY 投影轮廓生成，非矩形包围盒）===
-    // PolyJet 工艺物理现实：
-    //   - 底部平整贴底板（Z=0）
-    //   - 顶部跟随模型底面轮廓（不平整，反映模型下方空间形状）
-    //   - 每个 XY cell 的支撑柱高度 = 该 cell 处模型「向下法线面」的最低 Z
-    //
-    // 关键修复（用户反馈「不要上下对称，最上面是不平整的」）：
-    //   - 只统计「向下法线面」（faceNormal.z < 0）的 minZ
-    //   - 这样 minZ 真正代表模型在该 cell 的「下方表面」Z
-    //
-    // 实现方式：
-    //   1. 第一遍：栅格化所有面 → coveredGrid（标记投影内的 cell）
-    //   2. 第二遍：栅格化向下法线面 → minZGrid（每个 cell 的模型底面 Z）
-    //   3. 对每个被覆盖的 cell，生成一个支撑柱（柱底贴底板）
-    const gridSize = 0.5; // 0.5mm 栅格精度（更精细，让圆形边界更圆润）
-    const gridW = Math.ceil(boxSize2.x / gridSize) + 2;
-    const gridH = Math.ceil(boxSize2.y / gridSize) + 2;
-    const coveredGrid = new Uint8Array(gridW * gridH);
-    const minZGrid = new Float32Array(gridW * gridH).fill(Infinity);
-    // maxZGrid 记录每个 cell 处模型「向上法线面」的最高 Z（即模型顶面）
-    // 用于生成「上方跟随模型形状」的支撑顶部（不平整）
-    const maxZGrid = new Float32Array(gridW * gridH).fill(-Infinity);
-
-    // 第一遍：栅格化所有面到 XY 投影（标记被覆盖的 cell + 记录 minZ / maxZ）
-    for (let t = 0; t < triCount; t++) {
-      let i0: number;
-      let i1: number;
-      let i2: number;
-      if (index) {
-        i0 = index.getX(t * 3);
-        i1 = index.getX(t * 3 + 1);
-        i2 = index.getX(t * 3 + 2);
-      } else {
-        i0 = t * 3;
-        i1 = t * 3 + 1;
-        i2 = t * 3 + 2;
+    // ③ 平台投影 / 占地区域:全部面片沿 Z 压平到平台平面
+    //    用 MAX 混合方程,重叠三角形不叠加变亮
+    {
+      const flat = new Float32Array(shell.positions.length);
+      for (let i = 0; i < flat.length; i += 3) {
+        flat[i] = shell.positions[i] ?? 0;
+        flat[i + 1] = shell.positions[i + 1] ?? 0;
+        flat[i + 2] = shell.groundZ;
       }
-      if (i0 >= posAttr.count || i1 >= posAttr.count || i2 >= posAttr.count) {
-        continue;
-      }
-      v0.set(posAttr.getX(i0), posAttr.getY(i0), posAttr.getZ(i0)).applyMatrix4(
-        matrix
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute(
+        "position",
+        new THREE.BufferAttribute(toWorldPositions(flat), 3)
       );
-      v1.set(posAttr.getX(i1), posAttr.getY(i1), posAttr.getZ(i1)).applyMatrix4(
-        matrix
+      geo.setIndex(new THREE.BufferAttribute(shell.index, 1));
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xf59e0b,
+        side: THREE.DoubleSide,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.CustomBlending,
+        blendEquation: THREE.MaxEquation,
+        blendSrc: THREE.OneFactor,
+        blendDst: THREE.OneFactor,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.renderOrder = -1;
+      group.add(mesh);
+    }
+
+    // ④ 支撑外壁:下朝向区域的边界边竖直挤到平台
+    if (shell.curtain.length >= 9) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute(
+        "position",
+        new THREE.BufferAttribute(toWorldPositions(shell.curtain), 3)
       );
-      v2.set(posAttr.getX(i2), posAttr.getY(i2), posAttr.getZ(i2)).applyMatrix4(
-        matrix
-      );
-
-      const ax = v0.x - box2.min.x;
-      const ay = v0.y - box2.min.y;
-      const bx = v1.x - box2.min.x;
-      const by = v1.y - box2.min.y;
-      const cx = v2.x - box2.min.x;
-      const cy = v2.y - box2.min.y;
-      const txMin = Math.max(0, Math.floor(Math.min(ax, bx, cx) / gridSize));
-      const txMax = Math.min(
-        gridW - 1,
-        Math.floor(Math.max(ax, bx, cx) / gridSize)
-      );
-      const tyMin = Math.max(0, Math.floor(Math.min(ay, by, cy) / gridSize));
-      const tyMax = Math.min(
-        gridH - 1,
-        Math.floor(Math.max(ay, by, cy) / gridSize)
-      );
-      if (txMin > txMax || tyMin > tyMax) continue;
-      // 计算面法线（仅用于判断朝向）
-      edge1.subVectors(v1, v0);
-      edge2.subVectors(v2, v0);
-      faceNormal.crossVectors(edge1, edge2).normalize();
-      const faceMinZWorld = Math.min(v0.z, v1.z, v2.z) + zOffset;
-      const faceMaxZWorld = Math.max(v0.z, v1.z, v2.z) + zOffset;
-
-      for (let gy = tyMin; gy <= tyMax; gy++) {
-        for (let gx = txMin; gx <= txMax; gx++) {
-          const px = (gx + 0.5) * gridSize;
-          const py = (gy + 0.5) * gridSize;
-          const w0 = (bx - ax) * (py - ay) - (by - ay) * (px - ax);
-          const w1 = (cx - bx) * (py - by) - (cy - by) * (px - bx);
-          const w2 = (ax - cx) * (py - cy) - (ay - cy) * (px - cx);
-          if (
-            (w0 >= 0 && w1 >= 0 && w2 >= 0) ||
-            (w0 <= 0 && w1 <= 0 && w2 <= 0)
-          ) {
-            const cellIdx = gy * gridW + gx;
-            coveredGrid[cellIdx] = 1;
-            // 仅向下法线面参与 minZ 更新（模型底面）
-            if (faceNormal.z < -0.01) {
-              if (faceMinZWorld < minZGrid[cellIdx]!) {
-                minZGrid[cellIdx] = faceMinZWorld;
-              }
-            }
-            // 仅向上法线面参与 maxZ 更新（模型顶面）
-            if (faceNormal.z > 0.01) {
-              if (faceMaxZWorld > maxZGrid[cellIdx]!) {
-                maxZGrid[cellIdx] = faceMaxZWorld;
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // === 膨胀覆盖区域：真正的圆形扩展（distance field）===
-    //   - 用真正的圆形 distance field：每个 cell 计算到最近原始 cell 的欧几里得距离
-    //   - 距离 ≤ R 才标记为覆盖
-    //   - 配合 0.5mm 栅格精度（gridSize=0.5）让边界更精细
-    const DILATE_RADIUS_MM = 8; // 8mm 扩展半径（毫米）
-    const dilatedGrid = new Uint8Array(gridW * gridH);
-    const dilatedMinZ = new Float32Array(gridW * gridH).fill(Infinity);
-    const dilatedMaxZ = new Float32Array(gridW * gridH).fill(-Infinity);
-    // 先复制原始 cell
-    for (let i = 0; i < coveredGrid.length; i++) {
-      if (coveredGrid[i]) {
-        dilatedGrid[i] = 1;
-        dilatedMinZ[i] = minZGrid[i]!;
-        dilatedMaxZ[i] = maxZGrid[i]!;
-      }
-    }
-    // 对每个非原始 cell，搜索最近的原始 cell，距离 ≤ R 则标记
-    const Rcells = Math.ceil(DILATE_RADIUS_MM / gridSize);
-    for (let gy = 0; gy < gridH; gy++) {
-      for (let gx = 0; gx < gridW; gx++) {
-        const idx = gy * gridW + gx;
-        if (coveredGrid[idx]) continue;
-        // 在半径 Rcells 内搜索最近的原始 cell
-        let bestDist = Infinity;
-        let bestMinZ = 0;
-        let bestMaxZ = wrapTopZ;
-        for (let dy = -Rcells; dy <= Rcells; dy++) {
-          for (let dx = -Rcells; dx <= Rcells; dx++) {
-            const nx = gx + dx;
-            const ny = gy + dy;
-            if (nx < 0 || nx >= gridW || ny < 0 || ny >= gridH) continue;
-            const nIdx = ny * gridW + nx;
-            if (!coveredGrid[nIdx]) continue;
-            // 欧几里得距离（mm）
-            const dist = Math.sqrt(dx * dx + dy * dy) * gridSize;
-            if (dist > DILATE_RADIUS_MM) continue;
-            if (dist < bestDist) {
-              bestDist = dist;
-              bestMinZ = minZGrid[nIdx]!;
-              bestMaxZ = maxZGrid[nIdx]!;
-            }
-          }
-        }
-        if (bestDist < Infinity) {
-          dilatedGrid[idx] = 1;
-          dilatedMinZ[idx] = bestMinZ;
-          dilatedMaxZ[idx] = bestMaxZ;
-        }
-      }
-    }
-    for (let i = 0; i < coveredGrid.length; i++) {
-      coveredGrid[i] = dilatedGrid[i]!;
-      minZGrid[i] = dilatedMinZ[i] === Infinity ? 0 : dilatedMinZ[i]!;
-      maxZGrid[i] = dilatedMaxZ[i] === -Infinity ? wrapTopZ : dilatedMaxZ[i]!;
-    }
-
-    // === 平滑 maxZGrid / minZGrid（消除锯齿，让顶部和底部圆润）===
-    const SMOOTH_ITER = 8; // 增加到 8 次迭代
-    const SMOOTH_RADIUS = 3; // 7x7 邻域（扩大范围让过渡更圆润）
-    for (let iter = 0; iter < SMOOTH_ITER; iter++) {
-      const prevMax = new Float32Array(maxZGrid);
-      const prevMin = new Float32Array(minZGrid);
-      for (let gy = 0; gy < gridH; gy++) {
-        for (let gx = 0; gx < gridW; gx++) {
-          const idx = gy * gridW + gx;
-          if (!coveredGrid[idx]) continue;
-          let sumWMax = 0;
-          let sumMax = 0;
-          let sumWMin = 0;
-          let sumMin = 0;
-          for (let dy = -SMOOTH_RADIUS; dy <= SMOOTH_RADIUS; dy++) {
-            for (let dx = -SMOOTH_RADIUS; dx <= SMOOTH_RADIUS; dx++) {
-              const nx = gx + dx;
-              const ny = gy + dy;
-              if (nx < 0 || nx >= gridW || ny < 0 || ny >= gridH) continue;
-              const nIdx = ny * gridW + nx;
-              if (!coveredGrid[nIdx]) continue;
-              const distSq = dx * dx + dy * dy;
-              // 高斯衰减（σ更大让更多邻域参与）
-              const w = Math.exp(-distSq / 6);
-              sumWMax += w;
-              sumMax += prevMax[nIdx]! * w;
-              sumWMin += w;
-              sumMin += prevMin[nIdx]! * w;
-            }
-          }
-          if (sumWMax > 0) maxZGrid[idx] = sumMax / sumWMax;
-          if (sumWMin > 0) minZGrid[idx] = sumMin / sumWMin;
-        }
-      }
-    }
-
-    // 收集被覆盖的单元
-    // 用户要求「上方依然保持模型的形状」：
-    //   - 每个 cell 的支撑柱从 Z=0 填到 maxZ[cell]
-    //   - maxZ[cell] = 该 cell 处模型「向上法线面」的最高 Z（即模型顶面）
-    //   - 这样支撑顶部跟随模型顶面形状（不平整，跟随模型上表面）
-    const coveredCells: { x: number; y: number; h: number; z: number }[] = [];
-    for (let gy = 0; gy < gridH; gy++) {
-      for (let gx = 0; gx < gridW; gx++) {
-        const idx = gy * gridW + gx;
-        if (coveredGrid[idx]) {
-          // 高度 = maxZ（模型顶面 Z，确保覆盖整个模型）
-          // 位置 z = h/2（柱底贴底板）
-          const h = Math.max(0.5, maxZGrid[idx]!); // 至少 0.5mm 高度，避免 0 高度柱
-          coveredCells.push({ x: gx, y: gy, h, z: h / 2 });
-        }
-      }
-    }
-
-    if (coveredCells.length > 0) {
-      // 使用标准 MeshStandardMaterial（避免 shader 编译失败导致不可见）
-      // 透明度 0.4，琥珀色，让支撑清晰可见
-      const fillMat = new THREE.MeshStandardMaterial({
+      const mat = new THREE.MeshBasicMaterial({
         color: 0xf59e0b,
         transparent: true,
-        opacity: 0.4,
-        roughness: 0.9,
-        metalness: 0.0,
+        opacity: 0.32,
         side: THREE.DoubleSide,
         depthWrite: false,
       });
-
-      // 单元几何：1mm × 1mm × 1mm 单位立方体，通过 InstancedMesh 的 scale 实现不同高度
-      const cellGeo = new THREE.BoxGeometry(
-        gridSize * 0.98,
-        gridSize * 0.98,
-        1.0
-      );
-      const inst = new THREE.InstancedMesh(
-        cellGeo,
-        fillMat,
-        coveredCells.length
-      );
-      const dummy = new THREE.Object3D();
-      for (let i = 0; i < coveredCells.length; i++) {
-        const c = coveredCells[i]!;
-        // 柱底贴底板（Z=0），柱高 = c.h（= maxZ[cell] = 模型顶面 Z）
-        dummy.position.set(
-          box2.min.x + c.x * gridSize + gridSize / 2,
-          box2.min.y + c.y * gridSize + gridSize / 2,
-          box2.min.z + c.z // 柱中心位于 c.z = c.h/2，柱底自然贴底板
-        );
-        // 沿 Z 轴缩放到目标高度
-        dummy.scale.set(1, 1, c.h);
-        dummy.updateMatrix();
-        inst.setMatrixAt(i, dummy.matrix);
-      }
-      inst.instanceMatrix.needsUpdate = true;
-      scene.add(inst);
-      supportFillRef.current = inst;
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.renderOrder = 0;
+      group.add(mesh);
     }
+
+    scene.add(group);
+    supportGroupRef.current = group;
   };
 
   // Build/load model whenever inputs change
@@ -993,6 +723,17 @@ export function ObjViewer({
           fitCameraToModel();
         }
 
+        // 7. 备一份焊接后的模型(支撑几何的输入)——焊接 + 拓扑是姿态无关的,
+        //    只做一次,之后拖动角度时只旋转顶点。失败不影响主流程,只是不画支撑。
+        try {
+          supportModelRef.current = prepareSupportModel(workerResult.positions);
+        } catch (err) {
+          console.warn("支撑模型准备失败,支撑可视化不可用:", err);
+          supportModelRef.current = null;
+        }
+        // 建模是异步的:开关可能早就打开了,这里补一次支撑可视化
+        updateSupportShell(!!showSupportRef.current);
+
         setLoading(false);
         onProgressRef.current?.(100);
         onReadyRef.current?.();
@@ -1036,6 +777,8 @@ export function ObjViewer({
       : [scale ?? 1, scale ?? 1, scale ?? 1];
     model.scale.set(sx, sy, sz);
     // 应用用户旋转（不需要基础 -90° X 旋转了，因为场景已经是 Z-up）
+    // 顺序 "ZYX" = Rz·Ry·Rx,跟摆盘算法 / OBJ 导出口径一致(见 fitCameraToModel)
+    model.rotation.order = "ZYX";
     const rx = ((rotationX ?? 0) * Math.PI) / 180;
     const ry = ((rotationY ?? 0) * Math.PI) / 180;
     const rz = ((rotationZ ?? 0) * Math.PI) / 180;

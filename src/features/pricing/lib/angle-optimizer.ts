@@ -1,36 +1,44 @@
 /**
- * 移植自 wjp-source-code/src/lib/angle-optimizer.ts —— 耗材克重报价计算器（PolyJet 全彩打印）。
+ * 摆盘角度优化 —— 耗材克重报价计算器(PolyJet / WJP 全彩打印)
  *
- * 算法逻辑与源实现保持一致；移植时仅做类型严格化（noUncheckedIndexedAccess /
- * exactOptionalPropertyTypes）与 Biome 格式化调整，未改变任何数值行为。
+ * 2026-11-02:**支撑体积改用模型检查工具的包裹支撑算法**
+ * (`src/features/tools/lib/mesh/support-shell.ts`)。
+ *
+ * ## 之前的问题
+ *
+ * 这里原来有一套自己的「PolyJet 双体积公式」:
+ *   总支撑克重 = (外壳包裹体积 + 底部填充体积) × 填充率 × 密度
+ *   外壳包裹体积 = 下半部分表面积 × 壳厚
+ *   底部填充体积 = max(0, 投影面积 × 包裹顶部Z − 模型体积)
+ *
+ * 而模型检查工具(`/tools/model-check`)画出来的包裹支撑是**另一套几何**
+ * (平台 → 下朝向面之间的包裹体)。同一个模型,两个工具给两个数 ——
+ * 用户在检测工具里看到的支撑体,和在克重工具里算出来的克重对不上。
+ *
+ * ## 现在的算法
+ *
+ * 两边共用 `support-shell.ts`:
+ *   - 焊接 + 拓扑(姿态无关)→ 只做一次(`prepareSupportModel`)
+ *   - 每个候选姿态:旋转顶点与法线 → 生成包裹外壳 → 按列算支撑体积
+ *
+ * 支撑体积按列(height field)算:每个 XY 格子里,支撑从平台长到该列的
+ * 下朝向面(支撑材料的上边界),再扣掉该列里模型自己占掉的部分。
+ * 「蘑菇」(宽帽 + 细腿)算出来是帽子下面那圈空间,而不是把整根柱子当支撑。
+ *
+ * ## 摆盘策略
+ *
+ *   1. 平面模型(Z ≤ 最短轴 × 0.5)→ 直接平放
+ *   2. 其余:先剔除旋转后高度 > maxHeightMM 的候选(立着超过 50mm 不给印),
+ *      再在剩下的里优先选「彩色面没被包裹」的姿态,其次选支撑克重最小的
  */
-/**
- * 智能摆盘角度优化（PolyJet 多材料喷射全彩打印支撑模型）
- *
- * 核心算法（双体积公式）：
- *   总支撑克重 = (外壳包裹体积 + 底部填充体积) × 填充率 × 材料密度
- *
- *   外壳包裹体积 = Σ(法线朝下或水平的面面积) × 壳厚 (1mm)
- *     —— 仅 nz ≤ 0 的面需要包裹（侧面、悬垂面、朝下面）
- *     —— 平顶朝上的面（nz > 0）不参与
- *
- *   底部填充体积 = max(0, 投影面积 × 包裹顶部Z - 包裹区内模型体积)
- *     —— PolyJet 工艺中，模型内部空腔也会被填充支撑材料，所以直接用投影体积减去模型体积是合理的
- *
- * 智能裁剪逻辑：
- *   - 不再用「Z_max × 50%」这种死板阈值
- *   - 通过法线方向自然确定包裹范围（nz ≤ 0 的所有面参与包裹）
- *   - 包裹顶部 Z = 所有包裹面的最高 Z（动态计算）
- *   - 渲染端用 Shader 传入 uZThreshold，瞬间裁掉上半部分
- *
- * 摆盘策略：
- *   - 代价 = α·支撑克重 + β·彩色面被包裹面积
- *   - 若某角度让彩色面被包裹 → 优先级降至最低（次选最少包裹面积）
- *
- * 性能优化：
- *   - coarseMode = true：栅格 5mm，步长 30°（拖拽中实时预览）
- *   - coarseMode = false：栅格 1mm，步长 15°（松开后精确计算）
- */
+
+import {
+  buildSupportShell,
+  computeSupportVolume,
+  prepareSupportModel,
+  rotateSupportMesh,
+  type SupportModel,
+} from "@/features/tools/lib/mesh/support-shell";
 
 export type OptimalAngle = {
   /** 绕 X 轴旋转角度（度） */
@@ -39,11 +47,11 @@ export type OptimalAngle = {
   rotY: number;
   /** 本体支撑比例（无单位）：支撑克重 / 模型克重。>1 表示支撑比模型本身还重。 */
   selfSupportRatio: number;
-  /** 本体支撑面积 (mm²)：从上方俯视的 XY 投影面积（模型本体在打印平面上的覆盖范围） */
+  /** 支撑底面占地 (mm²)：平台上被支撑体占住的面积 */
   selfSupportArea: number;
   /** 总支撑比例（无单位）：与 selfSupportRatio 相同（保持兼容性） */
   totalSupportRatio: number;
-  /** 总支撑克重 (g)：基于 PolyJet 双体积公式（外壳包裹 + 底部填充） */
+  /** 总支撑克重 (g) */
   totalSupportWeight: number;
   /** 总表面积 (cm²) */
   totalArea: number;
@@ -53,16 +61,12 @@ export type OptimalAngle = {
   laidFlat: boolean;
   /** 旋转后悬垂面面积 (mm²)：仅法线朝下且 >45° 的三角面面积之和 */
   overhangArea?: number;
-  /** 旋转后被包裹的彩色表面面积 (mm²)：用于评估贴图表面保护效果 */
+  /** 旋转后被包裹的彩色表面面积 (mm²)：下朝向的彩色面(支撑体会盖住它们) */
   coloredDownArea?: number;
-  /** 包裹面总面积 (mm²)：所有 nz ≤ 0 的面面积之和（侧面 + 朝下面） */
+  /** 下朝向面总面积 (mm²)：支撑顶面与模型的接触面积 */
   wrapArea?: number;
-  /** 外壳包裹体积 (mm³) */
-  shellVolume?: number;
-  /** 底部填充体积 (mm³) */
-  fillVolume?: number;
-  /** 包裹顶部 Z (mm)：用于 Shader 裁剪阈值 */
-  wrapTopZ?: number;
+  /** 包裹支撑体积 (mm³)：平台到下朝向面之间的支撑材料 */
+  supportVolume?: number;
   /** 原始姿态（rotX=0, rotY=0）的支撑克重 (g)：用于对比 */
   originalWeight?: number;
   /** 原始姿态的支撑克重与最优姿态的比值（>1 表示原始姿态支撑更多） */
@@ -70,506 +74,111 @@ export type OptimalAngle = {
 };
 
 /**
- * 旋转一个法线向量（绕 X 轴再绕 Y 轴）
+ * 支撑材料参数(校准面板的三个旋钮)
+ *
+ * - `fillRate` 蜂窝填充率:支撑材料的实心比例(支撑是蜂窝结构,不是实心)
+ * - `gapScale` 包裹间隙倍率:1 = 检测工具的自适应间隙(对角线 2%,0.8~5mm)
+ * - `density` 支撑材料密度 (g/cm³)
  */
-function rotateNormal(
-  nx: number,
-  ny: number,
-  nz: number,
-  rotXDeg: number,
-  rotYDeg: number
-): [number, number, number] {
-  const rx = (rotXDeg * Math.PI) / 180;
-  const ry = (rotYDeg * Math.PI) / 180;
+export type SupportParams = {
+  fillRate: number;
+  gapScale: number;
+  density: number;
+};
 
-  const cosX = Math.cos(rx),
-    sinX = Math.sin(rx);
-  const y1 = ny * cosX - nz * sinX;
-  const z1 = ny * sinX + nz * cosX;
-
-  const cosY = Math.cos(ry),
-    sinY = Math.sin(ry);
-  const x2 = nx * cosY + z1 * sinY;
-  const z2 = -nx * sinY + z1 * cosY;
-
-  return [x2, y1, z2];
-}
-
-/**
- * 旋转所有顶点：绕 X 轴 → 绕 Y 轴 → 绕 Z 轴
- */
-function rotatePositions(
-  positions: Float32Array,
-  rotXDeg: number,
-  rotYDeg: number,
-  rotZDeg: number = 0
-): Float32Array {
-  const totalRotX = (rotXDeg * Math.PI) / 180;
-  const cosX = Math.cos(totalRotX),
-    sinX = Math.sin(totalRotX);
-  const ry = (rotYDeg * Math.PI) / 180;
-  const cosY = Math.cos(ry),
-    sinY = Math.sin(ry);
-  const rz = (rotZDeg * Math.PI) / 180;
-  const cosZ = Math.cos(rz),
-    sinZ = Math.sin(rz);
-
-  const result = new Float32Array(positions.length);
-  const vertCount = positions.length / 3;
-  for (let i = 0; i < vertCount; i++) {
-    const x0 = positions[i * 3]!;
-    const y0 = positions[i * 3 + 1]!;
-    const z0 = positions[i * 3 + 2]!;
-    const y1 = y0 * cosX - z0 * sinX;
-    const z1 = y0 * sinX + z0 * cosX;
-    const x2 = x0 * cosY + z1 * sinY;
-    const z2 = -x0 * sinY + z1 * cosY;
-    let x3 = x2,
-      y3 = y1;
-    if (rotZDeg !== 0) {
-      x3 = x2 * cosZ - y1 * sinZ;
-      y3 = x2 * sinZ + y1 * cosZ;
-    }
-    result[i * 3] = x3;
-    result[i * 3 + 1] = y3;
-    result[i * 3 + 2] = z2;
-  }
-  return result;
-}
-
-/**
- * 从 positions 数组计算每个三角面的法线和面积
- */
-function computeFaceData(positions: Float32Array): {
-  normals: Float32Array;
-  areas: Float32Array;
-} {
-  const triCount = positions.length / 9;
-  const normals = new Float32Array(triCount * 3);
-  const areas = new Float32Array(triCount);
-
-  for (let i = 0; i < triCount; i++) {
-    const base = i * 9;
-    const ax = positions[base]!,
-      ay = positions[base + 1]!,
-      az = positions[base + 2]!;
-    const bx = positions[base + 3]!,
-      by = positions[base + 4]!,
-      bz = positions[base + 5]!;
-    const cx = positions[base + 6]!,
-      cy = positions[base + 7]!,
-      cz = positions[base + 8]!;
-
-    const ex = bx - ax,
-      ey = by - ay,
-      ez = bz - az;
-    const fx = cx - ax,
-      fy = cy - ay,
-      fz = cz - az;
-
-    const nx = ey * fz - ez * fy;
-    const ny = ez * fx - ex * fz;
-    const nz = ex * fy - ey * fx;
-
-    const len = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
-    normals[i * 3] = nx / len;
-    normals[i * 3 + 1] = ny / len;
-    normals[i * 3 + 2] = nz / len;
-
-    areas[i] = 0.5 * len;
-  }
-
-  return { normals, areas };
-}
+export const DEFAULT_SUPPORT_PARAMS: SupportParams = {
+  fillRate: 0.37,
+  gapScale: 1,
+  density: 1.15,
+};
 
 /** 悬垂阈值：法线 z 分量 < -cos(45°) ≈ -0.707 时为悬垂面（>45° 倾斜朝下） */
 const OVERHANG_NORMAL_Z_THRESHOLD = -Math.SQRT1_2;
 
+/** 单个姿态下的支撑数据 */
+export type SupportPoseResult = {
+  /** 包裹支撑体积 (mm³) */
+  supportVolumeMM3: number;
+  /** 支撑克重 (g) */
+  supportWeightG: number;
+  /** 下朝向面总面积 (mm²)：支撑顶面与模型的接触面积 */
+  wrapAreaMM2: number;
+  /** 悬垂面面积 (mm²)：法线 z < -cos45° */
+  overhangAreaMM2: number;
+  /** 彩色面中被包裹(下朝向)的面积 (mm²) */
+  coloredWrapAreaMM2: number;
+  /** 模型 XY 投影面积 (mm²) */
+  projectedAreaMM2: number;
+  /** 有支撑的投影面积 (mm²)：支撑体在平台上的占地 */
+  supportAreaMM2: number;
+  /** 旋转后的模型高度 (mm) */
+  rotatedHeightMM: number;
+};
+
 /**
- * PolyJet 多材料喷射全彩打印支撑克重计算（核心算法）
+ * 计算单个姿态下的包裹支撑(检测工具算法)
  *
- * 双体积公式（修正版）：
- *   总支撑体积 = 外壳包裹体积 + 底部填充体积
- *
- *   外壳包裹体积 = 下半部分表面积 × 壳厚 (1mm)
- *     —— 下半部分 = Z ≤ wrapTopZ 的所有面（包括朝上的面，不只悬垂面）
- *     —— 跨越 wrapTopZ 的面按高度比例计算
- *
- *   底部填充体积 = max(0, 投影面积 × wrapTopZ - 模型在 [0, wrapTopZ] 区间内的体积)
- *     —— PolyJet 工艺中模型内部空腔也会被填充支撑材料
- *     —— 模型在区间内的体积按比例近似：modelVolume × (wrapTopZ / rotatedHeight)
- *
- *   wrapTopZ = rotatedHeight - 0.2mm（仅留 1-2 层给模型本身的最终封顶层）
- *     —— PolyJet 工艺：支撑逐层与模型同步沉积，打印完成时支撑延伸到接近模型顶部
- *     —— 不存在「顶部 10% 不需要支撑」——只要还有悬垂或侧面需要包裹，支撑就跟着堆
- *     —— 参考实拍图（打印中途）：黄色支撑凝胶从底部堆到当前打印层（约 50% 高度）
- *
- * @param positions 三角化顶点数据
- * @param normals 每个三角面的法线（已归一化）
- * @param areas 每个三角面的面积 (mm²)
+ * @param model 备好的模型(焊接一次,之后每个姿态只旋转)
  * @param rotXDeg X 轴旋转角度
  * @param rotYDeg Y 轴旋转角度
- * @param rotZDeg Z 轴旋转角度（手动微调）
- * @param gridSizeMM 栅格化精度
- * @param shellThicknessMM 壳层厚度（默认 1mm）
- * @param modelVolumeMM3 模型体积 (mm³)，用于底部填充减去实体部分
- * @param coloredFaceMask 每个三角面的彩色标记（1 = 有贴图/彩色）
- * @returns 外壳体积、填充体积、总克重、包裹面面积、悬垂面面积等
+ * @param rotZDeg Z 轴旋转角度
+ * @param params 支撑材料参数
+ * @param opts.gridSizeMM 栅格精度(mm),默认 1
+ * @param opts.coloredFaceMask 每个面的彩色标记(1 = 有贴图)
  */
-export function computePolyJetSupport(
-  positions: Float32Array,
-  normals: Float32Array,
-  areas: Float32Array,
+export function computeSupportAtPose(
+  model: SupportModel,
   rotXDeg: number,
   rotYDeg: number,
-  rotZDeg: number = 0,
-  gridSizeMM: number = 1.0,
-  shellThicknessMM: number = 1.0,
-  modelVolumeMM3: number = 0,
-  coloredFaceMask?: Uint8Array | null,
-  fillRate: number = 0.37,
-  densityGCm3: number = 1.15
-): {
-  shellVolumeMM3: number;
-  fillVolumeMM3: number;
-  totalVolumeMM3: number;
-  totalWeightG: number;
-  wrapAreaMM2: number; // 下半部分表面积（Z ≤ wrapTopZ 的面面积之和）
-  overhangAreaMM2: number; // 悬垂面面积（nz < -cos(45°)）
-  coloredWrapAreaMM2: number; // 下半部分彩色面面积
-  coloredDownAreaMM2: number; // 朝下的彩色面面积（用于彩色保护判定）
-  projectedAreaMM2: number;
-  wrapTopZMM: number; // 包裹顶部 Z（用于 Shader 裁剪阈值）
-  rotatedHeightMM: number;
-} {
-  const rotated = rotatePositions(positions, rotXDeg, rotYDeg, rotZDeg);
-
-  // 计算包围盒
-  let minX = Infinity,
-    maxX = -Infinity;
-  let minY = Infinity,
-    maxY = -Infinity;
-  let minZ = Infinity,
-    maxZ = -Infinity;
-  const vertCount = rotated.length / 3;
-  const stride = Math.max(1, Math.floor(vertCount / 8000));
-  for (let i = 0; i < vertCount; i += stride) {
-    const x = rotated[i * 3]!;
-    const y = rotated[i * 3 + 1]!;
-    const z = rotated[i * 3 + 2]!;
-    if (x < minX) minX = x;
-    if (x > maxX) maxX = x;
-    if (y < minY) minY = y;
-    if (y > maxY) maxY = y;
-    if (z < minZ) minZ = z;
-    if (z > maxZ) maxZ = z;
+  rotZDeg: number,
+  params: SupportParams = DEFAULT_SUPPORT_PARAMS,
+  opts?: {
+    gridSizeMM?: number | undefined;
+    coloredFaceMask?: Uint8Array | null | undefined;
   }
-  const width = maxX - minX;
-  const height = maxY - minY;
-  const rotatedHeight = maxZ - minZ;
-  const zOffset = -minZ; // 使底部贴在 Z=0
+): SupportPoseResult {
+  const rotated = rotateSupportMesh(model.mesh, rotXDeg, rotYDeg, rotZDeg);
+  // 克重只要体积:外壳的顶面 / 外壁 / 渲染索引都省掉
+  const shell = buildSupportShell(
+    rotated,
+    model.faceEnclosed,
+    { includeCurtain: false, includeTopIndex: false },
+    params.gapScale
+  );
+  const volume = computeSupportVolume(shell, rotated, {
+    gridSizeMM: opts?.gridSizeMM,
+  });
 
-  if (
-    width <= 0 ||
-    height <= 0 ||
-    !Number.isFinite(width) ||
-    !Number.isFinite(height)
-  ) {
-    return {
-      shellVolumeMM3: 0,
-      fillVolumeMM3: 0,
-      totalVolumeMM3: 0,
-      totalWeightG: 0,
-      wrapAreaMM2: 0,
-      overhangAreaMM2: 0,
-      coloredWrapAreaMM2: 0,
-      coloredDownAreaMM2: 0,
-      projectedAreaMM2: 0,
-      wrapTopZMM: 0,
-      rotatedHeightMM: rotatedHeight,
-    };
+  // 下朝向面 = 支撑顶面(支撑材料贴着模型的那一面)
+  const mask = opts?.coloredFaceMask;
+  const faceAreas = rotated.faceAreas;
+  let coloredWrapArea = 0;
+  for (let i = 0; i < shell.downFaces.length; i++) {
+    const f = shell.downFaces[i]!;
+    if (mask && mask[f] === 1) coloredWrapArea += faceAreas[f]!;
   }
 
-  // 设置栅格
-  const MAX_CELLS = 200_000;
-  let actualGridSize = gridSizeMM;
-  let gridW = Math.ceil(width / actualGridSize);
-  let gridH = Math.ceil(height / actualGridSize);
-  if (gridW * gridH > MAX_CELLS) {
-    const scale = Math.sqrt((gridW * gridH) / MAX_CELLS);
-    actualGridSize = gridSizeMM * scale;
-    gridW = Math.ceil(width / actualGridSize);
-    gridH = Math.ceil(height / actualGridSize);
-  }
-
-  // 初始化栅格：
-  // - coveredGrid: 标记单元是否被模型覆盖（用于投影面积）
-  // - minZGrid: 该单元内模型最低点的 Z（用于填充高度）
-  //   关键：填充体积 = Σ cellArea × minZ[cell]（每个 XY 单元从底板填到模型底面）
-  //   这是真正依赖旋转角度的量：
-  //     - 平躺时模型底面贴近底板，minZ 接近 0 → 填充体积小
-  //     - 侧立时模型大部分悬空，minZ 大 → 填充体积大
-  //   注意：旧公式 projectedArea × wrapTopZ - modelVolume 是错的（旋转不变），不能反映姿态差异
-  const coveredGrid = new Uint8Array(gridW * gridH);
-  const minZGrid = new Float32Array(gridW * gridH); // 模型底面 Z（初始为 Infinity，用 0 表示未覆盖）
-  // 用 Float32Array 初始化为大值
-  minZGrid.fill(1e9);
-
-  const triCount = positions.length / 9;
-
-  // === 第一遍：扫描所有面，统计悬垂面和朝下的彩色面（用于摆盘策略） ===
-  // 注意：wrapTopZ 不再由悬垂面决定，而是接近模型顶部（顶部一小段无需支撑）
+  // 悬垂面(>45° 朝下):只用于摆盘参考,不进克重公式
   let overhangArea = 0;
-  let coloredDownArea = 0;
-
-  for (let t = 0; t < triCount; t++) {
-    const nx = normals[t * 3]!;
-    const ny = normals[t * 3 + 1]!;
-    const nz = normals[t * 3 + 2]!;
-    const [, , rotatedNz] = rotateNormal(nx, ny, nz, rotXDeg, rotYDeg);
-
-    const isColored = coloredFaceMask ? coloredFaceMask[t] === 1 : false;
-
-    // 悬垂面检测：nz < -cos(45°)
-    // 用于摆盘策略（统计悬垂面积以避免大悬垂角度），不直接决定 wrapTopZ
-    if (rotatedNz < OVERHANG_NORMAL_Z_THRESHOLD) {
-      overhangArea += areas[t]!;
-      if (isColored) {
-        coloredDownArea += areas[t]!;
-      }
+  for (let f = 0; f < rotated.faceCount; f++) {
+    if (rotated.faceNormals[f * 3 + 2]! < OVERHANG_NORMAL_Z_THRESHOLD) {
+      overhangArea += faceAreas[f]!;
     }
   }
 
-  // === wrapTopZ：接近模型顶部（仅留 1-2 层给模型本身的最终封顶层）===
-  // PolyJet 工艺物理现实（用户提供的实拍图验证）：
-  //   - 支撑材料逐层与模型同步沉积（边打模型边堆支撑）
-  //   - 在打印过程中，支撑高度 = 当前打印层高度
-  //   - 在打印完成时，支撑延伸到接近模型顶部（仅留最顶 1-2 层给模型本身的最终封顶层）
-  //   - 不存在「顶部 10% 不需要支撑」的情况——只要还有悬垂或侧面需要包裹，支撑就跟着堆
-  //
-  // 参考实拍图：黄色支撑凝胶从底部一直堆到当前打印层（图中约 50% 高度），打印完成后将延伸到接近顶部
-  const TOP_RESERVE_LAYERS = 0.2; // 顶部预留 0.2mm（约 10 层，PolyJet 层厚 16-30μm）
-  let wrapTopZ = Math.max(0, rotatedHeight - TOP_RESERVE_LAYERS);
-  // 安全限制：wrapTopZ 至少 1mm（避免极矮模型导致 0）
-  if (wrapTopZ < 1 && rotatedHeight > 0) wrapTopZ = Math.min(rotatedHeight, 1);
-
-  // === 第二遍：计算下半部分（Z ≤ wrapTopZ）的外壳包裹面积 ===
-  // 用户要求：
-  //   1) 「模型法线正面只需要沿着表面覆盖，不需要和底下对称覆盖」
-  //      → 所有朝下面（nz < 0）都不参与外壳包裹
-  //   2) 「不是悬垂薄壳，是一直有支撑下去」
-  //      → 悬空朝下面下方的连续支撑由填充柱提供（从 Z=0 填到 minZ[cell]）
-  //        不再需要在朝下面外侧加 1mm 薄壳
-  let wrapArea = 0; // 下半部分表面积（仅 nz ≥ 0 的面，用于外壳体积）
-  let coloredWrapArea = 0; // 下半部分彩色面面积（仅 nz ≥ 0）
-
-  for (let t = 0; t < triCount; t++) {
-    const base = t * 9;
-    const z0 = rotated[base + 2]! + zOffset;
-    const z1 = rotated[base + 5]! + zOffset;
-    const z2 = rotated[base + 8]! + zOffset;
-    const faceMinZ = Math.min(z0, z1, z2);
-    const faceMaxZ = Math.max(z0, z1, z2);
-
-    // 完全在 wrapTopZ 上方：不参与包裹
-    if (faceMinZ > wrapTopZ) continue;
-
-    // 用户要求：所有朝下面（nz < 0）都不参与外壳包裹
-    // 悬空朝下面下方的支撑由填充柱负责
-    const nx = normals[t * 3]!;
-    const ny = normals[t * 3 + 1]!;
-    const nz = normals[t * 3 + 2]!;
-    const [, , rotatedNz] = rotateNormal(nx, ny, nz, rotXDeg, rotYDeg);
-    if (rotatedNz < -0.01) continue;
-
-    // 完全在 wrapTopZ 下方或恰好等于：整个面参与
-    if (faceMaxZ <= wrapTopZ) {
-      wrapArea += areas[t]!;
-      if (coloredFaceMask && coloredFaceMask[t] === 1) {
-        coloredWrapArea += areas[t]!;
-      }
-    } else {
-      // 跨越 wrapTopZ：按高度比例计算下半部分面积
-      const ratio = (wrapTopZ - faceMinZ) / (faceMaxZ - faceMinZ);
-      wrapArea += areas[t]! * ratio;
-      if (coloredFaceMask && coloredFaceMask[t] === 1) {
-        coloredWrapArea += areas[t]! * ratio;
-      }
-    }
-  }
-
-  // === 第三遍：栅格化所有面到 XY 投影，记录每个单元的模型最低 Z ===
-  // minZ[cell] = 该 XY 单元内模型「向下法线面」的最低 Z（真正的模型底面）
-  //
-  // 关键修复（用户反馈「不要上下对称，最上面是不平整的」）：
-  //   - 仅向下法线面（rotatedNz < 0）参与 minZ 更新
-  //   - 朝上面（rotatedNz > 0）的 faceMinZ 不应污染 minZ（否则模型顶面 Z 会拉低 minZ）
-  //   - 这样 minZ 真正代表模型在该 cell 的「下方表面」Z
-  for (let t = 0; t < triCount; t++) {
-    const base = t * 9;
-    const ax = rotated[base]! - minX;
-    const ay = rotated[base + 1]! - minY;
-    const az0 = rotated[base + 2]! + zOffset;
-    const bx = rotated[base + 3]! - minX;
-    const by = rotated[base + 4]! - minY;
-    const bz0 = rotated[base + 5]! + zOffset;
-    const cx = rotated[base + 6]! - minX;
-    const cy = rotated[base + 7]! - minY;
-    const cz0 = rotated[base + 8]! + zOffset;
-    const faceMinZ = Math.min(az0, bz0, cz0);
-
-    // 计算该面旋转后的法线 Z 分量
-    const nx = normals[t * 3]!;
-    const ny = normals[t * 3 + 1]!;
-    const nz = normals[t * 3 + 2]!;
-    const [, , rotatedNz] = rotateNormal(nx, ny, nz, rotXDeg, rotYDeg);
-    const isDownwardFace = rotatedNz < -0.01;
-
-    const txMin = Math.max(
-      0,
-      Math.floor(Math.min(ax, bx, cx) / actualGridSize)
-    );
-    const txMax = Math.min(
-      gridW - 1,
-      Math.floor(Math.max(ax, bx, cx) / actualGridSize)
-    );
-    const tyMin = Math.max(
-      0,
-      Math.floor(Math.min(ay, by, cy) / actualGridSize)
-    );
-    const tyMax = Math.min(
-      gridH - 1,
-      Math.floor(Math.max(ay, by, cy) / actualGridSize)
-    );
-    if (txMin > txMax || tyMin > tyMax) continue;
-
-    const eAB = (px: number, py: number) =>
-      (bx - ax) * (py - ay) - (by - ay) * (px - ax);
-    const eBC = (px: number, py: number) =>
-      (cx - bx) * (py - by) - (cy - by) * (px - bx);
-    const eCA = (px: number, py: number) =>
-      (ax - cx) * (py - cy) - (ay - cy) * (px - cx);
-    const areaSign = eAB(cx, cy);
-    const sign = areaSign >= 0 ? 1 : -1;
-
-    for (let gy = tyMin; gy <= tyMax; gy++) {
-      const py = (gy + 0.5) * actualGridSize;
-      for (let gx = txMin; gx <= txMax; gx++) {
-        const px = (gx + 0.5) * actualGridSize;
-        const w0 = eAB(px, py) * sign;
-        const w1 = eBC(px, py) * sign;
-        const w2 = eCA(px, py) * sign;
-        if (w0 >= 0 && w1 >= 0 && w2 >= 0) {
-          const cellIdx = gy * gridW + gx;
-          coveredGrid[cellIdx] = 1;
-          // 仅向下法线面参与 minZ 更新
-          if (isDownwardFace && faceMinZ < minZGrid[cellIdx]!) {
-            minZGrid[cellIdx] = faceMinZ;
-          }
-        }
-      }
-    }
-  }
-
-  // === 膨胀覆盖区域：将外轮廓向外扩展多个网格单元 ===
-  // PolyJet 工艺中支撑会显著超出模型外轮廓
-  // 用户反馈「还是不够」：从 3mm 扩展到 8mm（与可视化对齐）
-  const DILATE_RADIUS = 8; // 8 个网格单元（8mm）扩展半径
-  const origCovered = new Uint8Array(coveredGrid);
-  const dilatedGrid = new Uint8Array(gridW * gridH);
-  for (let i = 0; i < coveredGrid.length; i++) dilatedGrid[i] = coveredGrid[i]!;
-  for (let iter = 0; iter < DILATE_RADIUS; iter++) {
-    const prevGrid = new Uint8Array(dilatedGrid);
-    for (let gy = 0; gy < gridH; gy++) {
-      for (let gx = 0; gx < gridW; gx++) {
-        const idx = gy * gridW + gx;
-        if (prevGrid[idx]) {
-          for (let dy = -1; dy <= 1; dy++) {
-            for (let dx = -1; dx <= 1; dx++) {
-              const nx = gx + dx,
-                ny = gy + dy;
-              if (nx >= 0 && nx < gridW && ny >= 0 && ny < gridH) {
-                dilatedGrid[ny * gridW + nx] = 1;
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-  // 仅把 dilation 新增的 cell 加入 coveredGrid（不破坏原有 minZ）
-  for (let i = 0; i < coveredGrid.length; i++) {
-    if (dilatedGrid[i] && !origCovered[i]) {
-      coveredGrid[i] = 1;
-    }
-  }
-
-  // 计算投影面积 + 累计每个 cell 的 minZ（仅用于可视化高度，不影响克重）
-  let coveredCells = 0;
-  const cellArea = actualGridSize * actualGridSize;
-  for (let i = 0; i < coveredGrid.length; i++) {
-    if (coveredGrid[i]) coveredCells++;
-  }
-  const projectedArea = coveredCells * cellArea;
-
-  // 外壳包裹体积 = 下半部分表面积 × 壳厚
-  // 下半部分表面积 = wrapArea（仅 nz ≥ 0 的面，朝上和侧面）
-  const shellVolume = wrapArea * shellThicknessMM;
-
-  // === 底部填充体积（PolyJet 物理正确公式：column - model）===
-  // PolyJet 工艺：水溶性支撑材料填满整个 XY 投影柱体（从底板 Z=0 到模型顶部 wrapTopZ），
-  //   然后减去模型材料占据的体积（实际打印时该位置是模型材料，不是支撑）。
-  //
-  //   fillVolume = projectedArea × wrapTopZ − modelVolume
-  //
-  // 关键：这与「可视化顶部不平整」不冲突！
-  //   - 可视化柱高 = minZ[cell]（顶部跟随模型底面，不平整，仅悬空区域有支撑柱）
-  //   - 克重公式 = 投影柱体 - 模型体积（包含贴底区域的支撑填充，物理正确）
-  //
-  // 用户反馈：「模型躺平时实际支撑 100g，但显示 24g」
-  //   原因：之前用 Σ cellArea × minZ[cell]，模型贴底时所有 minZ ≈ 0，fillVolume ≈ 0
-  //   但 PolyJet 实际工艺中，模型贴底时仍然有支撑材料填满周围空隙（蜂窝填充）
-  //   所以必须用「柱体 - 模型」公式才能匹配真实测量
-  //
-  // 用户反馈：「不要上下对称，最上面是不平整的」
-  //   这是可视化要求 — 顶部不应是平整的 wrapTopZ，而应跟随模型底面
-  //   可视化已修复（柱高 = minZ[cell]），但克重计算不应受此影响
-  //
-  // 0.33 是 PolyJet 支撑材料的稀疏填充率（蜂窝状结构）
-  // 0.0012 g/mm³ = 1.2 g/cm³（PolyJet 水溶性支撑材料密度）
-  const projectionColumnVolume = projectedArea * wrapTopZ;
-  const fillVolume = Math.max(0, projectionColumnVolume - modelVolumeMM3);
-
-  const totalVolume = (shellVolume + fillVolume) * fillRate;
-  const totalWeightG = totalVolume * (densityGCm3 * 0.001);
-
-  // 调试：输出关键中间量，便于核对真实克重
-  if (
-    typeof window !== "undefined" &&
-    rotXDeg % 45 === 0 &&
-    rotYDeg % 45 === 0
-  ) {
-    console.log(
-      `[computePolyJetSupport] rotX=${rotXDeg}°, rotY=${rotYDeg}°: ` +
-        `projArea=${projectedArea.toFixed(0)}mm², wrapTopZ=${wrapTopZ.toFixed(1)}mm, ` +
-        `colVol=${projectionColumnVolume.toFixed(0)}mm³, modelVol=${modelVolumeMM3.toFixed(0)}mm³, ` +
-        `fillVol=${fillVolume.toFixed(0)}mm³, shellVol=${shellVolume.toFixed(0)}mm³, ` +
-        `weight=${totalWeightG.toFixed(2)}g`
-    );
-  }
+  // mm³ × 填充率 × (g/cm³ → g/mm³)
+  const supportWeightG =
+    volume.volumeMM3 * params.fillRate * params.density * 0.001;
 
   return {
-    shellVolumeMM3: shellVolume,
-    fillVolumeMM3: fillVolume,
-    totalVolumeMM3: totalVolume,
-    totalWeightG,
-    wrapAreaMM2: wrapArea,
+    supportVolumeMM3: volume.volumeMM3,
+    supportWeightG,
+    wrapAreaMM2: volume.contactAreaMM2,
     overhangAreaMM2: overhangArea,
     coloredWrapAreaMM2: coloredWrapArea,
-    coloredDownAreaMM2: coloredDownArea,
-    projectedAreaMM2: projectedArea,
-    wrapTopZMM: wrapTopZ,
-    rotatedHeightMM: rotatedHeight,
+    projectedAreaMM2: volume.footprintAreaMM2,
+    supportAreaMM2: volume.supportAreaMM2,
+    rotatedHeightMM: rotated.bboxMax[2] - rotated.bboxMin[2],
   };
 }
 
@@ -647,112 +256,148 @@ export function computeRotatedExternalSurface(
 /**
  * 计算给定角度下的支撑克重和本体支撑比例（用于手动角度调整时实时重算）
  *
- * @param positions 三角化顶点数据
+ * @param model 备好的模型(焊接一次)
  * @param rotXDeg X 轴旋转角度
  * @param rotYDeg Y 轴旋转角度
  * @param modelWeightG 模型本体克重（g）
  * @param scaleFactor 自选尺寸缩放因子
  * @param rotZDeg Z 轴旋转角度
- * @param modelVolumeMM3 模型体积 (mm³)
  * @param coloredFaceMask 彩色面标记
- * @returns 支撑克重和本体支撑比例
+ * @param params 支撑材料参数
  */
 export function computeSupportAtAngle(
-  positions: Float32Array,
+  model: SupportModel,
   rotXDeg: number,
   rotYDeg: number,
   modelWeightG: number,
   scaleFactor: number = 1,
   rotZDeg: number = 0,
-  modelVolumeMM3: number = 0,
   coloredFaceMask?: Uint8Array | null,
-  fillRate: number = 0.37,
-  shellThicknessMM: number = 1.0,
-  densityGCm3: number = 1.15
+  params: SupportParams = DEFAULT_SUPPORT_PARAMS
 ): { supportWeight: number; supportRatio: number } {
-  const { normals, areas } = computeFaceData(positions);
-  const r = computePolyJetSupport(
-    positions,
-    normals,
-    areas,
-    rotXDeg,
-    rotYDeg,
-    rotZDeg,
-    1.0,
-    shellThicknessMM,
-    modelVolumeMM3,
+  const pose = computeSupportAtPose(model, rotXDeg, rotYDeg, rotZDeg, params, {
     coloredFaceMask,
-    fillRate,
-    densityGCm3
-  );
+  });
 
   // 应用缩放因子：体积按 k³ 缩放，所以克重按 k³ 缩放
-  const scaledWeight = r.totalWeightG * scaleFactor * scaleFactor * scaleFactor;
+  const scaledWeight = pose.supportWeightG * scaleFactor ** 3;
   const supportRatio = modelWeightG > 0 ? scaledWeight / modelWeightG : 0;
 
   return { supportWeight: scaledWeight, supportRatio };
 }
 
 /**
- * 智能搜索最优打印角度（PolyJet 双体积公式 + 彩色面硬保护）
+ * 智能搜索最优打印角度（包裹支撑算法 + 彩色面硬保护）
  *
  * 策略：
  * 1. 平面模型（Z ≤ 最短轴×0.5）→ 直接平放
- * 2. 非平面模型 → 在高度最低 30% 候选中，按以下优先级筛选：
- *    a. 首选彩色包裹面积 = 0 的角度（完全不破坏彩色面）
- *    b. 若无零包裹角度，选彩色包裹面积最小的（次优解）
- *    c. 在同组彩色包裹面积下，选支撑克重最小的
- * 3. 若最优角度高度仍 > 原始高度 70% → 强制选最低高度
+ * 2. 非平面模型 → 在高度合规（旋转后 ≤ maxHeightMM）的候选中：
+ *    a. 首选彩色面没被包裹的姿态（支撑体不盖住贴图表面）
+ *    b. 若无这样的姿态，选彩色被包裹面积最小的
+ *    c. 同组内选支撑克重最小的
  *
- * @param positions 三角化顶点数据
+ * @param model 备好的模型(焊接一次)
  * @param totalSurfaceAreaMM2 总表面积（mm²，仅用于返回 totalArea 字段）
  * @param onProgress 进度回调
- * @param maxHeightMM 高度阈值（保留参数）
+ * @param maxHeightMM 高度阈值：旋转后超过这个高度就不给印
  * @param modelWeightG 模型本体克重（g）
  * @param scaleFactor 自选尺寸缩放因子
- * @param modelVolumeMM3 模型体积 (mm³)
- * @param coloredFaceMask 每个三角面的彩色标记
- * @param coarseMode 拖拽中粗算模式：栅格 5mm，步长 30°
+ * @param coloredFaceMask 每个面的彩色标记
+ * @param coarseMode 拖拽中粗算模式：栅格 3mm，步长 30°
+ * @param params 支撑材料参数
  */
 export function findOptimalAngle(
-  positions: Float32Array,
+  model: SupportModel,
   totalSurfaceAreaMM2: number,
   onProgress?: (percent: number) => void,
   maxHeightMM: number = 50,
   modelWeightG: number = 0,
   scaleFactor: number = 1,
-  modelVolumeMM3: number = 0,
   coloredFaceMask?: Uint8Array | null,
   coarseMode: boolean = false,
-  fillRate: number = 0.37,
-  shellThicknessMM: number = 1.0,
-  densityGCm3: number = 1.15
+  params: SupportParams = DEFAULT_SUPPORT_PARAMS
 ): OptimalAngle {
-  const { normals, areas } = computeFaceData(positions);
-
   // 候选角度范围：-180° 到 180°（覆盖完整 360° 旋转）
   // 这样可以找到「翻转」角度（如 180° X 翻转，让模型底部朝上）
   // 粗算步长 30°（13×13=169 候选），精算步长 15°（25×25=625 候选）
   const step = coarseMode ? 30 : 15;
   const angles: number[] = [];
   for (let a = -180; a <= 180; a += step) angles.push(a);
-  const gridSize = coarseMode ? 5.0 : 1.0;
-  const hasColoredMask = coloredFaceMask && coloredFaceMask.length > 0;
+  const gridSize = coarseMode ? 3 : 1;
+  const hasColoredMask = coloredFaceMask != null && coloredFaceMask.length > 0;
 
   type Candidate = {
     rotX: number;
     rotY: number;
     supportWeight: number;
+    supportVolume: number;
     projectedArea: number;
+    supportArea: number;
     overhangArea: number;
     coloredWrapArea: number;
     wrapArea: number;
-    shellVolume: number;
-    fillVolume: number;
-    wrapTopZ: number;
     rotatedHeight: number;
   };
   const candidates: Candidate[] = [];
+
+  const totalCombos = angles.length * angles.length;
+  let combo = 0;
+  let lastPct = -1;
+  const k3 = scaleFactor ** 3;
+  const k2 = scaleFactor ** 2;
+
+  for (const rotX of angles) {
+    for (const rotY of angles) {
+      const pose = computeSupportAtPose(model, rotX, rotY, 0, params, {
+        gridSizeMM: gridSize,
+        coloredFaceMask,
+      });
+      candidates.push({
+        rotX,
+        rotY,
+        supportWeight: pose.supportWeightG * k3,
+        supportVolume: pose.supportVolumeMM3 * k3,
+        projectedArea: pose.projectedAreaMM2 * k2,
+        supportArea: pose.supportAreaMM2 * k2,
+        overhangArea: pose.overhangAreaMM2 * k2,
+        coloredWrapArea: pose.coloredWrapAreaMM2 * k2,
+        wrapArea: pose.wrapAreaMM2 * k2,
+        rotatedHeight: pose.rotatedHeightMM * scaleFactor,
+      });
+      combo++;
+      const pct = Math.round((combo / totalCombos) * 100);
+      // 只在百分比变化时回调：625 次 setState 会把 React 拖垮
+      if (pct !== lastPct) {
+        lastPct = pct;
+        onProgress?.(pct);
+      }
+    }
+  }
+
+  // 模型原始包围盒
+  let origMinX = Infinity,
+    origMaxX = -Infinity;
+  let origMinY = Infinity,
+    origMaxY = -Infinity;
+  let origMinZ = Infinity,
+    origMaxZ = -Infinity;
+  const vertCount = model.mesh.vertexCount;
+  for (let i = 0; i < vertCount; i++) {
+    const x = model.mesh.vertices[i * 3]!;
+    const y = model.mesh.vertices[i * 3 + 1]!;
+    const z = model.mesh.vertices[i * 3 + 2]!;
+    if (x < origMinX) origMinX = x;
+    if (x > origMaxX) origMaxX = x;
+    if (y < origMinY) origMinY = y;
+    if (y > origMaxY) origMaxY = y;
+    if (z < origMinZ) origMinZ = z;
+    if (z > origMaxZ) origMaxZ = z;
+  }
+  const dimX = origMaxX - origMinX;
+  const dimY = origMaxY - origMinY;
+  const dimZ = origMaxZ - origMinZ;
+  const minDim = Math.min(dimX, dimY, dimZ);
+  const isFlatModel = dimZ <= minDim * 0.5;
 
   /**
    * 在候选列表中选出指定指标最小的项（列表为空时返回 undefined）
@@ -767,70 +412,6 @@ export function findOptimalAngle(
       list[0]!
     );
   };
-
-  const totalCombos = angles.length * angles.length;
-  let combo = 0;
-  const k3 = scaleFactor * scaleFactor * scaleFactor;
-
-  for (const rotX of angles) {
-    for (const rotY of angles) {
-      const r = computePolyJetSupport(
-        positions,
-        normals,
-        areas,
-        rotX,
-        rotY,
-        0,
-        gridSize,
-        shellThicknessMM,
-        modelVolumeMM3,
-        coloredFaceMask,
-        fillRate,
-        densityGCm3
-      );
-      candidates.push({
-        rotX,
-        rotY,
-        supportWeight: r.totalWeightG * k3,
-        projectedArea: r.projectedAreaMM2 * scaleFactor * scaleFactor,
-        overhangArea: r.overhangAreaMM2 * scaleFactor * scaleFactor,
-        coloredWrapArea: r.coloredWrapAreaMM2 * scaleFactor * scaleFactor,
-        wrapArea: r.wrapAreaMM2 * scaleFactor * scaleFactor,
-        shellVolume: r.shellVolumeMM3 * k3,
-        fillVolume: r.fillVolumeMM3 * k3,
-        wrapTopZ: r.wrapTopZMM * scaleFactor,
-        rotatedHeight: r.rotatedHeightMM * scaleFactor,
-      });
-      combo++;
-      onProgress?.(Math.round((combo / totalCombos) * 100));
-    }
-  }
-
-  // 模型原始包围盒
-  let origMinX = Infinity,
-    origMaxX = -Infinity;
-  let origMinY = Infinity,
-    origMaxY = -Infinity;
-  let origMinZ = Infinity,
-    origMaxZ = -Infinity;
-  const vertCount = positions.length / 3;
-  const stride = Math.max(1, Math.floor(vertCount / 5000));
-  for (let i = 0; i < vertCount; i += stride) {
-    const x = positions[i * 3]!,
-      y = positions[i * 3 + 1]!,
-      z = positions[i * 3 + 2]!;
-    if (x < origMinX) origMinX = x;
-    if (x > origMaxX) origMaxX = x;
-    if (y < origMinY) origMinY = y;
-    if (y > origMaxY) origMaxY = y;
-    if (z < origMinZ) origMinZ = z;
-    if (z > origMaxZ) origMaxZ = z;
-  }
-  const dimX = origMaxX - origMinX;
-  const dimY = origMaxY - origMinY;
-  const dimZ = origMaxZ - origMinZ;
-  const minDim = Math.min(dimX, dimY, dimZ);
-  const isFlatModel = dimZ <= minDim * 0.5;
 
   let best: Candidate | undefined;
 
@@ -872,45 +453,31 @@ export function findOptimalAngle(
       }
     }
 
-    // 策略修正：先按 fillVolume 排序，再在 fillVolume 接近最小的候选中选 shellVolume 最小的
-    // 原因：
-    //   - fillVolume（投影柱体体积 - 模型体积）是真正依赖姿态的量：
-    //     平躺时投影柱体小（高度低），fillVolume 小
-    //     立着时投影柱体大（高度高），fillVolume 大
-    //   - shellVolume（外壳包裹）也依赖姿态，但变化幅度小（约 7000-9000 mm³）
-    //   - 所以先取 fillVolume 最小的前 10% 候选，再在其中选 shellVolume 最小的
-    //     这样能找到「最大底面贴地 + 最少外壳包裹」的最优姿态
-    const sortedByFill = [...eligibleCandidates].sort(
-      (a, b) => a.fillVolume - b.fillVolume
-    );
-    const topFillCount = Math.max(1, Math.floor(sortedByFill.length * 0.1));
-    const topFill = sortedByFill.slice(0, topFillCount);
-
-    let picked: Candidate | undefined;
     if (hasColoredMask) {
-      // 优先选彩色包裹面积为 0 的角度（避免破坏彩色面）
-      const zeroColored = topFill.filter((c) => c.coloredWrapArea < 1); // <1 mm² 视为 0
-      picked =
-        zeroColored.length > 0
-          ? // 在零彩色包裹的候选中选 shellVolume 最小的
-            pickSmallest(zeroColored, (c) => c.shellVolume)
-          : // 次选：彩色包裹面积最小的
-            pickSmallest(topFill, (c) => c.coloredWrapArea);
+      // 优先选彩色面没被包裹的姿态（支撑体不盖住贴图表面）
+      const zeroColored = eligibleCandidates.filter(
+        (c) => c.coloredWrapArea < 1
+      );
+      if (zeroColored.length > 0) {
+        best = pickSmallest(zeroColored, (c) => c.supportWeight);
+      } else {
+        // 次选：彩色被包裹面积最小的（并列时比支撑克重）
+        best = eligibleCandidates.reduce((min, c) =>
+          c.coloredWrapArea < min.coloredWrapArea ||
+          (c.coloredWrapArea === min.coloredWrapArea &&
+            c.supportWeight < min.supportWeight)
+            ? c
+            : min
+        );
+      }
     } else {
-      // 无彩色标记：在 fillVolume 最小的前 10% 中选 shellVolume 最小的
-      picked = pickSmallest(topFill, (c) => c.shellVolume);
+      // 无彩色标记：直接选支撑克重最小的
+      best = pickSmallest(eligibleCandidates, (c) => c.supportWeight);
     }
-
-    // 安全兜底
-    best = picked ?? sortedByFill[0]!;
   }
 
   // 兜底：候选集永不为空（angles 至少含 13 个角度）
   const chosen = best!;
-
-  // 注：之前的「强制选最低高度」规则已删除
-  // 原因：新策略直接最小化 fillVolume，已经隐含选择最大底面贴地的姿态
-  // （fillVolume = 0 当且仅当模型底面完全贴地）
 
   const selfSupportRatio =
     modelWeightG > 0 ? chosen.supportWeight / modelWeightG : 0;
@@ -925,34 +492,11 @@ export function findOptimalAngle(
   const originalRatio =
     chosen.supportWeight > 0 ? originalWeight / chosen.supportWeight : 1;
 
-  // 调试：输出 Top 5 候选角度（按 fillVolume 排序）
-  const allCandidates = [...candidates].sort(
-    (a, b) => a.fillVolume - b.fillVolume
-  );
-  if (typeof window !== "undefined") {
-    console.log(
-      "[findOptimalAngle] Top 5 candidates by fillVolume (lower = better):"
-    );
-    for (const c of allCandidates.slice(0, 5)) {
-      console.log(
-        `  rotX=${c.rotX}°, rotY=${c.rotY}°: fillVol=${c.fillVolume.toFixed(0)}mm³, height=${c.rotatedHeight.toFixed(1)}mm, totalWeight=${c.supportWeight.toFixed(3)}g`
-      );
-    }
-    console.log(
-      `[findOptimalAngle] Selected: rotX=${chosen.rotX}°, rotY=${chosen.rotY}°, fillVol=${chosen.fillVolume.toFixed(0)}mm³, totalWeight=${chosen.supportWeight.toFixed(3)}g, height=${chosen.rotatedHeight.toFixed(1)}mm`
-    );
-    if (originalCandidate) {
-      console.log(
-        `[findOptimalAngle] Original pose (0°,0°): totalWeight=${originalWeight.toFixed(3)}g (${originalRatio.toFixed(2)}× of optimal)`
-      );
-    }
-  }
-
   return {
     rotX: chosen.rotX,
     rotY: chosen.rotY,
     selfSupportRatio,
-    selfSupportArea: chosen.projectedArea,
+    selfSupportArea: chosen.supportArea,
     totalSupportRatio: selfSupportRatio,
     totalSupportWeight: chosen.supportWeight,
     totalArea: totalSurfaceAreaMM2 / 100,
@@ -961,13 +505,19 @@ export function findOptimalAngle(
     overhangArea: chosen.overhangArea,
     coloredDownArea: chosen.coloredWrapArea,
     wrapArea: chosen.wrapArea,
-    shellVolume: chosen.shellVolume,
-    fillVolume: chosen.fillVolume,
-    wrapTopZ: chosen.wrapTopZ,
-    originalWeight: originalWeight * 1,
+    supportVolume: chosen.supportVolume,
+    originalWeight,
     originalRatio,
   };
 }
+
+/**
+ * 把三角汤备成摆盘用的模型
+ *
+ * 焊接 + 拓扑是姿态无关的,所以只做一次 —— 之后每个候选姿态只旋转。
+ * 拖动角度滑块时每次都重算支撑克重,重焊会明显卡。
+ */
+export { prepareSupportModel };
 
 /** 生成旋转角度（弧度）用于 three.js Object3D.rotation 设置 */
 export function getRotationEuler(

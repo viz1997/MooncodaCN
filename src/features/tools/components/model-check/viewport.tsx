@@ -463,8 +463,9 @@ export default function Viewport({
     // WJP 逐层喷射不存在悬空:平台到模型之间全部为支撑材料,三者共同围合支撑体积。
     const shell = result.supportShell;
     if (shell && shell.positions.length >= 9) {
-      // 平台平面(模型组局部坐标):与 worker 侧壁底面同一基准,平移后略低于世界 z=0
-      const groundZ = bb.min.z - Math.max(0.05, diag * 0.002);
+      // 平台平面(模型组局部坐标):由 worker 生成外壳时一并给出,
+      // 跟克重工具算支撑体积用的是同一个基准(2026-11-02)
+      const groundZ = shell.groundZ;
 
       // ① 支撑体外壳(白,半透明):已剔除下朝向面,该区域由支撑体顶面负责,避免叠加
       if (shell.topIndex.length >= 3) {
