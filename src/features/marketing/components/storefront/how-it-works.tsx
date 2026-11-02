@@ -38,14 +38,15 @@ const steps = [
   {
     icon: Wand2,
     n: "02",
-    title: "选风格",
-    description: "选 AI 风格:Q 版 / 二次元 / 水彩 / 线稿,5 秒看效果。",
+    title: "选尺寸与风格",
+    description:
+      "先定尺寸,再挑 AI 风格:Q 版 / 二次元 / 水彩 / 线稿,约 20–35 秒出预览。",
   },
   {
     icon: Settings,
     n: "03",
     title: "选规格",
-    description: "挑材质、尺寸,加可选刻字。",
+    description: "挑材质,加可选刻字与加急。",
   },
   {
     icon: Package,

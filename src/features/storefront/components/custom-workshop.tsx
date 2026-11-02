@@ -1,11 +1,12 @@
 /**
  * CustomWorkshop —— 1:1 移植自 atelier custom-workshop.tsx
  *
- * 4 阶段:Upload → Transform → Configure → Review
+ * 4 阶段:Upload → Style → Configure → Review
  *  - Upload:drag-drop / click 上传图片,验证 image/* + ≤10MB
- *  - Transform:5 种 AI 风格(Original / Q-Version / Anime / Watercolor / Line Art),
+ *  - Style:选尺寸 + 选 AI 风格(Original / Q-Version / Anime / Watercolor /
+ *    Line Art / Realistic),点风格只选中,底栏 CTA 统一提交,
  *    调 /api/store/ai/transform(委托 lingting/wellapi),返回 R2 URL
- *  - Configure:选材质(按 productType 过滤)+ 尺寸(按 productType 过滤)
+ *  - Configure:选材质(按 productType 过滤)
  *    + 配件(底座 / 玻璃罩 / 皮套 / 编织绳)+ 刻字(按型号能力开合)+ 加急 + 数量
  *  - Review:Before/After 对比 + spec 摘要 + 服务端定价 + Add to Bag
  *
@@ -28,6 +29,20 @@
  *  - 新增加急开关(+¥15,发货天数减半)
  *  - 刻字输入框按 product.canEngrave 开合(手办 / 冰箱贴不刻字)
  *  - 数量 / 单价 / 合计 / CTA 收进底部固定条,规格区独立滚动
+ *
+ * ── 2026-11-02 尺寸与风格前置 ──────────────────────────────────────
+ * 用户诉求:「上传图片后选择尺寸和风格,风格不应该和原图放在一起」。
+ *
+ *  - 第 2 步改名「尺寸与风格」:尺寸从第 3 步搬上来,跟风格一屏选完
+ *  - 原图从「左半屏大图」退成一行小缩略图条(缩略图 + 文件名 + 换一张),
+ *    不再和风格网格并排 —— 风格网格现在占满整宽
+ *  - 风格从竖排列表改成 2/3 列卡片网格(色卡 + 名字 + 预计耗时)
+ *  - 点风格**只选中**,不再立刻发 AI 请求(18–35s);底栏 CTA 统一提交
+ *  - CTA 三态:生成预览 / 重新生成预览 / 继续
+ *
+ * 关键不变式:**能进第 3 步 ⟺ 有预览图,且 previewStyleId === aiStyle.id**。
+ * 「进第 3 步」的唯一入口是第 2 步的 CTA(stepper 只允许往回点),
+ * CTA 按 styleStale 分支,所以图和风格 id 永远配对,不会写错购物袋。
  */
 
 "use client";
@@ -64,7 +79,7 @@ import type {
   PricingResult,
 } from "../types";
 
-type Phase = "upload" | "transform" | "configure" | "review";
+type Phase = "upload" | "style" | "configure" | "review";
 
 interface TransformResponse {
   previewImageUrl: string;
@@ -79,7 +94,7 @@ interface PricingResponse {
 
 const STEPS: { id: Phase; label: string; num: string }[] = [
   { id: "upload", label: "上传", num: "01" },
-  { id: "transform", label: "AI 风格", num: "02" },
+  { id: "style", label: "尺寸与风格", num: "02" },
   { id: "configure", label: "规格", num: "03" },
   { id: "review", label: "确认", num: "04" },
 ];
@@ -118,6 +133,17 @@ export function CustomWorkshop() {
   );
   const [isDragging, setIsDragging] = React.useState(false);
   const [aiStyle, setAiStyle] = React.useState<AiStyle | null>(null);
+  /**
+   * 当前预览图是用哪个风格生成的 —— 用户换风格后靠它判断预览是否过期。
+   * 只存 id:风格字典是静态的,id 够用。
+   */
+  const [previewStyleId, setPreviewStyleId] = React.useState<string | null>(
+    null
+  );
+  /** 上传的文件名 —— 第 2 步顶部缩略图条要显示 */
+  const [uploadedFileName, setUploadedFileName] = React.useState<string | null>(
+    null
+  );
   const [isTransforming, setIsTransforming] = React.useState(false);
   const [transformError, setTransformError] = React.useState<string | null>(
     null
@@ -143,19 +169,49 @@ export function CustomWorkshop() {
   const [pricingError, setPricingError] = React.useState<string | null>(null);
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  /**
+   * transform 请求序号 —— 生成途中关掉弹窗再开别的商品时,旧响应回来会把
+   * 上一个商品的预览写进当前状态。发请求前自增,回来时对不上就丢弃。
+   */
+  const transformSeqRef = React.useRef(0);
 
   // 配件数组当依赖会每次渲染都变引用 —— 用 join 出来的字符串当 key
   const accessoryKey = selectedAccessoryIds.join("|");
+
+  /** 有没有可用的预览图(原图 + 风格图都在 R2 上) */
+  const hasPreview = Boolean(previewUrl && originalImageUrl);
+  /**
+   * 预览是用别的风格生成的 —— 用户换了风格但还没重新生成。
+   * 换图时 previewUrl 被清空 → hasPreview 为 false → 这里的 false,
+   * 所以「换图」和「换风格」两种失效共用这一个布尔量,不用第二个 flag。
+   */
+  const styleStale = hasPreview && previewStyleId !== aiStyle?.id;
+
+  /**
+   * 某个步骤现在能不能进 —— stepper 点击和 CTA 都看它。
+   *
+   * 「规格」「确认」要求**预览图和当前风格对得上**,所以用户在第 2 步
+   * 改了风格又没重新生成时,stepper 上的「03 规格」点不动:必须先重生成。
+   */
+  const stepReachable = (id: Phase): boolean => {
+    if (id === "upload") return true;
+    if (id === "style") return Boolean(uploadedImage);
+    return hasPreview && previewStyleId === aiStyle?.id;
+  };
 
   // 初始化/重置:打开新 product 时
   React.useEffect(() => {
     if (product) {
       setPhase("upload");
       setUploadedImage(null);
+      setUploadedFileName(null);
       setPreviewUrl(null);
       setOriginalImageUrl(null);
+      setPreviewStyleId(null);
       setAiStyle(product.aiStyles[0] ?? null);
       setTransformError(null);
+      // 作废在飞的 transform —— 上一个商品的响应回来不能写进当前状态
+      transformSeqRef.current += 1;
       setSelectedMaterialId(product.materials[0]?.id ?? null);
       // 默认选中「标准款」,不是列表第一项 —— 以前默认 4cm,跟文案说的
       // 8cm / 12cm 标准款对不上,用户一进来看到的价就是错的
@@ -215,6 +271,10 @@ export function CustomWorkshop() {
     ) {
       return;
     }
+    // 防御:预览是旧风格生成的,aiStyle 却是新风格 —— 这种组合不该出现
+    // (进第 3 步的唯一入口是第 2 步 CTA,CTA 保证两者一致),但真出现了
+    // 就别拿它去算价,免得报一个用户看不懂的价
+    if (previewStyleId !== aiStyle.id) return;
 
     const spec: CustomizationSpec = {
       productId: product.id,
@@ -275,9 +335,18 @@ export function CustomWorkshop() {
     qty,
     previewUrl,
     originalImageUrl,
+    previewStyleId,
   ]);
 
   /* --------------------------- File handlers --------------------------- */
+
+  /** 清空一切跟「图」有关的 state —— 换图时调用 */
+  const resetPreview = React.useCallback(() => {
+    setPreviewUrl(null);
+    setOriginalImageUrl(null);
+    setPreviewStyleId(null);
+    setTransformError(null);
+  }, []);
 
   const handleFile = (file: File) => {
     if (!file.type.startsWith("image/")) {
@@ -296,11 +365,21 @@ export function CustomWorkshop() {
       });
       return;
     }
+    // 换图 = 在飞的 transform 立刻作废。它回来时会写 previewUrl /
+    // originalImageUrl,那是**上一张图**的 R2 URL,留着会跟新图配错对
+    // (原图 URL 也会指向旧照片)。序号对不上 → 响应被丢弃。
+    transformSeqRef.current += 1;
+    setIsTransforming(false);
+
     const reader = new FileReader();
     reader.onload = (e) => {
       const result = e.target?.result as string;
       setUploadedImage(result);
-      setPhase("transform");
+      setUploadedFileName(file.name);
+      // 换图 = 旧预览作废。旧 previewUrl / originalImageUrl 是上一张图的
+      // R2 URL,留着会跟新图配错对(原图 URL 也会指向旧照片)。
+      resetPreview();
+      setPhase("style");
     };
     reader.readAsDataURL(file);
   };
@@ -314,14 +393,19 @@ export function CustomWorkshop() {
 
   /* --------------------------- Transform handlers --------------------------- */
 
-  const handleTransform = async (styleOverride?: AiStyle) => {
-    if (!uploadedImage) return;
-    const style = styleOverride ?? aiStyle;
-    if (!style) return;
+  /**
+   * 跑一次 AI 风格转换(用当前选中的风格)。返回是否成功。
+   *
+   * 注意这里**不再 setPhase("configure")** —— 前进只允许从第 2 步的 CTA 发生,
+   * 保证「进第 3 步」这个动作一定经过 styleStale 判定。
+   */
+  const handleTransform = async (): Promise<boolean> => {
+    if (!uploadedImage || !aiStyle) return false;
+    const style = aiStyle;
 
+    const seq = ++transformSeqRef.current;
     setIsTransforming(true);
     setTransformError(null);
-    setAiStyle(style);
 
     try {
       const res = await fetch("/api/store/ai/transform", {
@@ -339,10 +423,14 @@ export function CustomWorkshop() {
         throw new Error(data?.message ?? "AI 转换失败");
       }
 
+      // 已经有更新的请求了(或者用户换商品了)—— 丢弃这次响应
+      if (seq !== transformSeqRef.current) return false;
+
       const result = data as TransformResponse;
       setPreviewUrl(result.previewImageUrl);
       setOriginalImageUrl(result.originalImageUrl);
-      setPhase("configure");
+      // 记下这张预览是哪个风格生成的 —— 后面换风格时靠它判 stale
+      setPreviewStyleId(result.aiStyleId ?? style.id);
 
       const latencySec = Math.round(result.estimatedLatencyMs / 1000);
       toast({
@@ -353,7 +441,9 @@ export function CustomWorkshop() {
             ? "未应用 AI 风格,保留原始照片"
             : `预览生成完成,耗时 ${latencySec}s`,
       });
+      return true;
     } catch (err) {
+      if (seq !== transformSeqRef.current) return false;
       const msg = err instanceof Error ? err.message : "网络错误";
       setTransformError(msg);
       toast({
@@ -361,9 +451,26 @@ export function CustomWorkshop() {
         description: msg,
         variant: "destructive",
       });
+      return false;
     } finally {
-      setIsTransforming(false);
+      if (seq === transformSeqRef.current) setIsTransforming(false);
     }
+  };
+
+  /**
+   * 第 2 步底部 CTA —— 三态:
+   *   没有预览        → 生成预览(跑一次 AI)
+   *   有预览但风格变了 → 重新生成预览
+   *   有预览且风格没变 → 直接进第 3 步,不重跑 AI
+   */
+  const handleStyleCta = async () => {
+    if (!aiStyle) return;
+    if (hasPreview && !styleStale) {
+      setPhase("configure");
+      return;
+    }
+    const ok = await handleTransform();
+    if (ok) setPhase("configure");
   };
 
   /* --------------------------- Spec handlers --------------------------- */
@@ -387,6 +494,15 @@ export function CustomWorkshop() {
   const handleAddToBag = async () => {
     if (!product || !pricing || !previewUrl || !originalImageUrl) return;
     if (!selectedMaterialId || !selectedSizeId || !aiStyle) return;
+    // 防御:预览是旧风格生成的,id 却是新风格 —— 写进购物袋就是错的
+    if (styleStale) {
+      toast({
+        title: "请先生成预览",
+        description: "风格已变更,需要重新生成预览后才能加入购物袋",
+        variant: "destructive",
+      });
+      return;
+    }
 
     try {
       await addLineItem.mutateAsync({
@@ -447,6 +563,26 @@ export function CustomWorkshop() {
       >
         <DialogTitle className="sr-only">定制 {product.title}</DialogTitle>
 
+        {/*
+          文件 input 挂在 DialogContent 顶层,不埋在上传步的 dropzone 里 ——
+          第 2 步的「换一张」要能复用同一个 input(埋进去的话那一步
+          DOM 里根本没有这个节点,fileInputRef.current 是 null)。
+          sr-only + absolute,不吃布局。
+        */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="sr-only"
+          tabIndex={-1}
+          aria-hidden="true"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleFile(file);
+            e.target.value = ""; // 重置,允许重选同一文件
+          }}
+        />
+
         {/* Header + stepper */}
         <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b bg-background/95 backdrop-blur shrink-0">
           <div className="min-w-0 flex-1">
@@ -473,14 +609,20 @@ export function CustomWorkshop() {
           <div className="flex items-center gap-1 sm:gap-2 overflow-x-auto">
             {STEPS.map((s, i) => {
               const active = phase === s.id;
-              const done = STEPS.findIndex((x) => x.id === phase) > i;
+              const reachable = stepReachable(s.id);
+              const done =
+                STEPS.findIndex((x) => x.id === phase) > i && reachable;
               return (
                 // biome-ignore lint/suspicious/noArrayIndexKey: 固定 4 步
                 <React.Fragment key={i}>
                   <button
                     type="button"
                     onClick={() => {
-                      if (done || active) setPhase(s.id);
+                      if (active || !reachable) return;
+                      // 只允许往回点;往前只放行到「尺寸与风格」——
+                      // 第 1 步已经有图了就能直接跳过去选尺寸和风格
+                      const idx = STEPS.findIndex((x) => x.id === phase);
+                      if (idx > i || s.id === "style") setPhase(s.id);
                     }}
                     className={`flex items-center gap-2 px-2.5 py-1.5 rounded-full text-[11px] font-medium uppercase tracking-[0.12em] whitespace-nowrap transition-colors ${
                       active
@@ -534,17 +676,6 @@ export function CustomWorkshop() {
                     : "border-border hover:border-foreground/40 hover:bg-secondary/40"
                 }`}
               >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="sr-only"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleFile(file);
-                    e.target.value = ""; // 重置,允许重选同一文件
-                  }}
-                />
                 <Upload className="size-12 mx-auto text-muted-foreground mb-4" />
                 <h3 className="font-serif text-xl mb-2">上传你的照片</h3>
                 <p className="text-sm text-muted-foreground max-w-sm mx-auto text-pretty">
@@ -555,13 +686,43 @@ export function CustomWorkshop() {
               <p className="text-[11px] text-muted-foreground text-center mt-4">
                 上传即表示你同意我们将图片用于 AI 风格转换与定制预览。
               </p>
+
+              {/* 回到第 1 步但手里已经有图了 —— 给条近路,不然用户会被
+                  困在上传页(第 2 步在 stepper 上点不到,因为它只允许往回点) */}
+              {uploadedImage && (
+                <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="size-10 rounded-sm overflow-hidden bg-muted shrink-0">
+                      <img
+                        src={uploadedImage}
+                        alt="当前图片"
+                        className="w-full h-full object-cover"
+                      />
+                    </span>
+                    <span className="text-sm text-muted-foreground">
+                      {uploadedFileName ?? "已上传图片"}
+                    </span>
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={() => setPhase("style")}
+                    className="rounded-full"
+                    type="button"
+                  >
+                    继续使用当前图片
+                  </Button>
+                </div>
+              )}
             </div>
           )}
 
-          {phase === "transform" && (
-            <div className="p-5 sm:p-8">
-              <div className="grid sm:grid-cols-2 gap-6">
-                <div className="bg-muted rounded-sm overflow-hidden aspect-square">
+          {phase === "style" && (
+            <div className="p-5 sm:p-8 space-y-7">
+              {/* ---------- 原图条 ---------- */}
+              {/* 原图退成一行小缩略图 —— 它只是「我们拿的是哪张照片」的凭据,
+                  不该再占半屏、把风格挤到窄条里 */}
+              <div className="flex items-center gap-3 rounded-sm border border-border bg-secondary/30 p-3">
+                <span className="size-14 rounded-sm overflow-hidden bg-muted shrink-0">
                   {uploadedImage && (
                     <img
                       src={uploadedImage}
@@ -569,68 +730,133 @@ export function CustomWorkshop() {
                       className="w-full h-full object-cover"
                     />
                   )}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium leading-tight">
+                    原图已上传
+                  </p>
+                  <p className="text-[11px] text-muted-foreground truncate">
+                    {uploadedFileName ?? "未命名图片"}
+                  </p>
                 </div>
-                <div>
-                  <div className="flex items-center gap-2 mb-3">
-                    <Sparkles className="size-4 text-accent" />
-                    <p className="text-[11px] uppercase tracking-[0.16em] font-medium">
-                      选择 AI 风格
-                    </p>
-                  </div>
-                  <div className="space-y-2">
-                    {product.aiStyles.map((style) => (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="rounded-full shrink-0"
+                  type="button"
+                >
+                  <Upload className="size-3.5 mr-1" />
+                  换一张
+                </Button>
+              </div>
+
+              {/* ---------- 尺寸 ---------- */}
+              {/* 尺寸从第 3 步搬上来 —— 上传完最想先定的是尺寸 */}
+              <div>
+                <SpecLabel>尺寸</SpecLabel>
+                <div className="flex flex-wrap gap-2">
+                  {product.sizes.map((size) => {
+                    const active = selectedSizeId === size.id;
+                    return (
+                      <button
+                        key={size.id}
+                        type="button"
+                        onClick={() => setSelectedSizeId(size.id)}
+                        aria-pressed={active}
+                        className={`min-w-[4.5rem] px-3 py-2 rounded-sm border text-sm transition-colors ${
+                          active
+                            ? "border-foreground bg-foreground text-background"
+                            : "border-border hover:border-foreground/40"
+                        }`}
+                      >
+                        <span className="block font-medium leading-tight">
+                          {size.cm}cm
+                        </span>
+                        <span
+                          className={`block text-[10px] leading-tight mt-0.5 ${
+                            active
+                              ? "text-background/70"
+                              : "text-muted-foreground"
+                          }`}
+                        >
+                          {formatInches(size.cm)}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* ---------- AI 风格 ---------- */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Sparkles className="size-4 text-accent" />
+                  <p className="text-[11px] uppercase tracking-[0.16em] font-medium">
+                    AI 风格
+                  </p>
+                </div>
+                {/* 点风格**只选中**,不发请求 —— 底栏 CTA 统一提交。
+                    误点一次风格就烧掉一次 30 秒的 AI 调用,体验太差 */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {product.aiStyles.map((style) => {
+                    const active = aiStyle?.id === style.id;
+                    return (
                       <button
                         key={style.id}
                         type="button"
-                        onClick={() => handleTransform(style)}
+                        onClick={() => setAiStyle(style)}
+                        aria-pressed={active}
                         disabled={isTransforming}
-                        className={`w-full flex items-center gap-3 p-3 rounded-sm border transition-colors text-left ${
-                          aiStyle?.id === style.id
+                        className={`flex flex-col items-start gap-2 p-3 rounded-sm border text-left transition-colors ${
+                          active
                             ? "border-foreground bg-secondary/60"
                             : "border-border hover:border-foreground/40"
                         } disabled:opacity-50`}
                       >
-                        <span
-                          className="size-10 rounded-full shrink-0"
-                          style={{ backgroundColor: style.swatch }}
-                        />
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium text-sm">{style.name}</p>
-                          <p className="text-[11px] text-muted-foreground">
-                            {style.id === "ai_original"
-                              ? "不应用 AI"
-                              : `约 ${style.estimatedLatencySec}s`}
-                          </p>
-                        </div>
-                        {aiStyle?.id === style.id && (
-                          <Check className="size-4 text-foreground shrink-0" />
-                        )}
+                        <span className="flex items-center gap-2 w-full">
+                          <span
+                            className="size-8 rounded-full shrink-0"
+                            style={{ backgroundColor: style.swatch }}
+                          />
+                          {active && (
+                            <Check className="size-4 text-foreground shrink-0 ml-auto" />
+                          )}
+                        </span>
+                        <span className="text-sm font-medium leading-tight">
+                          {style.name}
+                        </span>
+                        <span className="text-[11px] text-muted-foreground leading-tight">
+                          {style.id === "ai_original"
+                            ? "不应用 AI"
+                            : `约 ${style.estimatedLatencySec} 秒`}
+                        </span>
                       </button>
-                    ))}
-                  </div>
-                  {isTransforming && (
-                    <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
-                      <Loader2 className="size-4 animate-spin" />
-                      AI 转换中...可能需要 30 秒
-                    </div>
-                  )}
-                  {transformError && (
-                    <div className="mt-4 p-3 rounded-sm bg-destructive/10 text-destructive text-sm">
-                      {transformError}
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleTransform()}
-                        disabled={isTransforming}
-                        className="ml-2"
-                        type="button"
-                      >
-                        <RefreshCw className="size-3 mr-1" />
-                        重试
-                      </Button>
-                    </div>
-                  )}
+                    );
+                  })}
                 </div>
+                {isTransforming && (
+                  <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="size-4 animate-spin" />
+                    AI 转换中...可能需要 30 秒
+                  </div>
+                )}
+                {transformError && (
+                  <div className="mt-4 p-3 rounded-sm bg-destructive/10 text-destructive text-sm">
+                    {transformError}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleTransform()}
+                      disabled={isTransforming}
+                      className="ml-2"
+                      type="button"
+                    >
+                      <RefreshCw className="size-3 mr-1" />
+                      重试
+                    </Button>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -656,40 +882,28 @@ export function CustomWorkshop() {
 
                 {/* 右:规格 */}
                 <div className="space-y-5">
-                  {/* 尺寸 */}
-                  <div>
-                    <SpecLabel>尺寸</SpecLabel>
-                    <div className="flex flex-wrap gap-2">
-                      {product.sizes.map((size) => {
-                        const active = selectedSizeId === size.id;
-                        return (
-                          <button
-                            key={size.id}
-                            type="button"
-                            onClick={() => setSelectedSizeId(size.id)}
-                            aria-pressed={active}
-                            className={`min-w-[4.5rem] px-3 py-2 rounded-sm border text-sm transition-colors ${
-                              active
-                                ? "border-foreground bg-foreground text-background"
-                                : "border-border hover:border-foreground/40"
-                            }`}
-                          >
-                            <span className="block font-medium leading-tight">
-                              {size.cm}cm
-                            </span>
-                            <span
-                              className={`block text-[10px] leading-tight mt-0.5 ${
-                                active
-                                  ? "text-background/70"
-                                  : "text-muted-foreground"
-                              }`}
-                            >
-                              {formatInches(size.cm)}
-                            </span>
-                          </button>
-                        );
-                      })}
+                  {/* 尺寸和风格在第 2 步就选好了 —— 这儿只做摘要 + 改回去的入口 */}
+                  <div className="flex items-center gap-3 flex-wrap rounded-sm border border-border bg-secondary/30 px-3.5 py-3">
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="text-muted-foreground">尺寸</span>
+                      <span className="font-medium">
+                        {formatSizeWithInches(selectedSizeCm)}
+                      </span>
                     </div>
+                    <span className="h-4 w-px bg-border" aria-hidden />
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="text-muted-foreground">风格</span>
+                      <span className="font-medium">{aiStyle?.name}</span>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setPhase("style")}
+                      className="ml-auto rounded-full"
+                      type="button"
+                    >
+                      修改
+                    </Button>
                   </div>
 
                   {/* 材质 —— 只有一种时内联,不留半格空网格 */}
@@ -973,6 +1187,15 @@ export function CustomWorkshop() {
                     {/* 加选项的费用单独列出来 —— 尺寸加价按用户要求不在
                         规格屏展示,但配件 / 刻字 / 加急是用户自己点的,
                         钱花在哪儿得说清楚 */}
+                    {pricing.breakdown.aiStyleCents > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">AI 风格</span>
+                        <span>
+                          +
+                          {formatPriceCNY(pricing.breakdown.aiStyleCents / 100)}
+                        </span>
+                      </div>
+                    )}
                     {pricing.breakdown.accessoryCents > 0 && (
                       <div className="flex justify-between text-sm">
                         <span className="text-muted-foreground">配件</span>
@@ -1070,6 +1293,52 @@ export function CustomWorkshop() {
             </div>
           )}
         </div>
+
+        {/* 底部固定条 —— 第 2 步:尺寸和风格选完,一次性提交 */}
+        {phase === "style" && (
+          <div className="shrink-0 border-t bg-background/95 backdrop-blur px-5 sm:px-6 py-3">
+            <div className="mx-auto max-w-4xl flex items-center gap-4 flex-wrap">
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                {hasPreview && !styleStale
+                  ? "预览已生成,风格没变 —— 直接继续,不用再等一次 AI。"
+                  : aiStyle?.id === "ai_original"
+                    ? "保留原图,不跑 AI,生成几乎不耗时。"
+                    : `生成预览大约需要 ${aiStyle?.estimatedLatencySec ?? 30} 秒。`}
+              </p>
+              <div className="ml-auto flex items-center gap-3">
+                <span className="text-sm text-muted-foreground">
+                  {formatSizeWithInches(selectedSizeCm)} · {aiStyle?.name}
+                </span>
+                <Button
+                  size="lg"
+                  onClick={handleStyleCta}
+                  disabled={isTransforming || !aiStyle}
+                  className="rounded-full px-7"
+                  type="button"
+                >
+                  {isTransforming ? (
+                    <>
+                      <Loader2 className="size-4 mr-2 animate-spin" />
+                      生成中...
+                    </>
+                  ) : hasPreview && !styleStale ? (
+                    "继续"
+                  ) : hasPreview ? (
+                    <>
+                      <RefreshCw className="size-4 mr-2" />
+                      重新生成预览
+                    </>
+                  ) : (
+                    <>
+                      <Wand2 className="size-4 mr-2" />
+                      生成预览
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* 底部固定结算条 —— 只在规格这步,规格区独立滚动 */}
         {phase === "configure" && (

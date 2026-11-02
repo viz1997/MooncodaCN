@@ -314,8 +314,10 @@ export function ProductDetail({ handle }: { handle: string }) {
                 <li className="flex items-start gap-2">
                   <span className="size-1 rounded-full bg-accent mt-1.5 shrink-0" />
                   <span>
-                    <span className="font-medium">5 种 AI 风格</span> — 原图 / Q
-                    版 / 日漫 / 水彩 / 线稿
+                    <span className="font-medium">
+                      {product.aiStyles.length} 种 AI 风格
+                    </span>{" "}
+                    — {product.aiStyles.map((s) => s.name).join(" / ")}
                   </span>
                 </li>
                 <li className="flex items-start gap-2">

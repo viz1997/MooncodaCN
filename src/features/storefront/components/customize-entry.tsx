@@ -104,8 +104,8 @@ export function CustomizeEntry() {
           </h2>
           <p className="mt-2.5 text-sm text-muted-foreground leading-relaxed text-pretty">
             {isZh
-              ? "先选一个品类,接着上传照片、挑 AI 风格、选规格。不需要注册。"
-              : "Pick a form, then upload a photo, choose a style, set the specs. No sign-up."}
+              ? "先选一个品类,接着上传照片、选尺寸和风格、定规格。不需要注册。"
+              : "Pick a form, then upload a photo, choose a size and style, set the specs. No sign-up."}
           </p>
         </div>
 
