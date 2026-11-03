@@ -29,6 +29,18 @@
  * 体积走**真几何**(网格自己的顶点),跟模型克重同一口径 —— 检测工具
  * 画外壳时那圈间隙(对角线 2%,0.8~5mm)只是可视化,不进克重。
  *
+ * ## 三个克重的关系(2026-11-03)
+ *
+ *   全包裹体积 = 平台到模型顶的整块(支撑 + 模型)—— `wrapVolumeMM3`
+ *   支撑体积   = 全包裹体积 − 模型体积            —— `supportVolumeMM3`
+ *
+ *   支撑克重 = 包裹支撑体积 × 填充率 × 支撑密度
+ *   总克重   = 耗材克重 + 支撑克重
+ *
+ * 也就是:**支撑克重 = 全包裹克重 − 模型克重**。打印出来还没洗支撑时,
+ * 整块称重就是「总克重」;洗掉支撑、只剩模型时就是「耗材克重」,
+ * 两个一减就是支撑材料的净重 —— 跟工作室实际称重对得上。
+ *
  * ## 尺寸缩放(2026-11-03)
  *
  * 用户调过尺寸之后,支撑计算必须跑在**缩放后**的网格上
@@ -80,6 +92,8 @@ export type OptimalAngle = {
   wrapArea?: number;
   /** 包裹支撑体积 (mm³)：平台到下朝向面之间的支撑材料 */
   supportVolume?: number;
+  /** 全包裹体积 (mm³)：平台到模型顶的整块(支撑 + 模型) */
+  wrapVolume?: number;
   /** 原始姿态（rotX=0, rotY=0）的支撑克重 (g)：用于对比 */
   originalWeight?: number;
   /** 原始姿态的支撑克重与最优姿态的比值（>1 表示原始姿态支撑更多） */
@@ -114,8 +128,15 @@ const OVERHANG_NORMAL_Z_THRESHOLD = -Math.SQRT1_2;
 
 /** 单个姿态下的支撑数据 */
 export type SupportPoseResult = {
-  /** 包裹支撑体积 (mm³) */
+  /** 包裹支撑体积 (mm³) —— 支撑材料本身 */
   supportVolumeMM3: number;
+  /**
+   * 全包裹体积 (mm³) —— 平台到模型顶的整块(支撑 + 模型)
+   *
+   * 「支撑克重 = 全包裹克重 − 模型克重」里的那块全包裹:
+   * 打印出来还没洗支撑时,整块就是这个体积。
+   */
+  wrapVolumeMM3: number;
   /** 支撑克重 (g) */
   supportWeightG: number;
   /** 下朝向面总面积 (mm²)：支撑顶面与模型的接触面积 */
@@ -201,6 +222,7 @@ export function computeSupportAtPose(
 
   return {
     supportVolumeMM3: volume.volumeMM3,
+    wrapVolumeMM3: volume.wrapVolumeMM3,
     supportWeightG,
     wrapAreaMM2: volume.contactAreaMM2,
     overhangAreaMM2: overhangArea,
@@ -355,6 +377,7 @@ export function findOptimalAngle(
     rotY: number;
     supportWeight: number;
     supportVolume: number;
+    wrapVolume: number;
     projectedArea: number;
     supportArea: number;
     overhangArea: number;
@@ -379,6 +402,7 @@ export function findOptimalAngle(
         rotY,
         supportWeight: pose.supportWeightG,
         supportVolume: pose.supportVolumeMM3,
+        wrapVolume: pose.wrapVolumeMM3,
         projectedArea: pose.projectedAreaMM2,
         supportArea: pose.supportAreaMM2,
         overhangArea: pose.overhangAreaMM2,
@@ -529,6 +553,7 @@ export function findOptimalAngle(
     coloredDownArea: chosen.coloredWrapArea,
     wrapArea: chosen.wrapArea,
     supportVolume: chosen.supportVolume,
+    wrapVolume: chosen.wrapVolume,
     originalWeight,
     originalRatio,
   };

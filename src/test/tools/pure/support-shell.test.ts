@@ -221,6 +221,39 @@ describe("尺寸缩放(2026-11-03)", () => {
   });
 });
 
+describe("全包裹 − 模型 = 支撑(2026-11-03)", () => {
+  it("桌子:全包裹体积 = 支撑体积 + 模型体积", () => {
+    const { volume } = supportOf(TABLE, { gridSizeMM: 0.25 });
+
+    // 全包裹 = 平台到模型顶的整块:20×20 投影 × 20mm 高 = 8000 mm³
+    expect(volume.wrapVolumeMM3).toBeGreaterThan(7600);
+    expect(volume.wrapVolumeMM3).toBeLessThan(8400);
+    // 模型本体 = 帽 20×20×2 + 腿 4×4×18 = 1088 mm³
+    // 支撑 = 全包裹 − 模型(栅格离散留几个百分点)
+    expect(volume.wrapVolumeMM3 - 1088).toBeCloseTo(volume.volumeMM3, -2);
+  });
+
+  it("平底立方体:没有支撑,全包裹就是模型自己", () => {
+    const { volume } = supportOf(CUBE, { gridSizeMM: 0.25 });
+
+    expect(volume.volumeMM3).toBeLessThan(1);
+    // 20×20×20 = 8000 mm³
+    expect(volume.wrapVolumeMM3).toBeGreaterThan(7600);
+    expect(volume.wrapVolumeMM3).toBeLessThan(8400);
+  });
+
+  it("宽底座 + 悬空身体:全包裹 = 底座那圈 + 身体那圈", () => {
+    const { volume } = supportOf(BASE_AND_HOVERING_BODY, { gridSizeMM: 0.25 });
+
+    // 全包裹:身体的列到 z=30(26×26×30),底座多出来的一圈到 z=4
+    //   = 26×26×30 + (32×32 − 26×26)×4 = 20280 + 1152 = 21432 mm³
+    expect(volume.wrapVolumeMM3).toBeGreaterThan(20600);
+    expect(volume.wrapVolumeMM3).toBeLessThan(22200);
+    // 模型 = 底座 32×32×4 + 身体 26×26×20 = 4096 + 13520 = 17616 mm³
+    expect(volume.wrapVolumeMM3 - 17616).toBeCloseTo(volume.volumeMM3, -2);
+  });
+});
+
 describe("两个工具算的是同一块支撑", () => {
   it("克重工具的支撑体积 == 检测工具的支撑体积", () => {
     const positions = TABLE;

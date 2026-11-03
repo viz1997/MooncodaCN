@@ -9,6 +9,7 @@ import {
   Download,
   FileArchive,
   ListChecks,
+  Package,
   Pencil,
   RotateCcw,
   Scale,
@@ -376,6 +377,7 @@ export function PricingCalculator({
         totalSupportWeight: pose.supportWeightG,
         selfSupportArea: pose.supportAreaMM2,
         supportVolume: pose.supportVolumeMM3,
+        wrapVolume: pose.wrapVolumeMM3,
         wrapArea: pose.wrapAreaMM2,
         overhangArea: pose.overhangAreaMM2,
         coloredDownArea: pose.coloredWrapAreaMM2,
@@ -1119,13 +1121,27 @@ export function PricingCalculator({
               : "—"}
           </div>
         </div>
+        {/* 总克重 = 耗材克重 + 支撑克重 —— 打印出来还没洗支撑时，整块的重量 */}
+        <div>
+          <div className="flex items-center gap-1.5 text-xs text-stone-500">
+            <Package className="size-3.5" />
+            <span>{t("stats.totalWeight")}</span>
+          </div>
+          <div className="mt-0.5 font-mono text-lg font-medium text-stone-700">
+            {optimalAngle
+              ? `${Math.ceil(calc.materialWeight + optimalAngle.totalSupportWeight)} g`
+              : "—"}
+          </div>
+        </div>
       </div>
 
-      {!optimalAngle && (
-        <p className="mt-1 text-[11px] text-stone-400">
-          {t("stats.supportWeightHint")}
-        </p>
-      )}
+      <p className="mt-1 text-[11px] text-stone-400">
+        {optimalAngle
+          ? t("stats.totalWeightHint", {
+              volume: fmt((optimalAngle.wrapVolume ?? 0) / 1000, 2),
+            })
+          : t("stats.supportWeightHint")}
+      </p>
 
       {/* 智能摆盘结果 */}
       {optimalAngle && (

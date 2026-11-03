@@ -166,7 +166,7 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 - `rotateSupportMesh(mesh, rotX, rotY, rotZ)` → 刚体旋转顶点与法线(拓扑不变)
 - `scaleSupportModel(model, sx, sy, sz)` → 缩放到实际尺寸(只挪顶点,拓扑不变)
 - `buildSupportShell(mesh, faceEnclosed, options?, gapScale?)` → 外壳 / 支撑顶面 / 外壁 / 平台投影
-- `computeSupportVolume(shell, mesh, options?)` → 按 XY 列(height field)算支撑体积
+- `computeSupportVolume(shell, mesh, options?)` → 按 XY 列(height field)算支撑体积 + 全包裹体积
 
 **旋转口径**:一律「先 X 后 Y 后 Z」(外旋,R = Rz·Ry·Rx)。three.js 里对应
 `rotation.order = "ZYX"`(默认的 `"XYZ"` 是 Rx·Ry·Rz,对不上)。摆盘算法
@@ -188,6 +188,15 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 - **支撑克重 = 支撑体积 × 填充率 × 支撑密度**。`SupportParams` 只有
   `fillRate` + `density` 两个旋钮(旧的「包裹间隙倍率」已删)。支撑是
   **实心**的:默认 `fillRate = 1`、`density = 1.9`(按实测校准)。
+
+**三个克重的关系(2026-11-03)**:
+
+- `wrapVolumeMM3`(**全包裹体积**)= 平台到模型顶的整块(支撑 + 模型),
+  逐列取「该列模型最高点 − 平台」求和。
+- **支撑克重 = 全包裹克重 − 模型克重**:整块称重(打印出来还没洗支撑时)
+  减去模型自己那份,剩下的就是支撑。
+- **总克重 = 耗材克重 + 支撑克重** —— 克重页三个数字(耗材 / 支撑 / 总)
+  就是这个关系;批量汇总的「总克重」同口径(耗材 + 支撑)。
 
 行为由 `src/test/tools/pure/support-shell.test.ts` 守住。
 

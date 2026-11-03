@@ -491,8 +491,16 @@ export interface SupportVolumeOptions {
 
 /** 支撑体积计算结果 */
 export interface SupportVolumeResult {
-  /** 包裹支撑体积 (mm³) */
+  /** 包裹支撑体积 (mm³) —— 支撑材料本身 */
   volumeMM3: number;
+  /**
+   * 全包裹体积 (mm³) —— 平台到模型顶的整块(支撑 + 模型)
+   *
+   * 逐列取「模型在该列的最高点 − 平台」再乘格子面积求和。
+   * 支撑克重 = 全包裹克重 − 模型克重 —— 全包裹就是这一整块,
+   * 减去模型自己占的那部分,剩下的才是支撑材料。
+   */
+  wrapVolumeMM3: number;
   /** 模型 XY 投影面积 (mm²) —— 支撑底面 / 占地区域 */
   footprintAreaMM2: number;
   /** 有支撑的投影面积 (mm²) */
@@ -511,6 +519,10 @@ export interface SupportVolumeResult {
  *   - 交点按 z 排序后相邻两个之间是**模型材料**,再往下是**空腔**(填支撑)
  *   - 列高 = 顶交点 − 平台
  *   - 支撑高 = 列高 − 材料总长
+ *
+ * 列高(平台到模型顶)逐列加起来就是**全包裹体积** —— 打印出来那一整块
+ * (支撑 + 模型)。所以支撑克重 = 全包裹克重 − 模型克重:整块称重,
+ * 减去模型自己那份,剩下的才是支撑。
  *
  * 奇偶配对跟法线朝向无关,只看交点个数 —— 封闭网格的交点个数必然是偶数,
  * 配对出来的区间就是真正的材料段。这样同一列里模型上下两截时
@@ -545,6 +557,7 @@ export function computeSupportVolume(
 
   const empty: SupportVolumeResult = {
     volumeMM3: 0,
+    wrapVolumeMM3: 0,
     footprintAreaMM2: 0,
     supportAreaMM2: 0,
     maxHeightMM: 0,
@@ -708,6 +721,7 @@ export function computeSupportVolume(
   }
 
   let volume = 0;
+  let wrapVolume = 0;
   let supportArea = 0;
   let footprintArea = 0;
   let maxHeight = 0;
@@ -777,6 +791,14 @@ export function computeSupportVolume(
       gel = h - modelBelow;
       gelTop = uz;
     }
+    // 全包裹体积:这一列从平台到模型顶的整块(支撑 + 模型)。
+    // 「支撑克重 = 全包裹克重 − 模型克重」里的那块全包裹就是它。
+    // 放在跳过空支撑之前 —— 没有支撑的列(模型直接坐在平台上)也占全包裹。
+    const hi = modelHi[i];
+    if (Number.isFinite(hi)) {
+      const wrapH = hi - platformZ;
+      if (wrapH > 0) wrapVolume += wrapH * cellArea;
+    }
     // 平台正好等于模型最低点时,浮点噪声会让「平底模型」多出 1e-16mm 的支撑,
     // 摆盘时同一姿态的正/负 180° 会因此差一点点、选出莫名其妙的角度。
     // 1e-9mm 远小于任何有意义的尺寸,只是把噪声抹平。
@@ -789,6 +811,7 @@ export function computeSupportVolume(
 
   return {
     volumeMM3: volume,
+    wrapVolumeMM3: wrapVolume,
     footprintAreaMM2: footprintArea,
     supportAreaMM2: supportArea,
     maxHeightMM: maxHeight,

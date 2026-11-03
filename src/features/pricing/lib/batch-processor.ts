@@ -412,8 +412,14 @@ export function summarizeBatch(items: BatchItem[]) {
   const done = items.filter((i) => i.status === "done");
   const errors = items.filter((i) => i.status === "error");
   const total = items.length;
+  // 总克重 = 耗材克重 + 支撑克重 —— 跟单模型页一个口径:
+  // 打印出来还没洗支撑时,这一批整块称重的总和。
+  // 没跑智能摆盘的条目没有支撑数据,只算耗材那部分。
   const totalWeight = done.reduce(
-    (s, i) => s + (i.result?.pricing.materialWeight ?? 0),
+    (s, i) =>
+      s +
+      (i.result?.pricing.materialWeight ?? 0) +
+      (i.result?.optimalAngle?.totalSupportWeight ?? 0),
     0
   );
   const totalPrice = done.reduce(
