@@ -92,6 +92,27 @@ function mapUrl(model: ModelFile, material: string): string | undefined {
   return model.textureUrls?.[material]?.map;
 }
 
+/** 在进程内跑一遍 worker,拿回几何数据 */
+function parseWithWorker(objText: string): Promise<{
+  uvs?: Float32Array;
+  materialNames?: string[];
+}> {
+  return new Promise((resolve, reject) => {
+    const worker = new InProcessWorker();
+    worker.onmessage = (ev: { data: unknown }) => {
+      const msg = ev.data as {
+        type: string;
+        result?: { uvs?: Float32Array; materialNames?: string[] };
+        message?: string;
+      };
+      if (msg.type === "result" && msg.result) resolve(msg.result);
+      if (msg.type === "error")
+        reject(new Error(msg.message ?? "worker error"));
+    };
+    worker.postMessage({ objText, sendGeometry: true });
+  });
+}
+
 describe("extractZip:多材质模型的贴图解析", () => {
   it("每个材质挂自己 map_Kd 指的那张图,互不串味", async () => {
     const file = await makeZip({
@@ -232,5 +253,46 @@ describe("extractZip:多材质模型的贴图解析", () => {
     const urls = Object.values(model.textureUrls ?? {}).map((u) => u.map);
     expect(urls.filter(Boolean).length).toBe(2);
     expect(new Set(urls).size).toBe(2);
+  });
+
+  /**
+   * 流式 OBJ(3ds Max 导出)的负下标 —— 真实案例 `006109.zip`。
+   *
+   * 那种导出器**每个面自带一组 vt**,面里用 `-3 -2 -1` 引用刚写的那几个。
+   * 按 OBJ 规范(负下标 = 从文件末尾数)解析的话,每个面都会拿到文件最后几个 vt,
+   * 整张模型的 UV 塌成同几个点 —— 贴图明明加载了,画面却是一整块纯色。
+   */
+  it("流式 OBJ 的负下标:每个面拿到自己的 UV,不是全部塌成同一组", async () => {
+    const streamingObj = [
+      "mtllib model.mtl",
+      "v 0 0 0",
+      "v 1 0 0",
+      "v 0 1 0",
+      "v 1 1 0",
+      "usemtl Wood",
+      "vt 0 0",
+      "vt 1 0",
+      "vt 0 1",
+      "f 1/-3 2/-2 3/-1",
+      "vt 0.5 0.5",
+      "vt 0.75 0.5",
+      "vt 0.75 0.75",
+      "f 1/-3 2/-2 4/-1",
+    ].join("\n");
+    const file = await makeZip({
+      "model.obj": streamingObj,
+      "model.mtl": ["newmtl Wood", "Kd 1 1 1", "map_Kd wood.png"].join("\n"),
+      "wood.png": png("wood"),
+    });
+
+    const result = await extractZip(file);
+    const model = result.model!;
+    expect(mapUrl(model, "Wood")).toBeTruthy();
+
+    const parsed = await parseWithWorker(model.objText);
+    // 两个面 → 6 个角 → 12 个 float,UV 各不相同
+    expect(Array.from(parsed.uvs ?? [])).toEqual([
+      0, 0, 1, 0, 0, 1, 0.5, 0.5, 0.75, 0.5, 0.75, 0.75,
+    ]);
   });
 });

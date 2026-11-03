@@ -27,6 +27,7 @@ import {
   parseUsemtlNames,
   pickMtlFileName,
   pickPreviewTextureUrl,
+  resolveNegativeIndex,
   rewriteMtllib,
   rewriteMtlTextureRefs,
   rewriteTextureFileName,
@@ -315,6 +316,21 @@ describe("mergeMtlTexts", () => {
   });
 });
 
+describe("resolveNegativeIndex", () => {
+  it("负下标按「到该行为止的数量」换算成 0 基绝对下标", () => {
+    // 已经写了 3 个 → -3 指的是「刚写的那 3 个里的第 1 个」
+    expect(resolveNegativeIndex(-3, 3)).toBe(0);
+    expect(resolveNegativeIndex(-2, 3)).toBe(1);
+    expect(resolveNegativeIndex(-1, 3)).toBe(2);
+    // 已经写了 6 个 → -3 指的是第 4 个
+    expect(resolveNegativeIndex(-3, 6)).toBe(3);
+  });
+
+  it("常规文件里「到该行为止」==「整个文件」→ 与按规范解析一致", () => {
+    expect(resolveNegativeIndex(-3, 10)).toBe(7);
+  });
+});
+
 describe("countObjIndices", () => {
   it("分别统计 v 与 vt", () => {
     const obj = "v 0 0 0\nv 1 0 0\nvt 0 0\nvt 1 1\nf 1/1 2/2 1/1\n";
@@ -375,6 +391,38 @@ describe("combineObjSources", () => {
     ]);
     // offset(3) + count(3) + (-3) + 1 = 4
     expect(combined.objText).toContain("f 4/4 5/5 6/6");
+  });
+
+  /**
+   * 流式 OBJ(3ds Max 写法)合并时的负下标换算。
+   *
+   * 每个面自带一组 vt,面里用 `-3 -2 -1` 引用「刚写的那几个」。
+   * 合并时要把负下标烘成绝对下标 —— 基准必须是**这个文件自己写到该行为止**的
+   * vt 数量,而不是整个文件的 vt 总数,否则每个面都会指向同一组 vt
+   * (贴图糊成一块纯色)。
+   */
+  it("流式 OBJ 合并:每个面的 vt 组各自换算,不会全指向同一组", () => {
+    const streaming = [
+      "v 0 0 0",
+      "v 1 0 0",
+      "v 0 1 0",
+      "vt 0 0",
+      "vt 1 0",
+      "vt 0 1",
+      "f -3/-3 -2/-2 -1/-1",
+      "vt 0.5 0.5",
+      "vt 0.75 0.5",
+      "vt 0.75 0.75",
+      "f -3/-3 -2/-2 -1/-1",
+    ].join("\n");
+    const combined = combineObjSources([
+      { objText: sourceA },
+      { objText: streaming },
+    ]);
+    // 第一组 vt → 绝对 4/5/6(前面已有 sourceA 的 3 个)
+    expect(combined.objText).toContain("f 4/4 5/5 6/6");
+    // 第二组 vt → 绝对 7/8/9;顶点还是那 3 个 → 4/5/6
+    expect(combined.objText).toContain("f 4/7 5/8 6/9");
   });
 
   it("共用同一个 MTL 时材质名保持原样", () => {

@@ -164,6 +164,7 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 
 - `prepareSupportModel(positions)` → 焊接 + 拓扑(**姿态无关**,只做一次)
 - `rotateSupportMesh(mesh, rotX, rotY, rotZ)` → 刚体旋转顶点与法线(拓扑不变)
+- `scaleSupportModel(model, sx, sy, sz)` → 缩放到实际尺寸(只挪顶点,拓扑不变)
 - `buildSupportShell(mesh, faceEnclosed, options?, gapScale?)` → 外壳 / 支撑顶面 / 外壁 / 平台投影
 - `computeSupportVolume(shell, mesh, options?)` → 按 XY 列(height field)算支撑体积
 
@@ -171,6 +172,21 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 `rotation.order = "ZYX"`(默认的 `"XYZ"` 是 Rx·Ry·Rz,对不上)。摆盘算法
 (`angle-optimizer.ts`)、OBJ 导出(`obj-exporter.ts`)、3D 预览(`obj-viewer.tsx`)
 三处必须一致,否则画面里的姿态跟算出来的克重对不上。
+
+**支撑体积口径(2026-11-03 重写,跟模型克重对齐)**:
+
+- **按列奇偶配对**:一列(垂直视线)穿过模型表面得到一串 z 交点,相邻两个
+  交点之间是模型材料,空出来的那几段才是支撑。老算法假设「列内模型是从下
+  边界一直实心到上边界」,宽底座 + 悬空身体会被整段抹掉(支撑少算 3~45 倍)。
+- **走真几何**:交点取自 `mesh.vertices`,不是外壳(外壳沿法线外扩过)。
+  外壳间隙(对角线 2%,0.8~5mm)只是可视化用的,算进体积会让支撑克重
+  系统性高 10~30%。平台取**模型最低点**(`mesh.bboxMin[2]`),不是
+  `shell.groundZ`(那个还低 0.05~0.1mm,平底模型会凭空多出支撑)。
+- **缩放跑在真几何上**:用户改尺寸后,支撑计算跑在 `scaleSupportModel`
+  缩放过的网格(不是原始网格乘系数)—— 非均匀缩放时高度 / 投影 / 悬垂面
+  全变,乘系数会让 50mm 高度限制放行立不住的姿态。
+- **支撑克重 = 支撑体积 × 蜂窝填充率 × 支撑密度**。`SupportParams` 只有
+  `fillRate` + `density` 两个旋钮(旧的「包裹间隙倍率」已删)。
 
 行为由 `src/test/tools/pure/support-shell.test.ts` 守住。
 

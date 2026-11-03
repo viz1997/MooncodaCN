@@ -1,6 +1,9 @@
 "use client";
 
-import type { TextureUrlMap } from "@/features/pricing/lib/obj-materials";
+import type {
+  TextureDiagnostic,
+  TextureUrlMap,
+} from "@/features/pricing/lib/obj-materials";
 /**
  * 模型文件读取 —— 复用克重工具(/tools/weight)的解压管线
  *
@@ -72,6 +75,10 @@ export type LoadedModel = {
   mtlText: string | null;
   /** 材质名 → 该材质自己的贴图 blob URL */
   textureUrls: TextureUrlMap | null;
+  /**
+   * 每个材质槽位的贴图解析诊断 —— 白模时用来解释「贴图断在哪一步」。
+   */
+  textureDiagnostics: TextureDiagnostic[] | null;
   /**
    * 释放贴图的 blob URL(换模型 / 组件卸载时必须调用,否则 blob 一直占着内存)。
    */
@@ -171,6 +178,7 @@ export async function loadModelGeometry(
     materialIndex: geometry.materialIndex ?? null,
     mtlText: model.mtlText ?? null,
     textureUrls: model.textureUrls ?? null,
+    textureDiagnostics: model.textureDiagnostics ?? null,
     releaseTextures: () => revokeModelTextureUrls(model),
   };
 }

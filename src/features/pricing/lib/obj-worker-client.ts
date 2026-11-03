@@ -161,6 +161,9 @@ self.onmessage = function (e) {
     var uvCount = (uvs.length / 2) | 0;
 
     // ---- Pass 2: faces (30-70%) -------------------------------------------
+    // 到目前为止已经出现的 v / vt 数量 —— 负下标按它解析(见下方说明)
+    var vSeen = 0;
+    var vtSeen = 0;
     for (i = 0; i < totalLines; i++) {
       line = lines[i];
       var s = 0;
@@ -173,6 +176,10 @@ self.onmessage = function (e) {
       if (sp < 0) continue;
       cmd = line.substring(0, sp);
       rest = line.substring(sp + 1).trim();
+
+      // v / vt 计数 —— 负下标按「到该行为止」的数量解析
+      if (cmd === 'v') { vSeen++; continue; }
+      if (cmd === 'vt') { vtSeen++; continue; }
 
       // usemtl 切换当前材质 —— 之后的每个面都归它
       if (cmd === 'usemtl') {
@@ -197,12 +204,19 @@ self.onmessage = function (e) {
         var slashes = tok.split('/');
         var vi = parseInt(slashes[0], 10);
         var ti = slashes.length > 1 && slashes[1] ? parseInt(slashes[1], 10) : NaN;
+        // 负下标按「到该行为止已经出现的 v / vt 数量」解析,而不是整个文件的数量。
+        //
+        // OBJ 规范说 -N 是「从文件末尾数第 N 个」,但很多导出器是流式写文件的:
+        // 每写一个面就紧跟写它自己的几个 vt,面里用 -3 -2 -1 引用「刚写的那几个」。
+        // 按规范解析的话,每个面都会拿到文件最后几个 vt —— 整张模型的 UV 全变成
+        // 同几个点,贴图采样出来是一整块纯色(看起来就是「模型没有贴图」)。
+        // 常规文件(v / vt 全写在 f 之前)两种解析结果完全一致,没有回归。
         if (vi > 0) vIdx.push(vi - 1);
-        else if (vi < 0) vIdx.push(vertexCount + vi);
+        else if (vi < 0) vIdx.push(vSeen + vi);
         else continue; // 顶点下标非法 → 整个角丢掉(vIdx / tIdx 必须等长)
         // 该角没有 vt → 记 -1,后面逐角兜底(而不是让整面 UV 归零)
         if (ti > 0) tIdx.push(ti - 1);
-        else if (ti < 0) tIdx.push(uvCount + ti);
+        else if (ti < 0) tIdx.push(vtSeen + ti);
         else tIdx.push(-1);
       }
       if (vIdx.length >= 3) faces.push({ v: vIdx, t: tIdx, m: currentMaterial });

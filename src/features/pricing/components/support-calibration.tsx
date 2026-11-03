@@ -4,13 +4,14 @@
  * 移植自 wjp-source-code/src/app/page.tsx 的「支撑克重校准」面板。
  *
  * 主页卡片与模型设置弹窗各有一份（源实现如此），这里抽成组件复用。
- * 三个参数（蜂窝填充率 / 包裹间隙 / 支撑材料密度）改动后立即通过
+ * 两个参数（蜂窝填充率 / 支撑材料密度）改动后立即通过
  * `onParamsChange` 回调重算支撑克重，无需重新摆盘。
  *
- * 2026-11-02:第二个旋钮从「外壳厚度 (mm)」改成「包裹间隙倍率」——
- * 支撑体积改用模型检查工具的包裹支撑算法之后，不再有「一层 1mm 外壳」
- * 这个概念了；算法里的间隙是随模型尺寸自适应的(对角线 2%,0.8~5mm)，
- * 这个旋钮调的是它的倍率(1 = 保持默认间隙)。
+ * 2026-11-03:去掉第三个旋钮「包裹间隙倍率」——
+ * 支撑体积改走真几何（跟模型克重同一口径）之后，检测工具画外壳时那圈
+ * 可视化间隙就不再进克重了，留着会变成一个不起作用的滑块。
+ * 现在克重 = 包裹支撑体积 × 蜂窝填充率 × 支撑密度，两个旋钮都直接乘在
+ * 支撑克重上。
  */
 import { useTranslations } from "next-intl";
 
@@ -22,13 +23,13 @@ export function SupportCalibration({
   params,
   onParamsChange,
   accent = "violet",
-  columns = 3,
+  columns = 2,
 }: {
   params: SupportParams;
   onParamsChange: (next: SupportParams) => void;
   /** 主题色：violet（弹窗内）/ amber（主页卡片） */
   accent?: "violet" | "amber";
-  /** 列数：3（弹窗内三列）/ 2（主页卡片两列） */
+  /** 列数：2（默认）/ 3（弹窗内三列） */
   columns?: 2 | 3;
 }) {
   const t = useTranslations("MaterialPricing.calibration");
@@ -76,41 +77,6 @@ export function SupportCalibration({
             const v = parseFloat(e.target.value);
             if (!Number.isFinite(v)) return;
             apply({ fillRate: Math.max(0.05, Math.min(1.0, v)) });
-          }}
-          className="font-mono h-6 text-[10px] w-full px-1 border border-stone-300 rounded"
-        />
-      </label>
-
-      <label className="text-[10px] text-stone-600 flex flex-col gap-1">
-        <span className="flex items-center justify-between">
-          <span>{t("gapScale")}</span>
-          <span className="font-mono text-stone-800">
-            {params.gapScale.toFixed(2)}×
-          </span>
-        </span>
-        <input
-          type="range"
-          min={0.2}
-          max={3.0}
-          step={0.05}
-          value={params.gapScale}
-          onChange={(e) => {
-            const v = parseFloat(e.target.value);
-            if (!Number.isFinite(v)) return;
-            apply({ gapScale: v });
-          }}
-          className={rangeClass}
-        />
-        <input
-          type="number"
-          min={0.2}
-          max={3.0}
-          step={0.05}
-          value={params.gapScale}
-          onChange={(e) => {
-            const v = parseFloat(e.target.value);
-            if (!Number.isFinite(v)) return;
-            apply({ gapScale: Math.max(0.2, Math.min(3.0, v)) });
           }}
           className="font-mono h-6 text-[10px] w-full px-1 border border-stone-300 rounded"
         />

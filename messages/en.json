@@ -1192,11 +1192,18 @@
       "reoptimize": "Re-optimize",
       "resetAngle": "Reset angle"
     },
+    "preview": {
+      "texture": "Texture",
+      "textureTitle": "Show the model's own textures (each MTL material gets its own map_Kd); turn it off for the plain colour view",
+      "support": "Wrap-around support",
+      "supportTitle": "Shows the translucent support shell wrapped around the model, the platform footprint, and all the support material between platform and model (WJP jets layer by layer, so there is no overhang to support; the support is washed off after printing)",
+      "supportInfo": "Support {ratio}% · {weight} g",
+      "supportPending": "Run the orientation optimizer to see the support ratio"
+    },
     "calibration": {
       "fillRate": "Honeycomb fill rate",
-      "gapScale": "Wrap gap multiplier",
       "density": "Support density (g/cm³)",
-      "hint": "Support weight = wrap-support volume × fill rate × density. The wrap support is the material between the platform and the model's underside — the same thing the model checker draws; the fill rate is the solid fraction of the support, and the gap multiplier scales the wrap clearance.",
+      "hint": "Support weight = wrap-support volume × fill rate × density. The wrap support is the material between the platform and the model's underside — the same thing the model checker draws; the fill rate is the solid fraction of the support and the density is the material's own weight density.",
       "collapseLabel": "Support weight calibration",
       "oneClickTitle": "One-click calibration",
       "oneClickDesc": "Enter the measured support weight to back-solve the honeycomb fill rate.",
@@ -1850,6 +1857,14 @@
       },
       "submit": "Apply change",
       "discard": "Cancel"
+    }
+  },
+  "TextureDiagnostic": {
+    "failedTitle": "{failed} / {total} materials have no texture",
+    "status": {
+      "no-material": "no material with this name in the MTL",
+      "no-texture-in-mtl": "no map_Kd for this material in the MTL",
+      "file-missing": "this texture file is not in the archive"
     }
   }
 }

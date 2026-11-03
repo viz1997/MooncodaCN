@@ -70,8 +70,10 @@ import {
   scaleGeometryXYZ,
 } from "@/features/pricing/components/shared";
 import { SupportCalibration } from "@/features/pricing/components/support-calibration";
+import { TextureDiagnosticNote } from "@/features/pricing/components/texture-diagnostic";
 import {
   computeSupportAtAngle,
+  computeSupportAtPose,
   DEFAULT_SUPPORT_PARAMS,
   findOptimalAngle,
   type OptimalAngle,
@@ -105,6 +107,7 @@ import {
 } from "@/features/pricing/lib/zip-extractor";
 import type { PrintQuoteInput } from "@/features/print-quote/lib/quote-types";
 import type { SupportModel } from "@/features/tools/lib/mesh/support-shell";
+import { scaleSupportModel } from "@/features/tools/lib/mesh/support-shell";
 
 type Mode = "upload" | "manual" | "batch";
 
@@ -237,6 +240,11 @@ export function PricingCalculator({
   const [angleOptimizing, setAngleOptimizing] = useState(false);
   const [angleProgress, setAngleProgress] = useState(0);
   const [showSupport, setShowSupport] = useState(true);
+  /**
+   * 3D 预览是否显示模型自带的贴图 —— 与检测工具的「显示贴图」开关同一套行为。
+   * 关掉就是纯色(MTL 的 `Kd` 本色)视图,方便看模型本体形状。
+   */
+  const [showTexture, setShowTexture] = useState(true);
   const [viewerRotX, setViewerRotX] = useState(0);
   const [viewerRotY, setViewerRotY] = useState(0);
   const [viewerRotZ, setViewerRotZ] = useState(0);
@@ -245,7 +253,22 @@ export function PricingCalculator({
   const [manualRotZ, setManualRotZ] = useState(0);
   // 摆盘用的焊接模型(2026-11-02):焊接 + 拓扑是姿态无关的,只做一次;
   // 拖动角度滑块时每次只旋转,不重焊
+  /**
+   * 焊接后的**原始尺寸**模型。
+   *
+   * 缩放只挪顶点(拓扑不变),所以改尺寸时从它派生一份缩放版就行 ——
+   * 不用重新解析 / 重新焊接。
+   */
+  const baseSupportModelRef = useRef<SupportModel | null>(null);
+  /** 当前尺寸下的模型 —— 所有支撑计算都用它(几何已经是真实尺寸) */
   const supportModelRef = useRef<SupportModel | null>(null);
+  /** 摆盘结果 —— 重算 effect 读它,免得把它塞进依赖数组 */
+  const optimalAngleRef = useRef<OptimalAngle | null>(null);
+  /** 原始姿态(0°,0°)的支撑克重缓存 —— 只跟尺寸 / 校准参数有关,跟当前角度无关 */
+  const originalSupportRef = useRef<{ key: string; weight: number }>({
+    key: "",
+    weight: 0,
+  });
 
   // ---- 批量 ----
   const [batchItems, setBatchItems] = useState<BatchItem[]>([]);
@@ -287,6 +310,102 @@ export function PricingCalculator({
     if (uniformScale) return [scaleFactor, scaleFactor, scaleFactor];
     return [scaleX, scaleY, scaleZ];
   }, [dimMode, uniformScale, scaleFactor, scaleX, scaleY, scaleZ]);
+
+  /**
+   * 最新生效的缩放因子 —— 摆盘是异步的(好几秒),完成时要用「此刻」的尺寸,
+   * 不然摆出来的支撑克重跟页面上显示的尺寸对不上。
+   */
+  const scalesRef = useRef(appliedScales);
+  useEffect(() => {
+    scalesRef.current = appliedScales;
+  }, [appliedScales]);
+
+  // 摆盘结果写进 ref —— 重算 effect 不必把它塞进依赖数组
+  useEffect(() => {
+    optimalAngleRef.current = optimalAngle;
+  });
+
+  /**
+   * 支撑克重重算 —— **唯一**的支撑计算入口
+   *
+   * 尺寸改了 / 角度改了 / 校准参数改了,都走这里,保证「支撑克重」永远跟
+   * 「当前尺寸 + 当前姿态 + 当前参数」一致。之前每条路各算一次,漏了
+   * 「改尺寸」那条 —— 改完尺寸模型克重更新了,支撑克重还停在旧尺寸上,
+   * 支撑比例和报价全是错的。
+   *
+   * 算的是**缩放后**的真实几何:缩放只挪顶点(拓扑不变),不用重新焊接。
+   */
+  useEffect(() => {
+    const base = baseSupportModelRef.current;
+    if (!base || !model) return;
+    const [sx, sy, sz] = appliedScales;
+    // ① 支撑模型跟着尺寸走
+    const scaled = scaleSupportModel(base, sx, sy, sz);
+    supportModelRef.current = scaled;
+    // ② 没跑过摆盘就没有支撑数据
+    if (!optimalAngleRef.current) return;
+    const modelWeightG =
+      model.parseResult.volumeCM3 * sx * sy * sz * materialDensity;
+    const pose = computeSupportAtPose(
+      scaled,
+      manualRotX,
+      manualRotY,
+      manualRotZ,
+      supportParams
+    );
+    const supportRatio =
+      modelWeightG > 0 ? pose.supportWeightG / modelWeightG : 0;
+    // ③ 原始姿态(摆盘对比用):只跟尺寸 / 校准参数有关,没变就沿用缓存
+    const originalKey = `${sx}|${sy}|${sz}|${supportParams.fillRate}|${supportParams.density}`;
+    if (originalSupportRef.current.key !== originalKey) {
+      originalSupportRef.current = {
+        key: originalKey,
+        weight: computeSupportAtPose(scaled, 0, 0, 0, supportParams)
+          .supportWeightG,
+      };
+    }
+    const originalWeight = originalSupportRef.current.weight;
+    setOptimalAngle((prev) => {
+      if (!prev) return prev;
+      const next = {
+        ...prev,
+        rotX: manualRotX,
+        rotY: manualRotY,
+        selfSupportRatio: supportRatio,
+        totalSupportRatio: supportRatio,
+        totalSupportWeight: pose.supportWeightG,
+        selfSupportArea: pose.supportAreaMM2,
+        supportVolume: pose.supportVolumeMM3,
+        wrapArea: pose.wrapAreaMM2,
+        overhangArea: pose.overhangAreaMM2,
+        coloredDownArea: pose.coloredWrapAreaMM2,
+        rotatedHeight: pose.rotatedHeightMM,
+        originalWeight,
+        originalRatio:
+          pose.supportWeightG > 0 ? originalWeight / pose.supportWeightG : 1,
+      };
+      // 值没变就别 setState(否则这个 effect 会因为 optimalAngle 变化再跑一遍)
+      if (
+        prev.totalSupportWeight === next.totalSupportWeight &&
+        prev.selfSupportRatio === next.selfSupportRatio &&
+        prev.rotatedHeight === next.rotatedHeight &&
+        prev.originalWeight === next.originalWeight &&
+        prev.rotX === next.rotX &&
+        prev.rotY === next.rotY
+      ) {
+        return prev;
+      }
+      return next;
+    });
+  }, [
+    appliedScales,
+    manualRotX,
+    manualRotY,
+    manualRotZ,
+    supportParams,
+    materialDensity,
+    model,
+  ]);
 
   const geometry = useMemo((): ModelGeometry | null => {
     if (mode === "upload") {
@@ -424,6 +543,11 @@ export function PricingCalculator({
     setManualRotX(0);
     setManualRotY(0);
     setManualRotZ(0);
+    // 换模型 → 支撑模型作废(新模型要重新焊接)
+    baseSupportModelRef.current = null;
+    supportModelRef.current = null;
+    // 换模型 → 贴图开关复位(新模型可能压根没有贴图)
+    setShowTexture(true);
     setLoadStatus("uploading");
     setLoadProgress(t("upload.reading"));
     await yieldToUI();
@@ -482,6 +606,8 @@ export function PricingCalculator({
     setScaleY(1);
     setScaleZ(1);
     setOptimalAngle(null);
+    baseSupportModelRef.current = null;
+    supportModelRef.current = null;
   };
 
   const applyProduct = (id: string) => {
@@ -493,7 +619,7 @@ export function PricingCalculator({
   };
 
   // ---- 智能摆盘 ----
-  const optimizeAngle = async (pendingScales: [number, number, number]) => {
+  const optimizeAngle = async (_pendingScales: [number, number, number]) => {
     if (!model) return;
     setAngleOptimizing(true);
     setAngleProgress(0);
@@ -506,19 +632,21 @@ export function PricingCalculator({
       if (outcome.positions) {
         await yieldToUI();
         // 焊接一次,之后每个候选姿态只旋转(2026-11-02)
-        const supportModel = prepareSupportModel(outcome.positions);
-        supportModelRef.current = supportModel;
-        const [sx, sy, sz] = pendingScales;
+        const baseModel = prepareSupportModel(outcome.positions);
+        baseSupportModelRef.current = baseModel;
+        // 摆盘要跑好几秒,期间用户可能又改了尺寸 —— 用**完成时**的尺寸算,
+        // 免得摆出来的支撑克重跟页面上显示的尺寸对不上
+        const [sx, sy, sz] = scalesRef.current;
+        // 支撑计算跑在缩放后的网格上(真实尺寸,2026-11-03)
+        const scaledModel = scaleSupportModel(baseModel, sx, sy, sz);
+        supportModelRef.current = scaledModel;
         const modelVolumeCM3 = model.parseResult.volumeCM3 * sx * sy * sz;
         const modelWeightG = modelVolumeCM3 * materialDensity;
-        const avgK = Math.cbrt(sx * sy * sz);
         const result = findOptimalAngle(
-          supportModel,
-          model.parseResult.surfaceAreaMM2,
+          scaledModel,
           (p) => setAngleProgress(50 + Math.round(p * 0.5)),
           50,
           modelWeightG,
-          avgK,
           undefined,
           false,
           supportParams
@@ -548,11 +676,13 @@ export function PricingCalculator({
     setManualRotZ(0);
   };
 
-  /** 手动调整角度：实时重算支撑克重和本体支撑比例 */
+  /**
+   * 手动调整角度 —— 支撑克重由下面的 effect 重算(角度变了 → 重算)
+   */
   const handleManualAngleChange = (
     axis: "X" | "Y" | "Z",
     value: number,
-    scales: [number, number, number]
+    _scales: [number, number, number]
   ) => {
     if (!model) return;
     if (axis === "X") {
@@ -565,66 +695,11 @@ export function PricingCalculator({
       setManualRotZ(value);
       setViewerRotZ(value);
     }
-    if (supportModelRef.current && optimalAngle) {
-      const [sx, sy, sz] = scales;
-      const modelVolumeCM3 = model.parseResult.volumeCM3 * sx * sy * sz;
-      const modelWeightG = modelVolumeCM3 * materialDensity;
-      const avgK = Math.cbrt(sx * sy * sz);
-      const newRotX = axis === "X" ? value : manualRotX;
-      const newRotY = axis === "Y" ? value : manualRotY;
-      const newRotZ = axis === "Z" ? value : manualRotZ;
-      const { supportWeight, supportRatio } = computeSupportAtAngle(
-        supportModelRef.current,
-        newRotX,
-        newRotY,
-        modelWeightG,
-        avgK,
-        newRotZ,
-        undefined,
-        supportParams
-      );
-      setOptimalAngle({
-        ...optimalAngle,
-        rotX: newRotX,
-        rotY: newRotY,
-        selfSupportRatio: supportRatio,
-        totalSupportRatio: supportRatio,
-        totalSupportWeight: supportWeight,
-      });
-    }
   };
 
-  /** 支撑参数变化 → 立即重算当前角度的支撑克重 */
-  const recomputeSupport = (
-    params: SupportParams,
-    scales: [number, number, number]
-  ) => {
+  /** 支撑参数变化 → 立即重算当前角度的支撑克重(由 effect 统一重算) */
+  const recomputeSupport = (params: SupportParams) => {
     setSupportParams(params);
-    if (!supportModelRef.current || !optimalAngle || !model) return;
-    const [sx, sy, sz] = scales;
-    const modelVolumeCM3 = model.parseResult.volumeCM3 * sx * sy * sz;
-    const modelWeightG = modelVolumeCM3 * materialDensity;
-    const avgK = Math.cbrt(sx * sy * sz);
-    const { supportWeight, supportRatio } = computeSupportAtAngle(
-      supportModelRef.current,
-      manualRotX,
-      manualRotY,
-      modelWeightG,
-      avgK,
-      manualRotZ,
-      undefined,
-      params
-    );
-    setOptimalAngle((prev) =>
-      prev
-        ? {
-            ...prev,
-            totalSupportWeight: supportWeight,
-            selfSupportRatio: supportRatio,
-            totalSupportRatio: supportRatio,
-          }
-        : prev
-    );
   };
 
   /** 一键校准：用实测支撑克重反算蜂窝填充率 */
@@ -641,21 +716,19 @@ export function PricingCalculator({
     }
     const [sx, sy, sz] = appliedScales;
     const mW = model.parseResult.volumeCM3 * sx * sy * sz * materialDensity;
-    const ak = Math.cbrt(sx * sy * sz);
     // 先用 fillRate=1 计算最大理论克重
     const { supportWeight: maxW } = computeSupportAtAngle(
       supportModelRef.current,
       manualRotX,
       manualRotY,
       mW,
-      ak,
       manualRotZ,
       undefined,
       { ...supportParams, fillRate: 1 }
     );
     if (!(maxW > 0)) return;
     const newRate = Math.max(0.05, Math.min(0.95, realG / maxW));
-    recomputeSupport({ ...supportParams, fillRate: newRate }, [sx, sy, sz]);
+    recomputeSupport({ ...supportParams, fillRate: newRate });
   };
 
   // ---- 导出 ----
@@ -809,6 +882,7 @@ export function PricingCalculator({
     setSupportEnabled(false);
     setSupportPrice(DEFAULT_CONFIG.supportPrice);
     setSupportParams(DEFAULT_SUPPORT_PARAMS);
+    setShowTexture(true);
     setRealWeightInput("");
     setMode("upload");
     setDimMode("original");
@@ -952,6 +1026,8 @@ export function PricingCalculator({
               </Badge>
             )}
           </div>
+          {/* 贴图没解析出来时,把断点摆出来(全正常时不渲染) */}
+          <TextureDiagnosticNote diagnostics={model?.textureDiagnostics} />
         </div>
       </div>
       <div className="flex items-center gap-2 shrink-0">
@@ -1166,7 +1242,7 @@ export function PricingCalculator({
 
               <SupportCalibration
                 params={supportParams}
-                onParamsChange={(p) => recomputeSupport(p, appliedScales)}
+                onParamsChange={(p) => recomputeSupport(p)}
                 accent="amber"
                 columns={2}
               />
@@ -1351,6 +1427,8 @@ export function PricingCalculator({
                     angleProgress={angleProgress}
                     showSupport={showSupport}
                     onToggleSupport={() => setShowSupport((s) => !s)}
+                    showTexture={showTexture}
+                    onToggleTexture={() => setShowTexture((s) => !s)}
                     onClearModel={clearModel}
                     onViewerReady={() => {
                       setLoadStatus("ready");

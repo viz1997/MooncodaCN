@@ -1189,11 +1189,18 @@
       "reoptimize": "重新优化",
       "resetAngle": "重置角度"
     },
+    "preview": {
+      "texture": "显示贴图",
+      "textureTitle": "显示模型自带的贴图(MTL 里每个材质挂自己的 map_Kd);关掉就是纯色视图",
+      "support": "包裹支撑",
+      "supportTitle": "显示包裹模型的半透明支撑外壳、平台占地区域,以及平台到模型之间全部的支撑材料填充(WJP 逐层喷射不存在悬空,打印后水洗去除)",
+      "supportInfo": "支撑比例 {ratio}% · {weight} g",
+      "supportPending": "运行智能摆盘后显示支撑比例"
+    },
     "calibration": {
       "fillRate": "蜂窝填充率",
-      "gapScale": "包裹间隙倍率",
       "density": "支撑密度 (g/cm³)",
-      "hint": "支撑克重 = 包裹支撑体积 × 填充率 × 密度。包裹支撑就是平台到模型下表面之间的那团支撑材料(跟模型检查工具算的是同一个);填充率是支撑材料的实心比例,间隙倍率调整包裹间隙。",
+      "hint": "支撑克重 = 包裹支撑体积 × 填充率 × 密度。包裹支撑就是平台到模型下表面之间的那团支撑材料(跟模型检查工具算的是同一个);填充率是支撑材料的实心比例,密度是支撑材料本身的克重密度。",
       "collapseLabel": "支撑克重校准",
       "oneClickTitle": "一键校准",
       "oneClickDesc": "填入实测支撑克重，自动反算蜂窝填充率。",
@@ -1847,6 +1854,14 @@
       },
       "submit": "确认修改",
       "discard": "取消"
+    }
+  },
+  "TextureDiagnostic": {
+    "failedTitle": "{failed} / {total} 个材质没加载出贴图",
+    "status": {
+      "no-material": "MTL 里没有同名材质",
+      "no-texture-in-mtl": "MTL 里没写贴图(map_Kd)",
+      "file-missing": "压缩包里找不到这个贴图文件"
     }
   }
 }

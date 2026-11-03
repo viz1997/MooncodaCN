@@ -319,14 +319,12 @@ export async function processBatch(
             // 焊接一次(2026-11-02):支撑算法跟模型检查工具共用同一套网格准备
             optimalAngle = findOptimalAngle(
               prepareSupportModel(positions),
-              model.parseResult.surfaceAreaMM2,
               (p) => {
                 const pct = 70 + Math.floor(p * 0.2);
                 update(item, { progress: pct });
               },
               50,
-              modelWeightG,
-              1 // 批量模式默认使用原始尺寸（scaleFactor = 1）
+              modelWeightG
             );
           } catch (err) {
             console.warn(`[${item.name}] Angle optimization failed:`, err);

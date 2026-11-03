@@ -1,15 +1,18 @@
 "use client";
 
 import { AlertCircle } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
-import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import {
-  type MaterialInfo,
-  MTLLoader,
-} from "three/examples/jsm/loaders/MTLLoader.js";
 import type { TextureUrlMap } from "@/features/pricing/lib/obj-materials";
 import { parseObjInWorker } from "@/features/pricing/lib/obj-worker-client";
+import {
+  addMaterialGroups,
+  buildPreviewMaterials,
+} from "@/features/shared/components/obj-preview/materials";
+import {
+  ObjPreview,
+  type PreviewContext,
+} from "@/features/shared/components/obj-preview/obj-preview";
 import {
   buildSupportShell,
   prepareSupportModel,
@@ -30,6 +33,10 @@ import {
  *
  * 2026-11-03:**按材质分组渲染**,每个材质挂它自己 `map_Kd` 指向的贴图。
  * 之前是「整块模型挂一张图」—— 多材质模型必然贴错。
+ *
+ * 2026-11-03:场景本身(renderer / camera / 灯光 / 控制器 / 渲染循环)交给共用的
+ * `<ObjPreview mode="print-bed" />` —— 与模型检查工具(/tools/model-check)是同一个
+ * 组件,两个工具的模型观感、贴图表现完全一致。
  */
 
 type Props = {
@@ -55,6 +62,13 @@ type Props = {
   scale?: number | [number, number, number] | undefined;
   /** Show support shell visualization (semi-transparent shell around model). Default false. */
   showSupport?: boolean | undefined;
+  /**
+   * 是否显示模型自带的贴图。默认 true。
+   *
+   * 关掉时材质退回 MTL 的 `Kd` 本色(纯色视图)—— 贴图本体留在
+   * `userData.baseMap` 里,切回来不用重新下载。
+   */
+  showTexture?: boolean | undefined;
   /** Called once when the 3D render has finished (model loaded + camera framed) */
   onReady?: (() => void) | undefined;
   /** Called with percent 0-100 during parsing/loading */
@@ -62,36 +76,57 @@ type Props = {
   className?: string | undefined;
 };
 
-/**
- * 把材质的贴图指令换成它自己的 blob URL。
- *
- * 没有对应贴图时必须 `delete` 而不是置 undefined ——
- * `MTLLoader` 会对每个非空指令值调 `getTextureParams(value)`,
- * undefined 会在里面炸掉。
- */
-function patchTextureRef(
-  info: MaterialInfo,
-  key: "map_kd" | "map_ks" | "norm",
-  url: string | undefined
-): void {
-  if (url) {
-    info[key] = url;
-  } else if (info[key] !== undefined) {
-    delete info[key];
-  }
-}
-
 // Yield to the UI thread so progress callbacks and other tasks can run.
 const yieldToUI = (): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, 0));
+
+/**
+ * 兜底贴图 URL —— 浏览器解不了的格式(BMP 等)先转成 PNG data URL。
+ *
+ * three 的 `TextureLoader` 直接吃 blob URL;解不了就借 `<img>` + canvas 转一道。
+ * 转出来的 data URL 照样能交给 `TextureLoader`。
+ */
+async function resolveFallbackTextureUrl(
+  url: string | undefined
+): Promise<string | undefined> {
+  if (!url) return undefined;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      new THREE.TextureLoader().load(
+        url,
+        () => resolve(),
+        undefined,
+        () => reject(new Error("texture load failed"))
+      );
+    });
+    return url;
+  } catch {
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error("image decode failed"));
+        image.src = url;
+      });
+      const canvas = document.createElement("canvas");
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return url;
+      ctx.drawImage(img, 0, 0);
+      return canvas.toDataURL("image/png");
+    } catch {
+      return url;
+    }
+  }
+}
 
 /**
  * Lightweight three.js OBJ viewer.
  * - Parses OBJ off the main thread via a Web Worker (obj-worker-client)
  * - Builds a BufferGeometry from the worker's triangle-soup positions
  * - Parses `vt` UVs and attaches them as the 'uv' attribute
- * - Optionally parses MTL from text and patches texture paths BEFORE preload
- * - Optionally loads a texture (PNG/JPG) from a blob URL
+ * - Renders per-material groups, each material with its own `map_Kd` texture
  * - Auto-centers and scales the model to fit the viewport
  * - Shows a bounding box with axis colors (X red, Y green, Z blue)
  * - Orbit controls: drag to rotate, wheel to zoom, right-click to pan
@@ -107,19 +142,19 @@ export function ObjViewer({
   rotationZ,
   scale,
   showSupport,
+  showTexture,
   onReady,
   onProgress,
   className,
 }: Props) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const sceneRef = useRef<THREE.Scene | null>(null);
-  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
-  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
-  const controlsRef = useRef<OrbitControls | null>(null);
+  /** 预览场景上下文 —— <ObjPreview> 建好场景后交给我们 */
+  const [previewCtx, setPreviewCtx] = useState<PreviewContext | null>(null);
+  const ctxRef = useRef<PreviewContext | null>(null);
   const modelRef = useRef<THREE.Object3D | null>(null);
   const bboxHelperRef = useRef<THREE.Object3D | null>(null);
   const axisAnnotationRef = useRef<THREE.Group | null>(null);
-  const frameIdRef = useRef<number | null>(null);
+  // 场景还没就绪时建好的模型 —— 场景一好就挂上去
+  const pendingModelRef = useRef<THREE.Object3D | null>(null);
   // 支撑可视化组(包裹支撑:外壳 + 顶面 + 外壁 + 平台投影)
   const supportGroupRef = useRef<THREE.Group | null>(null);
   // 摆盘用的焊接模型(支撑几何的输入)——OBJ 解析时备一次,之后每个姿态只旋转
@@ -127,6 +162,11 @@ export function ObjViewer({
   // 支撑开关(给异步的建模流程读)
   const showSupportRef = useRef(showSupport);
   showSupportRef.current = showSupport;
+  // 贴图开关 —— 同理:建模是异步的,必须读 ref 拿到最新值
+  const showTextureRef = useRef(showTexture);
+  showTextureRef.current = showTexture;
+  /** 贴图开关的生效值(默认开) */
+  const showTextureOn = showTexture !== false;
   // Use refs for callbacks so the parse effect doesn't re-run on every parent render
   const onReadyRef = useRef(onReady);
   const onProgressRef = useRef(onProgress);
@@ -155,6 +195,9 @@ export function ObjViewer({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  /** 当前场景 —— <ObjPreview> 还没建好时为 null */
+  const getScene = (): THREE.Scene | null => ctxRef.current?.scene ?? null;
+
   // Add thick colored highlight lines along the 3 edges at the front-bottom-left corner.
   // These are visual axis identifiers only (no text labels).
   // X edge (red): along +X from origin (长, horizontal)
@@ -165,11 +208,12 @@ export function ObjViewer({
     boxMin: THREE.Vector3,
     _dimValues: [number, number, number]
   ) => {
-    if (!sceneRef.current) return;
+    const scene = getScene();
+    if (!scene) return;
 
     // Remove previous annotations
     if (axisAnnotationRef.current) {
-      sceneRef.current.remove(axisAnnotationRef.current);
+      scene.remove(axisAnnotationRef.current);
       axisAnnotationRef.current.traverse((child) => {
         const mesh = child as THREE.Mesh;
         if (mesh.geometry) mesh.geometry.dispose();
@@ -243,7 +287,7 @@ export function ObjViewer({
     // Common origin sphere (white) to mark the corner
     group.add(makeSphere(origin, 0xffffff));
 
-    sceneRef.current.add(group);
+    scene.add(group);
     axisAnnotationRef.current = group;
   };
 
@@ -257,9 +301,9 @@ export function ObjViewer({
   //
   // 现在：用包围球半径同时约束竖直 / 水平视野，并对准包围盒中心。
   const applyCameraFit = (box: THREE.Box3) => {
-    const camera = cameraRef.current;
-    const controls = controlsRef.current;
-    if (!camera || !controls) return;
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+    const { camera, controls } = ctx;
 
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
@@ -288,9 +332,8 @@ export function ObjViewer({
   // Defined as a function declaration so it can be called from the build effect above
   const fitCameraToModel = () => {
     const model = modelRef.current;
-    const camera = cameraRef.current;
-    const controls = controlsRef.current;
-    if (!model || !camera || !controls) return;
+    const ctx = ctxRef.current;
+    if (!model || !ctx) return;
 
     // 应用用户尺寸缩放（支持独立 XYZ）
     const [sx, sy, sz] = getScaleTuple();
@@ -345,7 +388,7 @@ export function ObjViewer({
   // 在 fitCameraToModel 和 rotation effect 中调用，确保坐标轴始终贴在网格平面
   const updateBoundingBoxAndAnnotations = () => {
     const model = modelRef.current;
-    const scene = sceneRef.current;
+    const scene = getScene();
     if (!model || !scene) return;
 
     // Remove previous bounding box helper
@@ -423,7 +466,7 @@ export function ObjViewer({
       supportGroupRef.current = null;
     }
 
-    const scene = sceneRef.current;
+    const scene = getScene();
     const model = modelRef.current;
     const supportModel = supportModelRef.current;
     if (!show || !model || !scene || !supportModel) return;
@@ -555,6 +598,20 @@ export function ObjViewer({
     supportGroupRef.current = group;
   };
 
+  // ---------- 场景就绪 ----------
+  const handleSceneReady = useCallback((ctx: PreviewContext) => {
+    // 同步写 ref —— 建模流程是异步的,可能在下一次 React 渲染前就跑到这一步
+    ctxRef.current = ctx;
+    setPreviewCtx(ctx);
+  }, []);
+
+  /** WebGL 不可用 —— <ObjPreview> 兜底 */
+  const handlePreviewError = useCallback((message: string) => {
+    setError(message);
+    setLoading(false);
+    onReadyRef.current?.();
+  }, []);
+
   // Build/load model whenever inputs change
   // biome-ignore lint/correctness/useExhaustiveDependencies: 只在模型源文件变化时重建
   useEffect(() => {
@@ -610,130 +667,33 @@ export function ObjViewer({
         onProgressRef.current?.(88);
         await yieldToUI();
 
-        // 3. 材质 —— 按 OBJ 的 `usemtl` 分组渲染
+        // 3. 材质 —— 与模型检查工具共用同一份实现
+        //    (src/features/shared/components/obj-preview/materials.ts)
         //
         // 关键点:
-        //  - 贴图路径必须在 `preload()` 之前 patch 好 —— MTLLoader.preload()
-        //    同步建材质并同步挂上 map(图片异步载入)。
-        //  - 每个材质换成**它自己**的 blob URL,不是「所有材质共用一张」。
-        //  - 没有对应贴图的材质:把 `map_Kd` 指令删掉,让它退回材质本色 ——
-        //    挂上别的图就是「贴图错乱」。
-        const slots: THREE.Material[] = [];
-        let singleMaterial: THREE.Material | null = null;
-        if (mtlText) {
-          try {
-            const mtlLoader = new MTLLoader();
-            const creator = mtlLoader.parse(mtlText, "");
-
-            // 每个材质换成它自己的贴图(baseUrl 保持空串,blob: URL 才能原样通过)
-            for (const [name, info] of Object.entries(creator.materialsInfo)) {
-              const urls = textureUrls?.[name];
-              patchTextureRef(info, "map_kd", urls?.map);
-              patchTextureRef(info, "map_ks", urls?.specularMap);
-              patchTextureRef(info, "norm", urls?.normalMap);
-            }
-
-            creator.preload();
-
-            // 亮度兜底:
-            //  - 有贴图的材质:Kd 全黑会把贴图乘成黑色 → 改成白色(让贴图原色显示)
-            //  - 没贴图的材质:Kd 全黑 → 0xcccccc,免得在浅色背景里看不见
-            for (const mat of Object.values(creator.materials)) {
-              // MTLLoader 产出的是 MeshPhongMaterial（同样带 color 属性）
-              const phong = mat as THREE.MeshPhongMaterial;
-              const color = phong.color;
-              if (!color) continue;
-              const isBlack = color.r < 0.1 && color.g < 0.1 && color.b < 0.1;
-              if (!isBlack) continue;
-              if (phong.map) {
-                color.setHex(0xffffff);
-              } else {
-                color.setHex(0xcccccc);
-              }
-              mat.needsUpdate = true;
-            }
-
-            // 材质槽位:按 OBJ 里 usemtl 的首次出现顺序
-            const materialNames = workerResult.materialNames ?? [];
-            for (const name of materialNames) {
-              const mat = creator.materials[name];
-              slots.push(
-                mat ??
-                  new THREE.MeshStandardMaterial({
-                    color: 0xcccccc,
-                    roughness: 0.6,
-                    metalness: 0.05,
-                  })
-              );
-            }
-
-            // OBJ 没写 usemtl → 整块模型用 MTL 里的第一个材质
-            if (slots.length === 0) {
-              const first = Object.values(creator.materials)[0];
-              if (first) singleMaterial = first;
-            }
-          } catch (e) {
-            console.warn("MTL parse failed, falling back:", e);
-          }
-        }
-
+        //  - 每个材质挂**它自己**的贴图(材质名 → blob URL 的映射由解压管线建好)
+        //  - 没有对应贴图的材质退回该材质的 Kd 本色 —— 绝不拿别的图顶替
+        //  - 几何体没有 uv 时**不能**挂贴图:three.js 会去采样 (0,0) 那个
+        //    像素,整块模型糊成一片(比白模还难看)
+        const hasUv = Boolean(workerResult.uvs && workerResult.uvs.length > 0);
+        const materialNames = workerResult.materialNames ?? [];
+        const fallbackTextureUrl =
+          await resolveFallbackTextureUrl(textureBlobUrl);
         if (cancelled) return;
+
+        const { slots, single } = buildPreviewMaterials({
+          mtlText,
+          textureUrls,
+          materialNames,
+          hasUv,
+          showTexture: showTextureRef.current !== false,
+          fallbackTextureUrl,
+        });
+
         onProgressRef.current?.(92);
         await yieldToUI();
 
-        // 4. 兜底贴图 —— 只在没有 MTL 材质时用
-        //
-        // 几何体没有 `uv` 属性时**不能**挂贴图:three.js 会去采样 (0,0) 那个
-        // 像素,整块模型糊成一片(比白模还难看)。
-        const hasUv = Boolean(workerResult.uvs && workerResult.uvs.length > 0);
-        let texture: THREE.Texture | undefined;
-        if (textureBlobUrl && hasUv) {
-          try {
-            // 先尝试直接加载
-            const texLoader = new THREE.TextureLoader();
-            texture = await new Promise<THREE.Texture>((resolve, reject) => {
-              texLoader.load(textureBlobUrl, resolve, undefined, reject);
-            });
-            texture.colorSpace = THREE.SRGBColorSpace;
-            // 不设置 flipY，使用 three.js 默认值 flipY=true
-            // 大多数 OBJ 导出器（Blender/ZBrush）的 UV 约定与 flipY=true 匹配
-          } catch {
-            // 直接加载失败，可能是 BMP 等不支持的格式，尝试用 Image + Canvas 转换
-            try {
-              const img = await new Promise<HTMLImageElement>(
-                (resolve, reject) => {
-                  const image = new Image();
-                  image.onload = () => resolve(image);
-                  image.onerror = reject;
-                  image.src = textureBlobUrl;
-                }
-              );
-              const canvas = document.createElement("canvas");
-              canvas.width = img.width;
-              canvas.height = img.height;
-              const ctx = canvas.getContext("2d");
-              if (ctx) {
-                ctx.drawImage(img, 0, 0);
-                const pngUrl = canvas.toDataURL("image/png");
-                const texLoader = new THREE.TextureLoader();
-                texture = await new Promise<THREE.Texture>(
-                  (resolve, reject) => {
-                    texLoader.load(pngUrl, resolve, undefined, reject);
-                  }
-                );
-                texture.colorSpace = THREE.SRGBColorSpace;
-              }
-            } catch (e2) {
-              console.warn("Texture load failed (all methods):", e2);
-            }
-          }
-        }
-
-        if (cancelled) return;
-        onProgressRef.current?.(95);
-        await yieldToUI();
-
-        // 5. 选材质:
+        // 4. 选材质:
         //    - 有 `usemtl` 分组 → 材质数组 + geometry groups(每个材质一块)
         //    - 没有分组 → 整块用单个材质
         let material: THREE.Material | THREE.Material[];
@@ -742,26 +702,18 @@ export function ObjViewer({
           // 把三角汤按材质切成连续段 —— 非索引几何,group 的 start/count 是顶点数
           const materialIndex = workerResult.materialIndex;
           if (materialIndex && materialIndex.length > 0) {
-            let groupStart = 0;
-            for (let t = 0; t <= materialIndex.length; t++) {
-              const prev = materialIndex[groupStart] ?? 0;
-              const cur =
-                t < materialIndex.length ? (materialIndex[t] ?? 0) : -1;
-              if (t === materialIndex.length || cur !== prev) {
-                const count = (t - groupStart) * 3;
-                if (count > 0) geometry.addGroup(groupStart * 3, count, prev);
-                groupStart = t;
-              }
-            }
+            addMaterialGroups(geometry, materialIndex);
+          } else {
+            // 材质数组必须配 group,否则 three.js 一个面都不画
+            geometry.addGroup(0, workerResult.positions.length, 0);
           }
-        } else if (singleMaterial) {
-          material = singleMaterial;
+        } else if (single) {
+          material = single;
         } else {
           material = new THREE.MeshStandardMaterial({
             color: 0xcccccc,
             roughness: 0.6,
             metalness: 0.05,
-            map: texture ?? null,
           });
         }
 
@@ -771,10 +723,11 @@ export function ObjViewer({
 
         if (cancelled) return;
 
-        // 6. Replace previous model
+        // 5. Replace previous model
         const previous = modelRef.current;
-        if (previous && sceneRef.current) {
-          sceneRef.current.remove(previous);
+        const scene = getScene();
+        if (previous && scene) {
+          scene.remove(previous);
           // Dispose geometries and materials
           previous.traverse((child) => {
             const m = child as THREE.Mesh;
@@ -791,12 +744,15 @@ export function ObjViewer({
           });
         }
         modelRef.current = object;
-        if (sceneRef.current) {
-          sceneRef.current.add(object);
+        if (scene) {
+          scene.add(object);
           fitCameraToModel();
+        } else {
+          // 场景还没就绪 —— 先存着,场景一好就挂上去
+          pendingModelRef.current = object;
         }
 
-        // 7. 备一份焊接后的模型(支撑几何的输入)——焊接 + 拓扑是姿态无关的,
+        // 6. 备一份焊接后的模型(支撑几何的输入)——焊接 + 拓扑是姿态无关的,
         //    只做一次,之后拖动角度时只旋转顶点。失败不影响主流程,只是不画支撑。
         try {
           supportModelRef.current = prepareSupportModel(workerResult.positions);
@@ -825,12 +781,45 @@ export function ObjViewer({
     };
   }, [objText, mtlText, textureBlobUrl, textureUrls]);
 
+  // 场景就绪后 —— 把「场景没赶上」时建好的模型挂进去
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 只在场景就绪时补挂一次
+  useEffect(() => {
+    const scene = previewCtx?.scene;
+    const pending = pendingModelRef.current;
+    if (!scene || !pending) return;
+    pendingModelRef.current = null;
+    scene.add(pending);
+    fitCameraToModel();
+  }, [previewCtx]);
+
   // Update axis annotations when dims change (without reloading the model)
   // biome-ignore lint/correctness/useExhaustiveDependencies: 只在尺寸变化时刷新标注
   useEffect(() => {
-    if (!modelRef.current || !sceneRef.current || !dims) return;
+    if (!modelRef.current || !getScene() || !dims) return;
     updateBoundingBoxAndAnnotations();
   }, [dims]);
+
+  // 贴图开关:摘掉 / 挂回各材质自己的贴图
+  //
+  // 贴图本体一直留在 `userData.baseMap` 里 —— 切换只是摘/挂 `map`,
+  // 不重新下载也不重建模型(重建要走一遍 worker 解析,太慢)。
+  useEffect(() => {
+    const model = modelRef.current;
+    if (!model) return;
+    model.traverse((child) => {
+      if (!(child instanceof THREE.Mesh)) return;
+      const mats = Array.isArray(child.material)
+        ? child.material
+        : [child.material];
+      for (const m of mats) {
+        const std = m as THREE.MeshStandardMaterial;
+        const baseMap = std.userData.baseMap as THREE.Texture | undefined;
+        if (!baseMap) continue;
+        std.map = showTextureOn ? baseMap : null;
+        std.needsUpdate = true;
+      }
+    });
+  }, [showTextureOn]);
 
   // Show/hide support shell visualization
   // biome-ignore lint/correctness/useExhaustiveDependencies: 支撑壳层依赖当前模型状态
@@ -893,155 +882,13 @@ export function ObjViewer({
     updateSupportShell(!!showSupport);
   }, [rotationX, rotationY, rotationZ, scale, showSupport]);
 
-  // Scene setup (once)
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    // 检测 WebGL 支持
-    function checkWebGLSupport(): boolean {
-      try {
-        const canvas = document.createElement("canvas");
-        const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
-        return !!gl;
-      } catch {
-        return false;
-      }
-    }
-
-    if (!checkWebGLSupport()) {
-      setError(
-        "当前浏览器环境不支持 WebGL，无法显示 3D 预览。请使用 Chrome/Edge 浏览器，或在浏览器设置中启用硬件加速。"
-      );
-      setLoading(false);
-      onReadyRef.current?.();
-      return;
-    }
-
-    // Scene
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xf5f5f4); // stone-100
-    sceneRef.current = scene;
-
-    // Camera — Z-up 视角：相机从斜上方看，Z 轴朝上
-    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 10000);
-    camera.up.set(0, 0, 1); // Z 轴朝上
-    camera.position.set(50, -50, 50); // 从 X+Y-Z+ 方向看
-    cameraRef.current = camera;
-
-    // Renderer — 包在 try-catch 中，防止沙箱环境创建失败导致白屏
-    let renderer: THREE.WebGLRenderer;
-    try {
-      renderer = new THREE.WebGLRenderer({
-        antialias: true,
-        failIfMajorPerformanceCaveat: false,
-      });
-    } catch (err) {
-      console.error("WebGLRenderer creation failed:", err);
-      setError(
-        "WebGL 上下文创建失败，可能是沙箱环境限制。请尝试使用 Chrome/Edge 浏览器，或在本地部署运行。"
-      );
-      setLoading(false);
-      onReadyRef.current?.();
-      return;
-    }
-    renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.localClippingEnabled = true; // 启用 clipping plane，支撑可视化需要
-    // 画布的「显示尺寸」交给 CSS（100% 铺满容器）—— three.js 默认会把画布写成
-    // 固定 px 宽高，容器变宽后画布不会跟着铺满，右侧会留一条空白。
-    // 绘制缓冲区（分辨率）由下面的 syncSize() 同步，两者分开管。
-    renderer.domElement.style.display = "block";
-    renderer.domElement.style.width = "100%";
-    renderer.domElement.style.height = "100%";
-    container.appendChild(renderer.domElement);
-    rendererRef.current = renderer;
-
-    // 容器尺寸 → 相机宽高比 + 绘制缓冲区尺寸
-    let lastW = 0;
-    let lastH = 0;
-    const syncSize = () => {
-      const w = container.clientWidth;
-      const h = container.clientHeight;
-      if (w <= 0 || h <= 0) return;
-      if (w === lastW && h === lastH) return;
-      lastW = w;
-      lastH = h;
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h, false); // false = 不覆盖上面的 CSS 尺寸
-    };
-    syncSize();
-
-    // Lights - enhanced for better visibility of resin prints
-    const ambient = new THREE.AmbientLight(0xffffff, 1.0);
-    scene.add(ambient);
-    // HemisphereLight 0.6 (sky/ground gradient for natural look) — Z 轴朝上
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
-    hemi.position.set(0, 0, 50);
-    scene.add(hemi);
-    // DirectionalLight 1.2 (key) + 0.6 (fill)
-    const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
-    keyLight.position.set(50, 50, 80);
-    scene.add(keyLight);
-    const fillLight = new THREE.DirectionalLight(0xffffff, 0.6);
-    fillLight.position.set(-50, -50, 30);
-    scene.add(fillLight);
-
-    // Grid helper - 打印底板网格（放在 Z=0 平面上，因为 Z 是高度方向）
-    const gridSize = Math.max(100, 200);
-    const grid = new THREE.GridHelper(
-      gridSize,
-      gridSize / 10,
-      0x999999,
-      0xcccccc
-    );
-    // GridHelper 默认在 XZ 平面（Y=0），需要旋转到 XY 平面（Z=0）
-    grid.rotation.x = Math.PI / 2;
-    grid.position.z = 0;
-    scene.add(grid);
-
-    // Controls
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.08;
-    controls.target.set(0, 0, 0);
-    controlsRef.current = controls;
-
-    // Animation loop
-    const animate = () => {
-      frameIdRef.current = requestAnimationFrame(animate);
-      syncSize(); // 兜底：容器尺寸变了但 ResizeObserver 没回调时也能跟上
-      controls.update();
-      renderer.render(scene, camera);
-    };
-    animate();
-
-    // Resize observer
-    const resizeObserver = new ResizeObserver(() => {
-      syncSize();
-    });
-    resizeObserver.observe(container);
-
-    return () => {
-      if (frameIdRef.current !== null) {
-        cancelAnimationFrame(frameIdRef.current);
-      }
-      resizeObserver.disconnect();
-      controls.dispose();
-      renderer.dispose();
-      if (renderer.domElement.parentNode) {
-        renderer.domElement.parentNode.removeChild(renderer.domElement);
-      }
-      sceneRef.current = null;
-      cameraRef.current = null;
-      rendererRef.current = null;
-      controlsRef.current = null;
-    };
-  }, []);
-
   return (
-    <div className={`relative w-full h-full ${className ?? ""}`}>
-      <div ref={containerRef} className="w-full h-full bg-stone-100" />
+    <ObjPreview
+      mode="print-bed"
+      className={className}
+      onSceneReady={handleSceneReady}
+      onError={handlePreviewError}
+    >
       {loading && (
         <div className="absolute inset-0 flex items-center justify-center text-xs text-stone-500 bg-stone-100/80 backdrop-blur-sm">
           <div className="flex items-center gap-2">
@@ -1085,10 +932,10 @@ export function ObjViewer({
           <span className="text-stone-600">Z 高</span>
         </div>
       </div>
-      {/* Hint */}
-      <div className="absolute bottom-2 left-2 text-[10px] text-stone-500 bg-white/80 backdrop-blur-sm rounded px-2 py-1 border border-stone-200">
+      {/* Hint —— 放左上角:底部中间要留给控制条(显示贴图 / 包裹支撑) */}
+      <div className="absolute top-2 left-2 text-[10px] text-stone-500 bg-white/80 backdrop-blur-sm rounded px-2 py-1 border border-stone-200">
         拖拽旋转 · 滚轮缩放 · 右键平移
       </div>
-    </div>
+    </ObjPreview>
   );
 }

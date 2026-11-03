@@ -19,10 +19,29 @@
  *
  * ## 支撑体积怎么算
  *
- * 按列算(height field):每个 XY 格子里,支撑从平台长到该列的下朝向面
- * (underZ),再扣掉该列里模型自己占掉的部分(模型底面 modelLo 到 underZ 之间)。
+ * 按列算(height field),但**列里的模型材料不一定是连续的一段**:
+ *
+ *   一列(垂直视线)穿过模型表面 = 一串 z 交点。按奇偶配对,相邻两个交点之间
+ *   是模型材料,再往下就是空腔(要填支撑)。列高(顶交点 − 平台)减去材料长度,
+ *   就是这一列的支撑高度。
+ *
  * 这样「蘑菇」(宽帽 + 细腿)算出来是帽子下面那圈空间,而不是把整根柱子
- * 都当成支撑。
+ * 都当成支撑;「宽底座 + 细身体」也不会因为底座盖住身体就漏掉悬空那圈。
+ *
+ * 之前用的是「列内模型 = 从 modelLo 一直实心到 modelHi」的近似,
+ * 一旦同一列里模型上下两截(底座 + 上面的身体 / 悬空手臂),
+ * 中间那段空腔就被当成模型自己占掉,支撑体积被整段抹掉 ——
+ * 有底座的手办,支撑克重能偏小 5 倍以上。
+ *
+ * ## 口径必须跟模型克重一致(2026-11-03)
+ *
+ * 模型克重 = 真网格的有符号四面体体积(解析值,精确)。
+ * 支撑克重如果拿**外扩过的外壳**去算,同样的模型两个数就对不上:
+ * 外壳间隙(对角线 2%,0.8~5mm)只是可视化用的间隙,算进体积会让支撑
+ * 克重系统性地高 10~30%(形状越细高越离谱)。
+ *
+ * 所以支撑体积一律用**真几何**(mesh.vertices),平台取模型最低点,
+ * 外壳间隙只留在可视化那一侧。
  *
  * ## 姿态搜索为什么不用重复焊接
  *
@@ -331,6 +350,87 @@ export function rotateSupportMesh(
   };
 }
 
+/**
+ * 按 XYZ 缩放焊接后的网格(拓扑不变,只挪顶点)
+ *
+ * 缩放不改变拓扑:焊接结果、面邻接、边-面映射、内腔标记都跟尺寸无关。
+ * 所以改尺寸不用重新解析 / 重新焊接 —— 挪一下顶点就行(2026-11-03)。
+ *
+ *   - 顶点:v' = S·v(以模型原点为中心,跟 OBJ 导出 / 预览同一口径)
+ *   - 法线:n' ∝ S⁻ᵀn(逆转置)—— 非均匀缩放时法线方向真的会变
+ *   - 面积:A' = A·|det S|·|S⁻ᵀn̂| —— 缩放后三角面的真实面积
+ *   - 包围盒 / 对角线:重算(外壳间隙、平台平面都依赖它)
+ */
+export function scaleSupportMesh(
+  mesh: SupportMesh,
+  sx: number,
+  sy: number,
+  sz: number
+): SupportMesh {
+  const vc = mesh.vertexCount;
+  const vertices = new Float32Array(vc * 3);
+  let minX = Infinity,
+    minY = Infinity,
+    minZ = Infinity;
+  let maxX = -Infinity,
+    maxY = -Infinity,
+    maxZ = -Infinity;
+  for (let v = 0; v < vc; v++) {
+    const x = mesh.vertices[v * 3] * sx;
+    const y = mesh.vertices[v * 3 + 1] * sy;
+    const z = mesh.vertices[v * 3 + 2] * sz;
+    vertices[v * 3] = x;
+    vertices[v * 3 + 1] = y;
+    vertices[v * 3 + 2] = z;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+    if (z < minZ) minZ = z;
+    if (z > maxZ) maxZ = z;
+  }
+
+  // 法线按逆转置变换 diag(1/sx, 1/sy, 1/sz)·n,再归一化
+  const det = Math.abs(sx * sy * sz);
+  const faceNormals = new Float32Array(mesh.faceCount * 3);
+  const faceAreas = new Float32Array(mesh.faceCount);
+  for (let f = 0; f < mesh.faceCount; f++) {
+    const nx = mesh.faceNormals[f * 3];
+    const ny = mesh.faceNormals[f * 3 + 1];
+    const nz = mesh.faceNormals[f * 3 + 2];
+    const tx = nx / sx;
+    const ty = ny / sy;
+    const tz = nz / sz;
+    // |S⁻ᵀn̂| —— 面被拉伸的倍数(退化面是 0,面积保持 0)
+    const stretch = Math.sqrt(tx * tx + ty * ty + tz * tz);
+    if (stretch > 0) {
+      faceNormals[f * 3] = tx / stretch;
+      faceNormals[f * 3 + 1] = ty / stretch;
+      faceNormals[f * 3 + 2] = tz / stretch;
+    }
+    // 面积 = 原面积 × |det S| × |S⁻ᵀn̂|
+    faceAreas[f] = mesh.faceAreas[f] * det * stretch;
+  }
+
+  const dx = maxX - minX,
+    dy = maxY - minY,
+    dz = maxZ - minZ;
+  const diag = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+  return {
+    vertexCount: vc,
+    vertices,
+    faceVertex: mesh.faceVertex,
+    faceCount: mesh.faceCount,
+    faceNormals,
+    faceAreas,
+    edgeFaceMap: mesh.edgeFaceMap,
+    diag: Number.isFinite(diag) && diag > 0 ? diag : 1,
+    bboxMin: [minX, minY, minZ],
+    bboxMax: [maxX, maxY, maxZ],
+  };
+}
+
 /** 标记被外壳包裹的内腔 / 碎片面片(与检测工具一致) */
 export function markEnclosedFaces(topo: TopologyResult): Uint8Array {
   const faceEnclosed = new Uint8Array(topo.mesh.faceCount);
@@ -362,6 +462,25 @@ export function prepareSupportModel(positions: Float32Array): SupportModel {
   };
 }
 
+/**
+ * 把摆盘模型缩放到实际尺寸(拓扑 / 内腔标记不变,只挪顶点)
+ *
+ * 克重工具按用户调过的尺寸算支撑,所以支撑计算必须跑在**缩放后**的网格上:
+ * 非均匀缩放时模型的高度、投影、悬垂面全变了,拿原始网格乘个系数去凑
+ * 会算不准(尤其高度限制那一步)。缩放只挪顶点,不用重新焊接 ✓
+ */
+export function scaleSupportModel(
+  model: SupportModel,
+  sx: number,
+  sy: number,
+  sz: number
+): SupportModel {
+  return {
+    mesh: scaleSupportMesh(model.mesh, sx, sy, sz),
+    faceEnclosed: model.faceEnclosed,
+  };
+}
+
 /** 支撑体积计算的选项 */
 export interface SupportVolumeOptions {
   /** 栅格精度 (mm),默认 1 */
@@ -385,26 +504,42 @@ export interface SupportVolumeResult {
 }
 
 /**
- * 包裹支撑体积(按列算)
+ * 包裹支撑体积(按列算 · 列内材料按奇偶配对求 · 真几何)
  *
- * 每个 XY 格子:
- *   - underZ  = 该列下朝向面的高度(支撑材料的上边界;没有下朝向面 → 该列无支撑)
- *   - modelLo / modelHi = 该列模型自身占据的 z 区间
- *   - 支撑高  = max(0, underZ - groundZ) - max(0, min(modelHi, underZ) - modelLo)
+ * 每个 XY 格子是一根垂直视线,穿过模型表面得到一串 z 交点:
  *
- * 最后一项是「扣掉模型自己占掉的部分」:蘑菇的帽下那圈有支撑,帽正中间
- * (模型自己的腿)没有支撑。
+ *   - 交点按 z 排序后相邻两个之间是**模型材料**,再往下是**空腔**(填支撑)
+ *   - 列高 = 顶交点 − 平台
+ *   - 支撑高 = 列高 − 材料总长
+ *
+ * 奇偶配对跟法线朝向无关,只看交点个数 —— 封闭网格的交点个数必然是偶数,
+ * 配对出来的区间就是真正的材料段。这样同一列里模型上下两截时
+ * (宽底座 + 细身体、悬空手臂、封闭内腔)中间的空腔不会被误当成模型。
+ *
+ * 竖直面与视线相切,不算「穿越」(上下沿各记一个会打乱奇偶配对),
+ * 只保留 min/max 用于兜底:一列里若没有可配对的交点(开口网格、
+ * 只有竖直面),退回「实心列」估算。
+ *
+ * **用真几何,不用外壳**:交点取自 `mesh.vertices`(模型自己的顶点),
+ * 不是 `shell.positions`(沿法线外扩过的外壳)。模型克重用的是真网格的
+ * 解析体积,支撑克重必须同一口径 —— 外壳间隙(对角线 2%,0.8~5mm)是
+ * 可视化用的,算进体积会让支撑克重系统性地高 10~30%。
+ *
+ * 平台取模型最低点(`mesh.bboxMin[2]`):预览里整组几何平移 -bboxMin.z
+ * 之后模型最低点正好落在平台上。`shell.groundZ` 还要再低 0.05~0.1mm
+ * (避免平台投影跟模型底面 z-fighting),那点缝不是材料,不算进支撑 ——
+ * 否则平底模型(立方体)会凭空多出 0.07mm 高的支撑。
  *
  * @param shell buildSupportShell 的输出(必须是**旋转后**网格算出来的)
- * @param mesh  与 shell 对应的(旋转后)网格 —— 用来取面索引和面积
+ * @param mesh  与 shell 对应的(旋转后)网格 —— 用来取顶点、面索引和面积
  */
 export function computeSupportVolume(
   shell: SupportShellData,
   mesh: SupportMesh,
   options?: SupportVolumeOptions
 ): SupportVolumeResult {
-  const positions = shell.positions;
-  const groundZ = shell.groundZ;
+  const positions = mesh.vertices;
+  const platformZ = mesh.bboxMin[2];
   const faceVertex = mesh.faceVertex;
   const faceAreas = mesh.faceAreas;
 
@@ -456,12 +591,19 @@ export function computeSupportVolume(
   const cellCount = gridW * gridH;
   const cellArea = gridSize * gridSize;
 
+  // ---- 逐列收集 z 交点 ----
+  // 交点数量 ≈ 面片数(密集网格每片面覆盖一格),用可增长数组兜住
+  let crossCap = Math.max(1024, Math.min(1 << 20, mesh.faceCount * 2));
+  let crossZ = new Float32Array(crossCap);
+  let crossCell = new Uint32Array(crossCap);
+  let crossCount = 0;
+
   const underZ = new Float32Array(cellCount).fill(-Infinity);
   const modelLo = new Float32Array(cellCount).fill(Infinity);
   const modelHi = new Float32Array(cellCount).fill(-Infinity);
   const covered = new Uint8Array(cellCount);
 
-  // 面法线 z 分量接近 0 = 竖直面:这一列穿过的是整段 z 区间,不是一个点
+  // 面法线 z 分量接近 0 = 竖直面:视线与它相切,不产生穿越交点
   const VERTICAL_NZ = 1e-3;
 
   for (let f = 0; f < mesh.faceCount; f++) {
@@ -531,12 +673,38 @@ export function computeSupportVolume(
         } else {
           if (zLocal < modelLo[idx]) modelLo[idx] = zLocal;
           if (zLocal > modelHi[idx]) modelHi[idx] = zLocal;
+          // 交点入列
+          if (crossCount === crossCap) {
+            crossCap *= 2;
+            const grownZ = new Float32Array(crossCap);
+            grownZ.set(crossZ);
+            crossZ = grownZ;
+            const grownCell = new Uint32Array(crossCap);
+            grownCell.set(crossCell);
+            crossCell = grownCell;
+          }
+          crossZ[crossCount] = zLocal;
+          crossCell[crossCount] = idx;
+          crossCount++;
         }
 
         // 下朝向面 = 支撑材料的上边界
         if (isDown[f] && zLocal > underZ[idx]) underZ[idx] = zLocal;
       }
     }
+  }
+
+  // ---- 按格归拢交点(计数排序)----
+  const offsets = new Uint32Array(cellCount + 1);
+  for (let i = 0; i < crossCount; i++) offsets[crossCell[i] + 1]++;
+  for (let i = 1; i <= cellCount; i++) offsets[i] += offsets[i - 1];
+  const cursor = new Uint32Array(cellCount);
+  for (let i = 0; i < cellCount; i++) cursor[i] = offsets[i];
+  const sortedZ = new Float32Array(crossCount);
+  for (let i = 0; i < crossCount; i++) {
+    const cell = crossCell[i];
+    sortedZ[cursor[cell]] = crossZ[i];
+    cursor[cell]++;
   }
 
   let volume = 0;
@@ -547,26 +715,76 @@ export function computeSupportVolume(
   for (let f = 0; f < mesh.faceCount; f++) {
     if (isDown[f]) contactArea += faceAreas[f];
   }
+
+  // 单列交点通常 2~6 个,小缓冲 + 插入排序;超了再单独分配
+  const sortBuf = new Float32Array(16);
+  // 几乎重合的交点要合并:格心正好落在两片三角形的公共边上时,同一张表面
+  // 会被数成两次穿越,奇偶配对整体错位(立方体的对角线格就是这样)。
+  const mergeEps = Math.max(1e-5, mesh.diag * 1e-6);
   for (let i = 0; i < cellCount; i++) {
     if (!covered[i]) continue;
     footprintArea += cellArea;
-    const uz = underZ[i];
-    if (!Number.isFinite(uz)) continue;
-    const h = uz - groundZ;
-    if (h <= 0) continue;
-    const lo = modelLo[i];
-    const hi = modelHi[i];
-    // 模型自己占掉的部分(列内 from modelLo 到 underZ)
-    let modelBelow = 0;
-    if (Number.isFinite(lo) && Number.isFinite(hi)) {
-      modelBelow = Math.min(hi, uz) - lo;
-      if (modelBelow < 0) modelBelow = 0;
+    const start = offsets[i];
+    const k = offsets[i + 1] - start;
+    let gel = NaN; // 支撑高度(NaN = 这列走兜底)
+    let gelTop = -Infinity; // 支撑顶面(这一列最高的空腔上沿)
+    if (k >= 2) {
+      let buf = sortBuf;
+      if (k > buf.length) buf = new Float32Array(k);
+      for (let j = 0; j < k; j++) buf[j] = sortedZ[start + j];
+      // 插入排序(交点个数很少)
+      for (let j = 1; j < k; j++) {
+        const v = buf[j];
+        let t = j - 1;
+        while (t >= 0 && buf[t] > v) {
+          buf[t + 1] = buf[t];
+          t--;
+        }
+        buf[t + 1] = v;
+      }
+      // 合并重合交点
+      let m = 0;
+      for (let j = 0; j < k; j++) {
+        if (m > 0 && buf[j] - buf[m - 1] <= mergeEps) continue;
+        buf[m++] = buf[j];
+      }
+      if (m % 2 === 0) {
+        // 奇偶配对:相邻交点之间是模型材料
+        let material = 0;
+        for (let j = 0; j + 1 < m; j += 2) material += buf[j + 1] - buf[j];
+        const top = buf[m - 1];
+        gel = top - platformZ - material;
+        // 空腔上沿 = 奇数位的交点(最大的那个)
+        gelTop = buf[m - 2];
+      } else {
+        gel = NaN; // 交点个数是奇数 → 走兜底
+      }
     }
-    const gel = h - modelBelow;
-    if (gel <= 0) continue;
+    if (!(gel >= 0)) {
+      // 兜底:这一列没法按奇偶配对(开口网格 / 只有竖直面 / 交点落单)
+      // → 退回「实心列」估算:支撑从平台长到模型下边界
+      const uz = underZ[i];
+      if (!Number.isFinite(uz)) continue;
+      const h = uz - platformZ;
+      if (h <= 0) continue;
+      const lo = modelLo[i];
+      const hi = modelHi[i];
+      let modelBelow = 0;
+      if (Number.isFinite(lo) && Number.isFinite(hi)) {
+        modelBelow = Math.min(hi, uz) - lo;
+        if (modelBelow < 0) modelBelow = 0;
+      }
+      gel = h - modelBelow;
+      gelTop = uz;
+    }
+    // 平台正好等于模型最低点时,浮点噪声会让「平底模型」多出 1e-16mm 的支撑,
+    // 摆盘时同一姿态的正/负 180° 会因此差一点点、选出莫名其妙的角度。
+    // 1e-9mm 远小于任何有意义的尺寸,只是把噪声抹平。
+    if (gel <= 1e-9) continue;
     volume += gel * cellArea;
     supportArea += cellArea;
-    if (h > maxHeight) maxHeight = h;
+    const hTop = gelTop - platformZ;
+    if (hTop > maxHeight) maxHeight = hTop;
   }
 
   return {

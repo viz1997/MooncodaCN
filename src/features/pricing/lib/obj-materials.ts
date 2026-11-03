@@ -283,10 +283,44 @@ export function parseMtl(text: string): MtlMaterial[] {
 }
 
 /**
+ * 贴图引用的归一化变体。
+ *
+ * MTL 里写的文件名有各种写法,包里存的是另一种:
+ * - `wood%20grain.png` ↔ `wood grain.png`(URL 转义)
+ * - `textures\wood.png` ↔ `textures/wood.png`(Windows 反斜杠)
+ * - `./wood.png` ↔ `wood.png`
+ *
+ * 返回所有等价写法(原始 + 解码后),匹配时逐个试。
+ */
+function refVariants(raw: string): string[] {
+  const variants = new Set<string>();
+  const add = (v: string) => {
+    const s = v.trim();
+    if (s) variants.add(s);
+  };
+  add(raw);
+  try {
+    add(decodeURIComponent(raw));
+  } catch {
+    // 不是合法的百分号编码(文件名里真的带 % 字符),忽略
+  }
+  return [...variants];
+}
+
+/** 去掉扩展名,得到文件「主干」(`wood.tga` → `wood`) */
+function stemOf(fileName: string): string {
+  const dot = fileName.lastIndexOf(".");
+  return dot > 0 ? fileName.slice(0, dot) : fileName;
+}
+
+/**
  * 把 MTL 里声明的贴图文件名,匹配到压缩包里的实际文件。
  *
- * 匹配规则:先按完整路径(忽略大小写)精确匹配,再退到 basename 匹配 ——
- * MTL 写 `wood.png` 而包里是 `textures/wood.png` 是常态。
+ * 匹配规则(逐级放宽):
+ * 1. 完整路径精确匹配(忽略大小写)
+ * 2. basename 精确匹配 —— MTL 写 `wood.png` 而包里是 `textures/wood.png` 是常态
+ * 3. **主干匹配** —— MTL 写 `wood.tga` 而包里是 `wood.png`
+ *    (只在主干唯一时才用:包里同时有 `wood.png` 和 `wood.jpg` 就算歧义,不用)
  *
  * 匹配不上就**不返回**(该材质退回本色),绝不拿别的图顶替。
  */
@@ -299,18 +333,40 @@ export function matchMaterialTextures(
 
   const byFullPath = new Map<string, TextureBlob>();
   const byBaseName = new Map<string, TextureBlob>();
+  // 主干 → 贴图;只有主干唯一时才记,避免张冠李戴
+  const byStem = new Map<string, TextureBlob>();
+  const stemCount = new Map<string, number>();
   for (const tb of textureBlobs) {
     const full = tb.name.replace(/\\/g, "/").toLowerCase();
     if (!byFullPath.has(full)) byFullPath.set(full, tb);
     const base = baseName(tb.name).toLowerCase();
     if (!byBaseName.has(base)) byBaseName.set(base, tb);
+    const stem = stemOf(base);
+    stemCount.set(stem, (stemCount.get(stem) ?? 0) + 1);
+  }
+  for (const tb of textureBlobs) {
+    const stem = stemOf(baseName(tb.name).toLowerCase());
+    if (stemCount.get(stem) === 1 && !byStem.has(stem)) byStem.set(stem, tb);
   }
 
   const find = (ref: string): TextureBlob | undefined => {
-    const full = ref.replace(/\\/g, "/").toLowerCase();
-    const exact = byFullPath.get(full);
-    if (exact) return exact;
-    return byBaseName.get(baseName(ref).toLowerCase());
+    const variants = refVariants(ref);
+    // 1. 完整路径
+    for (const v of variants) {
+      const hit = byFullPath.get(v.replace(/\\/g, "/").toLowerCase());
+      if (hit) return hit;
+    }
+    // 2. basename
+    for (const v of variants) {
+      const hit = byBaseName.get(baseName(v).toLowerCase());
+      if (hit) return hit;
+    }
+    // 3. 主干(唯一时)
+    for (const v of variants) {
+      const hit = byStem.get(stemOf(baseName(v).toLowerCase()));
+      if (hit) return hit;
+    }
+    return undefined;
   };
 
   for (const m of materials) {
@@ -373,6 +429,150 @@ export function parseUsemtlNames(objText: string): string[] {
     }
   }
   return names;
+}
+
+/**
+ * 材质名的归一化形式 —— 去掉尾部的「副本序号」后缀。
+ *
+ * 3ds Max / Blender 导出时经常把材质写成 `Material`、`Material.001`、
+ * `Material_1`,而 OBJ 里 `usemtl` 写的却是 `Material` —— 两者只差一个
+ * 后缀,贴图却因此查不到,模型直接变白模。
+ */
+function normalizeMaterialName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[._-]\d+$/, "");
+}
+
+/**
+ * 在候选材质名里找出与 `slotName` 对应的那个。
+ *
+ * 逐级放宽:精确 → 忽略大小写 → 忽略尾部副本序号。
+ * 命中不了返回 undefined(调用方自行决定要不要兜底)。
+ */
+export function resolveMaterialName(
+  slotName: string,
+  candidates: string[]
+): string | undefined {
+  if (candidates.length === 0) return undefined;
+  const exact = candidates.find((c) => c === slotName);
+  if (exact) return exact;
+
+  const lower = slotName.trim().toLowerCase();
+  const ci = candidates.find((c) => c.trim().toLowerCase() === lower);
+  if (ci) return ci;
+
+  const norm = normalizeMaterialName(slotName);
+  const loose = candidates.find((c) => normalizeMaterialName(c) === norm);
+  if (loose) return loose;
+
+  return undefined;
+}
+
+/**
+ * 在 MTL 材质列表里找出与 OBJ 的 `usemtl` 名对应的那个材质。
+ */
+export function matchMaterialName(
+  slotName: string,
+  materials: MtlMaterial[]
+): MtlMaterial | undefined {
+  const resolved = resolveMaterialName(
+    slotName,
+    materials.map((m) => m.name)
+  );
+  if (!resolved) return undefined;
+  return materials.find((m) => m.name === resolved);
+}
+
+/**
+ * 按 OBJ 的 `usemtl` 名建一份贴图表。
+ *
+ * ## 为什么需要这一层
+ *
+ * viewer 是拿 **OBJ 的 `usemtl` 名**去查贴图的,而贴图是按 **MTL 的 `newmtl` 名**
+ * 存下来的。两者只要对不上(大小写、`.001` 后缀、干脆少一个),查到的就是
+ * `undefined` —— 模型退回白模,贴图一张都不显示。
+ *
+ * 这里把每个 `usemtl` 名解析到它真正对应的 MTL 材质,再把贴图挂到这个名下;
+ * MTL 原名也一并保留 —— 两边都能查到。
+ */
+export function buildSlotTextureUrls(
+  materials: MtlMaterial[],
+  urlsByMaterial: TextureUrlMap,
+  slotNames: string[]
+): TextureUrlMap {
+  const result: TextureUrlMap = { ...urlsByMaterial };
+  for (const slot of slotNames) {
+    if (result[slot]?.map) continue;
+    const matched = matchMaterialName(slot, materials);
+    if (matched) {
+      const urls = urlsByMaterial[matched.name];
+      if (urls) result[slot] = urls;
+      continue;
+    }
+    // MTL 里只有一个材质 → 只能是它(没有第二种可能,不会张冠李戴)
+    if (materials.length === 1) {
+      const only = urlsByMaterial[materials[0]!.name];
+      if (only) result[slot] = only;
+    }
+  }
+  return result;
+}
+
+/**
+ * 单个材质的贴图解析结果 —— 给 UI 解释「这个材质为什么没贴图」。
+ */
+export type TextureDiagnostic = {
+  /** OBJ 的 `usemtl` 名(材质槽位) */
+  material: string;
+  /** MTL 里写的贴图文件名(没写贴图指令时为 undefined) */
+  textureName?: string | undefined;
+  /**
+   * - `ok` —— 贴图已解析
+   * - `no-material` —— MTL 里没有这个材质(名字对不上)
+   * - `no-texture-in-mtl` —— MTL 里这个材质压根没写贴图指令
+   * - `file-missing` —— MTL 写了贴图,但压缩包里没有这个文件
+   */
+  status: "ok" | "no-material" | "no-texture-in-mtl" | "file-missing";
+};
+
+/**
+ * 诊断每个材质槽位的贴图解析结果。
+ *
+ * 白模最常见的原因就是「贴图没解析出来」,但从画面上完全看不出是哪一步断的
+ * —— 这个诊断把断点直接摆出来:是材质名对不上?是 MTL 没写 map_Kd?
+ * 还是压缩包里根本没有那张图?
+ */
+export function diagnoseMaterialTextures(
+  materials: MtlMaterial[],
+  materialTextures: MaterialTextureMap,
+  slotNames: string[]
+): TextureDiagnostic[] {
+  const out: TextureDiagnostic[] = [];
+  for (const slot of slotNames) {
+    const matched = matchMaterialName(slot, materials);
+    if (!matched) {
+      out.push({ material: slot, status: "no-material" });
+      continue;
+    }
+    const hit = materialTextures[matched.name];
+    if (hit?.map || hit?.specularMap || hit?.normalMap) {
+      out.push({
+        material: slot,
+        textureName: hit.map ?? hit.specularMap ?? hit.normalMap,
+        status: "ok",
+      });
+      continue;
+    }
+    const declared = matched.mapKd ?? matched.mapKs ?? matched.normalMap;
+    if (!declared) {
+      out.push({ material: slot, status: "no-texture-in-mtl" });
+      continue;
+    }
+    out.push({ material: slot, textureName: declared, status: "file-missing" });
+  }
+  return out;
 }
 
 /**
@@ -482,28 +682,69 @@ export function countObjIndices(objText: string): {
 }
 
 /**
+ * 解析 OBJ 的**负下标**(`f 1/-3 2/-2 3/-1` 里的 `-3`)。
+ *
+ * ## 为什么要按「到该行为止的数量」而不是「整个文件的数量」
+ *
+ * OBJ 规范说负下标 `-N` 指的是「从**文件末尾**数第 N 个」。但很多导出器是
+ * **流式写文件**的:先写完所有 `v`,然后每写一个面就紧跟写它自己的几个 `vt`,
+ * 面里用 `-3 -2 -1` 引用「刚写的那几个 vt」。
+ *
+ * 那种文件里「整个文件的 vt 数量」远大于「写到这一行时已经出现的 vt 数量」——
+ * 按规范解析的话,**每个面都会拿到文件最后几个 vt**,整张模型的 UV 全变成
+ * 同几个点,贴图采样出来是一整块纯色(看起来就是「模型没有贴图」)。
+ *
+ * 真实案例:用户上传的 `006109.zip`(3ds Max 导出)就是这个格式 ——
+ * 49 万个面只解析出 3 个不同的 UV,贴图完全显示不出来。
+ *
+ * 按「到该行为止的数量」解析:
+ * - 流式文件 → 命中导出器的本意 ✓
+ * - 常规文件(`v` / `vt` 全写在 `f` 之前)→ 「到该行为止」== 「整个文件」,
+ *   与按规范解析的结果**完全一致**,不会有任何回归 ✓
+ *
+ * @param index 负下标本身(比如 -3)
+ * @param countSoFar 到该行为止已经出现的 `v` / `vt` 数量
+ * @returns 0 基的绝对下标
+ */
+export function resolveNegativeIndex(
+  index: number,
+  countSoFar: number
+): number {
+  return countSoFar + index;
+}
+
+/**
  * 给 OBJ 文本里 `f` 行的索引加偏移(多 OBJ 合并用)。
  *
  * `v` 与 `vt` 是**两套独立的索引空间** —— 只偏移 `v` 会让合并后的模型
  * 去采样别的模型的 UV 坐标,贴图直接错乱。
  *
- * 负索引(相对文件末尾)按 OBJ 规范换算成绝对索引:
- * 被合并文件里的 `-1` 指的是它自己的最后一个顶点,
- * 换算后应是 `offset + count`(而不是 `offset - 1`)。
+ * 负索引按「到该行为止已经出现的 `v` / `vt` 数量」换算成绝对索引。
+ * 详见 {@link resolveNegativeIndex} 的说明。
  */
 export function offsetObjFaceIndices(
   objText: string,
   vertexOffset: number,
-  uvOffset: number,
-  vertexCount: number,
-  uvCount: number
+  uvOffset: number
 ): string {
   if (vertexOffset === 0 && uvOffset === 0) return objText;
+
+  // 到目前为止已经出现的 v / vt 数量 —— 负下标按它解析
+  let vSeen = 0;
+  let vtSeen = 0;
 
   return objText
     .split(/\r?\n/)
     .map((line) => {
       const trimmed = line.trim();
+      if (/^vt\s/.test(trimmed)) {
+        vtSeen += 1;
+        return line;
+      }
+      if (/^v\s/.test(trimmed)) {
+        vSeen += 1;
+        return line;
+      }
       if (!/^f\s/.test(trimmed)) return line;
       const indent = line.slice(0, line.length - line.trimStart().length);
       const tokens = trimmed.split(/\s+/);
@@ -515,14 +756,16 @@ export function offsetObjFaceIndices(
           parts[0] = String(
             vIdx > 0
               ? vIdx + vertexOffset
-              : vertexOffset + vertexCount + vIdx + 1
+              : vertexOffset + resolveNegativeIndex(vIdx, vSeen) + 1
           );
         }
         if (parts.length > 1) {
           const tIdx = parseInt(parts[1] ?? "", 10);
           if (Number.isFinite(tIdx)) {
             parts[1] = String(
-              tIdx > 0 ? tIdx + uvOffset : uvOffset + uvCount + tIdx + 1
+              tIdx > 0
+                ? tIdx + uvOffset
+                : uvOffset + resolveNegativeIndex(tIdx, vtSeen) + 1
             );
           }
         }
@@ -591,13 +834,7 @@ export function combineObjSources(sources: ObjSource[]): CombinedObj {
   for (let i = 0; i < sources.length; i++) {
     const source = sources[i]!;
     const counts = countObjIndices(source.objText);
-    let text = offsetObjFaceIndices(
-      source.objText,
-      vertexOffset,
-      uvOffset,
-      counts.vertices,
-      counts.uvs
-    );
+    let text = offsetObjFaceIndices(source.objText, vertexOffset, uvOffset);
     if (mergedMtl) {
       const rename = mergedMtl.renameByFile[i];
       if (rename) text = rewriteUsemtl(text, rename);

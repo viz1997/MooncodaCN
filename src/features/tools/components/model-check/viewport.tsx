@@ -5,15 +5,26 @@
  *
  * 移植自 wjp-model-checker-source/src/components/model-checker/Viewport.tsx,
  * 只改了 import 路径与悬停提示文案(改为 next-intl)。
+ *
+ * 2026-11-03:场景本身(renderer / camera / 灯光 / 控制器 / 渲染循环)交给共用的
+ * `<ObjPreview mode="inspect" />` —— 与克重工具(/tools/weight)是同一个组件,
+ * 两个工具的模型观感、贴图表现完全一致。
  */
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
-import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
   parseMtl,
   type TextureUrlMap,
 } from "@/features/pricing/lib/obj-materials";
+import {
+  addMaterialGroups,
+  buildPreviewMaterials,
+} from "@/features/shared/components/obj-preview/materials";
+import {
+  ObjPreview,
+  type PreviewContext,
+} from "@/features/shared/components/obj-preview/obj-preview";
 import {
   type AnalysisResult,
   FACE_FLAG,
@@ -165,13 +176,10 @@ export default function Viewport({
   fitSignal,
 }: ViewportProps) {
   const t = useTranslations("ModelInspector");
-  const mountRef = useRef<HTMLDivElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
-  // 场景对象引用(跨 effect 复用)
-  const sceneRef = useRef<THREE.Scene | null>(null);
-  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
-  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
-  const controlsRef = useRef<OrbitControls | null>(null);
+  /** 预览场景上下文 —— <ObjPreview> 建好场景后交给我们 */
+  const [previewCtx, setPreviewCtx] = useState<PreviewContext | null>(null);
+  const ctxRef = useRef<PreviewContext | null>(null);
   const meshRef = useRef<THREE.Mesh | null>(null);
   const supportRef = useRef<THREE.Mesh | null>(null);
   const supportProjRef = useRef<THREE.Mesh | null>(null);
@@ -225,11 +233,29 @@ export default function Viewport({
     resultRef.current = result;
   }, [result]);
 
+  // ---------- 场景就绪 ----------
+  const handleSceneReady = useCallback((ctx: PreviewContext) => {
+    // 同步写 ref —— 相机取景等逻辑可能在 React 重新渲染前就被调用
+    ctxRef.current = ctx;
+    setPreviewCtx(ctx);
+  }, []);
+
+  // ---------- 每帧:聚焦动画 ----------
+  const handleFrame = useCallback((ctx: PreviewContext) => {
+    const fa = focusAnimRef.current;
+    if (!fa) return;
+    const t = Math.min(1, (performance.now() - fa.start) / 550);
+    const e = 1 - (1 - t) ** 3;
+    ctx.camera.position.lerpVectors(fa.from, fa.to, e);
+    ctx.controls.target.lerpVectors(fa.fromT, fa.toT, e);
+    if (t >= 1) focusAnimRef.current = null;
+  }, []);
+
   const fitCamera = useCallback(() => {
-    const camera = cameraRef.current;
-    const controls = controlsRef.current;
+    const ctx = ctxRef.current;
     const r = resultRef.current;
-    if (!camera || !controls) return;
+    if (!ctx) return;
+    const { camera, controls } = ctx;
     let min = new THREE.Vector3(-10, -10, 0);
     let max = new THREE.Vector3(10, 10, 10);
     if (r) {
@@ -253,146 +279,11 @@ export default function Viewport({
     controls.update();
   }, []);
 
-  // ---------- 初始化场景(仅一次) ----------
-  useEffect(() => {
-    const mount = mountRef.current;
-    if (!mount) return;
-
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color("#111418");
-    sceneRef.current = scene;
-
-    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 50000);
-    camera.up.set(0, 0, 1);
-    camera.position.set(80, -90, 60);
-    cameraRef.current = camera;
-
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setSize(mount.clientWidth, mount.clientHeight);
-    mount.appendChild(renderer.domElement);
-    rendererRef.current = renderer;
-
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.12;
-    controlsRef.current = controls;
-
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x33404d, 1.1);
-    scene.add(hemi);
-    const dir = new THREE.DirectionalLight(0xffffff, 1.6);
-    dir.position.set(1.5, -2, 3).multiplyScalar(100);
-    scene.add(dir);
-    const dir2 = new THREE.DirectionalLight(0xffffff, 0.5);
-    dir2.position.set(-2, 1.5, -1).multiplyScalar(100);
-    scene.add(dir2);
-
-    let raf = 0;
-    const tick = () => {
-      raf = requestAnimationFrame(tick);
-      const fa = focusAnimRef.current;
-      if (fa) {
-        const t = Math.min(1, (performance.now() - fa.start) / 550);
-        const e = 1 - (1 - t) ** 3;
-        camera.position.lerpVectors(fa.from, fa.to, e);
-        controls.target.lerpVectors(fa.fromT, fa.toT, e);
-        if (t >= 1) focusAnimRef.current = null;
-      }
-      controls.update();
-      renderer.render(scene, camera);
-    };
-    tick();
-
-    const resize = () => {
-      if (!mountRef.current) return;
-      const w = mountRef.current.clientWidth;
-      const h = mountRef.current.clientHeight;
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
-    };
-    const ro = new ResizeObserver(resize);
-    ro.observe(mount);
-
-    // ---------- 悬停提示 ----------
-    const raycaster = new THREE.Raycaster();
-    const pointer = new THREE.Vector2();
-    let lastHover = 0;
-    const onMove = (ev: PointerEvent) => {
-      const now = performance.now();
-      const tip = tooltipRef.current;
-      if (!tip) return;
-      const rect = renderer.domElement.getBoundingClientRect();
-      tip.style.left = `${ev.clientX - rect.left + 14}px`;
-      tip.style.top = `${ev.clientY - rect.top + 14}px`;
-      if (now - lastHover < 90) return;
-      lastHover = now;
-      const r = resultRef.current;
-      const mesh = meshRef.current;
-      if (!r || !mesh || r.stats.triangleCount > 150000) {
-        tip.style.display = "none";
-        return;
-      }
-      pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
-      pointer.y = (-(ev.clientY - rect.top) / rect.height) * 2 + 1;
-      raycaster.setFromCamera(pointer, camera);
-      const hits = raycaster.intersectObject(mesh, false);
-      const hit = hits[0];
-      if (hit && hit.faceIndex != null) {
-        const f = hit.faceIndex;
-        const fl = r.flags[f] ?? 0;
-        const texts = tooltipTextsRef.current;
-        let text = "";
-        if (fl & FACE_FLAG.FLIPPED) text = texts.flipped ?? "";
-        else if (fl & FACE_FLAG.DEGENERATE) text = texts.degenerate ?? "";
-        else if (fl & FACE_FLAG.DUPLICATE) text = texts.duplicate ?? "";
-        else if (fl & FACE_FLAG.SHELL_NOISE) text = texts.shellNoise ?? "";
-        else if (fl & FACE_FLAG.SHELL_EXTRA) text = texts.shellExtra ?? "";
-        if (text) {
-          tip.textContent = text;
-          tip.style.display = "block";
-        } else {
-          tip.style.display = "none";
-        }
-      } else {
-        tip.style.display = "none";
-      }
-    };
-    const onLeave = () => {
-      if (tooltipRef.current) tooltipRef.current.style.display = "none";
-    };
-    renderer.domElement.addEventListener("pointermove", onMove);
-    renderer.domElement.addEventListener("pointerleave", onLeave);
-
-    return () => {
-      cancelAnimationFrame(raf);
-      ro.disconnect();
-      renderer.domElement.removeEventListener("pointermove", onMove);
-      renderer.domElement.removeEventListener("pointerleave", onLeave);
-      controls.dispose();
-      renderer.dispose();
-      if (renderer.domElement.parentElement === mount) {
-        mount.removeChild(renderer.domElement);
-      }
-      sceneRef.current = null;
-      rendererRef.current = null;
-      cameraRef.current = null;
-      controlsRef.current = null;
-      meshRef.current = null;
-      supportRef.current = null;
-      supportProjRef.current = null;
-      supportCurtainRef.current = null;
-      supportUnderRef.current = null;
-      groupRef.current = null;
-      gridRef.current = null;
-      lineRefs.current = {};
-    };
-  }, []);
-
   // ---------- 结果变化 → 重建几何 ----------
   useEffect(() => {
-    const scene = sceneRef.current;
-    if (!scene) return;
+    const ctx = previewCtx;
+    if (!ctx) return;
+    const scene = ctx.scene;
     // 清理旧对象(全部挂在模型组下,随组一起移除)
     if (groupRef.current) {
       scene.remove(groupRef.current);
@@ -461,7 +352,6 @@ export default function Viewport({
     // ---------- 材质与贴图 ----------
     // 材质槽位:优先按 OBJ 的 `usemtl` 分组;OBJ 没写 usemtl 时用 MTL 的第一个材质
     const mtlList = textures?.mtlText ? parseMtl(textures.mtlText) : [];
-    const mtlByName = new Map(mtlList.map((m) => [m.name, m]));
     const uvs = textures?.uvs ?? null;
     // 几何体没有 uv 时**不能**挂贴图 —— three.js 会去采样 (0,0),整块糊成一片
     const hasUv = !!uvs && uvs.length >= triCount * 6;
@@ -473,41 +363,16 @@ export default function Viewport({
           ? [mtlList[0]!.name]
           : [];
 
-    const textureLoader = new THREE.TextureLoader();
-    const slots: THREE.Material[] = [];
-    const slotHasMap: boolean[] = [];
-    const slotHasKd: boolean[] = [];
-    for (const name of slotNames) {
-      const mat = new THREE.MeshStandardMaterial({
-        vertexColors: true,
-        flatShading: true,
-        side: THREE.DoubleSide,
-        roughness: 0.75,
-        metalness: 0.05,
-        polygonOffset: true,
-        polygonOffsetFactor: 1,
-        polygonOffsetUnits: 1,
-      });
-      const url = hasUv ? textures?.textureUrls?.[name]?.map : undefined;
-      const kd = mtlByName.get(name)?.kd;
-      slotHasKd.push(Boolean(kd));
-      if (url) {
-        const map = textureLoader.load(url);
-        map.colorSpace = THREE.SRGBColorSpace;
-        // 贴图开关关掉时只摘掉 map,贴图本体留着(切回来不用重新下载)
-        mat.userData.baseMap = map;
-        mat.map = showTextureRef.current ? map : null;
-        mat.needsUpdate = true;
-        slotHasMap.push(true);
-      } else {
-        // 没有贴图的材质:用 MTL 的 Kd 本色(没有 Kd 就退回白,顶点色负责外观)
-        if (kd) {
-          mat.color.setRGB(kd[0], kd[1], kd[2], THREE.SRGBColorSpace);
-        }
-        slotHasMap.push(false);
-      }
-      slots.push(mat);
-    }
+    // 材质构建只有一份实现 —— 与克重工具共用
+    // (见 src/features/shared/components/obj-preview/materials.ts)
+    const { slots, slotHasMap, slotHasKd, single } = buildPreviewMaterials({
+      mtlText: textures?.mtlText,
+      textureUrls: textures?.textureUrls,
+      materialNames: slotNames,
+      hasUv,
+      vertexColors: true,
+      showTexture: showTextureRef.current,
+    });
     slotHasMapRef.current = slotHasMap;
 
     for (let f = 0; f < triCount; f++) {
@@ -559,18 +424,8 @@ export default function Viewport({
 
     if (slots.length > 0) {
       // 材质分组:把三角汤按材质切成连续段(非索引几何,group 的 start/count 是顶点数)
-      const idx = materialIndex;
-      if (idx && idx.length > 0) {
-        let groupStart = 0;
-        for (let t = 0; t <= idx.length; t++) {
-          const prev = idx[groupStart] ?? 0;
-          const cur = t < idx.length ? (idx[t] ?? 0) : -1;
-          if (t === idx.length || cur !== prev) {
-            const count = (t - groupStart) * 3;
-            if (count > 0) geo.addGroup(groupStart * 3, count, prev);
-            groupStart = t;
-          }
-        }
+      if (materialIndex && materialIndex.length > 0) {
+        addMaterialGroups(geo, materialIndex);
       } else {
         geo.addGroup(0, triCount * 3, 0);
       }
@@ -585,7 +440,10 @@ export default function Viewport({
       polygonOffsetFactor: 1,
       polygonOffsetUnits: 1,
     });
-    const mesh = new THREE.Mesh(geo, slots.length > 0 ? slots : mat);
+    const mesh = new THREE.Mesh(
+      geo,
+      slots.length > 0 ? slots : (single ?? mat)
+    );
     group.add(mesh);
     meshRef.current = mesh;
 
@@ -763,7 +621,7 @@ export default function Viewport({
 
     // 视角适配
     fitCamera();
-  }, [result, meshPositions, textures, fitCamera]);
+  }, [previewCtx, result, meshPositions, textures, fitCamera]);
 
   // ---------- 贴图开关:摘掉 / 挂回各材质自己的贴图 ----------
   useEffect(() => {
@@ -825,12 +683,71 @@ export default function Viewport({
     }
   }, [visibility, result, showTexture, textures]);
 
+  // ---------- 悬停提示 ----------
+  useEffect(() => {
+    if (!previewCtx) return;
+    const { renderer, camera } = previewCtx;
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    let lastHover = 0;
+    const onMove = (ev: PointerEvent) => {
+      const now = performance.now();
+      const tip = tooltipRef.current;
+      if (!tip) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      tip.style.left = `${ev.clientX - rect.left + 14}px`;
+      tip.style.top = `${ev.clientY - rect.top + 14}px`;
+      if (now - lastHover < 90) return;
+      lastHover = now;
+      const r = resultRef.current;
+      const mesh = meshRef.current;
+      if (!r || !mesh || r.stats.triangleCount > 150000) {
+        tip.style.display = "none";
+        return;
+      }
+      pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = (-(ev.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+      const hits = raycaster.intersectObject(mesh, false);
+      const hit = hits[0];
+      if (hit && hit.faceIndex != null) {
+        const f = hit.faceIndex;
+        const fl = r.flags[f] ?? 0;
+        const texts = tooltipTextsRef.current;
+        let text = "";
+        if (fl & FACE_FLAG.FLIPPED) text = texts.flipped ?? "";
+        else if (fl & FACE_FLAG.DEGENERATE) text = texts.degenerate ?? "";
+        else if (fl & FACE_FLAG.DUPLICATE) text = texts.duplicate ?? "";
+        else if (fl & FACE_FLAG.SHELL_NOISE) text = texts.shellNoise ?? "";
+        else if (fl & FACE_FLAG.SHELL_EXTRA) text = texts.shellExtra ?? "";
+        if (text) {
+          tip.textContent = text;
+          tip.style.display = "block";
+        } else {
+          tip.style.display = "none";
+        }
+      } else {
+        tip.style.display = "none";
+      }
+    };
+    const onLeave = () => {
+      if (tooltipRef.current) tooltipRef.current.style.display = "none";
+    };
+    renderer.domElement.addEventListener("pointermove", onMove);
+    renderer.domElement.addEventListener("pointerleave", onLeave);
+
+    return () => {
+      renderer.domElement.removeEventListener("pointermove", onMove);
+      renderer.domElement.removeEventListener("pointerleave", onLeave);
+    };
+  }, [previewCtx]);
+
   // ---------- 聚焦动画 ----------
   useEffect(() => {
     if (!focusRequest || !focusRequest.point) return;
-    const camera = cameraRef.current;
-    const controls = controlsRef.current;
-    if (!camera || !controls) return;
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+    const { camera, controls } = ctx;
     const target = new THREE.Vector3(...focusRequest.point);
     // 聚焦点是模型原始坐标,同步落地平移(模型组整体 -bboxMin.z)
     const rr = resultRef.current;
@@ -855,12 +772,17 @@ export default function Viewport({
 
   return (
     <div className="absolute inset-0" data-testid="viewport">
-      <div ref={mountRef} className="absolute inset-0" />
-      <div
-        ref={tooltipRef}
-        className="pointer-events-none absolute z-10 hidden rounded-md border border-zinc-700 bg-zinc-900/95 px-2 py-1 text-xs text-zinc-100 shadow-lg"
-        style={{ display: "none" }}
-      />
+      <ObjPreview
+        mode="inspect"
+        onSceneReady={handleSceneReady}
+        onFrame={handleFrame}
+      >
+        <div
+          ref={tooltipRef}
+          className="pointer-events-none absolute z-10 hidden rounded-md border border-zinc-700 bg-zinc-900/95 px-2 py-1 text-xs text-zinc-100 shadow-lg"
+          style={{ display: "none" }}
+        />
+      </ObjPreview>
     </div>
   );
 }

@@ -15,13 +15,17 @@ import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader.js";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import {
   baseName,
+  buildSlotTextureUrls,
   buildTextureUrlMap,
   combineObjSources,
+  diagnoseMaterialTextures,
   matchMaterialTextures,
   parseMtl,
   parseMtllibNames,
+  parseUsemtlNames,
   pickMtlFileName,
   pickPreviewTextureUrl,
+  type TextureDiagnostic,
   type TextureUrlMap,
 } from "./obj-materials";
 import type { ObjParseResult, Vec3 } from "./obj-parser";
@@ -44,6 +48,10 @@ export type ModelFile = {
   previewUrl?: string | undefined;
   /** 所有纹理文件的 Blob（用于导出 ZIP 时保留原始纹理） */
   textureBlobs?: { name: string; blob: Blob }[] | undefined;
+  /**
+   * 每个材质槽位的贴图解析诊断 —— 白模时用来解释「贴图断在哪一步」。
+   */
+  textureDiagnostics?: TextureDiagnostic[] | undefined;
   /**
    * 材质名 → 该材质**自己**的贴图 object URL。
    *
@@ -722,10 +730,15 @@ export async function extractGlb(
       materials,
       assets.textureBlobs
     );
-    const textureUrls = buildTextureUrlMap(
+    const urlsByMaterial = buildTextureUrlMap(
       materialTextures,
       assets.textureBlobs,
       (blob) => URL.createObjectURL(blob)
+    );
+    const textureUrls = buildSlotTextureUrls(
+      materials,
+      urlsByMaterial,
+      parseUsemtlNames(objText)
     );
     const previewUrl = pickPreviewTextureUrl(materials, textureUrls);
 
@@ -885,13 +898,26 @@ export async function extractZip(
     // 按材质解析贴图：每个材质挂它自己 map_Kd 指向的那张图
     let previewUrl: string | undefined;
     let textureUrls: TextureUrlMap | undefined;
+    let textureDiagnostics: TextureDiagnostic[] | undefined;
     if (mtlText) {
       const materials = parseMtl(mtlText);
       const materialTextures = matchMaterialTextures(materials, textureBlobs);
-      textureUrls = buildTextureUrlMap(materialTextures, textureBlobs, (blob) =>
-        URL.createObjectURL(blob)
+      const urlsByMaterial = buildTextureUrlMap(
+        materialTextures,
+        textureBlobs,
+        (blob) => URL.createObjectURL(blob)
       );
+      // viewer 是拿 OBJ 的 `usemtl` 名查贴图的,而贴图按 MTL 的 `newmtl` 名存着
+      // —— 两者对不上(大小写 / `.001` 后缀)就会查不到,模型直接变白模。
+      // 这里把 `usemtl` 名也建成别名,两边都能查到。
+      const slotNames = parseUsemtlNames(objText);
+      textureUrls = buildSlotTextureUrls(materials, urlsByMaterial, slotNames);
       previewUrl = pickPreviewTextureUrl(materials, textureUrls);
+      textureDiagnostics = diagnoseMaterialTextures(
+        materials,
+        materialTextures,
+        slotNames.length > 0 ? slotNames : materials.map((m) => m.name)
+      );
     }
 
     return {
@@ -906,6 +932,7 @@ export async function extractZip(
         previewUrl,
         textureBlobs,
         textureUrls,
+        textureDiagnostics,
       },
       allFiles,
     };
@@ -1072,18 +1099,27 @@ export async function extractRar(
     // 按材质解析贴图：每个材质挂它自己 map_Kd 指向的那张图
     let previewUrl: string | undefined;
     let textureUrls: TextureUrlMap | undefined;
+    let textureDiagnostics: TextureDiagnostic[] | undefined;
     if (mtlText) {
       const materials = parseMtl(mtlText);
       const materialTextures = matchMaterialTextures(
         materials,
         rarTextureBlobs
       );
-      textureUrls = buildTextureUrlMap(
+      const urlsByMaterial = buildTextureUrlMap(
         materialTextures,
         rarTextureBlobs,
         (blob) => URL.createObjectURL(blob)
       );
+      // 同 ZIP 分支：`usemtl` 名也建成别名,viewer 按它查得到贴图
+      const slotNames = parseUsemtlNames(objText);
+      textureUrls = buildSlotTextureUrls(materials, urlsByMaterial, slotNames);
       previewUrl = pickPreviewTextureUrl(materials, textureUrls);
+      textureDiagnostics = diagnoseMaterialTextures(
+        materials,
+        materialTextures,
+        slotNames.length > 0 ? slotNames : materials.map((m) => m.name)
+      );
     }
 
     return {
@@ -1098,6 +1134,7 @@ export async function extractRar(
         previewUrl,
         textureBlobs: rarTextureBlobs,
         textureUrls,
+        textureDiagnostics,
       },
       allFiles,
     };

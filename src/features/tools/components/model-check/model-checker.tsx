@@ -25,6 +25,8 @@ import { useTranslations } from "next-intl";
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { TextureDiagnosticNote } from "@/features/pricing/components/texture-diagnostic";
+import type { TextureDiagnostic } from "@/features/pricing/lib/obj-materials";
 import {
   ISSUE_COLORS,
   ISSUE_LABEL_KEYS,
@@ -78,6 +80,8 @@ type LoadedState = {
   fileName: string;
   /** 贴图与材质分组(模型自带 MTL + 贴图时才有内容) */
   textures: MeshTextureInfo | null;
+  /** 贴图解析诊断 —— 白模时解释断点 */
+  textureDiagnostics: TextureDiagnostic[] | null;
   /** 释放贴图 blob URL */
   releaseTextures: () => void;
 };
@@ -145,6 +149,7 @@ export function ModelChecker() {
           mtlText: loaded.mtlText,
           textureUrls: loaded.textureUrls,
         },
+        textureDiagnostics: loaded.textureDiagnostics,
         releaseTextures: loaded.releaseTextures,
       });
     } catch (e) {
@@ -274,6 +279,8 @@ export function ModelChecker() {
               </span>
             </div>
           )}
+          {/* 贴图解析诊断 —— 白模时说明「贴图断在哪一步」 */}
+          <TextureDiagnosticNote diagnostics={model?.textureDiagnostics} />
           <Sidebar
             result={result}
             busy={busy || loading}

@@ -6,7 +6,9 @@ import {
   Compass,
   Info,
   Loader2,
+  Palette,
   RotateCcw,
+  Shell,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
@@ -125,6 +127,12 @@ export type ModelSettingsPanelProps = {
   angleProgress: number;
   showSupport: boolean;
   onToggleSupport: () => void;
+  /**
+   * 是否显示模型自带的贴图 —— 与检测工具的「显示贴图」开关同一套行为:
+   * 关掉就是纯色(MTL 的 `Kd` 本色)视图。
+   */
+  showTexture: boolean;
+  onToggleTexture: () => void;
 
   onClearModel: () => void;
   onViewerReady: () => void;
@@ -166,6 +174,8 @@ export function ModelSettingsPanel({
   angleProgress,
   showSupport,
   onToggleSupport,
+  showTexture,
+  onToggleTexture,
   onClearModel,
   onViewerReady,
   onViewerProgress,
@@ -214,6 +224,16 @@ export function ModelSettingsPanel({
     model !== null &&
     geometry !== null &&
     (loadStatus === "loading-3d" || loadStatus === "ready");
+
+  /**
+   * 模型有没有贴图可显示 —— 没有贴图就不给「显示贴图」开关。
+   *
+   * `textureUrls` 里**每个材质都有一项**(哪怕是空的),所以要看的是
+   * 「有没有哪个材质真的解析出了 base color 贴图」。
+   */
+  const hasTexture = Object.values(model?.textureUrls ?? {}).some((u) =>
+    Boolean(u?.map)
+  );
 
   // 没有模型、也没在加载 —— 什么都不渲染（页面上只有上传卡片）
   if (!model && loadStatus === "idle") return null;
@@ -305,31 +325,21 @@ export function ModelSettingsPanel({
                   </span>
                 )}
                 {loadStatus === "ready" && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={onToggleSupport}
-                      className={`text-[10px] flex items-center gap-1 px-2 py-0.5 rounded border ${showSupport ? "text-amber-700 border-amber-400 bg-amber-50" : "text-stone-500 border-stone-300 bg-white"}`}
-                      title={t("angle.toggleSupport")}
-                    >
-                      {t("angle.support")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onOptimizeAngle(scales)}
-                      disabled={angleOptimizing}
-                      className="text-[10px] text-violet-600 hover:text-violet-700 flex items-center gap-1 px-2 py-0.5 rounded border border-violet-300 bg-white hover:bg-violet-50 disabled:opacity-50"
-                    >
-                      {angleOptimizing ? (
-                        <Loader2 className="size-3 animate-spin" />
-                      ) : (
-                        <Compass className="size-3" />
-                      )}
-                      {angleOptimizing
-                        ? `${angleProgress}%`
-                        : t("angle.optimize")}
-                    </button>
-                  </>
+                  <button
+                    type="button"
+                    onClick={() => onOptimizeAngle(scales)}
+                    disabled={angleOptimizing}
+                    className="text-[10px] text-violet-600 hover:text-violet-700 flex items-center gap-1 px-2 py-0.5 rounded border border-violet-300 bg-white hover:bg-violet-50 disabled:opacity-50"
+                  >
+                    {angleOptimizing ? (
+                      <Loader2 className="size-3 animate-spin" />
+                    ) : (
+                      <Compass className="size-3" />
+                    )}
+                    {angleOptimizing
+                      ? `${angleProgress}%`
+                      : t("angle.optimize")}
+                  </button>
                 )}
               </div>
             </div>
@@ -386,6 +396,7 @@ export function ModelSettingsPanel({
                 rotationZ={viewerRotZ}
                 scale={dimMode === "custom" ? scales : 1}
                 showSupport={showSupport}
+                showTexture={showTexture}
                 onReady={onViewerReady}
                 onProgress={onViewerProgress}
               />
@@ -401,6 +412,57 @@ export function ModelSettingsPanel({
                       style={{ width: `${Math.max(5, loadPercent)}%` }}
                     />
                   </div>
+                </div>
+              )}
+
+              {/* ---------- 预览浮层控制条 ----------
+                  与检测工具(/tools/model-check)同一套:显示贴图 / 包裹支撑,
+                  外加支撑比例 —— 比例是「支撑克重 ÷ 本体克重」,
+                  跟右栏克重面板里的算法是同一份数据。 */}
+              {loadStatus === "ready" && (
+                <div className="pointer-events-auto absolute bottom-3 left-1/2 z-10 flex max-w-[95%] -translate-x-1/2 flex-wrap items-center justify-center gap-1.5 rounded-lg border border-stone-300 bg-white/90 px-2.5 py-1.5 shadow-sm backdrop-blur">
+                  {hasTexture && (
+                    <button
+                      type="button"
+                      aria-pressed={showTexture}
+                      title={t("preview.textureTitle")}
+                      onClick={onToggleTexture}
+                      className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${
+                        showTexture
+                          ? "bg-amber-50 text-amber-700"
+                          : "text-stone-500 hover:text-stone-700"
+                      }`}
+                    >
+                      <Palette className="size-3.5" />
+                      {t("preview.texture")}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    aria-pressed={showSupport}
+                    title={t("preview.supportTitle")}
+                    onClick={onToggleSupport}
+                    className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${
+                      showSupport
+                        ? "bg-amber-50 text-amber-700"
+                        : "text-stone-500 hover:text-stone-700"
+                    }`}
+                  >
+                    <Shell className="size-3.5" />
+                    {t("preview.support")}
+                  </button>
+                  {optimalAngle ? (
+                    <span className="font-mono text-[10px] text-stone-500">
+                      {t("preview.supportInfo", {
+                        ratio: Math.round(optimalAngle.selfSupportRatio * 100),
+                        weight: Math.ceil(optimalAngle.totalSupportWeight),
+                      })}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-stone-400">
+                      {t("preview.supportPending")}
+                    </span>
+                  )}
                 </div>
               )}
             </div>

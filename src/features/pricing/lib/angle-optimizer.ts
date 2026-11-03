@@ -21,9 +21,22 @@
  *   - 焊接 + 拓扑(姿态无关)→ 只做一次(`prepareSupportModel`)
  *   - 每个候选姿态:旋转顶点与法线 → 生成包裹外壳 → 按列算支撑体积
  *
- * 支撑体积按列(height field)算:每个 XY 格子里,支撑从平台长到该列的
- * 下朝向面(支撑材料的上边界),再扣掉该列里模型自己占掉的部分。
- * 「蘑菇」(宽帽 + 细腿)算出来是帽子下面那圈空间,而不是把整根柱子当支撑。
+ * 支撑体积按列(height field)算,但**列里的模型材料不一定是连续的一段**:
+ * 一列穿过模型表面得到一串 z 交点,按奇偶配对,相邻两个交点之间是模型材料,
+ * 空出来的那几段才是支撑。「蘑菇」(宽帽 + 细腿)算出来是帽子下面那圈空间,
+ * 「宽底座 + 细身体」也不会因为底座盖住身体就漏掉悬空那圈。
+ *
+ * 体积走**真几何**(网格自己的顶点),跟模型克重同一口径 —— 检测工具
+ * 画外壳时那圈间隙(对角线 2%,0.8~5mm)只是可视化,不进克重。
+ *
+ * ## 尺寸缩放(2026-11-03)
+ *
+ * 用户调过尺寸之后,支撑计算必须跑在**缩放后**的网格上
+ * (`scaleSupportModel`:只挪顶点,拓扑不变,不用重新焊接)。
+ * 之前是拿原始网格的支撑体积乘一个缩放系数 —— 体积上恰好对(支撑区域
+ * 在线性缩放下是自映射的,体积乘 det S),但**高度、投影、悬垂面全错**:
+ * 非均匀缩放(比如只把 Z 拉高)时,模型真实高度翻倍,乘系数却只涨了
+ * 立方根,50mm 高度限制会放行一堆立不住的姿态,摆出来的支撑克重也跟着错。
  *
  * ## 摆盘策略
  *
@@ -74,21 +87,23 @@ export type OptimalAngle = {
 };
 
 /**
- * 支撑材料参数(校准面板的三个旋钮)
+ * 支撑材料参数(校准面板的两个旋钮)
  *
  * - `fillRate` 蜂窝填充率:支撑材料的实心比例(支撑是蜂窝结构,不是实心)
- * - `gapScale` 包裹间隙倍率:1 = 检测工具的自适应间隙(对角线 2%,0.8~5mm)
  * - `density` 支撑材料密度 (g/cm³)
+ *
+ * 支撑克重 = 包裹支撑体积 × 填充率 × 密度。体积完全由几何决定
+ * (平台到模型下表面之间的空腔),没有第三个可调项 —— 之前那个
+ * 「包裹间隙倍率」是检测工具画外壳时用的间隙(对角线 2%,0.8~5mm),
+ * 算进体积会让支撑克重凭空高 10~30%,已经拿掉。
  */
 export type SupportParams = {
   fillRate: number;
-  gapScale: number;
   density: number;
 };
 
 export const DEFAULT_SUPPORT_PARAMS: SupportParams = {
   fillRate: 0.37,
-  gapScale: 1,
   density: 1.15,
 };
 
@@ -116,6 +131,19 @@ export type SupportPoseResult = {
 };
 
 /**
+ * 模型总表面积 (mm²) —— 网格面片面积之和
+ *
+ * 直接从(已缩放的)网格算,不从外面传表面积进来:用户改了尺寸之后,
+ * 解析阶段那个表面积就对不上了。
+ */
+export function totalSurfaceAreaMM2(model: SupportModel): number {
+  const areas = model.mesh.faceAreas;
+  let sum = 0;
+  for (let f = 0; f < model.mesh.faceCount; f++) sum += areas[f]!;
+  return sum;
+}
+
+/**
  * 计算单个姿态下的包裹支撑(检测工具算法)
  *
  * @param model 备好的模型(焊接一次,之后每个姿态只旋转)
@@ -138,13 +166,12 @@ export function computeSupportAtPose(
   }
 ): SupportPoseResult {
   const rotated = rotateSupportMesh(model.mesh, rotXDeg, rotYDeg, rotZDeg);
-  // 克重只要体积:外壳的顶面 / 外壁 / 渲染索引都省掉
-  const shell = buildSupportShell(
-    rotated,
-    model.faceEnclosed,
-    { includeCurtain: false, includeTopIndex: false },
-    params.gapScale
-  );
+  // 克重只要体积 + 下朝向面:外壳的顶面 / 外壁 / 渲染索引都省掉。
+  // 外壳间隙(可视化用的)不参与计算 —— 体积走真几何。
+  const shell = buildSupportShell(rotated, model.faceEnclosed, {
+    includeCurtain: false,
+    includeTopIndex: false,
+  });
   const volume = computeSupportVolume(shell, rotated, {
     gridSizeMM: opts?.gridSizeMM,
   });
@@ -256,11 +283,11 @@ export function computeRotatedExternalSurface(
 /**
  * 计算给定角度下的支撑克重和本体支撑比例（用于手动角度调整时实时重算）
  *
- * @param model 备好的模型(焊接一次)
+ * @param model 备好的模型(焊接一次)—— **必须已经是实际尺寸**:用户调过尺寸
+ *   之后支撑要按真实几何算(见 `scaleSupportModel`),这里不再乘任何缩放系数
  * @param rotXDeg X 轴旋转角度
  * @param rotYDeg Y 轴旋转角度
- * @param modelWeightG 模型本体克重（g）
- * @param scaleFactor 自选尺寸缩放因子
+ * @param modelWeightG 模型本体克重（g,已按实际尺寸算）
  * @param rotZDeg Z 轴旋转角度
  * @param coloredFaceMask 彩色面标记
  * @param params 支撑材料参数
@@ -270,7 +297,6 @@ export function computeSupportAtAngle(
   rotXDeg: number,
   rotYDeg: number,
   modelWeightG: number,
-  scaleFactor: number = 1,
   rotZDeg: number = 0,
   coloredFaceMask?: Uint8Array | null,
   params: SupportParams = DEFAULT_SUPPORT_PARAMS
@@ -279,11 +305,10 @@ export function computeSupportAtAngle(
     coloredFaceMask,
   });
 
-  // 应用缩放因子：体积按 k³ 缩放，所以克重按 k³ 缩放
-  const scaledWeight = pose.supportWeightG * scaleFactor ** 3;
-  const supportRatio = modelWeightG > 0 ? scaledWeight / modelWeightG : 0;
+  const supportRatio =
+    modelWeightG > 0 ? pose.supportWeightG / modelWeightG : 0;
 
-  return { supportWeight: scaledWeight, supportRatio };
+  return { supportWeight: pose.supportWeightG, supportRatio };
 }
 
 /**
@@ -296,23 +321,20 @@ export function computeSupportAtAngle(
  *    b. 若无这样的姿态，选彩色被包裹面积最小的
  *    c. 同组内选支撑克重最小的
  *
- * @param model 备好的模型(焊接一次)
- * @param totalSurfaceAreaMM2 总表面积（mm²，仅用于返回 totalArea 字段）
+ * @param model 备好的模型(焊接一次)—— **必须已经是实际尺寸**:高度限制
+ *   要拿真实高度判,支撑克重也要按真实几何算(见 `scaleSupportModel`)
  * @param onProgress 进度回调
  * @param maxHeightMM 高度阈值：旋转后超过这个高度就不给印
- * @param modelWeightG 模型本体克重（g）
- * @param scaleFactor 自选尺寸缩放因子
+ * @param modelWeightG 模型本体克重（g,已按实际尺寸算）
  * @param coloredFaceMask 每个面的彩色标记
  * @param coarseMode 拖拽中粗算模式：栅格 3mm，步长 30°
  * @param params 支撑材料参数
  */
 export function findOptimalAngle(
   model: SupportModel,
-  totalSurfaceAreaMM2: number,
   onProgress?: (percent: number) => void,
   maxHeightMM: number = 50,
   modelWeightG: number = 0,
-  scaleFactor: number = 1,
   coloredFaceMask?: Uint8Array | null,
   coarseMode: boolean = false,
   params: SupportParams = DEFAULT_SUPPORT_PARAMS
@@ -343,8 +365,6 @@ export function findOptimalAngle(
   const totalCombos = angles.length * angles.length;
   let combo = 0;
   let lastPct = -1;
-  const k3 = scaleFactor ** 3;
-  const k2 = scaleFactor ** 2;
 
   for (const rotX of angles) {
     for (const rotY of angles) {
@@ -355,14 +375,14 @@ export function findOptimalAngle(
       candidates.push({
         rotX,
         rotY,
-        supportWeight: pose.supportWeightG * k3,
-        supportVolume: pose.supportVolumeMM3 * k3,
-        projectedArea: pose.projectedAreaMM2 * k2,
-        supportArea: pose.supportAreaMM2 * k2,
-        overhangArea: pose.overhangAreaMM2 * k2,
-        coloredWrapArea: pose.coloredWrapAreaMM2 * k2,
-        wrapArea: pose.wrapAreaMM2 * k2,
-        rotatedHeight: pose.rotatedHeightMM * scaleFactor,
+        supportWeight: pose.supportWeightG,
+        supportVolume: pose.supportVolumeMM3,
+        projectedArea: pose.projectedAreaMM2,
+        supportArea: pose.supportAreaMM2,
+        overhangArea: pose.overhangAreaMM2,
+        coloredWrapArea: pose.coloredWrapAreaMM2,
+        wrapArea: pose.wrapAreaMM2,
+        rotatedHeight: pose.rotatedHeightMM,
       });
       combo++;
       const pct = Math.round((combo / totalCombos) * 100);
@@ -499,7 +519,8 @@ export function findOptimalAngle(
     selfSupportArea: chosen.supportArea,
     totalSupportRatio: selfSupportRatio,
     totalSupportWeight: chosen.supportWeight,
-    totalArea: totalSurfaceAreaMM2 / 100,
+    // 总表面积(cm²):直接取缩放后网格的面片面积和 —— 模型已是实际尺寸
+    totalArea: totalSurfaceAreaMM2(model) / 100,
     rotatedHeight: chosen.rotatedHeight,
     laidFlat: true,
     overhangArea: chosen.overhangArea,

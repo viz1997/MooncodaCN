@@ -217,6 +217,71 @@ describe("worker: 逐角 UV 兜底", () => {
     expect(Array.from(result.uvs ?? [])).toEqual([0, 0, 1, 0, 0, 1]);
   });
 
+  /**
+   * 流式 OBJ —— 3ds Max 这类导出器的写法。
+   *
+   * 先写完所有 `v`,然后**每写一个面就紧跟写它自己的 3 个 `vt`**,
+   * 面里用 `-3 -2 -1` 引用「刚写的那几个 vt」。
+   *
+   * OBJ 规范说负下标是「从文件末尾数第 N 个」,但这种文件里「整个文件的 vt 数量」
+   * 远大于「写到这一行时已经出现的 vt 数量」—— 按规范解析的话,
+   * **每个面都会拿到文件最后几个 vt**,整张模型的 UV 全变成同几个点,
+   * 贴图采样出来是一整块纯色(看起来就是「模型没有贴图」)。
+   *
+   * 真实案例:用户上传的 `006109.zip`(3ds Max 导出)49 万个面只解析出 3 个不同的 UV。
+   */
+  it("流式 OBJ:负下标按「到该行为止的 vt 数量」解析", async () => {
+    const streaming = [
+      "v 0 0 0",
+      "v 1 0 0",
+      "v 0 1 0",
+      "vt 0 0",
+      "vt 1 0",
+      "vt 0 1",
+      "f -3/-3 -2/-2 -1/-1",
+      "vt 0.5 0.5",
+      "vt 0.75 0.5",
+      "vt 0.75 0.75",
+      "f -3/-3 -2/-2 -1/-1",
+    ].join("\n");
+    const result = await runWorker(streaming);
+    // 第一个面拿第一组 vt,第二个面拿第二组 —— 各不相同
+    expect(Array.from(result.uvs ?? [])).toEqual([
+      0, 0, 1, 0, 0, 1, 0.5, 0.5, 0.75, 0.5, 0.75, 0.75,
+    ]);
+  });
+
+  it("流式 OBJ:负的顶点下标同样按「到该行为止」解析", async () => {
+    // 顶点也是流式写的:面后面还有 v,按规范解析会引用到**后面**才写的顶点
+    const streaming = [
+      "v 0 0 0",
+      "v 1 0 0",
+      "v 0 1 0",
+      "f -3 -2 -1",
+      "v 1 1 0",
+      "v 2 0 0",
+    ].join("\n");
+    const result = await runWorker(streaming);
+    const positions = Array.from(result.positions ?? []);
+    // 面用的是「已经写出来的」前 3 个顶点,不是文件最后 3 个
+    expect(positions.slice(0, 9)).toEqual([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+  });
+
+  it("常规文件(v / vt 全写在 f 之前)按规范解析,结果不受影响", async () => {
+    const conventional = [
+      "v 0 0 0",
+      "v 1 0 0",
+      "v 0 1 0",
+      "vt 0 0",
+      "vt 1 0",
+      "vt 0 1",
+      "f -3/-3 -2/-2 -1/-1",
+    ].join("\n");
+    const result = await runWorker(conventional);
+    // 「到该行为止」== 「整个文件」→ 与按规范解析完全一致
+    expect(Array.from(result.uvs ?? [])).toEqual([0, 0, 1, 0, 0, 1]);
+  });
+
   it("整个模型没有 vt → 不返回 uvs", async () => {
     const obj = ["v 0 0 0", "v 1 0 0", "v 0 1 0", "f 1 2 3"].join("\n");
     const result = await runWorker(obj);
