@@ -702,7 +702,7 @@ export function PricingCalculator({
     setSupportParams(params);
   };
 
-  /** 一键校准：用实测支撑克重反算蜂窝填充率 */
+  /** 一键校准：用实测支撑克重反算填充率 */
   const calibrateFromMeasured = () => {
     const realG = parseFloat(realWeightInput);
     if (
@@ -727,7 +727,8 @@ export function PricingCalculator({
       { ...supportParams, fillRate: 1 }
     );
     if (!(maxW > 0)) return;
-    const newRate = Math.max(0.05, Math.min(0.95, realG / maxW));
+    // 实测值比理论实心值还大是不可能的;上限跟滑块一致(1 = 实心)
+    const newRate = Math.max(0.05, Math.min(1, realG / maxW));
     recomputeSupport({ ...supportParams, fillRate: newRate });
   };
 

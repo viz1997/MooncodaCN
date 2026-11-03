@@ -1201,12 +1201,12 @@
       "supportPending": "Run the orientation optimizer to see the support ratio"
     },
     "calibration": {
-      "fillRate": "Honeycomb fill rate",
+      "fillRate": "Fill rate",
       "density": "Support density (g/cm³)",
-      "hint": "Support weight = wrap-support volume × fill rate × density. The wrap support is the material between the platform and the model's underside — the same thing the model checker draws; the fill rate is the solid fraction of the support and the density is the material's own weight density.",
+      "hint": "Support weight = wrap-support volume × fill rate × density. The wrap support is the material between the platform and the model's underside — the same thing the model checker draws; the fill rate is the solid fraction of the support (the support is solid, 100% by default) and the density is the material's own weight density.",
       "collapseLabel": "Support weight calibration",
       "oneClickTitle": "One-click calibration",
-      "oneClickDesc": "Enter the measured support weight to back-solve the honeycomb fill rate.",
+      "oneClickDesc": "Enter the measured support weight to back-solve the fill rate.",
       "placeholder": "Measured weight",
       "calibrate": "Calibrate",
       "ratioHint": "{current} g now → {target} g target (ratio {ratio})"
@@ -1268,7 +1268,7 @@
         "varnishFee": " + varnish",
         "repairFee": " + repair",
         "supportFee": " + support",
-        "p2": "Support weight is estimated from the honeycomb fill rate, the wrap gap multiplier and the support resin density (the wrap support volume is the same one the model checker computes); use “Support weight calibration” to back-solve it from a measured weight. The optimizer picks the pose with the least support and the lowest layer height."
+        "p2": "Support weight is estimated from the fill rate and the support resin density (the wrap support volume is the same one the model checker computes); use “Support weight calibration” to back-solve it from a measured weight. The optimizer picks the pose with the least support and the lowest layer height."
       },
       "products": {
         "title": "Product presets",

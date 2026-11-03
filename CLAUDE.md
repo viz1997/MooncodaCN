@@ -185,8 +185,9 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 - **缩放跑在真几何上**:用户改尺寸后,支撑计算跑在 `scaleSupportModel`
   缩放过的网格(不是原始网格乘系数)—— 非均匀缩放时高度 / 投影 / 悬垂面
   全变,乘系数会让 50mm 高度限制放行立不住的姿态。
-- **支撑克重 = 支撑体积 × 蜂窝填充率 × 支撑密度**。`SupportParams` 只有
-  `fillRate` + `density` 两个旋钮(旧的「包裹间隙倍率」已删)。
+- **支撑克重 = 支撑体积 × 填充率 × 支撑密度**。`SupportParams` 只有
+  `fillRate` + `density` 两个旋钮(旧的「包裹间隙倍率」已删)。支撑是
+  **实心**的:默认 `fillRate = 1`、`density = 1.9`(按实测校准)。
 
 行为由 `src/test/tools/pure/support-shell.test.ts` 守住。
 

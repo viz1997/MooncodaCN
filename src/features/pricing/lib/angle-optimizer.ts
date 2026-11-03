@@ -89,13 +89,15 @@ export type OptimalAngle = {
 /**
  * 支撑材料参数(校准面板的两个旋钮)
  *
- * - `fillRate` 蜂窝填充率:支撑材料的实心比例(支撑是蜂窝结构,不是实心)
+ * - `fillRate` 填充率:支撑材料的实心比例(支撑是**实心**的,默认 100%)
  * - `density` 支撑材料密度 (g/cm³)
  *
  * 支撑克重 = 包裹支撑体积 × 填充率 × 密度。体积完全由几何决定
  * (平台到模型下表面之间的空腔),没有第三个可调项 —— 之前那个
  * 「包裹间隙倍率」是检测工具画外壳时用的间隙(对角线 2%,0.8~5mm),
  * 算进体积会让支撑克重凭空高 10~30%,已经拿掉。
+ *
+ * 默认值按**实测校准**结果填:填充率 100%(支撑按实心算),密度 1.90 g/cm³。
  */
 export type SupportParams = {
   fillRate: number;
@@ -103,8 +105,8 @@ export type SupportParams = {
 };
 
 export const DEFAULT_SUPPORT_PARAMS: SupportParams = {
-  fillRate: 0.37,
-  density: 1.15,
+  fillRate: 1,
+  density: 1.9,
 };
 
 /** 悬垂阈值：法线 z 分量 < -cos(45°) ≈ -0.707 时为悬垂面（>45° 倾斜朝下） */

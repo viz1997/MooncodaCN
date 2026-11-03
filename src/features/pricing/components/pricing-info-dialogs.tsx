@@ -209,9 +209,6 @@ export function PricingInfoDialogs({
                 })}
               </tbody>
             </table>
-            <p className="text-xs text-stone-500 mt-3">
-              {t("info.products.hint")}
-            </p>
           </div>
         )}
 
