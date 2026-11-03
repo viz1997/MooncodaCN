@@ -23,6 +23,12 @@
  * transformation is O(n) — well under 100ms even for 100k vertices).
  */
 
+import {
+  baseName,
+  rewriteMtllib,
+  rewriteMtlTextureRefs,
+} from "@/features/pricing/lib/obj-materials";
+
 export type ExportRotation = {
   /** Degrees around X axis (in addition to the implicit -90° Z-up→Y-up) */
   rotX: number;
@@ -220,10 +226,102 @@ export function downloadObjFile(objText: string, filename: string): void {
 }
 
 /**
+ * zip 里 OBJ 条目的文件名 —— 去掉 3D 扩展名,统一成 `.obj`。
+ *
+ * 上传的可能是 `.stl` / `.glb`(这两种格式是我们自己合成的 OBJ 文本),
+ * 合并模型的 OBJ 名则是「3 个 OBJ 合并」这种没有扩展名的显示名 ——
+ * 直接当 zip entry 名写进去,工作室那边双击打不开。
+ */
+function objEntryName(fileName: string): string {
+  const base = baseName(fileName).trim();
+  if (!base) return "model.obj";
+  if (base.toLowerCase().endsWith(".obj")) return base;
+  const stem = base.replace(/\.(stl|glb|gltf|ply)$/i, "");
+  return `${stem || base}.obj`;
+}
+
+/**
+ * zip 里 MTL 条目的文件名 —— 统一成 `.mtl`。
+ */
+function mtlEntryName(fileName: string | undefined, fallback: string): string {
+  const base = baseName((fileName ?? "").trim()) || baseName(fallback);
+  if (!base) return "model.mtl";
+  if (base.toLowerCase().endsWith(".mtl")) return base;
+  const stem = base.replace(/\.[^.]+$/, "");
+  return `${stem || base}.mtl`;
+}
+
+/**
+ * 把纹理按 basename 平铺,重名的加序号后缀。
+ *
+ * 返回「包内原始路径 → 平铺后的名字」。
+ */
+function buildFlatTextureNames(
+  textureBlobs: { name: string; blob: Blob }[]
+): Map<string, string> {
+  const map = new Map<string, string>();
+  const used = new Set<string>();
+  for (const tb of textureBlobs) {
+    let flat = baseName(tb.name).trim();
+    if (!flat) flat = "texture";
+    if (used.has(flat.toLowerCase())) {
+      const dot = flat.lastIndexOf(".");
+      const stem = dot > 0 ? flat.slice(0, dot) : flat;
+      const suffix = dot > 0 ? flat.slice(dot) : "";
+      let n = 1;
+      let candidate = `${stem}_${n}${suffix}`;
+      while (used.has(candidate.toLowerCase())) {
+        n += 1;
+        candidate = `${stem}_${n}${suffix}`;
+      }
+      flat = candidate;
+    }
+    used.add(flat.toLowerCase());
+    map.set(tb.name, flat);
+  }
+  return map;
+}
+
+/**
+ * 做「MTL 里写的贴图名 → 包内实际文件」的解析器。
+ *
+ * 规则跟 `matchMaterialTextures` 一致:先按完整路径(忽略大小写)精确匹配,
+ * 再退到 basename 匹配。匹配不上返回 undefined —— **绝不乱指到别的图**。
+ */
+function makeTextureResolver(
+  textureBlobs: { name: string; blob: Blob }[],
+  flatNames: Map<string, string>
+): (ref: string) => string | undefined {
+  const byFullPath = new Map<string, string>();
+  const byBaseName = new Map<string, string>();
+  for (const tb of textureBlobs) {
+    const flat = flatNames.get(tb.name);
+    if (!flat) continue;
+    const full = tb.name.replace(/\\/g, "/").toLowerCase();
+    if (!byFullPath.has(full)) byFullPath.set(full, flat);
+    const base = baseName(tb.name).toLowerCase();
+    if (!byBaseName.has(base)) byBaseName.set(base, flat);
+  }
+  return (ref) => {
+    const full = ref.replace(/\\/g, "/").toLowerCase();
+    const exact = byFullPath.get(full);
+    if (exact) return exact;
+    return byBaseName.get(baseName(ref).toLowerCase());
+  };
+}
+
+/**
  * 打包 ZIP Blob（含 OBJ + MTL + 纹理），保留原始格式。
  *
  * 只打包、不下载 —— 打印服务下单时要把模型文件直传到 R2,得先有字节。
  * JSZip 动态导入（避免首屏加载时把压缩库打进 bundle）。
+ *
+ * ## 包内结构
+ *
+ * OBJ / MTL / 纹理**全部平铺到 zip 根目录**:
+ * MTL 里的 `map_Kd` 是相对路径,纹理一旦待在子目录(`textures/wood.png`),
+ * 而 MTL 写的是 `wood.png`,解压出来引用就断了 —— 这正是「导出的模型贴图丢失」
+ * 的原因。所以纹理按 basename 平铺,并同步改写 MTL 里的贴图引用。
  */
 export async function buildModelZipBlob(
   objText: string,
@@ -235,20 +333,37 @@ export async function buildModelZipBlob(
   const JSZip = (await import("jszip")).default;
   const zip = new JSZip();
 
+  const textures = textureBlobs ?? [];
+  const objEntry = objEntryName(objFileName);
+  const mtlEntry =
+    mtlText !== undefined ? mtlEntryName(mtlFileName, objEntry) : undefined;
+
+  // 纹理按 basename 平铺,重名加序号
+  const flatNames = buildFlatTextureNames(textures);
+
+  // MTL 里的贴图引用改成平铺后的名字(option token 原样保留)
+  const outMtlText =
+    mtlText !== undefined
+      ? rewriteMtlTextureRefs(mtlText, makeTextureResolver(textures, flatNames))
+      : undefined;
+
+  // OBJ 里的 mtllib 指向 zip 里 MTL 的实际名字
+  const outObjText = mtlEntry ? rewriteMtllib(objText, mtlEntry) : objText;
+
   // 添加 OBJ 文件（使用修改后的文本）
-  zip.file(objFileName, objText);
+  zip.file(objEntry, outObjText);
 
   // 添加 MTL 文件（如果有）
-  if (mtlText && mtlFileName) {
-    zip.file(mtlFileName, mtlText);
+  if (outMtlText !== undefined && mtlEntry) {
+    zip.file(mtlEntry, outMtlText);
   }
 
-  // 添加纹理文件（如果有）
-  if (textureBlobs && textureBlobs.length > 0) {
-    for (const { name, blob } of textureBlobs) {
-      const arrayBuffer = await blob.arrayBuffer();
-      zip.file(name, arrayBuffer);
-    }
+  // 添加纹理文件（如果有）—— 一律写平铺后的名字
+  for (const tb of textures) {
+    const flat = flatNames.get(tb.name);
+    if (!flat) continue;
+    const arrayBuffer = await tb.blob.arrayBuffer();
+    zip.file(flat, arrayBuffer);
   }
 
   return zip.generateAsync({

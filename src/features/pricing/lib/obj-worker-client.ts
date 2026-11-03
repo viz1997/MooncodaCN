@@ -53,6 +53,22 @@ export type ObjWorkerResult = {
   positions?: Float32Array;
   /** Per-vertex UVs, 6 floats per triangle. Present only when sendGeometry = true and `vt` lines exist */
   uvs?: Float32Array;
+  /**
+   * `usemtl` 声明的材质名,按首次出现顺序。
+   *
+   * Present only when sendGeometry = true and the OBJ actually declares materials.
+   * 材质分组是「每个材质挂自己的贴图」的前提 —— 丢掉它就只能整块模型挂一张图。
+   */
+  materialNames?: string[];
+  /** 每个三角形一个材质下标(指向 materialNames)。与 positions 的三角形顺序一一对应 */
+  materialIndex?: Uint16Array;
+  /**
+   * OBJ 里 `mtllib` 声明的材质表文件名。
+   *
+   * 压缩包里可能有好几个 `.mtl`,真正配套的那个由 `mtllib` 指明 ——
+   * 拿「第一个 .mtl」就是贴图错乱的常见来源。
+   */
+  mtllibNames?: string[];
 };
 
 export type ObjWorkerError = {
@@ -72,7 +88,10 @@ export type ObjWorkerOptions = {
 // Worker script (inline string, served via Blob URL)
 // ---------------------------------------------------------------------------
 
-const WORKER_SOURCE = `
+/**
+ * Worker 源码(纯字符串,导出供单测在 Node 里直接跑)。
+ */
+export const WORKER_SOURCE = `
 "use strict";
 self.onmessage = function (e) {
   try {
@@ -90,7 +109,11 @@ self.onmessage = function (e) {
     // ---- Pass 1: vertices + uvs (0-30%) -----------------------------------
     var vertices = [];  // flat [x,y,z, ...]
     var uvs = [];       // flat [u,v, ...]
-    var faces = [];     // each entry: { v: number[], t: number[] } (vertex indices, tex indices, 0-based)
+    var faces = [];     // each entry: { v: number[], t: number[], m: number } (顶点下标 / 贴图下标 / 材质下标, 0-based)
+    var materialNames = [];        // usemtl 材质名,按首次出现顺序
+    var materialLookup = {};       // 材质名 → materialNames 下标
+    var currentMaterial = -1;      // 当前 usemtl 指向的材质下标(-1 = 还没声明过)
+    var mtllibNames = [];          // OBJ 声明的 mtllib 文件名
 
     var i, j, line, sp, cmd, rest, parts;
 
@@ -117,6 +140,12 @@ self.onmessage = function (e) {
         parts = rest.split(/\\s+/);
         uvs.push(parseFloat(parts[0]) || 0);
         uvs.push(parseFloat(parts[1]) || 0);
+      } else if (cmd === 'mtllib') {
+        // mtllib 一行可以写多个文件名
+        var mtlTokens = rest.split(/\\s+/);
+        for (j = 0; j < mtlTokens.length; j++) {
+          if (mtlTokens[j]) mtllibNames.push(mtlTokens[j]);
+        }
       }
 
       if ((i & 8191) === 0) {
@@ -143,9 +172,22 @@ self.onmessage = function (e) {
       if (sp < 0) sp = line.indexOf('\\t');
       if (sp < 0) continue;
       cmd = line.substring(0, sp);
+      rest = line.substring(sp + 1).trim();
+
+      // usemtl 切换当前材质 —— 之后的每个面都归它
+      if (cmd === 'usemtl') {
+        var mname = rest.trim();
+        if (mname) {
+          if (materialLookup[mname] === undefined) {
+            materialLookup[mname] = materialNames.length;
+            materialNames.push(mname);
+          }
+          currentMaterial = materialLookup[mname];
+        }
+        continue;
+      }
       if (cmd !== 'f') continue;
 
-      rest = line.substring(sp + 1).trim();
       var tokens = rest.split(/\\s+/);
       var vIdx = [];
       var tIdx = [];
@@ -154,13 +196,16 @@ self.onmessage = function (e) {
         if (!tok) continue;
         var slashes = tok.split('/');
         var vi = parseInt(slashes[0], 10);
-        var ti = slashes.length > 1 && slashes[1] ? parseInt(slashes[1], 10) : 0;
+        var ti = slashes.length > 1 && slashes[1] ? parseInt(slashes[1], 10) : NaN;
         if (vi > 0) vIdx.push(vi - 1);
         else if (vi < 0) vIdx.push(vertexCount + vi);
+        else continue; // 顶点下标非法 → 整个角丢掉(vIdx / tIdx 必须等长)
+        // 该角没有 vt → 记 -1,后面逐角兜底(而不是让整面 UV 归零)
         if (ti > 0) tIdx.push(ti - 1);
         else if (ti < 0) tIdx.push(uvCount + ti);
+        else tIdx.push(-1);
       }
-      if (vIdx.length >= 3) faces.push({ v: vIdx, t: tIdx });
+      if (vIdx.length >= 3) faces.push({ v: vIdx, t: tIdx, m: currentMaterial });
 
       if ((i & 8191) === 0) {
         self.postMessage({
@@ -191,9 +236,11 @@ self.onmessage = function (e) {
 
     var positions = null;
     var uvArray = null;
+    var materialIndex = null;
     if (sendGeometry) {
       positions = new Float32Array(totalTriangles * 9);
       if (uvCount > 0) uvArray = new Float32Array(totalTriangles * 6);
+      if (materialNames.length > 0) materialIndex = new Uint16Array(totalTriangles);
     }
     var posIdx = 0;
     var uvIdx2 = 0;
@@ -209,7 +256,9 @@ self.onmessage = function (e) {
       var nv = vi.length;
       if (nv < 3) continue;
 
+      // 逐角取 UV —— 该角没有 vt 就退 (0,0),不再让整面 UV 归零
       var hasUv = uvArray !== null && ti2.length === nv;
+      var t0 = hasUv ? ti2[0] : -1;
 
       for (j = 1; j < nv - 1; j++) {
         var a0 = vi[0] * 3;
@@ -237,24 +286,27 @@ self.onmessage = function (e) {
 
         triangleCount++;
 
+        if (materialIndex) {
+          // -1 = 还没声明 usemtl → 归到第一个材质
+          materialIndex[triangleCount - 1] = f.m >= 0 ? f.m : 0;
+        }
+
         if (positions) {
           positions[posIdx++] = v0x; positions[posIdx++] = v0y; positions[posIdx++] = v0z;
           positions[posIdx++] = v1x; positions[posIdx++] = v1y; positions[posIdx++] = v1z;
           positions[posIdx++] = v2x; positions[posIdx++] = v2y; positions[posIdx++] = v2z;
 
           if (uvArray) {
-            if (hasUv) {
-              var u0 = ti2[0] * 2;
-              var u1 = ti2[j] * 2;
-              var u2 = ti2[j + 1] * 2;
-              uvArray[uvIdx2++] = uvs[u0];     uvArray[uvIdx2++] = uvs[u0 + 1];
-              uvArray[uvIdx2++] = uvs[u1];     uvArray[uvIdx2++] = uvs[u1 + 1];
-              uvArray[uvIdx2++] = uvs[u2];     uvArray[uvIdx2++] = uvs[u2 + 1];
-            } else {
-              uvArray[uvIdx2++] = 0; uvArray[uvIdx2++] = 0;
-              uvArray[uvIdx2++] = 0; uvArray[uvIdx2++] = 0;
-              uvArray[uvIdx2++] = 0; uvArray[uvIdx2++] = 0;
-            }
+            // 逐角兜底:该角没有 vt → (0,0),其余角照旧
+            var tu0 = t0;
+            var tu1 = hasUv ? ti2[j] : -1;
+            var tu2 = hasUv ? ti2[j + 1] : -1;
+            uvArray[uvIdx2++] = tu0 >= 0 ? uvs[tu0 * 2] : 0;
+            uvArray[uvIdx2++] = tu0 >= 0 ? uvs[tu0 * 2 + 1] : 0;
+            uvArray[uvIdx2++] = tu1 >= 0 ? uvs[tu1 * 2] : 0;
+            uvArray[uvIdx2++] = tu1 >= 0 ? uvs[tu1 * 2 + 1] : 0;
+            uvArray[uvIdx2++] = tu2 >= 0 ? uvs[tu2 * 2] : 0;
+            uvArray[uvIdx2++] = tu2 >= 0 ? uvs[tu2 * 2 + 1] : 0;
           }
         }
       }
@@ -287,6 +339,7 @@ self.onmessage = function (e) {
       volumeCM3: volumeCM3,
       surfaceAreaMM2: surfaceAreaMM2,
       surfaceAreaCM2: surfaceAreaCM2,
+      mtllibNames: mtllibNames,
     };
 
     if (sendGeometry && positions) {
@@ -295,11 +348,16 @@ self.onmessage = function (e) {
         // Trim UV buffer in case some faces had no UVs (already zero-filled above, but keep slice for safety)
         result.uvs = uvArray.length === uvIdx2 ? uvArray : uvArray.slice(0, uvIdx2);
       }
+      if (materialIndex) {
+        result.materialNames = materialNames;
+        result.materialIndex = materialIndex;
+      }
     }
 
     var transfer = [];
     if (result.positions) transfer.push(result.positions.buffer);
     if (result.uvs) transfer.push(result.uvs.buffer);
+    if (result.materialIndex) transfer.push(result.materialIndex.buffer);
 
     self.postMessage({ type: 'result', result: result }, transfer);
   } catch (err) {

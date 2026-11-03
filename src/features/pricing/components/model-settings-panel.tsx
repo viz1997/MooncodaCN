@@ -379,6 +379,7 @@ export function ModelSettingsPanel({
                 objText={model.objText}
                 mtlText={model.mtlText}
                 textureBlobUrl={model.previewUrl}
+                textureUrls={model.textureUrls}
                 dims={geometry.dims}
                 rotationX={viewerRotX}
                 rotationY={viewerRotY}

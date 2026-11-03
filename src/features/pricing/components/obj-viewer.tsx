@@ -4,7 +4,11 @@ import { AlertCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { MTLLoader } from "three/examples/jsm/loaders/MTLLoader.js";
+import {
+  type MaterialInfo,
+  MTLLoader,
+} from "three/examples/jsm/loaders/MTLLoader.js";
+import type { TextureUrlMap } from "@/features/pricing/lib/obj-materials";
 import { parseObjInWorker } from "@/features/pricing/lib/obj-worker-client";
 import {
   buildSupportShell,
@@ -23,12 +27,22 @@ import {
  * 2026-11-02:支撑可视化改用**模型检查工具的包裹支撑几何**
  * (`src/features/tools/lib/mesh/support-shell.ts`)——跟克重算法同一套算出来的,
  * 画面里的支撑体就是报价里算克重的那块支撑。
+ *
+ * 2026-11-03:**按材质分组渲染**,每个材质挂它自己 `map_Kd` 指向的贴图。
+ * 之前是「整块模型挂一张图」—— 多材质模型必然贴错。
  */
 
 type Props = {
   objText: string;
   mtlText?: string | undefined;
   textureBlobUrl?: string | undefined;
+  /**
+   * 材质名 → 该材质自己的贴图 blob URL。
+   *
+   * 多材质模型靠它把贴图分对 —— 没有对应贴图的材质不挂贴图(退回材质本色),
+   * 绝不拿别的图顶替。
+   */
+  textureUrls?: TextureUrlMap | undefined;
   /** Current display dimensions [X, Y, Z] in mm - shown as annotations on the bounding box */
   dims?: [number, number, number] | undefined;
   /** Rotation around X axis in degrees (for optimal print angle preview) */
@@ -47,6 +61,25 @@ type Props = {
   onProgress?: ((percent: number) => void) | undefined;
   className?: string | undefined;
 };
+
+/**
+ * 把材质的贴图指令换成它自己的 blob URL。
+ *
+ * 没有对应贴图时必须 `delete` 而不是置 undefined ——
+ * `MTLLoader` 会对每个非空指令值调 `getTextureParams(value)`,
+ * undefined 会在里面炸掉。
+ */
+function patchTextureRef(
+  info: MaterialInfo,
+  key: "map_kd" | "map_ks" | "norm",
+  url: string | undefined
+): void {
+  if (url) {
+    info[key] = url;
+  } else if (info[key] !== undefined) {
+    delete info[key];
+  }
+}
 
 // Yield to the UI thread so progress callbacks and other tasks can run.
 const yieldToUI = (): Promise<void> =>
@@ -67,6 +100,7 @@ export function ObjViewer({
   objText,
   mtlText,
   textureBlobUrl,
+  textureUrls,
   dims,
   rotationX,
   rotationY,
@@ -576,43 +610,67 @@ export function ObjViewer({
         onProgressRef.current?.(88);
         await yieldToUI();
 
-        // 3. Materials - parse MTL if provided
-        // FIX: patch map_kd texture path BEFORE preload() so the TextureLoader
-        // resolves the blob URL when materials are constructed.
-        let firstMaterial: THREE.Material | null = null;
+        // 3. 材质 —— 按 OBJ 的 `usemtl` 分组渲染
+        //
+        // 关键点:
+        //  - 贴图路径必须在 `preload()` 之前 patch 好 —— MTLLoader.preload()
+        //    同步建材质并同步挂上 map(图片异步载入)。
+        //  - 每个材质换成**它自己**的 blob URL,不是「所有材质共用一张」。
+        //  - 没有对应贴图的材质:把 `map_Kd` 指令删掉,让它退回材质本色 ——
+        //    挂上别的图就是「贴图错乱」。
+        const slots: THREE.Material[] = [];
+        let singleMaterial: THREE.Material | null = null;
         if (mtlText) {
           try {
             const mtlLoader = new MTLLoader();
             const creator = mtlLoader.parse(mtlText, "");
 
-            // Patch texture paths BEFORE preload
-            if (textureBlobUrl && creator.materialsInfo) {
-              Object.values(creator.materialsInfo).forEach((info) => {
-                if (info.map_kd !== undefined) {
-                  info.map_kd = textureBlobUrl;
-                }
-              });
+            // 每个材质换成它自己的贴图(baseUrl 保持空串,blob: URL 才能原样通过)
+            for (const [name, info] of Object.entries(creator.materialsInfo)) {
+              const urls = textureUrls?.[name];
+              patchTextureRef(info, "map_kd", urls?.map);
+              patchTextureRef(info, "map_ks", urls?.specularMap);
+              patchTextureRef(info, "norm", urls?.normalMap);
             }
 
             creator.preload();
 
-            // Material brightness check: if RGB < 0.1 across all channels, set to 0xcccccc
-            // This prevents invisible black meshes when the MTL specifies Ka/Kd of 0,0,0
-            const materials = creator.materials;
-            if (materials) {
-              const matList = Object.values(materials);
-              for (const mat of matList) {
-                // MTLLoader 产出的是 MeshPhongMaterial（同样带 color 属性）
-                const color = (mat as THREE.MeshPhongMaterial).color;
-                if (color.r < 0.1 && color.g < 0.1 && color.b < 0.1) {
-                  color.setHex(0xcccccc);
-                  mat.needsUpdate = true;
-                }
+            // 亮度兜底:
+            //  - 有贴图的材质:Kd 全黑会把贴图乘成黑色 → 改成白色(让贴图原色显示)
+            //  - 没贴图的材质:Kd 全黑 → 0xcccccc,免得在浅色背景里看不见
+            for (const mat of Object.values(creator.materials)) {
+              // MTLLoader 产出的是 MeshPhongMaterial（同样带 color 属性）
+              const phong = mat as THREE.MeshPhongMaterial;
+              const color = phong.color;
+              if (!color) continue;
+              const isBlack = color.r < 0.1 && color.g < 0.1 && color.b < 0.1;
+              if (!isBlack) continue;
+              if (phong.map) {
+                color.setHex(0xffffff);
+              } else {
+                color.setHex(0xcccccc);
               }
-              const first = matList[0];
-              if (first) {
-                firstMaterial = first;
-              }
+              mat.needsUpdate = true;
+            }
+
+            // 材质槽位:按 OBJ 里 usemtl 的首次出现顺序
+            const materialNames = workerResult.materialNames ?? [];
+            for (const name of materialNames) {
+              const mat = creator.materials[name];
+              slots.push(
+                mat ??
+                  new THREE.MeshStandardMaterial({
+                    color: 0xcccccc,
+                    roughness: 0.6,
+                    metalness: 0.05,
+                  })
+              );
+            }
+
+            // OBJ 没写 usemtl → 整块模型用 MTL 里的第一个材质
+            if (slots.length === 0) {
+              const first = Object.values(creator.materials)[0];
+              if (first) singleMaterial = first;
             }
           } catch (e) {
             console.warn("MTL parse failed, falling back:", e);
@@ -623,9 +681,13 @@ export function ObjViewer({
         onProgressRef.current?.(92);
         await yieldToUI();
 
-        // 4. Texture (fallback if no MTL, or to attach to a basic material)
+        // 4. 兜底贴图 —— 只在没有 MTL 材质时用
+        //
+        // 几何体没有 `uv` 属性时**不能**挂贴图:three.js 会去采样 (0,0) 那个
+        // 像素,整块模型糊成一片(比白模还难看)。
+        const hasUv = Boolean(workerResult.uvs && workerResult.uvs.length > 0);
         let texture: THREE.Texture | undefined;
-        if (textureBlobUrl) {
+        if (textureBlobUrl && hasUv) {
           try {
             // 先尝试直接加载
             const texLoader = new THREE.TextureLoader();
@@ -671,18 +733,29 @@ export function ObjViewer({
         onProgressRef.current?.(95);
         await yieldToUI();
 
-        // 5. Pick material: MTL > fallback standard with optional texture
-        let material: THREE.Material;
-        if (firstMaterial) {
-          material = firstMaterial;
-          // 如果 MTL 已加载了纹理，不需要额外设置 flipY
-          if (texture) {
-            const phongMat = material as THREE.MeshPhongMaterial;
-            if (phongMat.isMeshPhongMaterial && !phongMat.map) {
-              phongMat.map = texture;
-              phongMat.needsUpdate = true;
+        // 5. 选材质:
+        //    - 有 `usemtl` 分组 → 材质数组 + geometry groups(每个材质一块)
+        //    - 没有分组 → 整块用单个材质
+        let material: THREE.Material | THREE.Material[];
+        if (slots.length > 0) {
+          material = slots;
+          // 把三角汤按材质切成连续段 —— 非索引几何,group 的 start/count 是顶点数
+          const materialIndex = workerResult.materialIndex;
+          if (materialIndex && materialIndex.length > 0) {
+            let groupStart = 0;
+            for (let t = 0; t <= materialIndex.length; t++) {
+              const prev = materialIndex[groupStart] ?? 0;
+              const cur =
+                t < materialIndex.length ? (materialIndex[t] ?? 0) : -1;
+              if (t === materialIndex.length || cur !== prev) {
+                const count = (t - groupStart) * 3;
+                if (count > 0) geometry.addGroup(groupStart * 3, count, prev);
+                groupStart = t;
+              }
             }
           }
+        } else if (singleMaterial) {
+          material = singleMaterial;
         } else {
           material = new THREE.MeshStandardMaterial({
             color: 0xcccccc,
@@ -750,7 +823,7 @@ export function ObjViewer({
     return () => {
       cancelled = true;
     };
-  }, [objText, mtlText, textureBlobUrl]);
+  }, [objText, mtlText, textureBlobUrl, textureUrls]);
 
   // Update axis annotations when dims change (without reloading the model)
   // biome-ignore lint/correctness/useExhaustiveDependencies: 只在尺寸变化时刷新标注

@@ -32,7 +32,11 @@ import {
   type PricingInput,
   scaleGeometry,
 } from "./pricing-engine";
-import { extractModelZip, type ModelFile } from "./zip-extractor";
+import {
+  extractModelZip,
+  type ModelFile,
+  revokeModelTextureUrls,
+} from "./zip-extractor";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -247,6 +251,11 @@ export async function processBatch(
           return;
         }
         model = extractResult.model;
+        // 批量模式不渲染 3D 预览 —— 贴图的 blob URL 用不上,直接回收
+        // (每个文件都建一份 URL,不回收的话批量跑几百个就把内存撑爆了)
+        revokeModelTextureUrls(model);
+        model.previewUrl = undefined;
+        model.textureUrls = undefined;
       } catch (err) {
         update(item, {
           status: "error",

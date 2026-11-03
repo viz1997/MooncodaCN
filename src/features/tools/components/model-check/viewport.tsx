@@ -11,6 +11,10 @@ import { useCallback, useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
+  parseMtl,
+  type TextureUrlMap,
+} from "@/features/pricing/lib/obj-materials";
+import {
   type AnalysisResult,
   FACE_FLAG,
   ISSUE_COLORS,
@@ -29,10 +33,33 @@ export interface ViewportVisibility {
   outline: boolean;
 }
 
+/**
+ * 模型的贴图与材质分组信息。
+ *
+ * 全部来自 OBJ 的 `usemtl` / `vt` 与 MTL 的 `map_Kd` ——
+ * 没有它们就只能是灰模(白模)。
+ */
+export interface MeshTextureInfo {
+  /** 顶点 UV,6 floats per triangle(模型没有 `vt` 时为 null) */
+  uvs: Float32Array | null;
+  /** `usemtl` 声明的材质名(按首次出现顺序) */
+  materialNames: string[];
+  /** 每三角形一个材质下标(指向 materialNames) */
+  materialIndex: Uint16Array | null;
+  /** MTL 文本 */
+  mtlText: string | null;
+  /** 材质名 → 该材质自己的贴图 blob URL */
+  textureUrls: TextureUrlMap | null;
+}
+
 interface ViewportProps {
   result: AnalysisResult | null;
   /** 三角汤坐标(主线程持有),9 floats per triangle */
   meshPositions: Float32Array | null;
+  /** 贴图与材质分组(没有贴图的模型传 null) */
+  textures: MeshTextureInfo | null;
+  /** 是否显示贴图(用户可在图例栏切换) */
+  showTexture: boolean;
   visibility: ViewportVisibility;
   /** 是否显示包裹支撑外壳(WJP 水溶性支撑示意) */
   showSupport: boolean;
@@ -49,6 +76,8 @@ interface ViewportProps {
 
 const BASE_COLOR = new THREE.Color("#9aa3ad");
 const BASE_DIM = new THREE.Color("#565d66");
+/** 有贴图时干净面的顶点色 —— 白色才不压暗贴图 */
+const TEXTURED_COLOR = new THREE.Color(0xffffff);
 
 /** 面片级问题是否真实存在(按分析统计判断,避免无问题时也压暗模型) */
 function faceIssuePresent(s: AnalysisResult["stats"]): {
@@ -128,6 +157,8 @@ function faceColor(
 export default function Viewport({
   result,
   meshPositions,
+  textures,
+  showTexture,
   visibility,
   showSupport,
   focusRequest,
@@ -159,7 +190,10 @@ export default function Viewport({
   } | null>(null);
   const visibilityRef = useRef(visibility);
   const showSupportRef = useRef(showSupport);
+  const showTextureRef = useRef(showTexture);
   const resultRef = useRef(result);
+  /** 每个材质槽位有没有贴图(重着色时决定干净面用白色还是灰色) */
+  const slotHasMapRef = useRef<boolean[]>([]);
   /** 悬停提示文案(事件回调只读 ref,避免每次 pointermove 都跑一遍翻译) */
   const tooltipTextsRef = useRef<Record<string, string>>({});
 
@@ -176,6 +210,9 @@ export default function Viewport({
   useEffect(() => {
     visibilityRef.current = visibility;
   }, [visibility]);
+  useEffect(() => {
+    showTextureRef.current = showTexture;
+  }, [showTexture]);
   useEffect(() => {
     showSupportRef.current = showSupport;
     if (supportRef.current) supportRef.current.visible = showSupport;
@@ -368,7 +405,9 @@ export default function Viewport({
       ]) {
         if (o) {
           o.geometry.dispose();
-          (o.material as THREE.Material).dispose();
+          // 多材质模型:material 是数组
+          const mats = Array.isArray(o.material) ? o.material : [o.material];
+          for (const m of mats) m.dispose();
         }
       }
       meshRef.current = null;
@@ -418,10 +457,76 @@ export default function Viewport({
     const vis = visibilityRef.current;
     // 有真实问题面时才压暗其余面(有问题才需要显示)
     const dimBase = hasVisibleFaceIssues(stats, vis);
+
+    // ---------- 材质与贴图 ----------
+    // 材质槽位:优先按 OBJ 的 `usemtl` 分组;OBJ 没写 usemtl 时用 MTL 的第一个材质
+    const mtlList = textures?.mtlText ? parseMtl(textures.mtlText) : [];
+    const mtlByName = new Map(mtlList.map((m) => [m.name, m]));
+    const uvs = textures?.uvs ?? null;
+    // 几何体没有 uv 时**不能**挂贴图 —— three.js 会去采样 (0,0),整块糊成一片
+    const hasUv = !!uvs && uvs.length >= triCount * 6;
+    const materialIndex = textures?.materialIndex ?? null;
+    const slotNames =
+      textures?.materialNames && textures.materialNames.length > 0
+        ? textures.materialNames
+        : mtlList.length > 0
+          ? [mtlList[0]!.name]
+          : [];
+
+    const textureLoader = new THREE.TextureLoader();
+    const slots: THREE.Material[] = [];
+    const slotHasMap: boolean[] = [];
+    const slotHasKd: boolean[] = [];
+    for (const name of slotNames) {
+      const mat = new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        flatShading: true,
+        side: THREE.DoubleSide,
+        roughness: 0.75,
+        metalness: 0.05,
+        polygonOffset: true,
+        polygonOffsetFactor: 1,
+        polygonOffsetUnits: 1,
+      });
+      const url = hasUv ? textures?.textureUrls?.[name]?.map : undefined;
+      const kd = mtlByName.get(name)?.kd;
+      slotHasKd.push(Boolean(kd));
+      if (url) {
+        const map = textureLoader.load(url);
+        map.colorSpace = THREE.SRGBColorSpace;
+        // 贴图开关关掉时只摘掉 map,贴图本体留着(切回来不用重新下载)
+        mat.userData.baseMap = map;
+        mat.map = showTextureRef.current ? map : null;
+        mat.needsUpdate = true;
+        slotHasMap.push(true);
+      } else {
+        // 没有贴图的材质:用 MTL 的 Kd 本色(没有 Kd 就退回白,顶点色负责外观)
+        if (kd) {
+          mat.color.setRGB(kd[0], kd[1], kd[2], THREE.SRGBColorSpace);
+        }
+        slotHasMap.push(false);
+      }
+      slots.push(mat);
+    }
+    slotHasMapRef.current = slotHasMap;
+
     for (let f = 0; f < triCount; f++) {
+      const slot = materialIndex ? (materialIndex[f] ?? 0) : 0;
+      const textured = showTextureRef.current && slotHasMap[slot] === true;
       faceColor(flags[f] ?? 0, faceComponent[f] ?? 0, vis, color);
-      if (color.getHex() === BASE_COLOR.getHex() && dimBase)
-        color.copy(BASE_DIM);
+      if (color.getHex() === BASE_COLOR.getHex()) {
+        // 干净面:
+        //  - 有贴图 → 白色(别把贴图压暗 40%)
+        //  - 无贴图但有 Kd → 白色(让 Kd 原色显示);有问题时压暗
+        //  - 两者都没有 → 灰色(跟原来一致)
+        if (textured) {
+          color.copy(TEXTURED_COLOR);
+        } else if (slotHasKd[slot]) {
+          color.copy(dimBase ? BASE_DIM : TEXTURED_COLOR);
+        } else if (dimBase) {
+          color.copy(BASE_DIM);
+        }
+      }
       for (let v = 0; v < 3; v++) {
         colors[f * 9 + v * 3] = color.r;
         colors[f * 9 + v * 3 + 1] = color.g;
@@ -431,6 +536,12 @@ export default function Viewport({
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    if (hasUv && uvs) {
+      geo.setAttribute(
+        "uv",
+        new THREE.BufferAttribute(uvs.subarray(0, triCount * 6), 2)
+      );
+    }
     geo.computeVertexNormals();
     geo.computeBoundingBox();
     const bb = geo.boundingBox!;
@@ -445,6 +556,25 @@ export default function Viewport({
     group.position.z = -bb.min.z;
     scene.add(group);
     groupRef.current = group;
+
+    if (slots.length > 0) {
+      // 材质分组:把三角汤按材质切成连续段(非索引几何,group 的 start/count 是顶点数)
+      const idx = materialIndex;
+      if (idx && idx.length > 0) {
+        let groupStart = 0;
+        for (let t = 0; t <= idx.length; t++) {
+          const prev = idx[groupStart] ?? 0;
+          const cur = t < idx.length ? (idx[t] ?? 0) : -1;
+          if (t === idx.length || cur !== prev) {
+            const count = (t - groupStart) * 3;
+            if (count > 0) geo.addGroup(groupStart * 3, count, prev);
+            groupStart = t;
+          }
+        }
+      } else {
+        geo.addGroup(0, triCount * 3, 0);
+      }
+    }
     const mat = new THREE.MeshStandardMaterial({
       vertexColors: true,
       flatShading: true,
@@ -455,7 +585,7 @@ export default function Viewport({
       polygonOffsetFactor: 1,
       polygonOffsetUnits: 1,
     });
-    const mesh = new THREE.Mesh(geo, mat);
+    const mesh = new THREE.Mesh(geo, slots.length > 0 ? slots : mat);
     group.add(mesh);
     meshRef.current = mesh;
 
@@ -633,9 +763,23 @@ export default function Viewport({
 
     // 视角适配
     fitCamera();
-  }, [result, meshPositions, fitCamera]);
+  }, [result, meshPositions, textures, fitCamera]);
 
-  // ---------- 可见性变化 → 重新着色 ----------
+  // ---------- 贴图开关:摘掉 / 挂回各材质自己的贴图 ----------
+  useEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const m of mats) {
+      const std = m as THREE.MeshStandardMaterial;
+      const baseMap = std.userData.baseMap as THREE.Texture | undefined;
+      if (!baseMap) continue;
+      std.map = showTexture ? baseMap : null;
+      std.needsUpdate = true;
+    }
+  }, [showTexture]);
+
+  // ---------- 可见性 / 贴图开关变化 → 重新着色 ----------
   useEffect(() => {
     const mesh = meshRef.current;
     // 直接读 prop 而不是 resultRef:结果变了要重着色,ref 要等上面那个 effect
@@ -648,11 +792,21 @@ export default function Viewport({
     const flags = r.flags;
     const comps = r.faceComponent;
     const dimBase = hasVisibleFaceIssues(r.stats, visibility);
+    const slotHasMap = slotHasMapRef.current;
+    const materialIndex = textures?.materialIndex ?? null;
     const color = new THREE.Color();
     for (let f = 0; f < r.stats.triangleCount; f++) {
+      const slot = materialIndex ? (materialIndex[f] ?? 0) : 0;
+      const textured = showTexture && slotHasMap[slot] === true;
       faceColor(flags[f] ?? 0, comps[f] ?? 0, visibility, color);
-      if (color.getHex() === BASE_COLOR.getHex() && dimBase)
-        color.copy(BASE_DIM);
+      if (color.getHex() === BASE_COLOR.getHex()) {
+        // 干净面:有贴图 → 白色(别压暗贴图);否则沿用原来的灰色 / 压暗
+        if (textured) {
+          color.copy(TEXTURED_COLOR);
+        } else if (dimBase) {
+          color.copy(BASE_DIM);
+        }
+      }
       for (let v = 0; v < 3; v++)
         colorAttr.setXYZ(f * 3 + v, color.r, color.g, color.b);
     }
@@ -669,7 +823,7 @@ export default function Viewport({
     if (lineRefs.current.outline) {
       lineRefs.current.outline.visible = visibility.outline;
     }
-  }, [visibility, result]);
+  }, [visibility, result, showTexture, textures]);
 
   // ---------- 聚焦动画 ----------
   useEffect(() => {

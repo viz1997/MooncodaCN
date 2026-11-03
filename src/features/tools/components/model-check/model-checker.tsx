@@ -5,6 +5,7 @@ import {
   CircleAlert,
   CircleCheck,
   Loader2,
+  Palette,
   RotateCcw,
   Shell,
   Upload,
@@ -37,7 +38,10 @@ import {
 } from "@/features/tools/lib/model-loader";
 import Sidebar from "./sidebar";
 import { useAnalyzer } from "./use-analyzer";
-import Viewport, { type ViewportVisibility } from "./viewport";
+import Viewport, {
+  type MeshTextureInfo,
+  type ViewportVisibility,
+} from "./viewport";
 
 /**
  * 图层默认开关:对应参考软件检测面板
@@ -72,6 +76,10 @@ type LoadedState = {
   positions: Float32Array;
   /** 展示用文件名 */
   fileName: string;
+  /** 贴图与材质分组(模型自带 MTL + 贴图时才有内容) */
+  textures: MeshTextureInfo | null;
+  /** 释放贴图 blob URL */
+  releaseTextures: () => void;
 };
 
 export function ModelChecker() {
@@ -80,6 +88,7 @@ export function ModelChecker() {
   const [visibility, setVisibility] =
     useState<ViewportVisibility>(ALL_VISIBILITY);
   const [showSupport, setShowSupport] = useState(false);
+  const [showTexture, setShowTexture] = useState(true);
   const [focusRequest, setFocusRequest] = useState<{
     seq: number;
     point: [number, number, number] | null;
@@ -93,6 +102,8 @@ export function ModelChecker() {
   const [dragOver, setDragOver] = useState(false);
   const focusSeq = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /** 当前模型的贴图 blob URL 释放函数(换模型 / 卸载时调用) */
+  const releaseTexturesRef = useRef<(() => void) | null>(null);
 
   const { state, run } = useAnalyzer();
   const { result, busy, stage, pct, error } = state;
@@ -103,6 +114,14 @@ export function ModelChecker() {
     }
   }, [model, run]);
 
+  // 卸载时回收贴图 blob URL
+  useEffect(() => {
+    return () => {
+      releaseTexturesRef.current?.();
+      releaseTexturesRef.current = null;
+    };
+  }, []);
+
   const loadFile = useCallback(async (file: File) => {
     setLoadError(null);
     setLoading(true);
@@ -111,8 +130,23 @@ export function ModelChecker() {
       const loaded = await loadModelGeometry(file, (p) =>
         setLoadingPct(p.percent)
       );
+      // 换模型前先把上一个模型的贴图 URL 回收掉
+      releaseTexturesRef.current?.();
+      releaseTexturesRef.current = loaded.releaseTextures;
       setVisibility(ALL_VISIBILITY);
-      setModel({ positions: loaded.positions, fileName: loaded.fileName });
+      setShowTexture(true);
+      setModel({
+        positions: loaded.positions,
+        fileName: loaded.fileName,
+        textures: {
+          uvs: loaded.uvs,
+          materialNames: loaded.materialNames,
+          materialIndex: loaded.materialIndex,
+          mtlText: loaded.mtlText,
+          textureUrls: loaded.textureUrls,
+        },
+        releaseTextures: loaded.releaseTextures,
+      });
     } catch (e) {
       setLoadError(
         e instanceof ModelLoadError ? e.ref : { key: "errors.parseFailed" }
@@ -170,6 +204,11 @@ export function ModelChecker() {
   const activeLegend = issuePresent
     ? LEGEND_ITEMS.filter((item) => issuePresent[item.key])
     : [];
+  // 模型自带贴图时才显示「显示贴图 / 纯色」开关
+  const hasTexture = useMemo(
+    () => Object.keys(model?.textures?.textureUrls ?? {}).length > 0,
+    [model]
+  );
 
   return (
     <div className="flex h-[min(820px,78vh)] min-h-[560px] flex-col overflow-hidden rounded-xl border border-border/70 bg-zinc-950 text-zinc-100 shadow-sm">
@@ -256,6 +295,8 @@ export function ModelChecker() {
           <Viewport
             result={result}
             meshPositions={model?.positions ?? null}
+            textures={model?.textures ?? null}
+            showTexture={showTexture}
             visibility={visibility}
             showSupport={showSupport}
             focusRequest={focusRequest}
@@ -295,6 +336,22 @@ export function ModelChecker() {
                 className="mx-0.5 hidden h-4 w-px bg-zinc-700 sm:block"
                 aria-hidden
               />
+              {hasTexture && (
+                <button
+                  type="button"
+                  aria-pressed={showTexture}
+                  title={t("legend.textureTitle")}
+                  onClick={() => setShowTexture((v) => !v)}
+                  className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${
+                    showTexture
+                      ? "bg-emerald-500/15 text-emerald-300"
+                      : "text-zinc-500 hover:text-zinc-300"
+                  }`}
+                >
+                  <Palette className="h-3.5 w-3.5" aria-hidden />
+                  {t("legend.texture")}
+                </button>
+              )}
               <button
                 type="button"
                 aria-pressed={showSupport}

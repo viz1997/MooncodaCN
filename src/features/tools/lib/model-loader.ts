@@ -1,5 +1,6 @@
 "use client";
 
+import type { TextureUrlMap } from "@/features/pricing/lib/obj-materials";
 /**
  * 模型文件读取 —— 复用克重工具(/tools/weight)的解压管线
  *
@@ -23,6 +24,7 @@ import {
 } from "@/features/pricing/lib/obj-worker-client";
 import {
   extractModelZip,
+  revokeModelTextureUrls,
   type ZipExtractResult,
 } from "@/features/pricing/lib/zip-extractor";
 import type { MessageRef } from "./mesh/types";
@@ -60,6 +62,20 @@ export type LoadedModel = {
   positions: Float32Array;
   triangleCount: number;
   vertexCount: number;
+  /** 顶点 UV,6 floats / 三角面(模型没有 `vt` 时为 null) */
+  uvs: Float32Array | null;
+  /** `usemtl` 声明的材质名(按首次出现顺序) */
+  materialNames: string[];
+  /** 每三角形一个材质下标(指向 materialNames);模型没声明材质时为 null */
+  materialIndex: Uint16Array | null;
+  /** MTL 文本(压缩包里没带材质表时为 null) */
+  mtlText: string | null;
+  /** 材质名 → 该材质自己的贴图 blob URL */
+  textureUrls: TextureUrlMap | null;
+  /**
+   * 释放贴图的 blob URL(换模型 / 组件卸载时必须调用,否则 blob 一直占着内存)。
+   */
+  releaseTextures: () => void;
 };
 
 /** 读取失败。`ref` 是 i18n key + 参数,UI 层用 next-intl 渲染成对应语言的文案。 */
@@ -150,5 +166,11 @@ export async function loadModelGeometry(
     positions,
     triangleCount: geometry.triangleCount,
     vertexCount: geometry.vertexCount,
+    uvs: geometry.uvs ?? null,
+    materialNames: geometry.materialNames ?? [],
+    materialIndex: geometry.materialIndex ?? null,
+    mtlText: model.mtlText ?? null,
+    textureUrls: model.textureUrls ?? null,
+    releaseTextures: () => revokeModelTextureUrls(model),
   };
 }

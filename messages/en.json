@@ -1420,7 +1420,9 @@
       "outline": "Outline",
       "clean": "No issues found",
       "support": "Wrap-around support",
-      "supportTitle": "The model drops onto the platform; shows the translucent support shell wrapped around it, the platform footprint, and all the support material between platform and model (WJP jets layer by layer, so there is no overhang to support; the support is washed off after printing)"
+      "supportTitle": "The model drops onto the platform; shows the translucent support shell wrapped around it, the platform footprint, and all the support material between platform and model (WJP jets layer by layer, so there is no overhang to support; the support is washed off after printing)",
+      "texture": "Texture",
+      "textureTitle": "Show the model's own textures (each MTL material gets its own map_Kd); turn it off for the plain issue-colour view"
     },
     "tooltip": {
       "flipped": "Flipped normal (winding differs from its neighbours, easy to break when slicing)",

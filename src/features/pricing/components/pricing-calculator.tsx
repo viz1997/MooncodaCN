@@ -101,6 +101,7 @@ import {
 import {
   extractModelZip,
   type ModelFile,
+  revokeModelTextureUrls,
 } from "@/features/pricing/lib/zip-extractor";
 import type { PrintQuoteInput } from "@/features/print-quote/lib/quote-types";
 import type { SupportModel } from "@/features/tools/lib/mesh/support-shell";
@@ -441,12 +442,14 @@ export function PricingCalculator({
       });
       if (result.error) {
         setUploadError(result.error);
+        // 解析失败也要把上一个模型的贴图 URL 回收掉(否则 blob 一直占着)
+        revokeModelTextureUrls(model);
         setModel(null);
         setLoadStatus("error");
         setLoadProgress("");
         setLoadPercent(0);
       } else if (result.model) {
-        if (model?.previewUrl) URL.revokeObjectURL(model.previewUrl);
+        revokeModelTextureUrls(model);
         setModel(result.model);
         setLoadStatus("loading-3d");
         setLoadProgress(t("upload.rendering"));
@@ -465,7 +468,7 @@ export function PricingCalculator({
   };
 
   const clearModel = () => {
-    if (model?.previewUrl) URL.revokeObjectURL(model.previewUrl);
+    revokeModelTextureUrls(model);
     setModel(null);
     setUploadError(null);
     setFileName(null);
@@ -818,12 +821,13 @@ export function PricingCalculator({
     setBatchItems([]);
   };
 
-  // 组件卸载时回收 blob URL
+  // 组件卸载时回收 blob URL(缩略图 + 各材质贴图)
+  // 依赖 [model] —— 换模型时旧模型的 URL 也会被这一轮的 cleanup 回收掉
   useEffect(() => {
     return () => {
-      if (model?.previewUrl) URL.revokeObjectURL(model.previewUrl);
+      revokeModelTextureUrls(model);
     };
-  }, [model?.previewUrl]);
+  }, [model]);
 
   const titleBlock = (
     <div className="flex items-center gap-3">
