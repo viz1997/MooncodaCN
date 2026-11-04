@@ -133,6 +133,8 @@ function workerResultToParseResult(r: ObjWorkerResult): ObjParseResult {
     volumeCM3: r.volumeCM3,
     surfaceAreaMM2: r.surfaceAreaMM2,
     surfaceAreaCM2: r.surfaceAreaCM2,
+    // 智能摆盘 Worker 要几何:解析时就带上,别再解析一遍
+    positions: r.positions,
   };
 }
 
@@ -206,7 +208,7 @@ export async function extractDirectObj(
     onProgress?.({ phase: "parse", percent: 30 });
 
     const workerResult = await parseObjInWorker(objText, {
-      sendGeometry: false,
+      sendGeometry: true,
       onProgress: (wp) => {
         // Worker reports 0-95; remap to 30-95 for our overall progress
         const pct = 30 + Math.round((wp.percent / 95) * 65);
@@ -320,7 +322,7 @@ async function geometryToModel(
 
     // 用 Worker 解析 OBJ 文本（获取体积、表面积、包围盒等）
     const workerResult = await parseObjInWorker(objText, {
-      sendGeometry: false,
+      sendGeometry: true,
       onProgress: (wp) => {
         const pct = 60 + Math.round((wp.percent / 95) * 35);
         onProgress?.({ phase: "parse", percent: pct });
@@ -706,7 +708,7 @@ export async function extractGlb(
     await yieldToUI();
 
     const workerResult = await parseObjInWorker(objText, {
-      sendGeometry: false,
+      sendGeometry: true,
       onProgress: (wp) => {
         const pct = 60 + Math.round((wp.percent / 95) * 35);
         onProgress?.({ phase: "parse", percent: pct });
@@ -866,7 +868,7 @@ export async function extractZip(
 
     // Parse OBJ via Web Worker (off main thread)
     const workerResult = await parseObjInWorker(objText, {
-      sendGeometry: false,
+      sendGeometry: true,
       onProgress: (wp) => {
         const pct = 30 + Math.round((wp.percent / 95) * 65);
         onProgress?.({ phase: "parse", percent: pct });
@@ -1067,7 +1069,7 @@ export async function extractRar(
 
     // Parse OBJ via Web Worker
     const workerResult = await parseObjInWorker(objText, {
-      sendGeometry: false,
+      sendGeometry: true,
       onProgress: (wp) => {
         const pct = 30 + Math.round((wp.percent / 95) * 65);
         onProgress?.({ phase: "parse", percent: pct });

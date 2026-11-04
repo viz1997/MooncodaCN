@@ -42,7 +42,10 @@ import {
   DimEditor,
   fmt,
 } from "@/features/pricing/components/shared";
-import type { OptimalAngle } from "@/features/pricing/lib/angle-optimizer";
+import type {
+  OptimalAngle,
+  SupportPoseResult,
+} from "@/features/pricing/lib/angle-optimizer";
 import type { ModelFile } from "@/features/pricing/lib/zip-extractor";
 
 export type LoadStatus =
@@ -77,8 +80,8 @@ export type ModelSettingsPanelProps = {
   header?: ReactNode;
 
   /**
-   * 右栏顶部的内容 —— 克重 + 摆盘结果 + 支撑克重校准。
-   * 由父组件渲染（它持有 `calc` / `optimalAngle` / 校准回调）。
+   * 右栏顶部的内容 —— 克重 + 摆盘结果。
+   * 由父组件渲染（它持有 `calc` / `optimalAngle`）。
    */
   weight?: ReactNode;
 
@@ -109,6 +112,16 @@ export type ModelSettingsPanelProps = {
   geometry: ModelGeometry | null;
 
   optimalAngle: OptimalAngle | null;
+  /**
+   * **当前姿态**的包裹支撑数据 —— 没跑智能摆盘时就是初始角度 (0°,0°)。
+   *
+   * 之前这个徽标只认 `optimalAngle`,所以模型刚进来时显示「运行智能摆盘后
+   * 显示支撑比例」;现在初始角度的支撑一开始就有,徽标直接显示当前姿态的
+   * 支撑比例 + 克重。
+   */
+  poseSupport: SupportPoseResult | null;
+  /** 当前姿态的支撑比例(支撑克重 / 模型克重)—— 面板自己算不了(要模型克重) */
+  supportRatio: number;
   viewerRotX: number;
   viewerRotY: number;
   viewerRotZ: number;
@@ -125,6 +138,11 @@ export type ModelSettingsPanelProps = {
   onOptimizeAngle: (scales: [number, number, number]) => void;
   angleOptimizing: boolean;
   angleProgress: number;
+  /**
+   * 模型是否已经进了摆盘客户端 —— 没进去之前点「智能摆盘」只会报错,
+   * 按钮直接置灰。
+   */
+  angleReady: boolean;
   showSupport: boolean;
   onToggleSupport: () => void;
   /**
@@ -162,6 +180,8 @@ export function ModelSettingsPanel({
   onScaleZChange,
   geometry,
   optimalAngle,
+  poseSupport,
+  supportRatio,
   viewerRotX,
   viewerRotY,
   viewerRotZ,
@@ -172,6 +192,7 @@ export function ModelSettingsPanel({
   onOptimizeAngle,
   angleOptimizing,
   angleProgress,
+  angleReady,
   showSupport,
   onToggleSupport,
   showTexture,
@@ -328,7 +349,7 @@ export function ModelSettingsPanel({
                   <button
                     type="button"
                     onClick={() => onOptimizeAngle(scales)}
-                    disabled={angleOptimizing}
+                    disabled={angleOptimizing || !angleReady}
                     className="text-[10px] text-violet-600 hover:text-violet-700 flex items-center gap-1 px-2 py-0.5 rounded border border-violet-300 bg-white hover:bg-violet-50 disabled:opacity-50"
                   >
                     {angleOptimizing ? (
@@ -374,7 +395,8 @@ export function ModelSettingsPanel({
                   <button
                     type="button"
                     onClick={() => onOptimizeAngle(scales)}
-                    className="text-[10px] text-violet-600 hover:text-violet-700 flex items-center gap-1 px-2 py-0.5 rounded border border-violet-300 bg-white hover:bg-violet-50"
+                    disabled={angleOptimizing || !angleReady}
+                    className="text-[10px] text-violet-600 hover:text-violet-700 flex items-center gap-1 px-2 py-0.5 rounded border border-violet-300 bg-white hover:bg-violet-50 disabled:opacity-50"
                   >
                     <Compass className="size-3" />
                     {t("angle.reoptimize")}
@@ -451,11 +473,11 @@ export function ModelSettingsPanel({
                     <Shell className="size-3.5" />
                     {t("preview.support")}
                   </button>
-                  {optimalAngle ? (
+                  {poseSupport ? (
                     <span className="font-mono text-[10px] text-stone-500">
                       {t("preview.supportInfo", {
-                        ratio: Math.round(optimalAngle.selfSupportRatio * 100),
-                        weight: Math.ceil(optimalAngle.totalSupportWeight),
+                        ratio: Math.round(supportRatio * 100),
+                        weight: Math.ceil(poseSupport.supportWeightG),
                       })}
                     </span>
                   ) : (

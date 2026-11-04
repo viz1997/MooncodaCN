@@ -1146,7 +1146,10 @@
       "materialWeight": "Material weight",
       "supportWeight": "Support weight",
       "totalWeight": "Total weight",
-      "supportWeightHint": "Shown after the orientation optimizer runs",
+      "supportWeightHint": "Computed for the current pose once a model is loaded (the initial pose before optimizing)",
+      "supportWeightError": "Could not compute the support weight: {reason}",
+      "poseInitial": "Initial pose 0°,0°",
+      "poseCurrent": "Current pose X {x}° Y {y}° Z {z}°",
       "totalWeightHint": "Total weight = material weight + support weight — this is what the whole piece weighs before the support is washed off (full wrap {volume} cm³)",
       "supportNeedsModel": "Upload a model to compute it",
       "weightFormula": "Weight = volume × material density",
@@ -1184,6 +1187,7 @@
       "laidFlat": "Laid flat",
       "savingTitle": "{before} g original → {after} g optimized, {pct}% saved",
       "savingBadge": "{pct}% less support",
+      "compareSupport": "Initial pose 0°,0°: {initial} g → current pose: {current} g",
       "exportModel": "Export model",
       "reset": "Reset angle",
       "summary": "X {x}° Y {y}° Z {z}° · support {ratio}% · {weight} g · height {height} mm",
@@ -1200,18 +1204,7 @@
       "support": "Wrap-around support",
       "supportTitle": "Shows the translucent support shell wrapped around the model, the platform footprint, and all the support material between platform and model (WJP jets layer by layer, so there is no overhang to support; the support is washed off after printing)",
       "supportInfo": "Support {ratio}% · {weight} g",
-      "supportPending": "Run the orientation optimizer to see the support ratio"
-    },
-    "calibration": {
-      "fillRate": "Fill rate",
-      "density": "Support density (g/cm³)",
-      "hint": "Support weight = full-wrap weight − model weight = wrap-support volume × fill rate × density. The full wrap is the whole block from the platform up to the top of the model (support + model); the wrap support is that block minus the model itself — the same thing the model checker draws; the fill rate is the solid fraction of the support (the support is solid, 100% by default) and the density is the material's own weight density.",
-      "collapseLabel": "Support weight calibration",
-      "oneClickTitle": "One-click calibration",
-      "oneClickDesc": "Enter the measured support weight to back-solve the fill rate.",
-      "placeholder": "Measured weight",
-      "calibrate": "Calibrate",
-      "ratioHint": "{current} g now → {target} g target (ratio {ratio})"
+      "supportPending": "The support ratio appears once a model is loaded"
     },
     "axis": {
       "length": "L X",
@@ -1270,7 +1263,7 @@
         "varnishFee": " + varnish",
         "repairFee": " + repair",
         "supportFee": " + support",
-        "p2": "Support weight = full-wrap weight − model weight: the full wrap is the whole block you get before the support is washed off (support + model), so weighing that block and subtracting the model leaves the support. The support weight is estimated from the fill rate and the support resin density (the wrap support volume is the same one the model checker computes), and the total weight = material weight + support weight; use “Support weight calibration” to back-solve it from a measured weight. The optimizer picks the pose with the least support and the lowest layer height."
+        "p2": "Support weight = full-wrap weight − model weight: the full wrap is the whole block you get before the support is washed off (support + model), so weighing that block and subtracting the model leaves the support. The model does not sit flat on the platform — the support lifts it 1 mm, and that 1 mm counts as support too. The support and the model are the same material, share one density and are solid, so the support weight = wrap support volume × material density (the wrap support volume is the same one the model checker computes) and the total weight = full-wrap volume × material density = material weight + support weight — the wrapped model is one complete model, so the total never changes with the support material. The optimizer picks the pose with the least support and the lowest layer height; before it runs, the page shows the support for the current pose (the initial 0°,0° one)."
       },
       "products": {
         "title": "Product presets",

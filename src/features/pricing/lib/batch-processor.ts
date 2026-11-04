@@ -21,10 +21,11 @@
  */
 
 import {
-  findOptimalAngle,
+  DEFAULT_SUPPORT_PARAMS,
   type OptimalAngle,
-  prepareSupportModel,
+  type SupportParams,
 } from "./angle-optimizer";
+import { AngleOptimizerClient } from "./angle-optimizer-client";
 import { parseObjInWorker } from "./obj-worker-client";
 import {
   calculatePrice,
@@ -73,6 +74,14 @@ export type BatchResult = {
   model: ModelFile;
   parseResult: ModelFile["parseResult"];
   optimalAngle: OptimalAngle | null;
+  /**
+   * 支撑克重 (g) —— 摆盘过是最优姿态的,没摆盘是**初始角度 (0°,0°)** 的。
+   *
+   * 跟单模型页一个口径:不用先摆一次盘才知道要多少支撑。
+   */
+  supportWeightG: number;
+  /** 本体支撑比例 = 支撑克重 / 模型克重 */
+  supportRatio: number;
   pricing: {
     volumeCM3: number;
     surfaceAreaCM2: number;
@@ -272,15 +281,27 @@ export async function processBatch(
         return;
       }
 
-      // ---- 2. Parse with geometry (for angle optimization) ---------------
+      // ---- 2. 几何(支撑克重 + 智能摆盘都要用) --------------------------
       let positions: Float32Array | null = null;
       let optimalAngle: OptimalAngle | null = null;
-      if (doOptimize) {
-        update(item, {
-          status: "parsing",
-          progress: 45,
-          message: "解析几何 (Worker)...",
-        });
+      /**
+       * 支撑克重 (g) —— 摆盘过就用最优姿态的(支撑更少),没摆盘就用**初始
+       * 角度 (0°,0°)** 的。跟单模型页一个口径:不用先摆一次盘才知道要多少
+       * 支撑。
+       */
+      let supportWeightG = 0;
+      update(item, {
+        status: "parsing",
+        progress: 45,
+        message: "准备几何 (Worker)...",
+      });
+      // 解压阶段已经在 Worker 里把 OBJ 解析过了,几何顺手带出来了 ——
+      // 不用再解析一遍(大模型的 OBJ 解析很贵)
+      const parsed = model.parseResult.positions;
+      if (parsed && parsed.length > 0) {
+        positions = parsed;
+      } else {
+        // 老路径兜底:解析结果里没有几何就单独再解析一次
         try {
           const result = await parseObjInWorker(model.objText, {
             sendGeometry: true,
@@ -294,43 +315,81 @@ export async function processBatch(
           }
         } catch (err) {
           console.warn(
-            `[${item.name}] Worker parse failed, skipping angle optimization:`,
+            `[${item.name}] Worker parse failed, skipping support calculation:`,
             err
           );
         }
+      }
 
-        if (signal?.aborted) {
-          update(item, { status: "skipped", message: "已取消" });
-          return;
+      if (signal?.aborted) {
+        update(item, { status: "skipped", message: "已取消" });
+        return;
+      }
+
+      // ---- 3. 支撑克重 + 智能摆盘 ---------------------------------------
+      // 焊接 + 支撑搜索都跑在 Worker 里 —— 批量跑几十个模型时主线程不会被
+      // 卡死,页面照样能点能取消。
+      // 模型克重,用于"本体支撑比例"= 支撑克重 / 模型克重
+      const modelWeightG =
+        model.parseResult.volumeCM3 * pricingConfig.materialDensity;
+      // 支撑跟模型是同一种材料 —— 密度跟材料密度走(不是另一个数)
+      const supportParams: SupportParams = {
+        ...DEFAULT_SUPPORT_PARAMS,
+        materialDensity: pricingConfig.materialDensity,
+      };
+      if (positions) {
+        const client = new AngleOptimizerClient();
+        try {
+          await client.load(item.id, positions);
+        } catch (err) {
+          console.warn(`[${item.name}] Worker load failed:`, err);
         }
-
-        // ---- 3. Optimize angle ------------------------------------------
-        if (positions) {
+        // 智能摆盘(可选)—— 找支撑克重最小的姿态
+        if (doOptimize) {
           update(item, {
             status: "optimizing",
             progress: 70,
             message: "智能摆盘...",
           });
           await yieldToUI();
-          // 计算模型克重，用于"本体支撑比例"= 支撑克重 / 模型克重
-          const modelWeightG =
-            model.parseResult.volumeCM3 * pricingConfig.materialDensity;
           try {
-            // 焊接一次(2026-11-02):支撑算法跟模型检查工具共用同一套网格准备
-            optimalAngle = findOptimalAngle(
-              prepareSupportModel(positions),
+            optimalAngle = await client.search(
+              item.id,
+              {
+                scales: [1, 1, 1],
+                maxHeightMM: 50,
+                modelWeightG,
+                params: supportParams,
+              },
               (p) => {
                 const pct = 70 + Math.floor(p * 0.2);
                 update(item, { progress: pct });
-              },
-              50,
-              modelWeightG
+              }
             );
           } catch (err) {
             console.warn(`[${item.name}] Angle optimization failed:`, err);
             optimalAngle = null;
           }
         }
+        // 支撑克重:摆盘过就用最优姿态,没摆盘就用**初始角度**(0°,0°)
+        try {
+          const pose = await client.pose(item.id, {
+            rotX: 0,
+            rotY: 0,
+            rotZ: 0,
+            scales: [1, 1, 1],
+            params: supportParams,
+          });
+          supportWeightG =
+            optimalAngle?.totalSupportWeight ?? pose.supportWeightG;
+        } catch (err) {
+          console.warn(`[${item.name}] Support calculation failed:`, err);
+        } finally {
+          client.dispose();
+        }
+        // 几何用完就扔 —— 批量跑几百个模型时,每份三角汤几 MB,
+        // 全留着会把内存撑爆(OBJ 文本本来就还留着,不能再加一份几何)。
+        model.parseResult.positions = undefined;
       }
 
       // ---- 4. Pricing ----------------------------------------------------
@@ -351,12 +410,11 @@ export async function processBatch(
         solidRatio,
         dims: scaled.dims,
         // 支撑加价仅在开关开启时计入；关闭时传 0 让 pricing-engine 跳过
-        supportWeight: pricingConfig.supportEnabled
-          ? (optimalAngle?.totalSupportWeight ?? 0)
-          : 0,
-        selfSupportRatio: pricingConfig.supportEnabled
-          ? (optimalAngle?.selfSupportRatio ?? 0)
-          : 0,
+        supportWeight: pricingConfig.supportEnabled ? supportWeightG : 0,
+        selfSupportRatio:
+          pricingConfig.supportEnabled && modelWeightG > 0
+            ? supportWeightG / modelWeightG
+            : 0,
       };
       const priceResult = calculatePrice(pricingConfig, input);
       if (!priceResult) {
@@ -375,6 +433,10 @@ export async function processBatch(
         model,
         parseResult: r,
         optimalAngle,
+        // 支撑克重(摆盘过 = 最优姿态,没摆盘 = 初始角度)
+        supportWeightG,
+        // 本体支撑比例 = 支撑克重 / 模型克重
+        supportRatio: modelWeightG > 0 ? supportWeightG / modelWeightG : 0,
         pricing: {
           volumeCM3: scaled.volumeCM3,
           surfaceAreaCM2: scaled.surfaceAreaCM2,
@@ -414,12 +476,12 @@ export function summarizeBatch(items: BatchItem[]) {
   const total = items.length;
   // 总克重 = 耗材克重 + 支撑克重 —— 跟单模型页一个口径:
   // 打印出来还没洗支撑时,这一批整块称重的总和。
-  // 没跑智能摆盘的条目没有支撑数据,只算耗材那部分。
+  // 支撑克重跟当前姿态走:摆盘过是最优姿态,没摆盘是初始角度。
   const totalWeight = done.reduce(
     (s, i) =>
       s +
       (i.result?.pricing.materialWeight ?? 0) +
-      (i.result?.optimalAngle?.totalSupportWeight ?? 0),
+      (i.result?.supportWeightG ?? 0),
     0
   );
   const totalPrice = done.reduce(

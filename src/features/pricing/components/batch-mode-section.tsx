@@ -457,24 +457,28 @@ function BatchItemRow({
               {fmt(r.pricing.dims[2], 0)} mm
             </Badge>
             {angle && (
-              <>
-                <Badge
-                  variant="outline"
-                  className="font-mono border-violet-200 text-violet-700 bg-violet-50"
-                >
-                  <Compass className="size-3" />
-                  X:{angle.rotX}° Y:{angle.rotY}°
-                </Badge>
-                <Badge
-                  variant="outline"
-                  className="font-mono border-violet-200 text-violet-700 bg-violet-50"
-                >
-                  {t("selfSupport", {
-                    ratio: fmt(angle.selfSupportRatio * 100, 0),
-                    weight: Math.ceil(angle.totalSupportWeight),
-                  })}
-                </Badge>
-              </>
+              <Badge
+                variant="outline"
+                className="font-mono border-violet-200 text-violet-700 bg-violet-50"
+              >
+                <Compass className="size-3" />
+                X:{angle.rotX}° Y:{angle.rotY}°
+              </Badge>
+            )}
+            {/*
+              支撑徽标:摆盘过是最优姿态的支撑,没摆盘是**初始角度**的支撑
+              —— 不用先摆一次盘才知道要多少支撑。
+            */}
+            {r.supportWeightG > 0 && (
+              <Badge
+                variant="outline"
+                className="font-mono border-violet-200 text-violet-700 bg-violet-50"
+              >
+                {t("selfSupport", {
+                  ratio: fmt(r.supportRatio * 100, 0),
+                  weight: Math.ceil(r.supportWeightG),
+                })}
+              </Badge>
             )}
             {angle?.laidFlat && (
               <Badge className="text-[10px] bg-amber-100 text-amber-700 hover:bg-amber-100">

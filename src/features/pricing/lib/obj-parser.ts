@@ -34,6 +34,13 @@ export type ObjParseResult = {
   volumeCM3: number; // cm³
   surfaceAreaMM2: number; // mm²
   surfaceAreaCM2: number; // cm²
+  /**
+   * 三角汤几何(每个三角形 9 个 float)—— 智能摆盘 Worker 焊接用。
+   *
+   * 只有请求了 `sendGeometry` 的解析才有;拿不到时摆盘会退化成「只有主线程
+   * 能算」的老路径。
+   */
+  positions?: Float32Array | undefined;
 };
 
 const cross = (a: Vec3, b: Vec3): Vec3 => ({

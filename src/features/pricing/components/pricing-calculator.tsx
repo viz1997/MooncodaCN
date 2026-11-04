@@ -70,17 +70,13 @@ import {
   SOLID_PRESETS,
   scaleGeometryXYZ,
 } from "@/features/pricing/components/shared";
-import { SupportCalibration } from "@/features/pricing/components/support-calibration";
 import { TextureDiagnosticNote } from "@/features/pricing/components/texture-diagnostic";
-import {
-  computeSupportAtAngle,
-  computeSupportAtPose,
-  DEFAULT_SUPPORT_PARAMS,
-  findOptimalAngle,
-  type OptimalAngle,
-  prepareSupportModel,
-  type SupportParams,
+import type {
+  OptimalAngle,
+  SupportParams,
+  SupportPoseResult,
 } from "@/features/pricing/lib/angle-optimizer";
+import { AngleOptimizerClient } from "@/features/pricing/lib/angle-optimizer-client";
 import {
   type BatchItem,
   type BatchOptions,
@@ -92,7 +88,11 @@ import {
   downloadObjFile,
   exportRotatedObj,
 } from "@/features/pricing/lib/obj-exporter";
-import { parseObjInWorker } from "@/features/pricing/lib/obj-worker-client";
+import {
+  comparePoseSupport,
+  describePose,
+  weightPanelNumbers,
+} from "@/features/pricing/lib/pose-comparison";
 import {
   calculatePrice,
   DEFAULT_CONFIG,
@@ -107,8 +107,6 @@ import {
   revokeModelTextureUrls,
 } from "@/features/pricing/lib/zip-extractor";
 import type { PrintQuoteInput } from "@/features/print-quote/lib/quote-types";
-import type { SupportModel } from "@/features/tools/lib/mesh/support-shell";
-import { scaleSupportModel } from "@/features/tools/lib/mesh/support-shell";
 
 type Mode = "upload" | "manual" | "batch";
 
@@ -230,16 +228,41 @@ export function PricingCalculator({
   const [supportEnabled, setSupportEnabled] = useState(false);
   const [productId, setProductId] = useState("pet");
 
-  // ---- 支撑校准参数 ----
-  const [supportParams, setSupportParams] = useState<SupportParams>(
-    DEFAULT_SUPPORT_PARAMS
+  // ---- 支撑计算参数 ----
+  /**
+   * 支撑跟模型是**同一种材料**:密度一样,填充率也一样(实心 = 100%)。
+   * 所以这里只有材料密度一个数 —— 跟耗材克重用的是同一个。
+   * (以前支撑有个自己的密度 1.90 + 一个填充率旋钮,导致「总克重」既不是
+   * 包裹后整块的重量,也不等于耗材克重 + 支撑克重。)
+   */
+  const supportParams = useMemo<SupportParams>(
+    () => ({ materialDensity }),
+    [materialDensity]
   );
-  const [realWeightInput, setRealWeightInput] = useState("");
 
   // ---- 智能摆盘 ----
   const [optimalAngle, setOptimalAngle] = useState<OptimalAngle | null>(null);
   const [angleOptimizing, setAngleOptimizing] = useState(false);
   const [angleProgress, setAngleProgress] = useState(0);
+  /**
+   * **当前角度**的包裹支撑数据 —— 摆盘之前也有(初始角度就是 0°,0°)。
+   *
+   * 以前支撑克重只在跑完智能摆盘之后才有,没摆盘时页面上是「—」;
+   * 现在模型一进来就算初始角度的支撑:改尺寸 / 拖角度
+   * 都只改这一个姿态,数字始终对得上当前画面。
+   */
+  const [poseSupport, setPoseSupport] = useState<SupportPoseResult | null>(
+    null
+  );
+  /**
+   * 模型已经进了摆盘客户端(可以开始算姿态了)
+   *
+   * 不管是进了 Worker 还是退回主线程算的,都算「就绪」——
+   * 支撑克重不能因为 Worker 掉链子就永远是「—」。
+   */
+  const [supportModelReady, setSupportModelReady] = useState(false);
+  /** 支撑算不出来时的原因(页面上一行小字提示,别让用户对着「—」猜) */
+  const [supportError, setSupportError] = useState<string | null>(null);
   const [showSupport, setShowSupport] = useState(true);
   /**
    * 3D 预览是否显示模型自带的贴图 —— 与检测工具的「显示贴图」开关同一套行为。
@@ -252,20 +275,20 @@ export function PricingCalculator({
   const [manualRotX, setManualRotX] = useState(0);
   const [manualRotY, setManualRotY] = useState(0);
   const [manualRotZ, setManualRotZ] = useState(0);
-  // 摆盘用的焊接模型(2026-11-02):焊接 + 拓扑是姿态无关的,只做一次;
-  // 拖动角度滑块时每次只旋转,不重焊
   /**
-   * 焊接后的**原始尺寸**模型。
-   *
-   * 缩放只挪顶点(拓扑不变),所以改尺寸时从它派生一份缩放版就行 ——
-   * 不用重新解析 / 重新焊接。
+   * 摆盘 Worker 客户端 —— 焊接 + 625 个候选姿态的支撑搜索都在 Worker 里跑,
+   * 主线程只发指令收结果(摆盘期间页面照样能点能拖)。
    */
-  const baseSupportModelRef = useRef<SupportModel | null>(null);
-  /** 当前尺寸下的模型 —— 所有支撑计算都用它(几何已经是真实尺寸) */
-  const supportModelRef = useRef<SupportModel | null>(null);
-  /** 摆盘结果 —— 重算 effect 读它,免得把它塞进依赖数组 */
-  const optimalAngleRef = useRef<OptimalAngle | null>(null);
-  /** 原始姿态(0°,0°)的支撑克重缓存 —— 只跟尺寸 / 校准参数有关,跟当前角度无关 */
+  const angleClientRef = useRef<AngleOptimizerClient | null>(null);
+  useEffect(() => {
+    const client = new AngleOptimizerClient();
+    angleClientRef.current = client;
+    return () => {
+      client.dispose();
+      angleClientRef.current = null;
+    };
+  }, []);
+  /** 原始姿态(0°,0°)的支撑克重缓存 —— 只跟尺寸 / 材料密度有关,跟当前角度无关 */
   const originalSupportRef = useRef<{ key: string; weight: number }>({
     key: "",
     weight: 0,
@@ -321,84 +344,145 @@ export function PricingCalculator({
     scalesRef.current = appliedScales;
   }, [appliedScales]);
 
-  // 摆盘结果写进 ref —— 重算 effect 不必把它塞进依赖数组
+  /**
+   * 模型进页面 → 把几何交给摆盘 Worker(焊接 + 拓扑在 Worker 里做,主线程不卡)
+   *
+   * 几何是解析阶段就带出来的(`parseResult.positions`),不用再解析一遍 OBJ。
+   */
   useEffect(() => {
-    optimalAngleRef.current = optimalAngle;
-  });
+    const client = angleClientRef.current;
+    const positions = model?.parseResult.positions;
+    if (!client || !positions) {
+      setSupportModelReady(false);
+      setPoseSupport(null);
+      return;
+    }
+    let cancelled = false;
+    setSupportModelReady(false);
+    // 换模型 → 旧模型的支撑数据作废
+    setPoseSupport(null);
+    setSupportError(null);
+    originalSupportRef.current = { key: "", weight: 0 };
+    client
+      .load("main", positions)
+      .then(() => {
+        if (!cancelled) setSupportModelReady(true);
+      })
+      .catch((err) => {
+        console.error("摆盘 Worker 加载模型失败:", err);
+        if (!cancelled) {
+          setSupportError(err instanceof Error ? err.message : String(err));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [model]);
 
   /**
    * 支撑克重重算 —— **唯一**的支撑计算入口
    *
-   * 尺寸改了 / 角度改了 / 校准参数改了,都走这里,保证「支撑克重」永远跟
-   * 「当前尺寸 + 当前姿态 + 当前参数」一致。之前每条路各算一次,漏了
+   * 尺寸改了 / 角度改了,都走这里,保证「支撑克重」永远跟
+   * 「当前尺寸 + 当前姿态」一致。之前每条路各算一次,漏了
    * 「改尺寸」那条 —— 改完尺寸模型克重更新了,支撑克重还停在旧尺寸上,
    * 支撑比例和报价全是错的。
    *
    * 算的是**缩放后**的真实几何:缩放只挪顶点(拓扑不变),不用重新焊接。
+   *
+   * 计算在 Worker 里跑(主线程只发一条指令),所以拖滑块 / 改尺寸时
+   * 页面不会卡 —— 姿态算完再回填数字。
+   *
+   * 没有智能摆盘结果时也要算:**初始角度**(0°,0°)的支撑一开始就显示,
+   * 不用先摆一次盘才知道要多少支撑。
    */
   useEffect(() => {
-    const base = baseSupportModelRef.current;
-    if (!base || !model) return;
+    const client = angleClientRef.current;
+    if (!client || !supportModelReady || !model) return;
     const [sx, sy, sz] = appliedScales;
-    // ① 支撑模型跟着尺寸走
-    const scaled = scaleSupportModel(base, sx, sy, sz);
-    supportModelRef.current = scaled;
-    // ② 没跑过摆盘就没有支撑数据
-    if (!optimalAngleRef.current) return;
     const modelWeightG =
       model.parseResult.volumeCM3 * sx * sy * sz * materialDensity;
-    const pose = computeSupportAtPose(
-      scaled,
-      manualRotX,
-      manualRotY,
-      manualRotZ,
-      supportParams
-    );
-    const supportRatio =
-      modelWeightG > 0 ? pose.supportWeightG / modelWeightG : 0;
-    // ③ 原始姿态(摆盘对比用):只跟尺寸 / 校准参数有关,没变就沿用缓存
-    const originalKey = `${sx}|${sy}|${sz}|${supportParams.fillRate}|${supportParams.density}`;
-    if (originalSupportRef.current.key !== originalKey) {
-      originalSupportRef.current = {
-        key: originalKey,
-        weight: computeSupportAtPose(scaled, 0, 0, 0, supportParams)
-          .supportWeightG,
-      };
-    }
-    const originalWeight = originalSupportRef.current.weight;
-    setOptimalAngle((prev) => {
-      if (!prev) return prev;
-      const next = {
-        ...prev,
-        rotX: manualRotX,
-        rotY: manualRotY,
-        selfSupportRatio: supportRatio,
-        totalSupportRatio: supportRatio,
-        totalSupportWeight: pose.supportWeightG,
-        selfSupportArea: pose.supportAreaMM2,
-        supportVolume: pose.supportVolumeMM3,
-        wrapVolume: pose.wrapVolumeMM3,
-        wrapArea: pose.wrapAreaMM2,
-        overhangArea: pose.overhangAreaMM2,
-        coloredDownArea: pose.coloredWrapAreaMM2,
-        rotatedHeight: pose.rotatedHeightMM,
-        originalWeight,
-        originalRatio:
-          pose.supportWeightG > 0 ? originalWeight / pose.supportWeightG : 1,
-      };
-      // 值没变就别 setState(否则这个 effect 会因为 optimalAngle 变化再跑一遍)
-      if (
-        prev.totalSupportWeight === next.totalSupportWeight &&
-        prev.selfSupportRatio === next.selfSupportRatio &&
-        prev.rotatedHeight === next.rotatedHeight &&
-        prev.originalWeight === next.originalWeight &&
-        prev.rotX === next.rotX &&
-        prev.rotY === next.rotY
-      ) {
-        return prev;
+    // 原始姿态(摆盘对比用):只跟尺寸 / 材料密度有关,没变就沿用缓存
+    const originalKey = `${sx}|${sy}|${sz}|${supportParams.materialDensity}`;
+    const needOriginal = originalSupportRef.current.key !== originalKey;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [pose, originalPose] = await Promise.all([
+          client.pose("main", {
+            rotX: manualRotX,
+            rotY: manualRotY,
+            rotZ: manualRotZ,
+            scales: [sx, sy, sz],
+            params: supportParams,
+          }),
+          needOriginal
+            ? client.pose("main", {
+                rotX: 0,
+                rotY: 0,
+                rotZ: 0,
+                scales: [sx, sy, sz],
+                params: supportParams,
+              })
+            : Promise.resolve(null),
+        ]);
+        if (cancelled) return;
+        const supportRatio =
+          modelWeightG > 0 ? pose.supportWeightG / modelWeightG : 0;
+        let originalWeight = originalSupportRef.current.weight;
+        if (originalPose) {
+          originalWeight = originalPose.supportWeightG;
+          originalSupportRef.current = {
+            key: originalKey,
+            weight: originalWeight,
+          };
+        }
+        setPoseSupport(pose);
+        setSupportError(null);
+        setOptimalAngle((prev) => {
+          if (!prev) return prev;
+          const next = {
+            ...prev,
+            rotX: manualRotX,
+            rotY: manualRotY,
+            selfSupportRatio: supportRatio,
+            totalSupportRatio: supportRatio,
+            totalSupportWeight: pose.supportWeightG,
+            selfSupportArea: pose.supportAreaMM2,
+            supportVolume: pose.supportVolumeMM3,
+            wrapVolume: pose.wrapVolumeMM3,
+            wrapArea: pose.wrapAreaMM2,
+            overhangArea: pose.overhangAreaMM2,
+            coloredDownArea: pose.coloredWrapAreaMM2,
+            rotatedHeight: pose.rotatedHeightMM,
+            originalWeight,
+            originalRatio:
+              pose.supportWeightG > 0
+                ? originalWeight / pose.supportWeightG
+                : 1,
+          };
+          // 值没变就别 setState(否则这个 effect 会因为 optimalAngle 变化再跑一遍)
+          if (
+            prev.totalSupportWeight === next.totalSupportWeight &&
+            prev.selfSupportRatio === next.selfSupportRatio &&
+            prev.rotatedHeight === next.rotatedHeight &&
+            prev.originalWeight === next.originalWeight &&
+            prev.rotX === next.rotX &&
+            prev.rotY === next.rotY
+          ) {
+            return prev;
+          }
+          return next;
+        });
+      } catch (err) {
+        console.error("支撑重算失败:", err);
+        if (!cancelled) {
+          setSupportError(err instanceof Error ? err.message : String(err));
+        }
       }
-      return next;
-    });
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [
     appliedScales,
     manualRotX,
@@ -407,6 +491,7 @@ export function PricingCalculator({
     supportParams,
     materialDensity,
     model,
+    supportModelReady,
   ]);
 
   const geometry = useMemo((): ModelGeometry | null => {
@@ -444,6 +529,23 @@ export function PricingCalculator({
     };
   }, [mode, model, length, width, height, solidRatio, appliedScales]);
 
+  /**
+   * 当前角度的支撑克重 + 支撑比例(支撑克重 / 模型克重)
+   *
+   * 支撑数据来自 Worker 算出来的当前姿态 —— 没跑智能摆盘时就是初始角度
+   * (0°,0°)的支撑,所以模型一进来就有数。
+   */
+  const supportStats = useMemo(() => {
+    if (!poseSupport || !model) return { weightG: 0, ratio: 0 };
+    const [sx, sy, sz] = appliedScales;
+    const modelWeightG =
+      model.parseResult.volumeCM3 * sx * sy * sz * materialDensity;
+    return {
+      weightG: poseSupport.supportWeightG,
+      ratio: modelWeightG > 0 ? poseSupport.supportWeightG / modelWeightG : 0,
+    };
+  }, [poseSupport, model, appliedScales, materialDensity]);
+
   const calc = useMemo(() => {
     if (!geometry) return null;
     const input: PricingInput = {
@@ -452,12 +554,9 @@ export function PricingCalculator({
       mode: mode === "batch" ? "upload" : mode,
       solidRatio,
       dims: geometry.dims,
-      supportWeight: supportEnabled
-        ? Math.ceil(optimalAngle?.totalSupportWeight ?? 0)
-        : 0,
-      selfSupportRatio: supportEnabled
-        ? (optimalAngle?.selfSupportRatio ?? 0)
-        : 0,
+      // 支撑克重跟**当前角度**走(没摆盘时就是初始角度的支撑)
+      supportWeight: supportEnabled ? Math.ceil(supportStats.weightG) : 0,
+      selfSupportRatio: supportEnabled ? supportStats.ratio : 0,
     };
     const result = calculatePrice(pricingConfig, input);
     if (!result) return null;
@@ -476,7 +575,7 @@ export function PricingCalculator({
     coverage,
     repairEnabled,
     repairPrice,
-    optimalAngle,
+    supportStats,
     supportEnabled,
   ]);
 
@@ -504,13 +603,13 @@ export function PricingCalculator({
       volumeCM3: geometry.volumeCM3,
       surfaceAreaCM2: geometry.surfaceAreaCM2,
       dims: geometry.dims,
-      // 没跑智能摆盘就没有支撑数据 —— 跟 UI 上「运行智能摆盘后显示」一致
-      supportWeightG: optimalAngle
-        ? Math.ceil(optimalAngle.totalSupportWeight)
+      // 支撑数据跟当前角度走 —— 没跑智能摆盘时就是初始角度的支撑
+      supportWeightG: poseSupport
+        ? Math.ceil(poseSupport.supportWeightG)
         : null,
-      selfSupportRatio: optimalAngle ? optimalAngle.selfSupportRatio : null,
+      selfSupportRatio: poseSupport ? supportStats.ratio : null,
     });
-  }, [quoteMode, geometry, optimalAngle]);
+  }, [quoteMode, geometry, poseSupport, supportStats]);
 
   // 模型本体也要抛给父组件 —— 下单时要把文件打包上传到 R2
   const onModelChangeRef = useRef(onModelChange);
@@ -545,9 +644,8 @@ export function PricingCalculator({
     setManualRotX(0);
     setManualRotY(0);
     setManualRotZ(0);
-    // 换模型 → 支撑模型作废(新模型要重新焊接)
-    baseSupportModelRef.current = null;
-    supportModelRef.current = null;
+    // 换模型 → 支撑数据作废(新模型要重新焊接 + 重算)
+    setPoseSupport(null);
     // 换模型 → 贴图开关复位(新模型可能压根没有贴图)
     setShowTexture(true);
     setLoadStatus("uploading");
@@ -608,8 +706,7 @@ export function PricingCalculator({
     setScaleY(1);
     setScaleZ(1);
     setOptimalAngle(null);
-    baseSupportModelRef.current = null;
-    supportModelRef.current = null;
+    setPoseSupport(null);
   };
 
   const applyProduct = (id: string) => {
@@ -621,46 +718,41 @@ export function PricingCalculator({
   };
 
   // ---- 智能摆盘 ----
+  /**
+   * 智能摆盘 —— 搜索支撑克重最小的姿态
+   *
+   * 搜索跑在 Worker 里(625 个候选姿态 × 支撑体积),主线程只发一条指令 ——
+   * 摆盘那几秒页面照样能点能拖,不会卡死。
+   */
   const optimizeAngle = async (_pendingScales: [number, number, number]) => {
-    if (!model) return;
+    const client = angleClientRef.current;
+    if (!model || !client) return;
     setAngleOptimizing(true);
     setAngleProgress(0);
     await yieldToUI();
     try {
-      const outcome = await parseObjInWorker(model.objText, {
-        sendGeometry: true,
-        onProgress: (p) => setAngleProgress(Math.round(p.percent * 0.5)),
-      });
-      if (outcome.positions) {
-        await yieldToUI();
-        // 焊接一次,之后每个候选姿态只旋转(2026-11-02)
-        const baseModel = prepareSupportModel(outcome.positions);
-        baseSupportModelRef.current = baseModel;
-        // 摆盘要跑好几秒,期间用户可能又改了尺寸 —— 用**完成时**的尺寸算,
-        // 免得摆出来的支撑克重跟页面上显示的尺寸对不上
-        const [sx, sy, sz] = scalesRef.current;
-        // 支撑计算跑在缩放后的网格上(真实尺寸,2026-11-03)
-        const scaledModel = scaleSupportModel(baseModel, sx, sy, sz);
-        supportModelRef.current = scaledModel;
-        const modelVolumeCM3 = model.parseResult.volumeCM3 * sx * sy * sz;
-        const modelWeightG = modelVolumeCM3 * materialDensity;
-        const result = findOptimalAngle(
-          scaledModel,
-          (p) => setAngleProgress(50 + Math.round(p * 0.5)),
-          50,
+      // 摆盘要跑好几秒,期间用户可能又改了尺寸 —— 用**完成时**的尺寸算,
+      // 免得摆出来的支撑克重跟页面上显示的尺寸对不上
+      const [sx, sy, sz] = scalesRef.current;
+      const modelVolumeCM3 = model.parseResult.volumeCM3 * sx * sy * sz;
+      const modelWeightG = modelVolumeCM3 * materialDensity;
+      const result = await client.search(
+        "main",
+        {
+          scales: [sx, sy, sz],
+          maxHeightMM: 50,
           modelWeightG,
-          undefined,
-          false,
-          supportParams
-        );
-        setOptimalAngle(result);
-        setViewerRotX(result.rotX);
-        setViewerRotY(result.rotY);
-        setViewerRotZ(0);
-        setManualRotX(result.rotX);
-        setManualRotY(result.rotY);
-        setManualRotZ(0);
-      }
+          params: supportParams,
+        },
+        (p) => setAngleProgress(p)
+      );
+      setOptimalAngle(result);
+      setViewerRotX(result.rotX);
+      setViewerRotY(result.rotY);
+      setViewerRotZ(0);
+      setManualRotX(result.rotX);
+      setManualRotY(result.rotY);
+      setManualRotZ(0);
     } catch (err) {
       console.error("Angle optimization failed:", err);
     } finally {
@@ -697,41 +789,6 @@ export function PricingCalculator({
       setManualRotZ(value);
       setViewerRotZ(value);
     }
-  };
-
-  /** 支撑参数变化 → 立即重算当前角度的支撑克重(由 effect 统一重算) */
-  const recomputeSupport = (params: SupportParams) => {
-    setSupportParams(params);
-  };
-
-  /** 一键校准：用实测支撑克重反算填充率 */
-  const calibrateFromMeasured = () => {
-    const realG = parseFloat(realWeightInput);
-    if (
-      !Number.isFinite(realG) ||
-      realG <= 0 ||
-      !supportModelRef.current ||
-      !model ||
-      !optimalAngle
-    ) {
-      return;
-    }
-    const [sx, sy, sz] = appliedScales;
-    const mW = model.parseResult.volumeCM3 * sx * sy * sz * materialDensity;
-    // 先用 fillRate=1 计算最大理论克重
-    const { supportWeight: maxW } = computeSupportAtAngle(
-      supportModelRef.current,
-      manualRotX,
-      manualRotY,
-      mW,
-      manualRotZ,
-      undefined,
-      { ...supportParams, fillRate: 1 }
-    );
-    if (!(maxW > 0)) return;
-    // 实测值比理论实心值还大是不可能的;上限跟滑块一致(1 = 实心)
-    const newRate = Math.max(0.05, Math.min(1, realG / maxW));
-    recomputeSupport({ ...supportParams, fillRate: newRate });
   };
 
   // ---- 导出 ----
@@ -884,9 +941,7 @@ export function PricingCalculator({
     setProductId("pet");
     setSupportEnabled(false);
     setSupportPrice(DEFAULT_CONFIG.supportPrice);
-    setSupportParams(DEFAULT_SUPPORT_PARAMS);
     setShowTexture(true);
-    setRealWeightInput("");
     setMode("upload");
     setDimMode("original");
     setScaleFactor(1);
@@ -1088,10 +1143,49 @@ export function PricingCalculator({
   );
 
   /**
-   * 右栏底部 —— 克重（主角）+ 摆盘结果 + 支撑克重校准。
+   * 摆盘结果里的对比:初始角度 (0°,0°) vs 当前姿态
+   *
+   * `originalWeight` 是**初始角度 (0°,0°)** 的支撑克重(只跟尺寸 / 材料
+   * 密度有关,跟当前角度无关),`totalSupportWeight` 是当前姿态的。
+   * 省得不多(<1%)就不显示「省 X%」徽标 —— 省 0% 没意义;但两个克重
+   * 数字一直摆出来(见下面的对比行)。
+   */
+  const poseCompare = optimalAngle
+    ? comparePoseSupport(
+        optimalAngle.originalWeight,
+        optimalAngle.totalSupportWeight
+      )
+    : null;
+  const savingPct = poseCompare?.savingPct ?? 0;
+
+  /**
+   * 当前姿态 —— 支撑克重标的是**这个姿态**的数
+   *
+   * 只看姿态本身是不是 (0°,0°,0°),不看跑没跑过智能摆盘:手动拖了角度
+   * 之后摆盘结果还是空的,但姿态已经不是初始角度了,标错的话用户会以为
+   * 支撑克重跟角度没关系。
+   */
+  const poseLabel = describePose(manualRotX, manualRotY, manualRotZ);
+
+  /**
+   * 克重栏的三个数 —— 必须能对上
+   *
+   * 各自向上取整(0.4 g 也显示 1 g,别显示 0 g),总克重用**两个显示值相加**,
+   * 而不是 `ceil(耗材 + 支撑)` —— 后者会出现「43 + 53 = 96,总克重却写 95」
+   * 这种对不上的情况,用户一算就觉得错。
+   */
+  const weights = weightPanelNumbers(
+    calc?.materialWeight ?? 0,
+    poseSupport?.supportWeightG ?? 0
+  );
+  const materialWeightG = weights.material;
+  const supportWeightG = weights.support;
+
+  /**
+   * 右栏底部 —— 克重（主角）+ 摆盘结果。
    *
    * 克重是这一页唯一的主角：耗材克重大字号，支撑克重次一级，
-   * 摆盘结果和校准收在下面。其余数字（体积 / 表面积 / 顶点 / 三角面）
+   * 摆盘结果收在下面。其余数字（体积 / 表面积 / 顶点 / 三角面）
    * 都在头部以标签出现，这里不重复。
    *
    * 2026-11-01:从右栏顶部挪到底部。克重是尺寸调的**结论**,尺寸是**输入** ——
@@ -1107,7 +1201,7 @@ export function PricingCalculator({
             <span>{t("stats.materialWeight")}</span>
           </div>
           <div className="mt-0.5 font-mono text-3xl font-semibold tracking-tight text-amber-700">
-            {Math.ceil(calc.materialWeight)} g
+            {materialWeightG} g
           </div>
         </div>
         <div>
@@ -1116,10 +1210,24 @@ export function PricingCalculator({
             <span>{t("stats.supportWeight")}</span>
           </div>
           <div className="mt-0.5 font-mono text-lg font-medium text-stone-700">
-            {optimalAngle
-              ? `${Math.ceil(optimalAngle.totalSupportWeight)} g`
-              : "—"}
+            {poseSupport ? `${supportWeightG} g` : "—"}
           </div>
+          {/*
+            这个数对应的是**哪个姿态** —— 初始角度 (0°,0°) 还是当前姿态。
+            不标出来的话,用户会以为支撑克重跟角度没关系(其实改角度就改
+            这个数)。跑没跑过摆盘不算数,只看姿态本身。
+          */}
+          {poseSupport && (
+            <div className="text-[10px] text-stone-400">
+              {poseLabel.isInitial
+                ? t("stats.poseInitial")
+                : t("stats.poseCurrent", {
+                    x: poseLabel.x,
+                    y: poseLabel.y,
+                    z: poseLabel.z,
+                  })}
+            </div>
+          )}
         </div>
         {/* 总克重 = 耗材克重 + 支撑克重 —— 打印出来还没洗支撑时，整块的重量 */}
         <div>
@@ -1128,20 +1236,24 @@ export function PricingCalculator({
             <span>{t("stats.totalWeight")}</span>
           </div>
           <div className="mt-0.5 font-mono text-lg font-medium text-stone-700">
-            {optimalAngle
-              ? `${Math.ceil(calc.materialWeight + optimalAngle.totalSupportWeight)} g`
-              : "—"}
+            {poseSupport ? `${weights.total} g` : "—"}
           </div>
         </div>
       </div>
 
       <p className="mt-1 text-[11px] text-stone-400">
-        {optimalAngle
+        {poseSupport
           ? t("stats.totalWeightHint", {
-              volume: fmt((optimalAngle.wrapVolume ?? 0) / 1000, 2),
+              volume: fmt((poseSupport.wrapVolumeMM3 ?? 0) / 1000, 2),
             })
           : t("stats.supportWeightHint")}
       </p>
+      {/* 算不出来的时候把原因说清楚 —— 别让用户对着「—」猜 */}
+      {supportError && (
+        <p className="mt-1 text-[11px] text-red-500">
+          {t("stats.supportWeightError", { reason: supportError })}
+        </p>
+      )}
 
       {/* 智能摆盘结果 */}
       {optimalAngle && (
@@ -1184,89 +1296,43 @@ export function PricingCalculator({
                 {t("angle.laidFlat")}
               </Badge>
             )}
-            {optimalAngle.originalWeight !== undefined &&
-              optimalAngle.originalRatio !== undefined &&
-              optimalAngle.originalRatio > 1.05 && (
-                <Badge
-                  variant="outline"
-                  className="text-[10px] font-mono border-emerald-300 text-emerald-700 bg-emerald-50"
-                  title={t("angle.savingTitle", {
-                    before: Math.ceil(optimalAngle.originalWeight),
-                    after: Math.ceil(optimalAngle.totalSupportWeight),
-                    pct: Math.max(
-                      0,
-                      100 - Math.round(100 / optimalAngle.originalRatio)
-                    ),
-                  })}
-                >
-                  {t("angle.savingBadge", {
-                    pct: Math.max(
-                      0,
-                      100 - Math.round(100 / optimalAngle.originalRatio)
-                    ),
-                  })}
-                </Badge>
-              )}
+            {savingPct >= 1 && (
+              <Badge
+                variant="outline"
+                className="text-[10px] font-mono border-emerald-300 text-emerald-700 bg-emerald-50"
+                title={t("angle.savingTitle", {
+                  before: Math.ceil(optimalAngle.originalWeight ?? 0),
+                  after: Math.ceil(optimalAngle.totalSupportWeight),
+                  pct: savingPct,
+                })}
+              >
+                {t("angle.savingBadge", { pct: savingPct })}
+              </Badge>
+            )}
           </div>
 
-          {/* 支撑克重校准 */}
-          <details className="mt-1.5 group">
-            <summary className="cursor-pointer text-[10px] text-stone-500 hover:text-stone-700 select-none flex items-center gap-1">
-              <span className="group-open:hidden">▸</span>
-              <span className="hidden group-open:inline">▾</span>
-              {t("calibration.collapseLabel")}
-            </summary>
-            <div className="mt-2 space-y-2">
-              {/* 一键校准 */}
-              <div className="p-2 bg-amber-50 rounded border border-amber-200">
-                <div className="text-[10px] font-semibold text-amber-800 mb-1">
-                  {t("calibration.oneClickTitle")}
-                </div>
-                <div className="text-[10px] text-stone-600 mb-1.5">
-                  {t("calibration.oneClickDesc")}
-                </div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.1"
-                    placeholder={t("calibration.placeholder")}
-                    value={realWeightInput}
-                    onChange={(e) => setRealWeightInput(e.target.value)}
-                    className="font-mono h-7 text-xs w-24 px-2 border border-stone-300 rounded"
-                  />
-                  <span className="text-[10px] text-stone-500">g</span>
-                  <button
-                    type="button"
-                    disabled={
-                      !realWeightInput ||
-                      !supportModelRef.current ||
-                      !optimalAngle
-                    }
-                    onClick={calibrateFromMeasured}
-                    className="text-[10px] px-2 py-1 rounded bg-amber-500 text-white hover:bg-amber-600 disabled:bg-stone-300 disabled:cursor-not-allowed"
-                  >
-                    {t("calibration.calibrate")}
-                  </button>
-                  {realWeightInput && optimalAngle && (
-                    <MeasuredRatioHint
-                      realWeightInput={realWeightInput}
-                      currentWeight={optimalAngle.totalSupportWeight}
-                    />
-                  )}
-                </div>
-              </div>
-
-              <SupportCalibration
-                params={supportParams}
-                onParamsChange={(p) => recomputeSupport(p)}
-                accent="amber"
-                columns={2}
-              />
+          {/*
+            初始角度 vs 当前姿态 —— 把两个克重直接摆出来。
+            「省 X%」徽标只在省得明显(≥1%)时出现,这里始终给数字:
+            省得不多的时候,用户还是要知道原本要多少支撑。
+          */}
+          {poseCompare && poseCompare.initialWeightG !== null && (
+            <div className="mt-1 text-[10px] text-stone-500">
+              {t("angle.compareSupport", {
+                initial: Math.ceil(poseCompare.initialWeightG),
+                current: Math.ceil(poseCompare.currentWeightG),
+              })}
             </div>
-          </details>
+          )}
         </div>
       )}
+
+      {/*
+        支撑克重校准 —— 2026-11-04 整个去掉了。
+        支撑跟模型是同一种材料(密度一样、填充率一样 = 实心),所以
+        「支撑密度」和「填充率」两个旋钮都没得调了;总克重直接就是
+        「包裹后整块模型」的重量,不需要按实测值反算。
+      */}
     </>
   ) : null;
 
@@ -1432,6 +1498,8 @@ export function PricingCalculator({
                     onScaleZChange={setScaleZ}
                     geometry={geometry}
                     optimalAngle={optimalAngle}
+                    poseSupport={poseSupport}
+                    supportRatio={supportStats.ratio}
                     viewerRotX={viewerRotX}
                     viewerRotY={viewerRotY}
                     viewerRotZ={viewerRotZ}
@@ -1442,6 +1510,7 @@ export function PricingCalculator({
                     onOptimizeAngle={optimizeAngle}
                     angleOptimizing={angleOptimizing}
                     angleProgress={angleProgress}
+                    angleReady={supportModelReady}
                     showSupport={showSupport}
                     onToggleSupport={() => setShowSupport((s) => !s)}
                     showTexture={showTexture}
@@ -1606,28 +1675,5 @@ export function PricingCalculator({
         )}
       </div>
     </TooltipProvider>
-  );
-}
-
-/** 一键校准旁的「当前 → 目标」提示 */
-function MeasuredRatioHint({
-  realWeightInput,
-  currentWeight,
-}: {
-  realWeightInput: string;
-  currentWeight: number;
-}) {
-  const t = useTranslations("MaterialPricing.calibration");
-  const realG = parseFloat(realWeightInput);
-  if (!Number.isFinite(realG) || realG <= 0 || currentWeight <= 0) return null;
-  const ratio = realG / currentWeight;
-  return (
-    <span className="text-[10px] text-amber-700 font-mono">
-      {t("ratioHint", {
-        current: currentWeight.toFixed(0),
-        target: realG,
-        ratio: ratio.toFixed(2),
-      })}
-    </span>
   );
 }

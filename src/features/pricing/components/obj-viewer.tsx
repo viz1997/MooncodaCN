@@ -17,7 +17,9 @@ import {
   buildSupportShell,
   prepareSupportModel,
   rotateSupportMesh,
+  SUPPORT_LIFT_MM,
   type SupportModel,
+  scaleSupportModel,
 } from "@/features/tools/lib/mesh/support-shell";
 
 /**
@@ -368,9 +370,11 @@ export function ObjViewer({
     const rotBox = new THREE.Box3().setFromObject(model, true);
     if (rotBox.isEmpty()) return;
 
-    // 把模型底部贴到 Z=0（网格平面），同时居中 X/Y 到原点
-    // Z 是高度方向，网格在 Z=0 平面上
-    model.position.z = -rotBox.min.z;
+    // 把模型底部抬到 Z=1mm（网格平面之上）—— 支撑先长一层 1mm 托底，
+    // 模型悬在托底上不贴平台；Z 是高度方向，网格在 Z=0 平面上。
+    // 托底是**实际打印尺寸**的 1mm，不跟着模型缩放走（算克重那边也是
+    // 在缩放后的网格上减固定 1mm）。
+    model.position.z = -rotBox.min.z + SUPPORT_LIFT_MM;
     model.position.x = -(rotBox.min.x + rotBox.max.x) / 2;
     model.position.y = -(rotBox.min.y + rotBox.max.y) / 2;
     model.updateMatrixWorld(true);
@@ -471,21 +475,28 @@ export function ObjViewer({
     const supportModel = supportModelRef.current;
     if (!show || !model || !scene || !supportModel) return;
 
+    // 支撑壳按**缩放后**的几何算 —— 1mm 托底是实际打印尺寸的 1mm,
+    // 不该跟着模型缩放走(算克重那边是在缩放后的网格上减固定 1mm)。
+    // 画出来的托底厚度必须跟算出来的一致,否则画面跟报价对不上。
+    const [sx, sy, sz] = getScaleTuple();
+    const scaledModel = scaleSupportModel(supportModel, sx, sy, sz);
     // 旋转到当前打印姿态(口径跟 obj-exporter / 摆盘算法一致:先 X 后 Y 后 Z)
     const rotated = rotateSupportMesh(
-      supportModel.mesh,
+      scaledModel.mesh,
       rotationXRef.current ?? 0,
       rotationYRef.current ?? 0,
       rotationZRef.current ?? 0
     );
-    const shell = buildSupportShell(rotated, supportModel.faceEnclosed);
+    const shell = buildSupportShell(rotated, scaledModel.faceEnclosed);
     if (shell.positions.length < 9) return;
 
-    // 局部坐标(OBJ 的 mm,已按打印姿态旋转) → 世界坐标:
-    // 只应用缩放 + 平移 —— 旋转已经烘进几何里了
-    const toWorld = new THREE.Matrix4()
-      .makeScale(model.scale.x, model.scale.y, model.scale.z)
-      .setPosition(model.position.x, model.position.y, model.position.z);
+    // 局部坐标(已缩放 + 按打印姿态旋转的 mm) → 世界坐标:
+    // 只应用平移 —— 缩放已经烘进几何里了
+    const toWorld = new THREE.Matrix4().setPosition(
+      model.position.x,
+      model.position.y,
+      model.position.z
+    );
     const tmp = new THREE.Vector3();
     const toWorldPositions = (src: Float32Array): Float32Array => {
       const out = new Float32Array(src.length);
@@ -862,8 +873,9 @@ export function ObjViewer({
     // 计算旋转+缩放后的世界坐标包围盒
     const rotBox = new THREE.Box3().setFromObject(model, true);
     if (!rotBox.isEmpty()) {
-      // 把模型底部贴到 Z=0（网格平面），Z 是高度方向
-      model.position.z = -rotBox.min.z;
+      // 把模型底部抬到 Z=1mm（网格平面之上，支撑托底 1mm），Z 是高度方向。
+      // 托底是实际打印尺寸的 1mm,不跟着模型缩放走。
+      model.position.z = -rotBox.min.z + SUPPORT_LIFT_MM;
       // 同时居中 X/Y 到原点（水平方向）
       const centerX = (rotBox.min.x + rotBox.max.x) / 2;
       const centerY = (rotBox.min.y + rotBox.max.y) / 2;

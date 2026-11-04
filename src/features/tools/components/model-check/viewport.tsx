@@ -25,6 +25,7 @@ import {
   ObjPreview,
   type PreviewContext,
 } from "@/features/shared/components/obj-preview/obj-preview";
+import { SUPPORT_LIFT_MM } from "@/features/tools/lib/mesh/support-shell";
 import {
   type AnalysisResult,
   FACE_FLAG,
@@ -259,8 +260,9 @@ export default function Viewport({
     let min = new THREE.Vector3(-10, -10, 0);
     let max = new THREE.Vector3(10, 10, 10);
     if (r) {
-      // 模型组已整体平移落地(最低点贴住 z=0 平台),取景范围按落地后坐标计算
-      const dz = r.stats.bboxMin[2];
+      // 模型组已整体平移落地(最低点悬在 z=0 平台上方 1mm 的托底上),
+      // 取景范围按落地后坐标计算
+      const dz = r.stats.bboxMin[2] - SUPPORT_LIFT_MM;
       min = new THREE.Vector3(r.stats.bboxMin[0], r.stats.bboxMin[1], 0);
       max = new THREE.Vector3(
         r.stats.bboxMax[0],
@@ -415,10 +417,11 @@ export default function Viewport({
       stats.bboxMax[1] - stats.bboxMin[1],
       stats.bboxMax[2] - stats.bboxMin[2]
     );
-    // 模型组:整体平移使包围盒最低点贴住打印平台(世界 z=0,与网格地面重合),
-    // 模型不再悬空于网格上方
+    // 模型组:整体平移使包围盒最低点悬在打印平台上方 1mm(支撑托底,
+    // 模型不直接贴平台 —— 见 SUPPORT_LIFT_MM),平台平面落在世界 z=0
+    // (与网格地面重合),模型不再悬空于网格上方
     const group = new THREE.Group();
-    group.position.z = -bb.min.z;
+    group.position.z = -bb.min.z + SUPPORT_LIFT_MM;
     scene.add(group);
     groupRef.current = group;
 
@@ -749,9 +752,9 @@ export default function Viewport({
     if (!ctx) return;
     const { camera, controls } = ctx;
     const target = new THREE.Vector3(...focusRequest.point);
-    // 聚焦点是模型原始坐标,同步落地平移(模型组整体 -bboxMin.z)
+    // 聚焦点是模型原始坐标,同步落地平移(模型组整体 -bboxMin.z + 托底 1mm)
     const rr = resultRef.current;
-    if (rr) target.z -= rr.stats.bboxMin[2];
+    if (rr) target.z -= rr.stats.bboxMin[2] - SUPPORT_LIFT_MM;
     const dist = focusRequest.radius ?? 40;
     const dir = new THREE.Vector3(...(focusRequest.dir ?? [0.9, -1.1, 0.75]))
       .normalize()

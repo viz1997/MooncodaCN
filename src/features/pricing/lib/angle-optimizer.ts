@@ -34,8 +34,8 @@
  *   全包裹体积 = 平台到模型顶的整块(支撑 + 模型)—— `wrapVolumeMM3`
  *   支撑体积   = 全包裹体积 − 模型体积            —— `supportVolumeMM3`
  *
- *   支撑克重 = 包裹支撑体积 × 填充率 × 支撑密度
- *   总克重   = 耗材克重 + 支撑克重
+ *   支撑克重 = 包裹支撑体积 × 材料密度
+ *   总克重   = 全包裹体积   × 材料密度 = 耗材克重 + 支撑克重
  *
  * 也就是:**支撑克重 = 全包裹克重 − 模型克重**。打印出来还没洗支撑时,
  * 整块称重就是「总克重」;洗掉支撑、只剩模型时就是「耗材克重」,
@@ -101,26 +101,28 @@ export type OptimalAngle = {
 };
 
 /**
- * 支撑材料参数(校准面板的两个旋钮)
+ * 支撑计算参数
  *
- * - `fillRate` 填充率:支撑材料的实心比例(支撑是**实心**的,默认 100%)
- * - `density` 支撑材料密度 (g/cm³)
+ * 支撑跟模型是**同一种材料**(2026-11-04 改):密度一样,填充率也一样
+ * (支撑是实心的 = 100%,跟模型一样)。所以参数里只剩一个材料密度 ——
+ * 由调用方从材料设置传进来(跟耗材克重用的是同一个数)。
  *
- * 支撑克重 = 包裹支撑体积 × 填充率 × 密度。体积完全由几何决定
- * (平台到模型下表面之间的空腔),没有第三个可调项 —— 之前那个
- * 「包裹间隙倍率」是检测工具画外壳时用的间隙(对角线 2%,0.8~5mm),
- * 算进体积会让支撑克重凭空高 10~30%,已经拿掉。
+ * 以前这里有两个旋钮:「填充率」和「支撑密度 1.90」。支撑密度是另一个数,
+ * 导致「总克重」既不是包裹后整块的重量,也不等于耗材克重 + 支撑克重 ——
+ * 而包裹后的模型就是一个完整模型,整块都是同一种材料:
  *
- * 默认值按**实测校准**结果填:填充率 100%(支撑按实心算),密度 1.90 g/cm³。
+ *   支撑克重 = 包裹支撑体积 × 材料密度
+ *   总克重   = 全包裹体积   × 材料密度 = 耗材克重 + 支撑克重
+ *
+ * 体积完全由几何决定(平台到模型下表面之间的空腔)。
  */
 export type SupportParams = {
-  fillRate: number;
-  density: number;
+  /** 材料密度 (g/cm³)—— 支撑跟模型用同一个 */
+  materialDensity: number;
 };
 
 export const DEFAULT_SUPPORT_PARAMS: SupportParams = {
-  fillRate: 1,
-  density: 1.9,
+  materialDensity: 1.2,
 };
 
 /** 悬垂阈值：法线 z 分量 < -cos(45°) ≈ -0.707 时为悬垂面（>45° 倾斜朝下） */
@@ -173,7 +175,7 @@ export function totalSurfaceAreaMM2(model: SupportModel): number {
  * @param rotXDeg X 轴旋转角度
  * @param rotYDeg Y 轴旋转角度
  * @param rotZDeg Z 轴旋转角度
- * @param params 支撑材料参数
+ * @param params 材料密度(支撑跟模型同一种材料)
  * @param opts.gridSizeMM 栅格精度(mm),默认 1
  * @param opts.coloredFaceMask 每个面的彩色标记(1 = 有贴图)
  */
@@ -216,9 +218,9 @@ export function computeSupportAtPose(
     }
   }
 
-  // mm³ × 填充率 × (g/cm³ → g/mm³)
-  const supportWeightG =
-    volume.volumeMM3 * params.fillRate * params.density * 0.001;
+  // mm³ × (g/cm³ → g/mm³)
+  // 支撑是实心的(填充率跟模型一样 = 100%),密度也跟模型同一种材料
+  const supportWeightG = volume.volumeMM3 * params.materialDensity * 0.001;
 
   return {
     supportVolumeMM3: volume.volumeMM3,
@@ -314,7 +316,7 @@ export function computeRotatedExternalSurface(
  * @param modelWeightG 模型本体克重（g,已按实际尺寸算）
  * @param rotZDeg Z 轴旋转角度
  * @param coloredFaceMask 彩色面标记
- * @param params 支撑材料参数
+ * @param params 材料密度(支撑跟模型同一种材料)
  */
 export function computeSupportAtAngle(
   model: SupportModel,
@@ -352,7 +354,7 @@ export function computeSupportAtAngle(
  * @param modelWeightG 模型本体克重（g,已按实际尺寸算）
  * @param coloredFaceMask 每个面的彩色标记
  * @param coarseMode 拖拽中粗算模式：栅格 3mm，步长 30°
- * @param params 支撑材料参数
+ * @param params 材料密度(支撑跟模型同一种材料)
  */
 export function findOptimalAngle(
   model: SupportModel,
