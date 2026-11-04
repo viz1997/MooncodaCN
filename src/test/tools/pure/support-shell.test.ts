@@ -426,13 +426,13 @@ describe("两个工具算的是同一块支撑", () => {
 
     // 5mm 托底是按**底板占地**算的(轮廓外扩 5mm × 5),所以「占地小」比
     // 「躺平」更省:
-    //   - 原姿态(腿朝下)→ 帽下空腔 6912 + 底板 4385 = 11297 mm³ → 14.69 g
+    //   - 原姿态(腿朝下)→ 帽下空腔 6912 + 底板 4385 = 11297 mm³ → 14.46 g
     //   - 翻过来(帽当底座)→ 底板 4385 mm³
     //   - 侧躺(帽竖着)→ 占地只有 40mm²,底板 ≈ 340×5 ≈ 1700,加腿上那圈
     // 摆盘挑的就是最省的那个(侧躺 45°)。
-    expect(optimal.totalSupportWeight).toBeCloseTo(4.31, 2);
+    expect(optimal.totalSupportWeight).toBeCloseTo(4.24, 2);
     // 一定比原姿态省
-    expect(optimal.totalSupportWeight).toBeLessThan(14.69);
+    expect(optimal.totalSupportWeight).toBeLessThan(14.46);
     // 底板是固定的 5mm,小模型摊上就不便宜 —— 支撑比模型重(比例 > 1)
     expect(optimal.selfSupportRatio).toBeGreaterThan(1);
   });

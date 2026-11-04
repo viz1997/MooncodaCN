@@ -141,8 +141,8 @@ export type SupportParams = {
 export const DEFAULT_SUPPORT_PARAMS: SupportParams = {
   modelDensity: 1.2,
   // 支撑是另一种材料(水溶性支撑 PVA/BVOH),密度比模型高一点 ——
-  // 默认 1.3,跟工作室对数用的口径一致(见 pricing-engine.ts 的 DEFAULT_CONFIG)
-  supportDensity: 1.3,
+  // 默认 1.28,跟工作室对数用的口径一致(见 pricing-engine.ts 的 DEFAULT_CONFIG)
+  supportDensity: 1.28,
 };
 
 /**

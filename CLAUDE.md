@@ -221,7 +221,7 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 - `wrapVolumeMM3`(**全包裹体积**)= 平台到模型顶的整块(支撑 + 模型),
   逐列取「该列模型最高点 − 平台」求和。
 - **耗材克重 = 模型体积 × 模型密度**(`materialDensity`)。
-- **支撑克重 = 支撑体积 × 支撑密度**(`supportDensity`,默认 **1.3**)。
+- **支撑克重 = 支撑体积 × 支撑密度**(`supportDensity`,默认 **1.28**)。
 - **总克重 = 耗材克重 + 支撑克重** —— 这是唯一恒等式。
 - **「总克重 = 全包裹体积 × 单一密度」不再成立**:工作室用的是**水溶性
   支撑**(PVA/BVOH,约 1.13~1.30 g/cm³),跟模型材料(光敏树脂等)不是一种
