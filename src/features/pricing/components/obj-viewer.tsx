@@ -525,7 +525,7 @@ export function ObjViewer({
       geo.setIndex(new THREE.BufferAttribute(shell.topIndex, 1));
       geo.computeVertexNormals();
       const mat = new THREE.MeshStandardMaterial({
-        color: 0xfde68a,
+        color: 0xdbe4ee,
         transparent: true,
         opacity: 0.28,
         roughness: 0.9,
@@ -546,7 +546,7 @@ export function ObjViewer({
         new THREE.BufferAttribute(toWorldPositions(shell.underside), 3)
       );
       const mat = new THREE.MeshBasicMaterial({
-        color: 0xf59e0b,
+        color: 0xb9c7d6,
         transparent: true,
         opacity: 0.45,
         side: THREE.DoubleSide,
@@ -573,7 +573,7 @@ export function ObjViewer({
       );
       geo.setIndex(new THREE.BufferAttribute(shell.index, 1));
       const mat = new THREE.MeshBasicMaterial({
-        color: 0xf59e0b,
+        color: 0xcbd5e1,
         side: THREE.DoubleSide,
         transparent: true,
         depthWrite: false,
@@ -595,7 +595,7 @@ export function ObjViewer({
         new THREE.BufferAttribute(toWorldPositions(shell.curtain), 3)
       );
       const mat = new THREE.MeshBasicMaterial({
-        color: 0xf59e0b,
+        color: 0xb9c7d6,
         transparent: true,
         opacity: 0.32,
         side: THREE.DoubleSide,
