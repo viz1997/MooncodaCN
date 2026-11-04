@@ -1146,6 +1146,7 @@
       "materialWeight": "Material weight",
       "supportWeight": "Support weight",
       "totalWeight": "Total weight",
+      "totalWeightNote": "Material + support",
       "supportWeightHint": "Computed for the current pose once a model is loaded (the initial pose before optimizing)",
       "supportWeightError": "Could not compute the support weight: {reason}",
       "poseInitial": "Initial pose 0°,0°",

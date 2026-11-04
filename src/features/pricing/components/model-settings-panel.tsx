@@ -495,7 +495,7 @@ export function ModelSettingsPanel({
               **结论**，尺寸调节是**输入** —— 输入在前、结论在后，读起来是
               「先调尺寸 → 再看克重多少」。而且克重只有两个大数字，压在顶上
               会把下面真正要操作的尺寸输入挤到视线之外。 */}
-          <div className="p-4 space-y-4">
+          <div className="p-4 flex flex-col gap-4">
             <div className="rounded-lg border border-stone-200 overflow-hidden">
               <div className="flex items-center justify-between bg-stone-50 px-3 py-2 border-b border-stone-200">
                 <span className="text-xs font-medium text-stone-600">
@@ -650,8 +650,10 @@ export function ModelSettingsPanel({
               </div>
             </div>
 
-            {/* 克重 —— 尺寸调完之后的结果，放最后 */}
-            {weight}
+            {/* 克重 —— 尺寸调完之后的结果，放最后。
+                mt-auto:右栏比左边预览矮/高的差都让出来,克重贴着栏底,
+                跟预览的底边对齐(挤在中间会像没排完)。 */}
+            <div className="mt-auto">{weight}</div>
 
             {/* 报价条 —— 只在报价模式传进来，工具模式下是 null */}
             {quote}

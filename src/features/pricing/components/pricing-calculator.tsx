@@ -1213,62 +1213,80 @@ export function PricingCalculator({
    */
   const weightPanel = calc ? (
     <>
-      <div className="flex flex-wrap items-end gap-x-8 gap-y-3">
-        <div>
-          <div className="flex items-center gap-1.5 text-xs text-stone-500">
-            <Scale className="size-3.5" />
-            <span>{t("stats.materialWeight")}</span>
-          </div>
-          <div className="mt-0.5 font-mono text-3xl font-semibold tracking-tight text-amber-700">
-            {materialWeightG} g
-          </div>
-        </div>
-        <div>
-          <div className="flex items-center gap-1.5 text-xs text-stone-500">
-            <Compass className="size-3.5" />
-            <span>{t("stats.supportWeight")}</span>
-          </div>
-          <div className="mt-0.5 font-mono text-lg font-medium text-stone-700">
-            {poseSupport ? `${supportWeightG} g` : "—"}
-          </div>
-          {/*
-            这个数对应的是**哪个姿态** —— 初始角度 (0°,0°) 还是当前姿态。
-            不标出来的话,用户会以为支撑克重跟角度没关系(其实改角度就改
-            这个数)。跑没跑过摆盘不算数,只看姿态本身。
-          */}
-          {poseSupport && (
-            <div className="text-[10px] text-stone-400">
-              {poseLabel.isInitial
-                ? t("stats.poseInitial")
-                : t("stats.poseCurrent", {
-                    x: poseLabel.x,
-                    y: poseLabel.y,
-                    z: poseLabel.z,
-                  })}
+      {/*
+        三个数排成**一格一格**的(格子之间有分隔线),不是三个 flex 块
+        挤在一起 —— 挤在一起时,支撑克重底下多一行「初始角度 0°,0°」,
+        三个数字的**基线就错开了**(耗材 15 g 沉底、支撑 21 g 浮在上面、
+        总克重 36 g 又落到中间),看着像没对齐。
+
+        所以:标签一行、数一行(固定高度 + 底对齐)、注解一行(固定高度),
+        三格结构完全一样 → 数字必然对齐。注解行留空也是占位,
+        高度不变,三个数字不会因为谁多一行注解而错位。
+      */}
+      <div className="rounded-lg border border-stone-200 bg-stone-50/60 overflow-hidden">
+        <div className="grid grid-cols-3 divide-x divide-stone-200">
+          <div className="px-3 py-2.5">
+            <div className="flex items-center gap-1.5 text-[11px] text-stone-500">
+              <Scale className="size-3.5 shrink-0" />
+              <span className="truncate">{t("stats.materialWeight")}</span>
             </div>
-          )}
-        </div>
-        {/* 总克重 = 耗材克重 + 支撑克重 —— 打印出来还没洗支撑时，整块的重量 */}
-        <div>
-          <div className="flex items-center gap-1.5 text-xs text-stone-500">
-            <Package className="size-3.5" />
-            <span>{t("stats.totalWeight")}</span>
+            <div className="mt-1 flex h-9 items-end">
+              <span className="font-mono text-3xl font-semibold leading-none tracking-tight text-amber-700">
+                {materialWeightG} g
+              </span>
+            </div>
+            {/* 体积 × 材料密度 —— 把这个数是怎么来的摆出来 */}
+            <div className="mt-1 h-4 truncate font-mono text-[10px] text-stone-400">
+              {fmt(calc.volumeCM3, 2)} cm³ × {fmt(materialDensity, 2)}
+            </div>
           </div>
-          <div className="mt-0.5 font-mono text-lg font-medium text-stone-700">
-            {poseSupport ? `${weights.total} g` : "—"}
+
+          <div className="px-3 py-2.5">
+            <div className="flex items-center gap-1.5 text-[11px] text-stone-500">
+              <Compass className="size-3.5 shrink-0" />
+              <span className="truncate">{t("stats.supportWeight")}</span>
+            </div>
+            <div className="mt-1 flex h-9 items-end">
+              <span className="font-mono text-2xl font-semibold leading-none tracking-tight text-stone-700">
+                {poseSupport ? `${supportWeightG} g` : "—"}
+              </span>
+            </div>
+            {/*
+              这个数对应的是**哪个姿态** —— 初始角度 (0°,0°) 还是当前姿态。
+              不标出来的话,用户会以为支撑克重跟角度没关系(其实改角度就改
+              这个数)。跑没跑过摆盘不算数,只看姿态本身。
+            */}
+            <div className="mt-1 h-4 truncate text-[10px] text-stone-400">
+              {poseSupport
+                ? poseLabel.isInitial
+                  ? t("stats.poseInitial")
+                  : t("stats.poseCurrent", {
+                      x: poseLabel.x,
+                      y: poseLabel.y,
+                      z: poseLabel.z,
+                    })
+                : null}
+            </div>
+          </div>
+
+          {/* 总克重 = 耗材克重 + 支撑克重 —— 打印出来还没洗支撑时，整块的重量 */}
+          <div className="bg-stone-100/70 px-3 py-2.5">
+            <div className="flex items-center gap-1.5 text-[11px] text-stone-500">
+              <Package className="size-3.5 shrink-0" />
+              <span className="truncate">{t("stats.totalWeight")}</span>
+            </div>
+            <div className="mt-1 flex h-9 items-end">
+              <span className="font-mono text-2xl font-semibold leading-none tracking-tight text-stone-900">
+                {poseSupport ? `${weights.total} g` : "—"}
+              </span>
+            </div>
+            <div className="mt-1 h-4 truncate text-[10px] text-stone-400">
+              {poseSupport ? t("stats.totalWeightNote") : null}
+            </div>
           </div>
         </div>
       </div>
 
-      <p className="mt-1 text-[11px] text-stone-400">
-        {poseSupport
-          ? t("stats.totalWeightHint", {
-              volume: fmt((poseSupport.wrapVolumeMM3 ?? 0) / 1000, 2),
-              density: fmt(resolveSupportDensity(supportParams), 2),
-            })
-          : t("stats.supportWeightHint")}
-      </p>
-      {/* 算不出来的时候把原因说清楚 —— 别让用户对着「—」猜 */}
       {supportError && (
         <p className="mt-1 text-[11px] text-red-500">
           {t("stats.supportWeightError", { reason: supportError })}

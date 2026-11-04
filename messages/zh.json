@@ -1143,6 +1143,7 @@
       "materialWeight": "耗材克重",
       "supportWeight": "支撑克重",
       "totalWeight": "总克重",
+      "totalWeightNote": "耗材 + 支撑",
       "supportWeightHint": "上传模型后按当前姿态计算(没摆盘就是初始角度)",
       "supportWeightError": "支撑克重算不出来：{reason}",
       "poseInitial": "初始角度 0°,0°",
