@@ -98,9 +98,10 @@ describe("AngleOptimizerClient —— Worker 通路", () => {
         "pose"
       );
 
-      // 平底立方体:支撑只剩 5mm 托底 = 20×20×5 = 2000 mm³ → 2.4 g
-      expect(pose.supportVolumeMM3).toBeCloseTo(2000, 0);
-      expect(pose.supportWeightG).toBeCloseTo(2.4, 2);
+      // 平底立方体:支撑 = 5mm 托底,底板比轮廓外扩 5mm(876mm²)= 4380 mm³
+      expect(pose.supportVolumeMM3).toBeCloseTo(4380, 0);
+      // × 支撑密度 1.3 g/cm³ = 5.69 g
+      expect(pose.supportWeightG).toBeCloseTo(5.69, 2);
     } finally {
       client.dispose();
     }
@@ -119,7 +120,7 @@ describe("AngleOptimizerClient —— Worker 通路", () => {
         }),
         "search"
       );
-      expect(result.totalSupportWeight).toBeCloseTo(2.4, 1);
+      expect(result.totalSupportWeight).toBeCloseTo(5.7, 1);
     } finally {
       client.dispose();
     }
@@ -180,12 +181,12 @@ describe("AngleOptimizerClient —— 主线程兜底(Worker 不可用)", () => 
         params: DEFAULT_SUPPORT_PARAMS,
       });
 
-      // 平底立方体:支撑只剩 5mm 托底 = 20×20×5 = 2000 mm³
-      expect(pose.supportVolumeMM3).toBeCloseTo(2000, 0);
-      // 克重 = 体积 × 材料密度 = 2000 mm³ × 1.2 g/cm³ = 2.4 g
-      expect(pose.supportWeightG).toBeCloseTo(2.4, 2);
-      // 全包裹 = 20×20×25 = 10000 mm³(平台在底面下 5mm)
-      expect(pose.wrapVolumeMM3).toBeCloseTo(10000, 0);
+      // 平底立方体:支撑 = 5mm 托底,底板比轮廓外扩 5mm(876mm²)= 4380 mm³
+      expect(pose.supportVolumeMM3).toBeCloseTo(4380, 0);
+      // 克重 = 体积 × 支撑密度 = 4380 mm³ × 1.3 g/cm³ = 5.69 g
+      expect(pose.supportWeightG).toBeCloseTo(5.69, 2);
+      // 全包裹 = 模型 8000 + 托底 4380(平台在底面下 5mm)
+      expect(pose.wrapVolumeMM3).toBeCloseTo(12380, 0);
     } finally {
       client.dispose();
     }
@@ -210,8 +211,12 @@ describe("AngleOptimizerClient —— 主线程兜底(Worker 不可用)", () => 
         params: DEFAULT_SUPPORT_PARAMS,
       });
 
-      // 托底是固定的 5mm,占地按 k² 涨 → 支撑体积按 4 倍走
-      expect(scaled.supportVolumeMM3 / base.supportVolumeMM3).toBeCloseTo(4, 1);
+      // 托底是固定的 5mm,底板比轮廓外扩 5mm —— 轮廓按 k² 涨,留边那 5mm 不涨
+      // → 支撑体积按 2.83 倍走(不是精确的 k² = 4)
+      expect(scaled.supportVolumeMM3 / base.supportVolumeMM3).toBeCloseTo(
+        2.83,
+        1
+      );
     } finally {
       client.dispose();
     }
@@ -229,7 +234,7 @@ describe("AngleOptimizerClient —— 主线程兜底(Worker 不可用)", () => 
         scales: [1, 1, 1],
         params: DEFAULT_SUPPORT_PARAMS,
       });
-      expect(pose.supportWeightG).toBeCloseTo(2.4, 2);
+      expect(pose.supportWeightG).toBeCloseTo(5.69, 2);
     } finally {
       client.dispose();
     }
@@ -280,7 +285,7 @@ describe("AngleOptimizerClient —— Worker 掉链子时不能卡死", () => {
         }),
         "pose"
       );
-      expect(pose.supportWeightG).toBeCloseTo(2.4, 2);
+      expect(pose.supportWeightG).toBeCloseTo(5.69, 2);
     } finally {
       client.dispose();
     }
@@ -343,9 +348,9 @@ describe("Worker 协议 —— load → pose → search", () => {
 
     expect(res.type).toBe("pose");
     if (res.type !== "pose") return;
-    // 平底立方体:5mm 托底 = 2000 mm³ → 2.4 g
-    expect(res.result.supportVolumeMM3).toBeCloseTo(2000, 0);
-    expect(res.result.supportWeightG).toBeCloseTo(2.4, 2);
+    // 平底立方体:5mm 托底(底板外扩 5mm)= 4380 mm³ → 5.69 g
+    expect(res.result.supportVolumeMM3).toBeCloseTo(4380, 0);
+    expect(res.result.supportWeightG).toBeCloseTo(5.69, 2);
   });
 
   it("摆盘能找到支撑最少的姿态(立方体躺平)", () => {
@@ -369,7 +374,7 @@ describe("Worker 协议 —— load → pose → search", () => {
 
     expect(res.type).toBe("search");
     if (res.type !== "search") return;
-    expect(res.result.totalSupportWeight).toBeCloseTo(2.4, 1);
+    expect(res.result.totalSupportWeight).toBeCloseTo(5.7, 1);
   });
 });
 

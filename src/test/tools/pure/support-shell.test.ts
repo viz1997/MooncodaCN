@@ -222,8 +222,8 @@ describe("底板留边(2026-11-04):底板比模型轮廓四周各留一圈", () 
 
     expect(b.volume.supportAreaMM2).toBeGreaterThan(a.volume.supportAreaMM2);
     expect(c.volume.supportAreaMM2).toBeGreaterThan(b.volume.supportAreaMM2);
-    // 留边 10mm:20×20 → 40×40 切角 ≈ 1590 mm²
-    expect(c.volume.supportAreaMM2).toBeCloseTo(1590, -1.5);
+    // 留边 10mm:20×20 → 40×40 切角 ≈ 1514 mm²
+    expect(c.volume.supportAreaMM2).toBeCloseTo(1514, -1.5);
   });
 
   it("默认留边就是 SUPPORT_BASE_MARGIN_MM(5mm)", () => {
@@ -334,10 +334,11 @@ describe("双密度(2026-11-04):支撑是另一种材料", () => {
       supportDensity: 1.3,
     });
 
-    // 平底立方体:支撑 = 5mm 托底 = 4385 mm³
-    expect(pose.supportVolumeMM3).toBeCloseTo(CUBE_BASE_AREA * 5, 0);
-    // × 支撑密度 1.3 g/cm³ = 5.7 g(拿模型密度 1.2 算就是 5.26 g,错了)
-    expect(pose.supportWeightG).toBeCloseTo(5.7, 1);
+    // 平底立方体:支撑 = 5mm 托底(底板 876mm²)= 4380 mm³
+    // (走的是 computeSupportAtPose 的 1mm 栅格,0.25mm 栅格是 4385)
+    expect(pose.supportVolumeMM3).toBeCloseTo(4380, 0);
+    // × 支撑密度 1.3 g/cm³ = 5.69 g(拿模型密度 1.2 算就是 5.26 g,错了)
+    expect(pose.supportWeightG).toBeCloseTo(5.69, 2);
   });
 
   it("没给支撑密度 → 退回模型密度(同材料支撑的老口径)", () => {
@@ -425,13 +426,14 @@ describe("两个工具算的是同一块支撑", () => {
 
     // 5mm 托底是按**底板占地**算的(轮廓外扩 5mm × 5),所以「占地小」比
     // 「躺平」更省:
-    //   - 原姿态(腿朝下)→ 帽下空腔 6912 + 底板 4385 = 11297 mm³
+    //   - 原姿态(腿朝下)→ 帽下空腔 6912 + 底板 4385 = 11297 mm³ → 14.69 g
     //   - 翻过来(帽当底座)→ 底板 4385 mm³
     //   - 侧躺(帽竖着)→ 占地只有 40mm²,底板 ≈ 340×5 ≈ 1700,加腿上那圈
     // 摆盘挑的就是最省的那个(侧躺 45°)。
-    expect(optimal.totalSupportWeight).toBeCloseTo(4.15, 1);
+    expect(optimal.totalSupportWeight).toBeCloseTo(4.31, 2);
     // 一定比原姿态省
-    expect(optimal.totalSupportWeight).toBeLessThan(14.81);
-    expect(optimal.selfSupportRatio).toBeLessThan(1);
+    expect(optimal.totalSupportWeight).toBeLessThan(14.69);
+    // 底板是固定的 5mm,小模型摊上就不便宜 —— 支撑比模型重(比例 > 1)
+    expect(optimal.selfSupportRatio).toBeGreaterThan(1);
   });
 });
