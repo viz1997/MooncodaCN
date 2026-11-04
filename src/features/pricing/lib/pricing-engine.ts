@@ -140,9 +140,10 @@ export const DEFAULT_PRODUCT_PRESETS: ProductPreset[] = [
 
 export const DEFAULT_CONFIG: PricingConfig = {
   materialDensity: 1.2,
-  // 支撑材料密度 —— 水溶性支撑(PVA/BVOH)。默认跟模型同密度,工作室
-  // 按自己那卷支撑的实际密度改「材料参数」里的支撑密度。
-  supportDensity: 1.2,
+  // 支撑材料密度 —— 水溶性支撑(PVA/BVOH)。默认 1.3(那卷支撑的实际密度,
+  // 跟工作室对数用的口径一致:冰箱贴 43 + 59 = 102g)。工作室按自己那卷
+  // 支撑的实际密度改「材料参数」里的支撑密度。
+  supportDensity: 1.3,
   unitPrice: 4.5,
   varnishFee: 10,
   varnishEnabled: true,
