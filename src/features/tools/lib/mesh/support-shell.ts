@@ -100,6 +100,19 @@ export interface SupportMesh {
  */
 export const SUPPORT_LIFT_MM = 5;
 
+/**
+ * 底板留边 (mm)
+ *
+ * 工作室的支撑工艺:底板**比模型轮廓四周各留一圈边**再铺 5mm 托底 ——
+ * 底板不是照着模型的轮廓卡着裁,而是往外多出一圈(2026-11-04 跟工作室
+ * 对数确认:留边 5mm 时冰箱贴 43 + 59 = 102g,跟工作室报的一致;留边 0
+ * 只有 90g,轻 12g)。
+ *
+ * 这圈边也是 5mm 厚的支撑材料,算进支撑克重 —— 底板占地 = 模型轮廓
+ * (投影面积)按欧氏距离外扩这么多。
+ */
+export const SUPPORT_BASE_MARGIN_MM = 5;
+
 /** 包裹支撑外壳的生成选项 */
 export interface SupportShellOptions {
   /**
@@ -509,6 +522,106 @@ export interface SupportVolumeOptions {
   gridSizeMM?: number | undefined;
   /** 栅格格数上限,默认 200_000(超了就放大栅格) */
   maxCells?: number | undefined;
+  /**
+   * 底板留边 (mm) —— 底板比模型轮廓四周各留多宽
+   *
+   * 默认 `SUPPORT_BASE_MARGIN_MM`(5mm)。传 0 = 底板照着模型轮廓裁
+   * (老口径,工作室报数对不上)。
+   */
+  baseMarginMM?: number | undefined;
+}
+
+/**
+ * 一维平方距离变换(Felzenszwalb 的抛物线下包络)
+ *
+ * `f[i]` 换成一维「到最近零点位的距离平方」:f 里是 0 的位置是源点。
+ * O(n),每个元素进栈出栈各一次。
+ */
+function distanceTransform1D(
+  f: Float64Array,
+  n: number,
+  d: Float64Array,
+  v: Int32Array,
+  z: Float64Array
+): void {
+  let k = 0;
+  v[0] = 0;
+  z[0] = -Infinity;
+  z[1] = Infinity;
+  for (let q = 1; q < n; q++) {
+    let s = (f[q] + q * q - (f[v[k]!] + v[k]! * v[k]!)) / (2 * q - 2 * v[k]!);
+    while (s <= z[k]!) {
+      k--;
+      s = (f[q] + q * q - (f[v[k]!] + v[k]! * v[k]!)) / (2 * q - 2 * v[k]!);
+    }
+    k++;
+    v[k] = q;
+    z[k] = s;
+    z[k + 1] = Infinity;
+  }
+  k = 0;
+  for (let q = 0; q < n; q++) {
+    while (z[k + 1]! < q) k++;
+    const dq = q - v[k]!;
+    d[q] = dq * dq + f[v[k]!];
+  }
+}
+
+/**
+ * 把 0/1 掩膜按**欧氏距离**外扩 `marginMM`
+ *
+ * 返回的掩膜 = 原掩膜 + 距离最近被置位格子 ≤ marginMM 的格子。
+ * 用来算「底板比模型轮廓四周各留 N mm」。
+ *
+ * 为什么不用八邻域的逐层外扩(便宜得多):那是切比雪夫距离,底板会变成
+ * 方角,面积比真实的圆角外扩大一点点 —— 报价跟工作室对不上就差在这儿。
+ * 这里用精确的欧氏距离变换(Felzenszwalb 两遍一维),格子数只多几个百分点。
+ *
+ * **半格修正**:掩膜置位的是「格心落在模型轮廓内」的格子,它的外边界比
+ * 真实轮廓往里缩了约半格。所以距离阈值加上半格,外扩出来的才是「离真实
+ * 轮廓 marginMM」的那一圈。
+ */
+export function dilateMaskByDistance(
+  mask: Uint8Array,
+  gridW: number,
+  gridH: number,
+  marginMM: number,
+  cellSizeMM: number
+): Uint8Array {
+  const out = new Uint8Array(mask.length);
+  if (marginMM <= 0 || cellSizeMM <= 0) {
+    out.set(mask);
+    return out;
+  }
+  const INF = 1e20;
+  const f = new Float64Array(mask.length);
+  for (let i = 0; i < mask.length; i++) f[i] = mask[i] ? 0 : INF;
+
+  const n = Math.max(gridW, gridH);
+  const line = new Float64Array(n);
+  const lineOut = new Float64Array(n);
+  const v = new Int32Array(n);
+  const z = new Float64Array(n + 1);
+
+  // 先按列,再按行 —— 两遍一维变换拼出二维距离
+  // (输入输出必须分开:第二遍会读 f[v[k]],同一个数组会被前一次写入覆盖)
+  for (let x = 0; x < gridW; x++) {
+    for (let y = 0; y < gridH; y++) line[y] = f[y * gridW + x]!;
+    distanceTransform1D(line, gridH, lineOut, v, z);
+    for (let y = 0; y < gridH; y++) f[y * gridW + x] = lineOut[y]!;
+  }
+  for (let y = 0; y < gridH; y++) {
+    const row = y * gridW;
+    for (let x = 0; x < gridW; x++) line[x] = f[row + x]!;
+    distanceTransform1D(line, gridW, lineOut, v, z);
+    for (let x = 0; x < gridW; x++) f[row + x] = lineOut[x]!;
+  }
+
+  // 阈值:margin + 半格(掩膜外边界比真实轮廓往里缩了半格)
+  const maxDistCells = marginMM / cellSizeMM + 0.5;
+  const maxDist2 = maxDistCells * maxDistCells;
+  for (let i = 0; i < mask.length; i++) out[i] = f[i]! <= maxDist2 ? 1 : 0;
+  return out;
 }
 
 /** 支撑体积计算结果 */
@@ -609,8 +722,13 @@ export function computeSupportVolume(
     if (y > maxY) maxY = y;
   }
   if (!Number.isFinite(minX) || !Number.isFinite(minY)) return empty;
-  const width = maxX - minX;
-  const height = maxY - minY;
+  // 底板留边:底板比模型轮廓四周各留一圈 —— 栅格要比模型包围盒大一圈,
+  // 留边那部分落在模型轮廓外面(底板是实心的,那圈也是 5mm 厚的支撑)。
+  const marginMM = Math.max(0, options?.baseMarginMM ?? SUPPORT_BASE_MARGIN_MM);
+  const originX = minX - marginMM;
+  const originY = minY - marginMM;
+  const width = maxX - minX + marginMM * 2;
+  const height = maxY - minY + marginMM * 2;
   if (width <= 0 || height <= 0) return empty;
 
   // 栅格(格数超上限就放大栅格)
@@ -652,14 +770,14 @@ export function computeSupportVolume(
       b = faceVertex[f * 3 + 1],
       c = faceVertex[f * 3 + 2];
     if (a === b || b === c || a === c) continue;
-    const ax = positions[a * 3] - minX,
-      ay = positions[a * 3 + 1] - minY,
+    const ax = positions[a * 3] - originX,
+      ay = positions[a * 3 + 1] - originY,
       az = positions[a * 3 + 2];
-    const bx = positions[b * 3] - minX,
-      by = positions[b * 3 + 1] - minY,
+    const bx = positions[b * 3] - originX,
+      by = positions[b * 3 + 1] - originY,
       bz = positions[b * 3 + 2];
-    const cx = positions[c * 3] - minX,
-      cy = positions[c * 3 + 1] - minY,
+    const cx = positions[c * 3] - originX,
+      cy = positions[c * 3 + 1] - originY,
       cz = positions[c * 3 + 2];
 
     const faceMinZ = Math.min(az, bz, cz);
@@ -893,6 +1011,30 @@ export function computeSupportVolume(
     supportArea += cellArea;
     const hTop = gelTop - platformZ;
     if (hTop > maxHeight) maxHeight = hTop;
+  }
+
+  // ---- 底板留边:模型轮廓外扩 marginMM 的一圈,也是 5mm 厚的底板 ----
+  // 工作室的工艺:底板比模型大一圈(2026-11-04 确认)。这圈底板是实心的
+  // 支撑材料,体积 = 外扩出来的占地 × 托底厚度。
+  if (marginMM > 0 && footprintArea > 0) {
+    const dilated = dilateMaskByDistance(
+      covered,
+      gridW,
+      gridH,
+      marginMM,
+      gridSize
+    );
+    let extraCells = 0;
+    for (let i = 0; i < cellCount; i++) {
+      if (dilated[i] && !covered[i]) extraCells++;
+    }
+    const extraVolume = extraCells * cellArea * SUPPORT_LIFT_MM;
+    volume += extraVolume;
+    // 全包裹也跟着涨:底板那圈也在打印出来的整块里(上面没有模型,
+    // 全包裹 = 平台 → 底板顶面 = 5mm)
+    wrapVolume += extraVolume;
+    // 支撑在平台上的占地 = 底板(模型轮廓 + 留边)
+    supportArea += extraCells * cellArea;
   }
 
   return {

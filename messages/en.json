@@ -1151,7 +1151,6 @@
       "supportWeightError": "Could not compute the support weight: {reason}",
       "poseInitial": "Initial pose 0°,0°",
       "poseCurrent": "Current pose X {x}° Y {y}° Z {z}°",
-      "totalWeightHint": "Total weight = material weight + support weight — this is what the whole piece weighs before the support is washed off. The support is a different material ({density} g/cm³), so the full wrap ({volume} cm³) holds two materials and no single density can be multiplied through it.",
       "supportNeedsModel": "Upload a model to compute it",
       "weightFormula": "Weight = volume × material density",
       "density": "Material density",

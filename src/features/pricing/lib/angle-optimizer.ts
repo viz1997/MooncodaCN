@@ -205,6 +205,8 @@ export function totalSurfaceAreaMM2(model: SupportModel): number {
  * @param rotZDeg Z 轴旋转角度
  * @param params 两个密度:模型密度 + 支撑密度(支撑是另一种材料)
  * @param opts.gridSizeMM 栅格精度(mm),默认 1
+ * @param opts.baseMarginMM 底板留边(mm)—— 底板比模型轮廓四周各留多宽,
+ *   默认 `SUPPORT_BASE_MARGIN_MM`(5)。工作室的工艺:底板比模型大一圈。
  * @param opts.coloredFaceMask 每个面的彩色标记(1 = 有贴图)
  */
 export function computeSupportAtPose(
@@ -215,6 +217,7 @@ export function computeSupportAtPose(
   params: SupportParams = DEFAULT_SUPPORT_PARAMS,
   opts?: {
     gridSizeMM?: number | undefined;
+    baseMarginMM?: number | undefined;
     coloredFaceMask?: Uint8Array | null | undefined;
   }
 ): SupportPoseResult {
@@ -227,6 +230,7 @@ export function computeSupportAtPose(
   });
   const volume = computeSupportVolume(shell, rotated, {
     gridSizeMM: opts?.gridSizeMM,
+    baseMarginMM: opts?.baseMarginMM,
   });
 
   // 下朝向面 = 支撑顶面(支撑材料贴着模型的那一面)

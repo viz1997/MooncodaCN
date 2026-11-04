@@ -10,6 +10,7 @@ import {
   computeSupportVolume,
   prepareSupportModel,
   rotateSupportMesh,
+  SUPPORT_BASE_MARGIN_MM,
   scaleSupportModel,
 } from "@/features/tools/lib/mesh/support-shell";
 import {
@@ -27,10 +28,15 @@ import {
  *
  * 平台不在模型最低点上,而是**低 5mm**(`SUPPORT_LIFT_MM`)—— 有支撑的时候
  * 模型不直接贴平台,支撑先在平台上长一层 5mm 托住模型。所以:
- *   - 平底模型(立方体)→ 只有 5mm 托底(投影面积 × 5)
+ *   - 平底模型(立方体)→ 只有 5mm 托底(底板占地 × 5)
  *   - 悬空结构(帽 + 细腿)→ 帽下面那圈空间 + 5mm 托底
  *   - 宽底座 + 悬空身体 → 底座不能把上面那圈支撑吃掉
  *   - 球 → 球底那圈透镜形空间 + 5mm 托底
+ *
+ * **底板留边**(`SUPPORT_BASE_MARGIN_MM` = 5mm):工作室的工艺是底板比模型
+ * 轮廓**四周各留一圈边**再铺 5mm 托底 —— 底板不是照着轮廓卡着裁的。
+ * 那圈边也是实心支撑,算进支撑克重(冰箱贴留边 5mm 时 43 + 59 = 102g,
+ * 跟工作室报的一致)。
  *
  * 体积走真几何(网格自己的顶点),跟模型克重同一口径 —— 检测工具画外壳时
  * 那圈可视化间隙不进克重。
@@ -64,7 +70,7 @@ const TABLE = concat(
 
 /**
  * 宽底座 + 悬空身体:底座 32×32×4,身体 26×26 悬在底座上方 6mm(z 10~30)
- * 支撑 = 身体底下那圈空气 26×26×6 = 4056 mm³,再加 5mm 托底 32×32×5 = 5120
+ * 支撑 = 身体底下那圈空气 26×26×6 = 4056 mm³,再加 5mm 托底
  *
  * 这一对是老算法翻车的地方:老算法假设「一列里的模型是从下边界一直实心到
  * 上边界」,底座一盖住身体,悬空那 6mm 就被当成模型自己占掉,支撑算成 0。
@@ -87,6 +93,7 @@ type SupportOptions = {
   rotZ?: number;
   gapScale?: number;
   gridSizeMM?: number;
+  baseMarginMM?: number;
 };
 
 /** 走一遍「检测工具」那条路:焊接 → 旋转 → 外壳 → 体积 */
@@ -106,27 +113,38 @@ function supportOf(positions: Float32Array, options: SupportOptions = {}) {
   );
   const volume = computeSupportVolume(shell, rotated, {
     gridSizeMM: options.gridSizeMM ?? 0.25,
+    baseMarginMM: options.baseMarginMM,
   });
   return { shell, volume };
 }
+
+/**
+ * 20×20 的方形轮廓外扩 5mm 后的底板占地 (mm²)
+ *
+ * 连续几何的精确值:外扩后的方形 30×30,四角被 5mm 圆角切掉
+ *   900 − 4×(25 − π·25/4) = 878.4
+ * 栅格离散(0.25mm 格 + 半格修正)算出来 877,差 0.2%。
+ */
+const CUBE_BASE_AREA = 877;
 
 describe("computeSupportVolume —— 包裹支撑体积", () => {
   it("平底立方体:只剩 5mm 托底,没有别的支撑", () => {
     const { volume } = supportOf(CUBE);
 
-    // 支撑 = 5mm 托底 × 投影面积 = 5 × (20×20) = 2000 mm³
-    expect(volume.volumeMM3).toBeCloseTo(2000, 0);
-    expect(volume.supportAreaMM2).toBeCloseTo(400, 0);
+    // 支撑 = 5mm 托底 × 底板占地(轮廓外扩 5mm 后的 877mm²)
+    expect(volume.volumeMM3).toBeCloseTo(CUBE_BASE_AREA * 5, 0);
+    // 支撑占地 = 底板(轮廓 + 留边)
+    expect(volume.supportAreaMM2).toBeCloseTo(CUBE_BASE_AREA, 0);
     expect(volume.maxHeightMM).toBeCloseTo(5, 1);
   });
 
   it("桌子:帽下那圈空间 + 5mm 托底是支撑", () => {
     const { volume } = supportOf(TABLE);
 
-    // 帽下空腔 (400−16)×18 = 6912,加托底 20×20×5 = 2000 → 8912 mm³
-    expect(volume.volumeMM3).toBeCloseTo(8912, 0);
-    // 支撑占地 = 帽的投影(托底盖满整个脚印)
-    expect(volume.supportAreaMM2).toBeCloseTo(400, 0);
+    // 帽下空腔 (400−16)×18 = 6912,加托底 877×5 = 4385 → 11297 mm³
+    expect(volume.volumeMM3).toBeCloseTo(11297, 0);
+    // 支撑占地 = 底板(帽的轮廓外扩 5mm)
+    expect(volume.supportAreaMM2).toBeCloseTo(CUBE_BASE_AREA, 0);
     // 支撑最高点 = 帽底离平台的高度(帽底 18,平台 −5)
     expect(volume.maxHeightMM).toBeCloseTo(23, 1);
   });
@@ -134,25 +152,27 @@ describe("computeSupportVolume —— 包裹支撑体积", () => {
   it("桌子翻过来(180°):帽变成底座 → 只剩 5mm 托底", () => {
     const { volume } = supportOf(TABLE, { rotX: 180 });
 
-    expect(volume.volumeMM3).toBeCloseTo(2000, 0);
-    expect(volume.supportAreaMM2).toBeCloseTo(400, 0);
+    expect(volume.volumeMM3).toBeCloseTo(CUBE_BASE_AREA * 5, 0);
+    expect(volume.supportAreaMM2).toBeCloseTo(CUBE_BASE_AREA, 0);
   });
 
   it("球:球底透镜形空间 + 5mm 托底是支撑", () => {
     const { volume } = supportOf(BALL);
 
-    // 球底透镜 (1/3)πr³ ≈ 1047,加托底 πr²×5 ≈ 1571 → ≈ 2618 mm³
-    expect(volume.volumeMM3).toBeGreaterThan(2400);
-    expect(volume.volumeMM3).toBeLessThan(2850);
+    // 球底透镜 (1/3)πr³ ≈ 1047,加托底(外扩后的圆盘 701mm²)×5 ≈ 3505
+    // → ≈ 4550 mm³
+    expect(volume.volumeMM3).toBeGreaterThan(4400);
+    expect(volume.volumeMM3).toBeLessThan(4700);
   });
 
   it("宽底座 + 悬空身体:底座不能把悬空那圈支撑吃掉", () => {
     const { volume } = supportOf(BASE_AND_HOVERING_BODY);
 
-    // 身体底下那圈空腔 26×26×6 = 4056,加托底 32×32×5 = 5120 → 9176 mm³
-    expect(volume.volumeMM3).toBeCloseTo(9176, 0);
-    // 支撑占地 = 底座投影 32×32
-    expect(volume.supportAreaMM2).toBeCloseTo(1024, 0);
+    // 身体底下那圈空腔 26×26×6 = 4056,加托底(外扩后的 1741mm²)×5 = 8705
+    // → 12761 mm³
+    expect(volume.volumeMM3).toBeCloseTo(12761, 0);
+    // 支撑占地 = 底板(底座轮廓外扩 5mm)
+    expect(volume.supportAreaMM2).toBeCloseTo(1741, 0);
     // 支撑最高点 = 身体底面(z=10)离平台(−5)的高度
     expect(volume.maxHeightMM).toBeCloseTo(15, 1);
   });
@@ -178,8 +198,48 @@ describe("computeSupportVolume —— 包裹支撑体积", () => {
   });
 });
 
+describe("底板留边(2026-11-04):底板比模型轮廓四周各留一圈", () => {
+  it("底板占地 = 轮廓外扩 5mm 后的面积", () => {
+    const { volume } = supportOf(CUBE);
+
+    // 20×20 的轮廓外扩 5mm → 30×30 切掉四角圆弧 = 878.4 mm²(连续几何)
+    expect(volume.supportAreaMM2).toBeCloseTo(878.4, -1.5);
+    // 模型的投影面积本身不变(留边的是底板,不是模型)
+    expect(volume.footprintAreaMM2).toBeCloseTo(400, 0);
+  });
+
+  it("留边 0mm = 老口径:底板照着模型轮廓裁", () => {
+    const { volume } = supportOf(CUBE, { baseMarginMM: 0 });
+
+    expect(volume.supportAreaMM2).toBeCloseTo(400, 0);
+    expect(volume.volumeMM3).toBeCloseTo(2000, 0);
+  });
+
+  it("留边越大底板越大(单调查)", () => {
+    const a = supportOf(CUBE, { baseMarginMM: 0 });
+    const b = supportOf(CUBE, { baseMarginMM: 5 });
+    const c = supportOf(CUBE, { baseMarginMM: 10 });
+
+    expect(b.volume.supportAreaMM2).toBeGreaterThan(a.volume.supportAreaMM2);
+    expect(c.volume.supportAreaMM2).toBeGreaterThan(b.volume.supportAreaMM2);
+    // 留边 10mm:20×20 → 40×40 切角 ≈ 1590 mm²
+    expect(c.volume.supportAreaMM2).toBeCloseTo(1590, -1.5);
+  });
+
+  it("默认留边就是 SUPPORT_BASE_MARGIN_MM(5mm)", () => {
+    const def = supportOf(CUBE);
+    const five = supportOf(CUBE, { baseMarginMM: SUPPORT_BASE_MARGIN_MM });
+
+    expect(def.volume.supportAreaMM2).toBeCloseTo(
+      five.volume.supportAreaMM2,
+      6
+    );
+    expect(def.volume.volumeMM3).toBeCloseTo(five.volume.volumeMM3, 6);
+  });
+});
+
 describe("尺寸缩放(2026-11-03)", () => {
-  it("均匀缩放 k 倍:空腔按 k³ 走,托底那层只按 k²", () => {
+  it("均匀缩放 k 倍:空腔按 k³ 走,底板按 k² 走(留边是固定的 5mm)", () => {
     const base = prepareSupportModel(TABLE);
     const scaled = scaleSupportModel(base, 2, 2, 2);
     const a = computeSupportAtPose(base, 0, 0, 0, DEFAULT_SUPPORT_PARAMS, {
@@ -190,13 +250,17 @@ describe("尺寸缩放(2026-11-03)", () => {
     });
 
     // 支撑区域(模型下表面到平台)在缩放下是自映射的 → 空腔体积精确乘 det(S);
-    // 托底是**固定的 5mm**(打印机在平台上长一层 5mm,不是模型的一部分),
-    // 只有占地按 k² 涨,厚度还是 5mm。
-    //   (2000×k² + 6912×k³) / (2000 + 6912)
+    // 底板是**固定的 5mm 厚**(打印机在平台上长一层 5mm,不是模型的一部分),
+    // 它的占地是「轮廓外扩 5mm」—— 轮廓按 k² 涨,留边那 5mm 不涨,
+    // 所以底板不是精确的 k²(实测 2.82 倍,k² = 4)。
     const ratio = b.supportVolumeMM3 / a.supportVolumeMM3;
-    expect(ratio).toBeCloseTo((2000 * 4 + 6912 * 8) / 8912, 2);
-    // 占地按 k²
-    expect(b.supportAreaMM2 / a.supportAreaMM2).toBeCloseTo(4, 1);
+    expect(ratio).toBeCloseTo(5.99, 1);
+    // 底板占地:877 → 2477(比 2.82,不是 4 —— 留边那圈不跟着缩放)
+    expect(b.supportAreaMM2 / a.supportAreaMM2).toBeCloseTo(2.82, 1);
+    // 空腔部分严格按 k³:空腔 = 支撑体积 − 底板(占地 × 5)
+    const cavityA = a.supportVolumeMM3 - a.supportAreaMM2 * 5;
+    const cavityB = b.supportVolumeMM3 - b.supportAreaMM2 * 5;
+    expect(cavityB / cavityA).toBeCloseTo(8, 1);
   });
 
   it("非均匀缩放:高度按真实几何算(不是乘系数)", () => {
@@ -223,10 +287,9 @@ describe("尺寸缩放(2026-11-03)", () => {
     // 克重 = 体积 × 密度,两边同样算 → 比值就是体积比
     const weightA = a.supportWeightG;
     const weightB = b.supportWeightG;
-    // 跟上面同一口径:空腔按 k³,托底按 k²
     expect(weightB / weightA).toBeCloseTo(
-      (2000 * 1.5 ** 2 + 6912 * 1.5 ** 3) / 8912,
-      2
+      b.supportVolumeMM3 / a.supportVolumeMM3,
+      6
     );
   });
 });
@@ -235,8 +298,9 @@ describe("全包裹 − 模型 = 支撑(2026-11-03)", () => {
   it("桌子:全包裹体积 = 支撑体积 + 模型体积", () => {
     const { volume } = supportOf(TABLE, { gridSizeMM: 0.25 });
 
-    // 全包裹 = 平台到模型顶的整块:20×20 投影 × 25mm 高(平台在底面下 5mm)
-    expect(volume.wrapVolumeMM3).toBeCloseTo(10000, 0);
+    // 全包裹 = 平台到模型顶的整块(支撑 + 模型),外加底板留边那一圈
+    //   20×20×25 = 10000,加底板留边 877−400 = 477mm² × 5 = 2385
+    expect(volume.wrapVolumeMM3).toBeCloseTo(12385, 0);
     // 模型本体 = 帽 20×20×2 + 腿 4×4×18 = 1088 mm³
     // 支撑 = 全包裹 − 模型(栅格离散留几个百分点)
     expect(volume.wrapVolumeMM3 - 1088).toBeCloseTo(volume.volumeMM3, -2);
@@ -245,18 +309,18 @@ describe("全包裹 − 模型 = 支撑(2026-11-03)", () => {
   it("平底立方体:全包裹 = 模型 + 5mm 托底", () => {
     const { volume } = supportOf(CUBE, { gridSizeMM: 0.25 });
 
-    expect(volume.volumeMM3).toBeCloseTo(2000, 0);
-    // 20×20×20 + 20×20×5 = 10000 mm³
-    expect(volume.wrapVolumeMM3).toBeCloseTo(10000, 0);
+    expect(volume.volumeMM3).toBeCloseTo(CUBE_BASE_AREA * 5, 0);
+    // 20×20×20 + 底板 877×5 = 8000 + 4385 = 12385 mm³
+    expect(volume.wrapVolumeMM3).toBeCloseTo(12385, 0);
   });
 
   it("宽底座 + 悬空身体:全包裹 = 底座那圈 + 身体那圈", () => {
     const { volume } = supportOf(BASE_AND_HOVERING_BODY, { gridSizeMM: 0.25 });
 
     // 全包裹:身体的列从平台(−5)到 z=30 → 26×26×35,底座多出来的那圈
-    //   从 −5 到 4 → (32×32 − 26×26)×9
-    //   = 23660 + 3132 = 26792 mm³
-    expect(volume.wrapVolumeMM3).toBeCloseTo(26792, 0);
+    //   从 −5 到 4 → (32×32 − 26×26)×9,再加底板留边 (1741−1024)×5
+    //   = 23660 + 3132 + 3585 = 30377 mm³
+    expect(volume.wrapVolumeMM3).toBeCloseTo(30377, 0);
     // 模型 = 底座 32×32×4 + 身体 26×26×20 = 4096 + 13520 = 17616 mm³
     expect(volume.wrapVolumeMM3 - 17616).toBeCloseTo(volume.volumeMM3, -2);
   });
@@ -270,17 +334,17 @@ describe("双密度(2026-11-04):支撑是另一种材料", () => {
       supportDensity: 1.3,
     });
 
-    // 平底立方体:支撑 = 5mm 托底 = 2000 mm³
-    expect(pose.supportVolumeMM3).toBeCloseTo(2000, 0);
-    // × 支撑密度 1.3 g/cm³ = 2.6 g(拿模型密度 1.2 算就是 2.4 g,错了)
-    expect(pose.supportWeightG).toBeCloseTo(2.6, 6);
+    // 平底立方体:支撑 = 5mm 托底 = 4385 mm³
+    expect(pose.supportVolumeMM3).toBeCloseTo(CUBE_BASE_AREA * 5, 0);
+    // × 支撑密度 1.3 g/cm³ = 5.7 g(拿模型密度 1.2 算就是 5.26 g,错了)
+    expect(pose.supportWeightG).toBeCloseTo(5.7, 1);
   });
 
   it("没给支撑密度 → 退回模型密度(同材料支撑的老口径)", () => {
     const model = prepareSupportModel(CUBE);
     const pose = computeSupportAtPose(model, 0, 0, 0, { modelDensity: 1.2 });
 
-    expect(pose.supportWeightG).toBeCloseTo(2.4, 6);
+    expect(pose.supportWeightG).toBeCloseTo(5.26, 1);
   });
 
   it("支撑密度非法(≤0)→ 退回模型密度,不能算出 NaN", () => {
@@ -290,7 +354,7 @@ describe("双密度(2026-11-04):支撑是另一种材料", () => {
       supportDensity: 0,
     });
 
-    expect(pose.supportWeightG).toBeCloseTo(2.4, 6);
+    expect(pose.supportWeightG).toBeCloseTo(5.26, 1);
   });
 });
 
@@ -300,8 +364,8 @@ describe("封闭内腔也算支撑(水溶性支撑会灌进去)", () => {
     // 支撑,洗的时候一起溶掉,所以内腔的体积算支撑材料。
     const { volume } = supportOf(hollowShell().positions);
 
-    // 内腔 19×19×19 = 6859,加托底 20×20×5 = 2000 → 8859 mm³
-    expect(volume.volumeMM3).toBeCloseTo(8859, 0);
+    // 内腔 19×19×19 = 6859,加托底 877×5 = 4385 → 11244 mm³
+    expect(volume.volumeMM3).toBeCloseTo(11244, 0);
   });
 
   it("内腔算支撑时用的也是支撑密度", () => {
@@ -318,8 +382,8 @@ describe("封闭内腔也算支撑(水溶性支撑会灌进去)", () => {
       { gridSizeMM: 0.25 }
     );
 
-    // 8859 mm³ × 1.3 g/cm³ ≈ 11.52 g
-    expect(pose.supportWeightG).toBeCloseTo(11.52, 1);
+    // 11244 mm³ × 1.3 g/cm³ ≈ 14.6 g
+    expect(pose.supportWeightG).toBeCloseTo(14.6, 1);
   });
 
   it("生产栅格(1mm)也不能把内腔的支撑算爆", () => {
@@ -329,9 +393,9 @@ describe("封闭内腔也算支撑(水溶性支撑会灌进去)", () => {
     const model = prepareSupportModel(hollowShell().positions);
     const pose = computeSupportAtPose(model, 0, 0, 0, DEFAULT_SUPPORT_PARAMS);
 
-    // 真值 8859 mm³,1mm 栅格下允许 2% 的离散误差
-    expect(pose.supportVolumeMM3).toBeGreaterThan(8859 * 0.98);
-    expect(pose.supportVolumeMM3).toBeLessThan(8859 * 1.02);
+    // 真值 11244 mm³,1mm 栅格下允许 2% 的离散误差
+    expect(pose.supportVolumeMM3).toBeGreaterThan(11244 * 0.98);
+    expect(pose.supportVolumeMM3).toBeLessThan(11244 * 1.02);
   });
 });
 
@@ -359,14 +423,15 @@ describe("两个工具算的是同一块支撑", () => {
     // 模型本体:帽 20×20×2 + 腿 4×4×18 = 1088 mm³ → 1.088 cm³ × 1.15 g/cm³
     const optimal = findOptimalAngle(model, undefined, 50, 1.25);
 
-    // 5mm 托底是按**占地**算的(占地 × 5),所以「占地小」比「躺平」更省:
-    //   - 原姿态(腿朝下)→ 帽下空腔 6912 + 20×20 托底 2000 = 8912 mm³
-    //   - 翻过来(帽当底座)→ 20×20 托底 2000 mm³
-    //   - 侧躺(帽竖着)→ 占地只有 94 mm²,托底 470 + 腿上那圈 = 990 mm³
+    // 5mm 托底是按**底板占地**算的(轮廓外扩 5mm × 5),所以「占地小」比
+    // 「躺平」更省:
+    //   - 原姿态(腿朝下)→ 帽下空腔 6912 + 底板 4385 = 11297 mm³
+    //   - 翻过来(帽当底座)→ 底板 4385 mm³
+    //   - 侧躺(帽竖着)→ 占地只有 40mm²,底板 ≈ 340×5 ≈ 1700,加腿上那圈
     // 摆盘挑的就是最省的那个(侧躺 45°)。
-    expect(optimal.totalSupportWeight).toBeCloseTo(1.19, 2);
+    expect(optimal.totalSupportWeight).toBeCloseTo(4.15, 1);
     // 一定比原姿态省
-    expect(optimal.totalSupportWeight).toBeLessThan(10.69);
+    expect(optimal.totalSupportWeight).toBeLessThan(14.81);
     expect(optimal.selfSupportRatio).toBeLessThan(1);
   });
 });

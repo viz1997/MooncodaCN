@@ -1148,7 +1148,6 @@
       "supportWeightError": "支撑克重算不出来：{reason}",
       "poseInitial": "初始角度 0°,0°",
       "poseCurrent": "当前姿态 X {x}° Y {y}° Z {z}°",
-      "totalWeightHint": "总克重 = 耗材克重 + 支撑克重 —— 打印出来还没洗支撑时，整块称重就是这个数。支撑是另一种材料（{density} g/cm³），所以全包裹 {volume} cm³ 里是两种材料，不能用一个密度乘。",
       "supportNeedsModel": "需上传模型后计算",
       "weightFormula": "克重 = 体积 × 材料密度",
       "density": "材料密度",
