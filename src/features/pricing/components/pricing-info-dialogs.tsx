@@ -168,7 +168,7 @@ export function PricingInfoDialogs({
               })}
             </div>
             <p className="text-xs text-stone-500">{t("info.algorithm.p2")}</p>
-            {/* 口径与边界:内腔算支撑、1mm 托底算支撑、逐列配对是近似、
+            {/* 口径与边界:内腔算支撑、5mm 托底算支撑、逐列配对是近似、
                 页面上的数是取整后相加 —— 别让「全包裹 × 单一密度」的说法
                 混进这页。 */}
             <div className="rounded-md border border-stone-200 bg-stone-50/70 p-3">

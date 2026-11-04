@@ -370,10 +370,10 @@ export function ObjViewer({
     const rotBox = new THREE.Box3().setFromObject(model, true);
     if (rotBox.isEmpty()) return;
 
-    // 把模型底部抬到 Z=1mm（网格平面之上）—— 支撑先长一层 1mm 托底，
-    // 模型悬在托底上不贴平台；Z 是高度方向，网格在 Z=0 平面上。
-    // 托底是**实际打印尺寸**的 1mm，不跟着模型缩放走（算克重那边也是
-    // 在缩放后的网格上减固定 1mm）。
+    // 把模型底部抬到 Z=SUPPORT_LIFT_MM（网格平面之上）—— 支撑先长一层
+    // 5mm 托底，模型悬在托底上不贴平台；Z 是高度方向，网格在 Z=0 平面上。
+    // 托底是**实际打印尺寸**的固定厚度，不跟着模型缩放走（算克重那边也是
+    // 在缩放后的网格上减固定 `SUPPORT_LIFT_MM`）。
     model.position.z = -rotBox.min.z + SUPPORT_LIFT_MM;
     model.position.x = -(rotBox.min.x + rotBox.max.x) / 2;
     model.position.y = -(rotBox.min.y + rotBox.max.y) / 2;
@@ -475,9 +475,10 @@ export function ObjViewer({
     const supportModel = supportModelRef.current;
     if (!show || !model || !scene || !supportModel) return;
 
-    // 支撑壳按**缩放后**的几何算 —— 1mm 托底是实际打印尺寸的 1mm,
-    // 不该跟着模型缩放走(算克重那边是在缩放后的网格上减固定 1mm)。
-    // 画出来的托底厚度必须跟算出来的一致,否则画面跟报价对不上。
+    // 支撑壳按**缩放后**的几何算 —— 托底是实际打印尺寸的固定 5mm,
+    // 不该跟着模型缩放走(算克重那边是在缩放后的网格上减固定
+    // `SUPPORT_LIFT_MM`)。画出来的托底厚度必须跟算出来的一致,否则画面跟
+    // 报价对不上。
     const [sx, sy, sz] = getScaleTuple();
     const scaledModel = scaleSupportModel(supportModel, sx, sy, sz);
     // 旋转到当前打印姿态(口径跟 obj-exporter / 摆盘算法一致:先 X 后 Y 后 Z)
@@ -873,8 +874,8 @@ export function ObjViewer({
     // 计算旋转+缩放后的世界坐标包围盒
     const rotBox = new THREE.Box3().setFromObject(model, true);
     if (!rotBox.isEmpty()) {
-      // 把模型底部抬到 Z=1mm（网格平面之上，支撑托底 1mm），Z 是高度方向。
-      // 托底是实际打印尺寸的 1mm,不跟着模型缩放走。
+      // 把模型底部抬到 Z=SUPPORT_LIFT_MM（网格平面之上，支撑托底 5mm），Z 是高度方向。
+      // 托底是实际打印尺寸的固定 5mm,不跟着模型缩放走。
       model.position.z = -rotBox.min.z + SUPPORT_LIFT_MM;
       // 同时居中 X/Y 到原点（水平方向）
       const centerX = (rotBox.min.x + rotBox.max.x) / 2;

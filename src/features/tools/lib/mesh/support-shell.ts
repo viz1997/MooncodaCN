@@ -11,7 +11,7 @@
  * ## 支撑体是什么
  *
  * WJP 全彩打印用水溶性包裹支撑:支撑材料从平台往上长,长到模型的下表面为止。
- * 支撑先在平台上长一层 1mm 托底(`SUPPORT_LIFT_MM`),模型整个悬在托底上,
+ * 支撑先在平台上长一层 5mm 托底(`SUPPORT_LIFT_MM`),模型整个悬在托底上,
  * 不直接贴平台 —— 托底那层也是支撑材料,算进克重。
  * 支撑体由三部分围合(和检测工具的可视化一一对应):
  *
@@ -85,16 +85,20 @@ export interface SupportMesh {
 /**
  * 支撑托底高度 (mm)
  *
- * 有支撑的时候模型不会直接贴紧平台 —— 支撑材料先在平台上长一层 1mm 托住
- * 模型,模型整个悬在这层托底上。所以:
+ * 有支撑的时候模型不会直接贴紧平台 —— 支撑材料先在平台上长一层 **5mm**
+ * 托住模型,模型整个悬在这层托底上(工作室的实际工艺,2026-11-04 确认)。
+ * 所以:
  *
- *   平台面 = 模型最低点 − 1mm
- *   支撑   = 托底那 1mm + 平台到模型下表面之间的空腔
+ *   平台面 = 模型最低点 − 5mm
+ *   支撑   = 托底那 5mm + 平台到模型下表面之间的空腔
  *
  * 托底那层也是支撑材料(打印完一起洗掉),要算进支撑克重 —— 占地就是模型
- * 的投影面积,一个 40×40mm 的手办光托底就 1.6cm³。
+ * 的投影面积,一个 40×40mm 的手办光托底就 8cm³(5mm 厚)。
+ *
+ * 这个高度同时决定 3D 预览里模型离平台多远(`obj-viewer.tsx` /
+ * `model-check/viewport.tsx` 都直接用这个常量)—— 改了这里,画面跟着变。
  */
-export const SUPPORT_LIFT_MM = 1;
+export const SUPPORT_LIFT_MM = 5;
 
 /** 包裹支撑外壳的生成选项 */
 export interface SupportShellOptions {
@@ -154,7 +158,7 @@ export function buildSupportShell(
       normals[v * 3 + 2] += nz;
     }
   }
-  // 平台平面(模型坐标):托底 1mm(支撑托着模型,模型不贴平台)再略下方,
+  // 平台平面(模型坐标):托底 5mm(支撑托着模型,模型不贴平台)再略下方,
   // 主线程整组平移后即为打印平台
   const groundZ =
     mesh.bboxMin[2] - SUPPORT_LIFT_MM - Math.max(0.05, mesh.diag * 0.002);
@@ -555,8 +559,8 @@ export interface SupportVolumeResult {
  * 解析体积,支撑克重必须同一口径 —— 外壳间隙(对角线 2%,0.8~5mm)是
  * 可视化用的,算进体积会让支撑克重系统性地高 10~30%。
  *
- * 平台取模型最低点下方 1mm(`SUPPORT_LIFT_MM`):有支撑时支撑先在平台上
- * 长一层 1mm 托住模型,模型整个悬在托底上,不直接贴平台。托底那层也是
+ * 平台取模型最低点下方 5mm(`SUPPORT_LIFT_MM`):有支撑时支撑先在平台上
+ * 长一层 5mm 托住模型,模型整个悬在托底上,不直接贴平台。托底那层也是
  * 支撑材料(打印完一起洗掉),算进支撑体积 —— 占地就是模型的投影面积。
  * `shell.groundZ` 还要再低 0.05~0.1mm(避免平台投影跟模型底面
  * z-fighting),那点缝不是材料,不算进支撑。
@@ -570,7 +574,7 @@ export function computeSupportVolume(
   options?: SupportVolumeOptions
 ): SupportVolumeResult {
   const positions = mesh.vertices;
-  // 平台面比模型最低点低 1mm:支撑先长一层托底,模型悬在托底上(见
+  // 平台面比模型最低点低 5mm:支撑先长一层托底,模型悬在托底上(见
   // `SUPPORT_LIFT_MM`)。托底那层也是支撑材料,算进支撑体积。
   const platformZ = mesh.bboxMin[2] - SUPPORT_LIFT_MM;
   const faceVertex = mesh.faceVertex;
