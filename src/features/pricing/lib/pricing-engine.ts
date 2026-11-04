@@ -40,6 +40,14 @@ export type ProductPreset = {
 
 export type PricingConfig = {
   materialDensity: number; // g/cm³
+  /**
+   * 支撑材料密度 (g/cm³) —— 支撑跟模型**不是**一种材料
+   *
+   * 工作室用水溶性支撑(PVA/BVOH,约 1.13~1.30 g/cm³),模型是光敏树脂。
+   * 支撑克重 = 支撑体积 × 这个密度;总克重 = 耗材克重 + 支撑克重
+   * (不能再用「全包裹体积 × 单一密度」那套口径)。
+   */
+  supportDensity: number; // g/cm³
   unitPrice: number; // 元/g
   varnishFee: number; // 元
   varnishEnabled: boolean;
@@ -132,6 +140,9 @@ export const DEFAULT_PRODUCT_PRESETS: ProductPreset[] = [
 
 export const DEFAULT_CONFIG: PricingConfig = {
   materialDensity: 1.2,
+  // 支撑材料密度 —— 水溶性支撑(PVA/BVOH)。默认跟模型同密度,工作室
+  // 按自己那卷支撑的实际密度改「材料参数」里的支撑密度。
+  supportDensity: 1.2,
   unitPrice: 4.5,
   varnishFee: 10,
   varnishEnabled: true,

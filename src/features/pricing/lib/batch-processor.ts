@@ -20,11 +20,7 @@
  * All processing happens client-side; no files are uploaded to a server.
  */
 
-import {
-  DEFAULT_SUPPORT_PARAMS,
-  type OptimalAngle,
-  type SupportParams,
-} from "./angle-optimizer";
+import type { OptimalAngle, SupportParams } from "./angle-optimizer";
 import { AngleOptimizerClient } from "./angle-optimizer-client";
 import { parseObjInWorker } from "./obj-worker-client";
 import {
@@ -332,10 +328,11 @@ export async function processBatch(
       // 模型克重,用于"本体支撑比例"= 支撑克重 / 模型克重
       const modelWeightG =
         model.parseResult.volumeCM3 * pricingConfig.materialDensity;
-      // 支撑跟模型是同一种材料 —— 密度跟材料密度走(不是另一个数)
+      // 支撑跟模型**不是**一种材料(水溶性支撑)—— 支撑克重按支撑密度算,
+      // 模型密度只用来算耗材克重
       const supportParams: SupportParams = {
-        ...DEFAULT_SUPPORT_PARAMS,
-        materialDensity: pricingConfig.materialDensity,
+        modelDensity: pricingConfig.materialDensity,
+        supportDensity: pricingConfig.supportDensity,
       };
       if (positions) {
         const client = new AngleOptimizerClient();

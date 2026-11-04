@@ -45,6 +45,14 @@ export type PricingInfoDialogsProps = {
   /** 材料参数（受控） */
   materialDensity: number;
   onMaterialDensityChange: (v: number) => void;
+  /**
+   * 支撑材料密度 (g/cm³) —— 支撑跟模型**不是**一种材料
+   *
+   * 水溶性支撑(PVA/BVOH,约 1.13~1.30 g/cm³)跟光敏树脂密度不同:
+   * 支撑克重 = 支撑体积 × 支撑密度,总克重 = 耗材克重 + 支撑克重。
+   */
+  supportDensity: number;
+  onSupportDensityChange: (v: number) => void;
 
   /** 应用产品预设 */
   onApplyProduct: (productId: string) => void;
@@ -57,6 +65,8 @@ export function PricingInfoDialogs({
   onInfoDialogChange,
   materialDensity,
   onMaterialDensityChange,
+  supportDensity,
+  onSupportDensityChange,
   onApplyProduct,
 }: PricingInfoDialogsProps) {
   const t = useTranslations("MaterialPricing");
@@ -158,6 +168,21 @@ export function PricingInfoDialogs({
               })}
             </div>
             <p className="text-xs text-stone-500">{t("info.algorithm.p2")}</p>
+            {/* 口径与边界:内腔算支撑、1mm 托底算支撑、逐列配对是近似、
+                页面上的数是取整后相加 —— 别让「全包裹 × 单一密度」的说法
+                混进这页。 */}
+            <div className="rounded-md border border-stone-200 bg-stone-50/70 p-3">
+              <h4 className="text-xs font-semibold text-stone-700 mb-2">
+                {t("info.algorithm.boundariesTitle")}
+              </h4>
+              <ul className="space-y-1.5 list-disc list-inside text-[11px] leading-relaxed text-stone-500">
+                {(t.raw("info.algorithm.boundaries") as string[]).map(
+                  (item) => (
+                    <li key={item}>{item}</li>
+                  )
+                )}
+              </ul>
+            </div>
           </div>
         )}
 
@@ -243,27 +268,53 @@ export function PricingInfoDialogs({
                   {t("info.materials.density")}
                 </h4>
               </div>
-              <div className="flex items-center gap-2">
-                <Label className="text-xs text-stone-500 shrink-0">
-                  {t("info.materials.densityLabel")}
-                </Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0.1"
-                  max="5"
-                  value={materialDensity}
-                  onChange={(e) =>
-                    // 必须夹逼到 > 0：密度为 0 时 `calculatePrice()` 返回 null，
-                    // 整个克重界面（含体积 / 表面积）会一起消失。
-                    onMaterialDensityChange(
-                      Math.max(0.1, parseFloat(e.target.value) || 0.1)
-                    )
-                  }
-                  className="font-mono h-8 text-sm max-w-[120px]"
-                />
-                <span className="text-xs text-stone-500">g/cm³</span>
+              <div className="space-y-2.5">
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs text-stone-500 shrink-0">
+                    {t("info.materials.densityLabel")}
+                  </Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0.1"
+                    max="5"
+                    value={materialDensity}
+                    onChange={(e) =>
+                      // 必须夹逼到 > 0：密度为 0 时 `calculatePrice()` 返回 null，
+                      // 整个克重界面（含体积 / 表面积）会一起消失。
+                      onMaterialDensityChange(
+                        Math.max(0.1, parseFloat(e.target.value) || 0.1)
+                      )
+                    }
+                    className="font-mono h-8 text-sm max-w-[120px]"
+                  />
+                  <span className="text-xs text-stone-500">g/cm³</span>
+                </div>
+                {/* 支撑是另一种材料 —— 密度跟模型分开填 */}
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs text-stone-500 shrink-0">
+                    {t("info.materials.supportDensityLabel")}
+                  </Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0.1"
+                    max="5"
+                    value={supportDensity}
+                    onChange={(e) =>
+                      // 同样夹逼到 > 0：密度非法时支撑克重算不出来
+                      onSupportDensityChange(
+                        Math.max(0.1, parseFloat(e.target.value) || 0.1)
+                      )
+                    }
+                    className="font-mono h-8 text-sm max-w-[120px]"
+                  />
+                  <span className="text-xs text-stone-500">g/cm³</span>
+                </div>
               </div>
+              <p className="mt-2.5 text-[11px] leading-relaxed text-stone-500">
+                {t("info.materials.supportDensityHint")}
+              </p>
             </div>
           </div>
         )}

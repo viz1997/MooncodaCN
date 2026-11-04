@@ -71,10 +71,11 @@ import {
   scaleGeometryXYZ,
 } from "@/features/pricing/components/shared";
 import { TextureDiagnosticNote } from "@/features/pricing/components/texture-diagnostic";
-import type {
-  OptimalAngle,
-  SupportParams,
-  SupportPoseResult,
+import {
+  type OptimalAngle,
+  resolveSupportDensity,
+  type SupportParams,
+  type SupportPoseResult,
 } from "@/features/pricing/lib/angle-optimizer";
 import { AngleOptimizerClient } from "@/features/pricing/lib/angle-optimizer-client";
 import {
@@ -216,6 +217,19 @@ export function PricingCalculator({
   const [materialDensity, setMaterialDensity] = useState(
     DEFAULT_CONFIG.materialDensity
   );
+  /**
+   * 支撑材料密度 (g/cm³) —— 支撑跟模型**不是**一种材料
+   *
+   * 工作室用的是水溶性支撑(PVA/BVOH,约 1.13~1.30 g/cm³),模型是光敏树脂。
+   * 所以支撑克重按**支撑密度**算,不能拿模型密度乘:
+   *
+   *   耗材克重 = 模型体积 × 模型密度
+   *   支撑克重 = 支撑体积 × 支撑密度
+   *   总克重   = 耗材克重 + 支撑克重
+   */
+  const [supportDensity, setSupportDensity] = useState(
+    DEFAULT_CONFIG.supportDensity
+  );
   // ↓↓↓ 价格相关 state：UI 不再展示，但**绝不能删** ↓↓↓
   // `calculatePrice()` 是 `materialWeight`（克重）的唯一来源，它在
   // `unitPrice` 非法时返回 null —— 一旦 null，整个克重界面连同体积一起消失。
@@ -230,14 +244,14 @@ export function PricingCalculator({
 
   // ---- 支撑计算参数 ----
   /**
-   * 支撑跟模型是**同一种材料**:密度一样,填充率也一样(实心 = 100%)。
-   * 所以这里只有材料密度一个数 —— 跟耗材克重用的是同一个。
-   * (以前支撑有个自己的密度 1.90 + 一个填充率旋钮,导致「总克重」既不是
-   * 包裹后整块的重量,也不等于耗材克重 + 支撑克重。)
+   * 支撑克重 = 支撑体积 × **支撑密度**(支撑是另一种材料,水溶性支撑)
+   *
+   * 体积还是那个几何算出来的包裹支撑体积(跟检测工具同一块);
+   * 密度是支撑材料自己的 —— 模型密度只用来算耗材克重。
    */
   const supportParams = useMemo<SupportParams>(
-    () => ({ materialDensity }),
-    [materialDensity]
+    () => ({ modelDensity: materialDensity, supportDensity }),
+    [materialDensity, supportDensity]
   );
 
   // ---- 智能摆盘 ----
@@ -306,6 +320,7 @@ export function PricingCalculator({
     () => ({
       ...DEFAULT_CONFIG,
       materialDensity,
+      supportDensity,
       unitPrice,
       varnishFee,
       varnishEnabled,
@@ -317,6 +332,7 @@ export function PricingCalculator({
     }),
     [
       materialDensity,
+      supportDensity,
       unitPrice,
       varnishFee,
       varnishEnabled,
@@ -401,8 +417,10 @@ export function PricingCalculator({
     const [sx, sy, sz] = appliedScales;
     const modelWeightG =
       model.parseResult.volumeCM3 * sx * sy * sz * materialDensity;
-    // 原始姿态(摆盘对比用):只跟尺寸 / 材料密度有关,没变就沿用缓存
-    const originalKey = `${sx}|${sy}|${sz}|${supportParams.materialDensity}`;
+    // 原始姿态(摆盘对比用):只跟尺寸 / 支撑密度有关,没变就沿用缓存
+    const originalKey = `${sx}|${sy}|${sz}|${resolveSupportDensity(
+      supportParams
+    )}`;
     const needOriginal = originalSupportRef.current.key !== originalKey;
     let cancelled = false;
     void (async () => {
@@ -935,6 +953,7 @@ export function PricingCalculator({
     setRepairMode("none");
     setRepairPrice(0);
     setMaterialDensity(DEFAULT_CONFIG.materialDensity);
+    setSupportDensity(DEFAULT_CONFIG.supportDensity);
     // 价格相关 state 一并复位（UI 不展示，但引擎仍读它们算克重）
     setUnitPrice(DEFAULT_CONFIG.unitPrice);
     setVarnishEnabled(true);
@@ -1245,6 +1264,7 @@ export function PricingCalculator({
         {poseSupport
           ? t("stats.totalWeightHint", {
               volume: fmt((poseSupport.wrapVolumeMM3 ?? 0) / 1000, 2),
+              density: fmt(resolveSupportDensity(supportParams), 2),
             })
           : t("stats.supportWeightHint")}
       </p>
@@ -1652,6 +1672,7 @@ export function PricingCalculator({
               }}
               solidRatio={solidRatio}
               materialDensity={materialDensity}
+              supportDensity={supportDensity}
             />
           )}
         </main>
@@ -1662,6 +1683,8 @@ export function PricingCalculator({
           onInfoDialogChange={setInfoDialog}
           materialDensity={materialDensity}
           onMaterialDensityChange={setMaterialDensity}
+          supportDensity={supportDensity}
+          onSupportDensityChange={setSupportDensity}
           onApplyProduct={applyProduct}
         />
 

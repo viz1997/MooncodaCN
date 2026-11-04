@@ -80,6 +80,8 @@ export type BatchModeSectionProps = {
   onDropFiles: (files: FileList) => void;
   solidRatio: number;
   materialDensity: number;
+  /** 支撑材料密度 (g/cm³) —— 支撑跟模型不是一种材料,批量算支撑克重用这个 */
+  supportDensity: number;
 };
 
 export function BatchModeSection(props: BatchModeSectionProps) {
@@ -102,6 +104,7 @@ export function BatchModeSection(props: BatchModeSectionProps) {
     onDropFiles,
     solidRatio,
     materialDensity,
+    supportDensity,
   } = props;
 
   const summary = useMemo(() => summarizeBatch(batchItems), [batchItems]);
@@ -189,6 +192,18 @@ export function BatchModeSection(props: BatchModeSectionProps) {
               <div className="flex items-center gap-1 h-7">
                 <span className="font-mono text-sm text-stone-700">
                   {fmt(materialDensity, 2)}
+                </span>
+                <span className="text-xs text-stone-400">g/cm³</span>
+              </div>
+            </div>
+            {/* 支撑是另一种材料 —— 支撑克重按这个密度算,得让人看见 */}
+            <div className="space-y-1.5">
+              <Label className="text-xs text-stone-500">
+                {t("supportDensity")}
+              </Label>
+              <div className="flex items-center gap-1 h-7">
+                <span className="font-mono text-sm text-stone-700">
+                  {fmt(supportDensity, 2)}
                 </span>
                 <span className="text-xs text-stone-400">g/cm³</span>
               </div>
@@ -350,6 +365,7 @@ export function BatchModeSection(props: BatchModeSectionProps) {
             {t.rich("settingsReminder", {
               solidRatio,
               density: fmt(materialDensity, 2),
+              supportDensity: fmt(supportDensity, 2),
               angle: batchApplyAngle ? t("enabled") : t("disabled"),
               b: (chunks) => (
                 <strong className="text-stone-700">{chunks}</strong>

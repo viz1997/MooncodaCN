@@ -3,6 +3,7 @@ import {
   computeSupportAtPose,
   DEFAULT_SUPPORT_PARAMS,
   findOptimalAngle,
+  resolveSupportDensity,
 } from "@/features/pricing/lib/angle-optimizer";
 import {
   buildSupportShell,
@@ -11,7 +12,11 @@ import {
   rotateSupportMesh,
   scaleSupportModel,
 } from "@/features/tools/lib/mesh/support-shell";
-import { boxTriangles, uvSphere } from "@/test/tools/fixtures/mesh-fixtures";
+import {
+  boxTriangles,
+  hollowShell,
+  uvSphere,
+} from "@/test/tools/fixtures/mesh-fixtures";
 
 /**
  * 包裹支撑算法(模型检查工具 + 克重工具共用)的测试
@@ -257,6 +262,79 @@ describe("全包裹 − 模型 = 支撑(2026-11-03)", () => {
   });
 });
 
+describe("双密度(2026-11-04):支撑是另一种材料", () => {
+  it("支撑克重按支撑密度算,不是模型密度", () => {
+    const model = prepareSupportModel(CUBE);
+    const pose = computeSupportAtPose(model, 0, 0, 0, {
+      modelDensity: 1.2,
+      supportDensity: 1.3,
+    });
+
+    // 平底立方体:支撑 = 1mm 托底 = 400 mm³
+    expect(pose.supportVolumeMM3).toBeCloseTo(400, 0);
+    // × 支撑密度 1.3 g/cm³ = 0.52 g(拿模型密度 1.2 算就是 0.48 g,错了)
+    expect(pose.supportWeightG).toBeCloseTo(0.52, 6);
+  });
+
+  it("没给支撑密度 → 退回模型密度(同材料支撑的老口径)", () => {
+    const model = prepareSupportModel(CUBE);
+    const pose = computeSupportAtPose(model, 0, 0, 0, { modelDensity: 1.2 });
+
+    expect(pose.supportWeightG).toBeCloseTo(0.48, 6);
+  });
+
+  it("支撑密度非法(≤0)→ 退回模型密度,不能算出 NaN", () => {
+    const model = prepareSupportModel(CUBE);
+    const pose = computeSupportAtPose(model, 0, 0, 0, {
+      modelDensity: 1.2,
+      supportDensity: 0,
+    });
+
+    expect(pose.supportWeightG).toBeCloseTo(0.48, 6);
+  });
+});
+
+describe("封闭内腔也算支撑(水溶性支撑会灌进去)", () => {
+  it("空心立方体:内腔体积 + 1mm 托底都算支撑", () => {
+    // 业务口径:**按几何全包裹计,不区分可达性** —— 内腔灌满了水溶性
+    // 支撑,洗的时候一起溶掉,所以内腔的体积算支撑材料。
+    const { volume } = supportOf(hollowShell().positions);
+
+    // 内腔 19×19×19 = 6859,加托底 20×20×1 = 400 → 7259 mm³
+    expect(volume.volumeMM3).toBeCloseTo(7259, 0);
+  });
+
+  it("内腔算支撑时用的也是支撑密度", () => {
+    const model = prepareSupportModel(hollowShell().positions);
+    const pose = computeSupportAtPose(
+      model,
+      0,
+      0,
+      0,
+      {
+        modelDensity: 1.2,
+        supportDensity: 1.3,
+      },
+      { gridSizeMM: 0.25 }
+    );
+
+    // 7259 mm³ × 1.3 g/cm³ ≈ 9.44 g
+    expect(pose.supportWeightG).toBeCloseTo(9.44, 1);
+  });
+
+  it("生产栅格(1mm)也不能把内腔的支撑算爆", () => {
+    // 内腔壁正好落在栅格线上时,格心采样点会「擦」在面上 —— 交点个数多算
+    // 一个,奇偶配对整体错位,这一格会被当成空腔(支撑系统性地多算
+    // 10~30%)。掠射列按两种解释取平均,栅格再粗也不能离谱。
+    const model = prepareSupportModel(hollowShell().positions);
+    const pose = computeSupportAtPose(model, 0, 0, 0, DEFAULT_SUPPORT_PARAMS);
+
+    // 真值 7259 mm³,1mm 栅格下允许 2% 的离散误差
+    expect(pose.supportVolumeMM3).toBeGreaterThan(7259 * 0.98);
+    expect(pose.supportVolumeMM3).toBeLessThan(7259 * 1.02);
+  });
+});
+
 describe("两个工具算的是同一块支撑", () => {
   it("克重工具的支撑体积 == 检测工具的支撑体积", () => {
     const positions = TABLE;
@@ -269,9 +347,9 @@ describe("两个工具算的是同一块支撑", () => {
     expect(pose.supportVolumeMM3).toBeCloseTo(volume.volumeMM3, 3);
     expect(pose.supportAreaMM2).toBeCloseTo(volume.supportAreaMM2, 3);
     expect(pose.wrapAreaMM2).toBeCloseTo(volume.contactAreaMM2, 3);
-    // 克重 = 体积 × 材料密度(支撑跟模型同一种材料,实心)
+    // 克重 = 体积 × 支撑密度(支撑是另一种材料,实心)
     expect(pose.supportWeightG).toBeCloseTo(
-      volume.volumeMM3 * DEFAULT_SUPPORT_PARAMS.materialDensity * 0.001,
+      volume.volumeMM3 * resolveSupportDensity(DEFAULT_SUPPORT_PARAMS) * 0.001,
       6
     );
   });

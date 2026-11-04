@@ -29,17 +29,24 @@
  * 体积走**真几何**(网格自己的顶点),跟模型克重同一口径 —— 检测工具
  * 画外壳时那圈间隙(对角线 2%,0.8~5mm)只是可视化,不进克重。
  *
- * ## 三个克重的关系(2026-11-03)
+ * ## 三个克重的关系(2026-11-04 改成双密度)
  *
  *   全包裹体积 = 平台到模型顶的整块(支撑 + 模型)—— `wrapVolumeMM3`
  *   支撑体积   = 全包裹体积 − 模型体积            —— `supportVolumeMM3`
  *
- *   支撑克重 = 包裹支撑体积 × 材料密度
- *   总克重   = 全包裹体积   × 材料密度 = 耗材克重 + 支撑克重
+ *   耗材克重 = 模型体积 × 模型密度
+ *   支撑克重 = 支撑体积 × **支撑密度**
+ *   总克重   = 耗材克重 + 支撑克重
  *
- * 也就是:**支撑克重 = 全包裹克重 − 模型克重**。打印出来还没洗支撑时,
- * 整块称重就是「总克重」;洗掉支撑、只剩模型时就是「耗材克重」,
- * 两个一减就是支撑材料的净重 —— 跟工作室实际称重对得上。
+ * **支撑跟模型不是一种材料**:工作室用的是**水溶性支撑**(PVA/BVOH,
+ * 约 1.13~1.30 g/cm³),模型是光敏树脂(约 1.1~1.3 g/cm³)—— 两个密度
+ * 分开算,所以两条老恒等式**不再成立**:
+ *
+ *   - 「总克重 = 全包裹体积 × 单一密度」—— 全包裹里是两种材料,乘不出来
+ *   - 「支撑克重 = 全包裹克重 − 模型克重」—— 那个减法要同一个密度才成立
+ *
+ * 打印出来还没洗支撑时,整块称重就是「总克重」;洗掉支撑、只剩模型时就是
+ * 「耗材克重」—— 两个一减 = 支撑材料的净重(这个减法跟密度无关,一直成立)。
  *
  * ## 尺寸缩放(2026-11-03)
  *
@@ -101,29 +108,50 @@ export type OptimalAngle = {
 };
 
 /**
- * 支撑计算参数
+ * 支撑计算参数 —— **两个密度**
  *
- * 支撑跟模型是**同一种材料**(2026-11-04 改):密度一样,填充率也一样
- * (支撑是实心的 = 100%,跟模型一样)。所以参数里只剩一个材料密度 ——
- * 由调用方从材料设置传进来(跟耗材克重用的是同一个数)。
+ * 支撑跟模型**不是一种材料**(2026-11-04 改):
  *
- * 以前这里有两个旋钮:「填充率」和「支撑密度 1.90」。支撑密度是另一个数,
- * 导致「总克重」既不是包裹后整块的重量,也不等于耗材克重 + 支撑克重 ——
- * 而包裹后的模型就是一个完整模型,整块都是同一种材料:
+ *   模型 = 光敏树脂(约 1.1~1.3 g/cm³)
+ *   支撑 = 水溶性支撑 PVA / BVOH(约 1.13~1.30 g/cm³),打印完水洗掉
  *
- *   支撑克重 = 包裹支撑体积 × 材料密度
- *   总克重   = 全包裹体积   × 材料密度 = 耗材克重 + 支撑克重
+ * 所以克重是**双密度**的:
  *
- * 体积完全由几何决定(平台到模型下表面之间的空腔)。
+ *   耗材克重 = 模型体积 × 模型密度
+ *   支撑克重 = 支撑体积 × 支撑密度
+ *   总克重   = 耗材克重 + 支撑克重
+ *
+ * 「总克重 = 全包裹体积 × 单一密度」这条老恒等式**不再成立** —— 全包裹
+ * 里是两种材料,乘一个密度算不出总重。
+ *
+ * 支撑体积完全由几何决定(平台到模型下表面之间的空腔),跟密度无关。
  */
 export type SupportParams = {
-  /** 材料密度 (g/cm³)—— 支撑跟模型用同一个 */
-  materialDensity: number;
+  /** 模型材料密度 (g/cm³) —— 耗材克重用这个 */
+  modelDensity: number;
+  /**
+   * 支撑材料密度 (g/cm³)
+   *
+   * 省略 = 跟模型同一种材料(同材料支撑的老口径)。给了就是另一种材料,
+   * 支撑克重按这个密度算。
+   */
+  supportDensity?: number | undefined;
 };
 
 export const DEFAULT_SUPPORT_PARAMS: SupportParams = {
-  materialDensity: 1.2,
+  modelDensity: 1.2,
+  supportDensity: 1.2,
 };
+
+/**
+ * 实际生效的支撑密度 —— 没给支撑密度就当跟模型同一种材料
+ *
+ * 密度非法(≤0 / NaN)时也退回模型密度:克重算不出来不能变成 NaN。
+ */
+export function resolveSupportDensity(params: SupportParams): number {
+  const d = params.supportDensity ?? params.modelDensity;
+  return Number.isFinite(d) && d > 0 ? d : params.modelDensity;
+}
 
 /** 悬垂阈值：法线 z 分量 < -cos(45°) ≈ -0.707 时为悬垂面（>45° 倾斜朝下） */
 const OVERHANG_NORMAL_Z_THRESHOLD = -Math.SQRT1_2;
@@ -135,8 +163,8 @@ export type SupportPoseResult = {
   /**
    * 全包裹体积 (mm³) —— 平台到模型顶的整块(支撑 + 模型)
    *
-   * 「支撑克重 = 全包裹克重 − 模型克重」里的那块全包裹:
-   * 打印出来还没洗支撑时,整块就是这个体积。
+   * 打印出来还没洗支撑时,整块就是这个体积。**里面是两种材料**
+   * (模型 + 支撑),所以乘一个密度算不出总克重。
    */
   wrapVolumeMM3: number;
   /** 支撑克重 (g) */
@@ -175,7 +203,7 @@ export function totalSurfaceAreaMM2(model: SupportModel): number {
  * @param rotXDeg X 轴旋转角度
  * @param rotYDeg Y 轴旋转角度
  * @param rotZDeg Z 轴旋转角度
- * @param params 材料密度(支撑跟模型同一种材料)
+ * @param params 两个密度:模型密度 + 支撑密度(支撑是另一种材料)
  * @param opts.gridSizeMM 栅格精度(mm),默认 1
  * @param opts.coloredFaceMask 每个面的彩色标记(1 = 有贴图)
  */
@@ -219,8 +247,10 @@ export function computeSupportAtPose(
   }
 
   // mm³ × (g/cm³ → g/mm³)
-  // 支撑是实心的(填充率跟模型一样 = 100%),密度也跟模型同一种材料
-  const supportWeightG = volume.volumeMM3 * params.materialDensity * 0.001;
+  // 支撑是实心的(填充率跟模型一样 = 100%),但密度用**支撑材料**自己的 ——
+  // 支撑跟模型不是一种材料(水溶性支撑),拿模型密度乘是错的
+  const supportWeightG =
+    volume.volumeMM3 * resolveSupportDensity(params) * 0.001;
 
   return {
     supportVolumeMM3: volume.volumeMM3,
@@ -316,7 +346,7 @@ export function computeRotatedExternalSurface(
  * @param modelWeightG 模型本体克重（g,已按实际尺寸算）
  * @param rotZDeg Z 轴旋转角度
  * @param coloredFaceMask 彩色面标记
- * @param params 材料密度(支撑跟模型同一种材料)
+ * @param params 两个密度:模型密度 + 支撑密度(支撑是另一种材料)
  */
 export function computeSupportAtAngle(
   model: SupportModel,
@@ -354,7 +384,7 @@ export function computeSupportAtAngle(
  * @param modelWeightG 模型本体克重（g,已按实际尺寸算）
  * @param coloredFaceMask 每个面的彩色标记
  * @param coarseMode 拖拽中粗算模式：栅格 3mm，步长 30°
- * @param params 材料密度(支撑跟模型同一种材料)
+ * @param params 两个密度:模型密度 + 支撑密度(支撑是另一种材料)
  */
 export function findOptimalAngle(
   model: SupportModel,

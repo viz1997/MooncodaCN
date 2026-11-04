@@ -630,6 +630,9 @@ export function computeSupportVolume(
   let crossCap = Math.max(1024, Math.min(1 << 20, mesh.faceCount * 2));
   let crossZ = new Float32Array(crossCap);
   let crossCell = new Uint32Array(crossCap);
+  // 「掠射」标记:采样点正好落在面的边界上(栅格线跟面重合),这一格的交点
+  // 个数会被多算一个 —— 奇偶配对整体错位,支撑体积系统性地偏大。
+  let crossGraz = new Uint8Array(crossCap);
   let crossCount = 0;
 
   const underZ = new Float32Array(cellCount).fill(-Infinity);
@@ -716,9 +719,21 @@ export function computeSupportVolume(
             const grownCell = new Uint32Array(crossCap);
             grownCell.set(crossCell);
             crossCell = grownCell;
+            const grownGraz = new Uint8Array(crossCap);
+            grownGraz.set(crossGraz);
+            crossGraz = grownGraz;
           }
           crossZ[crossCount] = zLocal;
           crossCell[crossCount] = idx;
+          // 采样点落在面的边界上(而不是面的内部)→ 掠射交点。
+          // 判据用重心坐标:某个 w 距离 0 不超过 1e-9。
+          const grazeTol = a2 * 1e-9;
+          crossGraz[crossCount] =
+            Math.abs(eAB) <= grazeTol ||
+            Math.abs(eBC) <= grazeTol ||
+            Math.abs(eCA) <= grazeTol
+              ? 1
+              : 0;
           crossCount++;
         }
 
@@ -735,9 +750,11 @@ export function computeSupportVolume(
   const cursor = new Uint32Array(cellCount);
   for (let i = 0; i < cellCount; i++) cursor[i] = offsets[i];
   const sortedZ = new Float32Array(crossCount);
+  const sortedGraz = new Uint8Array(crossCount);
   for (let i = 0; i < crossCount; i++) {
     const cell = crossCell[i];
     sortedZ[cursor[cell]] = crossZ[i];
+    sortedGraz[cursor[cell]] = crossGraz[i];
     cursor[cell]++;
   }
 
@@ -752,7 +769,9 @@ export function computeSupportVolume(
   }
 
   // 单列交点通常 2~6 个,小缓冲 + 插入排序;超了再单独分配
-  const sortBuf = new Float32Array(16);
+  let sortBuf = new Float32Array(16);
+  let sortBufGraz = new Uint8Array(16);
+  let sortBufAlt = new Float32Array(16);
   // 几乎重合的交点要合并:格心正好落在两片三角形的公共边上时,同一张表面
   // 会被数成两次穿越,奇偶配对整体错位(立方体的对角线格就是这样)。
   const mergeEps = Math.max(1e-5, mesh.diag * 1e-6);
@@ -765,23 +784,44 @@ export function computeSupportVolume(
     let gelTop = -Infinity; // 支撑顶面(这一列最高的空腔上沿)
     if (k >= 2) {
       let buf = sortBuf;
-      if (k > buf.length) buf = new Float32Array(k);
-      for (let j = 0; j < k; j++) buf[j] = sortedZ[start + j];
-      // 插入排序(交点个数很少)
+      let bufGraz = sortBufGraz;
+      if (k > buf.length) {
+        // 记回外层,后面那几列直接复用(别每列都重新分配)
+        buf = new Float32Array(k);
+        bufGraz = new Uint8Array(k);
+        sortBuf = buf;
+        sortBufGraz = bufGraz;
+        sortBufAlt = new Float32Array(k);
+      }
+      for (let j = 0; j < k; j++) {
+        buf[j] = sortedZ[start + j];
+        bufGraz[j] = sortedGraz[start + j];
+      }
+      // 插入排序(交点个数很少);掠射标记跟着一起搬
       for (let j = 1; j < k; j++) {
         const v = buf[j];
+        const g = bufGraz[j];
         let t = j - 1;
         while (t >= 0 && buf[t] > v) {
           buf[t + 1] = buf[t];
+          bufGraz[t + 1] = bufGraz[t];
           t--;
         }
         buf[t + 1] = v;
+        bufGraz[t + 1] = g;
       }
       // 合并重合交点
       let m = 0;
+      let hasGrazing = 0;
       for (let j = 0; j < k; j++) {
-        if (m > 0 && buf[j] - buf[m - 1] <= mergeEps) continue;
-        buf[m++] = buf[j];
+        if (m > 0 && buf[j] - buf[m - 1] <= mergeEps) {
+          if (bufGraz[j]) bufGraz[m - 1] = 1;
+          continue;
+        }
+        buf[m] = buf[j];
+        bufGraz[m] = bufGraz[j];
+        if (bufGraz[m]) hasGrazing = 1;
+        m++;
       }
       if (m % 2 === 0) {
         // 奇偶配对:相邻交点之间是模型材料
@@ -791,6 +831,27 @@ export function computeSupportVolume(
         gel = top - platformZ - material;
         // 空腔上沿 = 奇数位的交点(最大的那个)
         gelTop = buf[m - 2];
+        if (hasGrazing) {
+          // 掠射列:格心正好落在面的边界上,这一格被那张面切成两半。
+          // 「算这个交点」和「不算这个交点」各对应半格,取平均才是这一格的
+          // 真实体积 —— 只取一种解释的话,整片倒向一边(封闭内腔的支撑会
+          // 系统性地多算 10~30%)。
+          let mAlt = 0;
+          const bufAlt = sortBufAlt;
+          for (let j = 0; j < m; j++) {
+            if (bufGraz[j]) continue;
+            bufAlt[mAlt++] = buf[j];
+          }
+          if (mAlt >= 2 && mAlt % 2 === 0) {
+            let materialAlt = 0;
+            for (let j = 0; j + 1 < mAlt; j += 2)
+              materialAlt += bufAlt[j + 1] - bufAlt[j];
+            const gelAlt = bufAlt[mAlt - 1] - platformZ - materialAlt;
+            gel = (gel + gelAlt) / 2;
+            const topAlt = bufAlt[mAlt - 2];
+            if (topAlt > gelTop) gelTop = topAlt;
+          }
+        }
       } else {
         gel = NaN; // 交点个数是奇数 → 走兜底
       }
