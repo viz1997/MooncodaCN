@@ -1,10 +1,14 @@
 /**
  * Shopify 通道的币种策略
  *
+ * > **⚠️ 这条路已经下线(2026-11-05)** —— 工作室只用微信 + 支付宝。本文件
+ * > 留在树里只是为了给老 Shopify 订单一个说得清楚的报错。整段逻辑是**币种
+ * > 无关**的:它认的是 `PRICE_CURRENCY`,不是写死的某个币种。
+ *
  * ## 我们**不换算** —— 让 Shopify 换
  *
- * 本仓库的价**一律是美元**(`PRICE_CURRENCY`)。草稿订单的行价是**我们算出来
- * 的那个数**,原样搬过去 —— 我们的代码里**没有汇率**。
+ * 本仓库的价是什么币种就是什么币种(`PRICE_CURRENCY`)。草稿订单的行价是
+ * **我们算出来的那个数**,原样搬过去 —— 我们的代码里**没有汇率**。
  *
  * ## Shopify 那边有两本账
  *
@@ -17,9 +21,9 @@
  * currency")。所以:
  *
  * ```text
- * presentmentCurrencyCode = USD
- * 行价 = 我们算出来的 $12.50
- *   → 用户付 $31.00(12.50 × 2 + 6.00 运费)—— 跟我们自己站上算的**一分不差**
+ * presentmentCurrencyCode = <PRICE_CURRENCY>
+ * 行价 = 我们算出来的 12.50
+ *   → 用户付 31.00(12.50 × 2 + 6.00 运费)—— 跟我们自己站上算的**一分不差**
  *   → 结算成别的币种是 Shopify 的事(它按自己的汇率换),不是我们的定价
  * ```
  *
@@ -27,14 +31,13 @@
  * `presentmentMoney`,它必须跟我们发过去的数**一分不差**
  * (`draft-order.ts` 的 `assertSameTotal`)。
  *
- * ## 前提:店铺得能收美元
+ * ## 前提:店铺得能收这个币种
  *
  * 两种配置任选其一:
  *
- * 1. **店铺结算币种就是美元** —— 最省事,不用碰 Markets(工作室 2026-11-05
- *    的店铺就是美元,走这条)
- * 2. **Markets 里把美元加成展示币种** —— 结算币种是别的,用户在美元这一层
- *    付钱
+ * 1. **店铺结算币种就是我们的价** —— 最省事,不用碰 Markets
+ * 2. **Markets 里把我们的价加成展示币种** —— 结算币种是别的,用户在我们的价
+ *    这一层付钱
  *
  * 两条都不满足 → **建不了单**(Shopify 会拒)。我们**当场报错**并说清楚怎么改,
  * 绝不拿一个猜的汇率去收钱 —— 那正是 2026-11-05 线上那单栽的坑。
@@ -87,18 +90,18 @@ export function resolvePresentmentCurrency(params: {
   shopCurrency: string;
   /** 店铺启用的展示币种(`shop { enabledPresentmentCurrencies }`) */
   enabledPresentmentCurrencies: readonly string[];
-  /** 本仓库的价是什么币种 —— 默认美元 */
+  /** 本仓库的价是什么币种 —— 默认 `PRICE_CURRENCY` */
   priceCurrency?: string;
 }): PresentmentPlan {
   const priceCurrency = (params.priceCurrency ?? PRICE_CURRENCY).toUpperCase();
   const shopCurrency = params.shopCurrency.toUpperCase();
 
-  // 路 1:店铺结算币种就是美元 —— 不用配 Markets
+  // 路 1:店铺结算币种就是我们的价 —— 不用配 Markets
   if (shopCurrency === priceCurrency) {
     return { presentmentCurrency: priceCurrency, mode: "shop_currency" };
   }
 
-  // 路 2:Markets 里美元是启用状态
+  // 路 2:Markets 里我们的价是启用状态
   const enabled = params.enabledPresentmentCurrencies.map((code) =>
     code.toUpperCase()
   );
@@ -108,10 +111,10 @@ export function resolvePresentmentCurrency(params: {
 
   // 两条都不满足 —— 说清楚怎么改
   throw new ShopifyNotConfiguredError(
-    `Shopify 那边收不了美元：店铺结算币种是 ${shopCurrency},` +
+    `Shopify 那边收不了${priceCurrency}：店铺结算币种是 ${shopCurrency},` +
       `已启用的展示币种是 ${enabled.length > 0 ? enabled.join(" / ") : "(一个都没有)"}。` +
       `两条修法任选其一：① 在 Shopify 后台「设置 → 市场」里把 ${priceCurrency} ` +
       `加成展示币种(Markets);② 把店铺的结算币种改成 ${priceCurrency}。` +
-      "改完不用改代码 —— 我们不换算,直接把美元的价原样送过去。"
+      `改完不用改代码 —— 我们不换算,直接把${priceCurrency}的价原样送过去。`
   );
 }

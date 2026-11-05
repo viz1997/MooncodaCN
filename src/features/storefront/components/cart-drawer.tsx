@@ -4,7 +4,7 @@
  * 视觉保留:
  *  - 右侧滑入 + backdrop blur overlay
  *  - 顶部 sticky:购物袋图标 + 标题 + 件数
- *  - 免运费进度条($19.99 门槛)
+ *  - 免运费进度条(¥99 门槛)
  *  - Line item 列表(图片 + 标题 + 规格 + 刻字 + 自定义预览标签)
  *  - +/- 数量 + 删除按钮
  *  - 底部:小计 / 运费 / 总价 / 去结算
@@ -12,8 +12,8 @@
  * 适配差异:
  *  - 用 useCart (TanStack Query) 替代 atelier useCartStore
  *  - 用 useCartUi (Zustand) 控制 drawer 开关
- *  - 用 formatCents 替代 useFormatPrice(单币种 USD)
- *  - 文案中文化($19.99 / 免运费)
+ *  - 用 formatCents 替代 useFormatPrice(单币种 CNY)
+ *  - 文案中文化(¥99 / 免运费)
  *  - 「去结算」跳 `/checkout`(2026-11-04:结算链接上了 Sellbase 收银台)
  *
  * ## 行合计用**折后**单价
@@ -159,7 +159,7 @@ export function CartDrawer() {
               </div>
               <h3 className="font-serif text-xl mb-2">购物袋是空的</h3>
               <p className="text-sm text-muted-foreground max-w-xs text-pretty">
-                浏览钥匙扣 / 手办 / 冰箱贴系列,选中的作品会出现在这里。$19.99
+                浏览钥匙扣 / 手办 / 冰箱贴系列,选中的作品会出现在这里。¥99
                 免运费。
               </p>
               <Button

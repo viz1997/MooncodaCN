@@ -59,7 +59,7 @@ export const PRODUCTS: Product[] = [
     dimensions: { width: 40, depth: 3, height: 40 },
     material: "WJP 全彩树脂",
     occasion: ["宠物纪念", "随身佩戴"],
-    basePriceCents: 699,
+    basePriceCents: 4900,
     featured: true,
     translations: {
       zh: {
@@ -98,7 +98,7 @@ export const PRODUCTS: Product[] = [
     dimensions: { width: 45, depth: 8, height: 50 },
     material: "WJP 全彩树脂 + 金属挂扣",
     occasion: ["宠物纪念", "日常携带"],
-    basePriceCents: 1299,
+    basePriceCents: 8900,
     translations: {
       zh: {
         name: "钥匙扣 · 虎斑猫",
@@ -132,7 +132,7 @@ export const PRODUCTS: Product[] = [
     dimensions: { width: 70, depth: 5, height: 80 },
     material: "WJP 全彩树脂 + 强磁底座",
     occasion: ["宠物纪念", "家居装饰"],
-    basePriceCents: 1299,
+    basePriceCents: 8900,
     featured: true,
     translations: {
       zh: {
@@ -170,7 +170,7 @@ export const PRODUCTS: Product[] = [
     dimensions: { width: 120, depth: 80, height: 180 },
     material: "WJP 全彩树脂 + 透明展示底座",
     occasion: ["二次元周边", "收藏摆件"],
-    basePriceCents: 4199,
+    basePriceCents: 29900,
     translations: {
       zh: {
         name: "OC 手办 · 插画师定制",
@@ -212,7 +212,7 @@ export const PRODUCTS: Product[] = [
     dimensions: { width: 100, depth: 12, height: 150 },
     material: "WJP 全彩树脂 + 高档礼盒",
     occasion: ["婚礼伴手", "纪念礼品"],
-    basePriceCents: 2799,
+    basePriceCents: 19900,
     translations: {
       zh: {
         name: "婚礼 Q 版立牌 · 50 份起",
@@ -242,7 +242,7 @@ export const PRODUCTS: Product[] = [
     dimensions: { width: 40, depth: 6, height: 50 },
     material: "WJP 全彩树脂 + 礼盒",
     occasion: ["生日礼物", "纪念日"],
-    basePriceCents: 2299,
+    basePriceCents: 15900,
     featured: true,
     translations: {
       zh: {

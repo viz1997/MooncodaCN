@@ -1,4 +1,5 @@
 import { siteConfig } from "@/config";
+import type { PRICE_CURRENCY } from "@/config/currency";
 
 type LocaleType = "en" | "zh";
 
@@ -199,7 +200,7 @@ export interface ProductSchemaInput {
   url: string;
   image: string;
   price: number;
-  currency: "CNY" | "USD";
+  currency: typeof PRICE_CURRENCY;
   sku?: string;
 }
 

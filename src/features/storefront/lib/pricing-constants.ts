@@ -4,7 +4,7 @@
  * ## 为什么要拆出来
  *
  * 定价常量原本住在 `pricing.ts` 里,那个文件 import 了 `mock-catalog.ts`
- * (800 多行的商品字典)。客户端组件只要一个「刻字费 $0.99」的数字,却因此
+ * (800 多行的商品字典)。客户端组件只要一个「刻字费 ¥3」的数字,却因此
  * 把整个商品字典拖进了 bundle。
  *
  * 所以常量搬到这儿,`pricing.ts` 从这里 re-export(老 import 路径继续能用),
@@ -26,18 +26,18 @@ import { PRICE_CURRENCY, PRICE_REGION_ID } from "@/config/currency";
 /* -------------------------------------------------------------------------- */
 
 export const PRICING_CONSTANTS = {
-  /** 刻字费用(分),即 $0.99 */
-  ENGRAVING_FEE_CENTS: 99,
+  /** 刻字费用(分),即 ¥3 */
+  ENGRAVING_FEE_CENTS: 300,
   /** 刻字最大长度 */
   MAX_ENGRAVING_LENGTH: 30,
   /** 单 line item 最大数量 */
   MAX_QUANTITY: 100,
-  /** 加急订单加价(分),$2.99 */
-  RUSH_ORDER_FEE_CENTS: 299,
-  /** 免运费门槛(分),$19.99 */
-  FREE_SHIPPING_THRESHOLD_CENTS: 1999,
-  /** 默认运费(分),$6.99 —— 中国发美国,这个数不是按汇率换的 */
-  DEFAULT_SHIPPING_CENTS: 699,
+  /** 加急订单加价(分),¥15 */
+  RUSH_ORDER_FEE_CENTS: 1500,
+  /** 免运费门槛(分),¥99 */
+  FREE_SHIPPING_THRESHOLD_CENTS: 9900,
+  /** 默认运费(分),¥8 */
+  DEFAULT_SHIPPING_CENTS: 800,
   /** 货币代码 */
   CURRENCY_CODE: PRICE_CURRENCY,
   /** 区域 */

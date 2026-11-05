@@ -8,13 +8,14 @@ import { describe, expect, it } from "vitest";
  *
  * ## 为什么这个值得测
  *
- * 工作室 2026-11-05 定了:三种付款方式(微信 / 支付宝 / Shopify)**都在界面上
- * 摆出来**。摆出来 ≠ 能付 —— 没配好的那个是灰的、选不了。
+ * 工作室 2026-11-05 定了:只用**微信 + 支付宝**两个付款方式(人民币结算,
+ * 境内商户的原生场景)。Shopify 那条路下线了 —— 界面上不再摆出来。
  *
- * 这两条不变量:
+ * 这几条不变量:
  *
- * 1. **三个都在开放名单里** —— 少一个,界面上就少一个付款方式
- * 2. **旧路 `stripe` 不在名单里** —— 它不再接新单
+ * 1. **两个通道都在开放名单里** —— 少一个,界面上就少一个付款方式
+ * 2. **Shopify 不在名单里** —— 它下线了,不接新单
+ * 3. **旧路 `stripe` 不在名单里** —— 它也不接新单
  *
  * 另外守住「清单 = 名单」:清单接口(`/api/store/payment-channels`)返回的就是
  * 这份名单,前端画的选择器跟它一一对应。
@@ -27,12 +28,13 @@ import {
 } from "@/features/payments/lib/channels";
 
 describe("ENABLED_PAYMENT_CHANNELS —— 开放名单", () => {
-  it("三个通道都开放(界面上一律摆出来)", () => {
-    expect([...ENABLED_PAYMENT_CHANNELS]).toEqual([
-      "wechat",
-      "alipay",
-      "shopify",
-    ]);
+  it("两个通道都开放(界面上一律摆出来)", () => {
+    expect([...ENABLED_PAYMENT_CHANNELS]).toEqual(["wechat", "alipay"]);
+  });
+
+  it("Shopify 已下线 —— 不在名单里,不接新单", () => {
+    expect(isPaymentChannelEnabled("shopify")).toBe(false);
+    expect(ENABLED_PAYMENT_CHANNELS).not.toContain("shopify");
   });
 
   it("旧路 stripe 不在名单里 —— 不再接新单", () => {
@@ -60,6 +62,10 @@ describe("ALL_CHANNELS —— 清单接口返回什么", () => {
       expect(channel.label.length).toBeGreaterThan(0);
       expect(channel.description.length).toBeGreaterThan(0);
     }
+  });
+
+  it("Shopify 已下线 —— 不在清单里(界面上不摆出来)", () => {
+    expect(ALL_CHANNELS.map((c) => c.channel)).not.toContain("shopify");
   });
 
   it("旧路 stripe 不在清单里 —— 它不再接新单", () => {

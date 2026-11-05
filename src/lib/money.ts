@@ -15,8 +15,8 @@
  * `mooncada/components/shared.tsx` 的 `formatCurrency` 收「元」,是给
  * 积分包那种**本来就按元存**的地方用的,没有跟着搬 —— 那类值不是分。
  *
- * 2026-11-05:默认币种从 CNY 改成 `PRICE_CURRENCY`(美元)。**币种只有一
- * 处定义** —— 见 `@/config/currency`。
+ * 2026-11-05:默认币种从写死的 `CNY` 改成 `PRICE_CURRENCY`。**币种只有一
+ * 处定义** —— 见 `@/config/currency`(现在是人民币)。
  */
 
 import { PRICE_CURRENCY } from "@/config/currency";
@@ -25,19 +25,19 @@ import { PRICE_CURRENCY } from "@/config/currency";
 export interface FormatMoneyOptions {
   /** BCP-47 语言标记,默认 `zh-CN` */
   locale?: string;
-  /** ISO 4217 货币码,默认 `PRICE_CURRENCY`(美元) */
+  /** ISO 4217 货币码,默认 `PRICE_CURRENCY`(人民币) */
   currency?: string;
   /**
    * 整数金额要不要省掉小数位
    *
-   * 默认 true:$88 显示成「$88」而不是「$88.00」——
+   * 默认 true:¥88 显示成「¥88」而不是「¥88.00」——
    * 整钱带两位小数看着像多收了。
    */
   hideTrailingZeros?: boolean;
 }
 
 /**
- * 分 → 「$123.45」
+ * 分 → 「¥123.45」
  *
  * @param cents 整数分。**不是元** —— 传元进来会差 100 倍。
  */
@@ -57,8 +57,8 @@ export function formatCents(
   return new Intl.NumberFormat(locale, {
     style: "currency",
     currency,
-    // 「narrowSymbol」= 只用符号,不加「US」前缀。zh-CN + USD 的默认写法
-    // 是「US$19.90」,给中文访客看 dollars 已经很怪,再加个 US 更怪。
+    // 「narrowSymbol」= 只用符号,不加「CN」前缀。zh-CN + CNY 的默认写法
+    // 是「CN¥19.90」,给中文访客看人民币带个 CN 纯属多余。
     currencyDisplay: "narrowSymbol",
     minimumFractionDigits: hideTrailingZeros && isWhole ? 0 : 2,
     maximumFractionDigits: 2,

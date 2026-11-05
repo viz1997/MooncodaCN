@@ -16,7 +16,7 @@ interface ProductCardProps {
  * 作品集卡片 —— 列表用
  *
  * - 缩略图占位用产品 slug 的封面（当前用 .svg 占位，未上传实际图片）
- * - 价统一是美元，中文 locale 前面加「起」，英文加 "from"
+ * - 价统一是人民币，中文 locale 前面加「起」，英文加 "from"
  */
 export function ProductCard({ product, locale, featured }: ProductCardProps) {
   const t = product.translations[locale];

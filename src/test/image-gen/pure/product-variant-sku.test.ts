@@ -9,7 +9,7 @@
  * 覆盖：
  *  1) buildSku —— 段规范化（_ → -，大写）+ 尾部 N-A 截断
  *  2) buildVariantSeeds —— 笛卡尔积展开 + 价格公式
- *     a) 尺寸阶梯 idx × $1
+ *     a) 尺寸阶梯 idx × ¥5
  *     b) 配件变体加价叠加
  *     c) 无变体的配件（metal/magnet/bracket）出 N-A 行
  *     d) 无配件的产品（RM）每尺寸出 1 行
@@ -62,7 +62,7 @@ const R_VARIANTS = [
     productTypeCode: "M",
     accessoryCode: "stand",
     variantCode: "stand_magnetic",
-    priceDeltaCents: 100,
+    priceDeltaCents: 800,
     sortOrder: 0,
   },
 ];
@@ -73,7 +73,7 @@ const M_GLASS_VARIANTS = [
     productTypeCode: "M",
     accessoryCode: "glass_cover",
     variantCode: "glass_4",
-    priceDeltaCents: 250,
+    priceDeltaCents: 1200,
     sortOrder: 0,
   },
 ];
@@ -84,7 +84,7 @@ const R_ROPE_VARIANTS = [
     productTypeCode: "R",
     accessoryCode: "braided_rope",
     variantCode: "rope_red",
-    priceDeltaCents: 50,
+    priceDeltaCents: 300,
     sortOrder: 0,
   },
 ];
@@ -176,39 +176,39 @@ describe("variantIdFromSku", () => {
 describe("buildVariantSeeds", () => {
   const ptR = productTypeOf("R");
 
-  it("尺寸阶梯加价 = idx × $1", () => {
+  it("尺寸阶梯加价 = idx × ¥5", () => {
     const seeds = buildVariantSeeds({
       productCode: "R",
-      basePriceCents: 299,
+      basePriceCents: 1900,
       productType: ptR,
       accessoryVariants: R_VARIANTS,
     });
-    // 第一个尺寸 4cm(idx 0)金属行：299 + 0 + 0
+    // 第一个尺寸 4cm(idx 0)金属行：1900 + 0 + 0
     const size4Metal = seeds.find((s) => s.sku === "R-4-METAL");
-    expect(size4Metal?.priceCents).toBe(299);
-    // 第二个尺寸 6cm(idx 1)：299 + 100
+    expect(size4Metal?.priceCents).toBe(1900);
+    // 第二个尺寸 6cm(idx 1)：1900 + 500
     const size6Metal = seeds.find((s) => s.sku === "R-6-METAL");
-    expect(size6Metal?.priceCents).toBe(299 + SIZE_STEP_CENTS);
+    expect(size6Metal?.priceCents).toBe(1900 + SIZE_STEP_CENTS);
   });
 
   it("配件变体加价叠加在尺寸阶梯之上", () => {
     const seeds = buildVariantSeeds({
       productCode: "R",
-      basePriceCents: 299,
+      basePriceCents: 1900,
       productType: ptR,
       accessoryVariants: R_VARIANTS,
     });
     // 6cm(idx1) + 黑色皮革(+100)
     const brown = seeds.find((s) => s.sku === "R-6-LEATHER-BROWN");
     const black = seeds.find((s) => s.sku === "R-6-LEATHER-BLACK");
-    expect(brown?.priceCents).toBe(299 + SIZE_STEP_CENTS + 0);
-    expect(black?.priceCents).toBe(299 + SIZE_STEP_CENTS + 100);
+    expect(brown?.priceCents).toBe(1900 + SIZE_STEP_CENTS + 0);
+    expect(black?.priceCents).toBe(1900 + SIZE_STEP_CENTS + 100);
   });
 
   it("无变体的配件产出 1 行 N-A", () => {
     const seeds = buildVariantSeeds({
       productCode: "R",
-      basePriceCents: 299,
+      basePriceCents: 1900,
       productType: ptR,
       accessoryVariants: R_VARIANTS,
     });
@@ -222,7 +222,7 @@ describe("buildVariantSeeds", () => {
   it("无配件的产品每个尺寸出 1 行", () => {
     const seeds = buildVariantSeeds({
       productCode: "RM",
-      basePriceCents: 799,
+      basePriceCents: 4900,
       productType: productTypeOf("RM"),
       accessoryVariants: [],
     });
@@ -231,9 +231,9 @@ describe("buildVariantSeeds", () => {
     expect(seeds.map((s) => s.sku)).toEqual(["RM-6", "RM-8", "RM-11"]);
     expect(seeds.every((s) => s.accessoryCode === NO_SEGMENT)).toBe(true);
     expect(seeds.map((s) => s.priceCents)).toEqual([
-      799,
-      799 + SIZE_STEP_CENTS,
-      799 + 2 * SIZE_STEP_CENTS,
+      4900,
+      4900 + SIZE_STEP_CENTS,
+      4900 + 2 * SIZE_STEP_CENTS,
     ]);
   });
 
@@ -243,40 +243,40 @@ describe("buildVariantSeeds", () => {
       productType: productTypeOf("P"),
       accessoryVariants: [],
     });
-    // P = $5.99
-    expect(seeds[0]?.priceCents).toBe(599);
+    // P = ¥39
+    expect(seeds[0]?.priceCents).toBe(3900);
   });
 
   it("glass_cover 的变体头掐不掉，SKU 冗余但不含糊", () => {
     const seeds = buildVariantSeeds({
       productCode: "M",
-      basePriceCents: 2999,
+      basePriceCents: 19900,
       productType: productTypeOf("M"),
       accessoryVariants: M_GLASS_VARIANTS,
     });
     const glass4 = seeds.find((s) => s.sku.endsWith("-GLASS-COVER-GLASS-4"));
     expect(glass4).toBeDefined();
-    // 首尺寸 idx=0 → 无阶梯加价，只有配件变体 +$2.50
-    expect(glass4?.priceCents).toBe(2999 + 250);
+    // 首尺寸 idx=0 → 无阶梯加价，只有配件变体 +¥12
+    expect(glass4?.priceCents).toBe(19900 + 1200);
   });
 
   it("编织绳变体头被掐掉，accessoryCode / variantCode 列仍存完整值", () => {
     const seeds = buildVariantSeeds({
       productCode: "R",
-      basePriceCents: 299,
+      basePriceCents: 1900,
       productType: ptR,
       accessoryVariants: R_ROPE_VARIANTS,
     });
     const rope = seeds.find((s) => s.sku === "R-4-BRAIDED-ROPE-RED");
     expect(rope?.accessoryCode).toBe("braided_rope");
     expect(rope?.variantCode).toBe("rope_red");
-    expect(rope?.priceCents).toBe(299 + 50);
+    expect(rope?.priceCents).toBe(1900 + 300);
   });
 
   it("sortOrder 连续递增，可从 startSortOrder 接续", () => {
     const seeds = buildVariantSeeds({
       productCode: "R",
-      basePriceCents: 299,
+      basePriceCents: 1900,
       productType: ptR,
       accessoryVariants: R_VARIANTS,
       startSortOrder: 100,
@@ -289,7 +289,7 @@ describe("buildVariantSeeds", () => {
   it("SKU 全局唯一（product_variant_sku_uniq_idx 依赖这个性质）", () => {
     const seeds = buildVariantSeeds({
       productCode: "R",
-      basePriceCents: 299,
+      basePriceCents: 1900,
       productType: ptR,
       accessoryVariants: R_VARIANTS,
     });
@@ -305,7 +305,7 @@ describe("buildVariantSeeds", () => {
 describe("buildAllVariantSeeds", () => {
   it("配件变体按 productTypeCode 正确分区，不串味", () => {
     const all = buildAllVariantSeeds({
-      basePrices: { R: 299, M: 2999 },
+      basePrices: { R: 1900, M: 19900 },
       accessoryVariants: R_VARIANTS,
     });
     // R 不能拿到 M 的 stand 变体

@@ -23,8 +23,9 @@ import type { OnlinePaymentChannel, PaymentChannelMeta } from "./types";
 /**
  * 现在**开放**的通道
  *
- * 2026-11-05:三个都开放(微信 / 支付宝 / Shopify)—— 工作室要在界面上把三种
- * 付款方式都摆出来。
+ * 2026-11-05:工作室决定**只用微信 + 支付宝**(人民币结算,境内商户的原生
+ * 场景)。Shopify 那条路**下线** —— 代码还留在树里(跟旧路 Sellbase 一样
+ * 的待遇),但界面上不再摆出来,结算也不再接新单。
  *
  * 「开放了」只是**摆出来**;能不能真付由「配好了」(`isConfigured()`)决定 ——
  * 没配好的那个在界面上是灰的、标着「暂未开放」、选不了,点了只会 503。
@@ -35,7 +36,6 @@ import type { OnlinePaymentChannel, PaymentChannelMeta } from "./types";
 export const ENABLED_PAYMENT_CHANNELS: readonly OnlinePaymentChannel[] = [
   "wechat",
   "alipay",
-  "shopify",
 ];
 
 /**
@@ -52,10 +52,13 @@ export function isPaymentChannelEnabled(
 }
 
 /**
- * 三个通道的静态信息(顺序 = 界面上的展示顺序)
+ * 通道的静态信息(顺序 = 界面上的展示顺序)
  *
  * 「配好了没」不在这里 —— 那个要问 provider(要读环境变量),在
  * `registry.ts` 里现算。
+ *
+ * **这份清单 = 开放名单** —— 清单接口(`/api/store/payment-channels`)返回的
+ * 就是它,前端画的选择器跟它一一对应。Shopify 已经下线,所以不在这里。
  */
 export const ALL_CHANNELS: readonly PaymentChannelMeta[] = [
   {
@@ -67,10 +70,5 @@ export const ALL_CHANNELS: readonly PaymentChannelMeta[] = [
     channel: "alipay",
     label: "支付宝",
     description: "跳转到支付宝付款",
-  },
-  {
-    channel: "shopify",
-    label: "银行卡 / Shop Pay",
-    description: "跳转到 Shopify 收银台刷卡",
   },
 ];

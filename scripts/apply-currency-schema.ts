@@ -1,39 +1,47 @@
 #!/usr/bin/env -S npx tsx
 
 /**
- * 币种迁移:人民币 → 美元(2026-11-05)
+ * 币种迁移:把数据库对齐到**代码里定义的币种**(2026-11-05)
  *
  * ## 为什么需要这个脚本
  *
- * 代码里的价已经全改成美元了(见 `src/config/currency.ts`),但 **DB 里还留着
- * 人民币那一套**:
+ * 改币种这件事,代码里改一遍还不够 —— **DB 里还留着上一套**:
  *
- * - `storefront_order.currency` / `cart.currency_code` 的**列默认值**是 CNY
- *   —— 不改的话,新落库的订单和购物车都还带着人民币
+ * - `storefront_order.currency` / `cart.currency_code` 的**列默认值**还是
+ *   旧币种 —— 不改的话,新落库的订单和购物车都还带着旧币种
  * - `product.base_price_cents` / `product_variant.price_cents` /
- *   `product_accessory_variant.price_delta_cents` 里还是**人民币那套价**
- *   (钥匙扣 1900 分 = ¥19)。改币种就是换一套价 —— 旧的人民币价留着,只会
- *   跟新的美元价混在一起,读表的人分不清哪个是哪个
+ *   `product_accessory_variant.price_delta_cents` 里还是**旧的那套价**
+ *   (钥匙扣 299 分 = $2.99)。改币种就是换一套价 —— 旧的价留着,只会跟
+ *   新的价混在一起,读表的人分不清哪个是哪个
+ *
+ * ## 币种**从代码里读**,不写死在这儿
+ *
+ * 本脚本 import `@/config/currency` 的 `PRICE_CURRENCY` / `PRICE_REGION_ID` ——
+ * **那才是唯一的定义处**。写死一份在这儿的话,改币种漏了这个脚本,就会变成
+ * 「代码是人民币、DB 默认值是美元」—— 这种错位**不会报错**,只在结账的时候炸。
+ *
+ * 历史:这个脚本的前身是 `apply-usd-currency-schema.ts`(2026-11-05 改成美元
+ * 时写的),当天币种又改回人民币,于是它被换成了这个通用版本。
  *
  * ## 改什么、**不改**什么
  *
  * | 目标 | 处理 |
  * |---|---|
- * | `storefront_order.currency` 列默认值 | 改成 `'USD'` |
- * | `cart.currency_code` / `cart.region_id` 列默认值 | 改成 `'USD'` / `'us'` |
- * | 已有购物车行 | 改成 USD / us(购物车是**在途状态**,不是历史) |
+ * | `storefront_order.currency` 列默认值 | 改成 `PRICE_CURRENCY` |
+ * | `cart.currency_code` / `cart.region_id` 列默认值 | 改成 `PRICE_CURRENCY` / `PRICE_REGION_ID` |
+ * | 已有购物车行 | 改成当前币种 / 区域(购物车是**在途状态**,不是历史) |
  * | 商品目录三张表的价格 | 按代码里的字典**重新定价** |
  * | **历史订单**(`storefront_order` 的行) | **一行不动** |
  *
  * ### 历史订单为什么不动
  *
- * 一笔 2026-11-04 用人民币下的单,收的就是人民币。把它改成 USD 等于**篡改
- * 账本** —— 以后对账(Stripe / PayPal 的流水、Shopify 的订单)会对不上。
- * 旧单的 `currency` 列就是它当时收的币种,那才是事实。
+ * 一笔用旧币种下的单,收的就是旧币种。把它改成新币种等于**篡改账本** ——
+ * 以后对账(微信 / 支付宝的流水)会对不上。旧单的 `currency` 列就是它当时收的
+ * 币种,那才是事实。
  *
- * 旧单里**没付款**的那些(还在 `unpaid`)现在付不了了 —— 三个通道都只收美元,
- * 通道会明确报错(「本订单的币种是 CNY,但这条通道的价一律是 USD」),不会
- * 收错钱。脚本会把这些单的数量打出来,要不要取消是工作室的决定(见输出
+ * 旧单里**没付款**的那些(还在 `unpaid`)现在付不了了 —— 两个通道只收当前
+ * 币种,通道会明确报错(「本订单的币种是 XXX,但这条通道的价一律是 YYY」),
+ * 不会收错钱。脚本会把这些单的数量打出来,要不要取消是工作室的决定(见输出
  * 末尾给出的 SQL)。
  *
  * ## 商品目录怎么重新定价
@@ -49,10 +57,10 @@
  * ```
  *
  * 尺寸档位和配件加价都从**代码里的字典**取(`product-catalog.ts` /
- * `product-accessory-variants.ts`),不是从 DB 取 —— DB 里那些数就是旧的人民币
+ * `product-accessory-variants.ts`),不是从 DB 取 —— DB 里那些数就是旧的
  * 那一套。
  *
- * **会覆盖 admin 改过的价。** 改币种就是换一套价,没有「人民币的价 + 美元
+ * **会覆盖 admin 改过的价。** 改币种就是换一套价,没有「旧币种的价 + 新币种
  * 的币种」这种说法。跑完在 `/admin/products` 里按新价重新调一遍。
  *
  * ## 幂等
@@ -61,20 +69,16 @@
  * `ALTER ... SET DEFAULT`,没有 `ADD COLUMN`,不需要「跑一次就删」。
  *
  * 用法:
- *   pnpm tsx scripts/apply-usd-currency-schema.ts
+ *   pnpm tsx scripts/apply-currency-schema.ts
  *
  * 跑完之后建议再跑一遍两个 seed(补上新增的配件变体):
  *   pnpm tsx src/db/seed-product-accessory-variants.ts
  *   pnpm tsx src/db/seed-products.ts
  */
 
-import { resolve } from "node:path";
-import { config as dotenvConfig } from "dotenv";
-import { expand as dotenvExpand } from "dotenv-expand";
+import "./lib/load-env";
 
-dotenvExpand(dotenvConfig({ path: resolve(process.cwd(), ".env.local") }));
-dotenvExpand(dotenvConfig({ path: resolve(process.cwd(), ".env") }));
-
+import { PRICE_CURRENCY, PRICE_REGION_ID } from "@/config/currency";
 import { PRODUCT_ACCESSORY_VARIANTS } from "@/features/gpt-image/lib/product-accessory-variants";
 // 字典是纯模块(没有 DB 依赖),静态 import 安全
 import {
@@ -94,9 +98,16 @@ function accKey(
 
 async function main(): Promise<void> {
   if (!process.env.DATABASE_URL) {
-    console.error("[apply-usd-currency] 缺少 DATABASE_URL");
+    console.error("[apply-currency] 缺少 DATABASE_URL");
     process.exit(1);
   }
+
+  const currency = PRICE_CURRENCY.toUpperCase();
+  const region = PRICE_REGION_ID;
+
+  console.log(
+    `[apply-currency] 按代码里的定义来:币种 = ${currency},区域 = ${region}`
+  );
 
   const { Client } = await import("pg");
   const client = new Client({
@@ -109,19 +120,19 @@ async function main(): Promise<void> {
 
   const defaults: Array<{ label: string; query: string }> = [
     {
-      label: "storefront_order.currency 默认值 → USD",
+      label: `storefront_order.currency 默认值 → ${currency}`,
       query: `ALTER TABLE "storefront_order"
-        ALTER COLUMN "currency" SET DEFAULT 'USD';`,
+        ALTER COLUMN "currency" SET DEFAULT '${currency}';`,
     },
     {
-      label: "cart.currency_code 默认值 → USD",
+      label: `cart.currency_code 默认值 → ${currency}`,
       query: `ALTER TABLE "cart"
-        ALTER COLUMN "currency_code" SET DEFAULT 'USD';`,
+        ALTER COLUMN "currency_code" SET DEFAULT '${currency}';`,
     },
     {
-      label: "cart.region_id 默认值 → us",
+      label: `cart.region_id 默认值 → ${region}`,
       query: `ALTER TABLE "cart"
-        ALTER COLUMN "region_id" SET DEFAULT 'us';`,
+        ALTER COLUMN "region_id" SET DEFAULT '${region}';`,
     },
   ];
 
@@ -144,13 +155,14 @@ async function main(): Promise<void> {
   // `repriceLineItem()`),存着的那个数只是算不出来时的兜底。
   const cartRes = await client.query(
     `UPDATE "cart"
-        SET "currency_code" = 'USD',
-            "region_id" = 'us',
+        SET "currency_code" = $1,
+            "region_id" = $2,
             "updated_at" = now()
-      WHERE "currency_code" <> 'USD' OR "region_id" <> 'us';`
+      WHERE "currency_code" <> $1 OR "region_id" <> $2;`,
+    [currency, region]
   );
   console.log(
-    `✓ 购物车改成 USD/us:${cartRes.rowCount ?? 0} 行` +
+    `✓ 购物车改成 ${currency}/${region}:${cartRes.rowCount ?? 0} 行` +
       `(行内的价不用改 —— 读的时候按目录重算)`
   );
 
@@ -176,7 +188,7 @@ async function main(): Promise<void> {
     productUpdated += 1;
     console.log(
       `  · product ${row.code}: ${row.base_price_cents} → ${next} 分` +
-        `($${(row.base_price_cents / 100).toFixed(2)} → $${(next / 100).toFixed(2)})`
+        `(${money(row.base_price_cents, currency)} → ${money(next, currency)})`
     );
   }
   console.log(`✓ product.base_price_cents:改写 ${productUpdated} 行`);
@@ -299,32 +311,36 @@ async function main(): Promise<void> {
   /* ── 4. 历史订单:只报告,不动 ──────────────────────────────────────── */
 
   const orderStats = await client.query<{
+    currency: string;
     payment_status: string;
     count: number;
   }>(
-    `SELECT "payment_status", count(*)::int AS "count"
+    `SELECT "currency", "payment_status", count(*)::int AS "count"
        FROM "storefront_order"
-      WHERE "currency" IS DISTINCT FROM 'USD'
-      GROUP BY "payment_status"
-      ORDER BY "payment_status"`
+      WHERE "currency" IS DISTINCT FROM $1
+      GROUP BY "currency", "payment_status"
+      ORDER BY "currency", "payment_status"`,
+    [currency]
   );
 
   if (orderStats.rows.length === 0) {
-    console.log("✓ 历史订单:没有非美元的订单");
+    console.log(`✓ 历史订单:没有非 ${currency} 的订单`);
   } else {
     console.log(
-      "\n[历史订单]以下订单还是人民币 —— **脚本没有改它们**(改了就是篡改账本):"
+      `\n[历史订单]以下订单不是 ${currency} —— **脚本没有改它们**(改了就是篡改账本):`
     );
     for (const row of orderStats.rows) {
-      console.log(`  · ${row.payment_status}:${row.count} 笔`);
-    }
-    const unpaid = orderStats.rows.find((r) => r.payment_status === "unpaid");
-    if (unpaid) {
       console.log(
-        "\n  这些未付款的旧单**现在付不了**(三个通道只收美元,通道会明确报错," +
+        `  · ${row.currency} / ${row.payment_status}:${row.count} 笔`
+      );
+    }
+    const unpaid = orderStats.rows.filter((r) => r.payment_status === "unpaid");
+    if (unpaid.length > 0) {
+      console.log(
+        "\n  这些未付款的旧单**现在付不了**(两个通道只收当前币种,通道会明确报错," +
           "不会收错钱)。要不要取消是工作室的决定 —— 需要的话跑这条:\n" +
-          "    UPDATE storefront_order SET status = 'cancelled'\n" +
-          "     WHERE currency <> 'USD' AND payment_status = 'unpaid';"
+          `    UPDATE storefront_order SET status = 'cancelled'\n` +
+          `     WHERE currency <> '${currency}' AND payment_status = 'unpaid';`
       );
     }
   }
@@ -347,22 +363,28 @@ async function main(): Promise<void> {
        (SELECT column_default FROM information_schema.columns
          WHERE table_name = 'cart' AND column_name = 'region_id')
          AS cart_region,
-       (SELECT count(*)::int FROM storefront_order WHERE currency <> 'USD')
-         AS legacy_orders;`
+       (SELECT count(*)::int FROM storefront_order WHERE currency <> $1)
+         AS legacy_orders;`,
+    [currency]
   );
   console.log(
-    `\n[apply-usd-currency] storefront_order.currency 默认值 = ${check.rows[0]?.order_currency}, ` +
+    `\n[apply-currency] storefront_order.currency 默认值 = ${check.rows[0]?.order_currency}, ` +
       `cart.currency_code = ${check.rows[0]?.cart_currency}, ` +
       `cart.region_id = ${check.rows[0]?.cart_region}, ` +
-      `仍是非美元的订单 ${check.rows[0]?.legacy_orders} 笔`
+      `仍是非 ${currency} 的订单 ${check.rows[0]?.legacy_orders} 笔`
   );
 
   await client.end();
   console.log(
-    "\n[apply-usd-currency] 完成。接下来跑一遍 seed 补上新增的配件变体:\n" +
+    "\n[apply-currency] 完成。接下来跑一遍 seed 补上新增的配件变体:\n" +
       "  pnpm tsx src/db/seed-product-accessory-variants.ts\n" +
       "  pnpm tsx src/db/seed-products.ts"
   );
+}
+
+/** 分 → 展示文本(给日志用,别拿它去算钱) */
+function money(cents: number, currency: string): string {
+  return `${(cents / 100).toFixed(2)} ${currency}`;
 }
 
 main().catch((error) => {

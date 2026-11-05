@@ -7,7 +7,7 @@
  * **建单**:从「定了展示币种」到「跟 Shopify 对账」中间那几步 —— 那几步里
  * 藏着两个「钱」的问题:
  *
- * 1. **我们发过去的价是不是原样的** —— 美元的价必须**一个字节都不改**
+ * 1. **我们发过去的价是不是原样的** —— 人民币的价必须**一个字节都不改**
  *    地送过去。不换算是我们的架构决定(见 `currency.ts`),改一个字节就是
  *    「逐分相等」破了
  * 2. **对账要比对的那个币种** —— Shopify 的 `totalPriceSet` 有两份:
@@ -101,7 +101,7 @@ afterEach(() => {
   }
 });
 
-/** 建单用的请求 —— $12.50 × 2 + $6.00 运费 = $31.00 */
+/** 建单用的请求 —— ¥12.50 × 2 + ¥6.00 运费 = ¥31.00 */
 const REQUEST = {
   orderNo: "SO-20261105-942D88",
   email: "buyer@example.com",
@@ -110,7 +110,7 @@ const REQUEST = {
   shippingAddress: null,
   note: "",
   successUrl: "https://example.com/checkout/success",
-  currency: "USD",
+  currency: "CNY",
 };
 
 /** Shopify 那边算出来的总额(presentment / shop 两份) */
@@ -249,8 +249,8 @@ function stubShopify(params: {
   return stub;
 }
 
-/** 我们算出来的总额 —— $31.00 */
-const EXPECTED_USD = "31.00";
+/** 我们算出来的总额 —— ¥31.00 */
+const EXPECTED_CNY = "31.00";
 
 describe("建单用的 GraphQL —— 选择集必须版本无关", () => {
   /**
@@ -276,8 +276,8 @@ describe("建单用的 GraphQL —— 选择集必须版本无关", () => {
 
   it("发出去的就是这条 query —— 别让常量跟实际请求脱节", async () => {
     const stub = stubShopify({
-      shopCurrency: "USD",
-      draft: { amount: EXPECTED_USD, currencyCode: "USD" },
+      shopCurrency: "CNY",
+      draft: { amount: EXPECTED_CNY, currencyCode: "CNY" },
     });
 
     const { draftOrder } = await loadShopify();
@@ -298,7 +298,7 @@ describe("buildDraftOrderInput —— 字段名 / 字段类型得对得上", () 
    * ```text
    * Field 'price' is not defined by type 'DraftOrderLineItemInput'
    * Field 'handle' is not defined by type 'ShippingLineInput'
-   * shippingLine.price (invalid money '{"amount" => "6.99", "currencyCode" => "USD"}')
+   * shippingLine.price (invalid money '{"amount" => "6.99", "currencyCode" => "CNY"}')
    * ```
    *
    * 也就是:行价不叫 `price`、运费不带 `handle`、运费的 `price` 是
@@ -308,7 +308,7 @@ describe("buildDraftOrderInput —— 字段名 / 字段类型得对得上", () 
     const { draftOrder } = await loadShopify();
     const input = draftOrder.buildDraftOrderInput({
       request: REQUEST,
-      currencyCode: "USD",
+      currencyCode: "CNY",
     });
 
     expect(input.lineItems[0]?.originalUnitPrice).toBe("12.50");
@@ -321,7 +321,7 @@ describe("buildDraftOrderInput —— 字段名 / 字段类型得对得上", () 
     const { draftOrder } = await loadShopify();
     const input = draftOrder.buildDraftOrderInput({
       request: REQUEST,
-      currencyCode: "USD",
+      currencyCode: "CNY",
     });
 
     expect(input.shippingLine?.price).toBe("6.00");
@@ -332,7 +332,7 @@ describe("buildDraftOrderInput —— 字段名 / 字段类型得对得上", () 
     const { draftOrder } = await loadShopify();
     const input = draftOrder.buildDraftOrderInput({
       request: REQUEST,
-      currencyCode: "USD",
+      currencyCode: "CNY",
     });
 
     expect(input.shippingLine).not.toHaveProperty("handle");
@@ -342,10 +342,10 @@ describe("buildDraftOrderInput —— 字段名 / 字段类型得对得上", () 
     const { draftOrder } = await loadShopify();
     const input = draftOrder.buildDraftOrderInput({
       request: REQUEST,
-      currencyCode: "USD",
+      currencyCode: "CNY",
     });
 
-    // $12.50 —— 不是 $12.5,也不是 1250
+    // ¥12.50 —— 不是 $12.5,也不是 1250
     expect(input.lineItems[0]?.originalUnitPrice).toBe("12.50");
     expect(input.shippingLine?.price).toBe("6.00");
   });
@@ -354,17 +354,17 @@ describe("buildDraftOrderInput —— 字段名 / 字段类型得对得上", () 
     const { draftOrder } = await loadShopify();
     const input = draftOrder.buildDraftOrderInput({
       request: REQUEST,
-      currencyCode: "USD",
+      currencyCode: "CNY",
     });
 
-    expect(input.presentmentCurrencyCode).toBe("USD");
+    expect(input.presentmentCurrencyCode).toBe("CNY");
   });
 
   it("关掉自动折扣 —— 别让 Shopify 自作主张改我们的价", async () => {
     const { draftOrder } = await loadShopify();
     const input = draftOrder.buildDraftOrderInput({
       request: REQUEST,
-      currencyCode: "USD",
+      currencyCode: "CNY",
     });
 
     expect(input.acceptAutomaticDiscounts).toBe(false);
@@ -375,7 +375,7 @@ describe("buildDraftOrderInput —— 字段名 / 字段类型得对得上", () 
     const { draftOrder } = await loadShopify();
     const input = draftOrder.buildDraftOrderInput({
       request: REQUEST,
-      currencyCode: "USD",
+      currencyCode: "CNY",
     });
 
     expect(input.tags).toContain("mooncoda:SO-20261105-942D88");
@@ -390,7 +390,7 @@ describe("buildDraftOrderInput —— 字段名 / 字段类型得对得上", () 
     const { draftOrder } = await loadShopify();
     const input = draftOrder.buildDraftOrderInput({
       request: REQUEST,
-      currencyCode: "USD",
+      currencyCode: "CNY",
       flavor: {
         linePrice: "priceOverrideMoneyInput",
         shippingPrice: "scalar",
@@ -399,7 +399,7 @@ describe("buildDraftOrderInput —— 字段名 / 字段类型得对得上", () 
 
     expect(input.lineItems[0]?.priceOverride).toEqual({
       amount: "12.50",
-      currencyCode: "USD",
+      currencyCode: "CNY",
     });
     expect(input.lineItems[0]).not.toHaveProperty("originalUnitPrice");
   });
@@ -408,7 +408,7 @@ describe("buildDraftOrderInput —— 字段名 / 字段类型得对得上", () 
     const { draftOrder } = await loadShopify();
     const input = draftOrder.buildDraftOrderInput({
       request: REQUEST,
-      currencyCode: "USD",
+      currencyCode: "CNY",
       flavor: {
         linePrice: "originalUnitPriceMoneyInput",
         shippingPrice: "scalar",
@@ -417,7 +417,7 @@ describe("buildDraftOrderInput —— 字段名 / 字段类型得对得上", () 
 
     expect(input.lineItems[0]?.originalUnitPrice).toEqual({
       amount: "12.50",
-      currencyCode: "USD",
+      currencyCode: "CNY",
     });
   });
 
@@ -425,14 +425,14 @@ describe("buildDraftOrderInput —— 字段名 / 字段类型得对得上", () 
     const { draftOrder } = await loadShopify();
     const input = draftOrder.buildDraftOrderInput({
       request: REQUEST,
-      currencyCode: "USD",
+      currencyCode: "CNY",
       flavor: {
         linePrice: "originalUnitPriceScalar",
         shippingPrice: "scalarWithCurrency",
       },
     });
 
-    expect(input.shippingLine?.price).toBe("6.00 USD");
+    expect(input.shippingLine?.price).toBe("6.00 CNY");
   });
 });
 
@@ -444,9 +444,9 @@ describe("computeRequestTotalCents —— 我们自己的总额", () => {
 });
 
 describe("createShopifyDraftOrder —— 展示币种定不下来就拒绝建单", () => {
-  it("店铺结算人民币、Markets 里没有美元 → 报错(重试没用,得改配置)", async () => {
+  it("店铺结算美元、Markets 里没有人民币 → 报错(重试没用,得改配置)", async () => {
     stubShopify({
-      shopCurrency: "CNY",
+      shopCurrency: "USD",
       enabledPresentmentCurrencies: ["EUR"],
       draft: null,
     });
@@ -457,40 +457,40 @@ describe("createShopifyDraftOrder —— 展示币种定不下来就拒绝建单
     );
   });
 
-  it("订单本身的币种不是美元 → 报错", async () => {
-    stubShopify({ shopCurrency: "USD", draft: null });
+  it("订单本身的币种不是人民币 → 报错", async () => {
+    stubShopify({ shopCurrency: "CNY", draft: null });
 
     const { draftOrder, types } = await loadShopify();
     await expect(
-      draftOrder.createShopifyDraftOrder({ ...REQUEST, currency: "CNY" })
+      draftOrder.createShopifyDraftOrder({ ...REQUEST, currency: "USD" })
     ).rejects.toThrow(types.PaymentProviderError);
   });
 });
 
 describe("createShopifyDraftOrder —— 建单", () => {
-  it("店铺结算就是美元 → 建单成功", async () => {
+  it("店铺结算就是人民币 → 建单成功", async () => {
     stubShopify({
-      shopCurrency: "USD",
-      draft: { amount: EXPECTED_USD, currencyCode: "USD" },
+      shopCurrency: "CNY",
+      draft: { amount: EXPECTED_CNY, currencyCode: "CNY" },
     });
 
     const { draftOrder } = await loadShopify();
     const draft = await draftOrder.createShopifyDraftOrder(REQUEST);
     expect(draft.invoiceUrl).toBe("https://demo-shop.myshopify.com/d/1");
-    // 用户被收的总额 —— 美元分,跟我们算的一分不差
+    // 用户被收的总额 —— 人民币分,跟我们算的一分不差
     expect(draft.totalCents).toBe(3100);
   });
 
-  it("店铺结算人民币、Markets 里有美元 → 也建单成功(展示币种是美元)", async () => {
+  it("店铺结算美元、Markets 里有人民币 → 也建单成功(展示币种是人民币)", async () => {
     stubShopify({
-      shopCurrency: "CNY",
-      enabledPresentmentCurrencies: ["USD", "EUR"],
+      shopCurrency: "USD",
+      enabledPresentmentCurrencies: ["CNY", "EUR"],
       draft: {
-        // 结算那份是人民币(Shopify 按自己的汇率换的),展示那份是美元
-        amount: "223.20",
-        currencyCode: "CNY",
-        presentmentAmount: EXPECTED_USD,
-        presentmentCurrencyCode: "USD",
+        // 结算那份是美元(Shopify 按自己的汇率换的),展示那份是人民币
+        amount: "43.00",
+        currencyCode: "USD",
+        presentmentAmount: EXPECTED_CNY,
+        presentmentCurrencyCode: "CNY",
       },
     });
 
@@ -499,15 +499,15 @@ describe("createShopifyDraftOrder —— 建单", () => {
     expect(draft.totalCents).toBe(3100);
   });
 
-  it("发过去的行价是美元(不换算)", async () => {
+  it("发过去的行价是人民币(不换算)", async () => {
     const stub = stubShopify({
-      shopCurrency: "CNY",
-      enabledPresentmentCurrencies: ["USD"],
+      shopCurrency: "USD",
+      enabledPresentmentCurrencies: ["CNY"],
       draft: {
-        amount: "223.20",
-        currencyCode: "CNY",
-        presentmentAmount: EXPECTED_USD,
-        presentmentCurrencyCode: "USD",
+        amount: "43.00",
+        currencyCode: "USD",
+        presentmentAmount: EXPECTED_CNY,
+        presentmentCurrencyCode: "CNY",
       },
     });
 
@@ -519,13 +519,13 @@ describe("createShopifyDraftOrder —— 建单", () => {
       presentmentCurrencyCode: string;
       lineItems: { originalUnitPrice?: string }[];
     };
-    expect(input.presentmentCurrencyCode).toBe("USD");
+    expect(input.presentmentCurrencyCode).toBe("CNY");
     expect(input.lineItems[0]?.originalUnitPrice).toBe("12.50");
   });
 
   it("Shopify 报了 userErrors → 报错(原文带出去)", async () => {
     stubShopify({
-      shopCurrency: "USD",
+      shopCurrency: "CNY",
       draft: null,
       userErrors: [{ field: ["lineItems"], message: "价格不合法" }],
     });
@@ -546,7 +546,7 @@ describe("写法阶梯 —— 字段形状对不上就换一种写法", () => {
    */
   it("字段名不认 → 换一种写法重发,第二次成了", async () => {
     const stub = stubShopify({
-      shopCurrency: "USD",
+      shopCurrency: "CNY",
       draftResponses: [
         {
           kind: "errors",
@@ -557,7 +557,7 @@ describe("写法阶梯 —— 字段形状对不上就换一种写法", () => {
               "`DraftOrderLineItemInput`)",
           ],
         },
-        { kind: "data", draft: { amount: EXPECTED_USD, currencyCode: "USD" } },
+        { kind: "data", draft: { amount: EXPECTED_CNY, currencyCode: "CNY" } },
       ],
     });
 
@@ -577,23 +577,23 @@ describe("写法阶梯 —— 字段形状对不上就换一种写法", () => {
     expect(first.lineItems[0]?.originalUnitPrice).toBe("12.50");
     expect(second.lineItems[0]?.priceOverride).toEqual({
       amount: "12.50",
-      currencyCode: "USD",
+      currencyCode: "CNY",
     });
   });
 
   it("字段类型不对(invalid money)→ 换一种写法重发", async () => {
     const stub = stubShopify({
-      shopCurrency: "USD",
+      shopCurrency: "CNY",
       draftResponses: [
         {
           kind: "errors",
           messages: [
             "Variable `$input` of type `DraftOrderInput!` was provided invalid " +
               "value for `shippingLine.price` (invalid money " +
-              '\'{"amount" => "6.00", "currencyCode" => "USD"}\')',
+              '\'{"amount" => "6.00", "currencyCode" => "CNY"}\')',
           ],
         },
-        { kind: "data", draft: { amount: EXPECTED_USD, currencyCode: "USD" } },
+        { kind: "data", draft: { amount: EXPECTED_CNY, currencyCode: "CNY" } },
       ],
     });
 
@@ -604,12 +604,12 @@ describe("写法阶梯 —— 字段形状对不上就换一种写法", () => {
     expect(stub.callCount).toBe(2);
     // 第二次运费标量里带上了币种
     const second = stub.sentInputs[1] as { shippingLine?: { price: unknown } };
-    expect(second.shippingLine?.price).toBe("6.00 USD");
+    expect(second.shippingLine?.price).toBe("6.00 CNY");
   });
 
   it("**不是**字段形状问题 → 不重试(一次就抛,别把真正的错误盖住)", async () => {
     const stub = stubShopify({
-      shopCurrency: "USD",
+      shopCurrency: "CNY",
       draftResponses: [
         {
           kind: "errors",
@@ -628,8 +628,8 @@ describe("写法阶梯 —— 字段形状对不上就换一种写法", () => {
 
   it("金额对不上 → 不重试(换写法救不了对账)", async () => {
     const stub = stubShopify({
-      shopCurrency: "USD",
-      draft: { amount: "30.99", currencyCode: "USD" },
+      shopCurrency: "CNY",
+      draft: { amount: "30.99", currencyCode: "CNY" },
     });
 
     const { draftOrder, types } = await loadShopify();
@@ -642,7 +642,7 @@ describe("写法阶梯 —— 字段形状对不上就换一种写法", () => {
 
   it("所有写法都不行 → 报错里说清试了几种 + 最后一次的原文", async () => {
     const stub = stubShopify({
-      shopCurrency: "USD",
+      shopCurrency: "CNY",
       draftResponses: [
         {
           kind: "errors",
@@ -735,7 +735,7 @@ describe("buildShippingPrice —— 三种写法", () => {
     expect(
       draftOrder.buildShippingPrice({
         amount: "6.00",
-        currency: "USD",
+        currency: "CNY",
         format: "scalar",
       })
     ).toBe("6.00");
@@ -746,10 +746,10 @@ describe("buildShippingPrice —— 三种写法", () => {
     expect(
       draftOrder.buildShippingPrice({
         amount: "6.00",
-        currency: "USD",
+        currency: "CNY",
         format: "scalarWithCurrency",
       })
-    ).toBe("6.00 USD");
+    ).toBe("6.00 CNY");
   });
 
   it("moneyInput —— 对象", async () => {
@@ -757,18 +757,18 @@ describe("buildShippingPrice —— 三种写法", () => {
     expect(
       draftOrder.buildShippingPrice({
         amount: "6.00",
-        currency: "USD",
+        currency: "CNY",
         format: "moneyInput",
       })
-    ).toEqual({ amount: "6.00", currencyCode: "USD" });
+    ).toEqual({ amount: "6.00", currencyCode: "CNY" });
   });
 });
 
 describe("createShopifyDraftOrder —— 对账", () => {
   it("Shopify 算的总额跟我们发过去的**一分不差** → 通过", async () => {
     stubShopify({
-      shopCurrency: "USD",
-      draft: { amount: EXPECTED_USD, currencyCode: "USD" },
+      shopCurrency: "CNY",
+      draft: { amount: EXPECTED_CNY, currencyCode: "CNY" },
     });
 
     const { draftOrder } = await loadShopify();
@@ -779,8 +779,8 @@ describe("createShopifyDraftOrder —— 对账", () => {
 
   it("差一分 → 报错(宁可这次失败,也不能给一个收了错钱的链接)", async () => {
     stubShopify({
-      shopCurrency: "USD",
-      draft: { amount: "30.99", currencyCode: "USD" },
+      shopCurrency: "CNY",
+      draft: { amount: "30.99", currencyCode: "CNY" },
     });
 
     const { draftOrder, types } = await loadShopify();
@@ -790,15 +790,15 @@ describe("createShopifyDraftOrder —— 对账", () => {
   });
 
   it("对账比的是 **presentmentMoney**(用户被收的那个币种)", async () => {
-    // 店铺结算币种是人民币、向用户收的是美元 —— 比 shopMoney 会误报
+    // 店铺结算币种是美元、向用户收的是人民币 —— 比 shopMoney 会误报
     stubShopify({
-      shopCurrency: "CNY",
-      enabledPresentmentCurrencies: ["USD"],
+      shopCurrency: "USD",
+      enabledPresentmentCurrencies: ["CNY"],
       draft: {
-        amount: "223.20",
-        currencyCode: "CNY",
-        presentmentAmount: EXPECTED_USD,
-        presentmentCurrencyCode: "USD",
+        amount: "43.00",
+        currencyCode: "USD",
+        presentmentAmount: EXPECTED_CNY,
+        presentmentCurrencyCode: "CNY",
       },
     });
 
@@ -810,11 +810,11 @@ describe("createShopifyDraftOrder —— 对账", () => {
 
   it("Shopify 说总额是别的币种 → 报错", async () => {
     stubShopify({
-      shopCurrency: "USD",
+      shopCurrency: "CNY",
       draft: {
-        amount: EXPECTED_USD,
-        currencyCode: "USD",
-        presentmentAmount: EXPECTED_USD,
+        amount: EXPECTED_CNY,
+        currencyCode: "CNY",
+        presentmentAmount: EXPECTED_CNY,
         presentmentCurrencyCode: "EUR",
       },
     });

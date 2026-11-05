@@ -13,11 +13,11 @@ import { formatCents } from "@/lib/money";
  * ## 2026-11-01:主图从「一张生活照」换成「四件商品」
  *
  * 原来右侧是一张 Unsplash 生活照(一个大笑的女人),角标写着「Q版手办 ·
- * 起 $29.99」—— 照片里根本没有手办,只有人。这不是配图不当,这是**读起来
+ * 起 ¥199」—— 照片里根本没有手办,只有人。这不是配图不当,这是**读起来
  * 完全不像商城**的根源:首屏看不到一件商品、一个价格,读者不知道这家店卖什么。
  *
- * 现在右侧是 2×2 的商品拼贴,四块分别覆盖三个品类(钥匙扣 $2.99 / 冰箱贴
- * $5.99 / 手办 $29.99),每块角上直接写价格和「起」。首屏一眼就知道:卖什么、
+ * 现在右侧是 2×2 的商品拼贴,四块分别覆盖三个品类(钥匙扣 ¥19 / 冰箱贴
+ * ¥39 / 手办 ¥199),每块角上直接写价格和「起」。首屏一眼就知道:卖什么、
  * 多少钱、大概什么形状。
  *
  * 价格锚点也补进了左侧文案 —— 商城的第一屏必须给数字。
@@ -120,11 +120,11 @@ export function StoreHero({ locale }: { locale: "zh" | "en" }) {
 
             {/* 价格锚点 —— 商城首屏必须给数字 */}
             <p className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-sm text-foreground/80">
-              <span>{isZh ? "钥匙扣 $2.99 起" : "Keychains from $2.99"}</span>
+              <span>{isZh ? "钥匙扣 ¥19 起" : "Keychains from ¥19"}</span>
               <span className="text-border">·</span>
-              <span>{isZh ? "冰箱贴 $5.99 起" : "Magnets from $5.99"}</span>
+              <span>{isZh ? "冰箱贴 ¥39 起" : "Magnets from ¥39"}</span>
               <span className="text-border">·</span>
-              <span>{isZh ? "Q 版手办 $29.99 起" : "Figures from $29.99"}</span>
+              <span>{isZh ? "Q 版手办 ¥199 起" : "Figures from ¥199"}</span>
             </p>
 
             <div className="mt-9 flex flex-wrap items-center gap-3">

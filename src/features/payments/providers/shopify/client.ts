@@ -108,7 +108,7 @@ export async function shopifyGraphql<T>(
  * - `enabledPresentmentCurrencies` —— 店铺**启用的展示币种**(Markets)
  *
  * **为什么要读**:草稿订单的展示币种(`presentmentCurrencyCode`)得从这两
- * 个里挑 —— 挑一个我们能原样送过去的(我们的价是美元)。
+ * 个里挑 —— 挑一个我们能原样送过去的(我们的价那个币种)。
  */
 export interface ShopCurrencyInfo {
   currencyCode: string;

@@ -162,7 +162,7 @@ PrintOrderEmail.PreviewProps = {
   paragraphs: ["The studio moved your order to a new stage."],
   facts: [
     { label: "Order", value: "PO-20261101-3F7K2A" },
-    { label: "Total", value: "$128.00" },
+    { label: "Total", value: "¥128.00" },
   ],
   statusLabel: "Status: In production",
   note: "The model needed a thinner support layer.",

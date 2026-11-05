@@ -200,7 +200,7 @@ function repriceLineItem(row: CartItemRow): CartLineItem {
 function toCart(row: CartRow, items: CartItemRow[]): Cart {
   return {
     id: row.id,
-    currencyCode: row.currencyCode as "USD",
+    currencyCode: row.currencyCode as typeof PRICE_CURRENCY,
     regionId: row.regionId,
     items: items.map(repriceLineItem),
     createdAt: row.createdAt.toISOString(),

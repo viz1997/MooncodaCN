@@ -128,9 +128,9 @@ export async function createNativeOrder(
     notify_url: params.notifyUrl,
     amount: {
       total: params.totalCents,
-      // 币种跟本仓库的价走(美元)。**境内商户只能收人民币** —— 走微信这一路
-      // 需要开通**跨境微信支付**(境外商户),否则微信会拒掉这笔单。
-      // 不在这里换算 —— 本仓库的代码里没有汇率(见 CLAUDE.md)。
+      // 币种跟本仓库的价走(人民币)。微信支付 V3 Native 的境内商户就是收
+      // 人民币的 —— 不用开跨境资质,也不用换算(本仓库的代码里没有汇率,
+      // 见 CLAUDE.md)。
       currency: PRICE_CURRENCY,
     },
   });

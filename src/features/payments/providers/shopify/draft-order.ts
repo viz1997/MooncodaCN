@@ -20,11 +20,13 @@
  *
  * ## 币种:我们不换算,Shopify 换(2026-11-05)
  *
- * 本仓库的价**一律是美元**,原样搬过去 —— **我们的代码里没有汇率**。
+ * 本仓库的价是什么币种(`PRICE_CURRENCY`,现在是人民币)就是什么币种,原样搬
+ * 过去 —— **我们的代码里没有汇率**。
  *
  * 草稿订单的行价按**展示币种**(`presentmentCurrencyCode`)给,所以我们把
- * 展示币种设成美元,用户付的就是 $31.00 —— 跟我们在自己站上算的**一分
- * 不差**。结算成别的币种是 Shopify 按它自己的汇率换的事,不是我们的定价。
+ * 展示币种设成我们的价,用户付的就是我们算出来的那个数 —— 跟我们在自己
+ * 站上算的**一分不差**。结算成别的币种是 Shopify 按它自己的汇率换的事,
+ * 不是我们的定价。
  *
  * 口径和前提见 `currency.ts`。
  *
@@ -273,8 +275,8 @@ export interface DraftOrderInput {
   /**
    * 展示币种 —— 用户被收的那个币种
    *
-   * **行价按这个币种给**。我们把它设成美元,行价也就是美元 —— 原样搬过去,
-   * 一个字节都不改。
+   * **行价按这个币种给**。我们把它设成自己的价,行价也就是那个币种的数 ——
+   * 原样搬过去,一个字节都不改。
    */
   presentmentCurrencyCode: string;
   /** 关掉店铺的自动折扣 —— 别让 Shopify 自作主张改我们的价 */
@@ -335,7 +337,7 @@ export function buildShippingPrice(params: {
  */
 export function buildDraftOrderInput(params: {
   request: PaymentRequest;
-  /** 展示币种 —— 一般就是美元 */
+  /** 展示币种 —— 一般就是本仓库的价那个币种 */
   currencyCode: string;
   /** 用哪种写法 —— 默认 `DEFAULT_DRAFT_ORDER_FLAVOR` */
   flavor?: DraftOrderFlavor;
@@ -418,7 +420,7 @@ export function buildDraftOrderInput(params: {
   return input;
 }
 
-/** 我们算出来的总额(分,美元) */
+/** 我们算出来的总额(分) */
 export function computeRequestTotalCents(request: PaymentRequest): number {
   const lines = request.items.reduce(
     (sum, item) => sum + item.unitPriceCents * item.quantity,
@@ -609,16 +611,16 @@ async function sendDraftOrder(params: {
  *
  * 四步:
  *
- * 1. **定展示币种** —— 店铺结算币种是美元,或者 Markets 里启用了美元
- *    (见 `currency.ts`)。两条都不满足就**当场报错**,不猜汇率
- * 2. **建单** —— 我们算出来的价原样搬过去(美元)
+ * 1. **定展示币种** —— 店铺结算币种就是我们的价,或者 Markets 里启用了
+ *    我们的价(见 `currency.ts`)。两条都不满足就**当场报错**,不猜汇率
+ * 2. **建单** —— 我们算出来的价原样搬过去(我们的价那个币种)
  * 3. **对账** —— Shopify 算出来的 `presentmentMoney` 跟我们的一分不差
  * 4. **写法对不上就换一种** —— 见下面的写法阶梯
  */
 export async function createShopifyDraftOrder(
   request: PaymentRequest
 ): Promise<ShopifyDraftOrder> {
-  // 本仓库的价一律是美元 —— 换算由 Shopify 做
+  // 本仓库的价一律是 `PRICE_CURRENCY` —— 换算由 Shopify 做
   const requestCurrency = request.currency.toUpperCase();
   if (requestCurrency !== PRICE_CURRENCY) {
     throw new PaymentProviderError(
@@ -627,7 +629,7 @@ export async function createShopifyDraftOrder(
     );
   }
 
-  // 展示币种 —— 店铺得能收美元
+  // 展示币种 —— 店铺得能收我们的价那个币种
   const shop = await getShopCurrencyInfo();
   const plan = resolvePresentmentCurrency({
     shopCurrency: shop.currencyCode,

@@ -15,10 +15,10 @@
  *
  * 数据来源:
  *  - 商品资料 ← product-catalog.ts 的 PRODUCT_META(名称/描述/分类)
- *  - 基础价   ← BASE_PRICE_CENTS(R=299 / A=349 / P=599 / RM=799 / LB=899 / M=2999)
+ *  - 基础价   ← BASE_PRICE_CENTS(R=1900 / A=2400 / P=3900 / RM=4900 / LB=5900 / M=19900)
  *  - SKU 矩阵 ← PRODUCT_TYPES[code].sizes × accessories × product_accessory_variant 行
  *
- * 初始价 = basePriceCents + 尺寸阶梯(idx × $1) + 配件变体加价，与改造前
+ * 初始价 = basePriceCents + 尺寸阶梯(idx × ¥5) + 配件变体加价，与改造前
  * 前端「base + 各维度 priceDeltaCents」的拼价结果一致，所以 seed 当天
  * 线上展示价零漂移。
  *

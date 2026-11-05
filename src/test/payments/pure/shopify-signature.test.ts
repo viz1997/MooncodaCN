@@ -50,7 +50,7 @@ const request: PaymentRequest = {
   },
   note: "",
   successUrl: "https://example.com/checkout/success",
-  currency: "USD",
+  currency: "CNY",
 };
 
 describe("Shopify webhook 验签", () => {
@@ -91,7 +91,7 @@ describe("Shopify webhook 验签", () => {
 
 describe("Shopify 草稿单 —— 逐分相等", () => {
   it("行价就是我们算出来的折后单价,原样搬过去", () => {
-    const input = buildDraftOrderInput({ request, currencyCode: "USD" });
+    const input = buildDraftOrderInput({ request, currencyCode: "CNY" });
     const line = input.lineItems[0];
     expect(line).toBeDefined();
     expect(line?.title).toBe("冰箱贴");
@@ -103,11 +103,11 @@ describe("Shopify 草稿单 —— 逐分相等", () => {
     // 不给 Shopify 留打折的空间 —— 走 `acceptAutomaticDiscounts: false`
     expect(input.acceptAutomaticDiscounts).toBe(false);
     // 币种由展示币种定 —— 行价标量不带币种
-    expect(input.presentmentCurrencyCode).toBe("USD");
+    expect(input.presentmentCurrencyCode).toBe("CNY");
   });
 
   it("运费是我们给的一行,不是 Shopify 算的", () => {
-    const input = buildDraftOrderInput({ request, currencyCode: "USD" });
+    const input = buildDraftOrderInput({ request, currencyCode: "CNY" });
     // `ShippingLineInput.price` 是 `Money` 标量 —— 字符串,不是对象
     expect(input.shippingLine?.price).toBe("6.00");
     // 不带 `handle` —— 带了会被店铺的运费费率覆盖掉
@@ -119,7 +119,7 @@ describe("Shopify 草稿单 —— 逐分相等", () => {
   });
 
   it("订单号写在 tags / note / 行项目属性里(回调要靠它认单)", () => {
-    const input = buildDraftOrderInput({ request, currencyCode: "USD" });
+    const input = buildDraftOrderInput({ request, currencyCode: "CNY" });
     expect(input.tags).toContain("mooncoda:SO-20261105-942D88");
     expect(input.note).toContain("SO-20261105-942D88");
     const properties = input.lineItems[0]?.customAttributes ?? [];
@@ -132,7 +132,7 @@ describe("Shopify 草稿单 —— 逐分相等", () => {
   });
 
   it("税自己算过了 —— 草稿单标成免税,别让 Shopify 再叠一层", () => {
-    const input = buildDraftOrderInput({ request, currencyCode: "USD" });
+    const input = buildDraftOrderInput({ request, currencyCode: "CNY" });
     expect(input.taxExempt).toBe(true);
   });
 });

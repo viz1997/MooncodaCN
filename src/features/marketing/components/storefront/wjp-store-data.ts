@@ -41,7 +41,7 @@ export const WJP_SERIES: WjpSeries[] = [
       "WJP 全彩树脂钥匙扣,激光切割按照片轮廓,支持透明/磨砂底板、单双面印图,送礼最受欢迎。",
     cover:
       "https://images.unsplash.com/photo-1624222247344-550fb60583dc?auto=format&fit=crop&w=1200&q=80",
-    fromPriceCents: 299,
+    fromPriceCents: 1900,
     count: 4,
     accent: "#B07A5B",
   },
@@ -57,7 +57,7 @@ export const WJP_SERIES: WjpSeries[] = [
     // 首页右侧大图之前一直是裂的。改用对应商品已验证的那张肖像图。
     cover:
       "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=1200&q=80",
-    fromPriceCents: 2999,
+    fromPriceCents: 19900,
     count: 4,
     accent: "#7A5A8C",
   },
@@ -72,7 +72,7 @@ export const WJP_SERIES: WjpSeries[] = [
     // 原 photo-1611923134239-b9be5816e23d 已 404
     cover:
       "https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=1200&q=80",
-    fromPriceCents: 599,
+    fromPriceCents: 3900,
     count: 4,
     accent: "#8FA873",
   },

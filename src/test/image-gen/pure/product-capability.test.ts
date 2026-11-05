@@ -618,7 +618,7 @@ describe("assembleProductCapabilities", () => {
     expect(out[0]?.capabilities.canHaveRemarks).toBe(false);
   });
 
-  it("sizes 来自 productType.sizes 字典,priceDeltaCents 按 idx×100", () => {
+  it("sizes 来自 productType.sizes 字典,priceDeltaCents 按 idx×500", () => {
     const out = assembleProductCapabilities(
       effects,
       variantsByProduct,
@@ -628,9 +628,9 @@ describe("assembleProductCapabilities", () => {
     const r = out.find((p) => p.productTypeCode === "R")!;
     expect(r.sizes.length).toBeGreaterThan(0);
     expect(r.sizes[0]?.priceDeltaCents).toBe(0);
-    expect(r.sizes[1]?.priceDeltaCents).toBe(100);
+    expect(r.sizes[1]?.priceDeltaCents).toBe(500);
     // 第三个若存在
-    if (r.sizes[2]) expect(r.sizes[2].priceDeltaCents).toBe(200);
+    if (r.sizes[2]) expect(r.sizes[2].priceDeltaCents).toBe(1000);
   });
 
   it("空 effects → 返 []", () => {
@@ -690,11 +690,11 @@ describe("assembleProductCapabilities", () => {
       null
     );
     const r = out.find((p) => p.productTypeCode === "R")!;
-    // R 钥匙扣 $2.99
-    expect(r.basePriceCents).toBe(299);
+    // R 钥匙扣 ¥19
+    expect(r.basePriceCents).toBe(1900);
     const m = out.find((p) => p.productTypeCode === "M")!;
-    // M 手办 $29.99
-    expect(m.basePriceCents).toBe(2999);
+    // M 手办 ¥199
+    expect(m.basePriceCents).toBe(19900);
   });
 });
 
@@ -796,7 +796,7 @@ describe("assembleProductCapabilities —— 商品目录 DB 化(2026-10-21)", (
     expect(out).toHaveLength(1);
     expect(out[0]?.displayName).toEqual(PRODUCT_META.R?.displayName);
     expect(out[0]?.description).toEqual(PRODUCT_META.R?.description);
-    expect(out[0]?.basePriceCents).toBe(299); // BASE_PRICE_CENTS.R
+    expect(out[0]?.basePriceCents).toBe(1900); // BASE_PRICE_CENTS.R
     expect(out[0]?.variants).toEqual([]);
   });
 
@@ -809,7 +809,7 @@ describe("assembleProductCapabilities —— 商品目录 DB 化(2026-10-21)", (
       new Map(),
       new Map()
     );
-    expect(out[0]?.basePriceCents).toBe(299);
+    expect(out[0]?.basePriceCents).toBe(1900);
     expect(out[0]?.variants).toEqual([]);
   });
 

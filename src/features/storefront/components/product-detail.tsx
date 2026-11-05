@@ -6,7 +6,7 @@
  *  - useFormatPrice → formatCents
  *  - next/link Link → @/i18n/routing Link
  *  - 客户端取数改走 useProduct(handle)(TanStack Query → /api/store/products/[handle])
- *  - 文案中文化($ / 天 / 工艺文案)
+ *  - 文案中文化(¥ / 天 / 工艺文案)
  *  - related 卡片 inline 渲染(无独立 ProductCard,避免跨模块耦合)
  *
  * Customize CTA 行为:setCustomize(product) + router.push("/"),让根 layout 挂载的
@@ -54,7 +54,7 @@ import { formatSizeCompact } from "../lib/size-format";
 import type { StorefrontProduct } from "../types";
 
 const perks = [
-  { icon: Truck, label: "$19.99 以上免运费" },
+  { icon: Truck, label: "¥99 以上免运费" },
   { icon: RotateCcw, label: "工艺问题免费重做" },
   { icon: ShieldCheck, label: "工作室手工精修" },
 ];
@@ -351,7 +351,7 @@ export function ProductDetail({ handle }: { handle: string }) {
                 {product.canEngrave && (
                   <li className="flex items-start gap-2">
                     <span className="size-1 rounded-full bg-accent mt-1.5 shrink-0" />
-                    <span>可选背面刻字(+$0.99)</span>
+                    <span>可选背面刻字(+¥3)</span>
                   </li>
                 )}
               </ul>
@@ -444,8 +444,8 @@ export function ProductDetail({ handle }: { handle: string }) {
                 value="shipping"
                 className="text-sm leading-relaxed text-muted-foreground mt-4 text-pretty"
               >
-                工作室手工精修,{product.leadTimeDays} 天内发货。$19.99
-                以上免运费。 定制商品不支持退货,但工艺问题免费重做。
+                工作室手工精修,{product.leadTimeDays} 天内发货。¥99 以上免运费。
+                定制商品不支持退货,但工艺问题免费重做。
               </TabsContent>
             </Tabs>
           </div>

@@ -13,9 +13,9 @@ Mooncoda is a production-ready Next.js SaaS template. It provides a complete fou
 | 系统 | 职责 | 技术栈 |
 |---|---|---|
 | **NextDevTpl**(本仓库) | AI 生图 SaaS 后端:user / credits / photo / imageJob / AI 路由 / WeChat 小程序登录 **+ 商品目录(商品 / SKU 变体 / 价格)+ 定价 + 购物车 + 订单事实 + 收货地址 + 打印工单(`/quote` 报价 → `print_order`,按 `user_id` 归属,登录后下单;也可以从 `/tools/weight` 直接加进商城购物车,见「打印服务进商城购物车」)** | Next.js 16 + Drizzle + PostgreSQL |
-| **微信支付 / 支付宝**(外部服务) | **自己直连的收款通道**:钱直接进我们自己的商户号 / 账户,没有中间层抽成,定价完全由本仓库说了算。**代码写好了,商户号 / 应用还没走完开通流程** —— 界面上摆出来但选不了(见「三个支付通道」的两道闸) | 微信支付 V3 Native(扫码)+ 支付宝电脑网站支付 |
-| **Shopify**(外部服务) | **只做银行卡 / Shop Pay 的收银台**。本仓库算出来的价通过**草稿订单**原样传过去(逐分相等),不跟 Shopify 的商品目录 / 运费规则走 | Shopify Admin GraphQL API + 草稿订单 |
-| **Sellbase**(独立服务)**过渡期保留** | 旧收款路:Sellbase 建单 + Stripe 付款页。**不再接新单**(已建好的旧单还能重取支付入口)。三个新通道跑通后整个 `src/features/sellbase/` 拆掉 | Supabase Edge Functions(**跟本仓库同一个 Supabase 项目**)+ Stripe(MIT) |
+| **微信支付 / 支付宝**(外部服务) | **自己直连的收款通道**:钱直接进我们自己的商户号 / 账户,没有中间层抽成,定价完全由本仓库说了算。**代码写好了,商户号 / 应用还没走完开通流程** —— 界面上摆出来但选不了(见「两个支付通道」的两道闸) | 微信支付 V3 Native(扫码)+ 支付宝电脑网站支付 |
+| **Shopify**(外部服务)**已下线** | 曾经只做银行卡 / Shop Pay 的收银台(草稿订单,逐分相等)。2026-11-05 工作室决定只用微信 + 支付宝,**不再接新单** —— 代码留着给老单用,整目录待拆 | Shopify Admin GraphQL API + 草稿订单 |
+| **Sellbase**(独立服务)**过渡期保留** | 旧收款路:Sellbase 建单 + Stripe 付款页。**不再接新单**(已建好的旧单还能重取支付入口)。两个新通道跑通后整个 `src/features/sellbase/` 拆掉 | Supabase Edge Functions(**跟本仓库同一个 Supabase 项目**)+ Stripe(MIT) |
 | **微信小程序 / 浏览器访客**(外部客户端) | 调 NextDevTpl AI 接口拿候选图 **+ 调 `/api/image-gen/products` 拿商品与 SKU**;调 NextDevTpl `/api/store/**` 加购 + 结算 | Taro 4 + React 18(小程序);Next.js(浏览器) |
 
 **接入形态 = 「本仓库算价,收银台只负责收钱」**(2026-11-05 取代 Sellbase 单通道):
@@ -23,7 +23,7 @@ Mooncoda is a production-ready Next.js SaaS template. It provides a complete fou
 - 商城结算:`购物车(DB) → 服务端重算每行价 → 落 storefront_order(_item) → 建支付会话 → 回写 provider_order_id + payment_url(+ 微信的 payment_qr_code_url)→ 前端跳转 / 画码`
 - 打印工单:同一套结算 + 同一个 webhook 体系 —— 两条支付链合一
 - **逐分相等**:`discountedUnitPriceCents × quantity` == 收银台实际收的金额(阶梯折扣必须「先折单价,再乘数量」)
-- 三个新通道的细节见「三个支付通道(2026-11-05)」;旧路的细节见「Sellbase 集成(2026-11-04)」
+- 两个新通道的细节见「两个支付通道(2026-11-05)」;旧路的细节见「Sellbase 集成(2026-11-04)」
 
 **NextDevTpl 做的商品目录**(2026-10-21 变更):
 - `product` 表 = 商品资料(名称/描述/封面/基础价/上下架),主键复用 `productTypeCode`(R/A/P/RM/LB/M)
@@ -35,15 +35,15 @@ Mooncoda is a production-ready Next.js SaaS template. It provides a complete fou
 
 **NextDevTpl 仍做**:`/marketing/*` 静态品牌页(博客 / 文档 / 法律页 / 价格页)+ `/marketing/products` 作品集 showcase(纯静态作品集,与商品目录无关)。
 
-**集成架构详情**:见 `architecture-sellbase-integration.md`(旧路的权威文档)+ `architecture-miniprogram-as-client.md`(项目身份定位)。`architecture-medusa-integration.md` 是 **Medusa 时代的方案稿,结论已作废**。三个新通道的架构写在 CLAUDE.md 的「三个支付通道(2026-11-05)」一节 + 各通道 `providers/*/env.ts` 的文件头。
+**集成架构详情**:见 `architecture-sellbase-integration.md`(旧路的权威文档)+ `architecture-miniprogram-as-client.md`(项目身份定位)。`architecture-medusa-integration.md` 是 **Medusa 时代的方案稿,结论已作废**。两个新通道的架构写在 CLAUDE.md 的「两个支付通道(2026-11-05)」一节 + 各通道 `providers/*/env.ts` 的文件头。
 
 ## Sellbase 集成(2026-11-04,**旧路,过渡期并行**)
 
-> **状态(2026-11-05)**:工作室决定把收款换成「微信 / 支付宝 / Shopify」三个
-> 直连通道(见「三个支付通道」)。这一节讲的是**旧路** —— 代码还活着,但
+> **状态(2026-11-05)**:工作室决定把收款换成「微信 / 支付宝」两个直连通道
+> (见「两个支付通道」)。这一节讲的是**旧路** —— 代码还活着,但
 > **新单已经不走它了**(结算传 `stripe` 直接 503;`/api/store/payment-channels`
 > 也不再返回那条旧通道,那段 `legacyChannel()` 已删)。留着它是为了让**已经
-> 建好的旧单**还能重取支付入口。**三个新通道全部跑通之后**整个
+> 建好的旧单**还能重取支付入口。**两个新通道全部跑通之后**整个
 > `src/features/sellbase/` 连同 `SELLBASE_*` 环境变量一起拆掉,届时
 > `stripe` 从 `PaymentChannel` 枚举里删掉。
 
@@ -76,7 +76,7 @@ lib/
 
 > **状态转移搬走了(2026-11-05)** —— 原来在 `sellbase/lib/storefront-transition.ts`
 > 的那套判断现在是 `src/features/payments/lib/transitions.ts`:微信 / 支付宝 /
-> Shopify / 旧路**四个通道共用**一份判断(退款只改支付状态、迟到的收款通知
+> Shopify / 旧路**这四条路共用**一份判断(退款只改支付状态、迟到的收款通知
 > 不改退款单、幂等)。拆 Sellbase 的时候这个文件**不用搬回去**。
 
 **必须守住的四条**:
@@ -94,7 +94,7 @@ lib/
 | `storefront_order.status` | 订单走到哪一步 | `unpaid` / `paid` / `fulfilled` / `cancelled` |
 | `storefront_order.payment_status` | 钱到没到、退没退 | `unpaid` / `paid` / `refunded` / `failed` |
 
-**退款只改 `payment_status`,不动 `status`** —— 早先只有一列的时候,退款把订单写成「已取消」,用户看着像没买过,工作室也没法把退款单跟取消单分开。**迟到的 `order.paid` 不能把退过款的单改回「已支付」** —— webhook 会重投,投递顺序不保证,靠 `payment_status === "refunded"` 挡住。判断逻辑在 `src/features/payments/lib/transitions.ts`(纯函数,四个通道共用),`print_order` 用的是同一个口径。
+**退款只改 `payment_status`,不动 `status`** —— 早先只有一列的时候,退款把订单写成「已取消」,用户看着像没买过,工作室也没法把退款单跟取消单分开。**迟到的 `order.paid` 不能把退过款的单改回「已支付」** —— webhook 会重投,投递顺序不保证,靠 `payment_status === "refunded"` 挡住。判断逻辑在 `src/features/payments/lib/transitions.ts`(纯函数,各通道共用),`print_order` 用的是同一个口径。
 
 **鉴权口径**:商城路由(`/api/store/checkout`、`/api/store/orders/**`、`/api/store/addresses/**`)认**两种凭据** —— `Authorization: Bearer <token>`(微信小程序)或者 Better Auth 的签名 cookie(浏览器),统一走 `src/lib/auth/request-session.ts` 的 `getSessionFromRequest`。**带了 Bearer 但 token 无效 → 直接 401,不退回 cookie** —— 悄悄换个身份继续跑,等于把「token 过期」变成「换个身份照样能过」。这个 helper 单独一个文件,是因为 `src/lib/auth/bearer.ts` 被 Edge 中间件(`src/proxy.ts`)引用,`better-auth` 绝不能进那个 bundle。
 
@@ -116,7 +116,7 @@ lib/
   - `scripts/` 里的脚本用 `import "./lib/load-env";`;**`src/db/` 里的两个 seed**
     (`seed-products.ts` / `seed-product-accessory-variants.ts`)用
     `import "../../scripts/lib/load-env";` —— 路径不同,道理一样
-  - **只有真连库的脚本才需要**。`scripts/apply-usd-currency-schema.ts` 自己
+  - **只有真连库的脚本才需要**。`scripts/apply-currency-schema.ts` 自己
     在模块体里加载 dotenv + 用 `pg` 直连,不 import `@/db`,所以它不受这条约束
 
 **写环境变量**统一走 `scripts/lib/env-file.ts` 的 `upsertEnvVar(path, key, value, {secret})` —— **替换**同名变量而不是追加(追加会出现两个同名变量,dotenv 取哪个取决于顺序,很容易踩「密钥明明配了却读不到」)。
@@ -384,38 +384,43 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 (客户端 + 批量汇总),`src/test/pricing/pure/pose-comparison.test.ts` 守住
 (省 X% 的算法)。
 
-### 币种:美元,只有一处定义(2026-11-05)
+### 币种:人民币,只有一处定义(2026-11-05)
 
-工作室主攻**美国市场**,所以本仓库的价**一律美元**(USD)。2026-11-05 从
-人民币改过来。
+本仓库的价**一律人民币**(CNY)。2026-11-05 短暂改成过美元,当天又改回来了
+—— 收款通道(微信支付 / 支付宝)是**境内商户**,收人民币是它们的原生场景;
+走美元就得先开跨境资质,还要多一道换算,平白多出汇率风险。
 
 - **币种只有一处定义** —— `src/config/currency.ts` 的 `PRICE_CURRENCY`
   (零依赖的纯常量文件,客户端 bundle 也能 import)。别的地方**不许**再写
-  一遍 `"USD"` / `"CNY"`。`PRICE_REGION_ID` 也是同一处("us")。
+  一遍 `"USD"` / `"CNY"`。`PRICE_REGION_ID` 也是同一处("china")。
 - **金额一律是整数分** —— 展示走全仓库唯一的入口 `src/lib/money.ts` 的
   `formatCents(分, { locale })`。以前商城那个收「元」的 `formatPriceCNY`
   已经删了(两套单位混用出来的「差 100 倍」在页面上看不出来,只在对账时炸)。
 - **定价常量**在 `src/features/storefront/lib/pricing-constants.ts`
-  (刻字 $0.99 / 加急 $2.99 / 运费 $6.99 / 免运费门槛 $19.99);**商品基础价**
+  (刻字 ¥3 / 加急 ¥15 / 运费 ¥8 / 免运费门槛 ¥99);**商品基础价**
   在 `src/features/gpt-image/lib/product-catalog.ts` 的 `BASE_PRICE_CENTS`
-  (钥匙扣 $2.99 / 冰箱贴 $5.99 / 徽章 $8.99 / 相框 $7.99 / 手办 $29.99)。
-  **尺寸阶梯 $1/档、配件加价、刻字费、加急费** 全在这两个文件里。
-- **三个通道都收美元** —— 微信 / 支付宝 / Shopify 的请求里带的是
-  `PRICE_CURRENCY`。微信有个坑:**境内商户只能收人民币**,走微信这条路要
-  开通**跨境微信支付**(境外商户),否则微信会拒掉这笔单。
-- **不换算** —— 代码里**没有汇率**(Shopify 那条见「Shopify 的币种」)。旧的
-  `SHOPIFY_FX_RATE` 写法已经被否掉了。
+  (钥匙扣 ¥19 / 异性钥匙扣 ¥24 / 冰箱贴 ¥39 / 相框 ¥49 / 皮革徽章 ¥59 /
+  手办 ¥199)。**尺寸阶梯 ¥5/档、配件加价、刻字费、加急费** 全在这两个
+  文件里。
+- **两个通道都收人民币** —— 微信 / 支付宝的请求里带的是 `PRICE_CURRENCY`。
+  微信那边**境内商户本来就收人民币**,不用开跨境资质。
+- **不换算** —— 代码里**没有汇率**。旧的 `SHOPIFY_FX_RATE` 写法已经被否掉
+  了(Shopify 那条路也下线了,见「两个支付通道」)。
 - **迁移脚本**(幂等,手写,不走 `db:generate`):
-  `scripts/apply-usd-currency-schema.ts` —— 改三张表的列默认值、按代码里的
-  字典**重新定价**商品目录三张表、把在途购物车改成 USD/us。
-  **历史订单一行不动**(旧单收的就是人民币,改了就等于篡改账本);脚本会把
-  还没付的旧单数量打出来,要不要取消是工作室的决定。
+  `scripts/apply-currency-schema.ts` —— 改三张表的列默认值、按代码里的
+  字典**重新定价**商品目录三张表、把在途购物车改成 CNY/china。
+  **币种从 `@/config/currency` 读**,脚本里不写死 —— 改币种漏了这个脚本
+  就会变成「代码是人民币、DB 默认值是美元」,那种错位不会报错,只在结账
+  的时候炸。**历史订单一行不动**(旧单收的就是它当时收的币种,改了等于
+  篡改账本);脚本会把还没付的旧单数量打出来,要不要取消是工作室的决定。
   跑完再补一遍 seed:`pnpm tsx src/db/seed-product-accessory-variants.ts` +
   `pnpm tsx src/db/seed-products.ts`。
-- **不在这次范围内**:AI 生图的**积分 / 模型成本**那一套
+- **不在这个范围内**:AI 生图的**积分 / 模型成本**那一套
   (`features/image-gen/lib/generation-service.ts` 的「1 积分 = 0.001 CNY」、
   admin 里的模型价格、`features/mooncoda/**`)—— 那是另一个钱的世界,跟着
-  积分制走,不是商品价。别把它跟商品价混在一起改。
+  积分制走,不是商品价。别把它跟商品价混在一起改。同理,模板自带的
+  **Creem 订阅**(`src/config/payment.ts` 的 `currency: "USD"`)也是另一个
+  收款系统,跟着订阅套餐走。
 
 ### 打印工单交期档位(2026-11-05)
 
@@ -432,8 +437,8 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
   96 小时 +¥0.00」在**同一个基数(¥55.81)**上,20.65 / 5.58 ≈ 3.70 →
   37% 与 10%(0.37 × 55.81 = 20.65、0.1 × 55.81 = 5.58,两个数都精确复现)。
   工作室调价改环境变量,不改代码。**比例跟币种无关** —— 收的是「小计的
-  百分之多少」,币种从人民币换成美元,37% / 10% 一个字都不用改(基数换成
-  $8.12 时是 +$3.00 / +$0.81)。
+  百分之多少」,37% / 10% 这两个数在任何币种下都成立(换个币种时比例一个字
+  都不用改,只要基数跟着换)。
 - **基数是「小计」不是「合计」** —— 小计 = 克重费 + 后处理费 + 支撑费。
   拿合计当基数就是「加价里套加价」,越算越高,而且「明细加起来 = 合计」
   这条恒等式会破。合计 = 小计 + 交期加价(四项)。
@@ -498,16 +503,23 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
   判据 / hash / 形状)和 `src/test/sellbase/pure/linked-print-order.test.ts`
   (工单跟着商城订单变)守住。
 
-### 三个支付通道(2026-11-05)
+### 两个支付通道(2026-11-05)
 
-工作室决定把收款从「Sellbase + Stripe 一条路」换成**三个通道**:微信支付、
-支付宝、Shopify(银行卡 / Shop Pay)。**微信和支付宝自己直连**(钱直接进我们
-自己的商户号 / 账户,没有中间层抽成,定价完全由本仓库说了算),**Shopify 只
-承接卡**。旧的 Sellbase + Stripe 那条路**并行保留**,等三个新通道跑通再拆。
+工作室决定把收款从「Sellbase + Stripe 一条路」换成**两个通道**:微信支付、
+支付宝。**两个都自己直连** —— 钱直接进我们自己的商户号 / 账户,没有中间层
+抽成,定价完全由本仓库说了算。旧的 Sellbase + Stripe 那条路**并行保留**,
+等两个新通道跑通再拆。
 
-> **2026-11-05 更新:三个通道都摆出来,能不能付看配置。** 「开放名单」在
-> `src/features/payments/lib/registry.ts` 的 `ENABLED_PAYMENT_CHANNELS`
-> —— 现在是 `["wechat", "alipay", "shopify"]`。
+> **2026-11-05 更新:Shopify 那条路下线了。** 工作室只用微信 + 支付宝 ——
+> 两个都是**境内商户**,收人民币是它们的原生场景,不用开跨境资质、不用换算。
+> Shopify 的 provider **代码还留在树里**(`src/features/payments/providers/shopify/`),
+> 但**不在开放名单里** → 界面上不摆出来、清单接口不返回、结算不接新单。
+> 留着它的唯一理由:「重新获取付款入口」那条路要能对已经建好的 Shopify 单说
+> 清楚「这条路走不通、为什么」,而不是一个看不懂的 404。跟旧路 Sellbase 一个
+> 待遇 —— 确认没有待付的老单了,整个目录一起拆掉。
+>
+> **「开放名单」**在 `src/features/payments/lib/channels.ts` 的
+> `ENABLED_PAYMENT_CHANNELS` —— 现在是 `["wechat", "alipay"]`。
 >
 > **「摆出来」≠「能付」** —— 没配好的那个在界面上是**灰的、标着「暂未
 > 开放」、选不了**(不是藏起来:工作室要让人看见支持哪几种付款方式)。要关
@@ -534,8 +546,7 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 > 哪些变量。**没有这条日志的时候,这类故障在服务端是静默的** —— 界面上只
 > 是灰了一个选项,日志里只有一行 `POST /api/store/checkout 503`,看不出
 > 为什么(2026-11-05 线上真踩过:Shopify 换成了新的凭据模型,而代码只认旧的
-> 永久 token,于是「配了但用不上」——详见下面「Shopify 的凭据(2026-01-01
-> 起变了)」)。
+> 永久 token,于是「配了但用不上」—— 详见下面「Shopify 已下线」)。
 
 #### 通道清单
 
@@ -543,7 +554,7 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 |---|---|---|---|
 | `wechat` | 微信支付 V3 **Native**(扫码) | 页面留在原地,画二维码 | 我们的微信商户号 |
 | `alipay` | 支付宝**电脑网站支付** | 整页跳支付宝 | 我们的支付宝账户 |
-| `shopify` | Shopify **草稿订单** | 整页跳 Shopify 收银台 | Shopify 店铺结算账户 |
+| `shopify` | **已下线**(2026-11-05)—— 代码留着,不再接新单 | — | — |
 | `stripe` | **旧路**:Sellbase + Stripe(过渡期保留,**不再接新单**) | 整页跳 Stripe | Stripe → 我们的账户 |
 | `offline` | 线下转账 | 没有 —— 工作室后台手动标 | — |
 
@@ -587,19 +598,20 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 ```
 lib/
 ├── types.ts        # 通道契约(PaymentRequest / PaymentSession / PaymentProvider)+ 两类错误
-├── registry.ts     # 通道注册表:ENABLED_PAYMENT_CHANNELS / getPaymentProvider() / listPaymentChannels()
+├── channels.ts     # 开放名单 + 通道清单(零依赖纯文件,能进 unit project 跑单测)
+├── registry.ts     # provider 注册表:getPaymentProvider() / listPaymentChannels()
 ├── money.ts        # 分 ↔ 元/分(微信要分,支付宝要元)—— 不用浮点
-├── settle.ts       # 收款状态落库(四个通道共用一份)
+├── settle.ts       # 收款状态落库(各通道共用一份)
 └── transitions.ts  # 状态转移判断(纯函数,零 DB 依赖)
 providers/
 ├── wechat/         # env / native / signature / webhook
 ├── alipay/        # env / page-pay / sign / query / webhook
-└── shopify/        # env / client / draft-order / signature / webhook / order-reference
+└── shopify/        # 已下线 —— env / client / draft-order / signature / webhook / order-reference
 ```
 
 - **通道之间共通的那部分**只有三件:**本仓库算价**、**一次支付会话**、**一次
   收款确认**。通道**不参与定价** —— 折后单价在进通道之前就已经折好了。
-- **`settle.ts` 是四个通道共用的** —— 回调长得完全不一样(验签、报文、状态
+- **`settle.ts` 是各通道共用的** —— 回调长得完全不一样(验签、报文、状态
   字段名都不同),但回调落地之后要做的事是同一件:「这笔钱到了 → 把订单标成
   已付」。只有一份实现,下面那两条规矩才站得住:
   1. **退款只改 `paymentStatus`**,不动 `status`(退款不是订单状态)
@@ -608,33 +620,23 @@ providers/
 - **幂等不靠去重表** —— 「已经是目标状态 → no-op」就够了。重投一次和重投
   十次,结果一样。
 
-#### 逐分相等(Shopify 尤其要紧)
+#### 逐分相等
 
 本仓库算出来的每一行单价,必须跟收银台实际收的金额**一分不差**。
 
 - **微信 / 支付宝**天然满足 —— 金额是我们在请求里给的(微信要**分**,支付宝要
-  **元**,转换走 `payments/lib/money.ts`,不用浮点)。
-- **Shopify 的普通购物车做不到**:Storefront API 的 `CartLineInput`
-  **没有价格字段**;改价要 Cart Transform(Plus 套餐);Shopify Scripts 已
-  在 2026-06-30 下线。所以走**草稿订单**(`draftOrderCreate`):
-  - 行是**自定义行**(`title` + `price` + `quantity`),价格**由我们给**
-  - `presentmentCurrencyCode` —— **我们不换算**,行价就是美元的数,展示
-    币种设成美元(见下面「Shopify 的币种」)
-  - `taxExempt: true` —— 不在我们的总价上再叠一层税
-  - `acceptAutomaticDiscounts: false` —— 店铺的自动折扣不许碰我们的价
-  - 运费也是我们自己给的一行(`shippingLine`),不跟 Shopify 的运费规则走
-  - 付完钱 Shopify 把它转成正式订单并发 `orders/paid` webhook
-  - **建完立刻回读总额对账** —— 比的是 `presentmentMoney`(用户被收的那份),
-    对不上就**大声失败**,不能带着错的价去收钱
-  - 也就是说:**不用把商品目录同步过去,也能保证一分钱不差**
+  **元**,转换走 `payments/lib/money.ts`,不用浮点)。两个通道都是**人民币**,
+  跟本仓库的价同一个币种,**不换算**。
+- **Shopify 那条(已下线)**曾经要靠草稿订单 + 建完回读 `presentmentMoney`
+  对账才能保证这一点 —— 细节见下面「Shopify 已下线」。
 
-#### 三个通道的 webhook
+#### 两个通道的 webhook
 
 | 通道 | 路由 | 验签 | 成功响应 |
 |---|---|---|---|
 | 微信 | `POST /api/webhooks/wechat` | 头 `Wechatpay-Signature`,签名串 = `timestamp\nnonce\nrawBody\n` | `200` + `{"code":"SUCCESS"}` |
 | 支付宝 | `POST /api/webhooks/alipay` | RSA2(`rsaCheckV1`:**`sign` 和 `sign_type` 都排除**) | `200` + **纯文本** `success` |
-| Shopify | `POST /api/webhooks/shopify` | 头 `X-Shopify-Hmac-Sha256` = base64(HMAC-SHA256(rawBody, API secret)) | `200` |
+| Shopify | `POST /api/webhooks/shopify`(**已下线** —— 路由还在,只服务老单) | 头 `X-Shopify-Hmac-Sha256` = base64(HMAC-SHA256(rawBody, API secret)) | `200` |
 
 - **必须读原始 body** —— 验签对的是字节,不是 `JSON.parse` 之后再序列化回来
   的结果(键序、空格、转义都可能不一样)。微信/支付宝用 `await request.text()`,
@@ -671,8 +673,8 @@ providers/
 `available`(配好了没)。
 
 - **只返回「开放了」的通道** —— `ENABLED_PAYMENT_CHANNELS` 之外的一个都不
-  返回(现在是三个:微信 / 支付宝 / Shopify)。旧路(Sellbase + Stripe)
-  **不在清单里** —— 它不再接新单。
+  返回(现在是两个:微信 / 支付宝)。Shopify 和旧路(Sellbase + Stripe)
+  **都不在清单里** —— 它们不再接新单。
 - **没配好的通道也返回,但前端画成灰的、标「暂未开放」、选不了** ——
   `available: false`。让用户点一个注定失败的按钮比不给这个选项更糟,但把
   选项整个藏起来也不行:工作室要让人看见支持哪几种付款方式。
@@ -706,144 +708,61 @@ providers/
 |---|---|
 | 微信 | `WECHAT_PAY_MCH_ID` / `WECHAT_PAY_APP_ID` / `WECHAT_PAY_API_V3_KEY`(32 字节)/ `WECHAT_PAY_SERIAL_NO` / `WECHAT_PAY_PRIVATE_KEY`(或 `_PATH`)/ 验签材料 `WECHAT_PAY_PUBLIC_KEY` + `WECHAT_PAY_PUBLIC_KEY_ID` **或** `WECHAT_PAY_PLATFORM_CERT_DIR` / `WECHAT_PAY_NOTIFY_URL`(可省) |
 | 支付宝 | `ALIPAY_APP_ID` / `ALIPAY_APP_PRIVATE_KEY`(或 `_PATH`)/ `ALIPAY_PUBLIC_KEY`(**支付宝公钥**,不是应用公钥)/ `ALIPAY_GATEWAY`(可省)/ `ALIPAY_NOTIFY_URL` / `ALIPAY_RETURN_URL`(可省) |
-| Shopify | `SHOPIFY_STORE_DOMAIN` / `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET`(新模型;**secret 也是 webhook 的验签密钥**)/ 旧路可省:`SHOPIFY_ADMIN_ACCESS_TOKEN`(永久 token,配了就优先用)/ `SHOPIFY_API_SECRET`(独立验签密钥)/ `SHOPIFY_API_VERSION`(可省)/ **`SHOPIFY_DEFAULT_COUNTRY`(可省,默认 `US`)**。**没有汇率变量** |
+| Shopify(**已下线**) | 不用配 —— 这条路不再接新单。变量说明留在 `providers/shopify/env.ts` 的文件头(`SHOPIFY_STORE_DOMAIN` / `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET` / `SHOPIFY_ADMIN_ACCESS_TOKEN` / `SHOPIFY_API_SECRET` / `SHOPIFY_API_VERSION` / `SHOPIFY_DEFAULT_COUNTRY`) |
 
-##### Shopify 的币种:**我们不换算,Shopify 换**(2026-11-05)
+##### Shopify 已下线(2026-11-05)
 
-**线上真踩过**:店铺结算是 USD,这单是 ¥27.00,Shopify 直接拒了(「币种对不上:
-店铺结算币种是 USD,本订单是 CNY」)。
+工作室只用**微信 + 支付宝**。Shopify 不在开放名单里 —— 界面上不摆出来、清单
+接口不返回、结算不接新单。下面那些环境变量**配不配都无所谓**(配了也不会被
+用到)。
 
-早先的修法是「本仓库乘一个写死的 `SHOPIFY_FX_RATE` 推成美元」—— **这条路
-被否掉了**(2026-11-05 工作室定的):汇率是一个**全局静态值**,涨了跌了都没人
-知道,而且没有任何一方对「用户看到的数」负责。自建站面向全球,这么干等于把
-汇兑风险和比价流失全揽在自己身上。
+**代码留着**,跟旧路 Sellbase 一个待遇:「重新获取付款入口」那条路要能对已经
+建好的 Shopify 单说清楚「这条路走不通、为什么」,而不是一个看不懂的 404。
+确认没有待付的老单了,整个 `providers/shopify/` 一起拆掉,这些变量也就一起
+不用管了。
 
-**现在的口径:定价权交给 Shopify 的展示币种(presentment currency)。**
+**哪天要重新开这条路,先看这三件事**(都是 2026-11-05 线上真踩过的):
 
-- **本仓库的价一律美元**,**原样**搬进草稿订单 —— 一个字节都不改
-- 草稿订单带 `presentmentCurrencyCode: "USD"` —— 文档原话:
-  "The presentment currency that should be used for the order. This currency is
-  the currency that the customer will be charged in."
-- **行价按展示币种给**(`DraftOrderLineItemInput.price`:"The price in
-  presentment currency")—— 所以我们给美元的数,用户就付美元
-- **逐分相等在展示币种上成立** —— 对账比的是 `totalPriceSet.presentmentMoney`
-  (用户被收的那份),必须跟我们发过去的**一分不差**
-  (`draft-order.ts` 的 `assertSameTotal`)
-- `totalPriceSet.shopMoney`(结算币种那份)**不参与对账** —— 那是 Shopify 按
-  自己的汇率换过的数,本来就不该等于我们的数
-- **Shopify 在草稿单创建那一刻就把汇率锁死** —— 用户看到的价、我们收到的钱,
-  用的是同一个数
+1. **币种:我们不换算,让 Shopify 换** —— 本仓库的价原样搬进草稿订单,带
+   `presentmentCurrencyCode`(展示币种 = 用户被收的那个币种)。**前提是店铺
+   得能收人民币**:要么把店铺结算币种改成人民币,要么在 Settings → Markets
+   里把人民币加成展示币种。两条都不满足 → **当场报错**,错误文案里写清楚怎么
+   改,**绝不拿一个猜的汇率去收钱**。早先那个「后端乘一个写死的
+   `SHOPIFY_FX_RATE`」的写法**已经被否掉了** —— 汇率是全局静态值,涨了跌了
+   都没人知道。口径见 `providers/shopify/currency.ts`。
+2. **API 版本的字段要挑「当前版本有的」** —— GraphQL 的验证是**全有全无**的:
+   选了一个当前版本没有的字段,整条 mutation 直接不执行(报的是验证错误,
+   不是 Shopify 的业务错误)。2026-11-05 栽过两处:
+   - `draftOrderCreate { userErrors { code } }` —— `code` 只在
+     `DraftOrderUserError` 上有,旧版本整条查询验证不过 → **只选 `field` +
+     `message`**(这两个是 `UserError` **接口**上的字段,哪个版本都在)
+   - `order { lineItems { node { properties } } }` —— `properties` 2024-10 起被
+     `customAttributes` 取代 → **两个都留着**,先用 `customAttributes`,报
+     「字段不存在」就换 `properties` 再来一次(`client.ts` 的
+     `buildOrderQuery()` + `isUnknownFieldError()`)。**只有「字段不存在」才
+     换写法**,别的错原样往上抛
+3. **输入类型的字段名 / 类型也随版本变** —— 2026-11-05 线上栽过两轮:
 
-**前提:店铺得能收美元。** 两条修法任选其一(`providers/shopify/currency.ts`
-的 `resolvePresentmentCurrency()`):
+   | 我们原来发的 | 实际应该是 |
+   |---|---|
+   | `lineItems[].price` | **`price` 压根不存在**。行价叫 `originalUnitPrice`(`Money` 标量,纯字符串 `"12.50"`)或 `priceOverride`(`MoneyInput` 对象) |
+   | `shippingLine.price: {amount, currencyCode}` | **`Money` 标量** —— 纯字符串 `"6.99"`。传对象 → `invalid money` |
+   | `shippingLine.handle: "shipping"` | **删掉**。`ShippingLineInput` 没这个字段;而且带了 handle 会被**店铺的运费费率**覆盖掉我们的价 |
 
-1. **店铺结算币种改成美元** —— 最省事,不用碰 Markets,而且结算没有汇兑
-   敞口(Markets 的自动换算大约带 1.5% 的零售加价)
-2. **Markets 里把美元加成展示币种**(Settings → Markets)—— 结算币种还是
-   别的币种,用户在美元这一层付钱
+   代码里留了一条**写法阶梯**(`draft-order.ts` 的 `DRAFT_ORDER_FLAVORS`,行价
+   3 种 × 运费 3 种共 9 种组合):碰到「**字段形状对不上**」
+   (`isFieldShapeError()`)就换一种写法重发,按**报错指向的那一处**换。**重发
+   是安全的** —— 变量强制转换失败不会建出草稿单。只有形状问题才换写法,别的
+   错(金额对不上、凭据不对)原样往上抛。
 
-两条都不满足 → **当场报错**(「没配好」,重试没用),错误文案里直接写清楚上面
-两条修法。**绝不拿一个猜的汇率去收钱。**
-
-- **界面上的「配好了」查不了这件事** —— `isShopifyConfigured()` 是同步的,
-  币种要问 Shopify。币种对不上会在**建单那一步**报错,报得很清楚
-- **本仓库的订单记录仍然是美元分** —— 那才是「用户买了什么、值多少」的事实
-
-
-##### Shopify 的 API 版本:字段要挑「当前版本有的」(2026-11-05 线上踩过)
-
-**GraphQL 的验证是全有全无的** —— 选了一个当前 API 版本没有的字段,**整条
-查询/mutation 直接不执行**,报的是:
-
-```
-Field 'code' doesn't exist on type 'UserError'
-```
-
-注意这个错**不是** Shopify 的业务报错(用户错误),是**查询本身没通过验证**。
-所以这类失败**一条数据都没建出来**,重试多少次都一样。
-
-线上真踩过两处(都在 Shopify 这条通道上):
-
-| 字段 | 情况 | 处理 |
-|---|---|---|
-| `draftOrderCreate { userErrors { code } }` | `userErrors` 在不同版本上类型不一样(基类 `UserError` / `DraftOrderUserError`)。`code` **只在后者上有**,旧版本整条 mutation 验证不过 | **只选 `field` + `message`** —— 这两个是 `UserError` **接口**上的字段,哪个版本都在。`code` 本来也没被用过(拼话术只读 `field`/`message`) |
-| `order { lineItems { node { properties } } }` | `LineItem.properties` 2024-10 起被 `customAttributes` 取代,老版本没新的、新版本没老的 | **两个都留着**:先用 `customAttributes`,报「字段不存在」就换 `properties` 再来一次(`client.ts` 的 `buildOrderQuery()` + `isUnknownFieldError()`)。**只有「字段不存在」才换写法**,别的错原样往上抛 |
-
-- **换写法不是万能药** —— 字段名在换,`presentmentCurrencyCode` 这类**新增的
-  字段**在旧版本上压根没有,只能靠报错定位。所以 Shopify 通道上任何一次
-  「验证不过」的报错,**先看报错里说的是哪个字段**,别急着改价
-- **本仓库的 API 版本**默认 `2026-07`(`providers/shopify/env.ts` 的
-  `DEFAULT_SHOPIFY_API_VERSION`),每个版本只保一年 —— 过期了 Shopify 直接
-  拒掉那个版本的**每一条**请求
-- **测试**:`src/test/payments/pure/shopify-draft-order.test.ts`(选择集不许
-  问 `code`)+ `src/test/payments/pure/shopify-client.test.ts`(两个字段名
-  的切换 + 「不是字段不存在的错就不重试」)
-
-
-##### Shopify 的**输入类型**字段:名字和类型都随版本变(2026-11-05 线上栽过两轮)
-
-上面说的是**选择集**(查询里问什么)。**输入**那一侧(我们发过去的 payload
-长什么样)同样随版本变,而且**报错方式不一样** —— 是**变量强制转换**失败:
-
-```
-Variable `$input` of type `DraftOrderInput!` was provided invalid value for
-`lineItems.0.price` (Field `price` is not defined by type `DraftOrderLineItemInput`),
-`shippingLine.price` (invalid money '{"amount" => "6.99", "currencyCode" => "USD"}'),
-`shippingLine.handle` (Field `handle` is not defined by type `ShippingLineInput`)
-```
-
-**三处都要改**:
-
-| 我们原来发的 | 实际应该是 |
-|---|---|
-| `lineItems[].price` | **`price` 这个字段压根不存在**。行价叫 `originalUnitPrice`(`Money` 标量,纯字符串 `"12.50"`)或 `priceOverride`(`MoneyInput` 对象) |
-| `shippingLine.price: {amount, currencyCode}` | **`Money` 标量** —— 纯字符串 `"6.99"`。传对象 → `invalid money` |
-| `shippingLine.handle: "shipping"` | **删掉**。`ShippingLineInput` 没这个字段;而且带了 handle 会被**店铺的运费费率**覆盖掉我们的价 |
-
-- **写法阶梯**(`draft-order.ts` 的 `DRAFT_ORDER_FLAVORS`)—— 行价有 3 种写法
-  × 运费有 3 种写法,共 9 种组合。碰到「**字段形状对不上**」(
-  `isFieldShapeError()`:字段名不认 / `invalid money`)就**换一种写法重发**,
-  按**报错指向的那一处**换(报错里提到 `shippingLine` 就换运费写法,提到
-  `lineItems` 就换行价写法)
-  - **重发是安全的** —— 变量强制转换失败**不会建出草稿单**,不会建出两张
-  - **只有「字段形状对不上」才换写法** —— 金额对不上、凭据不对那些原样往上抛
-    (换写法救不了那些,重试反而把真正的错误盖住)
-- **想看店铺当前版本的真实字段**:跑
-  `pnpm tsx scripts/dump-shopify-input-schema.ts`(GraphQL 内省,**只打印
-  schema 不打印任何凭据**)。需要本地 `.env.local` 里有 `SHOPIFY_*` 那几个变量
-- **`shopify.dev` 的文档页在很多网络环境下打不开** —— 别靠文档页,直接问店铺
-- **测试**:`src/test/payments/pure/shopify-draft-order.test.ts`(写法阶梯 +
-  「不是形状问题就不重试」)+ `src/test/payments/pure/shopify-client.test.ts`
-  (`isFieldShapeError()`)
-
-
-##### Shopify 的凭据(2026-01-01 起变了)
-
-**Shopify 从 2026-01-01 起不再给永久 token** —— 新 app 一律在 **Dev
-Dashboard** 里建,给的是 **Client ID + Client Secret**,没有可以复制的
-`shpat_…`。拿 Admin API token 改用 **client credentials grant**(OAuth 2.0
-RFC 6749 §4.4):
-
-```
-POST https://{shop}.myshopify.com/admin/oauth/access_token
-Content-Type: application/x-www-form-urlencoded
-
-grant_type=client_credentials&client_id=…&client_secret=…
-→ { "access_token": "shpat_…", "expires_in": 86400 }
-```
-
-- **token 只有 24 小时** → 代码里缓存住,到期前 5 分钟自己换;并发请求
-  单飞(同一时刻只发一次 grant)。见 `providers/shopify/env.ts` 的
-  `getShopifyAdminToken()`。
-- **Client Secret 就是 webhook 的 HMAC 密钥** —— `X-Shopify-Hmac-Sha256` =
-  `base64(HMAC-SHA256(原始 body, client secret))`。不用再单独配验签密钥
-  (旧 app 的 `SHOPIFY_API_SECRET` 仍然认,配了就优先用它)。
-- **app 要装在店铺上**,而且得跟店铺**同一个组织** —— 否则 grant 回
-  `app_not_installed`。scope 要含 `read_orders` + `write_orders`。
-- **4xx vs 5xx 分两类错**:4xx(凭据不对 / app 没装)=「没配好」,重试没用;
-  5xx / 网络不通 =「这次挂了」,重试就能好。见
-  `src/features/storefront/lib/payment-issue.ts`。
-- **密钥纪律**:Client Secret **只进环境变量**,绝不进仓库文件、绝不进聊天。
+**凭据模型(2026-01-01 起变了)**:Shopify 不再给永久 token,新 app 给的是
+Client ID + Client Secret,拿 Admin API token 改用 **client credentials
+grant**(`POST /admin/oauth/access_token`,`grant_type=client_credentials`)——
+token **只有 24 小时**,代码里缓存住、到期前 5 分钟自己换、并发单飞
+(`providers/shopify/env.ts` 的 `getShopifyAdminToken()`)。**Client Secret 就是
+webhook 的 HMAC 密钥**。app 要装在店铺上、且跟店铺同一个组织,scope 要含
+`read_orders` + `write_orders`。**密钥纪律**:Client Secret **只进环境变量**,
+绝不进仓库文件、绝不进聊天。
 
 #### 迁移脚本
 
@@ -864,11 +783,11 @@ grant_type=client_credentials&client_id=…&client_secret=…
 |---|---|
 | `src/test/payments/pure/wechat-signature.test.ts` | 签名 / 解密 / 验签 |
 | `src/test/payments/pure/alipay-signature.test.ts` | RSA2 签名 / 验签 |
-| `src/test/payments/pure/shopify-signature.test.ts` | HMAC 验签 / 草稿单 |
+| `src/test/payments/pure/shopify-signature.test.ts` | HMAC 验签 / 草稿单(**已下线的通道,留着给老单**用) |
 | `src/test/payments/pure/shopify-env.test.ts` | Shopify 凭据(Client ID / Secret、grant 换 token、缓存 / 单飞、4xx vs 5xx) |
 | `src/test/payments/pure/shopify-currency.test.ts` | 展示币种判定(店铺结算币种 / Markets 两条路,判定失败时报错文案) |
 | `src/test/payments/pure/shopify-draft-order.test.ts` | 建单那一整条链路(币种对不上就拒、对账比 presentmentMoney) |
-| `src/test/payments/pure/payment-channels.test.ts` | 开放名单 = 清单(三种都摆出来、旧路 stripe 不在) |
+| `src/test/payments/pure/payment-channels.test.ts` | 开放名单 = 清单(两个都摆出来、Shopify / 旧路 stripe 都不在) |
 | `src/test/payments/pure/storefront-transition.test.ts` | 状态转移(退款 / 迟到通知) |
 | `src/test/payments/pure/linked-print-order.test.ts` | 工单跟着商城订单变 |
 | `src/test/storefront/pure/checkout-payment-issue.test.ts` | 「没配好」vs「这次挂了」 |
@@ -876,39 +795,25 @@ grant_type=client_credentials&client_id=…&client_secret=…
 
 #### 上线清单(人工步骤,不在代码里)
 
-按顺序做,少一步就有一条路收不到钱。**三个通道都在「开放名单」里**(界面上
+按顺序做,少一步就有一条路收不到钱。**两个通道都在「开放名单」里**(界面上
 都摆出来),但**能不能付各看各的配置** —— 没配好的那个是灰的、选不了。所以
 下面第 2 步做完哪个通道,第 3、4 步就跑哪个通道;没配的那个不用管。
 
 1. **跑迁移** —— `pnpm tsx scripts/apply-payment-channel-schema.ts`
    (给 `storefront_order` / `print_order` 加 5 列 + 2 个索引;幂等)
+   + `pnpm tsx scripts/apply-currency-schema.ts`(把 DB 里的币种 / 默认值 /
+   商品目录的价对齐到**代码里定义的**人民币;幂等)
 2. **配环境变量** —— 各通道自己的变量(见上面那张表)。**密钥只进环境变量**,
    不进仓库文件、不进聊天。Vercel 上加完变量**要确认新部署已经生效**再让
    用户下单(环境变量是按部署快照的,加变量那一刻的构建可能还没带上它)
-
-   > **Shopify 的凭据**:`SHOPIFY_STORE_DOMAIN` + `SHOPIFY_CLIENT_ID` +
-   > `SHOPIFY_CLIENT_SECRET`(**Client Secret 就是 webhook 的验签密钥**,不用
-   > 再单独配)。旧 app 那种永久 token 走 `SHOPIFY_ADMIN_ACCESS_TOKEN` +
-   > `SHOPIFY_API_SECRET`,配了就优先用它们。app 记得**装在店铺上**、
-   > scope 要含 `read_orders` / `write_orders`。
-   >
-   > **Shopify 的币种不用配环境变量** —— 本仓库的价是美元,原样送过去,
-   > 换算交给 Shopify(见上面「Shopify 的币种」)。**前提是店铺能收美元**:
-   > 要么把店铺的结算币种改成美元,要么在 Settings → Markets 里把美元
-   > 加成展示币种。**代码不用改**,改的是 Shopify 后台。
-
 3. **登记回调地址** —— 各通道的通知地址要在对应平台上填:
    - 微信:商户平台 → 产品中心 → 开发配置 → 支付通知地址 →
      `https://<站点>/api/webhooks/wechat`
    - 支付宝:开放平台 → 应用 → 开发设置 → 异步通知地址 →
      `https://<站点>/api/webhooks/alipay`
-   - Shopify:后台 → Settings → Notifications → Webhooks → 三个 topic
-     (`orders/paid` / `orders/cancelled` / `refunds/create`),地址都是
-     `https://<站点>/api/webhooks/shopify`
-4. **各通道都要用小额真单试一遍** —— 微信扫一次码、支付宝跳一次、
-   Shopify 刷一次卡,确认「钱到了 → 订单变 paid → 挂在下面的工单也跟着变
-   paid → **购物车里买掉的那几行没了**」。各通道 webhook 的验签路径不一样,
-   只有真单能验出来
+4. **各通道都要用小额真单试一遍** —— 微信扫一次码、支付宝跳一次,确认
+   「钱到了 → 订单变 paid → 挂在下面的工单也跟着变 paid → **购物车里买掉的
+   那几行没了**」。两个通道 webhook 的验签路径不一样,只有真单能验出来
 5. **小程序端的微信支付暂时别开** —— 微信 Native 是扫码,在小程序里扫不了
    自己屏幕上的码。小程序要收微信支付得走 JSAPI(`wx.requestPayment`),
    本仓库**还没实现**
@@ -976,7 +881,7 @@ Sellbase 的 `createCheckout()` 把 `payment_method_types: ["card"]` **写死**
   `classifyPaymentIssue()` —— **纯函数**(不碰 DB、不碰网络),才能进 `unit`
   project 跑测试。放在 `checkout.ts` 里的话 import 它就会把 `@/db` 拖进来。
 - 码**现在是通道无关的**:早先只有 Sellbase 一条路时叫
-  `SELLBASE_NOT_CONFIGURED` / `SELLBASE_FAILED`,现在三个新通道也走同一套
+  `SELLBASE_NOT_CONFIGURED` / `SELLBASE_FAILED`,现在各条通道都走同一套
   分类,统一成 `PAYMENT_NOT_CONFIGURED` / `PAYMENT_FAILED`。旧码**不再产出**。
 - 结算接口返回体多一个 `paymentIssue` 字段(`null` = 没失败)。前端按它分两种
   话术。

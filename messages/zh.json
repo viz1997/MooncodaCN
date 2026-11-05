@@ -1124,8 +1124,8 @@
       "version": "Mooncoda 克重计算器"
     },
     "unit": {
-      "yuan": "美元",
-      "perGram": "美元/克"
+      "yuan": "元",
+      "perGram": "元/克"
     },
     "upload": {
       "reading": "正在读取文件…",
@@ -1349,7 +1349,7 @@
       "varnishOn": "开启",
       "varnishOff": "关闭",
       "supportOn": "开启",
-      "yuan": "美元",
+      "yuan": "元",
       "selfSupport": "本体支撑 {ratio}% · {weight} g",
       "laidFlat": "已躺平",
       "exportRotated": "导出已摆盘 OBJ",
@@ -1975,7 +1975,7 @@
       },
       "stripe": {
         "label": "银行卡(旧收款通道)",
-        "description": "过渡期保留的收银台,新的三个通道就绪后自动下线"
+        "description": "过渡期保留的收银台,新的两个通道就绪后自动下线"
       }
     },
     "qrTitle": "微信扫码支付",

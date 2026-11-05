@@ -79,7 +79,7 @@ function buildOrderUrl(locale: PrintOrderLocale, orderNo: string): string {
   return `${siteConfig.url}/${locale}/dashboard/print-orders/${orderNo}`;
 }
 
-/** 按订单语言格式化金额(仓库统一用美元) */
+/** 按订单语言格式化金额(仓库统一用 CNY) */
 function formatAmount(cents: number, locale: PrintOrderLocale): string {
   return formatCents(cents, locale === "en" ? "en-US" : "zh-CN");
 }

@@ -16,7 +16,7 @@
  *  - useCartStore → useStorefrontModal
  *  - useFormatPrice → formatCents
  *  - next/link Link → @/i18n/routing Link
- *  - 文案中文化($ / 天 / 工艺文案)
+ *  - 文案中文化(¥ / 天 / 工艺文案)
  *  - 用 shadcn Dialog 而非 raw framer-motion(更好的 a11y)
  */
 
@@ -46,7 +46,7 @@ import { PRICING_CONSTANTS } from "../lib/pricing-constants";
 import { formatSizeCompact } from "../lib/size-format";
 
 const perks = [
-  { icon: Truck, label: "$19.99 以上免运费" },
+  { icon: Truck, label: "¥99 以上免运费" },
   { icon: RotateCcw, label: "工艺问题免费重做" },
   { icon: ShieldCheck, label: "工作室手工精修" },
 ];
@@ -367,7 +367,7 @@ export function ProductQuickView() {
                     value="shipping"
                     className="text-sm leading-relaxed text-muted-foreground mt-4 text-pretty"
                   >
-                    工作室手工精修,{product.leadTimeDays} 天内发货。$19.99
+                    工作室手工精修,{product.leadTimeDays} 天内发货。¥99
                     以上免运费。 定制商品不支持退货,但工艺问题免费重做。
                   </TabsContent>
                 </Tabs>

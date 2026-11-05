@@ -1,20 +1,31 @@
 /**
  * 支付通道注册表
  *
- * ## 三个通道,三个角色
+ * ## 现在开放的两个通道
  *
  * | 通道 | 谁收钱 | 钱去哪 |
  * |---|---|---|
  * | `wechat` | 微信支付 Native(我们自己的商户号) | 直接进我们的商户号 |
  * | `alipay` | 支付宝电脑网站支付(我们自己的应用) | 直接进我们的账户 |
- * | `shopify` | Shopify 收银台 | 进 Shopify 店铺的结算账户 |
  *
- * **微信 / 支付宝为什么自己接**:钱直接进我们自己的账户,没有中间层抽成,
- * 而且定价完全由我们说了算(「本仓库算价」这条架构的前提)。
+ * **为什么自己接**:钱直接进我们自己的账户,没有中间层抽成,而且定价完全
+ * 由我们说了算(「本仓库算价」这条架构的前提)。两个通道都是**境内商户**,
+ * 收人民币是它们的原生场景 —— 不需要跨境资质,也没有汇率。
  *
- * **Shopify 为什么只做卡**:Shopify 的收银台认不了我们算出来的价(普通购物车
- * 没有价格字段、改价要 Plus 套餐),只有草稿订单能 —— 细节见
- * `@/features/payments/providers/shopify/env.ts`。
+ * ## Shopify 已经下线(2026-11-05)
+ *
+ * 工作室决定只用微信 + 支付宝。Shopify 的 provider **代码还留在树里**
+ * (`src/features/payments/providers/shopify/`),但:
+ *
+ * - 它**不在** `ENABLED_PAYMENT_CHANNELS` 里 → 界面上不摆出来、清单接口
+ *   不返回、结算不接新单
+ * - 它**仍然注册在下面的 `PROVIDERS` 里** → 「重新获取付款入口」那条路
+ *   还能拿到它,老订单点进去会得到一句明确的报错(「本订单的币种是 USD,
+ *   但这条通道的价一律是 CNY」—— 那条 Shopify 单是美元时代的单),而不是
+ *   一个看不懂的 404
+ *
+ * 跟旧路 Sellbase / Stripe 一个待遇 —— 等确认没有待付的老单了,整个目录
+ * 一起拆掉。
  *
  * ## 过渡期:旧的 Sellbase / Stripe 那条路还在
  *
@@ -23,14 +34,14 @@
  * 结算接口里走的是一条显式的旧分支,见
  * `src/features/storefront/lib/checkout.ts`。
  *
- * 跑通新的三个通道之后,那条分支连同整个 `src/features/sellbase/` 一起拆掉,
+ * 跑通新的两个通道之后,那条分支连同整个 `src/features/sellbase/` 一起拆掉,
  * 届时 `stripe` 从 `PaymentChannel` 枚举里删掉。
  *
  * ## 「配好了才让选」
  *
  * `isConfigured()` 返回 false 的通道**界面上看得到,但选不了** —— 显示成
  * 灰的、标着「暂未开放」。让用户点一个注定失败的按钮比不给这个选项更糟,
- * 但把整个选项藏起来也不行:工作室要让人看见「我们支持这三种付款方式」。
+ * 但把整个选项藏起来也不行:工作室要让人看见「我们支持这两种付款方式」。
  *
  * ## 「配好了」和「开放了」是两件事
  *
@@ -56,6 +67,9 @@ import type {
 const PROVIDERS: Partial<Record<OnlinePaymentChannel, PaymentProvider>> = {
   wechat: wechatPayProvider,
   alipay: alipayPayProvider,
+  // Shopify 已下线(2026-11-05)—— 界面上不摆出来了,但**仍然注册**:
+  // 「重新获取付款入口」要能对老订单说清楚「这条路走不通、为什么」,
+  // 而不是返回一个看不懂的「通道不存在」。
   shopify: shopifyPaymentProvider,
 };
 
@@ -82,7 +96,7 @@ export function getPaymentProvider(
   return PROVIDERS[channel] ?? null;
 }
 
-/** 三个通道的静态信息在 `channels.ts` —— 这里只补上「配好了没」 */
+/** 通道的静态信息在 `channels.ts` —— 这里只补上「配好了没」 */
 function isChannelConfigured(channel: OnlinePaymentChannel): boolean {
   return PROVIDERS[channel]?.isConfigured() ?? false;
 }

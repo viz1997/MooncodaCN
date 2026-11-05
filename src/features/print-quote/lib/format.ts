@@ -16,7 +16,7 @@
 
 import { formatCents as formatCentsShared } from "@/lib/money";
 
-/** 分 → 「$123.45」 */
+/** 分 → 「¥123.45」 */
 export function formatCents(cents: number, locale = "zh-CN"): string {
   return formatCentsShared(cents, { locale });
 }

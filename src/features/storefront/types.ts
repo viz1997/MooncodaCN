@@ -15,6 +15,7 @@
  *  - architecture-sellbase-integration.md 集成架构(数据归属边界见 §二)
  */
 
+import type { PRICE_CURRENCY } from "@/config/currency";
 import type { DeliveryTierId } from "@/features/print-quote/lib/delivery-tier";
 
 /* -------------------------------------------------------------------------- */
@@ -247,7 +248,7 @@ export interface CartLineItemMetadata {
   sizeCm: number;
   aiStyleId: string;
   engravingText: string;
-  /** 加急(2026-11-02 起工作台有开关:+$2.99,发货天数减半) */
+  /** 加急(2026-11-02 起工作台有开关:+¥15,发货天数减半) */
   rushOrder: boolean;
   /** 选中的配件变体 id(空数组 = 不加配件) */
   accessoryVariantIds: string[];
@@ -290,8 +291,8 @@ export interface CartLineItem {
 
 export interface Cart {
   id: string;
-  /** 单币种 USD(简化,见 plan) */
-  currencyCode: "USD";
+  /** 单币种 CNY(简化,见 plan) */
+  currencyCode: typeof PRICE_CURRENCY;
   /** 区域代码 */
   regionId: string;
   items: CartLineItem[];

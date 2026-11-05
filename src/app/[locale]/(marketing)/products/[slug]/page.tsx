@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { siteConfig } from "@/config";
+import { PRICE_CURRENCY } from "@/config/currency";
 import { ProductCard } from "@/features/products/components/product-card";
 import {
   getAllProductSlugs,
@@ -94,7 +95,7 @@ export default async function ProductDetailPage({
         url={`${siteConfig.url}/${locale}/products/${slug}`}
         image={`${siteConfig.url}${product.cover}`}
         price={product.basePriceCents / 100}
-        currency="USD"
+        currency={PRICE_CURRENCY}
       />
 
       <main className="container py-12 md:py-16">

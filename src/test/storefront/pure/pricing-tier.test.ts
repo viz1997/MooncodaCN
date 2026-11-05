@@ -47,7 +47,7 @@ import {
 } from "@/features/storefront/lib/pricing-constants";
 import type { CustomizationSpec } from "@/features/storefront/types";
 
-/** 一份 R(钥匙扣)的合法规格 —— 基准价 $2.99 + 6cm 尺寸 +$1 */
+/** 一份 R(钥匙扣)的合法规格 —— 基准价 ¥19 + 6cm 尺寸 +¥5 */
 const BASE_SPEC: CustomizationSpec = {
   productId: "prod_keychain-pet-portrait",
   productHandle: "keychain-pet-portrait",
@@ -239,7 +239,7 @@ describe("calculatePricing 的阶梯折扣", () => {
 });
 
 describe("运费", () => {
-  it("到门槛免运费,不到收 $6.99", () => {
+  it("到门槛免运费,不到收 ¥8", () => {
     expect(calculateShippingCents(0)).toBe(
       PRICING_CONSTANTS.DEFAULT_SHIPPING_CENTS
     );
@@ -254,29 +254,27 @@ describe("运费", () => {
   });
 
   it("门槛按**折后**金额算 —— 结算页算的就是折后小计", () => {
-    // 门槛 $19.99 = 1999 分
-    // 折前 2200 → 折后 1980 → 不到门槛,运费照收
-    expect(calculateShippingCents(1980)).toBe(
+    // 折前 10900 → 折后 9810 → 不到门槛(9900),运费照收
+    expect(calculateShippingCents(9810)).toBe(
       PRICING_CONSTANTS.DEFAULT_SHIPPING_CENTS
     );
-    // 单价 220 分 × 10 件 → 折后 198 分/件 → 合计 1980
-    const under = computeQuantityDiscount(220, 10);
-    expect(under.totalPriceCents).toBe(1980);
+    // 单价 1090 × 10 件 → 折后 981 分/件 → 合计 9810
+    const under = computeQuantityDiscount(1090, 10);
+    expect(under.totalPriceCents).toBe(9810);
     expect(calculateShippingCents(under.totalPriceCents)).toBe(
       PRICING_CONSTANTS.DEFAULT_SHIPPING_CENTS
     );
 
-    // 折前 2300 → 折后 2070 → 过门槛,免运费
-    expect(calculateShippingCents(2070)).toBe(0);
-    const over = computeQuantityDiscount(230, 10);
-    expect(over.totalPriceCents).toBe(2070);
+    // 折前 11000 → 折后 9900 → 过门槛,免运费
+    expect(calculateShippingCents(9900)).toBe(0);
+    const over = computeQuantityDiscount(1100, 10);
+    expect(over.totalPriceCents).toBe(9900);
     expect(calculateShippingCents(over.totalPriceCents)).toBe(0);
   });
 
   it("还差多少才免运费 —— 负数归零", () => {
-    expect(calculateRemainingForFreeShipping(0)).toBe(1999);
-    expect(calculateRemainingForFreeShipping(1900)).toBe(99);
-    expect(calculateRemainingForFreeShipping(1999)).toBe(0);
+    expect(calculateRemainingForFreeShipping(0)).toBe(9900);
+    expect(calculateRemainingForFreeShipping(9800)).toBe(100);
     expect(calculateRemainingForFreeShipping(12000)).toBe(0);
   });
 });

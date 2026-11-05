@@ -15,7 +15,7 @@
  *  - /api/ai/transform → /api/store/ai/transform(委托 lingting,输出 R2 URL)
  *  - /api/pricing/calculate → /api/store/pricing/calculate
  *  - addItem → useCart.addLineItem.mutate
- *  - 中文化文案 + 美元
+ *  - 中文化文案 + CNY
  *  - 用 shadcn Dialog 而非 raw framer-motion
  *
  * 服务端定价权威:cart 存 server 算的 unitPriceCents,client 不自己算。
@@ -26,7 +26,7 @@
  *  - 默认选中「标准款」(product.defaultSizeCm),不再是列表第一项
  *  - 材质只有一种时内联展示,不再占半格空网格
  *  - 新增配件选择器(按 product.accessoryGroups,组内单选)
- *  - 新增加急开关(+$2.99,发货天数减半)
+ *  - 新增加急开关(+¥15,发货天数减半)
  *  - 刻字输入框按 product.canEngrave 开合(手办 / 冰箱贴不刻字)
  *  - 数量 / 单价 / 合计 / CTA 收进底部固定条,规格区独立滚动
  *

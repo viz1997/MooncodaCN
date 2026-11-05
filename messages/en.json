@@ -1127,8 +1127,8 @@
       "version": "Mooncoda Weight Calculator"
     },
     "unit": {
-      "yuan": "USD",
-      "perGram": "USD/g"
+      "yuan": "CNY",
+      "perGram": "CNY/g"
     },
     "upload": {
       "reading": "Reading file…",
@@ -1352,7 +1352,7 @@
       "varnishOn": "on",
       "varnishOff": "off",
       "supportOn": "on",
-      "yuan": "USD",
+      "yuan": "CNY",
       "selfSupport": "Self-support {ratio}% · {weight} g",
       "laidFlat": "Laid flat",
       "exportRotated": "Export laid-out OBJ",
@@ -1978,7 +1978,7 @@
       },
       "stripe": {
         "label": "Card (legacy checkout)",
-        "description": "The old checkout, kept while the three new channels roll out"
+        "description": "The old checkout, kept while the two new channels roll out"
       }
     },
     "qrTitle": "Scan to pay with WeChat",

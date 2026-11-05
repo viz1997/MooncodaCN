@@ -3,16 +3,32 @@
  *
  * ## 本仓库的价是什么币种
  *
- * 一律**美元**(USD)。2026-11-05 从人民币改过来 —— 工作室主攻美国市场,
+ * 一律**人民币**(CNY)。2026-11-05 短暂改成过美元,当天又改回来了 ——
+ * 工作室的收款通道(微信支付 / 支付宝)是**境内商户**,收人民币是它们的原生
+ * 场景;走美元就得先开跨境资质,还要多一道换算,平白多出汇率风险。
+ *
  * 定价、购物车、订单、收银台三边必须是同一个币种。
  *
  * ## 为什么要有这么一个文件
  *
  * 改币种这件事散落在十几个文件里(商品目录、购物车、结算、支付通道、页面
- * 文案、数据库默认值)。**少改一处就会错位** —— 界面显示美元、收银台收
- * 人民币这种错位**不会报错**,只会在对账的时候炸(而且是对上真实订单炸)。
+ * 文案、数据库默认值)。**少改一处就会错位** —— 界面显示人民币、收银台收
+ * 美元这种错位**不会报错**,只会在对账的时候炸(而且是对上真实订单炸)。
  *
  * 所以币种**只在这一处定义**,别的文件一律 import 这里。
+ *
+ * ## 改币种的完整清单(踩过一次,别只改一处)
+ *
+ * 1. 这里的 `PRICE_CURRENCY` / `PRICE_REGION_ID`
+ * 2. 商品价 / 配件加价 / 尺寸阶梯 —— `gpt-image/lib/product-catalog.ts`、
+ *    `product-accessory-variants.ts`、`image-gen/lib/product-variant-sku.ts`
+ * 3. 运费 / 刻字 / 加急 —— `storefront/lib/pricing-constants.ts`
+ * 4. 克重报价 —— `pricing/lib/pricing-engine.ts`
+ * 5. 数据库列默认值 + 商品目录重新定价 —— `scripts/apply-currency-schema.ts`
+ *    (那个脚本**从本文件读币种**,不写死 —— 漏改它不会错位)
+ *
+ * 漏掉第 5 步 = 界面显示人民币、数据库里的价还是上一套 —— **不会报错**,
+ * 只在结账的时候炸。
  *
  * ## 这个文件里**不能**有任何 import
  *
@@ -27,11 +43,11 @@
  * —— 全是这个。**不是**「AI 成本」那一套(那个是模型供应商的计价币种,
  * 跟顾客付的钱无关,见 `features/image-gen/lib/generation-service.ts`)。
  */
-export const PRICE_CURRENCY = "USD";
+export const PRICE_CURRENCY = "CNY";
 
 /**
  * 结算区域 id
  *
  * 跟币种一起改 —— 中国区是 `china` + CNY,美国区是 `us` + USD。
  */
-export const PRICE_REGION_ID = "us";
+export const PRICE_REGION_ID = "china";

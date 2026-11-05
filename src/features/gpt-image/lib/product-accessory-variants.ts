@@ -115,7 +115,7 @@ export const PRODUCT_ACCESSORY_VARIANTS: readonly ProductAccessoryVariant[] = [
     name: "正红",
     nameEn: "Red",
     swatch: "#C0392B",
-    priceDeltaCents: 50, // +$0.50/件
+    priceDeltaCents: 200, // +¥2/件
     sortOrder: 10,
     appliesToSizesCm: [],
   },
@@ -126,7 +126,7 @@ export const PRODUCT_ACCESSORY_VARIANTS: readonly ProductAccessoryVariant[] = [
     name: "墨黑",
     nameEn: "Black",
     swatch: "#1A1A1A",
-    priceDeltaCents: 50,
+    priceDeltaCents: 200,
     sortOrder: 20,
     appliesToSizesCm: [],
   },
@@ -137,7 +137,7 @@ export const PRODUCT_ACCESSORY_VARIANTS: readonly ProductAccessoryVariant[] = [
     name: "宝蓝",
     nameEn: "Royal Blue",
     swatch: "#1F4E79",
-    priceDeltaCents: 50,
+    priceDeltaCents: 200,
     sortOrder: 30,
     appliesToSizesCm: [],
   },
@@ -148,7 +148,7 @@ export const PRODUCT_ACCESSORY_VARIANTS: readonly ProductAccessoryVariant[] = [
     name: "森林绿",
     nameEn: "Forest Green",
     swatch: "#2E5E3A",
-    priceDeltaCents: 50,
+    priceDeltaCents: 200,
     sortOrder: 40,
     appliesToSizesCm: [],
   },
@@ -159,7 +159,7 @@ export const PRODUCT_ACCESSORY_VARIANTS: readonly ProductAccessoryVariant[] = [
     name: "明黄",
     nameEn: "Yellow",
     swatch: "#E8C547",
-    priceDeltaCents: 50,
+    priceDeltaCents: 200,
     sortOrder: 50,
     appliesToSizesCm: [],
   },
@@ -170,7 +170,7 @@ export const PRODUCT_ACCESSORY_VARIANTS: readonly ProductAccessoryVariant[] = [
     name: "丁香紫",
     nameEn: "Lilac",
     swatch: "#8B5A9F",
-    priceDeltaCents: 50,
+    priceDeltaCents: 200,
     sortOrder: 60,
     appliesToSizesCm: [],
   },
@@ -181,7 +181,7 @@ export const PRODUCT_ACCESSORY_VARIANTS: readonly ProductAccessoryVariant[] = [
     name: "米白",
     nameEn: "Off-White",
     swatch: "#F5F0E8",
-    priceDeltaCents: 50,
+    priceDeltaCents: 200,
     sortOrder: 70,
     appliesToSizesCm: [],
   },
@@ -192,7 +192,7 @@ export const PRODUCT_ACCESSORY_VARIANTS: readonly ProductAccessoryVariant[] = [
     name: "焦糖棕",
     nameEn: "Caramel",
     swatch: "#A0734A",
-    priceDeltaCents: 50,
+    priceDeltaCents: 200,
     sortOrder: 80,
     appliesToSizesCm: [],
   },
@@ -205,7 +205,7 @@ export const PRODUCT_ACCESSORY_VARIANTS: readonly ProductAccessoryVariant[] = [
     name: "磁性底座",
     nameEn: "Magnetic",
     swatch: null,
-    priceDeltaCents: 100, // +$1
+    priceDeltaCents: 500, // +¥5
     sortOrder: 10,
     appliesToSizesCm: [],
   },
@@ -216,7 +216,7 @@ export const PRODUCT_ACCESSORY_VARIANTS: readonly ProductAccessoryVariant[] = [
     name: "木质底座",
     nameEn: "Wooden",
     swatch: "#8B6F47",
-    priceDeltaCents: 150, // +$1.50
+    priceDeltaCents: 800, // +¥8
     sortOrder: 20,
     appliesToSizesCm: [],
   },
@@ -240,7 +240,7 @@ export const PRODUCT_ACCESSORY_VARIANTS: readonly ProductAccessoryVariant[] = [
     name: "4cm 玻璃罩",
     nameEn: "4cm Glass Cover",
     swatch: null,
-    priceDeltaCents: 250, // +$2.50
+    priceDeltaCents: 1500, // +¥15
     sortOrder: 10,
     appliesToSizesCm: [4],
   },
@@ -251,7 +251,7 @@ export const PRODUCT_ACCESSORY_VARIANTS: readonly ProductAccessoryVariant[] = [
     name: "6cm 玻璃罩",
     nameEn: "6cm Glass Cover",
     swatch: null,
-    priceDeltaCents: 350, // +$3.50
+    priceDeltaCents: 2200, // +¥22
     sortOrder: 20,
     appliesToSizesCm: [6],
   },
@@ -262,7 +262,7 @@ export const PRODUCT_ACCESSORY_VARIANTS: readonly ProductAccessoryVariant[] = [
     name: "8cm 玻璃罩",
     nameEn: "8cm Glass Cover",
     swatch: null,
-    priceDeltaCents: 450, // +$4.50
+    priceDeltaCents: 3000, // +¥30
     sortOrder: 30,
     appliesToSizesCm: [8],
   },
