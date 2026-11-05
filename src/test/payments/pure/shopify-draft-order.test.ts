@@ -129,6 +129,8 @@ interface DraftResponse {
 interface StubShopify {
   /** 建草稿单时发过去的 input */
   sentInput: Record<string, unknown> | null;
+  /** 建草稿单时发过去的 query 原文 */
+  sentQuery: string | null;
 }
 
 function stubShopify(params: {
@@ -143,7 +145,7 @@ function stubShopify(params: {
       headers: { "Content-Type": "application/json" },
     });
 
-  const stub: StubShopify = { sentInput: null };
+  const stub: StubShopify = { sentInput: null, sentQuery: null };
 
   const fetchMock = vi
     .fn()
@@ -164,6 +166,7 @@ function stubShopify(params: {
         });
       }
       stub.sentInput = body.variables?.input ?? null;
+      stub.sentQuery = body.query;
       return json({
         data: {
           draftOrderCreate: {
@@ -198,6 +201,45 @@ function stubShopify(params: {
 
 /** 我们算出来的总额 —— $31.00 */
 const EXPECTED_USD = "31.00";
+
+describe("建单用的 GraphQL —— 选择集必须版本无关", () => {
+  /**
+   * 2026-11-05 线上栽过的坑:`Field 'code' doesn't exist on type 'UserError'`
+   *
+   * `draftOrderCreate` 的 `userErrors` 在不同 API 版本上类型不一样(基类
+   * `UserError` / `DraftOrderUserError`)。GraphQL 的验证是**全有全无**的 ——
+   * 选一个当前版本不认的字段,整条 mutation 验证不过,**草稿单根本没建出来**,
+   * 报的还是这个验证错误,不是 Shopify 的业务报错。
+   *
+   * `field` / `message` 是 `UserError` **接口**上的字段 —— 哪个版本都在。
+   */
+  it("userErrors 只选 field / message(选 code 会炸掉整条查询)", async () => {
+    const { draftOrder } = await loadShopify();
+    const selection =
+      draftOrder.DRAFT_ORDER_CREATE.match(/userErrors\s*\{([^}]*)\}/)?.[1] ??
+      "";
+
+    expect(selection).toContain("field");
+    expect(selection).toContain("message");
+    expect(selection).not.toContain("code");
+  });
+
+  it("发出去的就是这条 query —— 别让常量跟实际请求脱节", async () => {
+    const stub = stubShopify({
+      shopCurrency: "USD",
+      draft: { amount: EXPECTED_USD, currencyCode: "USD" },
+    });
+
+    const { draftOrder } = await loadShopify();
+    await draftOrder.createShopifyDraftOrder(REQUEST);
+
+    expect(stub.sentQuery).toBe(draftOrder.DRAFT_ORDER_CREATE);
+    // 发出去的那份也不能多问 `code`
+    const sentSelection =
+      stub.sentQuery?.match(/userErrors\s*\{([^}]*)\}/)?.[1] ?? "";
+    expect(sentSelection).not.toContain("code");
+  });
+});
 
 describe("buildDraftOrderInput —— 价原样搬过去", () => {
   it("行价就是我们算出来的数,一个字节都不改", async () => {

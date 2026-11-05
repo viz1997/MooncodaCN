@@ -753,6 +753,36 @@ providers/
 - **本仓库的订单记录仍然是美元分** —— 那才是「用户买了什么、值多少」的事实
 
 
+##### Shopify 的 API 版本:字段要挑「当前版本有的」(2026-11-05 线上踩过)
+
+**GraphQL 的验证是全有全无的** —— 选了一个当前 API 版本没有的字段,**整条
+查询/mutation 直接不执行**,报的是:
+
+```
+Field 'code' doesn't exist on type 'UserError'
+```
+
+注意这个错**不是** Shopify 的业务报错(用户错误),是**查询本身没通过验证**。
+所以这类失败**一条数据都没建出来**,重试多少次都一样。
+
+线上真踩过两处(都在 Shopify 这条通道上):
+
+| 字段 | 情况 | 处理 |
+|---|---|---|
+| `draftOrderCreate { userErrors { code } }` | `userErrors` 在不同版本上类型不一样(基类 `UserError` / `DraftOrderUserError`)。`code` **只在后者上有**,旧版本整条 mutation 验证不过 | **只选 `field` + `message`** —— 这两个是 `UserError` **接口**上的字段,哪个版本都在。`code` 本来也没被用过(拼话术只读 `field`/`message`) |
+| `order { lineItems { node { properties } } }` | `LineItem.properties` 2024-10 起被 `customAttributes` 取代,老版本没新的、新版本没老的 | **两个都留着**:先用 `customAttributes`,报「字段不存在」就换 `properties` 再来一次(`client.ts` 的 `buildOrderQuery()` + `isUnknownFieldError()`)。**只有「字段不存在」才换写法**,别的错原样往上抛 |
+
+- **换写法不是万能药** —— 字段名在换,`presentmentCurrencyCode` 这类**新增的
+  字段**在旧版本上压根没有,只能靠报错定位。所以 Shopify 通道上任何一次
+  「验证不过」的报错,**先看报错里说的是哪个字段**,别急着改价
+- **本仓库的 API 版本**默认 `2026-07`(`providers/shopify/env.ts` 的
+  `DEFAULT_SHOPIFY_API_VERSION`),每个版本只保一年 —— 过期了 Shopify 直接
+  拒掉那个版本的**每一条**请求
+- **测试**:`src/test/payments/pure/shopify-draft-order.test.ts`(选择集不许
+  问 `code`)+ `src/test/payments/pure/shopify-client.test.ts`(两个字段名
+  的切换 + 「不是字段不存在的错就不重试」)
+
+
 ##### Shopify 的凭据(2026-01-01 起变了)
 
 **Shopify 从 2026-01-01 起不再给永久 token** —— 新 app 一律在 **Dev

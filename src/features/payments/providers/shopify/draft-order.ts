@@ -240,7 +240,26 @@ export interface ShopifyDraftOrder {
   totalCents: number;
 }
 
-const DRAFT_ORDER_CREATE = `
+/**
+ * 建草稿单的 GraphQL
+ *
+ * ## `userErrors` 只选 `field` 和 `message`(**别加 `code`**)
+ *
+ * 2026-11-05 线上踩过:`Field 'code' doesn't exist on type 'UserError'`。
+ *
+ * `draftOrderCreate` 的 `userErrors` 在**不同的 API 版本上类型不一样**:
+ * 旧版本是基类 `UserError`,新版本是 `DraftOrderUserError`(多了 `code`
+ * 之类的字段)。**选 `code` 在旧版本上整条查询都验证不过** —— GraphQL 的
+ * 验证是全有全无的,一个字段不认,整条 mutation 直接不执行(草稿单根本没
+ * 建出来,报的是这个错,不是 Shopify 的业务报错)。
+ *
+ * `field` 和 `message` 是 `UserError` **接口上的字段** —— 哪个版本都在,
+ * 具体类型是 `UserError` 还是 `DraftOrderUserError` 都能选。
+ *
+ * 代价:拿不到 `code` 那个机器可读的错误码。但反正是**没被用过的** ——
+ * 下面把 `userErrors` 拼成话术时只读 `field` 和 `message`。
+ */
+export const DRAFT_ORDER_CREATE = `
   mutation MooncodaDraftOrderCreate($input: DraftOrderInput!) {
     draftOrderCreate(input: $input) {
       draftOrder {
@@ -261,7 +280,6 @@ const DRAFT_ORDER_CREATE = `
       userErrors {
         field
         message
-        code
       }
     }
   }

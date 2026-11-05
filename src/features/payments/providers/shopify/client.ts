@@ -155,7 +155,27 @@ export interface ShopifyOrderSnapshot {
   lineItemProperties: { name: string; value: string }[];
 }
 
-const ORDER_QUERY = `
+/**
+ * 行项目属性的字段名 —— **看 API 版本**
+ *
+ * `LineItem.customAttributes` 是新字段(2024-10 起),`LineItem.properties` 是
+ * 老字段(2024-10 起被标记弃用,后来被删)。
+ *
+ * **哪个在不在,取决于实际用的那个 API 版本** —— 选了一个当前版本没有的字段,
+ * 整条查询验证不过(跟 `draftOrderCreate` 上 `code` 那个坑一模一样:GraphQL
+ * 的验证是全有全无的,一个字段不认,整条查询就不执行)。
+ *
+ * 所以两份都留着:先用新的,报「字段不存在」就换老的。
+ */
+export type ShopifyLineItemAttrField = "customAttributes" | "properties";
+
+/** 按字段名拼订单查询 */
+export function buildOrderQuery(attrField: ShopifyLineItemAttrField): string {
+  const attrs =
+    attrField === "customAttributes"
+      ? "customAttributes { key value }"
+      : "properties { name value }";
+  return `
   query MooncodaOrder($id: ID!) {
     order(id: $id) {
       id
@@ -166,16 +186,14 @@ const ORDER_QUERY = `
       lineItems(first: 100) {
         edges {
           node {
-            properties {
-              name
-              value
-            }
+            ${attrs}
           }
         }
       }
     }
   }
 `;
+}
 
 interface OrderQueryResult {
   order: {
@@ -186,10 +204,30 @@ interface OrderQueryResult {
     financialStatus: string | null;
     lineItems: {
       edges: {
-        node: { properties: { name: string; value: string }[] };
+        node: {
+          /** 新字段(2024-10+) */
+          customAttributes?: { key: string; value: string | null }[] | null;
+          /** 老字段(2024-10 之前) */
+          properties?: { name: string; value: string | null }[] | null;
+        };
       }[];
     };
   } | null;
+}
+
+/**
+ * 「这个字段当前版本没有」 —— GraphQL 的验证错误
+ *
+ * Shopify 的话术是 `Field 'customAttributes' doesn't exist on type 'LineItem'`。
+ *
+ * **只认这一类错误** —— 别的(凭据不对、网络不通、订单不存在)直接往上抛,
+ * 别拿老字段再试一遍(那只是白跑一趟，还会把真正的错误盖住）。
+ */
+export function isUnknownFieldError(error: unknown): boolean {
+  if (!(error instanceof PaymentProviderError)) return false;
+  return /doesn't exist on type|is not defined by type|Unknown field/i.test(
+    error.message
+  );
 }
 
 /**
@@ -197,13 +235,28 @@ interface OrderQueryResult {
  *
  * Shopify 的 `tags` 在 GraphQL 里是 `[String!]`,但 REST 返回的是逗号分隔的
  * 字符串 —— 两种都兜住。
+ *
+ * 行项目属性走**两个字段名**(见 `buildOrderQuery`):先用 `customAttributes`,
+ * 当前 API 版本不认的话换 `properties` 再来一次。
  */
 export async function fetchShopifyOrder(
   orderId: string
 ): Promise<ShopifyOrderSnapshot | null> {
-  const data = await shopifyGraphql<OrderQueryResult>(ORDER_QUERY, {
-    id: orderId,
-  });
+  let data: OrderQueryResult;
+  try {
+    data = await shopifyGraphql<OrderQueryResult>(
+      buildOrderQuery("customAttributes"),
+      { id: orderId }
+    );
+  } catch (error) {
+    // 只有「字段不存在」才换写法 —— 别的错误原样往上抛
+    if (!isUnknownFieldError(error)) throw error;
+    data = await shopifyGraphql<OrderQueryResult>(
+      buildOrderQuery("properties"),
+      { id: orderId }
+    );
+  }
+
   const order = data.order;
   if (!order) return null;
 
@@ -211,10 +264,19 @@ export async function fetchShopifyOrder(
     ? order.tags.join(",")
     : (order.tags ?? "");
 
+  // 两种字段的形状不一样(`{key}` / `{name}`),统一成 `{name, value}`
   const properties: { name: string; value: string }[] = [];
   for (const edge of order.lineItems.edges) {
-    for (const property of edge.node.properties) {
-      properties.push(property);
+    const node = edge.node;
+    for (const attr of node.customAttributes ?? []) {
+      if (attr.key && attr.value != null) {
+        properties.push({ name: attr.key, value: attr.value });
+      }
+    }
+    for (const property of node.properties ?? []) {
+      if (property.name && property.value != null) {
+        properties.push({ name: property.name, value: property.value });
+      }
     }
   }
 
