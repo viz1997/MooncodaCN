@@ -617,6 +617,30 @@ providers/
 | `src/test/payments/pure/linked-print-order.test.ts` | 工单跟着商城订单变 |
 | `src/test/storefront/pure/checkout-payment-issue.test.ts` | 「没配好」vs「这次挂了」 |
 
+#### 上线清单(人工步骤,不在代码里)
+
+按顺序做,少一步就有一条路收不到钱:
+
+1. **跑迁移** —— `pnpm tsx scripts/apply-payment-channel-schema.ts`
+   (给 `storefront_order` / `print_order` 加 5 列 + 2 个索引;幂等)
+2. **配环境变量** —— 三个通道各自的变量(见上面那张表)。**密钥只进环境变量**,
+   不进仓库文件、不进聊天。Vercel 上加完变量**要确认新部署已经生效**再让
+   用户下单(环境变量是按部署快照的,加变量那一刻的构建可能还没带上它)
+3. **登记回调地址** —— 三条通知地址都要在对应平台上填:
+   - 微信:商户平台 → 产品中心 → 开发配置 → 支付通知地址 →
+     `https://<站点>/api/webhooks/wechat`
+   - 支付宝:开放平台 → 应用 → 开发设置 → 异步通知地址 →
+     `https://<站点>/api/webhooks/alipay`
+   - Shopify:后台 → Settings → Notifications → Webhooks → 三个 topic
+     (`orders/paid` / `orders/cancelled` / `refunds/create`),地址都是
+     `https://<站点>/api/webhooks/shopify`
+4. **各通道都要用小额真单试一遍** —— 微信扫一次码、支付宝跳一次、
+   Shopify 刷一次卡,确认「钱到了 → 订单变 paid → 挂在下面的工单也跟着变
+   paid」。三条 webhook 的验签路径不一样,只有真单能验出来
+5. **小程序端的微信支付暂时别开** —— 微信 Native 是扫码,在小程序里扫不了
+   自己屏幕上的码。小程序要收微信支付得走 JSAPI(`wx.requestPayment`),
+   本仓库**还没实现**。小程序里现在只有支付宝 / Shopify 能用
+
 ### Stripe 微信支付 / 支付宝(2026-11-05,**旧路,过渡期保留**)
 
 Sellbase 的 `createCheckout()` 把 `payment_method_types: ["card"]` **写死**
