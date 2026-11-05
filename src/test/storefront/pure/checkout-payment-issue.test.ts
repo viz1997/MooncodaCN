@@ -18,17 +18,28 @@
 
 import { describe, expect, it } from "vitest";
 
+import { PaymentNotConfiguredError } from "@/features/payments/lib/types";
 import { SellbaseNotConfiguredError } from "@/features/sellbase/lib/env";
 import { SellbaseOrderCreationError } from "@/features/sellbase/lib/orders";
 import { classifyPaymentIssue } from "@/features/storefront/lib/payment-issue";
 
 describe("classifyPaymentIssue", () => {
-  it("配置没配好 —— 直接抛的", () => {
+  it("配置没配好 —— 新通道直接抛的", () => {
     expect(
       classifyPaymentIssue(
-        new SellbaseNotConfiguredError("Sellbase 未配置:缺少 SELLBASE_API_TOKEN")
+        new PaymentNotConfiguredError("wechat", "缺少 WECHAT_PAY_PRIVATE_KEY")
       )
-    ).toBe("SELLBASE_NOT_CONFIGURED");
+    ).toBe("PAYMENT_NOT_CONFIGURED");
+  });
+
+  it("配置没配好 —— 旧路直接抛的", () => {
+    expect(
+      classifyPaymentIssue(
+        new SellbaseNotConfiguredError(
+          "Sellbase 未配置:缺少 SELLBASE_API_TOKEN"
+        )
+      )
+    ).toBe("PAYMENT_NOT_CONFIGURED");
   });
 
   it("配置没配好 —— 被建单那层包进了 SellbaseOrderCreationError", () => {
@@ -36,7 +47,7 @@ describe("classifyPaymentIssue", () => {
       "Sellbase 建单失败",
       new SellbaseNotConfiguredError("Sellbase 未配置:缺少 SELLBASE_API_TOKEN")
     );
-    expect(classifyPaymentIssue(wrapped)).toBe("SELLBASE_NOT_CONFIGURED");
+    expect(classifyPaymentIssue(wrapped)).toBe("PAYMENT_NOT_CONFIGURED");
   });
 
   it("别的错误 —— 就算包了一层也不该认成配置问题", () => {
@@ -44,20 +55,20 @@ describe("classifyPaymentIssue", () => {
       "Sellbase 建单失败",
       new Error("fetch failed")
     );
-    expect(classifyPaymentIssue(wrapped)).toBe("SELLBASE_FAILED");
+    expect(classifyPaymentIssue(wrapped)).toBe("PAYMENT_FAILED");
   });
 
   it("普通异常 —— 一次调用挂了,重试有意义", () => {
     expect(classifyPaymentIssue(new Error("fetch failed"))).toBe(
-      "SELLBASE_FAILED"
+      "PAYMENT_FAILED"
     );
   });
 
   it("不是 Error 的东西 —— 也归到「调用挂了」,不能炸", () => {
-    expect(classifyPaymentIssue(undefined)).toBe("SELLBASE_FAILED");
-    expect(classifyPaymentIssue(null)).toBe("SELLBASE_FAILED");
-    expect(classifyPaymentIssue("boom")).toBe("SELLBASE_FAILED");
-    expect(classifyPaymentIssue({ code: 500 })).toBe("SELLBASE_FAILED");
+    expect(classifyPaymentIssue(undefined)).toBe("PAYMENT_FAILED");
+    expect(classifyPaymentIssue(null)).toBe("PAYMENT_FAILED");
+    expect(classifyPaymentIssue("boom")).toBe("PAYMENT_FAILED");
+    expect(classifyPaymentIssue({ code: 500 })).toBe("PAYMENT_FAILED");
   });
 
   it("幂等 —— 同一个错误分类两次结果一样", () => {

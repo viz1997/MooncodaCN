@@ -5,20 +5,30 @@
  *
  * ```
  * 用户下单 → 本地落 print_order(unpaid)
- *          → Sellbase 建单(mode:"link")→ Stripe 支付链接
- *          → 用户付钱 → Sellbase 发 webhook → 本地标 paid
+ *          → 建一次支付会话(三个新通道之一,或旧路的 Sellbase)
+ *          → 用户付钱 → 通道回调 → 本地标 paid
  * ```
  *
  * 线上线下**两条腿**:
- * - 线上(Stripe):Sellbase 收钱,webhook 回写状态
+ * - 线上:微信扫码 / 支付宝跳页 / Shopify 付款页(旧路:Sellbase + Stripe)
  * - 线下(转账):工作室后台点「标记已收款」,本地标 paid + `payment_channel="offline"`
  *
- * 线下单**不建** Sellbase 订单 —— 建了会让两边的订单数对不上,而且工作室
- * 会在 Sellbase 后台看到一张永远收不到钱的单。
+ * 线下单**不建**支付会话 —— 建了会让两边的订单数对不上,而且工作室
+ * 会在支付后台看到一张永远收不到钱的单。
  *
- * ## 没配 Sellbase 也能下单
+ * ## 两条收款路线(2026-11-05)
  *
- * 没配 / 没同步目录时,工单照样建,只是没有支付链接,`payment_status` 停在
+ * | `payment_channel` | 走哪条 |
+ * |---|---|
+ * | `wechat` / `alipay` / `shopify` | 新路:按通道建一次支付会话 |
+ * | `stripe` / null | 旧路:Sellbase 订单 + Stripe 链接(过渡期并行) |
+ *
+ * 新路的通道**不参与定价** —— 工单的 `total_price_cents` 是下单那一刻
+ * 服务端重算出来的总价,建会话时直接当单价传出去,一分不多一分不少。
+ *
+ * ## 没配收款通道也能下单
+ *
+ * 没配 / 没同步目录时,工单照样建,只是没有支付入口,`payment_status` 停在
  * `unpaid`。工作室走线下收款。**下单接口不能因为收款通道没配好就挂掉** ——
  * 那是把一个配置问题变成一条断掉的业务链。
  */
@@ -26,6 +36,11 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { type PrintOrderRow, printOrder } from "@/db/schema";
+import { getPaymentProvider } from "@/features/payments/lib/registry";
+import type {
+  OnlinePaymentChannel,
+  PaymentRequest,
+} from "@/features/payments/lib/types";
 import {
   CarrierNotFoundError,
   type CarrierVariant,
@@ -47,6 +62,8 @@ import {
   createSellbaseOrder,
   createSellbasePaymentLink,
 } from "@/features/sellbase/lib/orders";
+
+import { classifyPaymentIssue } from "@/features/storefront/lib/payment-issue";
 
 /** 工单的收款状态 —— 跟 DB 列的枚举同名 */
 export type {
@@ -85,14 +102,126 @@ function round1(value: string | number): string {
 }
 
 /**
- * 给工单建 Sellbase 订单 + 拿支付链接
+ * 给工单建一次支付会话
  *
- * 失败**不抛** —— 调用方要的是「有没有链接」,不是「为什么失败」。失败原因
+ * `channel` 传新的三个通道之一 → 走新路;传 `null` / `"stripe"` → 走旧路
+ * (Sellbase 建单 + Stripe 链接)。
+ *
+ * 失败**不抛** —— 调用方要的是「有没有入口」,不是「为什么失败」。失败原因
  * 记日志,订单本身已经在本地建好了。
  */
 export async function createPrintOrderPayment(
+  order: PrintOrderRow,
+  channel?: OnlinePaymentChannel | null
+): Promise<PrintOrderPaymentSession | null> {
+  if (isNewChannel(channel)) {
+    return createNewChannelPrintOrderPayment(order, channel);
+  }
+  return createLegacyPrintOrderPayment(order);
+}
+
+/**
+ * 新路 —— 按通道建一次支付会话
+ *
+ * **单价是工单总价**(下单那一刻服务端重算出来的),不是重新报价 —— 用户
+ * 下单时同意的就是那个价。
+ */
+async function createNewChannelPrintOrderPayment(
+  order: PrintOrderRow,
+  channel: OnlinePaymentChannel
+): Promise<PrintOrderPaymentSession | null> {
+  const provider = getPaymentProvider(channel);
+  if (!provider || !provider.isConfigured()) {
+    console.error(
+      `[print-quote] ${order.orderNo} 收款通道 ${channel} 没配置好 —— 走线下收款`
+    );
+    return null;
+  }
+
+  const request = buildPrintOrderPaymentRequest(order);
+
+  try {
+    const session = await provider.createSession(request);
+
+    await db
+      .update(printOrder)
+      .set({
+        paymentChannel: channel,
+        providerOrderId: session.providerOrderId,
+        paymentUrl: session.redirectUrl,
+        paymentQrCodeUrl: session.qrCodeUrl,
+        updatedAt: new Date(),
+      })
+      .where(eq(printOrder.id, order.id));
+
+    return {
+      channel,
+      providerOrderId: session.providerOrderId,
+      paymentUrl: session.redirectUrl,
+      paymentQrCodeUrl: session.qrCodeUrl,
+    };
+  } catch (error) {
+    console.error(
+      `[print-quote] ${order.orderNo} 建 ${channel} 支付会话失败`,
+      error
+    );
+    return null;
+  }
+}
+
+/**
+ * 工单 → 支付请求
+ *
+ * 工单是「一活一模型」,所以只有**一行**,单价 = 总价,数量 = 1,运费 = 0。
+ * 克重 / 尺寸那些塞进 `attributes`,各通道自己决定怎么用(Shopify 落成行
+ * 属性,微信/支付宝塞进商品描述)。
+ */
+function buildPrintOrderPaymentRequest(order: PrintOrderRow): PaymentRequest {
+  const address = order.shippingAddress;
+  return {
+    orderNo: order.orderNo,
+    email: order.contactEmail,
+    items: [
+      {
+        title: "3D 打印服务",
+        quantity: 1,
+        unitPriceCents: order.totalPriceCents,
+        sku: order.orderNo,
+        attributes: {
+          耗材克重: `${round1(order.materialWeightG)} g`,
+          支撑克重:
+            order.supportWeightG === null || order.supportWeightG === undefined
+              ? "-"
+              : `${round1(order.supportWeightG)} g`,
+          尺寸: `${round1(order.dimX)}×${round1(order.dimY)}×${round1(order.dimZ)} mm`,
+        },
+      },
+    ],
+    shippingCents: 0,
+    shippingAddress: address
+      ? {
+          recipientName: address.recipientName,
+          phone: address.phone,
+          province: address.province,
+          city: address.city,
+          district: address.district,
+          detail: address.detail,
+        }
+      : null,
+    note: order.note ?? "",
+    successUrl: buildPrintOrderSuccessUrl(order.orderNo),
+    currency: "CNY",
+  };
+}
+
+/**
+ * 旧路 —— 给工单建 Sellbase 订单 + 拿支付链接
+ *
+ * 过渡期保留,跑通新通道后拆。
+ */
+async function createLegacyPrintOrderPayment(
   order: PrintOrderRow
-): Promise<{ sellbaseOrderId: string; paymentUrl: string | null } | null> {
+): Promise<PrintOrderPaymentSession | null> {
   let carrier: CarrierVariant;
   try {
     carrier = await resolvePrintServiceCarrier();
@@ -152,31 +281,70 @@ export async function createPrintOrderPayment(
     .where(eq(printOrder.id, order.id));
 
   return {
-    sellbaseOrderId: created.orderId,
+    channel: "stripe",
+    providerOrderId: created.orderId,
     paymentUrl: created.paymentUrl,
+    paymentQrCodeUrl: null,
   };
+}
+
+/**
+ * 一次支付会话的结果
+ *
+ * 「付款入口」不止是链接 —— 微信 Native 是**扫码**,二维码内容是
+ * `paymentQrCodeUrl`。两个字段有一个不是 null 就算成功。
+ */
+export interface PrintOrderPaymentSession {
+  /** 走的是哪条通道 */
+  channel: OnlinePaymentChannel;
+  /** 支付平台侧的订单号(回调反查用) */
+  providerOrderId: string | null;
+  /** 跳转地址(微信是 null —— 微信是扫码) */
+  paymentUrl: string | null;
+  /** 微信扫码的二维码内容 */
+  paymentQrCodeUrl: string | null;
+}
+
+/** 新路的三个通道 */
+function isNewChannel(
+  channel: string | null | undefined
+): channel is OnlinePaymentChannel {
+  return channel === "wechat" || channel === "alipay" || channel === "shopify";
 }
 
 /** 补一个支付链接的结果 */
 export type PaymentLinkResult =
-  | { ok: true; paymentUrl: string }
+  | {
+      ok: true;
+      /** 跳转地址(微信是 null —— 微信是扫码) */
+      paymentUrl: string | null;
+      /** 微信扫码的二维码内容 */
+      paymentQrCodeUrl: string | null;
+    }
   | {
       ok: false;
       code:
-        | "SELLBASE_NOT_CONFIGURED"
+        | "PAYMENT_NOT_CONFIGURED"
         | "ORDER_NOT_FOUND"
         | "ALREADY_PAID"
         | "LINK_FAILED";
     };
 
 /**
- * 拿(或者重拿)支付链接
+ * 拿(或者重拿)付款入口
  *
- * 两种情况:
- * - 本地还没有 Sellbase 订单 → 现建一个
- * - 有 Sellbase 订单但链接过期 → `POST /orders/:id/payment-link` 换新的
+ * 分两条路:
+ * - 新路(微信 / 支付宝 / Shopify)—— 按工单存下来的总价重建一次会话
+ * - 旧路(Sellbase + Stripe)—— 本地还没有 Sellbase 订单就现建一个,
+ *   有但链接过期就换新的
  *
- * 已经付过的不给链接 —— 付完了还让人付一次是事故。
+ * 已经付过的不给入口 —— 付完了还让人付一次是事故。
+ *
+ * ## 重建时用**存下来的**总价,不重新报价
+ *
+ * `total_price_cents` 是下单那一刻服务端重算出来的总价。重建会话时用它
+ * 当单价 —— 用户下单时同意的就是那个价,后来改了定价规则也不该让他的
+ * 订单变贵(或者变便宜)。
  */
 export async function ensurePrintOrderPaymentLink(
   order: PrintOrderRow
@@ -185,25 +353,32 @@ export async function ensurePrintOrderPaymentLink(
     return { ok: false, code: "ALREADY_PAID" };
   }
 
+  // 新路(微信 / 支付宝 / Shopify)—— 跟旧路完全分开
+  if (isNewChannel(order.paymentChannel)) {
+    return ensureNewChannelPrintOrderPaymentLink(order, order.paymentChannel);
+  }
+
+  // 旧路:Sellbase + Stripe(过渡期并行)
+  //
   // 收款通道没配好 —— 后面所有调用都会失败,直接说清楚
   //
-  // 注意这**不拦下单**:工单照样建(见本文件头「没配 Sellbase 也能下单」),
+  // 注意这**不拦下单**:工单照样建(见本文件头「没配收款通道也能下单」),
   // 工作室走线下收款。这里只是别让用户以为「再点一次就能拿到链接」。
   if (!isSellbaseConfigured()) {
-    return { ok: false, code: "SELLBASE_NOT_CONFIGURED" };
+    return { ok: false, code: "PAYMENT_NOT_CONFIGURED" };
   }
 
   // 已经有链接就直接用 —— Stripe 的链接 23 小时内有效,大多数时候够
   if (order.paymentUrl && order.sellbaseOrderId) {
-    return { ok: true, paymentUrl: order.paymentUrl };
+    return { ok: true, paymentUrl: order.paymentUrl, paymentQrCodeUrl: null };
   }
 
   if (!order.sellbaseOrderId) {
-    const created = await createPrintOrderPayment(order);
+    const created = await createLegacyPrintOrderPayment(order);
     if (!created?.paymentUrl) {
       return { ok: false, code: "LINK_FAILED" };
     }
-    return { ok: true, paymentUrl: created.paymentUrl };
+    return { ok: true, paymentUrl: created.paymentUrl, paymentQrCodeUrl: null };
   }
 
   try {
@@ -212,11 +387,72 @@ export async function ensurePrintOrderPaymentLink(
       .update(printOrder)
       .set({ paymentUrl: url, updatedAt: new Date() })
       .where(eq(printOrder.id, order.id));
-    return { ok: true, paymentUrl: url };
+    return { ok: true, paymentUrl: url, paymentQrCodeUrl: null };
   } catch (error) {
     console.error(`[print-quote] ${order.orderNo} 重取支付链接失败`, error);
     if (error instanceof SellbaseNotConfiguredError) {
-      return { ok: false, code: "SELLBASE_NOT_CONFIGURED" };
+      return { ok: false, code: "PAYMENT_NOT_CONFIGURED" };
+    }
+    return { ok: false, code: "LINK_FAILED" };
+  }
+}
+
+/**
+ * 新路 —— 重建一次支付会话
+ *
+ * 用**存下来的**总价,不重新报价(理由见函数头)。
+ */
+async function ensureNewChannelPrintOrderPaymentLink(
+  order: PrintOrderRow,
+  channel: OnlinePaymentChannel
+): Promise<PaymentLinkResult> {
+  const provider = getPaymentProvider(channel);
+  if (!provider || !provider.isConfigured()) {
+    return { ok: false, code: "PAYMENT_NOT_CONFIGURED" };
+  }
+
+  // 已经有入口了就直接用
+  //
+  // 微信的 `code_url` 两小时内有效(订单本身两小时过期),大多数时候够;
+  // 支付宝 / Shopify 的跳转地址重新建一个也不费事,但复用更省一次调用。
+  if (order.paymentUrl || order.paymentQrCodeUrl) {
+    return {
+      ok: true,
+      paymentUrl: order.paymentUrl,
+      paymentQrCodeUrl: order.paymentQrCodeUrl,
+    };
+  }
+
+  try {
+    const session = await provider.createSession(
+      buildPrintOrderPaymentRequest(order)
+    );
+
+    await db
+      .update(printOrder)
+      .set({
+        providerOrderId: session.providerOrderId,
+        paymentUrl: session.redirectUrl,
+        paymentQrCodeUrl: session.qrCodeUrl,
+        updatedAt: new Date(),
+      })
+      .where(eq(printOrder.id, order.id));
+
+    if (!session.redirectUrl && !session.qrCodeUrl) {
+      return { ok: false, code: "LINK_FAILED" };
+    }
+    return {
+      ok: true,
+      paymentUrl: session.redirectUrl,
+      paymentQrCodeUrl: session.qrCodeUrl,
+    };
+  } catch (error) {
+    console.error(
+      `[print-quote] ${order.orderNo} 重建 ${channel} 支付会话失败`,
+      error
+    );
+    if (classifyPaymentIssue(error) === "PAYMENT_NOT_CONFIGURED") {
+      return { ok: false, code: "PAYMENT_NOT_CONFIGURED" };
     }
     return { ok: false, code: "LINK_FAILED" };
   }
@@ -267,7 +503,10 @@ export async function revokePrintOrderOfflinePayment(
     .limit(1);
   const order = rows[0];
   if (!order) return { ok: false, code: "ORDER_NOT_FOUND" };
-  if (order.paymentChannel === "stripe") {
+  // 线上付过款的单不能走这条路 —— 钱已经进账了,本地标成未付只会让两边对不上。
+  //
+  // 旧路是 `stripe`,新路是微信 / 支付宝 / Shopify —— 四个都算「线上」。
+  if (order.paymentChannel && order.paymentChannel !== "offline") {
     return { ok: false, code: "ONLINE_PAYMENT" };
   }
 

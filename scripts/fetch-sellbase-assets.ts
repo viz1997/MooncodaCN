@@ -37,11 +37,14 @@
  *    `mooncoda_live_` —— Sellbase 默认的 `sb_` 前缀撞了 Supabase 自己的
  *    API key 命名空间,网关会在进函数之前就把请求 401 掉。细节和踩坑记录见
  *    `scripts/lib/sellbase-token.ts`。
- * 2. **Stripe 支付方式**:把 `payment_method_types: ["card"]` 扩成
- *    `["card", "alipay", "wechat_pay"]`,并给微信补上
+ * 2. **Stripe 支付方式**:把 `payment_method_types` **归一化**成想要的清单。
+ *    默认只有银行卡 —— 微信支付 / 支付宝**不在 Stripe 里接**(2026-11-05 工作室
+ *    的决定,它们要单独接入)。要用的话设
+ *    `SELLBASE_STRIPE_PAYMENT_METHODS=alipay,wechat_pay`,补丁会加上微信的
  *    `payment_method_options[wechat_pay][client] = "web"`。
  *
- * 补丁**每次取回都重打一遍**,所以升级 Sellbase 版本不会漏。
+ * 补丁**每次取回都重打一遍**,所以升级 Sellbase 版本不会漏;而且是**双向**
+ * 的 —— 清单能加也能缩(`--patch-only` 就能回退)。
  */
 
 import { execFileSync } from "node:child_process";
@@ -248,12 +251,21 @@ function patchTokenPrefix(file: string): void {
 /**
  * 读额外支付方式清单
  *
- * 没设这个环境变量 = 用默认的 `alipay,wechat_pay`(工作室要收微信和支付宝)。
- * 设成空串 = 什么都不加,只留银行卡。
+ * **默认只有银行卡**(2026-11-05 工作室的决定)。
+ *
+ * 微信支付 / 支付宝**不在 Stripe 里接** —— 它们要**单独接入**(自己的
+ * 商户号 / 自己的 SDK / 自己的对账),跟 Stripe 收银台是两条路。
+ *
+ * 为什么默认不带:Stripe 会拒收**账号没开通**的支付方式,而且不是退回来
+ * 只少一种方式 —— 是**整个 Checkout Session 建不出来**,连银行卡也一起挂。
+ * 所以「账号没开通」的时候,清单里就**不能**有它。
+ *
+ * 要加的时候:`SELLBASE_STRIPE_PAYMENT_METHODS=alipay,wechat_pay` 跑一遍
+ * 补丁(**先在 Stripe Dashboard 开通**,见 `patchStripePaymentMethods()`)。
  */
 function readExtraPaymentMethods(): string[] {
   const raw = process.env[PAYMENT_METHODS_ENV];
-  if (raw === undefined) return ["alipay", "wechat_pay"];
+  if (raw === undefined) return [];
   return raw
     .split(",")
     .map((method) => method.trim())
@@ -261,16 +273,30 @@ function readExtraPaymentMethods(): string[] {
 }
 
 /**
- * 把 Stripe 的支付方式扩成「银行卡 + 微信 + 支付宝」
+ * 把 Stripe 的支付方式清单**归一化**成想要的
  *
  * ## 为什么改 bundle 而不是改配置
  *
- * Sellbase 的 `createCheckout()` 把 `payment_method_types: ["card"]` **写死**
- * 在 bundle 里 —— 没有 store 级的配置项,`supportedMethods(country)` 也是
- * 硬编码的常量。想在收银台里出「微信支付 / 支付宝」,只能改 bundle。
+ * Sellbase 的 `createCheckout()` 把 `payment_method_types` **写死**在 bundle
+ * 里 —— 没有 store 级的配置项,`supportedMethods(country)` 也是硬编码的常量。
+ * 想在收银台里加减支付方式,只能改 bundle。
  *
  * 改的位置在 `scripts/fetch-sellbase-assets.ts` 里 —— 每次取回都重打一遍,
  * 所以升级 Sellbase 版本不会漏(不会像「手工改 dist」那样被覆盖掉)。
+ *
+ * ## 默认只有银行卡(2026-11-05)
+ *
+ * 微信支付 / 支付宝**不在 Stripe 里接** —— 它们要单独接入(自己的商户号 /
+ * 自己的 SDK / 自己的对账)。Stripe 这边先只留银行卡。
+ *
+ * **为什么不能「先加上,等开通了再用」**:Stripe 会拒收**账号没开通**的支付
+ * 方式,而且不是「退回来只少一种方式」—— 是**整个 Checkout Session 建不出来**,
+ * 连银行卡也一起挂。所以「账号还没开通」的时候,清单里就**不能**有它。
+ *
+ * ## 双向:清单能加也能缩
+ *
+ * 补丁不是「只往前加」,而是把清单**归一化**到当前想要的形态。所以
+ * `--patch-only` 重跑就能回退(去掉微信 / 支付宝),不用重新从 npm 拉一遍。
  *
  * ## 为什么微信要额外给 `payment_method_options`
  *
@@ -291,8 +317,9 @@ function readExtraPaymentMethods(): string[] {
  * 改完只是 bundle 变了,还要:
  *
  * 1. `supabase functions deploy sellbase-api --no-verify-jwt`
- * 2. 在 Stripe Dashboard 里**开通**这些支付方式(Settings → Payment
- *    methods)—— 测试模式能用不代表线上能用
+ * 2. **如果加了微信 / 支付宝**:在 Stripe Dashboard 里**开通**这些支付方式
+ *    (Settings → Payment methods)—— 测试模式能用不代表线上能用。顺序反了
+ *    就是把银行卡也一起打挂。
  */
 function patchStripePaymentMethods(file: string, extra: string[]): void {
   const source = readFileSync(file, "utf8");
@@ -301,42 +328,68 @@ function patchStripePaymentMethods(file: string, extra: string[]): void {
   const methodsLiteral = allMethods.map((m) => `"${m}"`).join(", ");
 
   // ① `payment_method_types` —— 真正决定收银台出哪些支付方式
+  //
+  //    匹配**任意一份**写死的清单(上游默认 `["card"]`,我们打过补丁的可能是
+  //    `["card","alipay","wechat_pay"]`)—— 改成「**归一化**」而不是「只往前
+  //    加」。清单要能**缩回去**:2026-11-05 工作室决定微信/支付宝单独接入,
+  //    Stripe 这边先只留银行卡。缩不回去的话,`--patch-only` 就没法用来回退。
   const typeMatch = source.match(
-    /^([ \t]*)payment_method_types: \["card"\],$/m
+    /^([ \t]*)payment_method_types: \[[^\]]*\],$/m
   );
 
   if (!typeMatch) {
-    // 已经打过补丁了 —— 幂等,`--patch-only` 重跑不报错
+    // 已经归一化过了 —— 幂等,`--patch-only` 重跑不报错
     if (source.includes(`payment_method_types: [${methodsLiteral}],`)) return;
     throw new Error(
-      `${file}: 找不到 \`payment_method_types: ["card"]\` —— ` +
+      `${file}: 找不到 \`payment_method_types: [...]\` —— ` +
         "上游 bundle 结构变了,补丁要跟着改(别硬来)"
     );
   }
 
   const indent = typeMatch[1] ?? "";
-  let replacement = `payment_method_types: [${methodsLiteral}],`;
+
+  // 先摘掉上一轮可能留下的 `payment_method_options` ——
+  // 微信不在清单里的时候留着它,Stripe 会报「未知的支付方式选项」。
+  const optionsMatch = matchWechatOptions(source);
+  let patched = optionsMatch ? source.replace(optionsMatch[0], "") : source;
+
+  // 再把清单归一化
+  patched = patched.replace(
+    typeMatch[0],
+    `${indent}payment_method_types: [${methodsLiteral}],`
+  );
+
   // 微信必须有 client —— 网页跳转是 "web",小程序 / App 才是 "mobile"
   if (extra.includes("wechat_pay")) {
-    replacement +=
-      `\n${indent}payment_method_options: { wechat_pay: { client: "web" } },`;
+    patched = patched.replace(
+      `${indent}payment_method_types: [${methodsLiteral}],`,
+      `${indent}payment_method_types: [${methodsLiteral}],\n` +
+        `${indent}payment_method_options: { wechat_pay: { client: "web" } },`
+    );
   }
-
-  let patched = source.replace(typeMatch[0], `${indent}${replacement}`);
 
   // ② `supportedMethods` —— 报告给前端的「支持哪些方式」。目前 bundle 里
   //    没有调用点,但上游哪天接上了就会用这份清单,一起改掉省得返工。
-  const supportedNeedle = 'country === "MX" ? ["card", "oxxo"] : ["card"]';
-  if (patched.includes(supportedNeedle)) {
+  const supportedMatch = patched.match(
+    /country === "MX" \? \["card", "oxxo"\] : \[[^\]]*\]/
+  );
+  if (supportedMatch) {
     const extraLiteral = extra.map((m) => `"${m}"`).join(", ");
     const fallback = `["card"${extraLiteral ? `, ${extraLiteral}` : ""}]`;
     patched = patched.replace(
-      supportedNeedle,
+      supportedMatch[0],
       `country === "MX" ? ["card", "oxxo"] : ${fallback}`
     );
   }
 
   writeFileSync(file, patched, "utf8");
+}
+
+/** 找 bundle 里那行 `payment_method_options: { wechat_pay: ... }`(带缩进) */
+function matchWechatOptions(source: string): RegExpMatchArray | null {
+  return source.match(
+    /^[ \t]*payment_method_options: \{ wechat_pay: \{ client: "web" \} \},\n/m
+  );
 }
 
 function main(): void {
@@ -347,11 +400,15 @@ function main(): void {
   const extraMethods = readExtraPaymentMethods();
   console.log(
     `[fetch-sellbase] Stripe 支付方式:card${
-      extraMethods.length > 0 ? ` + ${extraMethods.join(" + ")}` : "(只有银行卡)"
+      extraMethods.length > 0
+        ? ` + ${extraMethods.join(" + ")}`
+        : "(只有银行卡)"
     }`
   );
 
-  const tmp = patchOnly ? null : mkdtempSync(join(tmpdir(), "sellbase-assets-"));
+  const tmp = patchOnly
+    ? null
+    : mkdtempSync(join(tmpdir(), "sellbase-assets-"));
   try {
     if (tmp) {
       const tarball = npmPack(version, tmp);

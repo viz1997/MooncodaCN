@@ -12,24 +12,36 @@
  * 结算页上打断一下去弹个窗,用户填完还要再点一次回来。展开一块表单就地填,
  * 填完自动选中,少一次来回。
  *
+ * ## 三种付款方式,两种表现
+ *
+ * | 通道 | 付款方式 |
+ * |---|---|
+ * | 微信支付 | **扫码** —— 页面留在原地,画一个二维码给用户扫 |
+ * | 支付宝 / Shopify | **跳转** —— 整页跳到支付平台 |
+ *
+ * 微信那一支多一段「等用户扫完」的轮询 —— 钱到了才显示成功,没到就继续等。
+ * 轮询口径跟「支付成功页」一致(见 `checkout-success-view.tsx`)。
+ *
  * ## 支付失败要说清楚
  *
- * `paymentUrl` 是 null 表示「订单建好了,但支付链接没生成」(Sellbase 那边挂了)。
- * 这时候**不是**失败 —— 订单在,状态 unpaid,用户可以在「我的订单」里重取
- * 链接。所以文案是「订单已创建,支付链接生成失败」,并给出订单号。
+ * `paymentUrl` 和 `paymentQrCodeUrl` 都是 null 表示「订单建好了,但付款入口没
+ * 生成」。这时候**不是**失败 —— 订单在,状态 unpaid,用户可以在「我的订单」里
+ * 重取入口。所以文案是「订单已创建,支付入口生成失败」,并给出订单号。
  */
 
 "use client";
 
 import { ChevronUp, Loader2, Package, Plus, Zap } from "lucide-react";
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useAction } from "next-safe-action/hooks";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { createAddressAction } from "@/features/address/actions";
 import type { AddressErrorCode, AddressView } from "@/features/address/types";
 import { formatPriceCNY } from "@/features/marketing/components/storefront/wjp-store-data";
+import { PaymentChannelPicker } from "@/features/payments/components/payment-channel-picker";
+import { PaymentQrCode } from "@/features/payments/components/payment-qr";
 import { getDeliveryTier } from "@/features/print-quote/lib/delivery-tier";
 import { Link } from "@/i18n/routing";
 
@@ -68,6 +80,9 @@ export function CheckoutView({
    */
   const locale = useLocale();
 
+  /** 支付相关文案(微信扫码那一支) */
+  const tPayment = useTranslations("Payment");
+
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(
     addresses.find((a) => a.isDefault)?.id ?? addresses[0]?.id ?? null
   );
@@ -80,10 +95,20 @@ export function CheckoutView({
   const [isPaying, setIsPaying] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
   const [createdOrderNo, setCreatedOrderNo] = useState<string | null>(null);
-  /** 这一单里生成的打印工单号(`PO-…`)—— 支付链接没生成时给用户一个凭据 */
+  /** 这一单里生成的打印工单号(`PO-…`)—— 支付入口没生成时给用户一个凭据 */
   const [createdPrintOrderNos, setCreatedPrintOrderNos] = useState<string[]>(
     []
   );
+  /** 选中的收款通道 —— null = 还没选(服务端会走旧路) */
+  const [channel, setChannel] = useState<string | null>(null);
+  /**
+   * 微信扫码的二维码内容
+   *
+   * 非 null 时页面**留在原地**画码 —— 微信 Native 不跳页。
+   */
+  const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
+  /** 扫码之后钱到了没 —— 轮询出来的 */
+  const [scanPaid, setScanPaid] = useState(false);
 
   // 金额 —— 全部来自服务端算好的数
   const subtotalCents = useMemo(
@@ -137,6 +162,8 @@ export function CheckoutView({
     }
     setIsPaying(true);
     setPayError(null);
+    setQrCodeUrl(null);
+    setScanPaid(false);
 
     try {
       const res = await fetch("/api/store/checkout", {
@@ -148,6 +175,8 @@ export function CheckoutView({
           note: note.trim() ? note.trim() : null,
           // 打印工单的邮件通知语言 —— 跟着订单落库
           locale,
+          // 收款通道 —— 用户选的那个
+          channel: channel ?? undefined,
         }),
       });
 
@@ -159,23 +188,31 @@ export function CheckoutView({
         return;
       }
 
-      if (body?.paymentUrl) {
-        // 跳 Stripe —— 全页跳转,不能用 router.push(那是站内路由)
-        window.location.href = body.paymentUrl;
-        return;
-      }
-
-      // 订单建好了但没有支付链接 —— 给出订单号,让用户去订单页重取
       setCreatedOrderNo(body?.orderNo ?? null);
       setCreatedPrintOrderNos(
         Array.isArray(body?.printOrderNos) ? body.printOrderNos : []
       );
+
+      // 微信 Native —— 扫码,页面留在原地画码
+      if (body?.paymentQrCodeUrl) {
+        setQrCodeUrl(body.paymentQrCodeUrl);
+        setIsPaying(false);
+        return;
+      }
+
+      if (body?.paymentUrl) {
+        // 跳支付宝 / Shopify / 旧路的 Stripe —— 全页跳转,不能用 router.push
+        window.location.href = body.paymentUrl;
+        return;
+      }
+
+      // 订单建好了但没有付款入口 —— 给出订单号,让用户去订单页重取
       // 两种失败,两种说法(见 checkout.ts 的 classifyPaymentIssue):
       // 「收款通道没配好」重试没用,让他去找工作室;「这次调用挂了」重试就能好
       setPayError(
-        body?.paymentIssue === "SELLBASE_NOT_CONFIGURED"
+        body?.paymentIssue === "PAYMENT_NOT_CONFIGURED"
           ? "订单已创建,但支付通道暂时不可用。订单已经保留,工作室会跟你联系收款。"
-          : "订单已创建,但支付链接生成失败。请到「我的订单」里重新获取支付链接。"
+          : "订单已创建,但支付入口生成失败。请到「我的订单」里重新获取支付入口。"
       );
       setIsPaying(false);
     } catch {
@@ -183,6 +220,48 @@ export function CheckoutView({
       setIsPaying(false);
     }
   };
+
+  /**
+   * 扫码之后的轮询 —— 钱到了就停
+   *
+   * 微信的回调到本仓库有几秒延迟。用户扫完码盯着页面看,这时候显示
+   * 「失败」是错的(钱明明付了),显示「成功」也是错的(可能压根没付)。
+   * 所以轮询到状态明确为止。
+   */
+  useEffect(() => {
+    if (!qrCodeUrl || !createdOrderNo) return;
+
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const res = await fetch(
+          `/api/store/orders/${encodeURIComponent(createdOrderNo)}`,
+          { cache: "no-store", headers: { Accept: "application/json" } }
+        );
+        if (!res.ok) return;
+        const body = await res.json();
+        if (
+          body?.paymentStatus === "paid" ||
+          body?.status === "paid" ||
+          body?.status === "fulfilled"
+        ) {
+          if (!cancelled) setScanPaid(true);
+        }
+      } catch {
+        // 网络抖一下 —— 下一轮再试
+      }
+    };
+
+    void tick();
+    const timer = setInterval(() => {
+      void tick();
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [qrCodeUrl, createdOrderNo]);
 
   /* ---------------------------------------------------------------------- */
   /*  空购物车                                                                */
@@ -447,36 +526,90 @@ export function CheckoutView({
             </div>
           </dl>
 
-          {payError && (
-            <div className="mt-4 p-3 border border-destructive/40 bg-destructive/5 rounded-sm text-xs text-destructive">
-              {payError}
+          {/* 微信扫码 —— 页面留在原地画码,不跳页 */}
+          {qrCodeUrl ? (
+            <div className="mt-5 border border-border rounded-sm p-4">
+              <h3 className="text-sm font-medium mb-3 text-center">
+                {scanPaid ? tPayment("qrPaidTitle") : tPayment("qrTitle")}
+              </h3>
+              <div className="flex justify-center">
+                <PaymentQrCode
+                  value={qrCodeUrl}
+                  size={200}
+                  hint={scanPaid ? undefined : tPayment("qrHint")}
+                />
+              </div>
+              {scanPaid ? (
+                <p className="mt-3 text-xs text-primary text-center">
+                  {tPayment("qrPaid")}
+                </p>
+              ) : (
+                <p className="mt-3 text-xs text-muted-foreground text-center">
+                  正在确认支付…
+                </p>
+              )}
               {createdOrderNo && (
-                <p className="mt-1 text-muted-foreground">
+                <p className="mt-2 text-[11px] text-muted-foreground text-center">
                   订单号:{createdOrderNo}
                 </p>
               )}
               {createdPrintOrderNos.length > 0 && (
-                <p className="mt-1 text-muted-foreground">
+                <p className="mt-1 text-[11px] text-muted-foreground text-center">
                   打印工单号:{createdPrintOrderNos.join("、")}
                 </p>
               )}
+              <div className="mt-4 flex flex-col gap-2">
+                <Button
+                  asChild
+                  size="sm"
+                  className="w-full rounded-full"
+                  variant={scanPaid ? "default" : "outline"}
+                >
+                  <Link href="/dashboard/store-orders">我的订单</Link>
+                </Button>
+              </div>
             </div>
+          ) : (
+            <>
+              {/* 支付方式 —— 没配好的通道不显示 */}
+              <PaymentChannelPicker
+                value={channel}
+                onChange={setChannel}
+                disabled={isPaying}
+              />
+
+              {payError && (
+                <div className="mt-4 p-3 border border-destructive/40 bg-destructive/5 rounded-sm text-xs text-destructive">
+                  {payError}
+                  {createdOrderNo && (
+                    <p className="mt-1 text-muted-foreground">
+                      订单号:{createdOrderNo}
+                    </p>
+                  )}
+                  {createdPrintOrderNos.length > 0 && (
+                    <p className="mt-1 text-muted-foreground">
+                      打印工单号:{createdPrintOrderNos.join("、")}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <Button
+                size="lg"
+                onClick={handlePay}
+                disabled={isPaying || !selectedAddressId}
+                className="w-full mt-5 rounded-full h-12 uppercase tracking-[0.14em] text-[12px] font-medium"
+                type="button"
+              >
+                {isPaying && <Loader2 className="size-4 animate-spin" />}
+                去支付
+              </Button>
+
+              <p className="text-[11px] text-muted-foreground text-center mt-3">
+                提交后跳转在线支付,付款完成才开始制作。
+              </p>
+            </>
           )}
-
-          <Button
-            size="lg"
-            onClick={handlePay}
-            disabled={isPaying || !selectedAddressId}
-            className="w-full mt-5 rounded-full h-12 uppercase tracking-[0.14em] text-[12px] font-medium"
-            type="button"
-          >
-            {isPaying && <Loader2 className="size-4 animate-spin" />}
-            去支付
-          </Button>
-
-          <p className="text-[11px] text-muted-foreground text-center mt-3">
-            提交后跳转在线支付,付款完成才开始制作。
-          </p>
         </aside>
       </div>
     </div>

@@ -6,6 +6,20 @@
  * 品牌定位：WJP 全彩 3D 打印专家，主营宠物徽章 / 钥匙扣 / 冰箱贴 / 手办等，
  * 支持一件定制、一件发货。
  */
+
+/**
+ * 站点联系邮箱 —— 环境变量的兜底值
+ *
+ * `NEXT_PUBLIC_SUPPORT_EMAIL` 没配的时候用它。**别再写
+ * `hello@example.com` 这种占位符** —— 它会出现在页脚的版权行、导航里的
+ * 「联系我们」链接(用户点了发邮件给 nobody),以及打印工单通知邮件的
+ * Reply-To(工作室回信直接回不到)。
+ *
+ * 店铺自己的联系邮箱(收据 / 确认邮件上那个)是另一个东西,住在 Sellbase 的
+ * 店铺设置里(`shop@mooncoda.com`,用 `scripts/update-sellbase-store.ts` 改)。
+ */
+export const FALLBACK_SUPPORT_EMAIL = "support@mooncoda.com";
+
 export const siteConfig = {
   /** 站点名称 */
   name: "Mooncoda",
@@ -33,7 +47,7 @@ export const siteConfig = {
   author: {
     name: "Mooncoda",
     url: process.env.NEXT_PUBLIC_APP_URL || "https://example.com",
-    email: process.env.NEXT_PUBLIC_SUPPORT_EMAIL || "hello@example.com",
+    email: process.env.NEXT_PUBLIC_SUPPORT_EMAIL || FALLBACK_SUPPORT_EMAIL,
   },
 
   /** 社交链接 */

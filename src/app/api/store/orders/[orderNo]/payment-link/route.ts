@@ -1,10 +1,16 @@
 /**
- * POST /api/store/orders/[orderNo]/payment-link —— 重取支付链接
+ * POST /api/store/orders/[orderNo]/payment-link —— 重取付款入口
  *
  * 三种情况(见 `features/storefront/lib/order-payment.ts`):
- * - 还没链接 → 用订单行重建一张 Sellbase 订单
- * - 有 Sellbase 订单但链接失效 → `POST /orders/:id/payment-link` 换新的
+ * - 还没入口 → 按订单行重建一次支付会话
+ * - 有入口但失效 → 换新的
  * - 已经付了 → 拒绝
+ *
+ * ## 「入口」不止是链接
+ *
+ * 微信 Native 是**扫码**,不是跳转 —— 所以响应里有两个字段:
+ * `paymentUrl`(跳转地址)和 `paymentQrCodeUrl`(二维码内容),有一个不是 null
+ * 就算成功。
  *
  * ## 归属校验在数据层
  *
@@ -75,7 +81,11 @@ async function handle(
   }
 
   return NextResponse.json(
-    { orderNo: result.order.orderNo, paymentUrl: link.paymentUrl },
+    {
+      orderNo: result.order.orderNo,
+      paymentUrl: link.paymentUrl,
+      paymentQrCodeUrl: link.paymentQrCodeUrl,
+    },
     { headers: getRateLimitHeaders(rl) }
   );
 }
@@ -88,7 +98,7 @@ function messageForCode(code: string): string {
       return "这笔订单已经退过款了";
     case "CARRIER_MISSING":
       return "订单缺少载体信息,无法生成支付链接 —— 请联系工作室";
-    case "SELLBASE_NOT_CONFIGURED":
+    case "PAYMENT_NOT_CONFIGURED":
       return "收款通道没配置好,请联系工作室";
     default:
       return "生成支付链接失败,请稍后重试";

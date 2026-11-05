@@ -73,6 +73,7 @@ export default async function CheckoutSuccessPage({
       initialPaymentStatus={order.paymentStatus}
       initialTotalCents={order.totalCents}
       initialPaymentUrl={order.paymentUrl}
+      initialPaymentQrCodeUrl={order.paymentQrCodeUrl}
     />
   );
 }

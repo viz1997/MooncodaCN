@@ -28,7 +28,7 @@
  */
 
 import { getTranslations } from "next-intl/server";
-import { siteConfig } from "@/config/site";
+import { FALLBACK_SUPPORT_EMAIL, siteConfig } from "@/config/site";
 import type { PrintOrderRow } from "@/db/schema";
 import { PrintOrderEmail } from "@/features/mail/templates";
 import { sendEmail } from "@/features/mail/utils";
@@ -48,10 +48,18 @@ export type PrintOrderMailInfo = {
   locale: PrintOrderLocale;
 };
 
-/** 工作室收件地址 —— 没配就不发工作室那两封 */
-function getStudioEmail(): string | null {
-  const email = process.env.NEXT_PUBLIC_SUPPORT_EMAIL;
-  return email?.includes("@") ? email : null;
+/**
+ * 工作室收件地址
+ *
+ * **永远返回一个能收信的地址** —— 环境变量没配就落到兜底地址。
+ *
+ * 这里以前是「没配就返回 null,静默不发工作室那几封」。但工作室要的是
+ * 「每张工单都有人收到通知」—— 环境变量漏配的时候静默不发,等于工单躺在
+ * 后台没人知道。兜底地址在 `src/config/site.ts` 里。
+ */
+function getStudioEmail(): string {
+  const email = process.env.NEXT_PUBLIC_SUPPORT_EMAIL?.trim();
+  return email?.includes("@") ? email : FALLBACK_SUPPORT_EMAIL;
 }
 
 /** DB 行 → 通知用的订单信息 */
@@ -154,44 +162,42 @@ export async function notifyPrintOrderCreated(
 
     // ---- 工作室 ----
     const studio = getStudioEmail();
-    if (studio) {
-      const ts = await getTranslations({
-        locale: "zh",
-        namespace: "PrintQuote",
-      });
-      await deliverPrintOrderMail({
-        to: studio,
-        locale: "zh",
-        subject: ts("email.studioNewOrder.subject", {
+    const ts = await getTranslations({
+      locale: "zh",
+      namespace: "PrintQuote",
+    });
+    await deliverPrintOrderMail({
+      to: studio,
+      locale: "zh",
+      subject: ts("email.studioNewOrder.subject", {
+        orderNo: order.orderNo,
+      }),
+      preview: ts("email.studioNewOrder.preview", {
+        orderNo: order.orderNo,
+      }),
+      heading: ts("email.studioNewOrder.heading"),
+      paragraphs: [
+        ts("email.studioNewOrder.body", {
+          name: order.contactName,
           orderNo: order.orderNo,
         }),
-        preview: ts("email.studioNewOrder.preview", {
-          orderNo: order.orderNo,
-        }),
-        heading: ts("email.studioNewOrder.heading"),
-        paragraphs: [
-          ts("email.studioNewOrder.body", {
-            name: order.contactName,
-            orderNo: order.orderNo,
-          }),
-          ts("email.studioNewOrder.body2"),
-        ],
-        facts: [
-          { label: ts("email.common.orderNo"), value: order.orderNo },
-          {
-            label: ts("email.common.total"),
-            value: formatAmount(order.totalPriceCents, "zh"),
-          },
-          { label: ts("email.common.model"), value: order.modelFileName },
-          { label: ts("email.common.customer"), value: order.contactName },
-        ],
-        statusLabel: ts("status.PENDING"),
-        note: null,
-        noteLabel: null,
-        actionLabel: ts("email.common.action"),
-        actionUrl: `${siteConfig.url}/zh/admin/print-orders`,
-      });
-    }
+        ts("email.studioNewOrder.body2"),
+      ],
+      facts: [
+        { label: ts("email.common.orderNo"), value: order.orderNo },
+        {
+          label: ts("email.common.total"),
+          value: formatAmount(order.totalPriceCents, "zh"),
+        },
+        { label: ts("email.common.model"), value: order.modelFileName },
+        { label: ts("email.common.customer"), value: order.contactName },
+      ],
+      statusLabel: ts("status.PENDING"),
+      note: null,
+      noteLabel: null,
+      actionLabel: ts("email.common.action"),
+      actionUrl: `${siteConfig.url}/zh/admin/print-orders`,
+    });
   } catch (error) {
     logger.error(
       { err: error, orderNo: order.orderNo },
@@ -264,7 +270,8 @@ export async function notifyPrintOrderStatusChanged(params: {
  * 用户自助取消 —— 用户一封 + 工作室一封
  *
  * 用户那封是「确认」性质的(不是工作室干的),工作室那封是「告警」性质的。
- */ export async function notifyPrintOrderCancelledByUser(params: {
+ */
+export async function notifyPrintOrderCancelledByUser(params: {
   order: PrintOrderMailInfo;
   /** 用户填的取消原因(选填) */
   note: string | null;
@@ -297,45 +304,43 @@ export async function notifyPrintOrderStatusChanged(params: {
 
     // ---- 工作室 ----
     const studio = getStudioEmail();
-    if (studio) {
-      const ts = await getTranslations({
-        locale: "zh",
-        namespace: "PrintQuote",
-      });
-      await deliverPrintOrderMail({
-        to: studio,
-        locale: "zh",
-        subject: ts("email.studioCancelled.subject", {
+    const ts = await getTranslations({
+      locale: "zh",
+      namespace: "PrintQuote",
+    });
+    await deliverPrintOrderMail({
+      to: studio,
+      locale: "zh",
+      subject: ts("email.studioCancelled.subject", {
+        orderNo: order.orderNo,
+      }),
+      preview: ts("email.studioCancelled.preview", {
+        orderNo: order.orderNo,
+      }),
+      heading: ts("email.studioCancelled.heading"),
+      paragraphs: [
+        ts("email.studioCancelled.body", {
+          name: order.contactName,
           orderNo: order.orderNo,
         }),
-        preview: ts("email.studioCancelled.preview", {
-          orderNo: order.orderNo,
-        }),
-        heading: ts("email.studioCancelled.heading"),
-        paragraphs: [
-          ts("email.studioCancelled.body", {
-            name: order.contactName,
-            orderNo: order.orderNo,
-          }),
-          ...(params.note
-            ? [
-                ts("email.studioCancelled.bodyWithNote", {
-                  note: params.note,
-                }),
-              ]
-            : []),
-        ],
-        facts: [
-          { label: ts("email.common.orderNo"), value: order.orderNo },
-          { label: ts("email.common.customer"), value: order.contactName },
-        ],
-        statusLabel: ts("status.CANCELLED"),
-        note: params.note,
-        noteLabel: params.note ? ts("email.common.customerNoteLabel") : null,
-        actionLabel: ts("email.common.action"),
-        actionUrl: `${siteConfig.url}/zh/admin/print-orders`,
-      });
-    }
+        ...(params.note
+          ? [
+              ts("email.studioCancelled.bodyWithNote", {
+                note: params.note,
+              }),
+            ]
+          : []),
+      ],
+      facts: [
+        { label: ts("email.common.orderNo"), value: order.orderNo },
+        { label: ts("email.common.customer"), value: order.contactName },
+      ],
+      statusLabel: ts("status.CANCELLED"),
+      note: params.note,
+      noteLabel: params.note ? ts("email.common.customerNoteLabel") : null,
+      actionLabel: ts("email.common.action"),
+      actionUrl: `${siteConfig.url}/zh/admin/print-orders`,
+    });
   } catch (error) {
     logger.error(
       { err: error, orderNo: params.order.orderNo },
@@ -358,7 +363,6 @@ export async function notifyPrintOrderPaid(
 ): Promise<void> {
   try {
     const studio = getStudioEmail();
-    if (!studio) return;
 
     const ts = await getTranslations({
       locale: "zh",

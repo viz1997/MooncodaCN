@@ -37,6 +37,7 @@ export default async function StoreOrdersPage() {
     itemCount: items.reduce((sum, item) => sum + item.quantity, 0),
     titles: items.slice(0, 2).map((item) => item.productTitle),
     thumbnail: items[0]?.productThumbnail ?? null,
+    paymentChannel: order.paymentChannel,
   }));
 
   return (

@@ -127,6 +127,7 @@ export function PrintOrderDetailView({
             <OrderPaymentButton
               orderNo={order.orderNo}
               paymentUrl={order.paymentUrl}
+              paymentQrCodeUrl={order.paymentQrCodeUrl}
               paymentStatus={order.paymentStatus}
             />
             {cancellable ? (

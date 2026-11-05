@@ -1,9 +1,9 @@
 /**
- * 商城订单的 webhook 状态转移 —— **纯函数**
+ * 订单的收款状态转移 —— **纯函数**
  *
  * ## 为什么单独一个文件
  *
- * 状态转移的**判断**和状态转移的**落库**是两件事。判断决定「这次 webhook
+ * 状态转移的**判断**和状态转移的**落库**是两件事。判断决定「这次回调
  * 该改什么、不该改什么」,落库只是把判断结果写进 Drizzle。
  *
  * 判断这部分是最容易出错的地方 —— 里面藏着两条血淋淋的教训:
@@ -11,11 +11,17 @@
  * 1. **退款不是订单状态**。退款只改 `paymentStatus`,`status` 留在原地。
  *    早先只有一列 `status` 的时候,退款把订单写成了「已取消」,用户看着
  *    像没买过。
- * 2. **迟到的 `order.paid` 不能把退过款的单改回「已支付」**。webhook 会
- *    重投,投递顺序也不保证。
+ * 2. **迟到的收款通知不能把退过款的单改回「已支付」**。webhook 会重投,
+ *    投递顺序也不保证。
  *
  * 这两条都值得有测试盯着。所以判断抽成纯函数(零 DB 依赖,能进 `unit`
- * project),落库留在 `webhook-handler.ts`。
+ * project),落库留在 `settle.ts`。
+ *
+ * ## 为什么跟支付通道无关
+ *
+ * 微信 / 支付宝 / Shopify / 旧的 Sellbase —— 四个通道的回调最终都落到
+ * 同一套判断上。「退款不是订单状态」「迟到的通知不改回来」这两条规矩
+ * 不能每个通道各写一遍,写一遍就漏一遍。
  *
  * ## 两个状态是正交的
  *
@@ -106,7 +112,7 @@ export function decideStorefrontTransition(
       if (order.status === "cancelled") {
         return { kind: "skip", reason: "订单已经取消过了" };
       }
-      // 取消只动订单状态 —— 钱怎么样是另一回事(退不退款看 refund.created)
+      // 取消只动订单状态 —— 钱怎么样是另一回事(退不退款看退款事件)
       return { kind: "apply", setStatus: "cancelled", markPaidAt: false };
     }
 
@@ -123,7 +129,7 @@ export function decideStorefrontTransition(
  * 挂在商城订单下面的打印工单 —— 只需要支付状态
  *
  * 走商城购物车结算的打印服务行,工单挂 `print_order.storefront_order_id`
- * 上(整张购物车共用一张 Sellbase 订单,`sellbase_order_id` 那列是唯一索引,
+ * 上(整张购物车共用**一张**支付订单,`provider_order_id` 那类列是唯一索引,
  * 挂不上去)。
  */
 export interface LinkedPrintOrderState {
@@ -145,7 +151,7 @@ export type LinkedPrintOrderDecision =
       setPaymentStatus: "paid" | "refunded";
       /** 要不要写 `paid_at` */
       markPaidAt: boolean;
-      /** 要不要写 `payment_channel = "stripe"` */
+      /** 要不要写 `payment_channel` */
       setPaymentChannel: boolean;
     }
   | { kind: "cancel_via_state_machine" }
@@ -157,7 +163,7 @@ export type LinkedPrintOrderDecision =
  * ## 口径跟独立的工单、跟商城订单**完全一致**
  *
  * - 已经付过了 → 重投,不动
- * - 退过款的 → 迟到的 `order.paid` 不能把它改回「已支付」
+ * - 退过款的 → 迟到的收款通知不能把它改回「已支付」
  *
  * 钱是**整单收**的:商城订单一付款,挂在它下面的所有工单一起变成已付款。
  * 工单还停在「未付款」的话,工作室点「开始生产」会被 PAYMENT_REQUIRED

@@ -105,6 +105,14 @@ const orderSchema = z.object({
    * 传 "zh-CN" 这种别的值也会落到 zh。
    */
   locale: z.string().max(10).nullish(),
+  /**
+   * 收款通道(2026-11-05)
+   *
+   * 不传 = 旧路(Sellbase + Stripe,过渡期保留)。传 `wechat` / `alipay` /
+   * `shopify` 就走新通道 —— 通道没配好时**不拦下单**,只是没有付款入口,
+   * 工作室走线下收款。
+   */
+  channel: z.enum(["wechat", "alipay", "shopify", "stripe"]).nullish(),
 });
 
 async function handleList(request: NextRequest) {
@@ -293,12 +301,18 @@ async function handle(request: NextRequest) {
     });
   });
 
-  // 2026-11-04:建 Sellbase 订单拿支付链接。
+  // 2026-11-04:建一次支付会话拿付款入口。
   //
   // **这一步失败不影响下单** —— 工单已经在本地建好了,`payment_status` 停在
   // unpaid,用户可以在详情页点「重新获取支付链接」,或者工作室走线下收款。
   // 收款通道没配好就把下单接口打挂,是把一个配置问题变成一条断掉的业务链。
-  const payment = await createPrintOrderPayment(row);
+  //
+  // 2026-11-05:通道由客户端选(`channel`)—— 微信 / 支付宝 / Shopify 三个新的,
+  // 或者旧路(Sellbase + Stripe,过渡期保留)。传 `stripe` 或者不传都走旧路。
+  const payment = await createPrintOrderPayment(
+    row,
+    parsed.data.channel ?? null
+  );
 
   return NextResponse.json(
     {
@@ -307,8 +321,12 @@ async function handle(request: NextRequest) {
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
       locale: row.locale,
-      /** Stripe 支付链接 —— null 表示线上收款没配好,走线下 */
+      /** 付款入口(跳转地址)—— null 表示线上收款没配好,走线下 */
       paymentUrl: payment?.paymentUrl ?? null,
+      /** 微信扫码的二维码内容 —— 其他通道是 null */
+      paymentQrCodeUrl: payment?.paymentQrCodeUrl ?? null,
+      /** 走的是哪条通道 —— null 表示这次没建出付款入口 */
+      paymentChannel: payment?.channel ?? null,
       /** 支付状态 */
       paymentStatus: "unpaid",
     },

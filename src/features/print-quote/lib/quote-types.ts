@@ -49,8 +49,19 @@ export type PrintOrderPaymentStatus = "unpaid" | "paid" | "refunded" | "failed";
 export const PRINT_ORDER_PAYMENT_STATUSES: readonly PrintOrderPaymentStatus[] =
   ["unpaid", "paid", "refunded", "failed"];
 
-/** 收款渠道 —— 与 `print_order.payment_channel` 列的枚举一一对应 */
-export type PrintOrderPaymentChannel = "stripe" | "offline";
+/**
+ * 收款渠道 —— 与 `print_order.payment_channel` 列的枚举一一对应
+ *
+ * - `wechat` / `alipay` / `shopify` —— 新的三个线上通道(2026-11-05)
+ * - `stripe` —— 旧路:Sellbase + Stripe(过渡期并行,跑通新通道后拆)
+ * - `offline` —— 线下转账,工作室后台手动标
+ */
+export type PrintOrderPaymentChannel =
+  | "wechat"
+  | "alipay"
+  | "shopify"
+  | "stripe"
+  | "offline";
 
 /**
  * 报价入参 —— 几何 + 支撑信息
@@ -161,10 +172,23 @@ export type PrintOrderCreated = {
   /**
    * 支付链接(2026-11-04)
    *
-   * null = 线上收款没配好(Sellbase 没配 / 目录没同步 / Stripe 没连上)。
+   * null = 线上收款没配好(通道没配 / 目录没同步 / 上游没连上)。
    * 工单**照样建好了** —— 用户可以在详情页点「去支付」重试,或者走线下。
    */
   paymentUrl: string | null;
+  /**
+   * 微信扫码用的二维码内容(2026-11-05)
+   *
+   * 微信 Native 是扫码不是跳转 —— 前端拿这个渲染二维码。
+   * 其他通道是 null。
+   */
+  paymentQrCodeUrl: string | null;
+  /**
+   * 收款通道(2026-11-05)
+   *
+   * null = 支付会话没建出来(通道没配好,或者这次调用挂了)。
+   */
+  paymentChannel: PrintOrderPaymentChannel | null;
   /** 收款状态 —— 建单那一刻一定是 `unpaid` */
   paymentStatus: PrintOrderPaymentStatus;
 };
@@ -204,6 +228,21 @@ export type UserPrintOrder = {
    * null = 没有可用的线上支付链接(没配 Sellbase,或者还没生成)。
    */
   paymentUrl: string | null;
+  /**
+   * 微信扫码用的二维码内容(2026-11-05)
+   *
+   * 微信 Native 的付款方式不是跳转,是**扫码** —— 二维码的内容就是这一条
+   * (`weixin://wxpay/bizpayurl?pr=…`)。前端拿它渲染二维码。
+   *
+   * 支付宝 / Shopify 那两条路这个字段是 null —— 它们是跳转,不是扫码。
+   */
+  paymentQrCodeUrl: string | null;
+  /**
+   * 收款通道(2026-11-05)
+   *
+   * null = 还没开始收款(刚建单,支付会话还没建出来)。
+   */
+  paymentChannel: PrintOrderPaymentChannel | null;
 };
 
 /**

@@ -27,6 +27,8 @@ import {
   Wand2,
 } from "lucide-react";
 
+import { FALLBACK_SUPPORT_EMAIL } from "./site";
+
 /**
  * 导航链接类型
  */
@@ -170,7 +172,7 @@ export const footerNav = {
     { title: "Changelog", href: "/blog" },
     {
       title: "Contact Us",
-      href: `mailto:${process.env.NEXT_PUBLIC_SUPPORT_EMAIL || "hello@example.com"}`,
+      href: `mailto:${process.env.NEXT_PUBLIC_SUPPORT_EMAIL || FALLBACK_SUPPORT_EMAIL}`,
     },
   ] as NavItem[],
 

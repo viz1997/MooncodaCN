@@ -2464,12 +2464,17 @@ export const printOrder = pgTable(
     /**
      * 收款渠道
      *
-     * - stripe —— 线上,走 Sellbase + Stripe
+     * - wechat  —— 微信支付(Native 扫码)
+     * - alipay  —— 支付宝(电脑网站支付)
+     * - shopify —— Shopify 草稿订单的付款页
+     * - stripe  —— 旧路:Sellbase + Stripe(**过渡期并行**,跑通新通道后拆)
      * - offline —— 线下转账,工作室后台手动标
      *
-     * NULL = 还没开始收款(刚建单、Sellbase 那边还没建出订单)。
+     * NULL = 还没开始收款(刚建单、支付通道那边还没建出订单)。
      */
-    paymentChannel: text("payment_channel", { enum: ["stripe", "offline"] }),
+    paymentChannel: text("payment_channel", {
+      enum: ["wechat", "alipay", "shopify", "stripe", "offline"],
+    }),
     /**
      * Sellbase 订单 id —— webhook 反查用
      *
@@ -2477,6 +2482,17 @@ export const printOrder = pgTable(
      * 不另建去重表。
      */
     sellbaseOrderId: text("sellbase_order_id"),
+    /**
+     * 支付平台侧的订单号(2026-11-05)
+     *
+     * - 微信 —— `out_trade_no`(其实就是我们自己的订单号)
+     * - 支付宝 —— `trade_no`
+     * - Shopify —— 草稿单的 gid
+     *
+     * 跟 `sellbase_order_id` 分开:那条是旧路的,这条是新三个通道的。
+     * 回调里认订单时先认这一列,认不到再走旧路。
+     */
+    providerOrderId: text("provider_order_id"),
     /**
      * 关联的商城订单(2026-11-05)
      *
@@ -2492,6 +2508,13 @@ export const printOrder = pgTable(
     storefrontOrderId: text("storefront_order_id"),
     /** Stripe 支付链接(用户点「去支付」跳的就是它) */
     paymentUrl: text("payment_url"),
+    /**
+     * 微信扫码用的 `code_url`(2026-11-05)
+     *
+     * 微信 Native 的付款方式不是跳转,是**扫码** —— 二维码的内容就是这一列。
+     * 存下来是为了用户从「我的订单」里还能再看到码(不用重新下单)。
+     */
+    paymentQrCodeUrl: text("payment_qr_code_url"),
     /** 收款时间 */
     paidAt: timestamp("paid_at"),
     /**
@@ -2515,6 +2538,8 @@ export const printOrder = pgTable(
     index("print_order_user_id_idx").on(t.userId),
     // webhook 按 sellbase_order_id 反查工单
     uniqueIndex("print_order_sellbase_order_id_uniq_idx").on(t.sellbaseOrderId),
+    // 新的三个通道:回调按平台侧单号反查工单
+    index("print_order_provider_order_id_idx").on(t.providerOrderId),
     // 走商城那条路的工单:webhook 标 paid 时按商城订单反查
     index("print_order_storefront_order_id_idx").on(t.storefrontOrderId),
   ]
@@ -2702,8 +2727,31 @@ export const storefrontOrder = pgTable(
      * 唯一索引:webhook 会重投,靠这个唯一 + 「已是目标状态就 no-op」实现幂等。
      */
     sellbaseOrderId: text("sellbase_order_id"),
-    /** Stripe 支付链接 */
+    /**
+     * 收款渠道(2026-11-05)
+     *
+     * 跟 `print_order.payment_channel` 同一个口径 —— 两条链共用一套枚举,
+     * 免得改一处忘一处。
+     */
+    paymentChannel: text("payment_channel", {
+      enum: ["wechat", "alipay", "shopify", "stripe", "offline"],
+    }),
+    /**
+     * 支付平台侧的订单号(2026-11-05)
+     *
+     * 微信 = `out_trade_no`(我们自己的订单号)、支付宝 = `trade_no`、
+     * Shopify = 草稿单 gid。回调反查用。
+     */
+    providerOrderId: text("provider_order_id"),
+    /** 支付链接(支付宝 / Shopify 的跳转地址;微信存的是扫码用的 `code_url`) */
     paymentUrl: text("payment_url"),
+    /**
+     * 微信扫码用的 `code_url`(2026-11-05)
+     *
+     * 微信 Native 的付款方式不是跳转,是**扫码** —— 二维码的内容就是这一列。
+     * 存下来是为了用户从「我的订单」里还能再看到码(不用重新下单)。
+     */
+    paymentQrCodeUrl: text("payment_qr_code_url"),
     /** 收款时间 */
     paidAt: timestamp("paid_at"),
     /** 收货地址**快照** —— 用户后来改地址簿不改写历史订单 */
@@ -2719,6 +2767,8 @@ export const storefrontOrder = pgTable(
     uniqueIndex("storefront_order_no_uniq_idx").on(t.orderNo),
     // webhook 按 sellbase_order_id 反查订单
     uniqueIndex("storefront_order_sellbase_id_uniq_idx").on(t.sellbaseOrderId),
+    // 新的三个通道:回调按平台侧单号反查订单
+    index("storefront_order_provider_order_id_idx").on(t.providerOrderId),
     // 用户侧「我的订单」按 user_id 过滤 + 时间倒序
     index("storefront_order_user_idx").on(t.userId),
   ]

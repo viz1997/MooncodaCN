@@ -1,0 +1,162 @@
+/**
+ * 支付方式选择器 —— 「微信 / 支付宝 / Shopify(银行卡)」
+ *
+ * ## 通道清单从服务端拿
+ *
+ * `GET /api/store/payment-channels` 返回**当前配好了**的通道。没配好的
+ * (`available: false`)不渲染 —— 让用户点一个注定失败的按钮,比不给这个选项
+ * 更糟。
+ *
+ * 过渡期:三个新通道没全部就绪时,服务端会**额外**返回旧的 Sellbase +
+ * Stripe 那条路(见那个 route 的说明)。三个都就绪之后旧路自动消失。
+ *
+ * ## 拉不到清单怎么办
+ *
+ * 拉不到就**不渲染选择器** —— 结算页退回到「不传通道」,服务端走旧路。
+ * 这不是静默降级到错的地方:拉不到清单本身就意味着环境变量大概率也没配,
+ * 那条路本来也建不出支付会话(订单照样建,状态停在 unpaid,走线下)。
+ *
+ * ## 选中哪个
+ *
+ * 默认选第一个可用的。用户没选就点「去支付」时,得有个合理的默认值 ——
+ * 而不是把 `null` 发给服务端让服务端替用户挑。
+ */
+
+"use client";
+
+import { useTranslations } from "next-intl";
+import { useEffect, useRef, useState } from "react";
+
+/** 一个通道在界面上的信息 —— 跟服务端返回的形状一致 */
+export interface PaymentChannelOption {
+  channel: string;
+  label: string;
+  description: string;
+  available: boolean;
+}
+
+export function PaymentChannelPicker({
+  value,
+  onChange,
+  disabled,
+}: {
+  /** 当前选中的通道 id */
+  value: string | null;
+  /** 选中变了就调 */
+  onChange: (channel: string) => void;
+  disabled?: boolean;
+}) {
+  const [channels, setChannels] = useState<PaymentChannelOption[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  /**
+   * 通道的名字走 i18n
+   *
+   * 服务端返回的 `label` / `description` 是中文兜底(通道清单是后端给的,
+   * 前端不该自己造名字)。有对应翻译就翻,没有就用服务端那份 —— 新加通道
+   * 忘了配文案时,界面上还是能看见这个通道。
+   */
+  const t = useTranslations("Payment.channels");
+  const tRoot = useTranslations("Payment");
+
+  // `value` / `onChange` 每次渲染都是新引用 —— 放进 ref,
+  // effect 就只依赖「挂载时跑一次」,不会来回拉清单。
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const valueRef = useRef(value);
+  valueRef.current = value;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch("/api/store/payment-channels", {
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        });
+        const body = res.ok ? await res.json() : null;
+        if (cancelled) return;
+
+        const list: unknown = body?.channels;
+        const available = (Array.isArray(list) ? list : []).filter(
+          (c): c is PaymentChannelOption =>
+            typeof c === "object" &&
+            c !== null &&
+            typeof (c as PaymentChannelOption).channel === "string" &&
+            (c as PaymentChannelOption).available === true
+        );
+
+        setChannels(available);
+
+        // 默认选中第一个 —— 但别覆盖用户已经选好的
+        const first = available[0];
+        if (
+          first !== undefined &&
+          !available.some((c) => c.channel === valueRef.current)
+        ) {
+          onChangeRef.current(first.channel);
+        }
+      } catch {
+        // 拉不到就藏起选择器 —— 结算页还有兜底路径
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (loading) return null;
+  if (channels.length === 0) return null;
+
+  return (
+    <fieldset className="mt-6">
+      <legend className="eyebrow text-muted-foreground mb-3">
+        {tRoot("title")}
+      </legend>
+      <ul className="space-y-2">
+        {channels.map((channel) => {
+          const selected = channel.channel === value;
+          // 有翻译就用翻译,没有就退回服务端给的中文文案(新通道忘了配文案时
+          // 界面上仍然看得见这个通道,不会只剩一个空的 radio)
+          const labelKey = `${channel.channel}.label`;
+          const descriptionKey = `${channel.channel}.description`;
+          const label = t.has(labelKey) ? t(labelKey) : channel.label;
+          const description = t.has(descriptionKey)
+            ? t(descriptionKey)
+            : channel.description;
+          return (
+            <li key={channel.channel}>
+              <label
+                className={`flex gap-3 p-4 border rounded-sm cursor-pointer transition-colors ${
+                  selected
+                    ? "border-primary bg-secondary/40"
+                    : "border-border hover:bg-secondary/30"
+                } ${disabled ? "opacity-60 cursor-not-allowed" : ""}`}
+              >
+                <input
+                  type="radio"
+                  name="payment-channel"
+                  value={channel.channel}
+                  checked={selected}
+                  disabled={disabled}
+                  onChange={() => onChange(channel.channel)}
+                  className="mt-1 accent-[var(--primary)]"
+                />
+                <span className="flex-1 min-w-0">
+                  <span className="block text-sm font-medium">{label}</span>
+                  <span className="block mt-0.5 text-xs text-muted-foreground">
+                    {description}
+                  </span>
+                </span>
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+    </fieldset>
+  );
+}

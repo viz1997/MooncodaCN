@@ -23,7 +23,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { decideLinkedPrintOrderTransition } from "@/features/sellbase/lib/storefront-transition";
+import { decideLinkedPrintOrderTransition } from "@/features/payments/lib/transitions";
 
 describe("decideLinkedPrintOrderTransition", () => {
   describe("mark_paid", () => {

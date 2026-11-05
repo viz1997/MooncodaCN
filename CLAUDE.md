@@ -8,19 +8,22 @@ Mooncoda is a production-ready Next.js SaaS template. It provides a complete fou
 
 **Deployment:** Self-hosted or Vercel + Neon PostgreSQL + Cloudflare R2 (storage)
 
-## 三方系统分工(2026-11-04 更新)
+## 三方系统分工(2026-11-05 更新)
 
 | 系统 | 职责 | 技术栈 |
 |---|---|---|
 | **NextDevTpl**(本仓库) | AI 生图 SaaS 后端:user / credits / photo / imageJob / AI 路由 / WeChat 小程序登录 **+ 商品目录(商品 / SKU 变体 / 价格)+ 定价 + 购物车 + 订单事实 + 收货地址 + 打印工单(`/quote` 报价 → `print_order`,按 `user_id` 归属,登录后下单;也可以从 `/tools/weight` 直接加进商城购物车,见「打印服务进商城购物车」)** | Next.js 16 + Drizzle + PostgreSQL |
-| **Sellbase**(独立服务) | **只做收银台**:Stripe 支付链接 + 收款状态 + 收据。商品目录是同步过去的**镜像**,不是真理源 | Supabase Edge Functions(**跟本仓库同一个 Supabase 项目**)+ Stripe(MIT) |
-| **微信小程序 / 浏览器访客**(外部客户端) | 调 NextDevTpl AI 接口拿候选图 **+ 调 `/api/image-gen/products` 拿商品与 SKU**;调 NextDevTpl `/api/store/**` 加购 + 结算;支付时全页跳转 Stripe | Taro 4 + React 18(小程序);Next.js(浏览器) |
+| **微信支付 / 支付宝**(外部服务) | **自己直连的收款通道**:钱直接进我们自己的商户号 / 账户,没有中间层抽成,定价完全由本仓库说了算 | 微信支付 V3 Native(扫码)+ 支付宝电脑网站支付 |
+| **Shopify**(外部服务) | **只做银行卡 / Shop Pay 的收银台**。本仓库算出来的价通过**草稿订单**原样传过去(逐分相等),不跟 Shopify 的商品目录 / 运费规则走 | Shopify Admin GraphQL API + 草稿订单 |
+| **Sellbase**(独立服务)**过渡期保留** | 旧收款路:Sellbase 建单 + Stripe 付款页。**三个新通道没全部跑通之前一直留着**,跑通后整个 `src/features/sellbase/` 拆掉 | Supabase Edge Functions(**跟本仓库同一个 Supabase 项目**)+ Stripe(MIT) |
+| **微信小程序 / 浏览器访客**(外部客户端) | 调 NextDevTpl AI 接口拿候选图 **+ 调 `/api/image-gen/products` 拿商品与 SKU**;调 NextDevTpl `/api/store/**` 加购 + 结算 | Taro 4 + React 18(小程序);Next.js(浏览器) |
 
-**接入形态 = 「本仓库算价,Sellbase 只做收银台」**(2026-11-04 取代 Medusa 方案):
-- 本仓库算的价 = `items[].unit_price_amount`;Sellbase 那边只是**载体变体** + 一个能看懂的标题
-- 商城结算:`购物车(DB) → 服务端重算每行价 → 落 storefront_order(_item) → 建 Sellbase 订单 → 回写 sellbase_order_id + payment_url → 前端跳 Stripe`
-- 打印工单:同一套 `POST /orders` + 同一个 webhook —— 两条支付链合一
-- **逐分相等**:`discountedUnitPriceCents × quantity` == Sellbase 的 `unit_price_amount × quantity`(阶梯折扣必须「先折单价,再乘数量」)
+**接入形态 = 「本仓库算价,收银台只负责收钱」**(2026-11-05 取代 Sellbase 单通道):
+- 本仓库算的价 = `items[].unit_price_amount`;收银台那边只是**载体** + 一个能看懂的标题
+- 商城结算:`购物车(DB) → 服务端重算每行价 → 落 storefront_order(_item) → 建支付会话 → 回写 provider_order_id + payment_url(+ 微信的 payment_qr_code_url)→ 前端跳转 / 画码`
+- 打印工单:同一套结算 + 同一个 webhook 体系 —— 两条支付链合一
+- **逐分相等**:`discountedUnitPriceCents × quantity` == 收银台实际收的金额(阶梯折扣必须「先折单价,再乘数量」)
+- 三个新通道的细节见「三个支付通道(2026-11-05)」;旧路的细节见「Sellbase 集成(2026-11-04)」
 
 **NextDevTpl 做的商品目录**(2026-10-21 变更):
 - `product` 表 = 商品资料(名称/描述/封面/基础价/上下架),主键复用 `productTypeCode`(R/A/P/RM/LB/M)
@@ -32,9 +35,15 @@ Mooncoda is a production-ready Next.js SaaS template. It provides a complete fou
 
 **NextDevTpl 仍做**:`/marketing/*` 静态品牌页(博客 / 文档 / 法律页 / 价格页)+ `/marketing/products` 作品集 showcase(纯静态作品集,与商品目录无关)。
 
-**集成架构详情**:见 `architecture-sellbase-integration.md`(权威文档)+ `architecture-miniprogram-as-client.md`(项目身份定位)。`architecture-medusa-integration.md` 是 **Medusa 时代的方案稿,结论已作废**。
+**集成架构详情**:见 `architecture-sellbase-integration.md`(旧路的权威文档)+ `architecture-miniprogram-as-client.md`(项目身份定位)。`architecture-medusa-integration.md` 是 **Medusa 时代的方案稿,结论已作废**。三个新通道的架构写在 CLAUDE.md 的「三个支付通道(2026-11-05)」一节 + 各通道 `providers/*/env.ts` 的文件头。
 
-## Sellbase 集成(2026-11-04)
+## Sellbase 集成(2026-11-04,**旧路,过渡期并行**)
+
+> **状态(2026-11-05)**:工作室决定把收款换成「微信 / 支付宝 / Shopify」三个
+> 直连通道(见「三个支付通道」)。这一节讲的是**旧路** —— 代码还活着,还跑
+> 着,**三个新通道全部跑通之后**整个 `src/features/sellbase/` 连同
+> `SELLBASE_*` 环境变量一起拆掉,届时 `stripe` 从 `PaymentChannel` 枚举里
+> 删掉,`/api/store/payment-channels` 里那段 `legacyChannel()` 也一起删。
 
 **为什么不是 Medusa**:Medusa v2 要另起一台 server(Node + PostgreSQL + Redis),跟本仓库「SaaS 模板,自托管或 Vercel」的部署形态不合。Sellbase 是 Supabase Edge Functions —— 没有服务器要运维。
 
@@ -60,9 +69,13 @@ lib/
 ├── events.ts          # webhook 事件 → 本地动作
 ├── orders.ts          # 建订单 / 换支付链接
 ├── customer.ts        # sellbase_customer_id 回填
-├── storefront-transition.ts # 商城订单的 webhook 状态转移(纯函数,可单测)
-└── webhook-handler.ts # webhook 落库
+└── webhook-handler.ts # webhook 落库(状态转移已挪到 `features/payments/lib/transitions.ts`)
 ```
+
+> **状态转移搬走了(2026-11-05)** —— 原来在 `sellbase/lib/storefront-transition.ts`
+> 的那套判断现在是 `src/features/payments/lib/transitions.ts`:微信 / 支付宝 /
+> Shopify / 旧路**四个通道共用**一份判断(退款只改支付状态、迟到的收款通知
+> 不改退款单、幂等)。拆 Sellbase 的时候这个文件**不用搬回去**。
 
 **必须守住的四条**:
 - **服务端不信客户端带来的价** —— 结算时按 `metadata` 重算每一行
@@ -79,7 +92,7 @@ lib/
 | `storefront_order.status` | 订单走到哪一步 | `unpaid` / `paid` / `fulfilled` / `cancelled` |
 | `storefront_order.payment_status` | 钱到没到、退没退 | `unpaid` / `paid` / `refunded` / `failed` |
 
-**退款只改 `payment_status`,不动 `status`** —— 早先只有一列的时候,退款把订单写成「已取消」,用户看着像没买过,工作室也没法把退款单跟取消单分开。**迟到的 `order.paid` 不能把退过款的单改回「已支付」** —— webhook 会重投,投递顺序不保证,靠 `payment_status === "refunded"` 挡住。判断逻辑在 `src/features/sellbase/lib/storefront-transition.ts`(纯函数),`print_order` 用的是同一个口径。
+**退款只改 `payment_status`,不动 `status`** —— 早先只有一列的时候,退款把订单写成「已取消」,用户看着像没买过,工作室也没法把退款单跟取消单分开。**迟到的 `order.paid` 不能把退过款的单改回「已支付」** —— webhook 会重投,投递顺序不保证,靠 `payment_status === "refunded"` 挡住。判断逻辑在 `src/features/payments/lib/transitions.ts`(纯函数,四个通道共用),`print_order` 用的是同一个口径。
 
 **鉴权口径**:商城路由(`/api/store/checkout`、`/api/store/orders/**`、`/api/store/addresses/**`)认**两种凭据** —— `Authorization: Bearer <token>`(微信小程序)或者 Better Auth 的签名 cookie(浏览器),统一走 `src/lib/auth/request-session.ts` 的 `getSessionFromRequest`。**带了 Bearer 但 token 无效 → 直接 401,不退回 cookie** —— 悄悄换个身份继续跑,等于把「token 过期」变成「换个身份照样能过」。这个 helper 单独一个文件,是因为 `src/lib/auth/bearer.ts` 被 Edge 中间件(`src/proxy.ts`)引用,`better-auth` 绝不能进那个 bundle。
 
@@ -221,9 +234,9 @@ All tables use `text` primary keys with `nanoid()` defaults.
 |---|---|
 | `product` / `product_variant` | 商品目录(本仓库是真理源);`product_variant.sellbase_variant_id` 是同步到 Sellbase 后的载体变体指针 |
 | `cart` / `cart_item` | 购物车落库(cookie `wjp_cart_id`);`cart_item.spec_hash` + `(cart_id, spec_hash)` 唯一索引负责「同规格合并」 |
-| `storefront_order` / `storefront_order_item` | 商城订单事实;`sellbase_order_id` 唯一索引供 webhook 反查,`payment_url` 是 Stripe 支付链接副本;`status`(订单状态)和 `payment_status`(支付状态)**分两列** |
+| `storefront_order` / `storefront_order_item` | 商城订单事实;`status`(订单状态)和 `payment_status`(支付状态)**分两列**;收款相关列:`payment_channel`(这单走哪个通道)、`provider_order_id`(平台侧单号,回调反查)、`payment_qr_code_url`(微信扫码的 `code_url`)、`payment_url`(支付宝 / Shopify 的跳转地址)、`sellbase_order_id`(旧路,唯一索引)、`paid_at` |
 | `address` | 收货地址簿 —— **必须留在本仓库**,Sellbase 的 `customer.addresses` 只读,没有创建地址的路由 |
-| `print_order` | 打印工单;加过五列 `payment_status` / `payment_channel` / `sellbase_order_id` / `payment_url` / `paid_at`;另有交期两列 `delivery_tier` / `delivery_fee_cents`(见「打印工单交期档位」);走商城购物车结算的工单挂 `storefront_order_id`(见「打印服务进商城购物车」) |
+| `print_order` | 打印工单;收款相关列跟商城订单同一套:`payment_status` / `payment_channel` / `provider_order_id` / `payment_qr_code_url` / `payment_url` / `paid_at`(外加旧路的 `sellbase_order_id`);另有交期两列 `delivery_tier` / `delivery_fee_cents`(见「打印工单交期档位」);走商城购物车结算的工单挂 `storefront_order_id`(见「打印服务进商城购物车」) |
 
 `user.sellbase_customer_id`(原 `medusa_customer_id`)只是**加速指针** —— Sellbase 的 customer 按 **email** upsert,真正的 join key 永远是 email。
 
@@ -443,7 +456,168 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
   判据 / hash / 形状)和 `src/test/sellbase/pure/linked-print-order.test.ts`
   (工单跟着商城订单变)守住。
 
-### Stripe 微信支付 / 支付宝(2026-11-05)
+### 三个支付通道(2026-11-05)
+
+工作室决定把收款从「Sellbase + Stripe 一条路」换成**三个通道**:微信支付、
+支付宝、Shopify(银行卡 / Shop Pay)。**微信和支付宝自己直连**(钱直接进我们
+自己的商户号 / 账户,没有中间层抽成,定价完全由本仓库说了算),**Shopify 只
+承接卡**。旧的 Sellbase + Stripe 那条路**并行保留**,等三个新通道跑通再拆。
+
+#### 通道清单
+
+| 通道 | 收钱方式 | 付款页形态 | 钱去哪 |
+|---|---|---|---|
+| `wechat` | 微信支付 V3 **Native**(扫码) | 页面留在原地,画二维码 | 我们的微信商户号 |
+| `alipay` | 支付宝**电脑网站支付** | 整页跳支付宝 | 我们的支付宝账户 |
+| `shopify` | Shopify **草稿订单** | 整页跳 Shopify 收银台 | Shopify 店铺结算账户 |
+| `stripe` | **旧路**:Sellbase + Stripe(**过渡期并行**) | 整页跳 Stripe | Stripe → 我们的账户 |
+| `offline` | 线下转账 | 没有 —— 工作室后台手动标 | — |
+
+`offline` 不是「线上通道」:它没有支付会话,走的是后台「标记已收款」。
+
+#### 模块布局(`src/features/payments/`)
+
+```
+lib/
+├── types.ts        # 通道契约(PaymentRequest / PaymentSession / PaymentProvider)+ 两类错误
+├── registry.ts     # 通道注册表:getPaymentProvider() / listPaymentChannels()
+├── money.ts        # 分 ↔ 元/分(微信要分,支付宝要元)—— 不用浮点
+├── settle.ts       # 收款状态落库(四个通道共用一份)
+└── transitions.ts  # 状态转移判断(纯函数,零 DB 依赖)
+providers/
+├── wechat/         # env / native / signature / webhook
+├── alipay/        # env / page-pay / sign / query / webhook
+└── shopify/        # env / client / draft-order / signature / webhook / order-reference
+```
+
+- **通道之间共通的那部分**只有三件:**本仓库算价**、**一次支付会话**、**一次
+  收款确认**。通道**不参与定价** —— 折后单价在进通道之前就已经折好了。
+- **`settle.ts` 是四个通道共用的** —— 回调长得完全不一样(验签、报文、状态
+  字段名都不同),但回调落地之后要做的事是同一件:「这笔钱到了 → 把订单标成
+  已付」。只有一份实现,下面那两条规矩才站得住:
+  1. **退款只改 `paymentStatus`**,不动 `status`(退款不是订单状态)
+  2. **迟到的收款通知不能把退过款的单改回已付** —— 靠
+     `paymentStatus === "refunded"` 挡住(webhook 会重投,投递顺序不保证)
+- **幂等不靠去重表** —— 「已经是目标状态 → no-op」就够了。重投一次和重投
+  十次,结果一样。
+
+#### 逐分相等(Shopify 尤其要紧)
+
+本仓库算出来的每一行单价,必须跟收银台实际收的金额**一分不差**。
+
+- **微信 / 支付宝**天然满足 —— 金额是我们在请求里给的(微信要**分**,支付宝要
+  **元**,转换走 `payments/lib/money.ts`,不用浮点)。
+- **Shopify 的普通购物车做不到**:Storefront API 的 `CartLineInput`
+  **没有价格字段**;改价要 Cart Transform(Plus 套餐);Shopify Scripts 已
+  在 2026-06-30 下线。所以走**草稿订单**(`draftOrderCreate`):
+  - 行是**自定义行**(`title` + `price` + `quantity`),价格**由我们给**
+  - `taxExempt: true` —— 不在我们的总价上再叠一层税
+  - 运费也是我们自己给的一行(`shippingLine`),不跟 Shopify 的运费规则走
+  - 付完钱 Shopify 把它转成正式订单并发 `orders/paid` webhook
+  - **建完立刻回读总额对账** —— 对不上就**大声失败**,不能带着错的价去收钱
+  - 也就是说:**不用把商品目录同步过去,也能保证一分钱不差**
+
+#### 三个通道的 webhook
+
+| 通道 | 路由 | 验签 | 成功响应 |
+|---|---|---|---|
+| 微信 | `POST /api/webhooks/wechat` | 头 `Wechatpay-Signature`,签名串 = `timestamp\nnonce\nrawBody\n` | `200` + `{"code":"SUCCESS"}` |
+| 支付宝 | `POST /api/webhooks/alipay` | RSA2(`rsaCheckV1`:**`sign` 和 `sign_type` 都排除**) | `200` + **纯文本** `success` |
+| Shopify | `POST /api/webhooks/shopify` | 头 `X-Shopify-Hmac-Sha256` = base64(HMAC-SHA256(rawBody, API secret)) | `200` |
+
+- **必须读原始 body** —— 验签对的是字节,不是 `JSON.parse` 之后再序列化回来
+  的结果(键序、空格、转义都可能不一样)。微信/支付宝用 `await request.text()`,
+  Shopify 用 `await request.arrayBuffer()`。
+- **微信回调的 `resource` 是 AES-256-GCM** —— key = APIv3 密钥(32 字节),iv =
+  `resource.nonce`,AAD = `associated_data`,密文**最后 16 字节**是 authTag。
+- **支付宝只认纯文本 `success`** —— 带引号、多个空格、包成 JSON 一律算失败,
+  然后按计划重投(25 小时内最多 8 次)。
+- **认不出来的单号一律回 200 忽略** —— 回 4xx 平台会一直重投,把这个端点
+  打成噪音源,还会把真正重要的支付事件挤掉。
+- **同步回跳不可信** —— 支付宝 `return_url` 上的参数谁都能拼一个出来。「钱
+  到了」只认平台主动推过来的通知,而且必须验签。
+
+#### 微信是**扫码**,不是跳转
+
+- 微信 Native 下单拿到的是 `weixin://wxpay/bizpayurl?pr=…`,**不是图片 URL**,
+  得自己画成码。
+- **画码绝不能交给外部二维码服务** —— 把 `code_url` 传给 `api.qrserver.com`
+  之类,等于把这一笔付款的入口交给别人看。用 `qrcode` 包在**浏览器本地**生成
+  data URL(`src/features/payments/components/payment-qr.tsx`)。`qrcode` 这个
+  包本仓库早就在用了(`features/gpt-image/user/components/share-card.tsx`),
+  不新增依赖。
+- 结算页 / 支付成功页 / 我的订单 / 打印工单那几处都画码,都**轮询**订单状态,
+  钱到了才显示「已支付」。
+- **二维码存进 `payment_qr_code_url` 列** —— 用户从「我的订单」里还能再看到码,
+  不用重新下单。
+- **码只能复用,没有「刷新」这条路** —— `out_trade_no` 在微信侧唯一,同一张单
+  再建第二个 Native 会话会被拒(OUT_TRADE_NO_USED)。所以「重新获取付款入口」
+  对微信这一支是**把存下来的码再给一次**,不是重建。
+
+#### 通道清单接口
+
+`GET /api/store/payment-channels` 返回现在能用的通道。
+
+- **没配好的通道不显示** —— `available: false` 的前端不渲染。让用户点一个
+  注定失败的按钮,比不给这个选项更糟。
+- **过渡期多一条旧通道** —— 只要**三个新通道没全部就绪**,就额外返回旧的
+  Sellbase + Stripe 那条路;三个都就绪之后它自动消失(界面上就只剩三个支付
+  方式)。
+- 前端的选择器 `src/features/payments/components/payment-channel-picker.tsx`
+  用 `Payment.channels.*` 的 i18n 文案,没有翻译就退回服务端给的中文兜底。
+
+#### 通道没配好 ≠ 这次调用挂了
+
+| 情况 | 重试有用吗 | 用户该做什么 |
+|---|---|---|
+| `PAYMENT_NOT_CONFIGURED` | ❌ 没用,每次都一样 | 等部署补上配置 / 联系工作室 |
+| `PAYMENT_FAILED` | ✅ 有用 | 点「重新获取支付链接」 |
+
+- 分类在 `src/features/storefront/lib/payment-issue.ts` 的
+  `classifyPaymentIssue()` —— **纯函数**,能进 `unit` project 跑测试。
+- 码是**通道无关**的:早先叫 `SELLBASE_NOT_CONFIGURED` / `SELLBASE_FAILED`,
+  现在统一成 `PAYMENT_NOT_CONFIGURED` / `PAYMENT_FAILED`。旧码**不再产出**。
+- **重取链接的两个入口**(`ensureStorefrontOrderPaymentLink()` 商城 /
+  `ensurePrintOrderPaymentLink()` 工单)都先查通道配好没,通不过就直接回
+  `PAYMENT_NOT_CONFIGURED`,不白跑一趟网络。
+
+#### 环境变量
+
+`.env.example` 被 gitignore 挡掉了,所以变量说明写在各自通道的 `env.ts`
+文件头里(那几份就是活文档)。**密钥纪律**:所有私钥 / token / secret
+**只进环境变量**,绝不进仓库文件、绝不进聊天。
+
+| 通道 | 变量 |
+|---|---|
+| 微信 | `WECHAT_PAY_MCH_ID` / `WECHAT_PAY_APP_ID` / `WECHAT_PAY_API_V3_KEY`(32 字节)/ `WECHAT_PAY_SERIAL_NO` / `WECHAT_PAY_PRIVATE_KEY`(或 `_PATH`)/ 验签材料 `WECHAT_PAY_PUBLIC_KEY` + `WECHAT_PAY_PUBLIC_KEY_ID` **或** `WECHAT_PAY_PLATFORM_CERT_DIR` / `WECHAT_PAY_NOTIFY_URL`(可省) |
+| 支付宝 | `ALIPAY_APP_ID` / `ALIPAY_APP_PRIVATE_KEY`(或 `_PATH`)/ `ALIPAY_PUBLIC_KEY`(**支付宝公钥**,不是应用公钥)/ `ALIPAY_GATEWAY`(可省)/ `ALIPAY_NOTIFY_URL` / `ALIPAY_RETURN_URL`(可省) |
+| Shopify | `SHOPIFY_STORE_DOMAIN` / `SHOPIFY_ADMIN_ACCESS_TOKEN`(`shpat_…`,要 `write_orders`)/ `SHOPIFY_API_SECRET`(收 webhook 要)/ `SHOPIFY_API_VERSION`(可省) |
+
+#### 迁移脚本
+
+`scripts/apply-payment-channel-schema.ts`(幂等,手写,不走 `db:generate`):
+
+| 表 | 列 |
+|---|---|
+| `storefront_order` | `payment_channel` / `provider_order_id` / `payment_qr_code_url` |
+| `print_order` | `provider_order_id` / `payment_qr_code_url` |
+
+`print_order.payment_channel` 早就有(旧路用的)。`payment_channel` 是 **text**
+不是 PG enum(Drizzle 的 `text({enum})` 落到 PG 上就是普通 text 列,加值不用
+改列类型)。
+
+#### 行为由单测守住
+
+| 测试 | 守住什么 |
+|---|---|
+| `src/test/payments/pure/wechat-signature.test.ts` | 签名 / 解密 / 验签 |
+| `src/test/payments/pure/alipay-signature.test.ts` | RSA2 签名 / 验签 |
+| `src/test/payments/pure/shopify-signature.test.ts` | HMAC 验签 / 草稿单 |
+| `src/test/payments/pure/storefront-transition.test.ts` | 状态转移(退款 / 迟到通知) |
+| `src/test/payments/pure/linked-print-order.test.ts` | 工单跟着商城订单变 |
+| `src/test/storefront/pure/checkout-payment-issue.test.ts` | 「没配好」vs「这次挂了」 |
+
+### Stripe 微信支付 / 支付宝(2026-11-05,**旧路,过渡期保留**)
 
 Sellbase 的 `createCheckout()` 把 `payment_method_types: ["card"]` **写死**
 在边函数 bundle 里 —— 没有 store 级配置项,`supportedMethods(country)` 也是
@@ -499,19 +673,22 @@ Sellbase 的 `createCheckout()` 把 `payment_method_types: ["card"]` **写死**
 
 | 情况 | 重试有用吗 | 用户该做什么 |
 |---|---|---|
-| `SELLBASE_NOT_CONFIGURED` | ❌ 没用,每次都一样 | 等部署补上配置 / 联系工作室 |
-| `SELLBASE_FAILED` | ✅ 有用 | 点「重新获取支付链接」 |
+| `PAYMENT_NOT_CONFIGURED` | ❌ 没用,每次都一样 | 等部署补上配置 / 联系工作室 |
+| `PAYMENT_FAILED` | ✅ 有用 | 点「重新获取支付链接」 |
 
 - 分类在 `src/features/storefront/lib/payment-issue.ts` 的
   `classifyPaymentIssue()` —— **纯函数**(不碰 DB、不碰网络),才能进 `unit`
   project 跑测试。放在 `checkout.ts` 里的话 import 它就会把 `@/db` 拖进来。
+- 码**现在是通道无关的**:早先只有 Sellbase 一条路时叫
+  `SELLBASE_NOT_CONFIGURED` / `SELLBASE_FAILED`,现在三个新通道也走同一套
+  分类,统一成 `PAYMENT_NOT_CONFIGURED` / `PAYMENT_FAILED`。旧码**不再产出**。
 - 结算接口返回体多一个 `paymentIssue` 字段(`null` = 没失败)。前端按它分两种
   话术。
 - **重取链接的两个入口都返回这个码** —— `ensureStorefrontOrderPaymentLink()`
-  (商城)和 `ensurePrintOrderPaymentLink()`(工单)开头都先查
-  `isSellbaseConfigured()`,通不过就直接返回 `SELLBASE_NOT_CONFIGURED`,不再
-  白跑一趟网络。之前这两个函数里都有一段**永远返回不到**的
-  `SELLBASE_NOT_CONFIGURED` 代码 —— 声明了但没接上,现在接上了。
+  (商城)和 `ensurePrintOrderPaymentLink()`(工单)开头都先查**通道配好没**,
+  通不过就直接返回 `PAYMENT_NOT_CONFIGURED`,不再白跑一趟网络。之前这两个
+  函数里都有一段**永远返回不到**的 `SELLBASE_NOT_CONFIGURED` 代码 ——
+  声明了但没接上,现在接上了。
 - 行为由 `src/test/storefront/pure/checkout-payment-issue.test.ts` 守住。
 
 **用户那单怎么救**:线上已经部署了 `POST /api/store/orders/{orderNo}/payment-link`,

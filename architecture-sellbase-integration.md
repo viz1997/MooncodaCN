@@ -1,10 +1,25 @@
 # NextDevTpl × Sellbase · 集成架构说明
 
 > **Mooncoda · 小梦定制馆**
-> 状态:**已落地**(2026-11-04 收尾)
+> 状态:**已落地**(2026-11-04 收尾)—— **过渡期保留的旧路**(见下面的状态说明)
 > 目标读者:技术负责人 / 后端 / 前端 / DevOps
 > 前置阅读:[architecture-miniprogram-as-client.md](./architecture-miniprogram-as-client.md)(项目身份定位)
 > 取代:[architecture-medusa-integration.md](./architecture-medusa-integration.md)(Medusa 方案,已作废)
+
+> ### ⚠️ 状态说明(2026-11-05)
+>
+> 工作室决定把收款换成**三个直连通道**:微信支付(我们自己的商户号)、
+> 支付宝(我们自己的账户)、Shopify(只做银行卡 / Shop Pay)。**Sellbase +
+> Stripe 这条旧路并行保留**,等三个新通道全部跑通就整个拆掉。
+>
+> - 新架构:**CLAUDE.md 的「三个支付通道(2026-11-05)」一节** +
+>   `src/features/payments/` 的代码 + 各通道 `providers/*/env.ts` 的文件头
+> - 本文档描述的是**旧路** —— 代码还活着、还跑着,拆的时候照着这份文档
+>   把 `src/features/sellbase/` 整个目录、`SELLBASE_*` 环境变量、Stripe
+>   后台的商品镜像一起清掉
+> - 已经搬走的两处:状态转移判断在
+>   `src/features/payments/lib/transitions.ts`(四个通道共用),
+>   收银台建单在 `src/features/payments/providers/{wechat,alipay,shopify}/`
 
 ---
 
@@ -655,7 +670,7 @@ pnpm test:run --project=unit
 | `src/test/storefront/pure/cart-spec.test.ts` | `computeSpecHash` / `isSameSpec`:配件顺序无关、hash 稳定、字段边界不含糊 |
 | `src/test/storefront/pure/pricing-tier.test.ts` | 阶梯口径 + **两边一致性**(`discountedUnitPriceCents × quantity` == `totalPriceCents`) |
 | `src/test/print-quote/pure/payment-gate.test.ts` | 没付款不许进生产的状态门槛 |
-| `src/test/sellbase/pure/storefront-transition.test.ts` | 商城订单的 webhook 状态转移:退款只改支付状态、迟到的 `paid` 不改退款单、幂等 |
+| `src/test/payments/pure/storefront-transition.test.ts` | 商城订单的 webhook 状态转移:退款只改支付状态、迟到的 `paid` 不改退款单、幂等(2026-11-05 挪到 `src/test/payments/`,四个通道共用) |
 | `src/test/address/pure/address-schema.test.ts` | 地址入参校验(手机号 / 必填 / `district` 可选 / 20 条上限) |
 
 ---
@@ -683,7 +698,7 @@ pnpm test:run --project=unit
 - `src/features/sellbase/lib/money.ts` —— 分 ↔ 最小货币单位
 - `src/features/sellbase/lib/carrier.ts` —— 载体变体解析
 - `src/features/sellbase/lib/events.ts` —— webhook 事件 → 本地动作
-- `src/features/sellbase/lib/storefront-transition.ts` —— 商城订单的 webhook 状态转移(纯函数)
+- ~~`src/features/sellbase/lib/storefront-transition.ts`~~ —— **2026-11-05 已挪到 `src/features/payments/lib/transitions.ts`**(微信 / 支付宝 / Shopify / 旧路四个通道共用)
 - `src/features/sellbase/lib/orders.ts` —— 建订单 / 换支付链接
 - `src/features/sellbase/lib/customer.ts` —— customer id 回填
 - `src/features/sellbase/lib/webhook-handler.ts` —— webhook 落库

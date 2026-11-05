@@ -4,22 +4,28 @@
  * ## 为什么这个列表在 dashboard 而不是商城里
  *
  * 商城是匿名的(逛 → 加购 → 结算要登录),订单却**必须**挂在账号名下 ——
- * Sellbase 按 email upsert customer,订单归属账号才查得回来。所以订单页
+ * 支付平台按 email upsert customer,订单归属账号才查得回来。所以订单页
  * 放在 dashboard 这一侧。
  *
- * ## 「去支付」要能重取链接
+ * ## 「去支付」要能重取入口
  *
- * 未支付的订单给一个「去支付」按钮 —— 链接过期了(Sellbase 那边会换新的)
- * 或者结算时压根没生成链接(建单失败),都能在这里重新拿到。
+ * 未支付的订单给一个「去支付」按钮 —— 入口过期了(支付平台那边会换新的)
+ * 或者结算时压根没生成入口(建单失败),都能在这里重新拿到。
+ *
+ * ## 微信是**扫码**,不是跳转
+ *
+ * 别的通道点了按钮整页跳走;微信点了之后**留在原地**画一个二维码 ——
+ * 用户扫完码,页面轮询订单状态,收到款就显示「已支付」。
  */
 
 "use client";
 
 import { Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { formatPriceCNY } from "@/features/marketing/components/storefront/wjp-store-data";
+import { PaymentQrCode } from "@/features/payments/components/payment-qr";
 
 /** 列表里的一行(可序列化的形状) */
 export interface StoreOrderListItem {
@@ -34,6 +40,8 @@ export interface StoreOrderListItem {
   /** 商品名(最多展示两个) */
   titles: string[];
   thumbnail: string | null;
+  /** 走的哪条收款通道 —— null = 还没开始收款 */
+  paymentChannel?: string | null;
 }
 
 /** 状态的显示文案 + 颜色 */
@@ -100,6 +108,8 @@ export function StoreOrderList({ orders }: { orders: StoreOrderListItem[] }) {
 function OrderRow({ order }: { order: StoreOrderListItem }) {
   const meta = resolveOrderMeta(order);
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
+  /** 微信扫码的二维码内容 —— 非 null 时页面留在原地画码 */
+  const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -113,7 +123,13 @@ function OrderRow({ order }: { order: StoreOrderListItem }) {
       );
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(body?.message ?? "生成支付链接失败");
+        setError(body?.message ?? "生成支付入口失败");
+        setIsLoading(false);
+        return;
+      }
+      // 微信 Native —— 扫码,页面留在原地
+      if (body.paymentQrCodeUrl) {
+        setQrCodeUrl(body.paymentQrCodeUrl);
         setIsLoading(false);
         return;
       }
@@ -122,16 +138,57 @@ function OrderRow({ order }: { order: StoreOrderListItem }) {
         window.location.href = body.paymentUrl;
         return;
       }
-      setError("没有拿到支付链接");
+      setError("没有拿到支付入口");
       setIsLoading(false);
     } catch {
-      setError("生成支付链接失败");
+      setError("生成支付入口失败");
       setIsLoading(false);
     }
   };
 
+  /**
+   * 扫完码之后轮询收款状态
+   *
+   * 微信的回调到本仓库有几秒延迟。列表页不轮询的话用户得手动刷新 ——
+   * 扫完码盯着「待支付」不动,体验很差。
+   */
+  useEffect(() => {
+    if (!qrCodeUrl) return;
+
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const res = await fetch(
+          `/api/store/orders/${encodeURIComponent(order.orderNo)}`,
+          { cache: "no-store", headers: { Accept: "application/json" } }
+        );
+        if (!res.ok) return;
+        const body = await res.json();
+        if (
+          body?.paymentStatus === "paid" ||
+          body?.status === "paid" ||
+          body?.status === "fulfilled"
+        ) {
+          if (!cancelled) window.location.reload();
+        }
+      } catch {
+        // 网络抖一下 —— 下一轮再试
+      }
+    };
+
+    void tick();
+    const timer = setInterval(() => {
+      void tick();
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [qrCodeUrl, order.orderNo]);
+
   return (
-    <li className="border border-border rounded-sm p-4 flex gap-4 items-start">
+    <li className="border border-border rounded-sm p-4 flex flex-wrap gap-4 items-start">
       {order.thumbnail ? (
         <img
           src={order.thumbnail}
@@ -182,6 +239,18 @@ function OrderRow({ order }: { order: StoreOrderListItem }) {
           </a>
         )}
       </div>
+
+      {/* 微信扫码 —— 整行下方展开,画完码用户扫就行 */}
+      {qrCodeUrl && (
+        <div className="w-full shrink-0 border-t border-border pt-4 flex flex-col items-center">
+          <p className="text-sm font-medium mb-3">微信扫码支付</p>
+          <PaymentQrCode
+            value={qrCodeUrl}
+            size={200}
+            hint="用微信扫一扫,付款完成后这一行会自动变成「已支付」"
+          />
+        </div>
+      )}
     </li>
   );
 }

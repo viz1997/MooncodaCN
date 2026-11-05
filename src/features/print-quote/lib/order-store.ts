@@ -420,6 +420,8 @@ export function toUserPrintOrder(row: PrintOrderRow): UserPrintOrder {
     updatedAt: row.updatedAt.toISOString(),
     paymentStatus: row.paymentStatus,
     paymentUrl: row.paymentUrl,
+    paymentQrCodeUrl: row.paymentQrCodeUrl,
+    paymentChannel: row.paymentChannel,
   };
 }
 

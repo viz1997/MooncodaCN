@@ -3,13 +3,14 @@
 /**
  * 下单成功卡片 —— 「订单建好了,接下来付钱」
  *
- * ## 三种情形
+ * ## 四种情形
  *
  * | 情形 | 卡片说什么 | 做什么 |
  * |---|---|---|
- * | 有支付链接 | 「正在跳转支付…」 | 自动跳 Stripe(3 秒后) |
+ * | 有支付链接 | 「正在跳转支付…」 | 自动跳支付平台(3 秒后) |
  * | 有支付链接但自动跳被拦 | 同上 | 手动点「去支付」 |
- * | 没有支付链接 | 「订单已创建,支付链接生成失败」 | 给详情页链接(那儿能重试 / 走线下) |
+ * | 有二维码(微信) | 「微信扫码支付」 | 画一个码,用户扫 |
+ * | 没有付款入口 | 「订单已创建,支付入口生成失败」 | 给详情页链接(那儿能重试 / 走线下) |
  *
  * ## 为什么自动跳要延后 3 秒
  *
@@ -18,20 +19,21 @@
  *
  * 延后跳转期间页面仍然可点 —— 手动链接一直在。
  *
- * ## 跳去哪
+ * ## 微信不跳页
  *
- * Stripe(外部页面)。付完之后 Stripe 回跳到工单详情页
- * (`?paid=1`),webhook 稍后把收款状态改成 `paid`。
+ * 微信 Native 是**扫码**:页面留在原地画码,用户扫完钱才到。所以这一支
+ * 没有「3 秒后自动跳」,也没有「去支付」按钮 —— 码本身就是入口。
  */
 
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 
+import { PaymentQrCode } from "@/features/payments/components/payment-qr";
 import { formatCents } from "@/features/print-quote/lib/format";
 import type { PrintOrderCreated } from "@/features/print-quote/lib/quote-types";
 import { Link } from "@/i18n/routing";
 
-/** 延迟多久自动跳 Stripe */
+/** 延迟多久自动跳支付平台 */
 const AUTO_REDIRECT_DELAY_MS = 3000;
 
 export function OrderCreatedCard({ order }: { order: PrintOrderCreated }) {
@@ -41,6 +43,7 @@ export function OrderCreatedCard({ order }: { order: PrintOrderCreated }) {
   );
 
   const paymentUrl = order.paymentUrl;
+  const qrCodeUrl = order.paymentQrCodeUrl;
 
   useEffect(() => {
     if (!paymentUrl) return;
@@ -81,7 +84,21 @@ export function OrderCreatedCard({ order }: { order: PrintOrderCreated }) {
         </div>
       </dl>
 
-      {paymentUrl ? (
+      {/* 微信扫码 —— 页面留在原地,不跳 */}
+      {qrCodeUrl ? (
+        <div className="mt-4 rounded-lg border border-emerald-600/20 bg-white/60 p-3">
+          <p className="text-xs font-medium text-emerald-900">
+            {t("payment.qrTitle")}
+          </p>
+          <div className="mt-3 flex justify-center">
+            <PaymentQrCode
+              value={qrCodeUrl}
+              size={200}
+              hint={t("payment.qrHint")}
+            />
+          </div>
+        </div>
+      ) : paymentUrl ? (
         <div className="mt-4 rounded-lg border border-emerald-600/20 bg-white/60 p-3">
           <p className="text-xs font-medium text-emerald-900">
             {t("order.redirecting", { seconds: secondsLeft })}

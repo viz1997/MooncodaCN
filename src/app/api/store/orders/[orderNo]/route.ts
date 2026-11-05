@@ -53,6 +53,14 @@ async function handle(
     totalCents: order.totalCents,
     currency: order.currency,
     paymentUrl: order.paymentUrl,
+    /**
+     * 微信扫码的二维码内容(2026-11-05)
+     *
+     * 微信 Native 是扫码不是跳转 —— 前端拿这个渲染二维码。其他通道是 null。
+     */
+    paymentQrCodeUrl: order.paymentQrCodeUrl,
+    /** 走的是哪条通道 —— null = 还没开始收款 */
+    paymentChannel: order.paymentChannel,
     paidAt: order.paidAt ? order.paidAt.toISOString() : null,
     createdAt: order.createdAt.toISOString(),
   });

@@ -58,9 +58,3 @@ export {
   SELLBASE_WEBHOOK_TOLERANCE_SECONDS,
   verifySellbaseSignature,
 } from "./lib/signature";
-export {
-  decideStorefrontTransition,
-  type StorefrontOrderState,
-  type StorefrontPaymentKind,
-  type StorefrontTransitionDecision,
-} from "./lib/storefront-transition";

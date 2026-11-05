@@ -1736,7 +1736,7 @@
       "uploading": "Uploading model…",
       "submitting": "Submitting…",
       "cancel": "Back",
-      "payHint": "You'll be taken to Stripe to pay — production starts once payment lands.",
+      "payHint": "You'll be taken to the payment page — production starts once payment lands.",
       "policyNotice": "Please read these before you order — they are hard requirements of the print service, and following them saves a round of rework.",
       "policyPrintNotice": "Print Notice",
       "policyDesignSpec": "3D Model Design Specification",
@@ -1786,6 +1786,8 @@
       "paid": "Paid",
       "refunded": "Refunded",
       "offlineHint": "Online payment isn't set up — ask the studio for an offline transfer",
+      "qrTitle": "Scan to pay with WeChat",
+      "qrHint": "Scan with WeChat — this updates once the payment lands",
       "errors": {
         "LINK_FAILED": "Could not generate a payment link — retry later or contact the studio"
       }
@@ -1956,5 +1958,30 @@
       "no-texture-in-mtl": "no map_Kd for this material in the MTL",
       "file-missing": "this texture file is not in the archive"
     }
+  },
+  "Payment": {
+    "title": "Payment method",
+    "channels": {
+      "wechat": {
+        "label": "WeChat Pay",
+        "description": "Scan the code with WeChat to pay"
+      },
+      "alipay": {
+        "label": "Alipay",
+        "description": "Redirect to Alipay to complete the payment"
+      },
+      "shopify": {
+        "label": "Card / Shop Pay",
+        "description": "Debit card, credit card or Shop Pay"
+      },
+      "stripe": {
+        "label": "Card (legacy checkout)",
+        "description": "The old checkout, kept while the three new channels roll out"
+      }
+    },
+    "qrTitle": "Scan to pay with WeChat",
+    "qrHint": "Scan with WeChat — this updates once the payment lands",
+    "qrPaidTitle": "Payment received",
+    "qrPaid": "Payment received — we will start right away."
   }
 }

@@ -64,6 +64,12 @@ const checkoutSchema = z.object({
    * 触发的,那时请求 locale 是 admin 的语言,不是下单用户的语言。
    */
   locale: z.enum(["en", "zh"]).nullish(),
+  /**
+   * 收款通道(2026-11-05)
+   *
+   * 不传 = 旧的 Sellbase/Stripe 那条路(过渡期并行,跑通新通道后拆)。
+   */
+  channel: z.enum(["wechat", "alipay", "shopify", "stripe"]).nullish(),
 });
 
 /** CheckoutError 的 code → HTTP 状态 */
@@ -76,6 +82,8 @@ function statusForCode(code: CheckoutError["code"]): number {
     case "PRICING_FAILED":
       return 422;
     case "CARRIER_NOT_FOUND":
+      return 503;
+    case "PAYMENT_CHANNEL_UNAVAILABLE":
       return 503;
     default:
       return 500;
@@ -157,6 +165,7 @@ async function handle(request: NextRequest) {
       },
       note: parsed.data.note ?? null,
       locale: parsed.data.locale ?? null,
+      channel: parsed.data.channel ?? null,
     });
 
     return NextResponse.json(result, { headers: getRateLimitHeaders(rl) });

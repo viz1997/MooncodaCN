@@ -1,14 +1,27 @@
 /**
  * 商城结算 —— 服务端
  *
- * ## 「本仓库算价,Sellbase 只做收银台」在这条链上的落法
+ * ## 「本仓库算价,收银台只负责收钱」在这条链上的落法
  *
  * ```
  * 购物车(DB)→ 服务端重算每一行的价 → 落 storefront_order(_item)
- *            → 建 Sellbase 订单(items[].unit_price_amount = 折后单价)
- *            → 回写 sellbase_order_id + payment_url → 前端跳 Stripe
- *            → webhook 回写 status=paid
+ *            → 按用户选的通道建一次支付会话(本仓库算的价原样送过去)
+ *            → 回写 payment_channel + provider_order_id + 付款入口
+ *            → 前端跳(支付宝 / Shopify)或出示二维码(微信)
+ *            → 通道回调 → 订单标 paid
  * ```
+ *
+ * ## 三个通道(2026-11-05)
+ *
+ * | 通道 | 收钱方式 | 付款入口 |
+ * |---|---|---|
+ * | `wechat` | 微信支付 Native(我们自己的商户号) | **扫码** —— 前端渲染二维码 |
+ * | `alipay` | 支付宝电脑网站支付(我们自己的应用) | 跳支付宝 |
+ * | `shopify` | Shopify 草稿订单(只做卡) | 跳 Shopify 收银台 |
+ * | `stripe` | **旧路**:Sellbase + Stripe(过渡期并行) | 跳 Stripe |
+ *
+ * 「先并行,跑通再拆」—— 旧路还在,新路也在。三个新通道都跑通之后,旧路连同
+ * `src/features/sellbase/` 一起拆掉,届时 `stripe` 从枚举里删掉。
  *
  * ## 服务端**不信**客户端带来的价
  *
@@ -16,15 +29,15 @@
  * 把每一行按 `metadata` 重新算一遍 —— 定价规则(配件加价 / 基础价 / 阶梯
  * 折扣)改了之后,存量购物车带着旧价,直接收就是收错了。
  *
- * ## 先落本地订单,再建 Sellbase 订单
+ * ## 先落本地订单,再建支付会话
  *
- * 顺序不能反:本地订单是「订单事实」,Sellbase 订单是「收款载体」。Sellbase
- * 那边挂了(网络 / 配置 / Stripe 没连上),订单已经在了,状态停在 `unpaid`,
- * 用户还能在详情页重取支付链接。反过来的话就变成「收了钱但没有订单」。
+ * 顺序不能反:本地订单是「订单事实」,支付会话是「收款载体」。收款通道那边
+ * 挂了(网络 / 配置 / 上游没连上),订单已经在了,状态停在 `unpaid`,用户还能
+ * 在详情页重取付款入口。反过来的话就变成「收了钱但没有订单」。
  *
  * ## 失败要说清楚是**哪一种**失败
  *
- * 「收款通道没配好」(环境变量缺)和「这次调用挂了」(网络 / Stripe / 上游)
+ * 「收款通道没配好」(环境变量缺)和「这次调用挂了」(网络 / 上游)
  * 对用户是两件完全不同的事:前者重试**没用** —— 得等部署补上配置,用户在
  * 「我的订单」里点多少次「重新获取支付链接」都是同一个结果;后者重试就能好。
  *
@@ -35,9 +48,9 @@
  *
  * ## 逐分相等
  *
- * Sellbase 的行合计 = `unit_price_amount × quantity`。本仓库的口径是
- * 「先折单价,再乘数量」(`discountedUnitPriceCents × quantity`),两边
- * **逐分相等**(见 `pricing.ts` 的文件头)。
+ * 送过去的行合计 = `折后单价 × quantity`(`discountedUnitPriceCents × quantity`)。
+ * 本仓库的口径是「先折单价,再乘数量」(`pricing.ts` 的文件头),送过去的
+ * 跟收银台收的**逐分相等**。
  */
 
 import { randomBytes } from "node:crypto";
@@ -51,6 +64,13 @@ import {
   storefrontOrder,
   storefrontOrderItem,
 } from "@/db/schema";
+import { getPaymentProvider } from "@/features/payments/lib/registry";
+import type {
+  OnlinePaymentChannel,
+  PaymentChannel,
+  PaymentRequest,
+  PaymentRequestItem,
+} from "@/features/payments/lib/types";
 import { createPrintOrder } from "@/features/print-quote/lib/order-store";
 import {
   computePrintServiceLinePrice,
@@ -111,14 +131,34 @@ export interface CheckoutInput {
    * 的口径)。不传 = 中文。
    */
   locale?: string | null;
+  /**
+   * 收款通道(2026-11-05)
+   *
+   * 不传 = 走旧的 Sellbase/Stripe 那条路(过渡期)。前端会把用户选的那个
+   * 通道传上来。
+   */
+  channel?: PaymentChannel | null;
 }
 
 /** 结算成功的返回 */
 export interface CheckoutSuccess {
   /** 本地订单号 */
   orderNo: string;
-  /** Stripe 支付链接 —— null 表示 Sellbase 那边没给链接(订单还在,状态 unpaid) */
+  /**
+   * 付款入口(跳转地址)—— null 表示这一单不是「跳过去付」
+   *
+   * 支付宝 / Shopify / 旧路的 Stripe 都是跳转;微信是**扫码**,看
+   * `paymentQrCodeUrl`。
+   */
   paymentUrl: string | null;
+  /**
+   * 微信扫码用的二维码内容(2026-11-05)
+   *
+   * 只有微信通道有值 —— 别的通道是 null。
+   */
+  paymentQrCodeUrl: string | null;
+  /** 这次用的是哪个通道 */
+  paymentChannel: PaymentChannel;
   /** 折前小计(分) */
   subtotalCents: number;
   /** 阶梯折扣(分) */
@@ -137,16 +177,16 @@ export interface CheckoutSuccess {
    */
   printOrderNos: string[];
   /**
-   * 支付链接为什么没生成(2026-11-05)
+   * 付款入口为什么没生成(2026-11-05)
    *
-   * null = 链接拿到了(或者压根没失败)。非 null 时 `paymentUrl` 一定是 null。
+   * null = 拿到了(或者压根没失败)。非 null 时 `paymentUrl` 一定是 null。
    *
    * 分两种,不是一种 —— 用户看到的话术不一样:
    *
-   * - `SELLBASE_NOT_CONFIGURED` —— 收款通道**没配好**(环境变量缺)。
-   *   这种情况下「去我的订单里重新获取链接」**也拿不到链接**,提示得说清楚,
+   * - `PAYMENT_NOT_CONFIGURED` —— 收款通道**没配好**(环境变量缺)。
+   *   这种情况下「去我的订单里重新获取」**也拿不到**,提示得说清楚,
    *   否则用户会一直重试一件根本不会成功的事(2026-11-05 线上真实踩到过)。
-   * - `SELLBASE_FAILED` —— 通道配好了但这次调用失败(网络 / Stripe / 上游)。
+   * - `PAYMENT_FAILED` —— 通道配好了但这次调用失败(网络 / 上游)。
    *   这种重试是有意义的。
    */
   paymentIssue: StorefrontPaymentIssue | null;
@@ -160,7 +200,7 @@ export type CheckoutErrorCode =
   | "CART_EMPTY"
   | "PRICING_FAILED"
   | "CARRIER_NOT_FOUND"
-  | "SELLBASE_FAILED"
+  | "PAYMENT_CHANNEL_UNAVAILABLE"
   | "FAILED";
 
 /** 结算失败 —— 带机器可读的 code,Route Handler 翻译成响应 */
@@ -199,7 +239,7 @@ export function generateStorefrontOrderNo(now = new Date()): string {
 /* -------------------------------------------------------------------------- */
 
 /** 重算后的一行 */
-interface PricedLine {
+export interface PricedLine {
   item: CartLineItem;
   /** 折后单价(分) */
   discountedUnitPriceCents: number;
@@ -290,6 +330,114 @@ function repriceLine(item: CartLineItem): PricedLine {
 }
 
 /* -------------------------------------------------------------------------- */
+/*  通道                                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 定下这次用哪个通道
+ *
+ * 不传 = 旧的 Sellbase/Stripe 那条路(过渡期并行)。
+ *
+ * 指定的通道**没配好**就直接报错 —— 静默退回旧路会让用户以为自己选了
+ * 微信支付、结果跳到了 Stripe(用户看着莫名其妙)。「这个方式现在不可用」
+ * 是一句实话。
+ */
+export function resolveCheckoutChannel(
+  requested: PaymentChannel | null | undefined
+): OnlinePaymentChannel {
+  const channel = requested ?? "stripe";
+  // `offline` 不是线上通道 —— 线下收款是工作室后台手动标的,没有支付会话
+  if (channel === "offline") {
+    throw new CheckoutError(
+      "PAYMENT_CHANNEL_UNAVAILABLE",
+      "这个支付方式暂时不可用,请换一个或联系工作室"
+    );
+  }
+  if (channel === "stripe") return channel;
+
+  const provider = getPaymentProvider(channel);
+  if (!provider) {
+    throw new CheckoutError(
+      "PAYMENT_CHANNEL_UNAVAILABLE",
+      "这个支付方式暂时不可用,请换一个或联系工作室"
+    );
+  }
+  if (!provider.isConfigured()) {
+    throw new CheckoutError(
+      "PAYMENT_CHANNEL_UNAVAILABLE",
+      "这个支付方式暂时不可用,请换一个或联系工作室"
+    );
+  }
+  return channel;
+}
+
+/**
+ * 把重算后的行翻译成「支付请求」—— **通道无关**
+ *
+ * 送过去的单价是**折后单价**(分)。「先折单价,再乘数量」—— 阶梯折扣在这一层
+ * 就已经折过了,通道不参与定价。
+ */
+export function buildPaymentRequest(params: {
+  orderNo: string;
+  email: string;
+  lines: PricedLine[];
+  shippingCents: number;
+  shippingAddress: ShippingAddressSnapshot;
+  note: string | null;
+  successUrl: string;
+  currency: string;
+}): PaymentRequest {
+  const items: PaymentRequestItem[] = params.lines.map((line) => {
+    // 附加信息 —— 各通道自己决定怎么用(Shopify 落成行属性,微信/支付宝塞进描述)
+    //
+    // 用**对象字面量**而不是 `attributes["克重"] = …` —— 后者是计算属性访问,
+    // biome 的 `useLiteralKeys` 会报(而且中文标识符的点号写法读着别扭)。
+    const quote = line.printQuote;
+    const engraving = line.item.metadata.engravingText;
+
+    const attributes: Record<string, string> = {
+      ...(quote
+        ? {
+            克重: `${quote.materialWeightG} g`,
+            ...(quote.supportWeightG != null
+              ? { 支撑: `${quote.supportWeightG} g` }
+              : {}),
+            尺寸: `${quote.dims[0]}×${quote.dims[1]}×${quote.dims[2]} mm`,
+            交期: `${quote.deliveryHours} 小时`,
+          }
+        : {}),
+      ...(engraving ? { 刻字: engraving } : {}),
+    };
+
+    return {
+      title: line.item.productTitle,
+      quantity: line.quantity,
+      unitPriceCents: line.discountedUnitPriceCents,
+      sku: line.item.productHandle,
+      attributes,
+    };
+  });
+
+  return {
+    orderNo: params.orderNo,
+    email: params.email,
+    items,
+    shippingCents: params.shippingCents,
+    shippingAddress: {
+      recipientName: params.shippingAddress.recipientName,
+      phone: params.shippingAddress.phone,
+      province: params.shippingAddress.province,
+      city: params.shippingAddress.city,
+      district: params.shippingAddress.district,
+      detail: params.shippingAddress.detail,
+    },
+    note: params.note ?? "",
+    successUrl: params.successUrl,
+    currency: params.currency,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
 /*  结算                                                                      */
 /* -------------------------------------------------------------------------- */
 
@@ -298,10 +446,11 @@ function repriceLine(item: CartLineItem): PricedLine {
  *
  * 步骤:
  * 1. 读购物车 → 重算每一行的价
- * 2. 解析每一行的 Sellbase 载体变体
- * 3. 落 `storefront_order` + `storefront_order_item`
- * 4. 建 Sellbase 订单(收银台模式)
- * 5. 回写 `sellbase_order_id` + `payment_url`,清空购物车
+ * 2. 定通道(用户选的;没配好的通道直接报错)
+ * 3. 解析每一行的 Sellbase 载体变体(**只有旧路需要**)
+ * 4. 落 `storefront_order` + `storefront_order_item`
+ * 5. 建支付会话(旧路 = Sellbase 订单;新路 = 通道的支付会话)
+ * 6. 回写 `payment_channel` + `provider_order_id` + 付款入口,清空购物车
  */
 export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
   const cart = await getCart(input.cartId);
@@ -329,28 +478,37 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
   const shippingCents = calculateShippingCents(discountedSubtotalCents);
   const totalCents = discountedSubtotalCents + shippingCents;
 
-  // 3. 载体变体 —— 每个商品型号一个
-  //    打印服务行走**专用**的载体行(「打印服务(按克重)」),不按型号找。
-  const carriers = await Promise.all(
-    lines.map(async (line) => {
-      try {
-        if (getPrintServiceSpec(line.item.metadata)) {
-          return await resolvePrintServiceCarrier();
-        }
-        const product = findProductById(line.item.productId);
-        const productCode = product?.productTypeCode ?? "";
-        const sizeCode = sizeCodeFromSpecSizeId(line.item.metadata.sizeId);
-        return await resolveCarrierVariant({ productCode, sizeCode });
-      } catch (error) {
-        if (error instanceof CarrierNotFoundError) {
-          throw new CheckoutError("CARRIER_NOT_FOUND", error.message);
-        }
-        throw error;
-      }
-    })
-  );
+  // 3. 通道
+  const channel = resolveCheckoutChannel(input.channel);
+  const legacy = channel === "stripe";
 
-  // 4. 落本地订单
+  // 4. 载体变体 —— **只有旧路需要**
+  //
+  //    新通道的价是本仓库给的,不经过 Sellbase 的载体变体(所以新通道不
+  //    需要把商品目录同步过去)。
+  //    打印服务行走**专用**的载体行(「打印服务(按克重)」),不按型号找。
+  const carriers = legacy
+    ? await Promise.all(
+        lines.map(async (line) => {
+          try {
+            if (getPrintServiceSpec(line.item.metadata)) {
+              return await resolvePrintServiceCarrier();
+            }
+            const product = findProductById(line.item.productId);
+            const productCode = product?.productTypeCode ?? "";
+            const sizeCode = sizeCodeFromSpecSizeId(line.item.metadata.sizeId);
+            return await resolveCarrierVariant({ productCode, sizeCode });
+          } catch (error) {
+            if (error instanceof CarrierNotFoundError) {
+              throw new CheckoutError("CARRIER_NOT_FOUND", error.message);
+            }
+            throw error;
+          }
+        })
+      )
+    : null;
+
+  // 5. 落本地订单
   const orderNo = generateStorefrontOrderNo();
   const orderId = `so_${nanoid(16)}`;
   const now = new Date();
@@ -372,13 +530,14 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
       currency: "CNY",
       shippingAddress: input.address,
       note: input.note ?? null,
+      // 通道先记上 —— 建支付会话失败时也知道这单本来该走哪条路
+      paymentChannel: channel,
       createdAt: now,
       updatedAt: now,
     });
 
     for (const [index, line] of lines.entries()) {
-      const carrier = carriers[index];
-      if (!carrier) continue;
+      const carrier = carriers?.[index] ?? null;
       await tx.insert(storefrontOrderItem).values({
         id: `soi_${nanoid(16)}`,
         orderId,
@@ -386,8 +545,9 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
         productHandle: line.item.productHandle,
         productTitle: line.item.productTitle,
         productThumbnail: line.item.productThumbnail || null,
-        variantId: carrier.variantId,
-        sku: carrier.sku,
+        // 旧路挂 Sellbase 的载体变体;新路没有载体 —— 价是本仓库自己给的
+        variantId: carrier?.variantId ?? null,
+        sku: carrier?.sku ?? line.item.productHandle,
         unitPriceCents: line.unitPriceCents,
         discountedUnitPriceCents: line.discountedUnitPriceCents,
         quantity: line.quantity,
@@ -400,12 +560,12 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
     // 打印服务行 → 建工单
     //
     // **在同一个事务里** —— 商城订单和工单要么都成,要么都不成。
-    // 「收了钱但没有工单」比「整笔下单失败」更难收拾:钱已经进了 Sellbase
-    // 的订单,工作室那边看不到要干的活。
+    // 「收了钱但没有工单」比「整笔下单失败」更难收拾:钱已经进了收银台,
+    // 工作室那边看不到要干的活。
     //
-    // 工单的 `sellbase_order_id` 留空 —— 整张购物车共用**一张** Sellbase
-    // 订单,而 `print_order.sellbase_order_id` 是唯一索引,挂不上。工单靠
-    // `storefront_order_id` 跟商城订单关联,webhook 标 paid 时按它反查。
+    // 工单的 `sellbase_order_id` 留空 —— 整张购物车共用**一张**支付订单,
+    // 而 `print_order.sellbase_order_id` 是唯一索引,挂不上。工单靠
+    // `storefront_order_id` 跟商城订单关联,回调标 paid 时按它反查。
     const locale = normalizePrintOrderLocale(input.locale);
     for (const line of lines) {
       const printSpec = getPrintServiceSpec(line.item.metadata);
@@ -434,70 +594,124 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
     }
   });
 
-  // 5. 建 Sellbase 订单(收银台)
-  const conversion = getCurrencyConversion(SELLBASE_CURRENCY, SELLBASE_FX_RATE);
-  const note = buildStorefrontSellbaseNote({
-    orderNo,
-    lines: lines.map((l) => ({
-      title: l.item.productTitle,
-      quantity: l.quantity,
-    })),
-  });
-
+  // 6. 建支付会话
   let paymentUrl: string | null = null;
+  let paymentQrCodeUrl: string | null = null;
+  let providerOrderId: string | null = null;
   let sellbaseOrderId: string | null = null;
   let paymentIssue: StorefrontPaymentIssue | null = null;
 
-  try {
-    const created = await createSellbaseOrder({
-      email: input.email,
-      items: lines.map((line, index) => ({
-        variantId: carriers[index]!.variantId,
-        quantity: line.quantity,
-        unitPriceAmount: centsToStoreAmount(
-          line.discountedUnitPriceCents,
-          conversion
-        ),
-      })),
-      shippingAmount: centsToStoreAmount(shippingCents, conversion),
-      shippingAddress: input.address,
-      note,
-      successUrl: buildStorefrontSuccessUrl(orderNo),
-      // 商城这边本仓库不发确认邮件 —— 让 Sellbase 发,免得用户收两封
-      notifyCustomer: true,
-    });
-    sellbaseOrderId = created.orderId;
-    paymentUrl = created.paymentUrl;
-
-    // 回填 Sellbase customer 指针(加速用,失败不影响主流程)
-    if (created.customerId) {
-      await backfillSellbaseCustomerId(input.userId, created.customerId);
-    }
-  } catch (error) {
-    // 本地订单已经落好了 —— 记日志,把「没有支付链接」这件事如实返回,
-    // 用户还能在详情页重取链接。不要把一个收款通道的问题变成下单失败。
-    console.error(
-      `[storefront] ${orderNo} 建 Sellbase 订单失败 —— 订单已落库,状态 unpaid`,
-      error
+  if (legacy) {
+    // 旧路:Sellbase 收银台 + Stripe
+    const conversion = getCurrencyConversion(
+      SELLBASE_CURRENCY,
+      SELLBASE_FX_RATE
     );
-    // 「配置没配好」和「这次调用挂了」要分开 —— 前者重试没用(见
-    // `classifyPaymentIssue` 的注释)
-    paymentIssue = classifyPaymentIssue(error);
+    const note = buildStorefrontSellbaseNote({
+      orderNo,
+      lines: lines.map((l) => ({
+        title: l.item.productTitle,
+        quantity: l.quantity,
+      })),
+    });
+
+    try {
+      const created = await createSellbaseOrder({
+        email: input.email,
+        items: lines.map((line, index) => ({
+          variantId: carriers?.[index]?.variantId ?? "",
+          quantity: line.quantity,
+          unitPriceAmount: centsToStoreAmount(
+            line.discountedUnitPriceCents,
+            conversion
+          ),
+        })),
+        shippingAmount: centsToStoreAmount(shippingCents, conversion),
+        shippingAddress: input.address,
+        note,
+        successUrl: buildStorefrontSuccessUrl(orderNo),
+        // 商城这边本仓库不发确认邮件 —— 让 Sellbase 发,免得用户收两封
+        notifyCustomer: true,
+      });
+      sellbaseOrderId = created.orderId;
+      paymentUrl = created.paymentUrl;
+
+      // 回填 Sellbase customer 指针(加速用,失败不影响主流程)
+      if (created.customerId) {
+        await backfillSellbaseCustomerId(input.userId, created.customerId);
+      }
+    } catch (error) {
+      // 本地订单已经落好了 —— 记日志,把「没有支付链接」这件事如实返回,
+      // 用户还能在详情页重取链接。不要把一个收款通道的问题变成下单失败。
+      console.error(
+        `[storefront] ${orderNo} 建 Sellbase 订单失败 —— 订单已落库,状态 unpaid`,
+        error
+      );
+      // 「配置没配好」和「这次调用挂了」要分开 —— 前者重试没用(见
+      // `classifyPaymentIssue` 的注释)
+      paymentIssue = classifyPaymentIssue(error);
+    }
+  } else {
+    // 新路:微信 / 支付宝 / Shopify
+    const provider = getPaymentProvider(channel);
+    if (!provider) {
+      throw new CheckoutError(
+        "PAYMENT_CHANNEL_UNAVAILABLE",
+        "这个支付方式暂时不可用,请换一个或联系工作室"
+      );
+    }
+
+    try {
+      const session = await provider.createSession(
+        buildPaymentRequest({
+          orderNo,
+          email: input.email,
+          lines,
+          shippingCents,
+          shippingAddress: input.address,
+          note: input.note ?? null,
+          successUrl: buildStorefrontSuccessUrl(orderNo),
+          currency: "CNY",
+        })
+      );
+      paymentUrl = session.redirectUrl;
+      paymentQrCodeUrl = session.qrCodeUrl;
+      providerOrderId = session.providerOrderId;
+    } catch (error) {
+      console.error(
+        `[storefront] ${orderNo} 建 ${channel} 支付会话失败 —— 订单已落库,状态 unpaid`,
+        error
+      );
+      paymentIssue = classifyPaymentIssue(error);
+    }
   }
 
-  // 6. 回写
-  if (sellbaseOrderId) {
+  // 7. 回写
+  if (legacy) {
+    if (sellbaseOrderId) {
+      await db
+        .update(storefrontOrder)
+        .set({
+          sellbaseOrderId,
+          paymentUrl,
+          updatedAt: new Date(),
+        })
+        .where(eq(storefrontOrder.id, orderId));
+    }
+  } else {
     await db
       .update(storefrontOrder)
       .set({
-        sellbaseOrderId,
+        paymentChannel: channel,
+        providerOrderId,
         paymentUrl,
+        paymentQrCodeUrl,
         updatedAt: new Date(),
       })
       .where(eq(storefrontOrder.id, orderId));
   }
 
-  // 7. 购物车过户 + 清空
+  // 8. 购物车过户 + 清空
   //    「过户」先做 —— 游客购物车在这一刻归到账号名下(以后换设备登录还能找回)。
   //    清空放在最后:建单失败时用户还能回到购物车重试。
   await stampCartOwner(input.cartId, input.userId);
@@ -506,6 +720,8 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
   return {
     orderNo,
     paymentUrl,
+    paymentQrCodeUrl,
+    paymentChannel: channel,
     subtotalCents,
     discountCents,
     shippingCents,

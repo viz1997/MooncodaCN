@@ -98,7 +98,7 @@ async function handle(
         { status: 409, headers: getRateLimitHeaders(rl) }
       );
     }
-    // SELLBASE_NOT_CONFIGURED / LINK_FAILED —— 都不该让用户看到 500
+    // PAYMENT_NOT_CONFIGURED / LINK_FAILED —— 都不该让用户看到 500
     //
     // 话术分两种:「没配好」的时候重试**没用**(每次都是同一个结果),得让用户
     // 去找工作室;「这次挂了」重试才有意义。口径跟商城那边一样
@@ -108,7 +108,7 @@ async function handle(
         success: false,
         error: result.code,
         message:
-          result.code === "SELLBASE_NOT_CONFIGURED"
+          result.code === "PAYMENT_NOT_CONFIGURED"
             ? "收款通道没配置好,请联系工作室线下支付"
             : "支付链接生成失败,请稍后重试或联系工作室线下支付",
       },
@@ -120,7 +120,10 @@ async function handle(
     {
       success: true,
       orderNo: row.orderNo,
+      /** 跳转地址(微信是 null —— 微信是扫码) */
       paymentUrl: result.paymentUrl,
+      /** 微信扫码的二维码内容 */
+      paymentQrCodeUrl: result.paymentQrCodeUrl,
     },
     { headers: getRateLimitHeaders(rl) }
   );

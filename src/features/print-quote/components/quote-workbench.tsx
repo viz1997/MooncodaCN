@@ -92,6 +92,13 @@ export function QuoteWorkbench({
   const [orderError, setOrderError] = useState<string | null>(null);
   const [order, setOrder] = useState<PrintOrderCreated | null>(null);
   /**
+   * 选中的收款通道
+   *
+   * null = 还没选(服务端走旧路 Sellbase + Stripe,过渡期保留)。
+   * 支付方式选择器只渲染**配好了**的通道 —— 没配好的不给人看。
+   */
+  const [channel, setChannel] = useState<string | null>(null);
+  /**
    * 我的订单
    *
    * 首屏由页面 RSC 查好传进来(这个登录用户最近的订单);下单成功后新单
@@ -142,6 +149,8 @@ export function QuoteWorkbench({
             note: contact.note || null,
             // 这单的邮件通知语言 —— 落库,之后改状态时按它发信
             locale,
+            // 收款通道 —— 微信扫码 / 支付宝 / Shopify,不传走旧路
+            channel: channel ?? undefined,
           }),
         });
 
@@ -172,6 +181,8 @@ export function QuoteWorkbench({
           updatedAt: created.updatedAt,
           paymentStatus: created.paymentStatus,
           paymentUrl: created.paymentUrl,
+          paymentQrCodeUrl: created.paymentQrCodeUrl,
+          paymentChannel: created.paymentChannel,
         });
       } catch (error) {
         console.error("[PrintQuote] 下单失败", error);
@@ -179,7 +190,16 @@ export function QuoteWorkbench({
         setPhase("idle");
       }
     },
-    [quoteInput, modelPayload, quoteFresh, t, locale, upsertOrder, deliveryTier]
+    [
+      quoteInput,
+      modelPayload,
+      quoteFresh,
+      t,
+      locale,
+      upsertOrder,
+      deliveryTier,
+      channel,
+    ]
   );
 
   const quoteSlot = useMemo(
@@ -220,6 +240,8 @@ export function QuoteWorkbench({
           user={user}
           phase={phase}
           error={orderError}
+          channel={channel}
+          onChannelChange={setChannel}
           onSubmit={handleSubmitOrder}
           onCancel={() => {
             setStage("quote");

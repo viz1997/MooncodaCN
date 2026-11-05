@@ -28,7 +28,7 @@ import { describe, expect, it } from "vitest";
 import {
   decideStorefrontTransition,
   type StorefrontOrderState,
-} from "@/features/sellbase/lib/storefront-transition";
+} from "@/features/payments/lib/transitions";
 
 const unpaid: StorefrontOrderState = {
   status: "unpaid",

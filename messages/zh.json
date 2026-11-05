@@ -1733,7 +1733,7 @@
       "uploading": "上传模型中…",
       "submitting": "提交中…",
       "cancel": "返回",
-      "payHint": "提交后跳转 Stripe 支付,付完才开工。",
+      "payHint": "提交后进入支付,付完才开工。",
       "policyNotice": "下单前请先读一遍下面这几份 —— 它们是打印服务的硬性要求,照做能少一轮返工。",
       "policyPrintNotice": "打印须知",
       "policyDesignSpec": "3D模型设计规范",
@@ -1783,6 +1783,8 @@
       "paid": "已付款",
       "refunded": "已退款",
       "offlineHint": "在线支付没配好,可以联系工作室线下付款",
+      "qrTitle": "微信扫码支付",
+      "qrHint": "用微信扫一扫,付款完成后会自动更新",
       "errors": {
         "LINK_FAILED": "支付链接生成失败,请稍后重试或联系工作室"
       }
@@ -1953,5 +1955,30 @@
       "no-texture-in-mtl": "MTL 里没写贴图(map_Kd)",
       "file-missing": "压缩包里找不到这个贴图文件"
     }
+  },
+  "Payment": {
+    "title": "支付方式",
+    "channels": {
+      "wechat": {
+        "label": "微信支付",
+        "description": "扫码支付 —— 用微信扫一下就付完"
+      },
+      "alipay": {
+        "label": "支付宝",
+        "description": "跳转到支付宝完成付款"
+      },
+      "shopify": {
+        "label": "银行卡 / Shop Pay",
+        "description": "银行卡、信用卡、Shop Pay 都能付"
+      },
+      "stripe": {
+        "label": "银行卡(旧收款通道)",
+        "description": "过渡期保留的收银台,新的三个通道就绪后自动下线"
+      }
+    },
+    "qrTitle": "微信扫码支付",
+    "qrHint": "用微信扫一扫,付款完成后会自动更新",
+    "qrPaidTitle": "支付成功",
+    "qrPaid": "已经收到款,马上开始制作。"
   }
 }

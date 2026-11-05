@@ -22,6 +22,7 @@ import {
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
+import { PaymentChannelPicker } from "@/features/payments/components/payment-channel-picker";
 import { formatCents } from "@/features/print-quote/lib/format";
 import type { PrintQuote } from "@/features/print-quote/lib/quote-types";
 import { Link } from "@/i18n/routing";
@@ -41,6 +42,9 @@ export type OrderFormProps = {
   /** 提交进度 */
   phase: "idle" | "uploading" | "submitting";
   error: string | null;
+  /** 选中的收款通道 —— null = 还没选(服务端走旧路) */
+  channel: string | null;
+  onChannelChange: (channel: string) => void;
   onSubmit: (contact: OrderContact) => void;
   onCancel: () => void;
 };
@@ -51,6 +55,8 @@ export function OrderForm({
   user,
   phase,
   error,
+  channel,
+  onChannelChange,
   onSubmit,
   onCancel,
 }: OrderFormProps) {
@@ -206,6 +212,13 @@ export function OrderForm({
           {fieldError ?? error}
         </p>
       )}
+
+      {/* 支付方式 —— 没配好的通道不显示 */}
+      <PaymentChannelPicker
+        value={channel}
+        onChange={onChannelChange}
+        disabled={busy}
+      />
 
       {/* 下单前的须知 —— 打印服务的硬性要求,不合规的模型会被退回来返工 */}
       <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-[11px] leading-relaxed text-amber-900">

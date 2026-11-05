@@ -31,6 +31,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { formatPriceCNY } from "@/features/marketing/components/storefront/wjp-store-data";
+import { PaymentQrCode } from "@/features/payments/components/payment-qr";
 import { Link } from "@/i18n/routing";
 
 /** 轮询间隔 */
@@ -49,18 +50,24 @@ export function CheckoutSuccessView({
   initialPaymentStatus,
   initialTotalCents,
   initialPaymentUrl,
+  initialPaymentQrCodeUrl,
 }: {
   orderNo: string;
   initialStatus: OrderStatus;
   initialPaymentStatus: OrderPaymentStatus;
   initialTotalCents: number;
   initialPaymentUrl: string | null;
+  /** 微信扫码的二维码内容 —— null = 不是微信那一支 */
+  initialPaymentQrCodeUrl?: string | null;
 }) {
   const [status, setStatus] = useState<OrderStatus>(initialStatus);
   const [paymentStatus, setPaymentStatus] =
     useState<OrderPaymentStatus>(initialPaymentStatus);
   const [paymentUrl, setPaymentUrl] = useState<string | null>(
     initialPaymentUrl
+  );
+  const [paymentQrCodeUrl, setPaymentQrCodeUrl] = useState<string | null>(
+    initialPaymentQrCodeUrl ?? null
   );
   const [totalCents, setTotalCents] = useState(initialTotalCents);
   const [gaveUp, setGaveUp] = useState(false);
@@ -116,6 +123,7 @@ export function CheckoutSuccessView({
             paymentStatus?: OrderPaymentStatus;
             totalCents?: number;
             paymentUrl?: string | null;
+            paymentQrCodeUrl?: string | null;
           };
           if (typeof body.status === "string") {
             setStatus(body.status);
@@ -128,6 +136,9 @@ export function CheckoutSuccessView({
           }
           if (body.paymentUrl !== undefined) {
             setPaymentUrl(body.paymentUrl);
+          }
+          if (body.paymentQrCodeUrl !== undefined) {
+            setPaymentQrCodeUrl(body.paymentQrCodeUrl);
           }
           if (
             (body.status && body.status !== "unpaid") ||
@@ -251,10 +262,22 @@ export function CheckoutSuccessView({
           <h1 className="font-serif text-3xl mt-5 mb-2">还没收到付款</h1>
           <p className="text-sm text-muted-foreground mb-8">
             订单号 {orderNo} —— 支付可能没有完成,或者确认消息还没到。
-            {paymentUrl
+            {paymentUrl || paymentQrCodeUrl
               ? "你可以重新支付这笔订单。"
-              : "请到「我的订单」里重新获取支付链接。"}
+              : "请到「我的订单」里重新获取支付入口。"}
           </p>
+
+          {/* 微信那一支 —— 码还在,用户扫一下就行 */}
+          {paymentQrCodeUrl && (
+            <div className="mb-8 flex justify-center">
+              <PaymentQrCode
+                value={paymentQrCodeUrl}
+                size={200}
+                hint="用微信扫一扫,付款完成后这一页会自动更新"
+              />
+            </div>
+          )}
+
           <div className="flex gap-3 justify-center">
             {paymentUrl && (
               <Button asChild className="rounded-full px-7">
@@ -277,6 +300,17 @@ export function CheckoutSuccessView({
             <br />
             支付确认后会立刻显示,通常只要几秒。
           </p>
+
+          {/* 微信那一支 —— 用户还没扫码,码得一直显示着 */}
+          {paymentQrCodeUrl && (
+            <div className="mb-8 flex justify-center">
+              <PaymentQrCode
+                value={paymentQrCodeUrl}
+                size={200}
+                hint="用微信扫一扫,付款完成后这一页会自动更新"
+              />
+            </div>
+          )}
         </>
       )}
     </div>

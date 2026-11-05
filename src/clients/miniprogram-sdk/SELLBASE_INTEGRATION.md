@@ -381,6 +381,76 @@ Sellbase 那边挂了(网络 / 配置 / Stripe 没连上)时,**订单照样建�
 
 ---
 
+### 5.4b 三个支付通道(2026-11-05)
+
+> 本节是**新增**的。上面 §5.4 讲的是**旧路**(Sellbase + Stripe),过渡期
+> 并行保留;三个新通道跑通后旧路会拆掉。
+
+结算时多传一个 `channel`:
+
+```ts
+// POST /api/store/checkout
+{
+  addressId: "addr_…",
+  note: "…",
+  channel: "wechat" | "alipay" | "shopify" | "stripe", // 不传 = 旧路
+}
+```
+
+响应多两个字段:
+
+```ts
+{
+  orderNo: "SO-…",
+  paymentUrl: "https://…" | null,        // alipay / shopify:跳转地址
+  paymentQrCodeUrl: "weixin://wxpay/bizpayurl?pr=…" | null, // wechat:扫码内容
+  paymentChannel: "wechat",
+  paymentIssue: null, // 没生成付款入口时是 "PAYMENT_NOT_CONFIGURED" / "PAYMENT_FAILED"
+}
+```
+
+**先问服务端哪些通道能用**:`GET /api/store/payment-channels`
+
+```ts
+{
+  channels: [
+    { channel: "wechat",  label: "微信支付",   description: "…", available: true },
+    { channel: "alipay",  label: "支付宝",     description: "…", available: true },
+    { channel: "shopify", label: "银行卡 / Shop Pay", description: "…", available: true },
+  ],
+}
+```
+
+`available: false` 的通道**不要显示** —— 那条路没配好,点了必然失败。
+
+#### 三个通道在小程序里怎么走
+
+| 通道 | 拿到的东西 | 小程序侧 |
+|---|---|---|
+| `alipay` | `paymentUrl` | 全页跳(`web-view`),跟旧路一样 |
+| `shopify` | `paymentUrl` | 全页跳(`web-view`),Shopify 收银台 |
+| `wechat` | `paymentQrCodeUrl` | **⚠️ 见下** |
+
+#### ⚠️ 微信 Native 扫码在**小程序里用不了**
+
+本仓库的微信通道走的是 **Native(扫码)**:页面留在原地画一个二维码,用户用
+微信扫。这个形态适合**浏览器**(H5)。
+
+**微信小程序里扫自己屏幕上的二维码是死循环** —— 微信 Native 的二维码要
+「用微信扫」,而用户正在微信里。小程序要收微信支付得走 **JSAPI 支付**
+(`wx.requestPayment`),那是另一套接口(要 `openid`、要调
+`/v3/pay/transactions/jsapi`),本仓库目前**没有实现**。
+
+所以小程序侧现在只有两条路能用:
+
+- `alipay` / `shopify` —— 全页跳,跟旧路一样
+- `stripe`(旧路)—— 过渡期还在
+
+**微信小程序端的微信支付要单独接 JSAPI**,那是下一件事。在那之前,小程序
+的支付方式列表里**不要出现「微信支付」** —— 收了钱收不回来。
+
+---
+
 ### 5.5 查订单状态
 
 #### `GET /api/store/orders/{orderNo}`
