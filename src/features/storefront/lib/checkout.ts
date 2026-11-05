@@ -58,6 +58,7 @@ import { randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 
+import { PRICE_CURRENCY } from "@/config/currency";
 import { db } from "@/db";
 import {
   type ShippingAddressSnapshot,
@@ -600,7 +601,7 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
       discountCents,
       shippingCents,
       totalCents,
-      currency: "CNY",
+      currency: PRICE_CURRENCY,
       shippingAddress: input.address,
       note: input.note ?? null,
       // 通道先记上 —— 建支付会话失败时也知道这单本来该走哪条路
@@ -744,7 +745,7 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
           shippingAddress: input.address,
           note: input.note ?? null,
           successUrl: buildStorefrontSuccessUrl(orderNo),
-          currency: "CNY",
+          currency: PRICE_CURRENCY,
         })
       );
       paymentUrl = session.redirectUrl;
@@ -801,7 +802,7 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
     discountCents,
     shippingCents,
     totalCents,
-    currency: "CNY",
+    currency: PRICE_CURRENCY,
     printOrderNos,
     paymentIssue,
   };

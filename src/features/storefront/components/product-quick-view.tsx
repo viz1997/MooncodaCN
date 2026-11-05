@@ -14,9 +14,9 @@
  *
  * 适配差异:
  *  - useCartStore → useStorefrontModal
- *  - useFormatPrice → formatPriceCNY
+ *  - useFormatPrice → formatCents
  *  - next/link Link → @/i18n/routing Link
- *  - 文案中文化(¥ / 天 / 工艺文案)
+ *  - 文案中文化($ / 天 / 工艺文案)
  *  - 用 shadcn Dialog 而非 raw framer-motion(更好的 a11y)
  */
 
@@ -37,16 +37,16 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { formatPriceCNY } from "@/features/marketing/components/storefront/wjp-store-data";
 import { Link } from "@/i18n/routing";
-
+import { formatCents } from "@/lib/money";
 import { useAtelierContainer } from "../hooks/use-atelier-container";
 import { useRequireSignIn } from "../hooks/use-require-sign-in";
 import { useStorefrontModal } from "../hooks/use-storefront-modal";
+import { PRICING_CONSTANTS } from "../lib/pricing-constants";
 import { formatSizeCompact } from "../lib/size-format";
 
 const perks = [
-  { icon: Truck, label: "¥99 以上免运费" },
+  { icon: Truck, label: "$19.99 以上免运费" },
   { icon: RotateCcw, label: "工艺问题免费重做" },
   { icon: ShieldCheck, label: "工作室手工精修" },
 ];
@@ -210,7 +210,7 @@ export function ProductQuickView() {
 
                 <div className="flex items-baseline gap-3 mt-5">
                   <span className="text-2xl font-serif">
-                    {formatPriceCNY(product.basePriceCents / 100)}
+                    {formatCents(product.basePriceCents)}
                   </span>
                   <span className="text-xs text-muted-foreground uppercase tracking-[0.12em]">
                     起
@@ -260,7 +260,10 @@ export function ProductQuickView() {
                     {product.canEngrave && (
                       <li className="flex items-start gap-2">
                         <span className="size-1 rounded-full bg-accent mt-1.5 shrink-0" />
-                        <span>可选背面刻字(+{formatPriceCNY(3)})</span>
+                        <span>
+                          可选背面刻字(+
+                          {formatCents(PRICING_CONSTANTS.ENGRAVING_FEE_CENTS)})
+                        </span>
                       </li>
                     )}
                   </ul>
@@ -356,7 +359,7 @@ export function ProductQuickView() {
                       </li>
                       <li className="flex items-center gap-2">
                         <span className="size-1 rounded-full bg-accent" />
-                        起售价:{formatPriceCNY(product.basePriceCents / 100)}
+                        起售价:{formatCents(product.basePriceCents)}
                       </li>
                     </ul>
                   </TabsContent>
@@ -364,7 +367,7 @@ export function ProductQuickView() {
                     value="shipping"
                     className="text-sm leading-relaxed text-muted-foreground mt-4 text-pretty"
                   >
-                    工作室手工精修,{product.leadTimeDays} 天内发货。¥99
+                    工作室手工精修,{product.leadTimeDays} 天内发货。$19.99
                     以上免运费。 定制商品不支持退货,但工艺问题免费重做。
                   </TabsContent>
                 </Tabs>

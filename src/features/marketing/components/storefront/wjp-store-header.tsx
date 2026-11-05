@@ -83,12 +83,12 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { formatPriceCNY } from "@/features/marketing/components/storefront/wjp-store-data";
 import { useCart, useCartUi } from "@/features/storefront/hooks/use-cart";
 import { useProducts } from "@/features/storefront/hooks/use-products";
 import { useStorefrontModal } from "@/features/storefront/hooks/use-storefront-modal";
 import { Link, usePathname, useRouter } from "@/i18n/routing";
 import { signOut, useSession } from "@/lib/auth/client";
+import { formatCents } from "@/lib/money";
 
 import { STORE_NAV } from "./occasion-data";
 
@@ -444,10 +444,9 @@ export function WjpStoreHeader() {
                                 </p>
                               </div>
                               <p className="text-sm font-medium shrink-0">
-                                {formatPriceCNY(
-                                  p.basePriceCents / 100,
-                                  isZh ? "zh-CN" : "en"
-                                )}
+                                {formatCents(p.basePriceCents, {
+                                  locale: isZh ? "zh-CN" : "en",
+                                })}
                               </p>
                             </button>
                           </li>

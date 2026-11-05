@@ -10,8 +10,8 @@
  * 什么的、单价多少 —— 「不像商城」的根源就在这。
  *
  * 四条事实是从商品目录的真实参数推出来的,不是营销词:
- *  - 满 ¥99 免运费 —— 对齐 `use-cart.ts` 的 `FREE_SHIPPING_THRESHOLD_CENTS`
- *    (9900 分),别单独改这一行。
+ *  - 满 $19.99 免运费 —— 对齐 `use-cart.ts` 的 `FREE_SHIPPING_THRESHOLD_CENTS`
+ *    (1999 分),别单独改这一行。
  *  - 一件定制 · 一件发货 —— 首页 hero 的核心卖点。
  *  - 14 天工期 —— `WJP_SERIES` 里手办系列的工期。
  *  - 全彩树脂 · 手工精修 —— 工艺段说的就是这两件事。
@@ -22,13 +22,13 @@ export function ShopAnnouncement({ locale }: { locale: "zh" | "en" }) {
 
   const facts = isZh
     ? [
-        "满 ¥99 免运费",
+        "满 $19.99 免运费",
         "一件定制 · 一件发货",
         "14 天工期",
         "全彩树脂 · 手工精修",
       ]
     : [
-        "Free shipping over ¥99",
+        "Free shipping over $19.99",
         "One piece, one order",
         "14-day turnaround",
         "Full-colour resin, hand-finished",

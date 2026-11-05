@@ -44,7 +44,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { cookies } from "next/headers";
-
+import { PRICE_CURRENCY, PRICE_REGION_ID } from "@/config/currency";
 import { db } from "@/db";
 import { type CartItemRow, type CartRow, cart, cartItem } from "@/db/schema";
 import { computePrintServiceLinePrice } from "@/features/print-quote/lib/quote-server";
@@ -200,7 +200,7 @@ function repriceLineItem(row: CartItemRow): CartLineItem {
 function toCart(row: CartRow, items: CartItemRow[]): Cart {
   return {
     id: row.id,
-    currencyCode: row.currencyCode as "CNY",
+    currencyCode: row.currencyCode as "USD",
     regionId: row.regionId,
     items: items.map(repriceLineItem),
     createdAt: row.createdAt.toISOString(),
@@ -240,16 +240,16 @@ export async function createCart(userId?: string | null): Promise<Cart> {
   await db.insert(cart).values({
     id,
     userId: userId ?? null,
-    currencyCode: "CNY",
-    regionId: "china",
+    currencyCode: PRICE_CURRENCY,
+    regionId: PRICE_REGION_ID,
     createdAt: now,
     updatedAt: now,
   });
 
   return {
     id,
-    currencyCode: "CNY",
-    regionId: "china",
+    currencyCode: PRICE_CURRENCY,
+    regionId: PRICE_REGION_ID,
     items: [],
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),

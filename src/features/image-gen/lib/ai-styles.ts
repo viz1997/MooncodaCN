@@ -53,7 +53,7 @@ export const DEFAULT_TEMPLATE_STYLES: TemplateStyle[] = [
     nameEn: "Q-Version",
     prompt:
       "Q-version chibi figurine with simplified features, big eyes, and soft pastel tones; identity recognizable",
-    surchargeCents: 1500, // +¥15
+    surchargeCents: 250, // +$2.50
     outputSize: "1024x1024",
     swatch: "#7A5A8C",
     estimatedLatencySec: 25,
@@ -64,7 +64,7 @@ export const DEFAULT_TEMPLATE_STYLES: TemplateStyle[] = [
     nameEn: "Anime",
     prompt:
       "Japanese anime illustration style with vibrant colors, clean line art, and detailed shading; facial features and hairstyle preserved",
-    surchargeCents: 2000, // +¥20
+    surchargeCents: 350, // +$3.50
     outputSize: "1024x1024",
     swatch: "#E879F9",
     estimatedLatencySec: 28,
@@ -75,7 +75,7 @@ export const DEFAULT_TEMPLATE_STYLES: TemplateStyle[] = [
     nameEn: "Watercolor",
     prompt:
       "soft watercolor painting with visible brushstrokes, gentle color bleeds, and warm light; recognizable silhouette",
-    surchargeCents: 1500, // +¥15
+    surchargeCents: 250, // +$2.50
     outputSize: "1024x1024",
     swatch: "#60A5FA",
     estimatedLatencySec: 22,
@@ -86,7 +86,7 @@ export const DEFAULT_TEMPLATE_STYLES: TemplateStyle[] = [
     nameEn: "Line Art",
     prompt:
       "clean black-and-white line art suitable for engraving; bold outlines, no shading, simplified details for laser-cut reproduction",
-    surchargeCents: 1000, // +¥10
+    surchargeCents: 150, // +$1.50
     outputSize: "1024x1024",
     swatch: "#1F2937",
     estimatedLatencySec: 18,
@@ -100,7 +100,7 @@ export const DEFAULT_TEMPLATE_STYLES: TemplateStyle[] = [
     nameEn: "Realistic",
     prompt:
       "photorealistic style with true-to-life materials, natural lighting, fine surface textures, and accurate proportions; portrait-grade fidelity",
-    surchargeCents: 2500, // +¥25（写实档普遍贵一档）
+    surchargeCents: 400, // +$4（写实档普遍贵一档）
     outputSize: "1536x1024", // 写实档优先横版构图
     swatch: "#7A5C3A",
     estimatedLatencySec: 35,

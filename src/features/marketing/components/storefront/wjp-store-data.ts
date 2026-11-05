@@ -24,7 +24,8 @@ export interface WjpSeries {
   tagline: string;
   description: string;
   cover: string;
-  fromPriceCNY: number;
+  /** 起售价(分)—— 展示走 `@/lib/money` 的 `formatCents` */
+  fromPriceCents: number;
   count: number;
   accent: string;
 }
@@ -40,7 +41,7 @@ export const WJP_SERIES: WjpSeries[] = [
       "WJP 全彩树脂钥匙扣,激光切割按照片轮廓,支持透明/磨砂底板、单双面印图,送礼最受欢迎。",
     cover:
       "https://images.unsplash.com/photo-1624222247344-550fb60583dc?auto=format&fit=crop&w=1200&q=80",
-    fromPriceCNY: 19,
+    fromPriceCents: 299,
     count: 4,
     accent: "#B07A5B",
   },
@@ -56,7 +57,7 @@ export const WJP_SERIES: WjpSeries[] = [
     // 首页右侧大图之前一直是裂的。改用对应商品已验证的那张肖像图。
     cover:
       "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=1200&q=80",
-    fromPriceCNY: 199,
+    fromPriceCents: 2999,
     count: 4,
     accent: "#7A5A8C",
   },
@@ -71,7 +72,7 @@ export const WJP_SERIES: WjpSeries[] = [
     // 原 photo-1611923134239-b9be5816e23d 已 404
     cover:
       "https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=1200&q=80",
-    fromPriceCNY: 39,
+    fromPriceCents: 599,
     count: 4,
     accent: "#8FA873",
   },
@@ -148,20 +149,9 @@ export const WJP_COMMUNITY_POSTS: WjpCommunityPost[] = [
 ];
 
 /**
- * formatPrice —— 简化版(人民币展示,无 Zustand 货币切换)。
- * 后续接 NextIntl + 货币 store 可替换为完整版。
- */
-/**
- * 金额格式化(输入是「元」,不是分 —— 调用方记得 /100)。
+ * 金额格式化 —— **不在这里**
  *
- * `locale` 默认 zh-CN,保持既有调用点的输出不变;en locale 传 "en",
- * 否则 EN 页会显示中文格式的 ¥19 而不是 CN¥19。
+ * 以前这个文件里有一个 `formatPriceCNY`(收「元」的 float)。2026-11-05 起
+ * 全仓库统一走 `@/lib/money` 的 `formatCents`(收「分」的整数)—— 一份就够,
+ * 两份单位不同的格式化函数迟早混用出错(「差 100 倍」)。
  */
-export function formatPriceCNY(amountCNY: number, locale = "zh-CN"): string {
-  return new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency: "CNY",
-    minimumFractionDigits: amountCNY % 1 === 0 ? 0 : 2,
-    maximumFractionDigits: 2,
-  }).format(amountCNY);
-}

@@ -32,22 +32,22 @@
       "keychain": {
         "name": "钥匙扣",
         "size": "40-60mm",
-        "price": "¥89 起"
+        "price": "$12.99 起"
       },
       "badge": {
         "name": "宠物徽章",
         "size": "30-50mm",
-        "price": "¥49 起"
+        "price": "$6.99 起"
       },
       "magnet": {
         "name": "冰箱贴",
         "size": "70-100mm",
-        "price": "¥89 起"
+        "price": "$12.99 起"
       },
       "figure": {
         "name": "手办",
         "size": "100-200mm",
-        "price": "¥299 起"
+        "price": "$41.99 起"
       }
     }
   },
@@ -587,7 +587,7 @@
         "name": "宠物徽章",
         "description": "30-50mm，全彩胸针 / 徽章",
         "cta": "立即定制",
-        "creditsAmount": "¥49",
+        "creditsAmount": "$6.99",
         "creditsLabel": "/ 件",
         "creditsNote": "一件起印",
         "features": {
@@ -604,7 +604,7 @@
         "name": "钥匙扣 / 冰箱贴",
         "description": "40-100mm，挂件 / 冰箱贴系列",
         "cta": "立即定制",
-        "creditsAmount": "¥89",
+        "creditsAmount": "$12.99",
         "creditsLabel": "/ 件",
         "booksCount": "2",
         "features": {
@@ -622,7 +622,7 @@
         "name": "手办 / 立牌",
         "description": "100-200mm，桌面级收藏摆件",
         "cta": "立即定制",
-        "creditsAmount": "¥299",
+        "creditsAmount": "$41.99",
         "creditsLabel": "/ 件",
         "booksCount": "3",
         "features": {
@@ -1124,8 +1124,8 @@
       "version": "Mooncoda 克重计算器"
     },
     "unit": {
-      "yuan": "元",
-      "perGram": "元/克"
+      "yuan": "美元",
+      "perGram": "美元/克"
     },
     "upload": {
       "reading": "正在读取文件…",
@@ -1349,7 +1349,7 @@
       "varnishOn": "开启",
       "varnishOff": "关闭",
       "supportOn": "开启",
-      "yuan": "元",
+      "yuan": "美元",
       "selfSupport": "本体支撑 {ratio}% · {weight} g",
       "laidFlat": "已躺平",
       "exportRotated": "导出已摆盘 OBJ",

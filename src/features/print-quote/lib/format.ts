@@ -1,19 +1,22 @@
 /**
  * 打印服务报价的格式化helper
  *
- * ## 为什么不复用商城的 `formatPriceCNY`
+ * ## 为什么不复用商城那个 `formatPrice`
  *
- * 商城那个收「元」(float),这里一律收「分」(integer)。两边单位不同,
- * 硬复用会出「差 100 倍」这种错 —— 而且这类错在页面上看不出来,
- * 只会在对账时炸。所以这里单开一个收「分」的。
+ * 商城以前有个收「元」(float)的 `formatPriceCNY`,这里一律收「分」(integer)。
+ * 两边单位不同,硬复用会出「差 100 倍」这种错 —— 而且这类错在页面上
+ * 看不出来,只会在对账时炸。所以这里单开一个收「分」的。
+ *
+ * 2026-11-05:商城那个 `formatPriceCNY` 删了,两边都用 `@/lib/money` 的
+ * `formatCents`(收分)—— 一份格式化函数,不再有「元 / 分」两套。
  *
  * 2026-11-04:`formatCents` 的实现搬到了 `@/lib/money` —— 商城结算页
- * 也要用同一套「分 → ¥」,留在 feature 里就得复制一份。签名不变。
+ * 也要用同一套「分 → 展示」,留在 feature 里就得复制一份。签名不变。
  */
 
 import { formatCents as formatCentsShared } from "@/lib/money";
 
-/** 分 → 「¥123.45」 */
+/** 分 → 「$123.45」 */
 export function formatCents(cents: number, locale = "zh-CN"): string {
   return formatCentsShared(cents, { locale });
 }

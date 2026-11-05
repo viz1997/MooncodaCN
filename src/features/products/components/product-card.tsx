@@ -1,4 +1,5 @@
 import { Link } from "@/i18n/routing";
+import { formatCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
 import type { Product } from "../lib/data";
@@ -15,15 +16,15 @@ interface ProductCardProps {
  * 作品集卡片 —— 列表用
  *
  * - 缩略图占位用产品 slug 的封面（当前用 .svg 占位，未上传实际图片）
- * - 中文 locale 显示 ¥，英文显示价格附带 "from"
+ * - 价统一是美元，中文 locale 前面加「起」，英文加 "from"
  */
 export function ProductCard({ product, locale, featured }: ProductCardProps) {
   const t = product.translations[locale];
   const categoryLabel = PRODUCT_CATEGORY_LABELS[product.category][locale];
-  const priceDisplay =
-    locale === "zh"
-      ? `¥${product.basePriceCNY}`
-      : `from $${Math.round(product.basePriceCNY / 7)}`;
+  const priceDisplay = `${locale === "zh" ? "起 " : "from "}${formatCents(
+    product.basePriceCents,
+    { locale: locale === "zh" ? "zh-CN" : "en" }
+  )}`;
 
   return (
     <Link

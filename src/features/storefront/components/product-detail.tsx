@@ -3,10 +3,10 @@
  *
  * 适配差异:
  *  - useCartStore → useStorefrontModal(useStorefrontModal.setCustomize 触发 CustomWorkshop)
- *  - useFormatPrice → formatPriceCNY
+ *  - useFormatPrice → formatCents
  *  - next/link Link → @/i18n/routing Link
  *  - 客户端取数改走 useProduct(handle)(TanStack Query → /api/store/products/[handle])
- *  - 文案中文化(¥ / 天 / 工艺文案)
+ *  - 文案中文化($ / 天 / 工艺文案)
  *  - related 卡片 inline 渲染(无独立 ProductCard,避免跨模块耦合)
  *
  * Customize CTA 行为:setCustomize(product) + router.push("/"),让根 layout 挂载的
@@ -44,8 +44,8 @@ import {
   occasionsForHandle,
   washForHandle,
 } from "@/features/marketing/components/storefront/occasion-data";
-import { formatPriceCNY } from "@/features/marketing/components/storefront/wjp-store-data";
 import { Link, useRouter } from "@/i18n/routing";
+import { formatCents } from "@/lib/money";
 
 import { useProduct } from "../hooks/use-products";
 import { useRequireSignIn } from "../hooks/use-require-sign-in";
@@ -54,7 +54,7 @@ import { formatSizeCompact } from "../lib/size-format";
 import type { StorefrontProduct } from "../types";
 
 const perks = [
-  { icon: Truck, label: "¥99 以上免运费" },
+  { icon: Truck, label: "$19.99 以上免运费" },
   { icon: RotateCcw, label: "工艺问题免费重做" },
   { icon: ShieldCheck, label: "工作室手工精修" },
 ];
@@ -303,7 +303,7 @@ export function ProductDetail({ handle }: { handle: string }) {
 
             <div className="flex items-baseline gap-2 mt-5">
               <span className="font-serif text-3xl text-[var(--accent)]">
-                {formatPriceCNY(product.basePriceCents / 100)}
+                {formatCents(product.basePriceCents)}
               </span>
               <span className="text-xs text-muted-foreground uppercase tracking-[0.12em]">
                 起
@@ -351,7 +351,7 @@ export function ProductDetail({ handle }: { handle: string }) {
                 {product.canEngrave && (
                   <li className="flex items-start gap-2">
                     <span className="size-1 rounded-full bg-accent mt-1.5 shrink-0" />
-                    <span>可选背面刻字(+¥3)</span>
+                    <span>可选背面刻字(+$0.99)</span>
                   </li>
                 )}
               </ul>
@@ -436,7 +436,7 @@ export function ProductDetail({ handle }: { handle: string }) {
                   </li>
                   <li className="flex items-center gap-2">
                     <span className="size-1 rounded-full bg-accent" />
-                    起售价:{formatPriceCNY(product.basePriceCents / 100)}
+                    起售价:{formatCents(product.basePriceCents)}
                   </li>
                 </ul>
               </TabsContent>
@@ -444,8 +444,8 @@ export function ProductDetail({ handle }: { handle: string }) {
                 value="shipping"
                 className="text-sm leading-relaxed text-muted-foreground mt-4 text-pretty"
               >
-                工作室手工精修,{product.leadTimeDays} 天内发货。¥99 以上免运费。
-                定制商品不支持退货,但工艺问题免费重做。
+                工作室手工精修,{product.leadTimeDays} 天内发货。$19.99
+                以上免运费。 定制商品不支持退货,但工艺问题免费重做。
               </TabsContent>
             </Tabs>
           </div>
@@ -544,7 +544,7 @@ function RelatedCard({
         <div className="flex items-center justify-between gap-2">
           <p className="text-sm text-muted-foreground">
             <span className="text-foreground font-medium">
-              {formatPriceCNY(product.basePriceCents / 100)}
+              {formatCents(product.basePriceCents)}
             </span>
             <span className="ml-1.5 text-xs">起</span>
           </p>

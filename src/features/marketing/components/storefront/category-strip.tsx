@@ -23,8 +23,9 @@ import { useCallback } from "react";
 
 import { useShopFilter } from "@/features/storefront/hooks/use-shop-filter";
 import { findProductByHandle } from "@/features/storefront/lib/mock-catalog";
+import { formatCents } from "@/lib/money";
 
-import { formatPriceCNY, WJP_SERIES } from "./wjp-store-data";
+import { WJP_SERIES } from "./wjp-store-data";
 
 /** 商品网格的锚点 —— 跟顶部导航「作品」是同一个落点 */
 const SHOP_ANCHOR = "works";
@@ -162,7 +163,9 @@ export function CategoryStrip({ locale }: { locale: "zh" | "en" }) {
                   {isZh ? s.name : s.nameEn}
                 </span>
                 <span className="mt-1 block text-xs text-muted-foreground">
-                  {formatPriceCNY(s.fromPriceCNY, isZh ? "zh-CN" : "en")}{" "}
+                  {formatCents(s.fromPriceCents, {
+                    locale: isZh ? "zh-CN" : "en",
+                  })}{" "}
                   {isZh ? "起" : "from"}
                 </span>
                 <span className="mt-2 block text-[11px] text-muted-foreground/80">

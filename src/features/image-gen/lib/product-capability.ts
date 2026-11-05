@@ -357,12 +357,12 @@ export function assembleProductCapabilities(
         zh: `${sizeCode}${productType.unit}`,
         en: `${sizeCode} ${productType.unit}`,
       },
-      // 与 mock-catalog.ts:buildSizesForType 同款加价规则(>基准 cm ×¥5),
+      // 与 mock-catalog.ts:buildSizesForType 同款加价规则(>基准 cm ×$1),
       // 统一在 /api/store/products 也有此模式。
       //
       // @deprecated 2026-10-21 起这只是给老客户端的兼容字段,真 SKU 价看
       // ProductCapability.variants[].priceCents。改这里不影响新逻辑。
-      priceDeltaCents: idx * 500,
+      priceDeltaCents: idx * 100,
     }));
 
     // ----- accessories + variants -----

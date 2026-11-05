@@ -24,8 +24,8 @@ import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { formatPriceCNY } from "@/features/marketing/components/storefront/wjp-store-data";
 import { PaymentQrCode } from "@/features/payments/components/payment-qr";
+import { formatCents } from "@/lib/money";
 
 /** 列表里的一行(可序列化的形状) */
 export interface StoreOrderListItem {
@@ -217,7 +217,7 @@ function OrderRow({ order }: { order: StoreOrderListItem }) {
       </div>
 
       <div className="text-right shrink-0">
-        <p className="font-medium">{formatPriceCNY(order.totalCents / 100)}</p>
+        <p className="font-medium">{formatCents(order.totalCents)}</p>
         {order.paymentStatus === "unpaid" && order.status === "unpaid" && (
           <Button
             size="sm"

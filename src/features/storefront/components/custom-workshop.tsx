@@ -15,7 +15,7 @@
  *  - /api/ai/transform → /api/store/ai/transform(委托 lingting,输出 R2 URL)
  *  - /api/pricing/calculate → /api/store/pricing/calculate
  *  - addItem → useCart.addLineItem.mutate
- *  - 中文化文案 + CNY
+ *  - 中文化文案 + 美元
  *  - 用 shadcn Dialog 而非 raw framer-motion
  *
  * 服务端定价权威:cart 存 server 算的 unitPriceCents,client 不自己算。
@@ -26,7 +26,7 @@
  *  - 默认选中「标准款」(product.defaultSizeCm),不再是列表第一项
  *  - 材质只有一种时内联展示,不再占半格空网格
  *  - 新增配件选择器(按 product.accessoryGroups,组内单选)
- *  - 新增加急开关(+¥15,发货天数减半)
+ *  - 新增加急开关(+$2.99,发货天数减半)
  *  - 刻字输入框按 product.canEngrave 开合(手办 / 冰箱贴不刻字)
  *  - 数量 / 单价 / 合计 / CTA 收进底部固定条,规格区独立滚动
  *
@@ -69,10 +69,10 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { formatPriceCNY } from "@/features/marketing/components/storefront/wjp-store-data";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "@/i18n/routing";
 import { useSession } from "@/lib/auth/client";
+import { formatCents } from "@/lib/money";
 
 import { useAtelierContainer } from "../hooks/use-atelier-container";
 import { useCart, useCartUi } from "../hooks/use-cart";
@@ -976,7 +976,7 @@ export function CustomWorkshop() {
                                       : "text-muted-foreground"
                                   }`}
                                 >
-                                  +{formatPriceCNY(mat.surchargeCents / 100)}
+                                  +{formatCents(mat.surchargeCents)}
                                 </span>
                               )}
                             </button>
@@ -1034,10 +1034,7 @@ export function CustomWorkshop() {
                                         : "text-muted-foreground"
                                     }`}
                                   >
-                                    +
-                                    {formatPriceCNY(
-                                      variant.surchargeCents / 100
-                                    )}
+                                    +{formatCents(variant.surchargeCents)}
                                   </span>
                                 )}
                               </button>
@@ -1074,9 +1071,7 @@ export function CustomWorkshop() {
                         {engraving.length > 0 && (
                           <span className="ml-2">
                             +
-                            {formatPriceCNY(
-                              PRICING_CONSTANTS.ENGRAVING_FEE_CENTS / 100
-                            )}
+                            {formatCents(PRICING_CONSTANTS.ENGRAVING_FEE_CENTS)}
                           </span>
                         )}
                       </p>
@@ -1110,8 +1105,8 @@ export function CustomWorkshop() {
                             }`}
                           >
                             加{" "}
-                            {formatPriceCNY(
-                              PRICING_CONSTANTS.RUSH_ORDER_FEE_CENTS / 100
+                            {formatCents(
+                              PRICING_CONSTANTS.RUSH_ORDER_FEE_CENTS
                             )}
                             ,发货天数减半
                           </span>
@@ -1227,8 +1222,7 @@ export function CustomWorkshop() {
                       <div className="flex justify-between text-sm">
                         <span className="text-muted-foreground">AI 风格</span>
                         <span>
-                          +
-                          {formatPriceCNY(pricing.breakdown.aiStyleCents / 100)}
+                          +{formatCents(pricing.breakdown.aiStyleCents)}
                         </span>
                       </div>
                     )}
@@ -1236,10 +1230,7 @@ export function CustomWorkshop() {
                       <div className="flex justify-between text-sm">
                         <span className="text-muted-foreground">配件</span>
                         <span>
-                          +
-                          {formatPriceCNY(
-                            pricing.breakdown.accessoryCents / 100
-                          )}
+                          +{formatCents(pricing.breakdown.accessoryCents)}
                         </span>
                       </div>
                     )}
@@ -1247,10 +1238,7 @@ export function CustomWorkshop() {
                       <div className="flex justify-between text-sm">
                         <span className="text-muted-foreground">刻字</span>
                         <span>
-                          +
-                          {formatPriceCNY(
-                            pricing.breakdown.engravingFeeCents / 100
-                          )}
+                          +{formatCents(pricing.breakdown.engravingFeeCents)}
                         </span>
                       </div>
                     )}
@@ -1258,35 +1246,28 @@ export function CustomWorkshop() {
                       <div className="flex justify-between text-sm">
                         <span className="text-muted-foreground">加急</span>
                         <span>
-                          +
-                          {formatPriceCNY(
-                            pricing.breakdown.rushOrderCents / 100
-                          )}
+                          +{formatCents(pricing.breakdown.rushOrderCents)}
                         </span>
                       </div>
                     )}
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">单价</span>
-                      <span>
-                        {formatPriceCNY(pricing.unitPriceCents / 100)}
-                      </span>
+                      <span>{formatCents(pricing.unitPriceCents)}</span>
                     </div>
                     {pricing.breakdown.quantityTierDiscountCents > 0 && (
                       <div className="flex justify-between text-sm text-accent">
                         <span>数量折扣</span>
                         <span>
                           -
-                          {formatPriceCNY(
-                            pricing.breakdown.quantityTierDiscountCents / 100
+                          {formatCents(
+                            pricing.breakdown.quantityTierDiscountCents
                           )}
                         </span>
                       </div>
                     )}
                     <div className="flex justify-between text-base font-medium pt-1.5 border-t">
                       <span>合计</span>
-                      <span>
-                        {formatPriceCNY(pricing.totalPriceCents / 100)}
-                      </span>
+                      <span>{formatCents(pricing.totalPriceCents)}</span>
                     </div>
                   </div>
                 )}
@@ -1433,7 +1414,7 @@ export function CustomWorkshop() {
                     </p>
                   ) : pricing ? (
                     <p className="font-serif text-xl leading-none mt-1">
-                      {formatPriceCNY(pricing.unitPriceCents / 100)}
+                      {formatCents(pricing.unitPriceCents)}
                     </p>
                   ) : null}
                 </div>
@@ -1443,7 +1424,7 @@ export function CustomWorkshop() {
                       合计
                     </p>
                     <p className="font-serif text-xl leading-none mt-1">
-                      {formatPriceCNY(pricing.totalPriceCents / 100)}
+                      {formatCents(pricing.totalPriceCents)}
                     </p>
                   </div>
                 )}

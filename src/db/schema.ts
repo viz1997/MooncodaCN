@@ -2665,7 +2665,7 @@ export const storefrontOrderStatusEnum = pgEnum("storefront_order_status", [
  * ## 金额
  *
  * 全部**分**(integer),跟 `product.basePriceCents` 一致。结算页显示时才转成
- * 「¥123.45」。
+ * 「$123.45」。
  */
 export const storefrontOrder = pgTable(
   "storefront_order",
@@ -2715,12 +2715,12 @@ export const storefrontOrder = pgTable(
     subtotalCents: integer("subtotal_cents").notNull(),
     /** 阶梯折扣(分)—— 数量折扣,正数 */
     discountCents: integer("discount_cents").notNull().default(0),
-    /** 运费(分)—— 满 ¥99 免运费,否则 ¥8 */
+    /** 运费(分)—— 满 $19.99 免运费,否则 $6.99 */
     shippingCents: integer("shipping_cents").notNull().default(0),
     /** 合计(分) = subtotal - discount + shipping */
     totalCents: integer("total_cents").notNull(),
-    /** 币种(iso 大写);本轮全链路 CNY */
-    currency: text("currency").notNull().default("CNY"),
+    /** 币种(iso 大写);本轮全链路 USD */
+    currency: text("currency").notNull().default("USD"),
     /**
      * Sellbase 订单 id —— webhook 反查用
      *
@@ -2850,7 +2850,7 @@ export type NewStorefrontOrderItemRow = typeof storefrontOrderItem.$inferInsert;
  *
  * ## `regionId`
  *
- * 先留着 —— 现在只有「中国大陆」一个区域,运费规则写死在
+ * 先留着 —— 现在只有「美国」一个区域,运费规则写死在
  * `pricing-constants.ts`。以后要按地区分运费,这列就是那个开关。
  */
 export const cart = pgTable(
@@ -2860,9 +2860,9 @@ export const cart = pgTable(
     /** 登录用户;游客购物车为 null */
     userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
     /** 币种(iso 大写) */
-    currencyCode: text("currency_code").notNull().default("CNY"),
+    currencyCode: text("currency_code").notNull().default("USD"),
     /** 区域 —— 运费规则的分区键 */
-    regionId: text("region_id").notNull().default("china"),
+    regionId: text("region_id").notNull().default("us"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },

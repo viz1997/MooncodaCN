@@ -13,6 +13,7 @@ import {
   PRODUCT_CATEGORY_LABELS,
 } from "@/features/products/lib/data";
 import { Link } from "@/i18n/routing";
+import { formatCents } from "@/lib/money";
 
 /**
  * SSG —— 静态化所有作品详情页
@@ -70,8 +71,8 @@ export default async function ProductDetailPage({
   const categoryLabel =
     PRODUCT_CATEGORY_LABELS[product.category][isZh ? "zh" : "en"];
   const priceDisplay = isZh
-    ? `¥${product.basePriceCNY} / 件`
-    : `from $${Math.round(product.basePriceCNY / 7)} / piece`;
+    ? `起 ${formatCents(product.basePriceCents, { locale: "zh-CN" })} / 件`
+    : `from ${formatCents(product.basePriceCents, { locale: "en" })} / piece`;
 
   // 同分类下其他作品（最多 3 个，去掉当前）
   const related = getProductsByCategory(product.category)
@@ -92,8 +93,8 @@ export default async function ProductDetailPage({
         description={t.description}
         url={`${siteConfig.url}/${locale}/products/${slug}`}
         image={`${siteConfig.url}${product.cover}`}
-        price={product.basePriceCNY}
-        currency={isZh ? "CNY" : "USD"}
+        price={product.basePriceCents / 100}
+        currency="USD"
       />
 
       <main className="container py-12 md:py-16">

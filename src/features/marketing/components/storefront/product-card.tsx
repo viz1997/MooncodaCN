@@ -30,8 +30,7 @@ import { useRequireSignIn } from "@/features/storefront/hooks/use-require-sign-i
 import { useStorefrontModal } from "@/features/storefront/hooks/use-storefront-modal";
 import type { StorefrontProduct } from "@/features/storefront/types";
 import { Link } from "@/i18n/routing";
-
-import { formatPriceCNY } from "./wjp-store-data";
+import { formatCents } from "@/lib/money";
 
 /**
  * 图片框比例。
@@ -153,10 +152,9 @@ export function ProductCard({
         <div className="flex items-center justify-between gap-2 pt-0.5">
           <p className="text-sm text-muted-foreground">
             <span className="text-foreground font-medium">
-              {formatPriceCNY(
-                product.basePriceCents / 100,
-                isZh ? "zh-CN" : "en"
-              )}
+              {formatCents(product.basePriceCents, {
+                locale: isZh ? "zh-CN" : "en",
+              })}
             </span>
             <span className="ml-1.5 text-xs">{isZh ? "起" : "from"}</span>
           </p>

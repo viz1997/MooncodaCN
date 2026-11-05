@@ -12,13 +12,13 @@
  * 这里直接复用 `pricing-engine.ts` 的 `calculatePrice()`,不另写一份 ——
  * 两处公式各写一遍,迟早会漂移(改了单价忘了改报价页,或者反过来)。
  *
- * 唯一的差别是单位:引擎内部用「元」,这里对外一律「分」。转换只发生在
+ * 唯一的差别是单位:引擎内部用「元/美元」,这里对外一律「分」。转换只发生在
  * 两个边界上(元 → 分),中间不碰。
  *
  * ## 参数可被环境变量覆盖
  *
  * `PRINT_*` 系列。没配就用 `pricing-engine.ts` 里 `DEFAULT_CONFIG` 的值
- * (密度 1.2 g/cm³、单价 4.5 元/g、光油 10 元、支撑 1 元/g、阈值 1:1)。
+ * (密度 1.2 g/cm³、单价 $0.65/g、光油 $1.50、支撑 $0.15/g、阈值 1:1)。
  * 改价不用改代码 —— 发版前配好环境变量即可。
  */
 
@@ -77,10 +77,10 @@ function envRate(name: string, fallback: number): number {
  * | 环境变量 | 含义 | 默认 |
  * |---|---|---|
  * | `PRINT_MATERIAL_DENSITY` | 材料密度 g/cm³ | 1.2 |
- * | `PRINT_UNIT_PRICE_CENTS_PER_GRAM` | 单价 分/g | 450(4.5 元/g) |
- * | `PRINT_VARNISH_FEE_CENTS` | 光油 / 后处理固定费 分 | 1000(10 元) |
+ * | `PRINT_UNIT_PRICE_CENTS_PER_GRAM` | 单价 分/g | 65($0.65/g) |
+ * | `PRINT_VARNISH_FEE_CENTS` | 光油 / 后处理固定费 分 | 150($1.50) |
  * | `PRINT_VARNISH_ENABLED` | 光油是否计入报价(`"false"` 才关) | 计入 |
- * | `PRINT_SUPPORT_PRICE_CENTS_PER_GRAM` | 支撑单价 分/g | 100(1 元/g) |
+ * | `PRINT_SUPPORT_PRICE_CENTS_PER_GRAM` | 支撑单价 分/g | 15($0.15/g) |
  * | `PRINT_SUPPORT_THRESHOLD` | 本体支撑比例阈值(1 = 1:1) | 1 |
  * | `PRINT_SUPPORT_ENABLED` | 支撑加价总开关(`"true"` 才开) | 关 |
  * | `PRINT_DELIVERY_EXPRESS_RATE` | 72 小时档加价比例(0~1) | 0.1 |

@@ -40,11 +40,11 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { createAddressAction } from "@/features/address/actions";
 import type { AddressErrorCode, AddressView } from "@/features/address/types";
-import { formatPriceCNY } from "@/features/marketing/components/storefront/wjp-store-data";
 import { PaymentChannelPicker } from "@/features/payments/components/payment-channel-picker";
 import { PaymentQrCode } from "@/features/payments/components/payment-qr";
 import { getDeliveryTier } from "@/features/print-quote/lib/delivery-tier";
 import { Link } from "@/i18n/routing";
+import { formatCents } from "@/lib/money";
 
 import { invalidateCartCache } from "../hooks/use-cart";
 import { findAccessoryVariant } from "../lib/mock-catalog";
@@ -513,30 +513,26 @@ export function CheckoutView({
           <dl className="space-y-2.5 text-sm">
             <div className="flex items-center justify-between">
               <dt className="text-muted-foreground">小计</dt>
-              <dd className="font-medium">
-                {formatPriceCNY(subtotalCents / 100)}
-              </dd>
+              <dd className="font-medium">{formatCents(subtotalCents)}</dd>
             </div>
             {discountCents > 0 && (
               <div className="flex items-center justify-between">
                 <dt className="text-muted-foreground">数量折扣</dt>
                 <dd className="font-medium text-accent">
-                  -{formatPriceCNY(discountCents / 100)}
+                  -{formatCents(discountCents)}
                 </dd>
               </div>
             )}
             <div className="flex items-center justify-between">
               <dt className="text-muted-foreground">运费</dt>
               <dd className="font-medium">
-                {shippingCents === 0
-                  ? "免运费"
-                  : formatPriceCNY(shippingCents / 100)}
+                {shippingCents === 0 ? "免运费" : formatCents(shippingCents)}
               </dd>
             </div>
             <div className="border-t pt-3 mt-3 flex items-center justify-between">
               <dt className="uppercase tracking-[0.12em]">合计</dt>
               <dd className="font-serif text-2xl">
-                {formatPriceCNY((subtotalCents + shippingCents) / 100)}
+                {formatCents(subtotalCents + shippingCents)}
               </dd>
             </div>
           </dl>
@@ -708,7 +704,7 @@ function CheckoutLineItem({ item }: { item: CartLineItem }) {
         </p>
       </div>
       <p className="text-sm font-medium shrink-0">
-        {formatPriceCNY((item.discountedUnitPriceCents * item.quantity) / 100)}
+        {formatCents(item.discountedUnitPriceCents * item.quantity)}
       </p>
     </li>
   );

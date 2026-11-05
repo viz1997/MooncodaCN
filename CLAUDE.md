@@ -379,6 +379,39 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 (客户端 + 批量汇总),`src/test/pricing/pure/pose-comparison.test.ts` 守住
 (省 X% 的算法)。
 
+### 币种:美元,只有一处定义(2026-11-05)
+
+工作室主攻**美国市场**,所以本仓库的价**一律美元**(USD)。2026-11-05 从
+人民币改过来。
+
+- **币种只有一处定义** —— `src/config/currency.ts` 的 `PRICE_CURRENCY`
+  (零依赖的纯常量文件,客户端 bundle 也能 import)。别的地方**不许**再写
+  一遍 `"USD"` / `"CNY"`。`PRICE_REGION_ID` 也是同一处("us")。
+- **金额一律是整数分** —— 展示走全仓库唯一的入口 `src/lib/money.ts` 的
+  `formatCents(分, { locale })`。以前商城那个收「元」的 `formatPriceCNY`
+  已经删了(两套单位混用出来的「差 100 倍」在页面上看不出来,只在对账时炸)。
+- **定价常量**在 `src/features/storefront/lib/pricing-constants.ts`
+  (刻字 $0.99 / 加急 $2.99 / 运费 $6.99 / 免运费门槛 $19.99);**商品基础价**
+  在 `src/features/gpt-image/lib/product-catalog.ts` 的 `BASE_PRICE_CENTS`
+  (钥匙扣 $2.99 / 冰箱贴 $5.99 / 徽章 $8.99 / 相框 $7.99 / 手办 $29.99)。
+  **尺寸阶梯 $1/档、配件加价、刻字费、加急费** 全在这两个文件里。
+- **三个通道都收美元** —— 微信 / 支付宝 / Shopify 的请求里带的是
+  `PRICE_CURRENCY`。微信有个坑:**境内商户只能收人民币**,走微信这条路要
+  开通**跨境微信支付**(境外商户),否则微信会拒掉这笔单。
+- **不换算** —— 代码里**没有汇率**(Shopify 那条见「Shopify 的币种」)。旧的
+  `SHOPIFY_FX_RATE` 写法已经被否掉了。
+- **迁移脚本**(幂等,手写,不走 `db:generate`):
+  `scripts/apply-usd-currency-schema.ts` —— 改三张表的列默认值、按代码里的
+  字典**重新定价**商品目录三张表、把在途购物车改成 USD/us。
+  **历史订单一行不动**(旧单收的就是人民币,改了就等于篡改账本);脚本会把
+  还没付的旧单数量打出来,要不要取消是工作室的决定。
+  跑完再补一遍 seed:`pnpm tsx src/db/seed-product-accessory-variants.ts` +
+  `pnpm tsx src/db/seed-products.ts`。
+- **不在这次范围内**:AI 生图的**积分 / 模型成本**那一套
+  (`features/image-gen/lib/generation-service.ts` 的「1 积分 = 0.001 CNY」、
+  admin 里的模型价格、`features/mooncoda/**`)—— 那是另一个钱的世界,跟着
+  积分制走,不是商品价。别把它跟商品价混在一起改。
+
 ### 打印工单交期档位(2026-11-05)
 
 打印工单(`/quote` 报价 → `print_order`)有三档交期,**加价按比例收**,不是固定
@@ -393,7 +426,9 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 - **比例是反推出来的**:工作室那张表「48 小时 +¥20.65 / 72 小时 +¥5.58 /
   96 小时 +¥0.00」在**同一个基数(¥55.81)**上,20.65 / 5.58 ≈ 3.70 →
   37% 与 10%(0.37 × 55.81 = 20.65、0.1 × 55.81 = 5.58,两个数都精确复现)。
-  工作室调价改环境变量,不改代码。
+  工作室调价改环境变量,不改代码。**比例跟币种无关** —— 收的是「小计的
+  百分之多少」,币种从人民币换成美元,37% / 10% 一个字都不用改(基数换成
+  $8.12 时是 +$3.00 / +$0.81)。
 - **基数是「小计」不是「合计」** —— 小计 = 克重费 + 后处理费 + 支撑费。
   拿合计当基数就是「加价里套加价」,越算越高,而且「明细加起来 = 合计」
   这条恒等式会破。合计 = 小计 + 交期加价(四项)。
@@ -578,8 +613,8 @@ providers/
   **没有价格字段**;改价要 Cart Transform(Plus 套餐);Shopify Scripts 已
   在 2026-06-30 下线。所以走**草稿订单**(`draftOrderCreate`):
   - 行是**自定义行**(`title` + `price` + `quantity`),价格**由我们给**
-  - `presentmentCurrencyCode` —— **我们不换算**,行价就是人民币的数,展示
-    币种设成人民币(见下面「Shopify 的币种」)
+  - `presentmentCurrencyCode` —— **我们不换算**,行价就是美元的数,展示
+    币种设成美元(见下面「Shopify 的币种」)
   - `taxExempt: true` —— 不在我们的总价上再叠一层税
   - `acceptAutomaticDiscounts: false` —— 店铺的自动折扣不许碰我们的价
   - 运费也是我们自己给的一行(`shippingLine`),不跟 Shopify 的运费规则走
@@ -666,7 +701,7 @@ providers/
 |---|---|
 | 微信 | `WECHAT_PAY_MCH_ID` / `WECHAT_PAY_APP_ID` / `WECHAT_PAY_API_V3_KEY`(32 字节)/ `WECHAT_PAY_SERIAL_NO` / `WECHAT_PAY_PRIVATE_KEY`(或 `_PATH`)/ 验签材料 `WECHAT_PAY_PUBLIC_KEY` + `WECHAT_PAY_PUBLIC_KEY_ID` **或** `WECHAT_PAY_PLATFORM_CERT_DIR` / `WECHAT_PAY_NOTIFY_URL`(可省) |
 | 支付宝 | `ALIPAY_APP_ID` / `ALIPAY_APP_PRIVATE_KEY`(或 `_PATH`)/ `ALIPAY_PUBLIC_KEY`(**支付宝公钥**,不是应用公钥)/ `ALIPAY_GATEWAY`(可省)/ `ALIPAY_NOTIFY_URL` / `ALIPAY_RETURN_URL`(可省) |
-| Shopify | `SHOPIFY_STORE_DOMAIN` / `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET`(新模型;**secret 也是 webhook 的验签密钥**)/ 旧路可省:`SHOPIFY_ADMIN_ACCESS_TOKEN`(永久 token,配了就优先用)/ `SHOPIFY_API_SECRET`(独立验签密钥)/ `SHOPIFY_API_VERSION`(可省)/ **`SHOPIFY_DEFAULT_COUNTRY`(可省,默认 `CN`)**。**没有汇率变量** |
+| Shopify | `SHOPIFY_STORE_DOMAIN` / `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET`(新模型;**secret 也是 webhook 的验签密钥**)/ 旧路可省:`SHOPIFY_ADMIN_ACCESS_TOKEN`(永久 token,配了就优先用)/ `SHOPIFY_API_SECRET`(独立验签密钥)/ `SHOPIFY_API_VERSION`(可省)/ **`SHOPIFY_DEFAULT_COUNTRY`(可省,默认 `US`)**。**没有汇率变量** |
 
 ##### Shopify 的币种:**我们不换算,Shopify 换**(2026-11-05)
 
@@ -680,12 +715,12 @@ providers/
 
 **现在的口径:定价权交给 Shopify 的展示币种(presentment currency)。**
 
-- **本仓库的价一律人民币**,**原样**搬进草稿订单 —— 一个字节都不改
-- 草稿订单带 `presentmentCurrencyCode: "CNY"` —— 文档原话:
+- **本仓库的价一律美元**,**原样**搬进草稿订单 —— 一个字节都不改
+- 草稿订单带 `presentmentCurrencyCode: "USD"` —— 文档原话:
   "The presentment currency that should be used for the order. This currency is
   the currency that the customer will be charged in."
 - **行价按展示币种给**(`DraftOrderLineItemInput.price`:"The price in
-  presentment currency")—— 所以我们给人民币的数,用户就付人民币
+  presentment currency")—— 所以我们给美元的数,用户就付美元
 - **逐分相等在展示币种上成立** —— 对账比的是 `totalPriceSet.presentmentMoney`
   (用户被收的那份),必须跟我们发过去的**一分不差**
   (`draft-order.ts` 的 `assertSameTotal`)
@@ -694,13 +729,13 @@ providers/
 - **Shopify 在草稿单创建那一刻就把汇率锁死** —— 用户看到的价、我们收到的钱,
   用的是同一个数
 
-**前提:店铺得能收人民币。** 两条修法任选其一(`providers/shopify/currency.ts`
+**前提:店铺得能收美元。** 两条修法任选其一(`providers/shopify/currency.ts`
 的 `resolvePresentmentCurrency()`):
 
-1. **店铺结算币种改成人民币** —— 最省事,不用碰 Markets,而且结算没有汇兑
+1. **店铺结算币种改成美元** —— 最省事,不用碰 Markets,而且结算没有汇兑
    敞口(Markets 的自动换算大约带 1.5% 的零售加价)
-2. **Markets 里把人民币加成展示币种**(Settings → Markets)—— 结算币种还是
-   美元,用户在人民币这一层付钱
+2. **Markets 里把美元加成展示币种**(Settings → Markets)—— 结算币种还是
+   别的币种,用户在美元这一层付钱
 
 两条都不满足 → **当场报错**(「没配好」,重试没用),错误文案里直接写清楚上面
 两条修法。**绝不拿一个猜的汇率去收钱。**
@@ -710,7 +745,7 @@ providers/
 - **`originalUnitPrice` 那个字段不送了** —— 它已经废弃,新版本上类型变了
   (不再带币种),送过去 Shopify 会报 "invalid MoneyInput"。改用
   `acceptAutomaticDiscounts: false` 关掉自动折扣,对账是最后一道防线
-- **本仓库的订单记录仍然是人民币分** —— 那才是「用户买了什么、值多少」的事实
+- **本仓库的订单记录仍然是美元分** —— 那才是「用户买了什么、值多少」的事实
 
 
 ##### Shopify 的凭据(2026-01-01 起变了)
@@ -788,9 +823,9 @@ grant_type=client_credentials&client_id=…&client_secret=…
    > `SHOPIFY_API_SECRET`,配了就优先用它们。app 记得**装在店铺上**、
    > scope 要含 `read_orders` / `write_orders`。
    >
-   > **Shopify 的币种不用配环境变量** —— 本仓库的价是人民币,原样送过去,
-   > 换算交给 Shopify(见上面「Shopify 的币种」)。**前提是店铺能收人民币**:
-   > 要么把店铺的结算币种改成人民币,要么在 Settings → Markets 里把人民币
+   > **Shopify 的币种不用配环境变量** —— 本仓库的价是美元,原样送过去,
+   > 换算交给 Shopify(见上面「Shopify 的币种」)。**前提是店铺能收美元**:
+   > 要么把店铺的结算币种改成美元,要么在 Settings → Markets 里把美元
    > 加成展示币种。**代码不用改**,改的是 Shopify 后台。
 
 3. **登记回调地址** —— 各通道的通知地址要在对应平台上填:

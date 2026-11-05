@@ -25,11 +25,11 @@ export const NO_SEGMENT = "N-A";
 
 /**
  * 尺寸加价规则（分）—— 与 product-capability.ts 里
- * `sizes[].priceDeltaCents = idx * 500` 保持一致。
+ * `sizes[].priceDeltaCents = idx * 100` 保持一致。
  *
  * 抽成常量是为了让 seed 与运行时拼价逻辑不会各写一份然后漂移。
  */
-export const SIZE_STEP_CENTS = 500;
+export const SIZE_STEP_CENTS = 100;
 
 /** product_accessory_variant 行的最小结构（本模块只需要这几个字段） */
 export interface AccessoryVariantLike {

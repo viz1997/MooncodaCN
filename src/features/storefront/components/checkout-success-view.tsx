@@ -31,9 +31,9 @@ import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { formatPriceCNY } from "@/features/marketing/components/storefront/wjp-store-data";
 import { PaymentQrCode } from "@/features/payments/components/payment-qr";
 import { Link } from "@/i18n/routing";
+import { formatCents } from "@/lib/money";
 
 import { invalidateCartCache } from "../hooks/use-cart";
 
@@ -234,8 +234,7 @@ export function CheckoutSuccessView({
         <h1 className="font-serif text-3xl mt-5 mb-2">支付成功</h1>
         <p className="text-sm text-muted-foreground mb-1">订单号 {orderNo}</p>
         <p className="text-sm text-muted-foreground mb-8">
-          金额 {formatPriceCNY(totalCents / 100)} ——
-          我们已经收到款,马上开始制作。
+          金额 {formatCents(totalCents)} —— 我们已经收到款,马上开始制作。
         </p>
         <div className="flex gap-3 justify-center">
           <Button asChild className="rounded-full px-7">
@@ -314,7 +313,7 @@ export function CheckoutSuccessView({
           <p className="text-sm text-muted-foreground mb-8">
             订单号 {orderNo}
             <br />
-            金额 {formatPriceCNY(totalCents / 100)}
+            金额 {formatCents(totalCents)}
             <br />
             支付确认后会立刻显示,通常只要几秒。
           </p>

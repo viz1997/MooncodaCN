@@ -19,11 +19,11 @@
  *
  * ## 币种:我们不换算,Shopify 换(2026-11-05)
  *
- * 本仓库的价**一律是人民币**,原样搬过去 —— **我们的代码里没有汇率**。
+ * 本仓库的价**一律是美元**,原样搬过去 —— **我们的代码里没有汇率**。
  *
  * 草稿订单的行价按**展示币种**(`presentmentCurrencyCode`)给,所以我们把
- * 展示币种设成人民币,用户付的就是 ¥27.00 —— 跟我们在自己站上算的**一分
- * 不差**。结算成美元是 Shopify 按它自己的汇率换的事,不是我们的定价。
+ * 展示币种设成美元,用户付的就是 $31.00 —— 跟我们在自己站上算的**一分
+ * 不差**。结算成别的币种是 Shopify 按它自己的汇率换的事,不是我们的定价。
  *
  * 口径和前提见 `currency.ts`。
  *
@@ -66,7 +66,7 @@ export const SHOPIFY_ORDER_TAG_PREFIX = "mooncoda:";
 /** 默认国家/地区码 —— 地址簿里没存国家,Shopify 的地址需要 */
 function getDefaultCountry(): string {
   const raw = process.env.SHOPIFY_DEFAULT_COUNTRY?.trim();
-  return (raw || "CN").toUpperCase();
+  return (raw || "US").toUpperCase();
 }
 
 /** 一行(自定义行) */
@@ -88,8 +88,8 @@ export interface DraftOrderInput {
    * 展示币种 —— 用户被收的那个币种
    *
    * **行价按这个币种给**(`DraftOrderLineItemInput.price` 的文档原话:
-   * "The price in presentment currency")。我们把它设成人民币,行价也就是
-   * 人民币 —— 原样搬过去,一个字节都不改。
+   * "The price in presentment currency")。我们把它设成美元,行价也就是
+   * 美元 —— 原样搬过去,一个字节都不改。
    */
   presentmentCurrencyCode: string;
   /** 关掉店铺的自动折扣 —— 别让 Shopify 自作主张改我们的价 */
@@ -121,7 +121,7 @@ export interface DraftOrderInput {
  */
 export function buildDraftOrderInput(params: {
   request: PaymentRequest;
-  /** 展示币种 —— 一般就是人民币 */
+  /** 展示币种 —— 一般就是美元 */
   currencyCode: string;
 }): DraftOrderInput {
   const { request, currencyCode } = params;
@@ -189,7 +189,7 @@ export function buildDraftOrderInput(params: {
   return input;
 }
 
-/** 我们算出来的总额(分,人民币) */
+/** 我们算出来的总额(分,美元) */
 export function computeRequestTotalCents(request: PaymentRequest): number {
   const lines = request.items.reduce(
     (sum, item) => sum + item.unitPriceCents * item.quantity,
@@ -287,15 +287,15 @@ interface DraftOrderCreateResult {
  *
  * 四步:
  *
- * 1. **定展示币种** —— 店铺结算币种是人民币,或者 Markets 里启用了人民币
+ * 1. **定展示币种** —— 店铺结算币种是美元,或者 Markets 里启用了美元
  *    (见 `currency.ts`)。两条都不满足就**当场报错**,不猜汇率
- * 2. **建单** —— 我们算出来的价原样搬过去(人民币)
+ * 2. **建单** —— 我们算出来的价原样搬过去(美元)
  * 3. **对账** —— Shopify 算出来的 `presentmentMoney` 跟我们的一分不差
  */
 export async function createShopifyDraftOrder(
   request: PaymentRequest
 ): Promise<ShopifyDraftOrder> {
-  // 本仓库的价一律是人民币 —— 换算由 Shopify 做
+  // 本仓库的价一律是美元 —— 换算由 Shopify 做
   const requestCurrency = request.currency.toUpperCase();
   if (requestCurrency !== PRICE_CURRENCY) {
     throw new PaymentProviderError(
@@ -304,7 +304,7 @@ export async function createShopifyDraftOrder(
     );
   }
 
-  // 展示币种 —— 店铺得能收人民币
+  // 展示币种 —— 店铺得能收美元
   const shop = await getShopCurrencyInfo();
   const plan = resolvePresentmentCurrency({
     shopCurrency: shop.currencyCode,

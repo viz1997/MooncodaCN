@@ -48,14 +48,14 @@ export type PricingConfig = {
    * (不能再用「全包裹体积 × 单一密度」那套口径)。
    */
   supportDensity: number; // g/cm³
-  unitPrice: number; // 元/g
-  varnishFee: number; // 元
+  unitPrice: number; // $/g
+  varnishFee: number; // $
   varnishEnabled: boolean;
   repairMode: RepairMode;
   repairLabels: Record<RepairMode, string>;
   productPresets: ProductPreset[];
   productId: string;
-  /** 支撑材料单价（元/g），默认 1 元/g */
+  /** 支撑材料单价($/g)，默认 $0.15/g */
   supportPrice: number;
   /** 本体支撑比例阈值（超过此比例的部分按支撑单价加收），默认 1.0 = 1:1 */
   supportThreshold: number;
@@ -80,7 +80,7 @@ export type PricingResult = {
   materialWeight: number;
   weightFee: number;
   varnishFee: number;
-  /** 支撑加价（元）。本体支撑比例超过 1:1 阈值时，超出部分的支撑克重按 supportPrice 元/g 加收 */
+  /** 支撑加价($)。本体支撑比例超过 1:1 阈值时，超出部分的支撑克重按 supportPrice $/g 加收 */
   supportFee: number;
   /** 支撑加价明细：超出阈值的支撑克重（g） */
   excessSupportWeight: number;
@@ -144,8 +144,10 @@ export const DEFAULT_CONFIG: PricingConfig = {
   // 跟工作室对数用的口径一致:冰箱贴 43 + 59 = 102g)。工作室按自己那卷
   // 支撑的实际密度改「材料参数」里的支撑密度。
   supportDensity: 1.28,
-  unitPrice: 4.5,
-  varnishFee: 10,
+  // 单价 $/g —— 2026-11-05 从人民币改成美元(原 4.5 元/g)
+  unitPrice: 0.65,
+  // 光油 / 后处理固定费 $ —— 原 10 元
+  varnishFee: 1.5,
   varnishEnabled: true,
   repairMode: "none",
   repairLabels: {
@@ -156,7 +158,7 @@ export const DEFAULT_CONFIG: PricingConfig = {
   },
   productPresets: DEFAULT_PRODUCT_PRESETS,
   productId: "pet",
-  supportPrice: 1.0, // 1 元/g
+  supportPrice: 0.15, // $0.15/g(原 1 元/g)
   supportThreshold: 1.0, // 1:1 阈值
   supportEnabled: false, // 默认关闭，避免估算误差影响报价
 };
@@ -209,7 +211,7 @@ export function calculatePrice(
       ? Math.max(0, config.varnishFee)
       : 0;
 
-  // ---- 支撑加价：本体支撑比例超过 1:1 阈值时，超出部分的支撑克重按 supportPrice 元/g 加收 ----
+  // ---- 支撑加价：本体支撑比例超过 1:1 阈值时，超出部分的支撑克重按 supportPrice $/g 加收 ----
   // 当本体支撑比例 > supportThreshold（默认 1.0 = 1:1）时：
   //   超出比例 = selfSupportRatio - supportThreshold
   //   超出克重 = totalSupportWeight × (超出比例 / selfSupportRatio)
@@ -249,16 +251,16 @@ export function calculatePrice(
 
   const supportText =
     supportFee > 0
-      ? ` + 支撑超出 ${fmt(excessSupportWeight)} g × ${fmt(supportPrice)} 元/g = ${fmt(supportFee)} 元`
+      ? ` + 支撑超出 ${fmt(excessSupportWeight)} g × ${fmt(supportPrice)} $/g = ${fmt(supportFee)} $`
       : "";
 
-  const formulaText = `克重 = 体积 ${fmt(volumeCM3)} cm³ × 密度 ${fmt(density)} g/cm³，报价 = 克重 × ${fmt(unitPrice)} 元/g${config.varnishEnabled ? ` + 光油 ${fmt(varnishFee)} 元` : ""}${supportFee > 0 ? ` + 支撑超出 ${fmt(supportPrice)} 元/g` : ""}`;
+  const formulaText = `克重 = 体积 ${fmt(volumeCM3)} cm³ × 密度 ${fmt(density)} g/cm³，报价 = 克重 × ${fmt(unitPrice)} $/g${config.varnishEnabled ? ` + 光油 ${fmt(varnishFee)} $` : ""}${supportFee > 0 ? ` + 支撑超出 ${fmt(supportPrice)} $/g` : ""}`;
 
   const breakdownText =
-    `材料 ${fmt(materialWeight)} g × ${fmt(unitPrice)} 元/g = ${fmt(weightFee)} 元` +
-    (config.varnishEnabled ? ` + 光油 ${fmt(varnishFee)} 元` : "") +
+    `材料 ${fmt(materialWeight)} g × ${fmt(unitPrice)} $/g = ${fmt(weightFee)} $` +
+    (config.varnishEnabled ? ` + 光油 ${fmt(varnishFee)} $` : "") +
     supportText +
-    ` = ${fmt(totalPrice)} 元` +
+    ` = ${fmt(totalPrice)} $` +
     saText;
 
   return {

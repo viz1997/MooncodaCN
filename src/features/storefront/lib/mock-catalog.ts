@@ -146,14 +146,14 @@ const MATERIALS_BY_TYPE: Record<ProductTypeCode, Material[]> = {
 
 /**
  * 尺寸加价字典(超过基准尺寸按 cm 加价)
- * 基准:每个型号最小尺寸。超过 1cm +¥5
+ * 基准:每个型号最小尺寸。超过 1cm +$1
  */
 function buildSizesForType(code: ProductTypeCode): Size[] {
   const type = getProductType(code);
   if (!type) return [];
   return type.sizes.map((sizeStr, idx) => {
     const cm = Number(sizeStr);
-    const surchargeCents = idx * 500; // 每个型号的最小尺寸 +0,往后每档 +¥5
+    const surchargeCents = idx * 100; // 每个型号的最小尺寸 +0,往后每档 +$1
     return {
       id: `size_${code}_${cm}`,
       cm,

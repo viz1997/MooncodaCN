@@ -4,7 +4,7 @@
  * 视觉保留:
  *  - 右侧滑入 + backdrop blur overlay
  *  - 顶部 sticky:购物袋图标 + 标题 + 件数
- *  - 免运费进度条(¥99 门槛)
+ *  - 免运费进度条($19.99 门槛)
  *  - Line item 列表(图片 + 标题 + 规格 + 刻字 + 自定义预览标签)
  *  - +/- 数量 + 删除按钮
  *  - 底部:小计 / 运费 / 总价 / 去结算
@@ -12,8 +12,8 @@
  * 适配差异:
  *  - 用 useCart (TanStack Query) 替代 atelier useCartStore
  *  - 用 useCartUi (Zustand) 控制 drawer 开关
- *  - 用 formatPriceCNY 替代 useFormatPrice(单币种 CNY)
- *  - 文案中文化(¥99 / 免运费)
+ *  - 用 formatCents 替代 useFormatPrice(单币种 USD)
+ *  - 文案中文化($19.99 / 免运费)
  *  - 「去结算」跳 `/checkout`(2026-11-04:结算链接上了 Sellbase 收银台)
  *
  * ## 行合计用**折后**单价
@@ -42,9 +42,9 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { formatPriceCNY } from "@/features/marketing/components/storefront/wjp-store-data";
 import { getDeliveryTier } from "@/features/print-quote/lib/delivery-tier";
 import { useRouter } from "@/i18n/routing";
+import { formatCents } from "@/lib/money";
 
 import { useAtelierContainer } from "../hooks/use-atelier-container";
 import { useCart, useCartUi } from "../hooks/use-cart";
@@ -53,8 +53,8 @@ import { PRICING_CONSTANTS } from "../lib/pricing-constants";
 import { getPrintServiceSpec } from "../lib/print-service";
 import { formatSizeWithInches } from "../lib/size-format";
 
-const FREE_SHIPPING_THRESHOLD_CNY =
-  PRICING_CONSTANTS.FREE_SHIPPING_THRESHOLD_CENTS / 100;
+const FREE_SHIPPING_THRESHOLD_CENTS =
+  PRICING_CONSTANTS.FREE_SHIPPING_THRESHOLD_CENTS;
 
 export function CartDrawer() {
   const router = useRouter();
@@ -71,13 +71,14 @@ export function CartDrawer() {
     removeLineItem,
   } = useCart();
 
-  const subtotalCNY = subtotalCents / 100;
-  const shippingCNY = shippingCents / 100;
-  const totalCNY = subtotalCNY + shippingCNY;
-  const remainingCNY = Math.max(0, FREE_SHIPPING_THRESHOLD_CNY - subtotalCNY);
+  const totalCents = subtotalCents + shippingCents;
+  const remainingCents = Math.max(
+    0,
+    FREE_SHIPPING_THRESHOLD_CENTS - subtotalCents
+  );
   const progressPercent = Math.min(
     100,
-    (subtotalCNY / FREE_SHIPPING_THRESHOLD_CNY) * 100
+    (subtotalCents / FREE_SHIPPING_THRESHOLD_CENTS) * 100
   );
 
   const handleCheckout = () => {
@@ -122,11 +123,11 @@ export function CartDrawer() {
         {items.length > 0 && (
           <div className="px-5 py-4 bg-secondary/50 border-b">
             <p className="text-sm text-foreground/80 mb-2 text-pretty">
-              {remainingCNY > 0 ? (
+              {remainingCents > 0 ? (
                 <>
                   还差
                   <span className="font-semibold text-foreground mx-1">
-                    {formatPriceCNY(remainingCNY)}
+                    {formatCents(remainingCents)}
                   </span>
                   即可免运费
                 </>
@@ -158,7 +159,7 @@ export function CartDrawer() {
               </div>
               <h3 className="font-serif text-xl mb-2">购物袋是空的</h3>
               <p className="text-sm text-muted-foreground max-w-xs text-pretty">
-                浏览钥匙扣 / 手办 / 冰箱贴系列,选中的作品会出现在这里。¥99
+                浏览钥匙扣 / 手办 / 冰箱贴系列,选中的作品会出现在这里。$19.99
                 免运费。
               </p>
               <Button
@@ -309,7 +310,7 @@ export function CartDrawer() {
                           </div>
                         )}
                         <p className="text-sm font-medium">
-                          {formatPriceCNY(itemTotalCents / 100)}
+                          {formatCents(itemTotalCents)}
                         </p>
                       </div>
                     </div>
@@ -327,13 +328,13 @@ export function CartDrawer() {
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">小计</span>
                 <span className="font-medium">
-                  {formatPriceCNY(subtotalCNY)}
+                  {formatCents(subtotalCents)}
                 </span>
               </div>
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">运费</span>
                 <span className="font-medium">
-                  {remainingCNY > 0 ? "结算时计算" : "免运费"}
+                  {remainingCents > 0 ? "结算时计算" : "免运费"}
                 </span>
               </div>
               <div className="border-t pt-2.5" />
@@ -342,7 +343,7 @@ export function CartDrawer() {
                   合计
                 </span>
                 <span className="font-serif text-xl">
-                  {formatPriceCNY(totalCNY)}
+                  {formatCents(totalCents)}
                 </span>
               </div>
             </div>

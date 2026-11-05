@@ -40,10 +40,8 @@ import * as React from "react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import {
-  formatPriceCNY,
-  WJP_SERIES,
-} from "@/features/marketing/components/storefront/wjp-store-data";
+import { WJP_SERIES } from "@/features/marketing/components/storefront/wjp-store-data";
+import { formatCents } from "@/lib/money";
 
 import { useAtelierContainer } from "../hooks/use-atelier-container";
 import { useRequireSignIn } from "../hooks/use-require-sign-in";
@@ -151,7 +149,9 @@ export function CustomizeEntry() {
                 <div className="mt-auto pt-3 flex items-center justify-between gap-2">
                   <p className="text-xs text-muted-foreground">
                     {isZh ? "起 " : "from "}
-                    {formatPriceCNY(series.fromPriceCNY, isZh ? "zh-CN" : "en")}
+                    {formatCents(series.fromPriceCents, {
+                      locale: isZh ? "zh-CN" : "en",
+                    })}
                   </p>
                   <ArrowRight className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-[var(--accent)]" />
                 </div>

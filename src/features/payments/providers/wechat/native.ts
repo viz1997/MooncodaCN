@@ -41,6 +41,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { PRICE_CURRENCY } from "@/config/currency";
 import { WECHAT_PAY_API_BASE, type WechatPayConfig } from "./env";
 
 import {
@@ -127,7 +128,10 @@ export async function createNativeOrder(
     notify_url: params.notifyUrl,
     amount: {
       total: params.totalCents,
-      currency: "CNY",
+      // 币种跟本仓库的价走(美元)。**境内商户只能收人民币** —— 走微信这一路
+      // 需要开通**跨境微信支付**(境外商户),否则微信会拒掉这笔单。
+      // 不在这里换算 —— 本仓库的代码里没有汇率(见 CLAUDE.md)。
+      currency: PRICE_CURRENCY,
     },
   });
 

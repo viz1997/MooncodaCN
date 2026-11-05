@@ -3,7 +3,8 @@
 import { motion } from "framer-motion";
 import { ArrowRight } from "lucide-react";
 import { Link } from "@/i18n/routing";
-import { formatPriceCNY, WJP_SERIES } from "./wjp-store-data";
+import { formatCents } from "@/lib/money";
+import { WJP_SERIES } from "./wjp-store-data";
 
 /**
  * WJP 系列展示(品类 —— **二级**)。
@@ -66,7 +67,7 @@ export function SeriesShowcase() {
                     {s.tagline}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    起 {formatPriceCNY(s.fromPriceCNY)} · {s.count} 款
+                    起 {formatCents(s.fromPriceCents)} · {s.count} 款
                   </p>
                 </div>
                 <ArrowRight className="size-4 shrink-0 ml-auto text-muted-foreground/50 group-hover:text-[var(--accent)] group-hover:translate-x-0.5 transition-all" />

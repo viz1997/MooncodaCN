@@ -34,6 +34,7 @@
  */
 
 import { and, eq } from "drizzle-orm";
+import { PRICE_CURRENCY } from "@/config/currency";
 import { db } from "@/db";
 import { type PrintOrderRow, printOrder } from "@/db/schema";
 import {
@@ -230,7 +231,7 @@ function buildPrintOrderPaymentRequest(order: PrintOrderRow): PaymentRequest {
       : null,
     note: order.note ?? "",
     successUrl: buildPrintOrderSuccessUrl(order.orderNo),
-    currency: "CNY",
+    currency: PRICE_CURRENCY,
   };
 }
 

@@ -32,22 +32,22 @@
       "keychain": {
         "name": "Keychain",
         "size": "40-60mm",
-        "price": "from $13"
+        "price": "from $12.99"
       },
       "badge": {
         "name": "Pet Badge",
         "size": "30-50mm",
-        "price": "from $7"
+        "price": "from $6.99"
       },
       "magnet": {
         "name": "Fridge Magnet",
         "size": "70-100mm",
-        "price": "from $13"
+        "price": "from $12.99"
       },
       "figure": {
         "name": "Figure",
         "size": "100-200mm",
-        "price": "from $43"
+        "price": "from $41.99"
       }
     }
   },
@@ -630,7 +630,7 @@
         "name": "Pet Badge",
         "description": "30-50mm full-color pin / badge",
         "cta": "Customize Now",
-        "creditsAmount": "$7",
+        "creditsAmount": "$6.99",
         "creditsLabel": "/ piece",
         "creditsNote": "1 piece min.",
         "features": {
@@ -647,7 +647,7 @@
         "name": "Keychain / Fridge Magnet",
         "description": "40-100mm charms / fridge magnets",
         "cta": "Customize Now",
-        "creditsAmount": "$13",
+        "creditsAmount": "$12.99",
         "creditsLabel": "/ piece",
         "booksCount": "2",
         "features": {
@@ -665,7 +665,7 @@
         "name": "Figure / Standee",
         "description": "100-200mm desktop collectible",
         "cta": "Customize Now",
-        "creditsAmount": "$43",
+        "creditsAmount": "$41.99",
         "creditsLabel": "/ piece",
         "booksCount": "3",
         "features": {
@@ -1127,8 +1127,8 @@
       "version": "Mooncoda Weight Calculator"
     },
     "unit": {
-      "yuan": "CNY",
-      "perGram": "CNY/g"
+      "yuan": "USD",
+      "perGram": "USD/g"
     },
     "upload": {
       "reading": "Reading file…",
@@ -1352,7 +1352,7 @@
       "varnishOn": "on",
       "varnishOff": "off",
       "supportOn": "on",
-      "yuan": "CNY",
+      "yuan": "USD",
       "selfSupport": "Self-support {ratio}% · {weight} g",
       "laidFlat": "Laid flat",
       "exportRotated": "Export laid-out OBJ",
