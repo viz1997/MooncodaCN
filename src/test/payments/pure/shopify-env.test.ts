@@ -174,6 +174,18 @@ describe("isShopifyConfigured —— 「配好了没」", () => {
     expect(env.isShopifyConfigured()).toBe(true);
   });
 
+  it("凭据齐 → true(店铺能不能收人民币**这里查不了**,建单那一步才报)", async () => {
+    // 币种要问 Shopify,而 isConfigured() 是同步的(界面要立刻知道能不能选)
+    // —— 所以这里不查,建单那一步报得很清楚(见 shopify-currency.test.ts)
+    setShopifyEnv({
+      SHOPIFY_STORE_DOMAIN: "demo-shop.myshopify.com",
+      SHOPIFY_CLIENT_ID: "client-id-123",
+      SHOPIFY_CLIENT_SECRET: "client-secret-456",
+    });
+    const { env } = await loadShopify();
+    expect(env.isShopifyConfigured()).toBe(true);
+  });
+
   it("旧路:有永久 token 但**没有验签密钥** → false", async () => {
     // 回调验不过签的话,用户付了钱订单永远不会变「已付」—— 不算配好
     setShopifyEnv({

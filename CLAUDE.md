@@ -578,10 +578,14 @@ providers/
   **没有价格字段**;改价要 Cart Transform(Plus 套餐);Shopify Scripts 已
   在 2026-06-30 下线。所以走**草稿订单**(`draftOrderCreate`):
   - 行是**自定义行**(`title` + `price` + `quantity`),价格**由我们给**
+  - `presentmentCurrencyCode` —— **我们不换算**,行价就是人民币的数,展示
+    币种设成人民币(见下面「Shopify 的币种」)
   - `taxExempt: true` —— 不在我们的总价上再叠一层税
+  - `acceptAutomaticDiscounts: false` —— 店铺的自动折扣不许碰我们的价
   - 运费也是我们自己给的一行(`shippingLine`),不跟 Shopify 的运费规则走
   - 付完钱 Shopify 把它转成正式订单并发 `orders/paid` webhook
-  - **建完立刻回读总额对账** —— 对不上就**大声失败**,不能带着错的价去收钱
+  - **建完立刻回读总额对账** —— 比的是 `presentmentMoney`(用户被收的那份),
+    对不上就**大声失败**,不能带着错的价去收钱
   - 也就是说:**不用把商品目录同步过去,也能保证一分钱不差**
 
 #### 三个通道的 webhook
@@ -662,7 +666,52 @@ providers/
 |---|---|
 | 微信 | `WECHAT_PAY_MCH_ID` / `WECHAT_PAY_APP_ID` / `WECHAT_PAY_API_V3_KEY`(32 字节)/ `WECHAT_PAY_SERIAL_NO` / `WECHAT_PAY_PRIVATE_KEY`(或 `_PATH`)/ 验签材料 `WECHAT_PAY_PUBLIC_KEY` + `WECHAT_PAY_PUBLIC_KEY_ID` **或** `WECHAT_PAY_PLATFORM_CERT_DIR` / `WECHAT_PAY_NOTIFY_URL`(可省) |
 | 支付宝 | `ALIPAY_APP_ID` / `ALIPAY_APP_PRIVATE_KEY`(或 `_PATH`)/ `ALIPAY_PUBLIC_KEY`(**支付宝公钥**,不是应用公钥)/ `ALIPAY_GATEWAY`(可省)/ `ALIPAY_NOTIFY_URL` / `ALIPAY_RETURN_URL`(可省) |
-| Shopify | `SHOPIFY_STORE_DOMAIN` / `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET`(新模型;**secret 也是 webhook 的验签密钥**)/ 旧路可省:`SHOPIFY_ADMIN_ACCESS_TOKEN`(永久 token,配了就优先用)/ `SHOPIFY_API_SECRET`(独立验签密钥)/ `SHOPIFY_API_VERSION`(可省) |
+| Shopify | `SHOPIFY_STORE_DOMAIN` / `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET`(新模型;**secret 也是 webhook 的验签密钥**)/ 旧路可省:`SHOPIFY_ADMIN_ACCESS_TOKEN`(永久 token,配了就优先用)/ `SHOPIFY_API_SECRET`(独立验签密钥)/ `SHOPIFY_API_VERSION`(可省)/ **`SHOPIFY_DEFAULT_COUNTRY`(可省,默认 `CN`)**。**没有汇率变量** |
+
+##### Shopify 的币种:**我们不换算,Shopify 换**(2026-11-05)
+
+**线上真踩过**:店铺结算是 USD,这单是 ¥27.00,Shopify 直接拒了(「币种对不上:
+店铺结算币种是 USD,本订单是 CNY」)。
+
+早先的修法是「本仓库乘一个写死的 `SHOPIFY_FX_RATE` 推成美元」—— **这条路
+被否掉了**(2026-11-05 工作室定的):汇率是一个**全局静态值**,涨了跌了都没人
+知道,而且没有任何一方对「用户看到的数」负责。自建站面向全球,这么干等于把
+汇兑风险和比价流失全揽在自己身上。
+
+**现在的口径:定价权交给 Shopify 的展示币种(presentment currency)。**
+
+- **本仓库的价一律人民币**,**原样**搬进草稿订单 —— 一个字节都不改
+- 草稿订单带 `presentmentCurrencyCode: "CNY"` —— 文档原话:
+  "The presentment currency that should be used for the order. This currency is
+  the currency that the customer will be charged in."
+- **行价按展示币种给**(`DraftOrderLineItemInput.price`:"The price in
+  presentment currency")—— 所以我们给人民币的数,用户就付人民币
+- **逐分相等在展示币种上成立** —— 对账比的是 `totalPriceSet.presentmentMoney`
+  (用户被收的那份),必须跟我们发过去的**一分不差**
+  (`draft-order.ts` 的 `assertSameTotal`)
+- `totalPriceSet.shopMoney`(结算币种那份)**不参与对账** —— 那是 Shopify 按
+  自己的汇率换过的数,本来就不该等于我们的数
+- **Shopify 在草稿单创建那一刻就把汇率锁死** —— 用户看到的价、我们收到的钱,
+  用的是同一个数
+
+**前提:店铺得能收人民币。** 两条修法任选其一(`providers/shopify/currency.ts`
+的 `resolvePresentmentCurrency()`):
+
+1. **店铺结算币种改成人民币** —— 最省事,不用碰 Markets,而且结算没有汇兑
+   敞口(Markets 的自动换算大约带 1.5% 的零售加价)
+2. **Markets 里把人民币加成展示币种**(Settings → Markets)—— 结算币种还是
+   美元,用户在人民币这一层付钱
+
+两条都不满足 → **当场报错**(「没配好」,重试没用),错误文案里直接写清楚上面
+两条修法。**绝不拿一个猜的汇率去收钱。**
+
+- **界面上的「配好了」查不了这件事** —— `isShopifyConfigured()` 是同步的,
+  币种要问 Shopify。币种对不上会在**建单那一步**报错,报得很清楚
+- **`originalUnitPrice` 那个字段不送了** —— 它已经废弃,新版本上类型变了
+  (不再带币种),送过去 Shopify 会报 "invalid MoneyInput"。改用
+  `acceptAutomaticDiscounts: false` 关掉自动折扣,对账是最后一道防线
+- **本仓库的订单记录仍然是人民币分** —— 那才是「用户买了什么、值多少」的事实
+
 
 ##### Shopify 的凭据(2026-01-01 起变了)
 
@@ -713,6 +762,8 @@ grant_type=client_credentials&client_id=…&client_secret=…
 | `src/test/payments/pure/alipay-signature.test.ts` | RSA2 签名 / 验签 |
 | `src/test/payments/pure/shopify-signature.test.ts` | HMAC 验签 / 草稿单 |
 | `src/test/payments/pure/shopify-env.test.ts` | Shopify 凭据(Client ID / Secret、grant 换 token、缓存 / 单飞、4xx vs 5xx) |
+| `src/test/payments/pure/shopify-currency.test.ts` | 展示币种判定(店铺结算币种 / Markets 两条路,判定失败时报错文案) |
+| `src/test/payments/pure/shopify-draft-order.test.ts` | 建单那一整条链路(币种对不上就拒、对账比 presentmentMoney) |
 | `src/test/payments/pure/payment-channels.test.ts` | 开放名单 = 清单(三种都摆出来、旧路 stripe 不在) |
 | `src/test/payments/pure/storefront-transition.test.ts` | 状态转移(退款 / 迟到通知) |
 | `src/test/payments/pure/linked-print-order.test.ts` | 工单跟着商城订单变 |
@@ -736,6 +787,11 @@ grant_type=client_credentials&client_id=…&client_secret=…
    > 再单独配)。旧 app 那种永久 token 走 `SHOPIFY_ADMIN_ACCESS_TOKEN` +
    > `SHOPIFY_API_SECRET`,配了就优先用它们。app 记得**装在店铺上**、
    > scope 要含 `read_orders` / `write_orders`。
+   >
+   > **Shopify 的币种不用配环境变量** —— 本仓库的价是人民币,原样送过去,
+   > 换算交给 Shopify(见上面「Shopify 的币种」)。**前提是店铺能收人民币**:
+   > 要么把店铺的结算币种改成人民币,要么在 Settings → Markets 里把人民币
+   > 加成展示币种。**代码不用改**,改的是 Shopify 后台。
 
 3. **登记回调地址** —— 各通道的通知地址要在对应平台上填:
    - 微信:商户平台 → 产品中心 → 开发配置 → 支付通知地址 →

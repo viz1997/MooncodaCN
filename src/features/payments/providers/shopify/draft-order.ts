@@ -17,13 +17,25 @@
  * - `taxExempt: true` —— 不会在总价上再叠一层税
  * - 运费也是我们自己给的一行 —— 不跟 Shopify 的运费规则走
  *
+ * ## 币种:我们不换算,Shopify 换(2026-11-05)
+ *
+ * 本仓库的价**一律是人民币**,原样搬过去 —— **我们的代码里没有汇率**。
+ *
+ * 草稿订单的行价按**展示币种**(`presentmentCurrencyCode`)给,所以我们把
+ * 展示币种设成人民币,用户付的就是 ¥27.00 —— 跟我们在自己站上算的**一分
+ * 不差**。结算成美元是 Shopify 按它自己的汇率换的事,不是我们的定价。
+ *
+ * 口径和前提见 `currency.ts`。
+ *
  * ## 落库之前先对一遍账
  *
- * 建完草稿单会把 Shopify 那边算出来的总额跟我们的总额比一次
- * (`assertSameTotal`)。**对不上就当这次失败**,不给用户一个会收错钱的链接。
+ * 建完草稿单会把 Shopify 那边算出来的总额(**`presentmentMoney`**,也就是
+ * 用户被收的那份)跟我们的总额比一次(`assertSameTotal`)。**对不上就当这次
+ * 失败**,不给用户一个会收错钱的链接。
  *
  * 最常见的对不上原因是**自动折扣**:店铺里挂着「满减 / 打折」的活动时,
  * 草稿单也会被打折 —— 那钱就少了,而我们这边记的是没打折的价。
+ * (`acceptAutomaticDiscounts: false` 已经先关了一道,但对账是最后一道。)
  *
  * ## 订单号要出现在三个地方
  *
@@ -44,7 +56,8 @@ import {
   type PaymentRequest,
 } from "@/features/payments/lib/types";
 
-import { getShopCurrency, shopifyGraphql } from "./client";
+import { getShopCurrencyInfo, shopifyGraphql } from "./client";
+import { PRICE_CURRENCY, resolvePresentmentCurrency } from "./currency";
 import { SHOPIFY_ORDER_NO_PROPERTY } from "./order-reference";
 
 /** 我们在 Shopify 侧留下的标记前缀 —— 回调靠它认出「这单是我们的」 */
@@ -61,7 +74,6 @@ export interface DraftOrderLineInput {
   title: string;
   quantity: number;
   price: { amount: string; currencyCode: string };
-  originalUnitPrice: { amount: string; currencyCode: string };
   sku?: string;
   customAttributes?: { key: string; value: string }[];
 }
@@ -72,6 +84,16 @@ export interface DraftOrderInput {
   note: string;
   tags: string[];
   taxExempt: boolean;
+  /**
+   * 展示币种 —— 用户被收的那个币种
+   *
+   * **行价按这个币种给**(`DraftOrderLineItemInput.price` 的文档原话:
+   * "The price in presentment currency")。我们把它设成人民币,行价也就是
+   * 人民币 —— 原样搬过去,一个字节都不改。
+   */
+  presentmentCurrencyCode: string;
+  /** 关掉店铺的自动折扣 —— 别让 Shopify 自作主张改我们的价 */
+  acceptAutomaticDiscounts: boolean;
   lineItems: DraftOrderLineInput[];
   shippingLine?: {
     title: string;
@@ -92,18 +114,24 @@ export interface DraftOrderInput {
  * 把一次支付请求翻译成 Shopify 草稿单输入
  *
  * **纯函数** —— 不碰网络、不碰 env 里的密钥(只有国家码读了 env,给了默认值)。
- * 「我们算出来的价」原样搬过去,一个字节都不改。
+ *
+ * ## 「我们算出来的价」原样搬过去
+ *
+ * 一个字节都不改 —— **不换算**。展示币种是什么,行价就是那个币种的数。
  */
 export function buildDraftOrderInput(params: {
   request: PaymentRequest;
+  /** 展示币种 —— 一般就是人民币 */
   currencyCode: string;
 }): DraftOrderInput {
   const { request, currencyCode } = params;
   const currency = currencyCode.toUpperCase();
 
   const lineItems: DraftOrderLineInput[] = request.items.map((item) => {
-    const amount = centsToAmountString(item.unitPriceCents);
-    const price = { amount, currencyCode: currency };
+    const price = {
+      amount: centsToAmountString(item.unitPriceCents),
+      currencyCode: currency,
+    };
 
     const attributes: { key: string; value: string }[] = [
       { key: SHOPIFY_ORDER_NO_PROPERTY, value: request.orderNo },
@@ -117,8 +145,6 @@ export function buildDraftOrderInput(params: {
       title: item.title,
       quantity: item.quantity,
       price,
-      // 原价跟现价一样 —— 不给 Shopify 留「打折」的空间,免得它自作主张
-      originalUnitPrice: price,
       customAttributes: attributes,
     };
     if (item.sku) line.sku = item.sku;
@@ -131,6 +157,9 @@ export function buildDraftOrderInput(params: {
     tags: [`${SHOPIFY_ORDER_TAG_PREFIX}${request.orderNo}`],
     // 税我们自己算过了(本仓库算价),别让 Shopify 再叠一层
     taxExempt: true,
+    presentmentCurrencyCode: currency,
+    // 店铺里的「满减 / 打折」不许碰我们的价 —— 对账是最后一道,这里先关一道
+    acceptAutomaticDiscounts: false,
     lineItems,
   };
 
@@ -160,7 +189,7 @@ export function buildDraftOrderInput(params: {
   return input;
 }
 
-/** 我们算出来的总额(分) */
+/** 我们算出来的总额(分,人民币) */
 export function computeRequestTotalCents(request: PaymentRequest): number {
   const lines = request.items.reduce(
     (sum, item) => sum + item.unitPriceCents * item.quantity,
@@ -172,21 +201,30 @@ export function computeRequestTotalCents(request: PaymentRequest): number {
 /**
  * 对账 —— Shopify 那边算出来的总额必须跟我们的**一分不差**
  *
+ * 比的是 **`presentmentMoney`**(用户被收的那份),不是 `shopMoney`(结算
+ * 那份)。结算那份是 Shopify 按自己的汇率换过的,本来就不该等于我们的数。
+ *
  * 对不上就抛错:宁可这次支付失败,也不能给用户一个收了错钱的链接。
  */
 export function assertSameTotal(params: {
   orderNo: string;
+  /** 我们发过去的总额(分) */
   ourTotalCents: number;
+  /** Shopify 算出来的总额(金额字符串,展示币种) */
   shopifyTotalAmount: string;
+  /** 币种 —— 只用在错误信息里 */
+  currency?: string;
 }): void {
   const shopifyCents = amountStringToCents(params.shopifyTotalAmount);
   if (shopifyCents === params.ourTotalCents) return;
 
+  const currency = params.currency ? params.currency.toUpperCase() : "";
   throw new PaymentProviderError(
     "shopify",
     `Shopify 草稿单金额对不上：订单 ${params.orderNo} 我们算的是 ` +
-      `${centsToAmountString(params.ourTotalCents)},Shopify 算的是 ` +
-      `${params.shopifyTotalAmount}（店铺的自动折扣 / 税 / 运费规则可能改动了价格）`
+      `${centsToAmountString(params.ourTotalCents)}${currency},Shopify 算的是 ` +
+      `${params.shopifyTotalAmount}${currency}` +
+      "（店铺的自动折扣 / 税 / 运费规则可能改动了价格）"
   );
 }
 
@@ -198,7 +236,7 @@ export interface ShopifyDraftOrder {
   name: string | null;
   /** 收银台地址 —— 用户跳过去付款 */
   invoiceUrl: string | null;
-  /** Shopify 那边算出来的总额(分) */
+  /** 用户被收的总额(展示币种的最小单位) */
   totalCents: number;
 }
 
@@ -211,6 +249,10 @@ const DRAFT_ORDER_CREATE = `
         invoiceUrl
         totalPriceSet {
           shopMoney {
+            amount
+            currencyCode
+          }
+          presentmentMoney {
             amount
             currencyCode
           }
@@ -233,6 +275,7 @@ interface DraftOrderCreateResult {
       invoiceUrl: string | null;
       totalPriceSet: {
         shopMoney: { amount: string; currencyCode: string };
+        presentmentMoney: { amount: string; currencyCode: string } | null;
       };
     } | null;
     userErrors: { field: string[] | null; message: string }[];
@@ -242,30 +285,35 @@ interface DraftOrderCreateResult {
 /**
  * 建一张 Shopify 草稿订单
  *
- * 三步:
+ * 四步:
  *
- * 1. **确认币种** —— 店铺的结算币种必须跟我们的订单币种一样,否则金额没有
- *    「逐分相等」可言(数字对得上,钱不对)。
- * 2. **建单** —— 行价原样搬过去。
- * 3. **对账** —— Shopify 算出来的总额跟我们的一分不差才返回。
+ * 1. **定展示币种** —— 店铺结算币种是人民币,或者 Markets 里启用了人民币
+ *    (见 `currency.ts`)。两条都不满足就**当场报错**,不猜汇率
+ * 2. **建单** —— 我们算出来的价原样搬过去(人民币)
+ * 3. **对账** —— Shopify 算出来的 `presentmentMoney` 跟我们的一分不差
  */
 export async function createShopifyDraftOrder(
   request: PaymentRequest
 ): Promise<ShopifyDraftOrder> {
-  const shopCurrency = await getShopCurrency();
+  // 本仓库的价一律是人民币 —— 换算由 Shopify 做
   const requestCurrency = request.currency.toUpperCase();
-
-  if (shopCurrency !== requestCurrency) {
+  if (requestCurrency !== PRICE_CURRENCY) {
     throw new PaymentProviderError(
       "shopify",
-      `币种对不上：店铺结算币种是 ${shopCurrency},本订单是 ${requestCurrency}。` +
-        "换币种需要先定汇率 —— 现在的口径是不换算"
+      `本订单的币种是 ${requestCurrency},但这条通道的价一律是 ${PRICE_CURRENCY}`
     );
   }
 
+  // 展示币种 —— 店铺得能收人民币
+  const shop = await getShopCurrencyInfo();
+  const plan = resolvePresentmentCurrency({
+    shopCurrency: shop.currencyCode,
+    enabledPresentmentCurrencies: shop.enabledPresentmentCurrencies,
+  });
+
   const input = buildDraftOrderInput({
     request,
-    currencyCode: shopCurrency,
+    currencyCode: plan.presentmentCurrency,
   });
 
   const data = await shopifyGraphql<DraftOrderCreateResult>(
@@ -298,17 +346,34 @@ export async function createShopifyDraftOrder(
     );
   }
 
-  const shopifyTotalAmount = draft.totalPriceSet.shopMoney.amount;
+  // 对账比的是 `presentmentMoney` —— 用户被收的那份
+  //
+  // `shopMoney` 是结算币种的数(Shopify 按自己的汇率换过),本来就不该等于
+  // 我们的数,拿它比会误报。
+  const totalSet = draft.totalPriceSet;
+  const presentment = totalSet.presentmentMoney ?? totalSet.shopMoney;
+  const presentmentCurrency = presentment.currencyCode.toUpperCase();
+
+  if (presentmentCurrency !== plan.presentmentCurrency) {
+    throw new PaymentProviderError(
+      "shopify",
+      `币种对不上：我们按 ${plan.presentmentCurrency} 建的单,` +
+        `Shopify 那边算出来的总额是 ${presentmentCurrency}`
+    );
+  }
+
   assertSameTotal({
     orderNo: request.orderNo,
     ourTotalCents: computeRequestTotalCents(request),
-    shopifyTotalAmount,
+    shopifyTotalAmount: presentment.amount,
+    currency: plan.presentmentCurrency,
   });
 
   return {
     id: draft.id,
     name: draft.name,
     invoiceUrl: draft.invoiceUrl,
-    totalCents: amountStringToCents(shopifyTotalAmount),
+    // 用户被收的总额(展示币种的最小单位)
+    totalCents: amountStringToCents(presentment.amount),
   };
 }

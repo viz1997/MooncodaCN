@@ -61,6 +61,9 @@
  * (*) 只要配了 `SHOPIFY_ADMIN_ACCESS_TOKEN`,那两个就不用配 —— 反过来只配
  * Client ID / Secret 也行(grant 那条路)。
  *
+ * **没有汇率变量** —— 本仓库的价是人民币,原样送过去,换算交给 Shopify。
+ * 见 `currency.ts`(同目录)。
+ *
  * **app 要装在店铺上** —— client credentials grant 只对「跟店铺同一个组织、
  * 由我们自己开发」的 app 生效。没装的话 Shopify 会回 `app_not_installed`。
  *
@@ -69,6 +72,15 @@
  *
  * **密钥纪律**:token 和 secret **只进环境变量**,绝不进仓库文件、绝不进
  * 聊天记录。见 CLAUDE.md 的「密钥纪律」。
+ *
+ * ## 币种:不换算,让 Shopify 换
+ *
+ * 本仓库的价**一律是人民币分**,原样送进草稿订单。Shopify 那边把人民币的
+ * 展示币种锁在草稿单创建那一刻,结算成店铺的结算币种是它的事。
+ *
+ * **前提**:店铺得能收人民币 —— 结算币种是人民币,或者 Markets 里启用了
+ * 人民币。两条都不满足时建单会**当场报错**并说清楚怎么改(不猜汇率)。
+ * 口径见 `currency.ts`。
  *
  * ## 缺配置时的行为
  *
@@ -79,6 +91,11 @@
  */
 
 import { PaymentProviderError } from "@/features/payments/lib/types";
+
+import { ShopifyNotConfiguredError } from "./errors";
+
+/** 错误类搬到了 `errors.ts`(跟 `currency.ts` 循环依赖会出问题)—— 这里转出去一份 */
+export { ShopifyNotConfiguredError } from "./errors";
 
 /**
  * GraphQL API 版本
@@ -93,14 +110,6 @@ import { PaymentProviderError } from "@/features/payments/lib/types";
  * 代码。以后这个版本也过期了,改这里或者配 `SHOPIFY_API_VERSION`。
  */
 export const DEFAULT_SHOPIFY_API_VERSION = "2026-07";
-
-/** 读取配置时抛的错误 —— 跟 `PaymentNotConfiguredError` 分开是为了给一句更准的话 */
-export class ShopifyNotConfiguredError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ShopifyNotConfiguredError";
-  }
-}
 
 /** 去掉协议前缀和尾部斜杠 —— 两种写法都要能用 */
 function normalizeDomain(value: string): string {
@@ -335,6 +344,10 @@ export function getShopifyGraphqlUrl(): string {
  *
  * 少一样都不算配好 —— 「配好了」意味着**整条路走得通**,不是「建单那一步
  * 能过」。
+ *
+ * **注意**:这里**查不了**「店铺能不能收人民币」—— 那要问 Shopify,而
+ * `isConfigured()` 是同步的(界面上要立刻知道这个通道能不能选)。
+ * 币种对不上会在**建单那一步**报错,并且报得很清楚(见 `currency.ts`)。
  */
 export function isShopifyConfigured(): boolean {
   try {

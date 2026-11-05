@@ -97,8 +97,10 @@ describe("Shopify 草稿单 —— 逐分相等", () => {
     expect(line?.title).toBe("冰箱贴");
     expect(line?.quantity).toBe(2);
     expect(line?.price.amount).toBe("12.50");
-    // 原价跟现价一样 —— 不给 Shopify 留打折的空间
-    expect(line?.originalUnitPrice.amount).toBe("12.50");
+    // 不给 Shopify 留打折的空间 —— 走 `acceptAutomaticDiscounts: false`
+    // (`originalUnitPrice` 那个字段已经废弃,新版本上它的类型变了,送过去
+    //  Shopify 会报 "invalid MoneyInput")
+    expect(input.acceptAutomaticDiscounts).toBe(false);
     expect(line?.price.currencyCode).toBe("CNY");
   });
 

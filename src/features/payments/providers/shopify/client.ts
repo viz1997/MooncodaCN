@@ -102,24 +102,45 @@ export async function shopifyGraphql<T>(
 }
 
 /**
- * 读店铺的结算币种
+ * 店铺的币种信息
  *
- * **为什么要读**:草稿订单的金额是按店铺币种算的。我们的订单也是按店铺币种
- * 算的 —— 两者必须一致,否则「逐分相等」直接破了(¥100 的单子被当成 $100
- * 收,数字对得上但钱不对)。
+ * - `currencyCode` —— 店铺的**结算币种**(钱最终落在哪个币种账户里)
+ * - `enabledPresentmentCurrencies` —— 店铺**启用的展示币种**(Markets)
  *
- * 读一次缓存住 —— 一个部署的店铺币种不会变。
+ * **为什么要读**:草稿订单的展示币种(`presentmentCurrencyCode`)得从这两
+ * 个里挑 —— 挑一个我们能原样送过去的(我们的价是人民币)。
  */
-let cachedCurrency: string | null = null;
+export interface ShopCurrencyInfo {
+  currencyCode: string;
+  enabledPresentmentCurrencies: string[];
+}
 
-export async function getShopCurrency(): Promise<string> {
+/**
+ * 读店铺的币种信息
+ *
+ * 读一次缓存住 —— 一个部署的店铺币种不会变(Markets 改了会重启进程,
+ * 缓存自然失效)。
+ */
+let cachedCurrency: ShopCurrencyInfo | null = null;
+
+export async function getShopCurrencyInfo(): Promise<ShopCurrencyInfo> {
   if (cachedCurrency) return cachedCurrency;
 
-  const data = await shopifyGraphql<{ shop: { currencyCode: string } }>(
-    "query ShopCurrency { shop { currencyCode } }",
+  const data = await shopifyGraphql<{
+    shop: { currencyCode: string; enabledPresentmentCurrencies: string[] };
+  }>(
+    `query ShopCurrency {
+      shop {
+        currencyCode
+        enabledPresentmentCurrencies
+      }
+    }`,
     {}
   );
-  cachedCurrency = data.shop.currencyCode.toUpperCase();
+  cachedCurrency = {
+    currencyCode: data.shop.currencyCode.toUpperCase(),
+    enabledPresentmentCurrencies: data.shop.enabledPresentmentCurrencies,
+  };
   return cachedCurrency;
 }
 
