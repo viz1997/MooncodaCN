@@ -1,8 +1,7 @@
 /**
  * POST /api/store/carts/[id]/line-items —— 加 line item 到 cart
  *
- * 对齐 Medusa Store API `POST /store/carts/{id}/line-items`。
- * 切真 Medusa 时:转发到 Medusa,metadata 字段透传。
+ * 同规格的行会合并数量(靠 `(cart_id, spec_hash)` 唯一索引)。
  */
 
 import { NextResponse } from "next/server";
@@ -11,6 +10,8 @@ import { addLineItem, getCart } from "@/features/storefront/lib/cart-store";
 import { withApiLogging } from "@/lib/api-logger";
 
 export const runtime = "nodejs";
+/** 一次写入 + 读回 + 逐行重算价 */
+export const maxDuration = 15;
 
 const lineItemSchema = z.object({
   productId: z.string().min(1),
@@ -38,7 +39,7 @@ async function handle(
   context: { params: Promise<{ id: string }> }
 ) {
   const { id } = await context.params;
-  const cart = getCart(id);
+  const cart = await getCart(id);
   if (!cart) {
     return NextResponse.json(
       { error: "CART_NOT_FOUND", message: `cart ${id} 不存在` },

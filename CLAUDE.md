@@ -8,17 +8,21 @@ Mooncoda is a production-ready Next.js SaaS template. It provides a complete fou
 
 **Deployment:** Self-hosted or Vercel + Neon PostgreSQL + Cloudflare R2 (storage)
 
-## 三方系统分工(2026-10-21 更新)
+## 三方系统分工(2026-11-04 更新)
 
 | 系统 | 职责 | 技术栈 |
 |---|---|---|
-| **NextDevTpl**(本仓库) | AI 生图 SaaS 后端:user / credits / photo / imageJob / AI 路由 / WeChat 小程序登录 **+ 商品目录(商品 / SKU 变体 / 价格)** **+ 打印工单(`/quote` 报价 → `print_order`,按 `user_id` 归属,登录后下单)** | Next.js 16 + Drizzle + PostgreSQL |
-| **Medusa**(独立 server) | **购物车 + 订单管理 + 支付管理**(购物车 / 订单 / 支付 / 库存 / 客户地址) | Medusa v2 + Node + PostgreSQL + Redis |
-| **微信小程序 / 浏览器访客**(外部客户端) | 调 NextDevTpl AI 接口拿候选图 **+ 调 `/api/image-gen/products` 拿商品与 SKU**;调 Medusa Store API 加购 + 下单 + 支付 | Taro 4 + React 18(小程序);Next.js Medusa Storefront(浏览器) |
+| **NextDevTpl**(本仓库) | AI 生图 SaaS 后端:user / credits / photo / imageJob / AI 路由 / WeChat 小程序登录 **+ 商品目录(商品 / SKU 变体 / 价格)+ 定价 + 购物车 + 订单事实 + 收货地址 + 打印工单(`/quote` 报价 → `print_order`,按 `user_id` 归属,登录后下单)** | Next.js 16 + Drizzle + PostgreSQL |
+| **Sellbase**(独立服务) | **只做收银台**:Stripe 支付链接 + 收款状态 + 收据。商品目录是同步过去的**镜像**,不是真理源 | Supabase Edge Functions(**跟本仓库同一个 Supabase 项目**)+ Stripe(MIT) |
+| **微信小程序 / 浏览器访客**(外部客户端) | 调 NextDevTpl AI 接口拿候选图 **+ 调 `/api/image-gen/products` 拿商品与 SKU**;调 NextDevTpl `/api/store/**` 加购 + 结算;支付时全页跳转 Stripe | Taro 4 + React 18(小程序);Next.js(浏览器) |
 
-**NextDevTpl 不再做**:**购物车 / 结算 / 库存 / 收货地址 / 订单实体** —— 归 Medusa。
+**接入形态 = 「本仓库算价,Sellbase 只做收银台」**(2026-11-04 取代 Medusa 方案):
+- 本仓库算的价 = `items[].unit_price_amount`;Sellbase 那边只是**载体变体** + 一个能看懂的标题
+- 商城结算:`购物车(DB) → 服务端重算每行价 → 落 storefront_order(_item) → 建 Sellbase 订单 → 回写 sellbase_order_id + payment_url → 前端跳 Stripe`
+- 打印工单:同一套 `POST /orders` + 同一个 webhook —— 两条支付链合一
+- **逐分相等**:`discountedUnitPriceCents × quantity` == Sellbase 的 `unit_price_amount × quantity`(阶梯折扣必须「先折单价,再乘数量」)
 
-**NextDevTpl 现在做商品目录**(2026-10-21 变更,推翻了原「商品 100% 归 Medusa」的决定):
+**NextDevTpl 做的商品目录**(2026-10-21 变更):
 - `product` 表 = 商品资料(名称/描述/封面/基础价/上下架),主键复用 `productTypeCode`(R/A/P/RM/LB/M)
 - `product_variant` 表 = 真 SKU(`CODE-SIZE-ACCESSORY-VARIANT` + **绝对价** + 上下架)
 - 管理后台 `/admin/products`(列表)+ `/admin/products/[code]`(SKU 明细)
@@ -28,7 +32,76 @@ Mooncoda is a production-ready Next.js SaaS template. It provides a complete fou
 
 **NextDevTpl 仍做**:`/marketing/*` 静态品牌页(博客 / 文档 / 法律页 / 价格页)+ `/marketing/products` 作品集 showcase(纯静态作品集,与商品目录无关)。
 
-**集成架构详情**:见 `architecture-medusa-integration.md`(**§〇/§二 的商品归属结论已被 2026-10-21 变更覆盖**)+ `architecture-miniprogram-as-client.md`(项目身份定位)。
+**集成架构详情**:见 `architecture-sellbase-integration.md`(权威文档)+ `architecture-miniprogram-as-client.md`(项目身份定位)。`architecture-medusa-integration.md` 是 **Medusa 时代的方案稿,结论已作废**。
+
+## Sellbase 集成(2026-11-04)
+
+**为什么不是 Medusa**:Medusa v2 要另起一台 server(Node + PostgreSQL + Redis),跟本仓库「SaaS 模板,自托管或 Vercel」的部署形态不合。Sellbase 是 Supabase Edge Functions —— 没有服务器要运维。
+
+**共用同一个 Supabase 项目(2026-11-04)**:Sellbase 装在**本仓库 `DATABASE_URL` 那个 Supabase 项目**里 —— 同一个 `postgres` 库,但**不撞表**:本仓库的表在 `public`,Sellbase 的表全在 `sellbase` schema(Sellbase 自己的迁移 `0000_foundation.sql` 建的)。本仓库连的是 pooler 事务模式(`:6543`),`src/db/index.ts` 的 `isSupabase` 分支负责自签证书的 SSL(URL 里的 `sslmode` 要先剥掉,否则会覆盖掉 `rejectUnauthorized: false`)。连上后身份是 `postgres` + `rolbypassrls = true` —— **能直读 `sellbase.orders`**,但**状态同步仍然只走 webhook**,直读只当对账兜底。
+
+**环境变量**:`NEXT_PUBLIC_SUPABASE_URL` 一个地址覆盖两边(Sellbase 的 API base 自动拼 `/functions/v1/sellbase-api/v1`);`DATABASE_URL` 走 pooler;`SELLBASE_API_TOKEN` / `SELLBASE_WEBHOOK_SECRET` 仍要单独配。
+
+**别在本仓库直接跑 `npx sellbase init`**:它会装 `@sellbase/react` + `@sellbase/admin`、写 `components/sellbase/*`、写 `src/app/admin/[[...path]]/page.tsx`(跟本仓库的 `src/app/[locale]/(admin)/` 打架)、**往 CLAUDE.md 追加托管块**、往 `supabase/migrations/` 塞迁移(跟 Drizzle 那套是两套体系,会抢表)。在空目录跑完,把迁移文件 / Edge Function / token 挑过来。详见 `architecture-sellbase-integration.md` §1.1~1.3。
+
+**三条硬约束**(决定了「本仓库算价,Sellbase 只做收银台」不是权宜之计):
+1. Sellbase 的购物车行是 `{variant_id, quantity, booking_slot?}` —— **没有 metadata 字段**,刻字文字 / AI 预览图没地方存
+2. Sellbase 的**变体是价格单元**;本仓库的定价矩阵展开 ≈ 13000 个变体
+3. 数量阶梯折扣(≥10 减 10%、≥50 减 20%)是**按行数量**算的;Sellbase 的折扣阈值是**购物车总额**级别的,表达不了
+
+**模块布局**(`src/features/sellbase/`):
+```
+lib/
+├── env.ts             # 环境变量 + 优雅降级(缺配置 → 503,不崩下单)
+├── client.ts          # admin client 单例(@sellbase/sdk)
+├── signature.ts       # webhook 验签(纯函数,可单测)
+├── money.ts           # 分 ↔ 店铺币种最小单位
+├── carrier.ts         # 本仓库商品 → Sellbase 载体变体
+├── events.ts          # webhook 事件 → 本地动作
+├── orders.ts          # 建订单 / 换支付链接
+├── customer.ts        # sellbase_customer_id 回填
+├── storefront-transition.ts # 商城订单的 webhook 状态转移(纯函数,可单测)
+└── webhook-handler.ts # webhook 落库
+```
+
+**必须守住的四条**:
+- **服务端不信客户端带来的价** —— 结算时按 `metadata` 重算每一行
+- **先落本地订单,再建 Sellbase 订单** —— Sellbase 挂了订单还在(状态 `unpaid`),用户能在「我的订单」重取支付链接
+- **重建 Sellbase 订单不重算价** —— 用 `storefront_order_item` 里存下来的折后单价
+- **地址归属校验在数据层** —— 结算只收 `addressId`,服务端解析,别人的地址查出来是 null
+
+**webhook**:`POST /api/webhooks/sellbase`,验签 `Sellbase-Signature: t=<unix>,v1=<hex HMAC-SHA256("<t>.<raw body>")>`,容差 300 秒,**必须读 raw body**。认不出来的事件一律回 200 忽略(回 4xx 会让 Sellbase 一直重投)。
+
+**订单状态和支付状态是**两列**(2026-11-04):
+
+| 列 | 含义 | 取值 |
+|---|---|---|
+| `storefront_order.status` | 订单走到哪一步 | `unpaid` / `paid` / `fulfilled` / `cancelled` |
+| `storefront_order.payment_status` | 钱到没到、退没退 | `unpaid` / `paid` / `refunded` / `failed` |
+
+**退款只改 `payment_status`,不动 `status`** —— 早先只有一列的时候,退款把订单写成「已取消」,用户看着像没买过,工作室也没法把退款单跟取消单分开。**迟到的 `order.paid` 不能把退过款的单改回「已支付」** —— webhook 会重投,投递顺序不保证,靠 `payment_status === "refunded"` 挡住。判断逻辑在 `src/features/sellbase/lib/storefront-transition.ts`(纯函数),`print_order` 用的是同一个口径。
+
+**鉴权口径**:商城路由(`/api/store/checkout`、`/api/store/orders/**`、`/api/store/addresses/**`)认**两种凭据** —— `Authorization: Bearer <token>`(微信小程序)或者 Better Auth 的签名 cookie(浏览器),统一走 `src/lib/auth/request-session.ts` 的 `getSessionFromRequest`。**带了 Bearer 但 token 无效 → 直接 401,不退回 cookie** —— 悄悄换个身份继续跑,等于把「token 过期」变成「换个身份照样能过」。这个 helper 单独一个文件,是因为 `src/lib/auth/bearer.ts` 被 Edge 中间件(`src/proxy.ts`)引用,`better-auth` 绝不能进那个 bundle。
+
+**收货地址的 HTTP 路由**(2026-11-04,小程序侧要用):`GET/POST /api/store/addresses` + `PATCH/DELETE /api/store/addresses/{addressId}`。逻辑跟网页端的 server action 共用 `src/features/address/mutations.ts` ——「默认地址只有一个」那条约束只写了一遍。归属校验在数据层,别人的地址返 404 不是 403(id 能被枚举)。限流桶 `storeAddress` 30 次/分钟。
+
+**环境变量**:`SELLBASE_URL` / `SELLBASE_API_TOKEN`(`mooncoda_live_…`)/ `SELLBASE_WEBHOOK_SECRET` / `SELLBASE_CURRENCY`(默认 `cny`)/ `SELLBASE_FX_RATE`(默认 1)。`.env.example` 被 gitignore,所以说明写在 `src/features/sellbase/lib/env.ts` 文件头。
+
+**迁移脚本**(手写幂等,不走 `db:generate`):
+`scripts/apply-sellbase-payment-schema.ts` / `apply-storefront-cart-schema.ts` / `apply-user-address-schema.ts` / `apply-product-catalog-schema.ts` / `sync-sellbase-catalog.ts` / `register-sellbase-webhook.ts` / `bootstrap-sellbase-store.ts`
+
+**Sellbase 自己的迁移在 `supabase/`**(2026-11-04 已推到共享库):`supabase/migrations/0000~0009`(入库)+ 三个 Edge Function(`sellbase-api` / `sellbase-webhooks` / `sellbase-jobs`,**不入库** —— `supabase/functions/` 在 `.gitignore` 里,部署前跑 `pnpm tsx scripts/fetch-sellbase-assets.ts` 从 npm 取回来,版本跟 `@sellbase/sdk` 对齐)。**这个目录只放 Sellbase 的东西** —— 本仓库的表一律走 `scripts/apply-*.ts`,两套迁移体系会抢表。推迁移用 `supabase db push --remote="$DATABASE_URL" --include-all --skip-vault --yes`(`--remote=` 直接给连接串,**不需要** Supabase access token;只有 `functions deploy` 才需要)。`supabase/` 下已建好店铺(CNY / 税率 0)和 admin token(scope = `DEFAULT_AGENT_SCOPES` + `webhooks:write`,不含 `refunds:write`)。
+
+**初始化 2026-11-05 已全部就位**:三个边函数已部署(ACTIVE / `verify_jwt: false`)、admin token 已验证(`GET /v1/store` → 200)、webhook 端点已注册(`https://aimake3d.com/api/webhooks/sellbase`,4 个事件)、目录已同步(Sellbase 7 商品 / 85 变体,`product_variant.sellbase_variant_id` 回填 85 条)、jobs 已接进 pg_cron(vault 里 `sellbase_jobs_url` / `sellbase_jobs_key`)。**还差两件不在本仓库的事**:① Stripe(人工激活 + 付验证费,live key 粘进 Admin → Settings → Payments);② 本仓库部署到 `aimake3d.com` 并在部署环境配好 `SELLBASE_API_TOKEN` / `SELLBASE_WEBHOOK_SECRET`(线上跑的还是旧构建,webhook 端点实测 404)。细节见 `architecture-sellbase-integration.md` §1.4~1.8。
+
+**三个坑(都踩过)**:
+- **token 前缀必须是 `mooncoda_live_`,不是 `sb_live_`** —— `sb_` 是 Supabase 自己的 API key 命名空间,Edge 网关在进函数之前就把 `Bearer sb_…` 当 Supabase key 查表,查不到直接 401(`{"message":"Invalid API key"}`,不是 Sellbase 的错误形状)。解法是 `fetch-sellbase-assets.ts` 每次取回 bundle 时把 `BRAND.tokenPrefix` 打一下补丁;前缀唯一定义在 `scripts/lib/sellbase-token.ts`。
+- **`@sellbase/sdk` / `@sellbase/core` 是纯 ESM** —— 本仓库没有 `"type": "module"`,`pnpm tsx scripts/*.ts` 走 CJS 解析器,`require()` 直接 `ERR_PACKAGE_PATH_NOT_EXPORTED`。打了两个 pnpm patch(各加一条 `require` 条件,靠 Node 22+ 的 `require(esm)`),在 `patches/` 里,`pnpm-workspace.yaml` 的 `patchedDependencies` 登记。
+- **scripts 里的 dotenv 必须先加载** —— `src/db/index.ts` 在模块顶层就查 `DATABASE_URL`,静态 import 比模块体先跑,所以 `import "./lib/load-env"` **必须排 import 列表第一个**,否则 `@/db` 先炸。
+
+**写环境变量**统一走 `scripts/lib/env-file.ts` 的 `upsertEnvVar(path, key, value, {secret})` —— **替换**同名变量而不是追加(追加会出现两个同名变量,dotenv 取哪个取决于顺序,很容易踩「密钥明明配了却读不到」)。
+
+**密钥纪律**:admin token 和 webhook secret **只进环境变量**,绝不进仓库文件、绝不进聊天。Stripe 的「激活账号」「支付验证费」两步是人工操作,live key 粘进 Admin → Settings → Payments 后由 Sellbase 加密存进 Supabase Vault。动钱的操作一律要 `confirm: true` 且会被审计日志记一笔。
 
 ## Commands
 
@@ -141,6 +214,18 @@ Double-entry bookkeeping with FIFO batch expiration:
 Uses Drizzle ORM with typed enums. Key tables: `user`, `session`, `account`, `verification`, `subscription`, `creditsBalance`, `creditsBatch`, `creditsTransaction`, `ticket`, `ticketMessage`, `newsletterSubscriber`.
 
 All tables use `text` primary keys with `nanoid()` defaults.
+
+**商城 / 收款相关表**(2026-11-04):
+
+| 表 | 干什么 |
+|---|---|
+| `product` / `product_variant` | 商品目录(本仓库是真理源);`product_variant.sellbase_variant_id` 是同步到 Sellbase 后的载体变体指针 |
+| `cart` / `cart_item` | 购物车落库(cookie `wjp_cart_id`);`cart_item.spec_hash` + `(cart_id, spec_hash)` 唯一索引负责「同规格合并」 |
+| `storefront_order` / `storefront_order_item` | 商城订单事实;`sellbase_order_id` 唯一索引供 webhook 反查,`payment_url` 是 Stripe 支付链接副本;`status`(订单状态)和 `payment_status`(支付状态)**分两列** |
+| `address` | 收货地址簿 —— **必须留在本仓库**,Sellbase 的 `customer.addresses` 只读,没有创建地址的路由 |
+| `print_order` | 打印工单;加过五列 `payment_status` / `payment_channel` / `sellbase_order_id` / `payment_url` / `paid_at`;另有交期两列 `delivery_tier` / `delivery_fee_cents`(见「打印工单交期档位」) |
+
+`user.sellbase_customer_id`(原 `medusa_customer_id`)只是**加速指针** —— Sellbase 的 customer 按 **email** upsert,真正的 join key 永远是 email。
 
 ### Middleware (`src/proxy.ts`)
 
@@ -278,6 +363,37 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 空腔 + 掠射列),`src/test/pricing/pure/support-initial-angle.test.ts` 守住
 (客户端 + 批量汇总),`src/test/pricing/pure/pose-comparison.test.ts` 守住
 (省 X% 的算法)。
+
+### 打印工单交期档位(2026-11-05)
+
+打印工单(`/quote` 报价 → `print_order`)有三档交期,**加价按比例收**,不是固定
+金额:
+
+| 档位 | 时限 | 比例 | 默认 |
+|---|---|---|---|
+| `standard` 标准 | 96 小时 | 0 | 不加价 |
+| `express` 加急 | 72 小时 | 10% | `PRINT_DELIVERY_EXPRESS_RATE` |
+| `urgent` 特急 | 48 小时 | 37% | `PRINT_DELIVERY_URGENT_RATE` |
+
+- **比例是反推出来的**:工作室那张表「48 小时 +¥20.65 / 72 小时 +¥5.58 /
+  96 小时 +¥0.00」在**同一个基数(¥55.81)**上,20.65 / 5.58 ≈ 3.70 →
+  37% 与 10%(0.37 × 55.81 = 20.65、0.1 × 55.81 = 5.58,两个数都精确复现)。
+  工作室调价改环境变量,不改代码。
+- **基数是「小计」不是「合计」** —— 小计 = 克重费 + 后处理费 + 支撑费。
+  拿合计当基数就是「加价里套加价」,越算越高,而且「明细加起来 = 合计」
+  这条恒等式会破。合计 = 小计 + 交期加价(四项)。
+- **比例由服务端给,前端只负责预览** —— 报价接口把生效的 `deliveryRates`
+  带回来,前端用**同一个** `computeDeliveryFeeCents()` 算三档的预览价,
+  所以「页面显示的加价」一定等于「服务端收的加价」。前端不自己认一份比例。
+- **档位认不出来一律按标准档**(不按最贵的那档兜底)—— 客户端传
+  `"URGENT "`(带空格)不能按特急收费。
+- 纯函数在 `src/features/print-quote/lib/delivery-tier.ts`,服务端在
+  `quote-server.ts`(`PRINT_QUOTE_CONFIG.deliveryRates`),UI 在
+  `components/delivery-tier-picker.tsx`。
+- 落库两列:`print_order.delivery_tier`(档位)+ `delivery_fee_cents`(当时
+  的绝对金额)—— 比例以后会改,工单上的价不能跟着变。迁移脚本
+  `scripts/apply-print-order-delivery-tier-schema.ts`(幂等)。
+- 行为由 `src/test/print-quote/pure/delivery-tier.test.ts` 守住。
 
 ## Coding Conventions
 

@@ -1,3 +1,43 @@
+> 🔴 **本文档已作废(2026-11-04)—— 已被 [architecture-sellbase-integration.md](./architecture-sellbase-integration.md) 整体取代**
+>
+> Medusa 方案**没有落地**。电商后端最终选的是 **Sellbase**
+> (Supabase Edge Functions + Stripe),分工跟本文档写的完全不一样:
+>
+> > **本仓库算价,Sellbase 只做收银台。**
+>
+> 商品目录 / 定价 / 购物车 / 订单 / 收货地址**全在本仓库**;Sellbase 只负责
+> 建一张 Stripe 支付链接 + 回传收款状态。本文档**只作历史决策记录**保留
+> (当初为什么没选 Medusa、当时怎么规划的),**不要照着做**。
+>
+> **结论作废的章节**:
+>
+> | 章节 | 本文档原结论 | 现在的结论 |
+> |---|---|---|
+> | §〇 / §一 | Medusa = 唯一的电商后端,三方分工按 Medusa 展开 | **本仓库**持有商品目录 / 定价 / 购物车 / 订单 / 收货地址;Sellbase 只做收银台 |
+> | §二 | 购物车 / 订单 / 支付 / 库存 / 收货地址 **100% 归 Medusa** | 全在本仓库(`cart` / `cart_item` / `storefront_order` / `storefront_order_item` / `address`);Sellbase 侧只镜像 `payment_status` |
+> | §四 | 身份靠 Medusa customer + Better Auth 桥接插件 | 账号映射靠 **email upsert**;`user.sellbaseCustomerId` 只是加速指针 |
+> | §五 / §六 | Medusa Store API 下单 + `order.placed` webhook + Medusa Admin API | 本仓库 `/api/store/checkout` 结算 → 建 Sellbase 订单 → `POST /api/webhooks/sellbase` 回写收款状态 |
+> | §七 | Phase A~D 落地清单 | 已作废;现清单见 `architecture-sellbase-integration.md` §九 ~ §十四 |
+> | §八 ~ §十一 | 风险点 / 验证步骤 / 文件索引 / 未决问题 | 随 Medusa 方案一起作废 |
+>
+> **仍然值得看的历史信息**:
+>
+> - **§三 `productTypeCode` 对齐矩阵** —— 6 个 code(R/A/P/RM/LB/M)、`sizes` /
+>   `accessories` 字典、`PRODUCT_TYPES` 的对齐规则**一个字都没改**,到现在仍是
+>   真理源;只是「谁持有这张字典」从 Medusa 换成了**本仓库**
+>   (`product` / `product_variant` 表,主键 `product.code` 直接就是
+>   `productTypeCode`)。Sellbase 侧的商品目录是
+>   `scripts/sync-sellbase-catalog.ts` **单向同步**过去的镜像,**不是权威**。
+> - **§〇 / §一 / §二 的决策过程** —— 为什么先否掉 Medusa、为什么商品目录收回
+>   本仓库(2026-10-21)、为什么最后又换成 Sellbase。
+> - **§三 的 SKU 四段式说明** —— `buildSku()` 拼出
+>   `CODE-SIZE-ACCESSORY-VARIANT`,比本章示例的三段多一个配件变体段
+>   (见 `src/features/image-gen/lib/product-variant-sku.ts`)。
+>
+> **新权威文档**:[architecture-sellbase-integration.md](./architecture-sellbase-integration.md)
+
+---
+
 # NextDevTpl × Medusa · 集成架构说明
 
 > **Mooncoda · 小梦定制馆**

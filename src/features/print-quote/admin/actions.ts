@@ -44,6 +44,10 @@ import {
   transitionPrintOrderStatus,
 } from "@/features/print-quote/lib/order-store";
 import {
+  markPrintOrderPaidOffline,
+  revokePrintOrderOfflinePayment,
+} from "@/features/print-quote/lib/payment";
+import {
   PRINT_ORDER_STATUSES,
   type PrintOrderStatus,
 } from "@/features/print-quote/lib/quote-types";
@@ -176,3 +180,60 @@ export const adminGetPrintOrderDetailAction = withAdminPrintOrderAction(
       events: events.map(toPrintOrderEventView),
     };
   });
+
+// ============================================
+// 收款(线下)
+// ============================================
+
+const paymentSchema = z.object({
+  orderNo: z.string().min(1).max(64),
+});
+
+/** 收款动作的结果 */
+export type AdminPaymentResult =
+  | { ok: true; orderNo: string; alreadyPaid?: boolean }
+  | { ok: false; code: "ORDER_NOT_FOUND" | "ONLINE_PAYMENT" };
+
+/**
+ * 标记已收款(线下转账)
+ *
+ * 工作室线下收到款之后点这个。**不建 Sellbase 订单** —— 线下单在
+ * Sellbase 里没有对应实体,写进去会让两边的订单数对不上。
+ *
+ * 幂等:已经付过就当无事发生(后台连点两下不该报错)。
+ */
+export const adminMarkPrintOrderPaidOfflineAction = withAdminPrintOrderAction(
+  "markPaidOffline"
+)
+  .schema(paymentSchema)
+  .action(async ({ parsedInput }): Promise<AdminPaymentResult> => {
+    const result = await markPrintOrderPaidOffline(parsedInput.orderNo);
+    if (!result.ok) {
+      return { ok: false, code: "ORDER_NOT_FOUND" };
+    }
+    revalidatePath("/[locale]/admin/print-orders", "page");
+    return {
+      ok: true,
+      orderNo: parsedInput.orderNo,
+      alreadyPaid: result.alreadyPaid,
+    };
+  });
+
+/**
+ * 撤销线下收款 —— 防误点
+ *
+ * 线上付款**不能**走这条路:钱已经进账了,本地标成未付只会让两边对不上。
+ * 所以 `revokePrintOrderOfflinePayment()` 会拒绝 `paymentChannel === "stripe"`
+ * 的单,这里把那个拒绝原样传回后台。
+ */
+export const adminRevokePrintOrderOfflinePaymentAction =
+  withAdminPrintOrderAction("revokeOfflinePayment")
+    .schema(paymentSchema)
+    .action(async ({ parsedInput }): Promise<AdminPaymentResult> => {
+      const result = await revokePrintOrderOfflinePayment(parsedInput.orderNo);
+      if (!result.ok) {
+        return { ok: false, code: result.code ?? "ORDER_NOT_FOUND" };
+      }
+      revalidatePath("/[locale]/admin/print-orders", "page");
+      return { ok: true, orderNo: parsedInput.orderNo };
+    });

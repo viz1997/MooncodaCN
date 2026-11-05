@@ -618,7 +618,8 @@ export function getAccessoryMeta(
 // 用途：/api/image-gen/products 在 ProductCapability.basePriceCents 上暴露，
 // 前端拼 totalPrice = base + size.delta + variant.delta + style.surcharge。
 // 与 mock-catalog.ts 的 BASE_PRICE_CENTS 对齐；这里是真理源，mock-catalog
-// 反向 import（避免两处漂移）。Medusa 接管商品后这里改成读 Medusa 价格即可。
+// 反向 import（避免两处漂移）。本仓库是定价真理源，Sellbase 目录里的价
+// 只是同步过去的参考值，不会回流。
 //
 // 单位：分。改值需同步 PR 描述（订单归因 + admin 后台依赖此字典）。
 // ============================================

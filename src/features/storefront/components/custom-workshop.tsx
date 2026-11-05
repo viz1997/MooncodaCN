@@ -78,7 +78,7 @@ import { useAtelierContainer } from "../hooks/use-atelier-container";
 import { useCart, useCartUi } from "../hooks/use-cart";
 import { useSignInUrl } from "../hooks/use-require-sign-in";
 import { useStorefrontModal } from "../hooks/use-storefront-modal";
-import { PRICING_CONSTANTS } from "../lib/pricing";
+import { PRICING_CONSTANTS } from "../lib/pricing-constants";
 import { formatInches, formatSizeWithInches } from "../lib/size-format";
 import type {
   AccessoryGroup,

@@ -7,14 +7,20 @@
  *  - 免运费进度条(¥99 门槛)
  *  - Line item 列表(图片 + 标题 + 规格 + 刻字 + 自定义预览标签)
  *  - +/- 数量 + 删除按钮
- *  - 底部:小计 / 运费 / 总价 / Proceed to Checkout
+ *  - 底部:小计 / 运费 / 总价 / 去结算
  *
  * 适配差异:
  *  - 用 useCart (TanStack Query) 替代 atelier useCartStore
  *  - 用 useCartUi (Zustand) 控制 drawer 开关
  *  - 用 formatPriceCNY 替代 useFormatPrice(单币种 CNY)
- *  - 文案中文化(¥99 / 免运费 / 敬请期待)
- *  - "Proceed to Checkout" 弹 toast(真 Medusa 接入时改为跳转)
+ *  - 文案中文化(¥99 / 免运费)
+ *  - 「去结算」跳 `/checkout`(2026-11-04:结算链接上了 Sellbase 收银台)
+ *
+ * ## 行合计用**折后**单价
+ *
+ * 阶梯折扣是按行数量算的(买 10 个打九折),折扣落在单价上。显示的行合计
+ * 用 `discountedUnitPriceCents × quantity` —— 跟结算页显示的价、跟实际收
+ * 的钱是同一个数。
  */
 
 "use client";
@@ -29,17 +35,19 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { formatPriceCNY } from "@/features/marketing/components/storefront/wjp-store-data";
-import { useToast } from "@/hooks/use-toast";
+import { useRouter } from "@/i18n/routing";
 
 import { useAtelierContainer } from "../hooks/use-atelier-container";
 import { useCart, useCartUi } from "../hooks/use-cart";
 import { findAccessoryVariant } from "../lib/mock-catalog";
+import { PRICING_CONSTANTS } from "../lib/pricing-constants";
 import { formatSizeWithInches } from "../lib/size-format";
 
-const FREE_SHIPPING_THRESHOLD_CNY = 99;
+const FREE_SHIPPING_THRESHOLD_CNY =
+  PRICING_CONSTANTS.FREE_SHIPPING_THRESHOLD_CENTS / 100;
 
 export function CartDrawer() {
-  const { toast } = useToast();
+  const router = useRouter();
   const isOpen = useCartUi((s) => s.isOpen);
   const closeCart = useCartUi((s) => s.closeCart);
   const container = useAtelierContainer();
@@ -63,10 +71,8 @@ export function CartDrawer() {
   );
 
   const handleCheckout = () => {
-    toast({
-      title: "敬请期待",
-      description: "checkout 流程对接中。Mock storefront 阶段暂不支持下单。",
-    });
+    closeCart();
+    router.push("/checkout");
   };
 
   return (
@@ -156,7 +162,8 @@ export function CartDrawer() {
           ) : (
             <ul className="divide-y divide-border">
               {items.map((item) => {
-                const itemTotalCents = item.unitPriceCents * item.quantity;
+                const itemTotalCents =
+                  item.discountedUnitPriceCents * item.quantity;
                 // 配件名从字典反查 —— metadata 只存 id,改名/下架不用迁移存量 cart
                 const accessoryNames = (item.metadata.accessoryVariantIds ?? [])
                   .map((id) => findAccessoryVariant(id)?.name)
@@ -299,10 +306,10 @@ export function CartDrawer() {
                 className="w-full rounded-full h-12 uppercase tracking-[0.14em] text-[12px] font-medium"
                 type="button"
               >
-                去结算(敬请期待)
+                去结算
               </Button>
               <p className="text-[11px] text-muted-foreground text-center mt-3">
-                Mock storefront 阶段暂不支持真实下单。
+                提交后跳转在线支付,付款完成才开始制作。
               </p>
             </div>
           </div>

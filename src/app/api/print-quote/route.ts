@@ -51,6 +51,12 @@ const quoteInputSchema = z.object({
   supportWeightG: z.number().min(0).max(1_000_000).nullish(),
   /** 本体支撑比例(1 = 1:1) */
   selfSupportRatio: z.number().min(0).max(1_000_000).nullish(),
+  /**
+   * 交期档位(48 / 72 / 96 小时)
+   *
+   * 不传 = 标准档。传了不认识的 zod 会拒掉 —— 那是 400,不是「按最贵的算」。
+   */
+  deliveryTier: z.enum(["standard", "express", "urgent"]).nullish(),
 });
 
 async function handle(request: NextRequest) {
@@ -97,6 +103,7 @@ async function handle(request: NextRequest) {
     dims: parsed.data.dims,
     supportWeightG: parsed.data.supportWeightG ?? null,
     selfSupportRatio: parsed.data.selfSupportRatio ?? null,
+    deliveryTier: parsed.data.deliveryTier ?? null,
   };
 
   const quote = computePrintQuote(input);

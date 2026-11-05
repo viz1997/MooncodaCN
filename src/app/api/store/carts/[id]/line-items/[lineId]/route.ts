@@ -2,11 +2,7 @@
  * PUT /api/store/carts/[id]/line-items/[lineId] —— 更新 line item 数量
  * DELETE /api/store/carts/[id]/line-items/[lineId] —— 删除 line item
  *
- * 对齐 Medusa Store API:
- *  - PUT /store/carts/{id}/line-items/{line_id}
- *  - DELETE /store/carts/{id}/line-items/{line_id}
- *
- * 切真 Medusa 时:转发到 Medusa。
+ * 数量改成 0(或更小)等同删除。
  */
 
 import { NextResponse } from "next/server";
@@ -19,6 +15,8 @@ import {
 import { withApiLogging } from "@/lib/api-logger";
 
 export const runtime = "nodejs";
+/** 一次写入 + 读回 + 逐行重算价 */
+export const maxDuration = 15;
 
 const updateQuantitySchema = z.object({
   quantity: z.number().int().min(0).max(100),
@@ -29,7 +27,7 @@ async function handlePut(
   context: { params: Promise<{ id: string; lineId: string }> }
 ) {
   const { id, lineId } = await context.params;
-  const cart = getCart(id);
+  const cart = await getCart(id);
   if (!cart) {
     return NextResponse.json(
       { error: "CART_NOT_FOUND", message: `cart ${id} 不存在` },
@@ -60,7 +58,11 @@ async function handlePut(
   }
 
   try {
-    const result = updateLineItemQuantity(id, lineId, parsed.data.quantity);
+    const result = await updateLineItemQuantity(
+      id,
+      lineId,
+      parsed.data.quantity
+    );
     return NextResponse.json({ cart: result.cart, lineItem: result.lineItem });
   } catch (error) {
     return NextResponse.json(
@@ -78,7 +80,7 @@ async function handleDelete(
   context: { params: Promise<{ id: string; lineId: string }> }
 ) {
   const { id, lineId } = await context.params;
-  const cart = getCart(id);
+  const cart = await getCart(id);
   if (!cart) {
     return NextResponse.json(
       { error: "CART_NOT_FOUND", message: `cart ${id} 不存在` },
@@ -87,7 +89,7 @@ async function handleDelete(
   }
 
   try {
-    const result = removeLineItem(id, lineId);
+    const result = await removeLineItem(id, lineId);
     return NextResponse.json({ cart: result.cart });
   } catch (error) {
     return NextResponse.json(

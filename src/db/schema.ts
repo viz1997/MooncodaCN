@@ -93,11 +93,16 @@ export const user = pgTable(
     wechatOpenid: text("wechat_openid").unique(),
     wechatUnionid: text("wechat_unionid"),
     /**
-     * 2026-09-16：Medusa 订单 customer 关联（架构文档 §1.5）。
-     * 仅在用户首次下单时按需创建 Medusa Customer 然后回填 —— 多数用户为 NULL。
+     * Sellbase 订单 customer 关联（2026-11-04，Medusa → Sellbase 换名）。
+     * 仅在用户首次下单时按需创建 Sellbase Customer 然后回填 —— 多数用户为 NULL。
      * 与 user.customerId（Creem 支付 customer）分开，避免命名冲突。
+     *
+     * 注意：Sellbase 侧的 customer 是**按 email upsert** 的（真正的 join key
+     * 是 email），`auth_user_id` 字段没有 API 能写。所以这一列只是加速用的
+     * 指针（想查这个人的 Sellbase 订单史时省一次 email 查表），**不是**关联的
+     * 唯一依据。
      */
-    medusaCustomerId: text("medusa_customer_id"),
+    sellbaseCustomerId: text("sellbase_customer_id"),
     /**
      * 2026-09-16：最近一次成功登录时间（含微信 / 邮箱 / 手机号 / OAuth）。
      * 用户中心 + admin 活跃度分析用。
@@ -111,8 +116,8 @@ export const user = pgTable(
     index("user_agent_id_idx").on(t.agentId),
     // 微信 unionid 索引：WHERE wechat_unionid = ?
     index("user_wechat_unionid_idx").on(t.wechatUnionid),
-    // Medusa customer 索引：WHERE medusa_customer_id = ?
-    index("user_medusa_customer_id_idx").on(t.medusaCustomerId),
+    // Sellbase customer 索引：WHERE sellbase_customer_id = ?
+    index("user_sellbase_customer_id_idx").on(t.sellbaseCustomerId),
   ]
 );
 
@@ -2231,6 +2236,20 @@ export const productVariant = pgTable(
     variantCode: text("variant_code").notNull(),
     /** 绝对价（分），不是价差 */
     priceCents: integer("price_cents").notNull(),
+    /**
+     * Sellbase 侧的变体 id（uuid）
+     *
+     * 2026-11-04：由 `scripts/sync-sellbase-catalog.ts` 写入（目录同步时
+     * 拿到的 Sellbase variant id 回填）。
+     *
+     * 这一列在 Sellbase 集成里的角色是**载体**：建单时每行商品都要填一个
+     * 合法的 `variant_id`，但真正的价格永远走 `items[].unit_price_amount`
+     * （本仓库算出来的价）。Sellbase 那边只拿这个 id 当「这单是哪个商品」
+     * 的标签用。
+     *
+     * NULL = 还没同步过 —— 建单时会报错提示先跑同步脚本。
+     */
+    sellbaseVariantId: text("sellbase_variant_id"),
     /** 软下架（false = 不进对外接口） */
     isActive: boolean("is_active").notNull().default(true),
     /** UI 排序；asc */
@@ -2279,16 +2298,49 @@ export const printOrderStatusEnum = pgEnum("print_order_status", [
 ]);
 
 /**
+ * 收货地址(快照)
+ *
+ * 地址簿本身在 `address` 表(用户可维护),但订单里存的是**当时的快照** ——
+ * 用户后来改地址簿,历史工单的收货地址不该跟着变。
+ *
+ * 字段跟国内快递单一致:省 / 市 / 区 / 详细地址。
+ */
+export interface ShippingAddressSnapshot {
+  /** 收件人 */
+  recipientName: string;
+  /** 手机号 */
+  phone: string;
+  /** 省 / 直辖市 */
+  province: string;
+  /** 市 */
+  city: string;
+  /** 区 / 县 */
+  district: string;
+  /** 详细地址(街道门牌) */
+  detail: string;
+}
+
+/**
  * 打印服务订单(克重报价 → 下单)
  *
- * ## 这张表为什么在本仓库而不是 Medusa
+ * ## 这张表为什么在本仓库而不是 Sellbase
  *
- * Medusa 管的是「成品商品」的购物车 / 订单 / 支付:价格来自 SKU 目录,买什么
+ * Sellbase 管的是「成品商品」的购物车 / 订单 / 支付:价格来自 SKU 目录,买什么
  * 是确定的。而打印服务是**来料加工**——用户自带 3D 模型,按克重计价,SKU 目录
- * 里没有对应商品,Medusa 的 variant 模型套不上(没有 variant_id 可填)。
+ * 里没有对应商品,Sellbase 的 variant 模型套不上(没有对应的 variant 可填)。
  * 所以这条链路在自己的表里落一份「工单」:模型文件 + 几何 + 克重 + 报价明细。
  *
- * 支付仍然归 Medusa / 线下 —— 本表**没有** payment 字段,只记录订单事实。
+ * ## 支付
+ *
+ * 2026-11-04:工单接上了 Sellbase 收银台 —— 建单时在 Sellbase 侧建一个
+ * 「打印服务」载体变体的订单(价格用 `unit_price_amount` 覆盖),拿回支付链接,
+ * 钱由 Stripe 收,状态由 webhook 回写到本表。
+ *
+ * 但**工单的详情仍然只存在本仓库** —— Sellbase 那边只有一个壳(一行载体变体
+ * + 一个金额 + 一个备注)。工作室要看克重、几何、模型文件,还是看这张表。
+ *
+ * 线下收款(工作室转账)也能走:`payment_channel = "offline"`,后台「标记已收款」。
+ * 这种单**不建** Sellbase 订单 —— 建了会让两边的订单数对不上。
  *
  * ## 金额单位
  *
@@ -2357,6 +2409,23 @@ export const printOrder = pgTable(
     varnishFeeCents: integer("varnish_fee_cents").notNull(),
     /** 超出 1:1 阈值的支撑加价 */
     supportFeeCents: integer("support_fee_cents").notNull(),
+    /**
+     * 交期档位(2026-11-05)
+     *
+     * - standard —— 96 小时,不额外收费(默认值)
+     * - express  —— 72 小时,按小计的 10% 加收
+     * - urgent   —— 48 小时,按小计的 37% 加收
+     *
+     * 加价是**比例**不是固定金额 —— 比例见
+     * `src/features/print-quote/lib/delivery-tier.ts`。
+     */
+    deliveryTier: text("delivery_tier", {
+      enum: ["standard", "express", "urgent"],
+    })
+      .notNull()
+      .default("standard"),
+    /** 交期加价(分)—— 按小计的比例收,标准档是 0 */
+    deliveryFeeCents: integer("delivery_fee_cents").notNull().default(0),
     /** 合计 */
     totalPriceCents: integer("total_price_cents").notNull(),
     // ---- 联系方式 ----
@@ -2376,6 +2445,51 @@ export const printOrder = pgTable(
      * 默认 'zh':站点默认 locale 就是 zh,老订单(加列之前下的)也是中文单。
      */
     locale: text("locale").notNull().default("zh"),
+    // ---- 支付(2026-11-04)----
+    /**
+     * 支付状态
+     *
+     * 枚举值跟 Sellbase 的 `payment_status` **同名**(小写),免一层映射表。
+     *
+     * - unpaid   —— 还没收到钱(刚建单 / 支付链接还没付)
+     * - paid     —— 钱到账了(线上走 webhook,线下走后台「标记已收款」)
+     * - refunded —— 退过款
+     * - failed   —— 支付失败(Stripe 那边失败了)
+     */
+    paymentStatus: text("payment_status", {
+      enum: ["unpaid", "paid", "refunded", "failed"],
+    })
+      .notNull()
+      .default("unpaid"),
+    /**
+     * 收款渠道
+     *
+     * - stripe —— 线上,走 Sellbase + Stripe
+     * - offline —— 线下转账,工作室后台手动标
+     *
+     * NULL = 还没开始收款(刚建单、Sellbase 那边还没建出订单)。
+     */
+    paymentChannel: text("payment_channel", { enum: ["stripe", "offline"] }),
+    /**
+     * Sellbase 订单 id —— webhook 反查用
+     *
+     * 唯一索引:webhook 会重投,靠这个唯一 + 「已是目标状态就 no-op」实现幂等,
+     * 不另建去重表。
+     */
+    sellbaseOrderId: text("sellbase_order_id"),
+    /** Stripe 支付链接(用户点「去支付」跳的就是它) */
+    paymentUrl: text("payment_url"),
+    /** 收款时间 */
+    paidAt: timestamp("paid_at"),
+    /**
+     * 收货地址**快照**
+     *
+     * 存快照而不是外键:地址是订单事实的一部分,用户后来改地址簿不该改写
+     * 历史工单的收货地址。
+     */
+    shippingAddress: json(
+      "shipping_address"
+    ).$type<ShippingAddressSnapshot | null>(),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
@@ -2386,6 +2500,8 @@ export const printOrder = pgTable(
     index("print_order_created_at_idx").on(t.createdAt),
     // 用户侧「我的打印订单」按 user_id 过滤 + 时间倒序
     index("print_order_user_id_idx").on(t.userId),
+    // webhook 按 sellbase_order_id 反查工单
+    uniqueIndex("print_order_sellbase_order_id_uniq_idx").on(t.sellbaseOrderId),
   ]
 );
 
@@ -2473,3 +2589,360 @@ export const printOrderEventRelations = relations(
     }),
   })
 );
+
+// ============================================
+// 商城订单 (StorefrontOrder)
+// ============================================
+
+/**
+ * 商城订单状态
+ *
+ * - unpaid    —— 刚建单,等 Stripe 收款(webhook 还没来)
+ * - paid      —— 钱到账了
+ * - fulfilled —— 已发货
+ * - cancelled —— 已取消
+ *
+ * 退款**不进**这个状态机 —— 退款是**支付状态**,记在 `payment_status` 上。
+ * 一单退了款,单子本身还在(用户查得到、能看历史),只是钱退了;塞进订单
+ * 状态的话退款就会把单子变成「已取消」,用户看着像没买过。
+ */
+export const storefrontOrderStatusEnum = pgEnum("storefront_order_status", [
+  "unpaid",
+  "paid",
+  "fulfilled",
+  "cancelled",
+]);
+
+/**
+ * 商城订单
+ *
+ * ## 为什么要自己一张表
+ *
+ * Sellbase 那边也有订单 —— 但那边只有「一行载体变体 + 一个金额 + 一个备注」,
+ * 工作室在后台看不到用户选了哪个尺寸、刻了什么字、AI 预览图是哪张。**订单事实
+ * 存在本仓库**,Sellbase 只负责收钱。
+ *
+ * ## 金额
+ *
+ * 全部**分**(integer),跟 `product.basePriceCents` 一致。结算页显示时才转成
+ * 「¥123.45」。
+ */
+export const storefrontOrder = pgTable(
+  "storefront_order",
+  {
+    id: text("id").primaryKey(),
+    /** 业务订单号,用户可见,如 "SO-20261104-3F7K2A" */
+    orderNo: text("order_no").notNull().unique(),
+    /**
+     * 下单人 —— 商城结算必须登录
+     *
+     * 匿名购物车(还没登录时的 `wjp_cart_id` cookie)在结算时会要求先登录,
+     * 登录后把游客购物车的行挂到这个 user 上。
+     */
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    /** 下单邮箱 —— Sellbase 按 email upsert customer,所以这一列是 join key */
+    email: text("email").notNull(),
+    status: storefrontOrderStatusEnum("status").notNull().default("unpaid"),
+    /**
+     * 支付状态
+     *
+     * 跟 `print_order.payment_status` 同一个口径 —— 两条支付链共用同一个
+     * webhook,数据模型也得一样,不然改一处忘一处。
+     *
+     * - unpaid   —— 还没收到钱
+     * - paid     —— 钱到账了(webhook 标的)
+     * - refunded —— 退过款(`refund.created` 事件标的)
+     * - failed   —— 支付失败
+     *
+     * ## 为什么单独一列,而不是塞进 `status`
+     *
+     * `status` 说的是「这单走到哪一步了」,支付状态说的是「钱怎么样了」。
+     * 两者会分叉:
+     *
+     * - 退款之后单子还在,只是钱退了 → `status` 保持 `paid`,
+     *   `payment_status` 变 `refunded`
+     * - 迟到的 `order.paid`(webhook 重投)不能把退过款的单改回「已支付」
+     *   → 靠 `payment_status === "refunded"` 挡住
+     */
+    paymentStatus: text("payment_status", {
+      enum: ["unpaid", "paid", "refunded", "failed"],
+    })
+      .notNull()
+      .default("unpaid"),
+    /** 小计(分)—— 折扣前的金额 */
+    subtotalCents: integer("subtotal_cents").notNull(),
+    /** 阶梯折扣(分)—— 数量折扣,正数 */
+    discountCents: integer("discount_cents").notNull().default(0),
+    /** 运费(分)—— 满 ¥99 免运费,否则 ¥8 */
+    shippingCents: integer("shipping_cents").notNull().default(0),
+    /** 合计(分) = subtotal - discount + shipping */
+    totalCents: integer("total_cents").notNull(),
+    /** 币种(iso 大写);本轮全链路 CNY */
+    currency: text("currency").notNull().default("CNY"),
+    /**
+     * Sellbase 订单 id —— webhook 反查用
+     *
+     * 唯一索引:webhook 会重投,靠这个唯一 + 「已是目标状态就 no-op」实现幂等。
+     */
+    sellbaseOrderId: text("sellbase_order_id"),
+    /** Stripe 支付链接 */
+    paymentUrl: text("payment_url"),
+    /** 收款时间 */
+    paidAt: timestamp("paid_at"),
+    /** 收货地址**快照** —— 用户后来改地址簿不改写历史订单 */
+    shippingAddress: json(
+      "shipping_address"
+    ).$type<ShippingAddressSnapshot | null>(),
+    /** 用户留言 */
+    note: text("note"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("storefront_order_no_uniq_idx").on(t.orderNo),
+    // webhook 按 sellbase_order_id 反查订单
+    uniqueIndex("storefront_order_sellbase_id_uniq_idx").on(t.sellbaseOrderId),
+    // 用户侧「我的订单」按 user_id 过滤 + 时间倒序
+    index("storefront_order_user_idx").on(t.userId),
+  ]
+);
+
+export type StorefrontOrderRow = typeof storefrontOrder.$inferSelect;
+export type NewStorefrontOrderRow = typeof storefrontOrder.$inferInsert;
+
+/**
+ * 商城订单行
+ *
+ * ## 为什么把规格也存一份
+ *
+ * 规格(尺寸 / 材质 / AI 风格 / 配件 / 刻字文字 / 预览图)放在 `metadata` 里 ——
+ * 整个 JSON 存一份,不做列拆分:这些字段是**组合出来**的,拆成列就得跟着
+ * 定价维度一起加列,加一个 AI 风格就得改一次表。
+ *
+ * `metadata` 存的是**下单那一刻**的规格 —— 商品目录后来改了,历史订单不受影响。
+ */
+export const storefrontOrderItem = pgTable(
+  "storefront_order_item",
+  {
+    id: text("id").primaryKey(),
+    /** 所属订单 */
+    orderId: text("order_id")
+      .notNull()
+      .references(() => storefrontOrder.id, { onDelete: "cascade" }),
+    /** 商品 id(本仓库 mock 目录里的商品 id) */
+    productId: text("product_id").notNull(),
+    /** 商品 handle —— 便于拼回详情页链接 */
+    productHandle: text("product_handle").notNull(),
+    /** 商品名(下单时的快照) */
+    productTitle: text("product_title").notNull(),
+    /** 商品封面(下单时的快照) */
+    productThumbnail: text("product_thumbnail"),
+    /** Sellbase 载体变体 id —— 建单时填进 items[].variant_id */
+    variantId: text("variant_id"),
+    /** 本仓库 SKU —— 对账用 */
+    sku: text("sku"),
+    /** 原价(分)—— 折扣前的单价 */
+    unitPriceCents: integer("unit_price_cents").notNull(),
+    /**
+     * 折后单价(分)—— 阶梯折扣后的单价
+     *
+     * 这才是 Sellbase `items[].unit_price_amount` 里填的数:Sellbase 的行合计
+     * = `unit_price_amount × quantity`,所以**先折单价再乘数量**才能跟本仓库
+     * 逐分相等(见 `pricing.ts` 的阶梯折扣口径)。
+     */
+    discountedUnitPriceCents: integer("discounted_unit_price_cents").notNull(),
+    /** 数量 */
+    quantity: integer("quantity").notNull(),
+    /** 行合计(分) = discountedUnitPriceCents × quantity */
+    lineTotalCents: integer("line_total_cents").notNull(),
+    /** 规格快照(尺寸 / 材质 / 风格 / 配件 / 刻字 / 预览图) */
+    metadata: json("metadata").$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("storefront_order_item_order_idx").on(t.orderId)]
+);
+
+export type StorefrontOrderItemRow = typeof storefrontOrderItem.$inferSelect;
+export type NewStorefrontOrderItemRow = typeof storefrontOrderItem.$inferInsert;
+
+// ============================================
+// 购物车 (Cart)
+// ============================================
+
+/**
+ * 购物车
+ *
+ * 2026-11-04:从**进程内 Map** 挪到 DB(`cart-store.ts` 之前是
+ * `const CARTS = new Map<string, Cart>()`)。Map 版的三个毛病:重启即丢、
+ * 多实例部署各算各的、没法在后台看「有谁在买什么」。
+ *
+ * ## 为什么 `userId` 可空
+ *
+ * 没登录也能加购(游客购物车)。结算时才要求登录 —— 登录后把游客购物车的
+ * 行合并到账号购物车下。
+ *
+ * ## `regionId`
+ *
+ * 先留着 —— 现在只有「中国大陆」一个区域,运费规则写死在
+ * `pricing-constants.ts`。以后要按地区分运费,这列就是那个开关。
+ */
+export const cart = pgTable(
+  "cart",
+  {
+    id: text("id").primaryKey(),
+    /** 登录用户;游客购物车为 null */
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    /** 币种(iso 大写) */
+    currencyCode: text("currency_code").notNull().default("CNY"),
+    /** 区域 —— 运费规则的分区键 */
+    regionId: text("region_id").notNull().default("china"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    // 登录用户查自己的购物车:WHERE user_id = ?
+    index("cart_user_id_idx").on(t.userId),
+  ]
+);
+
+export type CartRow = typeof cart.$inferSelect;
+export type NewCartRow = typeof cart.$inferInsert;
+
+/**
+ * 购物车行
+ *
+ * ## `specHash`
+ *
+ * 同一「规格」的行要合并数量 —— 之前在内存里靠 `sameAccessories()` 逐字段比,
+ * 落库后改成算一个稳定 hash 当唯一键(`(cart_id, spec_hash)` 唯一)。
+ *
+ * hash 的输入是参与「同 spec 合并」判断的那几个字段(商品 / 材质 / 尺寸 /
+ * AI 风格 / 刻字 / 加急 / **排序后**的配件 / 预览图),见
+ * `src/features/storefront/lib/cart-spec.ts` 的 `computeSpecHash`。
+ *
+ * 配件要**排序**再进 hash —— 配件数组的顺序不影响商品本身,但 hash 必须一样,
+ * 否则「加购顺序不同」会变成两行。
+ */
+export const cartItem = pgTable(
+  "cart_item",
+  {
+    id: text("id").primaryKey(),
+    /** 所属购物车 */
+    cartId: text("cart_id")
+      .notNull()
+      .references(() => cart.id, { onDelete: "cascade" }),
+    /** 商品 id */
+    productId: text("product_id").notNull(),
+    /** 商品 handle */
+    productHandle: text("product_handle").notNull(),
+    /** 商品名(快照) */
+    productTitle: text("product_title").notNull(),
+    /** 商品封面(快照) */
+    productThumbnail: text("product_thumbnail"),
+    /**
+     * 单价(分)—— 只是**缓存**
+     *
+     * 读购物车时会按 metadata 重算单价(存的这个当缓存)。落库后购物车能活过
+     * 一次部署,定价源改了的话存量行会带旧价 —— 重算一遍才对。
+     */
+    unitPriceCents: integer("unit_price_cents").notNull(),
+    /** 数量 */
+    quantity: integer("quantity").notNull(),
+    /** 规格(尺寸 / 材质 / 风格 / 配件 / 刻字 / 预览图) */
+    metadata: json("metadata").$type<Record<string, unknown>>().notNull(),
+    /** 规格 hash —— 同 spec 合并的判据 */
+    specHash: text("spec_hash").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    // 同 spec 合并数量:撞上就 +quantity,而不是插第二行
+    uniqueIndex("cart_item_cart_spec_uniq_idx").on(t.cartId, t.specHash),
+    index("cart_item_cart_id_idx").on(t.cartId),
+  ]
+);
+
+export type CartItemRow = typeof cartItem.$inferSelect;
+export type NewCartItemRow = typeof cartItem.$inferInsert;
+
+// ============================================
+// 收货地址 (Address)
+// ============================================
+
+/**
+ * 收货地址簿
+ *
+ * ## 为什么地址簿留在本仓库
+ *
+ * Sellbase 的 `customer.addresses` 是**只读**的 —— 没有创建地址的路由,
+ * 地址建在本仓库再同步过去是死路。所以地址簿整个在本仓库,下单时把快照
+ * 一起发给 Sellbase(它只当一个字段存着)。
+ *
+ * ## 一个用户几个地址
+ *
+ * 可以有多个,`isDefault` 标记默认那个(结算页预选它)。不加「唯一默认地址」
+ * 的约束 —— 那个约束在并发下很难做对,而默认地址选错的后果很轻(用户能改)。
+ */
+export const address = pgTable(
+  "address",
+  {
+    id: text("id").primaryKey(),
+    /** 所属用户 */
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    /** 收件人 */
+    recipientName: text("recipient_name").notNull(),
+    /** 手机号 */
+    phone: text("phone").notNull(),
+    /** 省 / 直辖市 */
+    province: text("province").notNull(),
+    /** 市 */
+    city: text("city").notNull(),
+    /** 区 / 县 */
+    district: text("district").notNull(),
+    /** 详细地址(街道门牌) */
+    detail: text("detail").notNull(),
+    /** 默认地址 —— 结算页预选它 */
+    isDefault: boolean("is_default").notNull().default(false),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    // 地址簿列表:WHERE user_id = ? ORDER BY is_default DESC
+    index("address_user_id_idx").on(t.userId),
+  ]
+);
+
+export type AddressRow = typeof address.$inferSelect;
+export type NewAddressRow = typeof address.$inferInsert;
+
+export const storefrontOrderRelations = relations(
+  storefrontOrder,
+  ({ many }) => ({
+    items: many(storefrontOrderItem),
+  })
+);
+
+export const storefrontOrderItemRelations = relations(
+  storefrontOrderItem,
+  ({ one }) => ({
+    order: one(storefrontOrder, {
+      fields: [storefrontOrderItem.orderId],
+      references: [storefrontOrder.id],
+    }),
+  })
+);
+
+export const cartRelations = relations(cart, ({ many }) => ({
+  items: many(cartItem),
+}));
+
+export const cartItemRelations = relations(cartItem, ({ one }) => ({
+  cart: one(cart, {
+    fields: [cartItem.cartId],
+    references: [cart.id],
+  }),
+}));

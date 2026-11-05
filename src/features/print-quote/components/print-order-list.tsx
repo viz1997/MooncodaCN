@@ -30,7 +30,10 @@ import {
   formatGrams,
 } from "@/features/print-quote/lib/format";
 import type { UserPrintOrder } from "@/features/print-quote/lib/quote-types";
-import { PRINT_ORDER_STATUS_CHIP } from "@/features/print-quote/lib/status-ui";
+import {
+  PRINT_ORDER_PAYMENT_CHIP,
+  PRINT_ORDER_STATUS_CHIP,
+} from "@/features/print-quote/lib/status-ui";
 import { Link } from "@/i18n/routing";
 
 export function PrintOrderList({
@@ -97,6 +100,15 @@ export function PrintOrderList({
               }`}
             >
               {t(`status.${order.status}`)}
+            </span>
+
+            {/* 收款状态 —— 用户在列表里最想看到的是这个 */}
+            <span
+              className={`rounded-full px-2 py-0.5 text-[11px] ring-1 ring-inset ${
+                PRINT_ORDER_PAYMENT_CHIP[order.paymentStatus]
+              }`}
+            >
+              {t(`payment.status.${order.paymentStatus}`)}
             </span>
 
             <span className="font-mono text-xs text-muted-foreground">

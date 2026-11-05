@@ -1,15 +1,16 @@
 /**
  * GET /api/store/products —— 列出 mock 产品
  *
- * 对齐 Medusa Store API `GET /store/products`:
- * https://docs.medusajs.com/api/store#products-get-products
+ * 对齐 atelier 的 store 契约(`GET /store/products`,简化版:分页只有
+ * offset / limit,不是完整 schema)。
+ *
+ * 商品目录的真理源在本仓库 —— Sellbase 只做收银台、不提供商品目录读取
+ * 接口,所以这个 Route 永远读本仓库的数据,不会转发出去。
  *
  * Query params:
  *  - series: 按 series handle 过滤(keychain / figure / magnet)
  *  - type: 按 productTypeCode 过滤(R / A / P / RM / LB / M)
  *  - limit: 最多返回多少条
- *
- * 切真 Medusa 时:此 Route 转发到 `GET /store/products` Medusa API。
  */
 
 import type { NextRequest } from "next/server";

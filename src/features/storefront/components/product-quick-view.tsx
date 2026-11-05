@@ -289,7 +289,7 @@ export function ProductQuickView() {
 
                 {/* View full details link —— 跳到 /marketing/products 作品集
                    (mock catalog 与现有 marketing 路由 slug 不互通,
-                   故引到列表而非具体 handle,见 [[wjp-mock-medusa-storefront]]) */}
+                   故引到列表而非具体 handle,见 architecture-sellbase-integration.md) */}
                 <Link
                   href="/marketing/products"
                   onClick={() => setQuickView(null)}

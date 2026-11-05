@@ -24,6 +24,7 @@ import {
   printOrder,
 } from "@/db/schema";
 
+import { getDeliveryTier } from "./delivery-tier";
 import { appendPrintOrderEvent } from "./order-events";
 import type {
   PrintOrderEventActor,
@@ -88,6 +89,8 @@ export async function createPrintOrder(
         weightFeeCents: input.quote.weightFeeCents,
         varnishFeeCents: input.quote.varnishFeeCents,
         supportFeeCents: input.quote.supportFeeCents,
+        deliveryTier: input.quote.deliveryTier,
+        deliveryFeeCents: input.quote.deliveryFeeCents,
         totalPriceCents: input.quote.totalPriceCents,
         contactName: input.contactName,
         contactEmail: input.contactEmail,
@@ -200,7 +203,9 @@ export type PrintOrderTransitionErrorCode =
   /** 回退必须写备注 */
   | "NOTE_REQUIRED"
   /** 目标状态 = 当前状态(空转) */
-  | "SAME_STATUS";
+  | "SAME_STATUS"
+  /** 还没收款,不能开工(2026-11-04) */
+  | "PAYMENT_REQUIRED";
 
 export class PrintOrderTransitionError extends Error {
   readonly code: PrintOrderTransitionErrorCode;
@@ -268,7 +273,11 @@ export async function transitionPrintOrderStatus(
       : eq(printOrder.orderNo, input.orderNo);
 
     const locked = await tx
-      .select({ id: printOrder.id, status: printOrder.status })
+      .select({
+        id: printOrder.id,
+        status: printOrder.status,
+        paymentStatus: printOrder.paymentStatus,
+      })
       .from(printOrder)
       .where(where)
       .limit(1)
@@ -324,6 +333,21 @@ export async function transitionPrintOrderStatus(
       }
     }
 
+    // 2026-11-04:没收款不许开工
+    //
+    // 「开工」= 生产中 —— 工作室开始切料/打印的那一刻。在这之前收不到钱,
+    // 单子就开工了,后面追款的难度会陡增。所以门槛卡在**状态流转**这一层,
+    // 而不是靠后台界面把选项藏起来(那是 UI 便利,不是授权边界)。
+    //
+    // 只卡 IN_PRODUCTION —— PENDING / CONFIRMED 是在跟客户对齐,还没到花钱
+    // 的时候;SHIPPED / COMPLETED 是往回推,拦下来没有意义。
+    if (input.to === "IN_PRODUCTION" && current.paymentStatus !== "paid") {
+      throw new PrintOrderTransitionError(
+        "PAYMENT_REQUIRED",
+        `工单 ${input.orderNo} 还没收款,不能开始生产`
+      );
+    }
+
     // 3. 改状态
     const [updated] = await tx
       .update(printOrder)
@@ -368,6 +392,8 @@ export function toUserPrintOrder(row: PrintOrderRow): UserPrintOrder {
     totalPriceCents: row.totalPriceCents,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    paymentStatus: row.paymentStatus,
+    paymentUrl: row.paymentUrl,
   };
 }
 
@@ -389,6 +415,9 @@ export function toUserPrintOrderDetail(
     weightFeeCents: row.weightFeeCents,
     varnishFeeCents: row.varnishFeeCents,
     supportFeeCents: row.supportFeeCents,
+    deliveryFeeCents: row.deliveryFeeCents,
+    deliveryTier: row.deliveryTier,
+    deliveryHours: getDeliveryTier(row.deliveryTier).hours,
     contactName: row.contactName,
     contactEmail: row.contactEmail,
     contactPhone: row.contactPhone,

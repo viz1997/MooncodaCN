@@ -14,7 +14,7 @@
  * 用法：pnpm tsx scripts/apply-prompt-order-cursor-idx.ts
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { config as loadEnv } from "dotenv";
@@ -23,10 +23,25 @@ import { Client } from "pg";
 loadEnv({ path: ".env.local" });
 loadEnv({ path: ".env" });
 
-const SQL_PATH = resolve(
-  process.cwd(),
-  "drizzle/0006_prompt_order_cursor_idx.sql"
-);
+const SQL_PATH = resolveSqlPath("0006_prompt_order_cursor_idx.sql");
+
+/**
+ * 找迁移 SQL —— `drizzle/` 里只剩 0000/0001,其余的都在 `drizzle-archive/`
+ *
+ * 两处都找一遍:先按老路径(`drizzle/`),找不到再翻归档。归档目录名带日期
+ * (`20261013_231944`),是那批手写增量迁移的归档位置。
+ */
+function resolveSqlPath(fileName: string): string {
+  const candidates = [
+    resolve(process.cwd(), "drizzle", fileName),
+    resolve(process.cwd(), "drizzle-archive/20261013_231944", fileName),
+  ];
+  const hit = candidates.find((p) => existsSync(p));
+  if (!hit) {
+    throw new Error(`找不到 ${fileName}(试过:${candidates.join(", ")})`);
+  }
+  return hit;
+}
 
 async function main() {
   const url = process.env.DATABASE_URL;

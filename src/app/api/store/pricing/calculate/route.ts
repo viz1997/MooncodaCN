@@ -2,7 +2,8 @@
  * POST /api/store/pricing/calculate —— mock pricing
  *
  * 对齐 atelier `/api/pricing/calculate`。
- * 切真 Medusa 时:转发到 Medusa pricing API 或保留 mock 计算。
+ * 定价的真理源在本仓库 —— 结算时服务端会用 pricing.ts 重算一遍,
+ * 这个 Route 只是给前端预览用,不会转发到任何外部定价服务。
  */
 
 import { NextResponse } from "next/server";

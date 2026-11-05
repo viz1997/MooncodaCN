@@ -1,0 +1,116 @@
+/**
+ * 商城订单的 webhook 状态转移 —— **纯函数**
+ *
+ * ## 为什么单独一个文件
+ *
+ * 状态转移的**判断**和状态转移的**落库**是两件事。判断决定「这次 webhook
+ * 该改什么、不该改什么」,落库只是把判断结果写进 Drizzle。
+ *
+ * 判断这部分是最容易出错的地方 —— 里面藏着两条血淋淋的教训:
+ *
+ * 1. **退款不是订单状态**。退款只改 `paymentStatus`,`status` 留在原地。
+ *    早先只有一列 `status` 的时候,退款把订单写成了「已取消」,用户看着
+ *    像没买过。
+ * 2. **迟到的 `order.paid` 不能把退过款的单改回「已支付」**。webhook 会
+ *    重投,投递顺序也不保证。
+ *
+ * 这两条都值得有测试盯着。所以判断抽成纯函数(零 DB 依赖,能进 `unit`
+ * project),落库留在 `webhook-handler.ts`。
+ *
+ * ## 两个状态是正交的
+ *
+ * | 列 | 含义 | 取值 |
+ * |---|---|---|
+ * | `status` | 订单走到哪一步 | `unpaid` / `paid` / `fulfilled` / `cancelled` |
+ * | `paymentStatus` | 钱到没到、退没退 | `unpaid` / `paid` / `refunded` / `failed` |
+ *
+ * 合法的组合有 `status=paid` + `paymentStatus=refunded`(退过款的单)、
+ * `status=cancelled` + `paymentStatus=paid`(先付后取消)。
+ */
+
+/** 商城订单当前的状态(两个维度) */
+export interface StorefrontOrderState {
+  /** 订单状态 */
+  status: string;
+  /** 支付状态 */
+  paymentStatus: string;
+}
+
+/** webhook 能触发的三种支付动作 */
+export type StorefrontPaymentKind =
+  | "mark_paid"
+  | "mark_refunded"
+  | "mark_cancelled";
+
+/**
+ * 转移的结果
+ *
+ * - `apply` —— 按 `setStatus` / `setPaymentStatus` / `markPaidAt` 写库
+ * - `skip` —— 什么都不写(`reason` 给日志看)
+ */
+export type StorefrontTransitionDecision =
+  | {
+      kind: "apply";
+      /** 要写的订单状态;不写就是不动它 */
+      setStatus?: "paid" | "cancelled";
+      /** 要写的支付状态;不写就是不动它 */
+      setPaymentStatus?: "paid" | "refunded";
+      /** 要不要写 `paid_at` */
+      markPaidAt: boolean;
+    }
+  | {
+      kind: "skip";
+      reason: string;
+    };
+
+/**
+ * 判断一次 webhook 动作对商城订单意味着什么
+ *
+ * **幂等**:同样的输入永远得到同样的输出 —— 重投一次和重投十次,结果一样。
+ */
+export function decideStorefrontTransition(
+  order: StorefrontOrderState,
+  action: StorefrontPaymentKind
+): StorefrontTransitionDecision {
+  switch (action) {
+    case "mark_paid": {
+      // 已经付过了 —— 重投,不动
+      if (order.paymentStatus === "paid") {
+        return { kind: "skip", reason: "已经标记过收款" };
+      }
+      // 退过款的单不改回来(迟到的 paid 事件)
+      if (order.paymentStatus === "refunded") {
+        return { kind: "skip", reason: "订单已退款,忽略迟到的收款事件" };
+      }
+      // 已取消的单不改回来
+      if (order.status === "cancelled") {
+        return { kind: "skip", reason: "订单已取消,忽略收款事件" };
+      }
+      return {
+        kind: "apply",
+        setStatus: "paid",
+        setPaymentStatus: "paid",
+        markPaidAt: true,
+      };
+    }
+
+    case "mark_refunded": {
+      if (order.paymentStatus === "refunded") {
+        return { kind: "skip", reason: "已经标记过退款" };
+      }
+      // 只动支付状态 —— 订单本身留着(status 不改)
+      return { kind: "apply", setPaymentStatus: "refunded", markPaidAt: false };
+    }
+
+    case "mark_cancelled": {
+      if (order.status === "cancelled") {
+        return { kind: "skip", reason: "订单已经取消过了" };
+      }
+      // 取消只动订单状态 —— 钱怎么样是另一回事(退不退款看 refund.created)
+      return { kind: "apply", setStatus: "cancelled", markPaidAt: false };
+    }
+
+    default:
+      return { kind: "skip", reason: "不处理的动作" };
+  }
+}

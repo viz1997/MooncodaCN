@@ -2,7 +2,8 @@
  * use-products —— 客户端产品查询 hook(TanStack Query)
  *
  * 替代 atelier 直接 import mock data 的方式。
- * 切真 Medusa 时:fetch URL 不变,只改 Route Handler 转发到 Medusa。
+ * 商品目录的真理源在本仓库,fetch 的 URL 长期不变 —— Sellbase 只做收银台,
+ * 不参与商品目录的读取。
  */
 
 "use client";

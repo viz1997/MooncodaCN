@@ -30,6 +30,13 @@ import {
   type PricingConfig,
 } from "@/features/pricing/lib/pricing-engine";
 
+import {
+  computeDeliveryFeeCents,
+  DEFAULT_DELIVERY_RATES,
+  type DeliveryRates,
+  getDeliveryTier,
+  normalizeDeliveryTier,
+} from "./delivery-tier";
 import type { PrintQuote, PrintQuoteInput } from "./quote-types";
 
 /**
@@ -43,6 +50,20 @@ function envNumber(name: string, fallback: number): number {
   if (raw === undefined || raw === "") return fallback;
   const value = Number(raw);
   if (!Number.isFinite(value) || value < 0) return fallback;
+  return value;
+}
+
+/**
+ * 读一个 0~1 之间的比例环境变量;越界 / 非法时用 fallback。
+ *
+ * 比例必须夹在 [0, 1] —— 加价超过 100% 是配置写错了(不是「加两倍」),
+ * 这种值静默生效会让用户看到离谱的报价,比退回默认值危险。
+ */
+function envRate(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0 || value > 1) return fallback;
   return value;
 }
 
@@ -62,11 +83,28 @@ function envNumber(name: string, fallback: number): number {
  * | `PRINT_SUPPORT_PRICE_CENTS_PER_GRAM` | 支撑单价 分/g | 100(1 元/g) |
  * | `PRINT_SUPPORT_THRESHOLD` | 本体支撑比例阈值(1 = 1:1) | 1 |
  * | `PRINT_SUPPORT_ENABLED` | 支撑加价总开关(`"true"` 才开) | 关 |
+ * | `PRINT_DELIVERY_EXPRESS_RATE` | 72 小时档加价比例(0~1) | 0.1 |
+ * | `PRINT_DELIVERY_URGENT_RATE` | 48 小时档加价比例(0~1) | 0.37 |
  *
  * 注意:本仓库的 `.gitignore` 把 `.env*` 整个排掉了(`.env.example` 也一样),
  * 所以这份说明放在代码里 —— 环境变量的名字跟着代码走,不会因为
  * 「文档在一个没人能看到的文件里」而丢失。
  */
+/**
+ * 交期档位的加价比例
+ *
+ * 标准档(96 小时)恒为 0 —— 不额外收费;两档加急的比例可以用环境变量改,
+ * 工作室觉得贵就调低,不用改代码发版。
+ */
+const DELIVERY_RATES: DeliveryRates = {
+  standard: 0,
+  express: envRate(
+    "PRINT_DELIVERY_EXPRESS_RATE",
+    DEFAULT_DELIVERY_RATES.express
+  ),
+  urgent: envRate("PRINT_DELIVERY_URGENT_RATE", DEFAULT_DELIVERY_RATES.urgent),
+};
+
 export const PRINT_QUOTE_CONFIG = {
   /** 材料密度 g/cm³ —— `PRINT_MATERIAL_DENSITY` */
   materialDensity: envNumber(
@@ -102,6 +140,8 @@ export const PRINT_QUOTE_CONFIG = {
    * 悄悄多收一笔支撑费,而克重工具那边从不收这个钱,两边对不上。
    */
   supportEnabled: process.env.PRINT_SUPPORT_ENABLED === "true",
+  /** 交期档位加价比例 —— `PRINT_DELIVERY_EXPRESS_RATE` / `PRINT_DELIVERY_URGENT_RATE` */
+  deliveryRates: DELIVERY_RATES,
 } as const;
 
 /**
@@ -144,6 +184,16 @@ export function computePrintQuote(input: PrintQuoteInput): PrintQuote | null {
   const varnishFeeCents = Math.round(result.varnishFee * 100);
   const supportFeeCents = Math.round(result.supportFee * 100);
 
+  // 交期加价 —— 按**小计**的比例收(见 delivery-tier.ts)。
+  // 基数是三项基础费用之和,不是总价:加价不能把自己算进自己的基数。
+  const baseTotalCents = weightFeeCents + varnishFeeCents + supportFeeCents;
+  const deliveryTier = normalizeDeliveryTier(input.deliveryTier);
+  const deliveryFeeCents = computeDeliveryFeeCents(
+    baseTotalCents,
+    deliveryTier,
+    PRINT_QUOTE_CONFIG.deliveryRates
+  );
+
   return {
     materialWeightG: result.materialWeight,
     supportWeightG: input.supportWeightG ?? null,
@@ -156,7 +206,11 @@ export function computePrintQuote(input: PrintQuoteInput): PrintQuote | null {
     varnishFeeCents,
     supportFeeCents,
     excessSupportWeightG: result.excessSupportWeight,
-    totalPriceCents: weightFeeCents + varnishFeeCents + supportFeeCents,
+    deliveryFeeCents,
+    deliveryTier,
+    deliveryHours: getDeliveryTier(deliveryTier).hours,
+    deliveryRates: PRINT_QUOTE_CONFIG.deliveryRates,
+    totalPriceCents: baseTotalCents + deliveryFeeCents,
   };
 }
 

@@ -2,7 +2,7 @@
 
 NextDevTpl 暴露给小程序的 TypeScript SDK 参考实现。把本目录(`src/clients/miniprogram-sdk/`)整体复制到小程序仓库 `src/api/sdk/` 即可使用。
 
-> ⚠️ **本 SDK 只覆盖 NextDevTpl AI SaaS 后端的 API。Commerce(商品 / 购物车 / 订单 / 支付)走独立部署的 Medusa,详见 [`MEDUSA_INTEGRATION.md`](./MEDUSA_INTEGRATION.md)。**
+> ⚠️ **本 SDK 只覆盖 NextDevTpl AI SaaS 后端的 API。Commerce(商品 / 购物车 / 订单 / 支付)也走本仓库(`/api/store/**`),Sellbase 只做收银台(Stripe 支付链接),小程序不直连,详见 [`SELLBASE_INTEGRATION.md`](./SELLBASE_INTEGRATION.md)。**
 
 ## 当前版本
 
@@ -20,7 +20,7 @@ NextDevTpl 暴露给小程序的 TypeScript SDK 参考实现。把本目录(`src
 | `image-gen.ts` | 提交生图 + 轮询 + 模板 + 风格类型 + 配额 + 我的资产 |
 | `orders.ts` | `/orders/[token]/**` 公共预览流(12 端点) |
 | `index.ts` | 统一出口 |
-| `MEDUSA_INTEGRATION.md` | **小程序 commerce 走真 Medusa 的接入指南** |
+| `SELLBASE_INTEGRATION.md` | **小程序 commerce(商品 / 购物车 / 结算 / 支付)接入指南** |
 
 ## ⚠️ 鉴权模型澄清(2026-10-13 v1.2.0 必读)
 
@@ -457,7 +457,7 @@ const total =
 **不在本 SDK 范围**(要走 BA session 或 commerce API):
 - `/api/image-gen/photos/list` — 「我的资产」,要 BA session
 - `/api/credits/*` — 积分余额,mp 走自己的用户中心
-- `/api/store/**` — commerce,走真 Medusa(见 `MEDUSA_INTEGRATION.md`)
+- `/api/store/**` — commerce(购物车 / 结算 / 支付),走本仓库(见 `SELLBASE_INTEGRATION.md`)
 
 ---
 

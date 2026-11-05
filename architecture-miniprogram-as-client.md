@@ -1,23 +1,27 @@
 # NextDevTpl · AI 生图 API 后端定位说明
 
 > **Mooncoda · 小梦定制馆**
-> 状态:方案稿 · 2026-09-17 更新身份定位
+> 状态:方案稿 · 2026-09-17 更新身份定位 · 2026-11-04 电商后端改 Sellbase
 > 目标读者:技术负责人 / 后端 / 前端 / DevOps
+> 电商侧（商品 / 定价 / 购物车 / 订单 / 地址 / 收款）的完整口径见
+> [architecture-sellbase-integration.md](./architecture-sellbase-integration.md)
 
 ---
 
-## 〇、项目身份（2026-09-17 收敛）
+## 〇、项目身份（2026-09-17 收敛，2026-11-04 更新电商分工）
 
-NextDevTpl **不做电商前端**。最终身份定位：
+NextDevTpl 的**主体不是电商前端**。商城页面虽然也在本仓库里(见下),但它只是个薄壳 —— 所有数据都走本仓库自己的 `/api/store/**`。最终身份定位：
 
 - **AI 生图 API 后端** —— 暴露生图 / 积分 / 用户 / 文件上传 / Webhook 等 API
 - **Web 管理后台** —— `/dashboard/*` + `/admin/*` + `/marketing/{pricing,blog,legal,home}`（landing pages + 作品集 showcase + 博客 SEO）
 - **三类调用方**：
   - **Web dashboard**（现有）—— ToC 客户 + 代理商 + 管理员
   - **微信小程序**（外部项目）—— `Authorization: Bearer` 调 API
-  - **未来独立 Medusa 电商 storefront**（外部项目，不在本仓库）—— 商品 / 购物车 / 订单 / 收货地址全部走 Medusa Store API；本仓库仅提供 user / credits 共享层
+  - **商城访客**（浏览器）—— 商城页面本身就在本仓库（`(marketing-atelier)` 路由组：`/` 首页、`/product/[handle]`、`/checkout`、`/checkout/success`），小程序 / 访客调的都是**本仓库**的 `/api/store/**` 接口
 
-**本仓库内不引入**：shopping cart / 商品 SKU / 收货地址 / 订单实体（Medusa 实体）。`/marketing/products/*` 仅作品牌 showcase 静态橱窗，引导用户到独立 storefront。
+**电商后端是 Sellbase**（Supabase Edge Functions + Stripe），不是 Medusa —— Sellbase **只做收银台**：建一张 Stripe 支付链接 + 回传收款状态，不持有商品 / 购物车 / 订单 / 地址。
+
+**本仓库现在持有**：商品目录（`product` / `product_variant`）、定价规则、购物车（`cart` / `cart_item`）、订单事实（`storefront_order` / `storefront_order_item`，打印工单是 `print_order`）、收货地址（`address`）。`/marketing/products/*` 仍是作品牌 showcase 静态橱窗（与商品目录无关），引导用户到本仓库的商城首页。
 
 ---
 
@@ -29,15 +33,17 @@ NextDevTpl **不做电商前端**。最终身份定位：
 |---|---|---|
 | Web 端 | NextDevTpl(Next.js) | NextDevTpl 自身 |
 | 小程序端 | Taro 4.0.9 + React 18 | 独立 NestJS BFF(`mooncoda/bff/`) |
-| Medusa 电商 storefront(未来) | Next.js Medusa Storefront 模板 | Medusa Store API |
+| 商城 storefront | Next.js(本仓库 `(marketing-atelier)` 路由组) | 本仓库 `/api/store/**` |
 | **账号 / 积分** | NextDevTpl 持有 | NextDevTpl(单一权威) |
-| **商品 / 订单** | Medusa 持有 | Medusa(单一权威) |
+| **商品 / SKU / 价格** | NextDevTpl 持有 | NextDevTpl(单一权威,`product` / `product_variant`) |
+| **购物车 / 订单事实 / 地址** | NextDevTpl 持有 | NextDevTpl(单一权威,`cart` / `storefront_order` / `address`) |
+| **收款** | Sellbase 持有 | Sellbase(单一权威,Stripe 支付链接 + 收款状态) |
 
-BFF 是 in-memory 实现,**生产不可用**,且与未来 storefront 形态不一致 —— 收回到 NextDevTpl 让所有客户端共享同一份 user / credits。
+BFF 是 in-memory 实现,**生产不可用**,且与 storefront 形态不一致 —— 收回到 NextDevTpl 让所有客户端共享同一份 user / credits。
 
 ### 1.2 目标
 
-**NextDevTpl 是唯一后端**,**小程序只是另一个前端客户端**。
+**NextDevTpl 是唯一后端**(收款环节除外 —— 那一步交给 Sellbase 收银台),**小程序只是另一个前端客户端**。
 
 ```
 ┌─────────────────┐     ┌─────────────────┐
@@ -63,33 +69,42 @@ BFF 是 in-memory 实现,**生产不可用**,且与未来 storefront 形态不�
 │  │ AI 生图任务队列 (异步 + 轮询)        │    │
 │  └─────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────┐    │
-│  │ 支付回调 (Stripe + 微信支付)         │    │
+│  │ 商城:本仓库持有 (2026-11-04 起)      │    │
+│  │  • 商品目录 product / product_variant│    │
+│  │  • 定价规则 / 购物车 cart / 地址     │    │
+│  │  • 订单事实 storefront_order         │    │
+│  └─────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────┐    │
+│  │ 收款编排(建单 → 支付链接)            │    │
+│  │  → webhook 回写 payment_status       │    │
 │  └─────────────────────────────────────┘    │
 └──────────────────────┬──────────────────────┘
-                       │ 商品/订单查询
+                       │ 建单 / 换支付链接
                        ▼
               ┌─────────────────┐
-              │  Medusa (保留)   │
-              │  商品/订单管理    │   ← Medusa **不参与**
-              │                 │     账号与积分
-              └─────────────────┘
+              │    Sellbase     │   ← 只收钱,不持有
+              │  (收银台)       │     商品 / 购物车 / 订单 / 地址
+              └────────┬────────┘
+                       │ order.paid / payment.succeeded
+                       ▼
+              POST /api/webhooks/sellbase  → 回写本地订单状态
 ```
 
 ### 1.3 核心原则
 
-1. **后端统一**:NextDevTpl 唯一后端,BFF 退役
+1. **后端统一**:NextDevTpl 唯一后端,BFF 退役(收款由 Sellbase 承接)
 2. **前端薄**:小程序只负责展示 + 交互,不存业务状态
-3. **账号走 NextDevTpl**:**用户表 / 微信 openid 绑定 / BA session 签发全部由 NextDevTpl 持有**,Medusa 不参与
-4. **积分走 NextDevTpl**:**积分账本(账户表 + 流水表)全部由 NextDevTpl 持有**,Medusa 不参与
-5. **Medusa 边界**:Medusa **只管商品 SKU / 订单流水**,不存账号、不存积分
-6. **支付解耦**:Medusa 管商品,NextDevTpl 管支付(微信支付不走 Medusa)
+3. **账号走 NextDevTpl**:**用户表 / 微信 openid 绑定 / BA session 签发全部由 NextDevTpl 持有**,Sellbase 不参与
+4. **积分走 NextDevTpl**:**积分账本(账户表 + 流水表)全部由 NextDevTpl 持有**,Sellbase 不参与
+5. **商城数据走 NextDevTpl**:**商品目录 / 定价规则 / 购物车 / 订单事实 / 收货地址全部在本仓库**,Sellbase 不持有这些实体
+6. **收款交给 Sellbase**:本仓库算价、落单,Sellbase 只建一张 Stripe 支付链接;钱和收款状态以 Sellbase 为准
 7. **可观测**:所有积分流水、AI 任务状态走 Postgres,可审计可回放
 
 ### 1.4 业务归属矩阵
 
-| 业务能力 | NextDevTpl | Medusa | 备注 |
+| 业务能力 | NextDevTpl | Sellbase | 备注 |
 |---|---|---|---|
-| 用户账号 / 微信 openid 绑定 | ✅ | ❌ | 用户表只在 NextDevTpl |
+| 用户账号 / 微信 openid 绑定 | ✅ | ❌ | 用户表只在 NextDevTpl;Sellbase 侧按 email upsert customer |
 | Session 签发 (BA 原生) | ✅ | ❌ | 通过 phoneNumber 插件 verifyOTP 流 |
 | 积分账户余额 | ✅ | ❌ | Postgres ledger |
 | 积分流水(grant/spend/refund) | ✅ | ❌ | append-only 流水表 |
@@ -97,20 +112,22 @@ BFF 是 in-memory 实现,**生产不可用**,且与未来 storefront 形态不�
 | **每日手动领取积分** | ✅ | ❌ | NextDevTpl 暴露 `POST /api/credits/daily-claim` |
 | **每日 00:00 自动清零** | ✅ | ❌ | NextDevTpl cron / lazy reset |
 | AI 生图任务 | ✅ | ❌ | 异步任务 + 队列 |
-| 微信支付下单/回调 | ✅ | ❌ | NextDevTpl 调微信支付 API |
-| 商品 SKU / 分类 / 价格 | ❌ | ✅ | 商城浏览 |
-| 订单流水 / 物流 | ❌ | ✅ | Medusa 订单模块 |
-| 购物车(cart) | ❌ | ✅ | Medusa Store API |
-| 收货地址 | ❌ | ✅ | 跟 Medusa Customer 走 |
+| **商品目录 / SKU / 基础价** | ✅ | 镜像 | 本仓库是真理源;`product` / `product_variant`,目录同步是**单向**的 |
+| **定价规则**(材质 / 尺寸 / 配件 / 刻字 / 加急 / 数量阶梯折扣) | ✅ | ❌ | `src/features/storefront/lib/pricing.ts` |
+| **购物车(cart)** | ✅ | ❌ | `cart` / `cart_item` 表,cookie `wjp_cart_id` |
+| **订单事实** | ✅ | ❌ | `storefront_order` / `storefront_order_item`;打印工单是 `print_order` |
+| **收货地址** | ✅ | ❌ | `address` 表;Sellbase **没有创建地址的路由**;小程序用 `GET/POST /api/store/addresses` + `PATCH/DELETE /api/store/addresses/{addressId}` |
+| **收款 / Stripe 支付链接** | ❌ | ✅ | 本仓库只镜像 `payment_status` + `payment_url` + `sellbase_order_id` 指针 |
+| 物流 / 发货 | ✅ | ❌ | 订单状态在本仓库,发货走后台状态流转 |
 
 ### 1.5 跨系统用户标识
 
-- **NextDevTpl `user_id`**:NextDevTpl 自有 UUID,作为账号系统主键
-- **Medusa `customer_id`**:Medusa 自有 UUID,作为订单/地址主键
-- **关联方式**:NextDevTpl `users` 表增加 `medusa_customer_id` 字段,首次支付下单时按需创建 Medusa Customer
-- **小程序使用 NextDevTpl 的 `user_id`** 作为业务身份标识(积分、AI 任务、个人中心);涉及订单/地址时由 NextDevTpl 内部 join Medusa customer_id
+- **NextDevTpl `user_id`**:NextDevTpl 自有 ID,作为账号系统主键
+- **Sellbase `customer_id`**:Sellbase 自有 ID,只用于收银台侧(没有 API 能写 `auth_user_id`)
+- **关联方式**:`user.sellbaseCustomerId` 只是**加速指针**(首次下单时从建单响应里回填);真正的 join key 永远是 **email** —— Sellbase 的 customer 按 email upsert
+- **小程序使用 NextDevTpl 的 `user_id`** 作为业务身份标识(积分、AI 任务、个人中心);涉及订单/地址时查的就是本仓库的表,不 join 外部 customer_id
 
-> **原则**:**对外暴露 NextDevTpl user_id**,Medusa customer_id 是 NextDevTpl 内部细节,小程序不感知。
+> **原则**:**对外暴露 NextDevTpl user_id**;Sellbase customer_id 是 NextDevTpl 内部细节,小程序不感知。
 
 ---
 
@@ -242,128 +259,142 @@ export async function loginWithWechat() {
 #### 2.1.4 NextDevTpl 用户表 schema(账号由 NextDevTpl 独家持有)
 
 ```sql
--- 实际表名 / 列名 (2026-09-16 落地后) —— 见 drizzle/0042_user_wechat_medusa.sql
+-- 实际表名 / 列名 (2026-09-16 落地后) —— 见 drizzle-archive/20261013_231944/0042_user_wechat_medusa.sql
 -- user 是 Better Auth 的用户表,单数;本节展示新增列的最终形态
+-- 2026-11-04:medusa_customer_id 改名为 sellbase_customer_id(见 scripts/apply-sellbase-payment-schema.ts)
 
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "wechat_openid" text;          -- 微信小程序 openid(主索引),UNIQUE
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "wechat_unionid" text;         -- 同一微信开放平台下多端打通(预留)
-ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "medusa_customer_id" text;     -- 首次下单时按需创建 Medusa Customer
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "sellbase_customer_id" text;   -- 首次下单时回填的 Sellbase customer 指针(加速用,join key 是 email)
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "last_login_at" timestamp;     -- 最近一次成功登录(任意渠道)
 
 CREATE UNIQUE INDEX IF NOT EXISTS "user_wechat_openid_key" ON "user" ("wechat_openid");
 CREATE INDEX IF NOT EXISTS "user_wechat_unionid_idx" ON "user" ("wechat_unionid");
-CREATE INDEX IF NOT EXISTS "user_medusa_customer_id_idx" ON "user" ("medusa_customer_id");
+CREATE INDEX IF NOT EXISTS "user_sellbase_customer_id_idx" ON "user" ("sellbase_customer_id");
 ```
 
 **关键约束**:
-- `user` 表在 NextDevTpl 的 Postgres 里(Better Auth 持有),**Medusa 不持有 user 概念**
-- Medusa Customer 通过 `user.medusa_customer_id` 关联,NextDevTpl 内部 join
+- `user` 表在 NextDevTpl 的 Postgres 里(Better Auth 持有),**Sellbase 不持有 user 概念**
+- `user.sellbase_customer_id` 只是**加速指针** —— Sellbase 的 customer 按 **email** upsert,`auth_user_id` 没有任何 API 能写,所以 email 才是真正的关联键
 - 小程序 token = BA session.token(由 verifyPhoneNumber 流程签发,7 天有效),**不是自签 JWT**
 - 多端登录(Web 邮箱 / 手机号 / 微信小程序)共享同一 `user.id`,phoneNumber / wechatOpenid 任意一个已 verified 即可登录
 
-### 2.2 支付:Stripe → 微信支付
+### 2.2 收款:Sellbase 收银台 + Stripe 支付链接
 
-**问题**:Stripe 在小程序里用不了。
+**口径(2026-11-04 落地)**:**本仓库算价,Sellbase 只做收银台**。本仓库把购物车里每一行价**重算一遍**、落本地订单,再拿这些行去 Sellbase 建一张订单,拿回一张 Stripe 支付链接;钱到账后 Sellbase webhook 通知本仓库回写状态。
 
-#### 2.2.1 NextDevTpl 新增 `app/api/pay/wechat/create/route.ts`
+Sellbase 是 **Supabase Edge Functions + Stripe**,不是 Medusa —— 不用另起一台 server,`npx sellbase init` 装在自己的 Supabase 项目里。
+
+**问题**:Stripe 在小程序里没有内嵌支付组件。所以小程序是**全页跳转** Stripe 支付页,而不是小程序内拉起支付。(小程序内支付如需做,得走微信支付 JSAPI,那一套**尚未落地**。)
+
+#### 2.2.1 本仓库 `app/api/store/checkout/route.ts`(结算)
 
 ```ts
-// app/api/pay/wechat/create/route.ts
+// POST /api/store/checkout —— 结算:重算 → 落本地订单 → 建 Sellbase 订单 → 返支付链接
 export async function POST(req: NextRequest) {
-  const { productId, quantity = 1 } = await req.json()
-  const userId = req.headers.get('x-user-id')!
-  const openid = req.headers.get('x-openid')!
+  // 1. 结算必须登录:订单挂账号名下,Sellbase 按 email upsert customer
+  //    凭据两种都认 —— Bearer(小程序)优先,cookie(浏览器)兜底
+  const session = await getSessionFromRequest(req)
+  const user = session?.user
+  if (!user?.id) return Response.json({ error: 'AUTH_REQUIRED' }, { status: 401 })
 
-  // 1. 查商品
-  const product = await medusa.store.product.retrieve(productId)
-  const totalFen = product.variants[0].prices[0].amount * quantity
+  const parsed = checkoutSchema.safeParse(await req.json())   // { addressId, note }
+  if (!parsed.success) return Response.json({ error: 'INVALID_INPUT' }, { status: 400 })
 
-  // 2. 创建 Medusa 订单
-  const cart = await medusa.store.cart.create({
-    region_id: process.env.MEDUSA_REGION!,
-    items: [{ variant_id: product.variants[0].id, quantity }],
+  // 2. 地址**服务端查** —— 客户端只传 addressId,归属校验写死在 WHERE 里
+  const address = await getUserAddress(user.id, parsed.data.addressId)
+  if (!address) {
+    return Response.json({ error: 'ADDRESS_NOT_FOUND' }, { status: 404 })
+  }
+
+  // 3. 购物车从 cookie 拿,不接受客户端指定
+  const cartId = (await cookies()).get(CART_COOKIE_NAME)?.value   // wjp_cart_id
+  if (!cartId) return Response.json({ error: 'CART_NOT_FOUND' }, { status: 404 })
+
+  // 4. 价全部服务端重算 —— 客户端带来的任何金额都不看
+  const result = await checkout({
+    cartId,
+    userId: user.id,
+    email: user.email,                    // 一律取账号邮箱,不采信客户端
+    address: {
+      recipientName: address.recipientName,
+      phone: address.phone,
+      province: address.province,
+      city: address.city,
+      district: address.district,
+      detail: address.detail,
+    },
+    note: parsed.data.note ?? null,
   })
-  const order = await medusa.store.cart.complete(cart.id)
 
-  // 3. 微信支付下单(JSAPI)
-  const wxPayParams = await wechatPay.createJSAPI({
-    description: product.title,
-    out_trade_no: order.id,
-    total: totalFen,
-    openid,
-    notify_url: `${process.env.NEXT_PUBLIC_API}/api/webhooks/wechat-pay`,
-  })
-
-  // 4. 积分预授权(pending 态,等回调入账)
-  await creditLedger.authorize({
-    userId,
-    reference: order.id,
-    amount: totalFen,
-    type: 'payment_pending',
-  })
-
-  return Response.json({ orderId: order.id, payParams: wxPayParams })
+  return Response.json(result)
+  // → { orderNo, paymentUrl, subtotalCents, discountCents, shippingCents, totalCents, currency }
+  // paymentUrl 是 null = 订单已落库但支付链接没生成(用户可在订单页重取)
 }
 ```
 
-#### 2.2.2 NextDevTpl 新增 `app/api/webhooks/wechat-pay/route.ts`
+> ⚠️ **小程序必须走 Bearer**。`getSessionFromRequest` 的判断顺序是:
+> 带 `Authorization: Bearer <token>` 就用 Bearer 查会话,没带才退回 Better Auth
+> 的签名 cookie —— 小程序没有 cookie,所以**只带 cookie 会 401**。
+> 带 Bearer 但 token 无效 → 直接 401,**不**退回 cookie(不然「token 过期」
+> 就变成了「换个身份照样能过」)。
+
+**先落本地订单,再建 Sellbase 订单** —— 顺序不能反:本地订单是「订单事实」,Sellbase 订单是「收款载体」。Sellbase 挂了,订单还在,状态停在 `unpaid`,用户能重取支付链接。
+
+#### 2.2.2 本仓库 `app/api/webhooks/sellbase/route.ts`(收款事件入口)
 
 ```ts
-// app/api/webhooks/wechat-pay/route.ts
+// POST /api/webhooks/sellbase —— Sellbase 收款事件
 export async function POST(req: NextRequest) {
-  // 1. 验签
-  const body = await req.text()
-  if (!wechatPay.verifyNotify(body)) {
-    return new Response('FAIL', { status: 400 })
+  // 1. 原始 body —— 验签用的是字节,不能 req.json() 后重新序列化
+  const rawBody = await request.text()
+
+  // 2. 验签 —— 头形如 `t=<unix>,v1=<hex HMAC-SHA256("<t>.<raw body>")>`
+  const valid = verifySellbaseSignature(
+    rawBody,
+    request.headers.get(SELLBASE_SIGNATURE_HEADER),
+    getSellbaseWebhookSecret(),
+    Math.floor(Date.now() / 1000),
+  )
+  if (!valid) {
+    // 伪造的「已付款」事件是最坏的情况 —— 验签失败直接 401
+    return NextResponse.json({ success: false, error: 'INVALID_SIGNATURE' }, { status: 401 })
   }
 
-  const xml = parseXml(body)
-  const { out_trade_no, transaction_id, result_code } = xml
+  // 3. 解析 + 分发 —— 只认 4 个收款事件,其余回 200 忽略
+  //    (回 4xx 的话 Sellbase 会一直重投,把端点打成噪音源)
+  const payload = JSON.parse(rawBody) as SellbaseWebhookPayload
+  const action = classifySellbaseEvent(payload.type ?? '', payload)
+  const sellbaseOrderId = extractSellbaseOrderId(payload)
 
-  // 2. 幂等(同一 transaction_id 只处理一次)
-  const existing = await db.wechatPayWebhook.findUnique({
-    where: { transactionId: transaction_id },
-  })
-  if (existing) return new Response('SUCCESS')
+  // 4. 按 sellbase_order_id 反查本地订单(先查打印工单表,再查商城表)
+  //    幂等靠「已是目标状态就 no-op」,不另建去重表
+  const result = await applySellbasePaymentAction(action, sellbaseOrderId)
 
-  await db.wechatPayWebhook.create({
-    data: { transactionId: transaction_id, outTradeNo: out_trade_no },
-  })
-
-  // 3. 支付成功 → 发放积分
-  if (result_code === 'SUCCESS') {
-    const order = await db.order.findUnique({ where: { id: out_trade_no } })
-    await creditLedger.grant({
-      userId: order.customerId,
-      reference: transaction_id,
-      amount: order.metadata.creditAmount,
-      reason: 'wechat_pay',
-      idempotencyKey: transaction_id,
-    })
-  }
-
-  return new Response('SUCCESS')  // 微信只认这个字符串
+  return NextResponse.json({ success: true })
 }
 ```
+
+事件 → 本地动作的映射(`order.paid` / `payment.succeeded` / `order.cancelled` / `refund.created`)、验签细节、幂等策略,见
+[architecture-sellbase-integration.md](./architecture-sellbase-integration.md) §六。
 
 #### 2.2.3 小程序端 `miniprogram/src/api/payment.ts`
 
 ```ts
-import Taro from '@tarojs/taro'
 import { request } from './request'
 
-export async function payWithWechat(productId: string, quantity = 1) {
-  const { payParams } = await request.post('/api/pay/wechat/create', {
-    productId, quantity,
+export async function checkoutAndPay(addressId: string) {
+  // 1. 调本仓库结算 —— 价是服务端重算的,客户端不参与定价
+  const { orderNo, paymentUrl } = await request.post('/api/store/checkout', {
+    addressId,
   })
 
-  await Taro.requestPayment({
-    timeStamp: payParams.timeStamp,
-    nonceStr: payParams.nonceStr,
-    package: payParams.package,
-    signType: payParams.signType,
-    paySign: payParams.paySign,
-  })
+  // 2. 跳 Stripe 支付页(Sellbase 生成的那张链接)
+  //    付完回跳 /checkout/success?order=<orderNo>,页面轮询
+  //    GET /api/store/orders/<orderNo> 确认状态
+  //    小程序里怎么打开 paymentUrl 由客户端决定(web-view / 复制到浏览器)——
+  //    小程序 SDK 里没有内嵌支付组件
+  return { orderNo, paymentUrl }
 }
 ```
 
@@ -392,8 +423,14 @@ vercel env add WECHAT_API_KEY
 vercel env add WECHAT_APP_ID
 vercel env add WECHAT_APP_SECRET
 vercel env add MESHY_API_KEY
-vercel env add MEDUSA_API_KEY
+vercel env add SELLBASE_URL            # 收银台 API base
+vercel env add SELLBASE_API_TOKEN      # admin token(建单 / 换支付链接)
+vercel env add SELLBASE_WEBHOOK_SECRET # 验签收款事件用
 ```
+
+> 收款相关的全部环境变量(`SELLBASE_URL` / `SELLBASE_API_TOKEN` /
+> `SELLBASE_WEBHOOK_SECRET` / `SELLBASE_ANON_KEY` / `SELLBASE_CURRENCY` /
+> `SELLBASE_FX_RATE`)的说明写在 `src/features/sellbase/lib/env.ts` 的文件头。
 
 #### 2.3.2 小程序 `.env`
 
@@ -586,9 +623,11 @@ export async function POST(req: NextRequest) {
 
 ## 三、积分账本设计(核心)
 
-> **所有权**:**积分账本完全由 NextDevTpl 持有**,存在 NextDevTpl 自己的 Postgres 里。Medusa **不参与**任何积分概念 —— Medusa 既不知道积分存在,也不存积分余额。
+> **所有权**:**积分账本完全由 NextDevTpl 持有**,存在 NextDevTpl 自己的 Postgres 里。Sellbase **不参与**任何积分概念 —— Sellbase 既不知道积分存在,也不存积分余额。
 >
-> 跨系统对齐:**积分账户 1:1 绑定 NextDevTpl `users.id`**(账号主键),**不绑定** Medusa `customer_id`。即便用户尚未在 Medusa 创建 Customer(还没下过单),积分账户已经存在;积分先于订单。
+> 跨系统对齐:**积分账户 1:1 绑定 NextDevTpl `users.id`**(账号主键),**不绑定** Sellbase customer。即便用户还没下过单(Sellbase 那边还没有 Customer),积分账户已经存在;积分先于订单。
+>
+> 顺带一句:积分是**渲染 SaaS 的定价**,成品是**实物的定价**,两者完全脱钩 —— 付了钱买实物不会送积分,花了积分生图也不抵扣货款。
 
 ### 3.0 积分发放策略(NextDevTpl 独家负责)
 
@@ -614,7 +653,7 @@ export async function POST(req: NextRequest) {
 CREATE TABLE credit_accounts (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id         UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
-  -- ↑ 注意:这是 NextDevTpl users.id,不是 Medusa customer_id
+  -- ↑ 注意:这是 NextDevTpl users.id,不是 Sellbase customer
   daily_quota     INT NOT NULL DEFAULT 10,
   reset_at        TIMESTAMPTZ,                          -- 下次跨日重置时间
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -642,9 +681,9 @@ CREATE INDEX credit_tx_account_time
   ON credit_transactions(account_id, created_at DESC);
 ```
 
-**为什么 `user_id` 指向 NextDevTpl users 而不是 Medusa customers**:
-- 用户可以**只注册账号、只领积分、还没下过单**——此时 Medusa 还没有 Customer
-- 用户可以**下过单、有 Medusa Customer,但从没领过积分**——此时积分账户还没创建
+**为什么 `user_id` 指向 NextDevTpl users 而不是 Sellbase customers**:
+- 用户可以**只注册账号、只领积分、还没下过单**——此时 Sellbase 那边还没有 Customer
+- 用户可以**下过单、有 Sellbase Customer,但从没领过积分**——此时积分账户还没创建
 - 两者生命周期完全独立,**以积分账户的存在与否来推断积分可用性**
 
 ### 3.2 余额查询
@@ -825,7 +864,7 @@ interface CreditLedger {
 | **P0** 认证迁移 | NextDevTpl 加 `/api/auth/miniprogram`,中间件支持 Session + Token | 2 天 | 中 |
 | **P1** 积分 ledger 迁 Postgres | NextDevTpl 写 `credit_ledger.ts`,加幂等键 + dead-letter | 3 天 | 中 |
 | **P1** AI 生图迁 NextDevTpl | `bff/src/modules/meshy-creative/*` 翻译成 route handler + BullMQ | 2 天 | 低 |
-| **P2** 微信支付 | `/api/pay/wechat/*` + `/api/webhooks/wechat-pay`,小程序 `Taro.requestPayment` | 3 天 | 中 |
+| **P2** 收款接入 | Sellbase 收银台:`/api/store/checkout` 建单拿支付链接 + `/api/webhooks/sellbase` 回写收款状态,前端跳 Stripe | 3 天 | 中 |
 | **P2** 内容安全 | `/api/upload` 调微信 `img_sec_check` | 0.5 天 | 低 |
 | **P3** BFF 退役 | 标 deprecated → 切流量 → 3 个月后删 | - | 低 |
 
@@ -841,8 +880,11 @@ interface CreditLedger {
 app/
   api/
     auth/miniprogram/route.ts          # 小程序登录
-    pay/wechat/create/route.ts         # 微信支付下单
-    webhooks/wechat-pay/route.ts       # 微信支付回调
+    store/products/route.ts            # 商品目录
+    store/carts/route.ts               # 购物车(cookie wjp_cart_id)
+    store/pricing/calculate/route.ts   # 定价
+    store/checkout/route.ts            # 结算:重算 → 落本地订单 → 建 Sellbase 订单 → 返支付链接
+    webhooks/sellbase/route.ts         # Sellbase 收款事件入口(HMAC 验签)
     ai/generate-image/route.ts         # AI 异步创建
     ai/tasks/[taskId]/route.ts         # AI 任务轮询
     upload/route.ts                    # 文件上传(含内容安全)
@@ -859,6 +901,9 @@ prisma/migrations/
   001_credit_ledger.sql
 ```
 
+> 商城 / 收银台这一块的完整文件清单见
+> [architecture-sellbase-integration.md](./architecture-sellbase-integration.md) §十四。
+
 ### 5.2 小程序端改造
 
 | 文件 | 改动 |
@@ -866,7 +911,7 @@ prisma/migrations/
 | `.env` | `TARO_APP_API_BASE_URL=https://api.mooncoda.com` |
 | `src/api/request.ts` | baseURL 从 `.env` 读取 |
 | `src/api/authStore.ts` | loginWithWechat 调 `/api/auth/miniprogram` |
-| `src/api/payment.ts` | 新增 `payWithWechat` |
+| `src/api/payment.ts` | 新增 `checkoutAndPay`(调 `/api/store/checkout`,拿支付链接后跳 Stripe) |
 | `src/api/meshyCreative.ts` | URL 改 `/api/ai/generate-image`、`/api/ai/tasks/:id` |
 
 ### 5.3 BFF 退役(`mooncoda/bff/`)
@@ -911,12 +956,14 @@ prisma/migrations/
 - [ ] 失败时积分自动回滚
 - [ ] task 状态机:`pending → in_progress → succeeded / failed`
 
-### 6.5 微信支付
+### 6.5 收款(Sellbase + Stripe)
 
-- [ ] JSAPI 下单 → 小程序唤起支付 → 回调入账
-- [ ] 同一 transaction_id 回调多次,只入账一次
-- [ ] 支付失败/取消,积分预授权正确撤销
-- [ ] Medusa 订单状态与微信支付单号关联可查
+- [ ] 结算 → 服务端重算每一行 → 落本地订单 → 建 Sellbase 订单 → 拿到支付链接
+- [ ] 跳 Stripe 付完钱,Sellbase webhook 回写本地订单 `status = paid`
+- [ ] 同一支付事件重投多次,只入账一次(已是目标状态就 no-op)
+- [ ] 支付失败/取消,订单停在 `unpaid`,能在订单页重取支付链接
+- [ ] Sellbase 挂掉时订单照样落库(先落本地订单,再建 Sellbase 订单)
+- [ ] 本地订单的 `sellbase_order_id` 与 Sellbase 订单对得上
 
 ### 6.6 内容安全
 
@@ -935,7 +982,8 @@ prisma/migrations/
 | 风险 | 概率 | 影响 | 回滚 |
 |---|---|---|---|
 | Vercel 部署失败 | 低 | 高 | 暂用 BFF,问题修复后重试 |
-| 微信回调漏接 | 中 | 高 | 微信后台「补单」接口手动补发 |
+| Sellbase webhook 漏接 | 中 | 高 | 用户在订单页重取支付链接;Sellbase 后台可重投事件 |
+| Sellbase 整体不可用 | 低 | 高 | 订单先落本地库,状态停 `unpaid`,Sellbase 恢复后重取支付链接 |
 | 积分账本数据丢失 | 极低 | 极高 | 每日 Postgres 自动备份 + 异地 |
 | Token 泄漏 | 中 | 中 | BA session 7 天有效 + cookieCache 5 分钟窗口 + Bearer 128-bit 熵 |
 | Meshy API 限流 | 中 | 中 | 任务队列削峰 + 指数退避重试 |
@@ -944,9 +992,9 @@ prisma/migrations/
 
 ## 八、参考资料
 
-- [Medusa Credit Ledger(实验性)](https://docs.medusajs.com/resources/commerce-modules/credit-ledger)
+- [Sellbase 集成架构说明(本仓库 · 权威文档)](./architecture-sellbase-integration.md) —— 电商侧分工 / 金额口径 / webhook / 脚本
+- [Medusa 集成方案(已作废)](./architecture-medusa-integration.md) —— 结论已作废,别照着做
 - [微信小程序登录 code2Session](https://developers.weixin.qq.com/miniprogram/dev/api-backend/open-api/login/auth.code2Session.html)
-- [微信支付 JSAPI 文档](https://pay.weixin.qq.com/wiki/doc/api/jsapi.php)
 - [微信内容安全 img_sec_check](https://developers.weixin.qq.com/miniprogram/dev/api-backend/open-api/sec-check/sec.checkImg.html)
 - [Better Auth 文档](https://better-auth.com)
 - [Next.js Middleware](https://nextjs.org/docs/app/building-your-application/routing/middleware)
@@ -954,4 +1002,15 @@ prisma/migrations/
 
 ---
 
-**文档结束 · 版本 v1.0 · 2026-09-16**
+## 文档历史
+
+| 日期 | 变更 |
+|---|---|
+| 2026-09-16 | 初版(BFF 迁移 + 积分 ledger 方案) |
+| 2026-09-17 | 收敛身份定位:小程序是本仓库的客户端;电商后端当时定的是 Medusa |
+| 2026-11-04 | **电商后端改 Sellbase**:商品 / 定价 / 购物车 / 订单 / 地址全部收回本仓库,Sellbase 只做收银台(Stripe 支付链接 + 收款状态) |
+| 2026-11-04 | 商城路由接上 Bearer 鉴权(小程序链路打通);地址簿补 HTTP 路由 `/api/store/addresses/**` |
+
+---
+
+**文档结束 · 版本 v1.1 · 2026-11-04**

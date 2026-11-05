@@ -14,6 +14,7 @@ import {
   ListOrdered,
   type LucideIcon,
   Magnet,
+  MapPin,
   Package,
   Scale,
   ScrollText,
@@ -31,6 +32,13 @@ import {
  */
 export interface NavItem {
   title: string;
+  /**
+   * i18n key —— 给了就用 messages 里的文案,没给就用 title
+   *
+   * Footer 的链接标题历史上是写死的英文(zh 页面也显示英文)。中文站点的
+   * 打印须知这类文档必须有中文标题,靠 titleKey 补齐。
+   */
+  titleKey?: string;
   href: string;
   disabled?: boolean;
   external?: boolean;
@@ -172,6 +180,35 @@ export const footerNav = {
     { title: "Privacy Policy", href: "/legal/privacy" },
     { title: "Cookie Policy", href: "/legal/cookie-policy" },
   ] as NavItem[],
+
+  /**
+   * 打印服务 (Print Service) —— 2026-11-05 新增
+   *
+   * 打印工单(`/quote`)的须知 / 规范 / 售后。正文在 `src/content/legal/`
+   * 下的 MDX 里,标题走 titleKey 取 messages 的中文文案。
+   */
+  service: [
+    {
+      title: "Print Notice",
+      titleKey: "printNotice",
+      href: "/legal/print-notice",
+    },
+    {
+      title: "3D Model Design Specification",
+      titleKey: "designSpec",
+      href: "/legal/design-spec",
+    },
+    {
+      title: "After-Sales Policy",
+      titleKey: "afterSales",
+      href: "/legal/after-sales",
+    },
+    {
+      title: "Model Print Order Notice",
+      titleKey: "orderNotice",
+      href: "/legal/print-order-notice",
+    },
+  ] as NavItem[],
 };
 
 // ============================================
@@ -223,6 +260,20 @@ export const dashboardNav: NavGroup[] = [
         title: "My Print Orders",
         href: "/dashboard/print-orders",
         icon: Scale,
+      },
+      // 2026-11-04：成品商城的订单（storefront_order 表）—— 跟上面的打印工单
+      // 是两套独立数据。这一单走 Sellbase 收银台收款。
+      {
+        title: "My Orders",
+        href: "/dashboard/store-orders",
+        icon: ShoppingBag,
+      },
+      // 2026-11-04：收货地址簿。地址建在本仓库（Sellbase 的 customer.addresses
+      // 是只读的，没有创建地址的路由），下单时选一个、快照进订单。
+      {
+        title: "Addresses",
+        href: "/dashboard/addresses",
+        icon: MapPin,
       },
       {
         title: "Canvas",

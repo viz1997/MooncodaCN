@@ -2,7 +2,35 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { Link } from "@/i18n/routing";
-import { getAllLegalSlugs, getLegalDoc } from "@/lib/source";
+import {
+  getAllLegalSlugs,
+  getLegalDoc,
+  getLegalDocs,
+  getLegalSlug,
+} from "@/lib/source";
+
+/**
+ * MDX 里的站内链接
+ *
+ * MDX 里写 `/legal/design-spec` 是**不带语言前缀**的 —— 本仓库的
+ * localePrefix 是 always,直接丢给浏览器会 404。交给 next-intl 的 Link
+ * 补前缀(`/zh/legal/design-spec`)。站外链接(带协议)原样输出。
+ */
+function MdxLink({ href = "", children, ...props }: React.ComponentProps<"a">) {
+  // 协议头(http: / mailto: / tel:)和协议相对的 "//host" 都不做本地化
+  if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("//")) {
+    return (
+      <a href={href} {...props}>
+        {children}
+      </a>
+    );
+  }
+  return (
+    <Link href={href} {...props}>
+      {children}
+    </Link>
+  );
+}
 
 /**
  * 生成静态参数
@@ -57,6 +85,11 @@ export default async function LegalPage({
   // 获取 MDX 内容组件
   const MDXContent = doc.body;
 
+  // 同语言下的其他文档 —— 页脚列出,加文档时不用改这里
+  const siblings = getLegalDocs(locale).filter(
+    (item) => getLegalSlug(item) !== slug
+  );
+
   // 格式化日期
   const formattedDate =
     typeof doc.date === "string"
@@ -93,36 +126,24 @@ export default async function LegalPage({
 
       {/* 文档内容 - 使用 Tailwind Typography 样式 */}
       <div className="prose prose-neutral dark:prose-invert max-w-none prose-headings:font-semibold prose-h2:text-xl prose-h2:mt-8 prose-h3:text-lg prose-a:text-primary prose-a:no-underline hover:prose-a:underline prose-table:text-sm prose-th:bg-muted prose-th:p-2 prose-td:p-2 prose-td:border">
-        <MDXContent />
+        <MDXContent components={{ a: MdxLink }} />
       </div>
 
-      {/* 底部导航 */}
+      {/* 底部导航 —— 列出该语言下的全部文档 */}
       <footer className="mt-12 border-t pt-8">
-        <div className="flex flex-wrap gap-4 text-sm">
+        <div className="flex flex-wrap gap-x-4 gap-y-2 text-sm">
           <span className="text-muted-foreground">
-            {locale === "zh" ? "其他法律文档：" : "Other Legal Documents:"}
+            {locale === "zh" ? "其他文档：" : "Other documents:"}
           </span>
-          {slug !== "terms" && (
-            <Link href="/legal/terms" className="text-primary hover:underline">
-              {locale === "zh" ? "服务条款" : "Terms of Service"}
-            </Link>
-          )}
-          {slug !== "privacy" && (
+          {siblings.map((item) => (
             <Link
-              href="/legal/privacy"
+              key={item.info.path}
+              href={`/legal/${getLegalSlug(item)}`}
               className="text-primary hover:underline"
             >
-              {locale === "zh" ? "隐私政策" : "Privacy Policy"}
+              {item.title}
             </Link>
-          )}
-          {slug !== "cookie-policy" && (
-            <Link
-              href="/legal/cookie-policy"
-              className="text-primary hover:underline"
-            >
-              {locale === "zh" ? "Cookie 政策" : "Cookie Policy"}
-            </Link>
-          )}
+          ))}
         </div>
       </footer>
     </article>

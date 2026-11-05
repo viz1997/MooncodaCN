@@ -1,6 +1,6 @@
 /**
  * 根 `/` 专属 layout —— atelier 视觉 1:1 拼装 + commerce overlay 全部挂载
- * (mock Medusa 阶段,见 [[wjp-mock-medusa-storefront]])。
+ * (本仓库的 mock commerce 阶段,见 architecture-sellbase-integration.md)。
  *
  * 关键边界:
  *  - 此 layout 服务根 URL `/` + `/product/[handle]`(都隶属本 route group)

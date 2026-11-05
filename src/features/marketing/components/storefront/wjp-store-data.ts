@@ -5,7 +5,9 @@
  * 三个系列（钥匙扣 / 手办 / 冰箱贴）。数据 hardcoded 是因为：(1) 业务侧 monthly 上新品 (N 个),
  * 量小不值得上 DB; (2) 静态数据让 marketing 页 SSR 无需数据库连接。
  *
- * 关系：未来若需 Medusa product/market 接管，按 handle 在 Medusa 端建 Product 即可，本文件可删。
+ * 关系：商品目录的真理源在本仓库（见 architecture-sellbase-integration.md），Sellbase 只做
+ * 收银台、目录是同步过去的镜像，所以这个文件不会删 —— 真要接 Sellbase，走
+ * scripts/sync-sellbase-catalog.ts 按 product code 同步，跟这里的系列展示数据是两条线。
  */
 import type { PRODUCT_TYPES } from "@/features/gpt-image/lib/product-catalog";
 

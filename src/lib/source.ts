@@ -95,17 +95,25 @@ export function getLegalDocs(locale: string) {
 }
 
 /**
+ * 取文档的 slug —— 去掉语言前缀和 .mdx 后缀
+ *
+ * 路径形如 "zh/print-notice.mdx" → "print-notice"。
+ *
+ * 单独抽出来是因为「路由 slug」这个概念现在有三处要用(取文档、列全部
+ * slug、页脚列出同语言的其他文档),各写一遍正则迟早会走偏。
+ */
+export function getLegalSlug(doc: { info: { path: string } }): string {
+  const pathParts = doc.info.path.split("/");
+  const fileName = pathParts[pathParts.length - 1] ?? "";
+  return fileName.replace(/\.mdx$/, "");
+}
+
+/**
  * 获取指定 slug 的法律文档
  */
 export function getLegalDoc(slug: string, locale: string) {
   const docs = getLegalDocs(locale);
-  return docs.find((doc) => {
-    // 从文件路径中提取 slug (去掉语言前缀和 .mdx 后缀)
-    const pathParts = doc.info.path.split("/");
-    const fileName = pathParts[pathParts.length - 1] ?? "";
-    const docSlug = fileName.replace(/\.mdx$/, "");
-    return docSlug === slug;
-  });
+  return docs.find((doc) => getLegalSlug(doc) === slug);
 }
 
 /**
@@ -115,8 +123,6 @@ export function getAllLegalSlugs() {
   return legal.map((doc) => {
     const pathParts = doc.info.path.split("/");
     const locale = pathParts[0] ?? "en";
-    const fileName = pathParts[pathParts.length - 1] ?? "";
-    const slug = fileName.replace(/\.mdx$/, "");
-    return { locale, slug };
+    return { locale, slug: getLegalSlug(doc) };
   });
 }

@@ -264,8 +264,7 @@ export async function notifyPrintOrderStatusChanged(params: {
  * 用户自助取消 —— 用户一封 + 工作室一封
  *
  * 用户那封是「确认」性质的(不是工作室干的),工作室那封是「告警」性质的。
- */
-export async function notifyPrintOrderCancelledByUser(params: {
+ */ export async function notifyPrintOrderCancelledByUser(params: {
   order: PrintOrderMailInfo;
   /** 用户填的取消原因(选填) */
   note: string | null;
@@ -341,6 +340,61 @@ export async function notifyPrintOrderCancelledByUser(params: {
     logger.error(
       { err: error, orderNo: params.order.orderNo },
       "打印工单取消通知发送失败"
+    );
+  }
+}
+
+/**
+ * 收到付款 —— **只发工作室**
+ *
+ * 用户那边自己能看到支付状态(详情页轮询),不用再收一封「我们收到你的钱
+ * 了」的邮件 —— 他刚刚在 Stripe 上付完款,再收一封邮件只会觉得啰嗦。
+ *
+ * 工作室那封是刚需:「这单收款了,可以开工了」是工作室下一步动作的触发
+ * 信号。
+ */
+export async function notifyPrintOrderPaid(
+  order: PrintOrderMailInfo
+): Promise<void> {
+  try {
+    const studio = getStudioEmail();
+    if (!studio) return;
+
+    const ts = await getTranslations({
+      locale: "zh",
+      namespace: "PrintQuote",
+    });
+    await deliverPrintOrderMail({
+      to: studio,
+      locale: "zh",
+      subject: ts("email.studioPaid.subject", { orderNo: order.orderNo }),
+      preview: ts("email.studioPaid.preview", { orderNo: order.orderNo }),
+      heading: ts("email.studioPaid.heading"),
+      paragraphs: [
+        ts("email.studioPaid.body", {
+          name: order.contactName,
+          orderNo: order.orderNo,
+        }),
+        ts("email.studioPaid.body2"),
+      ],
+      facts: [
+        { label: ts("email.common.orderNo"), value: order.orderNo },
+        {
+          label: ts("email.common.total"),
+          value: formatAmount(order.totalPriceCents, "zh"),
+        },
+        { label: ts("email.common.customer"), value: order.contactName },
+      ],
+      statusLabel: ts("payment.status.paid"),
+      note: null,
+      noteLabel: null,
+      actionLabel: ts("email.common.action"),
+      actionUrl: `${siteConfig.url}/zh/admin/print-orders`,
+    });
+  } catch (error) {
+    logger.error(
+      { err: error, orderNo: order.orderNo },
+      "打印工单收款通知发送失败"
     );
   }
 }

@@ -5,8 +5,8 @@
  * 输入:base64 data URL + aiStyleId
  * 输出:R2 永久 URL
  *
- * 切真 Medusa 时:此 Route 不变(继续委托 lingting),或改为转发到
- * Medusa 端图像处理 service。
+ * 此 Route 跟 commerce 后端无关:继续委托 lingting/wellapi 就行 ——
+ * 图像处理是本仓库自己的事,Sellbase 只做收银台。
  *
  * 实现:
  *  0. 缺会话 → 401(2026-11-02:生图必须登录)

@@ -50,10 +50,13 @@ import {
 import {
   adminGetPrintOrderDetailAction,
   adminListPrintOrdersAction,
+  adminMarkPrintOrderPaidOfflineAction,
+  adminRevokePrintOrderOfflinePaymentAction,
   adminUpdatePrintOrderStatusAction,
 } from "@/features/print-quote/admin/actions";
 import type { AdminPrintOrder } from "@/features/print-quote/admin/types";
 import { OrderTimeline } from "@/features/print-quote/components/order-timeline";
+import type { DeliveryTierId } from "@/features/print-quote/lib/delivery-tier";
 import type { PrintOrderStats } from "@/features/print-quote/lib/order-store";
 import {
   PRINT_ORDER_STATUSES,
@@ -66,6 +69,7 @@ import {
   transitionRequiresNote,
 } from "@/features/print-quote/lib/status-machine";
 import {
+  PRINT_ORDER_PAYMENT_ADMIN_CHIP,
   PRINT_ORDER_STATUS_ADMIN_CHIP,
   PRINT_ORDER_STATUS_DOT,
 } from "@/features/print-quote/lib/status-ui";
@@ -77,7 +81,16 @@ const ADMIN_ERROR_CODES = new Set([
   "INVALID_TRANSITION",
   "NOTE_REQUIRED",
   "SAME_STATUS",
+  /** 没收款不许开工(2026-11-04) */
+  "PAYMENT_REQUIRED",
 ]);
+
+/** 交期档位 → 中文名(后台文案硬编码中文,跟这一屏其余部分一致) */
+const DELIVERY_TIER_LABEL: Record<DeliveryTierId, string> = {
+  standard: "标准",
+  express: "加急",
+  urgent: "特急",
+};
 
 export function PrintOrdersAdminView() {
   const { message } = App.useApp();
@@ -176,6 +189,59 @@ export function PrintOrdersAdminView() {
       },
       onError: ({ error }) => {
         setStatusError(error.serverError ?? "改状态失败");
+      },
+    }
+  );
+
+  /**
+   * 线下收款 —— 「标记已收款」
+   *
+   * 线上(Stripe)收的钱由 webhook 回写,工作室不用管。只有转账过来的
+   * 钱要手工标一下。
+   */
+  const { execute: markPaid, isPending: markingPaid } = useAction(
+    adminMarkPrintOrderPaidOfflineAction,
+    {
+      onSuccess: async ({ data }) => {
+        if (!data) return;
+        if (!data.ok) {
+          message.error(t("admin.payment.errors.ORDER_NOT_FOUND"));
+          return;
+        }
+        message.success(
+          data.alreadyPaid
+            ? t("admin.payment.alreadyPaid")
+            : t("admin.payment.marked")
+        );
+        void loadDetail(data.orderNo);
+        void reload();
+      },
+      onError: ({ error }) => {
+        message.error(error.serverError ?? t("admin.payment.errors.FAILED"));
+      },
+    }
+  );
+
+  /** 撤销线下收款 —— 防误点 */
+  const { execute: revokePayment, isPending: revokingPayment } = useAction(
+    adminRevokePrintOrderOfflinePaymentAction,
+    {
+      onSuccess: async ({ data }) => {
+        if (!data) return;
+        if (!data.ok) {
+          message.error(
+            data.code === "ONLINE_PAYMENT"
+              ? t("admin.payment.errors.ONLINE_PAYMENT")
+              : t("admin.payment.errors.ORDER_NOT_FOUND")
+          );
+          return;
+        }
+        message.success(t("admin.payment.revoked"));
+        void loadDetail(data.orderNo);
+        void reload();
+      },
+      onError: ({ error }) => {
+        message.error(error.serverError ?? t("admin.payment.errors.FAILED"));
       },
     }
   );
@@ -348,6 +414,7 @@ export function PrintOrdersAdminView() {
                   <th className="text-right font-medium px-3 py-2">克重</th>
                   <th className="text-left font-medium px-3 py-2">尺寸 (mm)</th>
                   <th className="text-right font-medium px-3 py-2">金额</th>
+                  <th className="text-left font-medium px-3 py-2">收款</th>
                   <th className="text-left font-medium px-3 py-2">状态</th>
                   <th className="text-right font-medium px-3 py-2">操作</th>
                 </tr>
@@ -385,6 +452,16 @@ export function PrintOrdersAdminView() {
                     </td>
                     <td className="px-3 py-2 text-right font-mono text-xs font-medium whitespace-nowrap">
                       {formatCurrency(o.totalPriceCents / 100)}
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px]",
+                          PRINT_ORDER_PAYMENT_ADMIN_CHIP[o.paymentStatus]
+                        )}
+                      >
+                        {t(`payment.status.${o.paymentStatus}`)}
+                      </span>
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">
                       <span
@@ -519,6 +596,75 @@ export function PrintOrdersAdminView() {
               ) : null}
             </div>
 
+            {/* 收款 —— 线上钱由 webhook 回写,这里只管线下转账 */}
+            <div className="rounded-lg border bg-muted/30 p-3">
+              <p className="text-xs text-muted-foreground mb-2">
+                {t("admin.payment.title")}
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px]",
+                    PRINT_ORDER_PAYMENT_ADMIN_CHIP[detail.paymentStatus]
+                  )}
+                >
+                  {t(`payment.status.${detail.paymentStatus}`)}
+                </span>
+                {detail.paymentChannel ? (
+                  <span className="text-[11px] text-muted-foreground">
+                    {detail.paymentChannel === "stripe"
+                      ? t("admin.payment.channel.stripe")
+                      : t("admin.payment.channel.offline")}
+                  </span>
+                ) : null}
+                {detail.paidAt ? (
+                  <span className="text-[11px] text-muted-foreground">
+                    {t("admin.payment.paidAt")}:{" "}
+                    {new Date(detail.paidAt).toLocaleString("zh-CN", {
+                      month: "2-digit",
+                      day: "2-digit",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                ) : null}
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                {detail.paymentStatus === "paid" ? (
+                  <>
+                    <span className="text-xs text-muted-foreground">
+                      {t("admin.payment.paidHint")}
+                    </span>
+                    {/* 只有线下收的钱能撤销 —— 线上钱已经进账了 */}
+                    {detail.paymentChannel === "offline" ? (
+                      <Button
+                        size="small"
+                        danger
+                        loading={revokingPayment}
+                        onClick={() => {
+                          void revokePayment({ orderNo: detail.orderNo });
+                        }}
+                      >
+                        {t("admin.payment.revoke")}
+                      </Button>
+                    ) : null}
+                  </>
+                ) : (
+                  <Button
+                    size="small"
+                    type="primary"
+                    loading={markingPaid}
+                    onClick={() => {
+                      void markPaid({ orderNo: detail.orderNo });
+                    }}
+                  >
+                    {t("admin.payment.markPaid")}
+                  </Button>
+                )}
+              </div>
+            </div>
+
             {/* 时间线 */}
             <div className="rounded-lg border p-3">
               <p className="mb-3 text-xs text-muted-foreground">
@@ -560,6 +706,17 @@ export function PrintOrdersAdminView() {
               <InfoRow
                 label="支撑加价"
                 value={formatCurrency(detail.supportFeeCents / 100)}
+              />
+              {/* 交期 —— 工作室按这个排产,加急单要插队 */}
+              <InfoRow
+                label="交期"
+                value={`${detail.deliveryHours} 小时 · ${
+                  DELIVERY_TIER_LABEL[detail.deliveryTier] ?? "标准"
+                }`}
+              />
+              <InfoRow
+                label="交期加价"
+                value={formatCurrency(detail.deliveryFeeCents / 100)}
               />
               <InfoRow
                 label="合计"

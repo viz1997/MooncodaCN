@@ -1,8 +1,8 @@
 "use client";
 
 /**
- * WJP 商店 Header —— 1:1 移植自 atelier `store-header.tsx` + 接通 mock Medusa
- * commerce(matching [[wjp-mock-medusa-storefront]])。
+ * WJP 商店 Header —— 1:1 移植自 atelier `store-header.tsx` + 接通本仓库的
+ * mock commerce(见 architecture-sellbase-integration.md)。
  *
  * 视觉保留(atelier 1:1):
  *  - sticky 顶部 + 滚动后 backdrop-blur
@@ -15,8 +15,20 @@
  *  - Cart 按钮 + count badge:从 `use-cart.itemCount` 取数 + `useCartUi.openCart` 打开抽屉
  *  - Search dropdown:用 `use-products` 拉所有 mock 商品,输入过滤 title / tags,
  *    点结果项 → `useStorefrontModal.setQuickView(product)` 弹 ProductQuickView
- *  - 删除 User icon,改为「登录」按钮
  *  - 用 mounted flag 延迟读 use-cart.itemCount(防 SSR/hydration flash)
+ *
+ * ── 2026-11-05 账号状态 ──────────────────────────────────────────────
+ * 之前这里**无条件**渲染「登录」按钮 —— 登录之后回来看,还是「登录」,
+ * 用户完全看不出自己已经登录了(而且手机上压根没有登录入口)。
+ *
+ * 现在按 `useSession()` 分三态:
+ *  - pending → 灰色占位(SSR 和客户端首帧一致,不闪)
+ *  - 已登录 → 头像 + 下拉(邮箱 / 我的订单 / 控制台 / 退出登录)
+ *  - 未登录 → 「登录」+ 移动端菜单里的「登录 / 注册」
+ *
+ * 头像用 `useSession()` 而不是服务端 cookie 读的 —— 服务端读到的会话在
+ * 客户端首帧还不一定一致,那样会 hydration mismatch。`useSession()` 首次
+ * 挂载时 `isPending` 为 true,SSR 也是 true,两端渲染同一个占位。
  *
  * 导航 IA(2026-10-31 精简到 4 项):作品 / 流程 / 工艺 / 定制。
  * 标签按 next-intl 的 useLocale() 取 zh / en —— 之前全文件硬编码中文。
@@ -41,11 +53,28 @@
  */
 
 import { AnimatePresence, motion } from "framer-motion";
-import { Loader2, Menu, Search, ShoppingBag } from "lucide-react";
+import {
+  LayoutDashboard,
+  Loader2,
+  LogOut,
+  Menu,
+  Package,
+  Search,
+  ShoppingBag,
+} from "lucide-react";
 import { useLocale } from "next-intl";
 import * as React from "react";
 
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
   Sheet,
@@ -58,7 +87,8 @@ import { formatPriceCNY } from "@/features/marketing/components/storefront/wjp-s
 import { useCart, useCartUi } from "@/features/storefront/hooks/use-cart";
 import { useProducts } from "@/features/storefront/hooks/use-products";
 import { useStorefrontModal } from "@/features/storefront/hooks/use-storefront-modal";
-import { Link, usePathname } from "@/i18n/routing";
+import { Link, usePathname, useRouter } from "@/i18n/routing";
+import { signOut, useSession } from "@/lib/auth/client";
 
 import { STORE_NAV } from "./occasion-data";
 
@@ -70,6 +100,26 @@ import { STORE_NAV } from "./occasion-data";
  */
 function navLabel(item: { label: string; labelEn: string }, isZh: boolean) {
   return isZh ? item.label : item.labelEn;
+}
+
+/**
+ * 头像里的缩写
+ *
+ * `name` 优先(取前两个词的首字母);没有名字就退到邮箱的首字母 ——
+ * 手机号注册的用户 `name` 可能是空的,那会儿只剩邮箱能认人。
+ */
+function getInitials(name?: string | null, email?: string | null): string {
+  const raw = (name ?? "").trim();
+  if (raw) {
+    return raw
+      .split(/\s+/)
+      .map((n) => n[0] ?? "")
+      .join("")
+      .toUpperCase()
+      .slice(0, 2);
+  }
+  const mail = (email ?? "").trim();
+  return mail ? (mail[0] ?? "").toUpperCase() : "·";
 }
 
 export function WjpStoreHeader() {
@@ -86,6 +136,21 @@ export function WjpStoreHeader() {
   const { itemCount } = useCart();
   const openCart = useCartUi((s) => s.openCart);
   const setQuickView = useStorefrontModal((s) => s.setQuickView);
+
+  // 账号 —— 登录后要在页面上看得见(2026-11-05)
+  const router = useRouter();
+  const { data: session, isPending: sessionPending } = useSession();
+  const user = session?.user;
+
+  const handleSignOut = async () => {
+    await signOut({
+      fetchOptions: {
+        onSuccess: () => {
+          router.push("/");
+        },
+      },
+    });
+  };
   // 「定制」导航项 —— 开品类选择层(CustomizeEntry → CustomWorkshop),
   // 不再跳 /image-gen(那是登录后的 SaaS 工作台,访客点会撞登录墙)
   const openCustomizePicker = useStorefrontModal((s) => s.openCustomizePicker);
@@ -181,13 +246,16 @@ export function WjpStoreHeader() {
                   <Menu className="size-5" />
                 </Button>
               </SheetTrigger>
-              <SheetContent side="left" className="w-[320px] sm:w-[380px] p-0">
+              <SheetContent
+                side="left"
+                className="w-[320px] sm:w-[380px] p-0 flex flex-col"
+              >
                 <SheetHeader className="px-6 pt-6 pb-4 border-b">
                   <SheetTitle className="text-xl font-semibold tracking-tight">
                     Mooncoda 梦可达
                   </SheetTitle>
                 </SheetHeader>
-                <nav className="flex flex-col px-2 py-4">
+                <nav className="flex-1 overflow-y-auto flex flex-col px-2 py-4">
                   {STORE_NAV.map((link) =>
                     link.kind === "customize" ? (
                       // 「定制」是动作不是链接 —— 开品类选择层,不跳页(见 occasion-data.ts)
@@ -214,6 +282,64 @@ export function WjpStoreHeader() {
                     )
                   )}
                 </nav>
+
+                {/* 账号 —— 手机上原本没有登录入口(桌面端那个「登录」按钮是
+                    `hidden sm:inline-flex`),这里补上 */}
+                <div className="border-t px-2 py-3">
+                  {sessionPending ? (
+                    <div className="h-9 animate-pulse rounded-md bg-muted" />
+                  ) : user ? (
+                    <div className="flex flex-col">
+                      <p className="px-4 pb-2 text-xs text-muted-foreground truncate">
+                        {user.name || user.email}
+                      </p>
+                      <Link
+                        href="/dashboard/store-orders"
+                        onClick={() => setMobileOpen(false)}
+                        className="flex items-center gap-2.5 px-4 py-3 text-sm font-medium hover:bg-muted transition-colors rounded-md"
+                      >
+                        <Package className="size-4" />
+                        {isZh ? "我的订单" : "My orders"}
+                      </Link>
+                      <Link
+                        href="/dashboard"
+                        onClick={() => setMobileOpen(false)}
+                        className="flex items-center gap-2.5 px-4 py-3 text-sm font-medium hover:bg-muted transition-colors rounded-md"
+                      >
+                        <LayoutDashboard className="size-4" />
+                        {isZh ? "控制台" : "Dashboard"}
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMobileOpen(false);
+                          void handleSignOut();
+                        }}
+                        className="flex items-center gap-2.5 px-4 py-3 text-sm font-medium text-left hover:bg-muted transition-colors rounded-md"
+                      >
+                        <LogOut className="size-4" />
+                        {isZh ? "退出登录" : "Sign out"}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col">
+                      <Link
+                        href={signInHref}
+                        onClick={() => setMobileOpen(false)}
+                        className="px-4 py-3 text-sm font-medium hover:bg-muted transition-colors rounded-md"
+                      >
+                        {isZh ? "登录" : "Sign in"}
+                      </Link>
+                      <Link
+                        href="/sign-up"
+                        onClick={() => setMobileOpen(false)}
+                        className="px-4 py-3 text-sm font-medium hover:bg-muted transition-colors rounded-md"
+                      >
+                        {isZh ? "注册" : "Sign up"}
+                      </Link>
+                    </div>
+                  )}
+                </div>
               </SheetContent>
             </Sheet>
 
@@ -343,15 +469,70 @@ export function WjpStoreHeader() {
               <Search className="size-5" />
             </Button>
 
-            {/* 登录 */}
-            <Button
-              asChild
-              variant="ghost"
-              size="sm"
-              className="hidden sm:inline-flex h-9 px-3 text-sm font-medium"
-            >
-              <Link href={signInHref}>{isZh ? "登录" : "Sign in"}</Link>
-            </Button>
+            {/* 账号 —— 未登录显示「登录」,已登录显示头像 + 邮箱 */}
+            {sessionPending ? (
+              <div
+                className="hidden size-9 animate-pulse rounded-full bg-muted sm:block"
+                aria-hidden
+              />
+            ) : user ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label={isZh ? "我的账户" : "My account"}
+                    className="hidden rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring sm:inline-flex"
+                  >
+                    <Avatar className="size-8">
+                      <AvatarImage
+                        src={user.image || undefined}
+                        alt={user.name || user.email}
+                      />
+                      <AvatarFallback className="bg-primary text-[10px] text-primary-foreground">
+                        {getInitials(user.name, user.email)}
+                      </AvatarFallback>
+                    </Avatar>
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel className="font-normal">
+                    <span className="block text-xs text-muted-foreground">
+                      {isZh ? "已登录" : "Signed in"}
+                    </span>
+                    <span className="block truncate text-sm font-medium">
+                      {user.name || user.email}
+                    </span>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild>
+                    <Link href="/dashboard/store-orders">
+                      <Package className="size-4" />
+                      {isZh ? "我的订单" : "My orders"}
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/dashboard">
+                      <LayoutDashboard className="size-4" />
+                      {isZh ? "控制台" : "Dashboard"}
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={handleSignOut}>
+                    <LogOut className="size-4" />
+                    {isZh ? "退出登录" : "Sign out"}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <Button
+                asChild
+                variant="ghost"
+                size="sm"
+                className="hidden sm:inline-flex h-9 px-3 text-sm font-medium"
+              >
+                <Link href={signInHref}>{isZh ? "登录" : "Sign in"}</Link>
+              </Button>
+            )}
 
             {/* Cart */}
             <Button

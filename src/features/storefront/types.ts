@@ -1,23 +1,26 @@
 /**
- * Mock Medusa Storefront 类型
+ * Mock Storefront 类型
  *
- * 形状严格对齐 Medusa Store API(products / carts / line-items)+ atelier
- * `CustomizationSpec` / `PricingResult`,切真 Medusa 时只改 Route Handlers
+ * 形状对齐 atelier 的 store 契约(products / carts / line-items)+ atelier
+ * `CustomizationSpec` / `PricingResult`,是**简化版**、不是完整 schema。
+ *
+ * 商品目录 / 定价 / 购物车都在本仓库(见 architecture-sellbase-integration.md:
+ * 本仓库算价,Sellbase 只做收银台),所以改数据来源时只改 Route Handlers
  * 实现,client 端 use-cart / use-products / use-quick-view 一行不改。
  *
  * 参考:
- *  - https://docs.medusajs.com/api/store (products, carts, line-items)
+ *  - atelier 的 store 契约(products / carts / line-items 的字段形状)
  *  - D:\下载\atelier-source\src\lib\store\types.ts (Product / CartItem / CustomOption)
  *  - D:\下载\atelier-source\src\lib\store\customization-spec.ts (CustomizationSpec / PricingResult)
- *  - [[mooncada-medusa-integration]] Medusa 集成架构
+ *  - architecture-sellbase-integration.md 集成架构(数据归属边界见 §二)
  */
 
 /* -------------------------------------------------------------------------- */
-/*  Product / Variant(对齐 Medusa Store Product schema)                       */
+/*  Product / Variant(对齐 atelier store 的 Product 契约)                     */
 /* -------------------------------------------------------------------------- */
 
 /**
- * Medusa ProductType.value 形式:"R" / "A" / "P" / "RM" / "LB" / "M"
+ * 商品型号 code 形式:"R" / "A" / "P" / "RM" / "LB" / "M"
  * 来自 src/features/gpt-image/lib/product-catalog.ts 的 PRODUCT_TYPES 字典
  */
 export type ProductTypeCode = "R" | "A" | "P" | "RM" | "LB" | "M";
@@ -101,7 +104,7 @@ export interface AiStyle {
 }
 
 /**
- * Mock Product(对齐 Medusa Product 简化版)
+ * Mock Product(对齐 atelier store 的 Product 契约,简化版)
  * 一个 product 对应 atelier 的一个"作品"(4 keychain + 4 figure + 4 magnet)
  */
 export interface StorefrontProduct {
@@ -173,7 +176,7 @@ export interface StorefrontProduct {
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Cart / CartLineItem(对齐 Medusa Store Cart schema)                        */
+/*  Cart / CartLineItem(对齐 atelier store 的 Cart 契约)                      */
 /* -------------------------------------------------------------------------- */
 
 /**
@@ -207,8 +210,15 @@ export interface CartLineItem {
   productHandle: string;
   productTitle: string;
   productThumbnail: string;
-  /** 单位价(分) */
+  /** 单位价(分)—— **折扣前** */
   unitPriceCents: number;
+  /**
+   * 折后单价(分)—— 阶梯折扣后的单价
+   *
+   * 这才是真正要收的数:Sellbase 的行合计 = `unit_price_amount × quantity`,
+   * 所以「先折单价再乘数量」才能跟 Sellbase 逐分相等(见 `pricing.ts`)。
+   */
+  discountedUnitPriceCents: number;
   quantity: number;
   /** customize 元数据,固化到 line item */
   metadata: CartLineItemMetadata;
@@ -253,8 +263,15 @@ export interface CustomizationSpec {
 }
 
 export interface PricingResult {
-  /** 单价(分) */
+  /** 单价(分)—— **折扣前** */
   unitPriceCents: number;
+  /**
+   * 折后单价(分)—— 阶梯折扣后的单价
+   *
+   * `totalPriceCents = discountedUnitPriceCents × quantity`。Sellbase 的
+   * `items[].unit_price_amount` 填的就是这个数。
+   */
+  discountedUnitPriceCents: number;
   /** 总价(分) */
   totalPriceCents: number;
   /** 拆分明细 */

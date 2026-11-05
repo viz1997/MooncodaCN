@@ -118,8 +118,10 @@ export function usePrintOrderPolling(
 
   /** 写入 state(指纹没变就不动) */
   const applyOrders = useCallback((next: UserPrintOrder[]) => {
+    // 指纹里必须带 `paymentStatus` —— 付款只改收款状态,工单状态不动。
+    // 少了它,用户付完钱回到页面,列表还是显示「未付款」。
     const fingerprint = next
-      .map((o) => `${o.orderNo}:${o.status}:${o.updatedAt}`)
+      .map((o) => `${o.orderNo}:${o.status}:${o.paymentStatus}:${o.updatedAt}`)
       .join("|");
     if (fingerprint === fingerprintRef.current) return;
     fingerprintRef.current = fingerprint;
@@ -348,7 +350,7 @@ export function usePrintOrderDetailPolling(
       const nextEvents = body.events ?? [];
       if (!nextOrder) return;
 
-      const fingerprint = `${nextOrder.orderNo}:${nextOrder.status}:${nextOrder.updatedAt}:${nextEvents.length}:${nextEvents.map((e) => e.id).join(",")}`;
+      const fingerprint = `${nextOrder.orderNo}:${nextOrder.status}:${nextOrder.paymentStatus}:${nextOrder.updatedAt}:${nextEvents.length}:${nextEvents.map((e) => e.id).join(",")}`;
       if (fingerprint === fingerprintRef.current) return;
       fingerprintRef.current = fingerprint;
 
@@ -402,7 +404,7 @@ export function usePrintOrderDetailPolling(
   // 都触发 —— 那会把轮询拉回来的新数据又覆盖回旧快照。
   const appliedInitialRef = useRef<string>("");
   useEffect(() => {
-    const fingerprint = `${initial.order.orderNo}:${initial.order.status}:${initial.order.updatedAt}:${initial.events.length}:${initial.events.map((e) => e.id).join(",")}`;
+    const fingerprint = `${initial.order.orderNo}:${initial.order.status}:${initial.order.paymentStatus}:${initial.order.updatedAt}:${initial.events.length}:${initial.events.map((e) => e.id).join(",")}`;
     if (fingerprint === appliedInitialRef.current) return;
     appliedInitialRef.current = fingerprint;
     setOrder(initial.order);

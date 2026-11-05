@@ -1,8 +1,22 @@
 /**
- * Mock 商品定价逻辑(对齐 atelier src/lib/store/pricing.config.ts)
+ * 商品定价逻辑(对齐 atelier src/lib/store/pricing.config.ts)
  *
- * 切真 Medusa 时:此文件作废,/api/store/pricing/calculate 转发到 Medusa
- * pricing API。
+ * ## 定价永远是本仓库的事
+ *
+ * Sellbase 只做收银台(见 `architecture-sellbase-integration.md`):它那边
+ * 的目录价只是给工作室看的参考值,真正收多少是本仓库算出来的
+ * `unit_price_amount`。
+ *
+ * ## 阶梯折扣口径:先折单价,再乘数量
+ *
+ * ```
+ * discountedUnitPrice = round(unitPrice * (1 - rate))
+ * total               = discountedUnitPrice * quantity
+ * ```
+ *
+ * 为什么不按「先乘数量再折总价」:那会跟 Sellbase 的行合计
+ * (`unit_price_amount × quantity`)差最多 ⌊qty/2⌋ 分 —— 结算页显示的价跟
+ * 实际收的价不是同一个数。先折单价再乘数量,两边**逐分相等**。
  */
 
 import type { CustomizationSpec, PricingResult } from "../types";
@@ -13,38 +27,69 @@ import {
   findProductById,
   findSize,
 } from "./mock-catalog";
+import {
+  calculateRemainingForFreeShipping,
+  calculateShippingCents,
+  getQuantityTier,
+  PRICING_CONSTANTS,
+  QUANTITY_TIERS,
+} from "./pricing-constants";
 
 /* -------------------------------------------------------------------------- */
-/*  全局定价常量                                                             */
+/*  常量 re-export(老 import 路径继续能用)                                    */
 /* -------------------------------------------------------------------------- */
 
-export const PRICING_CONSTANTS = {
-  /** 刻字费用(分),即 ¥3 */
-  ENGRAVING_FEE_CENTS: 300,
-  /** 刻字最大长度 */
-  MAX_ENGRAVING_LENGTH: 30,
-  /** 单 line item 最大数量 */
-  MAX_QUANTITY: 100,
-  /** 加急订单加价(分),¥15 */
-  RUSH_ORDER_FEE_CENTS: 1500,
-  /** 免运费门槛(分),¥99 */
-  FREE_SHIPPING_THRESHOLD_CENTS: 9900,
-  /** 默认运费(分),¥8 */
-  DEFAULT_SHIPPING_CENTS: 800,
-  /** 货币代码 */
-  CURRENCY_CODE: "CNY",
-  /** 区域 */
-  REGION_ID: "china",
-} as const;
+export {
+  calculateRemainingForFreeShipping,
+  calculateShippingCents,
+  getQuantityTier,
+  PRICING_CONSTANTS,
+  QUANTITY_TIERS,
+};
+export type { QuantityTier } from "./pricing-constants";
+
+/* -------------------------------------------------------------------------- */
+/*  数量阶梯折扣                                                              */
+/* -------------------------------------------------------------------------- */
+
+/** 数量阶梯折扣的结果 */
+export interface QuantityDiscount {
+  /** 折后单价(分)—— Sellbase 的 `unit_price_amount` 填的就是这个 */
+  discountedUnitPriceCents: number;
+  /** 行合计(分)—— `discountedUnitPriceCents × quantity` */
+  totalPriceCents: number;
+  /** 折扣额(分)—— 折前合计 − 折后合计 */
+  discountCents: number;
+}
 
 /**
- * 数量阶梯折扣(对齐 atelier `quantityTiers`)
+ * 数量阶梯折扣 —— **先折单价,再乘数量**
+ *
+ * ```
+ * discountedUnitPrice = round(unitPrice × (1 - rate))
+ * total               = discountedUnitPrice × quantity
+ * discount            = unitPrice × quantity - total
+ * ```
+ *
+ * 单独拆出来是为了能**直接**测「行合计 = 折后单价 × 数量」这条恒等式:目录里
+ * 现有的价都是 100 的倍数,两种口径碰巧相等,光靠目录数据测不出「顺序反了
+ * 会差几分」。这个函数接受任意单价,拿个奇数就能测出来。
  */
-export const QUANTITY_TIERS = [
-  { minQty: 50, discountRate: 0.2 },
-  { minQty: 10, discountRate: 0.1 },
-  { minQty: 1, discountRate: 0 },
-] as const;
+export function computeQuantityDiscount(
+  unitPriceCents: number,
+  quantity: number
+): QuantityDiscount {
+  const tier = getQuantityTier(quantity);
+  const discountedUnitPriceCents = Math.round(
+    unitPriceCents * (1 - tier.discountRate)
+  );
+  const totalPriceCents = discountedUnitPriceCents * quantity;
+  return {
+    discountedUnitPriceCents,
+    totalPriceCents,
+    discountCents: unitPriceCents * quantity - totalPriceCents,
+  };
+}
 
 /* -------------------------------------------------------------------------- */
 /*  定价计算                                                                 */
@@ -54,7 +99,7 @@ export const QUANTITY_TIERS = [
  * 计算 custom line item 价格
  *
  * unit = base + material + size + aiStyle + accessory + engraving + rush
- * total = unit * quantity * (1 - quantityTierDiscount)
+ * total = round(unit * (1 - tierRate)) * quantity
  */
 export function calculatePricing(spec: CustomizationSpec): PricingResult {
   // 校验 quantity
@@ -159,16 +204,10 @@ export function calculatePricing(spec: CustomizationSpec): PricingResult {
     engravingFeeCents +
     rushOrderCents;
 
-  // 数量阶梯折扣
-  const tier =
-    QUANTITY_TIERS.find((t) => spec.quantity >= t.minQty) ??
-    QUANTITY_TIERS[QUANTITY_TIERS.length - 1]!;
-  const subtotalCents = unitPriceCents * spec.quantity;
-  const quantityTierDiscountCents = Math.round(
-    subtotalCents * tier.discountRate
-  );
-
-  const totalPriceCents = subtotalCents - quantityTierDiscountCents;
+  // 数量阶梯折扣 —— 先折单价,再乘数量(见文件头)
+  const { discountedUnitPriceCents, totalPriceCents, discountCents } =
+    computeQuantityDiscount(unitPriceCents, spec.quantity);
+  const quantityTierDiscountCents = discountCents;
 
   // 估算发货天数(quantity 越大越久)
   const baseShipDays = product.leadTimeDays;
@@ -177,6 +216,7 @@ export function calculatePricing(spec: CustomizationSpec): PricingResult {
 
   return {
     unitPriceCents,
+    discountedUnitPriceCents,
     totalPriceCents,
     breakdown: {
       baseCents,
@@ -194,7 +234,10 @@ export function calculatePricing(spec: CustomizationSpec): PricingResult {
 }
 
 /**
- * 计算小计(用于 cart drawer 显示)
+ * 按**折前**单价算小计
+ *
+ * 注意:这是折扣**前**的合计。真正要收的钱是
+ * `discountedUnitPriceCents × quantity` 的和(见 `calculatePricing`)。
  */
 export function calculateSubtotalCents(
   items: Array<{ unitPriceCents: number; quantity: number }>
@@ -202,26 +245,5 @@ export function calculateSubtotalCents(
   return items.reduce(
     (sum, item) => sum + item.unitPriceCents * item.quantity,
     0
-  );
-}
-
-/**
- * 计算运费(到达免运费门槛则 0)
- */
-export function calculateShippingCents(subtotalCents: number): number {
-  return subtotalCents >= PRICING_CONSTANTS.FREE_SHIPPING_THRESHOLD_CENTS
-    ? 0
-    : PRICING_CONSTANTS.DEFAULT_SHIPPING_CENTS;
-}
-
-/**
- * 距离免运费还差多少(用于 cart drawer 进度条)
- */
-export function calculateRemainingForFreeShipping(
-  subtotalCents: number
-): number {
-  return Math.max(
-    0,
-    PRICING_CONSTANTS.FREE_SHIPPING_THRESHOLD_CENTS - subtotalCents
   );
 }

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { getTranslations } from "next-intl/server";
 import { ModelChecker } from "@/features/tools/components/model-check/model-checker";
+import { Link } from "@/i18n/routing";
 
 /**
  * 模型检查 —— `/tools/model-check`
@@ -75,6 +76,16 @@ export default async function ModelCheckPage() {
         </h1>
         <p className="mt-4 text-base text-foreground/65 leading-relaxed text-pretty">
           {t("page.description")}
+        </p>
+        {/* 几何过了不代表能打印 —— 壁厚 / 公差 / 悬臂 / 孔槽另有硬指标 */}
+        <p className="mt-4 text-sm leading-relaxed text-foreground/55">
+          {t("page.designSpecLink")}{" "}
+          <Link
+            href="/legal/design-spec"
+            className="text-[var(--accent)] underline underline-offset-4 hover:no-underline"
+          >
+            {t("page.designSpecCta")}
+          </Link>
         </p>
       </header>
       <ModelChecker />

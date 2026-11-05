@@ -43,6 +43,7 @@ import {
   listUserPrintOrders,
   toUserPrintOrder,
 } from "@/features/print-quote/lib/order-store";
+import { createPrintOrderPayment } from "@/features/print-quote/lib/payment";
 import {
   computePrintQuote,
   generatePrintOrderNo,
@@ -77,6 +78,13 @@ const orderSchema = z.object({
       }),
     supportWeightG: z.number().min(0).max(1_000_000).nullish(),
     selfSupportRatio: z.number().min(0).max(1_000_000).nullish(),
+    /**
+     * 交期档位(48 / 72 / 96 小时)—— 加价按小计比例收
+     *
+     * 服务端会按这个档位**重算**加价,客户端传来的金额一律不信(跟总价
+     * 一样)。不传 = 标准档(不额外收费)。
+     */
+    deliveryTier: z.enum(["standard", "express", "urgent"]).nullish(),
   }),
   modelFileName: z.string().min(1).max(255),
   objectKey: z.string().min(1).max(512),
@@ -184,6 +192,7 @@ async function handle(request: NextRequest) {
       dims: parsed.data.quote.dims,
       supportWeightG: parsed.data.quote.supportWeightG ?? null,
       selfSupportRatio: parsed.data.quote.selfSupportRatio ?? null,
+      deliveryTier: parsed.data.quote.deliveryTier ?? null,
     },
     modelFileName: parsed.data.modelFileName,
     objectKey: parsed.data.objectKey,
@@ -284,6 +293,13 @@ async function handle(request: NextRequest) {
     });
   });
 
+  // 2026-11-04:建 Sellbase 订单拿支付链接。
+  //
+  // **这一步失败不影响下单** —— 工单已经在本地建好了,`payment_status` 停在
+  // unpaid,用户可以在详情页点「重新获取支付链接」,或者工作室走线下收款。
+  // 收款通道没配好就把下单接口打挂,是把一个配置问题变成一条断掉的业务链。
+  const payment = await createPrintOrderPayment(row);
+
   return NextResponse.json(
     {
       orderNo,
@@ -291,6 +307,10 @@ async function handle(request: NextRequest) {
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
       locale: row.locale,
+      /** Stripe 支付链接 —— null 表示线上收款没配好,走线下 */
+      paymentUrl: payment?.paymentUrl ?? null,
+      /** 支付状态 */
+      paymentStatus: "unpaid",
     },
     { status: 201, headers: getRateLimitHeaders(rl) }
   );

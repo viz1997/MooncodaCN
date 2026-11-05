@@ -1,29 +1,20 @@
 /**
  * POST /api/store/carts —— 创建或取当前 cart(自动 cookie 关联)
  *
- * 对齐 Medusa Store API `POST /store/carts`。
- * 切真 Medusa 时:转发到 Medusa,cookie 关联由 Medusa 处理。
+ * cookie `wjp_cart_id` 关联购物车。游客也能有 cart(不用登录)。
  */
 
 import { NextResponse } from "next/server";
-import {
-  getCartId,
-  getOrCreateCart,
-  setCartId,
-} from "@/features/storefront/lib/cart-store";
+import { getOrCreateCart } from "@/features/storefront/lib/cart-store";
 import { withApiLogging } from "@/lib/api-logger";
 
 export const runtime = "nodejs";
+/** 一次 DB 查询(找 cart + 取行 + 重算价) */
+export const maxDuration = 15;
 
 async function handle() {
-  // 优先返回 cookie 关联的 cart(Medusa V1 模式:游客也能有 cart)
+  // cookie 关联的 cart;没有就新建一张(cookie 由 getOrCreateCart 写)
   const cart = await getOrCreateCart();
-
-  // 把 cart_id 写到 cookie(若还没写过)
-  const existingId = await getCartId();
-  if (!existingId) {
-    await setCartId(cart.id);
-  }
 
   return NextResponse.json({ cart }, { status: 201 });
 }

@@ -20,7 +20,7 @@
  * 内 —— 这里全是**字面量** class 字符串,不是拼接的,扫得到。
  */
 
-import type { PrintOrderStatus } from "./quote-types";
+import type { PrintOrderPaymentStatus, PrintOrderStatus } from "./quote-types";
 
 /**
  * 用户侧 chip(浅底彩,给 stone 色板的页面用)
@@ -55,4 +55,30 @@ export const PRINT_ORDER_STATUS_ADMIN_CHIP: Record<PrintOrderStatus, string> = {
   SHIPPED: "border-emerald-500/30 text-emerald-700 dark:text-emerald-300",
   COMPLETED: "border-emerald-600/30 text-emerald-700 dark:text-emerald-300",
   CANCELLED: "border-zinc-500/30 text-zinc-600 dark:text-zinc-300",
+};
+
+/**
+ * 收款状态 chip(用户侧,浅底彩)—— 2026-11-04
+ *
+ * 跟工单状态 chip 是**两套**:工单状态说「做到哪一步」,收款状态说
+ * 「钱到没到」。用户看工单列表时最关心的其实是后者(我付了吗),所以
+ * 列表里两个 chip 并排。
+ */
+export const PRINT_ORDER_PAYMENT_CHIP: Record<PrintOrderPaymentStatus, string> =
+  {
+    unpaid: "bg-amber-50 text-amber-700 ring-amber-600/20",
+    paid: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
+    refunded: "bg-stone-100 text-stone-600 ring-stone-500/20",
+    failed: "bg-red-50 text-red-700 ring-red-600/20",
+  };
+
+/** 后台收款状态 chip(深色主题) */
+export const PRINT_ORDER_PAYMENT_ADMIN_CHIP: Record<
+  PrintOrderPaymentStatus,
+  string
+> = {
+  unpaid: "border-amber-500/30 text-amber-700 dark:text-amber-300",
+  paid: "border-emerald-500/30 text-emerald-700 dark:text-emerald-300",
+  refunded: "border-zinc-500/30 text-zinc-600 dark:text-zinc-300",
+  failed: "border-red-500/30 text-red-700 dark:text-red-300",
 };

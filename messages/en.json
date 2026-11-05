@@ -1094,6 +1094,11 @@
     "description": "Mooncoda — WJP full-color 3D printing expert. Pet badges, keychains, fridge magnets, figures — single-piece customization & shipping.",
     "product": "Gallery",
     "legal": "Legal",
+    "service": "Print Service",
+    "printNotice": "Print Notice",
+    "designSpec": "3D Model Design Specification",
+    "afterSales": "After-Sales Policy",
+    "orderNotice": "Model Print Order Notice",
     "copyright": "© {year} {name}. All rights reserved.",
     "twitter": "Weibo",
     "github": "Xiaohongshu"
@@ -1393,7 +1398,9 @@
     "page": {
       "eyebrow": "Model Inspector",
       "title": "Check the mesh before it hits the printer",
-      "description": "Inverted normals, gaps and planar holes, degenerate and non-manifold faces, stray shells and sealed cavities — all judged against WJP full-color rules, with every problem highlighted in 3D."
+      "description": "Inverted normals, gaps and planar holes, degenerate and non-manifold faces, stray shells and sealed cavities — all judged against WJP full-color rules, with every problem highlighted in 3D.",
+      "designSpecLink": "Geometry checks out? Now check it against the 3D Model Design Specification — wall thickness, tolerances, overhangs and holes all have hard limits.",
+      "designSpecCta": "Read the 3D Model Design Specification"
     },
     "app": {
       "title": "Model Inspector",
@@ -1674,7 +1681,8 @@
       "subtitle": "We measure your model's volume and surface area, then price it by weight. Adjust the size or run smart orientation and the price follows — place the order and the studio will reach out within one business day.",
       "bulletUpload": "Models are parsed in your browser — nothing is uploaded while quoting",
       "bulletPrice": "Pricing is computed server-side, and the line items always add up to the total",
-      "bulletOrder": "Sign in to order — track every job under your own print orders"
+      "bulletOrder": "Sign in to order — track every job under your own print orders",
+      "policyLabel": "Before you order:"
     },
     "quote": {
       "title": "Quote breakdown",
@@ -1687,6 +1695,18 @@
       "varnishFee": "Finishing",
       "total": "Total",
       "stale": "Price updating, please wait"
+    },
+    "delivery": {
+      "label": "Delivery",
+      "hint": "Surcharged as a share of the quote",
+      "hours": "{hours} h",
+      "free": "Free",
+      "row": "Delivery · {hours} h",
+      "tier": {
+        "standard": "Standard",
+        "express": "Express",
+        "urgent": "Urgent"
+      }
     },
     "order": {
       "start": "Enter order details",
@@ -1704,12 +1724,22 @@
       "uploading": "Uploading model…",
       "submitting": "Submitting…",
       "cancel": "Back",
-      "payHint": "Nothing is charged now — the studio confirms the quote and settles separately.",
+      "payHint": "You'll be taken to Stripe to pay — production starts once payment lands.",
+      "policyNotice": "Please read these before you order — they are hard requirements of the print service, and following them saves a round of rework.",
+      "policyPrintNotice": "Print Notice",
+      "policyDesignSpec": "3D Model Design Specification",
+      "policyOrderNotice": "Model Print Order Notice",
+      "policyAfterSales": "After-Sales Policy",
       "successTitle": "Order submitted",
       "successBody": "We have your model and quote request.",
       "orderNo": "Order number",
       "successHint": "The order is filed under your account — check \"My print orders\" any time.",
       "successLink": "Go to my print orders",
+      "viewDetail": "View order details",
+      "payNow": "Pay now",
+      "redirecting": "Taking you to payment… redirecting in {seconds}s",
+      "paymentLinkFailed": "Order created, but the payment link could not be generated",
+      "paymentLinkFailedHint": "Online payment is unavailable right now — retry from the order page, or ask the studio for an offline transfer.",
       "errors": {
         "name": "Please enter your name",
         "noModel": "No model to order yet",
@@ -1732,6 +1762,22 @@
       "COMPLETED": "Completed",
       "CANCELLED": "Cancelled"
     },
+    "payment": {
+      "status": {
+        "unpaid": "Unpaid",
+        "paid": "Paid",
+        "refunded": "Refunded",
+        "failed": "Payment failed"
+      },
+      "payNow": "Pay now",
+      "loading": "Preparing the payment link…",
+      "paid": "Paid",
+      "refunded": "Refunded",
+      "offlineHint": "Online payment isn't set up — ask the studio for an offline transfer",
+      "errors": {
+        "LINK_FAILED": "Could not generate a payment link — retry later or contact the studio"
+      }
+    },
     "email": {
       "common": {
         "greeting": "Hi {name},",
@@ -1750,7 +1796,7 @@
         "preview": "We received your print order {orderNo}",
         "heading": "Your order is in",
         "body": "We got your model and quote request. The studio will confirm material, colour and lead time within one business day, and you will get an email as soon as it is confirmed.",
-        "body2": "Nothing is charged now — the studio confirms the quote and settles separately."
+        "body2": "Please complete the online payment — the studio starts production once the money arrives."
       },
       "statusChanged": {
         "subject": "Print order {orderNo}: {status}",
@@ -1779,6 +1825,13 @@
         "heading": "The customer cancelled their order",
         "body": "{name} cancelled print order {orderNo}.",
         "bodyWithNote": "Customer note: {note}"
+      },
+      "studioPaid": {
+        "subject": "Print order {orderNo} paid",
+        "preview": "Order {orderNo} has been paid",
+        "heading": "Payment received",
+        "body": "Print order {orderNo} from {name} has been paid.",
+        "body2": "You can move the order into production now."
       }
     },
     "timeline": {
@@ -1858,7 +1911,27 @@
         "ORDER_NOT_FOUND": "Order not found",
         "INVALID_TRANSITION": "This status change is not allowed",
         "NOTE_REQUIRED": "Rolling back needs a note",
-        "SAME_STATUS": "The status did not change"
+        "SAME_STATUS": "The status did not change",
+        "PAYMENT_REQUIRED": "Payment hasn't landed yet — production can't start"
+      },
+      "payment": {
+        "title": "Payment",
+        "markPaid": "Mark as paid",
+        "revoke": "Revoke payment",
+        "marked": "Marked as paid",
+        "alreadyPaid": "This order was already marked as paid",
+        "revoked": "Payment revoked",
+        "paidAt": "Paid at",
+        "paidHint": "Paid. Online payments are confirmed automatically by the Stripe receipt.",
+        "channel": {
+          "stripe": "Online payment",
+          "offline": "Offline transfer"
+        },
+        "errors": {
+          "ORDER_NOT_FOUND": "Order not found",
+          "ONLINE_PAYMENT": "Online payments can't be revoked",
+          "FAILED": "Action failed, please try again"
+        }
       },
       "submit": "Apply change",
       "discard": "Cancel"

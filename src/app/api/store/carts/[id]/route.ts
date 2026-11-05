@@ -1,8 +1,7 @@
 /**
  * GET /api/store/carts/[id] —— 取 cart
  *
- * 对齐 Medusa Store API `GET /store/carts/{id}`。
- * 切真 Medusa 时:转发到 Medusa,可选 expand line items。
+ * 单价是**重算**过的 —— 存的只是缓存(见 `cart-store.ts` 的说明)。
  */
 
 import { NextResponse } from "next/server";
@@ -10,13 +9,15 @@ import { getCart } from "@/features/storefront/lib/cart-store";
 import { withApiLogging } from "@/lib/api-logger";
 
 export const runtime = "nodejs";
+/** 一次 DB 查询 + 逐行重算价 */
+export const maxDuration = 15;
 
 async function handle(
   _request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
   const { id } = await context.params;
-  const cart = getCart(id);
+  const cart = await getCart(id);
 
   if (!cart) {
     return NextResponse.json(

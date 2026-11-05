@@ -1,10 +1,12 @@
 /**
- * Mock 产品目录(对齐 Medusa Store API 简化版)
+ * Mock 产品目录(对齐 atelier store 契约的简化版)
  *
  * 从 PRODUCT_TYPES 字典(R/A/P/RM/LB/M)+ WJP_SERIES 3 系列生成 12 个
  * 静态产品(对齐 atelier 4 keychain + 4 figure + 4 magnet 计数)。
  *
- * 切真 Medusa 时:此文件作废,/api/store/products 直接转发到 Medusa。
+ * 商品目录的真理源在本仓库(architecture-sellbase-integration.md §二:
+ * 商品资料 / SKU / 基础价归本仓库,Sellbase 那边只是同步过去的镜像)。
+ * 所以这个文件不会作废,/api/store/products 也不会转发出去。
  *
  * 数据来源:
  *  - PRODUCT_TYPES: src/features/gpt-image/lib/product-catalog.ts
@@ -52,8 +54,8 @@ import type {
  * `findAiStyle` 查询函数)不断。注意:storefront mock 出的 aiStyles 用
  * 的是同一份 5 项种子,但概念上 storefront 这边是「mock commerce
  * product 的可叠加 AI 风格」,与 image-gen 那边的「生图替换关键提示词」
- * 不是一回事 —— 切真 Medusa 时 storefront 这条链路会独立走 Medusa
- * metadata,届时一起清理。
+ * 不是一回事 —— storefront 这条链路的 AI 风格挂在商品 / 购物车行的
+ * metadata 上,与 image-gen 那套模板是两码事,保持分开维护。
  */
 const AI_STYLES: AiStyle[] = DEFAULT_TEMPLATE_STYLES.map((s) => ({
   id: s.id,
@@ -217,7 +219,8 @@ function buildAccessoryGroups(code: ProductTypeCode): AccessoryGroup[] {
 /* -------------------------------------------------------------------------- */
 
 // 产品基价(分)字典 —— 真理源在 product-catalog.ts 的 BASE_PRICE_CENTS,
-// 这里直接 import 用(切真 Medusa 时统一改成读 Medusa 价格)。
+// 这里直接 import 用(本仓库是定价真理源,Sellbase 目录里的价只是同步
+// 过去的参考值,不会回流)。
 
 interface MockProductSeed {
   handle: string;
@@ -623,7 +626,7 @@ export function findAiStyle(aiStyleId: string): AiStyle | null {
   // DEFAULT_TEMPLATE_STYLES,通过 findStyleInList 查找(返回
   // TemplateStyle | undefined)。这里 wrap 一层 undefined → null 保持
   // storefront 旧消费方(`/api/store/ai/transform`、`pricing.ts`、
-  // `customization-spec.ts` 等)签名兼容。切真 Medusa 时一并清理。
+  // `customization-spec.ts` 等)签名兼容。这层 wrap 保留,别再动。
   const found = findStyleInList(DEFAULT_TEMPLATE_STYLES, aiStyleId);
   if (!found) return null;
   return {

@@ -116,6 +116,27 @@ export const RateLimitConfig = {
    * 所以单开一个桶。120 ≈ 6 次满额列表加载，比 global 宽，但仍是有界的。
    */
   printOrder: { requests: 120, window: "1m" as const },
+  /**
+   * 商城结算: 10 请求/分钟。
+   *
+   * 结算会**建单 + 建 Sellbase 订单 + 拿支付链接** —— 三次外部调用,一次
+   * 结算比普通读接口贵得多。但也不能用 `strict`(3/min):用户填错地址会
+   * 改一次再提交,Stripe 回跳失败也会重试,3 次就顶满了。
+   *
+   * 10 次/分钟够正常用,又挡住了「脚本狂刷建单」(每次建单都留一张孤儿单
+   * 在 Sellbase 后台)。
+   */
+  storeCheckout: { requests: 10, window: "1m" as const },
+  /**
+   * 收货地址簿: 30 请求/分钟。
+   *
+   * 地址是纯读写(建一条、列几条),没有外部调用 —— 比结算便宜得多。
+   * 但也不能开太大:地址是 PII,脚本狂拉地址簿虽然拿不到别人的(归属校验
+   * 在数据层),还是会白白打数据库。
+   *
+   * 30/min 够正常用(打开结算页一次 + 地址页一次 + 偶尔改个地址)。
+   */
+  storeAddress: { requests: 30, window: "1m" as const },
 } as const;
 
 export type RateLimitType = keyof typeof RateLimitConfig;

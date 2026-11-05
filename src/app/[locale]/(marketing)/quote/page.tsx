@@ -8,6 +8,7 @@ import {
   listUserPrintOrders,
   toUserPrintOrder,
 } from "@/features/print-quote/lib/order-store";
+import { Link } from "@/i18n/routing";
 import { auth } from "@/lib/auth";
 
 /**
@@ -109,6 +110,14 @@ export default async function QuotePage({
     t("page.bulletOrder"),
   ];
 
+  // 打印服务的须知 / 规范 / 售后 —— 上传模型之前就该知道这些
+  const policies = [
+    { href: "/legal/print-notice", label: t("order.policyPrintNotice") },
+    { href: "/legal/design-spec", label: t("order.policyDesignSpec") },
+    { href: "/legal/print-order-notice", label: t("order.policyOrderNotice") },
+    { href: "/legal/after-sales", label: t("order.policyAfterSales") },
+  ] as const;
+
   return (
     <div className="container py-12 md:py-16">
       {/* 页头 */}
@@ -133,6 +142,20 @@ export default async function QuotePage({
             </li>
           ))}
         </ul>
+
+        {/* 打印服务的须知 / 规范 / 售后 —— 放在上传入口正上方 */}
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          <span>{t("page.policyLabel")}</span>
+          {policies.map((policy) => (
+            <Link
+              key={policy.href}
+              href={policy.href}
+              className="underline underline-offset-4 transition-colors hover:text-foreground"
+            >
+              {policy.label}
+            </Link>
+          ))}
+        </div>
       </div>
 
       {/* 报价台 */}

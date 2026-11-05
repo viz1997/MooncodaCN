@@ -1,0 +1,40 @@
+---
+title: 3D Model Design Specification
+date: "2026-11-05"
+description: Requirements for solid modelling, tolerances and fits, overhangs and supports, holes and grooves, and text and textures.
+---
+
+# 3D Model Design Specification
+
+A model that does not meet this specification counts as a customer stress test — see the disclaimer in the [After-Sales Policy](/legal/after-sales).
+
+## 1. General Modelling Principles
+
+- Build solid models with parametric software (SolidWorks, Fusion 360, Rhino, etc.)
+- Do not export surface ("NURBS") models directly — convert them to closed solids first
+- Check the model for self-intersections, overlapping faces, zero-thickness faces and other defects
+
+## 2. Tolerances and Fits
+
+- Clearance fit (sliding / rotating): leave 0.2–0.3 mm per side
+- Interference fit: −0.05 to −0.1 mm per side (adjust for material shrinkage)
+
+## 3. Overhangs and Supports
+
+- Overhang length ≤ 4 × the thickness of the feature itself; beyond that, add ribs or external supports
+- Bridge length: ≤ 50 mm recommended
+
+## 4. Holes and Grooves
+
+- Minimum through-hole diameter: ≥ 1.5 mm (≥ 2.0 mm recommended)
+- Deep blind holes: depth-to-diameter ratio ≤ 4:1; beyond that, leave room for powder / liquid drainage
+
+## 5. Text and Textures
+
+- Raised text: height ≥ 0.5 mm, width ≥ 0.5 mm
+- Engraved text: depth ≥ 0.5 mm, width ≥ 0.5 mm
+- Fine textures need to be confirmed with us for process feasibility
+
+---
+
+For the size, accuracy and wall-thickness requirements of the printing process itself, see [Print Notice](/legal/print-notice).

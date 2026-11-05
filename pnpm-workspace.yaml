@@ -7,3 +7,6 @@ allowBuilds:
   esbuild: true
   protobufjs: true
   sharp: true
+patchedDependencies:
+  '@sellbase/core@0.3.3': patches/@sellbase__core@0.3.3.patch
+  '@sellbase/sdk@0.3.3': patches/@sellbase__sdk@0.3.3.patch

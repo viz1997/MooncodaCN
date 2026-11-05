@@ -53,8 +53,9 @@ export {
   setSdkToken,
   setupSdk,
 } from "./request";
-// Storefront:见 MEDUSA_INTEGRATION.md —— commerce 不在 NextDevTpl,
-// 走独立部署的 Medusa Store API + 官方 @medusajs/medusa-js SDK。
+// Storefront:见 SELLBASE_INTEGRATION.md —— 商品目录 / 算价 / 购物车 /
+// 订单 / 收货地址全在本仓库,收款走 Sellbase 收银台(小程序只拿支付链接,
+// 全页跳 Stripe)。小程序不直连 Sellbase,也不装任何 commerce SDK。
 // 类型
 export type {
   AccessoryCategory,

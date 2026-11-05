@@ -7,8 +7,14 @@
  */
 
 import type { PrintOrderRow } from "@/db/schema";
+import {
+  type DeliveryTierId,
+  getDeliveryTier,
+} from "@/features/print-quote/lib/delivery-tier";
 import type {
   PrintOrderLocale,
+  PrintOrderPaymentChannel,
+  PrintOrderPaymentStatus,
   PrintOrderStatus,
 } from "@/features/print-quote/lib/quote-types";
 
@@ -30,6 +36,12 @@ export type AdminPrintOrder = {
   weightFeeCents: number;
   varnishFeeCents: number;
   supportFeeCents: number;
+  /** 交期档位(standard / express / urgent)—— 工作室据此排产 */
+  deliveryTier: DeliveryTierId;
+  /** 交期加价(分)—— 按小计比例收 */
+  deliveryFeeCents: number;
+  /** 承诺交期(小时) */
+  deliveryHours: number;
   totalPriceCents: number;
   contactName: string;
   contactEmail: string;
@@ -41,6 +53,17 @@ export type AdminPrintOrder = {
    * 工作室改状态时通知用户的邮件用这个语言 —— 后台界面的语言跟它没关系。
    */
   locale: PrintOrderLocale;
+  /**
+   * 收款状态(2026-11-04)
+   *
+   * 「生产中」这个状态要求 `paymentStatus === "paid"` —— 没收到钱的单
+   * 不该开工。工作室在这里能看到是不是已经付了。
+   */
+  paymentStatus: PrintOrderPaymentStatus;
+  /** 收款渠道:线上(stripe) / 线下转账(offline) */
+  paymentChannel: PrintOrderPaymentChannel | null;
+  /** 收款时间 */
+  paidAt: string | null;
   /** ISO 时间串 */
   createdAt: string;
   /** 最后一次状态变更时间 */
@@ -71,12 +94,18 @@ export function toAdminPrintOrder(row: PrintOrderRow): AdminPrintOrder {
     weightFeeCents: row.weightFeeCents,
     varnishFeeCents: row.varnishFeeCents,
     supportFeeCents: row.supportFeeCents,
+    deliveryTier: row.deliveryTier,
+    deliveryFeeCents: row.deliveryFeeCents,
+    deliveryHours: getDeliveryTier(row.deliveryTier).hours,
     totalPriceCents: row.totalPriceCents,
     contactName: row.contactName,
     contactEmail: row.contactEmail,
     contactPhone: row.contactPhone,
     note: row.note,
     locale: row.locale === "en" ? "en" : "zh",
+    paymentStatus: row.paymentStatus,
+    paymentChannel: row.paymentChannel,
+    paidAt: row.paidAt ? row.paidAt.toISOString() : null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

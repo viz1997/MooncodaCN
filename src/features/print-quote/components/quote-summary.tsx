@@ -13,7 +13,12 @@
 import { AlertCircle, Loader2, Scale } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { DeliveryTierPicker } from "@/features/print-quote/components/delivery-tier-picker";
 import { QuoteBreakdown } from "@/features/print-quote/components/quote-breakdown";
+import {
+  DEFAULT_DELIVERY_RATES,
+  type DeliveryTierId,
+} from "@/features/print-quote/lib/delivery-tier";
 import type { PrintQuote } from "@/features/print-quote/lib/quote-types";
 
 export type QuoteSummaryProps = {
@@ -34,6 +39,10 @@ export type QuoteSummaryProps = {
   onStartOrder: () => void;
   /** 已经进到填单阶段 */
   ordering: boolean;
+  /** 当前选的交期档位 */
+  deliveryTier: DeliveryTierId;
+  /** 切交期档位 —— 父组件要拿新档位重新去服务端报价 */
+  onDeliveryTierChange: (tier: DeliveryTierId) => void;
 };
 
 export function QuoteSummary({
@@ -43,8 +52,20 @@ export function QuoteSummary({
   error,
   onStartOrder,
   ordering,
+  deliveryTier,
+  onDeliveryTierChange,
 }: QuoteSummaryProps) {
   const t = useTranslations("PrintQuote");
+
+  /**
+   * 报价小计(克重 + 后处理 + 支撑)—— 三档加价的基数
+   *
+   * 从合计里减掉加价得到:服务端算的时候基数就是这个,前端反推能拿到同一个数
+   * (加减法在整数分上不会有误差)。
+   */
+  const subtotalCents = quote
+    ? quote.totalPriceCents - quote.deliveryFeeCents
+    : null;
 
   return (
     <div className="rounded-lg border border-border bg-card">
@@ -74,6 +95,14 @@ export function QuoteSummary({
 
         {quote && (
           <>
+            <DeliveryTierPicker
+              value={deliveryTier}
+              rates={quote.deliveryRates ?? DEFAULT_DELIVERY_RATES}
+              subtotalCents={subtotalCents}
+              onChange={onDeliveryTierChange}
+              disabled={loading}
+            />
+
             <QuoteBreakdown values={quote} />
 
             {stale && (

@@ -2,14 +2,14 @@
  * use-cart —— 客户端购物车 hook(TanStack Query)
  *
  * 替代 atelier 的 Zustand useCartStore,把 cart 状态搬到服务端。
- * - query: GET /api/store/carts/[id] (cookie 关联 cart_id)
+ * - query: POST /api/store/carts(cookie 关联 cart_id)
  * - mutations:
  *   - ensureCart() — POST /api/store/carts(创建或取现有)
  *   - addLineItem(spec)
  *   - updateLineItemQuantity(lineItemId, quantity)
  *   - removeLineItem(lineItemId)
  *
- * 切真 Medusa 时:fetch URL 不变,只改 Route Handler 转发。
+ * 购物车现在落库了(见 `lib/cart-store.ts`),重启 dev server 不会丢。
  */
 
 "use client";
@@ -21,7 +21,10 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
-
+import {
+  calculateRemainingForFreeShipping,
+  calculateShippingCents,
+} from "../lib/pricing-constants";
 import type { Cart, CartLineItem, CartLineItemMetadata } from "../types";
 
 const CART_QUERY_KEY = ["store", "cart"] as const;
@@ -196,22 +199,22 @@ export function useCart(): UseCartResult {
 
   // 3. selectors
   const items = query.data?.items ?? [];
+  // 小计用**折后**单价 —— 结算时收的就是这个数(见 pricing.ts 的阶梯折扣口径)
   const subtotalCents = useMemo(
-    () => items.reduce((sum, it) => sum + it.unitPriceCents * it.quantity, 0),
+    () =>
+      items.reduce(
+        (sum, it) => sum + it.discountedUnitPriceCents * it.quantity,
+        0
+      ),
     [items]
   );
   const itemCount = useMemo(
     () => items.reduce((sum, it) => sum + it.quantity, 0),
     [items]
   );
-  const FREE_SHIPPING_THRESHOLD_CENTS = 9900;
-  const DEFAULT_SHIPPING_CENTS = 800;
-  const remainingForFreeShippingCents = Math.max(
-    0,
-    FREE_SHIPPING_THRESHOLD_CENTS - subtotalCents
-  );
-  const shippingCents =
-    subtotalCents >= FREE_SHIPPING_THRESHOLD_CENTS ? 0 : DEFAULT_SHIPPING_CENTS;
+  const remainingForFreeShippingCents =
+    calculateRemainingForFreeShipping(subtotalCents);
+  const shippingCents = calculateShippingCents(subtotalCents);
 
   // 4. refetch helper
   const refetch = useCallback(() => query.refetch(), [query]);

@@ -23,8 +23,10 @@
 
 import { ArrowLeft, Box, FileText, Mail, Phone, User } from "lucide-react";
 import { useFormatter, useTranslations } from "next-intl";
+import { useEffect } from "react";
 
 import { OrderCancelButton } from "@/features/print-quote/components/order-cancel-button";
+import { OrderPaymentButton } from "@/features/print-quote/components/order-payment-button";
 import { OrderTimeline } from "@/features/print-quote/components/order-timeline";
 import { QuoteBreakdown } from "@/features/print-quote/components/quote-breakdown";
 import { usePrintOrderDetailPolling } from "@/features/print-quote/hooks/use-print-order-polling";
@@ -34,7 +36,10 @@ import type {
   UserPrintOrderDetail,
 } from "@/features/print-quote/lib/quote-types";
 import { isUserCancellable } from "@/features/print-quote/lib/status-machine";
-import { PRINT_ORDER_STATUS_CHIP } from "@/features/print-quote/lib/status-ui";
+import {
+  PRINT_ORDER_PAYMENT_CHIP,
+  PRINT_ORDER_STATUS_CHIP,
+} from "@/features/print-quote/lib/status-ui";
 import { Link } from "@/i18n/routing";
 
 export function PrintOrderDetailView({
@@ -53,6 +58,19 @@ export function PrintOrderDetailView({
   );
 
   const cancellable = isUserCancellable(order.status);
+
+  /**
+   * 从 Stripe 回跳(`?paid=1`)→ 立刻拉一次
+   *
+   * 页面首屏是 RSC 渲染时的那份数据 —— 用户付完钱跳回来,那份数据里
+   * 还是「未付款」。webhook 落库还有几秒延迟,轮询要等 30 秒。
+   *
+   * 所以这里立刻刷一次:多一个请求,换来「用户一回来就看到已付款」。
+   */
+  useEffect(() => {
+    if (!new URLSearchParams(window.location.search).has("paid")) return;
+    void refresh();
+  }, [refresh]);
 
   return (
     <div className="space-y-6">
@@ -79,6 +97,14 @@ export function PrintOrderDetailView({
               >
                 {t(`status.${order.status}`)}
               </span>
+              {/* 收款状态 —— 跟工单状态是两回事,用户最关心的是这个 */}
+              <span
+                className={`rounded-full px-2 py-0.5 text-[11px] ring-1 ring-inset ${
+                  PRINT_ORDER_PAYMENT_CHIP[order.paymentStatus]
+                }`}
+              >
+                {t(`payment.status.${order.paymentStatus}`)}
+              </span>
               <span className="text-xs text-muted-foreground">
                 {t("detail.placedAt")}:{" "}
                 {format.dateTime(new Date(order.createdAt), {
@@ -96,14 +122,22 @@ export function PrintOrderDetailView({
             </div>
           </div>
 
-          {cancellable ? (
-            <OrderCancelButton
+          <div className="flex flex-wrap items-start gap-2">
+            {/* 收款入口 —— 未付的单在这儿付 */}
+            <OrderPaymentButton
               orderNo={order.orderNo}
-              onCancelled={async () => {
-                await refresh();
-              }}
+              paymentUrl={order.paymentUrl}
+              paymentStatus={order.paymentStatus}
             />
-          ) : null}
+            {cancellable ? (
+              <OrderCancelButton
+                orderNo={order.orderNo}
+                onCancelled={async () => {
+                  await refresh();
+                }}
+              />
+            ) : null}
+          </div>
         </div>
       </section>
 

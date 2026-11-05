@@ -11,12 +11,20 @@
  * R2 + 建单),这里只管收集和校验。
  */
 
-import { AlertCircle, Loader2, Lock, Package, Upload } from "lucide-react";
+import {
+  AlertCircle,
+  Loader2,
+  Lock,
+  Package,
+  ShieldAlert,
+  Upload,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
 import { formatCents } from "@/features/print-quote/lib/format";
 import type { PrintQuote } from "@/features/print-quote/lib/quote-types";
+import { Link } from "@/i18n/routing";
 
 export type OrderContact = {
   name: string;
@@ -56,6 +64,14 @@ export function OrderForm({
   const [fieldError, setFieldError] = useState<string | null>(null);
 
   const busy = phase !== "idle";
+
+  // 下单前该读的几份 —— 打印须知 / 设计规范 / 下单提示 / 售后
+  const policies = [
+    { href: "/legal/print-notice", label: t("order.policyPrintNotice") },
+    { href: "/legal/design-spec", label: t("order.policyDesignSpec") },
+    { href: "/legal/print-order-notice", label: t("order.policyOrderNotice") },
+    { href: "/legal/after-sales", label: t("order.policyAfterSales") },
+  ] as const;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -109,6 +125,21 @@ export function OrderForm({
           </p>
         </div>
       </div>
+
+      {/* 交期 —— 填单时再摆一次,用户确认的是「这个交期、这个价」 */}
+      {quote && (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2">
+          <span className="text-xs text-stone-600">{t("delivery.label")}</span>
+          <span className="text-xs font-medium text-stone-900">
+            {t("delivery.hours", { hours: quote.deliveryHours })}
+            {quote.deliveryFeeCents > 0 && (
+              <span className="ml-2 font-mono text-stone-500">
+                +{formatCents(quote.deliveryFeeCents)}
+              </span>
+            )}
+          </span>
+        </div>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Field id="pq-name" label={t("order.name")} required>
@@ -175,6 +206,25 @@ export function OrderForm({
           {fieldError ?? error}
         </p>
       )}
+
+      {/* 下单前的须知 —— 打印服务的硬性要求,不合规的模型会被退回来返工 */}
+      <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-[11px] leading-relaxed text-amber-900">
+        <p className="flex items-start gap-1.5">
+          <ShieldAlert className="mt-px size-3.5 shrink-0" />
+          <span>{t("order.policyNotice")}</span>
+        </p>
+        <p className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 pl-5">
+          {policies.map((policy) => (
+            <Link
+              key={policy.href}
+              href={policy.href}
+              className="underline underline-offset-2 hover:no-underline"
+            >
+              {policy.label}
+            </Link>
+          ))}
+        </p>
+      </div>
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
         <button

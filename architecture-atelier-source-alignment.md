@@ -4,7 +4,9 @@
 >
 > 本文档基于对 `D:\下载\atelier-source` 的**误读**编写。原以为该目录是 Medusa 项目,实际它是 **Next.js 16 + NextAuth + Prisma + Tailwind + Shadcn + z-ai-web-dev-sdk 的纯电商模板**,没有 Medusa server,没有 PostgreSQL,Prisma schema 只有 stock 的 User / Post 两张表。
 >
-> **正确方向仍由 [architecture-medusa-integration.md](./architecture-medusa-integration.md) 描述**:Medusa 100% 承担 product/market + 订单管理 + 支付管理;NextDevTpl 只做 AI SaaS 后端。
+> **正确方向现由 [architecture-sellbase-integration.md](./architecture-sellbase-integration.md) 描述**:本仓库算价(商品目录 / 定价 / 购物车 / 订单 / 收货地址全在本仓库),Sellbase 只做收银台(建一张 Stripe 支付链接 + 回传收款状态)。
+>
+> 本文里的 **atelier 对齐**(字段映射 / 路由 / 定价口径)**已经搬到本仓库的 storefront 上** —— `src/app/api/store/ai/transform`、`src/app/api/store/pricing/calculate`、`src/features/storefront/lib/customization-spec.ts` 都是照 atelier 源码写的,所以下面记的字段对照 / 口径仍然值得看。2026-11-04 起,文中提到 Medusa 的地方已按 Sellbase 口径改写(历史决策记录里的 Medusa 保留)。
 >
 > 本文档归档保留,仅作历史决策日志;**不要按本文档做任何代码改动**。
 
@@ -15,7 +17,7 @@
 > 目标读者:技术负责人 / 后端 / 前端 / DevOps
 > 前置阅读:
 > - [architecture-miniprogram-as-client.md](./architecture-miniprogram-as-client.md)——项目身份定位(已定)
-> - [architecture-medusa-integration.md](./architecture-medusa-integration.md)——**已被本文档取代**
+> - [architecture-sellbase-integration.md](./architecture-sellbase-integration.md)——**当前的集成架构**(本仓库算价,Sellbase 只做收银台);Medusa 方案稿 `architecture-medusa-integration.md` 已整体作废
 >
 > 参考实现:`D:\下载\atelier-source`(Next.js 16 + NextAuth + Prisma + Tailwind 4 + Shadcn + NextIntl + z-ai-web-dev-sdk 的纯电商模板)
 
@@ -45,6 +47,23 @@ atelier-source 是**已写好的 80% 商业参考实现**(纯 Next.js + Stripe-R
 - ✅ **保留** NextDevTpl 已落地的 BA 鉴权 / credits 账本 / photo + imageJob 数据 / R2 上传 / WeChat 小程序登录
 - ❌ **砍掉** Medusa server + 独立 storefront + Medusa Store/Admin API + 17 个 `/api/orders/[token]/*` 中的 Medusa-only 字段
 - 🔄 **重构** `promptTemplate` + `promptTemplatePrice` + `productLine` + `productEffect` 为 atelier 风格的 TS config + Prisma
+
+### 0.3 最终形态(2026-11-04 定稿)
+
+§0.1 的对比表是 **2026-09-17 的快照**,当时的结论是「atelier 路线 = 本仓库单体扛全部,
+直接连 Stripe」。后来又调整了一次,分两条:
+
+- **atelier 对齐的部分全部保留** —— `CustomizationSpec` 协议、定价常量、
+  `/api/ai/transform` 的 z-ai 直调、storefront 的字段对照,都还是本仓库
+  storefront 的形状来源(本文档主体因此仍然有效)。
+- **零售支付的后端换成 Sellbase**(Supabase Edge Functions + Stripe):
+  **本仓库算价,Sellbase 只做收银台** —— 商品目录 / 定价 / 购物车 / 订单 /
+  收货地址全在本仓库;Sellbase 只建一张 Stripe 支付链接 + webhook 回传收款
+  状态。Sellbase 侧的目录价是 `scripts/sync-sellbase-catalog.ts` **单向同步**
+  过去的**参考值**,本仓库的定价才是收多少钱的依据。
+- **Medusa 从来没落地**,方案稿 `architecture-medusa-integration.md` 已整体作废。
+
+细节见 [architecture-sellbase-integration.md](./architecture-sellbase-integration.md)。
 
 ---
 
@@ -298,10 +317,24 @@ const previewUrl = await saveImage(editedDataUrl, style.id)
 | `/api/medusa/bridge-token` | 无 Medusa 桥接 |
 | 17 个 `/api/orders/[token]/*` 中的 Medusa 字段 | order 不再写 medusa_order_id/no |
 
+> **现状(2026-11-04)**:Medusa 时代的那些端点确实一个都没落地。收款 webhook
+> 走的是 **`POST /api/webhooks/sellbase`**(HMAC 验签 → 按 `sellbase_order_id`
+> 反查 → 回写本地订单状态),购物车 / 订单 / 收货地址全在本仓库。
+> 见 [architecture-sellbase-integration.md](./architecture-sellbase-integration.md) §六 / §九。
+
 ### 3.4 全部路由鉴权改造(Phase R 残留)
 
-- `/api/ai/transform` 用 `getSessionFromRequest`(Cookie-or-Bearer)
-- `/api/pricing/calculate` 公开,但扣 credit 时需鉴权(可选)
+- `/api/store/ai/transform` —— **现状(2026-11-04)**:走 `getServerSession()`,**只认 cookie**。
+  它是**网页端**自己的接口(商城定制台调它),小程序 SDK 不碰这个端点,所以
+  没接 Bearer。真要接,跟商城结算那条链一样换成 `getSessionFromRequest`。
+- `/api/store/pricing/calculate` —— 公开(算价不扣 credit,扣 credit 的是
+  `/api/image-gen/*` 那条链)
+
+> **商城结算那条链已经接了 Bearer**(2026-11-04):`/api/store/checkout`、
+> `/api/store/orders/**`、`/api/store/addresses/**` 都用
+> `src/lib/auth/request-session.ts` 的 `getSessionFromRequest`
+> (Bearer 优先,cookie 兜底;带了 Bearer 但无效 → 直接 401,不退回 cookie)。
+> 见 [architecture-sellbase-integration.md](./architecture-sellbase-integration.md) §九。
 
 ---
 
@@ -360,7 +393,8 @@ model ProductVariant {
 - 新加:`customOrderItems` 子表(支持多 item 一单,如批量钥匙扣 5 个)
 
 **user 表**:
-- **删除** `medusaCustomerId` 字段(无 Medusa 集成)
+- **删除** `medusaCustomerId` 字段(现为 `sellbaseCustomerId` —— Sellbase customer
+  id 的回填指针;Sellbase 侧按 **email upsert**,真正的 join key 是 email)
 - **保留** `wechatOpenid` / `wechatUnionid` / `lastLoginAt` / `phoneNumber` / `phoneNumberVerified`
 
 ---
@@ -379,10 +413,28 @@ atelier-source **只一套定价**(成品价 USD cents)。NextDevTpl 引入积�
 - 价格公式:`basePriceCents + materialDeltaCents + sizeDeltaCents + engravingFeeCents`
 - 应用 rushMultiplier + quantity tier discount
 - 落库到 `customOrder.unitPriceCents` + `customOrder.totalPriceCents`
+- **本仓库是定价真理源** —— Sellbase 侧的目录价只是
+  `scripts/sync-sellbase-catalog.ts` 同步过去的**参考值**;结算时服务端按本仓库
+  的定价**重算每一行**(购物车里存的单价只是缓存)
 
 ### 5.3 支付/订单
 
-atelier 仍无订单表。**NextDevTpl 走 Creem 订阅模式**(现有 `/api/webhooks/creem`),**单笔零售支付后续接**(暂不在 V1 范围)。**用户下单触发**:前端 → `customOrder` 表写入 + Creem 一次性付款链接 + webhook 确认 → `customOrder.status = PAID`。
+atelier 模板本身仍无订单表 —— 零售下单是 2026-11-04 之后在本仓库补上的,
+分两条:
+
+- **积分包 / 订阅**照旧走 Creem(现有 `/api/webhooks/creem`)
+- **成品零售**走 Sellbase 收银台:**本仓库算价,Sellbase 只做收银台**
+  - 前端 → 本仓库服务端重算每一行的价 → 落 `storefront_order` +
+    `storefront_order_item` → 建 Sellbase 订单(`items[].unit_price_amount`
+    = 折后单价)→ 回写 `sellbase_order_id` + `payment_url` → 前端跳 Stripe
+  - 收款状态由 `POST /api/webhooks/sellbase` 回写(`status = paid` +
+    `paid_at`);金额两边**逐分相等**
+- **打印工单**(`/quote` → `print_order`)走同一张收银台:报价服务端重算 →
+  落 `print_order` → 建 Sellbase 订单 → 返 `paymentUrl` → 同一个 webhook
+  回写 `payment_status = paid`
+
+收多少钱以本仓库的定价为准 —— Sellbase 侧的目录价只是同步过去的参考值。
+详见 [architecture-sellbase-integration.md](./architecture-sellbase-integration.md) §三 / §四 / §六。
 
 ---
 
@@ -416,10 +468,12 @@ const finalPricing = await fetch('/api/pricing/calculate', {
   method: 'POST', body: JSON.stringify({ ..., previewImageUrl: previewUrl })
 })
 
-// 5. 调 Creem 一次性支付(暂跳过)
+// 5. 调本仓库 /api/store/checkout 结算 → 拿 Stripe 支付链接(暂跳过)
 ```
 
-**无 Medusa JWT,无 cart API,无 order API**。简化 ~80%。
+**无 Medusa JWT,无第三方 cart / order API** —— 购物车和结算都在本仓库
+(`/api/store/carts/**`、`/api/store/checkout`),支付只多一跳 Stripe。
+简化 ~80%。
 
 ---
 
@@ -453,7 +507,7 @@ const finalPricing = await fetch('/api/pricing/calculate', {
 
 #### Phase U-E(清理 + 文档,0.5 周)
 - [ ] 删除 11 个 cookie-only 路由的 cookie 硬依赖(全部走 getSessionFromRequest)
-- [ ] 删除 Medusa 相关代码(`architecture-medusa-integration.md` 标注 DEPRECATED)
+- [ ] 删除 Medusa 相关代码(方案稿 `architecture-medusa-integration.md` 已整体作废,2026-11-04)
 - [ ] 更新 CLAUDE.md 指向 atelier 模板
 
 ---
@@ -484,9 +538,15 @@ atelier 的 5 个 aiStyles 是 TS config,**admin 不能运行时改**。如果�
 
 atelier 的 cart 是 Zustand + localStorage,**无服务端订单**。ToB 代理商 demo 流还可能用 customOrder 表(内部审计),但 ToC 客户下单通道需后续补支付。
 
+> **现状(2026-11-04)**:ToC 下单通道已补上 —— 购物车 / 订单落本仓库
+> (`cart` / `cart_item` / `storefront_order` / `storefront_order_item`),
+> 收款走 Sellbase 收银台(见 §5.3)。
+
 ### 8.5 文档一致性
 
 - `architecture-medusa-integration.md` 标记 DEPRECATED,顶部加 warning banner
+  (2026-11-04 已补:整篇被 `architecture-sellbase-integration.md` 取代)
+- `architecture-sellbase-integration.md` 是当前的集成架构权威文档
 - CLAUDE.md 「画布模块」段不变(画布是 infinite-canvas 迁移,与电商集成无关)
 - `architecture-miniprogram-as-client.md` 主体保留(项目身份定位不变)
 
@@ -509,6 +569,8 @@ atelier 的 cart 是 Zustand + localStorage,**无服务端订单**。ToB 代理�
 5. 输入 13MB+ jpg → 期望 400 `Image too large`
 6. 已知 promptTemplate ID 调 GET `/api/prompt-templates` → 期望返 NotFound(已删除)
 7. 调 `/api/webhooks/medusa/order-placed` → 期望 404(已删除)
+8. 调 `POST /api/webhooks/sellbase`(错误签名)→ 期望 401;签名正确 → 本地订单
+   `status = paid` + `paid_at` 落库
 
 ---
 
@@ -517,5 +579,6 @@ atelier 的 cart 是 Zustand + localStorage,**无服务端订单**。ToB 代理�
 | 日期 | 变更 |
 |---|---|
 | 2026-09-17 | 初版,基于 `D:\下载\atelier-source` 模板全面重构,废弃 Medusa 路线 |
+| 2026-11-04 | 文中的 Medusa 表述按 Sellbase 口径改写;零售支付后端定稿为 Sellbase(本仓库算价,Sellbase 只做收银台) |
 
-**替代文档**:`architecture-medusa-integration.md`(2026-09-17 草稿,未实施)
+**替代文档**:[architecture-sellbase-integration.md](./architecture-sellbase-integration.md)(当前集成架构)

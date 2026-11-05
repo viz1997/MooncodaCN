@@ -33,6 +33,7 @@ import {
   buildModelZipBlob,
   exportRotatedObj,
 } from "@/features/pricing/lib/obj-exporter";
+import { OrderCreatedCard } from "@/features/print-quote/components/order-created-card";
 import {
   type OrderContact,
   OrderForm,
@@ -40,14 +41,16 @@ import {
 import { PrintOrderList } from "@/features/print-quote/components/print-order-list";
 import { QuoteSummary } from "@/features/print-quote/components/quote-summary";
 import { usePrintOrderPolling } from "@/features/print-quote/hooks/use-print-order-polling";
-import { formatCents } from "@/features/print-quote/lib/format";
+import {
+  DEFAULT_DELIVERY_TIER,
+  type DeliveryTierId,
+} from "@/features/print-quote/lib/delivery-tier";
 import type {
   PrintOrderCreated,
   PrintQuote,
   PrintQuoteInput,
   UserPrintOrder,
 } from "@/features/print-quote/lib/quote-types";
-import { Link } from "@/i18n/routing";
 
 type Stage = "quote" | "form" | "done";
 
@@ -75,6 +78,16 @@ export function QuoteWorkbench({
   );
 
   /**
+   * 交期档位(48 / 72 / 96 小时)
+   *
+   * 跟几何分开存 —— 几何是克重工具给的,交期是用户在报价条上选的,两个
+   * 都会触发重新报价。
+   */
+  const [deliveryTier, setDeliveryTier] = useState<DeliveryTierId>(
+    DEFAULT_DELIVERY_TIER
+  );
+
+  /**
    * 服务端报价 —— 连同「它是按哪组几何算出来的」一起存。
    *
    * 只存报价不够:用户改了尺寸之后,新报价要等 400ms 防抖 + 一次往返才回来,
@@ -96,13 +109,17 @@ export function QuoteWorkbench({
    * 挂着的报价跟当前几何还对得上吗?
    *
    * 对不上 = 界面上的价是上一组尺寸的,不能拿去下单。
+   *
+   * 交期档位也算在内:换档位要重新报价,回来的路上界面挂的还是旧档位的价 ——
+   * 那时候不能下单(用户以为付的是加急的钱,服务端按标准档建单)。
    */
   const quoteFresh = useMemo(
     () =>
       quoteResult !== null &&
       quoteInput !== null &&
-      sameQuoteInput(quoteResult.input, quoteInput),
-    [quoteResult, quoteInput]
+      sameQuoteInput(quoteResult.input, quoteInput) &&
+      quoteResult.quote.deliveryTier === deliveryTier,
+    [quoteResult, quoteInput, deliveryTier]
   );
 
   const [stage, setStage] = useState<Stage>("quote");
@@ -144,6 +161,12 @@ export function QuoteWorkbench({
     latestInputRef.current = quoteInput;
   }, [quoteInput]);
 
+  // 交期档位也要防「旧响应盖掉新响应」—— 连点三档,回来的顺序不保证
+  const latestTierRef = useRef(deliveryTier);
+  useEffect(() => {
+    latestTierRef.current = deliveryTier;
+  }, [deliveryTier]);
+
   useEffect(() => {
     if (!quoteInput) {
       setQuoteResult(null);
@@ -153,6 +176,7 @@ export function QuoteWorkbench({
     }
 
     const requestedInput = quoteInput;
+    const requestedTier = deliveryTier;
     const controller = new AbortController();
     const timer = setTimeout(() => {
       setQuoteLoading(true);
@@ -161,7 +185,10 @@ export function QuoteWorkbench({
           const res = await fetch("/api/print-quote", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(requestedInput),
+            body: JSON.stringify({
+              ...requestedInput,
+              deliveryTier: requestedTier,
+            }),
             signal: controller.signal,
           });
           if (!res.ok) {
@@ -173,8 +200,9 @@ export function QuoteWorkbench({
             return;
           }
           const body = (await res.json()) as { quote: PrintQuote };
-          // 几何在这期间又变了 → 这个价已经过期,丢掉(新请求在路上)
+          // 几何或交期档位在这期间又变了 → 这个价已经过期,丢掉(新请求在路上)
           if (!sameQuoteInput(requestedInput, latestInputRef.current)) return;
+          if (requestedTier !== latestTierRef.current) return;
           setQuoteResult({ input: requestedInput, quote: body.quote });
           setQuoteError(null);
         } catch (error) {
@@ -192,7 +220,7 @@ export function QuoteWorkbench({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [quoteInput, t]);
+  }, [quoteInput, deliveryTier, t]);
 
   // ---- 下单 ----
   const handleSubmitOrder = useCallback(
@@ -218,7 +246,7 @@ export function QuoteWorkbench({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            quote: quoteInput,
+            quote: { ...quoteInput, deliveryTier },
             modelFileName: uploaded.fileName,
             objectKey: uploaded.objectKey,
             modelUrl: uploaded.url,
@@ -256,6 +284,8 @@ export function QuoteWorkbench({
           totalPriceCents: created.quote.totalPriceCents,
           createdAt: created.createdAt,
           updatedAt: created.updatedAt,
+          paymentStatus: created.paymentStatus,
+          paymentUrl: created.paymentUrl,
         });
       } catch (error) {
         console.error("[PrintQuote] 下单失败", error);
@@ -263,7 +293,7 @@ export function QuoteWorkbench({
         setPhase("idle");
       }
     },
-    [quoteInput, modelPayload, quoteFresh, t, locale, upsertOrder]
+    [quoteInput, modelPayload, quoteFresh, t, locale, upsertOrder, deliveryTier]
   );
 
   const quoteSlot = useMemo(
@@ -274,6 +304,8 @@ export function QuoteWorkbench({
         stale={!quoteFresh}
         error={quoteError}
         ordering={stage === "form"}
+        deliveryTier={deliveryTier}
+        onDeliveryTierChange={setDeliveryTier}
         onStartOrder={() => {
           // 报价过期就别进填单 —— 进去之后表单上显示的还是旧价
           if (!quoteFresh) return;
@@ -282,7 +314,7 @@ export function QuoteWorkbench({
         }}
       />
     ),
-    [quote, quoteLoading, quoteError, quoteFresh, stage]
+    [quote, quoteLoading, quoteError, quoteFresh, stage, deliveryTier]
   );
 
   return (
@@ -310,43 +342,7 @@ export function QuoteWorkbench({
         />
       )}
 
-      {stage === "done" && order && (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-5">
-          <h3 className="text-base font-semibold text-emerald-900">
-            {t("order.successTitle")}
-          </h3>
-          <p className="mt-1 text-sm text-emerald-800/80">
-            {t("order.successBody")}
-          </p>
-          <dl className="mt-4 grid gap-3 sm:grid-cols-2">
-            <div>
-              <dt className="text-xs text-emerald-800/70">
-                {t("order.orderNo")}
-              </dt>
-              <dd className="mt-0.5 font-mono text-sm font-medium text-emerald-900">
-                {order.orderNo}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs text-emerald-800/70">
-                {t("quote.total")}
-              </dt>
-              <dd className="mt-0.5 font-mono text-sm font-medium text-emerald-900">
-                {formatCents(order.quote.totalPriceCents)}
-              </dd>
-            </div>
-          </dl>
-          <p className="mt-4 text-xs text-emerald-800/70">
-            {t("order.successHint")}
-          </p>
-          <Link
-            href="/dashboard/print-orders"
-            className="mt-2 inline-block text-xs font-medium text-emerald-800 underline underline-offset-4 hover:text-emerald-900"
-          >
-            {t("order.successLink")}
-          </Link>
-        </div>
-      )}
+      {stage === "done" && order && <OrderCreatedCard order={order} />}
 
       <PrintOrderList orders={orders} />
     </div>

@@ -1,17 +1,54 @@
 /**
- * 服务端 cart 存储(对齐 Medusa Store Cart schema)
+ * 服务端 cart 存储 —— **DB 版**
  *
- * In-memory Map + cookie `wjp_cart_id`(对齐 Medusa V1 pattern)。
- * 重启服务器会丢失 cart(符合 mock 定位,见 [[wjp-mock-medusa-storefront]])。
+ * ## 2026-11-04:从进程内 Map 挪到 DB
  *
- * 切真 Medusa 时:此文件作废,Route Handlers 改为转发到 Medusa Store API,
- * client use-cart 不变。
+ * 之前是 `const CARTS = new Map<string, Cart>()`,三个毛病:
+ *
+ * 1. **重启即丢** —— Vercel 每次冷启动都清空,用户加购的东西没了
+ * 2. **多实例各算各的** —— 部署两台,加购请求打到 A 机、结账请求打到 B 机,
+ *    B 机压根不知道有这张购物车
+ * 3. **后台看不见** —— 工作室想看「有谁在买什么」没处看
+ *
+ * 现在落在 `cart` / `cart_item` 两张表里,cookie `wjp_cart_id` 不变。
+ *
+ * ## 「同规格合并」靠数据库判重,不是靠内存比对
+ *
+ * `cart_item` 上有 `(cart_id, spec_hash)` 唯一索引,加购时用
+ * `INSERT … ON CONFLICT DO UPDATE` 原子地累加数量 —— 两个并发请求同时
+ * 加同一件商品,数据库保证只留一行、数量加两次。
+ *
+ * 之前那套「把整个购物车拉下来在内存里逐字段比」的做法在多实例下会
+ * 合并出两行(两个请求都读到旧数据)。
+ *
+ * ## 读购物车时**重算**单价
+ *
+ * `cart_item.unit_price_cents` 只是**缓存**。落库之后购物车能活过一次
+ * 部署,定价源(材质加价 / 配件价 / 基础价)改了之后,存量行带着旧价 ——
+ * 结算时用户看到的价跟实际收的价对不上。
+ *
+ * 所以每次读购物车都按 `metadata` 重算一遍。算不出来(比如某个材质下架了)
+ * 就退回存的那个价,别让整个购物车打不开。
+ *
+ * ## 账号归属
+ *
+ * cookie 是购物车的**唯一**身份。`cart.user_id` 只在两个时刻有意义:
+ *
+ * - **结算时**打上(那时必须登录)
+ * - **换设备登录时**用它找回「我的购物车」
+ *
+ * 游客浏览时不做会话查询 —— 那是热路径,每次读购物车都查一次 session 表
+ * 太贵。用户登录后 cookie 里还是游客那张车,结算时再打上 user_id。
  */
 
-import { randomBytes } from "node:crypto";
+import { and, eq, sql } from "drizzle-orm";
+import { nanoid } from "nanoid";
 import { cookies } from "next/headers";
 
+import { db } from "@/db";
+import { type CartItemRow, type CartRow, cart, cartItem } from "@/db/schema";
 import type { Cart, CartLineItem, CartLineItemMetadata } from "../types";
+import { computeSpecHash } from "./cart-spec";
 import { findProductById } from "./mock-catalog";
 import { calculatePricing } from "./pricing";
 
@@ -53,65 +90,219 @@ export async function clearCartId(): Promise<void> {
 }
 
 /* -------------------------------------------------------------------------- */
-/*  In-memory Map(模块级单例)                                                */
+/*  账号归属                                                                 */
 /* -------------------------------------------------------------------------- */
 
 /**
- * ⚠️ 服务端 in-memory 存储。
- * - 单进程 Vercel serverless:每次冷启动丢失,符合 mock 定位
- * - 持久化:不做,符合 mock 定位
- * - 切真 Medusa 时,此 Map 删除,Route Handlers 改为转发到 Medusa
+ * 当前登录用户 id —— 没有会话 / 不在 request 作用域里都返回 null
+ *
+ * 用 `auth.api.getSession` 而不是自己解 cookie:会话有效性得由 Better Auth
+ * 说了算。异常一律吞掉 —— 读购物车不该因为会话查询失败而整个挂掉。
  */
-const CARTS = new Map<string, Cart>();
-
-function generateId(prefix: string): string {
-  return `${prefix}_${randomBytes(8).toString("hex")}`;
+async function getCurrentUserId(): Promise<string | null> {
+  try {
+    const { getServerSession } = await import("@/lib/auth/server");
+    const session = await getServerSession();
+    return session?.user?.id ?? null;
+  } catch {
+    return null;
+  }
 }
 
-function nowIso(): string {
-  return new Date().toISOString();
+/* -------------------------------------------------------------------------- */
+/*  Row → Domain                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 按 metadata 重算一行的价
+ *
+ * 算不出来就退回存的值 —— 定价规则变了(材质下架 / 配件停售)不该让
+ * 整张购物车打不开,但那一行的价得让用户看见(或者让用户自己删掉)。
+ */
+function repriceLineItem(row: CartItemRow): CartLineItem {
+  const metadata = row.metadata as unknown as CartLineItemMetadata;
+
+  let unitPriceCents = row.unitPriceCents;
+  let discountedUnitPriceCents = row.unitPriceCents;
+
+  const product = findProductById(row.productId);
+  if (product) {
+    try {
+      const pricing = calculatePricing({
+        productId: row.productId,
+        productHandle: product.handle,
+        productTypeCode: product.productTypeCode,
+        materialId: metadata.materialId,
+        sizeId: metadata.sizeId,
+        aiStyleId: metadata.aiStyleId,
+        engravingText: metadata.engravingText,
+        rushOrder: metadata.rushOrder,
+        accessoryVariantIds: metadata.accessoryVariantIds ?? [],
+        quantity: row.quantity,
+        previewImageUrl: metadata.previewImage,
+        originalImageUrl: metadata.originalImage,
+      });
+      unitPriceCents = pricing.unitPriceCents;
+      discountedUnitPriceCents = pricing.discountedUnitPriceCents;
+    } catch {
+      // 定价失败 → 用存着的价兜底
+    }
+  }
+
+  return {
+    id: row.id,
+    cartId: row.cartId,
+    productId: row.productId,
+    productHandle: row.productHandle,
+    productTitle: row.productTitle,
+    productThumbnail: row.productThumbnail ?? "",
+    unitPriceCents,
+    discountedUnitPriceCents,
+    quantity: row.quantity,
+    metadata,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+/** cart 行 → domain Cart(带 items) */
+function toCart(row: CartRow, items: CartItemRow[]): Cart {
+  return {
+    id: row.id,
+    currencyCode: row.currencyCode as "CNY",
+    regionId: row.regionId,
+    items: items.map(repriceLineItem),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+/** 取 cart 的行 */
+async function loadCartRow(cartId: string): Promise<CartRow | null> {
+  const rows = await db.select().from(cart).where(eq(cart.id, cartId)).limit(1);
+  return rows[0] ?? null;
+}
+
+/** 取 cart 的行(按创建时间排序) */
+async function loadCartItemRows(cartId: string): Promise<CartItemRow[]> {
+  return db
+    .select()
+    .from(cartItem)
+    .where(eq(cartItem.cartId, cartId))
+    .orderBy(cartItem.createdAt);
 }
 
 /* -------------------------------------------------------------------------- */
 /*  Cart CRUD                                                                */
 /* -------------------------------------------------------------------------- */
 
-export function createCart(): Cart {
-  const id = generateId("cart");
-  const now = nowIso();
-  const cart: Cart = {
+/**
+ * 新建一张空购物车
+ *
+ * 不写 cookie —— 写 cookie 的是 `getOrCreateCart`(它知道是不是该复用
+ * 已有 cookie)。
+ */
+export async function createCart(userId?: string | null): Promise<Cart> {
+  const id = `cart_${nanoid(16)}`;
+  const now = new Date();
+
+  await db.insert(cart).values({
+    id,
+    userId: userId ?? null,
+    currencyCode: "CNY",
+    regionId: "china",
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  return {
     id,
     currencyCode: "CNY",
     regionId: "china",
     items: [],
-    createdAt: now,
-    updatedAt: now,
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
   };
-  CARTS.set(id, cart);
-  return cart;
-}
-
-export function getCart(cartId: string): Cart | null {
-  return CARTS.get(cartId) ?? null;
-}
-
-export function deleteCart(cartId: string): boolean {
-  return CARTS.delete(cartId);
 }
 
 /**
- * 拿 cart_id 对应的 cart;不存在就创建一个新 cart
- * (用于 /api/store/carts 的 POST handler)
+ * 取购物车(含行)
+ *
+ * 找不到返回 null。单价是**重算**过的,不是存的值。
+ */
+export async function getCart(cartId: string): Promise<Cart | null> {
+  const row = await loadCartRow(cartId);
+  if (!row) return null;
+  const items = await loadCartItemRows(cartId);
+  return toCart(row, items);
+}
+
+/**
+ * 删掉整张购物车(行跟着 cascade 走)
+ */
+export async function deleteCart(cartId: string): Promise<boolean> {
+  const deleted = await db
+    .delete(cart)
+    .where(eq(cart.id, cartId))
+    .returning({ id: cart.id });
+  return deleted.length > 0;
+}
+
+/**
+ * 拿 cart_id 对应的 cart;不存在就创建一张新的
+ *
+ * 顺序:
+ * 1. cookie 里的 cart 还在 → 用它
+ * 2. cookie 过期了(或者没有)→ 登录用户找回「我的购物车」
+ * 3. 都没有 → 新建
  */
 export async function getOrCreateCart(): Promise<Cart> {
-  const existingId = await getCartId();
-  if (existingId) {
-    const existing = getCart(existingId);
-    if (existing) return existing;
-    // cookie 有但内存里没有(可能冷启动过)→ 清掉 cookie,创建新 cart
+  const cookieId = await getCartId();
+
+  if (cookieId) {
+    const row = await loadCartRow(cookieId);
+    if (row) {
+      const items = await loadCartItemRows(cookieId);
+      return toCart(row, items);
+    }
+    // cookie 指向的 cart 没了(被删了 / 换了库)→ 清掉 cookie 往下走
     await clearCartId();
   }
-  return createCart();
+
+  // cookie 没了 —— 这时候才查一次会话(冷路径,不是热路径)
+  const userId = await getCurrentUserId();
+  if (userId) {
+    const rows = await db
+      .select()
+      .from(cart)
+      .where(eq(cart.userId, userId))
+      .limit(1);
+    const row = rows[0];
+    if (row) {
+      await setCartId(row.id);
+      const items = await loadCartItemRows(row.id);
+      return toCart(row, items);
+    }
+  }
+
+  const created = await createCart(userId);
+  await setCartId(created.id);
+  return created;
+}
+
+/**
+ * 给购物车打上主人(结算时调用 —— 那时必须登录)
+ *
+ * 游客购物车在结算这一刻「过户」给登录用户。
+ */
+export async function stampCartOwner(
+  cartId: string,
+  userId: string
+): Promise<void> {
+  await db
+    .update(cart)
+    .set({ userId, updatedAt: new Date() })
+    .where(eq(cart.id, cartId));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -125,34 +316,28 @@ export interface AddLineItemInput {
 }
 
 /**
- * 两份配件选择是否一致(配件是数组,顺序无关 —— 比对前先排序)。
- */
-function sameAccessories(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false;
-  const sa = [...a].sort();
-  const sb = [...b].sort();
-  return sa.every((v, i) => v === sb[i]);
-}
-
-/**
  * 加 line item 到 cart
- * - 同 spec 完全一致的 item 合并 quantity
+ *
+ * - 同 spec 完全一致的 item 合并数量(靠 `(cart_id, spec_hash)` 唯一索引)
  * - 不一致则新增
+ *
+ * 合并用 `ON CONFLICT DO UPDATE` + 数据库里的 `quantity + excluded.quantity`
+ * —— 原子操作,两个并发请求不会合并出两行,也不会丢掉一次加购。
  */
 export async function addLineItem(
   cartId: string,
   input: AddLineItemInput
 ): Promise<{ cart: Cart; lineItem: CartLineItem }> {
-  const cart = getCart(cartId);
-  if (!cart) throw new Error(`cart ${cartId} 不存在`);
+  const cartRow = await loadCartRow(cartId);
+  if (!cartRow) throw new Error(`cart ${cartId} 不存在`);
 
   const product = findProductById(input.productId);
   if (!product) throw new Error(`产品 ${input.productId} 不存在`);
 
   const quantity = input.quantity ?? 1;
 
-  // 调定价 API(用 mock pricing)
-  const pricing = await calculatePricing({
+  // 定价永远是服务端算的 —— 客户端带来的价一律不信
+  const pricing = calculatePricing({
     productId: input.productId,
     productHandle: product.handle,
     productTypeCode: product.productTypeCode,
@@ -167,32 +352,24 @@ export async function addLineItem(
     originalImageUrl: input.spec.originalImage,
   });
 
-  // 找现有同 spec 的 line item,合并
-  const existing = cart.items.find(
-    (item) =>
-      item.productId === input.productId &&
-      item.metadata.materialId === input.spec.materialId &&
-      item.metadata.sizeId === input.spec.sizeId &&
-      item.metadata.aiStyleId === input.spec.aiStyleId &&
-      item.metadata.engravingText === input.spec.engravingText &&
-      item.metadata.rushOrder === input.spec.rushOrder &&
-      sameAccessories(
-        item.metadata.accessoryVariantIds ?? [],
-        input.spec.accessoryVariantIds ?? []
-      ) &&
-      item.metadata.previewImage === input.spec.previewImage
-  );
+  const specHash = computeSpecHash({
+    productId: input.productId,
+    materialId: input.spec.materialId,
+    sizeId: input.spec.sizeId,
+    aiStyleId: input.spec.aiStyleId,
+    engravingText: input.spec.engravingText,
+    rushOrder: input.spec.rushOrder,
+    accessoryVariantIds: input.spec.accessoryVariantIds ?? [],
+    previewImage: input.spec.previewImage,
+  });
 
-  let lineItem: CartLineItem;
-  if (existing) {
-    existing.quantity += quantity;
-    existing.unitPriceCents = pricing.unitPriceCents; // 用最新定价
-    existing.updatedAt = nowIso();
-    lineItem = existing;
-  } else {
-    const now = nowIso();
-    lineItem = {
-      id: generateId("item"),
+  const now = new Date();
+
+  // 命中已有行 → 数量累加;否则插新行
+  const inserted = await db
+    .insert(cartItem)
+    .values({
+      id: `item_${nanoid(16)}`,
       cartId,
       productId: input.productId,
       productHandle: product.handle,
@@ -200,51 +377,98 @@ export async function addLineItem(
       productThumbnail: product.thumbnail,
       unitPriceCents: pricing.unitPriceCents,
       quantity,
-      metadata: input.spec,
+      metadata: input.spec as unknown as Record<string, unknown>,
+      specHash,
       createdAt: now,
       updatedAt: now,
-    };
-    cart.items.push(lineItem);
-  }
+    })
+    .onConflictDoUpdate({
+      target: [cartItem.cartId, cartItem.specHash],
+      set: {
+        // 数量原子累加 —— 单价用最新的定价覆盖
+        quantity: sql`${cartItem.quantity} + ${quantity}`,
+        unitPriceCents: pricing.unitPriceCents,
+        updatedAt: now,
+      },
+    })
+    .returning();
 
-  cart.updatedAt = nowIso();
-  CARTS.set(cartId, cart);
+  const row = inserted[0];
+  if (!row) throw new Error("加入购物车失败");
 
-  return { cart, lineItem };
+  await db.update(cart).set({ updatedAt: now }).where(eq(cart.id, cartId));
+
+  const fresh = await getCart(cartId);
+  if (!fresh) throw new Error(`cart ${cartId} 不存在`);
+
+  return { cart: fresh, lineItem: repriceLineItem(row) };
 }
 
-export function updateLineItemQuantity(
+/**
+ * 改数量(qty < 1 等同于删除)
+ */
+export async function updateLineItemQuantity(
   cartId: string,
   lineItemId: string,
   quantity: number
-): { cart: Cart; lineItem: CartLineItem } {
-  const cart = getCart(cartId);
-  if (!cart) throw new Error(`cart ${cartId} 不存在`);
-  const item = cart.items.find((it) => it.id === lineItemId);
-  if (!item) throw new Error(`line item ${lineItemId} 不存在`);
-
+): Promise<{ cart: Cart; lineItem: CartLineItem }> {
   if (quantity < 1) {
-    // qty=0 等同于删除
     return removeLineItem(cartId, lineItemId);
   }
-  item.quantity = quantity;
-  item.updatedAt = nowIso();
-  cart.updatedAt = item.updatedAt;
-  CARTS.set(cartId, cart);
-  return { cart, lineItem: item };
+
+  const rows = await db
+    .update(cartItem)
+    .set({ quantity, updatedAt: new Date() })
+    .where(and(eq(cartItem.id, lineItemId), eq(cartItem.cartId, cartId)))
+    .returning();
+
+  const row = rows[0];
+  if (!row) throw new Error(`line item ${lineItemId} 不存在`);
+
+  await db
+    .update(cart)
+    .set({ updatedAt: new Date() })
+    .where(eq(cart.id, cartId));
+
+  const fresh = await getCart(cartId);
+  if (!fresh) throw new Error(`cart ${cartId} 不存在`);
+
+  return { cart: fresh, lineItem: repriceLineItem(row) };
 }
 
-export function removeLineItem(
+/**
+ * 删一行
+ */
+export async function removeLineItem(
   cartId: string,
   lineItemId: string
-): { cart: Cart; lineItem: CartLineItem } {
-  const cart = getCart(cartId);
-  if (!cart) throw new Error(`cart ${cartId} 不存在`);
-  const idx = cart.items.findIndex((it) => it.id === lineItemId);
-  if (idx === -1) throw new Error(`line item ${lineItemId} 不存在`);
-  const [item] = cart.items.splice(idx, 1);
-  if (!item) throw new Error(`line item ${lineItemId} 已被删除`);
-  cart.updatedAt = nowIso();
-  CARTS.set(cartId, cart);
-  return { cart, lineItem: item };
+): Promise<{ cart: Cart; lineItem: CartLineItem }> {
+  const rows = await db
+    .delete(cartItem)
+    .where(and(eq(cartItem.id, lineItemId), eq(cartItem.cartId, cartId)))
+    .returning();
+
+  const row = rows[0];
+  if (!row) throw new Error(`line item ${lineItemId} 不存在`);
+
+  await db
+    .update(cart)
+    .set({ updatedAt: new Date() })
+    .where(eq(cart.id, cartId));
+
+  const fresh = await getCart(cartId);
+  if (!fresh) throw new Error(`cart ${cartId} 不存在`);
+
+  return { cart: fresh, lineItem: repriceLineItem(row) };
+}
+
+/**
+ * 清空购物车的行(下单成功后用 —— 购物车留着但清空,用户还能看到订单)
+ */
+export async function clearCartItems(cartId: string): Promise<void> {
+  await db.delete(cartItem).where(eq(cartItem.cartId, cartId));
+  await db
+    .update(cart)
+    .set({ updatedAt: new Date() })
+    .where(eq(cart.id, cartId));
 }

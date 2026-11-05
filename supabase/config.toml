@@ -1,0 +1,26 @@
+# Supabase 项目配置(共用项目模式)
+#
+# 本仓库的 Postgres 用 Drizzle 管(见 `drizzle/` + `scripts/apply-*.ts`),
+# **这个目录只放 Sellbase 的东西** —— 迁移文件 + 三个 Edge Function。
+#
+# ⚠️ 不要把本仓库自己的表迁移放进 `supabase/migrations/` ——
+# 两套迁移体系会抢同一张表。本仓库的表一律走 `scripts/apply-*.ts`。
+#
+# `npx sellbase init` 会往这个文件里追加 `[functions.*]` 段;
+# 我们只保留 Sellbase 需要的三个,verify_jwt = false(Sellbase 自己鉴权:
+# 会话 / sb_live_ token / 签名 webhook)。
+
+project_id = "ryetxrquondhkemqwmjk"
+
+# Sellbase: authenticates on its own (sessions, sb_live_ tokens, signed webhooks).
+[functions.sellbase-api]
+verify_jwt = false
+entrypoint = "./functions/sellbase-api/index.js"
+
+[functions.sellbase-webhooks]
+verify_jwt = false
+entrypoint = "./functions/sellbase-webhooks/index.js"
+
+[functions.sellbase-jobs]
+verify_jwt = false
+entrypoint = "./functions/sellbase-jobs/index.js"

@@ -11,7 +11,8 @@ import {
 
 /**
  * SSG —— mock 阶段静态化所有 12 个产品详情页
- * 切真 Medusa 后改用 generateMetadata + 客户端 useProduct 拉取即可
+ * 商品目录的真理源在本仓库,Sellbase 只做收银台 —— 目录不会外迁,
+ * 这条 SSG 路线长期有效,不用改成客户端拉取
  */
 export function generateStaticParams() {
   return MOCK_PRODUCTS.map((p) => ({ handle: p.handle }));

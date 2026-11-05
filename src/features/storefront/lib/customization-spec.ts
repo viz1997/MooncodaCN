@@ -5,8 +5,9 @@
  *  - CustomizationSpec: 客户端上传的 spec
  *  - specToMetadata(): 转成 CartLineItem.metadata 存到 cart
  *
- * 切真 Medusa 时:这个 contract 不变(写到 line item metadata),
- * 改由 Medusa schema 决定 server 端如何处理 metadata 字段。
+ * 这个 contract 是本仓库自己的,不随 commerce 后端变 —— 规格固化在
+ * cart line item 的 metadata 里,server 端怎么存怎么读是 server 端的事,
+ * 不影响这份契约。
  */
 
 import type {

@@ -1,9 +1,10 @@
 /**
  * GET /api/store/products/[handle] —— 单个产品详情
  *
- * 对齐 Medusa Store API `GET /store/products/{handle}`。
+ * 对齐 atelier 的 store 契约(`GET /store/products/{handle}`,简化版)。
  *
- * 切真 Medusa 时:转发到 Medusa Store API。
+ * 商品目录的真理源在本仓库,Sellbase 只做收银台 —— 这个 Route 永远读
+ * 本仓库的数据,不会转发出去。
  */
 
 import { NextResponse } from "next/server";

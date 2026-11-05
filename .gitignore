@@ -68,3 +68,10 @@ deploy.tgz
 秘密.md
 # claude code 临时
 .mcp_config*
+# 临时排查脚本(跑完即删,不入库)
+tmp-*.ts
+
+# Sellbase 的 Edge Function 产物(12 MB,从 npm 的 sellbase 包取,不入库)
+# 需要部署时跑:pnpm tsx scripts/fetch-sellbase-assets.ts
+supabase/functions/
+supabase/.temp/

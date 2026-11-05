@@ -6,17 +6,16 @@
  * 商城那个收「元」(float),这里一律收「分」(integer)。两边单位不同,
  * 硬复用会出「差 100 倍」这种错 —— 而且这类错在页面上看不出来,
  * 只会在对账时炸。所以这里单开一个收「分」的。
+ *
+ * 2026-11-04:`formatCents` 的实现搬到了 `@/lib/money` —— 商城结算页
+ * 也要用同一套「分 → ¥」,留在 feature 里就得复制一份。签名不变。
  */
+
+import { formatCents as formatCentsShared } from "@/lib/money";
 
 /** 分 → 「¥123.45」 */
 export function formatCents(cents: number, locale = "zh-CN"): string {
-  const yuan = cents / 100;
-  return new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency: "CNY",
-    minimumFractionDigits: Number.isInteger(yuan) ? 0 : 2,
-    maximumFractionDigits: 2,
-  }).format(yuan);
+  return formatCentsShared(cents, { locale });
 }
 
 /** 克重 → 「43 g」 */

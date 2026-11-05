@@ -1,8 +1,8 @@
 import { Github, Twitter } from "lucide-react";
-import Link from "next/link";
 import { useTranslations } from "next-intl";
 
 import { footerNav, siteConfig } from "@/config";
+import { Link } from "@/i18n/routing";
 
 export function Footer() {
   const t = useTranslations("Footer");
@@ -30,7 +30,7 @@ export function Footer() {
           </div>
 
           {/* 链接区 */}
-          <div className="grid grid-cols-2 gap-8">
+          <div className="grid grid-cols-2 gap-8 sm:grid-cols-3">
             {/* 产品 */}
             <div>
               <h3 className="mb-4 text-sm font-semibold">{t("product")}</h3>
@@ -62,6 +62,23 @@ export function Footer() {
                       className="text-sm text-muted-foreground transition-colors hover:text-foreground"
                     >
                       {link.title}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* 打印服务 —— 打印工单的须知 / 规范 / 售后 */}
+            <div>
+              <h3 className="mb-4 text-sm font-semibold">{t("service")}</h3>
+              <ul className="space-y-3">
+                {footerNav.service.map((link) => (
+                  <li key={link.href}>
+                    <Link
+                      href={link.href}
+                      className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      {link.titleKey ? t(link.titleKey) : link.title}
                     </Link>
                   </li>
                 ))}

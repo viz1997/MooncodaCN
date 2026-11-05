@@ -4,6 +4,10 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@sellbase/core@0.3.3': f965c21b5d477772277080e3c7ed5da49d738d69c5e9fb6a3f9b5d715d69141d
+  '@sellbase/sdk@0.3.3': 2a3e76c35bf1b44a9d5210c1ae72ed83105fab2444aad593b29e74ca44be46e0
+
 importers:
 
   .:
@@ -107,6 +111,9 @@ importers:
       '@resvg/resvg-js':
         specifier: ^2.6.2
         version: 2.6.2
+      '@sellbase/sdk':
+        specifier: 0.3.3
+        version: 0.3.3(patch_hash=2a3e76c35bf1b44a9d5210c1ae72ed83105fab2444aad593b29e74ca44be46e0)
       '@sentry/nextjs':
         specifier: ^10.37.0
         version: 10.37.0(@opentelemetry/context-async-hooks@2.5.0(@opentelemetry/api@1.9.0))(@opentelemetry/core@2.5.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.5.0(@opentelemetry/api@1.9.0))(next@16.1.4(@babel/core@7.28.6(supports-color@8.1.1))(@opentelemetry/api@1.9.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)(supports-color@8.1.1)(webpack@5.104.1(@swc/core@1.15.10)(esbuild@0.25.12))
@@ -3994,6 +4001,14 @@ packages:
   '@selderee/plugin-htmlparser2@0.11.0':
     resolution: {integrity: sha512-P33hHGdldxGabLFjPPpaTxVolMrzrcegejx+0GxjrIb9Zv48D8yAIA/QTDR2dFl7Uz7urX8aX6+5bCZslr+gWQ==}
 
+  '@sellbase/core@0.3.3':
+    resolution: {integrity: sha512-AvNPp09hxK1KGk9cSNAODmUSxB/Ax/zIzeC1Jb8QkmyhvmE+OW1odFJA9aeiRjRIkJIjY+8bO/eZ9Hwb+kK/lg==}
+    engines: {node: '>=20'}
+
+  '@sellbase/sdk@0.3.3':
+    resolution: {integrity: sha512-CEZ05a4WlSY5z7X16i9e3gwwRiV7hnrsLG7zgs7W53Bt7REHpZaNR4szrM0egQFlFJJ999tgngxm6nTVwFFhkQ==}
+    engines: {node: '>=20'}
+
   '@sentry-internal/browser-utils@10.37.0':
     resolution: {integrity: sha512-rqdESYaVio9Ktz55lhUhtBsBUCF3wvvJuWia5YqoHDd+egyIfwWxITTAa0TSEyZl7283A4WNHNl0hyeEMblmfA==}
     engines: {node: '>=18'}
@@ -7852,6 +7867,9 @@ packages:
 
   zod@4.3.6:
     resolution: {integrity: sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg==}
+
+  zod@4.6.7:
+    resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
 
   zustand@5.0.14:
     resolution: {integrity: sha512-/8tAspM5LMPr28b3fwLYrtdj77ECpfZviaP75CMTnwO8ISyaE4GDIG/9rDDYq/cH9D2Xw2A2RXglLInmVBQB/g==}
@@ -11874,6 +11892,15 @@ snapshots:
     dependencies:
       domhandler: 5.0.3
       selderee: 0.11.0
+
+  '@sellbase/core@0.3.3(patch_hash=f965c21b5d477772277080e3c7ed5da49d738d69c5e9fb6a3f9b5d715d69141d)':
+    dependencies:
+      zod: 4.6.7
+
+  '@sellbase/sdk@0.3.3(patch_hash=2a3e76c35bf1b44a9d5210c1ae72ed83105fab2444aad593b29e74ca44be46e0)':
+    dependencies:
+      '@sellbase/core': 0.3.3(patch_hash=f965c21b5d477772277080e3c7ed5da49d738d69c5e9fb6a3f9b5d715d69141d)
+      zod: 4.6.7
 
   '@sentry-internal/browser-utils@10.37.0':
     dependencies:
@@ -16356,6 +16383,8 @@ snapshots:
   zod@3.25.76: {}
 
   zod@4.3.6: {}
+
+  zod@4.6.7: {}
 
   zustand@5.0.14(@types/react@19.2.9)(immer@11.1.3)(react@19.2.3)(use-sync-external-store@1.6.0(react@19.2.3)):
     optionalDependencies:

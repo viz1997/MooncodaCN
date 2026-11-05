@@ -1091,6 +1091,11 @@
     "description": "Mooncoda 梦可达 — WJP 全彩 3D 打印专家，宠物徽章、钥匙扣、冰箱贴、手办等一件定制、一件发货。",
     "product": "作品",
     "legal": "条款",
+    "service": "打印服务",
+    "printNotice": "打印须知",
+    "designSpec": "3D模型设计规范",
+    "afterSales": "售后说明",
+    "orderNotice": "下单须知",
     "copyright": "© {year} {name}。保留所有权利。",
     "twitter": "微博",
     "github": "小红书"
@@ -1390,7 +1395,9 @@
     "page": {
       "eyebrow": "模型检查",
       "title": "打印前,先确认模型没有破面",
-      "description": "反转法向、缝隙与平面孔洞、退化面与非流形边、多余壳体与密封内腔 —— 按 WJP 全彩工艺标准一次查完,问题位置在 3D 里直接标色。"
+      "description": "反转法向、缝隙与平面孔洞、退化面与非流形边、多余壳体与密封内腔 —— 按 WJP 全彩工艺标准一次查完,问题位置在 3D 里直接标色。",
+      "designSpecLink": "几何检查过了?再对照一遍《3D模型设计规范》—— 壁厚、公差、悬臂、孔槽都有硬指标。",
+      "designSpecCta": "查看《3D模型设计规范》"
     },
     "app": {
       "title": "模型检查",
@@ -1671,7 +1678,8 @@
       "subtitle": "解析模型体积与表面积,按克重实时算价。调整尺寸、加跑智能摆盘,价格跟着变;确定要做就下单,工作室一个工作日内联系你。",
       "bulletUpload": "模型只在浏览器里解析,报价阶段不上传",
       "bulletPrice": "价格由服务器算,明细加起来等于合计",
-      "bulletOrder": "登录后下单,进度在「我的打印订单」里看"
+      "bulletOrder": "登录后下单,进度在「我的打印订单」里看",
+      "policyLabel": "下单前请先了解："
     },
     "quote": {
       "title": "报价明细",
@@ -1684,6 +1692,18 @@
       "varnishFee": "后处理",
       "total": "合计",
       "stale": "价格正在更新,请稍候"
+    },
+    "delivery": {
+      "label": "交期",
+      "hint": "按报价小计的比例加收",
+      "hours": "{hours} 小时",
+      "free": "免费",
+      "row": "交期 · {hours} 小时",
+      "tier": {
+        "standard": "标准",
+        "express": "加急",
+        "urgent": "特急"
+      }
     },
     "order": {
       "start": "填写下单信息",
@@ -1701,12 +1721,22 @@
       "uploading": "上传模型中…",
       "submitting": "提交中…",
       "cancel": "返回",
-      "payHint": "提交不扣款,工作室确认报价后另行结算。",
+      "payHint": "提交后跳转 Stripe 支付,付完才开工。",
+      "policyNotice": "下单前请先读一遍下面这几份 —— 它们是打印服务的硬性要求,照做能少一轮返工。",
+      "policyPrintNotice": "打印须知",
+      "policyDesignSpec": "3D模型设计规范",
+      "policyOrderNotice": "模型打印下单提示",
+      "policyAfterSales": "售后说明",
       "successTitle": "订单已提交",
       "successBody": "我们收到你的模型和报价请求了。",
       "orderNo": "订单号",
       "successHint": "订单已挂在你的账号下,可在「我的打印订单」里随时查进度。",
       "successLink": "去我的打印订单",
+      "viewDetail": "查看工单详情",
+      "payNow": "去支付",
+      "redirecting": "正在跳转支付…{seconds} 秒后自动跳转",
+      "paymentLinkFailed": "订单已创建,但支付链接生成失败",
+      "paymentLinkFailedHint": "在线支付暂时不可用 —— 你可以在工单详情页重试,或者联系工作室线下付款。",
       "errors": {
         "name": "请填写称呼",
         "noModel": "还没有可下单的模型",
@@ -1729,6 +1759,22 @@
       "COMPLETED": "已完成",
       "CANCELLED": "已取消"
     },
+    "payment": {
+      "status": {
+        "unpaid": "未付款",
+        "paid": "已付款",
+        "refunded": "已退款",
+        "failed": "付款失败"
+      },
+      "payNow": "去支付",
+      "loading": "准备支付链接…",
+      "paid": "已付款",
+      "refunded": "已退款",
+      "offlineHint": "在线支付没配好,可以联系工作室线下付款",
+      "errors": {
+        "LINK_FAILED": "支付链接生成失败,请稍后重试或联系工作室"
+      }
+    },
     "email": {
       "common": {
         "greeting": "{name},你好",
@@ -1747,7 +1793,7 @@
         "preview": "我们收到了你的打印订单 {orderNo}",
         "heading": "订单已提交",
         "body": "我们收到了你的模型和报价请求。工作室会在 1 个工作日内确认材质、颜色与交期,确认后你会收到邮件。",
-        "body2": "提交时不扣款 —— 工作室确认报价后另行结算。"
+        "body2": "提交后请完成在线支付 —— 工作室收到款之后才会开始生产。"
       },
       "statusChanged": {
         "subject": "打印订单 {orderNo}:{status}",
@@ -1776,6 +1822,13 @@
         "heading": "用户取消了打印订单",
         "body": "客户 {name} 取消了打印订单 {orderNo}。",
         "bodyWithNote": "客户留言:{note}"
+      },
+      "studioPaid": {
+        "subject": "打印订单 {orderNo} 已收款",
+        "preview": "工单 {orderNo} 收到付款",
+        "heading": "工单已收款",
+        "body": "客户 {name} 的打印订单 {orderNo} 已经付款。",
+        "body2": "现在可以把工单推到「生产中」了。"
       }
     },
     "timeline": {
@@ -1855,7 +1908,27 @@
         "ORDER_NOT_FOUND": "工单不存在",
         "INVALID_TRANSITION": "当前状态不能改成这个状态",
         "NOTE_REQUIRED": "回退必须写备注",
-        "SAME_STATUS": "状态没有变化"
+        "SAME_STATUS": "状态没有变化",
+        "PAYMENT_REQUIRED": "还没收款,不能开始生产"
+      },
+      "payment": {
+        "title": "收款",
+        "markPaid": "标记已收款",
+        "revoke": "撤销收款",
+        "marked": "已标记为已收款",
+        "alreadyPaid": "这单已经标记过收款了",
+        "revoked": "已撤销收款",
+        "paidAt": "收款时间",
+        "paidHint": "已收款。线上付款由 Stripe 回执自动确认。",
+        "channel": {
+          "stripe": "线上支付",
+          "offline": "线下转账"
+        },
+        "errors": {
+          "ORDER_NOT_FOUND": "工单不存在",
+          "ONLINE_PAYMENT": "线上付款不能撤销",
+          "FAILED": "操作失败,请稍后重试"
+        }
       },
       "submit": "确认修改",
       "discard": "取消"

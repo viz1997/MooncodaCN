@@ -21,9 +21,7 @@ import { describe, expect, it } from "vitest";
  * 这些都是纯函数的判断,写反例比在 dev 环境手动点便宜得多。
  */
 
-import {
-  PRINT_ORDER_STATUSES,
-} from "@/features/print-quote/lib/quote-types";
+import { PRINT_ORDER_STATUSES } from "@/features/print-quote/lib/quote-types";
 import {
   allowedNextStatuses,
   canTransition,
@@ -168,9 +166,7 @@ describe("isLiveStatus / isTerminalStatus", () => {
 describe("statusFlowIndex", () => {
   it("主流程上的状态按顺序排", () => {
     expect(statusFlowIndex("PENDING")).toBe(0);
-    expect(statusFlowIndex("COMPLETED")).toBe(
-      PRINT_ORDER_FLOW.length - 1
-    );
+    expect(statusFlowIndex("COMPLETED")).toBe(PRINT_ORDER_FLOW.length - 1);
   });
 
   it("取消不在主流程上", () => {
@@ -186,16 +182,16 @@ describe("i18n 状态文案齐全", () => {
   for (const locale of locales) {
     it(`${locale} 的 PrintQuote.status 覆盖每一个状态`, () => {
       const messages = JSON.parse(
-        readFileSync(
-          resolve(process.cwd(), `messages/${locale}.json`),
-          "utf8"
-        )
+        readFileSync(resolve(process.cwd(), `messages/${locale}.json`), "utf8")
       ) as {
         PrintQuote?: { status?: Record<string, string> };
       };
       const status = messages.PrintQuote?.status ?? {};
       for (const value of PRINT_ORDER_STATUSES) {
-        expect(status[value], `${locale} 缺 PrintQuote.status.${value}`).toBeTruthy();
+        expect(
+          status[value],
+          `${locale} 缺 PrintQuote.status.${value}`
+        ).toBeTruthy();
       }
     });
   }
