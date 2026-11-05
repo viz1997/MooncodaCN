@@ -493,9 +493,9 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 > 日志里留一条 warn(每进程每通道一条,不刷屏),指明该去哪个 `env.ts` 看要
 > 哪些变量。**没有这条日志的时候,这类故障在服务端是静默的** —— 界面上只
 > 是灰了一个选项,日志里只有一行 `POST /api/store/checkout 503`,看不出
-> 为什么(2026-11-05 线上真踩过:Shopify 只配了 `SHOPIFY_CLIENT_ID` /
-> `SHOPIFY_CLIENT_SECRET`,那俩是 Storefront API 的客户端凭据,不是建草稿
-> 单要的 Admin API token)。
+> 为什么(2026-11-05 线上真踩过:Shopify 换成了新的凭据模型,而代码只认旧的
+> 永久 token,于是「配了但用不上」——详见下面「Shopify 的凭据(2026-01-01
+> 起变了)」)。
 
 #### 通道清单
 
@@ -662,7 +662,35 @@ providers/
 |---|---|
 | 微信 | `WECHAT_PAY_MCH_ID` / `WECHAT_PAY_APP_ID` / `WECHAT_PAY_API_V3_KEY`(32 字节)/ `WECHAT_PAY_SERIAL_NO` / `WECHAT_PAY_PRIVATE_KEY`(或 `_PATH`)/ 验签材料 `WECHAT_PAY_PUBLIC_KEY` + `WECHAT_PAY_PUBLIC_KEY_ID` **或** `WECHAT_PAY_PLATFORM_CERT_DIR` / `WECHAT_PAY_NOTIFY_URL`(可省) |
 | 支付宝 | `ALIPAY_APP_ID` / `ALIPAY_APP_PRIVATE_KEY`(或 `_PATH`)/ `ALIPAY_PUBLIC_KEY`(**支付宝公钥**,不是应用公钥)/ `ALIPAY_GATEWAY`(可省)/ `ALIPAY_NOTIFY_URL` / `ALIPAY_RETURN_URL`(可省) |
-| Shopify | `SHOPIFY_STORE_DOMAIN` / `SHOPIFY_ADMIN_ACCESS_TOKEN`(`shpat_…`,要 `write_orders`)/ `SHOPIFY_API_SECRET`(收 webhook 要)/ `SHOPIFY_API_VERSION`(可省) |
+| Shopify | `SHOPIFY_STORE_DOMAIN` / `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET`(新模型;**secret 也是 webhook 的验签密钥**)/ 旧路可省:`SHOPIFY_ADMIN_ACCESS_TOKEN`(永久 token,配了就优先用)/ `SHOPIFY_API_SECRET`(独立验签密钥)/ `SHOPIFY_API_VERSION`(可省) |
+
+##### Shopify 的凭据(2026-01-01 起变了)
+
+**Shopify 从 2026-01-01 起不再给永久 token** —— 新 app 一律在 **Dev
+Dashboard** 里建,给的是 **Client ID + Client Secret**,没有可以复制的
+`shpat_…`。拿 Admin API token 改用 **client credentials grant**(OAuth 2.0
+RFC 6749 §4.4):
+
+```
+POST https://{shop}.myshopify.com/admin/oauth/access_token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=client_credentials&client_id=…&client_secret=…
+→ { "access_token": "shpat_…", "expires_in": 86400 }
+```
+
+- **token 只有 24 小时** → 代码里缓存住,到期前 5 分钟自己换;并发请求
+  单飞(同一时刻只发一次 grant)。见 `providers/shopify/env.ts` 的
+  `getShopifyAdminToken()`。
+- **Client Secret 就是 webhook 的 HMAC 密钥** —— `X-Shopify-Hmac-Sha256` =
+  `base64(HMAC-SHA256(原始 body, client secret))`。不用再单独配验签密钥
+  (旧 app 的 `SHOPIFY_API_SECRET` 仍然认,配了就优先用它)。
+- **app 要装在店铺上**,而且得跟店铺**同一个组织** —— 否则 grant 回
+  `app_not_installed`。scope 要含 `read_orders` + `write_orders`。
+- **4xx vs 5xx 分两类错**:4xx(凭据不对 / app 没装)=「没配好」,重试没用;
+  5xx / 网络不通 =「这次挂了」,重试就能好。见
+  `src/features/storefront/lib/payment-issue.ts`。
+- **密钥纪律**:Client Secret **只进环境变量**,绝不进仓库文件、绝不进聊天。
 
 #### 迁移脚本
 
@@ -684,6 +712,8 @@ providers/
 | `src/test/payments/pure/wechat-signature.test.ts` | 签名 / 解密 / 验签 |
 | `src/test/payments/pure/alipay-signature.test.ts` | RSA2 签名 / 验签 |
 | `src/test/payments/pure/shopify-signature.test.ts` | HMAC 验签 / 草稿单 |
+| `src/test/payments/pure/shopify-env.test.ts` | Shopify 凭据(Client ID / Secret、grant 换 token、缓存 / 单飞、4xx vs 5xx) |
+| `src/test/payments/pure/payment-channels.test.ts` | 开放名单 = 清单(三种都摆出来、旧路 stripe 不在) |
 | `src/test/payments/pure/storefront-transition.test.ts` | 状态转移(退款 / 迟到通知) |
 | `src/test/payments/pure/linked-print-order.test.ts` | 工单跟着商城订单变 |
 | `src/test/storefront/pure/checkout-payment-issue.test.ts` | 「没配好」vs「这次挂了」 |
@@ -701,11 +731,11 @@ providers/
    不进仓库文件、不进聊天。Vercel 上加完变量**要确认新部署已经生效**再让
    用户下单(环境变量是按部署快照的,加变量那一刻的构建可能还没带上它)
 
-   > **Shopify 那两个变量别搞混**:`SHOPIFY_ADMIN_ACCESS_TOKEN`(`shpat_…`,
-   > 需要 `write_orders` scope)+ `SHOPIFY_API_SECRET`(webhook 的 HMAC 密钥)
-   > 才是本仓库要的。`SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET` 是
-   > Storefront API / headless 的**客户端凭据**,跟建草稿单没关系 —— 只配
-   > 那两个的话,Shopify 在界面上是灰的,结算直接 503。
+   > **Shopify 的凭据**:`SHOPIFY_STORE_DOMAIN` + `SHOPIFY_CLIENT_ID` +
+   > `SHOPIFY_CLIENT_SECRET`(**Client Secret 就是 webhook 的验签密钥**,不用
+   > 再单独配)。旧 app 那种永久 token 走 `SHOPIFY_ADMIN_ACCESS_TOKEN` +
+   > `SHOPIFY_API_SECRET`,配了就优先用它们。app 记得**装在店铺上**、
+   > scope 要含 `read_orders` / `write_orders`。
 
 3. **登记回调地址** —— 各通道的通知地址要在对应平台上填:
    - 微信:商户平台 → 产品中心 → 开发配置 → 支付通知地址 →

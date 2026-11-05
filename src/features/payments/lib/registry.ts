@@ -111,10 +111,9 @@ const warnedChannels = new Set<string>();
  * ## 为什么要有这条
  *
  * 2026-11-05 线上踩过一次:结算接口 503,日志里只有一行
- * `POST /api/store/checkout 503` —— **看不出为什么**。查下去是 Shopify 的
- * `SHOPIFY_ADMIN_ACCESS_TOKEN` 没配(只有 `SHOPIFY_CLIENT_ID` /
- * `SHOPIFY_CLIENT_SECRET`,那是 Storefront API 的客户端凭据,不是 Admin
- * API 的 token)。
+ * `POST /api/store/checkout 503` —— **看不出为什么**。查下去是 Shopify 换
+ * 了凭据模型(2026-01-01 起给的是 Client ID / Client Secret,不再给永久
+ * token),而代码只认旧的 `SHOPIFY_ADMIN_ACCESS_TOKEN`,于是「配了但用不上」。
  *
  * 这种「配置没配好」在服务端是**静默**的:界面把没配好的通道藏起来,用户
  * 看到的只是「支付方式」那一栏不见了,或者结算直接 503。这条日志让它在

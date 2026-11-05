@@ -5,6 +5,11 @@
  *
  * 头 `X-Shopify-Hmac-Sha256` = `base64(HMAC-SHA256(原始 body, API secret))`。
  *
+ * **验签密钥就是 Client Secret** —— 2026-01-01 起 Shopify 不再给单独的
+ * API secret 了,Dev Dashboard 里那对 Client ID / Client Secret 中的 secret
+ * 就是 HMAC 的 key。旧 app 那种独立的 `SHOPIFY_API_SECRET` 仍然认(配了就
+ * 优先用)。见 `@/features/payments/providers/shopify/env.ts`。
+ *
  * **必须用原始字节验签** —— `await request.json()` 之后再 `JSON.stringify`
  * 回来的字节可能不一样(键序、空格、转义),签就对不上。这里先
  * `await request.arrayBuffer()` 拿原始字节,验完再 `toString("utf8")` 解析。

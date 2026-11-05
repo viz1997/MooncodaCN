@@ -38,7 +38,11 @@ export async function shopifyGraphql<T>(
   variables: Record<string, unknown>
 ): Promise<T> {
   const url = getShopifyGraphqlUrl();
-  const token = getShopifyAdminToken();
+  // **要 await** —— 新模型下 token 是 client credentials grant 换来的
+  // (24 小时有效),第一次调用要先去换一次。这个 `await` 在 try 外面 ——
+  // 换 token 失败要保留它自己的错误分类(4xx = 没配好,5xx = 这次挂了),
+  // 别被下面这个 catch 统统改成「请求没发出去」。
+  const token = await getShopifyAdminToken();
 
   let response: Response;
   try {
@@ -59,10 +63,25 @@ export async function shopifyGraphql<T>(
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
+    const detail = body.slice(0, 500);
+
+    // 401 / 403 = 凭据或权限不对 —— token 被拒、scope 不够、app 没装在店铺上。
+    // **重试没用**,得改配置(app 的 scope / 安装状态 / 凭据)。
+    // 归错类很重要:归成「这次挂了」的话,界面会一直让用户点「重试」,
+    // 而重一百次也是一样的结果。见 `@/features/storefront/lib/payment-issue.ts`。
+    if (response.status === 401 || response.status === 403) {
+      throw new ShopifyNotConfiguredError(
+        `Shopify 拒绝了这次请求(HTTP ${response.status})：${detail}` +
+          "—— 检查 app 的 scope(read_orders / write_orders)、" +
+          "app 有没有装在店铺上、凭据对不对"
+      );
+    }
+
+    // 429 / 5xx = Shopify 那边的问题 —— 重试有用
     throw new PaymentProviderError(
       "shopify",
       `Shopify 返回 HTTP ${response.status}`,
-      { cause: body.slice(0, 500) }
+      { cause: detail }
     );
   }
 
