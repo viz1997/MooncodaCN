@@ -113,6 +113,11 @@ lib/
 - **token 前缀必须是 `mooncoda_live_`,不是 `sb_live_`** —— `sb_` 是 Supabase 自己的 API key 命名空间,Edge 网关在进函数之前就把 `Bearer sb_…` 当 Supabase key 查表,查不到直接 401(`{"message":"Invalid API key"}`,不是 Sellbase 的错误形状)。解法是 `fetch-sellbase-assets.ts` 每次取回 bundle 时把 `BRAND.tokenPrefix` 打一下补丁;前缀唯一定义在 `scripts/lib/sellbase-token.ts`。
 - **`@sellbase/sdk` / `@sellbase/core` 是纯 ESM** —— 本仓库没有 `"type": "module"`,`pnpm tsx scripts/*.ts` 走 CJS 解析器,`require()` 直接 `ERR_PACKAGE_PATH_NOT_EXPORTED`。打了两个 pnpm patch(各加一条 `require` 条件,靠 Node 22+ 的 `require(esm)`),在 `patches/` 里,`pnpm-workspace.yaml` 的 `patchedDependencies` 登记。
 - **scripts 里的 dotenv 必须先加载** —— `src/db/index.ts` 在模块顶层就查 `DATABASE_URL`,静态 import 比模块体先跑,所以 `import "./lib/load-env"` **必须排 import 列表第一个**,否则 `@/db` 先炸。
+  - `scripts/` 里的脚本用 `import "./lib/load-env";`;**`src/db/` 里的两个 seed**
+    (`seed-products.ts` / `seed-product-accessory-variants.ts`)用
+    `import "../../scripts/lib/load-env";` —— 路径不同,道理一样
+  - **只有真连库的脚本才需要**。`scripts/apply-usd-currency-schema.ts` 自己
+    在模块体里加载 dotenv + 用 `pg` 直连,不 import `@/db`,所以它不受这条约束
 
 **写环境变量**统一走 `scripts/lib/env-file.ts` 的 `upsertEnvVar(path, key, value, {secret})` —— **替换**同名变量而不是追加(追加会出现两个同名变量,dotenv 取哪个取决于顺序,很容易踩「密钥明明配了却读不到」)。
 

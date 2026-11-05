@@ -32,6 +32,10 @@
  *   合计约 111 行
  */
 
+// ⚠️ 必须排 import 列表**第一个** —— `src/db/index.ts` 在模块顶层就查
+// `DATABASE_URL`,拿不到直接抛错。静态 import 比模块体先跑,所以 .env 得
+// 先加载,再让 `@/db` 被求值。顺序反了照样炸(见 scripts/lib/load-env.ts)。
+import "../../scripts/lib/load-env";
 import { db } from "@/db";
 import type { NewProductRow, NewProductVariantRow } from "@/db/schema";
 import { product, productAccessoryVariant, productVariant } from "@/db/schema";
