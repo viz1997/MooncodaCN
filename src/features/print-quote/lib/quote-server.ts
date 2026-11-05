@@ -215,6 +215,46 @@ export function computePrintQuote(input: PrintQuoteInput): PrintQuote | null {
 }
 
 /**
+ * 打印服务**购物车行**的价 —— 服务端权威
+ *
+ * 打印服务进了商城购物车之后,购物车里的这一行走的是「按克重计价」而不是
+ * 目录定价(见 `storefront/lib/print-service.ts`)。购物车每次被读出来都会
+ * 重算一遍(跟普通商品行走 `calculatePricing()` 一个道理)—— 定价参数改了之后,
+ * 存量购物车带着旧价,直接收就是收错了。
+ *
+ * ## 折扣:打印服务行**不参与**数量阶梯折扣
+ *
+ * 阶梯折扣是「买 10 个打九折」—— 打印服务是**来料加工**,一件活一个模型,
+ * 数量恒为 1(购物车 UI 里也不给加减)。所以折后单价 = 原价。
+ *
+ * 保留这个字段是为了让「行合计 = 折后单价 × 数量」这条恒等式对所有行都成立
+ * —— Sellbase 那边 `unit_price_amount × quantity` 收的钱必须跟本仓库
+ * 逐分相等(见 `storefront/lib/pricing.ts` 的文件头)。
+ *
+ * ## 跟工单的价是同一个数
+ *
+ * 结算时建的那张 `print_order`,`total_price_cents` 也是这个值 —— 同一个
+ * `computePrintQuote()` 算出来的,不会漂。
+ */
+export function computePrintServiceLinePrice(input: PrintQuoteInput): {
+  /** 原价(分) */
+  unitPriceCents: number;
+  /** 折后单价(分)—— 打印服务行恒等于原价 */
+  discountedUnitPriceCents: number;
+  /** 完整的报价(建工单时用) */
+  quote: PrintQuote;
+} | null {
+  const quote = computePrintQuote(input);
+  if (!quote) return null;
+  const cents = quote.totalPriceCents;
+  return {
+    unitPriceCents: cents,
+    discountedUnitPriceCents: cents,
+    quote,
+  };
+}
+
+/**
  * 生成业务订单号 —— `PO-20261101-3F7K2A`
  *
  * 格式:前缀 + 日期 + 6 位大写 hex。随机段用 `randomBytes` 而不是

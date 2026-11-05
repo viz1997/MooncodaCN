@@ -25,7 +25,15 @@
 
 "use client";
 
-import { Minus, Plus, ShoppingBag, Trash2, X, Zap } from "lucide-react";
+import {
+  Minus,
+  Package,
+  Plus,
+  ShoppingBag,
+  Trash2,
+  X,
+  Zap,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -35,12 +43,14 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { formatPriceCNY } from "@/features/marketing/components/storefront/wjp-store-data";
+import { getDeliveryTier } from "@/features/print-quote/lib/delivery-tier";
 import { useRouter } from "@/i18n/routing";
 
 import { useAtelierContainer } from "../hooks/use-atelier-container";
 import { useCart, useCartUi } from "../hooks/use-cart";
 import { findAccessoryVariant } from "../lib/mock-catalog";
 import { PRICING_CONSTANTS } from "../lib/pricing-constants";
+import { getPrintServiceSpec } from "../lib/print-service";
 import { formatSizeWithInches } from "../lib/size-format";
 
 const FREE_SHIPPING_THRESHOLD_CNY =
@@ -164,49 +174,79 @@ export function CartDrawer() {
               {items.map((item) => {
                 const itemTotalCents =
                   item.discountedUnitPriceCents * item.quantity;
+                /**
+                 * 打印服务行 —— 不是目录商品
+                 *
+                 * 判据是「有没有 printSpec」,不是 productId(见
+                 * `lib/print-service.ts`)。这一行没有封面图(手上是一个模型
+                 * 文件,不是图片),数量恒为 1(一活一模型)。
+                 */
+                const printSpec = getPrintServiceSpec(item.metadata);
                 // 配件名从字典反查 —— metadata 只存 id,改名/下架不用迁移存量 cart
                 const accessoryNames = (item.metadata.accessoryVariantIds ?? [])
                   .map((id) => findAccessoryVariant(id)?.name)
                   .filter((n): n is string => Boolean(n));
                 return (
                   <li key={item.id} className="flex gap-4 px-5 py-4">
-                    <img
-                      src={item.productThumbnail}
-                      alt={item.productTitle}
-                      className="size-24 object-cover rounded-sm bg-muted shrink-0"
-                      loading="lazy"
-                    />
+                    {printSpec ? (
+                      <div className="size-24 shrink-0 rounded-sm bg-secondary flex items-center justify-center">
+                        <Package className="size-8 text-muted-foreground" />
+                      </div>
+                    ) : (
+                      <img
+                        src={item.productThumbnail}
+                        alt={item.productTitle}
+                        className="size-24 object-cover rounded-sm bg-muted shrink-0"
+                        loading="lazy"
+                      />
+                    )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="font-serif text-[15px] leading-tight truncate">
                             {item.productTitle}
                           </p>
-                          {item.metadata.sizeCm > 0 && (
-                            <p className="text-[11px] text-muted-foreground mt-0.5">
-                              {formatSizeWithInches(item.metadata.sizeCm)}
-                            </p>
-                          )}
-                          {accessoryNames.length > 0 && (
-                            <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
-                              {accessoryNames.join(" · ")}
-                            </p>
-                          )}
-                          {item.metadata.engravingText && (
-                            <p className="text-[11px] text-muted-foreground mt-0.5 italic truncate">
-                              &ldquo;{item.metadata.engravingText}&rdquo;
-                            </p>
-                          )}
-                          {item.metadata.rushOrder && (
-                            <p className="text-[10px] uppercase tracking-[0.12em] text-accent mt-1 inline-flex items-center gap-1">
-                              <Zap className="size-3" />
-                              加急
-                            </p>
-                          )}
-                          {item.metadata.previewImage && (
-                            <p className="text-[10px] text-accent mt-0.5 uppercase tracking-[0.12em]">
-                              Custom preview
-                            </p>
+                          {printSpec ? (
+                            <>
+                              <p className="text-[11px] text-muted-foreground mt-0.5">
+                                {printSpec.dims[0]} × {printSpec.dims[1]} ×{" "}
+                                {printSpec.dims[2]} mm
+                              </p>
+                              <p className="text-[11px] text-muted-foreground mt-0.5">
+                                交期{" "}
+                                {getDeliveryTier(printSpec.deliveryTier).hours}{" "}
+                                小时
+                              </p>
+                            </>
+                          ) : (
+                            <>
+                              {item.metadata.sizeCm > 0 && (
+                                <p className="text-[11px] text-muted-foreground mt-0.5">
+                                  {formatSizeWithInches(item.metadata.sizeCm)}
+                                </p>
+                              )}
+                              {accessoryNames.length > 0 && (
+                                <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                                  {accessoryNames.join(" · ")}
+                                </p>
+                              )}
+                              {item.metadata.engravingText && (
+                                <p className="text-[11px] text-muted-foreground mt-0.5 italic truncate">
+                                  &ldquo;{item.metadata.engravingText}&rdquo;
+                                </p>
+                              )}
+                              {item.metadata.rushOrder && (
+                                <p className="text-[10px] uppercase tracking-[0.12em] text-accent mt-1 inline-flex items-center gap-1">
+                                  <Zap className="size-3" />
+                                  加急
+                                </p>
+                              )}
+                              {item.metadata.previewImage && (
+                                <p className="text-[10px] text-accent mt-0.5 uppercase tracking-[0.12em]">
+                                  Custom preview
+                                </p>
+                              )}
+                            </>
                           )}
                         </div>
                         <button
@@ -225,42 +265,49 @@ export function CartDrawer() {
                       </div>
 
                       <div className="flex items-center justify-between mt-3">
-                        <div className="flex items-center border rounded-full">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              updateLineItemQuantity.mutate({
-                                lineItemId: item.id,
-                                quantity: item.quantity - 1,
-                              })
-                            }
-                            disabled={
-                              updateLineItemQuantity.isPending ||
-                              item.quantity <= 1
-                            }
-                            aria-label="减少数量"
-                            className="size-8 flex items-center justify-center hover:bg-secondary rounded-l-full transition-colors disabled:opacity-30"
-                          >
-                            <Minus className="size-3" />
-                          </button>
-                          <span className="w-8 text-center text-sm font-medium">
-                            {item.quantity}
+                        {printSpec ? (
+                          // 打印服务恒为一件 —— 不给加减(一活一模型)
+                          <span className="text-[11px] text-muted-foreground">
+                            × 1
                           </span>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              updateLineItemQuantity.mutate({
-                                lineItemId: item.id,
-                                quantity: item.quantity + 1,
-                              })
-                            }
-                            disabled={updateLineItemQuantity.isPending}
-                            aria-label="增加数量"
-                            className="size-8 flex items-center justify-center hover:bg-secondary rounded-r-full transition-colors disabled:opacity-50"
-                          >
-                            <Plus className="size-3" />
-                          </button>
-                        </div>
+                        ) : (
+                          <div className="flex items-center border rounded-full">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateLineItemQuantity.mutate({
+                                  lineItemId: item.id,
+                                  quantity: item.quantity - 1,
+                                })
+                              }
+                              disabled={
+                                updateLineItemQuantity.isPending ||
+                                item.quantity <= 1
+                              }
+                              aria-label="减少数量"
+                              className="size-8 flex items-center justify-center hover:bg-secondary rounded-l-full transition-colors disabled:opacity-30"
+                            >
+                              <Minus className="size-3" />
+                            </button>
+                            <span className="w-8 text-center text-sm font-medium">
+                              {item.quantity}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateLineItemQuantity.mutate({
+                                  lineItemId: item.id,
+                                  quantity: item.quantity + 1,
+                                })
+                              }
+                              disabled={updateLineItemQuantity.isPending}
+                              aria-label="增加数量"
+                              className="size-8 flex items-center justify-center hover:bg-secondary rounded-r-full transition-colors disabled:opacity-50"
+                            >
+                              <Plus className="size-3" />
+                            </button>
+                          </div>
+                        )}
                         <p className="text-sm font-medium">
                           {formatPriceCNY(itemTotalCents / 100)}
                         </p>

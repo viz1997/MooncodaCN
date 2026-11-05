@@ -12,7 +12,7 @@ Mooncoda is a production-ready Next.js SaaS template. It provides a complete fou
 
 | 系统 | 职责 | 技术栈 |
 |---|---|---|
-| **NextDevTpl**(本仓库) | AI 生图 SaaS 后端:user / credits / photo / imageJob / AI 路由 / WeChat 小程序登录 **+ 商品目录(商品 / SKU 变体 / 价格)+ 定价 + 购物车 + 订单事实 + 收货地址 + 打印工单(`/quote` 报价 → `print_order`,按 `user_id` 归属,登录后下单)** | Next.js 16 + Drizzle + PostgreSQL |
+| **NextDevTpl**(本仓库) | AI 生图 SaaS 后端:user / credits / photo / imageJob / AI 路由 / WeChat 小程序登录 **+ 商品目录(商品 / SKU 变体 / 价格)+ 定价 + 购物车 + 订单事实 + 收货地址 + 打印工单(`/quote` 报价 → `print_order`,按 `user_id` 归属,登录后下单;也可以从 `/tools/weight` 直接加进商城购物车,见「打印服务进商城购物车」)** | Next.js 16 + Drizzle + PostgreSQL |
 | **Sellbase**(独立服务) | **只做收银台**:Stripe 支付链接 + 收款状态 + 收据。商品目录是同步过去的**镜像**,不是真理源 | Supabase Edge Functions(**跟本仓库同一个 Supabase 项目**)+ Stripe(MIT) |
 | **微信小程序 / 浏览器访客**(外部客户端) | 调 NextDevTpl AI 接口拿候选图 **+ 调 `/api/image-gen/products` 拿商品与 SKU**;调 NextDevTpl `/api/store/**` 加购 + 结算;支付时全页跳转 Stripe | Taro 4 + React 18(小程序);Next.js(浏览器) |
 
@@ -223,7 +223,7 @@ All tables use `text` primary keys with `nanoid()` defaults.
 | `cart` / `cart_item` | 购物车落库(cookie `wjp_cart_id`);`cart_item.spec_hash` + `(cart_id, spec_hash)` 唯一索引负责「同规格合并」 |
 | `storefront_order` / `storefront_order_item` | 商城订单事实;`sellbase_order_id` 唯一索引供 webhook 反查,`payment_url` 是 Stripe 支付链接副本;`status`(订单状态)和 `payment_status`(支付状态)**分两列** |
 | `address` | 收货地址簿 —— **必须留在本仓库**,Sellbase 的 `customer.addresses` 只读,没有创建地址的路由 |
-| `print_order` | 打印工单;加过五列 `payment_status` / `payment_channel` / `sellbase_order_id` / `payment_url` / `paid_at`;另有交期两列 `delivery_tier` / `delivery_fee_cents`(见「打印工单交期档位」) |
+| `print_order` | 打印工单;加过五列 `payment_status` / `payment_channel` / `sellbase_order_id` / `payment_url` / `paid_at`;另有交期两列 `delivery_tier` / `delivery_fee_cents`(见「打印工单交期档位」);走商城购物车结算的工单挂 `storefront_order_id`(见「打印服务进商城购物车」) |
 
 `user.sellbase_customer_id`(原 `medusa_customer_id`)只是**加速指针** —— Sellbase 的 customer 按 **email** upsert,真正的 join key 永远是 email。
 
@@ -394,6 +394,126 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
   的绝对金额)—— 比例以后会改,工单上的价不能跟着变。迁移脚本
   `scripts/apply-print-order-delivery-tier-schema.ts`(幂等)。
 - 行为由 `src/test/print-quote/pure/delivery-tier.test.ts` 守住。
+
+### 打印服务进商城购物车(2026-11-05)
+
+克重工具(`/tools/weight`)量完之后**可以直接加入购物车**,跟别的商品一起结算。
+一次结算同时出 `SO-…`(商城订单)和 `PO-…`(打印工单),钱一次付清。
+
+```
+克重工具量出几何 → 服务端报价(同一套接口)
+  → 点「加入购物车」→ 模型打包上传 R2(按用户分区)
+  → POST /api/store/carts/{id}/line-items(带 printSpec)
+  → 服务端**重算**一遍价 → 落购物车
+  → 结算 → 同一个事务里落 storefront_order + print_order
+```
+
+- **打印服务不是目录商品** —— 它是「来料加工」:用户自带 3D 模型,按克重计价,
+  目录里没有对应 SKU。判据是 `metadata.printSpec` 在不在,**不是** `productId`
+  (`productId` 是个哨兵值 `service_print_3d`,拿去 `findProductById()` 查不到
+  是**预期**的)。共享契约在 `src/features/storefront/lib/print-service.ts`
+  (纯文件,客户端和服务端都 import —— 不能在里面 import 服务端模块)。
+- **报价在两个页面必须是同一个数** —— `/quote` 和 `/tools/weight` 共用
+  `usePrintQuote()`(`src/features/print-quote/hooks/use-print-quote.ts`):
+  同样的防抖、同样的「旧响应盖掉新响应」防护、同样的 `quoteFresh` 判定。
+  两处各写一遍的话,改了一处忘了另一处就会出现「报价台说 61.18、工具页说
+  61.20」。
+- **模型只在用户点「加入购物车」那一刻才上传** —— 量重量的过程模型一个字节
+  都不出浏览器。上传是加购动作的一部分,不是量重量的副产品。
+- **加购要登录** —— 模型要落到 R2,而且工单必须挂在账号名下。未登录时按钮
+  变成登录链接(登录态由页面 RSC 查好传下去)。
+- **打印服务行恒为一件** —— 一活一模型,没有数量阶梯折扣。购物袋 / 结算页
+  不给 +/− 按钮。
+- **打印服务行没有封面图** —— 手上是模型文件(一个 zip),不是图片。metadata
+  的 `productThumbnail` 是空串,购物袋 / 结算页画一个包裹图标。
+- **服务端重建 metadata** —— 客户端带来的标题 / 封面 / handle 一律不采信
+  (`buildPrintServiceMetadata()`)。
+- **模型归属校验在服务端** —— `isOwnModelUrl(url, objectKey, userId)` +
+  `objectExists(objectKey)`:别人的模型、伪造的 URL、指向空对象的链接都不行。
+- 落库:`print_order.storefront_order_id`(不是 `sellbase_order_id` —— 整张
+  购物车共用**一张** Sellbase 订单,而 `print_order.sellbase_order_id` 是唯一
+  索引,挂不上)。迁移脚本
+  `scripts/apply-print-order-storefront-link-schema.ts`(幂等)。
+- **webhook 标商城订单 paid 时,挂在它下面的工单一起标 paid** —— 钱是整单
+  收的,工单还停在「未付款」的话,工作室点「开始生产」会被 `PAYMENT_REQUIRED`
+  挡住。判断在 `storefront-transition.ts` 的
+  `decideLinkedPrintOrderTransition()`(纯函数),落库在
+  `webhook-handler.ts` 的 `syncLinkedPrintOrders()`。
+- 行为由 `src/test/storefront/pure/print-service-cart.test.ts`(购物车行的
+  判据 / hash / 形状)和 `src/test/sellbase/pure/linked-print-order.test.ts`
+  (工单跟着商城订单变)守住。
+
+### Stripe 微信支付 / 支付宝(2026-11-05)
+
+Sellbase 的 `createCheckout()` 把 `payment_method_types: ["card"]` **写死**
+在边函数 bundle 里 —— 没有 store 级配置项,`supportedMethods(country)` 也是
+硬编码。想在收银台里出「微信支付 / 支付宝」,只能改 bundle。
+
+- **补丁在 `scripts/fetch-sellbase-assets.ts` 里**(`patchStripePaymentMethods()`),
+  每次取回 bundle 都重打一遍 —— 升级 Sellbase 版本不会漏。`--patch-only` 可以
+  只重打补丁不重新下载。
+- 改两处:`payment_method_types` 扩成 `["card","alipay","wechat_pay"]`,并给
+  微信补 `payment_method_options: { wechat_pay: { client: "web" } }`
+  (微信在 Checkout Session 里必须显式指定客户端类型,网页跳转是 `web`,
+  `mobile` 是给小程序 / App 原生 SDK 的)。
+- **支付方式清单可配** —— `SELLBASE_STRIPE_PAYMENT_METHODS` 环境变量,默认
+  `alipay,wechat_pay`,设成空串就只留银行卡。Stripe 会拒收**账号没开通**的
+  支付方式,而且是整个 Checkout Session 建不出来(连银行卡也一起挂)。
+- **账号要支持** —— 实测这个香港账号(test key)在 test mode 下 `card` /
+  `alipay` / `wechat_pay` 三种都建得出 Session。但**线上还要在 Stripe
+  Dashboard 里开通**(Settings → Payment methods)—— 测试模式能用 ≠ 线上能用。
+- **`paymentMethodFrom()` 不改** —— bundle 里那个函数把
+  `payment_method_types[0]` 映射成 Sellbase 的支付方式名,改了会吐出
+  `"alipay"` / `"wechat_pay"` 这种 Sellbase 自己的表可能没有的值(枚举 / CHECK
+  约束),webhook 落库会失败 —— **收了钱但没记账**。让它继续报 `"card"`:
+  钱走得对,只是 Sellbase 后台看到的支付方式名是「card」。
+
+### 支付链接失败:分清「没配好」和「这次挂了」(2026-11-05)
+
+**线上踩过一次的故障**:`SO-20261105-942D88` 提示「订单已创建,但支付链接生成
+失败」,订单落库了但 `sellbase_order_id` / `payment_url` 都是 NULL,Sellbase 那边
+**连订单都没有**。
+
+**根因(Vercel 环境变量的快照语义)**:那次请求打到的部署是
+`bjb3vvvl2`(构建于 04:51:55Z)—— 正好是 Vercel 触发「新增 Sellbase 环境变量」
+后重建的那一次。**环境变量是按部署快照的**:加变量的那一刻触发的构建,快照
+里可能还没有那个变量。那次构建里 `SELLBASE_API_TOKEN` / `SELLBASE_URL` 都读
+不到 → `getSellbaseConfig()` 抛 `SellbaseNotConfiguredError`。
+
+- **`getSellbaseAdmin()` 在 `createSellbaseOrder()` 的 try **外面** **
+  —— 配置错误原样抛上来,没被包成 `SellbaseOrderCreationError`,于是
+  「找回孤儿单」那段逻辑(`findSellbaseOrderByNote()`)根本没跑到。表现就是
+  Sellbase 里查无此单。
+- **结算是「先落本地订单,再建 Sellbase 订单」** —— 所以这次故障的形态是
+  「本地订单在、支付链接没有」,订单**没有**丢,钱也**没有**被收走(用户没
+  付)。这条设计救了这次事故。
+- **修法**:部署环境变量之后**要确认新部署已经生效**再让用户下单。Vercel 上
+  加环境变量会触发一次重建,那次构建的产物才是带新变量的。
+
+**代码层面的加固**:光说「生成支付链接失败」不够 —— 「收款通道没配好」和
+「这次调用挂了」对用户是两件完全不同的事,前者重试**没用**。
+
+| 情况 | 重试有用吗 | 用户该做什么 |
+|---|---|---|
+| `SELLBASE_NOT_CONFIGURED` | ❌ 没用,每次都一样 | 等部署补上配置 / 联系工作室 |
+| `SELLBASE_FAILED` | ✅ 有用 | 点「重新获取支付链接」 |
+
+- 分类在 `src/features/storefront/lib/payment-issue.ts` 的
+  `classifyPaymentIssue()` —— **纯函数**(不碰 DB、不碰网络),才能进 `unit`
+  project 跑测试。放在 `checkout.ts` 里的话 import 它就会把 `@/db` 拖进来。
+- 结算接口返回体多一个 `paymentIssue` 字段(`null` = 没失败)。前端按它分两种
+  话术。
+- **重取链接的两个入口都返回这个码** —— `ensureStorefrontOrderPaymentLink()`
+  (商城)和 `ensurePrintOrderPaymentLink()`(工单)开头都先查
+  `isSellbaseConfigured()`,通不过就直接返回 `SELLBASE_NOT_CONFIGURED`,不再
+  白跑一趟网络。之前这两个函数里都有一段**永远返回不到**的
+  `SELLBASE_NOT_CONFIGURED` 代码 —— 声明了但没接上,现在接上了。
+- 行为由 `src/test/storefront/pure/checkout-payment-issue.test.ts` 守住。
+
+**用户那单怎么救**:线上已经部署了 `POST /api/store/orders/{orderNo}/payment-link`,
+`ensureStorefrontOrderPaymentLink()` 会用 `storefront_order_item` 里**存下来的**
+折后单价重建一张 Sellbase 订单(**不重算价** —— 用户下单时同意的是那个价),
+然后拿到 Stripe 链接。用户去「我的订单」点「重新获取支付链接」就行。
 
 ## Coding Conventions
 

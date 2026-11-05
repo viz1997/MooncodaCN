@@ -26,6 +26,10 @@
  * 本地订单先落库,再建 Sellbase 订单。Sellbase 那边失败时订单照样在,
  * 状态停在 `unpaid`,响应里 `paymentUrl` 是 null —— 前端提示「订单已创建,
  * 支付链接生成失败」,用户可以在详情页重取。
+ *
+ * 响应里还有一个 `paymentIssue` 字段(`null` = 没失败):区分「收款通道没配
+ * 好」(重试没用)和「这次调用挂了」(重试有用),话术不一样。见
+ * `features/storefront/lib/payment-issue.ts`。
  */
 
 import { cookies } from "next/headers";
@@ -53,6 +57,13 @@ const checkoutSchema = z.object({
   addressId: z.string().min(1).max(64),
   /** 用户留言 */
   note: z.string().max(500).nullish(),
+  /**
+   * 界面语言(`en` / `zh`)—— 打印工单的邮件通知语言
+   *
+   * 不传 = 中文。落库而不是取「当前请求的 locale」:改状态的邮件是**工作室**
+   * 触发的,那时请求 locale 是 admin 的语言,不是下单用户的语言。
+   */
+  locale: z.enum(["en", "zh"]).nullish(),
 });
 
 /** CheckoutError 的 code → HTTP 状态 */
@@ -145,6 +156,7 @@ async function handle(request: NextRequest) {
         detail: address.detail,
       },
       note: parsed.data.note ?? null,
+      locale: parsed.data.locale ?? null,
     });
 
     return NextResponse.json(result, { headers: getRateLimitHeaders(rl) });

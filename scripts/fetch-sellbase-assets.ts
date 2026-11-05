@@ -31,12 +31,15 @@
  * 跑完 `supabase/functions/<name>/index.js` 就在位,可以
  * `supabase functions deploy sellbase-api --no-verify-jwt`。
  *
- * ## 顺带打一个补丁
+ * ## 顺带打两个补丁
  *
- * 取回之后会把 bundle 里的 `BRAND.tokenPrefix` 从 `sb_live_` 改成
- * `mooncoda_live_` —— Sellbase 默认的 `sb_` 前缀撞了 Supabase 自己的
- * API key 命名空间,网关会在进函数之前就把请求 401 掉。细节和踩坑记录见
- * `scripts/lib/sellbase-token.ts`。
+ * 1. **token 前缀**:把 bundle 里的 `BRAND.tokenPrefix` 从 `sb_live_` 改成
+ *    `mooncoda_live_` —— Sellbase 默认的 `sb_` 前缀撞了 Supabase 自己的
+ *    API key 命名空间,网关会在进函数之前就把请求 401 掉。细节和踩坑记录见
+ *    `scripts/lib/sellbase-token.ts`。
+ * 2. **Stripe 支付方式**:把 `payment_method_types: ["card"]` 扩成
+ *    `["card", "alipay", "wechat_pay"]`,并给微信补上
+ *    `payment_method_options[wechat_pay][client] = "web"`。
  *
  * 补丁**每次取回都重打一遍**,所以升级 Sellbase 版本不会漏。
  */
@@ -64,6 +67,17 @@ const FUNCTIONS = [
   "sellbase-jobs",
 ] as const;
 
+/**
+ * 额外的 Stripe 支付方式 —— 环境变量名
+ *
+ * 跟账号所在地区有关,不是一份写死的清单:香港的 Stripe 账号支持微信支付
+ * 和支付宝,别的地区不一定支持 —— Stripe 会拒收**没有开通**的支付方式,
+ * 而且是整个 Checkout Session 建不出来(连银行卡也一起挂)。
+ *
+ * 所以这个清单**可配**:想关就把它设成空串,重新取一次 + 重新部署。
+ */
+const PAYMENT_METHODS_ENV = "SELLBASE_STRIPE_PAYMENT_METHODS";
+
 /** 仓库里放它们的地方 */
 const OUT_DIR = resolve(process.cwd(), "supabase", "functions");
 
@@ -73,6 +87,16 @@ function readVersionFlag(): string | null {
   if (index < 0) return null;
   const value = process.argv[index + 1];
   return value && !value.startsWith("--") ? value : null;
+}
+
+/**
+ * `--patch-only` → 只重打补丁,不重新下载
+ *
+ * 改了支付方式清单(或者换了 token 前缀)之后,只想把补丁重打一遍,不想再从
+ * npm 拉 12 MB 的 bundle —— 这个模式就是干这个的。
+ */
+function readPatchOnlyFlag(): boolean {
+  return process.argv.includes("--patch-only");
 }
 
 /** 跟 `@sellbase/sdk` 对齐 —— 边函数是它调的那一端 */
@@ -205,6 +229,10 @@ function patchTokenPrefix(file: string): void {
   const replacement = `tokenPrefix: "${SELLBASE_TOKEN_PREFIX}"`;
 
   const source = readFileSync(file, "utf8");
+
+  // 已经打过补丁了 —— 幂等,`--patch-only` 重跑不报错
+  if (source.includes(replacement)) return;
+
   const hits = source.split(needle).length - 1;
 
   if (hits !== 1) {
@@ -217,25 +245,131 @@ function patchTokenPrefix(file: string): void {
   writeFileSync(file, source.replace(needle, replacement), "utf8");
 }
 
+/**
+ * 读额外支付方式清单
+ *
+ * 没设这个环境变量 = 用默认的 `alipay,wechat_pay`(工作室要收微信和支付宝)。
+ * 设成空串 = 什么都不加,只留银行卡。
+ */
+function readExtraPaymentMethods(): string[] {
+  const raw = process.env[PAYMENT_METHODS_ENV];
+  if (raw === undefined) return ["alipay", "wechat_pay"];
+  return raw
+    .split(",")
+    .map((method) => method.trim())
+    .filter(Boolean);
+}
+
+/**
+ * 把 Stripe 的支付方式扩成「银行卡 + 微信 + 支付宝」
+ *
+ * ## 为什么改 bundle 而不是改配置
+ *
+ * Sellbase 的 `createCheckout()` 把 `payment_method_types: ["card"]` **写死**
+ * 在 bundle 里 —— 没有 store 级的配置项,`supportedMethods(country)` 也是
+ * 硬编码的常量。想在收银台里出「微信支付 / 支付宝」,只能改 bundle。
+ *
+ * 改的位置在 `scripts/fetch-sellbase-assets.ts` 里 —— 每次取回都重打一遍,
+ * 所以升级 Sellbase 版本不会漏(不会像「手工改 dist」那样被覆盖掉)。
+ *
+ * ## 为什么微信要额外给 `payment_method_options`
+ *
+ * Stripe 的微信支付在 Checkout Session 里必须显式指定客户端类型
+ * (`client`)。我们走的是**网页跳转**(`mode: "redirect"`),所以是
+ * `web`;`mobile` 是给小程序 / App 的原生 SDK 用的,配错了会直接报错。
+ *
+ * 支付宝不需要 options。
+ *
+ * ## 微信 + 支付宝对 CNY 的支持
+ *
+ * Stripe 的微信支付 / 支付宝都支持 CNY 结算 —— 这一点实测过(测试模式
+ * 建 Session 成功)。但**用户所在地区**有要求(微信 / 支付宝各有支持的国家
+ * 列表),这是 Stripe 那边按付款人所在地判的,不是我们能配的。
+ *
+ * ## 改了之后要做什么
+ *
+ * 改完只是 bundle 变了,还要:
+ *
+ * 1. `supabase functions deploy sellbase-api --no-verify-jwt`
+ * 2. 在 Stripe Dashboard 里**开通**这些支付方式(Settings → Payment
+ *    methods)—— 测试模式能用不代表线上能用
+ */
+function patchStripePaymentMethods(file: string, extra: string[]): void {
+  const source = readFileSync(file, "utf8");
+
+  const allMethods = ["card", ...extra.filter((m) => m !== "card")];
+  const methodsLiteral = allMethods.map((m) => `"${m}"`).join(", ");
+
+  // ① `payment_method_types` —— 真正决定收银台出哪些支付方式
+  const typeMatch = source.match(
+    /^([ \t]*)payment_method_types: \["card"\],$/m
+  );
+
+  if (!typeMatch) {
+    // 已经打过补丁了 —— 幂等,`--patch-only` 重跑不报错
+    if (source.includes(`payment_method_types: [${methodsLiteral}],`)) return;
+    throw new Error(
+      `${file}: 找不到 \`payment_method_types: ["card"]\` —— ` +
+        "上游 bundle 结构变了,补丁要跟着改(别硬来)"
+    );
+  }
+
+  const indent = typeMatch[1] ?? "";
+  let replacement = `payment_method_types: [${methodsLiteral}],`;
+  // 微信必须有 client —— 网页跳转是 "web",小程序 / App 才是 "mobile"
+  if (extra.includes("wechat_pay")) {
+    replacement +=
+      `\n${indent}payment_method_options: { wechat_pay: { client: "web" } },`;
+  }
+
+  let patched = source.replace(typeMatch[0], `${indent}${replacement}`);
+
+  // ② `supportedMethods` —— 报告给前端的「支持哪些方式」。目前 bundle 里
+  //    没有调用点,但上游哪天接上了就会用这份清单,一起改掉省得返工。
+  const supportedNeedle = 'country === "MX" ? ["card", "oxxo"] : ["card"]';
+  if (patched.includes(supportedNeedle)) {
+    const extraLiteral = extra.map((m) => `"${m}"`).join(", ");
+    const fallback = `["card"${extraLiteral ? `, ${extraLiteral}` : ""}]`;
+    patched = patched.replace(
+      supportedNeedle,
+      `country === "MX" ? ["card", "oxxo"] : ${fallback}`
+    );
+  }
+
+  writeFileSync(file, patched, "utf8");
+}
+
 function main(): void {
+  const patchOnly = readPatchOnlyFlag();
   const version = readVersionFlag() ?? readSdkVersion();
   console.log(`[fetch-sellbase] 版本:${version}`);
 
-  const tmp = mkdtempSync(join(tmpdir(), "sellbase-assets-"));
-  try {
-    const tarball = npmPack(version, tmp);
-    console.log(`[fetch-sellbase] 已下载 ${tarball}`);
+  const extraMethods = readExtraPaymentMethods();
+  console.log(
+    `[fetch-sellbase] Stripe 支付方式:card${
+      extraMethods.length > 0 ? ` + ${extraMethods.join(" + ")}` : "(只有银行卡)"
+    }`
+  );
 
-    // tarball 里的路径是 package/assets/functions/<fn>/index.js
-    const wanted: Record<string, string> = {};
-    for (const fn of FUNCTIONS) {
-      wanted[`package/assets/functions/${fn}/index.js`] = join(
-        OUT_DIR,
-        fn,
-        "index.js"
-      );
+  const tmp = patchOnly ? null : mkdtempSync(join(tmpdir(), "sellbase-assets-"));
+  try {
+    if (tmp) {
+      const tarball = npmPack(version, tmp);
+      console.log(`[fetch-sellbase] 已下载 ${tarball}`);
+
+      // tarball 里的路径是 package/assets/functions/<fn>/index.js
+      const wanted: Record<string, string> = {};
+      for (const fn of FUNCTIONS) {
+        wanted[`package/assets/functions/${fn}/index.js`] = join(
+          OUT_DIR,
+          fn,
+          "index.js"
+        );
+      }
+      extractFromTarball(tarball, wanted);
+    } else {
+      console.log("[fetch-sellbase] --patch-only:只重打补丁,不重新下载");
     }
-    extractFromTarball(tarball, wanted);
 
     for (const fn of FUNCTIONS) {
       const file = join(OUT_DIR, fn, "index.js");
@@ -245,6 +379,9 @@ function main(): void {
 
       // 改 token 前缀(见 patchTokenPrefix 的注释)
       patchTokenPrefix(file);
+
+      // 扩 Stripe 支付方式(见 patchStripePaymentMethods 的注释)
+      patchStripePaymentMethods(file, extraMethods);
 
       const bytes = readFileSync(file);
       const hash = createHash("sha256")
@@ -260,8 +397,14 @@ function main(): void {
       "\n[fetch-sellbase] 现在可以部署了:\n" +
         "  supabase functions deploy sellbase-api sellbase-webhooks sellbase-jobs --no-verify-jwt"
     );
+    if (extraMethods.length > 0) {
+      console.log(
+        "\n[fetch-sellbase] ⚠️  别忘了在 Stripe Dashboard 里开通这些支付方式" +
+          "(Settings → Payment methods)。测试模式能用 ≠ 线上能用。"
+      );
+    }
   } finally {
-    rmSync(tmp, { recursive: true, force: true });
+    if (tmp) rmSync(tmp, { recursive: true, force: true });
   }
 }
 

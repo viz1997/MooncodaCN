@@ -99,11 +99,18 @@ async function handle(
       );
     }
     // SELLBASE_NOT_CONFIGURED / LINK_FAILED —— 都不该让用户看到 500
+    //
+    // 话术分两种:「没配好」的时候重试**没用**(每次都是同一个结果),得让用户
+    // 去找工作室;「这次挂了」重试才有意义。口径跟商城那边一样
+    // (见 `storefront/lib/payment-issue.ts`)。
     return NextResponse.json(
       {
         success: false,
         error: result.code,
-        message: "支付链接生成失败,请稍后重试或联系工作室线下支付",
+        message:
+          result.code === "SELLBASE_NOT_CONFIGURED"
+            ? "收款通道没配置好,请联系工作室线下支付"
+            : "支付链接生成失败,请稍后重试或联系工作室线下支付",
       },
       { status: 503, headers: getRateLimitHeaders(rl) }
     );

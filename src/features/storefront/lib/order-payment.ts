@@ -30,6 +30,7 @@ import {
 } from "@/db/schema";
 import { backfillSellbaseCustomerId } from "@/features/sellbase/lib/customer";
 import {
+  isSellbaseConfigured,
   SELLBASE_CURRENCY,
   SELLBASE_FX_RATE,
 } from "@/features/sellbase/lib/env";
@@ -46,6 +47,7 @@ import {
   buildStorefrontSellbaseNote,
   buildStorefrontSuccessUrl,
 } from "./checkout";
+import { classifyPaymentIssue } from "./payment-issue";
 
 export type StorefrontPaymentLinkResult =
   | { ok: true; paymentUrl: string }
@@ -60,6 +62,18 @@ export type StorefrontPaymentLinkResult =
     };
 
 /**
+ * 收款通道是不是根本没配好
+ *
+ * 「没配好」跟「调用失败」要分开报:没配好的时候用户点多少次「重新获取
+ * 支付链接」都是同一个结果,提示得让他去找工作室,而不是让他重试。
+ *
+ * 分类逻辑跟结算那边共用一个(`payment-issue.ts`)—— 两边口径不能不一样。
+ */
+function isConfigMissing(error: unknown): boolean {
+  return classifyPaymentIssue(error) === "SELLBASE_NOT_CONFIGURED";
+}
+
+/**
  * 拿(或者重拿)支付链接
  */
 export async function ensureStorefrontOrderPaymentLink(
@@ -72,6 +86,11 @@ export async function ensureStorefrontOrderPaymentLink(
   }
   if (order.paymentStatus === "refunded") {
     return { ok: false, code: "ORDER_REFUNDED" };
+  }
+
+  // 收款通道没配好 —— 后面所有调用都会失败,直接说清楚
+  if (!isSellbaseConfigured()) {
+    return { ok: false, code: "SELLBASE_NOT_CONFIGURED" };
   }
 
   if (order.paymentUrl) {
@@ -89,6 +108,9 @@ export async function ensureStorefrontOrderPaymentLink(
       return { ok: true, paymentUrl: url };
     } catch (error) {
       console.error(`[storefront] ${order.orderNo} 重取支付链接失败`, error);
+      if (isConfigMissing(error)) {
+        return { ok: false, code: "SELLBASE_NOT_CONFIGURED" };
+      }
       return { ok: false, code: "LINK_FAILED" };
     }
   }
@@ -149,6 +171,9 @@ export async function ensureStorefrontOrderPaymentLink(
       `[storefront] ${order.orderNo} 重建 Sellbase 订单失败`,
       error
     );
+    if (isConfigMissing(error)) {
+      return { ok: false, code: "SELLBASE_NOT_CONFIGURED" };
+    }
     return { ok: false, code: "LINK_FAILED" };
   }
 }

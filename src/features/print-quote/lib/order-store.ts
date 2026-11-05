@@ -22,7 +22,9 @@ import {
   type PrintOrderEventRow,
   type PrintOrderRow,
   printOrder,
+  type ShippingAddressSnapshot,
 } from "@/db/schema";
+import type { DbOrTx } from "@/features/gpt-image/lib/order-history";
 
 import { getDeliveryTier } from "./delivery-tier";
 import { appendPrintOrderEvent } from "./order-events";
@@ -51,6 +53,19 @@ export type CreatePrintOrderInput = {
   note: string | null;
   /** 这单的邮件通知语言 */
   locale: PrintOrderLocale;
+  /**
+   * 关联的商城订单(2026-11-05)
+   *
+   * 打印服务走商城购物车结算时,工单是**跟着商城订单**建的 —— 钱由商城
+   * 订单收(Sellbase 一张订单覆盖整张购物车),webhook 标 paid 时按这个
+   * 关联把工单一起标上。
+   *
+   * 独立下单那条路(「/quote」直接下单)不传这一列 —— 工单自己建 Sellbase
+   * 订单,靠 `sellbase_order_id` 反查。
+   */
+  storefrontOrderId?: string | null;
+  /** 收货地址快照 —— 走商城结算时跟商城订单共用一份 */
+  shippingAddress?: ShippingAddressSnapshot | null;
 };
 
 /**
@@ -59,12 +74,19 @@ export type CreatePrintOrderInput = {
  * **事务**:插订单 + 插第一条时间线事件(`from=null` → `to=PENDING`,actor=user)。
  * 两条要一起成功 —— 只有订单没有事件,时间线就是空的,用户看到一张空白的
  * 流水,根本不知道工单是从哪来的。
+ *
+ * ## `tx` 参数
+ *
+ * 传了就用调用方的事务(不新开一个)—— 商城结算那条路要在**同一个事务**里
+ * 建商城订单和工单:两张表要么都成,要么都不成。半张订单(收了钱没工单)
+ * 比整笔失败更难收拾。
  */
 export async function createPrintOrder(
-  input: CreatePrintOrderInput
+  input: CreatePrintOrderInput,
+  tx?: DbOrTx
 ): Promise<PrintOrderRow> {
-  return db.transaction(async (tx) => {
-    const [row] = await tx
+  const run = async (executor: DbOrTx): Promise<PrintOrderRow> => {
+    const [row] = await executor
       .insert(printOrder)
       .values({
         id: nanoid(),
@@ -97,6 +119,8 @@ export async function createPrintOrder(
         contactPhone: input.contactPhone,
         note: input.note,
         locale: input.locale,
+        storefrontOrderId: input.storefrontOrderId ?? null,
+        shippingAddress: input.shippingAddress ?? null,
       })
       .returning();
     if (!row) {
@@ -104,7 +128,7 @@ export async function createPrintOrder(
     }
 
     // 建单事件:时间线的第一格
-    await appendPrintOrderEvent(tx, {
+    await appendPrintOrderEvent(executor, {
       orderId: row.id,
       fromStatus: null,
       toStatus: "PENDING",
@@ -113,7 +137,9 @@ export async function createPrintOrder(
     });
 
     return row;
-  });
+  };
+
+  return tx ? run(tx) : db.transaction(run);
 }
 
 /**

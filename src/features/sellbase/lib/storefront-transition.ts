@@ -114,3 +114,93 @@ export function decideStorefrontTransition(
       return { kind: "skip", reason: "不处理的动作" };
   }
 }
+
+/* -------------------------------------------------------------------------- */
+/*  挂在商城订单下的工单                                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 挂在商城订单下面的打印工单 —— 只需要支付状态
+ *
+ * 走商城购物车结算的打印服务行,工单挂 `print_order.storefront_order_id`
+ * 上(整张购物车共用一张 Sellbase 订单,`sellbase_order_id` 那列是唯一索引,
+ * 挂不上去)。
+ */
+export interface LinkedPrintOrderState {
+  /** 支付状态 */
+  paymentStatus: string;
+}
+
+/**
+ * 「这张工单跟着商城订单一起变」的决定
+ *
+ * - `apply` —— 按 `setPaymentStatus` / `markPaidAt` 写库
+ * - `cancel_via_state_machine` —— 取消要走状态机(时间线上要留一条事件)
+ * - `skip` —— 什么都不写
+ */
+export type LinkedPrintOrderDecision =
+  | {
+      kind: "apply";
+      /** 要写的支付状态 */
+      setPaymentStatus: "paid" | "refunded";
+      /** 要不要写 `paid_at` */
+      markPaidAt: boolean;
+      /** 要不要写 `payment_channel = "stripe"` */
+      setPaymentChannel: boolean;
+    }
+  | { kind: "cancel_via_state_machine" }
+  | { kind: "skip"; reason: string };
+
+/**
+ * 判断一次 webhook 动作对「挂在商城订单下的工单」意味着什么
+ *
+ * ## 口径跟独立的工单、跟商城订单**完全一致**
+ *
+ * - 已经付过了 → 重投,不动
+ * - 退过款的 → 迟到的 `order.paid` 不能把它改回「已支付」
+ *
+ * 钱是**整单收**的:商城订单一付款,挂在它下面的所有工单一起变成已付款。
+ * 工单还停在「未付款」的话,工作室点「开始生产」会被 PAYMENT_REQUIRED
+ * 挡住 —— 单子卡住。
+ */
+export function decideLinkedPrintOrderTransition(
+  order: LinkedPrintOrderState,
+  action: StorefrontPaymentKind
+): LinkedPrintOrderDecision {
+  switch (action) {
+    case "mark_paid": {
+      if (order.paymentStatus === "paid") {
+        return { kind: "skip", reason: "工单已经标记过收款" };
+      }
+      if (order.paymentStatus === "refunded") {
+        return { kind: "skip", reason: "工单已退款,忽略迟到的收款事件" };
+      }
+      return {
+        kind: "apply",
+        setPaymentStatus: "paid",
+        markPaidAt: true,
+        setPaymentChannel: true,
+      };
+    }
+
+    case "mark_refunded": {
+      if (order.paymentStatus === "refunded") {
+        return { kind: "skip", reason: "工单已经标记过退款" };
+      }
+      return {
+        kind: "apply",
+        setPaymentStatus: "refunded",
+        markPaidAt: false,
+        setPaymentChannel: false,
+      };
+    }
+
+    case "mark_cancelled": {
+      // 取消要走状态机 —— 时间线上要留一条事件,用户看得见
+      return { kind: "cancel_via_state_machine" };
+    }
+
+    default:
+      return { kind: "skip", reason: "不处理的动作" };
+  }
+}

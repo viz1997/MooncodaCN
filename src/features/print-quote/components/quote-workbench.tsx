@@ -23,16 +23,12 @@
  */
 
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import {
   PricingCalculator,
   type PricingModelPayload,
 } from "@/features/pricing/components/pricing-calculator";
-import {
-  buildModelZipBlob,
-  exportRotatedObj,
-} from "@/features/pricing/lib/obj-exporter";
 import { OrderCreatedCard } from "@/features/print-quote/components/order-created-card";
 import {
   type OrderContact,
@@ -41,16 +37,12 @@ import {
 import { PrintOrderList } from "@/features/print-quote/components/print-order-list";
 import { QuoteSummary } from "@/features/print-quote/components/quote-summary";
 import { usePrintOrderPolling } from "@/features/print-quote/hooks/use-print-order-polling";
-import {
-  DEFAULT_DELIVERY_TIER,
-  type DeliveryTierId,
-} from "@/features/print-quote/lib/delivery-tier";
+import { usePrintQuote } from "@/features/print-quote/hooks/use-print-quote";
 import type {
   PrintOrderCreated,
-  PrintQuote,
-  PrintQuoteInput,
   UserPrintOrder,
 } from "@/features/print-quote/lib/quote-types";
+import { uploadModelFile } from "@/features/print-quote/lib/upload-model";
 
 type Stage = "quote" | "form" | "done";
 
@@ -72,55 +64,26 @@ export function QuoteWorkbench({
    */
   const locale = useLocale();
 
-  const [quoteInput, setQuoteInput] = useState<PrintQuoteInput | null>(null);
   const [modelPayload, setModelPayload] = useState<PricingModelPayload | null>(
     null
   );
 
   /**
-   * 交期档位(48 / 72 / 96 小时)
+   * 报价 —— 防抖请求 + 过期判定
    *
-   * 跟几何分开存 —— 几何是克重工具给的,交期是用户在报价条上选的,两个
-   * 都会触发重新报价。
+   * 跟 `/tools/weight` 的「加入购物车」那条路**共用同一个 hook** ——
+   * 两个页面看到的价必须是同一个数(同一个服务端接口、同一套口径)。
    */
-  const [deliveryTier, setDeliveryTier] = useState<DeliveryTierId>(
-    DEFAULT_DELIVERY_TIER
-  );
-
-  /**
-   * 服务端报价 —— 连同「它是按哪组几何算出来的」一起存。
-   *
-   * 只存报价不够:用户改了尺寸之后,新报价要等 400ms 防抖 + 一次往返才回来,
-   * 这期间界面上挂的还是**旧几何的价**。只看「有没有报价」来决定能不能下单,
-   * 就会让用户按旧价确认、服务端按新价建单 —— 两边对不上。
-   *
-   * 所以报价必须带着它的输入一起存,靠 `quoteFresh` 判断它跟当前几何还对不对得上。
-   */
-  const [quoteResult, setQuoteResult] = useState<{
-    input: PrintQuoteInput;
-    quote: PrintQuote;
-  } | null>(null);
-  const [quoteLoading, setQuoteLoading] = useState(false);
-  const [quoteError, setQuoteError] = useState<string | null>(null);
-
-  const quote = quoteResult?.quote ?? null;
-
-  /**
-   * 挂着的报价跟当前几何还对得上吗?
-   *
-   * 对不上 = 界面上的价是上一组尺寸的,不能拿去下单。
-   *
-   * 交期档位也算在内:换档位要重新报价,回来的路上界面挂的还是旧档位的价 ——
-   * 那时候不能下单(用户以为付的是加急的钱,服务端按标准档建单)。
-   */
-  const quoteFresh = useMemo(
-    () =>
-      quoteResult !== null &&
-      quoteInput !== null &&
-      sameQuoteInput(quoteResult.input, quoteInput) &&
-      quoteResult.quote.deliveryTier === deliveryTier,
-    [quoteResult, quoteInput, deliveryTier]
-  );
+  const {
+    quoteInput,
+    setQuoteInput: handleQuoteInput,
+    deliveryTier,
+    setDeliveryTier,
+    quote,
+    quoteFresh,
+    loading: quoteLoading,
+    error: quoteError,
+  } = usePrintQuote();
 
   const [stage, setStage] = useState<Stage>("quote");
   const [phase, setPhase] = useState<"idle" | "uploading" | "submitting">(
@@ -138,89 +101,12 @@ export function QuoteWorkbench({
    */
   const { orders, upsertOrder } = usePrintOrderPolling(initialOrders);
 
-  const handleQuoteInput = useCallback((input: PrintQuoteInput | null) => {
-    setQuoteInput(input);
-  }, []);
-
   const handleModelChange = useCallback(
     (payload: PricingModelPayload | null) => {
       setModelPayload(payload);
     },
     []
   );
-
-  // ---- 报价请求(防抖) ----
-  //
-  // 拖尺寸滑块会连着触发几十次几何变化 —— 不防抖就是几十次请求。
-  // 400ms 是个体感合适的值:停手之后价格立刻跟上。
-  //
-  // `latestInputRef` 存当前几何:响应回来时先比一下,晚到的旧响应直接丢,
-  // 免得旧几何的价把新几何的价盖掉。
-  const latestInputRef = useRef(quoteInput);
-  useEffect(() => {
-    latestInputRef.current = quoteInput;
-  }, [quoteInput]);
-
-  // 交期档位也要防「旧响应盖掉新响应」—— 连点三档,回来的顺序不保证
-  const latestTierRef = useRef(deliveryTier);
-  useEffect(() => {
-    latestTierRef.current = deliveryTier;
-  }, [deliveryTier]);
-
-  useEffect(() => {
-    if (!quoteInput) {
-      setQuoteResult(null);
-      setQuoteError(null);
-      setQuoteLoading(false);
-      return;
-    }
-
-    const requestedInput = quoteInput;
-    const requestedTier = deliveryTier;
-    const controller = new AbortController();
-    const timer = setTimeout(() => {
-      setQuoteLoading(true);
-      void (async () => {
-        try {
-          const res = await fetch("/api/print-quote", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              ...requestedInput,
-              deliveryTier: requestedTier,
-            }),
-            signal: controller.signal,
-          });
-          if (!res.ok) {
-            const body = (await res.json().catch(() => null)) as {
-              message?: string;
-            } | null;
-            setQuoteError(body?.message ?? t("quote.error"));
-            setQuoteResult(null);
-            return;
-          }
-          const body = (await res.json()) as { quote: PrintQuote };
-          // 几何或交期档位在这期间又变了 → 这个价已经过期,丢掉(新请求在路上)
-          if (!sameQuoteInput(requestedInput, latestInputRef.current)) return;
-          if (requestedTier !== latestTierRef.current) return;
-          setQuoteResult({ input: requestedInput, quote: body.quote });
-          setQuoteError(null);
-        } catch (error) {
-          // 几何又变了 → 这次请求作废,新的请求已经在路上
-          if ((error as Error)?.name === "AbortError") return;
-          setQuoteError(t("quote.error"));
-          setQuoteResult(null);
-        } finally {
-          if (!controller.signal.aborted) setQuoteLoading(false);
-        }
-      })();
-    }, 400);
-
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [quoteInput, deliveryTier, t]);
 
   // ---- 下单 ----
   const handleSubmitOrder = useCallback(
@@ -346,95 +232,5 @@ export function QuoteWorkbench({
 
       <PrintOrderList orders={orders} />
     </div>
-  );
-}
-
-/**
- * 把模型打包成 ZIP 直传到 R2
- *
- * 打包时按用户调过的尺寸重新缩放 —— 否则工作室拿到的文件尺寸和报价单上
- * 的对不上。**不旋转**:报价单上的尺寸是未旋转的包围盒,旋转后包围盒会变,
- * 两边对不上;摆盘角度是给工作室的参考,不是硬约束。
- */
-async function uploadModelFile(payload: PricingModelPayload): Promise<{
-  url: string;
-  objectKey: string;
-  size: number;
-  fileName: string;
-}> {
-  const { model, scales } = payload;
-
-  const objText = exportRotatedObj(
-    model.objText,
-    { rotX: 0, rotY: 0, rotZ: 0 },
-    { scaleX: scales[0], scaleY: scales[1], scaleZ: scales[2] }
-  );
-
-  const blob = await buildModelZipBlob(
-    objText,
-    model.mtlText,
-    model.textureBlobs,
-    model.objFileName,
-    model.mtlFileName
-  );
-
-  const fileName = `${model.name || "model"}.zip`;
-
-  const presignRes = await fetch("/api/print-orders/upload-url", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fileName, size: blob.size }),
-  });
-  if (!presignRes.ok) {
-    const body = (await presignRes.json().catch(() => null)) as {
-      error?: string;
-    } | null;
-    throw new Error(body?.error ?? "presign failed");
-  }
-
-  const presign = (await presignRes.json()) as {
-    uploadUrl: string;
-    publicUrl: string;
-    objectKey: string;
-    headers: Record<string, string>;
-  };
-
-  const putRes = await fetch(presign.uploadUrl, {
-    method: "PUT",
-    headers: presign.headers,
-    body: blob,
-  });
-  if (!putRes.ok) {
-    throw new Error(`R2 PUT failed: ${putRes.status}`);
-  }
-
-  return {
-    url: presign.publicUrl,
-    objectKey: presign.objectKey,
-    size: blob.size,
-    fileName,
-  };
-}
-
-/**
- * 两组几何是不是同一组
- *
- * 按值比 —— 几何每次变化都是新对象,比引用永远不相等。
- * 报价是否过期、下单前的一致性检查都靠它。
- */
-function sameQuoteInput(
-  a: PrintQuoteInput | null,
-  b: PrintQuoteInput | null
-): boolean {
-  if (a === b) return true;
-  if (!a || !b) return false;
-  return (
-    a.volumeCM3 === b.volumeCM3 &&
-    a.surfaceAreaCM2 === b.surfaceAreaCM2 &&
-    a.dims[0] === b.dims[0] &&
-    a.dims[1] === b.dims[1] &&
-    a.dims[2] === b.dims[2] &&
-    (a.supportWeightG ?? null) === (b.supportWeightG ?? null) &&
-    (a.selfSupportRatio ?? null) === (b.selfSupportRatio ?? null)
   );
 }

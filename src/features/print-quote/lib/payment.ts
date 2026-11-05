@@ -32,8 +32,10 @@ import {
   resolvePrintServiceCarrier,
 } from "@/features/sellbase/lib/carrier";
 import {
+  isSellbaseConfigured,
   SELLBASE_CURRENCY,
   SELLBASE_FX_RATE,
+  SellbaseNotConfiguredError,
 } from "@/features/sellbase/lib/env";
 import {
   centsToStoreAmount,
@@ -183,6 +185,14 @@ export async function ensurePrintOrderPaymentLink(
     return { ok: false, code: "ALREADY_PAID" };
   }
 
+  // 收款通道没配好 —— 后面所有调用都会失败,直接说清楚
+  //
+  // 注意这**不拦下单**:工单照样建(见本文件头「没配 Sellbase 也能下单」),
+  // 工作室走线下收款。这里只是别让用户以为「再点一次就能拿到链接」。
+  if (!isSellbaseConfigured()) {
+    return { ok: false, code: "SELLBASE_NOT_CONFIGURED" };
+  }
+
   // 已经有链接就直接用 —— Stripe 的链接 23 小时内有效,大多数时候够
   if (order.paymentUrl && order.sellbaseOrderId) {
     return { ok: true, paymentUrl: order.paymentUrl };
@@ -205,6 +215,9 @@ export async function ensurePrintOrderPaymentLink(
     return { ok: true, paymentUrl: url };
   } catch (error) {
     console.error(`[print-quote] ${order.orderNo} 重取支付链接失败`, error);
+    if (error instanceof SellbaseNotConfiguredError) {
+      return { ok: false, code: "SELLBASE_NOT_CONFIGURED" };
+    }
     return { ok: false, code: "LINK_FAILED" };
   }
 }

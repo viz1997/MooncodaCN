@@ -59,6 +59,7 @@ import {
   ModelSettingsPanel,
 } from "@/features/pricing/components/model-settings-panel";
 import { ObjThumbnail } from "@/features/pricing/components/obj-thumbnail";
+import type { PricingModelPayload } from "@/features/pricing/components/pricing-calculator-types";
 import {
   type InfoDialogKind,
   PricingInfoDialogs,
@@ -112,15 +113,10 @@ import type { PrintQuoteInput } from "@/features/print-quote/lib/quote-types";
 type Mode = "upload" | "manual" | "batch";
 
 /**
- * 报价模式下抛给父组件的模型载荷（2026-11-01 新增）
- *
- * `scales` 是当前生效的缩放因子 —— 下单重新打包模型时要按它缩放，
- * 否则工作室拿到的文件和报价单上的尺寸对不上。
+ * 模型载荷的类型定义在 `pricing-calculator-types.ts` —— 从这里再导出一次,
+ * 免得每个调用方都要知道它住在哪个文件。
  */
-export type PricingModelPayload = {
-  model: ModelFile;
-  scales: [number, number, number];
-};
+export type { PricingModelPayload };
 
 const yieldToUI = (): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, 0));

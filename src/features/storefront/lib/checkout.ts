@@ -22,6 +22,17 @@
  * 那边挂了(网络 / 配置 / Stripe 没连上),订单已经在了,状态停在 `unpaid`,
  * 用户还能在详情页重取支付链接。反过来的话就变成「收了钱但没有订单」。
  *
+ * ## 失败要说清楚是**哪一种**失败
+ *
+ * 「收款通道没配好」(环境变量缺)和「这次调用挂了」(网络 / Stripe / 上游)
+ * 对用户是两件完全不同的事:前者重试**没用** —— 得等部署补上配置,用户在
+ * 「我的订单」里点多少次「重新获取支付链接」都是同一个结果;后者重试就能好。
+ *
+ * 混成一句话「生成支付链接失败,请稍后重试」的话,用户就在反复重试一件根本
+ * 不会成功的事(2026-11-05 线上真实踩到过:一次部署刚加好 Sellbase 环境变量,
+ * 但那一次构建没赶上,用户下了一单既没有 Sellbase 订单也没有支付链接)。
+ * `paymentIssue` 就是这个区分 —— 见 `classifyPaymentIssue`。
+ *
  * ## 逐分相等
  *
  * Sellbase 的行合计 = `unit_price_amount × quantity`。本仓库的口径是
@@ -40,9 +51,17 @@ import {
   storefrontOrder,
   storefrontOrderItem,
 } from "@/db/schema";
+import { createPrintOrder } from "@/features/print-quote/lib/order-store";
+import {
+  computePrintServiceLinePrice,
+  generatePrintOrderNo,
+} from "@/features/print-quote/lib/quote-server";
+import type { PrintQuote } from "@/features/print-quote/lib/quote-types";
+import { normalizePrintOrderLocale } from "@/features/print-quote/lib/quote-types";
 import {
   CarrierNotFoundError,
   resolveCarrierVariant,
+  resolvePrintServiceCarrier,
   sizeCodeFromSpecSizeId,
 } from "@/features/sellbase/lib/carrier";
 import { backfillSellbaseCustomerId } from "@/features/sellbase/lib/customer";
@@ -58,8 +77,16 @@ import { createSellbaseOrder } from "@/features/sellbase/lib/orders";
 import type { CartLineItem, PricingResult } from "../types";
 import { clearCartItems, getCart, stampCartOwner } from "./cart-store";
 import { findProductById } from "./mock-catalog";
+import {
+  classifyPaymentIssue,
+  type StorefrontPaymentIssue,
+} from "./payment-issue";
 import { calculatePricing } from "./pricing";
 import { calculateShippingCents } from "./pricing-constants";
+import {
+  getPrintServiceSpec,
+  printServiceSpecToQuoteInput,
+} from "./print-service";
 
 /* -------------------------------------------------------------------------- */
 /*  入参 / 出参                                                               */
@@ -76,6 +103,14 @@ export interface CheckoutInput {
   address: ShippingAddressSnapshot;
   /** 用户留言 */
   note?: string | null;
+  /**
+   * 界面语言 —— 打印工单的邮件通知语言
+   *
+   * 落库而不是取「当前请求的 locale」:改状态的邮件是**工作室**触发的,
+   * 那时请求 locale 是 admin 的语言,不是下单用户的语言(同 print_order.locale
+   * 的口径)。不传 = 中文。
+   */
+  locale?: string | null;
 }
 
 /** 结算成功的返回 */
@@ -94,7 +129,31 @@ export interface CheckoutSuccess {
   totalCents: number;
   /** 币种 */
   currency: string;
+  /**
+   * 这一单里包含的打印工单号(2026-11-05)
+   *
+   * 购物车里每一条打印服务行都会生成一张工单(`PO-…`)—— 工作室照着工单
+   * 生产,用户照着工单号查进度。没有打印服务行时是空数组。
+   */
+  printOrderNos: string[];
+  /**
+   * 支付链接为什么没生成(2026-11-05)
+   *
+   * null = 链接拿到了(或者压根没失败)。非 null 时 `paymentUrl` 一定是 null。
+   *
+   * 分两种,不是一种 —— 用户看到的话术不一样:
+   *
+   * - `SELLBASE_NOT_CONFIGURED` —— 收款通道**没配好**(环境变量缺)。
+   *   这种情况下「去我的订单里重新获取链接」**也拿不到链接**,提示得说清楚,
+   *   否则用户会一直重试一件根本不会成功的事(2026-11-05 线上真实踩到过)。
+   * - `SELLBASE_FAILED` —— 通道配好了但这次调用失败(网络 / Stripe / 上游)。
+   *   这种重试是有意义的。
+   */
+  paymentIssue: StorefrontPaymentIssue | null;
 }
+
+export type { StorefrontPaymentIssue };
+export { classifyPaymentIssue };
 
 export type CheckoutErrorCode =
   | "CART_NOT_FOUND"
@@ -148,6 +207,10 @@ interface PricedLine {
   unitPriceCents: number;
   /** 行合计(分) */
   lineTotalCents: number;
+  /** 这一行的数量 —— 打印服务行恒为 1 */
+  quantity: number;
+  /** 打印服务行的报价明细(不是打印服务行就是 null) */
+  printQuote: PrintQuote | null;
 }
 
 /**
@@ -155,8 +218,36 @@ interface PricedLine {
  *
  * 算不出来就抛 —— 结算的时候不能「按旧价收」,也不能「按 0 收」。
  * 用户会看到「这件商品的价格算不出来,请刷新购物车」,把那一行删掉重下。
+ *
+ * 打印服务行走的是另一套:按克重计价(`computePrintServiceLinePrice()`),
+ * 不查目录。
  */
 function repriceLine(item: CartLineItem): PricedLine {
+  const metadata = item.metadata;
+
+  // 打印服务行 —— 按克重计价
+  const printSpec = getPrintServiceSpec(metadata);
+  if (printSpec) {
+    const priced = computePrintServiceLinePrice(
+      printServiceSpecToQuoteInput(printSpec)
+    );
+    if (!priced) {
+      throw new CheckoutError(
+        "PRICING_FAILED",
+        "打印服务这组模型数据算不出报价,请回到工具页重新测量"
+      );
+    }
+    // 打印服务恒为一件 —— 数量阶梯折扣对它没有意义
+    return {
+      item,
+      unitPriceCents: priced.unitPriceCents,
+      discountedUnitPriceCents: priced.discountedUnitPriceCents,
+      lineTotalCents: priced.discountedUnitPriceCents,
+      quantity: 1,
+      printQuote: priced.quote,
+    };
+  }
+
   const product = findProductById(item.productId);
   if (!product) {
     throw new CheckoutError(
@@ -164,8 +255,6 @@ function repriceLine(item: CartLineItem): PricedLine {
       `商品 ${item.productId} 已经不在目录里了`
     );
   }
-
-  const metadata = item.metadata;
 
   let pricing: PricingResult;
   try {
@@ -195,6 +284,8 @@ function repriceLine(item: CartLineItem): PricedLine {
     unitPriceCents: pricing.unitPriceCents,
     discountedUnitPriceCents: pricing.discountedUnitPriceCents,
     lineTotalCents: pricing.discountedUnitPriceCents * item.quantity,
+    quantity: item.quantity,
+    printQuote: null,
   };
 }
 
@@ -226,7 +317,7 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
 
   // 2. 金额
   const subtotalCents = lines.reduce(
-    (sum, l) => sum + l.unitPriceCents * l.item.quantity,
+    (sum, l) => sum + l.unitPriceCents * l.quantity,
     0
   );
   const discountedSubtotalCents = lines.reduce(
@@ -239,12 +330,16 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
   const totalCents = discountedSubtotalCents + shippingCents;
 
   // 3. 载体变体 —— 每个商品型号一个
+  //    打印服务行走**专用**的载体行(「打印服务(按克重)」),不按型号找。
   const carriers = await Promise.all(
     lines.map(async (line) => {
-      const product = findProductById(line.item.productId);
-      const productCode = product?.productTypeCode ?? "";
-      const sizeCode = sizeCodeFromSpecSizeId(line.item.metadata.sizeId);
       try {
+        if (getPrintServiceSpec(line.item.metadata)) {
+          return await resolvePrintServiceCarrier();
+        }
+        const product = findProductById(line.item.productId);
+        const productCode = product?.productTypeCode ?? "";
+        const sizeCode = sizeCodeFromSpecSizeId(line.item.metadata.sizeId);
         return await resolveCarrierVariant({ productCode, sizeCode });
       } catch (error) {
         if (error instanceof CarrierNotFoundError) {
@@ -259,6 +354,8 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
   const orderNo = generateStorefrontOrderNo();
   const orderId = `so_${nanoid(16)}`;
   const now = new Date();
+
+  const printOrderNos: string[] = [];
 
   await db.transaction(async (tx) => {
     await tx.insert(storefrontOrder).values({
@@ -293,11 +390,47 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
         sku: carrier.sku,
         unitPriceCents: line.unitPriceCents,
         discountedUnitPriceCents: line.discountedUnitPriceCents,
-        quantity: line.item.quantity,
+        quantity: line.quantity,
         lineTotalCents: line.lineTotalCents,
         metadata: line.item.metadata as unknown as Record<string, unknown>,
         createdAt: now,
       });
+    }
+
+    // 打印服务行 → 建工单
+    //
+    // **在同一个事务里** —— 商城订单和工单要么都成,要么都不成。
+    // 「收了钱但没有工单」比「整笔下单失败」更难收拾:钱已经进了 Sellbase
+    // 的订单,工作室那边看不到要干的活。
+    //
+    // 工单的 `sellbase_order_id` 留空 —— 整张购物车共用**一张** Sellbase
+    // 订单,而 `print_order.sellbase_order_id` 是唯一索引,挂不上。工单靠
+    // `storefront_order_id` 跟商城订单关联,webhook 标 paid 时按它反查。
+    const locale = normalizePrintOrderLocale(input.locale);
+    for (const line of lines) {
+      const printSpec = getPrintServiceSpec(line.item.metadata);
+      if (!printSpec || !line.printQuote) continue;
+
+      const printOrderNo = generatePrintOrderNo();
+      await createPrintOrder(
+        {
+          orderNo: printOrderNo,
+          userId: input.userId,
+          modelFileName: printSpec.modelFileName,
+          modelUrl: printSpec.modelUrl,
+          modelSizeBytes: printSpec.modelSizeBytes,
+          quote: line.printQuote,
+          contactName: input.address.recipientName,
+          contactEmail: input.email,
+          contactPhone: input.address.phone,
+          note: input.note ?? null,
+          locale,
+          storefrontOrderId: orderId,
+          shippingAddress: input.address,
+        },
+        tx
+      );
+      printOrderNos.push(printOrderNo);
     }
   });
 
@@ -307,19 +440,20 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
     orderNo,
     lines: lines.map((l) => ({
       title: l.item.productTitle,
-      quantity: l.item.quantity,
+      quantity: l.quantity,
     })),
   });
 
   let paymentUrl: string | null = null;
   let sellbaseOrderId: string | null = null;
+  let paymentIssue: StorefrontPaymentIssue | null = null;
 
   try {
     const created = await createSellbaseOrder({
       email: input.email,
       items: lines.map((line, index) => ({
         variantId: carriers[index]!.variantId,
-        quantity: line.item.quantity,
+        quantity: line.quantity,
         unitPriceAmount: centsToStoreAmount(
           line.discountedUnitPriceCents,
           conversion
@@ -346,6 +480,9 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
       `[storefront] ${orderNo} 建 Sellbase 订单失败 —— 订单已落库,状态 unpaid`,
       error
     );
+    // 「配置没配好」和「这次调用挂了」要分开 —— 前者重试没用(见
+    // `classifyPaymentIssue` 的注释)
+    paymentIssue = classifyPaymentIssue(error);
   }
 
   // 6. 回写
@@ -374,6 +511,8 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
     shippingCents,
     totalCents,
     currency: "CNY",
+    printOrderNos,
+    paymentIssue,
   };
 }
 

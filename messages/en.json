@@ -1708,6 +1708,18 @@
         "urgent": "Urgent"
       }
     },
+    "cart": {
+      "title": "Add to cart",
+      "needModel": "Upload a 3D model — the quote shows up here and you can order right after measuring.",
+      "add": "Add to cart",
+      "uploading": "Uploading model…",
+      "adding": "Adding…",
+      "signInFirst": "Sign in to add to cart",
+      "hint": "Your model is packaged and uploaded only when you click “Add to cart” — nothing leaves the browser while measuring.",
+      "errors": {
+        "addFailed": "Could not add to cart, please try again"
+      }
+    },
     "order": {
       "start": "Enter order details",
       "continueEditing": "Order details open",

@@ -26,7 +26,8 @@
 
 import { createHash } from "node:crypto";
 
-import type { CartLineItemMetadata } from "../types";
+import type { CartLineItemMetadata, PrintServiceSpec } from "../types";
+import { printServiceSpecHashParts } from "./print-service";
 
 /** 参与「同 spec 合并」判断的字段 */
 export interface CartSpecInput {
@@ -40,6 +41,13 @@ export interface CartSpecInput {
   accessoryVariantIds: string[];
   /** AI 预览图 —— 不同预览图是不同商品(用户改图了) */
   previewImage: string;
+  /**
+   * 打印服务规格 —— **有它就走打印服务那一套 hash**
+   *
+   * 目录商品那套字段(材质 / 尺寸 / 刻字 / 配件)对打印服务没有意义,
+   * 真正决定「是不是同一件活」的是几何 + 交期 + 模型文件。
+   */
+  printSpec?: PrintServiceSpec | undefined;
 }
 
 /**
@@ -65,18 +73,24 @@ export function sortAccessoryIds(ids: string[] | null | undefined): string[] {
  * 算规格 hash
  *
  * sha256 取前 16 个 hex 字符 —— 128 bit,碰撞概率在本仓库的量级下可以忽略。
+ *
+ * 打印服务行走的是**另一套字段**(几何 + 交期 + 模型文件),见
+ * `printServiceSpecHashParts()` —— 目录商品那套字段对它是空的,拿空值算
+ * hash 会让所有打印服务行撞成同一行。
  */
 export function computeSpecHash(input: CartSpecInput): string {
-  const parts = [
-    input.productId,
-    input.materialId,
-    input.sizeId,
-    input.aiStyleId,
-    input.engravingText,
-    input.rushOrder ? "1" : "0",
-    sortAccessoryIds(input.accessoryVariantIds).join(","),
-    input.previewImage,
-  ];
+  const parts = input.printSpec
+    ? [input.productId, "print", ...printServiceSpecHashParts(input.printSpec)]
+    : [
+        input.productId,
+        input.materialId,
+        input.sizeId,
+        input.aiStyleId,
+        input.engravingText,
+        input.rushOrder ? "1" : "0",
+        sortAccessoryIds(input.accessoryVariantIds).join(","),
+        input.previewImage,
+      ];
 
   return createHash("sha256")
     .update(parts.join(FIELD_SEPARATOR))
@@ -101,6 +115,7 @@ export function computeSpecHashFromMetadata(
     rushOrder: metadata.rushOrder,
     accessoryVariantIds: metadata.accessoryVariantIds ?? [],
     previewImage: metadata.previewImage,
+    printSpec: metadata.printSpec,
   });
 }
 

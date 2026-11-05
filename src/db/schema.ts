@@ -2477,6 +2477,19 @@ export const printOrder = pgTable(
      * 不另建去重表。
      */
     sellbaseOrderId: text("sellbase_order_id"),
+    /**
+     * 关联的商城订单(2026-11-05)
+     *
+     * 打印服务进了商城购物车之后,**一张 Sellbase 订单里可能同时有**
+     * 「打印服务行」和「普通商品行」。而 `sellbase_order_id` 是唯一索引 ——
+     * 同一张 Sellbase 订单不能挂到多条工单上。
+     *
+     * 所以走商城那条路的工单改挂**商城订单**:webhook 收到 `order.paid` →
+     * 反查 `storefront_order` → 把 `storefront_order_id` 指向它的那些工单
+     * 一并标 paid。走独立下单那条路的工单这一列是 null,仍然靠
+     * `sellbase_order_id` 反查 —— 两条路互不干扰。
+     */
+    storefrontOrderId: text("storefront_order_id"),
     /** Stripe 支付链接(用户点「去支付」跳的就是它) */
     paymentUrl: text("payment_url"),
     /** 收款时间 */
@@ -2502,6 +2515,8 @@ export const printOrder = pgTable(
     index("print_order_user_id_idx").on(t.userId),
     // webhook 按 sellbase_order_id 反查工单
     uniqueIndex("print_order_sellbase_order_id_uniq_idx").on(t.sellbaseOrderId),
+    // 走商城那条路的工单:webhook 标 paid 时按商城订单反查
+    index("print_order_storefront_order_id_idx").on(t.storefrontOrderId),
   ]
 );
 

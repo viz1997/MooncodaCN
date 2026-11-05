@@ -15,6 +15,8 @@
  *  - architecture-sellbase-integration.md 集成架构(数据归属边界见 §二)
  */
 
+import type { DeliveryTierId } from "@/features/print-quote/lib/delivery-tier";
+
 /* -------------------------------------------------------------------------- */
 /*  Product / Variant(对齐 atelier store 的 Product 契约)                     */
 /* -------------------------------------------------------------------------- */
@@ -180,6 +182,58 @@ export interface StorefrontProduct {
 /* -------------------------------------------------------------------------- */
 
 /**
+ * 打印服务购物车行 —— 几何 + 交期 + 模型文件
+ *
+ * ## 为什么打印服务是「服务行」而不是「商品行」
+ *
+ * 商城里别的行是**目录商品 + 规格**(尺寸 / 材质 / 配件),价格由
+ * `calculatePricing()` 按目录算。打印服务不是目录商品:它是来料加工 ——
+ * 用户自带 3D 模型,按克重计价,没有对应的 SKU 可选。
+ *
+ * 所以打印服务行走的是另一套定价:`computePrintQuote()`(几何 → 克重 → 价),
+ * 载体变体也换成专门的「打印服务」载体行(见 `sellbase/lib/carrier.ts`)。
+ *
+ * ## 字段跟 `PrintQuoteInput` 对齐
+ *
+ * 几何那几个字段直接就是 `PrintQuoteInput` 的字段 —— 购物车里存的这份
+ * 规格,结算时会被原样交给 `computePrintQuote()` 重算一遍(客户端带来的价
+ * 一律不信)。多出来的三个 `model*` 字段是**模型文件**:工作室照着它取件。
+ */
+export interface PrintServiceSpec {
+  /** 体积 cm³ */
+  volumeCM3: number;
+  /** 表面积 cm² */
+  surfaceAreaCM2: number;
+  /** 成品尺寸 mm:X=长 Y=宽 Z=高 */
+  dims: [number, number, number];
+  /** 智能摆盘算出的支撑克重 g;没跑摆盘是 null */
+  supportWeightG: number | null;
+  /** 本体支撑比例(1 = 1:1);没跑摆盘是 null */
+  selfSupportRatio: number | null;
+  /** 交期档位 —— 加价按小计比例收 */
+  deliveryTier: DeliveryTierId;
+  /** 模型文件名(用户上传时的原名) */
+  modelFileName: string;
+  /** 模型文件在 R2 上的对象键 —— 归属校验靠它 */
+  modelObjectKey: string;
+  /** 模型文件在 R2 上的永久 URL */
+  modelUrl: string;
+  /** 模型文件字节数 */
+  modelSizeBytes: number | null;
+  /**
+   * 耗材克重 g —— **纯展示用**
+   *
+   * 服务端算报价时按「体积 × 材料密度」算出来的,客户端拿不到密度(那是服务端
+   * 的配置),所以这个数由**服务端**在重算之后回填(见 `cart-store.ts` 的
+   * `repriceLineItem()`)。
+   *
+   * 它不参与定价 —— 定价只看几何(体积 / 表面积 / 尺寸 / 支撑)。所以客户端
+   * 传错也收不到钱,只是购物车里的克重显示会不对。
+   */
+  materialWeightG?: number | null;
+}
+
+/**
  * CartLineItem.metadata 存的 customize 规格(来自 CustomizationSpec)
  * 与 atelier src/lib/store/customization-spec.ts 的 specToMetadata() 兼容
  */
@@ -201,6 +255,13 @@ export interface CartLineItemMetadata {
   previewImage: string;
   /** 渲染前原图 URL(R2) */
   originalImage: string;
+  /**
+   * 打印服务规格 —— **有这一项的行就是打印服务行**
+   *
+   * 判据是「有没有这个字段」,不看 `productId` —— 打印服务在目录里没有
+   * 对应的商品,`productId` 是个固定的哨兵值(见 `lib/print-service.ts`)。
+   */
+  printSpec?: PrintServiceSpec;
 }
 
 export interface CartLineItem {
