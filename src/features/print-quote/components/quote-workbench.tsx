@@ -94,7 +94,8 @@ export function QuoteWorkbench({
   /**
    * 选中的收款通道
    *
-   * null = 还没选(服务端走旧路 Sellbase + Stripe,过渡期保留)。
+   * null = 还没选(服务端挑一个**开放的**通道,见
+   * `payments/lib/registry.ts` 的 `ENABLED_PAYMENT_CHANNELS`)。
    * 支付方式选择器只渲染**配好了**的通道 —— 没配好的不给人看。
    */
   const [channel, setChannel] = useState<string | null>(null);
@@ -149,7 +150,8 @@ export function QuoteWorkbench({
             note: contact.note || null,
             // 这单的邮件通知语言 —— 落库,之后改状态时按它发信
             locale,
-            // 收款通道 —— 微信扫码 / 支付宝 / Shopify,不传走旧路
+            // 收款通道 —— 微信扫码 / 支付宝 / Shopify,不传由服务端挑一个
+            // 开放的通道
             channel: channel ?? undefined,
           }),
         });

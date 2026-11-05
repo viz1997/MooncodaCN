@@ -247,7 +247,7 @@ body 只有两个字段 —— **没有 `cartId`,没有金额,没有地址**:
 ```ts
 {
   orderNo: "SO-20261104-3F7K2A",  // 业务订单号,用户可见
-  paymentUrl: "https://checkout.stripe.com/…",  // 可能是 null,见 §五.4
+  paymentUrl: "https://…",  // 付款入口(Shopify 收银台);可能是 null,见 §5.4b
   subtotalCents: 4800,   // 折前小计
   discountCents: 200,    // 数量阶梯折扣
   shippingCents: 800,    // 运费(折后满 ¥99 免运费,否则 ¥8)
@@ -279,6 +279,17 @@ body 只有两个字段 —— **没有 `cartId`,没有金额,没有地址**:
 **④ 结算的购物车靠 cookie 认。** 服务端从 `wjp_cart_id` 里取 cartId,
 不接受客户端指定。没带 cookie → 404 `CART_NOT_FOUND`。
 
+**⑤ 结算**不会**清空购物车**(2026-11-05 改的)。**钱到了才清** —— 没付款
+就走的用户,购物车还是原样(早先是在建单那一刻就清掉了,用户反馈「没支付
+返回购物车为什么清空了」)。所以小程序侧:
+
+- 结算返回之后,购物车里**还有**那些行 —— **别急着把本地的购物车清掉**
+- 同一批货再点一次「去支付」→ 服务端**复用**上一张还没付的订单(同一批货 +
+  同一地址 + 同一留言),返回**同一个** `orderNo` 和**同一个**付款入口。
+  不会多出一张单,也不会给你两个付款入口
+- 钱到了(webhook 回调)之后,买掉的那几行才从购物车里摘掉 —— 付款之后又
+  加的别的行**留着**
+
 **结算的错误码**:
 
 | HTTP | `error` | 含义 |
@@ -287,6 +298,7 @@ body 只有两个字段 —— **没有 `cartId`,没有金额,没有地址**:
 | 400 | `CART_EMPTY` | 购物车是空的 |
 | 400 | `INVALID_JSON` / `INVALID_INPUT` | body 不合法 |
 | 404 | `CART_NOT_FOUND` | cookie 没带上 / 购物车过期 |
+| 503 | `PAYMENT_CHANNEL_UNAVAILABLE` | 指定的支付方式现在不可用(见 §5.4b) |
 | 404 | `ADDRESS_NOT_FOUND` | 地址不存在或不属于当前用户 |
 | 422 | `PRICING_FAILED` | 某一行的价算不出来(商品下架了之类)→ 让用户删掉那行重下 |
 | 503 | `CARRIER_NOT_FOUND` | 工作室没跑目录同步 → 提示联系工作室 |
@@ -385,6 +397,11 @@ Sellbase 那边挂了(网络 / 配置 / Stripe 没连上)时,**订单照样建�
 
 > 本节是**新增**的。上面 §5.4 讲的是**旧路**(Sellbase + Stripe),过渡期
 > 并行保留;三个新通道跑通后旧路会拆掉。
+>
+> **2026-11-05 更新:先只开 Shopify。** 微信 / 支付宝的代码都写好了,但
+> 商户号 / 应用还没走完开通流程 —— 那种情况下「配好了」是 false,用户本来
+> 就看不到。还有一层是**工作室那边主动关掉**的(`ENABLED_PAYMENT_CHANNELS`),
+> 现在名单里只有 `shopify`。要开别的通道,改那份名单就行。
 
 结算时多传一个 `channel`:
 
@@ -393,9 +410,18 @@ Sellbase 那边挂了(网络 / 配置 / Stripe 没连上)时,**订单照样建�
 {
   addressId: "addr_…",
   note: "…",
-  channel: "wechat" | "alipay" | "shopify" | "stripe", // 不传 = 旧路
+  channel: "wechat" | "alipay" | "shopify" | "stripe", // 不传 = 服务端挑
 }
 ```
+
+- **不传** → 服务端挑第一个「**开放了而且配好了**」的通道(现在就是
+  `shopify`)。小程序侧**建议显式传** —— 界面上的默认选中项和服务端的默认
+  永远是同一个,显式传就不用猜
+- **传了但现在不可用**(没开放 / 没配好 / 是旧路 `stripe`)→ **503
+  `PAYMENT_CHANNEL_UNAVAILABLE`**。**不会**静默退回别的通道 —— 用户以为
+  选了微信支付、结果跳去了别处,那比直接报错糟得多
+- `stripe`(旧路)现在**不再接新单** —— 代码还留着(已建好的旧单还能重取
+  支付入口),但新单传 `stripe` 也是 503
 
 响应多两个字段:
 
@@ -404,7 +430,7 @@ Sellbase 那边挂了(网络 / 配置 / Stripe 没连上)时,**订单照样建�
   orderNo: "SO-…",
   paymentUrl: "https://…" | null,        // alipay / shopify:跳转地址
   paymentQrCodeUrl: "weixin://wxpay/bizpayurl?pr=…" | null, // wechat:扫码内容
-  paymentChannel: "wechat",
+  paymentChannel: "shopify",
   paymentIssue: null, // 没生成付款入口时是 "PAYMENT_NOT_CONFIGURED" / "PAYMENT_FAILED"
 }
 ```
@@ -414,14 +440,13 @@ Sellbase 那边挂了(网络 / 配置 / Stripe 没连上)时,**订单照样建�
 ```ts
 {
   channels: [
-    { channel: "wechat",  label: "微信支付",   description: "…", available: true },
-    { channel: "alipay",  label: "支付宝",     description: "…", available: true },
     { channel: "shopify", label: "银行卡 / Shop Pay", description: "…", available: true },
   ],
 }
 ```
 
-`available: false` 的通道**不要显示** —— 那条路没配好,点了必然失败。
+返回的**只有开放了的通道**。`available: false` 的通道**不要显示** ——
+那条路没配好,点了必然失败。
 
 #### 三个通道在小程序里怎么走
 
@@ -441,10 +466,11 @@ Sellbase 那边挂了(网络 / 配置 / Stripe 没连上)时,**订单照样建�
 (`wx.requestPayment`),那是另一套接口(要 `openid`、要调
 `/v3/pay/transactions/jsapi`),本仓库目前**没有实现**。
 
-所以小程序侧现在只有两条路能用:
+所以小程序侧现在能用的只有一条路:
 
-- `alipay` / `shopify` —— 全页跳,跟旧路一样
-- `stripe`(旧路)—— 过渡期还在
+- `shopify` —— 全页跳(`web-view`),Shopify 收银台(现在唯一开放的通道)
+
+(`alipay` 的代码也在,但还没开放 —— 见 §5.4b 的 `ENABLED_PAYMENT_CHANNELS`。)
 
 **微信小程序端的微信支付要单独接 JSAPI**,那是下一件事。在那之前,小程序
 的支付方式列表里**不要出现「微信支付」** —— 收了钱收不回来。

@@ -30,6 +30,15 @@
  *
  * `isConfigured()` 返回 false 的通道**不出现在「选择支付方式」里** ——
  * 让用户点一个注定失败的按钮,比不给这个选项更糟。
+ *
+ * ## 「配好了」和「开放了」是两件事
+ *
+ * - **配好了**(`isConfigured()`)—— 环境变量齐了,技术上收得到钱
+ * - **开放了**(`ENABLED_PAYMENT_CHANNELS`)—— 工作室说现在让用户用这个
+ *
+ * 微信 / 支付宝的代码都写好了,但商户号 / 应用还没走完开通流程 —— 那种
+ * 情况下「配好了」是 false,用户看不到。但还有一种情况是**配好了也没开放**
+ * (比如先只开 Shopify 收一段),那就是这份名单说了算。
  */
 
 import { alipayPayProvider } from "@/features/payments/providers/alipay";
@@ -50,10 +59,38 @@ const PROVIDERS: Partial<Record<OnlinePaymentChannel, PaymentProvider>> = {
 };
 
 /**
+ * 现在**开放**的通道
+ *
+ * 2026-11-05:先只开 Shopify —— 微信 / 支付宝的代码都在,但还没到能用的时候。
+ * 先不让用户点一个注定失败的入口。
+ *
+ * 以后要开微信 / 支付宝,把 id 加进来就行 —— 剩下的(清单接口、结算默认
+ * 通道、打印工单)全都跟着这份名单走。
+ */
+export const ENABLED_PAYMENT_CHANNELS: readonly OnlinePaymentChannel[] = [
+  "shopify",
+];
+
+/**
+ * 这个通道现在开放吗
+ *
+ * 「开放了」跟「配好了」是两道闸 —— 两道都过才给用户看。
+ */
+export function isPaymentChannelEnabled(
+  channel: string | null | undefined
+): boolean {
+  if (!channel) return false;
+  return ENABLED_PAYMENT_CHANNELS.includes(channel as OnlinePaymentChannel);
+}
+
+/**
  * 取一个通道的实现
  *
  * 没有实现的通道(比如过渡期的 `stripe`)返回 null —— 调用方自己决定
  * 「不支持这个通道」该怎么办。
+ *
+ * **不受「开放名单」限制** —— 「重新获取付款入口」那条路要能救回任何一张
+ * 已经建好的单(哪怕那单走的是现在关掉的通道)。
  */
 export function getPaymentProvider(
   channel: OnlinePaymentChannel
@@ -61,33 +98,38 @@ export function getPaymentProvider(
   return PROVIDERS[channel] ?? null;
 }
 
+/** 三个通道的界面信息(顺序 = 展示顺序) */
+const ALL_CHANNELS: PaymentChannelInfo[] = [
+  {
+    channel: "wechat",
+    label: "微信支付",
+    description: "扫码支付,钱直接进我们的商户号",
+    available: wechatPayProvider.isConfigured(),
+  },
+  {
+    channel: "alipay",
+    label: "支付宝",
+    description: "跳转到支付宝付款",
+    available: alipayPayProvider.isConfigured(),
+  },
+  {
+    channel: "shopify",
+    label: "银行卡 / Shop Pay",
+    description: "跳转到 Shopify 收银台刷卡",
+    available: shopifyPaymentProvider.isConfigured(),
+  },
+];
+
 /**
- * 列出所有通道,给界面选
+ * 列出**开放了**的通道,给界面选
  *
  * `available` 为 false 的通道前端不显示 —— 但这里还是返回了,是为了让
  * 前端能区分「不支持这个通道」和「通道挂了」。
  */
 export function listPaymentChannels(): PaymentChannelInfo[] {
-  return [
-    {
-      channel: "wechat",
-      label: "微信支付",
-      description: "扫码支付,钱直接进我们的商户号",
-      available: wechatPayProvider.isConfigured(),
-    },
-    {
-      channel: "alipay",
-      label: "支付宝",
-      description: "跳转到支付宝付款",
-      available: alipayPayProvider.isConfigured(),
-    },
-    {
-      channel: "shopify",
-      label: "银行卡 / Shop Pay",
-      description: "跳转到 Shopify 收银台刷卡",
-      available: shopifyPaymentProvider.isConfigured(),
-    },
-  ];
+  return ALL_CHANNELS.filter((channel) =>
+    isPaymentChannelEnabled(channel.channel)
+  );
 }
 
 /** 配好了、能用的通道 */

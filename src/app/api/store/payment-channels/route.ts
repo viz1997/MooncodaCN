@@ -3,26 +3,23 @@
  *
  * 结算页靠它画「选择支付方式」那几个按钮。
  *
- * ## 没配好的通道不显示
+ * ## 两道闸
  *
- * `available: false` 的通道前端不渲染 —— 让用户点一个注定失败的按钮,比不给
- * 这个选项更糟。
+ * - **开放了** —— `ENABLED_PAYMENT_CHANNELS`(工作室说现在用哪几个)
+ * - **配好了** —— `isConfigured()`(环境变量齐没齐)
  *
- * ## 过渡期多一条「旧通道」
+ * 两道都过的通道才出现在这儿。没配好的不渲染 —— 让用户点一个注定失败的
+ * 按钮,比不给这个选项更糟。
  *
- * 新的三个通道(微信 / 支付宝 / Shopify)还没配好时,结算页不能一个选项都没有
- * —— 那等于关掉了收款。所以只要**三个新通道没全部就绪**,就额外返回旧的
- * Sellbase + Stripe 那条路。
+ * ## 旧的 Sellbase + Stripe 那条路不在这儿了
  *
- * 三个都就绪之后,这条旧通道自动消失 —— 界面上就只剩三个支付方式。
- * 跑通之后把 `src/features/sellbase/` 整个拆掉,那时把下面那段
- * `legacyChannel` 一起删了。
+ * 旧路的代码还住在 `src/features/sellbase/`(过渡期保留,已建好的旧单还能
+ * 重取支付入口),但**新单不再走它** —— 所以这里不再返回那条旧通道。
  */
 
 import { type NextRequest, NextResponse } from "next/server";
 
 import { listPaymentChannels } from "@/features/payments/lib/registry";
-import { isSellbaseConfigured } from "@/features/sellbase/lib/env";
 import { withApiLogging } from "@/lib/api-logger";
 import {
   checkRateLimit,
@@ -35,16 +32,6 @@ export const runtime = "nodejs";
 /** 一次本地读,10s 绰绰有余 */
 export const maxDuration = 10;
 
-/** 过渡期的旧通道(Sellbase + Stripe)—— 三个新通道都就绪之后就不再返回 */
-function legacyChannel() {
-  return {
-    channel: "stripe" as const,
-    label: "银行卡(旧收款通道)",
-    description: "过渡期保留的收银台,新的三个通道就绪后自动下线",
-    available: isSellbaseConfigured(),
-  };
-}
-
 async function handle(request: NextRequest) {
   const ip = getClientIp(request);
   const rl = await checkRateLimit(ip, "storeCheckout");
@@ -52,13 +39,8 @@ async function handle(request: NextRequest) {
     return createRateLimitResponse(rl);
   }
 
-  const channels = listPaymentChannels();
-  const allNewReady = channels.every((channel) => channel.available);
-
   return NextResponse.json(
-    {
-      channels: allNewReady ? channels : [...channels, legacyChannel()],
-    },
+    { channels: listPaymentChannels() },
     { headers: getRateLimitHeaders(rl) }
   );
 }

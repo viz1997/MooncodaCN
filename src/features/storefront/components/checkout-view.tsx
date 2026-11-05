@@ -31,6 +31,7 @@
 
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { ChevronUp, Loader2, Package, Plus, Zap } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useAction } from "next-safe-action/hooks";
@@ -45,6 +46,7 @@ import { PaymentQrCode } from "@/features/payments/components/payment-qr";
 import { getDeliveryTier } from "@/features/print-quote/lib/delivery-tier";
 import { Link } from "@/i18n/routing";
 
+import { invalidateCartCache } from "../hooks/use-cart";
 import { findAccessoryVariant } from "../lib/mock-catalog";
 import { getPrintServiceSpec } from "../lib/print-service";
 import { formatSizeWithInches } from "../lib/size-format";
@@ -71,6 +73,8 @@ export function CheckoutView({
   signInUrl: string;
 }) {
   const items = cart?.items ?? [];
+
+  const queryClient = useQueryClient();
 
   /**
    * 界面语言 —— 跟着打印工单落库
@@ -99,7 +103,7 @@ export function CheckoutView({
   const [createdPrintOrderNos, setCreatedPrintOrderNos] = useState<string[]>(
     []
   );
-  /** 选中的收款通道 —— null = 还没选(服务端会走旧路) */
+  /** 选中的收款通道 —— null = 还没选(服务端挑第一个可用的) */
   const [channel, setChannel] = useState<string | null>(null);
   /**
    * 微信扫码的二维码内容
@@ -262,6 +266,17 @@ export function CheckoutView({
       clearInterval(timer);
     };
   }, [qrCodeUrl, createdOrderNo]);
+
+  /**
+   * 钱到了 → 购物车缓存作废
+   *
+   * 服务端在收款回调那一刻把买掉的行从购物车里摘掉了(见
+   * `payments/lib/settle.ts`)—— 客户端这份缓存得跟着作废。
+   */
+  useEffect(() => {
+    if (!scanPaid) return;
+    void invalidateCartCache(queryClient);
+  }, [scanPaid, queryClient]);
 
   /* ---------------------------------------------------------------------- */
   /*  空购物车                                                                */

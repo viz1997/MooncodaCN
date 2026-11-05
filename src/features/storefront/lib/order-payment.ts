@@ -34,7 +34,10 @@ import {
   type StorefrontOrderRow,
   storefrontOrder,
 } from "@/db/schema";
-import { getPaymentProvider } from "@/features/payments/lib/registry";
+import {
+  getPaymentProvider,
+  listAvailablePaymentChannels,
+} from "@/features/payments/lib/registry";
 import type {
   OnlinePaymentChannel,
   PaymentRequest,
@@ -58,7 +61,7 @@ import {
 import {
   buildStorefrontSellbaseNote,
   buildStorefrontSuccessUrl,
-} from "./checkout";
+} from "./checkout-url";
 import { classifyPaymentIssue } from "./payment-issue";
 
 /** 一次「重新获取付款入口」的结果 */
@@ -119,7 +122,26 @@ export async function ensureStorefrontOrderPaymentLink(
     return ensureNewChannelPaymentLink(order, items);
   }
 
+  // `payment_channel` 是 null 的单 = 建单时压根没定通道(比如建单那一刻
+  // 没有可用的线上通道)。这种单按**新路**处理 —— 走第一个「开放了而且配好了」
+  // 的通道,别掉回旧路(旧路已经不再接新单了)。
+  if (order.paymentChannel === null) {
+    const fallback = listAvailablePaymentChannels()[0];
+    if (!fallback) {
+      return { ok: false, code: "PAYMENT_NOT_CONFIGURED" };
+    }
+    return ensureNewChannelPaymentLink(order, items, fallback.channel);
+  }
+
+  // `offline` 的单是**线下**收款(工作室后台手动标的)—— 不给线上入口。
+  if (order.paymentChannel === "offline") {
+    return { ok: false, code: "PAYMENT_NOT_CONFIGURED" };
+  }
+
   // 旧路:Sellbase + Stripe(过渡期并行)
+  //
+  // 只接**已经建好的旧单** —— 新单不再走它(见 `checkout.ts` 的
+  // `resolveCheckoutChannel`)。
   //
   // 收款通道没配好 —— 后面所有调用都会失败,直接说清楚
   if (!isSellbaseConfigured()) {
@@ -215,12 +237,16 @@ export async function ensureStorefrontOrderPaymentLink(
  * 新路 —— 按订单行重建一次支付会话
  *
  * 用**存下来的**折后单价,不重新定价(理由见文件头)。
+ *
+ * `channelOverride` —— 订单上没记通道(`payment_channel` 是 null)时用这个
+ * 兜底(调用方挑的那个「开放了而且配好了」的通道)。
  */
 async function ensureNewChannelPaymentLink(
   order: StorefrontOrderRow,
-  items: StorefrontOrderItemRow[]
+  items: StorefrontOrderItemRow[],
+  channelOverride?: OnlinePaymentChannel
 ): Promise<StorefrontPaymentLinkResult> {
-  const channel = order.paymentChannel;
+  const channel = channelOverride ?? order.paymentChannel;
   if (!isNewChannel(channel)) {
     return { ok: false, code: "LINK_FAILED" };
   }
@@ -281,6 +307,9 @@ async function ensureNewChannelPaymentLink(
         providerOrderId: session.providerOrderId,
         paymentUrl: session.redirectUrl,
         paymentQrCodeUrl: session.qrCodeUrl,
+        // 订单上原本没记通道的(建单那一刻没有可用的线上通道)—— 把这次用的
+        // 通道记下来。下次再取入口走的是同一条通道,不会换。
+        ...(order.paymentChannel ? {} : { paymentChannel: channel }),
         updatedAt: new Date(),
       })
       .where(eq(storefrontOrder.id, order.id));

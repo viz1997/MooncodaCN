@@ -36,7 +36,11 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { type PrintOrderRow, printOrder } from "@/db/schema";
-import { getPaymentProvider } from "@/features/payments/lib/registry";
+import {
+  getPaymentProvider,
+  isPaymentChannelEnabled,
+  listAvailablePaymentChannels,
+} from "@/features/payments/lib/registry";
 import type {
   OnlinePaymentChannel,
   PaymentRequest,
@@ -104,8 +108,15 @@ function round1(value: string | number): string {
 /**
  * 给工单建一次支付会话
  *
- * `channel` 传新的三个通道之一 → 走新路;传 `null` / `"stripe"` → 走旧路
- * (Sellbase 建单 + Stripe 链接)。
+ * ## 走哪条通道
+ *
+ * - 指定了通道 → 用它(得是「开放了」的,见
+ *   `ENABLED_PAYMENT_CHANNELS`)
+ * - 没指定 → 第一个「开放了而且配好了」的通道
+ * - 一个都没有 → **返回 null**(走线下收款,工作室后台点「标记已收款」)
+ *
+ * 旧路(Sellbase + Stripe)不再接**新**工单 —— 代码还留着(已建好的旧工单
+ * 还能重取支付入口),但新单不走它。
  *
  * 失败**不抛** —— 调用方要的是「有没有入口」,不是「为什么失败」。失败原因
  * 记日志,订单本身已经在本地建好了。
@@ -114,10 +125,19 @@ export async function createPrintOrderPayment(
   order: PrintOrderRow,
   channel?: OnlinePaymentChannel | null
 ): Promise<PrintOrderPaymentSession | null> {
-  if (isNewChannel(channel)) {
-    return createNewChannelPrintOrderPayment(order, channel);
+  const resolved =
+    channel && isPaymentChannelEnabled(channel)
+      ? channel
+      : (listAvailablePaymentChannels()[0]?.channel ?? null);
+
+  if (!resolved) {
+    console.error(
+      `[print-quote] ${order.orderNo} 没有可用的线上收款通道 —— 走线下收款`
+    );
+    return null;
   }
-  return createLegacyPrintOrderPayment(order);
+
+  return createNewChannelPrintOrderPayment(order, resolved);
 }
 
 /**
@@ -305,10 +325,15 @@ export interface PrintOrderPaymentSession {
   paymentQrCodeUrl: string | null;
 }
 
-/** 新路的三个通道 */
+/**
+ * 新路的三个通道 —— **不含**过渡期的 `stripe`
+ *
+ * 类型谓词只认这三个:`stripe` 走旧路(Sellbase + Stripe),`offline` 是线下
+ * 收款,两者都不是「新通道」。
+ */
 function isNewChannel(
   channel: string | null | undefined
-): channel is OnlinePaymentChannel {
+): channel is "wechat" | "alipay" | "shopify" {
   return channel === "wechat" || channel === "alipay" || channel === "shopify";
 }
 
@@ -356,6 +381,24 @@ export async function ensurePrintOrderPaymentLink(
   // 新路(微信 / 支付宝 / Shopify)—— 跟旧路完全分开
   if (isNewChannel(order.paymentChannel)) {
     return ensureNewChannelPrintOrderPaymentLink(order, order.paymentChannel);
+  }
+
+  // `payment_channel` 是 null 的单 = 建单时压根没定通道(当时没有可用的线上
+  // 通道)。这种单按**新路**处理 —— 走第一个「开放了而且配好了」的通道。
+  if (order.paymentChannel === null) {
+    const fallback = listAvailablePaymentChannels()[0];
+    if (!fallback) {
+      return { ok: false, code: "PAYMENT_NOT_CONFIGURED" };
+    }
+    return ensureNewChannelPrintOrderPaymentLink(order, fallback.channel);
+  }
+
+  // `offline` 的单是**线下**收款(工作室后台手动标的)—— 不给线上入口。
+  //
+  // 正常情况下这种单已经是「已付款」了(上面就返回 ALREADY_PAID),走到这里
+  // 说明状态被改过 —— 那也不能给它塞一条线上付款链接。
+  if (order.paymentChannel === "offline") {
+    return { ok: false, code: "PAYMENT_NOT_CONFIGURED" };
   }
 
   // 旧路:Sellbase + Stripe(过渡期并行)
@@ -434,6 +477,9 @@ async function ensureNewChannelPrintOrderPaymentLink(
         providerOrderId: session.providerOrderId,
         paymentUrl: session.redirectUrl,
         paymentQrCodeUrl: session.qrCodeUrl,
+        // 工单上原本没记通道的(建单那一刻没有可用的线上通道)—— 把这次用的
+        // 通道记下来。下次再取入口走的是同一条通道,不会换。
+        ...(order.paymentChannel ? {} : { paymentChannel: channel }),
         updatedAt: new Date(),
       })
       .where(eq(printOrder.id, order.id));

@@ -15,6 +15,7 @@
 "use client";
 
 import {
+  type QueryClient,
   type UseMutationResult,
   useMutation,
   useQuery,
@@ -27,7 +28,20 @@ import {
 } from "../lib/pricing-constants";
 import type { Cart, CartLineItem, CartLineItemMetadata } from "../types";
 
-const CART_QUERY_KEY = ["store", "cart"] as const;
+export const CART_QUERY_KEY = ["store", "cart"] as const;
+
+/**
+ * 付款成功后把购物车缓存作废
+ *
+ * 购物车是「**付款成功才清空**」(2026-11-05)—— 付款成功那一刻服务端把买掉
+ * 的行从购物车里摘掉了(见 `payments/lib/settle.ts`)。客户端这份缓存得跟着
+ * 作废,不然用户看到的还是买之前的购物袋(缓存 30 秒,而且窗口聚焦时不重拉)。
+ */
+export async function invalidateCartCache(
+  queryClient: QueryClient
+): Promise<void> {
+  await queryClient.invalidateQueries({ queryKey: CART_QUERY_KEY });
+}
 
 type AddLineItemInput = {
   productId: string;

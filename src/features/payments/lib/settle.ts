@@ -25,11 +25,14 @@
 import { eq } from "drizzle-orm";
 
 import { db } from "@/db";
-import { printOrder, storefrontOrder } from "@/db/schema";
+import { printOrder, storefrontOrder, storefrontOrderItem } from "@/db/schema";
 import {
   PrintOrderTransitionError,
   transitionPrintOrderStatus,
 } from "@/features/print-quote/lib/order-store";
+import { buildLineSnapshot } from "@/features/storefront/lib/cart-snapshot";
+import { removeOrderedLinesFromCarts } from "@/features/storefront/lib/cart-store";
+import type { CartLineItemMetadata } from "@/features/storefront/types";
 
 import {
   decideLinkedPrintOrderTransition,
@@ -61,6 +64,8 @@ export interface OrderLookup {
   orderNo: string;
   status: string;
   paymentStatus: string;
+  /** 下单人 —— 付款成功时要把买掉的行从他的购物车里摘掉 */
+  userId: string;
 }
 
 function ignored(reason: string): SettleResult {
@@ -96,6 +101,7 @@ export async function findOrderByOrderNo(
       orderNo: storefrontOrder.orderNo,
       status: storefrontOrder.status,
       paymentStatus: storefrontOrder.paymentStatus,
+      userId: storefrontOrder.userId,
     })
     .from(storefrontOrder)
     .where(eq(storefrontOrder.orderNo, orderNo))
@@ -110,6 +116,7 @@ export async function findOrderByOrderNo(
       orderNo: printOrder.orderNo,
       status: printOrder.status,
       paymentStatus: printOrder.paymentStatus,
+      userId: printOrder.userId,
     })
     .from(printOrder)
     .where(eq(printOrder.orderNo, orderNo))
@@ -316,7 +323,61 @@ export async function settleStorefrontOrder(params: {
   // 挂在它下面的打印工单一起标 —— 钱是整单收的,工单不能还停在「未付款」
   await syncLinkedPrintOrders(order.id, action, channel);
 
+  // 付款成功 → 把买掉的行从购物车里摘掉
+  //
+  // 购物车是「**付款成功才清空**」(2026-11-05)—— 建单那一刻不动它,钱到了
+  // 才摘。摘的是买掉的那几行,用户付款之后又加的别的行留着。
+  //
+  // **失败不抛** —— 订单已经标成已付了(那才是钱的记录),购物车摘不掉顶多
+  // 是用户的购物袋里还留着已经买过的东西。抛出去的话 webhook 会重投,
+  // 重投时状态机判「已经标记过收款」直接 skip —— 这一次反而永远摘不掉了。
+  if (decision.setPaymentStatus === "paid") {
+    try {
+      await removeOrderedLinesFromCart(order);
+    } catch (error) {
+      console.error(
+        `[payments] ${order.orderNo} 已付款,但购物车里的行没摘掉`,
+        error
+      );
+    }
+  }
+
   return { ...base, changed: true };
+}
+
+/**
+ * 付款成功 → 把买掉的行从用户的购物车里摘掉
+ *
+ * ## 按**规格 hash** 对上
+ *
+ * 订单行和购物车行不是同一张表,也没有共同的行 id —— 能对上的是规格 hash
+ * (同一份规格在哪儿都是同一个 hash,见 `storefront/lib/cart-snapshot.ts`)。
+ *
+ * ## 为什么这一步在**回调**里,不在下单时
+ *
+ * 下单只说明「用户点了去支付」,不代表钱到了。下单就清购物车的话,用户没
+ * 付钱就走了,回来一看购物车空了(2026-11-05 线上真实踩到过)。
+ */
+async function removeOrderedLinesFromCart(order: OrderLookup): Promise<void> {
+  const items = await db
+    .select({
+      productId: storefrontOrderItem.productId,
+      metadata: storefrontOrderItem.metadata,
+      quantity: storefrontOrderItem.quantity,
+    })
+    .from(storefrontOrderItem)
+    .where(eq(storefrontOrderItem.orderId, order.id));
+  if (items.length === 0) return;
+
+  const snapshot = buildLineSnapshot(
+    items.map((item) => ({
+      productId: item.productId,
+      metadata: item.metadata as unknown as CartLineItemMetadata,
+      quantity: item.quantity,
+    }))
+  );
+
+  await removeOrderedLinesFromCarts(order.userId, snapshot);
 }
 
 /**

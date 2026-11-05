@@ -13,9 +13,9 @@ Mooncoda is a production-ready Next.js SaaS template. It provides a complete fou
 | 系统 | 职责 | 技术栈 |
 |---|---|---|
 | **NextDevTpl**(本仓库) | AI 生图 SaaS 后端:user / credits / photo / imageJob / AI 路由 / WeChat 小程序登录 **+ 商品目录(商品 / SKU 变体 / 价格)+ 定价 + 购物车 + 订单事实 + 收货地址 + 打印工单(`/quote` 报价 → `print_order`,按 `user_id` 归属,登录后下单;也可以从 `/tools/weight` 直接加进商城购物车,见「打印服务进商城购物车」)** | Next.js 16 + Drizzle + PostgreSQL |
-| **微信支付 / 支付宝**(外部服务) | **自己直连的收款通道**:钱直接进我们自己的商户号 / 账户,没有中间层抽成,定价完全由本仓库说了算 | 微信支付 V3 Native(扫码)+ 支付宝电脑网站支付 |
-| **Shopify**(外部服务) | **只做银行卡 / Shop Pay 的收银台**。本仓库算出来的价通过**草稿订单**原样传过去(逐分相等),不跟 Shopify 的商品目录 / 运费规则走 | Shopify Admin GraphQL API + 草稿订单 |
-| **Sellbase**(独立服务)**过渡期保留** | 旧收款路:Sellbase 建单 + Stripe 付款页。**三个新通道没全部跑通之前一直留着**,跑通后整个 `src/features/sellbase/` 拆掉 | Supabase Edge Functions(**跟本仓库同一个 Supabase 项目**)+ Stripe(MIT) |
+| **微信支付 / 支付宝**(外部服务) | **自己直连的收款通道**:钱直接进我们自己的商户号 / 账户,没有中间层抽成,定价完全由本仓库说了算。**代码写好了,还没开放**(见「三个支付通道」的 `ENABLED_PAYMENT_CHANNELS`) | 微信支付 V3 Native(扫码)+ 支付宝电脑网站支付 |
+| **Shopify**(外部服务) | **只做银行卡 / Shop Pay 的收银台**。本仓库算出来的价通过**草稿订单**原样传过去(逐分相等),不跟 Shopify 的商品目录 / 运费规则走。**现在唯一开放的通道** | Shopify Admin GraphQL API + 草稿订单 |
+| **Sellbase**(独立服务)**过渡期保留** | 旧收款路:Sellbase 建单 + Stripe 付款页。**不再接新单**(已建好的旧单还能重取支付入口)。三个新通道跑通后整个 `src/features/sellbase/` 拆掉 | Supabase Edge Functions(**跟本仓库同一个 Supabase 项目**)+ Stripe(MIT) |
 | **微信小程序 / 浏览器访客**(外部客户端) | 调 NextDevTpl AI 接口拿候选图 **+ 调 `/api/image-gen/products` 拿商品与 SKU**;调 NextDevTpl `/api/store/**` 加购 + 结算 | Taro 4 + React 18(小程序);Next.js(浏览器) |
 
 **接入形态 = 「本仓库算价,收银台只负责收钱」**(2026-11-05 取代 Sellbase 单通道):
@@ -40,10 +40,12 @@ Mooncoda is a production-ready Next.js SaaS template. It provides a complete fou
 ## Sellbase 集成(2026-11-04,**旧路,过渡期并行**)
 
 > **状态(2026-11-05)**:工作室决定把收款换成「微信 / 支付宝 / Shopify」三个
-> 直连通道(见「三个支付通道」)。这一节讲的是**旧路** —— 代码还活着,还跑
-> 着,**三个新通道全部跑通之后**整个 `src/features/sellbase/` 连同
-> `SELLBASE_*` 环境变量一起拆掉,届时 `stripe` 从 `PaymentChannel` 枚举里
-> 删掉,`/api/store/payment-channels` 里那段 `legacyChannel()` 也一起删。
+> 直连通道(见「三个支付通道」)。这一节讲的是**旧路** —— 代码还活着,但
+> **新单已经不走它了**(结算传 `stripe` 直接 503;`/api/store/payment-channels`
+> 也不再返回那条旧通道,那段 `legacyChannel()` 已删)。留着它是为了让**已经
+> 建好的旧单**还能重取支付入口。**三个新通道全部跑通之后**整个
+> `src/features/sellbase/` 连同 `SELLBASE_*` 环境变量一起拆掉,届时
+> `stripe` 从 `PaymentChannel` 枚举里删掉。
 
 **为什么不是 Medusa**:Medusa v2 要另起一台 server(Node + PostgreSQL + Redis),跟本仓库「SaaS 模板,自托管或 Vercel」的部署形态不合。Sellbase 是 Supabase Edge Functions —— 没有服务器要运维。
 
@@ -444,14 +446,14 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 - **模型归属校验在服务端** —— `isOwnModelUrl(url, objectKey, userId)` +
   `objectExists(objectKey)`:别人的模型、伪造的 URL、指向空对象的链接都不行。
 - 落库:`print_order.storefront_order_id`(不是 `sellbase_order_id` —— 整张
-  购物车共用**一张** Sellbase 订单,而 `print_order.sellbase_order_id` 是唯一
-  索引,挂不上)。迁移脚本
+  购物车共用**一张**支付订单,而 `print_order.sellbase_order_id` /
+  `provider_order_id` 是唯一索引,挂不上)。迁移脚本
   `scripts/apply-print-order-storefront-link-schema.ts`(幂等)。
 - **webhook 标商城订单 paid 时,挂在它下面的工单一起标 paid** —— 钱是整单
   收的,工单还停在「未付款」的话,工作室点「开始生产」会被 `PAYMENT_REQUIRED`
-  挡住。判断在 `storefront-transition.ts` 的
+  挡住。判断在 `payments/lib/transitions.ts` 的
   `decideLinkedPrintOrderTransition()`(纯函数),落库在
-  `webhook-handler.ts` 的 `syncLinkedPrintOrders()`。
+  `payments/lib/settle.ts` 的 `syncLinkedPrintOrders()`。
 - 行为由 `src/test/storefront/pure/print-service-cart.test.ts`(购物车行的
   判据 / hash / 形状)和 `src/test/sellbase/pure/linked-print-order.test.ts`
   (工单跟着商城订单变)守住。
@@ -463,6 +465,27 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 自己的商户号 / 账户,没有中间层抽成,定价完全由本仓库说了算),**Shopify 只
 承接卡**。旧的 Sellbase + Stripe 那条路**并行保留**,等三个新通道跑通再拆。
 
+> **2026-11-05 更新:先只开 Shopify。** 微信 / 支付宝的代码都写好了,但商户号
+> / 应用还没走完开通流程。「开放名单」在
+> `src/features/payments/lib/registry.ts` 的 `ENABLED_PAYMENT_CHANNELS`
+> —— 现在只有 `["shopify"]`。要开别的通道,把 id 加进去就行(清单接口、结算
+> 默认通道、打印工单全都跟着那份名单走)。
+>
+> **旧路(Sellbase + Stripe)不再接新单** —— 代码还留着(已建好的旧单还能重取
+> 支付入口),但结算时传 `stripe` 会直接回 503 `PAYMENT_CHANNEL_UNAVAILABLE`。
+> `/api/store/payment-channels` 也不再返回那条旧通道。
+
+#### 两道闸:「开放了」+「配好了」
+
+| 闸 | 在哪儿 | 管什么 |
+|---|---|---|
+| **开放了** | `ENABLED_PAYMENT_CHANNELS` | 工作室说现在让用户用这个 |
+| **配好了** | `provider.isConfigured()` | 环境变量齐了,技术上收得到钱 |
+
+**两道都过**才出现在「选择支付方式」里。让用户点一个注定失败的按钮,比不给
+这个选项更糟。指定的通道过不了闸 → **503 `PAYMENT_CHANNEL_UNAVAILABLE`**,
+**不静默退回别的通道**(用户以为选了微信支付、结果跳去了别处)。
+
 #### 通道清单
 
 | 通道 | 收钱方式 | 付款页形态 | 钱去哪 |
@@ -470,17 +493,50 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 | `wechat` | 微信支付 V3 **Native**(扫码) | 页面留在原地,画二维码 | 我们的微信商户号 |
 | `alipay` | 支付宝**电脑网站支付** | 整页跳支付宝 | 我们的支付宝账户 |
 | `shopify` | Shopify **草稿订单** | 整页跳 Shopify 收银台 | Shopify 店铺结算账户 |
-| `stripe` | **旧路**:Sellbase + Stripe(**过渡期并行**) | 整页跳 Stripe | Stripe → 我们的账户 |
+| `stripe` | **旧路**:Sellbase + Stripe(过渡期保留,**不再接新单**) | 整页跳 Stripe | Stripe → 我们的账户 |
 | `offline` | 线下转账 | 没有 —— 工作室后台手动标 | — |
 
 `offline` 不是「线上通道」:它没有支付会话,走的是后台「标记已收款」。
+**`offline` 的单不给线上付款入口** —— 那是工作室手动标的线下收款。
+
+#### 购物车改成「付款成功才清空」(2026-11-05)
+
+**原来是在建单那一刻就 `clearCartItems()`** —— 用户没付钱就走了,回来一看购物车
+空了,东西「丢了」(线上真实踩到过,用户原话「没有支付返回购物车为什么清空了」)。
+
+现在改成:**钱到了才摘**(见 `payments/lib/settle.ts` 的
+`removeOrderedLinesFromCart`)。摘的是**买掉的那几行**,付款之后又加的别的行
+留着;购物车里 3 件、订单里买了 2 件 → 剩 1 件,不是整行删掉。
+
+- **按规格 hash 对上** —— 订单行和购物车行不是同一张表,也没有共同的行 id。
+  能对上的是**规格 hash**(`storefront/lib/cart-spec.ts`),两边对同一份规格
+  算出来是同一个值
+- **「过户」提前到结算函数开头**(`stampCartOwner`)—— 付款那一刻要靠
+  `cart.user_id` 找到「这个人的购物车」,晚了就摘不掉
+- **摘失败不抛** —— 订单已经标成已付了(那才是钱的记录),购物车摘不掉顶多是
+  购物袋里还留着已经买过的东西。抛出去的话 webhook 会重投,重投时状态机判
+  「已经标记过收款」直接 skip —— 这一次反而永远摘不掉了
+- **行为由 `src/test/storefront/pure/cart-snapshot.test.ts` 守住**(hash 对得上
+  / 顺序无关 / 地址比较)
+
+**所以要「复用」上一张待付款的订单**(`storefront/lib/pending-order.ts`):
+购物车不清 → 用户再点一次「去支付」会攒出两张一样的单(工作室那边多一张
+永远不付的僵尸单;支付入口有两份,用户可能付了旧的那张、系统标的是新的那张,
+或者两张都付 = 收两次钱)。
+
+复用判据(全都一样才算同一单):**同一批货**(规格 hash + 数量)+ **同一合计**
+(分)+ **同一收货地址** + **同一留言** + 通道还在开放名单里。
+
+**为什么是「复用」不是「取消旧的」**:取消旧单有个要命的副作用 —— 用户可能已经
+扫了旧单的付款码,钱正准备到账;旧单一取消,回调按状态机判断就会跳过「标已付」
+(见 `payments/lib/transitions.ts`),**钱收了但系统不认**。复用没这个问题。
 
 #### 模块布局(`src/features/payments/`)
 
 ```
 lib/
 ├── types.ts        # 通道契约(PaymentRequest / PaymentSession / PaymentProvider)+ 两类错误
-├── registry.ts     # 通道注册表:getPaymentProvider() / listPaymentChannels()
+├── registry.ts     # 通道注册表:ENABLED_PAYMENT_CHANNELS / getPaymentProvider() / listPaymentChannels()
 ├── money.ts        # 分 ↔ 元/分(微信要分,支付宝要元)—— 不用浮点
 ├── settle.ts       # 收款状态落库(四个通道共用一份)
 └── transitions.ts  # 状态转移判断(纯函数,零 DB 依赖)
@@ -558,11 +614,11 @@ providers/
 
 `GET /api/store/payment-channels` 返回现在能用的通道。
 
-- **没配好的通道不显示** —— `available: false` 的前端不渲染。让用户点一个
+- **只返回「开放了」的通道** —— `ENABLED_PAYMENT_CHANNELS` 之外的一个都不
+  返回(现在就是只有 `shopify`)。旧路(Sellbase + Stripe)**不在清单里** ——
+  它不再接新单。
+- **没配好的通道不渲染** —— `available: false` 的前端不画。让用户点一个
   注定失败的按钮,比不给这个选项更糟。
-- **过渡期多一条旧通道** —— 只要**三个新通道没全部就绪**,就额外返回旧的
-  Sellbase + Stripe 那条路;三个都就绪之后它自动消失(界面上就只剩三个支付
-  方式)。
 - 前端的选择器 `src/features/payments/components/payment-channel-picker.tsx`
   用 `Payment.channels.*` 的 i18n 文案,没有翻译就退回服务端给的中文兜底。
 
@@ -616,17 +672,20 @@ providers/
 | `src/test/payments/pure/storefront-transition.test.ts` | 状态转移(退款 / 迟到通知) |
 | `src/test/payments/pure/linked-print-order.test.ts` | 工单跟着商城订单变 |
 | `src/test/storefront/pure/checkout-payment-issue.test.ts` | 「没配好」vs「这次挂了」 |
+| `src/test/storefront/pure/cart-snapshot.test.ts` | 订单行的 hash = 购物车行的 hash(付款后摘行靠它) |
 
 #### 上线清单(人工步骤,不在代码里)
 
-按顺序做,少一步就有一条路收不到钱:
+按顺序做,少一步就有一条路收不到钱。**现在只开 Shopify**,所以只跑 Shopify
+那一列;微信 / 支付宝开通之后(改 `ENABLED_PAYMENT_CHANNELS` + 补上第 3、4 步)
+再放流量。
 
 1. **跑迁移** —— `pnpm tsx scripts/apply-payment-channel-schema.ts`
    (给 `storefront_order` / `print_order` 加 5 列 + 2 个索引;幂等)
-2. **配环境变量** —— 三个通道各自的变量(见上面那张表)。**密钥只进环境变量**,
+2. **配环境变量** —— 各通道自己的变量(见上面那张表)。**密钥只进环境变量**,
    不进仓库文件、不进聊天。Vercel 上加完变量**要确认新部署已经生效**再让
    用户下单(环境变量是按部署快照的,加变量那一刻的构建可能还没带上它)
-3. **登记回调地址** —— 三条通知地址都要在对应平台上填:
+3. **登记回调地址** —— 各通道的通知地址要在对应平台上填:
    - 微信:商户平台 → 产品中心 → 开发配置 → 支付通知地址 →
      `https://<站点>/api/webhooks/wechat`
    - 支付宝:开放平台 → 应用 → 开发设置 → 异步通知地址 →
@@ -636,10 +695,11 @@ providers/
      `https://<站点>/api/webhooks/shopify`
 4. **各通道都要用小额真单试一遍** —— 微信扫一次码、支付宝跳一次、
    Shopify 刷一次卡,确认「钱到了 → 订单变 paid → 挂在下面的工单也跟着变
-   paid」。三条 webhook 的验签路径不一样,只有真单能验出来
+   paid → **购物车里买掉的那几行没了**」。各通道 webhook 的验签路径不一样,
+   只有真单能验出来
 5. **小程序端的微信支付暂时别开** —— 微信 Native 是扫码,在小程序里扫不了
    自己屏幕上的码。小程序要收微信支付得走 JSAPI(`wx.requestPayment`),
-   本仓库**还没实现**。小程序里现在只有支付宝 / Shopify 能用
+   本仓库**还没实现**
 
 ### Stripe 微信支付 / 支付宝(2026-11-05,**旧路,过渡期保留**)
 

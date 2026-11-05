@@ -106,8 +106,32 @@ export function computeSpecHash(input: CartSpecInput): string {
 export function computeSpecHashFromMetadata(
   metadata: CartLineItemMetadata
 ): string {
-  return computeSpecHash({
+  return computeSpecHashForLine({
     productId: metadata.productId,
+    metadata,
+  });
+}
+
+/**
+ * 从「一行」算 hash —— **product id 用行上那一个**
+ *
+ * ## 为什么不直接用 `computeSpecHashFromMetadata()`
+ *
+ * `metadata.productId` 是**客户端带来的** id(加购时原样存进 metadata),
+ * 购物车落库用的却是**服务端解析过的** id —— 打印服务行的哨兵值
+ * `service_print_3d` 就是在这儿换掉的。
+ *
+ * 两个 id 不一样,hash 就不一样 —— 用 metadata 里那个算,永远对不上购物车
+ * 里存着的 `spec_hash`。所以订单行 / 购物车行要算 hash 时,一律走这个函数,
+ * **product id 从行上取**。
+ */
+export function computeSpecHashForLine(line: {
+  productId: string;
+  metadata: CartLineItemMetadata;
+}): string {
+  const metadata = line.metadata;
+  return computeSpecHash({
+    productId: line.productId,
     materialId: metadata.materialId,
     sizeId: metadata.sizeId,
     aiStyleId: metadata.aiStyleId,

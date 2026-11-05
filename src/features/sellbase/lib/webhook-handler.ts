@@ -46,12 +46,12 @@ import { eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import { printOrder, storefrontOrder } from "@/db/schema";
+import type { PaymentAction } from "@/features/payments/lib/settle";
 import {
   type OrderLookup,
   settlePrintOrder,
   settleStorefrontOrder,
 } from "@/features/payments/lib/settle";
-import type { PaymentAction } from "@/features/payments/lib/settle";
 
 import type { SellbasePaymentAction } from "./events";
 
@@ -111,6 +111,7 @@ export async function applySellbasePaymentAction(
       orderNo: printOrder.orderNo,
       status: printOrder.status,
       paymentStatus: printOrder.paymentStatus,
+      userId: printOrder.userId,
     })
     .from(printOrder)
     .where(eq(printOrder.sellbaseOrderId, sellbaseOrderId))
@@ -128,6 +129,7 @@ export async function applySellbasePaymentAction(
       orderNo: storefrontOrder.orderNo,
       status: storefrontOrder.status,
       paymentStatus: storefrontOrder.paymentStatus,
+      userId: storefrontOrder.userId,
     })
     .from(storefrontOrder)
     .where(eq(storefrontOrder.sellbaseOrderId, sellbaseOrderId))

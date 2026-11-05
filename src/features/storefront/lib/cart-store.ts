@@ -41,7 +41,7 @@
  * 太贵。用户登录后 cookie 里还是游客那张车,结算时再打上 user_id。
  */
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { cookies } from "next/headers";
 
@@ -567,4 +567,83 @@ export async function clearCartItems(cartId: string): Promise<void> {
     .update(cart)
     .set({ updatedAt: new Date() })
     .where(eq(cart.id, cartId));
+}
+
+/**
+ * 把「已经买掉的那些行」从用户的购物车里摘掉
+ *
+ * ## 什么时候用
+ *
+ * 2026-11-05 起购物车改成**付款成功才清空** —— 下单那一刻不动购物车,
+ * 钱到了才摘掉买掉的那些行。没付钱就走的用户,购物车还是原样。
+ *
+ * ## 只摘买掉的那些
+ *
+ * 用户付款之后可能又往购物车里加了别的行 —— 那些得留着。所以不是「清空
+ * 购物车」,而是「把买掉的那几行摘掉」。
+ *
+ * ## 按 `spec_hash` 摘,不是按行 id
+ *
+ * 订单行和购物车行不是同一张表,也没有共同的行 id。能对上的是**规格
+ * hash** —— 同一份规格在哪儿都是同一个 hash(见 `cart-spec.ts`)。
+ *
+ * ## 是「减数量」不是「删行」
+ *
+ * 购物车里 3 件、订单里买了 2 件 → 购物车剩 1 件,不是整行删掉。
+ *
+ * ## 找哪些购物车
+ *
+ * `cart.user_id` —— 结算时打过户(见 `stampCartOwner`),所以这一列找得到
+ * 这个人的所有购物车(换设备登录也在内)。已经买过的规格,别的设备上也不该
+ * 再留着让人重复下单。
+ */
+export async function removeOrderedLinesFromCarts(
+  userId: string,
+  ordered: Array<{ specHash: string; quantity: number }>
+): Promise<void> {
+  if (ordered.length === 0) return;
+
+  const cartRows = await db
+    .select({ id: cart.id })
+    .from(cart)
+    .where(eq(cart.userId, userId));
+  if (cartRows.length === 0) return;
+
+  const cartIds = cartRows.map((row) => row.id);
+  const bought = new Map(ordered.map((line) => [line.specHash, line.quantity]));
+
+  const rows = await db
+    .select({
+      id: cartItem.id,
+      specHash: cartItem.specHash,
+      quantity: cartItem.quantity,
+    })
+    .from(cartItem)
+    .where(
+      and(
+        inArray(cartItem.cartId, cartIds),
+        inArray(cartItem.specHash, [...bought.keys()])
+      )
+    );
+  if (rows.length === 0) return;
+
+  const now = new Date();
+  for (const row of rows) {
+    const quantity = bought.get(row.specHash);
+    if (quantity === undefined) continue;
+    const remaining = row.quantity - quantity;
+    if (remaining > 0) {
+      await db
+        .update(cartItem)
+        .set({ quantity: remaining, updatedAt: now })
+        .where(eq(cartItem.id, row.id));
+    } else {
+      await db.delete(cartItem).where(eq(cartItem.id, row.id));
+    }
+  }
+
+  await db
+    .update(cart)
+    .set({ updatedAt: now })
+    .where(inArray(cart.id, cartIds));
 }

@@ -64,7 +64,11 @@ import {
   storefrontOrder,
   storefrontOrderItem,
 } from "@/db/schema";
-import { getPaymentProvider } from "@/features/payments/lib/registry";
+import {
+  getPaymentProvider,
+  isPaymentChannelEnabled,
+  listAvailablePaymentChannels,
+} from "@/features/payments/lib/registry";
 import type {
   OnlinePaymentChannel,
   PaymentChannel,
@@ -95,12 +99,22 @@ import {
 } from "@/features/sellbase/lib/money";
 import { createSellbaseOrder } from "@/features/sellbase/lib/orders";
 import type { CartLineItem, PricingResult } from "../types";
-import { clearCartItems, getCart, stampCartOwner } from "./cart-store";
+import { buildLineSnapshot } from "./cart-snapshot";
+import { getCart, stampCartOwner } from "./cart-store";
+import {
+  buildStorefrontSellbaseNote,
+  buildStorefrontSuccessUrl,
+} from "./checkout-url";
 import { findProductById } from "./mock-catalog";
+import { ensureStorefrontOrderPaymentLink } from "./order-payment";
 import {
   classifyPaymentIssue,
   type StorefrontPaymentIssue,
 } from "./payment-issue";
+import {
+  findReusablePendingOrder,
+  type ReusablePendingOrder,
+} from "./pending-order";
 import { calculatePricing } from "./pricing";
 import { calculateShippingCents } from "./pricing-constants";
 import {
@@ -336,39 +350,51 @@ function repriceLine(item: CartLineItem): PricedLine {
 /**
  * 定下这次用哪个通道
  *
- * 不传 = 旧的 Sellbase/Stripe 那条路(过渡期并行)。
+ * ## 不传 = 第一个「开放了而且配好了」的通道
  *
- * 指定的通道**没配好**就直接报错 —— 静默退回旧路会让用户以为自己选了
- * 微信支付、结果跳到了 Stripe(用户看着莫名其妙)。「这个方式现在不可用」
- * 是一句实话。
+ * 通道的名单在 `@/features/payments/lib/registry` 的
+ * `ENABLED_PAYMENT_CHANNELS` —— 现在先只开 Shopify。前端的选择器也是按
+ * 同一份清单画的,所以「不传」和「前端默认选中的那个」永远是同一个。
+ *
+ * ## 指定的通道不可用就直接报错
+ *
+ * 静默退回别的通道会让用户以为自己选了微信支付、结果跳到了别的地方
+ * (用户看着莫名其妙)。「这个方式现在不可用」是一句实话。
+ *
+ * ## 旧路(Sellbase + Stripe)不再接新单
+ *
+ * 代码还留着(`src/features/sellbase/`,已建好的旧单还能重取支付入口),
+ * 但**新单不走它** —— 所以这里直接拒掉。
  */
 export function resolveCheckoutChannel(
   requested: PaymentChannel | null | undefined
 ): OnlinePaymentChannel {
-  const channel = requested ?? "stripe";
-  // `offline` 不是线上通道 —— 线下收款是工作室后台手动标的,没有支付会话
-  if (channel === "offline") {
-    throw new CheckoutError(
-      "PAYMENT_CHANNEL_UNAVAILABLE",
-      "这个支付方式暂时不可用,请换一个或联系工作室"
-    );
-  }
-  if (channel === "stripe") return channel;
+  const unavailable = new CheckoutError(
+    "PAYMENT_CHANNEL_UNAVAILABLE",
+    "这个支付方式暂时不可用,请换一个或联系工作室"
+  );
 
-  const provider = getPaymentProvider(channel);
-  if (!provider) {
+  // `offline` 不是线上通道 —— 线下收款是工作室后台手动标的,没有支付会话
+  if (requested === "offline") throw unavailable;
+  // 旧路:过渡期保留,新单不再走
+  if (requested === "stripe") throw unavailable;
+
+  if (requested) {
+    if (!isPaymentChannelEnabled(requested)) throw unavailable;
+    const provider = getPaymentProvider(requested);
+    if (!provider?.isConfigured()) throw unavailable;
+    return requested;
+  }
+
+  // 没指定 → 第一个「开放了而且配好了」的通道
+  const fallback = listAvailablePaymentChannels()[0];
+  if (!fallback) {
     throw new CheckoutError(
       "PAYMENT_CHANNEL_UNAVAILABLE",
-      "这个支付方式暂时不可用,请换一个或联系工作室"
+      "暂时没有可用的在线支付方式,请联系工作室"
     );
   }
-  if (!provider.isConfigured()) {
-    throw new CheckoutError(
-      "PAYMENT_CHANNEL_UNAVAILABLE",
-      "这个支付方式暂时不可用,请换一个或联系工作室"
-    );
-  }
-  return channel;
+  return fallback.channel;
 }
 
 /**
@@ -445,12 +471,26 @@ export function buildPaymentRequest(params: {
  * 结算
  *
  * 步骤:
- * 1. 读购物车 → 重算每一行的价
+ * 1. 读购物车 → **过户**给账号 → 重算每一行的价
  * 2. 定通道(用户选的;没配好的通道直接报错)
- * 3. 解析每一行的 Sellbase 载体变体(**只有旧路需要**)
- * 4. 落 `storefront_order` + `storefront_order_item`
- * 5. 建支付会话(旧路 = Sellbase 订单;新路 = 通道的支付会话)
- * 6. 回写 `payment_channel` + `provider_order_id` + 付款入口,清空购物车
+ * 3. 看看有没有一张**可以复用**的待付款订单(同一批货 + 同一地址 + 同一留言)
+ * 4. 解析每一行的 Sellbase 载体变体(**只有旧路需要**)
+ * 5. 落 `storefront_order` + `storefront_order_item`
+ * 6. 建支付会话(旧路 = Sellbase 订单;新路 = 通道的支付会话)
+ * 7. 回写 `payment_channel` + `provider_order_id` + 付款入口
+ *
+ * ## 购物车**不在这里清空**(2026-11-05)
+ *
+ * 原来是在建单这一刻就 `clearCartItems()` —— 用户没付钱就走了,回来一看购物车
+ * 空了,东西「丢了」(这是 2026-11-05 线上真实踩到的)。
+ *
+ * 现在改成:**付款成功才清** —— 钱到了(见 `payments/lib/settle.ts`)才把买掉
+ * 的那几行从购物车里摘掉。没付钱就走 → 购物车原样还在。
+ *
+ * ## 所以要「复用」上一张待付款的订单
+ *
+ * 购物车不清 → 用户再点一次「去支付」会多出一张一样的单(还有可能付两次钱)。
+ * 同一批货直接复用上一张单,见 `pending-order.ts`。
  */
 export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
   const cart = await getCart(input.cartId);
@@ -460,6 +500,14 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
   if (cart.items.length === 0) {
     throw new CheckoutError("CART_EMPTY", "购物车是空的");
   }
+
+  // 0. 购物车过户
+  //
+  //    游客购物车在这一刻归到账号名下(以后换设备登录还能找回)。
+  //
+  //    **必须早于付款** —— 付款成功那一刻要靠 `cart.user_id` 找到「这个人的
+  //    购物车」,把买掉的行摘掉。晚了就摘不掉。
+  await stampCartOwner(input.cartId, input.userId);
 
   // 1. 重算每一行
   const lines = cart.items.map(repriceLine);
@@ -482,7 +530,32 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
   const channel = resolveCheckoutChannel(input.channel);
   const legacy = channel === "stripe";
 
-  // 4. 载体变体 —— **只有旧路需要**
+  // 4. 复用:同一批货 → 用上一张还没付的单
+  //
+  //    购物车改成「付款成功才清空」之后,用户没付钱又点一次「去支付」会攒出
+  //    两张一样的单 —— 工作室那边多一张永远不付的僵尸单,用户那边可能付了
+  //    旧的那张码、系统却标的是新的那张(或者两张都付)。
+  //
+  //    复用还顺带避免了重复开工单:打印服务行每一次下单都会开一张 `PO-…`,
+  //    复用就只开一张。
+  const reusable = await findReusablePendingOrder({
+    userId: input.userId,
+    snapshot: buildLineSnapshot(
+      lines.map((line) => ({
+        productId: line.item.productId,
+        metadata: line.item.metadata,
+        quantity: line.quantity,
+      }))
+    ),
+    totalCents,
+    address: input.address,
+    note: input.note ?? null,
+  });
+  if (reusable) {
+    return reusePendingOrder(reusable, channel);
+  }
+
+  // 5. 载体变体 —— **只有旧路需要**
   //
   //    新通道的价是本仓库给的,不经过 Sellbase 的载体变体(所以新通道不
   //    需要把商品目录同步过去)。
@@ -508,7 +581,7 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
       )
     : null;
 
-  // 5. 落本地订单
+  // 6. 落本地订单
   const orderNo = generateStorefrontOrderNo();
   const orderId = `so_${nanoid(16)}`;
   const now = new Date();
@@ -594,7 +667,7 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
     }
   });
 
-  // 6. 建支付会话
+  // 7. 建支付会话
   let paymentUrl: string | null = null;
   let paymentQrCodeUrl: string | null = null;
   let providerOrderId: string | null = null;
@@ -686,7 +759,7 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
     }
   }
 
-  // 7. 回写
+  // 8. 回写
   if (legacy) {
     if (sellbaseOrderId) {
       await db
@@ -711,11 +784,13 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
       .where(eq(storefrontOrder.id, orderId));
   }
 
-  // 8. 购物车过户 + 清空
-  //    「过户」先做 —— 游客购物车在这一刻归到账号名下(以后换设备登录还能找回)。
-  //    清空放在最后:建单失败时用户还能回到购物车重试。
-  await stampCartOwner(input.cartId, input.userId);
-  await clearCartItems(input.cartId);
+  // 9. **购物车不清空**
+  //
+  //    购物车改成「付款成功才清空」—— 钱到了才把买掉的那些行摘掉(见
+  //    `payments/lib/settle.ts`)。用户没付钱就走了,购物车还是原样。
+  //
+  //    「过户」在函数开头就做了(早于付款 —— 付款那一刻要靠 `cart.user_id`
+  //    找到这个人的购物车)。
 
   return {
     orderNo,
@@ -733,35 +808,52 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
 }
 
 /* -------------------------------------------------------------------------- */
-/*  备注 / 回跳地址                                                            */
+/*  复用上一张待付款的订单                                                       */
 /* -------------------------------------------------------------------------- */
 
 /**
- * Sellbase 备注 —— 工作室在后台直接看到要点
+ * 复用一张待付款的订单
  *
- * 第一段是订单号:它是本仓库和 Sellbase 之间的**唯一**关联标记(建单失败
- * 时的「找回孤儿单」靠它,见 `sellbase/lib/orders.ts`)。
+ * ## 为什么复用而不是再落一张
+ *
+ * 购物车改成「付款成功才清空」之后,用户没付钱又回来点一次「去支付」,会
+ * 攒出两张一模一样的单:
+ *
+ * - 工作室那边多一张永远不付的僵尸单
+ * - 支付入口有两份 —— 用户可能付了旧的那张,系统标的是新的那张,或者两张
+ *   都付(收两次钱)
+ *
+ * ## 付款入口沿用那一单原本的通道
+ *
+ * 入口跟通道绑着(微信是二维码、Shopify 是跳转地址)。用户中途换了通道
+ * 的话,与其重建一张单(又变成重复下单),不如把那一单原来的通道给他 ——
+ * 他看到的是「我这一单还没付钱」。
  */
-export function buildStorefrontSellbaseNote(input: {
-  orderNo: string;
-  lines: Array<{ title: string; quantity: number }>;
-}): string {
-  const parts = [input.orderNo];
-  for (const line of input.lines) {
-    parts.push(`${line.title} ×${line.quantity}`);
-  }
-  return parts.join(" · ");
-}
+async function reusePendingOrder(
+  reusable: ReusablePendingOrder,
+  fallbackChannel: OnlinePaymentChannel
+): Promise<CheckoutSuccess> {
+  const link = await ensureStorefrontOrderPaymentLink(
+    reusable.order,
+    reusable.items
+  );
 
-/**
- * 付款后回跳的地址
- *
- * 带上订单号 —— success 页靠它查本地订单。
- */
-export function buildStorefrontSuccessUrl(orderNo: string): string {
-  const base =
-    process.env.BETTER_AUTH_URL?.trim() ||
-    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-    "http://localhost:3000";
-  return `${base.replace(/\/+$/, "")}/checkout/success?order=${encodeURIComponent(orderNo)}`;
+  return {
+    orderNo: reusable.order.orderNo,
+    paymentUrl: link.ok ? link.paymentUrl : null,
+    paymentQrCodeUrl: link.ok ? link.paymentQrCodeUrl : null,
+    paymentChannel: reusable.order.paymentChannel ?? fallbackChannel,
+    subtotalCents: reusable.order.subtotalCents,
+    discountCents: reusable.order.discountCents,
+    shippingCents: reusable.order.shippingCents,
+    totalCents: reusable.order.totalCents,
+    currency: reusable.order.currency,
+    printOrderNos: reusable.printOrderNos,
+    // 「没配好」和「这次挂了」要分开 —— 前者重试没用(见 `payment-issue.ts`)
+    paymentIssue: link.ok
+      ? null
+      : link.code === "PAYMENT_NOT_CONFIGURED"
+        ? "PAYMENT_NOT_CONFIGURED"
+        : "PAYMENT_FAILED",
+  };
 }

@@ -26,6 +26,7 @@
 
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -33,6 +34,8 @@ import { Button } from "@/components/ui/button";
 import { formatPriceCNY } from "@/features/marketing/components/storefront/wjp-store-data";
 import { PaymentQrCode } from "@/features/payments/components/payment-qr";
 import { Link } from "@/i18n/routing";
+
+import { invalidateCartCache } from "../hooks/use-cart";
 
 /** 轮询间隔 */
 const POLL_INTERVAL_MS = 3000;
@@ -75,6 +78,21 @@ export function CheckoutSuccessView({
   const aliveRef = useRef(true);
   const attemptRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const queryClient = useQueryClient();
+
+  /**
+   * 付款成功 → 购物车缓存作废
+   *
+   * 服务端在收款回调那一刻把买掉的行从购物车里摘掉了(见
+   * `payments/lib/settle.ts`)—— 客户端这份缓存得跟着作废,不然用户看到的
+   * 还是买之前的购物袋。
+   */
+  useEffect(() => {
+    if (paymentStatus === "paid") {
+      void invalidateCartCache(queryClient);
+    }
+  }, [paymentStatus, queryClient]);
 
   useEffect(() => {
     aliveRef.current = true;

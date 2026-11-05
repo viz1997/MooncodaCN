@@ -21,11 +21,11 @@
  * 见 `features/storefront/lib/checkout.ts` 的文件头。客户端带来的任何
  * 金额都不看。
  *
- * ## Sellbase 挂了**不影响**下单
+ * ## 收款通道挂了**不影响**下单
  *
- * 本地订单先落库,再建 Sellbase 订单。Sellbase 那边失败时订单照样在,
- * 状态停在 `unpaid`,响应里 `paymentUrl` 是 null —— 前端提示「订单已创建,
- * 支付链接生成失败」,用户可以在详情页重取。
+ * 本地订单先落库,再建支付会话。通道那边失败时订单照样在,状态停在
+ * `unpaid`,响应里 `paymentUrl` 是 null —— 前端提示「订单已创建,支付链接生成
+ * 失败」,用户可以在详情页重取。
  *
  * 响应里还有一个 `paymentIssue` 字段(`null` = 没失败):区分「收款通道没配
  * 好」(重试没用)和「这次调用挂了」(重试有用),话术不一样。见
@@ -67,7 +67,12 @@ const checkoutSchema = z.object({
   /**
    * 收款通道(2026-11-05)
    *
-   * 不传 = 旧的 Sellbase/Stripe 那条路(过渡期并行,跑通新通道后拆)。
+   * 不传 = 服务端挑第一个「开放了而且配好了」的通道(`ENABLED_PAYMENT_CHANNELS`
+   * + `isConfigured()`)。
+   *
+   * 传了但那个通道现在不可用 → 503 `PAYMENT_CHANNEL_UNAVAILABLE`(不是 400)——
+   * 「这个方式现在不可用」比「参数不合法」更贴近真实原因,前端也是按这个码
+   * 提示的。
    */
   channel: z.enum(["wechat", "alipay", "shopify", "stripe"]).nullish(),
 });

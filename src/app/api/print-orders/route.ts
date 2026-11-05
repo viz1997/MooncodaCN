@@ -36,6 +36,7 @@ import { after, type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import type { PrintOrderRow } from "@/db/schema";
 import { isR2Configured, objectExists } from "@/features/image-gen/lib/r2";
+import { isPaymentChannelEnabled } from "@/features/payments/lib/registry";
 import { getPrintOrderUser } from "@/features/print-quote/lib/auth";
 import { notifyPrintOrderCreated } from "@/features/print-quote/lib/notifications";
 import {
@@ -108,9 +109,9 @@ const orderSchema = z.object({
   /**
    * 收款通道(2026-11-05)
    *
-   * 不传 = 旧路(Sellbase + Stripe,过渡期保留)。传 `wechat` / `alipay` /
-   * `shopify` 就走新通道 —— 通道没配好时**不拦下单**,只是没有付款入口,
-   * 工作室走线下收款。
+   * 不传 = 服务端挑第一个「开放了而且配好了」的通道。传了就用它(得是开放
+   * 了的那个)—— 通道没配好时**不拦下单**,只是没有付款入口,工作室走线下
+   * 收款。
    */
   channel: z.enum(["wechat", "alipay", "shopify", "stripe"]).nullish(),
 });
@@ -190,6 +191,24 @@ async function handle(request: NextRequest) {
         issues: parsed.error.issues,
       },
       { status: 400 }
+    );
+  }
+
+  // 指定的通道现在不可用 → 503,别静默换一个
+  //
+  // 跟商城结算(`storefront/lib/checkout.ts` 的 `resolveCheckoutChannel`)同一个
+  // 口径:客户端点名要一个通道,服务端不能悄悄换成别的 —— 用户以为选了微信
+  // 支付、结果跳去了别处,那比直接报错糟得多。
+  //
+  // 「开放了但没配好」**不在这里拦** —— 那种情况下工单照样建,只是没有付款
+  // 入口,工作室走线下收款(见下面「这一步失败不影响下单」)。
+  if (parsed.data.channel && !isPaymentChannelEnabled(parsed.data.channel)) {
+    return NextResponse.json(
+      {
+        error: "PAYMENT_CHANNEL_UNAVAILABLE",
+        message: "这个支付方式暂时不可用,请换一个或联系工作室",
+      },
+      { status: 503 }
     );
   }
 
@@ -307,8 +326,9 @@ async function handle(request: NextRequest) {
   // unpaid,用户可以在详情页点「重新获取支付链接」,或者工作室走线下收款。
   // 收款通道没配好就把下单接口打挂,是把一个配置问题变成一条断掉的业务链。
   //
-  // 2026-11-05:通道由客户端选(`channel`)—— 微信 / 支付宝 / Shopify 三个新的,
-  // 或者旧路(Sellbase + Stripe,过渡期保留)。传 `stripe` 或者不传都走旧路。
+  // 2026-11-05:通道由客户端选(`channel`),或者不传让服务端挑第一个可用的。
+  // 旧路(Sellbase + Stripe)不再接新工单 —— 代码还留着,已建好的旧工单还能
+  // 重取支付入口。
   const payment = await createPrintOrderPayment(
     row,
     parsed.data.channel ?? null
