@@ -13,8 +13,8 @@
  * | `presentmentMoney` | **用户被收的钱**(展示币种 = `presentmentCurrencyCode`) |
  * | `shopMoney` | **店铺结算的钱**(结算币种) |
  *
- * 草稿订单的**行价是按展示币种给的**(`DraftOrderLineItemInput.price` 的
- * 文档原话:"The price in presentment currency")。所以:
+ * 草稿订单的**行价是按展示币种给的**(文档原话:"The price in presentment
+ * currency")。所以:
  *
  * ```text
  * presentmentCurrencyCode = USD

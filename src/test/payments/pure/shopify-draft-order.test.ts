@@ -15,6 +15,12 @@
  *    也就是我们发过去的行价的币种)。跟 `shopMoney` 比的话,店铺结算币种跟
  *    展示币种不同时会比错对象
  *
+ * ## 还有一个:**字段名 / 字段类型随 API 版本变**
+ *
+ * 2026-11-05 线上连栽两次(`price` 字段不存在、`handle` 字段不存在、
+ * 运费的 `price` 要标量不要对象)。所以这里钉的不只是「发的价对不对」,
+ * 还有「**形状对不上时会换一种写法重发**」。
+ *
  * ## 不碰真网络
  *
  * `fetch` 是桩。纯模块:不碰 DB。跑在 unit project 里。
@@ -117,6 +123,16 @@ interface DraftResponse {
   presentmentCurrencyCode?: string;
 }
 
+/** 一次建单尝试的结果 */
+type DraftAttempt =
+  | {
+      kind: "data";
+      draft: DraftResponse | null;
+      userErrors?: { field: string[] | null; message: string }[];
+    }
+  /** GraphQL 的 `errors` 数组 —— 验证错误 / 变量强制转换错误走这条路 */
+  | { kind: "errors"; messages: string[] };
+
 /**
  * 桩 fetch:按 GraphQL 查询里的关键字分派
  *
@@ -127,17 +143,23 @@ interface DraftResponse {
  * 要看的是真正发出去的东西,不是我们以为发出去的东西。
  */
 interface StubShopify {
-  /** 建草稿单时发过去的 input */
+  /** 建草稿单时发过去的 input(最后一次) */
   sentInput: Record<string, unknown> | null;
   /** 建草稿单时发过去的 query 原文 */
   sentQuery: string | null;
+  /** 建草稿单发了几次 */
+  callCount: number;
+  /** 每次建草稿单发过去的 input */
+  sentInputs: (Record<string, unknown> | null)[];
 }
 
 function stubShopify(params: {
   shopCurrency: string;
   enabledPresentmentCurrencies?: string[];
-  draft: DraftResponse | null;
+  draft?: DraftResponse | null;
   userErrors?: { field: string[] | null; message: string }[];
+  /** 按次序的建单结果 —— 用来测「写法阶梯」 */
+  draftResponses?: DraftAttempt[];
 }): StubShopify {
   const json = (data: unknown): Response =>
     new Response(JSON.stringify(data), {
@@ -145,7 +167,20 @@ function stubShopify(params: {
       headers: { "Content-Type": "application/json" },
     });
 
-  const stub: StubShopify = { sentInput: null, sentQuery: null };
+  const stub: StubShopify = {
+    sentInput: null,
+    sentQuery: null,
+    callCount: 0,
+    sentInputs: [],
+  };
+
+  const attempts: DraftAttempt[] = params.draftResponses ?? [
+    {
+      kind: "data",
+      draft: params.draft ?? null,
+      userErrors: params.userErrors ?? [],
+    },
+  ];
 
   const fetchMock = vi
     .fn()
@@ -165,32 +200,47 @@ function stubShopify(params: {
           },
         });
       }
+
+      const attempt =
+        attempts[Math.min(stub.callCount, attempts.length - 1)] ?? attempts[0];
+      stub.callCount += 1;
       stub.sentInput = body.variables?.input ?? null;
+      stub.sentInputs.push(body.variables?.input ?? null);
       stub.sentQuery = body.query;
+
+      if (!attempt || attempt.kind === "errors") {
+        return json({
+          errors: (attempt?.kind === "errors"
+            ? attempt.messages
+            : ["未知错误"]
+          ).map((message) => ({ message })),
+        });
+      }
+
       return json({
         data: {
           draftOrderCreate: {
-            draftOrder: params.draft
+            draftOrder: attempt.draft
               ? {
                   id: "gid://shopify/DraftOrder/1",
                   name: "#D1",
                   invoiceUrl: "https://demo-shop.myshopify.com/d/1",
                   totalPriceSet: {
                     shopMoney: {
-                      amount: params.draft.amount,
-                      currencyCode: params.draft.currencyCode,
+                      amount: attempt.draft.amount,
+                      currencyCode: attempt.draft.currencyCode,
                     },
                     presentmentMoney: {
                       amount:
-                        params.draft.presentmentAmount ?? params.draft.amount,
+                        attempt.draft.presentmentAmount ?? attempt.draft.amount,
                       currencyCode:
-                        params.draft.presentmentCurrencyCode ??
-                        params.draft.currencyCode,
+                        attempt.draft.presentmentCurrencyCode ??
+                        attempt.draft.currencyCode,
                     },
                   },
                 }
               : null,
-            userErrors: params.userErrors ?? [],
+            userErrors: attempt.userErrors ?? [],
           },
         },
       });
@@ -241,32 +291,63 @@ describe("建单用的 GraphQL —— 选择集必须版本无关", () => {
   });
 });
 
-describe("buildDraftOrderInput —— 价原样搬过去", () => {
-  it("行价就是我们算出来的数,一个字节都不改", async () => {
+describe("buildDraftOrderInput —— 字段名 / 字段类型得对得上", () => {
+  /**
+   * 2026-11-05 线上栽过的三个坑:
+   *
+   * ```text
+   * Field 'price' is not defined by type 'DraftOrderLineItemInput'
+   * Field 'handle' is not defined by type 'ShippingLineInput'
+   * shippingLine.price (invalid money '{"amount" => "6.99", "currencyCode" => "USD"}')
+   * ```
+   *
+   * 也就是:行价不叫 `price`、运费不带 `handle`、运费的 `price` 是
+   * **`Money` 标量**(字符串)而不是对象。
+   */
+  it("行价叫 originalUnitPrice(不是不存在的 price)", async () => {
     const { draftOrder } = await loadShopify();
     const input = draftOrder.buildDraftOrderInput({
       request: REQUEST,
       currencyCode: "USD",
     });
 
-    expect(input.lineItems[0]?.price).toEqual({
-      amount: "12.50",
-      currencyCode: "USD",
-    });
+    expect(input.lineItems[0]?.originalUnitPrice).toBe("12.50");
     expect(input.lineItems[0]?.quantity).toBe(2);
+    // **`price` 这个字段压根不存在** —— 送过去整条 mutation 验证不过
+    expect(input.lineItems[0]).not.toHaveProperty("price");
   });
 
-  it("运费也是我们给的数", async () => {
+  it("运费是 Money 标量(纯字符串),不是 {amount, currencyCode}", async () => {
     const { draftOrder } = await loadShopify();
     const input = draftOrder.buildDraftOrderInput({
       request: REQUEST,
       currencyCode: "USD",
     });
 
-    expect(input.shippingLine?.price).toEqual({
-      amount: "6.00",
+    expect(input.shippingLine?.price).toBe("6.00");
+    expect(typeof input.shippingLine?.price).toBe("string");
+  });
+
+  it("运费不带 handle —— 带了会被店铺的运费费率覆盖掉", async () => {
+    const { draftOrder } = await loadShopify();
+    const input = draftOrder.buildDraftOrderInput({
+      request: REQUEST,
       currencyCode: "USD",
     });
+
+    expect(input.shippingLine).not.toHaveProperty("handle");
+  });
+
+  it("价原样搬过去 —— 一个字节都不改", async () => {
+    const { draftOrder } = await loadShopify();
+    const input = draftOrder.buildDraftOrderInput({
+      request: REQUEST,
+      currencyCode: "USD",
+    });
+
+    // $12.50 —— 不是 $12.5,也不是 1250
+    expect(input.lineItems[0]?.originalUnitPrice).toBe("12.50");
+    expect(input.shippingLine?.price).toBe("6.00");
   });
 
   it("带上展示币种 —— 用户被收的那个币种", async () => {
@@ -303,6 +384,55 @@ describe("buildDraftOrderInput —— 价原样搬过去", () => {
       key: "订单号",
       value: "SO-20261105-942D88",
     });
+  });
+
+  it("换成 priceOverride 写法 —— 行价是带币种的对象", async () => {
+    const { draftOrder } = await loadShopify();
+    const input = draftOrder.buildDraftOrderInput({
+      request: REQUEST,
+      currencyCode: "USD",
+      flavor: {
+        linePrice: "priceOverrideMoneyInput",
+        shippingPrice: "scalar",
+      },
+    });
+
+    expect(input.lineItems[0]?.priceOverride).toEqual({
+      amount: "12.50",
+      currencyCode: "USD",
+    });
+    expect(input.lineItems[0]).not.toHaveProperty("originalUnitPrice");
+  });
+
+  it("老版本里 originalUnitPrice 是对象 —— 那种写法也留着", async () => {
+    const { draftOrder } = await loadShopify();
+    const input = draftOrder.buildDraftOrderInput({
+      request: REQUEST,
+      currencyCode: "USD",
+      flavor: {
+        linePrice: "originalUnitPriceMoneyInput",
+        shippingPrice: "scalar",
+      },
+    });
+
+    expect(input.lineItems[0]?.originalUnitPrice).toEqual({
+      amount: "12.50",
+      currencyCode: "USD",
+    });
+  });
+
+  it("运费标量里带币种 —— 少数版本要这种写法", async () => {
+    const { draftOrder } = await loadShopify();
+    const input = draftOrder.buildDraftOrderInput({
+      request: REQUEST,
+      currencyCode: "USD",
+      flavor: {
+        linePrice: "originalUnitPriceScalar",
+        shippingPrice: "scalarWithCurrency",
+      },
+    });
+
+    expect(input.shippingLine?.price).toBe("6.00 USD");
   });
 });
 
@@ -387,13 +517,10 @@ describe("createShopifyDraftOrder —— 建单", () => {
     // 真正发出去的那份 input —— 不是我们以为发出去的那份
     const input = stub.sentInput as {
       presentmentCurrencyCode: string;
-      lineItems: { price: unknown }[];
+      lineItems: { originalUnitPrice?: string }[];
     };
     expect(input.presentmentCurrencyCode).toBe("USD");
-    expect(input.lineItems[0]?.price).toEqual({
-      amount: "12.50",
-      currencyCode: "USD",
-    });
+    expect(input.lineItems[0]?.originalUnitPrice).toBe("12.50");
   });
 
   it("Shopify 报了 userErrors → 报错(原文带出去)", async () => {
@@ -407,6 +534,233 @@ describe("createShopifyDraftOrder —— 建单", () => {
     await expect(draftOrder.createShopifyDraftOrder(REQUEST)).rejects.toThrow(
       types.PaymentProviderError
     );
+  });
+});
+
+describe("写法阶梯 —— 字段形状对不上就换一种写法", () => {
+  /**
+   * Shopify 的**同一个输入类型在不同 API 版本上字段不一样**,而文档页常常
+   * 打不开、二手信息也可能对不上版本 —— 所以代码里留了一条自动换写法的路。
+   *
+   * 换写法的**唯一触发条件**是「字段形状对不上」(字段名不认 / 字段类型不对)。
+   */
+  it("字段名不认 → 换一种写法重发,第二次成了", async () => {
+    const stub = stubShopify({
+      shopCurrency: "USD",
+      draftResponses: [
+        {
+          kind: "errors",
+          messages: [
+            "Variable `$input` of type `DraftOrderInput!` was provided invalid " +
+              "value for `lineItems.0.originalUnitPrice` (Field " +
+              "`originalUnitPrice` is not defined by type " +
+              "`DraftOrderLineItemInput`)",
+          ],
+        },
+        { kind: "data", draft: { amount: EXPECTED_USD, currencyCode: "USD" } },
+      ],
+    });
+
+    const { draftOrder } = await loadShopify();
+    const draft = await draftOrder.createShopifyDraftOrder(REQUEST);
+
+    expect(draft.totalCents).toBe(3100);
+    expect(stub.callCount).toBe(2);
+
+    const first = stub.sentInputs[0] as {
+      lineItems: Record<string, unknown>[];
+    };
+    const second = stub.sentInputs[1] as {
+      lineItems: Record<string, unknown>[];
+    };
+    // 第一次用 originalUnitPrice,第二次换成了 priceOverride
+    expect(first.lineItems[0]?.originalUnitPrice).toBe("12.50");
+    expect(second.lineItems[0]?.priceOverride).toEqual({
+      amount: "12.50",
+      currencyCode: "USD",
+    });
+  });
+
+  it("字段类型不对(invalid money)→ 换一种写法重发", async () => {
+    const stub = stubShopify({
+      shopCurrency: "USD",
+      draftResponses: [
+        {
+          kind: "errors",
+          messages: [
+            "Variable `$input` of type `DraftOrderInput!` was provided invalid " +
+              "value for `shippingLine.price` (invalid money " +
+              '\'{"amount" => "6.00", "currencyCode" => "USD"}\')',
+          ],
+        },
+        { kind: "data", draft: { amount: EXPECTED_USD, currencyCode: "USD" } },
+      ],
+    });
+
+    const { draftOrder } = await loadShopify();
+    const draft = await draftOrder.createShopifyDraftOrder(REQUEST);
+
+    expect(draft.totalCents).toBe(3100);
+    expect(stub.callCount).toBe(2);
+    // 第二次运费标量里带上了币种
+    const second = stub.sentInputs[1] as { shippingLine?: { price: unknown } };
+    expect(second.shippingLine?.price).toBe("6.00 USD");
+  });
+
+  it("**不是**字段形状问题 → 不重试(一次就抛,别把真正的错误盖住)", async () => {
+    const stub = stubShopify({
+      shopCurrency: "USD",
+      draftResponses: [
+        {
+          kind: "errors",
+          messages: ["Access denied for resource type GraphqlAdminOperation"],
+        },
+      ],
+    });
+
+    const { draftOrder, types } = await loadShopify();
+    await expect(draftOrder.createShopifyDraftOrder(REQUEST)).rejects.toThrow(
+      types.PaymentProviderError
+    );
+
+    expect(stub.callCount).toBe(1);
+  });
+
+  it("金额对不上 → 不重试(换写法救不了对账)", async () => {
+    const stub = stubShopify({
+      shopCurrency: "USD",
+      draft: { amount: "30.99", currencyCode: "USD" },
+    });
+
+    const { draftOrder, types } = await loadShopify();
+    await expect(draftOrder.createShopifyDraftOrder(REQUEST)).rejects.toThrow(
+      types.PaymentProviderError
+    );
+
+    expect(stub.callCount).toBe(1);
+  });
+
+  it("所有写法都不行 → 报错里说清试了几种 + 最后一次的原文", async () => {
+    const stub = stubShopify({
+      shopCurrency: "USD",
+      draftResponses: [
+        {
+          kind: "errors",
+          messages: [
+            "Field 'originalUnitPrice' is not defined by type 'DraftOrderLineItemInput'",
+          ],
+        },
+      ],
+    });
+
+    const { draftOrder, types } = await loadShopify();
+    await expect(draftOrder.createShopifyDraftOrder(REQUEST)).rejects.toThrow(
+      types.PaymentProviderError
+    );
+
+    // 每种写法都试过了
+    expect(stub.callCount).toBe(draftOrder.DRAFT_ORDER_FLAVORS.length);
+
+    await expect(draftOrder.createShopifyDraftOrder(REQUEST)).rejects.toThrow(
+      /试了 \d+ 种写法/
+    );
+  });
+});
+
+describe("nextDraftOrderFlavor —— 按错误指向的那一处换写法", () => {
+  it("提到 shippingLine → 换运费写法,行价不动", async () => {
+    const { draftOrder } = await loadShopify();
+    const next = draftOrder.nextDraftOrderFlavor({
+      current: {
+        linePrice: "originalUnitPriceScalar",
+        shippingPrice: "scalar",
+      },
+      error: new Error(
+        "Variable `$input` ... invalid value for `shippingLine.price` " +
+          '(invalid money \'{"amount" => "6.00"}\')'
+      ),
+      tried: [
+        { linePrice: "originalUnitPriceScalar", shippingPrice: "scalar" },
+      ],
+    });
+
+    expect(next).toEqual({
+      linePrice: "originalUnitPriceScalar",
+      shippingPrice: "scalarWithCurrency",
+    });
+  });
+
+  it("提到 lineItems → 换行价写法,运费不动", async () => {
+    const { draftOrder } = await loadShopify();
+    const next = draftOrder.nextDraftOrderFlavor({
+      current: {
+        linePrice: "originalUnitPriceScalar",
+        shippingPrice: "scalar",
+      },
+      error: new Error(
+        "Variable `$input` ... invalid value for `lineItems.0.originalUnitPrice` " +
+          "(Field `originalUnitPrice` is not defined by type `DraftOrderLineItemInput`)"
+      ),
+      tried: [
+        { linePrice: "originalUnitPriceScalar", shippingPrice: "scalar" },
+      ],
+    });
+
+    expect(next).toEqual({
+      linePrice: "priceOverrideMoneyInput",
+      shippingPrice: "scalar",
+    });
+  });
+
+  it("全试过了 → 没有下一招(返回 null,别转圈)", async () => {
+    const { draftOrder } = await loadShopify();
+    const next = draftOrder.nextDraftOrderFlavor({
+      current: {
+        linePrice: "priceOverrideMoneyInput",
+        shippingPrice: "moneyInput",
+      },
+      error: new Error(
+        "Variable `$input` ... invalid value for `lineItems.0.price`"
+      ),
+      tried: [...draftOrder.DRAFT_ORDER_FLAVORS],
+    });
+
+    expect(next).toBeNull();
+  });
+});
+
+describe("buildShippingPrice —— 三种写法", () => {
+  it("scalar —— 纯字符串,不带币种", async () => {
+    const { draftOrder } = await loadShopify();
+    expect(
+      draftOrder.buildShippingPrice({
+        amount: "6.00",
+        currency: "USD",
+        format: "scalar",
+      })
+    ).toBe("6.00");
+  });
+
+  it("scalarWithCurrency —— 带币种", async () => {
+    const { draftOrder } = await loadShopify();
+    expect(
+      draftOrder.buildShippingPrice({
+        amount: "6.00",
+        currency: "USD",
+        format: "scalarWithCurrency",
+      })
+    ).toBe("6.00 USD");
+  });
+
+  it("moneyInput —— 对象", async () => {
+    const { draftOrder } = await loadShopify();
+    expect(
+      draftOrder.buildShippingPrice({
+        amount: "6.00",
+        currency: "USD",
+        format: "moneyInput",
+      })
+    ).toEqual({ amount: "6.00", currencyCode: "USD" });
   });
 });
 

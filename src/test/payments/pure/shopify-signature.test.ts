@@ -50,7 +50,7 @@ const request: PaymentRequest = {
   },
   note: "",
   successUrl: "https://example.com/checkout/success",
-  currency: "CNY",
+  currency: "USD",
 };
 
 describe("Shopify webhook 验签", () => {
@@ -91,22 +91,27 @@ describe("Shopify webhook 验签", () => {
 
 describe("Shopify 草稿单 —— 逐分相等", () => {
   it("行价就是我们算出来的折后单价,原样搬过去", () => {
-    const input = buildDraftOrderInput({ request, currencyCode: "CNY" });
+    const input = buildDraftOrderInput({ request, currencyCode: "USD" });
     const line = input.lineItems[0];
     expect(line).toBeDefined();
     expect(line?.title).toBe("冰箱贴");
     expect(line?.quantity).toBe(2);
-    expect(line?.price.amount).toBe("12.50");
+    // 行价字段叫 `originalUnitPrice`(`Money` 标量,纯字符串)——
+    // `price` 那个字段压根不存在,送过去整条 mutation 验证不过
+    // (2026-11-05 线上踩过)
+    expect(line?.originalUnitPrice).toBe("12.50");
     // 不给 Shopify 留打折的空间 —— 走 `acceptAutomaticDiscounts: false`
-    // (`originalUnitPrice` 那个字段已经废弃,新版本上它的类型变了,送过去
-    //  Shopify 会报 "invalid MoneyInput")
     expect(input.acceptAutomaticDiscounts).toBe(false);
-    expect(line?.price.currencyCode).toBe("CNY");
+    // 币种由展示币种定 —— 行价标量不带币种
+    expect(input.presentmentCurrencyCode).toBe("USD");
   });
 
   it("运费是我们给的一行,不是 Shopify 算的", () => {
-    const input = buildDraftOrderInput({ request, currencyCode: "CNY" });
-    expect(input.shippingLine?.price.amount).toBe("6.00");
+    const input = buildDraftOrderInput({ request, currencyCode: "USD" });
+    // `ShippingLineInput.price` 是 `Money` 标量 —— 字符串,不是对象
+    expect(input.shippingLine?.price).toBe("6.00");
+    // 不带 `handle` —— 带了会被店铺的运费费率覆盖掉
+    expect(input.shippingLine).not.toHaveProperty("handle");
   });
 
   it("总额 = 行价 × 数量 + 运费", () => {
@@ -114,7 +119,7 @@ describe("Shopify 草稿单 —— 逐分相等", () => {
   });
 
   it("订单号写在 tags / note / 行项目属性里(回调要靠它认单)", () => {
-    const input = buildDraftOrderInput({ request, currencyCode: "CNY" });
+    const input = buildDraftOrderInput({ request, currencyCode: "USD" });
     expect(input.tags).toContain("mooncoda:SO-20261105-942D88");
     expect(input.note).toContain("SO-20261105-942D88");
     const properties = input.lineItems[0]?.customAttributes ?? [];
@@ -127,7 +132,7 @@ describe("Shopify 草稿单 —— 逐分相等", () => {
   });
 
   it("税自己算过了 —— 草稿单标成免税,别让 Shopify 再叠一层", () => {
-    const input = buildDraftOrderInput({ request, currencyCode: "CNY" });
+    const input = buildDraftOrderInput({ request, currencyCode: "USD" });
     expect(input.taxExempt).toBe(true);
   });
 });

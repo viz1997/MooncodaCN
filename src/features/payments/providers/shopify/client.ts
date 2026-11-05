@@ -231,6 +231,27 @@ export function isUnknownFieldError(error: unknown): boolean {
 }
 
 /**
+ * 「字段形状对不上」—— 验证错误 **或** 变量强制转换错误
+ *
+ * 这两类错误说明**我们发的字段名或字段类型跟当前 API 版本不匹配**:
+ *
+ * - `Field 'price' is not defined by type 'DraftOrderLineItemInput'` —— 字段名
+ * - `invalid money '{"amount" => "6.99", "currencyCode" => "USD"}'` —— 字段类型
+ *
+ * 碰到这种错误,重发一份**形状不一样**的 payload 有可能就过了(见
+ * `draft-order.ts` 的「写法阶梯」)。
+ *
+ * **只认这一类** —— 别的(凭据不对、金额对不上)原样往上抛:拿另一种写法再试
+ * 一遍只是白跑一趟,还会把真正的错误盖住。
+ */
+export function isFieldShapeError(error: unknown): boolean {
+  if (!(error instanceof PaymentProviderError)) return false;
+  return /doesn't exist on type|is not defined by type|Unknown field|invalid money/i.test(
+    error.message
+  );
+}
+
+/**
  * 按订单 id 拉一张订单
  *
  * Shopify 的 `tags` 在 GraphQL 里是 `[String!]`,但 REST 返回的是逗号分隔的

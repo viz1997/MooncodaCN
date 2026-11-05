@@ -747,9 +747,6 @@ providers/
 
 - **界面上的「配好了」查不了这件事** —— `isShopifyConfigured()` 是同步的,
   币种要问 Shopify。币种对不上会在**建单那一步**报错,报得很清楚
-- **`originalUnitPrice` 那个字段不送了** —— 它已经废弃,新版本上类型变了
-  (不再带币种),送过去 Shopify 会报 "invalid MoneyInput"。改用
-  `acceptAutomaticDiscounts: false` 关掉自动折扣,对账是最后一道防线
 - **本仓库的订单记录仍然是美元分** —— 那才是「用户买了什么、值多少」的事实
 
 
@@ -781,6 +778,43 @@ Field 'code' doesn't exist on type 'UserError'
 - **测试**:`src/test/payments/pure/shopify-draft-order.test.ts`(选择集不许
   问 `code`)+ `src/test/payments/pure/shopify-client.test.ts`(两个字段名
   的切换 + 「不是字段不存在的错就不重试」)
+
+
+##### Shopify 的**输入类型**字段:名字和类型都随版本变(2026-11-05 线上栽过两轮)
+
+上面说的是**选择集**(查询里问什么)。**输入**那一侧(我们发过去的 payload
+长什么样)同样随版本变,而且**报错方式不一样** —— 是**变量强制转换**失败:
+
+```
+Variable `$input` of type `DraftOrderInput!` was provided invalid value for
+`lineItems.0.price` (Field `price` is not defined by type `DraftOrderLineItemInput`),
+`shippingLine.price` (invalid money '{"amount" => "6.99", "currencyCode" => "USD"}'),
+`shippingLine.handle` (Field `handle` is not defined by type `ShippingLineInput`)
+```
+
+**三处都要改**:
+
+| 我们原来发的 | 实际应该是 |
+|---|---|
+| `lineItems[].price` | **`price` 这个字段压根不存在**。行价叫 `originalUnitPrice`(`Money` 标量,纯字符串 `"12.50"`)或 `priceOverride`(`MoneyInput` 对象) |
+| `shippingLine.price: {amount, currencyCode}` | **`Money` 标量** —— 纯字符串 `"6.99"`。传对象 → `invalid money` |
+| `shippingLine.handle: "shipping"` | **删掉**。`ShippingLineInput` 没这个字段;而且带了 handle 会被**店铺的运费费率**覆盖掉我们的价 |
+
+- **写法阶梯**(`draft-order.ts` 的 `DRAFT_ORDER_FLAVORS`)—— 行价有 3 种写法
+  × 运费有 3 种写法,共 9 种组合。碰到「**字段形状对不上**」(
+  `isFieldShapeError()`:字段名不认 / `invalid money`)就**换一种写法重发**,
+  按**报错指向的那一处**换(报错里提到 `shippingLine` 就换运费写法,提到
+  `lineItems` 就换行价写法)
+  - **重发是安全的** —— 变量强制转换失败**不会建出草稿单**,不会建出两张
+  - **只有「字段形状对不上」才换写法** —— 金额对不上、凭据不对那些原样往上抛
+    (换写法救不了那些,重试反而把真正的错误盖住)
+- **想看店铺当前版本的真实字段**:跑
+  `pnpm tsx scripts/dump-shopify-input-schema.ts`(GraphQL 内省,**只打印
+  schema 不打印任何凭据**)。需要本地 `.env.local` 里有 `SHOPIFY_*` 那几个变量
+- **`shopify.dev` 的文档页在很多网络环境下打不开** —— 别靠文档页,直接问店铺
+- **测试**:`src/test/payments/pure/shopify-draft-order.test.ts`(写法阶梯 +
+  「不是形状问题就不重试」)+ `src/test/payments/pure/shopify-client.test.ts`
+  (`isFieldShapeError()`)
 
 
 ##### Shopify 的凭据(2026-01-01 起变了)

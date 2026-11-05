@@ -278,6 +278,51 @@ describe("fetchShopifyOrder —— 老 API 版本(没有 customAttributes)", () 
   });
 });
 
+describe("isFieldShapeError —— 字段名不认 / 字段类型不对", () => {
+  it("「字段不存在」认", async () => {
+    const { client, types } = await loadClient();
+    expect(
+      client.isFieldShapeError(
+        new types.PaymentProviderError(
+          "shopify",
+          "Field 'price' is not defined by type 'DraftOrderLineItemInput'"
+        )
+      )
+    ).toBe(true);
+  });
+
+  it("「invalid money」(标量给了对象)认", async () => {
+    const { client, types } = await loadClient();
+    expect(
+      client.isFieldShapeError(
+        new types.PaymentProviderError(
+          "shopify",
+          "Variable `$input` ... invalid value for `shippingLine.price` " +
+            '(invalid money \'{"amount" => "6.99", "currencyCode" => "USD"}\')'
+        )
+      )
+    ).toBe(true);
+  });
+
+  it("别的错不认(凭据不对、金额对不上 —— 换写法救不了那些)", async () => {
+    const { client, types } = await loadClient();
+    expect(
+      client.isFieldShapeError(
+        new types.PaymentProviderError("shopify", "Access denied")
+      )
+    ).toBe(false);
+    expect(
+      client.isFieldShapeError(
+        new types.PaymentProviderError(
+          "shopify",
+          "Shopify 草稿单金额对不上：订单 SO-1 我们算的是 31.00USD"
+        )
+      )
+    ).toBe(false);
+    expect(client.isFieldShapeError(new Error("boom"))).toBe(false);
+  });
+});
+
 describe("isUnknownFieldError —— 只认 GraphQL 的验证错误", () => {
   it("「字段不存在」认", async () => {
     const { client, types } = await loadClient();
