@@ -13,8 +13,8 @@ Mooncoda is a production-ready Next.js SaaS template. It provides a complete fou
 | 系统 | 职责 | 技术栈 |
 |---|---|---|
 | **NextDevTpl**(本仓库) | AI 生图 SaaS 后端:user / credits / photo / imageJob / AI 路由 / WeChat 小程序登录 **+ 商品目录(商品 / SKU 变体 / 价格)+ 定价 + 购物车 + 订单事实 + 收货地址 + 打印工单(`/quote` 报价 → `print_order`,按 `user_id` 归属,登录后下单;也可以从 `/tools/weight` 直接加进商城购物车,见「打印服务进商城购物车」)** | Next.js 16 + Drizzle + PostgreSQL |
-| **微信支付 / 支付宝**(外部服务) | **自己直连的收款通道**:钱直接进我们自己的商户号 / 账户,没有中间层抽成,定价完全由本仓库说了算。**代码写好了,还没开放**(见「三个支付通道」的 `ENABLED_PAYMENT_CHANNELS`) | 微信支付 V3 Native(扫码)+ 支付宝电脑网站支付 |
-| **Shopify**(外部服务) | **只做银行卡 / Shop Pay 的收银台**。本仓库算出来的价通过**草稿订单**原样传过去(逐分相等),不跟 Shopify 的商品目录 / 运费规则走。**现在唯一开放的通道** | Shopify Admin GraphQL API + 草稿订单 |
+| **微信支付 / 支付宝**(外部服务) | **自己直连的收款通道**:钱直接进我们自己的商户号 / 账户,没有中间层抽成,定价完全由本仓库说了算。**代码写好了,商户号 / 应用还没走完开通流程** —— 界面上摆出来但选不了(见「三个支付通道」的两道闸) | 微信支付 V3 Native(扫码)+ 支付宝电脑网站支付 |
+| **Shopify**(外部服务) | **只做银行卡 / Shop Pay 的收银台**。本仓库算出来的价通过**草稿订单**原样传过去(逐分相等),不跟 Shopify 的商品目录 / 运费规则走 | Shopify Admin GraphQL API + 草稿订单 |
 | **Sellbase**(独立服务)**过渡期保留** | 旧收款路:Sellbase 建单 + Stripe 付款页。**不再接新单**(已建好的旧单还能重取支付入口)。三个新通道跑通后整个 `src/features/sellbase/` 拆掉 | Supabase Edge Functions(**跟本仓库同一个 Supabase 项目**)+ Stripe(MIT) |
 | **微信小程序 / 浏览器访客**(外部客户端) | 调 NextDevTpl AI 接口拿候选图 **+ 调 `/api/image-gen/products` 拿商品与 SKU**;调 NextDevTpl `/api/store/**` 加购 + 结算 | Taro 4 + React 18(小程序);Next.js(浏览器) |
 
@@ -465,11 +465,14 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 自己的商户号 / 账户,没有中间层抽成,定价完全由本仓库说了算),**Shopify 只
 承接卡**。旧的 Sellbase + Stripe 那条路**并行保留**,等三个新通道跑通再拆。
 
-> **2026-11-05 更新:先只开 Shopify。** 微信 / 支付宝的代码都写好了,但商户号
-> / 应用还没走完开通流程。「开放名单」在
+> **2026-11-05 更新:三个通道都摆出来,能不能付看配置。** 「开放名单」在
 > `src/features/payments/lib/registry.ts` 的 `ENABLED_PAYMENT_CHANNELS`
-> —— 现在只有 `["shopify"]`。要开别的通道,把 id 加进去就行(清单接口、结算
-> 默认通道、打印工单全都跟着那份名单走)。
+> —— 现在是 `["wechat", "alipay", "shopify"]`。
+>
+> **「摆出来」≠「能付」** —— 没配好的那个在界面上是**灰的、标着「暂未
+> 开放」、选不了**(不是藏起来:工作室要让人看见支持哪几种付款方式)。要关
+> 掉哪一个,把 id 从那份名单里拿掉就行(清单接口、结算默认通道、打印工单
+> 全都跟着那份名单走)。
 >
 > **旧路(Sellbase + Stripe)不再接新单** —— 代码还留着(已建好的旧单还能重取
 > 支付入口),但结算时传 `stripe` 会直接回 503 `PAYMENT_CHANNEL_UNAVAILABLE`。
@@ -479,12 +482,20 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 
 | 闸 | 在哪儿 | 管什么 |
 |---|---|---|
-| **开放了** | `ENABLED_PAYMENT_CHANNELS` | 工作室说现在让用户用这个 |
-| **配好了** | `provider.isConfigured()` | 环境变量齐了,技术上收得到钱 |
+| **开放了** | `ENABLED_PAYMENT_CHANNELS` | 这个通道**摆不摆出来**给用户看 |
+| **配好了** | `provider.isConfigured()` | 环境变量齐了,技术上**收得到钱** |
 
-**两道都过**才出现在「选择支付方式」里。让用户点一个注定失败的按钮,比不给
-这个选项更糟。指定的通道过不了闸 → **503 `PAYMENT_CHANNEL_UNAVAILABLE`**,
-**不静默退回别的通道**(用户以为选了微信支付、结果跳去了别处)。
+两道闸**各管一件事**:开放的都摆出来,配好的才让选。**两道都过**才能付款 ——
+指定的通道没配好 → **503 `PAYMENT_CHANNEL_UNAVAILABLE`**,**不静默退回别的
+通道**(用户以为选了微信支付、结果跳去了别处)。
+
+> **服务端会说话(2026-11-05 加的)** —— 「开放了但没配好」的通道会在服务端
+> 日志里留一条 warn(每进程每通道一条,不刷屏),指明该去哪个 `env.ts` 看要
+> 哪些变量。**没有这条日志的时候,这类故障在服务端是静默的** —— 界面上只
+> 是灰了一个选项,日志里只有一行 `POST /api/store/checkout 503`,看不出
+> 为什么(2026-11-05 线上真踩过:Shopify 只配了 `SHOPIFY_CLIENT_ID` /
+> `SHOPIFY_CLIENT_SECRET`,那俩是 Storefront API 的客户端凭据,不是建草稿
+> 单要的 Admin API token)。
 
 #### 通道清单
 
@@ -612,15 +623,19 @@ providers/
 
 #### 通道清单接口
 
-`GET /api/store/payment-channels` 返回现在能用的通道。
+`GET /api/store/payment-channels` 返回**开放了**的通道,每个带一个
+`available`(配好了没)。
 
 - **只返回「开放了」的通道** —— `ENABLED_PAYMENT_CHANNELS` 之外的一个都不
-  返回(现在就是只有 `shopify`)。旧路(Sellbase + Stripe)**不在清单里** ——
-  它不再接新单。
-- **没配好的通道不渲染** —— `available: false` 的前端不画。让用户点一个
-  注定失败的按钮,比不给这个选项更糟。
+  返回(现在是三个:微信 / 支付宝 / Shopify)。旧路(Sellbase + Stripe)
+  **不在清单里** —— 它不再接新单。
+- **没配好的通道也返回,但前端画成灰的、标「暂未开放」、选不了** ——
+  `available: false`。让用户点一个注定失败的按钮比不给这个选项更糟,但把
+  选项整个藏起来也不行:工作室要让人看见支持哪几种付款方式。
 - 前端的选择器 `src/features/payments/components/payment-channel-picker.tsx`
-  用 `Payment.channels.*` 的 i18n 文案,没有翻译就退回服务端给的中文兜底。
+  用 `Payment.channels.*` 的 i18n 文案,没有翻译就退回服务端给的中文兜底;
+  「暂未开放」用 `Payment.unavailable`,一个都配不好时的提示用
+  `Payment.noneAvailable`。
 
 #### 通道没配好 ≠ 这次调用挂了
 
@@ -676,15 +691,22 @@ providers/
 
 #### 上线清单(人工步骤,不在代码里)
 
-按顺序做,少一步就有一条路收不到钱。**现在只开 Shopify**,所以只跑 Shopify
-那一列;微信 / 支付宝开通之后(改 `ENABLED_PAYMENT_CHANNELS` + 补上第 3、4 步)
-再放流量。
+按顺序做,少一步就有一条路收不到钱。**三个通道都在「开放名单」里**(界面上
+都摆出来),但**能不能付各看各的配置** —— 没配好的那个是灰的、选不了。所以
+下面第 2 步做完哪个通道,第 3、4 步就跑哪个通道;没配的那个不用管。
 
 1. **跑迁移** —— `pnpm tsx scripts/apply-payment-channel-schema.ts`
    (给 `storefront_order` / `print_order` 加 5 列 + 2 个索引;幂等)
 2. **配环境变量** —— 各通道自己的变量(见上面那张表)。**密钥只进环境变量**,
    不进仓库文件、不进聊天。Vercel 上加完变量**要确认新部署已经生效**再让
    用户下单(环境变量是按部署快照的,加变量那一刻的构建可能还没带上它)
+
+   > **Shopify 那两个变量别搞混**:`SHOPIFY_ADMIN_ACCESS_TOKEN`(`shpat_…`,
+   > 需要 `write_orders` scope)+ `SHOPIFY_API_SECRET`(webhook 的 HMAC 密钥)
+   > 才是本仓库要的。`SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET` 是
+   > Storefront API / headless 的**客户端凭据**,跟建草稿单没关系 —— 只配
+   > 那两个的话,Shopify 在界面上是灰的,结算直接 503。
+
 3. **登记回调地址** —— 各通道的通知地址要在对应平台上填:
    - 微信:商户平台 → 产品中心 → 开发配置 → 支付通知地址 →
      `https://<站点>/api/webhooks/wechat`

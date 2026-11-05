@@ -3,12 +3,16 @@
  *
  * ## 通道清单从服务端拿
  *
- * `GET /api/store/payment-channels` 返回**当前开放了而且配好了**的通道。
- * 没配好的(`available: false`)不渲染 —— 让用户点一个注定失败的按钮,比不给
- * 这个选项更糟。
+ * `GET /api/store/payment-channels` 返回**当前开放了**的通道,每个都带一个
+ * `available`(配好了没)。
+ *
+ * **没配好的也显示** —— 显示成灰的、标着「暂未开放」。工作室要让人看见支持
+ * 哪几种付款方式,但没配好的那一个**不能点**:点了服务端只会 503
+ * (`PAYMENT_CHANNEL_UNAVAILABLE`)。让用户点一个注定失败的按钮,比把这个
+ * 选项灰掉更糟。
  *
  * 「开放了」是工作室那边的开关(`ENABLED_PAYMENT_CHANNELS`),「配好了」是
- * 环境变量齐没齐 —— 两道闸都过才出现在这儿。
+ * 环境变量齐没齐 —— 两道闸,各管一件事。
  *
  * ## 拉不到清单怎么办
  *
@@ -19,8 +23,10 @@
  *
  * ## 选中哪个
  *
- * 默认选第一个可用的。用户没选就点「去支付」时,得有个合理的默认值 ——
+ * 默认选第一个**配好了**的。用户没选就点「去支付」时,得有个合理的默认值 ——
  * 而不是把 `null` 发给服务端让服务端替用户挑。
+ *
+ * **绝不能把没配好的通道发出去** —— 服务端会 503。
  */
 
 "use client";
@@ -80,21 +86,24 @@ export function PaymentChannelPicker({
         if (cancelled) return;
 
         const list: unknown = body?.channels;
-        const available = (Array.isArray(list) ? list : []).filter(
+        // **全部**都留着 —— 没配好的(`available: false`)也要显示出来,
+        // 只是灰着、选不了。工作室要让人看见支持哪几种付款方式。
+        const all = (Array.isArray(list) ? list : []).filter(
           (c): c is PaymentChannelOption =>
             typeof c === "object" &&
             c !== null &&
             typeof (c as PaymentChannelOption).channel === "string" &&
-            (c as PaymentChannelOption).available === true
+            typeof (c as PaymentChannelOption).available === "boolean"
         );
 
-        setChannels(available);
+        setChannels(all);
 
-        // 默认选中第一个 —— 但别覆盖用户已经选好的
-        const first = available[0];
+        // 默认选中第一个**配好了**的 —— 没配好的发出去服务端只会 503
+        const usable = all.filter((c) => c.available);
+        const first = usable[0];
         if (
           first !== undefined &&
-          !available.some((c) => c.channel === valueRef.current)
+          !usable.some((c) => c.channel === valueRef.current)
         ) {
           onChangeRef.current(first.channel);
         }
@@ -113,6 +122,9 @@ export function PaymentChannelPicker({
   if (loading) return null;
   if (channels.length === 0) return null;
 
+  // 一个都配不好 —— 明说,别让用户对着一个全灰的列表猜
+  const noneAvailable = channels.every((channel) => !channel.available);
+
   return (
     <fieldset className="mt-6">
       <legend className="eyebrow text-muted-foreground mb-3">
@@ -121,6 +133,8 @@ export function PaymentChannelPicker({
       <ul className="space-y-2">
         {channels.map((channel) => {
           const selected = channel.channel === value;
+          // 没配好的通道**显示但选不了** —— 点了服务端只会 503
+          const usable = channel.available;
           // 有翻译就用翻译,没有就退回服务端给的中文文案(新通道忘了配文案时
           // 界面上仍然看得见这个通道,不会只剩一个空的 radio)
           const labelKey = `${channel.channel}.label`;
@@ -132,23 +146,32 @@ export function PaymentChannelPicker({
           return (
             <li key={channel.channel}>
               <label
-                className={`flex gap-3 p-4 border rounded-sm cursor-pointer transition-colors ${
-                  selected
-                    ? "border-primary bg-secondary/40"
-                    : "border-border hover:bg-secondary/30"
-                } ${disabled ? "opacity-60 cursor-not-allowed" : ""}`}
+                className={`flex gap-3 p-4 border rounded-sm transition-colors ${
+                  selected ? "border-primary bg-secondary/40" : "border-border"
+                } ${
+                  usable && !disabled
+                    ? "cursor-pointer hover:bg-secondary/30"
+                    : "opacity-50 cursor-not-allowed"
+                }`}
               >
                 <input
                   type="radio"
                   name="payment-channel"
                   value={channel.channel}
                   checked={selected}
-                  disabled={disabled}
+                  disabled={disabled || !usable}
                   onChange={() => onChange(channel.channel)}
                   className="mt-1 accent-[var(--primary)]"
                 />
                 <span className="flex-1 min-w-0">
-                  <span className="block text-sm font-medium">{label}</span>
+                  <span className="flex items-center gap-2">
+                    <span className="text-sm font-medium">{label}</span>
+                    {!usable && (
+                      <span className="rounded-sm border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                        {tRoot("unavailable")}
+                      </span>
+                    )}
+                  </span>
                   <span className="block mt-0.5 text-xs text-muted-foreground">
                     {description}
                   </span>
@@ -158,6 +181,11 @@ export function PaymentChannelPicker({
           );
         })}
       </ul>
+      {noneAvailable && (
+        <p className="mt-3 text-xs text-muted-foreground">
+          {tRoot("noneAvailable")}
+        </p>
+      )}
     </fieldset>
   );
 }

@@ -205,13 +205,17 @@ export class PaymentProviderError extends Error {
 /*  通道清单(给界面用)                                                         */
 /* -------------------------------------------------------------------------- */
 
-/** 一个通道在界面上的信息 */
-export interface PaymentChannelInfo {
+/** 一个通道的静态信息(不涉及「配好了没」) */
+export interface PaymentChannelMeta {
   channel: OnlinePaymentChannel;
   /** 按钮上的名字 */
   label: string;
   /** 一句话说明(「扫码支付」「跳到支付宝」「银行卡」) */
   description: string;
-  /** 配好了没 —— 没配好的不显示 */
+}
+
+/** 一个通道在界面上的信息 */
+export interface PaymentChannelInfo extends PaymentChannelMeta {
+  /** 配好了没 —— 没配好的在界面上是灰的、选不了 */
   available: boolean;
 }

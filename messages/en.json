@@ -1961,6 +1961,8 @@
   },
   "Payment": {
     "title": "Payment method",
+    "unavailable": "Not available yet",
+    "noneAvailable": "No payment method is available right now — please contact us",
     "channels": {
       "wechat": {
         "label": "WeChat Pay",
