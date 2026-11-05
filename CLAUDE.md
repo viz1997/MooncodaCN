@@ -457,8 +457,12 @@ Sellbase 的 `createCheckout()` 把 `payment_method_types: ["card"]` **写死**
   (微信在 Checkout Session 里必须显式指定客户端类型,网页跳转是 `web`,
   `mobile` 是给小程序 / App 原生 SDK 的)。
 - **支付方式清单可配** —— `SELLBASE_STRIPE_PAYMENT_METHODS` 环境变量,默认
-  `alipay,wechat_pay`,设成空串就只留银行卡。Stripe 会拒收**账号没开通**的
-  支付方式,而且是整个 Checkout Session 建不出来(连银行卡也一起挂)。
+  `alipay,wechat_pay`,设成空串就只留银行卡。**这个变量是「打补丁时」读的**
+  (本地跑 `fetch-sellbase-assets.ts` 的时候),不是边函数运行时读的 ——
+  清单会被**写死**进 bundle。想改就得改完变量重新取 + 重新部署。
+- **Stripe 会拒收账号没开通的支付方式** —— 而且是整个 Checkout Session 建
+  不出来(连银行卡也一起挂)。所以**开通 Stripe 账号的支付方式要先于**上线
+  带微信/支付宝的 bundle:没开通就等于把银行卡也一起打挂。
 - **账号要支持** —— 实测这个香港账号(test key)在 test mode 下 `card` /
   `alipay` / `wechat_pay` 三种都建得出 Session。但**线上还要在 Stripe
   Dashboard 里开通**(Settings → Payment methods)—— 测试模式能用 ≠ 线上能用。
