@@ -40,6 +40,20 @@
  * 标签:摆在菜单顶上只是给人看的,不是「一个入口」。移动端 Sheet 里那一块
  * 同样改成链接。
  *
+ * 2026-11-06(再调):**触发按钮旁边的名字撤掉了** —— 只留一个头像。
+ * 名字那一串占掉的宽度把搜索框和购物袋挤得慌,而且「我是谁」点开下拉
+ * 就看得到,不必在顶栏挂一遍。
+ *
+ * 2026-11-06(再调):**下拉菜单跟电商统一了**。之前它跟商城不是一个
+ * 风格,根因是 **portal 落到了 `.atelier-root` 外面**:Radix 的
+ * DropdownMenu 默认 portal 到 `document.body`,而 atelier 的配色 / 圆角
+ * token 重定义在 `.atelier-root` 这棵子树上 —— 菜单于是拿到**全站默认
+ * 主题**(纯白底 + 1.25rem 圆角),跟骨白底 + 0.5rem 圆角的电商页面完全
+ * 不像一家。现在 `DropdownMenuContent` 多了 `portalContainer` prop(跟
+ * `Sheet` / `Dialog` 同一个套路),菜单和移动端菜单都指回 `.atelier-root`。
+ * 菜单内部也照着**同一个头里的搜索下拉**重排了一遍:圆角面板、细线分隔
+ * 的行、行内图标走 muted 色。
+ *
  * 头像是 `getAvatarUrl(user.image)` 出来的 —— `user.image` 可能是**存储
  * 键名**(自己在账户信息页上传的),不是 URL,直接当 src 会是裂图。
  *
@@ -90,7 +104,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -106,6 +119,7 @@ import {
 // 裂图。刻意从 utils 导入,不走 "@/features/storage" 桶文件(那会把
 // AWS SDK 打进客户端 bundle)。
 import { getAvatarUrl } from "@/features/storage/utils";
+import { useAtelierContainer } from "@/features/storefront/hooks/use-atelier-container";
 import { useCart, useCartUi } from "@/features/storefront/hooks/use-cart";
 import { useProducts } from "@/features/storefront/hooks/use-products";
 import { useStorefrontModal } from "@/features/storefront/hooks/use-storefront-modal";
@@ -159,6 +173,9 @@ export function WjpStoreHeader() {
   const { itemCount } = useCart();
   const openCart = useCartUi((s) => s.openCart);
   const setQuickView = useStorefrontModal((s) => s.setQuickView);
+  // 弹层的 portal 挂载点 —— 指回 `.atelier-root`,下拉菜单 / 移动端菜单才
+  // 拿得到 atelier 的配色和圆角(见 use-atelier-container.ts)
+  const atelierContainer = useAtelierContainer();
 
   // 账号 —— 登录后要在页面上看得见(2026-11-05)
   const router = useRouter();
@@ -271,6 +288,9 @@ export function WjpStoreHeader() {
               </SheetTrigger>
               <SheetContent
                 side="left"
+                // portal 指回 .atelier-root —— 否则菜单落在 atelier 的 token
+                // 子树外,配色和圆角退回全站默认主题(见 use-atelier-container.ts)
+                portalContainer={atelierContainer}
                 className="w-[320px] sm:w-[380px] p-0 flex flex-col"
               >
                 <SheetHeader className="px-6 pt-6 pb-4 border-b">
@@ -532,7 +552,7 @@ export function WjpStoreHeader() {
               <Search className="size-5" />
             </Button>
 
-            {/* 账号 —— 未登录显示「登录」,已登录显示头像 + 邮箱 */}
+            {/* 账号 —— 未登录显示「登录」,已登录显示头像 */}
             {sessionPending ? (
               <div
                 className="hidden size-9 animate-pulse rounded-full bg-muted sm:block"
@@ -544,9 +564,13 @@ export function WjpStoreHeader() {
                   <button
                     type="button"
                     aria-label={isZh ? "我的账户" : "My account"}
-                    className="hidden items-center gap-2 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring sm:inline-flex"
+                    className="hidden size-9 items-center justify-center rounded-full outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring sm:inline-flex"
                   >
-                    <Avatar className="size-8">
+                    {/* 触发按钮**只有头像**,不摆名字(2026-11-06)——
+                        名字塞在右边会把这一行的宽度吃掉,搜索框和购物袋
+                        挤得慌;而且「我是谁」这件事点开下拉就能看到,
+                        不必在顶栏挂一遍。 */}
+                    <Avatar className="size-9">
                       <AvatarImage
                         src={getAvatarUrl(user.image)}
                         alt={user.name || user.email}
@@ -555,14 +579,22 @@ export function WjpStoreHeader() {
                         {getInitials(user.name, user.email)}
                       </AvatarFallback>
                     </Avatar>
-                    {/* 账户信息 —— 光一个圆头像认不出人,名字摆在旁边。
-                        lg 以下藏起来:那个宽度还要放搜索框和购物车。 */}
-                    <span className="hidden max-w-[10rem] truncate text-sm text-foreground/80 lg:inline">
-                      {user.name || user.email}
-                    </span>
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-64">
+                {/* 下拉菜单 —— 版式跟**同一个头里的搜索下拉**一致:
+                    圆角面板 + 细线分隔的行 + hover 变麦色。行内图标是
+                    muted 色,文字是前景色 —— 跟购物袋抽屉里的行一个调子。
+
+                    portal 指回 `.atelier-root`:菜单默认 portal 到 body,
+                    落在 atelier 的 token 子树外,配色退回全站默认主题
+                    (纯白 + 1.25rem 圆角),跟骨白底 + 0.5rem 圆角的电商
+                    页面完全不像一家(见 use-atelier-container.ts)。 */}
+                <DropdownMenuContent
+                  align="end"
+                  sideOffset={8}
+                  portalContainer={atelierContainer}
+                  className="w-72 overflow-hidden rounded-md border bg-popover p-0 shadow-lg"
+                >
                   {/* 账户信息 —— 头像 + 姓名 + 邮箱。
                       用户点开菜单第一眼要看到「我是谁」,不是「已登录」四个字。
 
@@ -572,70 +604,101 @@ export function WjpStoreHeader() {
                       只是给人看的,不是「一个入口」。 */}
                   <DropdownMenuItem
                     asChild
-                    className="cursor-pointer px-3 py-2.5"
+                    className="cursor-pointer rounded-none focus:bg-muted/60 focus:text-foreground"
                   >
-                    <Link href="/account">
-                      <div className="flex w-full items-center gap-3">
-                        <Avatar className="size-9 shrink-0">
-                          <AvatarImage
-                            src={getAvatarUrl(user.image)}
-                            alt={user.name || user.email}
-                          />
-                          <AvatarFallback className="bg-primary text-[10px] text-primary-foreground">
-                            {getInitials(user.name, user.email)}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium">
-                            {user.name || user.email}
+                    <Link
+                      href="/account"
+                      className="flex items-center gap-3 p-3"
+                    >
+                      <Avatar className="size-9 shrink-0">
+                        <AvatarImage
+                          src={getAvatarUrl(user.image)}
+                          alt={user.name || user.email}
+                        />
+                        <AvatarFallback className="bg-primary text-[10px] text-primary-foreground">
+                          {getInitials(user.name, user.email)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0">
+                        <p className="truncate font-serif text-[15px] leading-tight">
+                          {user.name || user.email}
+                        </p>
+                        {user.name && user.email ? (
+                          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                            {user.email}
                           </p>
-                          {user.name && user.email ? (
-                            <p className="truncate text-[11px] text-muted-foreground">
-                              {user.email}
-                            </p>
-                          ) : null}
-                        </div>
-                        <ChevronRight className="ml-auto size-4 shrink-0 text-muted-foreground" />
+                        ) : null}
                       </div>
+                      <ChevronRight className="ml-auto size-4 shrink-0 text-muted-foreground" />
                     </Link>
                   </DropdownMenuItem>
-                  <DropdownMenuSeparator />
                   {/* 买家的三样东西 —— 2026-11-06 从控制台搬到这里。
                       工作室的原话:「打印订单、购物订单、地址管理不放在控制台
                       里面,而是电商首页的用户头像那里。」这三个入口指向
                       `/account/*`,不在 `/dashboard` 底下了。
                       「控制台」还留着 —— 那是工具用户的地方(积分 / 画布 / 生图),
                       跟买家那三样是两回事。 */}
-                  <DropdownMenuItem asChild>
-                    <Link href="/account/orders">
-                      <ShoppingBag className="size-4" />
-                      {isZh ? "商城订单" : "Store orders"}
-                    </Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem asChild>
-                    <Link href="/account/print-orders">
-                      <Package className="size-4" />
-                      {isZh ? "打印订单" : "Print orders"}
-                    </Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem asChild>
-                    <Link href="/account/addresses">
-                      <MapPin className="size-4" />
-                      {isZh ? "收货地址" : "Addresses"}
-                    </Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem asChild>
-                    <Link href="/dashboard">
-                      <LayoutDashboard className="size-4" />
-                      {isZh ? "控制台" : "Dashboard"}
-                    </Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onSelect={handleSignOut}>
-                    <LogOut className="size-4" />
-                    {isZh ? "退出登录" : "Sign out"}
-                  </DropdownMenuItem>
+                  <div className="divide-y divide-border border-t border-border">
+                    <DropdownMenuItem
+                      asChild
+                      className="cursor-pointer rounded-none hover:bg-muted/60 focus:bg-muted/60 focus:text-foreground"
+                    >
+                      <Link
+                        href="/account/orders"
+                        className="flex items-center gap-3 p-3"
+                      >
+                        <ShoppingBag className="size-4 shrink-0 text-muted-foreground" />
+                        {isZh ? "商城订单" : "Store orders"}
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      asChild
+                      className="cursor-pointer rounded-none hover:bg-muted/60 focus:bg-muted/60 focus:text-foreground"
+                    >
+                      <Link
+                        href="/account/print-orders"
+                        className="flex items-center gap-3 p-3"
+                      >
+                        <Package className="size-4 shrink-0 text-muted-foreground" />
+                        {isZh ? "打印订单" : "Print orders"}
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      asChild
+                      className="cursor-pointer rounded-none hover:bg-muted/60 focus:bg-muted/60 focus:text-foreground"
+                    >
+                      <Link
+                        href="/account/addresses"
+                        className="flex items-center gap-3 p-3"
+                      >
+                        <MapPin className="size-4 shrink-0 text-muted-foreground" />
+                        {isZh ? "收货地址" : "Addresses"}
+                      </Link>
+                    </DropdownMenuItem>
+                  </div>
+                  <div className="border-t border-border">
+                    <DropdownMenuItem
+                      asChild
+                      className="cursor-pointer rounded-none hover:bg-muted/60 focus:bg-muted/60 focus:text-foreground"
+                    >
+                      <Link
+                        href="/dashboard"
+                        className="flex items-center gap-3 p-3"
+                      >
+                        <LayoutDashboard className="size-4 shrink-0 text-muted-foreground" />
+                        {isZh ? "控制台" : "Dashboard"}
+                      </Link>
+                    </DropdownMenuItem>
+                  </div>
+                  <div className="border-t border-border">
+                    <DropdownMenuItem
+                      onSelect={handleSignOut}
+                      className="cursor-pointer gap-3 rounded-none p-3 hover:bg-muted/60 focus:bg-muted/60 focus:text-foreground"
+                    >
+                      <LogOut className="size-4 shrink-0 text-muted-foreground" />
+                      {isZh ? "退出登录" : "Sign out"}
+                    </DropdownMenuItem>
+                  </div>
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : (

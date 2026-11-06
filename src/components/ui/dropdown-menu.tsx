@@ -34,10 +34,23 @@ function DropdownMenuTrigger({
 function DropdownMenuContent({
   className,
   sideOffset = 4,
+  portalContainer,
   ...props
-}: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Content> & {
+  /**
+   * Portal 挂载点。默认 `document.body`。
+   *
+   * 路由组把主题 token(CSS 变量)重定义在包裹 div 上时,portal 到 body 的
+   * 下拉菜单落在那个 div 外面,拿不到 token —— 视觉上退回全站默认主题。
+   * atelier 路由组的头像下拉用这个 prop 把 portal 指回 `.atelier-root`
+   * (见 use-atelier-container.ts)。
+   *
+   * 不传 = 原有行为,全站其他下拉菜单不受影响。
+   */
+  portalContainer?: HTMLElement | null;
+}) {
   return (
-    <DropdownMenuPrimitive.Portal>
+    <DropdownMenuPrimitive.Portal container={portalContainer}>
       <DropdownMenuPrimitive.Content
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}
