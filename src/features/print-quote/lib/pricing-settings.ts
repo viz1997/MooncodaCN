@@ -470,4 +470,12 @@ export type PrintPricingOverview = {
   materials: PrintMaterialLite[];
   /** 配置行存不存在 —— false = 还在走 env / 默认值 */
   hasConfigRow: boolean;
+  /**
+   * 读失败的原因(读成了才有)
+   *
+   * null = 读成了。**「没存过配置」和「表还没建」是两回事** —— 后者得先
+   * 跑一次迁移脚本,不然后台每个写操作都会撞同一个错。所以读失败的原因
+   * 要一路带到界面上,别让工作室对着「还没存过配置」的横幅发愣。
+   */
+  readError?: string | null;
 };

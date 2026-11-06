@@ -190,7 +190,10 @@ describe("computePrintQuote —— 交期加价接进报价", () => {
 
   it("「明细加起来 = 合计」这条恒等式还成立", () => {
     for (const tier of ["standard", "express", "urgent"] as const) {
-      const quote = computePrintQuote(SETTINGS, { ...base, deliveryTier: tier });
+      const quote = computePrintQuote(SETTINGS, {
+        ...base,
+        deliveryTier: tier,
+      });
       expect(quote).not.toBeNull();
       expect(quote?.totalPriceCents).toBe(
         (quote?.weightFeeCents ?? 0) +

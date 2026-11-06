@@ -27,7 +27,7 @@ import { cache } from "react";
 
 import { db } from "@/db";
 import { printMaterial, printPricingConfig } from "@/db/schema";
-
+import { describeDbError } from "./db-error";
 import {
   type PrintMaterialKind,
   type PrintMaterialLite,
@@ -136,9 +136,10 @@ export const getPrintPricingSettings = cache(
       ]);
       return resolvePrintPricingSettings({ configRow, materials, fallback });
     } catch (error) {
+      const info = describeDbError(error);
       console.error(
         "[print-pricing] 读配置失败,退回环境变量兜底:",
-        error instanceof Error ? error.message : error
+        info.message || error
       );
       return fallback;
     }
@@ -167,13 +168,24 @@ export const getPrintPricingOverview = cache(
         }),
         materials,
         hasConfigRow: configRow !== null,
+        readError: null,
       };
     } catch (error) {
+      const info = describeDbError(error);
       console.error(
         "[print-pricing] 读后台概览失败,退回环境变量兜底:",
-        error instanceof Error ? error.message : error
+        info.message || error
       );
-      return { settings: fallback, materials: [], hasConfigRow: false };
+      // 读失败要**说清楚为什么** —— 「还没存过配置」和「表还没建」是两回事,
+      // 后者得先跑迁移脚本,否则后台每个写操作都会撞同一个错
+      return {
+        settings: fallback,
+        materials: [],
+        hasConfigRow: false,
+        readError: info.missingRelation
+          ? "打印定价的表还不存在(迁移脚本没跑)"
+          : `读定价配置失败:${info.message}`,
+      };
     }
   }
 );

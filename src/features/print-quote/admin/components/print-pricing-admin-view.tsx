@@ -186,6 +186,8 @@ const ERROR_TEXT: Record<string, string> = {
   MATERIAL_NOT_FOUND: "找不到这档材料(可能已经被删了)",
   MATERIAL_IN_USE: "这档材料正在生效,先换成别的再停用",
   CODE_DUPLICATE: "标识重复了,换一个新的",
+  MIGRATION_MISSING:
+    "打印定价的表还不存在 —— 先跑一次迁移脚本(pnpm migrate:apply-print-pricing),再回来保存",
   SAVE_FAILED: "保存失败,看服务端日志",
 };
 
@@ -640,7 +642,24 @@ export function PrintPricingAdminView() {
           )}
         </div>
 
-        {!overview.hasConfigRow ? (
+        {overview.readError ? (
+          /* 读失败跟「还没存过配置」是两回事 —— 前者得先跑迁移脚本,
+             不然后台每个写操作都会撞同一个错。用红条摆出来。 */
+          <div className="mb-3 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs leading-relaxed">
+            <p className="mb-1 flex items-center gap-1 font-medium">
+              <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
+              读不到定价配置
+            </p>
+            <p className="text-muted-foreground">
+              {overview.readError}。现在页面上摆的是环境变量 / 默认值那一份,
+              存不进去 —— 先把
+              <code className="mx-1 rounded bg-muted px-1 py-0.5 font-mono">
+                pnpm migrate:apply-print-pricing
+              </code>
+              跑一遍,再回来保存。
+            </p>
+          </div>
+        ) : !overview.hasConfigRow ? (
           <div className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs leading-relaxed">
             还没有后台配置行,现在生效的是 `PRINT_*` 环境变量 / 代码里的默认值。
             在下面点一次「保存」,今天的生效值就会固化进数据库,之后改环境变量不再影响线上。

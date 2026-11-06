@@ -33,7 +33,10 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-
+import {
+  describeDbError,
+  isMissingPrintPricingTable,
+} from "@/features/print-quote/lib/db-error";
 import type {
   PrintPricingOverview,
   PrintPricingSettings,
@@ -71,6 +74,7 @@ export type AdminPricingWriteResult =
         | "MATERIAL_NOT_FOUND"
         | "MATERIAL_IN_USE"
         | "CODE_DUPLICATE"
+        | "MIGRATION_MISSING"
         | "SAVE_FAILED";
     };
 
@@ -99,6 +103,21 @@ function isUniqueViolation(error: unknown): boolean {
     break;
   }
   return false;
+}
+
+/**
+ * 写操作撞到「表还不存在」—— 迁移脚本没跑
+ *
+ * 打印定价那两张表(`print_pricing_config` / `print_material`)是
+ * 2026-11-06 才加的。线上没跑迁移脚本的时候,后台**每一个**写操作都会
+ * 撞同一个错 —— 而默认那句「保存失败,看服务端日志」对工作室没用:
+ * 日志里只有一坨 SQL。
+ *
+ * 所以这里单独认出来,回一个 `MIGRATION_MISSING`,界面照着它说「先跑一次
+ * 迁移脚本」。
+ */
+function isMigrationMissing(error: unknown): boolean {
+  return isMissingPrintPricingTable(error);
 }
 
 /** 配置行的校验 —— 比例 0~1、金额非负整数、几何非负 */
@@ -217,7 +236,13 @@ export const adminSavePrintPricingAction = withAdminPricingAction("save")
     try {
       await savePrintPricingConfig(parsedInput);
     } catch (error) {
-      console.error("[print-pricing] 保存计价设置失败:", error);
+      console.error(
+        "[print-pricing] 保存计价设置失败:",
+        describeDbError(error).message || error
+      );
+      if (isMigrationMissing(error)) {
+        return { ok: false, code: "MIGRATION_MISSING" };
+      }
       return { ok: false, code: "SAVE_FAILED" };
     }
 
@@ -268,7 +293,13 @@ export const adminSetPrintPricingMaterialAction = withAdminPricingAction(
     try {
       await savePrintPricingConfig(next);
     } catch (error) {
-      console.error("[print-pricing] 设置当前材料失败:", error);
+      console.error(
+        "[print-pricing] 设置当前材料失败:",
+        describeDbError(error).message || error
+      );
+      if (isMigrationMissing(error)) {
+        return { ok: false, code: "MIGRATION_MISSING" };
+      }
       return { ok: false, code: "SAVE_FAILED" };
     }
 
@@ -347,7 +378,13 @@ export const adminCreatePrintMaterialAction = withAdminPricingAction(
       if (isUniqueViolation(error)) {
         return { ok: false, code: "CODE_DUPLICATE" };
       }
-      console.error("[print-pricing] 新增材料失败:", error);
+      console.error(
+        "[print-pricing] 新增材料失败:",
+        describeDbError(error).message || error
+      );
+      if (isMigrationMissing(error)) {
+        return { ok: false, code: "MIGRATION_MISSING" };
+      }
       return { ok: false, code: "SAVE_FAILED" };
     }
 
@@ -392,7 +429,13 @@ export const adminUpdatePrintMaterialAction = withAdminPricingAction(
       if (isUniqueViolation(error)) {
         return { ok: false, code: "CODE_DUPLICATE" };
       }
-      console.error("[print-pricing] 更新材料失败:", error);
+      console.error(
+        "[print-pricing] 更新材料失败:",
+        describeDbError(error).message || error
+      );
+      if (isMigrationMissing(error)) {
+        return { ok: false, code: "MIGRATION_MISSING" };
+      }
       return { ok: false, code: "SAVE_FAILED" };
     }
 
@@ -422,7 +465,13 @@ export const adminDeletePrintMaterialAction = withAdminPricingAction(
     try {
       await deactivatePrintMaterial(parsedInput.id);
     } catch (error) {
-      console.error("[print-pricing] 停用材料失败:", error);
+      console.error(
+        "[print-pricing] 停用材料失败:",
+        describeDbError(error).message || error
+      );
+      if (isMigrationMissing(error)) {
+        return { ok: false, code: "MIGRATION_MISSING" };
+      }
       return { ok: false, code: "SAVE_FAILED" };
     }
 
