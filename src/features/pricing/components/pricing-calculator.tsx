@@ -127,6 +127,7 @@ export function PricingCalculator({
   onQuoteInput,
   quoteSlot,
   onModelChange,
+  initialModel,
 }: {
   /**
    * 是否渲染工具自带的页头 / 页脚。
@@ -142,7 +143,7 @@ export function PricingCalculator({
    * 报价模式（2026-11-01 新增，给打印服务报价页用）。
    *
    * false（默认）= **工具模式**：只算不存、不显示任何价格、模型不上传服务器。
-   *                 这是 `/tools/weight` 的行为，本次改动不能动它。
+   *                 这是 `/tools/weight` 的行为 —— 2026-11-06 恢复了它。
    * true          = **报价模式**：把几何数据通过 `onQuoteInput` 抛给父组件，
    *                 由父组件去服务端要报价，并把 `quoteSlot` 渲染在右栏
    *                 克重下方。
@@ -162,18 +163,38 @@ export function PricingCalculator({
   onQuoteInput?: (input: PrintQuoteInput | null) => void;
 
   /**
-   * 报价条插槽（报价模式）—— 父组件渲染价格明细 + 合计 + 下单入口。
-   * 渲染位置：右栏克重下方。
+   * 右栏插槽 —— 渲染在右栏克重面板下方。
+   *
+   * 报价模式(`/quote`)放的是报价条(价格明细 + 交期 + 下单入口);
+   * 工具模式(`/tools/weight`)放的是「报价下单」入口卡片 —— 工具里不显示
+   * 价格,只给一个通往报价台的口子。
+   *
+   * 传了才渲染,不传就是空的。
    */
   quoteSlot?: ReactNode;
 
   /**
-   * 模型就绪回调（报价模式）—— 父组件要用模型文件本体打包上传。
+   * 模型就绪回调 —— 父组件要用模型文件本体时用它。
    *
-   * 带上 `scales`:下单时要按用户调过的尺寸重新打包模型,否则工作室拿到的
-   * 文件尺寸和报价单上的尺寸对不上。
+   * 报价模式:下单时要按用户调过的尺寸重新打包模型上传,不带 `scales` 的话
+   * 工作室拿到的文件尺寸和报价单上的尺寸对不上。
+   *
+   * 工具模式:模型要**接力**给报价台(省得用户再选一遍文件)。
+   *
+   * 两种模式都会抛 —— 模型不是报价专属的东西。
    */
   onModelChange?: (payload: PricingModelPayload | null) => void;
+
+  /**
+   * 外部接手的模型 —— 报价台从克重工具接力过来的那个
+   *
+   * 传进来就当自己的模型用:模型本体 + 用户在工具里调过的缩放一起搬过来。
+   * 传 null(默认) = 没有接手,走正常路径(用户自己选文件)。
+   *
+   * 接力只在**客户端跳转**里成立(整页刷新就没了),见
+   * `print-quote/lib/model-handoff.ts`。
+   */
+  initialModel?: PricingModelPayload | null;
 }) {
   const t = useTranslations("MaterialPricing");
 
@@ -625,18 +646,20 @@ export function PricingCalculator({
     });
   }, [quoteMode, geometry, poseSupport, supportStats]);
 
-  // 模型本体也要抛给父组件 —— 下单时要把文件打包上传到 R2
+  // 模型本体也要抛给父组件 —— 下单时要把文件打包上传到 R2,
+  // 工具页要把它**接力**给报价台
+  //
+  // 两种模式都抛:模型不是报价专属的东西(报价模式才需要几何)。
   const onModelChangeRef = useRef(onModelChange);
   useEffect(() => {
     onModelChangeRef.current = onModelChange;
   }, [onModelChange]);
 
   useEffect(() => {
-    if (!quoteMode) return;
     const notify = onModelChangeRef.current;
     if (!notify) return;
     notify(model ? { model, scales: appliedScales } : null);
-  }, [quoteMode, model, appliedScales]);
+  }, [model, appliedScales]);
 
   // ---- 文件上传 ----
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -722,6 +745,45 @@ export function PricingCalculator({
     setOptimalAngle(null);
     setPoseSupport(null);
   };
+
+  // ---- 外部接手的模型 ----
+  //
+  // 报价台从克重工具接力过来的那个模型(见 print-quote/lib/model-handoff.ts)。
+  // 接手的动作 = 跟用户自己选完文件一样:模型装上、尺寸装上、开始渲染。
+  //
+  // 用 ref 记住「接过哪一个」:同一个模型对象只接一次 —— 父组件重渲染不会
+  // 把模型重新塞一遍(那会把用户后来改的尺寸冲掉)。
+  const injectedRef = useRef<PricingModelPayload | null>(null);
+  useEffect(() => {
+    if (!initialModel) return;
+    if (injectedRef.current === initialModel) return;
+    injectedRef.current = initialModel;
+
+    const { model: m, scales } = initialModel;
+    setModel(m);
+    setFileName(m.objFileName);
+    setUploadError(null);
+    setLoadStatus("loading-3d");
+    setLoadProgress(t("upload.rendering"));
+    setLoadPercent(95);
+
+    // 尺寸:把工具里调过的缩放搬过来 —— 报价单上的尺寸要跟用户看到的一致
+    const [sx, sy, sz] = scales;
+    if (sx === 1 && sy === 1 && sz === 1) {
+      setDimMode("original");
+    } else {
+      setDimMode("custom");
+      if (sx === sy && sy === sz) {
+        setUniformScale(true);
+        setScaleFactor(sx);
+      } else {
+        setUniformScale(false);
+        setScaleX(sx);
+        setScaleY(sy);
+        setScaleZ(sz);
+      }
+    }
+  }, [initialModel, t]);
 
   const applyProduct = (id: string) => {
     const p = PRODUCT_TYPES.find((x) => x.id === id);
@@ -1517,7 +1579,7 @@ export function PricingCalculator({
                     uploadError={uploadError}
                     header={modelHeader}
                     weight={weightPanel}
-                    quote={quoteMode ? quoteSlot : null}
+                    quote={quoteSlot}
                     dimMode={dimMode}
                     uniformScale={uniformScale}
                     scaleFactor={scaleFactor}

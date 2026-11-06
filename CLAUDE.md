@@ -12,7 +12,7 @@ Mooncoda is a production-ready Next.js SaaS template. It provides a complete fou
 
 | 系统 | 职责 | 技术栈 |
 |---|---|---|
-| **NextDevTpl**(本仓库) | AI 生图 SaaS 后端:user / credits / photo / imageJob / AI 路由 / WeChat 小程序登录 **+ 商品目录(商品 / SKU 变体 / 价格)+ 定价 + 购物车 + 订单事实 + 收货地址 + 打印工单(`/quote` 报价 → `print_order`,按 `user_id` 归属,登录后下单;也可以从 `/tools/weight` 直接加进商城购物车,见「打印服务进商城购物车」)** | Next.js 16 + Drizzle + PostgreSQL |
+| **NextDevTpl**(本仓库) | AI 生图 SaaS 后端:user / credits / photo / imageJob / AI 路由 / WeChat 小程序登录 **+ 商品目录(商品 / SKU 变体 / 价格)+ 定价 + 购物车 + 订单事实 + 收货地址 + 打印工单(`/quote` 报价 → `print_order`,按 `user_id` 归属,登录后下单;克重工具 `/tools/weight` 只出报价下单入口,**不带加购入口**,见「打印服务进商城购物车」)** | Next.js 16 + Drizzle + PostgreSQL |
 | **微信支付 / 支付宝**(外部服务) | **自己直连的收款通道**:钱直接进我们自己的商户号 / 账户,没有中间层抽成,定价完全由本仓库说了算。**代码写好了,商户号 / 应用还没走完开通流程** —— 界面上摆出来但选不了(见「两个支付通道」的两道闸) | 微信支付 V3 Native(扫码)+ 支付宝电脑网站支付 |
 | **Shopify**(外部服务)**已下线** | 曾经只做银行卡 / Shop Pay 的收银台(草稿订单,逐分相等)。2026-11-05 工作室决定只用微信 + 支付宝,**不再接新单** —— 代码留着给老单用,整目录待拆 | Shopify Admin GraphQL API + 草稿订单 |
 | **Sellbase**(独立服务)**过渡期保留** | 旧收款路:Sellbase 建单 + Stripe 付款页。**不再接新单**(已建好的旧单还能重取支付入口)。两个新通道跑通后整个 `src/features/sellbase/` 拆掉 | Supabase Edge Functions(**跟本仓库同一个 Supabase 项目**)+ Stripe(MIT) |
@@ -455,9 +455,19 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
   `scripts/apply-print-order-delivery-tier-schema.ts`(幂等)。
 - 行为由 `src/test/print-quote/pure/delivery-tier.test.ts` 守住。
 
-### 打印服务进商城购物车(2026-11-05)
+### 打印服务进商城购物车(2026-11-05,**当前没有 UI 入口**)
 
-克重工具(`/tools/weight`)量完之后**可以直接加入购物车**,跟别的商品一起结算。
+> **2026-11-06 更新**:工作室的要求是「工具里不应该直接放下单控件,给一个
+> **报价下单入口**就够」。克重工具(`/tools/weight`)上那套「报价 + 交期 +
+> 加入购物车」(2026-11-05 加的)已经撤掉,面板组件
+> (`print-service-cart-panel.tsx`)一并删了 —— 工具页现在右栏只有一张
+> 「报价下单」入口卡片,点过去是 `/quote`。
+>
+> **下面这套能力本身还在**,只是**界面上没有入口**:API 路由 / 数据层 / 迁移
+> / 测试都留着(小程序或将来的新入口可以直接调)。要恢复界面入口,照着
+> 「打印服务」那条链路再做一遍面板就行 —— 底座都还在。
+
+克重工具量完之后**可以直接加入购物车**,跟别的商品一起结算。
 一次结算同时出 `SO-…`(商城订单)和 `PO-…`(打印工单),钱一次付清。
 
 ```
@@ -473,15 +483,12 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
   (`productId` 是个哨兵值 `service_print_3d`,拿去 `findProductById()` 查不到
   是**预期**的)。共享契约在 `src/features/storefront/lib/print-service.ts`
   (纯文件,客户端和服务端都 import —— 不能在里面 import 服务端模块)。
-- **报价在两个页面必须是同一个数** —— `/quote` 和 `/tools/weight` 共用
-  `usePrintQuote()`(`src/features/print-quote/hooks/use-print-quote.ts`):
-  同样的防抖、同样的「旧响应盖掉新响应」防护、同样的 `quoteFresh` 判定。
-  两处各写一遍的话,改了一处忘了另一处就会出现「报价台说 61.18、工具页说
-  61.20」。
+- **价格只在报价台一处算** —— 2026-11-06 起工具页**不显示价格、也不调报价
+  接口**(计算器跑工具模式,几何数据不抛给服务端)。所以「两个页面价格对不上」
+  这类漂移从根上没了;要改价格口径,只改报价台那一处。
 - **模型只在用户点「加入购物车」那一刻才上传** —— 量重量的过程模型一个字节
   都不出浏览器。上传是加购动作的一部分,不是量重量的副产品。
-- **加购要登录** —— 模型要落到 R2,而且工单必须挂在账号名下。未登录时按钮
-  变成登录链接(登录态由页面 RSC 查好传下去)。
+- **加购要登录** —— 模型要落到 R2,而且工单必须挂在账号名下。
 - **打印服务行恒为一件** —— 一活一模型,没有数量阶梯折扣。购物袋 / 结算页
   不给 +/− 按钮。
 - **打印服务行没有封面图** —— 手上是模型文件(一个 zip),不是图片。metadata
@@ -502,6 +509,27 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 - 行为由 `src/test/storefront/pure/print-service-cart.test.ts`(购物车行的
   判据 / hash / 形状)和 `src/test/sellbase/pure/linked-print-order.test.ts`
   (工单跟着商城订单变)守住。
+
+### 模型接力:工具页 → 报价台(2026-11-06)
+
+克重工具量完之后,右栏那张「报价下单」卡片点下去,**把量好的模型一起带到
+`/quote`** —— 用户不用在报价台重新选一遍文件。
+
+- **接力靠模块级变量**(`src/features/print-quote/lib/model-handoff.ts`):
+  客户端路由跳转**不刷新文档**,同一个 JS 上下文里变量还在。URL 带不了
+  (几 MB 的 OBJ + 贴图 blob),sessionStorage 也存不了(`ModelFile` 里装的是
+  `URL.createObjectURL()` 的 blob URL,不是字符串)。
+- **取走即清空** —— 接力是一次性的:报价台刷新一下不会又冒出个模型。
+- **只留最新那一个** —— 用户在工具页换了模型,之前那个作废(留着旧的 =
+  报价单上的尺寸跟用户最后选的对不上)。
+- **尺寸一起搬过去** —— 计算器的 `initialModel` 把工具里调过的缩放
+  (`appliedScales`)一起接过来,报价单上的尺寸跟用户看到的一致。
+- **接力只在客户端跳转里成立** —— 整页刷新没了;未登录被弹去登录页(整页
+  跳转)也没了。工具页的入口卡片上写明了这一点(登录态由页面 RSC 查好传
+  下去)。
+- **摆盘结果不接力** —— 接力过去的是**初始角度**的支撑克重;要最优姿态得在
+  报价台再跑一次智能摆盘。
+- 行为由 `src/test/print-quote/pure/model-handoff.test.ts` 守住。
 
 ### 两个支付通道(2026-11-05)
 

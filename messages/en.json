@@ -1708,17 +1708,13 @@
         "urgent": "Urgent"
       }
     },
-    "cart": {
-      "title": "Add to cart",
-      "needModel": "Upload a 3D model — the quote shows up here and you can order right after measuring.",
-      "add": "Add to cart",
-      "uploading": "Uploading model…",
-      "adding": "Adding…",
-      "signInFirst": "Sign in to add to cart",
-      "hint": "Your model is packaged and uploaded only when you click “Add to cart” — nothing leaves the browser while measuring.",
-      "errors": {
-        "addFailed": "Could not add to cart, please try again"
-      }
+    "entry": {
+      "title": "Order it",
+      "desc": "The quote desk handles delivery tier, your details and payment.",
+      "cta": "Go to quote",
+      "carry": "The model you measured comes along — no need to pick the file again.",
+      "empty": "Pick a model file above first, then you won't have to upload it again.",
+      "signIn": "You'll be sent to sign in first — pick the model file again once you're back."
     },
     "order": {
       "start": "Enter order details",

@@ -23,7 +23,7 @@
  */
 
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   PricingCalculator,
@@ -38,6 +38,7 @@ import { PrintOrderList } from "@/features/print-quote/components/print-order-li
 import { QuoteSummary } from "@/features/print-quote/components/quote-summary";
 import { usePrintOrderPolling } from "@/features/print-quote/hooks/use-print-order-polling";
 import { usePrintQuote } from "@/features/print-quote/hooks/use-print-quote";
+import { takePendingModel } from "@/features/print-quote/lib/model-handoff";
 import type {
   PrintOrderCreated,
   UserPrintOrder,
@@ -69,10 +70,28 @@ export function QuoteWorkbench({
   );
 
   /**
+   * 从克重工具接力过来的模型 —— 挂载后取一次
+   *
+   * 必须在 effect 里取,不能在 render 里取:接力只存在于浏览器(客户端跳转
+   * 过来的),render 时取会让服务端渲染出空态、客户端渲染出有模型 —— 两边
+   * 不一致,React 会报 hydration 错。
+   *
+   * 取走即清空(见 `lib/model-handoff.ts`),所以刷新一下不会又冒出个模型。
+   */
+  const [relayedModel, setRelayedModel] = useState<PricingModelPayload | null>(
+    null
+  );
+  useEffect(() => {
+    const pending = takePendingModel();
+    if (pending) setRelayedModel(pending);
+  }, []);
+
+  /**
    * 报价 —— 防抖请求 + 过期判定
    *
-   * 跟 `/tools/weight` 的「加入购物车」那条路**共用同一个 hook** ——
-   * 两个页面看到的价必须是同一个数(同一个服务端接口、同一套口径)。
+   * 价格**只在报价台这一处算**(2026-11-06 起工具页不显示价格、也不调报价
+   * 接口)。这个 hook 是「报价的唯一入口」—— 将来再加第二个报价入口,照着它
+   * 接,不要另写一套防抖 / 过期判定。
    */
   const {
     quoteInput,
@@ -232,6 +251,7 @@ export function QuoteWorkbench({
         quoteMode
         onQuoteInput={handleQuoteInput}
         onModelChange={handleModelChange}
+        initialModel={relayedModel}
         quoteSlot={quoteSlot}
       />
 

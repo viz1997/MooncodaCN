@@ -655,7 +655,7 @@ export function ModelSettingsPanel({
                 跟预览的底边对齐(挤在中间会像没排完)。 */}
             <div className="mt-auto">{weight}</div>
 
-            {/* 报价条 —— 只在报价模式传进来，工具模式下是 null */}
+            {/* 右栏插槽 —— 报价模式放报价条，工具模式放「报价下单」入口卡片 */}
             {quote}
           </div>
         </div>

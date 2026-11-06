@@ -15,8 +15,8 @@
  *
  * ## 这个文件为什么是纯的
  *
- * 它被客户端组件(克重工具的「加入购物车」面板)和服务端(购物车 / 结算)同时
- * import。所以**不能**在这里 import 任何服务端模块(`quote-server.ts` 读
+ * 它被客户端组件(商城里加打印服务行的那些界面)和服务端(购物车 / 结算)
+ * 同时 import。所以**不能**在这里 import 任何服务端模块(`quote-server.ts` 读
  * `process.env`、`db/index.ts` 连库)—— 那会让客户端 bundle 里混进 Node 代码。
  *
  * 服务端的定价在 `print-quote/lib/quote-server.ts` 里,两边通过
