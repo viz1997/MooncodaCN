@@ -12,10 +12,12 @@
  *    比例、支撑几何参数(托底高度 / 底板留边)。
  * 3. **材料库**(表格)—— 多档材料,增删改 + 停用,再指定哪一档当前生效。
  *
- * ## 单位:金额一律「分」,比例界面用「%」
+ * ## 单位:金额一律「元」,比例界面用「%」
  *
- * - 金额输入框收**整数分**(450 = 4.5 元/g)—— 全仓库的金额口径就是整数
- *   分,后台也不引入第二套单位。
+ * - 金额输入框收**元**(4.5 = 4.5 元/g)—— 工作室看的是钱,让人填「450 分」
+ *   等于让人自己心算换算,填错一个数量级就是把价定成 100 倍。
+ * - **提交时换算成整数分**,服务端和 DB 的口径没动(还是分)—— 换算只发生
+ *   在表单这一层,`pricing-actions.ts` 收到的仍然是分。
  * - 交期比例界面用百分比(填 37 = 37%),提交时换算成 0~1 的小数 ——
  *   `delivery-tier.ts` 里的口径就是小数。
  *
@@ -75,16 +77,25 @@ import { formatCents } from "@/lib/money";
 /*  表单形状                                                                    */
 /* -------------------------------------------------------------------------- */
 
-/** 计价设置的表单值 —— 交期比例用百分比,其余跟配置行一一对应 */
+/**
+ * 计价设置的表单值 —— 金额是**元**,交期比例是百分比
+ *
+ * 表单里的金额字段一律叫 `...Yuan...`,不叫 `...Cents...` —— 名字就是
+ * 单位,写错名字的东西迟早会被当成另一个单位用(仓库里踩过「差 100 倍」
+ * 的坑)。提交时在 `handleSaveConfig` 里换算成整数分。
+ */
 type ConfigFormValues = {
   modelMaterialId: string | null;
   supportMaterialId: string | null;
-  varnishFeeCents: number | null;
+  /** 元 */
+  varnishFeeYuan: number | null;
   varnishEnabled: boolean;
   supportThreshold: number | null;
   supportTier1Ratio: number | null;
-  supportTier1PriceCentsPerGram: number | null;
-  supportTier2PriceCentsPerGram: number | null;
+  /** 元/g */
+  supportTier1PriceYuanPerGram: number | null;
+  /** 元/g */
+  supportTier2PriceYuanPerGram: number | null;
   supportEnabled: boolean;
   supportLiftMm: number | null;
   supportBaseMarginMm: number | null;
@@ -93,13 +104,14 @@ type ConfigFormValues = {
   deliveryUrgentPercent: number | null;
 };
 
-/** 材料行的表单值 */
+/** 材料行的表单值 —— 金额是**元** */
 type MaterialFormValues = {
   code: string;
   name: string;
   kind: "model" | "support";
   density: number | null;
-  unitPriceCentsPerGram: number | null;
+  /** 元/g */
+  unitPriceYuanPerGram: number | null;
   isActive: boolean;
   sortOrder: number | null;
 };
@@ -108,22 +120,47 @@ type MaterialFormValues = {
 /*  小工具                                                                      */
 /* -------------------------------------------------------------------------- */
 
-/** 元 → 「¥4.50」 —— 后台读数用,不用「分」(工作室看的是钱) */
+/** 分 → 「¥4.50」 —— 服务端 / DB 给的是分,读数时换成人看得懂的元 */
 function yuan(cents: number): string {
   return formatCents(cents);
 }
 
-/** 生效设置 → 表单初值 */
+/** 元 → 「¥4.50」 —— 表单里已经是元,过一遍 formatCents 保持一个格式化入口 */
+function yuanOf(value: number): string {
+  return formatCents(yuanToCents(value));
+}
+
+/** 分 → 元(填进表单的值) */
+function centsToYuan(cents: number | null): number | null {
+  return cents === null ? null : cents / 100;
+}
+
+/**
+ * 元 → 分(提交给服务端的值)
+ *
+ * 服务端口径是**整数分**,这里只做单位换算 + 取整。`+ Number.EPSILON`
+ * 是为了对付浮点误差:1.005 * 100 在 IEEE754 下是 100.49999999999999,
+ * 直接 round 会掉到 100,加一点点再乘就落在 100.5 上,round 到 101。
+ */
+function yuanToCents(value: number | null | undefined): number {
+  return Math.round(((value ?? 0) + Number.EPSILON) * 100);
+}
+
+/** 生效设置 → 表单初值(金额从分换成元) */
 function toFormValues(settings: PrintPricingSettings): ConfigFormValues {
   return {
     modelMaterialId: settings.modelMaterialId,
     supportMaterialId: settings.supportMaterialId,
-    varnishFeeCents: settings.varnishFeeCents,
+    varnishFeeYuan: centsToYuan(settings.varnishFeeCents),
     varnishEnabled: settings.varnishEnabled,
     supportThreshold: settings.supportThreshold,
     supportTier1Ratio: settings.supportTier1Ratio,
-    supportTier1PriceCentsPerGram: settings.supportTier1PriceCentsPerGram,
-    supportTier2PriceCentsPerGram: settings.supportTier2PriceCentsPerGram,
+    supportTier1PriceYuanPerGram: centsToYuan(
+      settings.supportTier1PriceCentsPerGram
+    ),
+    supportTier2PriceYuanPerGram: centsToYuan(
+      settings.supportTier2PriceCentsPerGram
+    ),
     supportEnabled: settings.supportEnabled,
     supportLiftMm: settings.supportLiftMm,
     supportBaseMarginMm: settings.supportBaseMarginMm,
@@ -219,15 +256,16 @@ export function PrintPricingAdminView() {
     saveConfig({
       modelMaterialId: values.modelMaterialId ?? null,
       supportMaterialId: values.supportMaterialId ?? null,
-      varnishFeeCents: Math.round(values.varnishFeeCents ?? 0),
+      // 表单里是元,服务端要整数分 —— 换算只在这一层发生
+      varnishFeeCents: yuanToCents(values.varnishFeeYuan),
       varnishEnabled: values.varnishEnabled,
       supportThreshold: values.supportThreshold ?? 1,
       supportTier1Ratio: values.supportTier1Ratio ?? 2,
-      supportTier1PriceCentsPerGram: Math.round(
-        values.supportTier1PriceCentsPerGram ?? 0
+      supportTier1PriceCentsPerGram: yuanToCents(
+        values.supportTier1PriceYuanPerGram
       ),
-      supportTier2PriceCentsPerGram: Math.round(
-        values.supportTier2PriceCentsPerGram ?? 0
+      supportTier2PriceCentsPerGram: yuanToCents(
+        values.supportTier2PriceYuanPerGram
       ),
       supportEnabled: values.supportEnabled,
       supportLiftMm: values.supportLiftMm ?? 0,
@@ -321,7 +359,8 @@ export function PrintPricingAdminView() {
       name: "",
       kind: "model",
       density: 1.2,
-      unitPriceCentsPerGram: 450,
+      // 出厂树脂 4.5 元/g(= 450 分/g)
+      unitPriceYuanPerGram: 4.5,
       isActive: true,
       sortOrder: 0,
     });
@@ -334,7 +373,7 @@ export function PrintPricingAdminView() {
       name: row.name,
       kind: row.kind,
       density: row.density,
-      unitPriceCentsPerGram: row.unitPriceCentsPerGram,
+      unitPriceYuanPerGram: centsToYuan(row.unitPriceCentsPerGram),
       isActive: row.isActive,
       sortOrder: row.sortOrder,
     });
@@ -357,7 +396,7 @@ export function PrintPricingAdminView() {
       unitPriceCentsPerGram:
         values.kind === "support"
           ? null
-          : Math.round(values.unitPriceCentsPerGram ?? 0),
+          : yuanToCents(values.unitPriceYuanPerGram),
       isActive: values.isActive,
       sortOrder: values.sortOrder ?? 0,
     };
@@ -397,18 +436,19 @@ export function PrintPricingAdminView() {
   );
 
   // 支撑加价规则的实时预览 —— 改一个数就能看到规则变成什么样
+  // (watch 到的值是**元** —— 表单里填的就是元)
   const threshold = Form.useWatch("supportThreshold", configForm);
   const tier1Ratio = Form.useWatch("supportTier1Ratio", configForm);
-  const tier1Price = Form.useWatch("supportTier1PriceCentsPerGram", configForm);
-  const tier2Price = Form.useWatch("supportTier2PriceCentsPerGram", configForm);
+  const tier1Price = Form.useWatch("supportTier1PriceYuanPerGram", configForm);
+  const tier2Price = Form.useWatch("supportTier2PriceYuanPerGram", configForm);
 
   const rulePreview = useMemo(() => {
     const t = threshold ?? 1;
     const b = Math.max(t, tier1Ratio ?? t);
     return [
       `比例 ≤ ${ratioLabel(t)}:不收`,
-      `${ratioLabel(t)} < 比例 ≤ ${ratioLabel(b)}:超出部分 ${yuan(tier1Price ?? 0)}/g`,
-      `比例 > ${ratioLabel(b)}:再超出部分 ${yuan(tier2Price ?? 0)}/g`,
+      `${ratioLabel(t)} < 比例 ≤ ${ratioLabel(b)}:超出部分 ${yuanOf(tier1Price ?? 0)}/g`,
+      `比例 > ${ratioLabel(b)}:再超出部分 ${yuanOf(tier2Price ?? 0)}/g`,
     ];
   }, [threshold, tier1Ratio, tier1Price, tier2Price]);
 
@@ -654,7 +694,7 @@ export function PrintPricingAdminView() {
           计价设置
         </h3>
         <p className="mb-4 text-xs text-muted-foreground">
-          金额单位是<b>分</b>(450 = 4.5 元);交期比例填百分比(37 = 37%)。
+          金额单位是<b>元</b>(4.5 = 4.5 元/g);交期比例填百分比(37 = 37%)。
           保存后立刻生效 —— 购物车、打印单、结算都按新的值重算。
         </p>
 
@@ -721,31 +761,21 @@ export function PrintPricingAdminView() {
             </Form.Item>
 
             <Form.Item
-              name="supportTier1PriceCentsPerGram"
-              label="第一档单价(分/g)"
+              name="supportTier1PriceYuanPerGram"
+              label="第一档单价(元/g)"
               extra="1:1 ~ 1:2 那部分支撑按它收"
               rules={[{ required: true, message: "必填" }]}
             >
-              <InputNumber
-                min={0}
-                max={1_000_000}
-                step={10}
-                className="w-full"
-              />
+              <InputNumber min={0} max={10_000} step={0.1} className="w-full" />
             </Form.Item>
 
             <Form.Item
-              name="supportTier2PriceCentsPerGram"
-              label="第二档单价(分/g)"
+              name="supportTier2PriceYuanPerGram"
+              label="第二档单价(元/g)"
               extra="超过 1:2 那部分支撑按它收"
               rules={[{ required: true, message: "必填" }]}
             >
-              <InputNumber
-                min={0}
-                max={1_000_000}
-                step={10}
-                className="w-full"
-              />
+              <InputNumber min={0} max={10_000} step={0.1} className="w-full" />
             </Form.Item>
           </div>
 
@@ -769,17 +799,12 @@ export function PrintPricingAdminView() {
 
           <div className="grid grid-cols-1 gap-x-4 md:grid-cols-2 lg:grid-cols-3">
             <Form.Item
-              name="varnishFeeCents"
-              label="后处理固定费(分)"
-              extra="光油 / 后处理,默认 1000 分 = 10 元"
+              name="varnishFeeYuan"
+              label="后处理固定费(元)"
+              extra="光油 / 后处理,默认 10 元"
               rules={[{ required: true, message: "必填" }]}
             >
-              <InputNumber
-                min={0}
-                max={1_000_000}
-                step={100}
-                className="w-full"
-              />
+              <InputNumber min={0} max={10_000} step={1} className="w-full" />
             </Form.Item>
 
             <Form.Item
@@ -926,14 +951,14 @@ export function PrintPricingAdminView() {
                 </Form.Item>
 
                 <Form.Item
-                  name="unitPriceCentsPerGram"
-                  label="单价(分/g)"
+                  name="unitPriceYuanPerGram"
+                  label="单价(元/g)"
                   extra="只有模型材料用得上;支撑材料走分段规则"
                 >
                   <InputNumber
                     min={0}
-                    max={1_000_000}
-                    step={10}
+                    max={10_000}
+                    step={0.1}
                     className="w-full"
                   />
                 </Form.Item>
