@@ -168,7 +168,7 @@ PrintOrderEmail.PreviewProps = {
   note: "The model needed a thinner support layer.",
   noteLabel: "Note from the studio",
   actionLabel: "View order",
-  actionUrl: "https://example.com/dashboard/print-orders",
+  actionUrl: "https://example.com/account/print-orders",
 } satisfies PrintOrderEmailProps;
 
 export default PrintOrderEmail;

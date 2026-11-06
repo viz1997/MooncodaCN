@@ -1,64 +1,29 @@
-import { notFound, redirect } from "next/navigation";
-
-import { PrintOrderDetailView } from "@/features/print-quote/components/print-order-detail-view";
-import {
-  listPrintOrderEvents,
-  toPrintOrderEventView,
-} from "@/features/print-quote/lib/order-events";
-import {
-  getUserPrintOrderByOrderNo,
-  toUserPrintOrderDetail,
-} from "@/features/print-quote/lib/order-store";
-import { getServerSession } from "@/lib/auth/server";
-
-export const dynamic = "force-dynamic";
-
-interface PrintOrderDetailPageProps {
-  /**
-   * Next 16:params 是 Promise
-   *
-   * 漏了 `await` 会拿到 `"[object Promise]"` —— 查不到单,页面看着像
-   * 「工单不存在」,其实是自己写错了。
-   */
-  params: Promise<{ orderNo: string }>;
-}
+import { redirect, type routing } from "@/i18n/routing";
 
 /**
- * /dashboard/print-orders/[orderNo] —— 工单详情
+ * `/dashboard/print-orders/[orderNo]` —— **旧地址**,已搬到
+ * `/account/print-orders/[orderNo]`
  *
- * ## 归属校验写在查询里
+ * 2026-11-06:工作室要求把「打印订单 / 购物订单 / 地址管理」从控制台搬到
+ * 电商首页头像下拉里(理由见 `/account/orders/page.tsx` 的文件头)。
  *
- * `getUserPrintOrderByOrderNo(userId, orderNo)` 查不到就是 null(别人的单
- * 和不存在的单返回**同一个答案**)。403 等于告诉别人「这个订单号确实
- * 存在」,而订单号是可以被枚举的 —— 所以这里是 `notFound()`。
+ * ## 为什么留一个重定向而不是 404
  *
- * ## 时间线一并查出来
+ * 老的链接不该断 —— **工单邮件里带着带订单号的地址**
+ * (`features/print-quote/lib/notifications.tsx` 拼的),还有用户收藏的
+ * 书签、分享出去的地址。重定向比 404 多做一件事:把人送到现在唯一正确的
+ * 那个页面。
  *
- * 事件跟订单在同一个库里,一次查完传给客户端。客户端之后靠轮询保持新鲜
- * (工作室改状态是外部写入,用户不刷新就看不到)。
+ * 订单号要转义 —— 它是 URL 路径里的一段,原样拼过去会被当成路径分隔符。
  */
-export default async function PrintOrderDetailPage({
+export default async function LegacyPrintOrderDetailPage({
   params,
-}: PrintOrderDetailPageProps) {
-  const session = await getServerSession();
-  if (!session?.user) {
-    redirect("/sign-in?callbackUrl=/dashboard/print-orders");
-  }
-
-  const { orderNo } = await params;
-
-  const row = await getUserPrintOrderByOrderNo(session.user.id, orderNo);
-  if (!row) {
-    // 不存在 和 不是你的 —— 同一个答案
-    notFound();
-  }
-
-  const events = await listPrintOrderEvents(row.id);
-
-  return (
-    <PrintOrderDetailView
-      order={toUserPrintOrderDetail(row)}
-      events={events.map(toPrintOrderEventView)}
-    />
-  );
+}: {
+  params: Promise<{ locale: string; orderNo: string }>;
+}) {
+  const { locale, orderNo } = await params;
+  redirect({
+    href: `/account/print-orders/${encodeURIComponent(orderNo)}`,
+    locale: locale as (typeof routing.locales)[number],
+  });
 }

@@ -550,7 +550,7 @@ Sellbase 那边挂了(网络 / 配置 / Stripe 没连上)时,**订单照样建�
   (跟订单号一个道理:403 等于告诉别人「这个 id 存在」)。
 - 限流桶 `storeAddress`,**30 次/分钟**。
 
-> 网页端仍然走 `/dashboard/addresses` 的 server action
+> 网页端仍然走 `/account/addresses` 的 server action
 > (`src/features/address/actions.ts`)。两边调的是同一份业务逻辑
 > (`src/features/address/mutations.ts`),校验规则和「默认地址只有一个」
 > 那条约束只写了一遍。

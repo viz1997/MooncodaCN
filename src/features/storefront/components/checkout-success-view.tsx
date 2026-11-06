@@ -206,7 +206,7 @@ export function CheckoutSuccessView({
           订单号 {orderNo} —— 这笔订单已经退过款。
         </p>
         <Button asChild className="rounded-full px-7">
-          <Link href="/dashboard/store-orders">我的订单</Link>
+          <Link href="/account/orders">我的订单</Link>
         </Button>
       </div>
     );
@@ -221,7 +221,7 @@ export function CheckoutSuccessView({
           订单号 {orderNo} —— 这次没有扣款成功,可以在「我的订单」里重新支付。
         </p>
         <Button asChild className="rounded-full px-7">
-          <Link href="/dashboard/store-orders">我的订单</Link>
+          <Link href="/account/orders">我的订单</Link>
         </Button>
       </div>
     );
@@ -241,7 +241,7 @@ export function CheckoutSuccessView({
             <Link href="/products">继续逛</Link>
           </Button>
           <Button asChild variant="outline" className="rounded-full px-7">
-            <Link href="/dashboard/store-orders">我的订单</Link>
+            <Link href="/account/orders">我的订单</Link>
           </Button>
         </div>
       </div>
@@ -302,7 +302,7 @@ export function CheckoutSuccessView({
               </Button>
             )}
             <Button asChild variant="outline" className="rounded-full px-7">
-              <Link href="/dashboard/store-orders">我的订单</Link>
+              <Link href="/account/orders">我的订单</Link>
             </Button>
           </div>
         </>

@@ -815,6 +815,49 @@ pnpm migrate:apply-print-pricing   # = tsx scripts/apply-print-pricing-schema.ts
 | `src/test/print-quote/pure/support-fee-bands.test.ts` | 分段的克重怎么切 / 各档之和 = 合计 / 阈值以下不收 |
 | `src/test/print-quote/pure/delivery-tier.test.ts` | 交期加价(比例 / 基数 / 恒等式) |
 
+### 买家的三样东西搬出控制台(2026-11-06)
+
+工作室的原话:**「打印订单、购物订单、地址管理不放在控制台里面,而是电商首页
+的用户头像那里。」**
+
+这三样是**买家的东西**(我的单、我的地址),不是**工具用户的东西**(积分、
+画布、生图)。摆在控制台侧边栏里,买家得先知道「控制台」是什么、登录进去
+才找得到自己的单。
+
+```
+电商首页  →  右上角头像下拉
+                   ├─ 商城订单   → /account/orders
+                   ├─ 打印订单   → /account/print-orders
+                   ├─ 收货地址   → /account/addresses
+                   ├─ 控制台     → /dashboard        (工具用户的地方,留着)
+                   └─ 退出登录
+```
+
+- **URL 换成 `/account/*`** —— 旧地址(`/dashboard/store-orders` /
+  `/dashboard/print-orders` / `/dashboard/addresses`)留着**重定向**,
+  已经发出去的工单邮件里的链接不会断。重定向写法跟 `/quote` 一样:
+  `@/i18n/routing` 的 `redirect({href, locale})`,自带 locale 前缀。
+- **页面挂在 `(marketing-atelier)` 组** —— 因为**入口在那个头里**。这一组
+  的 layout 挂的是 `<WjpStoreHeader />`(头像下拉就在那儿),页面从那儿点
+  进来就得长成那个样子,跟 `/cart` / `/checkout` 同一组。
+- **这一组是公开组,没有会话守卫** —— `(marketing-atelier)/layout.tsx` 不做
+  鉴权(匿名访客要能逛首页),所以三个页面**各自** `getServerSession()` +
+  `redirect("/sign-in?callbackUrl=…")`。`(dashboard)` 那边的兜底搬走时注释里
+  就写着这一条。
+- **控制台侧边栏少了三项** —— `src/config/nav.ts` 的 `dashboardNav` 里
+  「My Print Orders / My Orders / Addresses」删掉;`sidebar.tsx` 的
+  `getNavTitle` 映射和 `main-wrapper.tsx` 的页面标题映射同步删。
+  `messages/*.json` 里对应的 `Dashboard.nav.myPrintOrders` /
+  `Dashboard.pages.printOrders` / `printOrderDetail` 也一并删了
+  (后台那个 `AdminSidebar.printOrders` 是**管理后台**的,留着)。
+- **`PrintOrdersDashboardView` → `PrintOrdersView`** —— 组件跟着改名 +
+  换文件名(`print-orders-dashboard-view.tsx` → `print-orders-view.tsx`),
+  它现在挂在商城那套头底下,名字里带 "Dashboard" 会让人以为它还归控制台。
+- **链接跟着改** —— 结算成功页、支付面板、工单列表 / 详情 / 下单成功卡片、
+  工单邮件(`notifications.tsx`)、Sellbase 那条旧路的付款回跳地址
+  (`sellbase/lib/orders.ts` 的 `buildPrintOrderSuccessUrl`)全指向
+  `/account/*`。
+
 ### 两个支付通道(2026-11-05)
 
 工作室决定把收款从「Sellbase + Stripe 一条路」换成**两个通道**:微信支付、

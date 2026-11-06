@@ -18,7 +18,6 @@ function getPageTitleKey(pathname: string): string {
     "/dashboard/effects": "effects",
     "/dashboard/models": "models",
     "/dashboard/tasks": "tasks",
-    "/dashboard/print-orders": "printOrders",
     "/dashboard/decks": "myDecks",
     "/dashboard/support": "support",
     "/dashboard/support/new": "newTicket",
@@ -40,9 +39,6 @@ function getPageTitleKey(pathname: string): string {
   }
   if (path.startsWith("/dashboard/support/")) {
     return "ticketDetails";
-  }
-  if (path.startsWith("/dashboard/print-orders/")) {
-    return "printOrderDetail";
   }
 
   return "dashboard";

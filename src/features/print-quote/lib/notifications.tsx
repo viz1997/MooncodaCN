@@ -76,7 +76,7 @@ export function toPrintOrderMailInfo(row: PrintOrderRow): PrintOrderMailInfo {
 
 /** 工单详情页的绝对链接(邮件里的按钮) */
 function buildOrderUrl(locale: PrintOrderLocale, orderNo: string): string {
-  return `${siteConfig.url}/${locale}/dashboard/print-orders/${orderNo}`;
+  return `${siteConfig.url}/${locale}/account/print-orders/${orderNo}`;
 }
 
 /** 按订单语言格式化金额(仓库统一用 CNY) */

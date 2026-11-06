@@ -249,8 +249,8 @@ export function CheckoutPaymentPanel({
             <Link
               href={
                 cartKind === "print"
-                  ? "/dashboard/print-orders"
-                  : "/dashboard/store-orders"
+                  ? "/account/print-orders"
+                  : "/account/orders"
               }
             >
               我的订单

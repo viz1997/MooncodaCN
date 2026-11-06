@@ -720,7 +720,6 @@
       "models": "3D 模型",
       "credits": "积分",
       "orders": "订单管理",
-      "myPrintOrders": "我的打印订单",
       "canvas": "画布",
       "settings": "设置",
       "support": "支持",
@@ -748,9 +747,7 @@
       "billing": "账单管理",
       "notifications": "通知设置",
       "deckDetails": "卡组详情",
-      "ticketDetails": "工单详情",
-      "printOrders": "我的打印订单",
-      "printOrderDetail": "工单详情"
+      "ticketDetails": "工单详情"
     },
     "sidebar": {
       "settings": "设置",

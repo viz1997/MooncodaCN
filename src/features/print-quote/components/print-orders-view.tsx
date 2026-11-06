@@ -1,7 +1,12 @@
 "use client";
 
 /**
- * 「我的打印订单」整页 —— `/dashboard/print-orders`
+ * 「我的打印订单」整页 —— `/account/print-orders`
+ *
+ * 2026-11-06 从 `/dashboard/print-orders` 搬过来(工作室要求把买家的东西
+ * 放电商首页头像下拉,不放控制台),组件也跟着从 `PrintOrdersDashboardView`
+ * 改名为 `PrintOrdersView` —— 它现在挂在商城那套头底下,名字里带
+ * "Dashboard" 会让人以为它还归控制台。
  *
  * ## 为什么列表页要有轮询
  *
@@ -19,7 +24,7 @@ import { PrintOrderList } from "@/features/print-quote/components/print-order-li
 import { usePrintOrderPolling } from "@/features/print-quote/hooks/use-print-order-polling";
 import type { UserPrintOrder } from "@/features/print-quote/lib/quote-types";
 
-export function PrintOrdersDashboardView({
+export function PrintOrdersView({
   initialOrders,
 }: {
   initialOrders: UserPrintOrder[];

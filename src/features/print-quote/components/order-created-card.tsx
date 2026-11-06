@@ -126,13 +126,13 @@ export function OrderCreatedCard({ order }: { order: PrintOrderCreated }) {
       </p>
       <div className="mt-2 flex flex-wrap items-center gap-3">
         <Link
-          href="/dashboard/print-orders"
+          href="/account/print-orders"
           className="text-xs font-medium text-emerald-800 underline underline-offset-4 hover:text-emerald-900"
         >
           {t("order.successLink")}
         </Link>
         <Link
-          href={`/dashboard/print-orders/${order.orderNo}`}
+          href={`/account/print-orders/${order.orderNo}`}
           className="text-xs font-medium text-emerald-800 underline underline-offset-4 hover:text-emerald-900"
         >
           {t("order.viewDetail")}

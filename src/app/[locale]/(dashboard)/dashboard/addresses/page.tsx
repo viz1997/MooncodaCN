@@ -1,25 +1,24 @@
+import { redirect, type routing } from "@/i18n/routing";
+
 /**
- * /dashboard/addresses —— 「收货地址」
+ * `/dashboard/addresses` —— **旧地址**,已搬到 `/account/addresses`
  *
- * 地址簿整个在本仓库(Sellbase 的 `customer.addresses` 是只读的,没有创建
- * 地址的路由)。见 `src/features/address/types.ts` 的文件头。
+ * 2026-11-06:工作室要求把「打印订单 / 购物订单 / 地址管理」从控制台搬到
+ * 电商首页头像下拉里(理由见 `/account/orders/page.tsx` 的文件头)。
+ *
+ * ## 为什么留一个重定向而不是 404
+ *
+ * 老的链接不该断 —— 结算流程里、分享出去的地址都可能还指着这儿。重定向比
+ * 404 多做一件事:把人送到现在唯一正确的那个页面。
  */
-
-import { redirect } from "next/navigation";
-
-import { AddressBook } from "@/features/address/components/address-book";
-import { listUserAddresses } from "@/features/address/queries";
-import { getServerSession } from "@/lib/auth/server";
-
-export const dynamic = "force-dynamic";
-
-export default async function AddressesPage() {
-  const session = await getServerSession();
-  if (!session?.user) {
-    redirect("/sign-in?callbackUrl=/dashboard/addresses");
-  }
-
-  const addresses = await listUserAddresses(session.user.id);
-
-  return <AddressBook initialAddresses={addresses} />;
+export default async function LegacyAddressesPage({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}) {
+  const { locale } = await params;
+  redirect({
+    href: "/account/addresses",
+    locale: locale as (typeof routing.locales)[number],
+  });
 }

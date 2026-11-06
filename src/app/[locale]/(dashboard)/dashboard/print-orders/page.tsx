@@ -1,36 +1,26 @@
-import { redirect } from "next/navigation";
-
-import { PrintOrdersDashboardView } from "@/features/print-quote/components/print-orders-dashboard-view";
-import {
-  listUserPrintOrders,
-  toUserPrintOrder,
-} from "@/features/print-quote/lib/order-store";
-import { getServerSession } from "@/lib/auth/server";
-
-export const dynamic = "force-dynamic";
+import { redirect, type routing } from "@/i18n/routing";
 
 /**
- * /dashboard/print-orders —— 「我的打印订单」
+ * `/dashboard/print-orders` —— **旧地址**,已搬到 `/account/print-orders`
  *
- * 2026-11-01:打印服务改成登录后下单,订单挂在账号名下,所以这里按
- * `user_id` 查 —— 用户只看得到自己下的单。
+ * 2026-11-06:工作室要求把「打印订单 / 购物订单 / 地址管理」从控制台搬到
+ * 电商首页头像下拉里(理由见 `/account/orders/page.tsx` 的文件头)。
  *
- * 鉴权由 `(dashboard)/layout.tsx` 兜住(那边是真的查库校验 session),
- * 这里再判一次是为了把类型收窄 —— 万一哪天这个页面被挪出 dashboard
- * 布局,也不会变成一个谁都能看的页面。
+ * ## 为什么留一个重定向而不是 404
  *
- * 首屏数据由这里查好传下去(不用等客户端那一趟往返);列表页接上轮询,
- * 工作室改了状态用户不用刷新页面就能看到。
+ * 老的链接不该断 —— **工单确认邮件里就带着这个地址**
+ * (`features/print-quote/lib/notifications.tsx` 拼的),还有用户收藏的
+ * 书签、分享出去的地址。重定向比 404 多做一件事:把人送到现在唯一正确的
+ * 那个页面。
  */
-export default async function PrintOrdersPage() {
-  const session = await getServerSession();
-  if (!session?.user) {
-    redirect("/sign-in?callbackUrl=/dashboard/print-orders");
-  }
-
-  const rows = await listUserPrintOrders(session.user.id, 50);
-
-  return (
-    <PrintOrdersDashboardView initialOrders={rows.map(toUserPrintOrder)} />
-  );
+export default async function LegacyPrintOrdersPage({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}) {
+  const { locale } = await params;
+  redirect({
+    href: "/account/print-orders",
+    locale: locale as (typeof routing.locales)[number],
+  });
 }

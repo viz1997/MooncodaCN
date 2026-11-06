@@ -14,7 +14,6 @@ import {
   ListOrdered,
   type LucideIcon,
   Magnet,
-  MapPin,
   Package,
   Scale,
   ScrollText,
@@ -260,27 +259,12 @@ export const dashboardNav: NavGroup[] = [
         href: "/dashboard/prompt-orders",
         icon: ListOrdered,
       },
-      // 2026-11-01：打印服务的工单（print_order 表）—— 跟上面的「订单管理」
-      // （promptOrder 表，gpt-image 生图订单）是两套独立数据
-      {
-        title: "My Print Orders",
-        href: "/dashboard/print-orders",
-        icon: Scale,
-      },
-      // 2026-11-04：成品商城的订单（storefront_order 表）—— 跟上面的打印工单
-      // 是两套独立数据。这一单走 Sellbase 收银台收款。
-      {
-        title: "My Orders",
-        href: "/dashboard/store-orders",
-        icon: ShoppingBag,
-      },
-      // 2026-11-04：收货地址簿。地址建在本仓库（Sellbase 的 customer.addresses
-      // 是只读的，没有创建地址的路由），下单时选一个、快照进订单。
-      {
-        title: "Addresses",
-        href: "/dashboard/addresses",
-        icon: MapPin,
-      },
+      // 2026-11-06：「我的打印订单 / 我的商城订单 / 收货地址」三样从控制台
+      // 侧边栏撤掉了 —— 工作室的原话:「打印订单、购物订单、地址管理不放在
+      // 控制台里面,而是电商首页的用户头像那里」。这三样是**买家的东西**,
+      // 摆在控制台里等于让买家先搞懂「控制台」是什么才找得到自己的单。
+      // 入口现在在电商首页右上角头像下拉里,指向 `/account/*`。
+      // （旧的 `/dashboard/print-orders` 等地址留了重定向,见那四个 page.tsx。）
       {
         title: "Canvas",
         href: "/dashboard/canvas",

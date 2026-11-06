@@ -23,8 +23,13 @@
  *
  * 现在按 `useSession()` 分三态:
  *  - pending → 灰色占位(SSR 和客户端首帧一致,不闪)
- *  - 已登录 → 头像 + 下拉(邮箱 / 我的订单 / 控制台 / 退出登录)
+ *  - 已登录 → 头像 + 下拉(邮箱 / 商城订单 / 打印订单 / 收货地址 / 控制台 /
+ *    退出登录)
  *  - 未登录 → 「登录」+ 移动端菜单里的「登录 / 注册」
+ *
+ * 2026-11-06:下拉里多出「商城订单 / 打印订单 / 收货地址」三项 —— 工作室
+ * 要求「打印订单、购物订单、地址管理不放在控制台里面,而是电商首页的用户
+ * 头像那里」。这三项指向 `/account/*`,原来的 `/dashboard/*` 地址留了重定向。
  *
  * 头像用 `useSession()` 而不是服务端 cookie 读的 —— 服务端读到的会话在
  * 客户端首帧还不一定一致,那样会 hydration mismatch。`useSession()` 首次
@@ -57,6 +62,7 @@ import {
   LayoutDashboard,
   Loader2,
   LogOut,
+  MapPin,
   Menu,
   Package,
   Search,
@@ -294,12 +300,28 @@ export function WjpStoreHeader() {
                         {user.name || user.email}
                       </p>
                       <Link
-                        href="/dashboard/store-orders"
+                        href="/account/orders"
+                        onClick={() => setMobileOpen(false)}
+                        className="flex items-center gap-2.5 px-4 py-3 text-sm font-medium hover:bg-muted transition-colors rounded-md"
+                      >
+                        <ShoppingBag className="size-4" />
+                        {isZh ? "商城订单" : "Store orders"}
+                      </Link>
+                      <Link
+                        href="/account/print-orders"
                         onClick={() => setMobileOpen(false)}
                         className="flex items-center gap-2.5 px-4 py-3 text-sm font-medium hover:bg-muted transition-colors rounded-md"
                       >
                         <Package className="size-4" />
-                        {isZh ? "我的订单" : "My orders"}
+                        {isZh ? "打印订单" : "Print orders"}
+                      </Link>
+                      <Link
+                        href="/account/addresses"
+                        onClick={() => setMobileOpen(false)}
+                        className="flex items-center gap-2.5 px-4 py-3 text-sm font-medium hover:bg-muted transition-colors rounded-md"
+                      >
+                        <MapPin className="size-4" />
+                        {isZh ? "收货地址" : "Addresses"}
                       </Link>
                       <Link
                         href="/dashboard"
@@ -503,12 +525,31 @@ export function WjpStoreHeader() {
                     </span>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
+                  {/* 买家的三样东西 —— 2026-11-06 从控制台搬到这里。
+                      工作室的原话:「打印订单、购物订单、地址管理不放在控制台
+                      里面,而是电商首页的用户头像那里。」这三个入口指向
+                      `/account/*`,不在 `/dashboard` 底下了。
+                      「控制台」还留着 —— 那是工具用户的地方(积分 / 画布 / 生图),
+                      跟买家那三样是两回事。 */}
                   <DropdownMenuItem asChild>
-                    <Link href="/dashboard/store-orders">
-                      <Package className="size-4" />
-                      {isZh ? "我的订单" : "My orders"}
+                    <Link href="/account/orders">
+                      <ShoppingBag className="size-4" />
+                      {isZh ? "商城订单" : "Store orders"}
                     </Link>
                   </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/account/print-orders">
+                      <Package className="size-4" />
+                      {isZh ? "打印订单" : "Print orders"}
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/account/addresses">
+                      <MapPin className="size-4" />
+                      {isZh ? "收货地址" : "Addresses"}
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem asChild>
                     <Link href="/dashboard">
                       <LayoutDashboard className="size-4" />

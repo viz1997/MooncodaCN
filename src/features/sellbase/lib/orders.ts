@@ -219,7 +219,7 @@ export async function createSellbasePaymentLink(
  * 默认落在「我的打印订单」页 —— 用户从哪儿付完钱就回哪儿。
  */
 export function buildPrintOrderSuccessUrl(orderNo: string): string {
-  return `${getSiteUrl()}/dashboard/print-orders/${orderNo}?paid=1`;
+  return `${getSiteUrl()}/account/print-orders/${orderNo}?paid=1`;
 }
 
 /**

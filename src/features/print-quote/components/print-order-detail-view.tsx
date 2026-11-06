@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * 工单详情页 —— `/dashboard/print-orders/[orderNo]`
+ * 工单详情页 —— `/account/print-orders/[orderNo]`
  *
  * ## 这一页要回答四个问题
  *
@@ -75,7 +75,7 @@ export function PrintOrderDetailView({
   return (
     <div className="space-y-6">
       <Link
-        href="/dashboard/print-orders"
+        href="/account/print-orders"
         className="inline-flex items-center gap-1.5 text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
       >
         <ArrowLeft className="size-3.5" />

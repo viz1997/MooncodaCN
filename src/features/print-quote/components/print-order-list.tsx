@@ -3,11 +3,11 @@
 /**
  * 「我的打印订单」—— 列表展示组件
  *
- * 用在 dashboard `/dashboard/print-orders` 整页(经 `PrintOrdersDashboardView`)。
+ * 用在 `/account/print-orders` 整页(经 `PrintOrdersView`)。
  *
  * 2026-11-06 报价台(`/quote`)整页删掉之前,这里还挂在报价台底部 ——
- * 报价台没了,这个组件就只剩 dashboard 那一个用方了(所以「查看全部」那个
- * 链接也一并删掉:dashboard 页自己就是全部)。
+ * 报价台没了,这个组件就只剩订单列表页那一个用方了(所以「查看全部」那个
+ * 链接也一并删掉:那个页自己就是全部)。
  *
  * ## 只读,没有「移除」
  *
@@ -17,9 +17,10 @@
  *
  * ## 配色走语义 token
  *
- * dashboard 在 shadcn 主题里 —— `--card` / `--border` / `--muted-foreground`
- * 都是同一套暖灰,用语义 token 一份代码两处都对。状态 chip 是例外:它有自己
- * 的语义色,统一放在 `lib/status-ui.ts`,用户侧和后台共用一份。
+ * 商城那套主题里 —— `--card` / `--border` / `--muted-foreground` 都是同一套
+ * 变量,用语义 token 一份代码两处都对(控制台 / 商城各有一套色板,靠变量
+ * 切换,组件本身不用改)。状态 chip 是例外:它有自己的语义色,统一放在
+ * `lib/status-ui.ts`,用户侧和后台共用一份。
  */
 
 import { PackageSearch } from "lucide-react";
@@ -78,7 +79,7 @@ export function PrintOrderList({
             className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3 first:pt-0 last:pb-0"
           >
             <Link
-              href={`/dashboard/print-orders/${order.orderNo}`}
+              href={`/account/print-orders/${order.orderNo}`}
               className="font-mono text-xs font-medium text-foreground underline-offset-4 hover:underline"
             >
               {order.orderNo}
@@ -124,7 +125,7 @@ export function PrintOrderList({
             </span>
 
             <Link
-              href={`/dashboard/print-orders/${order.orderNo}`}
+              href={`/account/print-orders/${order.orderNo}`}
               className="ml-auto text-[11px] text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
             >
               {t("list.viewDetail")}

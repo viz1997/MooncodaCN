@@ -1,54 +1,29 @@
+import { redirect, type routing } from "@/i18n/routing";
+
 /**
- * /dashboard/store-orders —— 「我的商城订单」
+ * `/dashboard/store-orders` —— **旧地址**,已搬到 `/account/orders`
  *
- * 商城订单挂在账号名下(`storefront_order.user_id`),所以这里按 `user_id`
- * 查 —— 用户只看得到自己下的单。
+ * 2026-11-06:工作室要求把「打印订单 / 购物订单 / 地址管理」从控制台搬到
+ * 电商首页头像下拉里(理由见 `/account/orders/page.tsx` 的文件头)。
  *
- * 鉴权由 `(dashboard)/layout.tsx` 兜住(那边是真的查库校验 session),这里
- * 再判一次是为了把类型收窄 —— 万一哪天这个页面被挪出 dashboard 布局,也
- * 不会变成一个谁都能看的页面。
+ * ## 为什么留一个重定向而不是 404
+ *
+ * 老的链接不该断 —— **工单确认邮件里就带着这个地址**
+ * (`features/print-quote/lib/notifications.tsx` 拼的),还有用户收藏的
+ * 书签、分享出去的地址。重定向比 404 多做一件事:把人送到现在唯一正确的
+ * 那个页面。
+ *
+ * 写法跟 `/quote` 那个已下线的报价台一样(`@/i18n/routing` 的 `redirect`
+ * 自带 locale 前缀,不用手拼 `/zh`)。
  */
-
-import { redirect } from "next/navigation";
-
-import {
-  StoreOrderList,
-  type StoreOrderListItem,
-} from "@/features/storefront/components/store-order-list";
-import { listUserStorefrontOrders } from "@/features/storefront/lib/orders";
-import { getServerSession } from "@/lib/auth/server";
-
-export const dynamic = "force-dynamic";
-
-export default async function StoreOrdersPage() {
-  const session = await getServerSession();
-  if (!session?.user) {
-    redirect("/sign-in?callbackUrl=/dashboard/store-orders");
-  }
-
-  const rows = await listUserStorefrontOrders(session.user.id, 50);
-
-  const orders: StoreOrderListItem[] = rows.map(({ order, items }) => ({
-    orderNo: order.orderNo,
-    status: order.status,
-    paymentStatus: order.paymentStatus,
-    totalCents: order.totalCents,
-    createdAt: order.createdAt.toISOString(),
-    itemCount: items.reduce((sum, item) => sum + item.quantity, 0),
-    titles: items.slice(0, 2).map((item) => item.productTitle),
-    thumbnail: items[0]?.productThumbnail ?? null,
-    paymentChannel: order.paymentChannel,
-  }));
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="font-serif text-2xl">我的订单</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          成品商城的订单。付款完成才开始制作,进度会在这里更新。
-        </p>
-      </div>
-      <StoreOrderList orders={orders} />
-    </div>
-  );
+export default async function LegacyStoreOrdersPage({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}) {
+  const { locale } = await params;
+  redirect({
+    href: "/account/orders",
+    locale: locale as (typeof routing.locales)[number],
+  });
 }
