@@ -3,70 +3,99 @@
 /**
  * 克重工具 —— `/tools/weight`
  *
- * ## 它跟 `/quote` 的关系
+ * ## 它是打印服务的**第一步**
  *
- * 两个页面用的是**同一个**克重计算器(`PricingCalculator`),分工不同:
+ * 工作室的流程(2026-11-06):
  *
- * | 页面 | 是什么 | 报价之后 |
+ *   /tools/weight(量重量的工具,公开)→ 点「加入打印单」→ /print-order(打印单)
+ *
+ * 报价台(`/quote`)2026-11-06 整页删掉 —— 它跟工具页用的是**同一个**克重
+ * 计算器,重复了一份「报价 + 交期 + 加进打印单」的下单控件。工作室要的是
+ * 「工具里量完直接加进打印单,金额在打印单上确认」。
+ *
+ * | 页面 | 是什么 | 出口 |
  * |---|---|---|
- * | `/tools/weight` | **工具**:只算不存、不显示价格、模型不上传 | 给一个「报价下单」入口 → 去 `/quote` |
- * | `/quote` | **服务**:能报价、能下单 | 选交期 → 填信息 → 付款 |
+ * | `/tools/weight` | **工具**:只算不存、不显示价格 | 「加入打印单」→ `/print-order` |
+ * | `/print-order` | **下单**:打印列表 + 下单金额 + 收货地址 | 一次付款 |
  *
- * 价格、交期、下单**只在报价台**那一条路上。工具页不调服务端报价接口,
+ * 价格、交期、下单**只在打印单**那一条路上。工具页不调服务端报价接口,
  * 量重量的过程里一个网络请求都没有(除材料参数的密码校验)。
  *
- * ## 2026-11-06:工具页撤下报价条,改成报价下单入口
+ * ## 两条边界照旧
  *
- * 2026-11-05 曾在工具页挂过「报价 + 交期 + 加入购物车」那一整套 —— 跟
- * `/quote` 平行的一份,金额对得上但**多了一套要维护的下单控件**。
- * 工作室的要求是:工具里不该直接放这些,给一个报价下单入口就够。
- *
- * 撤掉之后:
- * - 工具页不再显示价格 → 计算器跑**工具模式**(`quoteMode` 不开),几何数据
- *   不抛给服务端,也就没有报价请求
- * - 模型不上传 → 上传是**下单动作**的一部分,不是量重量的副产品
- * - 量好的模型**接力**给报价台(`lib/model-handoff.ts`),用户不用重选文件
+ * - **工具页不显示价格** —— 价格是服务端算的,工具页只出几何
+ * - **模型不上传** —— 上传是**加购动作**的一部分,不是量重量的副产品
  *
  * ## 为什么在商城路由组里
  *
  * `/tools/weight` 在 `(marketing-atelier)` 下 —— 那一组挂着 `<CartDrawer />`。
- * 工具页自己不卖东西,但商城里能一键跳过去报价。
+ * 工具页自己不卖东西,但商城里能一键跳过去量。
  */
 
 import { useCallback, useState } from "react";
 
 import { PricingCalculator } from "@/features/pricing/components/pricing-calculator";
 import type { PricingModelPayload } from "@/features/pricing/components/pricing-calculator-types";
-import { PrintServiceQuoteEntry } from "@/features/print-quote/components/print-service-quote-entry";
+import { PrintServiceAddToOrder } from "@/features/print-quote/components/print-service-add-to-order";
+import type { ClientPrintConfig } from "@/features/print-quote/lib/pricing-settings";
+import type { PrintQuoteInput } from "@/features/print-quote/lib/quote-types";
 
 export function PrintServiceWeightTool({
   isLoggedIn,
+  signInUrl,
+  clientConfig,
 }: {
-  /** 登录了吗 —— 没登录去报价台会先被弹去登录页,模型接力会丢 */
+  /** 登录了吗 —— 没登录不能加打印单(工单要挂在账号名下) */
   isLoggedIn: boolean;
+  /** 登录链接(带 callbackUrl,登录完回到工具页) */
+  signInUrl: string;
+  /**
+   * 生效中的打印定价设置(密度 / 支撑几何)
+   *
+   * **访客改不了** —— 由页面的 RSC 从后台 `/admin/print-pricing` 读出来
+   * (兜底 `PRINT_*` 环境变量)传下来。工具页只显示克重,不显示价格。
+   */
+  clientConfig: ClientPrintConfig;
 }) {
   /**
-   * 当前量着的模型 —— 接力给报价台用
+   * 当前量着的模型 —— 加进打印单时要按它打包上传
    *
-   * 计算器在**工具模式**下也会抛这个(模型不是报价专属的东西)。
+   * 计算器在两种场合都会抛这个:模型换了几何变了(缩放改了)都会更新。
    */
-  const [modelPayload, setModelPayload] = useState<PricingModelPayload | null>(
-    null
-  );
+  const [model, setModel] = useState<PricingModelPayload | null>(null);
+
+  /**
+   * 当前几何 + 支撑 —— 服务端按这组数重算报价
+   *
+   * 计算器本地算出来的(体积 / 表面积 / 尺寸 / 支撑克重),**不是价格**。
+   * 价格一律服务端算(见 `print-quote/lib/quote-server.ts`)。
+   */
+  const [input, setInput] = useState<PrintQuoteInput | null>(null);
 
   const handleModelChange = useCallback(
     (payload: PricingModelPayload | null) => {
-      setModelPayload(payload);
+      setModel(payload);
     },
     []
   );
 
+  const handleQuoteInput = useCallback((next: PrintQuoteInput | null) => {
+    setInput(next);
+  }, []);
+
   return (
     <PricingCalculator
       showChrome={false}
+      clientConfig={clientConfig}
       onModelChange={handleModelChange}
+      onQuoteInput={handleQuoteInput}
       quoteSlot={
-        <PrintServiceQuoteEntry model={modelPayload} isLoggedIn={isLoggedIn} />
+        <PrintServiceAddToOrder
+          model={model}
+          input={input}
+          isLoggedIn={isLoggedIn}
+          signInUrl={signInUrl}
+        />
       }
     />
   );

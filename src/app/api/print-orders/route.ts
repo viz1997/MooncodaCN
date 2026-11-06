@@ -45,6 +45,7 @@ import {
   toUserPrintOrder,
 } from "@/features/print-quote/lib/order-store";
 import { createPrintOrderPayment } from "@/features/print-quote/lib/payment";
+import { getPrintPricingSettings } from "@/features/print-quote/lib/pricing-store";
 import {
   computePrintQuote,
   generatePrintOrderNo,
@@ -254,7 +255,10 @@ async function handle(request: NextRequest) {
   }
 
   // 服务端重算报价 —— 客户端传来的总价一律不信
-  const quote = computePrintQuote(input.quote);
+  //
+  // 价从哪儿来:后台 `/admin/print-pricing` 配的值 → `PRINT_*` env → 默认值
+  const settings = await getPrintPricingSettings();
+  const quote = computePrintQuote(settings, input.quote);
   if (!quote) {
     return NextResponse.json(
       {

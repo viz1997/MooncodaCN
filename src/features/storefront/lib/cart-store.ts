@@ -63,6 +63,8 @@ import { PRICE_CURRENCY, PRICE_REGION_ID } from "@/config/currency";
 import { db } from "@/db";
 import { type CartItemRow, type CartRow, cart, cartItem } from "@/db/schema";
 import type { DeliveryTierId } from "@/features/print-quote/lib/delivery-tier";
+import type { PrintPricingSettings } from "@/features/print-quote/lib/pricing-settings";
+import { getPrintPricingSettings } from "@/features/print-quote/lib/pricing-store";
 import { computePrintServiceLinePrice } from "@/features/print-quote/lib/quote-server";
 import type { Cart, CartLineItem, CartLineItemMetadata } from "../types";
 import {
@@ -181,8 +183,14 @@ async function getCurrentUserId(): Promise<string | null> {
  * 整张购物车打不开,但那一行的价得让用户看见(或者让用户自己删掉)。
  *
  * 打印服务行走的是另一套定价(按克重),见 `computePrintServiceLinePrice()`。
+ *
+ * `settings` 是生效中的打印定价设置(后台配的)—— **必须显式传**:
+ * 打印服务行的价整条跟着它走,漏传就是按错价收钱。
  */
-function repriceLineItem(row: CartItemRow): CartLineItem {
+function repriceLineItem(
+  row: CartItemRow,
+  settings: PrintPricingSettings
+): CartLineItem {
   let metadata = row.metadata as unknown as CartLineItemMetadata;
 
   let unitPriceCents = row.unitPriceCents;
@@ -192,14 +200,16 @@ function repriceLineItem(row: CartItemRow): CartLineItem {
   if (printSpec) {
     // 打印服务行:按克重计价,不查目录
     const priced = computePrintServiceLinePrice(
+      settings,
       printServiceSpecToQuoteInput(printSpec)
     );
     if (priced) {
       unitPriceCents = priced.unitPriceCents;
       discountedUnitPriceCents = priced.discountedUnitPriceCents;
-      // 耗材克重 / 交期加价 / 各档比例 由**服务端**回填 —— 客户端没有材料
-      // 密度,也不认一份加价比例(比例可以用环境变量调)。
-      // 都只影响展示(购物车里显示「XX g」、打印单上摆出三档的加价),不参与定价。
+      // 耗材克重 / 交期加价 / 各档比例 / 支撑分段 由**服务端**回填 —— 客户端
+      // 没有材料密度,也不认一份加价比例(比例可以在后台调)。
+      // 都只影响展示(购物车里显示「XX g」、打印单上摆出三档的加价、支撑
+      // 加价按哪一段收),不参与定价。
       metadata = {
         ...metadata,
         printSpec: {
@@ -207,6 +217,8 @@ function repriceLineItem(row: CartItemRow): CartLineItem {
           materialWeightG: priced.quote.materialWeightG,
           deliveryFeeCents: priced.quote.deliveryFeeCents,
           deliveryRates: priced.quote.deliveryRates,
+          supportFeeCents: priced.quote.supportFeeCents,
+          supportFeeBands: priced.quote.supportFeeBands,
         },
       };
     }
@@ -253,7 +265,11 @@ function repriceLineItem(row: CartItemRow): CartLineItem {
 }
 
 /** cart 行 → domain Cart(带 items) */
-function toCart(row: CartRow, items: CartItemRow[]): Cart {
+function toCart(
+  row: CartRow,
+  items: CartItemRow[],
+  settings: PrintPricingSettings
+): Cart {
   const kind = normalizeCartKind(row.kind);
   return {
     id: row.id,
@@ -271,7 +287,7 @@ function toCart(row: CartRow, items: CartItemRow[]): Cart {
           item.metadata as unknown as CartLineItemMetadata
         )
       )
-      .map(repriceLineItem),
+      .map((item) => repriceLineItem(item, settings)),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -341,7 +357,8 @@ export async function getCart(cartId: string): Promise<Cart | null> {
   const row = await loadCartRow(cartId);
   if (!row) return null;
   const items = await loadCartItemRows(cartId);
-  return toCart(row, items);
+  const settings = await getPrintPricingSettings();
+  return toCart(row, items, settings);
 }
 
 /**
@@ -386,6 +403,7 @@ async function getOrCreateCartOfKind(kind: CartKind): Promise<Cart> {
   const cookieName = cartCookieName(kind);
   const store = await cookies();
   const cookieId = store.get(cookieName)?.value ?? null;
+  const settings = await getPrintPricingSettings();
 
   if (cookieId) {
     const row = await loadCartRow(cookieId);
@@ -394,7 +412,7 @@ async function getOrCreateCartOfKind(kind: CartKind): Promise<Cart> {
     //  cookie 撞上商城车的情况只可能出现在手工改过 cookie 的情况下)
     if (row && normalizeCartKind(row.kind) === kind) {
       const items = await loadCartItemRows(cookieId);
-      return toCart(row, items);
+      return toCart(row, items, settings);
     }
     // cookie 指向的 cart 没了(被删了 / 换了库)→ 清掉 cookie 往下走
     store.delete(cookieName);
@@ -416,7 +434,7 @@ async function getOrCreateCartOfKind(kind: CartKind): Promise<Cart> {
         await setCartId(row.id);
       }
       const items = await loadCartItemRows(row.id);
-      return toCart(row, items);
+      return toCart(row, items, settings);
     }
   }
 
@@ -499,6 +517,7 @@ export async function addLineItem(
   if (printSpec) {
     // 打印服务行 —— 按克重计价,不走目录
     const priced = computePrintServiceLinePrice(
+      await getPrintPricingSettings(),
       printServiceSpecToQuoteInput(printSpec)
     );
     if (!priced) {
@@ -601,7 +620,10 @@ export async function addLineItem(
   const fresh = await getCart(cartId);
   if (!fresh) throw new Error(`cart ${cartId} 不存在`);
 
-  return { cart: fresh, lineItem: repriceLineItem(row) };
+  return {
+    cart: fresh,
+    lineItem: repriceLineItem(row, await getPrintPricingSettings()),
+  };
 }
 
 /**
@@ -647,7 +669,10 @@ export async function updateLineItemQuantity(
   const fresh = await getCart(cartId);
   if (!fresh) throw new Error(`cart ${cartId} 不存在`);
 
-  return { cart: fresh, lineItem: repriceLineItem(row) };
+  return {
+    cart: fresh,
+    lineItem: repriceLineItem(row, await getPrintPricingSettings()),
+  };
 }
 
 /**
@@ -673,7 +698,10 @@ export async function removeLineItem(
   const fresh = await getCart(cartId);
   if (!fresh) throw new Error(`cart ${cartId} 不存在`);
 
-  return { cart: fresh, lineItem: repriceLineItem(row) };
+  return {
+    cart: fresh,
+    lineItem: repriceLineItem(row, await getPrintPricingSettings()),
+  };
 }
 
 /**
@@ -731,7 +759,10 @@ export async function updatePrintLineDeliveryTier(
   if (printSpec.deliveryTier === deliveryTier) {
     const fresh = await getCart(cartId);
     if (!fresh) throw new Error(`cart ${cartId} 不存在`);
-    return { cart: fresh, lineItem: repriceLineItem(existingRow) };
+    return {
+      cart: fresh,
+      lineItem: repriceLineItem(existingRow, await getPrintPricingSettings()),
+    };
   }
 
   // 1. 按新档位加一行(价格服务端重算 —— 加价是按小计的比例收的)

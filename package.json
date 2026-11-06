@@ -21,6 +21,7 @@
     "migrate:apply-agent-workbench": "tsx scripts/apply-agent-workbench-migration.ts",
     "migrate:apply-admin-prompt-order-indexes": "tsx scripts/apply-admin-prompt-order-indexes.ts",
     "migrate:apply-print-order-delivery-tier": "tsx scripts/apply-print-order-delivery-tier-schema.ts",
+    "migrate:apply-print-pricing": "tsx scripts/apply-print-pricing-schema.ts",
     "migrate:apply-product-catalog": "tsx scripts/apply-product-catalog-schema.ts",
     "migrate:apply-sellbase-payment": "tsx scripts/apply-sellbase-payment-schema.ts",
     "migrate:apply-storefront-cart": "tsx scripts/apply-storefront-cart-schema.ts",

@@ -20,7 +20,7 @@
  *
  * 打印单**没有运费** —— 打印服务的价就是报价本身(见
  * `print-quote/lib/payment.ts`:工单的支付金额恒等于 `total_price_cents`)。
- * 报价台显示多少、工单上写多少、这里显示多少、实际收多少,是同一个数。
+ * 服务端重算出来多少、工单上写多少、这里显示多少、实际收多少,是同一个数。
  */
 
 "use client";
@@ -188,12 +188,12 @@ export interface UsePrintCartResult {
 /**
  * 打印单 hook
  *
- * `enabled: false` —— **不自动拉打印单**。报价台用这个模式:打开报价台不该
- * 顺手建一张空打印单(每个访客一行 DB + 一个 cookie)。等用户真的点了「加入
- * 打印单」,`addPrintLine` 自己去要那张车(见下面的 `ensurePrintCart()`)。
+ * `enabled: false` —— **不自动拉打印单**。克重工具用这个模式:打开工具页
+ * 不该顺手建一张空打印单(每个访客一行 DB + 一个 cookie)。等用户真的点了
+ * 「加入打印单」,`addPrintLine` 自己去要那张车(见下面的 `ensurePrintCart()`)。
  */
 export function usePrintCart(options?: {
-  /** false = 不自动拉(报价台用) */
+  /** false = 不自动拉(克重工具用) */
   enabled?: boolean;
 }): UsePrintCartResult {
   const queryClient = useQueryClient();
@@ -251,7 +251,7 @@ export function usePrintCart(options?: {
    * 下单金额 —— 打印单**没有运费**
    *
    * 每行的单价就是报价(按克重算出来的那个数,含交期加价)。Σ 起来就是
-   * 用户要付的数 —— 跟报价台看到的、工单上写的、收款通道收的,是同一个数。
+   * 用户要付的数 —— 跟打印单上看到的、工单上写的、收款通道收的,是同一个数。
    */
   const totalCents = useMemo(
     () =>

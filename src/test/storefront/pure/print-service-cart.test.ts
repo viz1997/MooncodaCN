@@ -14,6 +14,8 @@
  *    丢了,工作室只收到一份。
  * 3. **交期档位要进 hash** —— 加急和不加急是两份额报价(加价 37% / 10%)。
  *    合成一行的话,用户看到的「加急」会被后面合并进来的标准档行覆盖掉。
+ * 4. **工具页传出来的几何不能被动过** —— 服务端按 `printSpec` 重算报价,
+ *    几何一旦被加工过,用户看到的尺寸跟工单上的价就对不上。
  *
  * 纯计算:不碰 DB、不碰网络。跑在 unit project 里。
  */
@@ -23,6 +25,7 @@ import { describe, expect, it } from "vitest";
 import { computeSpecHash } from "@/features/storefront/lib/cart-spec";
 import {
   buildPrintServiceMetadata,
+  buildPrintServiceSpecFromGeometry,
   getPrintServiceSpec,
   isPrintServiceMetadata,
   PRINT_SERVICE_PRODUCT_ID,
@@ -161,6 +164,69 @@ describe("printServiceSpecHashParts", () => {
       modelUrl: "https://cdn.example/print-orders/abc123/cat.zip",
     }).join("|");
     expect(otherDomain).toBe(base);
+  });
+});
+
+describe("buildPrintServiceSpecFromGeometry(工具页 → 打印单)", () => {
+  const UPLOADED = {
+    fileName: "cat.zip",
+    objectKey: "print-orders/abc123/cat.zip",
+    url: "https://r2.example/print-orders/abc123/cat.zip",
+    sizeBytes: 1024,
+  };
+
+  const GEOMETRY = {
+    volumeCM3: 12.5,
+    surfaceAreaCM2: 48.2,
+    dims: [40, 30, 20] as [number, number, number],
+    supportWeightG: 3.1,
+    selfSupportRatio: 0.82,
+  };
+
+  it("几何原样搬过去 —— 服务端按同一组数重算报价", () => {
+    const spec = buildPrintServiceSpecFromGeometry(GEOMETRY, UPLOADED);
+    expect(spec.volumeCM3).toBe(12.5);
+    expect(spec.surfaceAreaCM2).toBe(48.2);
+    expect(spec.dims).toEqual([40, 30, 20]);
+    expect(spec.supportWeightG).toBe(3.1);
+    expect(spec.selfSupportRatio).toBe(0.82);
+  });
+
+  it("没跑摆盘的两个数是 null —— 不是 0(0 会被当成「没有支撑」)", () => {
+    const spec = buildPrintServiceSpecFromGeometry(
+      { ...GEOMETRY, supportWeightG: null, selfSupportRatio: null },
+      UPLOADED
+    );
+    expect(spec.supportWeightG).toBeNull();
+    expect(spec.selfSupportRatio).toBeNull();
+  });
+
+  it("交期一律标准档 —— 工具页不选交期,用户在打印单上改", () => {
+    const spec = buildPrintServiceSpecFromGeometry(
+      { ...GEOMETRY, deliveryTier: "urgent" },
+      UPLOADED
+    );
+    expect(spec.deliveryTier).toBe("standard");
+  });
+
+  it("模型文件四个字段原样带过去 —— 归属校验靠对象键", () => {
+    const spec = buildPrintServiceSpecFromGeometry(GEOMETRY, UPLOADED);
+    expect(spec.modelFileName).toBe("cat.zip");
+    expect(spec.modelObjectKey).toBe("print-orders/abc123/cat.zip");
+    expect(spec.modelUrl).toBe(
+      "https://r2.example/print-orders/abc123/cat.zip"
+    );
+    expect(spec.modelSizeBytes).toBe(1024);
+  });
+
+  it("往返一圈几何不变 —— 打印单上的报价跟工具页量的是同一组数", () => {
+    const spec = buildPrintServiceSpecFromGeometry(GEOMETRY, UPLOADED);
+    const back = printServiceSpecToQuoteInput(spec);
+    expect(back.volumeCM3).toBe(GEOMETRY.volumeCM3);
+    expect(back.surfaceAreaCM2).toBe(GEOMETRY.surfaceAreaCM2);
+    expect(back.dims).toEqual(GEOMETRY.dims);
+    expect(back.supportWeightG).toBe(GEOMETRY.supportWeightG);
+    expect(back.selfSupportRatio).toBe(GEOMETRY.selfSupportRatio);
   });
 });
 

@@ -30,7 +30,6 @@ export function PrintOrdersDashboardView({
     <div className="space-y-6">
       <PrintOrderList
         orders={orders}
-        showAllLink={false}
         loading={loading && orders.length === 0}
       />
     </div>

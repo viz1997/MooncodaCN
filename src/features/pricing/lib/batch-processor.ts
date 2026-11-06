@@ -22,6 +22,7 @@
 
 import type { OptimalAngle, SupportParams } from "./angle-optimizer";
 import { AngleOptimizerClient } from "./angle-optimizer-client";
+import { detectModelUnitScale } from "./model-units";
 import { parseObjInWorker } from "./obj-worker-client";
 import {
   calculatePrice,
@@ -98,6 +99,19 @@ export type BatchResult = {
 export type BatchOptions = {
   concurrency?: number;
   pricingConfig: PricingConfig;
+  /**
+   * 托底高度 (mm) —— 平台面在模型最低点下方多远
+   *
+   * 省略 = 用 `SUPPORT_LIFT_MM`(5mm)。后台(`/admin/print-pricing`)配的值
+   * 从这里进来 —— 批量模式跟单件模式必须同一口径。
+   */
+  supportLiftMm?: number | undefined;
+  /**
+   * 底板留边 (mm) —— 底板比模型轮廓四周各留多宽
+   *
+   * 省略 = 用 `SUPPORT_BASE_MARGIN_MM`(5mm)。同上。
+   */
+  supportBaseMarginMm?: number | undefined;
   solidRatio: number;
   repairEnabled: boolean;
   repairPrice: number;
@@ -325,14 +339,34 @@ export async function processBatch(
       // ---- 3. 支撑克重 + 智能摆盘 ---------------------------------------
       // 焊接 + 支撑搜索都跑在 Worker 里 —— 批量跑几十个模型时主线程不会被
       // 卡死,页面照样能点能取消。
+
+      /**
+       * 单位判定 —— 坐标不是毫米的文件(AI 生成 / Blender 默认导出)按最大边
+       * 100mm 归一化
+       *
+       * 跟单模型页同一条规则(`lib/model-units.ts`)。批量模式**没有尺寸调节**,
+       * 用户没法自己纠 —— 不归一化的话,托底 5mm 相对模型太大,支撑比例是
+       * 几万倍(实测真实模型 56,868%)。
+       */
+      const unitScale = detectModelUnitScale(
+        model.parseResult.boundingBox.size
+      ).scale;
+
       // 模型克重,用于"本体支撑比例"= 支撑克重 / 模型克重
       const modelWeightG =
-        model.parseResult.volumeCM3 * pricingConfig.materialDensity;
+        model.parseResult.volumeCM3 *
+        unitScale *
+        unitScale *
+        unitScale *
+        pricingConfig.materialDensity;
       // 支撑跟模型**不是**一种材料(水溶性支撑)—— 支撑克重按支撑密度算,
       // 模型密度只用来算耗材克重
       const supportParams: SupportParams = {
         modelDensity: pricingConfig.materialDensity,
         supportDensity: pricingConfig.supportDensity,
+        // 几何参数跟随后台 —— 批量模式跟单件模式必须同一口径
+        liftMm: options.supportLiftMm,
+        baseMarginMm: options.supportBaseMarginMm,
       };
       if (positions) {
         const client = new AngleOptimizerClient();
@@ -353,7 +387,7 @@ export async function processBatch(
             optimalAngle = await client.search(
               item.id,
               {
-                scales: [1, 1, 1],
+                scales: [unitScale, unitScale, unitScale],
                 maxHeightMM: 50,
                 modelWeightG,
                 params: supportParams,
@@ -374,7 +408,7 @@ export async function processBatch(
             rotX: 0,
             rotY: 0,
             rotZ: 0,
-            scales: [1, 1, 1],
+            scales: [unitScale, unitScale, unitScale],
             params: supportParams,
           });
           supportWeightG =
@@ -399,7 +433,12 @@ export async function processBatch(
         r.boundingBox.size.z,
         r.boundingBox.size.y,
       ];
-      const scaled = scaleGeometry(r.volumeCM3, r.surfaceAreaCM2, origDims, 1);
+      const scaled = scaleGeometry(
+        r.volumeCM3,
+        r.surfaceAreaCM2,
+        origDims,
+        unitScale
+      );
       const input: PricingInput = {
         volumeCM3: scaled.volumeCM3,
         surfaceAreaCM2: scaled.surfaceAreaCM2,

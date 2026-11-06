@@ -24,7 +24,35 @@ import {
   getDeliveryTier,
   normalizeDeliveryTier,
 } from "@/features/print-quote/lib/delivery-tier";
+import type { PrintPricingSettings } from "@/features/print-quote/lib/pricing-settings";
 import { computePrintQuote } from "@/features/print-quote/lib/quote-server";
+
+/**
+ * 一份**手写**的生效设置 —— 不从 env / DB 取
+ *
+ * 报价引擎现在吃 `settings` 入参(2026-11-06):价从哪儿来由调用方决定。
+ * 这个测试只管「交期加价接进报价」,所以固定一份设置最省心 —— 也让这个文件
+ * 保持 DB-free(env 都不用读),留在 Vitest 的 `unit` project 里。
+ */
+const SETTINGS: PrintPricingSettings = {
+  modelMaterialId: null,
+  modelMaterialName: "测试树脂",
+  modelDensity: 1.2,
+  unitPriceCentsPerGram: 450,
+  supportMaterialId: null,
+  supportMaterialName: "测试支撑",
+  supportDensity: 1.28,
+  supportThreshold: 1,
+  supportTier1Ratio: 2,
+  supportTier1PriceCentsPerGram: 50,
+  supportTier2PriceCentsPerGram: 100,
+  supportEnabled: false,
+  varnishFeeCents: 1000,
+  varnishEnabled: true,
+  supportLiftMm: 5,
+  supportBaseMarginMm: 5,
+  deliveryRates: DEFAULT_DELIVERY_RATES,
+};
 
 describe("normalizeDeliveryTier", () => {
   it("认得的三档原样返回", () => {
@@ -125,14 +153,20 @@ describe("computePrintQuote —— 交期加价接进报价", () => {
   };
 
   it("标准档不加价", () => {
-    const quote = computePrintQuote({ ...base, deliveryTier: "standard" });
+    const quote = computePrintQuote(SETTINGS, {
+      ...base,
+      deliveryTier: "standard",
+    });
     expect(quote).not.toBeNull();
     expect(quote?.deliveryFeeCents).toBe(0);
     expect(quote?.deliveryHours).toBe(96);
   });
 
   it("加急档的加价 = round(小计 × 比例)", () => {
-    const quote = computePrintQuote({ ...base, deliveryTier: "express" });
+    const quote = computePrintQuote(SETTINGS, {
+      ...base,
+      deliveryTier: "express",
+    });
     expect(quote).not.toBeNull();
     const subtotal =
       (quote?.weightFeeCents ?? 0) +
@@ -145,15 +179,18 @@ describe("computePrintQuote —— 交期加价接进报价", () => {
   });
 
   it("不传档位 = 标准档(不能因为缺省就多收钱)", () => {
-    const withTier = computePrintQuote({ ...base, deliveryTier: "standard" });
-    const withoutTier = computePrintQuote(base);
+    const withTier = computePrintQuote(SETTINGS, {
+      ...base,
+      deliveryTier: "standard",
+    });
+    const withoutTier = computePrintQuote(SETTINGS, base);
     expect(withoutTier?.deliveryFeeCents).toBe(0);
     expect(withoutTier?.totalPriceCents).toBe(withTier?.totalPriceCents);
   });
 
   it("「明细加起来 = 合计」这条恒等式还成立", () => {
     for (const tier of ["standard", "express", "urgent"] as const) {
-      const quote = computePrintQuote({ ...base, deliveryTier: tier });
+      const quote = computePrintQuote(SETTINGS, { ...base, deliveryTier: tier });
       expect(quote).not.toBeNull();
       expect(quote?.totalPriceCents).toBe(
         (quote?.weightFeeCents ?? 0) +
@@ -165,8 +202,14 @@ describe("computePrintQuote —— 交期加价接进报价", () => {
   });
 
   it("加价只跟档位有关,跟几何无关 —— 同一个模型换档位,小计不变", () => {
-    const standard = computePrintQuote({ ...base, deliveryTier: "standard" });
-    const urgent = computePrintQuote({ ...base, deliveryTier: "urgent" });
+    const standard = computePrintQuote(SETTINGS, {
+      ...base,
+      deliveryTier: "standard",
+    });
+    const urgent = computePrintQuote(SETTINGS, {
+      ...base,
+      deliveryTier: "urgent",
+    });
     const subtotalOf = (q: typeof standard) =>
       (q?.weightFeeCents ?? 0) +
       (q?.varnishFeeCents ?? 0) +

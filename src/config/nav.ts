@@ -21,6 +21,7 @@ import {
   Settings,
   Shield,
   ShoppingBag,
+  SlidersHorizontal,
   Sparkles,
   Ticket,
   Users,
@@ -151,8 +152,11 @@ export const mainNav: NavItem[] = [
   { title: "Image Gen", href: "/image-gen" },
   { title: "Docs", href: "/docs" },
   { title: "Pricing", href: "/#pricing" },
-  // 打印服务报价 —— 2026-11-01 新增。官网侧(不在商城里)的「上传模型 → 报价 → 下单」入口
-  { title: "Quote", href: "/quote" },
+  // 打印服务 —— 2026-11-01 新增,2026-11-06 改指打印单。
+  // 报价台(`/quote`)整页删掉后,打印服务唯一的对外页面就是打印单:
+  // 打印列表 + 下单金额 + 收货地址。空打印单那一页会把人引到克重工具
+  // (`/tools/weight`),量完直接「加入打印单」就回到这里。
+  { title: "Print", href: "/print-order" },
   // 工具中心 —— 公开工具页(克重计算器 / 模型检查),浏览器本地算,不需登录
   // 2026-11-01：导航只留一个「工具」位,工具清单在 /tools 里列
   { title: "Tools", href: "/tools" },
@@ -167,8 +171,8 @@ export const footerNav = {
   product: [
     { title: "Pricing", href: "/#pricing" },
     { title: "Tools", href: "/tools" },
-    // 打印服务报价 —— 2026-11-01 新增
-    { title: "Quote", href: "/quote" },
+    // 打印服务 —— 2026-11-01 新增,2026-11-06 改指打印单(报价台已删)
+    { title: "Print", href: "/print-order" },
     { title: "Changelog", href: "/blog" },
     {
       title: "Contact Us",
@@ -186,7 +190,7 @@ export const footerNav = {
   /**
    * 打印服务 (Print Service) —— 2026-11-05 新增
    *
-   * 打印工单(`/quote`)的须知 / 规范 / 售后。正文在 `src/content/legal/`
+   * 打印工单(`/print-order`)的须知 / 规范 / 售后。正文在 `src/content/legal/`
    * 下的 MDX 里,标题走 titleKey 取 messages 的中文文案。
    */
   service: [
@@ -355,6 +359,14 @@ export const adminNav: NavGroup[] = [
         title: "打印订单",
         href: "/admin/print-orders",
         icon: Scale,
+      },
+      // 2026-11-06：打印定价后台 —— 克重的计算和计价、材料、计算逻辑
+      // 都在这一页配(材料库 / 计价基础 / 支撑加价的分段规则 / 交期比例 /
+      // 支撑几何参数)。工具页和打印单一律跟这里走,访客改不了。
+      {
+        title: "打印定价",
+        href: "/admin/print-pricing",
+        icon: SlidersHorizontal,
       },
       {
         title: "商品管理",

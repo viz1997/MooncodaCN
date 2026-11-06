@@ -18,6 +18,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getPrintOrderUser } from "@/features/print-quote/lib/auth";
+import { getPrintPricingSettings } from "@/features/print-quote/lib/pricing-store";
 import { computePrintQuote } from "@/features/print-quote/lib/quote-server";
 import type { PrintQuoteInput } from "@/features/print-quote/lib/quote-types";
 import { withApiLogging } from "@/lib/api-logger";
@@ -106,7 +107,9 @@ async function handle(request: NextRequest) {
     deliveryTier: parsed.data.deliveryTier ?? null,
   };
 
-  const quote = computePrintQuote(input);
+  // 价从哪儿来:后台 `/admin/print-pricing` 配的值 → `PRINT_*` env → 默认值
+  const settings = await getPrintPricingSettings();
+  const quote = computePrintQuote(settings, input);
   if (!quote) {
     return NextResponse.json(
       { error: "QUOTE_UNAVAILABLE", message: "这组几何算不出报价" },

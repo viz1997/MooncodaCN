@@ -3,7 +3,7 @@
  *
  * ## 为什么不在 `pricing-calculator.tsx` 里
  *
- * `PricingModelPayload` 要被**别的模块**import(打印报价台、模型上传器),
+ * `PricingModelPayload` 要被**别的模块**import(打印单卡片、模型上传器),
  * 而 `pricing-calculator.tsx` 是一个 "use client" 组件 —— 从组件文件里 import
  * 类型虽然编译期没问题(类型会被擦除),但读代码的人会以为引入了那个组件的
  * 运行时依赖。

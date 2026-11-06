@@ -33,6 +33,14 @@ export interface AnalyzerInput {
   /** 三角汤,9 floats / 三角面 */
   positions: Float32Array;
   fileName: string;
+  /**
+   * 托底高度 (mm) —— 支撑外壳的平台平面在模型最低点下方多远
+   *
+   * 不传 = `SUPPORT_LIFT_MM`(5mm)。**跟随后台**
+   * (`/admin/print-pricing`)—— 模型检查页画的支撑跟克重工具算的必须是
+   * 同一个几何。
+   */
+  liftMm?: number | undefined;
 }
 
 export function useAnalyzer() {
@@ -69,7 +77,8 @@ export function useAnalyzer() {
           (stage, pct) => {
             if (seqRef.current !== seq) return;
             setState((s) => ({ ...s, busy: pct < 100, stage, pct }));
-          }
+          },
+          input.liftMm
         );
         if (seqRef.current !== seq) return;
         setState({
@@ -175,6 +184,7 @@ export function useAnalyzer() {
         seq,
         positions: input.positions,
         fileName: input.fileName,
+        liftMm: input.liftMm,
       });
     },
     [ensureWorker, runOnMainThread]

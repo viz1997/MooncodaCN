@@ -23,6 +23,7 @@
  * `printServiceSpecToQuoteInput()` 对齐输入形状。
  */
 
+import { DEFAULT_DELIVERY_TIER } from "@/features/print-quote/lib/delivery-tier";
 import type { PrintQuoteInput } from "@/features/print-quote/lib/quote-types";
 
 import type { CartLineItemMetadata, PrintServiceSpec } from "../types";
@@ -151,6 +152,56 @@ export function printServiceSpecHashParts(spec: PrintServiceSpec): string[] {
     spec.deliveryTier,
     spec.modelObjectKey,
   ];
+}
+
+/* -------------------------------------------------------------------------- */
+/*  工具页 → 打印服务规格                                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 工具页(`/tools/weight`)算出来的几何 → 打印服务规格
+ *
+ * ## 为什么要有这个函数
+ *
+ * 工具页上看到的克重/尺寸,和打印单上那笔报价,必须是**同一组几何** ——
+ * 服务端按 `printSpec` 重算报价,客户端传过去的数只要被动过(哪怕只是
+ * 四舍五入),用户看到的尺寸跟工单上的价就对不上。
+ *
+ * 所以这里**一一对应地搬**,不做任何加工:体积、表面积、尺寸、支撑克重、
+ * 支撑比例原样过去。
+ *
+ * ## 交期一律标准档
+ *
+ * 工具页**不选交期** —— 交期在打印单上逐行改(标准 / 加急 / 特急)。这里
+ * 写死标准档,不是默认值而是**这一处的口径**:工具页加进来的一律是标准档,
+ * 跟用户在打印单上改过的那一行是两件事。
+ *
+ * ## 纯函数
+ *
+ * 不碰 DB、不碰网络、不碰 `window` —— 客户端组件(工具页的「加入打印单」
+ * 卡片)和服务端都 import 它。
+ */
+export function buildPrintServiceSpecFromGeometry(
+  geometry: PrintQuoteInput,
+  model: {
+    fileName: string;
+    objectKey: string;
+    url: string;
+    sizeBytes: number | null;
+  }
+): PrintServiceSpec {
+  return {
+    volumeCM3: geometry.volumeCM3,
+    surfaceAreaCM2: geometry.surfaceAreaCM2,
+    dims: geometry.dims,
+    supportWeightG: geometry.supportWeightG ?? null,
+    selfSupportRatio: geometry.selfSupportRatio ?? null,
+    deliveryTier: DEFAULT_DELIVERY_TIER,
+    modelFileName: model.fileName,
+    modelObjectKey: model.objectKey,
+    modelUrl: model.url,
+    modelSizeBytes: model.sizeBytes,
+  };
 }
 
 /* -------------------------------------------------------------------------- */

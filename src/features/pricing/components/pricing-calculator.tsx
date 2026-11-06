@@ -23,8 +23,12 @@ import { useTranslations } from "next-intl";
  * ## 边界
  *
  * **只算不存**：所有解析 / 摆盘 / 克重计算都在浏览器本地完成，模型文件不上传服务器，
- * 计算结果不写数据库。唯一的网络请求是「材料参数是否需要密码」（见
- * `/api/image-gen/pricing/materials-auth`），且只传密码字符串。
+ * 计算结果不写数据库。
+ *
+ * **材料参数跟随后台，访客改不了**（2026-11-06）：密度 / 支撑几何由工作室在
+ * `/admin/print-pricing` 配好，页面的 RSC 读出来当 `clientConfig` prop 传下来。
+ * 原来那条「密码解锁 → 改密度」的路（`/api/image-gen/pricing/materials-auth`）
+ * 整个退役了 —— 访客改密度只会让「工具页看到的克重」跟「打印单上的价」对不上。
  *
  * **只展示克重**：页面对外只呈现体积 / 表面积 / 本体克重 / 支撑克重 / 摆盘角度，
  * 不呈现任何价格。计价相关状态（`unitPrice` 等）仍保留在底层 `pricing-engine.ts`
@@ -36,7 +40,8 @@ import { useTranslations } from "next-intl";
  *  - 「模型设置」从弹窗改成**页面内的一张卡**（`ModelSettingsPanel`，见该文件
  *    说明）：结果卡与模型设置卡合并成同一张 —— 头部是文件身份 + 几何标签，
  *    左栏 3D 预览，右栏克重 + 摆盘结果 + 尺寸调节；
- *  - 材料参数密码校验改为服务端环境变量（源实现把哈希硬编码在客户端）；
+ *  - 材料参数密码校验改为服务端环境变量（源实现把哈希硬编码在客户端），
+ *    2026-11-06 起进一步改成**后台统一配置**、访客只读；
  *  - 文案全部改为 t() 调用（i18n）。
  */
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
@@ -86,6 +91,10 @@ import {
   processBatch,
 } from "@/features/pricing/lib/batch-processor";
 import {
+  detectModelUnitScale,
+  type ModelUnitCheck,
+} from "@/features/pricing/lib/model-units";
+import {
   downloadModelZip,
   downloadObjFile,
   exportRotatedObj,
@@ -108,7 +117,12 @@ import {
   type ModelFile,
   revokeModelTextureUrls,
 } from "@/features/pricing/lib/zip-extractor";
+import type { ClientPrintConfig } from "@/features/print-quote/lib/pricing-settings";
 import type { PrintQuoteInput } from "@/features/print-quote/lib/quote-types";
+import {
+  SUPPORT_BASE_MARGIN_MM,
+  SUPPORT_LIFT_MM,
+} from "@/features/tools/lib/mesh/support-shell";
 
 type Mode = "upload" | "manual" | "batch";
 
@@ -123,11 +137,10 @@ const yieldToUI = (): Promise<void> =>
 
 export function PricingCalculator({
   showChrome = true,
-  quoteMode = false,
   onQuoteInput,
   quoteSlot,
   onModelChange,
-  initialModel,
+  clientConfig,
 }: {
   /**
    * 是否渲染工具自带的页头 / 页脚。
@@ -140,34 +153,21 @@ export function PricingCalculator({
   showChrome?: boolean;
 
   /**
-   * 报价模式（2026-11-01 新增，给打印服务报价页用）。
+   * 几何变化回调 —— 把「几何 + 支撑」抛给父组件。
    *
-   * false（默认）= **工具模式**：只算不存、不显示任何价格、模型不上传服务器。
-   *                 这是 `/tools/weight` 的行为 —— 2026-11-06 恢复了它。
-   * true          = **报价模式**：把几何数据通过 `onQuoteInput` 抛给父组件，
-   *                 由父组件去服务端要报价，并把 `quoteSlot` 渲染在右栏
-   *                 克重下方。
+   * 传 null 表示「当前没有模型」。父组件拿它去拼打印服务的规格
+   * （`printSpec`：体积 / 表面积 / 尺寸 / 支撑克重）—— 服务端按这组数
+   * 重算报价。
    *
-   * 为什么价格不在这儿算：报价必须是**服务端算的**（客户端能改）。
-   * 所以这里只负责把「几何 + 支撑」交出去,价格由父组件拿服务端返回的
-   * 结果渲染。
-   */
-  quoteMode?: boolean;
-
-  /**
-   * 几何变化回调（报价模式）。
-   *
-   * 传 null 表示「当前没有可报价的模型」。父组件拿到就防抖去调
-   * `POST /api/print-quote`。
+   * **这里只抛输入,不抛价格** —— 价格必须服务端算(客户端能改)。
    */
   onQuoteInput?: (input: PrintQuoteInput | null) => void;
 
   /**
    * 右栏插槽 —— 渲染在右栏克重面板下方。
    *
-   * 报价模式(`/quote`)放的是报价条(价格明细 + 交期 + 下单入口);
-   * 工具模式(`/tools/weight`)放的是「报价下单」入口卡片 —— 工具里不显示
-   * 价格,只给一个通往报价台的口子。
+   * `/tools/weight` 放的是「加入打印单」卡片 —— 工具里不显示价格,只给一个
+   * 把模型加进打印单的出口。
    *
    * 传了才渲染,不传就是空的。
    */
@@ -176,25 +176,20 @@ export function PricingCalculator({
   /**
    * 模型就绪回调 —— 父组件要用模型文件本体时用它。
    *
-   * 报价模式:下单时要按用户调过的尺寸重新打包模型上传,不带 `scales` 的话
+   * 下单时要按用户调过的尺寸重新打包模型上传,不带 `scales` 的话
    * 工作室拿到的文件尺寸和报价单上的尺寸对不上。
-   *
-   * 工具模式:模型要**接力**给报价台(省得用户再选一遍文件)。
-   *
-   * 两种模式都会抛 —— 模型不是报价专属的东西。
    */
   onModelChange?: (payload: PricingModelPayload | null) => void;
 
   /**
-   * 外部接手的模型 —— 报价台从克重工具接力过来的那个
+   * 后台配的材料参数 —— **只读**,访客改不了
    *
-   * 传进来就当自己的模型用:模型本体 + 用户在工具里调过的缩放一起搬过来。
-   * 传 null(默认) = 没有接手,走正常路径(用户自己选文件)。
+   * 密度、支撑几何都跟随后台(`/admin/print-pricing`),RSC 读好当 prop
+   * 传下来。不传就用引擎的默认值(组件单独用的时候)。
    *
-   * 接力只在**客户端跳转**里成立(整页刷新就没了),见
-   * `print-quote/lib/model-handoff.ts`。
+   * 这里只有**几何和密度**,没有价格 —— 价格是服务端算的。
    */
-  initialModel?: PricingModelPayload | null;
+  clientConfig?: ClientPrintConfig;
 }) {
   const t = useTranslations("MaterialPricing");
 
@@ -224,6 +219,13 @@ export function PricingCalculator({
   const [scaleX, setScaleX] = useState(1);
   const [scaleY, setScaleY] = useState(1);
   const [scaleZ, setScaleZ] = useState(1);
+  /**
+   * 单位判定结果 —— 文件坐标不是毫米时才有值
+   *
+   * 判出来的横幅要在尺寸面板上摆出来(「这个文件的坐标不是毫米」),
+   * 用户得知道工具替他把尺寸换算过了。
+   */
+  const [unitCheck, setUnitCheck] = useState<ModelUnitCheck | null>(null);
 
   // ---- 计算参数 ----
   const [solidRatio, setSolidRatio] = useState(30);
@@ -231,9 +233,15 @@ export function PricingCalculator({
   const [repairMode, setRepairMode] = useState<RepairMode>("none");
   const [repairPrice, setRepairPrice] = useState(0);
   const repairEnabled = repairMode !== "none";
-  const [materialDensity, setMaterialDensity] = useState(
-    DEFAULT_CONFIG.materialDensity
-  );
+  /**
+   * 材料密度 —— **跟随后台,访客改不了**
+   *
+   * `clientConfig` 是 RSC 从 `/admin/print-pricing` 读出来的生效设置。
+   * 访客侧的「材料参数」弹窗是只读的 —— 密度改了,支撑克重就是假的,
+   * 而服务端报价按自己那份密度算,两边对不上。
+   */
+  const materialDensity =
+    clientConfig?.modelDensity ?? DEFAULT_CONFIG.materialDensity;
   /**
    * 支撑材料密度 (g/cm³) —— 支撑跟模型**不是**一种材料
    *
@@ -244,19 +252,17 @@ export function PricingCalculator({
    *   支撑克重 = 支撑体积 × 支撑密度
    *   总克重   = 耗材克重 + 支撑克重
    */
-  const [supportDensity, setSupportDensity] = useState(
-    DEFAULT_CONFIG.supportDensity
-  );
-  // ↓↓↓ 价格相关 state：UI 不再展示，但**绝不能删** ↓↓↓
+  const supportDensity =
+    clientConfig?.supportDensity ?? DEFAULT_CONFIG.supportDensity;
+  // ↓↓↓ 价格相关常量：UI 不展示，但**绝不能删** ↓↓↓
   // `calculatePrice()` 是 `materialWeight`（克重）的唯一来源，它在
   // `unitPrice` 非法时返回 null —— 一旦 null，整个克重界面连同体积一起消失。
   // 所以这些值保持合法且恒为默认，只是不渲染。
-  const [unitPrice, setUnitPrice] = useState(DEFAULT_CONFIG.unitPrice);
-  const [varnishEnabled, setVarnishEnabled] = useState(true);
+  const unitPrice = DEFAULT_CONFIG.unitPrice;
+  const varnishEnabled = true;
   const varnishFee = DEFAULT_CONFIG.varnishFee;
-  const [supportPrice, setSupportPrice] = useState(DEFAULT_CONFIG.supportPrice);
   const supportThreshold = DEFAULT_CONFIG.supportThreshold;
-  const [supportEnabled, setSupportEnabled] = useState(false);
+  const supportEnabled = false;
   const [productId, setProductId] = useState("pet");
 
   // ---- 支撑计算参数 ----
@@ -265,10 +271,23 @@ export function PricingCalculator({
    *
    * 体积还是那个几何算出来的包裹支撑体积(跟检测工具同一块);
    * 密度是支撑材料自己的 —— 模型密度只用来算耗材克重。
+   *
+   * 托底高度 / 底板留边也跟随后台 —— 几何参数变了,支撑克重跟着变,
+   * 3D 预览画的那层托底用的是同一组数(画面跟报价对得上)。
    */
   const supportParams = useMemo<SupportParams>(
-    () => ({ modelDensity: materialDensity, supportDensity }),
-    [materialDensity, supportDensity]
+    () => ({
+      modelDensity: materialDensity,
+      supportDensity,
+      liftMm: clientConfig?.supportLiftMm,
+      baseMarginMm: clientConfig?.supportBaseMarginMm,
+    }),
+    [
+      materialDensity,
+      supportDensity,
+      clientConfig?.supportLiftMm,
+      clientConfig?.supportBaseMarginMm,
+    ]
   );
 
   // ---- 智能摆盘 ----
@@ -343,7 +362,6 @@ export function PricingCalculator({
       varnishEnabled,
       repairMode,
       productId,
-      supportPrice,
       supportThreshold,
       supportEnabled,
     }),
@@ -352,12 +370,9 @@ export function PricingCalculator({
       supportDensity,
       unitPrice,
       varnishFee,
-      varnishEnabled,
       repairMode,
       productId,
-      supportPrice,
       supportThreshold,
-      supportEnabled,
     ]
   );
 
@@ -611,10 +626,9 @@ export function PricingCalculator({
     repairEnabled,
     repairPrice,
     supportStats,
-    supportEnabled,
   ]);
 
-  // ---- 报价模式：把几何交给父组件（2026-11-01 新增）----
+  // ---- 把几何交给父组件 ----
   //
   // 只抛**输入**（几何 + 支撑），不抛价格 —— 价格必须服务端算，客户端
   // 算的价不能信（见 print-quote/lib/quote-server.ts 的说明）。
@@ -627,7 +641,6 @@ export function PricingCalculator({
   }, [onQuoteInput]);
 
   useEffect(() => {
-    if (!quoteMode) return;
     const notify = onQuoteInputRef.current;
     if (!notify) return;
     if (!geometry) {
@@ -644,12 +657,9 @@ export function PricingCalculator({
         : null,
       selfSupportRatio: poseSupport ? supportStats.ratio : null,
     });
-  }, [quoteMode, geometry, poseSupport, supportStats]);
+  }, [geometry, poseSupport, supportStats]);
 
-  // 模型本体也要抛给父组件 —— 下单时要把文件打包上传到 R2,
-  // 工具页要把它**接力**给报价台
-  //
-  // 两种模式都抛:模型不是报价专属的东西(报价模式才需要几何)。
+  // 模型本体也要抛给父组件 —— 下单时要把文件打包上传到 R2
   const onModelChangeRef = useRef(onModelChange);
   useEffect(() => {
     onModelChangeRef.current = onModelChange;
@@ -715,6 +725,26 @@ export function PricingCalculator({
         setLoadStatus("loading-3d");
         setLoadProgress(t("upload.rendering"));
         setLoadPercent(95);
+
+        /**
+         * 单位判定 —— 文件坐标不是毫米(AI 生成 / Blender 默认导出)就自动归一化
+         *
+         * 归一化走的是「自选尺寸」那条**已有的**路:缩放因子一填,几何、支撑
+         * 几何、3D 预览一起进毫米空间重算(托底 5mm 也就落在正确的位置)。
+         *
+         * 不这么做的话,平台会被拉到模型下面 5 个**单位**(托底是固定毫米值),
+         * 支撑比模型本身还高 3.5 倍,支撑比例算出来是几万倍 —— 报价全错。
+         * 详见 `model-units.ts` 的文件头。
+         */
+        const check = detectModelUnitScale(
+          result.model.parseResult.boundingBox.size
+        );
+        setUnitCheck(check.normalized ? check : null);
+        if (check.normalized) {
+          setDimMode("custom");
+          setUniformScale(true);
+          setScaleFactor(check.scale);
+        }
       }
     } catch (err) {
       setUploadError(
@@ -742,48 +772,26 @@ export function PricingCalculator({
     setScaleX(1);
     setScaleY(1);
     setScaleZ(1);
+    setUnitCheck(null);
     setOptimalAngle(null);
     setPoseSupport(null);
   };
 
-  // ---- 外部接手的模型 ----
-  //
-  // 报价台从克重工具接力过来的那个模型(见 print-quote/lib/model-handoff.ts)。
-  // 接手的动作 = 跟用户自己选完文件一样:模型装上、尺寸装上、开始渲染。
-  //
-  // 用 ref 记住「接过哪一个」:同一个模型对象只接一次 —— 父组件重渲染不会
-  // 把模型重新塞一遍(那会把用户后来改的尺寸冲掉)。
-  const injectedRef = useRef<PricingModelPayload | null>(null);
-  useEffect(() => {
-    if (!initialModel) return;
-    if (injectedRef.current === initialModel) return;
-    injectedRef.current = initialModel;
-
-    const { model: m, scales } = initialModel;
-    setModel(m);
-    setFileName(m.objFileName);
-    setUploadError(null);
-    setLoadStatus("loading-3d");
-    setLoadProgress(t("upload.rendering"));
-    setLoadPercent(95);
-
-    // 尺寸:把工具里调过的缩放搬过来 —— 报价单上的尺寸要跟用户看到的一致
-    const [sx, sy, sz] = scales;
-    if (sx === 1 && sy === 1 && sz === 1) {
-      setDimMode("original");
-    } else {
-      setDimMode("custom");
-      if (sx === sy && sy === sz) {
-        setUniformScale(true);
-        setScaleFactor(sx);
-      } else {
-        setUniformScale(false);
-        setScaleX(sx);
-        setScaleY(sy);
-        setScaleZ(sz);
-      }
-    }
-  }, [initialModel, t]);
+  /**
+   * 「改回原始尺寸」—— 用户坚持把文件里的数字当毫米
+   *
+   * 工具替人换算过尺寸,得给人一个反悔的机会(万一这个文件本来就是毫米,
+   * 只是特别小)。点了就回到「原始尺寸」,横幅也撤掉。
+   */
+  const revertToOriginalUnits = () => {
+    setUnitCheck(null);
+    setDimMode("original");
+    setUniformScale(true);
+    setScaleFactor(1);
+    setScaleX(1);
+    setScaleY(1);
+    setScaleZ(1);
+  };
 
   const applyProduct = (id: string) => {
     const p = PRODUCT_TYPES.find((x) => x.id === id);
@@ -950,6 +958,9 @@ export function PricingCalculator({
     const options: BatchOptions = {
       concurrency: batchConcurrency,
       pricingConfig,
+      // 几何参数跟随后台 —— 批量跟单件同一口径
+      supportLiftMm: clientConfig?.supportLiftMm,
+      supportBaseMarginMm: clientConfig?.supportBaseMarginMm,
       solidRatio,
       repairEnabled,
       repairPrice,
@@ -1010,14 +1021,7 @@ export function PricingCalculator({
     setCoverage(50);
     setRepairMode("none");
     setRepairPrice(0);
-    setMaterialDensity(DEFAULT_CONFIG.materialDensity);
-    setSupportDensity(DEFAULT_CONFIG.supportDensity);
-    // 价格相关 state 一并复位（UI 不展示，但引擎仍读它们算克重）
-    setUnitPrice(DEFAULT_CONFIG.unitPrice);
-    setVarnishEnabled(true);
     setProductId("pet");
-    setSupportEnabled(false);
-    setSupportPrice(DEFAULT_CONFIG.supportPrice);
     setShowTexture(true);
     setMode("upload");
     setDimMode("original");
@@ -1592,6 +1596,8 @@ export function PricingCalculator({
                     onScaleXChange={setScaleX}
                     onScaleYChange={setScaleY}
                     onScaleZChange={setScaleZ}
+                    unitCheck={unitCheck}
+                    onRevertUnitScale={revertToOriginalUnits}
                     geometry={geometry}
                     optimalAngle={optimalAngle}
                     poseSupport={poseSupport}
@@ -1609,6 +1615,7 @@ export function PricingCalculator({
                     angleReady={supportModelReady}
                     showSupport={showSupport}
                     onToggleSupport={() => setShowSupport((s) => !s)}
+                    supportLiftMm={clientConfig?.supportLiftMm}
                     showTexture={showTexture}
                     onToggleTexture={() => setShowTexture((s) => !s)}
                     onClearModel={clearModel}
@@ -1758,9 +1765,11 @@ export function PricingCalculator({
           infoDialog={infoDialog}
           onInfoDialogChange={setInfoDialog}
           materialDensity={materialDensity}
-          onMaterialDensityChange={setMaterialDensity}
           supportDensity={supportDensity}
-          onSupportDensityChange={setSupportDensity}
+          supportLiftMm={clientConfig?.supportLiftMm ?? SUPPORT_LIFT_MM}
+          supportBaseMarginMm={
+            clientConfig?.supportBaseMarginMm ?? SUPPORT_BASE_MARGIN_MM
+          }
           onApplyProduct={applyProduct}
         />
 

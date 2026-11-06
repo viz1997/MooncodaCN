@@ -15,11 +15,22 @@
  * 唯一的差别是单位:引擎内部用「元」,这里对外一律「分」。转换只发生在
  * 两个边界上(元 → 分),中间不碰。
  *
- * ## 参数可被环境变量覆盖
+ * ## 价格从哪儿来(2026-11-06)
  *
- * `PRINT_*` 系列。没配就用 `pricing-engine.ts` 里 `DEFAULT_CONFIG` 的值
- * (密度 1.2 g/cm³、单价 $0.65/g、光油 $1.50、支撑 $0.15/g、阈值 1:1)。
- * 改价不用改代码 —— 发版前配好环境变量即可。
+ * 以前是这个文件里的 `PRINT_QUOTE_CONFIG` —— 模块级常量,导入时读一次
+ * `PRINT_*` 环境变量。现在配置搬到后台(`/admin/print-pricing`),这一层
+ * 变成**入参**:
+ *
+ * ```
+ * DB 配置行 → PRINT_* 环境变量 → DEFAULT_CONFIG
+ * ```
+ *
+ * 解析逻辑在 `pricing-settings.ts`(纯函数),连库那一半在
+ * `pricing-store.ts`。**这个文件本身不碰 DB** —— 所以它能被单测直接
+ * import,`unit` project 里没有数据库也跑得起来。
+ *
+ * 传进来的 `settings` 是**权威值**:调用方必须显式给,漏了就是类型错误 ——
+ * 「忘了传 settings,悄悄按环境变量收钱」这种错不能留。
  */
 
 import { randomBytes } from "node:crypto";
@@ -32,137 +43,52 @@ import {
 
 import {
   computeDeliveryFeeCents,
-  DEFAULT_DELIVERY_RATES,
-  type DeliveryRates,
   getDeliveryTier,
   normalizeDeliveryTier,
 } from "./delivery-tier";
-import type { PrintQuote, PrintQuoteInput } from "./quote-types";
+import type { PrintPricingSettings } from "./pricing-settings";
+import type {
+  PrintQuote,
+  PrintQuoteInput,
+  PrintSupportFeeBand,
+} from "./quote-types";
 
 /**
- * 读一个非负数字环境变量;非法或缺失时用 fallback。
+ * 把「生效设置」翻译成引擎认识的 `PricingConfig`
  *
- * 不合法的值静默退回默认值而不是抛错 —— 报价服务挂掉比用错价格更糟,
- * 但「配置写错了」应该被看见,所以这里把 fallback 的来源写清楚。
+ * 引擎内部用**元**,设置里用**分** —— 转换只发生在这里一次。
  */
-function envNumber(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (raw === undefined || raw === "") return fallback;
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value < 0) return fallback;
-  return value;
+function toPricingConfig(settings: PrintPricingSettings): PricingConfig {
+  return {
+    ...DEFAULT_CONFIG,
+    materialDensity: settings.modelDensity,
+    unitPrice: settings.unitPriceCentsPerGram / 100,
+    varnishFee: settings.varnishFeeCents / 100,
+    varnishEnabled: settings.varnishEnabled,
+    supportTier1Ratio: settings.supportTier1Ratio,
+    supportTier1Price: settings.supportTier1PriceCentsPerGram / 100,
+    supportTier2Price: settings.supportTier2PriceCentsPerGram / 100,
+    supportThreshold: settings.supportThreshold,
+    supportEnabled: settings.supportEnabled,
+  };
 }
-
-/**
- * 读一个 0~1 之间的比例环境变量;越界 / 非法时用 fallback。
- *
- * 比例必须夹在 [0, 1] —— 加价超过 100% 是配置写错了(不是「加两倍」),
- * 这种值静默生效会让用户看到离谱的报价,比退回默认值危险。
- */
-function envRate(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (raw === undefined || raw === "") return fallback;
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value < 0 || value > 1) return fallback;
-  return value;
-}
-
-/**
- * 报价参数 —— 单位:克/密度用原单位,金额一律「分」
- *
- * ## 环境变量
- *
- * 全部可选,不配就用 `pricing-engine.ts` 里 `DEFAULT_CONFIG` 的默认值:
- *
- * | 环境变量 | 含义 | 默认 |
- * |---|---|---|
- * | `PRINT_MATERIAL_DENSITY` | 材料密度 g/cm³ | 1.2 |
- * | `PRINT_UNIT_PRICE_CENTS_PER_GRAM` | 单价 分/g | 450(4.5 元/g) |
- * | `PRINT_VARNISH_FEE_CENTS` | 光油 / 后处理固定费 分 | 1000(10 元) |
- * | `PRINT_VARNISH_ENABLED` | 光油是否计入报价(`"false"` 才关) | 计入 |
- * | `PRINT_SUPPORT_PRICE_CENTS_PER_GRAM` | 支撑单价 分/g | 100(1 元/g) |
- * | `PRINT_SUPPORT_THRESHOLD` | 本体支撑比例阈值(1 = 1:1) | 1 |
- * | `PRINT_SUPPORT_ENABLED` | 支撑加价总开关(`"true"` 才开) | 关 |
- * | `PRINT_DELIVERY_EXPRESS_RATE` | 72 小时档加价比例(0~1) | 0.1 |
- * | `PRINT_DELIVERY_URGENT_RATE` | 48 小时档加价比例(0~1) | 0.37 |
- *
- * 注意:本仓库的 `.gitignore` 把 `.env*` 整个排掉了(`.env.example` 也一样),
- * 所以这份说明放在代码里 —— 环境变量的名字跟着代码走,不会因为
- * 「文档在一个没人能看到的文件里」而丢失。
- */
-/**
- * 交期档位的加价比例
- *
- * 标准档(96 小时)恒为 0 —— 不额外收费;两档加急的比例可以用环境变量改,
- * 工作室觉得贵就调低,不用改代码发版。
- */
-const DELIVERY_RATES: DeliveryRates = {
-  standard: 0,
-  express: envRate(
-    "PRINT_DELIVERY_EXPRESS_RATE",
-    DEFAULT_DELIVERY_RATES.express
-  ),
-  urgent: envRate("PRINT_DELIVERY_URGENT_RATE", DEFAULT_DELIVERY_RATES.urgent),
-};
-
-export const PRINT_QUOTE_CONFIG = {
-  /** 材料密度 g/cm³ —— `PRINT_MATERIAL_DENSITY` */
-  materialDensity: envNumber(
-    "PRINT_MATERIAL_DENSITY",
-    DEFAULT_CONFIG.materialDensity
-  ),
-  /** 单价 分/g —— `PRINT_UNIT_PRICE_CENTS_PER_GRAM` */
-  unitPriceCentsPerGram: Math.round(
-    envNumber("PRINT_UNIT_PRICE_CENTS_PER_GRAM", DEFAULT_CONFIG.unitPrice * 100)
-  ),
-  /** 光油 / 后处理固定费 分 —— `PRINT_VARNISH_FEE_CENTS` */
-  varnishFeeCents: Math.round(
-    envNumber("PRINT_VARNISH_FEE_CENTS", DEFAULT_CONFIG.varnishFee * 100)
-  ),
-  /** 光油是否计入报价 —— `PRINT_VARNISH_ENABLED`(默认计入) */
-  varnishEnabled: process.env.PRINT_VARNISH_ENABLED !== "false",
-  /** 支撑单价 分/g —— `PRINT_SUPPORT_PRICE_CENTS_PER_GRAM` */
-  supportPriceCentsPerGram: Math.round(
-    envNumber(
-      "PRINT_SUPPORT_PRICE_CENTS_PER_GRAM",
-      DEFAULT_CONFIG.supportPrice * 100
-    )
-  ),
-  /** 本体支撑比例阈值(1 = 1:1),超出的部分按支撑单价加收 —— `PRINT_SUPPORT_THRESHOLD` */
-  supportThreshold: envNumber(
-    "PRINT_SUPPORT_THRESHOLD",
-    DEFAULT_CONFIG.supportThreshold
-  ),
-  /**
-   * 支撑加价总开关 —— **默认关**,跟克重工具一致(估算误差大,不该自动加钱)
-   *
-   * 只有显式 `PRINT_SUPPORT_ENABLED=true` 才开 —— 默认开的话,每一单都会
-   * 悄悄多收一笔支撑费,而克重工具那边从不收这个钱,两边对不上。
-   */
-  supportEnabled: process.env.PRINT_SUPPORT_ENABLED === "true",
-  /** 交期档位加价比例 —— `PRINT_DELIVERY_EXPRESS_RATE` / `PRINT_DELIVERY_URGENT_RATE` */
-  deliveryRates: DELIVERY_RATES,
-} as const;
 
 /**
  * 按几何算报价。
  *
  * 返回 `null` 表示这组输入算不出来(体积非正 / 密度非法)—— 调用方要把它
  * 当成「还没报价」处理,而不是「报价是 0」。
+ *
+ * @param settings 生效中的定价设置(后台配的,或兜底的 env / 默认值)
+ * @param input    几何 + 支撑 + 交期档位
  */
-export function computePrintQuote(input: PrintQuoteInput): PrintQuote | null {
-  const config: PricingConfig = {
-    ...DEFAULT_CONFIG,
-    materialDensity: PRINT_QUOTE_CONFIG.materialDensity,
-    unitPrice: PRINT_QUOTE_CONFIG.unitPriceCentsPerGram / 100,
-    varnishFee: PRINT_QUOTE_CONFIG.varnishFeeCents / 100,
-    varnishEnabled: PRINT_QUOTE_CONFIG.varnishEnabled,
-    supportPrice: PRINT_QUOTE_CONFIG.supportPriceCentsPerGram / 100,
-    supportThreshold: PRINT_QUOTE_CONFIG.supportThreshold,
-    supportEnabled: PRINT_QUOTE_CONFIG.supportEnabled,
-  };
+export function computePrintQuote(
+  settings: PrintPricingSettings,
+  input: PrintQuoteInput
+): PrintQuote | null {
+  const config = toPricingConfig(settings);
 
-  const useSupport = PRINT_QUOTE_CONFIG.supportEnabled;
+  const useSupport = settings.supportEnabled;
   // 注意:`config.supportEnabled` 只是为了满足 PricingConfig 的字段要求 ——
   // calculatePrice() 自己不看它。真正的开关在这里:关掉时把支撑克重填 0,
   // 引擎那边自然算不出支撑费。
@@ -184,6 +110,32 @@ export function computePrintQuote(input: PrintQuoteInput): PrintQuote | null {
   const varnishFeeCents = Math.round(result.varnishFee * 100);
   const supportFeeCents = Math.round(result.supportFee * 100);
 
+  /**
+   * 支撑加价的分段明细 —— 换到「分」
+   *
+   * 引擎那边算的是「元」(浮点),这里换成分。**各档之和必须等于
+   * `supportFeeCents`** —— 逐档取整再相加,跟总额取整可能差 1 分,差额由
+   * **最后一档**吸收。否则打印单上会出现「8.3 g × ¥0.50/g + 4.2 g ×
+   * ¥1.00/g」跟「支撑加价 ¥6.60」对不上(明细加起来 ≠ 合计)。
+   */
+  const supportFeeBands: PrintSupportFeeBand[] = result.supportFeeBands.map(
+    (band) => ({
+      fromRatio: band.fromRatio,
+      upToRatio: band.upToRatio,
+      priceCentsPerGram: Math.round(band.price * 100),
+      weightG: band.weightG,
+      feeCents: Math.round(band.fee * 100),
+    })
+  );
+  const lastBand = supportFeeBands[supportFeeBands.length - 1];
+  if (lastBand) {
+    const sumOfBands = supportFeeBands.reduce(
+      (sum, band) => sum + band.feeCents,
+      0
+    );
+    lastBand.feeCents += supportFeeCents - sumOfBands;
+  }
+
   // 交期加价 —— 按**小计**的比例收(见 delivery-tier.ts)。
   // 基数是三项基础费用之和,不是总价:加价不能把自己算进自己的基数。
   const baseTotalCents = weightFeeCents + varnishFeeCents + supportFeeCents;
@@ -191,7 +143,7 @@ export function computePrintQuote(input: PrintQuoteInput): PrintQuote | null {
   const deliveryFeeCents = computeDeliveryFeeCents(
     baseTotalCents,
     deliveryTier,
-    PRINT_QUOTE_CONFIG.deliveryRates
+    settings.deliveryRates
   );
 
   return {
@@ -201,15 +153,16 @@ export function computePrintQuote(input: PrintQuoteInput): PrintQuote | null {
     surfaceAreaCM2: input.surfaceAreaCM2,
     dims: input.dims,
     density: result.density,
-    unitPriceCentsPerGram: PRINT_QUOTE_CONFIG.unitPriceCentsPerGram,
+    unitPriceCentsPerGram: settings.unitPriceCentsPerGram,
     weightFeeCents,
     varnishFeeCents,
     supportFeeCents,
     excessSupportWeightG: result.excessSupportWeight,
+    supportFeeBands,
     deliveryFeeCents,
     deliveryTier,
     deliveryHours: getDeliveryTier(deliveryTier).hours,
-    deliveryRates: PRINT_QUOTE_CONFIG.deliveryRates,
+    deliveryRates: settings.deliveryRates,
     totalPriceCents: baseTotalCents + deliveryFeeCents,
   };
 }
@@ -228,7 +181,7 @@ export function computePrintQuote(input: PrintQuoteInput): PrintQuote | null {
  * 数量恒为 1(购物车 UI 里也不给加减)。所以折后单价 = 原价。
  *
  * 保留这个字段是为了让「行合计 = 折后单价 × 数量」这条恒等式对所有行都成立
- * —— Sellbase 那边 `unit_price_amount × quantity` 收的钱必须跟本仓库
+ * —— 收银台那边 `unit_price_amount × quantity` 收的钱必须跟本仓库
  * 逐分相等(见 `storefront/lib/pricing.ts` 的文件头)。
  *
  * ## 跟工单的价是同一个数
@@ -236,7 +189,10 @@ export function computePrintQuote(input: PrintQuoteInput): PrintQuote | null {
  * 结算时建的那张 `print_order`,`total_price_cents` 也是这个值 —— 同一个
  * `computePrintQuote()` 算出来的,不会漂。
  */
-export function computePrintServiceLinePrice(input: PrintQuoteInput): {
+export function computePrintServiceLinePrice(
+  settings: PrintPricingSettings,
+  input: PrintQuoteInput
+): {
   /** 原价(分) */
   unitPriceCents: number;
   /** 折后单价(分)—— 打印服务行恒等于原价 */
@@ -244,7 +200,7 @@ export function computePrintServiceLinePrice(input: PrintQuoteInput): {
   /** 完整的报价(建工单时用) */
   quote: PrintQuote;
 } | null {
-  const quote = computePrintQuote(input);
+  const quote = computePrintQuote(settings, input);
   if (!quote) return null;
   const cents = quote.totalPriceCents;
   return {

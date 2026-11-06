@@ -46,6 +46,7 @@ import type {
   OptimalAngle,
   SupportPoseResult,
 } from "@/features/pricing/lib/angle-optimizer";
+import type { ModelUnitCheck } from "@/features/pricing/lib/model-units";
 import type { ModelFile } from "@/features/pricing/lib/zip-extractor";
 
 export type LoadStatus =
@@ -108,6 +109,16 @@ export type ModelSettingsPanelProps = {
   onScaleYChange: (value: number) => void;
   onScaleZChange: (value: number) => void;
 
+  /**
+   * 单位判定结果 —— 文件坐标**不是毫米**时才有值
+   *
+   * 工具已经按「最大边 100mm」替用户归一化过了,面板上要挂一条横幅把这件事
+   * 摆出来 —— 用户得知道尺寸被换算过,否则横幅没了就没人知道为什么。
+   */
+  unitCheck?: ModelUnitCheck | null;
+  /** 「改回原始尺寸」—— 用户坚持把文件里的数字当毫米 */
+  onRevertUnitScale?: () => void;
+
   /** 父组件算好的几何 */
   geometry: ModelGeometry | null;
 
@@ -146,6 +157,13 @@ export type ModelSettingsPanelProps = {
   showSupport: boolean;
   onToggleSupport: () => void;
   /**
+   * 托底高度 (mm) —— 3D 预览里模型悬在平台上方多远
+   *
+   * 不传 = `SUPPORT_LIFT_MM`(5mm)。**2026-11-06 起跟随后台**
+   * (`/admin/print-pricing`)—— 画面跟报价必须用同一个值。
+   */
+  supportLiftMm?: number | undefined;
+  /**
    * 是否显示模型自带的贴图 —— 与检测工具的「显示贴图」开关同一套行为:
    * 关掉就是纯色(MTL 的 `Kd` 本色)视图。
    */
@@ -178,6 +196,8 @@ export function ModelSettingsPanel({
   onScaleXChange,
   onScaleYChange,
   onScaleZChange,
+  unitCheck,
+  onRevertUnitScale,
   geometry,
   optimalAngle,
   poseSupport,
@@ -195,6 +215,7 @@ export function ModelSettingsPanel({
   angleReady,
   showSupport,
   onToggleSupport,
+  supportLiftMm,
   showTexture,
   onToggleTexture,
   onClearModel,
@@ -418,6 +439,7 @@ export function ModelSettingsPanel({
                 rotationZ={viewerRotZ}
                 scale={dimMode === "custom" ? scales : 1}
                 showSupport={showSupport}
+                supportLiftMm={supportLiftMm}
                 showTexture={showTexture}
                 onReady={onViewerReady}
                 onProgress={onViewerProgress}
@@ -520,6 +542,45 @@ export function ModelSettingsPanel({
               </div>
 
               <div className="p-3 space-y-3">
+                {/* ---------- 单位横幅 ----------
+                    文件坐标不是毫米(AI 生成 / Blender 默认导出都是归一化的),
+                    工具已经按「最大边 100mm」替用户归一化过了 —— 这件事必须
+                    摆出来,否则用户看到的尺寸跟他想的不是一个东西。
+
+                    托底 5mm 是固定毫米值,不跟着模型缩放:不归一化的话平台会
+                    被拉到模型下面 5 个「单位」,支撑比模型本身还高,支撑比例是
+                    万倍量级(见 `lib/model-units.ts`)。 */}
+                {unitCheck?.normalized && (
+                  <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2">
+                    <AlertCircle className="size-3.5 shrink-0 mt-px text-amber-600" />
+                    <div className="min-w-0 flex-1 text-[11px] leading-relaxed">
+                      <p className="font-medium text-amber-900">
+                        {t("dialog.unitNotice", {
+                          extent: fmt(unitCheck.originalMaxExtent, 2),
+                        })}
+                      </p>
+                      <p className="text-amber-700">
+                        {dimMode === "custom"
+                          ? t("dialog.unitNoticeHandled", {
+                              size: unitCheck.assumedMaxExtentMm,
+                            })
+                          : t("dialog.unitNoticeUnhandled")}
+                      </p>
+                    </div>
+                    {/* 「改回原始尺寸」只在归一化还生效时给 —— 已经回到原始
+                        尺寸的话,这个按钮按下去什么都不会变。 */}
+                    {dimMode === "custom" && onRevertUnitScale && (
+                      <button
+                        type="button"
+                        onClick={onRevertUnitScale}
+                        className="shrink-0 text-[11px] font-medium text-amber-700 hover:text-amber-900 underline underline-offset-2 whitespace-nowrap"
+                      >
+                        {t("dialog.revertOriginalUnits")}
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 <div className="space-y-2 min-h-[124px] flex flex-col justify-start">
                   <div className="grid grid-cols-3 gap-2">
                     {dimMode === "original" ? (

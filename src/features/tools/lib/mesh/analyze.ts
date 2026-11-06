@@ -28,20 +28,22 @@ type ProgressFn = (stage: ProgressStage, pct: number) => void;
 export function analyzeNewMesh(
   positions: Float32Array,
   fileName: string,
-  onProgress: ProgressFn
+  onProgress: ProgressFn,
+  liftMm?: number
 ): { state: WorkerState | null; result: AnalysisResult } {
   const t0 = performance.now();
   onProgress("weld", 8);
   const topo = weldAndAnalyzeTopology(positions);
   const state: WorkerState = { topo, fileName };
-  const result = runAnalysis(state, onProgress);
+  const result = runAnalysis(state, onProgress, liftMm);
   result.stats.analysisMs = Math.round(performance.now() - t0);
   return { state, result };
 }
 
 export function runAnalysis(
   state: WorkerState,
-  onProgress: ProgressFn
+  onProgress: ProgressFn,
+  liftMm?: number
 ): AnalysisResult {
   const { topo, fileName } = state;
   const mesh = topo.mesh;
@@ -290,7 +292,7 @@ export function runAnalysis(
     const info = topo.components[c];
     if (info && (info.isCavity || info.isDebris)) faceEnclosed[f] = 1;
   }
-  const supportShell = buildSupportShell(mesh, faceEnclosed);
+  const supportShell = buildSupportShell(mesh, faceEnclosed, { liftMm });
   onProgress("done", 100);
 
   return {

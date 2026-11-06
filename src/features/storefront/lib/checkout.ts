@@ -77,6 +77,8 @@ import type {
   PaymentRequestItem,
 } from "@/features/payments/lib/types";
 import { createPrintOrder } from "@/features/print-quote/lib/order-store";
+import type { PrintPricingSettings } from "@/features/print-quote/lib/pricing-settings";
+import { getPrintPricingSettings } from "@/features/print-quote/lib/pricing-store";
 import {
   computePrintServiceLinePrice,
   generatePrintOrderNo,
@@ -139,7 +141,7 @@ export interface CheckoutInput {
    * - 商城购物袋有运费(¥8,小计到 ¥99 免)—— 那是目录商品的运费规则
    * - 打印单**没有运费** —— 打印服务的价就是报价本身(见
    *   `print-quote/lib/payment.ts`:工单的支付金额恒等于 `total_price_cents`),
-   *   报价台那边看到多少就收多少,不能到结算时再加一笔
+   *   打印单那边看到多少就收多少,不能到结算时再加一笔
    *
    * 不传 = 商城购物袋(旧调用方兼容)。
    */
@@ -296,14 +298,21 @@ export interface PricedLine {
  *
  * 打印服务行走的是另一套:按克重计价(`computePrintServiceLinePrice()`),
  * 不查目录。
+ *
+ * `settings` 是**生效中的打印定价设置**(后台 `/admin/print-pricing` 配的,
+ * 兜底到 `PRINT_*` 环境变量)—— 价从哪儿来由它决定,这里是权威值。
  */
-function repriceLine(item: CartLineItem): PricedLine {
+function repriceLine(
+  item: CartLineItem,
+  settings: PrintPricingSettings
+): PricedLine {
   const metadata = item.metadata;
 
   // 打印服务行 —— 按克重计价
   const printSpec = getPrintServiceSpec(metadata);
   if (printSpec) {
     const priced = computePrintServiceLinePrice(
+      settings,
       printServiceSpecToQuoteInput(printSpec)
     );
     if (!priced) {
@@ -550,7 +559,11 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
   await stampCartOwner(input.cartId, input.userId);
 
   // 1. 重算每一行
-  const lines = cart.items.map(repriceLine);
+  //
+  //    打印服务行的价来自**生效中的打印定价设置** —— 后台改过密度 / 单价 /
+  //    支撑规则之后,这里立刻按新口径重算(跟购物车每次读都重算一个道理)。
+  const printSettings = await getPrintPricingSettings();
+  const lines = cart.items.map((item) => repriceLine(item, printSettings));
 
   // 2. 金额
   const subtotalCents = lines.reduce(
@@ -565,8 +578,8 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
   // 免运费门槛按**折后**金额算 —— 用户看到的、付的小计就是折后那个
   //
   // 打印单**没有运费**(2026-11-06)—— 打印服务的价就是报价本身:
-  // 报价台显示多少、工单上写多少、收多少,是同一个数(见
-  // `print-quote/lib/payment.ts`)。到结算时再加一笔运费,用户在报价台
+  // 打印单显示多少、工单上写多少、收多少,是同一个数(见
+  // `print-quote/lib/payment.ts`)。到结算时再加一笔运费,用户在打印单
   // 看到的总价跟实际收的钱就对不上了。
   //
   // 规则本身在 `pricing-constants.ts` 的 `shippingCentsForCart()` —— 客户端

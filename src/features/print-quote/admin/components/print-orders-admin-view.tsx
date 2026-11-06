@@ -300,7 +300,7 @@ export function PrintOrdersAdminView() {
     <div className="space-y-6">
       <ModuleHeader
         title="打印订单"
-        description="按克重计价的 3D 打印工单 —— 官网 /quote 页登录下单,金额为服务端重算后的报价"
+        description="按克重计价的 3D 打印工单 —— 官网打印单(/print-order)登录下单,金额为服务端重算后的报价"
         actions={
           <Button icon={<RefreshCw className="h-4 w-4" />} onClick={reload}>
             刷新
@@ -398,7 +398,7 @@ export function PrintOrdersAdminView() {
             <EmptyState
               icon={ClipboardList}
               title={loading ? "加载中..." : "暂无打印订单"}
-              description="官网 /quote 页用户下单后会出现在这里"
+              description="官网打印单用户下单后会出现在这里"
             />
           </div>
         </div>

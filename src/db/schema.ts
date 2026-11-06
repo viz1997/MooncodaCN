@@ -2616,6 +2616,228 @@ export const printOrderEvent = pgTable(
 export type PrintOrderEventRow = typeof printOrderEvent.$inferSelect;
 export type NewPrintOrderEventRow = typeof printOrderEvent.$inferInsert;
 
+// ============================================
+// 2026-11-06：打印定价后台（材料库 + 计价设置）
+// ============================================
+//
+// 工作室要求「在后台设置克重的计算和计价、材料、计算逻辑」。改之前这些
+// 口径全在代码 / 环境变量里：
+//   - 密度 / 单价 / 后处理 / 支撑阈值 → `PRINT_*` 环境变量（quote-server.ts）
+//   - 交期三档比例                     → `PRINT_DELIVERY_*_RATE` 环境变量
+//   - 支撑几何参数（托底 / 留边）      → `support-shell.ts` 里的**常量**
+//
+// 现在搬进两张表：材料**多档**放一张表，计价设置是**单行**。
+//
+// ## 为什么**模型**材料的单价跟着材料走
+//
+// 「密度 1.2 的树脂，单价 450 分/g」是**同一个材料**的属性 —— 换一种树脂
+// 密度和单价一起变。拆成两处就会漂移(密度改了单价忘了改)。所以配置行
+// 只存「当前生效的是哪一档材料」，单价从材料行读。
+//
+// ## 为什么**支撑**的价在配置行上，不在材料行上
+//
+// 支撑的加价是一条**规则**，不是材料的每克价 —— 工作室说的是
+// 「超过 1:1 的多的支撑按 0.5 元/g，1:2 的多的按 1 元/g」：同一卷支撑，
+// 挂得越多单价越贵。所以整条规则(阈值 + 第一档上界 + 两档单价)都在
+// 配置行上，材料行只管**密度**(支撑克重 = 支撑体积 × 支撑密度)。
+//
+// ## 为什么配置行是单行
+//
+// 打印服务只有一套定价口径(不像商城有多个商品各自定价)。单行 = 不用
+// 「哪一行是当前行」这种判断,读的时候按 `id = "default"` 取。
+// ============================================
+
+/**
+ * 打印材料库 —— 多档可选(2026-11-06)
+ *
+ * 一行 = 一种材料。模型材料(`kind = "model"`)和支撑材料
+ * (`kind = "support"`)分开 —— 支撑是水溶性的(PVA/BVOH),跟模型树脂
+ * 不是一种材料,密度也不一样。
+ *
+ * ## 停用而不是删
+ *
+ * `is_active = false` 是「这档不用了」。真删掉的话,引用过它的配置行会
+ * 悬空 —— 配置行里的 `model_material_id` 找不到材料,报价就退回环境变量
+ * 那条路,工作室会看到「我明明选了 X,怎么算出来是 Y」。
+ */
+export const printMaterial = pgTable(
+  "print_material",
+  {
+    id: text("id").primaryKey(),
+    /**
+     * 稳定标识 —— 后台用它做「选哪一档」的引用,改名不影响引用
+     *
+     * 唯一。出厂预置是 `builtin-model` / `builtin-support`。
+     */
+    code: text("code").notNull(),
+    /** 材料名 —— 后台列表显示,打印单上也显示(「材料:光敏树脂」) */
+    name: text("name").notNull(),
+    /**
+     * 材料类别
+     *
+     * - `model`   —— 模型本体材料(树脂)。耗材克重按它的密度算。
+     * - `support` —— 支撑材料。支撑克重按它的密度算。
+     */
+    kind: text("kind", { enum: ["model", "support"] }).notNull(),
+    /** 密度 g/cm³ */
+    density: numeric("density", { precision: 8, scale: 4 }).notNull(),
+    /**
+     * 单价 分/g
+     *
+     * **整数分** —— 全仓库的金额口径(`src/config/currency.ts` 是人民币)。
+     * 450 = 4.5 元/g。
+     *
+     * **只有模型材料用得上** —— 支撑材料的加价走的是「分段规则」
+     * (阈值 + 两档单价,在 `print_pricing_config` 上),不是材料的每克价。
+     * 支撑材料行这里留 null。
+     */
+    unitPriceCentsPerGram: integer("unit_price_cents_per_gram"),
+    /** 停用而不是删(见文件头) */
+    isActive: boolean("is_active").notNull().default(true),
+    /** 后台列表排序 */
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("print_material_code_uniq_idx").on(t.code),
+    // 后台按类别筛 + 只看启用的
+    index("print_material_kind_active_idx").on(t.kind, t.isActive),
+  ]
+);
+
+export type PrintMaterialRow = typeof printMaterial.$inferSelect;
+export type NewPrintMaterialRow = typeof printMaterial.$inferInsert;
+
+/**
+ * 打印计价设置 —— **单行**(2026-11-06)
+ *
+ * `id` 恒为 `"default"`。读的时候按这个 id 取,写的时候 upsert。
+ *
+ * ## 这里的值是「兜底链」的第二环
+ *
+ * 生效值 = DB 这一行 → `PRINT_*` 环境变量 → `DEFAULT_CONFIG`
+ * (逐字段取第一个非空)。所以**这一行不存在**时,一切照旧走环境变量 ——
+ * 迁移脚本跑完不会让线上价格静默变掉,直到工作室在后台第一次点保存。
+ *
+ * ## 交期比例存的是小数
+ *
+ * `0.37` = 37%。后台界面用百分比输入框(填 37),存进来是小数 ——
+ * 跟 `delivery-tier.ts` 里 `computeDeliveryFeeCents()` 用的口径一致。
+ * 标准档恒为 0,不落列。
+ */
+export const printPricingConfig = pgTable("print_pricing_config", {
+  id: text("id").primaryKey(),
+  /**
+   * 当前生效的**模型**材料 —— 密度和单价都从它读
+   *
+   * null = 没指定 → 走环境变量 / 默认值那条路。
+   */
+  modelMaterialId: text("model_material_id").references(() => printMaterial.id, {
+    onDelete: "set null",
+  }),
+  /** 当前生效的**支撑**材料 —— 同上 */
+  supportMaterialId: text("support_material_id").references(
+    () => printMaterial.id,
+    { onDelete: "set null" }
+  ),
+  /** 后处理 / 光油固定费 分 —— 默认 1000(10 元) */
+  varnishFeeCents: integer("varnish_fee_cents").notNull().default(1000),
+  /** 后处理是否计入报价 —— 默认计入 */
+  varnishEnabled: boolean("varnish_enabled").notNull().default(true),
+  /**
+   * 自支撑比例阈值(1 = 1:1)—— 低于它不收支撑费
+   *
+   * 「本体支撑比例」= 支撑克重 ÷ 耗材克重。默认 1.0。
+   */
+  supportThreshold: numeric("support_threshold", {
+    precision: 8,
+    scale: 4,
+  })
+    .notNull()
+    .default("1.0"),
+  /**
+   * 支撑加价**第一档的上界**(2 = 1:2)—— 默认 2.0
+   *
+   * 工作室的规则(2026-11-06 原文):「模型支撑超过 1:1 的多的支撑按照
+   * 0.5 元一克,1:2 的多的支撑按照 1 元一克」。也就是超阈值的那部分**分两段**收:
+   *
+   * ```
+   * r ≤ 1         不收钱
+   * 1 < r ≤ b     超出部分 × 第一档单价   (b = 本列,默认 2 = 1:2)
+   * r > b         再超出部分 × 第二档单价
+   * ```
+   */
+  supportTier1Ratio: numeric("support_tier1_ratio", {
+    precision: 8,
+    scale: 4,
+  })
+    .notNull()
+    .default("2.0000"),
+  /**
+   * 第一档单价 分/g —— 默认 50(0.5 元/g)
+   *
+   * 1:1~1:2 之间那部分支撑按这个价收。
+   */
+  supportTier1PriceCentsPerGram: integer(
+    "support_tier1_price_cents_per_gram"
+  )
+    .notNull()
+    .default(50),
+  /**
+   * 第二档单价 分/g —— 默认 100(1 元/g)
+   *
+   * 超过 1:2 那部分支撑按这个价收。
+   */
+  supportTier2PriceCentsPerGram: integer(
+    "support_tier2_price_cents_per_gram"
+  )
+    .notNull()
+    .default(100),
+  /**
+   * 支撑加价总开关 —— **默认关**
+   *
+   * 默认开的话每一单都会悄悄多收一笔支撑费,而克重工具那边从不收这个钱,
+   * 两边对不上。
+   */
+  supportEnabled: boolean("support_enabled").notNull().default(false),
+  /**
+   * 托底高度 mm —— 支撑在平台上先长一层托住模型
+   *
+   * 工作室的工艺参数。改了之后 3D 预览里模型离平台的高度也跟着变 ——
+   * 计算和画面必须用**同一个**值。
+   */
+  supportLiftMm: numeric("support_lift_mm", { precision: 8, scale: 2 })
+    .notNull()
+    .default("5.00"),
+  /** 底板留边 mm —— 底板比模型轮廓四周各留一圈(默认 5mm) */
+  supportBaseMarginMm: numeric("support_base_margin_mm", {
+    precision: 8,
+    scale: 2,
+  })
+    .notNull()
+    .default("5.00"),
+  /** 72 小时档加价比例(0~1)—— 默认 0.1 */
+  deliveryExpressRate: numeric("delivery_express_rate", {
+    precision: 6,
+    scale: 4,
+  })
+    .notNull()
+    .default("0.1000"),
+  /** 48 小时档加价比例(0~1)—— 默认 0.37 */
+  deliveryUrgentRate: numeric("delivery_urgent_rate", {
+    precision: 6,
+    scale: 4,
+  })
+    .notNull()
+    .default("0.3700"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export type PrintPricingConfigRow = typeof printPricingConfig.$inferSelect;
+export type NewPrintPricingConfigRow = typeof printPricingConfig.$inferInsert;
+
 export const printOrderRelations = relations(printOrder, ({ many }) => ({
   events: many(printOrderEvent),
 }));
@@ -2626,6 +2848,27 @@ export const printOrderEventRelations = relations(
     order: one(printOrder, {
       fields: [printOrderEvent.orderId],
       references: [printOrder.id],
+    }),
+  })
+);
+
+/**
+ * 打印定价设置的关系(2026-11-06)
+ *
+ * 配置行指向两档生效材料。反向关系也声明上 —— 后台列表要显示
+ * 「当前模型材料是哪一档」时,顺着 `printPricingConfig.modelMaterialId`
+ * 直接查就行,不用在应用层手工 join。
+ */
+export const printPricingConfigRelations = relations(
+  printPricingConfig,
+  ({ one }) => ({
+    modelMaterial: one(printMaterial, {
+      fields: [printPricingConfig.modelMaterialId],
+      references: [printMaterial.id],
+    }),
+    supportMaterial: one(printMaterial, {
+      fields: [printPricingConfig.supportMaterialId],
+      references: [printMaterial.id],
     }),
   })
 );

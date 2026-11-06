@@ -61,6 +61,7 @@ export function AdminSidebar() {
       模板管理: t("nav.gptImageTemplates"),
       订单管理: t("nav.gptImageOrders"),
       打印订单: t("nav.printOrders"),
+      打印定价: t("nav.printPricing"),
     };
     return titleMap[title] || title;
   };

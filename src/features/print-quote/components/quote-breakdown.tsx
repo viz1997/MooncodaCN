@@ -1,13 +1,16 @@
 "use client";
 
 /**
- * 报价明细 —— 报价台和工单详情页共用
+ * 报价明细 —— 工单详情页(以及任何要显示「按什么价收的」的地方)共用
  *
  * ## 为什么要抽出来
  *
- * 之前只有报价台(`QuoteSummary`)渲染这几行,现在工单详情页也要显示
+ * 早先只有报价台(`QuoteSummary`)渲染这几行,后来工单详情页也要显示
  * 「当时按什么价收的」。抄一份的话,以后改一行文案/加一行费用就得改两处,
  * 漏一处就会出现「详情页少一项费用」这种用户会来问的问题。
+ *
+ * 报价台 2026-11-06 整页删掉,这个组件还在 —— 工单详情页那一份明细就是
+ * 它渲染的。
  *
  * ## 组件只管「摆出来」
  *
@@ -27,7 +30,7 @@ import { formatCents, formatGrams } from "@/features/print-quote/lib/format";
 /**
  * 渲染报价明细需要的那几个数
  *
- * `PrintQuote`(报价台)和 `UserPrintOrderDetail`(详情页)都满足这个形状。
+ * `PrintQuote`(报价结果)和 `UserPrintOrderDetail`(详情页)都满足这个形状。
  */
 export type QuoteBreakdownValues = {
   /** 耗材克重 g */

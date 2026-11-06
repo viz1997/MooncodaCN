@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { getTranslations } from "next-intl/server";
+import { getPrintPricingSettings } from "@/features/print-quote/lib/pricing-store";
 import { ModelChecker } from "@/features/tools/components/model-check/model-checker";
 import { Link } from "@/i18n/routing";
 
@@ -67,6 +68,12 @@ export async function generateMetadata({
 export default async function ModelCheckPage() {
   const t = await getTranslations("ModelInspector");
 
+  // 托底高度 —— 跟随后台(`/admin/print-pricing`,兜底 `PRINT_*` 环境变量)
+  //
+  // 这一页画的包裹支撑跟克重工具(`/tools/weight`)算的是**同一块几何** ——
+  // 托底高度不一样,工作室就会对着两个不一样的支撑看。
+  const settings = await getPrintPricingSettings();
+
   return (
     <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8 py-10 lg:py-14">
       <header className="max-w-2xl mb-8">
@@ -88,7 +95,7 @@ export default async function ModelCheckPage() {
           </Link>
         </p>
       </header>
-      <ModelChecker />
+      <ModelChecker supportLiftMm={settings.supportLiftMm} />
     </div>
   );
 }

@@ -75,6 +75,13 @@ interface ViewportProps {
   visibility: ViewportVisibility;
   /** 是否显示包裹支撑外壳(WJP 水溶性支撑示意) */
   showSupport: boolean;
+  /**
+   * 托底高度 (mm) —— 模型悬在平台上方多远
+   *
+   * 不传 = `SUPPORT_LIFT_MM`(5mm)。**跟随后台**
+   * (`/admin/print-pricing`)—— 画面跟克重工具算的必须是同一个几何。
+   */
+  supportLiftMm?: number | undefined;
   /** 聚焦请求:带递增序号,触发相机飞往该点 */
   focusRequest: {
     seq: number;
@@ -173,6 +180,7 @@ export default function Viewport({
   showTexture,
   visibility,
   showSupport,
+  supportLiftMm,
   focusRequest,
   fitSignal,
 }: ViewportProps) {
@@ -199,6 +207,13 @@ export default function Viewport({
   } | null>(null);
   const visibilityRef = useRef(visibility);
   const showSupportRef = useRef(showSupport);
+  /**
+   * 托底高度 —— 用 ref 读,免得改一个数就把整条建模流程重跑一遍。
+   *
+   * 同一个数要喂给三处:模型抬离平台的高度、相机取景范围、聚焦目标点。
+   */
+  const supportLiftMmRef = useRef(supportLiftMm);
+  supportLiftMmRef.current = supportLiftMm;
   const showTextureRef = useRef(showTexture);
   const resultRef = useRef(result);
   /** 每个材质槽位有没有贴图(重着色时决定干净面用白色还是灰色) */
@@ -262,7 +277,8 @@ export default function Viewport({
     if (r) {
       // 模型组已整体平移落地(最低点悬在 z=0 平台上方 5mm 的托底上),
       // 取景范围按落地后坐标计算
-      const dz = r.stats.bboxMin[2] - SUPPORT_LIFT_MM;
+      const dz =
+        r.stats.bboxMin[2] - (supportLiftMmRef.current ?? SUPPORT_LIFT_MM);
       min = new THREE.Vector3(r.stats.bboxMin[0], r.stats.bboxMin[1], 0);
       max = new THREE.Vector3(
         r.stats.bboxMax[0],
@@ -417,11 +433,12 @@ export default function Viewport({
       stats.bboxMax[1] - stats.bboxMin[1],
       stats.bboxMax[2] - stats.bboxMin[2]
     );
-    // 模型组:整体平移使包围盒最低点悬在打印平台上方 5mm(支撑托底,
-    // 模型不直接贴平台 —— 见 SUPPORT_LIFT_MM),平台平面落在世界 z=0
-    // (与网格地面重合),模型不再悬空于网格上方
+    // 模型组:整体平移使包围盒最低点悬在打印平台上方一段托底高度
+    // (支撑托底,模型不直接贴平台 —— 见 SUPPORT_LIFT_MM),平台平面落在
+    // 世界 z=0(与网格地面重合),模型不再悬空于网格上方
     const group = new THREE.Group();
-    group.position.z = -bb.min.z + SUPPORT_LIFT_MM;
+    group.position.z =
+      -bb.min.z + (supportLiftMmRef.current ?? SUPPORT_LIFT_MM);
     scene.add(group);
     groupRef.current = group;
 
@@ -752,9 +769,11 @@ export default function Viewport({
     if (!ctx) return;
     const { camera, controls } = ctx;
     const target = new THREE.Vector3(...focusRequest.point);
-    // 聚焦点是模型原始坐标,同步落地平移(模型组整体 -bboxMin.z + 托底 5mm)
+    // 聚焦点是模型原始坐标,同步落地平移(模型组整体 -bboxMin.z + 托底高度)
     const rr = resultRef.current;
-    if (rr) target.z -= rr.stats.bboxMin[2] - SUPPORT_LIFT_MM;
+    if (rr)
+      target.z -=
+        rr.stats.bboxMin[2] - (supportLiftMmRef.current ?? SUPPORT_LIFT_MM);
     const dist = focusRequest.radius ?? 40;
     const dir = new THREE.Vector3(...(focusRequest.dir ?? [0.9, -1.1, 0.75]))
       .normalize()

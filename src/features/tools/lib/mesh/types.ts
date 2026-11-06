@@ -191,7 +191,20 @@ export interface SupportShellData {
 export type ProgressStage = "weld" | "shells" | "cluster" | "support" | "done";
 
 export type WorkerInMessage =
-  | { type: "analyze"; seq: number; positions: Float32Array; fileName: string }
+  | {
+      type: "analyze";
+      seq: number;
+      positions: Float32Array;
+      fileName: string;
+      /**
+       * 托底高度 (mm) —— 支撑外壳的平台平面在模型最低点下方多远
+       *
+       * 不传 = `SUPPORT_LIFT_MM`(5mm)。**2026-11-06 起跟随后台**
+       * (`/admin/print-pricing`)—— 模型检查页画的支撑跟克重工具算的
+       * 必须是同一个几何。
+       */
+      liftMm?: number | undefined;
+    }
   | { type: "reset" };
 
 export type WorkerOutMessage =

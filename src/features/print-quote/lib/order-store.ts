@@ -60,7 +60,7 @@ export type CreatePrintOrderInput = {
    * 订单收(Sellbase 一张订单覆盖整张购物车),webhook 标 paid 时按这个
    * 关联把工单一起标上。
    *
-   * 独立下单那条路(「/quote」直接下单)不传这一列 —— 工单自己建 Sellbase
+   * 独立下单那条路(旧路「直接提交订单」)不传这一列 —— 工单自己建 Sellbase
    * 订单,靠 `sellbase_order_id` 反查。
    */
   storefrontOrderId?: string | null;

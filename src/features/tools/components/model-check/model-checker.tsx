@@ -26,6 +26,12 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { TextureDiagnosticNote } from "@/features/pricing/components/texture-diagnostic";
+import {
+  detectModelUnitScale,
+  type ModelUnitCheck,
+  measurePositionsSize,
+  scalePositions,
+} from "@/features/pricing/lib/model-units";
 import type { TextureDiagnostic } from "@/features/pricing/lib/obj-materials";
 import {
   ISSUE_COLORS,
@@ -86,7 +92,18 @@ type LoadedState = {
   releaseTextures: () => void;
 };
 
-export function ModelChecker() {
+export function ModelChecker({
+  supportLiftMm,
+}: {
+  /**
+   * 托底高度 (mm) —— 模型悬在平台上方多远
+   *
+   * 不传 = `SUPPORT_LIFT_MM`(5mm)。**2026-11-06 起跟随后台**
+   * (`/admin/print-pricing`)—— 这一页画的支撑跟克重工具算的必须是同一个
+   * 几何,不然工作室会对着两个不一样的支撑看。
+   */
+  supportLiftMm?: number | undefined;
+}) {
   const t = useTranslations("ModelInspector");
   const [model, setModel] = useState<LoadedState | null>(null);
   const [visibility, setVisibility] =
@@ -102,6 +119,14 @@ export function ModelChecker() {
   const [fitSignal, setFitSignal] = useState(0);
   const [loadError, setLoadError] = useState<MessageRef | null>(null);
   const [loading, setLoading] = useState(false);
+  /**
+   * 单位判定结果 —— 文件坐标不是毫米时才有值
+   *
+   * 这一页画的支撑跟克重工具算的必须是同一个几何(见 CLAUDE.md),
+   * 而支撑几何用的是**绝对毫米值**(托底 5mm)—— 文件坐标不是毫米时,
+   * 托底会变成「模型下面 5 个单位」,支撑比模型本身还高。
+   */
+  const [unitCheck, setUnitCheck] = useState<ModelUnitCheck | null>(null);
   const [loadingPct, setLoadingPct] = useState(0);
   const [dragOver, setDragOver] = useState(false);
   const focusSeq = useRef(0);
@@ -114,9 +139,13 @@ export function ModelChecker() {
 
   useEffect(() => {
     if (model) {
-      run({ positions: model.positions, fileName: model.fileName });
+      run({
+        positions: model.positions,
+        fileName: model.fileName,
+        liftMm: supportLiftMm,
+      });
     }
-  }, [model, run]);
+  }, [model, run, supportLiftMm]);
 
   // 卸载时回收贴图 blob URL
   useEffect(() => {
@@ -134,13 +163,28 @@ export function ModelChecker() {
       const loaded = await loadModelGeometry(file, (p) =>
         setLoadingPct(p.percent)
       );
+      /**
+       * 单位判定 —— 坐标不是毫米的文件(AI 生成 / Blender 默认导出)按最大边
+       * 100mm 归一化
+       *
+       * 跟克重工具同一条规则(`lib/model-units.ts`)。**归一化的是顶点本身**,
+       * 所以视口画的模型、分析器算的问题、支撑外壳画的几何是同一个坐标系 ——
+       * 画出来的支撑跟克重工具算出来的克重才对得上。
+       */
+      const check = detectModelUnitScale(
+        measurePositionsSize(loaded.positions)
+      );
+      setUnitCheck(check.normalized ? check : null);
+      const positions = check.normalized
+        ? scalePositions(loaded.positions, check.scale)
+        : loaded.positions;
       // 换模型前先把上一个模型的贴图 URL 回收掉
       releaseTexturesRef.current?.();
       releaseTexturesRef.current = loaded.releaseTextures;
       setVisibility(ALL_VISIBILITY);
       setShowTexture(true);
       setModel({
-        positions: loaded.positions,
+        positions,
         fileName: loaded.fileName,
         textures: {
           uvs: loaded.uvs,
@@ -281,6 +325,22 @@ export function ModelChecker() {
           )}
           {/* 贴图解析诊断 —— 白模时说明「贴图断在哪一步」 */}
           <TextureDiagnosticNote diagnostics={model?.textureDiagnostics} />
+          {/* 单位判定 —— 文件坐标不是毫米时,支撑外壳按归一化后的真实尺寸画 */}
+          {unitCheck && (
+            <output className="mb-3 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+              <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                {t("units.notMillimeters", {
+                  extent: unitCheck.originalMaxExtent.toFixed(2),
+                })}
+                <span className="mt-1 block text-amber-400/80">
+                  {t("units.treatedAs", {
+                    size: unitCheck.assumedMaxExtentMm,
+                  })}
+                </span>
+              </span>
+            </output>
+          )}
           <Sidebar
             result={result}
             busy={busy || loading}
@@ -306,6 +366,7 @@ export function ModelChecker() {
             showTexture={showTexture}
             visibility={visibility}
             showSupport={showSupport}
+            supportLiftMm={supportLiftMm}
             focusRequest={focusRequest}
             fitSignal={fitSignal}
           />

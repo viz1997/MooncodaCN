@@ -16,12 +16,21 @@
  * 2. **下单金额** —— Σ 每行的报价(**没有运费**)
  * 3. **提交打印单** —— 一次付款,钱到了才开工单
  *
+ * ## 模型的来路:克重工具
+ *
+ * 2026-11-06 起流程收成两步 —— 报价台(`/quote`)整页删掉,只留一个重定向到
+ * 这一页:
+ *
+ *   /tools/weight(量重量的工具)→ 点「加入打印单」→ /print-order(这一页)
+ *
+ * 所以这一页的「再加一个模型」指向 `/tools/weight`,空打印单的引导也是它。
+ *
  * ## 金额口径:没有运费
  *
- * 打印服务的价**就是报价本身** —— 报价台显示多少、工单上写多少、这里显示
- * 多少、实际收多少,是同一个数(见 `print-quote/lib/payment.ts`:工单的支付
- * 金额恒等于 `total_price_cents`)。结算时再加一笔运费,用户在报价台看到的
- * 总价就跟实际收的钱对不上了。
+ * 打印服务的价**就是报价本身** —— 服务端重算出来多少、工单上写多少、这里
+ * 显示多少、实际收多少,是同一个数(见 `print-quote/lib/payment.ts`:工单的
+ * 支付金额恒等于 `total_price_cents`)。结算时再加一笔运费,用户在打印单上
+ * 看到的总价就跟实际收的钱对不上了。
  *
  * ## 付款那一块跟商城结算共用一份
  *
@@ -35,12 +44,14 @@
  * 这一页跟着走,别单独开一套(那会让「中文抽屉 → 英文打印单 → 中文结算页」
  * 更割裂)。
  *
- * 唯一一处会跟着 locale 变的是**交期档位选择器** —— 它是报价台那一个组件
- * (`PrintQuote.delivery.*` 的文案)。跟结算页里的 `Payment.*` 收款文案是
- * 同一个情况:嵌在中文页面里的一个本地化小组件。
+ * 唯一跟着 locale 变的是两处小组件:**交期档位选择器**
+ * (`PrintQuote.delivery.*`)和顶部的须知 / 规范 / 售后链接
+ * (`PrintQuote.order.policy*`)—— 它们是报价台留下来的组件。跟结算页里的
+ * `Payment.*` 收款文案是同一个情况:嵌在中文页面里的本地化小组件。
  */
 
 import { Package, Printer, Trash2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -73,6 +84,21 @@ export function PrintOrderView({
   /** 登录链接(带 callbackUrl) */
   signInUrl: string;
 }) {
+  const t = useTranslations("PrintQuote");
+
+  /**
+   * 打印服务的须知 / 规范 / 售后
+   *
+   * 报价台(`/quote`)2026-11-06 整页删掉,这几条链接跟着挪到打印单上 ——
+   * 它们是打印服务的硬性要求,下单之前就该让人看到。
+   */
+  const policies = [
+    { href: "/legal/print-notice", label: t("order.policyPrintNotice") },
+    { href: "/legal/design-spec", label: t("order.policyDesignSpec") },
+    { href: "/legal/print-order-notice", label: t("order.policyOrderNotice") },
+    { href: "/legal/after-sales", label: t("order.policyAfterSales") },
+  ] as const;
+
   const {
     cart: cachedCart,
     items: cachedItems,
@@ -137,10 +163,10 @@ export function PrintOrderView({
         </div>
         <h1 className="font-serif text-3xl mb-3">打印单是空的</h1>
         <p className="text-sm text-muted-foreground mb-8 max-w-xs mx-auto text-pretty">
-          还没有要打印的模型 —— 去报价台量一个,加进来就能下单。
+          还没有要打印的模型 —— 去克重工具量一个,点「加入打印单」就能下单。
         </p>
         <Button asChild className="rounded-full px-7">
-          <Link href="/quote">去报价台</Link>
+          <Link href="/tools/weight">去量一个模型</Link>
         </Button>
       </div>
     );
@@ -177,10 +203,24 @@ export function PrintOrderView({
             {itemCount} 个模型待打印
           </p>
         </div>
-        {/* 想再加一个模型 —— 回报价台量 */}
+        {/* 想再加一个模型 —— 回克重工具量 */}
         <Button asChild variant="ghost" size="sm" className="rounded-full">
-          <Link href="/quote">再加一个模型</Link>
+          <Link href="/tools/weight">再加一个模型</Link>
         </Button>
+      </div>
+
+      {/* 打印服务的须知 / 规范 / 售后 —— 报价台删掉后,这些挪到打印单上 */}
+      <div className="mb-8 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        <span>{t("page.policyLabel")}</span>
+        {policies.map((policy) => (
+          <Link
+            key={policy.href}
+            href={policy.href}
+            className="underline underline-offset-4 transition-colors hover:text-foreground"
+          >
+            {policy.label}
+          </Link>
+        ))}
       </div>
 
       <div className="grid lg:grid-cols-[1fr_360px] gap-8 lg:gap-12 items-start">
@@ -344,6 +384,28 @@ function PrintLineRow({
                     耗材 {printSpec.materialWeightG.toFixed(1)} g
                     {printSpec.supportWeightG != null &&
                       ` · 支撑 ${printSpec.supportWeightG.toFixed(1)} g`}
+                  </p>
+                )}
+                {/*
+                  支撑加价 —— **分段**收(工作室的规则:超 1:1 的按 0.5 元/g,
+                  超 1:2 的按 1 元/g)。摆出「哪一段按哪个价收的」,用户不用
+                  猜这一笔是怎么来的。
+
+                  数字全是服务端回填的(`cart-store.ts` 的 `repriceLineItem()`),
+                  客户端不重算 —— 各档 `feeCents` 之和恒等于这一行的支撑
+                  加价,不会出现「加起来 ≠ 合计」。
+                */}
+                {(printSpec.supportFeeCents ?? 0) > 0 && (
+                  <p className="text-[11px] text-muted-foreground">
+                    支撑加价 {formatCents(printSpec.supportFeeCents ?? 0)}
+                    {printSpec.supportFeeBands?.length
+                      ? `（${printSpec.supportFeeBands
+                          .map(
+                            (band) =>
+                              `${band.weightG.toFixed(1)} g × ${formatCents(band.priceCentsPerGram)}/g`
+                          )
+                          .join(" + ")}）`
+                      : null}
                   </p>
                 )}
               </div>

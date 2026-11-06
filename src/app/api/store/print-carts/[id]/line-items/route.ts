@@ -24,12 +24,12 @@ import { z } from "zod";
 import { isR2Configured, objectExists } from "@/features/image-gen/lib/r2";
 import { normalizeDeliveryTier } from "@/features/print-quote/lib/delivery-tier";
 import { isOwnModelUrl } from "@/features/print-quote/lib/upload-key";
+import { CartKindMismatchError } from "@/features/storefront/lib/cart-kind";
 import {
   addLineItem,
   getCart,
   getPrintCartId,
 } from "@/features/storefront/lib/cart-store";
-import { CartKindMismatchError } from "@/features/storefront/lib/cart-kind";
 import {
   buildPrintServiceMetadata,
   PRINT_SERVICE_PRODUCT_ID,

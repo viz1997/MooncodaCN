@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { PrintServiceWeightTool } from "@/features/print-quote/components/print-service-weight-tool";
+import { toClientPrintConfig } from "@/features/print-quote/lib/pricing-settings";
+import { getPrintPricingSettings } from "@/features/print-quote/lib/pricing-store";
 import { getServerSession } from "@/lib/auth/server";
 
 /**
@@ -9,24 +11,31 @@ import { getServerSession } from "@/lib/auth/server";
  * 计算器)。整页的克重 / 摆盘 / 解析都在浏览器本地跑:
  *  - 模型文件**默认**不上传服务器;
  *  - 计算结果不写数据库(「只算不存」);
- *  - 唯一的网络请求是「材料参数是否需要密码」,见
- *    `/api/image-gen/pricing/materials-auth`。
+ *  - 材料参数(密度 / 支撑几何)由后台 `/admin/print-pricing` 统一配置,
+ *    访客改不了 —— 页面只读。
  *
- * ## 2026-11-06:工具页只留一个「报价下单」入口
+ * ## 2026-11-06:工具页是打印服务的入口 —— 「加入打印单」
  *
- * 2026-11-05 曾在右栏挂过「报价 + 交期 + 加入购物车」那一整套(跟 `/quote`
- * 平行的一份),当天按工作室要求撤掉 —— 工具里不该直接放那些下单控件。
- * 现在右栏是一个入口卡片:点「去报价下单」到 `/quote`,那边能选交期、填
- * 收货信息、付款下单。
+ * 流程收成两步:
+ *
+ *   /tools/weight(量重量的工具,公开)→ 点「加入打印单」→ /print-order(打印单)
+ *
+ * 报价台(`/quote`)整页删掉了 —— 它跟工具页用的是**同一个**克重计算器,
+ * 重复了一份「报价 + 交期 + 加进打印单」的下单控件。工作室要的是「工具里
+ * 量完直接加进打印单,金额在打印单上确认」。
  *
  * 两条边界照旧:
- * - **工具页不显示价格** —— 计算器跑工具模式,几何数据不抛给服务端,也就
- *   没有报价请求。价格、交期、下单全在报价台那一条路上
- * - **模型不上传** —— 上传是**下单动作**的一部分,不是量重量的副产品
+ * - **工具页不显示价格** —— 价格是服务端算的,工具页只出几何(体积 / 表面积 /
+ *   尺寸 / 支撑克重),交给服务端重算报价。价格、交期、下单全在打印单那一条路上
+ * - **模型不上传** —— 上传是**加购动作**的一部分,不是量重量的副产品
  *
- * 量好的模型会**接力**给报价台(用户不用在那边重选一遍文件),但接力只在
- * 客户端跳转里成立 —— 未登录会被弹去登录页(整页跳转),接力作废,所以卡片
- * 上写明了这一点。登录态由页面的 RSC 查好传下去。
+ * ## 登录要在量之前
+ *
+ * 加打印单要登录(工单挂在账号名下,模型文件也落到用户自己的 R2 分区)。
+ * 登录那一下是**整页跳转**,浏览器里的模型会没 —— 所以卡片上的按钮在没登录
+ * 时是「去登录」,文案写的是「先登录再量」,而不是让人量完再被弹去登录。
+ *
+ * 登录态由页面的 RSC 查好传下去。
  *
  * ## 为什么从 `/pricing` 挪到 `/tools/weight`
  *
@@ -49,8 +58,8 @@ export async function generateMetadata({
     : "3D Print Weight Calculator — Resin Usage Estimator";
 
   const description = isZh
-    ? "上传 3D 模型,本地解析体积与表面积,算出耗材克重、支撑克重与最佳打印摆盘角度。量完可直接去报价台下单 —— 量重量的过程模型不上传。"
-    : "Upload a 3D model and get its resin weight, support weight and best print orientation — computed locally in your browser. Head to the quote desk to order; nothing is uploaded while measuring.";
+    ? "上传 3D 模型,本地解析体积与表面积,算出耗材克重、支撑克重与最佳打印摆盘角度。量完直接「加入打印单」,在打印单上确认金额再下单 —— 量重量的过程模型不上传。"
+    : "Upload a 3D model and get its resin weight, support weight and best print orientation — computed locally in your browser. Add it to your print order and confirm the total there; nothing is uploaded while measuring.";
 
   return {
     title,
@@ -81,10 +90,34 @@ export async function generateMetadata({
   };
 }
 
-export default async function WeightToolPage() {
-  // 登录态 —— 只为了在入口卡片上写明「没登录会先跳登录页,接力会丢」
+export default async function WeightToolPage({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}) {
+  const { locale } = await params;
+
+  // 登录态 —— 没登录不能加打印单(工单要挂在账号名下)
   const session = await getServerSession();
   const isLoggedIn = Boolean(session?.user?.id);
 
-  return <PrintServiceWeightTool isLoggedIn={isLoggedIn} />;
+  // 登录链接带 callbackUrl —— 登录完回到工具页
+  const signInUrl = `/sign-in?callbackUrl=${encodeURIComponent(
+    `/${locale}/tools/weight`
+  )}`;
+
+  // 生效中的打印定价设置 —— 密度 / 支撑几何
+  //
+  // **访客改不了**(2026-11-06):这些数来自后台 `/admin/print-pricing`
+  // (兜底 `PRINT_*` 环境变量)。工具页只显示**克重**,不显示价格 ——
+  // 单价 / 后处理 / 阈值 / 交期比例一律不往浏览器里发,价由服务端算。
+  const clientConfig = toClientPrintConfig(await getPrintPricingSettings());
+
+  return (
+    <PrintServiceWeightTool
+      isLoggedIn={isLoggedIn}
+      signInUrl={signInUrl}
+      clientConfig={clientConfig}
+    />
+  );
 }

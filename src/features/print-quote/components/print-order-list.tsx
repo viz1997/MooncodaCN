@@ -3,9 +3,11 @@
 /**
  * 「我的打印订单」—— 列表展示组件
  *
- * 两处共用:
- *  - 报价台 `/quote` 底部(下单成功后新单会插到最上面)
- *  - dashboard `/dashboard/print-orders` 整页(经 `PrintOrdersDashboardView`)
+ * 用在 dashboard `/dashboard/print-orders` 整页(经 `PrintOrdersDashboardView`)。
+ *
+ * 2026-11-06 报价台(`/quote`)整页删掉之前,这里还挂在报价台底部 ——
+ * 报价台没了,这个组件就只剩 dashboard 那一个用方了(所以「查看全部」那个
+ * 链接也一并删掉:dashboard 页自己就是全部)。
  *
  * ## 只读,没有「移除」
  *
@@ -15,10 +17,9 @@
  *
  * ## 配色走语义 token
  *
- * 报价台在 marketing 布局(暖色 stone 底),dashboard 在 shadcn 主题里 ——
- * 两边的 `--card` / `--border` / `--muted-foreground` 都是同一套暖灰,
- * 用语义 token 一份代码两处都对。状态 chip 是例外:它有自己的语义色,
- * 统一放在 `lib/status-ui.ts`,用户侧和后台共用一份。
+ * dashboard 在 shadcn 主题里 —— `--card` / `--border` / `--muted-foreground`
+ * 都是同一套暖灰,用语义 token 一份代码两处都对。状态 chip 是例外:它有自己
+ * 的语义色,统一放在 `lib/status-ui.ts`,用户侧和后台共用一份。
  */
 
 import { PackageSearch } from "lucide-react";
@@ -38,12 +39,9 @@ import { Link } from "@/i18n/routing";
 
 export function PrintOrderList({
   orders,
-  showAllLink = true,
   loading = false,
 }: {
   orders: UserPrintOrder[];
-  /** 报价台里显示「查看全部」;dashboard 页自己就是全部,不显示 */
-  showAllLink?: boolean;
   /** 首屏还在拉 —— 别急着显示「还没有下单记录」 */
   loading?: boolean;
 }) {
@@ -71,14 +69,6 @@ export function PrintOrderList({
           <PackageSearch className="size-4 text-muted-foreground" />
           {t("list.title")}
         </h3>
-        {showAllLink && (
-          <Link
-            href="/dashboard/print-orders"
-            className="text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
-          >
-            {t("list.viewAll")}
-          </Link>
-        )}
       </div>
 
       <ul className="divide-y divide-border">

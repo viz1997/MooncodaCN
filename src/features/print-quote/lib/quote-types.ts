@@ -89,6 +89,38 @@ export type PrintQuoteInput = {
 };
 
 /**
+ * 支撑加价的**一档**(2026-11-06)
+ *
+ * 工作室的规则:「模型支撑超过 1:1 的多的支撑按照 0.5 元一克,1:2 的多的
+ * 支撑按照 1 元一克」。也就是超阈值的那部分**分两段**收:
+ *
+ * ```
+ * r ≤ 1         不收钱
+ * 1 < r ≤ 2     超出部分 × 第一档单价(0.5 元/g)
+ * r > 2         再超出部分 × 第二档单价(1 元/g)
+ * ```
+ *
+ * `r` = 本体支撑比例 = 支撑克重 ÷ 耗材克重。
+ *
+ * ## 单位:**分**
+ *
+ * 跟 `PrintQuote` 的其余金额字段一致 —— 引擎内部用「元」,转换只发生在
+ * 这一层(`quote-server.ts` 的 `computePrintQuote()`)。
+ */
+export type PrintSupportFeeBand = {
+  /** 这一档的**下**界(比例)—— 第一档是阈值,后面是上一档的上界 */
+  fromRatio: number;
+  /** 这一档的**上**界(比例)—— 最后一档是 null(没有上限) */
+  upToRatio: number | null;
+  /** 这一档的单价 分/g */
+  priceCentsPerGram: number;
+  /** 这一档收钱的支撑克重 g */
+  weightG: number;
+  /** 这一档的钱 分 */
+  feeCents: number;
+};
+
+/**
  * 报价结果
  *
  * `totalPriceCents` 恒等于四项费用之和(各自取整后再加),不是先加后取整 ——
@@ -114,6 +146,19 @@ export type PrintQuote = {
   supportFeeCents: number;
   /** 超出 1:1 阈值的支撑克重 g */
   excessSupportWeightG: number;
+  /**
+   * 支撑加价的**分段明细**(2026-11-06)
+   *
+   * 工作室的规则是分段的(1:1~1:2 一档,超 1:2 另一档),所以一笔支撑费
+   * 不是一个数 —— 得能说清「哪一段按哪个价收的」。
+   *
+   * **各档 `feeCents` 之和恒等于 `supportFeeCents`** —— 明细加起来必须
+   * 等于合计(取整的差额由最后一档吸收),否则用户会看到「8.3 g × ¥0.50/g
+   * + 4.2 g × ¥1.00/g」跟「支撑加价 ¥6.60」对不上。
+   *
+   * 支撑加价关掉时是空数组(不是 null)—— 界面直接 `.map()` 就行。
+   */
+  supportFeeBands: PrintSupportFeeBand[];
   /**
    * 交期加价(分)—— 按小计的**比例**收(见 `delivery-tier.ts`)
    *

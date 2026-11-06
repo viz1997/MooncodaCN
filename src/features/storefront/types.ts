@@ -20,6 +20,7 @@ import type {
   DeliveryRates,
   DeliveryTierId,
 } from "@/features/print-quote/lib/delivery-tier";
+import type { PrintSupportFeeBand } from "@/features/print-quote/lib/quote-types";
 
 import type { CartKind } from "./lib/cart-kind";
 
@@ -254,6 +255,24 @@ export interface PrintServiceSpec {
    * 认一份 —— 两边各认一份就会出现「页面写 +¥20.65、实际收 ¥19.85」。
    */
   deliveryRates?: DeliveryRates | null;
+  /**
+   * 这一行的支撑加价(分)—— **纯展示用**(2026-11-06)
+   *
+   * 服务端重算报价时算出来的,同样在读购物车的时候回填。
+   *
+   * 支撑加价默认**关着**(后台 `/admin/print-pricing` 里开),所以大多数行
+   * 上这个是 null —— 界面按它 > 0 才摆出来。
+   */
+  supportFeeCents?: number | null;
+  /**
+   * 支撑加价的**分段明细** —— **纯展示用**(2026-11-06)
+   *
+   * 工作室的规则是分段的(1:1~1:2 按 0.5 元/g,超 1:2 按 1 元/g),一笔支撑
+   * 费不是一个数,得说清哪一段按哪个价收的。
+   *
+   * 各档 `feeCents` 之和恒等于 `supportFeeCents`。
+   */
+  supportFeeBands?: PrintSupportFeeBand[] | null;
 }
 
 /**

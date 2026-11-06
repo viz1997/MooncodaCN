@@ -65,6 +65,14 @@ type Props = {
   /** Show support shell visualization (semi-transparent shell around model). Default false. */
   showSupport?: boolean | undefined;
   /**
+   * 托底高度 (mm) —— 模型悬在平台上方多远
+   *
+   * 不传 = `SUPPORT_LIFT_MM`(5mm)。**2026-11-06 起由工作室在
+   * `/admin/print-pricing` 里配** —— 画出来的托底厚度必须跟算克重那边
+   * 用的是同一个值,否则画面跟报价对不上。
+   */
+  supportLiftMm?: number | undefined;
+  /**
    * 是否显示模型自带的贴图。默认 true。
    *
    * 关掉时材质退回 MTL 的 `Kd` 本色(纯色视图)—— 贴图本体留在
@@ -144,6 +152,7 @@ export function ObjViewer({
   rotationZ,
   scale,
   showSupport,
+  supportLiftMm,
   showTexture,
   onReady,
   onProgress,
@@ -164,6 +173,10 @@ export function ObjViewer({
   // 支撑开关(给异步的建模流程读)
   const showSupportRef = useRef(showSupport);
   showSupportRef.current = showSupport;
+  // 托底高度 —— 同一个数要喂给:模型抬离平台的高度 + 支撑外壳的地面平面。
+  // 用 ref 读,免得改一个数就把整条建模流程重跑一遍。
+  const supportLiftMmRef = useRef(supportLiftMm);
+  supportLiftMmRef.current = supportLiftMm;
   // 贴图开关 —— 同理:建模是异步的,必须读 ref 拿到最新值
   const showTextureRef = useRef(showTexture);
   showTextureRef.current = showTexture;
@@ -370,11 +383,12 @@ export function ObjViewer({
     const rotBox = new THREE.Box3().setFromObject(model, true);
     if (rotBox.isEmpty()) return;
 
-    // 把模型底部抬到 Z=SUPPORT_LIFT_MM（网格平面之上）—— 支撑先长一层
-    // 5mm 托底，模型悬在托底上不贴平台；Z 是高度方向，网格在 Z=0 平面上。
+    // 把模型底部抬到 Z=托底高度（网格平面之上）—— 支撑先长一层
+    // 托底，模型悬在托底上不贴平台；Z 是高度方向，网格在 Z=0 平面上。
     // 托底是**实际打印尺寸**的固定厚度，不跟着模型缩放走（算克重那边也是
-    // 在缩放后的网格上减固定 `SUPPORT_LIFT_MM`）。
-    model.position.z = -rotBox.min.z + SUPPORT_LIFT_MM;
+    // 在缩放后的网格上减同一个值）。
+    model.position.z =
+      -rotBox.min.z + (supportLiftMmRef.current ?? SUPPORT_LIFT_MM);
     model.position.x = -(rotBox.min.x + rotBox.max.x) / 2;
     model.position.y = -(rotBox.min.y + rotBox.max.y) / 2;
     model.updateMatrixWorld(true);
@@ -475,10 +489,10 @@ export function ObjViewer({
     const supportModel = supportModelRef.current;
     if (!show || !model || !scene || !supportModel) return;
 
-    // 支撑壳按**缩放后**的几何算 —— 托底是实际打印尺寸的固定 5mm,
-    // 不该跟着模型缩放走(算克重那边是在缩放后的网格上减固定
-    // `SUPPORT_LIFT_MM`)。画出来的托底厚度必须跟算出来的一致,否则画面跟
-    // 报价对不上。
+    // 支撑壳按**缩放后**的几何算 —— 托底是实际打印尺寸的固定厚度,
+    // 不该跟着模型缩放走(算克重那边是在缩放后的网格上减同一个值)。
+    // 画出来的托底厚度必须跟算出来的一致,否则画面跟报价对不上。
+    const liftMm = supportLiftMmRef.current;
     const [sx, sy, sz] = getScaleTuple();
     const scaledModel = scaleSupportModel(supportModel, sx, sy, sz);
     // 旋转到当前打印姿态(口径跟 obj-exporter / 摆盘算法一致:先 X 后 Y 后 Z)
@@ -488,7 +502,9 @@ export function ObjViewer({
       rotationYRef.current ?? 0,
       rotationZRef.current ?? 0
     );
-    const shell = buildSupportShell(rotated, scaledModel.faceEnclosed);
+    const shell = buildSupportShell(rotated, scaledModel.faceEnclosed, {
+      liftMm,
+    });
     if (shell.positions.length < 9) return;
 
     // 局部坐标(已缩放 + 按打印姿态旋转的 mm) → 世界坐标:
@@ -837,7 +853,7 @@ export function ObjViewer({
   // biome-ignore lint/correctness/useExhaustiveDependencies: 支撑壳层依赖当前模型状态
   useEffect(() => {
     updateSupportShell(!!showSupport);
-  }, [showSupport]);
+  }, [showSupport, supportLiftMm]);
 
   // Apply rotation when rotationX/rotationY/rotationZ change (for optimal print angle + manual fine-tuning)
   // Also re-applies scale so changes to dimensions are reflected in the 3D preview.
@@ -874,9 +890,10 @@ export function ObjViewer({
     // 计算旋转+缩放后的世界坐标包围盒
     const rotBox = new THREE.Box3().setFromObject(model, true);
     if (!rotBox.isEmpty()) {
-      // 把模型底部抬到 Z=SUPPORT_LIFT_MM（网格平面之上，支撑托底 5mm），Z 是高度方向。
-      // 托底是实际打印尺寸的固定 5mm,不跟着模型缩放走。
-      model.position.z = -rotBox.min.z + SUPPORT_LIFT_MM;
+      // 把模型底部抬到 Z=托底高度（网格平面之上，支撑托底），Z 是高度方向。
+      // 托底是实际打印尺寸的固定厚度,不跟着模型缩放走。
+      model.position.z =
+        -rotBox.min.z + (supportLiftMmRef.current ?? SUPPORT_LIFT_MM);
       // 同时居中 X/Y 到原点（水平方向）
       const centerX = (rotBox.min.x + rotBox.max.x) / 2;
       const centerY = (rotBox.min.y + rotBox.max.y) / 2;
@@ -893,7 +910,7 @@ export function ObjViewer({
     }
     // 旋转/缩放后更新支撑壳层位置
     updateSupportShell(!!showSupport);
-  }, [rotationX, rotationY, rotationZ, scale, showSupport]);
+  }, [rotationX, rotationY, rotationZ, scale, showSupport, supportLiftMm]);
 
   return (
     <ObjPreview

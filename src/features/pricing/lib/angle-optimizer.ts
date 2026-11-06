@@ -136,6 +136,19 @@ export type SupportParams = {
    * 支撑克重按这个密度算。
    */
   supportDensity?: number | undefined;
+  /**
+   * 托底高度 (mm) —— 平台面在模型最低点下方多远
+   *
+   * 省略 = 用 `SUPPORT_LIFT_MM`(5mm)。**2026-11-06 起由工作室在
+   * `/admin/print-pricing` 里配**,从这里一路传到 Worker。
+   */
+  liftMm?: number | undefined;
+  /**
+   * 底板留边 (mm) —— 底板比模型轮廓四周各留多宽
+   *
+   * 省略 = 用 `SUPPORT_BASE_MARGIN_MM`(5mm)。同上,后台可配。
+   */
+  baseMarginMm?: number | undefined;
 };
 
 export const DEFAULT_SUPPORT_PARAMS: SupportParams = {
@@ -205,10 +218,12 @@ export function totalSurfaceAreaMM2(model: SupportModel): number {
  * @param rotXDeg X 轴旋转角度
  * @param rotYDeg Y 轴旋转角度
  * @param rotZDeg Z 轴旋转角度
- * @param params 两个密度:模型密度 + 支撑密度(支撑是另一种材料)
+ * @param params 两个密度:模型密度 + 支撑密度(支撑是另一种材料),
+ *   外加托底高度 / 底板留边(后台配的几何参数)
  * @param opts.gridSizeMM 栅格精度(mm),默认 1
  * @param opts.baseMarginMM 底板留边(mm)—— 底板比模型轮廓四周各留多宽,
- *   默认 `SUPPORT_BASE_MARGIN_MM`(5)。工作室的工艺:底板比模型大一圈。
+ *   默认取 `params.baseMarginMm`,再退回 `SUPPORT_BASE_MARGIN_MM`(5)。
+ *   工作室的工艺:底板比模型大一圈。
  * @param opts.coloredFaceMask 每个面的彩色标记(1 = 有贴图)
  */
 export function computeSupportAtPose(
@@ -226,13 +241,20 @@ export function computeSupportAtPose(
   const rotated = rotateSupportMesh(model.mesh, rotXDeg, rotYDeg, rotZDeg);
   // 克重只要体积 + 下朝向面:外壳的顶面 / 外壁 / 渲染索引都省掉。
   // 外壳间隙(可视化用的)不参与计算 —— 体积走真几何。
+  //
+  // 几何参数(托底 / 留边)来自后台 —— 一次调用里两处(外壳 + 体积)必须用
+  // 同一份,否则外壳画的跟算出来的对不上。
+  const liftMm = params.liftMm;
+  const baseMarginMM = opts?.baseMarginMM ?? params.baseMarginMm;
   const shell = buildSupportShell(rotated, model.faceEnclosed, {
     includeCurtain: false,
     includeTopIndex: false,
+    liftMm,
   });
   const volume = computeSupportVolume(shell, rotated, {
     gridSizeMM: opts?.gridSizeMM,
-    baseMarginMM: opts?.baseMarginMM,
+    baseMarginMM,
+    liftMm,
   });
 
   // 下朝向面 = 支撑顶面(支撑材料贴着模型的那一面)

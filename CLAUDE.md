@@ -12,7 +12,7 @@ Mooncoda is a production-ready Next.js SaaS template. It provides a complete fou
 
 | 系统 | 职责 | 技术栈 |
 |---|---|---|
-| **NextDevTpl**(本仓库) | AI 生图 SaaS 后端:user / credits / photo / imageJob / AI 路由 / WeChat 小程序登录 **+ 商品目录(商品 / SKU 变体 / 价格)+ 定价 + 购物车(`/cart`)+ 订单事实 + 收货地址 + 打印工单(`/quote` 报价 → 打印单 `/print-order` → `print_order`,按 `user_id` 归属,登录后下单;克重工具 `/tools/weight` 只出报价下单入口,**不带加购入口**;打印服务**不走商城购物袋**,见「打印服务走「打印单」」)** | Next.js 16 + Drizzle + PostgreSQL |
+| **NextDevTpl**(本仓库) | AI 生图 SaaS 后端:user / credits / photo / imageJob / AI 路由 / WeChat 小程序登录 **+ 商品目录(商品 / SKU 变体 / 价格)+ 定价 + 购物车(`/cart`)+ 订单事实 + 收货地址 + 打印工单(克重工具 `/tools/weight` 量 → 「加入打印单」→ 打印单 `/print-order` → `print_order`,按 `user_id` 归属,登录后下单;报价台 `/quote` 已删,只留重定向;打印服务**不走商城购物袋**,见「打印服务走「打印单」」)** | Next.js 16 + Drizzle + PostgreSQL |
 | **微信支付 / 支付宝**(外部服务) | **自己直连的收款通道**:钱直接进我们自己的商户号 / 账户,没有中间层抽成,定价完全由本仓库说了算。**代码写好了,商户号 / 应用还没走完开通流程** —— 界面上摆出来但选不了(见「两个支付通道」的两道闸) | 微信支付 V3 Native(扫码)+ 支付宝电脑网站支付 |
 | **Shopify**(外部服务)**已下线** | 曾经只做银行卡 / Shop Pay 的收银台(草稿订单,逐分相等)。2026-11-05 工作室决定只用微信 + 支付宝,**不再接新单** —— 代码留着给老单用,整目录待拆 | Shopify Admin GraphQL API + 草稿订单 |
 | **Sellbase**(独立服务)**过渡期保留** | 旧收款路:Sellbase 建单 + Stripe 付款页。**不再接新单**(已建好的旧单还能重取支付入口)。两个新通道跑通后整个 `src/features/sellbase/` 拆掉 | Supabase Edge Functions(**跟本仓库同一个 Supabase 项目**)+ Stripe(MIT) |
@@ -255,7 +255,7 @@ All tables use `text` primary keys with `nanoid()` defaults.
 
 Handles three concerns in order:
 1. **API rate limiting** — Pattern-matched per-route (auth, upload)
-2. **Auth protection** — `/dashboard/**`、`/admin/**`、`/quote` require session token cookie, auth routes redirect if logged in
+2. **Auth protection** — `/dashboard/**`、`/admin/**` require session token cookie, auth routes redirect if logged in(`/quote` 2026-11-06 摘掉 —— 它现在只是个重定向到公开的 `/print-order`)
 3. **i18n routing** — next-intl locale prefix handling
 
 ### AI Provider Abstraction (`src/lib/ai/openai.ts`)
@@ -340,6 +340,37 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
   之和),不是各自算好再取整 —— 否则会出现 43 + 53 ≠ 95 这种对不上的情况。
   这个取整是显示层的策略,显示的总克重可能比真实总克重高 1~2 g。
 
+**模型文件的单位:坐标不是毫米的时候(2026-11-06)**
+
+> **这一段是踩过坑之后加的** —— 用户拿一个 Meshy 导出的模型来量,
+> 屏幕上「支撑比例 686161%」,整个模型泡在一根比它还高的支撑柱里。
+
+- **工具把模型坐标当成毫米**(`obj-parser.ts` 的 `// dimensions in mm
+  (assuming OBJ is in mm)`)。但 AI 生成(Meshy)、Blender 默认导出的文件,
+  坐标是**归一化的**(±1),不是毫米。
+- **托底 5mm 是固定的毫米值**,不跟着模型缩放 → 平台被拉到模型下面 5 个
+  **单位** → 支撑比模型本身还高 → 耗材克重 0.001 g、支撑比例几万倍
+  (实测比雄小狗 56,868%、猫 51,929%)。**页面上看不出任何异常** ——
+  数字都「有」,就是离谱。
+- **判据在 `src/features/pricing/lib/model-units.ts` 的
+  `detectModelUnitScale()`** —— 看**最大边**:≥ 10mm 就算毫米(不动它),
+  < 10mm 判成「坐标不是毫米」。用最大边不用最小边,是为了让**扁平模型**
+  (冰箱贴 40×40×2mm)留在「按毫米算」那一档。
+- **归一化到最大边 100mm**(`ASSUMED_MAX_EXTENT_MM`)—— 只是一个**起点**,
+  用户可以在尺寸面板里改成实际尺寸,改完支撑 / 克重 / 报价一起重算。
+- **三个地方都要归一化,规则只有一份**:
+  | 位置 | 怎么接 |
+  |---|---|
+  | 克重工具 `pricing-calculator.tsx` | 载入时判定 → 设 `dimMode="custom"` + 缩放因子 → 面板上挂横幅 + 「改回原始尺寸」 |
+  | 批量模式 `batch-processor.ts` | 批量**没有尺寸调节**,用户没法自己纠 → 每个文件各自判定,缩放系数接到 `client.search/pose` 的 `scales` |
+  | 模型检查 `model-checker.tsx` | **归一化的是顶点本身**,视口画的模型 / 分析器 / 支撑外壳在同一个坐标系 —— 否则两个工具画的支撑不是同一个 |
+- **横幅不是可选项** —— 工具替人改了尺寸,就得告诉人。克重工具的横幅上带
+  「改回原始尺寸」按钮(用户坚持把文件里的数字当毫米时用)。
+- **退化输入不动它** —— 某一轴是 0 / NaN 的文件**不缩放**(缩了就是在给
+  坏文件编数字)。
+- 行为由 `src/test/pricing/pure/model-units.test.ts` 守住(判定 + 真几何:
+  归一化后支撑比例回到个位数百分比)。
+
 **智能摆盘跑在 Worker 里(2026-11-03)**:
 
 - `src/features/pricing/workers/angle-optimizer.worker.ts` —— 焊接 + 625 个
@@ -382,7 +413,8 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 行为由 `src/test/tools/pure/support-shell.test.ts` 守住(几何 + 双密度 +
 空腔 + 掠射列),`src/test/pricing/pure/support-initial-angle.test.ts` 守住
 (客户端 + 批量汇总),`src/test/pricing/pure/pose-comparison.test.ts` 守住
-(省 X% 的算法)。
+(省 X% 的算法),`src/test/pricing/pure/model-units.test.ts` 守住(单位判定 +
+归一化之后支撑比例回到正常量级)。
 
 ### 币种:人民币,只有一处定义(2026-11-05)
 
@@ -424,8 +456,8 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 
 ### 打印工单交期档位(2026-11-05)
 
-打印工单(`/quote` 报价 → `print_order`)有三档交期,**加价按比例收**,不是固定
-金额:
+打印工单(`/tools/weight` 量 → 打印单 `/print-order` → `print_order`)有三档
+交期,**加价按比例收**,不是固定金额:
 
 | 档位 | 时限 | 比例 | 默认 |
 |---|---|---|---|
@@ -465,13 +497,16 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 **一行目录商品都不会出现**。
 
 ```
-报价台 /quote:上传模型 → 算报价(选交期)
+工具页 /tools/weight:选模型 → 量克重(几何全在浏览器里算)
   → 点「加入打印单」→ 模型打包上传 R2(按用户分区)
   → POST /api/store/print-carts/{id}/line-items(带 printSpec)
   → 服务端**重算**一遍价 → 落打印单
-  → 打印单 /print-order:打印列表 + 下单金额 + 收货地址
+  → 打印单 /print-order:打印列表 + 交期档位 + 下单金额 + 收货地址
   → 提交 → 同一个事务里落 storefront_order + print_order → 一次付款
 ```
+
+> **报价台(`/quote`)2026-11-06 整页删掉**,只留一个重定向到 `/print-order`。
+> 以前是「报价台 → 加入打印单」,现在是**工具页 → 加入打印单**,少一跳。
 
 #### 两张车,一张表
 
@@ -502,8 +537,8 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 #### 打印单页摆三样东西
 
 1. **打印列表** —— 每个模型一行:尺寸、耗材 / 支撑克重、交期档位、单价、删
-   一行。交期档位用报价台那**同一个** `DeliveryTierPicker`(一份 UI、一套
-   i18n 文案)。
+   一行。交期档位用 `DeliveryTierPicker`(一份 UI、一套 i18n 文案,工具页
+   加进来时是标准档,用户在打印单上改)。
 2. **下单金额** —— Σ 每行的报价(**没有运费**)。
 3. **提交打印单** —— 一次付款,钱到了才开工单。
 
@@ -519,7 +554,7 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
   `pricing-constants.ts` 的 `shippingCentsForCart(kind, subtotal)`:打印单恒
   为 0。客户端(购物袋页 / 打印单页)和服务端(`checkout.ts`)**用同一份** ——
   两处各写一遍就会出现「页面没运费、结算收了一笔」。打印服务的价就是报价
-  本身:报价台显示多少、工单上写多少、实际收多少,是同一个数(见
+  本身:打印单显示多少、工单上写多少、实际收多少,是同一个数(见
   `print-quote/lib/payment.ts`:工单的支付金额恒等于 `total_price_cents`)。
 - **加价摆出来靠服务端回填** —— 服务端重算报价时把 `deliveryFeeCents` /
   `deliveryRates` 填进 `printSpec`(见 `cart-store.ts` 的
@@ -537,19 +572,29 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
   哨兵值 `service_print_3d`,拿去 `findProductById()` 查不到是**预期**的)。
   共享契约在 `src/features/storefront/lib/print-service.ts`(纯文件,客户端
   和服务端都 import —— 不能在里面 import 服务端模块)。
-- **价格只在报价台一处算** —— 工具页(`/tools/weight`)**不显示价格、也不调
-  报价接口**(计算器跑工具模式,几何数据不抛给服务端)。要改价格口径,只改
-  报价台那一处。
+- **价格只在服务端一处算** —— 工具页(`/tools/weight`)**不显示价格**;它只
+  把几何数据(体积 / 表面积 / 尺寸 / 支撑克重)作为 `printSpec` 抛给服务端,
+  价由服务端重算(`print-quote/lib/quote-server.ts`)。要改价格口径,只改
+  服务端那一处。
 - **模型只在用户点「加入打印单」那一刻才上传** —— 量重量的过程模型一个
   字节都不出浏览器。上传是加购动作的一部分,不是量重量的副产品。
 
-#### 报价台的出口是「加入打印单」
+#### 工具页的出口是「加入打印单」(2026-11-06)
 
-- 报价台(`/quote`)的主按钮是**「加入打印单」** —— 点下去上传模型、落打印
-  单,然后跳 `/print-order` 确认金额再提交。按钮点完就地变成「已加入 +
-  查看打印单」。
-- **打开报价台不会建空打印单** —— `usePrintCart({ enabled: false })`。
-  真的加了行才去要那张车(否则每个访客都留一行 DB + 一个 cookie)。
+- 工具页(`/tools/weight`)右栏那张「加入打印单」卡片就是出口 —— 点下去上传
+  模型、落打印单,然后跳 `/print-order` 确认金额再提交。
+- **卡片按登录态分两种**:未登录是「去登录」(跳登录页,带 `callbackUrl`
+  回工具页);已登录是「加入打印单」。登录态由页面 RSC 查好传下去。
+- **打开工具页不会建空打印单** —— `usePrintCart({ enabled: false })`。
+  真的点了「加入打印单」才去要那张车(否则每个访客都留一行 DB + 一个
+  cookie)。
+- **必须先登录再量** —— 加购接口要 session(401 `AUTH_REQUIRED`),而登录完
+  回来是**整页跳转**(`sign-in-form.tsx` 走 `window.location.href`),内存里
+  那个模型选不回来。所以登录得放在量之前 —— 卡片上就是这么写的,别再搞
+  「量完再登录,登录后把模型带回来」那套接力(接力模块
+  `print-quote/lib/model-handoff.ts` 已经删掉)。
+- **交期档位在打印单上选** —— 工具页加进来时一律标准档,用户在打印单那
+  一行上改。
 - **旧路(直接提交订单)留着但界面上不走** ——
   `order-form.tsx` / `order-created-card.tsx` / `POST /api/print-orders` 都
   还在树里。两个出口会让用户不知道钱付到哪儿去了,而且旧路**不收收货地址**
@@ -561,7 +606,7 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 |---|---|
 | `src/test/storefront/pure/cart-kind.test.ts` | 两张车的判定 / 兜底方向 / 放错车的话术 |
 | `src/test/storefront/pure/print-cart-totals.test.ts` | 打印单**没有运费**,合计 = 小计 |
-| `src/test/storefront/pure/print-service-cart.test.ts` | 打印服务行的判据 / hash / 形状 |
+| `src/test/storefront/pure/print-service-cart.test.ts` | 打印服务行的判据 / hash / 形状 + 工具页传出来的几何原样搬运 |
 | `src/test/storefront/pure/cart-totals.test.ts` | 商城购物袋的金额口径(折扣落在单价上) |
 | `src/test/sellbase/pure/linked-print-order.test.ts` | 工单跟着商城订单变 |
 
@@ -583,28 +628,192 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 - **这一页只有目录商品** —— 打印服务走自己的打印单(`/print-order`)。
 - 页面在 `(marketing-atelier)` 组(跟 `/checkout` 一条路)—— 商城这一套
   (`/cart` / `/checkout` / 购物袋抽屉)共用商城的头部 + 抽屉。**打印单
-  (`/print-order`)不在这一组**(它在 `(marketing)`,跟 `/quote` 一条路)。
+  (`/print-order`)不在这一组**(它在 `(marketing)`,打印服务自己的页面)。
 
-### 模型接力:工具页 → 报价台(2026-11-06)
+### 模型从工具页直接进打印单(2026-11-06)
 
-克重工具量完之后,右栏那张「报价下单」卡片点下去,**把量好的模型一起带到
-`/quote`** —— 用户不用在报价台重新选一遍文件。
+打印服务对外只有两页:**工具页**(`/tools/weight`,量克重)和**打印单**
+(`/print-order`,下单)。报价台(`/quote`)整页删掉,只留一个重定向到
+`/print-order`。
 
-- **接力靠模块级变量**(`src/features/print-quote/lib/model-handoff.ts`):
-  客户端路由跳转**不刷新文档**,同一个 JS 上下文里变量还在。URL 带不了
-  (几 MB 的 OBJ + 贴图 blob),sessionStorage 也存不了(`ModelFile` 里装的是
-  `URL.createObjectURL()` 的 blob URL,不是字符串)。
-- **取走即清空** —— 接力是一次性的:报价台刷新一下不会又冒出个模型。
-- **只留最新那一个** —— 用户在工具页换了模型,之前那个作废(留着旧的 =
-  报价单上的尺寸跟用户最后选的对不上)。
-- **尺寸一起搬过去** —— 计算器的 `initialModel` 把工具里调过的缩放
-  (`appliedScales`)一起接过来,报价单上的尺寸跟用户看到的一致。
-- **接力只在客户端跳转里成立** —— 整页刷新没了;未登录被弹去登录页(整页
-  跳转)也没了。工具页的入口卡片上写明了这一点(登录态由页面 RSC 查好传
-  下去)。
-- **摆盘结果不接力** —— 接力过去的是**初始角度**的支撑克重;要最优姿态得在
-  报价台再跑一次智能摆盘。
-- 行为由 `src/test/print-quote/pure/model-handoff.test.ts` 守住。
+```
+/tools/weight  →  「加入打印单」  →  /print-order  →  提交  →  一次付款
+```
+
+- **量完直接加,不再绕一圈** —— 工具页右栏那张「加入打印单」卡片是唯一
+  出口。点下去:模型打包上传 R2 → `POST /api/store/print-carts/{id}/line-items`
+  (带 `printSpec`)→ 服务端重算价 → 落打印单 → 跳 `/print-order`。
+- **几何数据走 `printSpec`,价格走服务端** —— 计算器把体积 / 表面积 / 尺寸 /
+  支撑克重推给父组件(`PricingCalculator` 的 `onQuoteInput`),加购时一起
+  发上去;**价不在这儿算**,服务端重算(见 `cart-store.ts` 的
+  `repriceLineItem()`)。
+- **计算器不再有「报价模式」** —— 早先 `quoteMode` 控制着「几何要不要抛给
+  父组件」,报价台删掉之后这个开关没了,几何**一直**推给父组件。
+- **工具有两个出口状态** —— 未登录:卡片显示「去登录」;已登录:显示
+  「加入打印单」。
+- **先登录再量** —— 加购接口要 session(401 `AUTH_REQUIRED`),而登录完回来
+  是**整页跳转**(`sign-in-form.tsx` 的 `window.location.href`),内存里的
+  模型选不回来。所以登录放在量之前,卡片文案里写明了这一条。
+  早先那套「模型接力」(`print-quote/lib/model-handoff.ts`,靠模块级变量
+  跨路由跳转)已经删掉 —— 接力只扛得住客户端路由跳转,扛不住登录往返。
+- **摆盘结果不接力** —— 加进打印单的是**当前姿态**的支撑克重(智能摆盘
+  跑过就是最优姿态的,没跑就是初始角度的)。
+
+### 打印定价后台(2026-11-06)
+
+工作室的要求:「需要能够在 dashboard 后台设置**克重的计算和计价、材料、
+计算逻辑**」。
+
+- **位置**:`/admin/print-pricing`(管理员后台,不是 `/dashboard`)
+- **材料组织**:**多档材料可选** —— 后台维护一份材料库,再指定哪一档当前生效
+- **工具页口径**:**跟随后台,访客改不了** —— 密度 / 支撑几何都读后台
+- **计算逻辑范围**:① 计价基础 ② 交期三档比例 ③ 支撑几何参数
+  ④ 自支撑阈值规则(分段计价)
+
+#### 两张新表
+
+| 表 | 干什么 |
+|---|---|
+| `print_material` | 材料库(多档)。`code` 唯一;`kind` = `model` / `support`;`density` g/cm³;`unit_price_cents_per_gram` **分/g**;`is_active` 停用而不是删 |
+| `print_pricing_config` | **单行**(`id = "default"`)。存「当前生效的是哪两档材料」+ 计价基础 + 分段规则 + 支撑几何 + 交期两档比例 |
+
+- **单价不在配置行里** —— 单价跟密度是**同一个材料**的属性(密度 1.2 的树脂
+  就是 450 分/g)。配置行只存「当前生效的是哪一档」,密度和单价从材料行读。
+  改价 = 改材料行。
+- **支撑的价在配置行上,不在材料行上** —— 支撑的加价是一条**规则**
+  (阈值 + 两档上界 + 两档单价),不是材料的每克价。同一卷支撑,挂得越多
+  单价越贵。所以支撑材料行的 `unit_price_cents_per_gram` 恒为 null。
+- **停用而不是删** —— 工单留档要引得到材料。配置行正引用着的那一档**不许
+  停用**(返回 `MATERIAL_IN_USE`)。
+
+#### 生效值的回退链(逐字段)
+
+```
+DB 配置行 → PRINT_* 环境变量 → DEFAULT_CONFIG
+```
+
+- **逐字段**取第一个非空,不是「配置行优先,没有就整个回退」—— 后台只改
+  了密度,单价仍然走环境变量那一档。
+- **迁移脚本不写配置行** —— 只建表 + 播种两条出厂材料预设。所以**跑完迁移
+  线上价格不会静默变掉**,直到工作室在后台第一次点「保存」,才把「当前生效
+  值」固化进 DB(后台顶部会挂一条横幅提示「还在走环境变量兜底」)。
+- **非法值退回兜底** —— 密度 ≤ 0、单价 < 0、比例 ∉ [0,1]、第一档上界 <
+  阈值 → 退回 env / 默认值。报价链路不能因为后台手滑就收一个离谱的价。
+- **DB 读失败 → 整份退回 env / 默认值**,并记一条 error 日志。**绝不把
+  异常抛进报价链路** —— 收钱的链路崩了,工作室看到的是「下不了单」。
+
+纯逻辑那一半在 `print-quote/lib/pricing-settings.ts`(**不碰 DB**,能进
+`unit` project 跑单测),连库那一半在 `print-quote/lib/pricing-store.ts`
+(`getPrintPricingSettings()` 用 React 的 `cache()` 包一层,同一请求内只查
+一次库;**跨请求不缓存** —— 后台改完设置要立刻生效)。
+
+#### 报价引擎吃 settings 入参
+
+`computePrintQuote(settings, input)` / `computePrintServiceLinePrice(settings, input)`
+—— **settings 是第一个、必填的入参**,漏了就是类型错误。「忘了传 settings,
+悄悄按环境变量收钱」这种错不能留。
+
+- `quote-server.ts` 里的 `PRINT_QUOTE_CONFIG` 模块级常量**删掉**了 ——
+  它就是「配置只能来自 env」的固化。
+- 引擎内部仍然是纯函数,只是多了一个入参;`calculatePrice()` 本身不动。
+- **服务端不信客户端带来的价**这条不变 —— 变的只是「价从哪儿来」。
+
+#### 支撑加价 = 分段计价(工作室 2026-11-06 补充)
+
+工作室的规则原文:「模型支撑超过 1:1 的多的支撑按照 **0.5 元一克**,1:2 的
+多的支撑按照 **1 元一克**」。
+
+```
+本体支撑比例 r = 支撑克重 ÷ 耗材克重     (1 = 1:1,2 = 1:2)
+
+r ≤ 1        不收钱(1:1 以内的支撑是工艺必需)
+1 < r ≤ b    超出部分 × 第一档单价(0.5 元/g)   ← b = support_tier1_ratio
+r > b        再超出部分 × 第二档单价(1 元/g)
+```
+
+**分段的克重怎么切**:
+
+```
+第一档克重 = W × (min(r, b) − T) / r
+第二档克重 = W × (r − b) / r          (r > b 时)
+```
+
+两档加起来 = `W × (r − T) / r` —— 跟原来单档公式的「超阈值克重」**完全
+一致**,所以「阈值以下不收、超出部分收钱」这条不变,只是超出部分现在**分两
+段定价**。
+
+- **超阈值克重是按比例折出来的** —— `W × (r − T) / r`。阈值 `T = 1` 时它
+  正好等于「支撑克重 − 耗材克重」(同一个式子两种写法),但**两档之间的切分
+  只有比例能算**:20 g 支撑、耗材 6.67 g(比例 3)→ 超阈值 13.33 g,其中
+  1:1~1:2 那段 6.67 g、第二档 6.67 g。减法只能给一个总数,分不出两段。
+- **纯函数**在 `pricing-engine.ts` 的 `computeSupportFeeBands()`;报价层
+  换算成「分」在 `quote-server.ts`。
+- **各档 `feeCents` 之和恒等于 `supportFeeCents`** —— 逐档取整再相加跟总额
+  取整可能差 1 分,差额由**最后一档**吸收。否则打印单上会出现「8.3 g ×
+  ¥0.50/g + 4.2 g × ¥1.00/g」跟「支撑加价 ¥6.60」对不上。
+- **默认关**(`support_enabled = false`)—— 默认开的话每一单都会悄悄多收
+  一笔支撑费,而克重工具那边从不收这个钱,两边对不上。
+- 打印单上摆出「支撑加价 ¥x(6.7 g × ¥0.50/g)」—— 服务端回填到 `printSpec`
+  的 `supportFeeCents` / `supportFeeBands`,**纯展示用,不参与定价**。
+
+#### 工具页跟随后台,访客改不了
+
+- **密度 / 支撑密度 / 托底 / 留边走受控 prop** —— RSC 读
+  `getPrintPricingSettings()`,把客户端需要的子集(`ClientPrintConfig`:
+  两个密度 + 两个几何参数)当 prop 传下去。
+- **单价 / 后处理 / 阈值 / 交期比例一律不发到浏览器** —— 工具页不显示价格,
+  那些是服务端的事。
+- **「材料参数」弹窗改成只读** —— 密度改了,支撑克重就是假的,而服务端报价按
+  自己那份密度算,两边对不上。`/api/image-gen/pricing/materials-auth` 路由
+  和 `PRICING_MATERIALS_PASSWORD` 一起退役。
+- **支撑几何参数化** —— `SUPPORT_LIFT_MM` / `SUPPORT_BASE_MARGIN_MM` 原来
+  是写死的常量(六个地方读),现在全部是**可选参数**,默认值不变(5mm)。
+  Worker 不用改协议(`SupportParams` 加字段自动就带过去了)。**计算和画面
+  必须用同一个 `liftMm`** —— 3D 预览画的托底高度跟算出来的支撑克重对不上,
+  用户会来问。
+
+#### 后台页面
+
+| 文件 | 干什么 |
+|---|---|
+| `src/app/[locale]/(admin)/admin/print-pricing/page.tsx` | 路由(RBAC 由父 layout 的 `checkAdmin()` 守卫,页面不重复检查) |
+| `src/features/print-quote/admin/components/print-pricing-admin-view.tsx` | 客户端视图(antd `Form` + `useAction`) |
+| `src/features/print-quote/admin/pricing-actions.ts` | server actions(跟 `admin/actions.ts` 分开 —— 一个管定价配置,一个管工单状态机) |
+
+- **三块**:① 当前生效值(只读卡 + 「还在走环境变量兜底」横幅)② 计价设置
+  (表单)③ 材料库(表格 + **就地展开**的新增/编辑表单)。
+- **配置界面在页面上直接处理,不开弹窗** —— 工作室的口味(配置 UI 不要
+  弹窗挡住别的内容)。材料编辑表单就地展开在表格下面。
+- **金额输入框收整数分**(450 = 4.5 元/g);**交期比例界面用百分比**(填 37),
+  提交时换算成 0~1 的小数 —— `delivery-tier.ts` 的口径就是小数。
+- **出错返回 `{ok:false, code}` 而不是 throw** —— throw 会被 next-safe-action
+  糊成「服务器错误」。码:`TIER1_RATIO_BELOW_THRESHOLD` / `MATERIAL_NOT_FOUND`
+  / `MATERIAL_IN_USE` / `CODE_DUPLICATE` / `SAVE_FAILED`。
+- **「use server」文件不许 re-export 类型** —— Turbopack 会把它注册成
+  server action,运行时引用一个不存在的类型绑定 → ReferenceError,整个页面
+  500(见 `src/test/repo/pure/use-server-exports.test.ts`)。
+
+#### 迁移脚本(用户自己跑)
+
+`scripts/apply-print-pricing-schema.ts`(幂等,手写,不走 `db:generate`):
+建 `print_material` + `print_pricing_config` + 索引,播种两条出厂材料预设
+(`builtin-model` 出厂树脂 密度 1.2 / 450 分/g、`builtin-support` 水溶性支撑
+密度 1.28 / 单价 null),**不写配置行**。`ON CONFLICT DO NOTHING` ——
+工作室改过的预置不会被改回去。
+
+```bash
+pnpm migrate:apply-print-pricing   # = tsx scripts/apply-print-pricing-schema.ts
+```
+
+**不代跑** —— 用户的生产库由用户自己执行。
+
+#### 行为由单测守住
+
+| 测试 | 守住什么 |
+|---|---|
+| `src/test/print-quote/pure/pricing-settings.test.ts` | 回退链(逐字段)/ 材料库选哪一档 / 非法值退回默认 / env 那一档 |
+| `src/test/print-quote/pure/support-fee-bands.test.ts` | 分段的克重怎么切 / 各档之和 = 合计 / 阈值以下不收 |
+| `src/test/print-quote/pure/delivery-tier.test.ts` | 交期加价(比例 / 基数 / 恒等式) |
 
 ### 两个支付通道(2026-11-05)
 

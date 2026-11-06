@@ -126,6 +126,13 @@ export interface SupportShellOptions {
    * 只有可视化需要;克重工具用不上。
    */
   includeTopIndex?: boolean | undefined;
+  /**
+   * 托底高度 (mm) —— 平台面在模型最低点下方多远
+   *
+   * 默认 `SUPPORT_LIFT_MM`(5mm)。**2026-11-06 起这个值由工作室在
+   * `/admin/print-pricing` 里配** —— 不传就退回 5mm(行为跟以前一样)。
+   */
+  liftMm?: number | undefined;
 }
 
 /**
@@ -174,7 +181,9 @@ export function buildSupportShell(
   // 平台平面(模型坐标):托底 5mm(支撑托着模型,模型不贴平台)再略下方,
   // 主线程整组平移后即为打印平台
   const groundZ =
-    mesh.bboxMin[2] - SUPPORT_LIFT_MM - Math.max(0.05, mesh.diag * 0.002);
+    mesh.bboxMin[2] -
+    (options?.liftMm ?? SUPPORT_LIFT_MM) -
+    Math.max(0.05, mesh.diag * 0.002);
   const gap = Math.min(5, Math.max(0.8, mesh.diag * 0.02)) * gapScale;
   const positions = new Float32Array(vc * 3);
   for (let v = 0; v < vc; v++) {
@@ -529,6 +538,15 @@ export interface SupportVolumeOptions {
    * (老口径,工作室报数对不上)。
    */
   baseMarginMM?: number | undefined;
+  /**
+   * 托底高度 (mm) —— 平台面在模型最低点下方多远
+   *
+   * 默认 `SUPPORT_LIFT_MM`(5mm)。**2026-11-06 起这个值由工作室在
+   * `/admin/print-pricing` 里配** —— 不传就退回 5mm(行为跟以前一样)。
+   *
+   * 底板那圈留边的**厚度**也是这个值(底板就是平台上那层托底)。
+   */
+  liftMm?: number | undefined;
 }
 
 /**
@@ -689,7 +707,8 @@ export function computeSupportVolume(
   const positions = mesh.vertices;
   // 平台面比模型最低点低 5mm:支撑先长一层托底,模型悬在托底上(见
   // `SUPPORT_LIFT_MM`)。托底那层也是支撑材料,算进支撑体积。
-  const platformZ = mesh.bboxMin[2] - SUPPORT_LIFT_MM;
+  const liftMm = options?.liftMm ?? SUPPORT_LIFT_MM;
+  const platformZ = mesh.bboxMin[2] - liftMm;
   const faceVertex = mesh.faceVertex;
   const faceAreas = mesh.faceAreas;
 
@@ -1028,7 +1047,7 @@ export function computeSupportVolume(
     for (let i = 0; i < cellCount; i++) {
       if (dilated[i] && !covered[i]) extraCells++;
     }
-    const extraVolume = extraCells * cellArea * SUPPORT_LIFT_MM;
+    const extraVolume = extraCells * cellArea * liftMm;
     volume += extraVolume;
     // 全包裹也跟着涨:底板那圈也在打印出来的整块里(上面没有模型,
     // 全包裹 = 平台 → 底板顶面 = 5mm)
