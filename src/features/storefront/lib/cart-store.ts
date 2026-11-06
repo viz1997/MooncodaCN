@@ -39,6 +39,21 @@
  *
  * 游客浏览时不做会话查询 —— 那是热路径,每次读购物车都查一次 session 表
  * 太贵。用户登录后 cookie 里还是游客那张车,结算时再打上 user_id。
+ *
+ * ## 两种车(2026-11-06)
+ *
+ * 打印服务**不再走商城购物袋** —— 工作室的说法:「模型打印是不走商城正常
+ * 的购物车的,而是走打印下单」。
+ *
+ * | 性质 | 装什么 | cookie |
+ * |---|---|---|
+ * | `storefront` 商城购物袋 | 只放目录商品 | `wjp_cart_id` |
+ * | `print` 打印单 | 只放打印服务(自带模型) | `wjp_print_cart_id` |
+ *
+ * 两种车在同一张 `cart` 表里,靠 `cart.kind` 区分。**关卡在数据层**:
+ * `addLineItem()` 拒绝放错车的行 —— 绕过界面的直接调 API 也进不去。
+ * 读车的时候也按性质过滤(`toCart()`),所以老购物车里混着的打印服务行
+ * 不会出现在商城购物袋里。
  */
 
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -47,8 +62,17 @@ import { cookies } from "next/headers";
 import { PRICE_CURRENCY, PRICE_REGION_ID } from "@/config/currency";
 import { db } from "@/db";
 import { type CartItemRow, type CartRow, cart, cartItem } from "@/db/schema";
+import type { DeliveryTierId } from "@/features/print-quote/lib/delivery-tier";
 import { computePrintServiceLinePrice } from "@/features/print-quote/lib/quote-server";
 import type { Cart, CartLineItem, CartLineItemMetadata } from "../types";
+import {
+  assertLineAllowedInCart,
+  type CartKind,
+  isLineAllowedInCart,
+  normalizeCartKind,
+  PRINT_CART_KIND,
+  STOREFRONT_CART_KIND,
+} from "./cart-kind";
 import { computeSpecHash } from "./cart-spec";
 import { findProductById } from "./mock-catalog";
 import { calculatePricing } from "./pricing";
@@ -65,6 +89,14 @@ import {
 /* -------------------------------------------------------------------------- */
 
 export const CART_COOKIE_NAME = "wjp_cart_id";
+/**
+ * 打印单的 cookie(2026-11-06)
+ *
+ * 跟商城购物袋**分开** —— 两张车两种性质,不能共用一个 cookie:共用的话
+ * 「商城购物袋」会指向一张打印单(或者反过来),用户在商城里结算时看到的是
+ * 一堆打印服务行。
+ */
+export const PRINT_CART_COOKIE_NAME = "wjp_print_cart_id";
 export const CART_COOKIE_OPTIONS = {
   httpOnly: true,
   sameSite: "lax" as const,
@@ -72,6 +104,11 @@ export const CART_COOKIE_OPTIONS = {
   /** 7 天(对齐 preview_share 默认过期时间) */
   maxAge: 60 * 60 * 24 * 7,
 };
+
+/** 性质 → cookie 名 */
+export function cartCookieName(kind: CartKind): string {
+  return kind === PRINT_CART_KIND ? PRINT_CART_COOKIE_NAME : CART_COOKIE_NAME;
+}
 
 /**
  * 从 cookie 读 cart_id(服务端调用)
@@ -82,11 +119,27 @@ export async function getCartId(): Promise<string | null> {
 }
 
 /**
+ * 从 cookie 读打印单的 id(服务端调用)
+ */
+export async function getPrintCartId(): Promise<string | null> {
+  const store = await cookies();
+  return store.get(PRINT_CART_COOKIE_NAME)?.value ?? null;
+}
+
+/**
  * 写 cart_id cookie(服务端调用,通常在 POST /api/store/carts 里)
  */
 export async function setCartId(cartId: string): Promise<void> {
   const store = await cookies();
   store.set(CART_COOKIE_NAME, cartId, CART_COOKIE_OPTIONS);
+}
+
+/**
+ * 写打印单的 cookie
+ */
+export async function setPrintCartId(cartId: string): Promise<void> {
+  const store = await cookies();
+  store.set(PRINT_CART_COOKIE_NAME, cartId, CART_COOKIE_OPTIONS);
 }
 
 /**
@@ -144,13 +197,16 @@ function repriceLineItem(row: CartItemRow): CartLineItem {
     if (priced) {
       unitPriceCents = priced.unitPriceCents;
       discountedUnitPriceCents = priced.discountedUnitPriceCents;
-      // 耗材克重由**服务端**回填 —— 客户端没有材料密度,自己算不出来。
-      // 只影响展示(购物车里显示「XX g」),不参与定价。
+      // 耗材克重 / 交期加价 / 各档比例 由**服务端**回填 —— 客户端没有材料
+      // 密度,也不认一份加价比例(比例可以用环境变量调)。
+      // 都只影响展示(购物车里显示「XX g」、打印单上摆出三档的加价),不参与定价。
       metadata = {
         ...metadata,
         printSpec: {
           ...printSpec,
           materialWeightG: priced.quote.materialWeightG,
+          deliveryFeeCents: priced.quote.deliveryFeeCents,
+          deliveryRates: priced.quote.deliveryRates,
         },
       };
     }
@@ -198,11 +254,24 @@ function repriceLineItem(row: CartItemRow): CartLineItem {
 
 /** cart 行 → domain Cart(带 items) */
 function toCart(row: CartRow, items: CartItemRow[]): Cart {
+  const kind = normalizeCartKind(row.kind);
   return {
     id: row.id,
+    kind,
     currencyCode: row.currencyCode as typeof PRICE_CURRENCY,
     regionId: row.regionId,
-    items: items.map(repriceLineItem),
+    // 按性质过滤 —— 商城购物袋里不会有打印服务行,打印单里不会有目录商品行。
+    //
+    // 老购物车(2026-11-06 之前)可能混着打印服务行(那是「打印服务进商城
+    // 购物车」那版留下的),那些行**还在库里**,只是不再出现在商城购物袋里。
+    items: items
+      .filter((item) =>
+        isLineAllowedInCart(
+          kind,
+          item.metadata as unknown as CartLineItemMetadata
+        )
+      )
+      .map(repriceLineItem),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -232,14 +301,20 @@ async function loadCartItemRows(cartId: string): Promise<CartItemRow[]> {
  *
  * 不写 cookie —— 写 cookie 的是 `getOrCreateCart`(它知道是不是该复用
  * 已有 cookie)。
+ *
+ * `kind` 决定这张车能装什么:商城购物袋只装目录商品,打印单只装打印服务。
  */
-export async function createCart(userId?: string | null): Promise<Cart> {
+export async function createCart(
+  userId?: string | null,
+  kind: CartKind = STOREFRONT_CART_KIND
+): Promise<Cart> {
   const id = `cart_${nanoid(16)}`;
   const now = new Date();
 
   await db.insert(cart).values({
     id,
     userId: userId ?? null,
+    kind,
     currencyCode: PRICE_CURRENCY,
     regionId: PRICE_REGION_ID,
     createdAt: now,
@@ -248,6 +323,7 @@ export async function createCart(userId?: string | null): Promise<Cart> {
 
   return {
     id,
+    kind,
     currencyCode: PRICE_CURRENCY,
     regionId: PRICE_REGION_ID,
     items: [],
@@ -286,18 +362,42 @@ export async function deleteCart(cartId: string): Promise<boolean> {
  * 1. cookie 里的 cart 还在 → 用它
  * 2. cookie 过期了(或者没有)→ 登录用户找回「我的购物车」
  * 3. 都没有 → 新建
+ *
+ * **只找商城购物袋**(`kind = "storefront"`)—— 打印单是另一张车,另一个
+ * cookie。混起来的话,用户在商城里结算时看到的会是一堆打印服务行。
  */
 export async function getOrCreateCart(): Promise<Cart> {
-  const cookieId = await getCartId();
+  return getOrCreateCartOfKind(STOREFRONT_CART_KIND);
+}
+
+/**
+ * 拿打印单;不存在就创建一张新的
+ *
+ * 跟 `getOrCreateCart()` 是同一个流程,只是 cookie 和性质不同。
+ */
+export async function getOrCreatePrintCart(): Promise<Cart> {
+  return getOrCreateCartOfKind(PRINT_CART_KIND);
+}
+
+/**
+ * 按性质拿车(两种车共用这一份流程)
+ */
+async function getOrCreateCartOfKind(kind: CartKind): Promise<Cart> {
+  const cookieName = cartCookieName(kind);
+  const store = await cookies();
+  const cookieId = store.get(cookieName)?.value ?? null;
 
   if (cookieId) {
     const row = await loadCartRow(cookieId);
-    if (row) {
+    // cookie 指向的车**性质对得上**才认 —— 否则清掉 cookie 往下走
+    // (老 cookie 指向的车没有 kind 列,迁移后默认 storefront,打印单的
+    //  cookie 撞上商城车的情况只可能出现在手工改过 cookie 的情况下)
+    if (row && normalizeCartKind(row.kind) === kind) {
       const items = await loadCartItemRows(cookieId);
       return toCart(row, items);
     }
     // cookie 指向的 cart 没了(被删了 / 换了库)→ 清掉 cookie 往下走
-    await clearCartId();
+    store.delete(cookieName);
   }
 
   // cookie 没了 —— 这时候才查一次会话(冷路径,不是热路径)
@@ -306,18 +406,26 @@ export async function getOrCreateCart(): Promise<Cart> {
     const rows = await db
       .select()
       .from(cart)
-      .where(eq(cart.userId, userId))
+      .where(and(eq(cart.userId, userId), eq(cart.kind, kind)))
       .limit(1);
     const row = rows[0];
     if (row) {
-      await setCartId(row.id);
+      if (kind === PRINT_CART_KIND) {
+        await setPrintCartId(row.id);
+      } else {
+        await setCartId(row.id);
+      }
       const items = await loadCartItemRows(row.id);
       return toCart(row, items);
     }
   }
 
-  const created = await createCart(userId);
-  await setCartId(created.id);
+  const created = await createCart(userId, kind);
+  if (kind === PRINT_CART_KIND) {
+    await setPrintCartId(created.id);
+  } else {
+    await setCartId(created.id);
+  }
   return created;
 }
 
@@ -361,6 +469,12 @@ export interface AddLineItemInput {
  * - 不查目录(打印服务不在 `mock-catalog` 里)
  * - 定价走 `computePrintServiceLinePrice()`(按克重)
  * - **数量恒为 1** —— 一件活一个模型,客户端传什么都按 1 算
+ *
+ * ## 放错车 → 抛错(2026-11-06)
+ *
+ * 商城购物袋只放目录商品,打印单只放打印服务。**关卡在数据层** ——
+ * 绕过界面的直接调 API 也进不去。抛的是 `CartKindMismatchError`,
+ * 路由层翻译成 400 并把话带给用户(见 `storefront/lib/cart-kind.ts`)。
  */
 export async function addLineItem(
   cartId: string,
@@ -369,7 +483,11 @@ export async function addLineItem(
   const cartRow = await loadCartRow(cartId);
   if (!cartRow) throw new Error(`cart ${cartId} 不存在`);
 
+  const kind = normalizeCartKind(cartRow.kind);
   const printSpec = getPrintServiceSpec(input.spec);
+
+  // 放错车 → 拒(不是静默忽略:用户点了「加入」却什么都没发生,最费解)
+  assertLineAllowedInCart(kind, input.spec);
 
   let productId: string;
   let productHandle: string;
@@ -570,6 +688,79 @@ export async function clearCartItems(cartId: string): Promise<void> {
 }
 
 /**
+ * 改打印服务行的交期档位(打印单专用)
+ *
+ * ## 为什么不直接 UPDATE 那一行
+ *
+ * 档位参与「同 spec 合并」的 hash(见 `print-service.ts` 的
+ * `printServiceSpecHashParts()`)—— 改了档位,hash 就变了,那一行的
+ * `spec_hash` 也得跟着改。直接改 metadata 而不改 hash,这一行就跟自己的
+ * 规格对不上了:后面再加同样规格的东西,合并判据会失灵(算出两个 hash)。
+ *
+ * ## 所以是「先加后删」
+ *
+ * 1. 按新档位 `addLineItem()` —— 走同一套合并逻辑(万一已经有一行同样
+ *    规格的,合并进去,数量仍然是 1)
+ * 2. 再把旧行删掉
+ *
+ * 顺序反了会出事:先删再加的话,加的那一步失败,用户的这一行就凭空没了。
+ * 现在这个顺序里,加失败 → 旧行还在(什么都没变),加成功 → 旧行删掉。
+ *
+ * 档位没变 → 什么都不做(直接返回这一行)。不然「先加后删」会把自己
+ * 刚加的那行删掉(同一份规格,hash 一样,合并到自己头上)。
+ */
+export async function updatePrintLineDeliveryTier(
+  cartId: string,
+  lineItemId: string,
+  deliveryTier: DeliveryTierId
+): Promise<{ cart: Cart; lineItem: CartLineItem }> {
+  const existing = await db
+    .select()
+    .from(cartItem)
+    .where(and(eq(cartItem.id, lineItemId), eq(cartItem.cartId, cartId)))
+    .limit(1);
+  const existingRow = existing[0];
+  if (!existingRow) throw new Error(`line item ${lineItemId} 不存在`);
+
+  const metadata = existingRow.metadata as unknown as CartLineItemMetadata;
+  const printSpec = getPrintServiceSpec(metadata);
+  if (!printSpec) {
+    throw new Error("这一行不是打印服务行,没有交期档位");
+  }
+
+  if (printSpec.deliveryTier === deliveryTier) {
+    const fresh = await getCart(cartId);
+    if (!fresh) throw new Error(`cart ${cartId} 不存在`);
+    return { cart: fresh, lineItem: repriceLineItem(existingRow) };
+  }
+
+  // 1. 按新档位加一行(价格服务端重算 —— 加价是按小计的比例收的)
+  const added = await addLineItem(cartId, {
+    productId: PRINT_SERVICE_PRODUCT_ID,
+    spec: {
+      ...metadata,
+      printSpec: { ...printSpec, deliveryTier },
+    } as CartLineItemMetadata,
+    quantity: 1,
+  });
+
+  // 2. 删掉旧行
+  await db
+    .delete(cartItem)
+    .where(and(eq(cartItem.id, lineItemId), eq(cartItem.cartId, cartId)));
+
+  await db
+    .update(cart)
+    .set({ updatedAt: new Date() })
+    .where(eq(cart.id, cartId));
+
+  const fresh = await getCart(cartId);
+  if (!fresh) throw new Error(`cart ${cartId} 不存在`);
+
+  return { cart: fresh, lineItem: added.lineItem };
+}
+
+/**
  * 把「已经买掉的那些行」从用户的购物车里摘掉
  *
  * ## 什么时候用
@@ -596,17 +787,21 @@ export async function clearCartItems(cartId: string): Promise<void> {
  * `cart.user_id` —— 结算时打过户(见 `stampCartOwner`),所以这一列找得到
  * 这个人的所有购物车(换设备登录也在内)。已经买过的规格,别的设备上也不该
  * 再留着让人重复下单。
+ *
+ * **再按性质分一次**(2026-11-06)—— 商城购物袋和打印单是两张车:
+ * 买的是打印服务就去打印单上摘,买的是目录商品就去商城购物袋上摘。
  */
 export async function removeOrderedLinesFromCarts(
   userId: string,
-  ordered: Array<{ specHash: string; quantity: number }>
+  ordered: Array<{ specHash: string; quantity: number }>,
+  kind: CartKind = STOREFRONT_CART_KIND
 ): Promise<void> {
   if (ordered.length === 0) return;
 
   const cartRows = await db
     .select({ id: cart.id })
     .from(cart)
-    .where(eq(cart.userId, userId));
+    .where(and(eq(cart.userId, userId), eq(cart.kind, kind)));
   if (cartRows.length === 0) return;
 
   const cartIds = cartRows.map((row) => row.id);

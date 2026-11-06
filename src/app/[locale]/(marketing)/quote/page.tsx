@@ -160,13 +160,7 @@ export default async function QuotePage({
 
       {/* 报价台 */}
       <div className="mt-10 md:mt-12">
-        <QuoteWorkbench
-          user={{
-            name: session.user.name ?? "",
-            email: session.user.email ?? "",
-          }}
-          initialOrders={rows.map(toUserPrintOrder)}
-        />
+        <QuoteWorkbench initialOrders={rows.map(toUserPrintOrder)} />
       </div>
     </div>
   );

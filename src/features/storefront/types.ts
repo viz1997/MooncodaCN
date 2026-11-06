@@ -16,7 +16,12 @@
  */
 
 import type { PRICE_CURRENCY } from "@/config/currency";
-import type { DeliveryTierId } from "@/features/print-quote/lib/delivery-tier";
+import type {
+  DeliveryRates,
+  DeliveryTierId,
+} from "@/features/print-quote/lib/delivery-tier";
+
+import type { CartKind } from "./lib/cart-kind";
 
 /* -------------------------------------------------------------------------- */
 /*  Product / Variant(对齐 atelier store 的 Product 契约)                     */
@@ -232,6 +237,23 @@ export interface PrintServiceSpec {
    * 传错也收不到钱,只是购物车里的克重显示会不对。
    */
   materialWeightG?: number | null;
+  /**
+   * 这一行的交期加价(分)—— **纯展示用**(2026-11-06)
+   *
+   * 服务端重算报价时算出来的,同样在读的时候回填。
+   *
+   * 有了它,客户端就能反推出「不含加价的小计」(`行价 - 加价`),于是打印单
+   * 上能把**三档**的加价都摆出来(「48 小时 +¥20.65」)—— 用户在点加急之前
+   * 就知道要加多少钱,而不是点了之后才发现价跳了。
+   */
+  deliveryFeeCents?: number | null;
+  /**
+   * 各档加价比例 —— **纯展示用**(2026-11-06)
+   *
+   * 服务端给的(比例可以用环境变量调,见 `quote-server.ts`)。客户端不自己
+   * 认一份 —— 两边各认一份就会出现「页面写 +¥20.65、实际收 ¥19.85」。
+   */
+  deliveryRates?: DeliveryRates | null;
 }
 
 /**
@@ -291,6 +313,13 @@ export interface CartLineItem {
 
 export interface Cart {
   id: string;
+  /**
+   * 车的性质(2026-11-06)
+   *
+   * `storefront` 商城购物袋 / `print` 打印单。打印服务**不走商城购物袋**
+   * —— 工作室的说法:「模型打印是不走商城正常的购物车的,而是走打印下单」。
+   */
+  kind: CartKind;
   /** 单币种 CNY(简化,见 plan) */
   currencyCode: typeof PRICE_CURRENCY;
   /** 区域代码 */

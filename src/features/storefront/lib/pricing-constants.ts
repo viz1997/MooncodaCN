@@ -21,6 +21,8 @@
 
 import { PRICE_CURRENCY, PRICE_REGION_ID } from "@/config/currency";
 
+import { type CartKind, PRINT_CART_KIND } from "./cart-kind";
+
 /* -------------------------------------------------------------------------- */
 /*  常量                                                                      */
 /* -------------------------------------------------------------------------- */
@@ -96,4 +98,29 @@ export function calculateRemainingForFreeShipping(
     0,
     PRICING_CONSTANTS.FREE_SHIPPING_THRESHOLD_CENTS - subtotalCents
   );
+}
+
+/**
+ * 这张车的运费 —— **打印单没有运费**(2026-11-06)
+ *
+ * ## 为什么是**一张车一个口径**
+ *
+ * 打印服务的价**就是报价本身**:报价台显示多少、工单上写多少、收银台收
+ * 多少,是同一个数(见 `print-quote/lib/payment.ts`:工单的支付金额恒等于
+ * `total_price_cents`)。到结算时再加一笔运费,用户在报价台看到的总价跟
+ * 实际收的钱就对不上了 —— 三处得是同一个数,不然用户只会认为是系统算错。
+ *
+ * ## 为什么放在这里
+ *
+ * 客户端(购物袋页 / 打印单页)和服务端(结算)**都要**用这条规则。两处各写
+ * 一遍的话,改了一处忘了另一处,就会出现「页面上没有运费、结算时收了一笔」。
+ * 所以它跟 `calculateShippingCents()` 放在同一个文件里 —— 运费规则只有
+ * 一处定义。
+ */
+export function shippingCentsForCart(
+  kind: CartKind,
+  subtotalCents: number
+): number {
+  if (kind === PRINT_CART_KIND) return 0;
+  return calculateShippingCents(subtotalCents);
 }

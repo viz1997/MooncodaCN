@@ -30,8 +30,13 @@ import {
   PrintOrderTransitionError,
   transitionPrintOrderStatus,
 } from "@/features/print-quote/lib/order-store";
+import {
+  PRINT_CART_KIND,
+  STOREFRONT_CART_KIND,
+} from "@/features/storefront/lib/cart-kind";
 import { buildLineSnapshot } from "@/features/storefront/lib/cart-snapshot";
 import { removeOrderedLinesFromCarts } from "@/features/storefront/lib/cart-store";
+import { getPrintServiceSpec } from "@/features/storefront/lib/print-service";
 import type { CartLineItemMetadata } from "@/features/storefront/types";
 
 import {
@@ -377,7 +382,20 @@ async function removeOrderedLinesFromCart(order: OrderLookup): Promise<void> {
     }))
   );
 
-  await removeOrderedLinesFromCarts(order.userId, snapshot);
+  /**
+   * 摘哪张车?(2026-11-06)
+   *
+   * 商城购物袋和打印单是两张车 —— 买的是打印服务就去打印单上摘,买的是
+   * 目录商品就去商城购物袋上摘。判据还是「有没有 printSpec」(跟
+   * `storefront/lib/print-service.ts` 同一个口径)。
+   */
+  const kind = items.some((item) =>
+    getPrintServiceSpec(item.metadata as unknown as CartLineItemMetadata)
+  )
+    ? PRINT_CART_KIND
+    : STOREFRONT_CART_KIND;
+
+  await removeOrderedLinesFromCarts(order.userId, snapshot, kind);
 }
 
 /**

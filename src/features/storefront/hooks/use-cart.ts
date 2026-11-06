@@ -193,8 +193,10 @@ export function useCart(): UseCartResult {
       lineItemId: string;
       quantity: number;
     }) => {
-      if (!query.data) throw new Error("cart 还没准备好");
-      return updateQuantityFetch(query.data.id, lineItemId, quantity);
+      // 缓存还没回来就退一步去问服务端要这张车 —— 跟加购那条一样。
+      // 否则「页面刚打开就点 +」会直接报「cart 还没准备好」。
+      const cart = query.data ?? (await ensureCart());
+      return updateQuantityFetch(cart.id, lineItemId, quantity);
     },
     onSuccess: (data) => {
       queryClient.setQueryData(CART_QUERY_KEY, data.cart);
@@ -203,8 +205,8 @@ export function useCart(): UseCartResult {
 
   const removeLineItemMutation = useMutation({
     mutationFn: async ({ lineItemId }: { lineItemId: string }) => {
-      if (!query.data) throw new Error("cart 还没准备好");
-      return removeLineItemFetch(query.data.id, lineItemId);
+      const cart = query.data ?? (await ensureCart());
+      return removeLineItemFetch(cart.id, lineItemId);
     },
     onSuccess: (data) => {
       queryClient.setQueryData(CART_QUERY_KEY, data.cart);

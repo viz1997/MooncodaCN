@@ -7,10 +7,19 @@
  * 那一列)。客户端不重算 —— 客户端算的数只配用来显示,收多少钱由
  * `POST /api/store/checkout` 在服务端重算一遍决定。
  *
- * ## 「新建地址」是**展开**不是弹窗
+ * ## 打印服务**不在这一页**
  *
- * 结算页上打断一下去弹个窗,用户填完还要再点一次回来。展开一块表单就地填,
- * 填完自动选中,少一次来回。
+ * 打印服务走自己的「打印单」(`/print-order`),不走商城购物袋 —— 工作室的
+ * 要求:「模型打印是不走商城正常的购物车的,而是走打印下单」。所以这一页
+ * 里出现的行**一定是目录商品**,不判 printSpec、不画包裹图标。
+ *
+ * ## 收货地址和付款是**共用**的两块
+ *
+ * - 地址 → `<AddressSection>`(跟打印单页同一份)
+ * - 付款 → `<CheckoutPaymentPanel>`(跟打印单页同一份,只差 `cartKind`)
+ *
+ * 抽出来是因为两处的「默认地址」逻辑和「扫码 → 轮询 → 钱到了」逻辑一旦
+ * 各写一遍,漂移了没人发现。
  *
  * ## 三种付款方式,两种表现
  *
@@ -18,47 +27,24 @@
  * |---|---|
  * | 微信支付 | **扫码** —— 页面留在原地,画一个二维码给用户扫 |
  * | 支付宝 / Shopify | **跳转** —— 整页跳到支付平台 |
- *
- * 微信那一支多一段「等用户扫完」的轮询 —— 钱到了才显示成功,没到就继续等。
- * 轮询口径跟「支付成功页」一致(见 `checkout-success-view.tsx`)。
- *
- * ## 支付失败要说清楚
- *
- * `paymentUrl` 和 `paymentQrCodeUrl` 都是 null 表示「订单建好了,但付款入口没
- * 生成」。这时候**不是**失败 —— 订单在,状态 unpaid,用户可以在「我的订单」里
- * 重取入口。所以文案是「订单已创建,支付入口生成失败」,并给出订单号。
  */
 
 "use client";
 
-import { useQueryClient } from "@tanstack/react-query";
-import { ChevronUp, Loader2, Package, Plus, Zap } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
-import { useAction } from "next-safe-action/hooks";
-import { useEffect, useMemo, useState } from "react";
+import { Zap } from "lucide-react";
+import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { createAddressAction } from "@/features/address/actions";
-import type { AddressErrorCode, AddressView } from "@/features/address/types";
-import { PaymentChannelPicker } from "@/features/payments/components/payment-channel-picker";
-import { PaymentQrCode } from "@/features/payments/components/payment-qr";
-import { getDeliveryTier } from "@/features/print-quote/lib/delivery-tier";
+import { AddressSection } from "@/features/address/components/address-section";
+import type { AddressView } from "@/features/address/types";
 import { Link } from "@/i18n/routing";
 import { formatCents } from "@/lib/money";
 
-import { invalidateCartCache } from "../hooks/use-cart";
+import { computeCartTotals } from "../lib/cart-totals";
 import { findAccessoryVariant } from "../lib/mock-catalog";
-import { getPrintServiceSpec } from "../lib/print-service";
 import { formatSizeWithInches } from "../lib/size-format";
 import type { Cart, CartLineItem } from "../types";
-
-/** 地址表单的失败文案 */
-const ADDRESS_ERROR_TEXT: Record<AddressErrorCode, string> = {
-  ADDRESS_NOT_FOUND: "地址不存在",
-  INVALID_INPUT: "填写的信息不合法",
-  TOO_MANY_ADDRESSES: "保存的地址太多了(最多 20 个)",
-  FAILED: "保存失败,请稍后重试",
-};
+import { CheckoutPaymentPanel } from "./checkout-payment-panel";
 
 export function CheckoutView({
   cart,
@@ -74,209 +60,14 @@ export function CheckoutView({
 }) {
   const items = cart?.items ?? [];
 
-  const queryClient = useQueryClient();
-
-  /**
-   * 界面语言 —— 跟着打印工单落库
-   *
-   * 之后工作室改状态发的通知邮件用**订单的语言**,不是「谁点的那个按钮」的
-   * 语言(改状态的是工作室,界面是中文,但邮件是发给下单用户的)。
-   */
-  const locale = useLocale();
-
-  /** 支付相关文案(微信扫码那一支) */
-  const tPayment = useTranslations("Payment");
-
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(
     addresses.find((a) => a.isDefault)?.id ?? addresses[0]?.id ?? null
   );
-  const [addressList, setAddressList] = useState<AddressView[]>(addresses);
-  const [showForm, setShowForm] = useState(addresses.length === 0);
-  const [form, setForm] = useState(emptyAddressForm());
-  const [addressError, setAddressError] = useState<string | null>(null);
   const [note, setNote] = useState("");
 
-  const [isPaying, setIsPaying] = useState(false);
-  const [payError, setPayError] = useState<string | null>(null);
-  const [createdOrderNo, setCreatedOrderNo] = useState<string | null>(null);
-  /** 这一单里生成的打印工单号(`PO-…`)—— 支付入口没生成时给用户一个凭据 */
-  const [createdPrintOrderNos, setCreatedPrintOrderNos] = useState<string[]>(
-    []
-  );
-  /** 选中的收款通道 —— null = 还没选(服务端挑第一个可用的) */
-  const [channel, setChannel] = useState<string | null>(null);
-  /**
-   * 微信扫码的二维码内容
-   *
-   * 非 null 时页面**留在原地**画码 —— 微信 Native 不跳页。
-   */
-  const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
-  /** 扫码之后钱到了没 —— 轮询出来的 */
-  const [scanPaid, setScanPaid] = useState(false);
-
-  // 金额 —— 全部来自服务端算好的数
-  const subtotalCents = useMemo(
-    () =>
-      items.reduce(
-        (sum, it) => sum + it.discountedUnitPriceCents * it.quantity,
-        0
-      ),
-    [items]
-  );
-  const rawSubtotalCents = useMemo(
-    () => items.reduce((sum, it) => sum + it.unitPriceCents * it.quantity, 0),
-    [items]
-  );
-  const discountCents = rawSubtotalCents - subtotalCents;
-  const shippingCents = subtotalCents >= 9900 ? 0 : 800;
-
-  const createAddress = useAction(createAddressAction, {
-    onSuccess: ({ data }) => {
-      if (data?.ok) {
-        setAddressError(null);
-        setForm(emptyAddressForm());
-        setShowForm(false);
-        // 新建的地址直接选中 —— 用户刚填完,意图很明确
-        setSelectedAddressId(data.addressId);
-        setAddressList((prev) => [
-          {
-            id: data.addressId,
-            ...form,
-            isDefault: false,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-          ...prev,
-        ]);
-        return;
-      }
-      setAddressError(
-        ADDRESS_ERROR_TEXT[(data?.code ?? "FAILED") as AddressErrorCode]
-      );
-    },
-    onError: ({ error }) => {
-      setAddressError(error.serverError ?? "保存失败,请稍后重试");
-    },
-  });
-
-  const handlePay = async () => {
-    if (!selectedAddressId) {
-      setPayError("请先选择收货地址");
-      return;
-    }
-    setIsPaying(true);
-    setPayError(null);
-    setQrCodeUrl(null);
-    setScanPaid(false);
-
-    try {
-      const res = await fetch("/api/store/checkout", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          addressId: selectedAddressId,
-          note: note.trim() ? note.trim() : null,
-          // 打印工单的邮件通知语言 —— 跟着订单落库
-          locale,
-          // 收款通道 —— 用户选的那个
-          channel: channel ?? undefined,
-        }),
-      });
-
-      const body = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        setPayError(body?.message ?? `结算失败(HTTP ${res.status})`);
-        setIsPaying(false);
-        return;
-      }
-
-      setCreatedOrderNo(body?.orderNo ?? null);
-      setCreatedPrintOrderNos(
-        Array.isArray(body?.printOrderNos) ? body.printOrderNos : []
-      );
-
-      // 微信 Native —— 扫码,页面留在原地画码
-      if (body?.paymentQrCodeUrl) {
-        setQrCodeUrl(body.paymentQrCodeUrl);
-        setIsPaying(false);
-        return;
-      }
-
-      if (body?.paymentUrl) {
-        // 跳支付宝 / Shopify / 旧路的 Stripe —— 全页跳转,不能用 router.push
-        window.location.href = body.paymentUrl;
-        return;
-      }
-
-      // 订单建好了但没有付款入口 —— 给出订单号,让用户去订单页重取
-      // 两种失败,两种说法(见 checkout.ts 的 classifyPaymentIssue):
-      // 「收款通道没配好」重试没用,让他去找工作室;「这次调用挂了」重试就能好
-      setPayError(
-        body?.paymentIssue === "PAYMENT_NOT_CONFIGURED"
-          ? "订单已创建,但支付通道暂时不可用。订单已经保留,工作室会跟你联系收款。"
-          : "订单已创建,但支付入口生成失败。请到「我的订单」里重新获取支付入口。"
-      );
-      setIsPaying(false);
-    } catch {
-      setPayError("结算失败,请稍后重试");
-      setIsPaying(false);
-    }
-  };
-
-  /**
-   * 扫码之后的轮询 —— 钱到了就停
-   *
-   * 微信的回调到本仓库有几秒延迟。用户扫完码盯着页面看,这时候显示
-   * 「失败」是错的(钱明明付了),显示「成功」也是错的(可能压根没付)。
-   * 所以轮询到状态明确为止。
-   */
-  useEffect(() => {
-    if (!qrCodeUrl || !createdOrderNo) return;
-
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const res = await fetch(
-          `/api/store/orders/${encodeURIComponent(createdOrderNo)}`,
-          { cache: "no-store", headers: { Accept: "application/json" } }
-        );
-        if (!res.ok) return;
-        const body = await res.json();
-        if (
-          body?.paymentStatus === "paid" ||
-          body?.status === "paid" ||
-          body?.status === "fulfilled"
-        ) {
-          if (!cancelled) setScanPaid(true);
-        }
-      } catch {
-        // 网络抖一下 —— 下一轮再试
-      }
-    };
-
-    void tick();
-    const timer = setInterval(() => {
-      void tick();
-    }, 3000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [qrCodeUrl, createdOrderNo]);
-
-  /**
-   * 钱到了 → 购物车缓存作废
-   *
-   * 服务端在收款回调那一刻把买掉的行从购物车里摘掉了(见
-   * `payments/lib/settle.ts`)—— 客户端这份缓存得跟着作废。
-   */
-  useEffect(() => {
-    if (!scanPaid) return;
-    void invalidateCartCache(queryClient);
-  }, [scanPaid, queryClient]);
+  // 金额 —— 全部来自服务端算好的数;口径跟购物袋详情页共用一份
+  // (见 `lib/cart-totals.ts` —— 两页显示的合计必须是同一个数)
+  const totals = useMemo(() => computeCartTotals(items), [items]);
 
   /* ---------------------------------------------------------------------- */
   /*  空购物车                                                                */
@@ -320,7 +111,13 @@ export function CheckoutView({
 
   return (
     <div className="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8 py-10">
-      <h1 className="font-serif text-3xl mb-8">结算</h1>
+      <div className="flex items-center justify-between gap-4 mb-8">
+        <h1 className="font-serif text-3xl">结算</h1>
+        {/* 改数量 / 删一行回购物袋去改 —— 结算页上不给改,免得跟付款入口混在一起 */}
+        <Button asChild variant="ghost" size="sm" className="rounded-full">
+          <Link href="/cart">返回购物袋</Link>
+        </Button>
+      </div>
 
       <div className="grid lg:grid-cols-[1fr_360px] gap-8 lg:gap-12 items-start">
         {/* 左栏:商品 + 地址 */}
@@ -335,161 +132,14 @@ export function CheckoutView({
             </ul>
           </section>
 
-          {/* 收货地址 */}
+          {/* 收货地址 —— 跟打印单页共用一份 */}
           <section>
             <h2 className="eyebrow text-muted-foreground mb-4">收货地址</h2>
-
-            {addressList.length > 0 && (
-              <ul className="space-y-3">
-                {addressList.map((address) => (
-                  <li key={address.id}>
-                    <label
-                      className={`flex gap-3 p-4 border rounded-sm cursor-pointer transition-colors ${
-                        selectedAddressId === address.id
-                          ? "border-primary bg-secondary/40"
-                          : "border-border hover:bg-secondary/30"
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="checkout-address"
-                        value={address.id}
-                        checked={selectedAddressId === address.id}
-                        onChange={() => setSelectedAddressId(address.id)}
-                        className="mt-1 accent-[var(--primary)]"
-                      />
-                      <span className="flex-1 min-w-0">
-                        <span className="flex items-center gap-2 text-sm font-medium">
-                          {address.recipientName}
-                          <span className="text-muted-foreground font-normal">
-                            {address.phone}
-                          </span>
-                          {address.isDefault && (
-                            <span className="text-[10px] uppercase tracking-[0.12em] text-accent">
-                              默认
-                            </span>
-                          )}
-                        </span>
-                        <span className="block mt-1 text-xs text-muted-foreground">
-                          {[
-                            address.province,
-                            address.city,
-                            address.district,
-                            address.detail,
-                          ]
-                            .filter(Boolean)
-                            .join(" ")}
-                        </span>
-                      </span>
-                    </label>
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            {/* 新建地址 —— 展开,不弹窗 */}
-            <div className="mt-4">
-              <Button
-                variant="ghost"
-                size="sm"
-                type="button"
-                onClick={() => setShowForm((v) => !v)}
-                className="rounded-full"
-              >
-                {showForm ? (
-                  <ChevronUp className="size-4" />
-                ) : (
-                  <Plus className="size-4" />
-                )}
-                {showForm ? "收起" : "新建收货地址"}
-              </Button>
-
-              {showForm && (
-                <form
-                  className="mt-4 p-5 border border-border rounded-sm space-y-3 bg-secondary/20"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    void createAddress.execute(form);
-                  }}
-                >
-                  <div className="grid sm:grid-cols-2 gap-3">
-                    <AddressField
-                      label="收件人"
-                      value={form.recipientName}
-                      onChange={(v) => setForm({ ...form, recipientName: v })}
-                      placeholder="张三"
-                    />
-                    <AddressField
-                      label="手机号"
-                      value={form.phone}
-                      onChange={(v) => setForm({ ...form, phone: v })}
-                      placeholder="13800000000"
-                    />
-                  </div>
-                  <div className="grid sm:grid-cols-3 gap-3">
-                    <AddressField
-                      label="省"
-                      value={form.province}
-                      onChange={(v) => setForm({ ...form, province: v })}
-                      placeholder="广东省"
-                    />
-                    <AddressField
-                      label="市"
-                      value={form.city}
-                      onChange={(v) => setForm({ ...form, city: v })}
-                      placeholder="深圳市"
-                    />
-                    <AddressField
-                      label="区"
-                      value={form.district}
-                      onChange={(v) => setForm({ ...form, district: v })}
-                      placeholder="南山区"
-                    />
-                  </div>
-                  <AddressField
-                    label="详细地址"
-                    value={form.detail}
-                    onChange={(v) => setForm({ ...form, detail: v })}
-                    placeholder="科技园路 1 号 3 栋 502"
-                  />
-
-                  {addressError && (
-                    <p className="text-xs text-destructive">{addressError}</p>
-                  )}
-
-                  <div className="flex gap-2 pt-1">
-                    <Button
-                      type="submit"
-                      size="sm"
-                      disabled={createAddress.isPending}
-                      className="rounded-full"
-                    >
-                      {createAddress.isPending && (
-                        <Loader2 className="size-3.5 animate-spin" />
-                      )}
-                      保存地址
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="rounded-full"
-                      onClick={() => {
-                        setForm(emptyAddressForm());
-                        setAddressError(null);
-                        setShowForm(false);
-                      }}
-                    >
-                      取消
-                    </Button>
-                  </div>
-                </form>
-              )}
-            </div>
-
-            {addressError && !showForm && (
-              <p className="mt-3 text-xs text-destructive">{addressError}</p>
-            )}
+            <AddressSection
+              addresses={addresses}
+              value={selectedAddressId}
+              onChange={setSelectedAddressId}
+            />
           </section>
 
           {/* 留言 */}
@@ -513,114 +163,41 @@ export function CheckoutView({
           <dl className="space-y-2.5 text-sm">
             <div className="flex items-center justify-between">
               <dt className="text-muted-foreground">小计</dt>
-              <dd className="font-medium">{formatCents(subtotalCents)}</dd>
+              <dd className="font-medium">
+                {formatCents(totals.subtotalCents)}
+              </dd>
             </div>
-            {discountCents > 0 && (
+            {totals.discountCents > 0 && (
               <div className="flex items-center justify-between">
                 <dt className="text-muted-foreground">数量折扣</dt>
                 <dd className="font-medium text-accent">
-                  -{formatCents(discountCents)}
+                  -{formatCents(totals.discountCents)}
                 </dd>
               </div>
             )}
             <div className="flex items-center justify-between">
               <dt className="text-muted-foreground">运费</dt>
               <dd className="font-medium">
-                {shippingCents === 0 ? "免运费" : formatCents(shippingCents)}
+                {totals.shippingCents === 0
+                  ? "免运费"
+                  : formatCents(totals.shippingCents)}
               </dd>
             </div>
             <div className="border-t pt-3 mt-3 flex items-center justify-between">
               <dt className="uppercase tracking-[0.12em]">合计</dt>
               <dd className="font-serif text-2xl">
-                {formatCents(subtotalCents + shippingCents)}
+                {formatCents(totals.totalCents)}
               </dd>
             </div>
           </dl>
 
-          {/* 微信扫码 —— 页面留在原地画码,不跳页 */}
-          {qrCodeUrl ? (
-            <div className="mt-5 border border-border rounded-sm p-4">
-              <h3 className="text-sm font-medium mb-3 text-center">
-                {scanPaid ? tPayment("qrPaidTitle") : tPayment("qrTitle")}
-              </h3>
-              <div className="flex justify-center">
-                <PaymentQrCode
-                  value={qrCodeUrl}
-                  size={200}
-                  hint={scanPaid ? undefined : tPayment("qrHint")}
-                />
-              </div>
-              {scanPaid ? (
-                <p className="mt-3 text-xs text-primary text-center">
-                  {tPayment("qrPaid")}
-                </p>
-              ) : (
-                <p className="mt-3 text-xs text-muted-foreground text-center">
-                  正在确认支付…
-                </p>
-              )}
-              {createdOrderNo && (
-                <p className="mt-2 text-[11px] text-muted-foreground text-center">
-                  订单号:{createdOrderNo}
-                </p>
-              )}
-              {createdPrintOrderNos.length > 0 && (
-                <p className="mt-1 text-[11px] text-muted-foreground text-center">
-                  打印工单号:{createdPrintOrderNos.join("、")}
-                </p>
-              )}
-              <div className="mt-4 flex flex-col gap-2">
-                <Button
-                  asChild
-                  size="sm"
-                  className="w-full rounded-full"
-                  variant={scanPaid ? "default" : "outline"}
-                >
-                  <Link href="/dashboard/store-orders">我的订单</Link>
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <>
-              {/* 支付方式 —— 没配好的通道不显示 */}
-              <PaymentChannelPicker
-                value={channel}
-                onChange={setChannel}
-                disabled={isPaying}
-              />
-
-              {payError && (
-                <div className="mt-4 p-3 border border-destructive/40 bg-destructive/5 rounded-sm text-xs text-destructive">
-                  {payError}
-                  {createdOrderNo && (
-                    <p className="mt-1 text-muted-foreground">
-                      订单号:{createdOrderNo}
-                    </p>
-                  )}
-                  {createdPrintOrderNos.length > 0 && (
-                    <p className="mt-1 text-muted-foreground">
-                      打印工单号:{createdPrintOrderNos.join("、")}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              <Button
-                size="lg"
-                onClick={handlePay}
-                disabled={isPaying || !selectedAddressId}
-                className="w-full mt-5 rounded-full h-12 uppercase tracking-[0.14em] text-[12px] font-medium"
-                type="button"
-              >
-                {isPaying && <Loader2 className="size-4 animate-spin" />}
-                去支付
-              </Button>
-
-              <p className="text-[11px] text-muted-foreground text-center mt-3">
-                提交后跳转在线支付,付款完成才开始制作。
-              </p>
-            </>
-          )}
+          {/* 付款 —— 跟打印单页共用一份 */}
+          <CheckoutPaymentPanel
+            cartKind="storefront"
+            addressId={selectedAddressId}
+            note={note}
+            submitLabel="去支付"
+          />
         </aside>
       </div>
     </div>
@@ -632,121 +209,51 @@ export function CheckoutView({
 /* -------------------------------------------------------------------------- */
 
 function CheckoutLineItem({ item }: { item: CartLineItem }) {
-  /**
-   * 打印服务行 —— 不是目录商品
-   *
-   * 判据是「有没有 printSpec」,不是 productId(见 `lib/print-service.ts`)。
-   * 这一行没有封面图(手上是一个模型文件,不是图片),数量恒为 1。
-   */
-  const printSpec = getPrintServiceSpec(item.metadata);
-
+  // 配件名从字典反查 —— metadata 只存 id,改名/下架不用迁移存量 cart
   const accessoryNames = (item.metadata.accessoryVariantIds ?? [])
     .map((id) => findAccessoryVariant(id)?.name)
     .filter((n): n is string => Boolean(n));
 
   return (
     <li className="flex gap-4 py-5">
-      {printSpec ? (
-        <div className="size-24 shrink-0 rounded-sm bg-secondary flex items-center justify-center">
-          <Package className="size-8 text-muted-foreground" />
-        </div>
-      ) : (
-        <img
-          src={item.productThumbnail}
-          alt={item.productTitle}
-          className="size-24 object-cover rounded-sm bg-muted shrink-0"
-          loading="lazy"
-        />
-      )}
+      <img
+        src={item.productThumbnail}
+        alt={item.productTitle}
+        className="size-24 object-cover rounded-sm bg-muted shrink-0"
+        loading="lazy"
+      />
       <div className="flex-1 min-w-0">
         <p className="font-serif text-[15px] leading-tight">
           {item.productTitle}
         </p>
         <div className="mt-1 space-y-0.5">
-          {printSpec ? (
-            <>
-              <p className="text-[11px] text-muted-foreground">
-                {printSpec.dims[0]} × {printSpec.dims[1]} × {printSpec.dims[2]}{" "}
-                mm
-              </p>
-              <p className="text-[11px] text-muted-foreground">
-                交期 {getDeliveryTier(printSpec.deliveryTier).hours} 小时
-              </p>
-            </>
-          ) : (
-            <>
-              {item.metadata.sizeCm > 0 && (
-                <p className="text-[11px] text-muted-foreground">
-                  {formatSizeWithInches(item.metadata.sizeCm)}
-                </p>
-              )}
-              {accessoryNames.length > 0 && (
-                <p className="text-[11px] text-muted-foreground">
-                  {accessoryNames.join(" · ")}
-                </p>
-              )}
-              {item.metadata.engravingText && (
-                <p className="text-[11px] text-muted-foreground italic">
-                  &ldquo;{item.metadata.engravingText}&rdquo;
-                </p>
-              )}
-              {item.metadata.rushOrder && (
-                <p className="text-[10px] uppercase tracking-[0.12em] text-accent mt-1 inline-flex items-center gap-1">
-                  <Zap className="size-3" />
-                  加急
-                </p>
-              )}
-            </>
+          {item.metadata.sizeCm > 0 && (
+            <p className="text-[11px] text-muted-foreground">
+              {formatSizeWithInches(item.metadata.sizeCm)}
+            </p>
+          )}
+          {accessoryNames.length > 0 && (
+            <p className="text-[11px] text-muted-foreground">
+              {accessoryNames.join(" · ")}
+            </p>
+          )}
+          {item.metadata.engravingText && (
+            <p className="text-[11px] text-muted-foreground italic">
+              &ldquo;{item.metadata.engravingText}&rdquo;
+            </p>
+          )}
+          {item.metadata.rushOrder && (
+            <p className="text-[10px] uppercase tracking-[0.12em] text-accent mt-1 inline-flex items-center gap-1">
+              <Zap className="size-3" />
+              加急
+            </p>
           )}
         </div>
-        <p className="mt-2 text-xs text-muted-foreground">
-          × {printSpec ? 1 : item.quantity}
-        </p>
+        <p className="mt-2 text-xs text-muted-foreground">× {item.quantity}</p>
       </div>
       <p className="text-sm font-medium shrink-0">
         {formatCents(item.discountedUnitPriceCents * item.quantity)}
       </p>
     </li>
   );
-}
-
-function AddressField({
-  label,
-  value,
-  onChange,
-  placeholder,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-}) {
-  return (
-    <label className="block">
-      <span className="block text-[11px] uppercase tracking-[0.12em] text-muted-foreground mb-1">
-        {label}
-      </span>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="w-full px-3 py-2 border border-border rounded-sm bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-      />
-    </label>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/*  工具                                                                       */
-/* -------------------------------------------------------------------------- */
-
-function emptyAddressForm() {
-  return {
-    recipientName: "",
-    phone: "",
-    province: "",
-    city: "",
-    district: "",
-    detail: "",
-  };
 }

@@ -1708,9 +1708,19 @@
         "urgent": "Urgent"
       }
     },
+    "printOrder": {
+      "add": "Add to print order",
+      "adding": "Uploading model…",
+      "added": "Added to your print order",
+      "view": "View print order",
+      "addMore": "Add another model",
+      "errors": {
+        "addFailed": "Could not add to the print order — please try again"
+      }
+    },
     "entry": {
       "title": "Order it",
-      "desc": "The quote desk handles delivery tier, your details and payment.",
+      "desc": "The quote desk handles the delivery tier and adds the model to your print order — you confirm the total there.",
       "cta": "Go to quote",
       "carry": "The model you measured comes along — no need to pick the file again.",
       "empty": "Pick a model file above first, then you won't have to upload it again.",

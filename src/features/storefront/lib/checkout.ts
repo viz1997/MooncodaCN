@@ -100,6 +100,7 @@ import {
 } from "@/features/sellbase/lib/money";
 import { createSellbaseOrder } from "@/features/sellbase/lib/orders";
 import type { CartLineItem, PricingResult } from "../types";
+import { type CartKind, normalizeCartKind, PRINT_CART_KIND } from "./cart-kind";
 import { buildLineSnapshot } from "./cart-snapshot";
 import { getCart, stampCartOwner } from "./cart-store";
 import {
@@ -117,7 +118,7 @@ import {
   type ReusablePendingOrder,
 } from "./pending-order";
 import { calculatePricing } from "./pricing";
-import { calculateShippingCents } from "./pricing-constants";
+import { shippingCentsForCart } from "./pricing-constants";
 import {
   getPrintServiceSpec,
   printServiceSpecToQuoteInput,
@@ -130,6 +131,19 @@ import {
 export interface CheckoutInput {
   /** 购物车 id(来自 cookie) */
   cartId: string;
+  /**
+   * 车的性质(2026-11-06)
+   *
+   * `storefront` 商城购物袋 / `print` 打印单。两种车的**钱**不一样:
+   *
+   * - 商城购物袋有运费(¥8,小计到 ¥99 免)—— 那是目录商品的运费规则
+   * - 打印单**没有运费** —— 打印服务的价就是报价本身(见
+   *   `print-quote/lib/payment.ts`:工单的支付金额恒等于 `total_price_cents`),
+   *   报价台那边看到多少就收多少,不能到结算时再加一笔
+   *
+   * 不传 = 商城购物袋(旧调用方兼容)。
+   */
+  cartKind?: CartKind;
   /** 下单人 —— 结算必须登录 */
   userId: string;
   /** 下单邮箱 —— 一律取账号邮箱,不采信客户端 */
@@ -213,6 +227,12 @@ export { classifyPaymentIssue };
 export type CheckoutErrorCode =
   | "CART_NOT_FOUND"
   | "CART_EMPTY"
+  /**
+   * 车的性质对不上(2026-11-06)
+   *
+   * 拿打印单去走商城那条路(或者反过来)—— 钱的口径会错(运费 / 商品)。
+   */
+  | "CART_KIND_MISMATCH"
   | "PRICING_FAILED"
   | "CARRIER_NOT_FOUND"
   | "PAYMENT_CHANNEL_UNAVAILABLE"
@@ -502,6 +522,25 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
     throw new CheckoutError("CART_EMPTY", "购物车是空的");
   }
 
+  /**
+   * 车的性质对得上吗(2026-11-06)
+   *
+   * 商城购物袋和打印单是两张车、两种口径(运费 / 商品)。结算的通道按
+   * `cartKind` 选 —— 拿打印单去走商城那条路(或者反过来)会把钱的口径
+   * 搞错:打印单多收一笔运费,或者商城订单少了运费。
+   *
+   * 兜底:认不出来一律当商城购物袋(`normalizeCartKind`)。
+   */
+  const cartKind = normalizeCartKind(input.cartKind);
+  if (cart.kind !== cartKind) {
+    throw new CheckoutError(
+      "CART_KIND_MISMATCH",
+      cartKind === PRINT_CART_KIND
+        ? "这不是打印单,不能按打印单结算"
+        : "购物袋里没有可结算的商品"
+    );
+  }
+
   // 0. 购物车过户
   //
   //    游客购物车在这一刻归到账号名下(以后换设备登录还能找回)。
@@ -524,7 +563,15 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
   );
   const discountCents = subtotalCents - discountedSubtotalCents;
   // 免运费门槛按**折后**金额算 —— 用户看到的、付的小计就是折后那个
-  const shippingCents = calculateShippingCents(discountedSubtotalCents);
+  //
+  // 打印单**没有运费**(2026-11-06)—— 打印服务的价就是报价本身:
+  // 报价台显示多少、工单上写多少、收多少,是同一个数(见
+  // `print-quote/lib/payment.ts`)。到结算时再加一笔运费,用户在报价台
+  // 看到的总价跟实际收的钱就对不上了。
+  //
+  // 规则本身在 `pricing-constants.ts` 的 `shippingCentsForCart()` —— 客户端
+  // 的购物袋页 / 打印单页跟这里用**同一份**,不会「页面没运费、结算收了」。
+  const shippingCents = shippingCentsForCart(cartKind, discountedSubtotalCents);
   const totalCents = discountedSubtotalCents + shippingCents;
 
   // 3. 通道

@@ -1,69 +1,72 @@
 "use client";
 
 /**
- * 打印服务报价台 —— 官网的「上传模型 → 报价 → 下单」主流程
+ * 打印服务报价台 —— 官网的「上传模型 → 报价 → 加入打印单 → 提交」主流程
  *
  * ## 页面结构
  *
- *   ┌─ 克重计算器（复用 /tools/weight 的那套）─────────┐
- *   │  左：3D 预览      右：克重 → 尺寸调整 → 报价条   │
+ *   ┌─ 克重计算器(复用 /tools/weight 的那套)─────────┐
+ *   │  左:3D 预览      右:克重 → 尺寸调整 → 报价条   │
  *   └────────────────────────────────────────────────┘
- *   └─ 下单表单（点「填写下单信息」后内联展开）
- *   └─ 下单成功 / 我的订单
+ *   └─ 我的打印订单
+ *
+ * ## 报价台的出口是**打印单**,不是「直接提交订单」(2026-11-06)
+ *
+ * 工作室的要求:「模型打印是不走商城正常的购物车的,而是走打印下单,即展示
+ * 打印列表和下单金额」。所以这里的主按钮是「加入打印单」——
+ *
+ * - 加到**打印单**(`/print-order`):另一张车(`kind = "print"`、另一个 cookie
+ *   `wjp_print_cart_id`),**不是**商城购物袋
+ * - 打印单页摆出**打印列表**(每个模型一行)和**下单金额**;用户确认金额、填
+ *   收货地址、提交 → 一次付款 → 钱到了才开工单
  *
  * ## 谁算什么
  *
  * 浏览器算**几何**(体积 / 表面积 / 尺寸 / 克重)—— 这是本地解析出来的,
- * 不上传。服务端算**价格** —— 客户端算的价不信,下单时服务端还会再算一遍。
+ * 不上传。服务端算**价格** —— 客户端算的价不信,加进打印单时服务端还会再算
+ * 一遍(见 `storefront/lib/cart-store.ts` 的 `computePrintServiceLinePrice`)。
  *
  * ## 模型文件什么时候离开浏览器
  *
- * 只有真的下单时才上传。上面那些「改尺寸看价格」的反复调整,模型一个字节
- * 都没出过浏览器 —— 跟克重工具「只算不存」的边界一致,只是多了一条出口。
+ * 只有真的点「加入打印单」时才上传。上面那些「改尺寸看价格」的反复调整,
+ * 模型一个字节都没出过浏览器 —— 跟克重工具「只算不存」的边界一致,只是多
+ * 了一条出口。
+ *
+ * ## 直接下单那条路(旧,界面上不再走)
+ *
+ * 以前这里有个「填写下单信息」的内联表单,直接 POST `/api/print-orders`
+ * 建一张工单。那条路**留着**(`order-form.tsx` / `order-created-card.tsx` /
+ * `/api/print-orders` 都在树里),但界面上不再走它:
+ *
+ * - 两个出口会让用户不知道钱付到哪儿去了
+ * - 那条路**不收收货地址**(只有称呼 + 电话)—— 工作室照着单子寄不出去
  */
 
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   PricingCalculator,
   type PricingModelPayload,
 } from "@/features/pricing/components/pricing-calculator";
-import { OrderCreatedCard } from "@/features/print-quote/components/order-created-card";
-import {
-  type OrderContact,
-  OrderForm,
-} from "@/features/print-quote/components/order-form";
 import { PrintOrderList } from "@/features/print-quote/components/print-order-list";
 import { QuoteSummary } from "@/features/print-quote/components/quote-summary";
 import { usePrintOrderPolling } from "@/features/print-quote/hooks/use-print-order-polling";
 import { usePrintQuote } from "@/features/print-quote/hooks/use-print-quote";
 import { takePendingModel } from "@/features/print-quote/lib/model-handoff";
-import type {
-  PrintOrderCreated,
-  UserPrintOrder,
-} from "@/features/print-quote/lib/quote-types";
+import type { UserPrintOrder } from "@/features/print-quote/lib/quote-types";
 import { uploadModelFile } from "@/features/print-quote/lib/upload-model";
+import { usePrintCart } from "@/features/storefront/hooks/use-print-cart";
 
-type Stage = "quote" | "form" | "done";
+type Stage = "quote" | "added";
 
 export function QuoteWorkbench({
-  user,
   initialOrders,
 }: {
-  /** 当前登录用户 —— 表单用它预填称呼和邮箱 */
-  user: { name: string; email: string };
   /** 这个用户最近的订单(页面 RSC 查好传进来) */
   initialOrders: UserPrintOrder[];
 }) {
   const t = useTranslations("PrintQuote");
-  /**
-   * 当前界面语言 —— 跟着订单一起落库
-   *
-   * 之后工作室改状态发的通知邮件用**订单的语言**,不是「谁点的那个按钮」
-   * 的语言:改状态的是工作室(中文界面),但邮件是发给下单用户的。
-   */
-  const locale = useLocale();
 
   const [modelPayload, setModelPayload] = useState<PricingModelPayload | null>(
     null
@@ -104,29 +107,26 @@ export function QuoteWorkbench({
     error: quoteError,
   } = usePrintQuote();
 
-  const [stage, setStage] = useState<Stage>("quote");
-  const [phase, setPhase] = useState<"idle" | "uploading" | "submitting">(
-    "idle"
-  );
-  const [orderError, setOrderError] = useState<string | null>(null);
-  const [order, setOrder] = useState<PrintOrderCreated | null>(null);
   /**
-   * 选中的收款通道
+   * 打印单 hook —— **不自动拉**(报价台不该给每个访客建一张空打印单)
    *
-   * null = 还没选(服务端挑一个**开放的**通道,见
-   * `payments/lib/registry.ts` 的 `ENABLED_PAYMENT_CHANNELS`)。
-   * 支付方式选择器只渲染**配好了**的通道 —— 没配好的不给人看。
+   * 真正要加行的时候,`addPrintLine` 自己会去要那张车(见 hook 里的
+   * `ensurePrintCart()`)。加完之后缓存里就是最新的打印单,`/print-order`
+   * 打开时直接拿得到。
    */
-  const [channel, setChannel] = useState<string | null>(null);
+  const { addPrintLine } = usePrintCart({ enabled: false });
+
+  const [stage, setStage] = useState<Stage>("quote");
+  const [phase, setPhase] = useState<"idle" | "adding">("idle");
+  const [orderError, setOrderError] = useState<string | null>(null);
+
   /**
    * 我的订单
    *
-   * 首屏由页面 RSC 查好传进来(这个登录用户最近的订单);下单成功后新单
-   * 乐观插到最上面 —— 不用等刷新就能看到。
-   *
-   * 之后靠轮询保持新鲜:工作室在后台改了状态,这个页面开着也会跟着变。
+   * 首屏由页面 RSC 查好传进来(这个登录用户最近的订单)。之后靠轮询保持
+   * 新鲜:工作室在后台改了状态,这个页面开着也会跟着变。
    */
-  const { orders, upsertOrder } = usePrintOrderPolling(initialOrders);
+  const { orders } = usePrintOrderPolling(initialOrders);
 
   const handleModelChange = useCallback(
     (payload: PricingModelPayload | null) => {
@@ -135,93 +135,48 @@ export function QuoteWorkbench({
     []
   );
 
-  // ---- 下单 ----
-  const handleSubmitOrder = useCallback(
-    async (contact: OrderContact) => {
-      if (!quoteInput || !modelPayload) {
-        setOrderError(t("order.errors.noModel"));
-        return;
-      }
-      // 报价跟当前几何对不上 → 不能下单。用户看到的价和服务端会算的价
-      // 不是同一个,建出来的单子跟他确认过的对不上。
-      if (!quoteFresh) {
-        setOrderError(t("order.errors.quoteStale"));
-        return;
-      }
-      setOrderError(null);
+  // ---- 加入打印单 ----
+  const handleAddToPrintOrder = useCallback(async () => {
+    if (!quoteInput || !modelPayload) {
+      setOrderError(t("order.errors.noModel"));
+      return;
+    }
+    // 报价跟当前几何对不上 → 不能加。用户看到的价和服务端会算的价
+    // 不是同一个,加进去的单子跟他确认过的对不上。
+    if (!quoteFresh) {
+      setOrderError(t("order.errors.quoteStale"));
+      return;
+    }
+    setOrderError(null);
+    setPhase("adding");
 
-      try {
-        setPhase("uploading");
-        const uploaded = await uploadModelFile(modelPayload);
+    try {
+      // 模型文件在这里才离开浏览器 —— 上面的报价阶段一个字节都没传
+      const uploaded = await uploadModelFile(modelPayload);
 
-        setPhase("submitting");
-        const res = await fetch("/api/print-orders", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            quote: { ...quoteInput, deliveryTier },
-            modelFileName: uploaded.fileName,
-            objectKey: uploaded.objectKey,
-            modelUrl: uploaded.url,
-            modelSizeBytes: uploaded.size,
-            contactName: contact.name,
-            contactPhone: contact.phone || null,
-            note: contact.note || null,
-            // 这单的邮件通知语言 —— 落库,之后改状态时按它发信
-            locale,
-            // 收款通道 —— 微信扫码 / 支付宝 / Shopify,不传由服务端挑一个
-            // 开放的通道
-            channel: channel ?? undefined,
-          }),
-        });
-
-        if (!res.ok) {
-          const body = (await res.json().catch(() => null)) as {
-            message?: string;
-          } | null;
-          setOrderError(body?.message ?? t("order.errors.submit"));
-          setPhase("idle");
-          return;
-        }
-
-        const created = (await res.json()) as PrintOrderCreated;
-        setOrder(created);
-        setStage("done");
-        setPhase("idle");
-        // 新单乐观插到列表顶部 —— 订单挂在账号名下,列表本身就是「我的订单」。
-        // 服务端下一轮拉到这张单之后,以服务端为准。
-        upsertOrder({
-          orderNo: created.orderNo,
-          status: "PENDING",
+      await addPrintLine.mutateAsync({
+        printSpec: {
+          volumeCM3: quoteInput.volumeCM3,
+          surfaceAreaCM2: quoteInput.surfaceAreaCM2,
+          dims: quoteInput.dims,
+          supportWeightG: quoteInput.supportWeightG ?? null,
+          selfSupportRatio: quoteInput.selfSupportRatio ?? null,
+          deliveryTier,
           modelFileName: uploaded.fileName,
-          materialWeightG: created.quote.materialWeightG,
-          supportWeightG: created.quote.supportWeightG,
-          dims: created.quote.dims,
-          totalPriceCents: created.quote.totalPriceCents,
-          createdAt: created.createdAt,
-          updatedAt: created.updatedAt,
-          paymentStatus: created.paymentStatus,
-          paymentUrl: created.paymentUrl,
-          paymentQrCodeUrl: created.paymentQrCodeUrl,
-          paymentChannel: created.paymentChannel,
-        });
-      } catch (error) {
-        console.error("[PrintQuote] 下单失败", error);
-        setOrderError(t("order.errors.submit"));
-        setPhase("idle");
-      }
-    },
-    [
-      quoteInput,
-      modelPayload,
-      quoteFresh,
-      t,
-      locale,
-      upsertOrder,
-      deliveryTier,
-      channel,
-    ]
-  );
+          modelObjectKey: uploaded.objectKey,
+          modelUrl: uploaded.url,
+          modelSizeBytes: uploaded.size,
+        },
+      });
+
+      setStage("added");
+    } catch (error) {
+      console.error("[PrintQuote] 加入打印单失败", error);
+      setOrderError(t("printOrder.errors.addFailed"));
+    } finally {
+      setPhase("idle");
+    }
+  }, [quoteInput, modelPayload, quoteFresh, t, deliveryTier, addPrintLine]);
 
   const quoteSlot = useMemo(
     () => (
@@ -230,18 +185,28 @@ export function QuoteWorkbench({
         loading={quoteLoading}
         stale={!quoteFresh}
         error={quoteError}
-        ordering={stage === "form"}
-        deliveryTier={deliveryTier}
-        onDeliveryTierChange={setDeliveryTier}
-        onStartOrder={() => {
-          // 报价过期就别进填单 —— 进去之后表单上显示的还是旧价
-          if (!quoteFresh) return;
-          setStage("form");
+        adding={phase === "adding"}
+        added={stage === "added"}
+        onAddToPrintOrder={handleAddToPrintOrder}
+        onReset={() => {
+          setStage("quote");
           setOrderError(null);
         }}
+        deliveryTier={deliveryTier}
+        onDeliveryTierChange={setDeliveryTier}
       />
     ),
-    [quote, quoteLoading, quoteError, quoteFresh, stage, deliveryTier]
+    [
+      quote,
+      quoteLoading,
+      quoteError,
+      quoteFresh,
+      phase,
+      stage,
+      handleAddToPrintOrder,
+      deliveryTier,
+      setDeliveryTier,
+    ]
   );
 
   return (
@@ -255,24 +220,9 @@ export function QuoteWorkbench({
         quoteSlot={quoteSlot}
       />
 
-      {stage === "form" && (
-        <OrderForm
-          quote={quote}
-          modelName={modelPayload?.model.objFileName ?? ""}
-          user={user}
-          phase={phase}
-          error={orderError}
-          channel={channel}
-          onChannelChange={setChannel}
-          onSubmit={handleSubmitOrder}
-          onCancel={() => {
-            setStage("quote");
-            setOrderError(null);
-          }}
-        />
+      {orderError && (
+        <p className="text-sm text-destructive text-center">{orderError}</p>
       )}
-
-      {stage === "done" && order && <OrderCreatedCard order={order} />}
 
       <PrintOrderList orders={orders} />
     </div>

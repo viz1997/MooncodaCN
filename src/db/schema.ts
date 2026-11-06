@@ -2859,6 +2859,18 @@ export const cart = pgTable(
     id: text("id").primaryKey(),
     /** 登录用户;游客购物车为 null */
     userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    /**
+     * 车的性质 —— `storefront` 商城购物袋 / `print` 打印单
+     *
+     * 2026-11-06 起打印服务**不再走商城购物袋**(工作室的说法:「模型打印
+     * 不走商城正常的购物车,而是走打印下单」)。两种车在同一张表里,靠这一列
+     * 区分 —— 判在**数据层**(见 `storefront/lib/cart-store.ts` 的
+     * `addLineItem()`),界面上只是显示这个结果。
+     *
+     * text 不是 PG enum:加值不用改列类型(Drizzle 的 `text({enum})` 落到
+     * PG 上也是普通 text 列)。
+     */
+    kind: text("kind").notNull().default("storefront"),
     /** 币种(iso 大写) */
     currencyCode: text("currency_code").notNull().default("CNY"),
     /** 区域 —— 运费规则的分区键 */
@@ -2869,6 +2881,8 @@ export const cart = pgTable(
   (t) => [
     // 登录用户查自己的购物车:WHERE user_id = ?
     index("cart_user_id_idx").on(t.userId),
+    // 按性质找车:WHERE kind = ?(打印单 / 商城购物袋各找各的)
+    index("cart_kind_idx").on(t.kind),
   ]
 );
 
