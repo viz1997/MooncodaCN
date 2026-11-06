@@ -1673,6 +1673,36 @@
       "localHint": "ZIP / RAR / OBJ / STL / PLY / GLB / GLTF · everything is analysed locally in your browser"
     }
   },
+  "Account": {
+    "title": "Account",
+    "description": "Your account details — name, avatar and how we reach you.",
+    "section": "Account",
+    "name": "Name",
+    "namePlaceholder": "What should we call you",
+    "nameTooShort": "Name needs at least 2 characters",
+    "nameTooLong": "Name can be at most 50 characters",
+    "save": "Save",
+    "saving": "Saving…",
+    "saved": "Details updated",
+    "saveFailed": "Could not save. Try again later.",
+    "email": "Email",
+    "emailVerified": "Verified",
+    "emailUnverified": "Not verified",
+    "emailHint": "To change your email, contact the studio.",
+    "phone": "Phone",
+    "phoneVerified": "Verified",
+    "phoneUnverified": "Not verified",
+    "phoneNotBound": "Not bound",
+    "avatarChange": "Change avatar",
+    "avatarUploading": "Uploading…",
+    "avatarHint": "JPG / PNG / GIF / WebP, up to {size}MB.",
+    "avatarTypeFailed": "Only JPG / PNG / GIF / WebP are supported.",
+    "avatarTooLarge": "Image is larger than {size}MB.",
+    "avatarFailed": "Could not upload the avatar. Try again later.",
+    "memberSince": "Member since",
+    "moreSettings": "Change password, bind phone",
+    "moreSettingsHint": "Password and phone verification live in account settings."
+  },
   "PrintQuote": {
     "page": {
       "policyLabel": "Before you order:"
@@ -1760,7 +1790,11 @@
     },
     "list": {
       "title": "My print orders",
-      "empty": "No orders yet",
+      "empty": "No print orders yet",
+      "emptyHint": "Upload a model, measure it and place an order — it will show up here.",
+      "emptyCta": "Measure a model",
+      "count": "{count} orders",
+      "newOrder": "New order",
       "viewAll": "View all",
       "viewDetail": "View details",
       "loading": "Loading…"

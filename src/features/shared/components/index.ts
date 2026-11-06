@@ -1,4 +1,11 @@
 // Shared Components
+export {
+  AtelierEmptyState,
+  AtelierPageHeader,
+  AtelierPageShell,
+  AtelierPanel,
+  AtelierSectionTitle,
+} from "./atelier-page";
 export { CookieSettingsDialog } from "./cookie-settings-dialog";
 export { LanguageSwitcher } from "./language-switcher";
 export { MaxWidthWrapper } from "./max-width-wrapper";

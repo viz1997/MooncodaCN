@@ -9,6 +9,12 @@
  * (2026-11-06 从 `/dashboard/store-orders` 搬过来 —— 工作室要求把买家的
  * 东西放电商首页右上角头像下拉,不放控制台)。
  *
+ * ## 版式跟商城一致
+ *
+ * 这一页是从电商首页头像点进来的,长相要跟 `/cart` 一家:页面留白、衬线
+ * 大标题、分隔线列表、空状态。版式走 `features/shared/components/atelier-page.tsx`
+ * 那一份共享骨架,别再各写一遍。
+ *
  * ## 「去支付」要能重取入口
  *
  * 未支付的订单给一个「去支付」按钮 —— 入口过期了(支付平台那边会换新的)
@@ -22,11 +28,17 @@
 
 "use client";
 
-import { Loader2 } from "lucide-react";
+import { Loader2, ShoppingBag } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { PaymentQrCode } from "@/features/payments/components/payment-qr";
+import {
+  AtelierEmptyState,
+  AtelierPageHeader,
+  AtelierPageShell,
+} from "@/features/shared/components/atelier-page";
+import { Link } from "@/i18n/routing";
 import { formatCents } from "@/lib/money";
 
 /** 列表里的一行(可序列化的形状) */
@@ -89,21 +101,37 @@ function resolveOrderMeta(order: StoreOrderListItem): {
 export function StoreOrderList({ orders }: { orders: StoreOrderListItem[] }) {
   if (orders.length === 0) {
     return (
-      <div className="text-center py-16">
-        <h2 className="font-serif text-xl mb-2">还没有订单</h2>
-        <p className="text-sm text-muted-foreground">
-          在商城里挑一个作品,付完款就能在这里看到进度。
-        </p>
-      </div>
+      <AtelierEmptyState
+        icon={ShoppingBag}
+        title="还没有订单"
+        description="在商城里挑一个作品,付完款就能在这里看到进度。"
+        action={
+          <Button asChild className="rounded-full px-7">
+            <Link href="/">浏览作品</Link>
+          </Button>
+        }
+      />
     );
   }
 
   return (
-    <ul className="space-y-4">
-      {orders.map((order) => (
-        <OrderRow key={order.orderNo} order={order} />
-      ))}
-    </ul>
+    <AtelierPageShell>
+      <AtelierPageHeader
+        title="我的订单"
+        description="成品商城的订单。付款完成才开始制作,进度会在这里更新。"
+        action={
+          <Button asChild variant="ghost" size="sm" className="rounded-full">
+            <Link href="/">继续浏览</Link>
+          </Button>
+        }
+      />
+
+      <ul className="divide-y divide-border border-y border-border">
+        {orders.map((order) => (
+          <OrderRow key={order.orderNo} order={order} />
+        ))}
+      </ul>
+    </AtelierPageShell>
   );
 }
 
@@ -190,48 +218,61 @@ function OrderRow({ order }: { order: StoreOrderListItem }) {
   }, [qrCodeUrl, order.orderNo]);
 
   return (
-    <li className="border border-border rounded-sm p-4 flex flex-wrap gap-4 items-start">
+    <li className="flex flex-wrap gap-4 py-6">
       {order.thumbnail ? (
         <img
           src={order.thumbnail}
           alt=""
-          className="size-16 object-cover rounded-sm bg-muted shrink-0"
+          className="size-28 object-cover rounded-sm bg-muted shrink-0"
           loading="lazy"
         />
       ) : (
-        <div className="size-16 rounded-sm bg-muted shrink-0" />
+        <div className="size-28 rounded-sm bg-muted shrink-0" />
       )}
 
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-medium">{order.orderNo}</span>
-          <span className={`text-xs ${meta.className}`}>{meta.label}</span>
-        </div>
-        <p className="mt-1 text-xs text-muted-foreground truncate">
-          {order.titles.join(" · ")}
-          {order.itemCount > order.titles.length ? " 等" : ""}
-          <span className="ml-2">共 {order.itemCount} 件</span>
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {new Date(order.createdAt).toLocaleString("zh-CN")}
-        </p>
-        {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
-      </div>
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="font-serif text-base leading-tight">
+              {order.titles.join(" · ") || order.orderNo}
+              {order.itemCount > order.titles.length ? " 等" : ""}
+            </p>
+            <div className="mt-1 space-y-0.5">
+              <p className="text-[11px] text-muted-foreground">
+                {order.orderNo} · 共 {order.itemCount} 件
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                {new Date(order.createdAt).toLocaleString("zh-CN")}
+              </p>
+            </div>
+          </div>
 
-      <div className="text-right shrink-0">
-        <p className="font-medium">{formatCents(order.totalCents)}</p>
-        {order.paymentStatus === "unpaid" && order.status === "unpaid" && (
-          <Button
-            size="sm"
-            className="mt-2 rounded-full"
-            onClick={handlePay}
-            disabled={isLoading}
-            type="button"
+          <span
+            className={`shrink-0 rounded-full border border-border px-2.5 py-0.5 text-[11px] ${meta.className}`}
           >
-            {isLoading && <Loader2 className="size-3.5 animate-spin" />}
-            去支付
-          </Button>
-        )}
+            {meta.label}
+          </span>
+        </div>
+
+        {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+
+        <div className="mt-4 flex items-end justify-between gap-4">
+          <p className="font-serif text-xl">{formatCents(order.totalCents)}</p>
+
+          {order.paymentStatus === "unpaid" && order.status === "unpaid" && (
+            <Button
+              size="sm"
+              className="rounded-full"
+              onClick={handlePay}
+              disabled={isLoading}
+              type="button"
+            >
+              {isLoading && <Loader2 className="size-3.5 animate-spin" />}
+              去支付
+            </Button>
+          )}
+        </div>
+
         {paymentUrl && (
           <a
             href={paymentUrl}
@@ -245,7 +286,7 @@ function OrderRow({ order }: { order: StoreOrderListItem }) {
       {/* 微信扫码 —— 整行下方展开,画完码用户扫就行 */}
       {qrCodeUrl && (
         <div className="w-full shrink-0 border-t border-border pt-4 flex flex-col items-center">
-          <p className="text-sm font-medium mb-3">微信扫码支付</p>
+          <p className="font-serif text-base mb-3">微信扫码支付</p>
           <PaymentQrCode
             value={qrCodeUrl}
             size={200}

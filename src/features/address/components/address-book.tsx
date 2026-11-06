@@ -7,6 +7,12 @@
  * 从「看我的地址」这个上下文里拽走,填完还要再点一次回来。展开一块表单就地
  * 填,填完保存,原地收起。
  *
+ * ## 版式跟商城一致
+ *
+ * 这一页是从电商首页头像点进来的,长相要跟 `/cart` 一家:页面留白、衬线
+ * 大标题、分隔线列表、空状态。版式走 `features/shared/components/atelier-page.tsx`
+ * 那一份共享骨架,别再各写一遍。
+ *
  * ## 失败要说出原因
  *
  * server action 返回 `{ok:false, code}`,这里按 code 找文案 —— 不能只弹一句
@@ -20,11 +26,16 @@
 
 "use client";
 
-import { Check, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Check, Loader2, MapPin, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useAction } from "next-safe-action/hooks";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import {
+  AtelierEmptyState,
+  AtelierPageHeader,
+  AtelierPageShell,
+} from "@/features/shared/components/atelier-page";
 
 import {
   createAddressAction,
@@ -165,34 +176,35 @@ export function AddressBook({
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="font-serif text-2xl">收货地址</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            下单时会选其中一个。地址改了不会影响已经下的订单 —— 订单上存的是
-            下单那一刻的地址快照。
-          </p>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className="rounded-full shrink-0"
-          type="button"
-          onClick={() => {
-            setShowCreate((v) => !v);
-            setEditingId(null);
-            setForm(EMPTY_FORM);
-            setError(null);
-          }}
-        >
-          {showCreate ? <X className="size-4" /> : <Plus className="size-4" />}
-          {showCreate ? "收起" : "新建地址"}
-        </Button>
-      </div>
+    <AtelierPageShell>
+      <AtelierPageHeader
+        title="收货地址"
+        description="下单时会选其中一个。地址改了不会影响已经下的订单 —— 订单上存的是下单那一刻的地址快照。"
+        action={
+          <Button
+            variant="outline"
+            size="sm"
+            className="rounded-full shrink-0"
+            type="button"
+            onClick={() => {
+              setShowCreate((v) => !v);
+              setEditingId(null);
+              setForm(EMPTY_FORM);
+              setError(null);
+            }}
+          >
+            {showCreate ? (
+              <X className="size-4" />
+            ) : (
+              <Plus className="size-4" />
+            )}
+            {showCreate ? "收起" : "新建地址"}
+          </Button>
+        }
+      />
 
       {error && (
-        <p className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+        <p className="rounded-sm border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
           {error}
         </p>
       )}
@@ -200,7 +212,7 @@ export function AddressBook({
       {/* 新建 —— 展开,不弹窗 */}
       {showCreate && (
         <form
-          className="rounded-md border border-border p-5 space-y-3"
+          className="rounded-sm border border-border bg-card p-6 space-y-3"
           onSubmit={(e) => {
             e.preventDefault();
             void create.execute(form);
@@ -236,15 +248,32 @@ export function AddressBook({
       )}
 
       {addresses.length === 0 && !showCreate ? (
-        <p className="rounded-md border border-border px-4 py-8 text-center text-sm text-muted-foreground">
-          还没有收货地址 —— 点右上角「新建地址」加一个。
-        </p>
+        <AtelierEmptyState
+          icon={MapPin}
+          title="还没有收货地址"
+          description="加一个,下单的时候就能直接选了。"
+          action={
+            <Button
+              className="rounded-full px-7"
+              type="button"
+              onClick={() => {
+                setShowCreate(true);
+                setEditingId(null);
+                setForm(EMPTY_FORM);
+                setError(null);
+              }}
+            >
+              <Plus className="size-4" />
+              新建地址
+            </Button>
+          }
+        />
       ) : (
-        <ul className="space-y-3">
+        <ul className="divide-y divide-border border-y border-border">
           {addresses.map((address) => (
             <li
               key={address.id}
-              className="rounded-md border border-border p-4 flex flex-wrap items-start gap-3"
+              className="py-5 flex flex-wrap items-start gap-3"
             >
               {editingId === address.id ? (
                 <form
@@ -282,19 +311,19 @@ export function AddressBook({
                 <>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-medium">
+                      <span className="font-serif text-base leading-tight">
                         {address.recipientName}
                       </span>
-                      <span className="text-sm text-muted-foreground">
+                      <span className="text-[11px] text-muted-foreground">
                         {address.phone}
                       </span>
                       {address.isDefault && (
-                        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">
+                        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-primary">
                           默认
                         </span>
                       )}
                     </div>
-                    <p className="mt-1 text-sm text-muted-foreground">
+                    <p className="mt-1 text-[11px] text-muted-foreground">
                       {[
                         address.province,
                         address.city,
@@ -352,7 +381,7 @@ export function AddressBook({
           ))}
         </ul>
       )}
-    </div>
+    </AtelierPageShell>
   );
 }
 
@@ -426,12 +455,14 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs text-muted-foreground">{label}</span>
+      <span className="mb-1.5 block text-[11px] text-muted-foreground">
+        {label}
+      </span>
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:ring-2 focus:ring-ring focus:outline-none"
+        className="w-full rounded-sm border border-input bg-background px-3 py-2 text-sm focus:ring-2 focus:ring-ring focus:outline-none"
       />
     </label>
   );

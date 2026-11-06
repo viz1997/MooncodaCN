@@ -42,6 +42,8 @@ export const updateProfileAction = protectedAction
 
     // 刷新设置页面缓存，使 UI 更新
     revalidatePath("/dashboard/settings");
+    // 账户信息页(2026-11-06 新增 `/account`)也读同一份资料
+    revalidatePath("/account");
 
     return {
       message: "资料更新成功",

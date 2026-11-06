@@ -31,6 +31,18 @@
  * 要求「打印订单、购物订单、地址管理不放在控制台里面,而是电商首页的用户
  * 头像那里」。这三项指向 `/account/*`,原来的 `/dashboard/*` 地址留了重定向。
  *
+ * 2026-11-06:下拉顶部改成**账户信息块**(头像 + 姓名 + 邮箱),触发按钮旁边
+ * 也摆上名字 —— 原来只有一个圆头像,认不出人。「已登录」四个字换成了真的
+ * 账户信息。
+ *
+ * 2026-11-06:那块账户信息**整块变成可点的菜单项** —— 点进 `/account`
+ * (账户信息页)改名字、换头像。原来它是 `DropdownMenuLabel`,一块点不动的
+ * 标签:摆在菜单顶上只是给人看的,不是「一个入口」。移动端 Sheet 里那一块
+ * 同样改成链接。
+ *
+ * 头像是 `getAvatarUrl(user.image)` 出来的 —— `user.image` 可能是**存储
+ * 键名**(自己在账户信息页上传的),不是 URL,直接当 src 会是裂图。
+ *
  * 头像用 `useSession()` 而不是服务端 cookie 读的 —— 服务端读到的会话在
  * 客户端首帧还不一定一致,那样会 hydration mismatch。`useSession()` 首次
  * 挂载时 `isPending` 为 true,SSR 也是 true,两端渲染同一个占位。
@@ -59,6 +71,7 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  ChevronRight,
   LayoutDashboard,
   Loader2,
   LogOut,
@@ -77,7 +90,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -89,6 +101,11 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+// 头像的 URL 要过一次 getAvatarUrl —— `user.image` 可能是**存储键名**
+// (自己在「账户信息」页上传的头像),不是 URL。直接拿它当 src 会是一张
+// 裂图。刻意从 utils 导入,不走 "@/features/storage" 桶文件(那会把
+// AWS SDK 打进客户端 bundle)。
+import { getAvatarUrl } from "@/features/storage/utils";
 import { useCart, useCartUi } from "@/features/storefront/hooks/use-cart";
 import { useProducts } from "@/features/storefront/hooks/use-products";
 import { useStorefrontModal } from "@/features/storefront/hooks/use-storefront-modal";
@@ -296,9 +313,34 @@ export function WjpStoreHeader() {
                     <div className="h-9 animate-pulse rounded-md bg-muted" />
                   ) : user ? (
                     <div className="flex flex-col">
-                      <p className="px-4 pb-2 text-xs text-muted-foreground truncate">
-                        {user.name || user.email}
-                      </p>
+                      {/* 账户信息 —— 头像 + 姓名 + 邮箱(跟桌面端下拉一致)。
+                          整块是**可点的**:进 `/account`(账户信息页)。 */}
+                      <Link
+                        href="/account"
+                        onClick={() => setMobileOpen(false)}
+                        className="flex items-center gap-3 px-4 pb-3"
+                      >
+                        <Avatar className="size-9 shrink-0">
+                          <AvatarImage
+                            src={getAvatarUrl(user.image)}
+                            alt={user.name || user.email}
+                          />
+                          <AvatarFallback className="bg-primary text-[10px] text-primary-foreground">
+                            {getInitials(user.name, user.email)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">
+                            {user.name || user.email}
+                          </p>
+                          {user.name && user.email ? (
+                            <p className="truncate text-[11px] text-muted-foreground">
+                              {user.email}
+                            </p>
+                          ) : null}
+                        </div>
+                        <ChevronRight className="ml-auto size-4 shrink-0 text-muted-foreground" />
+                      </Link>
                       <Link
                         href="/account/orders"
                         onClick={() => setMobileOpen(false)}
@@ -502,28 +544,61 @@ export function WjpStoreHeader() {
                   <button
                     type="button"
                     aria-label={isZh ? "我的账户" : "My account"}
-                    className="hidden rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring sm:inline-flex"
+                    className="hidden items-center gap-2 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring sm:inline-flex"
                   >
                     <Avatar className="size-8">
                       <AvatarImage
-                        src={user.image || undefined}
+                        src={getAvatarUrl(user.image)}
                         alt={user.name || user.email}
                       />
                       <AvatarFallback className="bg-primary text-[10px] text-primary-foreground">
                         {getInitials(user.name, user.email)}
                       </AvatarFallback>
                     </Avatar>
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuLabel className="font-normal">
-                    <span className="block text-xs text-muted-foreground">
-                      {isZh ? "已登录" : "Signed in"}
-                    </span>
-                    <span className="block truncate text-sm font-medium">
+                    {/* 账户信息 —— 光一个圆头像认不出人,名字摆在旁边。
+                        lg 以下藏起来:那个宽度还要放搜索框和购物车。 */}
+                    <span className="hidden max-w-[10rem] truncate text-sm text-foreground/80 lg:inline">
                       {user.name || user.email}
                     </span>
-                  </DropdownMenuLabel>
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-64">
+                  {/* 账户信息 —— 头像 + 姓名 + 邮箱。
+                      用户点开菜单第一眼要看到「我是谁」,不是「已登录」四个字。
+
+                      整块是**可点的菜单项**(2026-11-06):点进 `/account`
+                      (账户信息页)改名字、换头像。原来这里是
+                      `DropdownMenuLabel` —— 一块点不动的标签,摆在菜单顶上
+                      只是给人看的,不是「一个入口」。 */}
+                  <DropdownMenuItem
+                    asChild
+                    className="cursor-pointer px-3 py-2.5"
+                  >
+                    <Link href="/account">
+                      <div className="flex w-full items-center gap-3">
+                        <Avatar className="size-9 shrink-0">
+                          <AvatarImage
+                            src={getAvatarUrl(user.image)}
+                            alt={user.name || user.email}
+                          />
+                          <AvatarFallback className="bg-primary text-[10px] text-primary-foreground">
+                            {getInitials(user.name, user.email)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">
+                            {user.name || user.email}
+                          </p>
+                          {user.name && user.email ? (
+                            <p className="truncate text-[11px] text-muted-foreground">
+                              {user.email}
+                            </p>
+                          ) : null}
+                        </div>
+                        <ChevronRight className="ml-auto size-4 shrink-0 text-muted-foreground" />
+                      </div>
+                    </Link>
+                  </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   {/* 买家的三样东西 —— 2026-11-06 从控制台搬到这里。
                       工作室的原话:「打印订单、购物订单、地址管理不放在控制台

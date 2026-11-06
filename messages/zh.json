@@ -1670,6 +1670,36 @@
       "localHint": "支持 ZIP / RAR / OBJ / STL / PLY / GLB / GLTF · 所有分析均在浏览器本地完成"
     }
   },
+  "Account": {
+    "title": "账户信息",
+    "description": "你的账号资料 —— 名字、头像、联系方式都在这儿。",
+    "section": "账户",
+    "name": "姓名",
+    "namePlaceholder": "你希望别人怎么称呼你",
+    "nameTooShort": "姓名至少 2 个字符",
+    "nameTooLong": "姓名最多 50 个字符",
+    "save": "保存",
+    "saving": "保存中…",
+    "saved": "资料已更新",
+    "saveFailed": "保存失败，稍后再试。",
+    "email": "邮箱",
+    "emailVerified": "已验证",
+    "emailUnverified": "未验证",
+    "emailHint": "换邮箱请联系工作室。",
+    "phone": "手机号",
+    "phoneVerified": "已验证",
+    "phoneUnverified": "未验证",
+    "phoneNotBound": "未绑定",
+    "avatarChange": "换头像",
+    "avatarUploading": "上传中…",
+    "avatarHint": "JPG / PNG / GIF / WebP，最大 {size}MB。",
+    "avatarTypeFailed": "只支持 JPG / PNG / GIF / WebP。",
+    "avatarTooLarge": "图片超过 {size}MB。",
+    "avatarFailed": "头像上传失败，稍后再试。",
+    "memberSince": "注册于",
+    "moreSettings": "改密码、绑手机号",
+    "moreSettingsHint": "密码、手机号验证这些在账户设置里。"
+  },
   "PrintQuote": {
     "page": {
       "policyLabel": "下单前请先了解："
@@ -1757,7 +1787,11 @@
     },
     "list": {
       "title": "我的打印订单",
-      "empty": "还没有下单记录",
+      "empty": "还没有打印订单",
+      "emptyHint": "上传一个模型,量完克重就能下单 —— 下的单会出现在这里。",
+      "emptyCta": "去量克重",
+      "count": "{count} 张工单",
+      "newOrder": "去下单",
       "viewAll": "查看全部",
       "viewDetail": "查看详情",
       "loading": "加载中…"

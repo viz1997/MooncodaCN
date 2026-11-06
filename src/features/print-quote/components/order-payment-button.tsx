@@ -60,7 +60,7 @@ export function OrderPaymentButton({
 
   if (paymentStatus === "paid") {
     return (
-      <p className="inline-flex items-center gap-1.5 rounded-md border border-emerald-600/20 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700">
+      <p className="inline-flex items-center gap-1.5 rounded-full border border-emerald-600/20 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700">
         <Wallet className="size-3.5" />
         {t("payment.paid")}
       </p>
@@ -69,7 +69,7 @@ export function OrderPaymentButton({
 
   if (paymentStatus === "refunded") {
     return (
-      <p className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/50 px-3 py-1.5 text-xs font-medium text-muted-foreground">
+      <p className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/50 px-3 py-1.5 text-xs font-medium text-muted-foreground">
         <Wallet className="size-3.5" />
         {t("payment.refunded")}
       </p>
@@ -126,7 +126,7 @@ export function OrderPaymentButton({
         onClick={() => {
           void goPay();
         }}
-        className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-50"
+        className="inline-flex items-center gap-1.5 rounded-full bg-foreground px-4 py-1.5 text-xs font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-50"
       >
         {pending ? (
           <Loader2 className="size-3.5 animate-spin" />

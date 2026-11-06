@@ -9,6 +9,11 @@
  * 报价台没了,这个组件就只剩订单列表页那一个用方了(所以「查看全部」那个
  * 链接也一并删掉:那个页自己就是全部)。
  *
+ * ## 只画列表,页面骨架归 `PrintOrdersView`
+ *
+ * 页面留白、标题、空状态都在 `print-orders-view.tsx` —— 那边知道轮询回来的
+ * 订单到底有没有,空状态要占满整页。这里只负责把订单画成行。
+ *
  * ## 只读,没有「移除」
  *
  * 2026-11-01 之前这里是浏览器 localStorage 里的一个索引,用户能随手删掉 ——
@@ -23,7 +28,6 @@
  * `lib/status-ui.ts`,用户侧和后台共用一份。
  */
 
-import { PackageSearch } from "lucide-react";
 import { useFormatter, useTranslations } from "next-intl";
 
 import {
@@ -38,101 +42,73 @@ import {
 } from "@/features/print-quote/lib/status-ui";
 import { Link } from "@/i18n/routing";
 
-export function PrintOrderList({
-  orders,
-  loading = false,
-}: {
-  orders: UserPrintOrder[];
-  /** 首屏还在拉 —— 别急着显示「还没有下单记录」 */
-  loading?: boolean;
-}) {
+export function PrintOrderList({ orders }: { orders: UserPrintOrder[] }) {
   const t = useTranslations("PrintQuote");
   const format = useFormatter();
 
-  if (orders.length === 0) {
-    return (
-      <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-          <PackageSearch className="size-4 text-muted-foreground" />
-          {t("list.title")}
-        </h3>
-        <p className="mt-3 text-xs text-muted-foreground">
-          {loading ? t("list.loading") : t("list.empty")}
-        </p>
-      </section>
-    );
-  }
-
   return (
-    <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-          <PackageSearch className="size-4 text-muted-foreground" />
-          {t("list.title")}
-        </h3>
-      </div>
-
-      <ul className="divide-y divide-border">
-        {orders.map((order) => (
-          <li
-            key={order.orderNo}
-            className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3 first:pt-0 last:pb-0"
-          >
+    <ul className="divide-y divide-border border-y border-border">
+      {orders.map((order) => (
+        <li key={order.orderNo} className="flex flex-wrap gap-4 py-5">
+          <div className="flex-1 min-w-0">
             <Link
               href={`/account/print-orders/${order.orderNo}`}
-              className="font-mono text-xs font-medium text-foreground underline-offset-4 hover:underline"
+              className="font-serif text-base leading-tight underline-offset-4 hover:underline"
             >
               {order.orderNo}
             </Link>
 
-            <span
-              className={`rounded-full px-2 py-0.5 text-[11px] ring-1 ring-inset ${
-                PRINT_ORDER_STATUS_CHIP[order.status]
-              }`}
-            >
-              {t(`status.${order.status}`)}
-            </span>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              <span
+                className={`rounded-full px-2 py-0.5 text-[11px] ring-1 ring-inset ${
+                  PRINT_ORDER_STATUS_CHIP[order.status]
+                }`}
+              >
+                {t(`status.${order.status}`)}
+              </span>
 
-            {/* 收款状态 —— 用户在列表里最想看到的是这个 */}
-            <span
-              className={`rounded-full px-2 py-0.5 text-[11px] ring-1 ring-inset ${
-                PRINT_ORDER_PAYMENT_CHIP[order.paymentStatus]
-              }`}
-            >
-              {t(`payment.status.${order.paymentStatus}`)}
-            </span>
+              {/* 收款状态 —— 用户在列表里最想看到的是这个 */}
+              <span
+                className={`rounded-full px-2 py-0.5 text-[11px] ring-1 ring-inset ${
+                  PRINT_ORDER_PAYMENT_CHIP[order.paymentStatus]
+                }`}
+              >
+                {t(`payment.status.${order.paymentStatus}`)}
+              </span>
 
-            <span className="font-mono text-xs text-muted-foreground">
-              {formatGrams(order.materialWeightG)}
-              {order.supportWeightG !== null
-                ? ` + ${formatGrams(order.supportWeightG)}`
-                : null}
-            </span>
+              <span className="font-mono text-[11px] text-muted-foreground">
+                {formatGrams(order.materialWeightG)}
+                {order.supportWeightG !== null
+                  ? ` + ${formatGrams(order.supportWeightG)}`
+                  : null}
+              </span>
 
-            <span className="font-mono text-xs text-muted-foreground">
-              {formatDims(order.dims)}
-            </span>
+              <span className="font-mono text-[11px] text-muted-foreground">
+                {formatDims(order.dims)}
+              </span>
 
-            <span className="font-mono text-xs font-medium text-foreground">
+              <span className="text-[11px] text-muted-foreground">
+                {format.dateTime(new Date(order.createdAt), {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                })}
+              </span>
+            </div>
+          </div>
+
+          <div className="text-right shrink-0">
+            <p className="font-serif text-base">
               {formatCents(order.totalPriceCents)}
-            </span>
-
-            <span className="text-[11px] text-muted-foreground">
-              {format.dateTime(new Date(order.createdAt), {
-                dateStyle: "medium",
-                timeStyle: "short",
-              })}
-            </span>
-
+            </p>
             <Link
               href={`/account/print-orders/${order.orderNo}`}
-              className="ml-auto text-[11px] text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+              className="mt-1 block text-[11px] text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
             >
               {t("list.viewDetail")}
             </Link>
-          </li>
-        ))}
-      </ul>
-    </section>
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }

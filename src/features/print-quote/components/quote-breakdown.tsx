@@ -62,7 +62,7 @@ export function QuoteBreakdown({
   const t = useTranslations("PrintQuote");
 
   return (
-    <>
+    <dl className="space-y-2.5 text-sm">
       <Row
         label={t("quote.materialWeight")}
         value={formatGrams(values.materialWeightG)}
@@ -92,27 +92,27 @@ export function QuoteBreakdown({
             : t("delivery.free")
         }
       />
-      <div className="flex items-baseline justify-between border-t border-border pt-2">
-        <span className="text-xs font-medium text-foreground">
+      <div className="flex items-baseline justify-between border-t border-border pt-3 mt-3">
+        <dt className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
           {t("quote.total")}
-        </span>
-        <span
-          className={`font-mono font-semibold tracking-tight text-amber-700 dark:text-amber-400 ${
-            totalSize === "lg" ? "text-xl" : "text-base"
+        </dt>
+        <dd
+          className={`font-serif text-foreground ${
+            totalSize === "lg" ? "text-2xl" : "text-xl"
           }`}
         >
           {formatCents(values.totalPriceCents)}
-        </span>
+        </dd>
       </div>
-    </>
+    </dl>
   );
 }
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-baseline justify-between text-xs">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-mono text-foreground">{value}</span>
+    <div className="flex items-baseline justify-between">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="font-medium text-foreground">{value}</dd>
     </div>
   );
 }

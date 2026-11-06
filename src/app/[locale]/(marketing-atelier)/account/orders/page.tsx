@@ -63,15 +63,7 @@ export default async function AccountOrdersPage() {
     paymentChannel: order.paymentChannel,
   }));
 
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="font-serif text-2xl">我的订单</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          成品商城的订单。付款完成才开始制作,进度会在这里更新。
-        </p>
-      </div>
-      <StoreOrderList orders={orders} />
-    </div>
-  );
+  // 版式(页面留白 / 标题 / 列表 / 空状态)在组件里 —— 商城那边也是组件自己
+  // 掌版(`CartPageView` 就是),页面只管鉴权和取数。
+  return <StoreOrderList orders={orders} />;
 }
