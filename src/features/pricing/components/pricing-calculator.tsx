@@ -126,6 +126,7 @@ import {
 } from "@/features/pricing/lib/zip-extractor";
 import type { ClientPrintConfig } from "@/features/print-quote/lib/pricing-settings";
 import type { PrintQuoteInput } from "@/features/print-quote/lib/quote-types";
+import { useDropZone } from "@/features/shared/hooks/use-drop-zone";
 import {
   MeshCheckBadge,
   MeshCheckIssues,
@@ -237,7 +238,6 @@ export function PricingCalculator({
    */
   const [meshSummary, setMeshSummary] = useState<MeshCheckSummary | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isDragging, setIsDragging] = useState(false);
   /** 接力只取一次 —— StrictMode 下 effect 会跑两遍 */
   const handoffTakenRef = useRef(false);
 
@@ -812,6 +812,23 @@ export function PricingCalculator({
     // 同一个文件再选一次也要能重新触发 change
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
+
+  /**
+   * 拖文件进上传卡 —— **用共享的那一套**
+   *
+   * 以前这里是 `onDragOver` → true / `onDragLeave` → false:指针从卡上移到
+   * 里面的图标上时 `dragleave` 会冒上来,边框颜色跟着闪一下。
+   * 计数版的口径见 `features/shared/hooks/use-drop-zone.ts`。
+   */
+  const handleDroppedFiles = useCallback(
+    (files: File[]) => {
+      const file = files[0];
+      if (file) void loadFile(file);
+    },
+    [loadFile]
+  );
+  const { isDragOver, dropHandlers } =
+    useDropZone<HTMLDivElement>(handleDroppedFiles);
 
   /**
    * 从模型检查工具接力过来的文件 —— **挂载时取一次**
@@ -1590,49 +1607,23 @@ export function PricingCalculator({
             <section className="mb-6">
               {!model && loadStatus === "idle" ? (
                 <Card
-                  className={`border-2 border-dashed transition-colors cursor-pointer bg-stone-50/40 ${isDragging ? "border-amber-500 bg-amber-50/60 ring-2 ring-amber-200" : "border-stone-300 hover:border-amber-400"}`}
+                  className={`border-2 border-dashed transition-colors cursor-pointer bg-stone-50/40 ${isDragOver ? "border-amber-500 bg-amber-50/60 ring-2 ring-amber-200" : "border-stone-300 hover:border-amber-400"}`}
                   onClick={() => fileInputRef.current?.click()}
-                  onDragEnter={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setIsDragging(true);
-                  }}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setIsDragging(true);
-                  }}
-                  onDragLeave={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setIsDragging(false);
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setIsDragging(false);
-                    const files = e.dataTransfer.files;
-                    if (files && files.length > 0) {
-                      const fakeEvent = {
-                        target: { files },
-                      } as unknown as React.ChangeEvent<HTMLInputElement>;
-                      handleFileChange(fakeEvent);
-                    }
-                  }}
+                  {...dropHandlers}
                 >
                   <CardContent className="p-10 flex flex-col items-center text-center">
                     <div
-                      className={`size-16 rounded-full flex items-center justify-center mb-4 transition-colors ${isDragging ? "bg-amber-200" : "bg-amber-100"}`}
+                      className={`size-16 rounded-full flex items-center justify-center mb-4 transition-colors ${isDragOver ? "bg-amber-200" : "bg-amber-100"}`}
                     >
                       <UploadCloud
-                        className={`size-8 ${isDragging ? "text-amber-700" : "text-amber-600"}`}
+                        className={`size-8 ${isDragOver ? "text-amber-700" : "text-amber-600"}`}
                       />
                     </div>
                     <h3 className="text-base font-semibold text-stone-800 mb-1">
-                      {isDragging ? t("upload.dropNow") : t("upload.dropTitle")}
+                      {isDragOver ? t("upload.dropNow") : t("upload.dropTitle")}
                     </h3>
                     <p className="text-sm text-stone-500 max-w-md">
-                      {isDragging ? t("upload.dropSoon") : t("upload.dropHint")}
+                      {isDragOver ? t("upload.dropSoon") : t("upload.dropHint")}
                     </p>
                     {uploadError && (
                       <div className="mt-3 flex items-center gap-2 text-sm text-red-600 bg-red-50 border border-red-200 px-3 py-2 rounded-md">
@@ -1647,7 +1638,7 @@ export function PricingCalculator({
                       onChange={handleFileChange}
                       className="hidden"
                     />
-                    {!isDragging && (
+                    {!isDragOver && (
                       <Button
                         type="button"
                         variant="outline"
@@ -1839,10 +1830,7 @@ export function PricingCalculator({
               onConcurrencyChange={setBatchConcurrency}
               onApplyAngleChange={setBatchApplyAngle}
               onDropFiles={(files) => {
-                setBatchItems((prev) => [
-                  ...prev,
-                  ...initBatch(Array.from(files)),
-                ]);
+                setBatchItems((prev) => [...prev, ...initBatch(files)]);
               }}
               solidRatio={solidRatio}
               materialDensity={materialDensity}

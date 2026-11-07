@@ -22,7 +22,7 @@ import { useTranslations } from "next-intl";
  *
  * 区块只呈现克重 / 体积 / 摆盘结果，不呈现任何价格。
  */
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -39,6 +39,7 @@ import {
   type BatchItem,
   summarizeBatch,
 } from "@/features/pricing/lib/batch-processor";
+import { useDropZone } from "@/features/shared/hooks/use-drop-zone";
 
 const BATCH_STATUS_LABEL_KEY: Record<BatchItem["status"], string> = {
   pending: "pending",
@@ -77,7 +78,7 @@ export type BatchModeSectionProps = {
   onExportItem: (item: BatchItem) => void;
   onConcurrencyChange: (v: number) => void;
   onApplyAngleChange: (v: boolean) => void;
-  onDropFiles: (files: FileList) => void;
+  onDropFiles: (files: File[]) => void;
   solidRatio: number;
   materialDensity: number;
   /** 支撑材料密度 (g/cm³) —— 支撑跟模型不是一种材料,批量算支撑克重用这个 */
@@ -112,8 +113,9 @@ export function BatchModeSection(props: BatchModeSectionProps) {
   const hasPending = batchItems.some(
     (i) => i.status === "pending" || i.status === "error"
   );
-  const [isBatchDragging, setIsBatchDragging] = useState(false);
-
+  // 拖放 —— 与克重工具的上传卡、模型检查工具的视口共用一份口径
+  const { isDragOver: isBatchDragging, dropHandlers } =
+    useDropZone<HTMLDivElement>((files) => onDropFiles(files));
   return (
     <section className="mb-6 space-y-4">
       {/* 头部说明 */}
@@ -275,28 +277,7 @@ export function BatchModeSection(props: BatchModeSectionProps) {
         <Card
           className={`border-2 border-dashed transition-colors cursor-pointer bg-stone-50/40 ${isBatchDragging ? "border-amber-500 bg-amber-50/60 ring-2 ring-amber-200" : "border-stone-300 hover:border-amber-400"}`}
           onClick={onPickFiles}
-          onDragEnter={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setIsBatchDragging(true);
-          }}
-          onDragOver={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setIsBatchDragging(true);
-          }}
-          onDragLeave={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setIsBatchDragging(false);
-          }}
-          onDrop={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setIsBatchDragging(false);
-            const files = e.dataTransfer.files;
-            if (files && files.length > 0) onDropFiles(files);
-          }}
+          {...dropHandlers}
         >
           <CardContent className="p-10 flex flex-col items-center text-center">
             <div

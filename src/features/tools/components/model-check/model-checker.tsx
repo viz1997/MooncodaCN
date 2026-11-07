@@ -34,6 +34,7 @@ import {
   scalePositions,
 } from "@/features/pricing/lib/model-units";
 import type { TextureDiagnostic } from "@/features/pricing/lib/obj-materials";
+import { useDropZone } from "@/features/shared/hooks/use-drop-zone";
 import {
   ISSUE_COLORS,
   ISSUE_LABEL_KEYS,
@@ -136,7 +137,6 @@ export function ModelChecker({
    */
   const [unitCheck, setUnitCheck] = useState<ModelUnitCheck | null>(null);
   const [loadingPct, setLoadingPct] = useState(0);
-  const [dragOver, setDragOver] = useState(false);
   const focusSeq = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   /** 当前模型的贴图 blob URL 释放函数(换模型 / 卸载时调用) */
@@ -272,15 +272,24 @@ export function ModelChecker({
     []
   );
 
-  const onDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      setDragOver(false);
-      const file = e.dataTransfer.files?.[0];
+  /**
+   * 拖文件进视口 —— **用共享的那一套**
+   *
+   * 以前这里是 `onDragOver` → true / `onDragLeave` → false,那个写法会**闪**:
+   * 遮罩盖在指针下面,它自己成了事件目标,`dragleave` 冒上来把遮罩撤掉,
+   * 撤掉之后 `dragover` 又来 —— 一直闪,模型根本拖不进来。
+   *
+   * 计数版的口径见 `features/shared/hooks/use-drop-zone.ts`。
+   */
+  const handleDroppedFiles = useCallback(
+    (files: File[]) => {
+      const file = files[0];
       if (file) void loadFile(file);
     },
     [loadFile]
   );
+  const { isDragOver: dragOver, dropHandlers } =
+    useDropZone<HTMLElement>(handleDroppedFiles);
 
   const stats = result?.stats ?? null;
 
@@ -418,12 +427,7 @@ export function ModelChecker({
         {/* ---------- 3D 视口 ---------- */}
         <main
           className="relative order-1 h-[48vh] min-h-[300px] flex-1 md:order-2 md:h-auto"
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragOver(true);
-          }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={onDrop}
+          {...dropHandlers}
         >
           <Viewport
             result={result}
@@ -542,7 +546,16 @@ export function ModelChecker({
 
           {/* 拖拽遮罩 */}
           {dragOver && (
-            <div className="absolute inset-0 z-20 flex items-center justify-center border-2 border-dashed border-emerald-500/60 bg-emerald-500/10 backdrop-blur-sm">
+            /**
+             * `pointer-events-none` —— **必须**
+             *
+             * 遮罩盖在指针下面,它就成了拖放的事件目标:浏览器把「进入遮罩」
+             * 算成一次 dragenter、把「离开容器」算成一次 dragleave,容器跟着
+             * 撤遮罩 → 遮罩没了 → 又 dragover …… 一直闪。
+             *
+             * 遮罩只是给人看的,不吃事件。
+             */
+            <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center border-2 border-dashed border-emerald-500/60 bg-emerald-500/10 backdrop-blur-sm">
               <p className="rounded-lg bg-zinc-900/90 px-4 py-2 text-sm text-emerald-300">
                 {t("upload.dropOverlay")}
               </p>
