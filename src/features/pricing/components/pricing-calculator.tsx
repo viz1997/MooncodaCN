@@ -155,7 +155,6 @@ export function PricingCalculator({
   quoteSlot,
   onModelChange,
   clientConfig,
-  checkSlot,
 }: {
   /**
    * 是否渲染工具自带的页头 / 页脚。
@@ -205,31 +204,6 @@ export function PricingCalculator({
    * 这里只有**几何和密度**,没有价格 —— 价格是服务端算的。
    */
   clientConfig?: ClientPrintConfig;
-
-  /**
-   * 「检查」视角的内容 —— **渲染函数**,不是节点
-   *
-   * 检查面板要的是**当前模型 + 当前缩放 + 当前参数** —— 这三样都在这个
-   * 组件里,所以只能由它来调这个函数,把模型递出去。
-   *
-   * 2026-11-07:模型检查工具并进这个页面(两个工具页合成一个工作台),
-   * 模型只载入一次 —— 检查面板吃的是**同一个** `ModelFile`,
-   * 不用再解析一遍 OBJ。
-   *
-   * 不传就没有「检查」视角。
-   */
-  checkSlot?:
-    | ((args: {
-        model: ModelFile | null;
-        /** 当前生效的缩放因子 —— 检查面板按它缩放后再分析 */
-        scales: [number, number, number];
-        clientConfig?: ClientPrintConfig | undefined;
-        /** 单位判定结果(文件坐标不是毫米时才有值) */
-        unitCheck: ModelUnitCheck | null;
-        /** 拖文件进来 —— 交给本页的上传管线 */
-        onFiles: (files: File[]) => void;
-      }) => ReactNode)
-    | undefined;
 }) {
   const t = useTranslations("MaterialPricing");
 
@@ -865,9 +839,11 @@ export function PricingCalculator({
   /**
    * 切换工作台视角
    *
-   * 「检查」视角整块换成它自己那一套(深色视口 + 侧栏),预览不在这条路上 ——
-   * 所以切过去时预览的「就绪」状态要照旧置上,否则「导出模型」那几颗按钮
-   * 会一直灰着。
+   * 三个视角**共用一个展示区域**(同一个 `ModelViewport`,永远挂在左栏),
+   * 切视角只换喂进去的数据 —— 视口不卸载,相机不动。
+   *
+   * 「检查」那一栏的视口数据由分析器回话才有 —— 切过去时预览的「就绪」
+   * 状态要照旧置上,否则「导出模型」那几颗按钮会一直灰着。
    */
   const handleTabChange = useCallback(
     (next: WorkspaceTab) => {
@@ -1714,17 +1690,6 @@ export function PricingCalculator({
                     header={modelHeader}
                     weight={weightReadout}
                     pose={posePanel}
-                    check={
-                      workspaceTab === "check" && checkSlot
-                        ? checkSlot({
-                            model,
-                            scales: appliedScales,
-                            clientConfig,
-                            unitCheck,
-                            onFiles: handleDroppedFiles,
-                          })
-                        : undefined
-                    }
                     tab={workspaceTab}
                     onTabChange={handleTabChange}
                     quote={quoteSlot}
@@ -1743,7 +1708,6 @@ export function PricingCalculator({
                     unitCheck={unitCheck}
                     onRevertUnitScale={revertToOriginalUnits}
                     geometry={geometry}
-                    optimalAngle={optimalAngle}
                     poseSupport={poseSupport}
                     supportRatio={supportStats.ratio}
                     viewerRotX={viewerRotX}
@@ -1753,6 +1717,7 @@ export function PricingCalculator({
                     manualRotY={manualRotY}
                     manualRotZ={manualRotZ}
                     onManualAngleChange={handleManualAngleChange}
+                    onResetAngle={resetAngle}
                     onOptimizeAngle={optimizeAngle}
                     angleOptimizing={angleOptimizing}
                     angleProgress={angleProgress}
@@ -1760,8 +1725,10 @@ export function PricingCalculator({
                     showSupport={showSupport}
                     onToggleSupport={() => setShowSupport((s) => !s)}
                     supportLiftMm={clientConfig?.supportLiftMm}
+                    supportBaseMarginMm={clientConfig?.supportBaseMarginMm}
                     showTexture={showTexture}
                     onToggleTexture={() => setShowTexture((s) => !s)}
+                    onFiles={handleDroppedFiles}
                     onClearModel={clearModel}
                     onViewerReady={() => {
                       setLoadStatus("ready");

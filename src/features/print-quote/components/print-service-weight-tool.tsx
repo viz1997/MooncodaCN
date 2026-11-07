@@ -39,7 +39,6 @@ import type { PricingModelPayload } from "@/features/pricing/components/pricing-
 import { PrintServiceAddToOrder } from "@/features/print-quote/components/print-service-add-to-order";
 import type { ClientPrintConfig } from "@/features/print-quote/lib/pricing-settings";
 import type { PrintQuoteInput } from "@/features/print-quote/lib/quote-types";
-import { ModelCheckPanel } from "@/features/tools/components/model-check/model-check-panel";
 
 export function PrintServiceWeightTool({
   isLoggedIn,
@@ -90,30 +89,6 @@ export function PrintServiceWeightTool({
       clientConfig={clientConfig}
       onModelChange={handleModelChange}
       onQuoteInput={handleQuoteInput}
-      /**
-       * 「检查」视角 —— 打印前自检
-       *
-       * 2026-11-07:模型检查工具并进了这个页面。检查面板吃的是**同一个**
-       * `ModelFile`(只解析了一遍)加当前缩放因子,所以画出来的支撑外壳跟
-       * 克重那一栏的支撑克重是同一个几何。
-       */
-      checkSlot={({
-        model: m,
-        scales,
-        clientConfig: cfg,
-        unitCheck,
-        onFiles,
-      }) =>
-        m ? (
-          <ModelCheckPanel
-            model={m}
-            scales={scales}
-            clientConfig={cfg}
-            unitCheck={unitCheck}
-            onFiles={onFiles}
-          />
-        ) : null
-      }
       quoteSlot={
         <PrintServiceAddToOrder
           model={model}

@@ -1204,7 +1204,8 @@
       "optimize": "智能摆盘",
       "manualTune": "手动微调",
       "reoptimize": "重新优化",
-      "resetAngle": "重置角度"
+      "resetAngle": "重置角度",
+      "modelAngle": "模型角度"
     },
     "preview": {
       "texture": "显示贴图",

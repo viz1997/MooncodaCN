@@ -216,22 +216,22 @@ describe("拖放规矩 —— 三个拖放区共用一份口径", () => {
 
 describe("拖放规矩 —— 遮罩不吃事件", () => {
   it("打印前工作台的拖放遮罩带 pointer-events-none", () => {
-    // 2026-11-07:模型检查并进了克重工具,组件从 `model-checker.tsx`
-    // 改名成 `model-check-panel.tsx`(它是工作台的「检查」视角)。
+    // 2026-11-07:模型检查并进了克重工具,拖放区跟着「共用展示区域」搬到了
+    // 工作台框架(`model-settings-panel.tsx`)—— 三个视角共用那一个展示区。
     const file = join(
       ROOT,
-      "src/features/tools/components/model-check/model-check-panel.tsx"
+      "src/features/pricing/components/model-settings-panel.tsx"
     );
     const code = readFileSync(file, "utf8");
 
-    // 遮罩那一行:`pointer-events-none` 和 `absolute inset-0` 在同一行
-    const overlayLine = code
+    // 盖在指针下面的每一层都得带 `pointer-events-none` —— 遮罩只是给人看的
+    const overlayLines = code
       .split("\n")
-      .find(
-        (line) => line.includes("absolute inset-0") && line.includes("<div")
-      );
+      .filter((line) => line.includes("absolute inset-0"));
 
-    expect(overlayLine).toBeDefined();
-    expect(overlayLine).toContain("pointer-events-none");
+    expect(overlayLines.length).toBeGreaterThan(0);
+    for (const line of overlayLines) {
+      expect(line).toContain("pointer-events-none");
+    }
   });
 });

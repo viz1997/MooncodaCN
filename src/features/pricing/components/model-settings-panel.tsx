@@ -15,9 +15,10 @@ import {
 import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 /**
- * Mooncoda 克重计算器的「模型设置」面板 —— 也就是**整页唯一那张卡片**。
+ * Mooncoda 克重计算器的「模型设置」面板 —— 也就是**整页唯一那张卡片**,
+ * 同时是打印前工作台(`/tools/workbench`)的**框架**。
  *
- * 2026-11-01 的三次改版：
+ * 2026-11-01 的三次改版:
  *  1. 原先是 `ModelSettingsDialog` 弹窗（Radix Dialog）。改成**页面内直接
  *     处理** —— 尺寸调节不再弹窗，改完即时生效。
  *  2. 去掉「待应用 / 已应用」两套状态。尺寸状态只有一份，由父组件持有，
@@ -28,13 +29,38 @@ import type { ReactNode } from "react";
  *     父组件渲染），左栏 3D 预览，右栏克重 + 摆盘结果（`weight` 插槽，
  *     父组件渲染）+ 尺寸调节。
  *
+ * ## 共用一个展示区域(2026-11-07)
+ *
+ * 工作室的原话:**「共用一个展示区域，切换只是切换不同数据而已」**。
+ *
+ * 以前「检查」那一栏**整块替换**两栏布局,自己挂一个深色视口 —— 切一次
+ * 视角,视口就卸载重挂一遍,相机、模型、支撑全得重来。
+ *
+ * 现在**只有一个 `ModelViewport`**,永远挂在左栏:
+ *
+ * | 视角 | 喂进去的数据 |
+ * |---|---|
+ * | `check` | 分析结果(问题着色 / 问题边线)+ 图层开关 + 聚焦请求 |
+ * | `weight` | 支撑外壳(摆盘 Worker 算的那块)+ 当前姿态 |
+ * | `pose` | 同上 |
+ *
+ * 切视角 = 换几行 prop。**视口不卸载**,相机不动,模型不重建。
+ *
+ * ## 模型角度是**模型**的旋转,不是**视角**的旋转
+ *
+ * 工作室的原话:**「模型需要支持旋转角度而不是视角旋转」**。
+ *
+ * 摆着看(转相机)跟摆着印(转模型)是两件事 —— 后者决定支撑克重。所以
+ * 姿态走**姿态组**(`rotation.order = "ZYX"`,跟摆盘算法 / OBJ 导出同
+ * 一套口径),三个视角**都**能转,角度条常驻在展示区上方。
+ *
  * 几何由父组件算好后传进来（`geometry`）—— 面板不自己重算一遍，
  * 拆成两处只会各自漂移。
  *
  * i18n 沿用 `MaterialPricing.dialog.*` 命名空间（文案与旧弹窗一致），只是
  * 调用位置从弹窗换成了面板 —— 整个命名空间的重命名留给单独的清理。
  */
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -43,10 +69,7 @@ import {
   DimEditor,
   fmt,
 } from "@/features/pricing/components/shared";
-import type {
-  OptimalAngle,
-  SupportPoseResult,
-} from "@/features/pricing/lib/angle-optimizer";
+import type { SupportPoseResult } from "@/features/pricing/lib/angle-optimizer";
 import {
   type ModelUnitCheck,
   scalePositionsXYZ,
@@ -56,6 +79,10 @@ import {
   type MeshTextureInfo,
   ModelViewport,
 } from "@/features/shared/components/model-viewport";
+import { useDropZone } from "@/features/shared/hooks/use-drop-zone";
+import { ModelCheckSidePanel } from "@/features/tools/components/model-check/model-check-panel";
+import { useCheckView } from "@/features/tools/components/model-check/use-check-view";
+import { ISSUE_LABEL_KEYS } from "@/features/tools/lib/mesh/types";
 
 export type LoadStatus =
   | "idle"
@@ -75,12 +102,12 @@ export type DimMode = "original" | "custom";
  *
  * | 视角 | 看什么 |
  * |---|---|
- * | `check` | 打印前自检(反转法向 / 坏边破面 / 壳体封闭性)—— 整块替换两栏布局 |
- * | `weight` | 克重(耗材 / 支撑 / 总克重)+ 尺寸调节 + 下单出口 |
+ * | `check` | 打印前自检(反转法向 / 坏边破面 / 壳体封闭性)—— 右栏换成检查侧栏 |
+ * | `weight` | 克重(耗材 / 支撑 / 总克重)+ 尺寸调节 |
  * | `pose` | 摆盘(最优姿态 + 省了多少料) |
  *
- * 「检查」那一栏是**别的组件**渲染的(它有自己的一整套深色视口),父组件
- * 通过 `check` 插槽递进来 —— 面板只管摆位置。
+ * 三个视角**共用左栏那一个展示区域**(同一个 `ModelViewport`)——
+ * 切视角只换喂进去的数据。
  */
 export type WorkspaceTab = "check" | "weight" | "pose";
 
@@ -131,22 +158,12 @@ export type ModelSettingsPanelProps = {
    */
   pose?: ReactNode;
 
-  /**
-   * 「检查」视角的内容 —— **整块替换两栏布局**。
-   *
-   * 检查面板有自己的一整套深色视口 + 侧栏(那是模型检查工具的老界面),
-   * 塞进两栏布局里会被挤扁,所以它整块占一行。
-   *
-   * 父组件只在「检查」视角下渲染它 —— 不渲染就等于没有这个视角。
-   */
-  check?: ReactNode;
-
   /** 当前视角 —— 父组件持有(切换视角要重算东西,不能只改显示) */
   tab: WorkspaceTab;
   onTabChange: (tab: WorkspaceTab) => void;
 
   /**
-   * 右栏最底部的内容 —— 报价条（价格明细 + 合计 + 下单入口）。
+   * 卡片最下面的内容 —— 报价条（价格明细 + 合计 + 下单入口）。
    *
    * 2026-11-01 新增:打印服务报价页要把价格接在克重下面,所以这里开了个
    * 插槽。**工具模式不传这个 prop** —— 克重工具仍然只显示克重,不显示
@@ -181,7 +198,6 @@ export type ModelSettingsPanelProps = {
   /** 父组件算好的几何 */
   geometry: ModelGeometry | null;
 
-  optimalAngle: OptimalAngle | null;
   /**
    * **当前姿态**的包裹支撑数据 —— 没跑智能摆盘时就是初始角度 (0°,0°)。
    *
@@ -192,9 +208,15 @@ export type ModelSettingsPanelProps = {
   poseSupport: SupportPoseResult | null;
   /** 当前姿态的支撑比例(支撑克重 / 模型克重)—— 面板自己算不了(要模型克重) */
   supportRatio: number;
+  /**
+   * **模型**的当前角度 —— 视口按它转模型(不是转相机)
+   *
+   * 三个视角共用 —— 在「检查」那一栏转了模型,切到「克重」还是这个姿态。
+   */
   viewerRotX: number;
   viewerRotY: number;
   viewerRotZ: number;
+  /** 角度条上那几个输入框的值 —— 跟上面那三个一样(摆盘跑完会写进来) */
   manualRotX: number;
   manualRotY: number;
   manualRotZ: number;
@@ -204,6 +226,8 @@ export type ModelSettingsPanelProps = {
     value: number,
     scales: [number, number, number]
   ) => void;
+  /** 角度归零(顺带把摆盘结果也清掉) */
+  onResetAngle?: () => void;
   /** 触发智能摆盘；传入当前生效的缩放因子 */
   onOptimizeAngle: (scales: [number, number, number]) => void;
   angleOptimizing: boolean;
@@ -223,11 +247,21 @@ export type ModelSettingsPanelProps = {
    */
   supportLiftMm?: number | undefined;
   /**
+   * 底板留边 (mm) —— 跟随后台
+   *
+   * 检查视角画的底板跟克重那一栏算的支撑克重必须是同一个几何(那一圈边
+   * 也是实心支撑,算进克重)。
+   */
+  supportBaseMarginMm?: number | undefined;
+  /**
    * 是否显示模型自带的贴图 —— 与检测工具的「显示贴图」开关同一套行为:
    * 关掉就是纯色(MTL 的 `Kd` 本色)视图。
    */
   showTexture: boolean;
   onToggleTexture: () => void;
+
+  /** 拖文件进展示区 —— 交给上层那个上传管线 */
+  onFiles?: ((files: File[]) => void) | undefined;
 
   onClearModel: () => void;
   onViewerReady: () => void;
@@ -242,7 +276,6 @@ export function ModelSettingsPanel({
   header,
   weight,
   pose,
-  check,
   tab,
   onTabChange,
   quote,
@@ -261,7 +294,6 @@ export function ModelSettingsPanel({
   unitCheck,
   onRevertUnitScale,
   geometry,
-  optimalAngle,
   poseSupport,
   supportRatio,
   viewerRotX,
@@ -271,6 +303,7 @@ export function ModelSettingsPanel({
   manualRotY,
   manualRotZ,
   onManualAngleChange,
+  onResetAngle,
   onOptimizeAngle,
   angleOptimizing,
   angleProgress,
@@ -278,12 +311,15 @@ export function ModelSettingsPanel({
   showSupport,
   onToggleSupport,
   supportLiftMm,
+  supportBaseMarginMm,
   showTexture,
   onToggleTexture,
+  onFiles,
   onClearModel,
   onViewerReady,
 }: ModelSettingsPanelProps) {
   const t = useTranslations("MaterialPricing");
+  const tInspect = useTranslations("ModelInspector");
 
   /** 重置视角的信号 —— 视口每次看见新信号就把相机摆回默认位置 */
   const [fitSignal, setFitSignal] = useState(0);
@@ -319,6 +355,34 @@ export function ModelSettingsPanel({
       textureUrls: model.textureUrls ?? null,
     };
   }, [model]);
+
+  /**
+   * 「检查」视角的状态 —— **住在视口的上一层**
+   *
+   * 视口要吃分析结果(问题着色)、图层开关、聚焦请求 —— 视角切换时换的
+   * 就是这几样。分析器只在切到「检查」那一栏才启动。
+   */
+  const check = useCheckView({
+    positions: scaledPositions,
+    fileName: model?.objFileName || model?.name || "",
+    liftMm: supportLiftMm,
+    baseMarginMm: supportBaseMarginMm,
+    active: tab === "check",
+  });
+
+  /**
+   * 拖文件进展示区 —— **用共享的那一套**
+   *
+   * 计数版的口径见 `features/shared/hooks/use-drop-zone.ts`。
+   */
+  const handleDroppedFiles = useCallback(
+    (files: File[]) => {
+      onFiles?.(files);
+    },
+    [onFiles]
+  );
+  const { isDragOver: dragOver, dropHandlers } =
+    useDropZone<HTMLDivElement>(handleDroppedFiles);
 
   /** 切换「统一缩放」：开时取 XYZ 缩放的几何平均，关时把三轴拉到同一值 */
   const toggleUniformScale = (checked: boolean) => {
@@ -438,13 +502,12 @@ export function ModelSettingsPanel({
         </div>
       )}
 
-      {/* ---------- 3D 预览 + 尺寸调节 ---------- */}
+      {/* ---------- 共用的展示区域 + 右侧栏 ---------- */}
       {showViewer && model && geometry && (
         <>
           {/* ---------- 视角切换（检查 / 克重 / 摆盘）----------
               三个视角看的是**同一个**模型 —— 模型只载入一次,切换不重新解析。
-              「检查」那一栏是别的组件渲染的(它有自己的一整套深色视口),
-              整块替换下面的两栏布局。 */}
+              下面那一个展示区域也是**共用的**:切视角只换喂进去的数据。 */}
           <div className="flex items-center gap-1 border-b border-stone-200 bg-stone-50/60 px-3 py-2">
             {WORKSPACE_TABS.map((item) => (
               <button
@@ -464,196 +527,293 @@ export function ModelSettingsPanel({
             ))}
           </div>
 
-          {tab === "check" && check ? (
-            <>
-              <div>{check}</div>
-              {/* 下单出口在**每一个**视角都在 ——
-                  检查完就该能下单,不该再跳回「克重」那一栏找按钮。 */}
-              {quote}
-            </>
-          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2">
-              {/* 左：3D 预览 */}
-              <div className="border-b lg:border-b-0 lg:border-r border-stone-200 flex flex-col">
-                <div className="flex items-center justify-between bg-stone-50 px-3 py-2 border-b border-stone-200">
-                  <span className="text-xs font-medium text-stone-600 flex items-center gap-1.5">
-                    <Boxes className="size-3.5 text-amber-600" />
-                    {t("dialog.preview3d")}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    {loadStatus === "loading-3d" && (
-                      <span className="text-[10px] text-amber-600 font-mono flex items-center gap-1">
-                        <Loader2 className="size-3 animate-spin" />
-                        {loadPercent}%
-                      </span>
-                    )}
-                    {loadStatus === "ready" && (
-                      <button
-                        type="button"
-                        onClick={() => onOptimizeAngle(scales)}
-                        disabled={angleOptimizing || !angleReady}
-                        className="text-[10px] text-violet-600 hover:text-violet-700 flex items-center gap-1 px-2 py-0.5 rounded border border-violet-300 bg-white hover:bg-violet-50 disabled:opacity-50"
-                      >
-                        {angleOptimizing ? (
-                          <Loader2 className="size-3 animate-spin" />
-                        ) : (
-                          <Compass className="size-3" />
-                        )}
-                        {angleOptimizing
-                          ? `${angleProgress}%`
-                          : t("angle.optimize")}
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* 手动角度调整（仅当已执行智能摆盘后显示） */}
-                {optimalAngle && loadStatus === "ready" && (
-                  <div className="px-3 py-2 border-b border-stone-200 bg-violet-50/30">
-                    <div className="flex items-center gap-3">
-                      <span className="text-[10px] font-medium text-violet-700 shrink-0">
-                        {t("angle.manualTune")}
-                      </span>
-                      <div className="flex items-center gap-2 flex-1">
-                        <AngleInput
-                          label="X"
-                          value={manualRotX}
-                          onChange={(v) => onManualAngleChange("X", v, scales)}
-                          color="#ef4444"
-                        />
-                        <AngleInput
-                          label="Y"
-                          value={manualRotY}
-                          onChange={(v) => onManualAngleChange("Y", v, scales)}
-                          color="#22c55e"
-                        />
-                        <AngleInput
-                          label="Z"
-                          value={manualRotZ}
-                          onChange={(v) => onManualAngleChange("Z", v, scales)}
-                          color="#3b82f6"
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => onOptimizeAngle(scales)}
-                        disabled={angleOptimizing || !angleReady}
-                        className="text-[10px] text-violet-600 hover:text-violet-700 flex items-center gap-1 px-2 py-0.5 rounded border border-violet-300 bg-white hover:bg-violet-50 disabled:opacity-50"
-                      >
-                        <Compass className="size-3" />
-                        {t("angle.reoptimize")}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* 预览区 —— 页面内布局给固定高度（弹窗里靠 flex-1 撑开）
-                    底色跟「检查」那一栏一样是深色 —— 同一个视口组件,
-                    两处必须长得一样。 */}
-                <div className="relative h-[300px] sm:h-[360px] lg:h-[420px] bg-[#111418]">
-                  {/* 克重 / 摆盘两个视角用的是**检查那一套**视口 ——
-                      同一个模型、同一个相机、同一套画法。 */}
-                  <ModelViewport
-                    result={null}
-                    meshPositions={scaledPositions}
-                    textures={textures}
-                    showTexture={showTexture}
-                    showSupport={showSupport}
-                    supportShell={poseSupport?.shell ?? null}
-                    pose={{
-                      rotX: viewerRotX,
-                      rotY: viewerRotY,
-                      rotZ: viewerRotZ,
-                    }}
-                    supportLiftMm={supportLiftMm}
-                    focusRequest={null}
-                    fitSignal={fitSignal}
-                    onReady={onViewerReady}
-                  />
+          <div className="grid grid-cols-1 lg:grid-cols-2">
+            {/* ---------- 左：共用的展示区域 ----------
+                **只有一个 `ModelViewport`** —— 切视角不卸载它,
+                相机不动、模型不重建,只是喂进去的数据换了。 */}
+            <div className="border-b lg:border-b-0 lg:border-r border-stone-200 flex flex-col lg:h-[560px]">
+              <div className="flex items-center justify-between bg-stone-50 px-3 py-2 border-b border-stone-200">
+                <span className="text-xs font-medium text-stone-600 flex items-center gap-1.5">
+                  <Boxes className="size-3.5 text-amber-600" />
+                  {t("dialog.preview3d")}
+                </span>
+                <div className="flex items-center gap-2">
                   {loadStatus === "loading-3d" && (
-                    <div className="absolute inset-0 bg-[#111418]/85 backdrop-blur-sm flex flex-col items-center justify-center text-xs text-zinc-400 pointer-events-none">
-                      <div className="size-10 rounded-full bg-amber-500/15 flex items-center justify-center mb-2">
-                        <Loader2 className="size-5 text-amber-400 animate-spin" />
-                      </div>
-                      <span>{loadProgress || t("dialog.loadingPreview")}</span>
-                      <div className="mt-2 w-32 h-1 bg-zinc-800 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-amber-500 rounded-full transition-all duration-300"
-                          style={{ width: `${Math.max(5, loadPercent)}%` }}
-                        />
-                      </div>
-                    </div>
+                    <span className="text-[10px] text-amber-600 font-mono flex items-center gap-1">
+                      <Loader2 className="size-3 animate-spin" />
+                      {loadPercent}%
+                    </span>
                   )}
-
-                  {/* ---------- 预览浮层控制条 ----------
-                  与「检查」视角同一套:显示贴图 / 包裹支撑,
-                  外加支撑比例 —— 比例是「支撑克重 ÷ 本体克重」,
-                  跟右栏克重面板里的算法是同一份数据。 */}
                   {loadStatus === "ready" && (
-                    <div className="pointer-events-auto absolute bottom-3 left-1/2 z-10 flex max-w-[95%] -translate-x-1/2 flex-wrap items-center justify-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900/90 px-2.5 py-1.5 shadow-xl backdrop-blur">
-                      {hasTexture && (
-                        <button
-                          type="button"
-                          aria-pressed={showTexture}
-                          title={t("preview.textureTitle")}
-                          onClick={onToggleTexture}
-                          className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${
-                            showTexture
-                              ? "bg-amber-500/15 text-amber-300"
-                              : "text-zinc-500 hover:text-zinc-300"
-                          }`}
-                        >
-                          <Palette className="size-3.5" />
-                          {t("preview.texture")}
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        aria-pressed={showSupport}
-                        title={t("preview.supportTitle")}
-                        onClick={onToggleSupport}
-                        className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${
-                          showSupport
-                            ? "bg-amber-500/15 text-amber-300"
-                            : "text-zinc-500 hover:text-zinc-300"
-                        }`}
-                      >
-                        <Shell className="size-3.5" />
-                        {t("preview.support")}
-                      </button>
-                      {/* 重置视角 —— 跟「检查」那一栏顶栏那颗同一个作用 */}
-                      <button
-                        type="button"
-                        title={t("preview.resetViewTitle")}
-                        onClick={() => setFitSignal((v) => v + 1)}
-                        className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-zinc-500 transition-colors hover:text-zinc-300"
-                      >
-                        <RotateCcw className="size-3.5" />
-                        {t("preview.resetView")}
-                      </button>
-                      {poseSupport ? (
-                        <span className="font-mono text-[10px] text-zinc-500">
-                          {t("preview.supportInfo", {
-                            ratio: Math.round(supportRatio * 100),
-                            weight: Math.ceil(poseSupport.supportWeightG),
-                          })}
-                        </span>
+                    <button
+                      type="button"
+                      onClick={() => onOptimizeAngle(scales)}
+                      disabled={angleOptimizing || !angleReady}
+                      className="text-[10px] text-violet-600 hover:text-violet-700 flex items-center gap-1 px-2 py-0.5 rounded border border-violet-300 bg-white hover:bg-violet-50 disabled:opacity-50"
+                    >
+                      {angleOptimizing ? (
+                        <Loader2 className="size-3 animate-spin" />
                       ) : (
-                        <span className="text-[10px] text-zinc-400">
-                          {t("preview.supportPending")}
-                        </span>
+                        <Compass className="size-3" />
                       )}
-                    </div>
+                      {angleOptimizing
+                        ? `${angleProgress}%`
+                        : t("angle.optimize")}
+                    </button>
                   )}
                 </div>
               </div>
 
-              {/* 右：尺寸调节在上，克重（父组件渲染）在下。
-              2026-11-01 调整：原来是「克重 → 尺寸调节」。克重是这块面板的
-              **结论**，尺寸调节是**输入** —— 输入在前、结论在后，读起来是
-              「先调尺寸 → 再看克重多少」。而且克重只有两个大数字，压在顶上
-              会把下面真正要操作的尺寸输入挤到视线之外。 */}
-              <div className="p-4 flex flex-col gap-4">
+              {/* ---------- 模型角度条 ----------
+                  **转的是模型,不是相机** —— 摆着印(转模型)决定支撑克重,
+                  摆着看(转相机)决定看得清看不清,是两件事。
+                  三个视角都能转:在「检查」那一栏转了模型,切到「克重」
+                  还是这个姿态。 */}
+              {loadStatus === "ready" && (
+                <div className="px-3 py-2 border-b border-stone-200 bg-violet-50/30">
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] font-medium text-violet-700 shrink-0">
+                      {t("angle.modelAngle")}
+                    </span>
+                    <div className="flex items-center gap-2 flex-1">
+                      <AngleInput
+                        label="X"
+                        value={manualRotX}
+                        onChange={(v) => onManualAngleChange("X", v, scales)}
+                        color="#ef4444"
+                      />
+                      <AngleInput
+                        label="Y"
+                        value={manualRotY}
+                        onChange={(v) => onManualAngleChange("Y", v, scales)}
+                        color="#22c55e"
+                      />
+                      <AngleInput
+                        label="Z"
+                        value={manualRotZ}
+                        onChange={(v) => onManualAngleChange("Z", v, scales)}
+                        color="#3b82f6"
+                      />
+                    </div>
+                    {onResetAngle && (
+                      <button
+                        type="button"
+                        onClick={onResetAngle}
+                        title={t("angle.resetAngle")}
+                        className="text-[10px] text-violet-600 hover:text-violet-700 flex items-center gap-1 px-2 py-0.5 rounded border border-violet-300 bg-white hover:bg-violet-50"
+                      >
+                        <RotateCcw className="size-3" />
+                        {t("angle.resetAngle")}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* ---------- 展示区 ----------
+                  底色跟「检查」那一栏一样是深色 —— 同一个视口组件,
+                  三处必须长得一样。 */}
+              <div
+                className="relative h-[300px] sm:h-[360px] lg:h-auto lg:flex-1 lg:min-h-[300px] bg-[#111418]"
+                {...dropHandlers}
+              >
+                <ModelViewport
+                  /* 「检查」那一栏喂分析结果(问题着色 / 问题边线),
+                     别的视角喂 null —— 问题着色那一层压根不画。 */
+                  result={tab === "check" ? check.result : null}
+                  meshPositions={scaledPositions}
+                  textures={textures}
+                  showTexture={showTexture}
+                  visibility={check.visibility}
+                  showSupport={showSupport}
+                  /* 支撑几何永远是摆盘 Worker 算的那块 —— 算克重的是它,
+                     画出来的也得是它(否则转个角度画面就跟数字对不上)。 */
+                  supportShell={poseSupport?.shell ?? null}
+                  /* 模型姿态 —— 三个视角共用同一个角度 */
+                  pose={{
+                    rotX: viewerRotX,
+                    rotY: viewerRotY,
+                    rotZ: viewerRotZ,
+                  }}
+                  supportLiftMm={supportLiftMm}
+                  focusRequest={tab === "check" ? check.focusRequest : null}
+                  fitSignal={fitSignal}
+                  onReady={onViewerReady}
+                />
+
+                {loadStatus === "loading-3d" && (
+                  <div className="absolute inset-0 bg-[#111418]/85 backdrop-blur-sm flex flex-col items-center justify-center text-xs text-zinc-400 pointer-events-none">
+                    <div className="size-10 rounded-full bg-amber-500/15 flex items-center justify-center mb-2">
+                      <Loader2 className="size-5 text-amber-400 animate-spin" />
+                    </div>
+                    <span>{loadProgress || t("dialog.loadingPreview")}</span>
+                    <div className="mt-2 w-32 h-1 bg-zinc-800 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-amber-500 rounded-full transition-all duration-300"
+                        style={{ width: `${Math.max(5, loadPercent)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* ---------- 分析进度(「检查」那一栏) ---------- */}
+                {tab === "check" && check.busy && (
+                  <output className="absolute left-1/2 top-3 z-10 block w-64 -translate-x-1/2 rounded-lg border border-zinc-700 bg-zinc-900/95 px-3 py-2 shadow-xl">
+                    <div className="mb-1.5 flex items-center gap-2 text-xs text-zinc-300">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      {check.stage
+                        ? tInspect(`phases.${check.stage}`)
+                        : tInspect("app.analyzing")}
+                      <span className="ml-auto font-mono text-zinc-500">
+                        {Math.round(check.pct)}%
+                      </span>
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800">
+                      <div
+                        className="h-full rounded-full bg-emerald-500 transition-[width] duration-200"
+                        style={{ width: `${check.pct}%` }}
+                      />
+                    </div>
+                  </output>
+                )}
+
+                {/* ---------- 拖拽遮罩 ----------
+                    `pointer-events-none` —— **必须**
+                    遮罩盖在指针下面,它就成了拖放的事件目标:浏览器把
+                    「进入遮罩」算成一次 dragenter、把「离开容器」算成一次
+                    dragleave,容器跟着撤遮罩 → 遮罩没了 → 又 dragover ……
+                    一直闪。遮罩只是给人看的,不吃事件。 */}
+                {dragOver && (
+                  <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center border-2 border-dashed border-emerald-500/60 bg-emerald-500/10 backdrop-blur-sm">
+                    <p className="rounded-lg bg-zinc-900/90 px-4 py-2 text-sm text-emerald-300">
+                      {tInspect("upload.dropOverlay")}
+                    </p>
+                  </div>
+                )}
+
+                {/* ---------- 浮层控制条 ----------
+                    三个视角共用一条:问题图层开关(只有「检查」那一栏有)
+                    + 显示贴图 / 包裹支撑 / 重置视角 + 支撑比例。 */}
+                {loadStatus === "ready" && (
+                  <div className="pointer-events-auto absolute bottom-3 left-1/2 z-10 flex max-w-[95%] -translate-x-1/2 flex-wrap items-center justify-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900/90 px-2.5 py-1.5 shadow-xl backdrop-blur">
+                    {tab === "check" &&
+                      check.activeLegend.map((item) => {
+                        const on = check.visibility[item.key];
+                        return (
+                          <button
+                            key={item.key}
+                            type="button"
+                            aria-pressed={on}
+                            onClick={() =>
+                              check.setVisibility((v) => ({
+                                ...v,
+                                [item.key]: !v[item.key],
+                              }))
+                            }
+                            className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${on ? "bg-zinc-800/80 text-zinc-200" : "text-zinc-500 hover:text-zinc-300"}`}
+                          >
+                            <span
+                              className="inline-block h-2.5 w-2.5 rounded-full transition-opacity"
+                              style={{
+                                background: item.color,
+                                opacity: on ? 1 : 0.25,
+                              }}
+                            />
+                            {tInspect(`legend.${ISSUE_LABEL_KEYS[item.key]}`)}
+                          </button>
+                        );
+                      })}
+                    {tab === "check" &&
+                      check.result &&
+                      check.activeLegend.length === 0 && (
+                        <span className="flex items-center gap-1.5 rounded-md bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300">
+                          {tInspect("legend.clean")}
+                        </span>
+                      )}
+                    {tab === "check" && check.activeLegend.length > 0 && (
+                      <span
+                        className="mx-0.5 hidden h-4 w-px bg-zinc-700 sm:block"
+                        aria-hidden
+                      />
+                    )}
+                    {hasTexture && (
+                      <button
+                        type="button"
+                        aria-pressed={showTexture}
+                        title={t("preview.textureTitle")}
+                        onClick={onToggleTexture}
+                        className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${
+                          showTexture
+                            ? "bg-amber-500/15 text-amber-300"
+                            : "text-zinc-500 hover:text-zinc-300"
+                        }`}
+                      >
+                        <Palette className="size-3.5" />
+                        {t("preview.texture")}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      aria-pressed={showSupport}
+                      title={t("preview.supportTitle")}
+                      onClick={onToggleSupport}
+                      className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${
+                        showSupport
+                          ? "bg-amber-500/15 text-amber-300"
+                          : "text-zinc-500 hover:text-zinc-300"
+                      }`}
+                    >
+                      <Shell className="size-3.5" />
+                      {t("preview.support")}
+                    </button>
+                    {/* 重置视角 —— 把**相机**摆回默认位置(不是模型角度) */}
+                    <button
+                      type="button"
+                      title={t("preview.resetViewTitle")}
+                      onClick={() => setFitSignal((v) => v + 1)}
+                      className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-zinc-500 transition-colors hover:text-zinc-300"
+                    >
+                      <RotateCcw className="size-3.5" />
+                      {t("preview.resetView")}
+                    </button>
+                    {poseSupport ? (
+                      <span className="font-mono text-[10px] text-zinc-500">
+                        {t("preview.supportInfo", {
+                          ratio: Math.round(supportRatio * 100),
+                          weight: Math.ceil(poseSupport.supportWeightG),
+                        })}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-zinc-400">
+                        {t("preview.supportPending")}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ---------- 右:按视角换内容 ----------
+                展示区域是共用的,右栏按视角换 —— 「检查」那一栏换成
+                深色的检查侧栏(检查工具的老界面),别的视角是尺寸调节
+                + 克重 / 摆盘结果。 */}
+            {tab === "check" ? (
+              <div className="bg-zinc-950 text-zinc-100 p-3 lg:h-[560px] lg:overflow-y-auto">
+                <h2 className="mb-3 flex items-center gap-2 text-sm font-bold tracking-tight text-zinc-100">
+                  <ShieldCheck className="size-4 text-emerald-400" />
+                  {tInspect("app.title")}
+                </h2>
+                <ModelCheckSidePanel
+                  result={check.result}
+                  busy={check.busy}
+                  error={check.error}
+                  unitCheck={unitCheck}
+                  onFocusCluster={check.focusCluster}
+                  onFocusPoint={check.focusPoint}
+                />
+              </div>
+            ) : (
+              <div className="p-4 flex flex-col gap-4 lg:h-[560px] lg:overflow-y-auto">
                 <div className="rounded-lg border border-stone-200 overflow-hidden">
                   <div className="flex items-center justify-between bg-stone-50 px-3 py-2 border-b border-stone-200">
                     <span className="text-xs font-medium text-stone-600">
@@ -855,12 +1015,14 @@ export function ModelSettingsPanel({
 
                 「摆盘」视角换成摆盘结果 —— 两个问题分两栏看,不挤在一块。 */}
                 <div className="mt-auto">{tab === "pose" ? pose : weight}</div>
-
-                {/* 右栏插槽 —— 报价模式放报价条，工具模式放「报价下单」入口卡片 */}
-                {quote}
               </div>
-            </div>
-          )}
+            )}
+          </div>
+
+          {/* ---------- 下单出口 ----------
+              在**每一个**视角都在 —— 检查完就该能下单,不该再跳回
+              「克重」那一栏找按钮。 */}
+          {quote}
         </>
       )}
     </div>

@@ -82,13 +82,26 @@ describe("共用视口 —— 三个视角用的是同一个组件", () => {
     expect(code).toContain("<ModelViewport");
   });
 
-  it("「检查」那一栏 import 的是同一个共享视口", () => {
-    const code = stripComments(read(CHECK_PANEL));
+  it("「检查」那一栏不自己挂视口 —— 展示区域只有那一个", () => {
+    const check = stripComments(read(CHECK_PANEL));
 
-    expect(code).toContain(
-      'from "@/features/shared/components/model-viewport"'
-    );
-    expect(code).toContain("<ModelViewport");
+    // 检查侧栏只剩右栏那一块;视口由工作台框架统一挂
+    expect(check).not.toContain("ModelViewport");
+
+    // 整个工作台只挂一个
+    const frame = stripComments(read(SETTINGS_PANEL));
+    expect(frame.match(/<ModelViewport/g) ?? []).toHaveLength(1);
+  });
+
+  it("模型角度在所有视角都传给视口(转的是模型,不是相机)", () => {
+    const code = stripComments(read(SETTINGS_PANEL));
+
+    // 姿态无条件传 —— 不分视角:在「检查」那一栏转了模型,
+    // 切到「克重」还是这个姿态
+    expect(code).toContain("pose={{");
+    expect(code).toContain("rotX: viewerRotX");
+    // 角度条常驻 —— 不是「跑过智能摆盘才出现」
+    expect(code).toContain('t("angle.modelAngle")');
   });
 
   it("两个老视口文件删掉了(别有人从老文件里抄回去)", () => {

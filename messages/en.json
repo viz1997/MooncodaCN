@@ -1207,7 +1207,8 @@
       "optimize": "Optimize orientation",
       "manualTune": "Fine tune",
       "reoptimize": "Re-optimize",
-      "resetAngle": "Reset angle"
+      "resetAngle": "Reset angle",
+      "modelAngle": "Model angle"
     },
     "preview": {
       "texture": "Texture",

@@ -62,6 +62,10 @@ function stripComments(src: string): string {
 
 const CHECK_PANEL =
   "src/features/tools/components/model-check/model-check-panel.tsx";
+const CHECK_VIEW =
+  "src/features/tools/components/model-check/use-check-view.ts";
+const SETTINGS_PANEL =
+  "src/features/pricing/components/model-settings-panel.tsx";
 const CALCULATOR = "src/features/pricing/components/pricing-calculator.tsx";
 const TOOLS_HUB = "src/features/tools/components/tools-hub.tsx";
 const WORKBENCH_PAGE =
@@ -114,8 +118,8 @@ describe("工作台 —— 老地址只重定向", () => {
 });
 
 describe("工作台 —— 模型只解析一遍", () => {
-  it("检查面板吃父组件给的顶点,自己不解析 OBJ", () => {
-    const code = stripComments(read(CHECK_PANEL));
+  it("工作台框架吃父组件给的顶点,自己不解析 OBJ", () => {
+    const code = stripComments(read(SETTINGS_PANEL));
 
     // 顶点来自 `model.parseResult.positions`
     expect(code).toContain("parseResult.positions");
@@ -134,8 +138,18 @@ describe("工作台 —— 模型只解析一遍", () => {
     expect(valueImport).toBeNull();
   });
 
-  it("检查面板按克重工具那份缩放缩放顶点", () => {
-    const code = read(CHECK_PANEL);
+  it("检查侧栏不自己解析顶点、不自己缩放(吃的是同一份)", () => {
+    const code = stripComments(read(CHECK_PANEL));
+
+    // 缩放后的顶点由工作台框架算好传进来 —— 两边各缩放一次的话,
+    // 尺寸面板改的是**另一边**的几何,两个视角的支撑克重对不上
+    expect(code).not.toContain("parseResult.positions");
+    expect(code).not.toContain("scalePositionsXYZ");
+    expect(code).not.toMatch(/from\s+"@\/features\/pricing\/lib\/obj-parser"/);
+  });
+
+  it("按克重工具那份缩放缩放顶点", () => {
+    const code = read(SETTINGS_PANEL);
 
     // 同一个 `scalePositionsXYZ` —— 克重工具算克重用的也是缩放后的几何
     expect(code).toContain("scalePositionsXYZ");
@@ -150,12 +164,45 @@ describe("工作台 —— 模型只解析一遍", () => {
     expect(code).not.toContain("takeModelFile");
     expect(code).not.toContain("stashModelFile");
   });
+});
 
-  it("「检查」视角只在这一页渲染(不在后台偷偷跑分析器)", () => {
-    const code = read(CALCULATOR);
+describe("工作台 —— 共用一个展示区域", () => {
+  it("整个工作台只挂**一个** `ModelViewport`", () => {
+    const code = stripComments(read(SETTINGS_PANEL));
 
-    // 不渲染就没有这个视角 —— 分析器只在切到「检查」时才启动
-    expect(code).toContain('workspaceTab === "check"');
+    // 切视角只换喂进去的数据 —— 视口不卸载,相机不动,模型不重建
+    expect(code.match(/<ModelViewport/g) ?? []).toHaveLength(1);
+  });
+
+  it("「检查」那一栏不自己挂视口(它只剩右栏那一块)", () => {
+    const code = stripComments(read(CHECK_PANEL));
+
+    expect(code).not.toContain("ModelViewport");
+  });
+
+  it("分析器只在切到「检查」那一栏时才启动", () => {
+    const frame = stripComments(read(SETTINGS_PANEL));
+    expect(frame).toContain('active: tab === "check"');
+
+    const hook = stripComments(read(CHECK_VIEW));
+    expect(hook).toContain("if (!active || !positions) return;");
+  });
+
+  it("支撑几何永远是摆盘 Worker 算的那块(不是分析器自带的那块)", () => {
+    const code = stripComments(read(SETTINGS_PANEL));
+
+    // 算克重的那块支撑 —— 画出来的也得是它,否则转个角度画面就跟数字对不上
+    expect(code).toContain("supportShell={poseSupport?.shell ?? null}");
+  });
+
+  it("模型角度三个视角都吃得到(转的是**模型**,不是视角)", () => {
+    const code = stripComments(read(SETTINGS_PANEL));
+
+    // 姿态无条件传给视口 —— 不分视角
+    expect(code).toContain("pose={{");
+    expect(code).toContain("rotX: viewerRotX");
+    // 角度条常驻 —— 不是「跑过智能摆盘才出现」
+    expect(code).toContain('t("angle.modelAngle")');
   });
 });
 

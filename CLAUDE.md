@@ -695,22 +695,24 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 - **三个视角** —— 视角切换条在**上传模式**里(手动尺寸 / 批量模式没有模型,
   摆不了)。`check` / `weight` / `pose` 三个 tab,`WorkspaceTab` 类型在
   `pricing/components/model-settings-panel.tsx`。
-  - **检查** —— 整块**替换**两栏布局(`ModelCheckPanel` 有自己那套侧栏,
-    塞进两栏会被挤扁)。它只在切到这个 tab 时才挂载 ⇒ 分析器
-    不在后台偷偷跑。3D 视口跟另外两个视角**共用同一份**(见下面
-    「共用一份 3D 视口」)。
+  - **检查** —— **左栏那个展示区域不动**(跟另外两个视角是同一个视口,
+    见下面「共用一个展示区域」),只把**右栏**换成深色的检查侧栏
+    (`ModelCheckSidePanel`)。分析器只在切到这个 tab 时才启动 ⇒
+    不在后台偷偷跑。
   - **克重** —— 右栏三个数(耗材 / 支撑 / 总)+ 尺寸调节 + 下单出口。
   - **摆盘** —— 智能摆盘结果。没跑过摆盘就摆**当前姿态**(初始角度 0°,0°)
     的样子 + 一句提示(这一栏空着的话用户会以为坏了)。
 - **模型只解析一遍** —— `extractModelZip()` 在 worker 里解析 OBJ 一次,
   结果带 `positions` / `uvs` / `materialNames` / `materialIndex` 回来
-  (`ObjParseResult` 加了这几个字段)。检查面板吃的是**同一个** `ModelFile` 的
-  `parseResult.positions`,**不再自己解析一遍**。
+  (`ObjParseResult` 加了这几个字段)。**工作台框架**
+  (`model-settings-panel.tsx`)吃的是父组件给的 `ModelFile` 的
+  `parseResult.positions`,**不再自己解析一遍**;检查侧栏更不解析。
   (以前它要走 `tools/lib/model-loader.ts` 二次解析 —— 那个文件已删。)
-- **尺寸跟着克重那一栏走** —— 检查面板按 `scalePositionsXYZ(raw, scales)`
-  缩放顶点,`scales` 是克重工具**生效的**缩放因子。支撑外壳的平台平面是
+- **尺寸跟着克重那一栏走** —— 工作台框架按 `scalePositionsXYZ(raw, scales)`
+  缩放顶点,`scales` 是克重工具**生效的**缩放因子,缩完的结果**同一个**
+  `Float32Array` 喂给视口和分析器。支撑外壳的平台平面是
   绝对毫米值(托底 5mm),不缩放顶点的话画出来的支撑跟克重那栏对不上。
-- **一份口径(结构上保证)** —— 两个视角的数字来自同一个 `ModelFile`、
+- **一份口径(结构上保证)** —— 三个视角的数字来自同一个 `ModelFile`、
   同一套缩放、同一份后台参数(`ClientPrintConfig`),**不可能**对不上。
 - **自检摘要白捡** —— 摆盘 Worker 焊接模型时本来就在建完整拓扑
   (`weldAndAnalyzeTopology`),以前把除了网格和内腔标记之外的东西全扔了。
@@ -735,7 +737,7 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 - **行为由单测守住** ——
   | 测试 | 守住什么 |
   |---|---|
-  | `src/test/tools/pure/workbench-merge.test.ts` | 三个老地址只 308 跳到 `/tools/workbench` / 检查面板不自己解析 OBJ / 按同一份缩放 / 工具中心只剩一个入口 |
+  | `src/test/tools/pure/workbench-merge.test.ts` | 三个老地址只 308 跳到 `/tools/workbench` / 检查侧栏不自己解析 OBJ、不自己缩放 / 工作台框架只挂**一个** `<ModelViewport>` / 工具中心只剩一个入口 |
   | `src/test/tools/pure/mesh-summary.test.ts` | 摘要的 stats / warnings / WJP 报告跟检查面板**逐字相同**(6 个网格夹具) |
 
 #### 拖文件进页面(2026-11-07)
@@ -756,8 +758,9 @@ dragover → 遮罩出现 → 指针落在**它自己**身上
 进不来**,因为 `dragover` 的 `preventDefault` 被这一轮闪没了。
 
 - **一份口径** —— `src/features/shared/hooks/use-drop-zone.ts` 的
-  `useDropZone()`。三个拖放区都用它:检查视角的 3D 视口、克重工具的
-  上传卡、批量模式的空状态卡。**别再自己写一遍** `onDragOver` →
+  `useDropZone()`。三个拖放区都用它:**工作台那个共用的展示区**
+  (`model-settings-panel.tsx`)、克重工具的上传卡、批量模式的空状态卡。
+  **别再自己写一遍** `onDragOver` →
   true / `onDragLeave` → false —— 那个写法就是会闪的那份。
 - **进出配对计数** —— `dragenter` +1 / `dragleave` −1,**归零才撤高亮**。
   指针在容器和子元素之间来回移动时深度始终 > 0,高亮不翻。
@@ -843,6 +846,66 @@ shared/components/model-viewport/
   | 测试 | 守住什么 |
   |---|---|
   | `src/test/tools/pure/shared-viewport.test.ts` | 三个视角 import 的是同一个 `ModelViewport` / 老的两份视口文件删了 / 支撑几何来自 Worker 的同一块(`withShell`)/ 姿态组跟模型组的成员划分 / 旋转顺序跟 `rotateSupportMesh` 逐点相同 |
+
+#### 共用一个展示区域 + 模型角度(2026-11-07)
+
+工作室的原话:**「共用一个展示区域，切换只是切换不同数据而已」** +
+**「模型需要支持旋转角度而不是视角旋转」**。
+
+#### 共用一个展示区域
+
+以前「检查」那一栏**整块替换**两栏布局,自己挂一个深色视口(`ModelCheckPanel`
+带自己的侧栏和自己的视口)。切一次视角,视口就**卸载重挂**一遍 —— 相机归位、
+模型重建、支撑重画,切过去看到的跟切回来看到的不是同一个场景。
+
+现在**整页只有一个 `ModelViewport`**,永远挂在左栏:
+
+| 视角 | 喂进去的数据 |
+|---|---|
+| `check` | 分析结果(问题着色 / 问题边线)+ 图层开关 + 聚焦请求 |
+| `weight` | 支撑外壳(摆盘 Worker 算的那块)+ 当前姿态 |
+| `pose` | 同上 |
+
+切视角 = **换几行 prop**。视口不卸载,相机不动,模型不重建。
+
+- **检查侧栏只剩右栏那一块** —— `ModelCheckPanel` 改成了
+  `ModelCheckSidePanel`(`tools/components/model-check/model-check-panel.tsx`),
+  **纯展示**:拿 `result` / `busy` / `error` 渲染问题列表、统计条、单位横幅,
+  点一下图例 → `onFocusCluster` / `onFocusPoint`。
+- **检查状态住在视口的上一层** —— `useCheckView()`
+  (`tools/components/model-check/use-check-view.ts`):分析器、图层开关、
+  聚焦请求、图例。**视口要吃的就是这几样**,所以它们必须在切视角的**上面**,
+  不然切一下就没了。
+- **分析器按需启动** —— `useCheckView({ active: tab === "check" })`。
+  不切到「检查」那一栏就**不跑**(多秒的焊接 + 拓扑不该在后台偷偷烧 CPU);
+  但**切回来不重跑** —— 内部按「顶点引用 + 文件名 + 托底 + 留边」记了一份
+  身份,一样就跳过。改尺寸时身份变了,下次进「检查」那栏会重算。
+- **拖放区跟着展示区走** —— 遮罩从检查面板搬到了工作台框架
+  (`model-settings-panel.tsx`),拖文件进的是**那一个**展示区。
+- **浮层控制条也是共用的** —— 问题图层开关(只有「检查」那栏有)+ 贴图 /
+  包裹支撑 / 重置视角 + 支撑比例,三个视角共用一条。
+
+#### 模型角度:转的是**模型**,不是**视角**
+
+摆着看(转相机)跟摆着印(转模型)是两件事 —— **后者决定支撑克重**。这两件事
+以前混在一颗「重置视角」按钮附近,用户分不清。
+
+- **姿态组转的是模型** —— 模型 + 问题边线装在姿态组里,`rotation.order = "ZYX"`;
+  相机归位是**另一件事**(浮层条上那颗「重置视角」按钮)。
+- **角度条常驻** —— 展示区上方那条「模型角度」(`MaterialPricing.angle.modelAngle`)
+  在**每个视角**都在,而且**不是「跑过智能摆盘才出现」** —— 模型刚进来就有,
+  初始角度 0°,0°。
+- **三个视角共用同一个姿态** —— 在「检查」那一栏把模型转了,切到「克重」
+  还是这个姿态;反之亦然。
+- **改角度 → 支撑克重跟着重算** —— `handleManualAngleChange` 改的是
+  `viewerRotX/Y/Z`,下面的 effect 按新姿态重算(摆盘 Worker 的 `pose()`
+  指令),画面上的支撑外壳也就跟着换。
+
+- **行为由单测守住** ——
+  | 测试 | 守住什么 |
+  |---|---|
+  | `src/test/tools/pure/workbench-merge.test.ts` | 整个工作台只挂**一个** `<ModelViewport>` / 检查侧栏不自己挂视口 / 分析器只在 `tab === "check"` 时启动 / 支撑几何永远是摆盘 Worker 算的那块 / 角度条常驻 |
+  | `src/test/tools/pure/shared-viewport.test.ts` | 检查侧栏不 import 视口 / 姿态无条件传给视口 / 旋转顺序跟 `rotateSupportMesh` 逐点相同 |
 
 ### 打印定价后台(2026-11-06)
 
