@@ -204,6 +204,33 @@ describe("工作台 —— 共用一个展示区域", () => {
     // 角度条常驻 —— 不是「跑过智能摆盘才出现」
     expect(code).toContain('t("angle.modelAngle")');
   });
+
+  it("侧栏在**左**、3D 视口在**右**(跟以前那个检查工具一个方向)", () => {
+    const code = stripComments(read(SETTINGS_PANEL));
+
+    // 工作室的原话:「克重区域应该像之前的检查区域那样,而不是反过来」
+    // —— 以前那个模型检查工具是「侧栏左 + 视口右」,所以是**克重那一栏**
+    // 改成那个排布,不是把检查那一栏塞进右栏。
+
+    // 整块:一行两列
+    expect(code).toContain("lg:flex-row");
+
+    // 侧栏(`<aside>`):桌面端排在左边
+    const asides = code.match(/<aside className="[^"]*"/g) ?? [];
+    expect(asides.length).toBeGreaterThan(0);
+    for (const tag of asides) expect(tag).toContain("lg:order-1");
+
+    // 视口那一列:桌面端排在右边(手机上还是在上,所以 DOM 里在前面)
+    expect(code).toMatch(/className="order-1 lg:order-2[^"]*"/);
+  });
+
+  it("两个视角的侧栏同宽 —— 不然切一次视角视口宽度就变,相机取景会跑偏", () => {
+    const code = stripComments(read(SETTINGS_PANEL));
+
+    const widths = code.match(/lg:w-\[\d+px\]/g) ?? [];
+    expect(widths.length).toBeGreaterThan(0);
+    expect(new Set(widths).size).toBe(1);
+  });
 });
 
 describe("工作台 —— 工具中心只剩一个入口", () => {

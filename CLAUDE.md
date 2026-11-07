@@ -591,7 +591,7 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 
 #### 工具页的出口是「加入打印单」(2026-11-06)
 
-- 工具页(`/tools/workbench`)右栏那张「加入打印单」卡片就是出口 —— 点下去上传
+- 工具页(`/tools/workbench`)下方那张「加入打印单」卡片就是出口 —— 点下去上传
   模型、落打印单,然后跳 `/print-order` 确认金额再提交。
 - **卡片按登录态分两种**:未登录是「去登录」(跳登录页,带 `callbackUrl`
   回工具页);已登录是「加入打印单」。登录态由页面 RSC 查好传下去。
@@ -650,7 +650,7 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 /tools/workbench  →  「加入打印单」  →  /print-order  →  提交  →  一次付款
 ```
 
-- **量完直接加,不再绕一圈** —— 工具页右栏那张「加入打印单」卡片是唯一
+- **量完直接加,不再绕一圈** —— 工具页下方那张「加入打印单」卡片是唯一
   出口。点下去:模型打包上传 R2 → `POST /api/store/print-carts/{id}/line-items`
   (带 `printSpec`)→ 服务端重算价 → 落打印单 → 跳 `/print-order`。
 - **几何数据走 `printSpec`,价格走服务端** —— 计算器把体积 / 表面积 / 尺寸 /
@@ -695,11 +695,11 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 - **三个视角** —— 视角切换条在**上传模式**里(手动尺寸 / 批量模式没有模型,
   摆不了)。`check` / `weight` / `pose` 三个 tab,`WorkspaceTab` 类型在
   `pricing/components/model-settings-panel.tsx`。
-  - **检查** —— **左栏那个展示区域不动**(跟另外两个视角是同一个视口,
-    见下面「共用一个展示区域」),只把**右栏**换成深色的检查侧栏
+  - **检查** —— **右侧那个 3D 视口不动**(跟另外两个视角是同一个视口,
+    见下面「共用一个展示区域」),只把**左侧的侧栏**换成深色的检查侧栏
     (`ModelCheckSidePanel`)。分析器只在切到这个 tab 时才启动 ⇒
     不在后台偷偷跑。
-  - **克重** —— 右栏三个数(耗材 / 支撑 / 总)+ 尺寸调节 + 下单出口。
+  - **克重** —— 侧栏三个数(耗材 / 支撑 / 总)+ 尺寸调节 + 下单出口。
   - **摆盘** —— 智能摆盘结果。没跑过摆盘就摆**当前姿态**(初始角度 0°,0°)
     的样子 + 一句提示(这一栏空着的话用户会以为坏了)。
 - **模型只解析一遍** —— `extractModelZip()` 在 worker 里解析 OBJ 一次,
@@ -840,7 +840,7 @@ shared/components/model-viewport/
 - **克重视角变深色了** —— 视口统一用 `ObjPreview` 的 `mode="inspect"`
   (深底)。预览区底色、加载遮罩、浮层控制条都跟着改成深色那一套。
 - **丢了的东西** —— 老 `ObjViewer` 里的包围盒标注、X/Y/Z 轴标注和浅色
-  HTML 浮层没了;右栏的 X/Y/Z 尺寸仍然有(`DimDisplay` / `DimEditor`)。
+  HTML 浮层没了;侧栏的 X/Y/Z 尺寸仍然有(`DimDisplay` / `DimEditor`)。
   补了一颗「重置视角」按钮(跟检查那一栏顶栏那颗同一个作用)。
 - **行为由单测守住** ——
   | 测试 | 守住什么 |
@@ -850,7 +850,8 @@ shared/components/model-viewport/
 #### 共用一个展示区域 + 模型角度(2026-11-07)
 
 工作室的原话:**「共用一个展示区域，切换只是切换不同数据而已」** +
-**「模型需要支持旋转角度而不是视角旋转」**。
+**「模型需要支持旋转角度而不是视角旋转」** +
+**「克重区域应该像之前的检查区域那样，而不是反过来」**。
 
 #### 共用一个展示区域
 
@@ -858,7 +859,14 @@ shared/components/model-viewport/
 带自己的侧栏和自己的视口)。切一次视角,视口就**卸载重挂**一遍 —— 相机归位、
 模型重建、支撑重画,切过去看到的跟切回来看到的不是同一个场景。
 
-现在**整页只有一个 `ModelViewport`**,永远挂在左栏:
+现在**整页只有一个 `ModelViewport`**,永远挂在**右边**:
+
+```
+┌──────────────┬───────────────────────────────────┐
+│  侧栏(左)     │  3D 视口(右)—— 顶栏 + 角度条 + 画布  │
+│  按视角换内容  │  **永远挂载,切视角不卸载**          │
+└──────────────┴───────────────────────────────────┘
+```
 
 | 视角 | 喂进去的数据 |
 |---|---|
@@ -868,7 +876,17 @@ shared/components/model-viewport/
 
 切视角 = **换几行 prop**。视口不卸载,相机不动,模型不重建。
 
-- **检查侧栏只剩右栏那一块** —— `ModelCheckPanel` 改成了
+- **侧栏在左、视口在右** —— 跟以前那个模型检查工具**一个方向**(那边就是
+  「侧栏左 + 视口右」)。工作室的原话:「克重区域应该像之前的检查区域那样,
+  而不是反过来」—— 所以是**克重那一栏改成检查工具那个排布**,不是反过来
+  把检查那一栏塞进右栏。实现上靠 flex 的 `order`:DOM 里视口在前(手机上
+  视口在上),`lg:order-2` 把它换到右边,侧栏 `lg:order-1` 换到左边。
+- **视口那一整列是深色的** —— 顶栏(3D 预览 + 智能摆盘)、角度条、画布
+  三块都是深色,读起来是**一个 3D 应用**,跟以前检查工具的深色视口区是
+  同一块地。侧栏另算:「检查」那一栏深色,「克重 / 摆盘」浅色。
+- **两个视角的侧栏同宽(`lg:w-[400px]`)** —— 不然切一次视角视口宽度就变,
+  相机的取景会跑偏(相机只在建模 / 重置时重新取景)。
+- **检查侧栏只剩那一块** —— `ModelCheckPanel` 改成了
   `ModelCheckSidePanel`(`tools/components/model-check/model-check-panel.tsx`),
   **纯展示**:拿 `result` / `busy` / `error` 渲染问题列表、统计条、单位横幅,
   点一下图例 → `onFocusCluster` / `onFocusPoint`。
@@ -904,7 +922,7 @@ shared/components/model-viewport/
 - **行为由单测守住** ——
   | 测试 | 守住什么 |
   |---|---|
-  | `src/test/tools/pure/workbench-merge.test.ts` | 整个工作台只挂**一个** `<ModelViewport>` / 检查侧栏不自己挂视口 / 分析器只在 `tab === "check"` 时启动 / 支撑几何永远是摆盘 Worker 算的那块 / 角度条常驻 |
+  | `src/test/tools/pure/workbench-merge.test.ts` | 整个工作台只挂**一个** `<ModelViewport>` / 检查侧栏不自己挂视口 / **侧栏在左、视口在右**(跟以前那个检查工具一个方向)/ 分析器只在 `tab === "check"` 时启动 / 支撑几何永远是摆盘 Worker 算的那块 / 角度条常驻 |
   | `src/test/tools/pure/shared-viewport.test.ts` | 检查侧栏不 import 视口 / 姿态无条件传给视口 / 旋转顺序跟 `rotateSupportMesh` 逐点相同 |
 
 ### 打印定价后台(2026-11-06)

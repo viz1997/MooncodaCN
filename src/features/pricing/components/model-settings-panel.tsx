@@ -527,19 +527,26 @@ export function ModelSettingsPanel({
             ))}
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2">
-            {/* ---------- 左：共用的展示区域 ----------
+          {/* ---------- 侧栏 + 共用的展示区域 ----------
+              **侧栏在左,3D 视口在右** —— 跟以前那个模型检查工具一个方向
+              (那边是「侧栏左 + 视口右」)。切视角只换**侧栏**的内容,
+              视口不卸载、相机不动、模型不重建。 */}
+          <div className="flex flex-col lg:flex-row lg:h-[560px]">
+            {/* ---------- 右：共用的展示区域 ----------
                 **只有一个 `ModelViewport`** —— 切视角不卸载它,
-                相机不动、模型不重建,只是喂进去的数据换了。 */}
-            <div className="border-b lg:border-b-0 lg:border-r border-stone-200 flex flex-col lg:h-[560px]">
-              <div className="flex items-center justify-between bg-stone-50 px-3 py-2 border-b border-stone-200">
-                <span className="text-xs font-medium text-stone-600 flex items-center gap-1.5">
-                  <Boxes className="size-3.5 text-amber-600" />
+                相机不动、模型不重建,只是喂进去的数据换了。
+
+                这一整列是**深色的**(顶栏 + 角度条 + 视口)—— 它就是那个
+                3D 应用本身,跟以前检查工具的深色视口区是同一块地。 */}
+            <div className="order-1 lg:order-2 flex flex-col lg:flex-1 min-w-0">
+              <div className="flex items-center justify-between bg-zinc-950 px-3 py-2 border-b border-zinc-800">
+                <span className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
+                  <Boxes className="size-3.5 text-amber-500" />
                   {t("dialog.preview3d")}
                 </span>
                 <div className="flex items-center gap-2">
                   {loadStatus === "loading-3d" && (
-                    <span className="text-[10px] text-amber-600 font-mono flex items-center gap-1">
+                    <span className="text-[10px] text-amber-400 font-mono flex items-center gap-1">
                       <Loader2 className="size-3 animate-spin" />
                       {loadPercent}%
                     </span>
@@ -549,7 +556,7 @@ export function ModelSettingsPanel({
                       type="button"
                       onClick={() => onOptimizeAngle(scales)}
                       disabled={angleOptimizing || !angleReady}
-                      className="text-[10px] text-violet-600 hover:text-violet-700 flex items-center gap-1 px-2 py-0.5 rounded border border-violet-300 bg-white hover:bg-violet-50 disabled:opacity-50"
+                      className="text-[10px] text-violet-300 hover:text-violet-200 flex items-center gap-1 px-2 py-0.5 rounded border border-violet-400/40 bg-white/10 hover:bg-white/20 disabled:opacity-50"
                     >
                       {angleOptimizing ? (
                         <Loader2 className="size-3 animate-spin" />
@@ -570,9 +577,9 @@ export function ModelSettingsPanel({
                   三个视角都能转:在「检查」那一栏转了模型,切到「克重」
                   还是这个姿态。 */}
               {loadStatus === "ready" && (
-                <div className="px-3 py-2 border-b border-stone-200 bg-violet-50/30">
+                <div className="px-3 py-2 border-b border-zinc-800 bg-zinc-900">
                   <div className="flex items-center gap-3">
-                    <span className="text-[10px] font-medium text-violet-700 shrink-0">
+                    <span className="text-[10px] font-medium text-violet-300 shrink-0">
                       {t("angle.modelAngle")}
                     </span>
                     <div className="flex items-center gap-2 flex-1">
@@ -581,18 +588,21 @@ export function ModelSettingsPanel({
                         value={manualRotX}
                         onChange={(v) => onManualAngleChange("X", v, scales)}
                         color="#ef4444"
+                        tone="dark"
                       />
                       <AngleInput
                         label="Y"
                         value={manualRotY}
                         onChange={(v) => onManualAngleChange("Y", v, scales)}
                         color="#22c55e"
+                        tone="dark"
                       />
                       <AngleInput
                         label="Z"
                         value={manualRotZ}
                         onChange={(v) => onManualAngleChange("Z", v, scales)}
                         color="#3b82f6"
+                        tone="dark"
                       />
                     </div>
                     {onResetAngle && (
@@ -600,7 +610,7 @@ export function ModelSettingsPanel({
                         type="button"
                         onClick={onResetAngle}
                         title={t("angle.resetAngle")}
-                        className="text-[10px] text-violet-600 hover:text-violet-700 flex items-center gap-1 px-2 py-0.5 rounded border border-violet-300 bg-white hover:bg-violet-50"
+                        className="text-[10px] text-violet-300 hover:text-violet-200 flex items-center gap-1 px-2 py-0.5 rounded border border-violet-400/40 bg-white/10 hover:bg-white/20"
                       >
                         <RotateCcw className="size-3" />
                         {t("angle.resetAngle")}
@@ -793,12 +803,12 @@ export function ModelSettingsPanel({
               </div>
             </div>
 
-            {/* ---------- 右:按视角换内容 ----------
-                展示区域是共用的,右栏按视角换 —— 「检查」那一栏换成
-                深色的检查侧栏(检查工具的老界面),别的视角是尺寸调节
+            {/* ---------- 左:侧栏,按视角换内容 ----------
+                展示区域(3D 视口)是共用的,侧栏按视角换 —— 「检查」那一栏
+                换成深色的检查侧栏(检查工具的老界面),别的视角是尺寸调节
                 + 克重 / 摆盘结果。 */}
             {tab === "check" ? (
-              <div className="bg-zinc-950 text-zinc-100 p-3 lg:h-[560px] lg:overflow-y-auto">
+              <aside className="order-2 lg:order-1 lg:w-[400px] lg:shrink-0 bg-zinc-950 text-zinc-100 p-3 lg:overflow-y-auto border-t lg:border-t-0 lg:border-r border-zinc-800">
                 <h2 className="mb-3 flex items-center gap-2 text-sm font-bold tracking-tight text-zinc-100">
                   <ShieldCheck className="size-4 text-emerald-400" />
                   {tInspect("app.title")}
@@ -811,9 +821,9 @@ export function ModelSettingsPanel({
                   onFocusCluster={check.focusCluster}
                   onFocusPoint={check.focusPoint}
                 />
-              </div>
+              </aside>
             ) : (
-              <div className="p-4 flex flex-col gap-4 lg:h-[560px] lg:overflow-y-auto">
+              <aside className="order-2 lg:order-1 lg:w-[400px] lg:shrink-0 p-4 flex flex-col gap-4 lg:overflow-y-auto border-t lg:border-t-0 lg:border-r border-stone-200">
                 <div className="rounded-lg border border-stone-200 overflow-hidden">
                   <div className="flex items-center justify-between bg-stone-50 px-3 py-2 border-b border-stone-200">
                     <span className="text-xs font-medium text-stone-600">
@@ -1010,12 +1020,12 @@ export function ModelSettingsPanel({
                 </div>
 
                 {/* 克重 —— 尺寸调完之后的结果，放最后。
-                mt-auto:右栏比左边预览矮/高的差都让出来,克重贴着栏底,
-                跟预览的底边对齐(挤在中间会像没排完)。
+                mt-auto:侧栏比右边视口矮/高的差都让出来,克重贴着栏底,
+                跟视口的底边对齐(挤在中间会像没排完)。
 
                 「摆盘」视角换成摆盘结果 —— 两个问题分两栏看,不挤在一块。 */}
                 <div className="mt-auto">{tab === "pose" ? pose : weight}</div>
-              </div>
+              </aside>
             )}
           </div>
 

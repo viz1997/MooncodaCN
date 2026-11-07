@@ -272,25 +272,37 @@ export function DimEditor({
   );
 }
 
-/** 角度输入框（手动微调摆盘角度） */
+/**
+ * 角度输入框（手动微调摆盘角度）
+ *
+ * `tone="dark"` —— 放在**深色的视口条**上时用(工作台的「模型角度」条跟
+ * 3D 视口是同一个深色区块)。默认 `light` 给浅色面板用。
+ */
 export function AngleInput({
   label,
   value,
   onChange,
   color,
+  tone = "light",
 }: {
   label: string;
   value: number;
   onChange: (v: number) => void;
   color: string;
+  tone?: "light" | "dark";
 }) {
+  const dark = tone === "dark";
   return (
     <div className="flex items-center gap-1.5 flex-1">
       <span
         className="size-2.5 rounded-sm shrink-0"
         style={{ backgroundColor: color }}
       />
-      <span className="text-[10px] font-medium text-stone-600 shrink-0">
+      <span
+        className={`text-[10px] font-medium shrink-0 ${
+          dark ? "text-zinc-400" : "text-stone-600"
+        }`}
+      >
         {label}
       </span>
       <Input
@@ -298,10 +310,20 @@ export function AngleInput({
         step="1"
         value={Number.isFinite(value) ? Math.round(value) : 0}
         onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
-        className="font-mono text-xs h-6 px-1.5 py-0 border-stone-200 focus-visible:ring-violet-200 focus-visible:border-violet-400"
+        className={
+          dark
+            ? "font-mono text-xs h-6 px-1.5 py-0 bg-zinc-900 border-zinc-700 text-zinc-100 placeholder:text-zinc-600 focus-visible:ring-violet-500/40 focus-visible:border-violet-400"
+            : "font-mono text-xs h-6 px-1.5 py-0 border-stone-200 focus-visible:ring-violet-200 focus-visible:border-violet-400"
+        }
         placeholder="0"
       />
-      <span className="text-[10px] text-stone-400 shrink-0">°</span>
+      <span
+        className={`text-[10px] shrink-0 ${
+          dark ? "text-zinc-500" : "text-stone-400"
+        }`}
+      >
+        °
+      </span>
     </div>
   );
 }
