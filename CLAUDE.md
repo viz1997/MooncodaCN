@@ -262,10 +262,10 @@ Handles three concerns in order:
 
 Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optional Cloudflare AI Gateway proxying. Provides a generic `chatCompletion()` function for LLM calls.
 
-### 包裹支撑算法(检测工具 + 克重工具共用)
+### 包裹支撑算法(检查视角 + 克重视角共用)
 
-`src/features/tools/lib/mesh/support-shell.ts` —— **两个工具算/画的是同一块支撑**:
-模型检查工具(`/tools/model-check`)画它,克重工具(`/tools/weight`)按它算克重。
+`src/features/tools/lib/mesh/support-shell.ts` —— **两个视角算/画的是同一块支撑**:
+打印前工作台(`/tools/weight`)的「检查」视角画它,「克重 / 摆盘」视角按它算克重。
 
 - `prepareSupportModel(positions)` → 焊接 + 拓扑(**姿态无关**,只做一次)
 - `rotateSupportMesh(mesh, rotX, rotY, rotZ)` → 刚体旋转顶点与法线(拓扑不变)
@@ -363,7 +363,7 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
   |---|---|
   | 克重工具 `pricing-calculator.tsx` | 载入时判定 → 设 `dimMode="custom"` + 缩放因子 → 面板上挂横幅 + 「改回原始尺寸」 |
   | 批量模式 `batch-processor.ts` | 批量**没有尺寸调节**,用户没法自己纠 → 每个文件各自判定,缩放系数接到 `client.search/pose` 的 `scales` |
-  | 模型检查 `model-checker.tsx` | **归一化的是顶点本身**,视口画的模型 / 分析器 / 支撑外壳在同一个坐标系 —— 否则两个工具画的支撑不是同一个 |
+  | 检查视角 `model-check-panel.tsx` | **归一化的是顶点本身**,视口画的模型 / 分析器 / 支撑外壳在同一个坐标系 —— 否则两个视角画的支撑不是同一个 |
 - **横幅不是可选项** —— 工具替人改了尺寸,就得告诉人。克重工具的横幅上带
   「改回原始尺寸」按钮(用户坚持把文件里的数字当毫米时用)。
 - **退化输入不动它** —— 某一轴是 0 / NaN 的文件**不缩放**(缩了就是在给
@@ -659,46 +659,69 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 - **摆盘结果不接力** —— 加进打印单的是**当前姿态**的支撑克重(智能摆盘
   跑过就是最优姿态的,没跑就是初始角度的)。
 
-### 两个模型工具连着用(2026-11-06)
+### 打印前工作台:检查 / 克重 / 摆盘(2026-11-07)
 
-工作室问过「克重工具和模型检查工具要不要合并」。**结论:不合并成一页,
-但把「同一个文件只拖一次」这件事做掉** —— 两个工具问的是同一个模型的两个
-问题(能不能印 / 要多少料),以前同一个文件要拖两次、解压两次、量两遍。
+工作室的原话:**「不想分成两个工具页」**。
+
+以前模型检查(`/tools/model-check`)和克重(`/tools/weight`)是**两个页面**,
+同一个文件要拖两次、解压两次、量两遍,中间还要跳页。现在合成**一个**
+工作台(`/tools/weight`),模型**只载入一次**,里面用三个视角看同一个模型:
 
 ```
-/tools/model-check  →  「去量克重」  →  /tools/weight
-/tools/weight       →  头部徽标「在检查工具里看详情」→  /tools/model-check
+/tools/weight  →  拖进来  →  检查(能不能印)→ 克重(要多少料)→ 摆盘(怎么摆)
 ```
 
-- **不合并成一页** —— 两页身份不同:`/tools/model-check` 是带 SEO 关键词的
-  落地页,`/tools/weight` 是下单入口(密度 / 支撑几何跟随后台,访客只读)。
-  合一页 = 两种视觉语言 + 两套批量语义 + 5500 行。
-- **克重工具白捡一份自检摘要** —— 摆盘 Worker 焊接模型时本来就在建完整
-  拓扑(`weldAndAnalyzeTopology`),以前把除了网格和内腔标记之外的东西全
-  扔了。摘要吃的就是那份拓扑,**不多焊一次、不多花时间**。
-- **一份口径(结构上保证)** —— 摘要和检查工具调的是**同一个函数**:
-  `tools/lib/mesh/summary.ts` 的 `classifyShells()` / `buildCheckStats()` /
-  `buildCheckWarnings()` / `evaluateWjp()`。所以两个工具**不可能**对同一个
-  模型给出相反的结论。`analyze.ts`(检查工具)和 `prepareSupportModel()`
-  (克重工具)都从这里取。
+老地址 `/tools/model-check` **308 跳**到 `/tools/weight`
+(`permanentRedirect` —— 永久搬家,权重要转移;307 会被当成临时跳转)。
+
+- **三个视角** —— 视角切换条在**上传模式**里(手动尺寸 / 批量模式没有模型,
+  摆不了)。`check` / `weight` / `pose` 三个 tab,`WorkspaceTab` 类型在
+  `pricing/components/model-settings-panel.tsx`。
+  - **检查** —— 整块**替换**两栏布局(`ModelCheckPanel` 有自己那套深色
+    视口 + 侧栏,塞进两栏会被挤扁)。它只在切到这个 tab 时才挂载 ⇒ 分析器
+    不在后台偷偷跑。
+  - **克重** —— 右栏三个数(耗材 / 支撑 / 总)+ 尺寸调节 + 下单出口。
+  - **摆盘** —— 智能摆盘结果。没跑过摆盘就摆**当前姿态**(初始角度 0°,0°)
+    的样子 + 一句提示(这一栏空着的话用户会以为坏了)。
+- **模型只解析一遍** —— `extractModelZip()` 在 worker 里解析 OBJ 一次,
+  结果带 `positions` / `uvs` / `materialNames` / `materialIndex` 回来
+  (`ObjParseResult` 加了这几个字段)。检查面板吃的是**同一个** `ModelFile` 的
+  `parseResult.positions`,**不再自己解析一遍**。
+  (以前它要走 `tools/lib/model-loader.ts` 二次解析 —— 那个文件已删。)
+- **尺寸跟着克重那一栏走** —— 检查面板按 `scalePositionsXYZ(raw, scales)`
+  缩放顶点,`scales` 是克重工具**生效的**缩放因子。支撑外壳的平台平面是
+  绝对毫米值(托底 5mm),不缩放顶点的话画出来的支撑跟克重那栏对不上。
+- **一份口径(结构上保证)** —— 两个视角的数字来自同一个 `ModelFile`、
+  同一套缩放、同一份后台参数(`ClientPrintConfig`),**不可能**对不上。
+- **自检摘要白捡** —— 摆盘 Worker 焊接模型时本来就在建完整拓扑
+  (`weldAndAnalyzeTopology`),以前把除了网格和内腔标记之外的东西全扔了。
+  摘要吃的就是那份拓扑,**不多焊一次、不多花时间**。摘要和检查面板调的
+  是**同一个函数**(`tools/lib/mesh/summary.ts` 的 `classifyShells()` /
+  `buildCheckStats()` / `buildCheckWarnings()` / `evaluateWjp()`)——
+  两个视角**不可能**对同一个模型给出相反的结论。
 - **徽标只摆事实,不拦人** —— 有问题照样能加入打印单(工作室可能有特殊处理
   办法)。加一道「确认」就多一个决策,而工作室要的是「少操作」。
 - **徽标只显示跟尺寸无关的结论** —— 状态 + 提示清单。带尺寸的 WJP 结论
   (外形尺寸那条)不摆 —— 摘要是在**原始文件单位**下算的,尺寸结论会跟
   页面上归一化后的尺寸对不上。
-- **接力用模块级变量,不用 sessionStorage** —— `tools/lib/model-handoff.ts`
-  存的是 `File` 本体(几 MB 的 OBJ,进 sessionStorage 会撑爆配额)。
-  **只扛得住客户端路由跳转**:必须用 `useRouter().push()`,不能用
-  `window.location.href`。
-  (打印单那边有一版一模一样的接力 `print-quote/lib/model-handoff.ts`,
-  2026-11-06 删掉了 —— 它挂在**登录往返**上,而登录完是整页跳转,必然断。)
-- **行为由单测守住** —— `src/test/tools/pure/mesh-summary.test.ts` 拿 6 个
-  网格夹具逐个比「检查工具的 stats / warnings / WJP 报告」和「摘要的
-  stats / warnings / WJP 报告」,必须逐字相同。
+- **接力模块全删** —— `tools/lib/model-handoff.ts` 和
+  `print-quote/lib/model-handoff.ts` 都已删。跨页接力只扛得住**客户端路由
+  跳转**,扛不住**登录往返**(登录完是整页跳转,必然断)—— 现在根本不需要
+  接力了:同一个页面里切 tab,模型一直在。
+- **SEO 关键词两套都留** —— 合并之前这是两个页面,各自被收录过。工具页
+  的 `generateMetadata()` 带上了检查那一套(`3D模型检查` / `反转法向` /
+  `非流形边` …)+ 克重那一套。
+- **sitemap 里没有 `/tools/model-check`** —— 它现在只是个 308,留在 sitemap
+  里等于告诉搜索引擎「这个页面也是正式页面」。
+- **行为由单测守住** ——
+  | 测试 | 守住什么 |
+  |---|---|
+  | `src/test/tools/pure/workbench-merge.test.ts` | 老地址只重定向 / 检查面板不自己解析 OBJ / 按同一份缩放 / 工具中心只剩一个入口 |
+  | `src/test/tools/pure/mesh-summary.test.ts` | 摘要的 stats / warnings / WJP 报告跟检查面板**逐字相同**(6 个网格夹具) |
 
 #### 拖文件进页面(2026-11-07)
 
-模型检查工具(`/tools/model-check`)曾经**拖不进模型** —— 指针一进视口,遮罩
+工作台的「检查」视角曾经**拖不进模型** —— 指针一进视口,遮罩
 **一闪一闪**,文件落下不来。
 
 **根因不在浏览器,在遮罩自己身上**:
@@ -714,7 +737,7 @@ dragover → 遮罩出现 → 指针落在**它自己**身上
 进不来**,因为 `dragover` 的 `preventDefault` 被这一轮闪没了。
 
 - **一份口径** —— `src/features/shared/hooks/use-drop-zone.ts` 的
-  `useDropZone()`。三个拖放区都用它:模型检查工具的 3D 视口、克重工具的
+  `useDropZone()`。三个拖放区都用它:检查视角的 3D 视口、克重工具的
   上传卡、批量模式的空状态卡。**别再自己写一遍** `onDragOver` →
   true / `onDragLeave` → false —— 那个写法就是会闪的那份。
 - **进出配对计数** —— `dragenter` +1 / `dragleave` −1,**归零才撤高亮**。

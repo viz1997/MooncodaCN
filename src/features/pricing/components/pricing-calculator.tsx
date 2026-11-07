@@ -69,6 +69,7 @@ import {
   type LoadStatus,
   type ModelGeometry,
   ModelSettingsPanel,
+  type WorkspaceTab,
 } from "@/features/pricing/components/model-settings-panel";
 import { ObjThumbnail } from "@/features/pricing/components/obj-thumbnail";
 import type { PricingModelPayload } from "@/features/pricing/components/pricing-calculator-types";
@@ -136,11 +137,6 @@ import {
   SUPPORT_BASE_MARGIN_MM,
   SUPPORT_LIFT_MM,
 } from "@/features/tools/lib/mesh/support-shell";
-import {
-  stashModelFile,
-  takeModelFile,
-} from "@/features/tools/lib/model-handoff";
-import { useRouter } from "@/i18n/routing";
 
 type Mode = "upload" | "manual" | "batch";
 
@@ -159,6 +155,7 @@ export function PricingCalculator({
   quoteSlot,
   onModelChange,
   clientConfig,
+  checkSlot,
 }: {
   /**
    * 是否渲染工具自带的页头 / 页脚。
@@ -208,13 +205,43 @@ export function PricingCalculator({
    * 这里只有**几何和密度**,没有价格 —— 价格是服务端算的。
    */
   clientConfig?: ClientPrintConfig;
+
+  /**
+   * 「检查」视角的内容 —— **渲染函数**,不是节点
+   *
+   * 检查面板要的是**当前模型 + 当前缩放 + 当前参数** —— 这三样都在这个
+   * 组件里,所以只能由它来调这个函数,把模型递出去。
+   *
+   * 2026-11-07:模型检查工具并进这个页面(两个工具页合成一个工作台),
+   * 模型只载入一次 —— 检查面板吃的是**同一个** `ModelFile`,
+   * 不用再解析一遍 OBJ。
+   *
+   * 不传就没有「检查」视角。
+   */
+  checkSlot?:
+    | ((args: {
+        model: ModelFile | null;
+        /** 当前生效的缩放因子 —— 检查面板按它缩放后再分析 */
+        scales: [number, number, number];
+        clientConfig?: ClientPrintConfig | undefined;
+        /** 单位判定结果(文件坐标不是毫米时才有值) */
+        unitCheck: ModelUnitCheck | null;
+        /** 拖文件进来 —— 交给本页的上传管线 */
+        onFiles: (files: File[]) => void;
+      }) => ReactNode)
+    | undefined;
 }) {
   const t = useTranslations("MaterialPricing");
-  /** 跳去模型检查工具 —— 只走**客户端跳转**,接力才断不了 */
-  const router = useRouter();
 
   const [mode, setMode] = useState<Mode>("upload");
   const [infoDialog, setInfoDialog] = useState<InfoDialogKind>(null);
+  /**
+   * 工作台视角 —— 检查 / 克重 / 摆盘
+   *
+   * 三个视角看的是**同一个**模型。默认落在「克重」上 —— 工作室的主路径是
+   * 「量克重 → 加进打印单」,检查是可选的一步。
+   */
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("weight");
 
   // ---- 模型 ----
   const [model, setModel] = useState<ModelFile | null>(null);
@@ -225,12 +252,6 @@ export function PricingCalculator({
   /** 正在解析的文件名 —— 解析完成前 `model` 还是 null，头部要靠它显示文件名 */
   const [fileName, setFileName] = useState<string | null>(null);
   /**
-   * 原始文件本体 —— 「去检查工具看详情」要用它接力过去
-   *
-   * `ModelFile` 里只有解析出来的文本和贴图 blob,原始的 `File` 不在里面。
-   */
-  const [sourceFile, setSourceFile] = useState<File | null>(null);
-  /**
    * 网格自检摘要 —— **焊接的时候顺手算出来的**
    *
    * 摆盘 Worker 焊接模型时本来就要建完整拓扑,摘要吃的就是那份拓扑 ——
@@ -238,8 +259,6 @@ export function PricingCalculator({
    */
   const [meshSummary, setMeshSummary] = useState<MeshCheckSummary | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  /** 接力只取一次 —— StrictMode 下 effect 会跑两遍 */
-  const handoffTakenRef = useRef(false);
 
   // ---- 手动模式尺寸 ----
   const [length, setLength] = useState(68.3);
@@ -721,7 +740,6 @@ export function PricingCalculator({
     async (file: File) => {
       setUploadError(null);
       setFileName(file.name);
-      setSourceFile(file);
       setLoadPercent(0);
       setDimMode("original");
       setScaleFactor(1);
@@ -831,33 +849,32 @@ export function PricingCalculator({
     useDropZone<HTMLDivElement>(handleDroppedFiles);
 
   /**
-   * 从模型检查工具接力过来的文件 —— **挂载时取一次**
+   * 「在检查工具里看详情」—— **切到「检查」视角**,不跳页
    *
-   * 检查工具那边点「去量克重」会把文件递过来(`tools/lib/model-handoff.ts`),
-   * 用户不用再拖一次、也不用再解压一次。
-   *
-   * 接力只在**客户端跳转**里有效(整页刷新就没了),所以取一次就断 ——
-   * `handoffTakenRef` 保证 StrictMode 下 effect 跑两遍也只取一次。
-   */
-  useEffect(() => {
-    if (handoffTakenRef.current) return;
-    const file = takeModelFile();
-    if (!file) return;
-    handoffTakenRef.current = true;
-    void loadFile(file);
-  }, [loadFile]);
-
-  /**
-   * 「在检查工具里看详情」—— 带着同一个文件跳过去
-   *
-   * 检查工具要的是**完整分析结果**(问题位置标色、聚类),克重工具这边只
-   * 摆结论 —— 想看细节就跳过去,文件不用再拖一次。
+   * 2026-11-07:模型检查工具并进了这个页面(两个工具页合成一个工作台),
+   * 所以这里不用再跳 —— 直接把视角切过去,模型是**同一个**,不用再拖一次、
+   * 也不用再解压一次。
    */
   const openModelCheck = useCallback(() => {
-    if (!sourceFile) return;
-    stashModelFile(sourceFile);
-    router.push("/tools/model-check");
-  }, [router, sourceFile]);
+    setWorkspaceTab("check");
+  }, []);
+
+  /**
+   * 切换工作台视角
+   *
+   * 「检查」视角没有 `ObjViewer`(它有自己的深色视口),所以预览的「就绪」
+   * 状态要照旧置上 —— 否则「导出模型」那几颗按钮会一直灰着。
+   */
+  const handleTabChange = useCallback(
+    (next: WorkspaceTab) => {
+      setWorkspaceTab(next);
+      if (next === "check" && loadStatus === "loading-3d") {
+        setLoadStatus("ready");
+        setLoadPercent(100);
+      }
+    },
+    [loadStatus]
+  );
 
   const clearModel = () => {
     revokeModelTextureUrls(model);
@@ -876,9 +893,10 @@ export function PricingCalculator({
     setUnitCheck(null);
     setOptimalAngle(null);
     setPoseSupport(null);
-    // 换模型 → 原始文件本体和自检结论一起作废(不然「看详情」会递一个旧文件)
-    setSourceFile(null);
+    // 换模型 → 自检结论作废(新模型还没焊)
     setMeshSummary(null);
+    // 换模型 → 回到「克重」视角(检查面板要重新分析新模型)
+    setWorkspaceTab("weight");
   };
 
   /**
@@ -1371,17 +1389,18 @@ export function PricingCalculator({
   const supportWeightG = weights.support;
 
   /**
-   * 右栏底部 —— 克重（主角）+ 摆盘结果。
+   * 右栏「克重」视角 —— 三个数(耗材 / 支撑 / 总)。
    *
-   * 克重是这一页唯一的主角：耗材克重大字号，支撑克重次一级，
-   * 摆盘结果收在下面。其余数字（体积 / 表面积 / 顶点 / 三角面）
-   * 都在头部以标签出现，这里不重复。
+   * 克重是这一页的主角:耗材克重大字号,支撑克重次一级。
+   * 其余数字(体积 / 表面积 / 顶点 / 三角面)都在头部以标签出现,这里不重复。
    *
    * 2026-11-01:从右栏顶部挪到底部。克重是尺寸调的**结论**,尺寸是**输入** ——
    * 放在上面时,读者先看到两个大数字,再往下找才能改尺寸,真正要操作的
    * 输入被压在视线之外。现在顺序是「调尺寸 → 看克重」。
+   *
+   * 2026-11-07:摆盘结果挪到「摆盘」视角(`posePanel`)—— 两个问题分两栏看。
    */
-  const weightPanel = calc ? (
+  const weightReadout = calc ? (
     <>
       {/*
         三个数排成**一格一格**的(格子之间有分隔线),不是三个 flex 块
@@ -1462,10 +1481,20 @@ export function PricingCalculator({
           {t("stats.supportWeightError", { reason: supportError })}
         </p>
       )}
+    </>
+  ) : null;
 
-      {/* 智能摆盘结果 */}
-      {optimalAngle && (
-        <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50/50 p-2.5">
+  /**
+   * 右栏「摆盘」视角 —— 智能摆盘结果
+   *
+   * 跑过摆盘才摆得出「最佳姿态 / 省了多少料」;没跑过就摆**当前姿态**
+   * (初始角度 0°,0°)的样子 + 一句提示 —— 这一栏空着的话,用户会以为
+   * 「摆盘」视角坏了。
+   */
+  const posePanel = (
+    <>
+      {optimalAngle ? (
+        <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-2.5">
           <div className="flex items-center gap-2 flex-wrap">
             <Compass className="size-3.5 text-violet-600" />
             <span className="text-xs text-stone-600">
@@ -1533,16 +1562,31 @@ export function PricingCalculator({
             </div>
           )}
         </div>
+      ) : (
+        <div className="rounded-lg border border-stone-200 bg-stone-50/60 p-2.5">
+          <div className="flex items-center gap-2 text-xs text-stone-600">
+            <Compass className="size-3.5 text-violet-600" />
+            {t("angle.currentPose", {
+              x: poseLabel.x,
+              y: poseLabel.y,
+              z: poseLabel.z,
+            })}
+          </div>
+          {poseSupport && (
+            <p className="mt-1 font-mono text-[11px] text-stone-500">
+              {t("angle.currentSupport", {
+                weight: Math.ceil(poseSupport.supportWeightG),
+                ratio: fmt(supportStats.ratio * 100, 0),
+              })}
+            </p>
+          )}
+          <p className="mt-1 text-[11px] text-stone-500">
+            {t("angle.noResultHint")}
+          </p>
+        </div>
       )}
-
-      {/*
-        支撑克重校准 —— 2026-11-04 整个去掉了。
-        支撑跟模型是同一种材料(密度一样、填充率一样 = 实心),所以
-        「支撑密度」和「填充率」两个旋钮都没得调了;总克重直接就是
-        「包裹后整块模型」的重量,不需要按实测值反算。
-      */}
     </>
-  ) : null;
+  );
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -1664,7 +1708,21 @@ export function PricingCalculator({
                     loadPercent={loadPercent}
                     uploadError={uploadError}
                     header={modelHeader}
-                    weight={weightPanel}
+                    weight={weightReadout}
+                    pose={posePanel}
+                    check={
+                      workspaceTab === "check" && checkSlot
+                        ? checkSlot({
+                            model,
+                            scales: appliedScales,
+                            clientConfig,
+                            unitCheck,
+                            onFiles: handleDroppedFiles,
+                          })
+                        : undefined
+                    }
+                    tab={workspaceTab}
+                    onTabChange={handleTabChange}
                     quote={quoteSlot}
                     dimMode={dimMode}
                     uniformScale={uniformScale}

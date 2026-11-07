@@ -11,7 +11,7 @@ import { useDropZone } from "@/features/shared/hooks/use-drop-zone";
  *
  * ## 当时的故障
  *
- * 模型检查工具(`/tools/model-check`)拖不进去模型:指针一进视口,遮罩
+ * 打印前工作台的「检查」视角拖不进去模型:指针一进视口,遮罩
  * **一闪一闪**,文件落下不来。
  *
  * 根因不在浏览器,在遮罩自己身上:
@@ -215,10 +215,12 @@ describe("拖放规矩 —— 三个拖放区共用一份口径", () => {
 });
 
 describe("拖放规矩 —— 遮罩不吃事件", () => {
-  it("模型检查工具的拖放遮罩带 pointer-events-none", () => {
+  it("打印前工作台的拖放遮罩带 pointer-events-none", () => {
+    // 2026-11-07:模型检查并进了克重工具,组件从 `model-checker.tsx`
+    // 改名成 `model-check-panel.tsx`(它是工作台的「检查」视角)。
     const file = join(
       ROOT,
-      "src/features/tools/components/model-check/model-checker.tsx"
+      "src/features/tools/components/model-check/model-check-panel.tsx"
     );
     const code = readFileSync(file, "utf8");
 

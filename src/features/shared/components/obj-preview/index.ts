@@ -1,4 +1,5 @@
-// 共用的 3D 预览组件 —— 克重工具(/tools/weight)与模型检查工具(/tools/model-check)
+// 共用的 3D 预览组件 —— 打印前工作台(/tools/weight)的「克重 / 摆盘」视角
+// 与「检查」视角
 export {
   addMaterialGroups,
   buildPreviewMaterials,

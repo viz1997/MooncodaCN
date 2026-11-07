@@ -135,6 +135,10 @@ function workerResultToParseResult(r: ObjWorkerResult): ObjParseResult {
     surfaceAreaCM2: r.surfaceAreaCM2,
     // 智能摆盘 Worker 要几何:解析时就带上,别再解析一遍
     positions: r.positions,
+    // 3D 预览要贴图 —— 同一个模型只解析一遍(见 ObjParseResult 上的说明)
+    uvs: r.uvs,
+    materialNames: r.materialNames,
+    materialIndex: r.materialIndex,
   };
 }
 

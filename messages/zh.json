@@ -1179,6 +1179,11 @@
       "varnishFee": "光油费",
       "repairFee": "修模费"
     },
+    "tabs": {
+      "check": "检查",
+      "weight": "克重",
+      "pose": "摆盘"
+    },
     "angle": {
       "best": "最佳摆盘 X {x}° Y {y}° Z {z}°",
       "selfSupport": "本体支撑 {ratio}%",
@@ -1188,6 +1193,9 @@
       "savingTitle": "原摆放 {before} g → 优化后 {after} g，节省 {pct}%",
       "savingBadge": "省 {pct}% 支撑",
       "compareSupport": "初始角度 0°,0° 支撑 {initial} g → 当前姿态 {current} g",
+      "currentPose": "当前姿态 X {x}° Y {y}° Z {z}°",
+      "currentSupport": "支撑 {weight} g · 本体支撑 {ratio}%",
+      "noResultHint": "还没跑过智能摆盘 —— 点上面「智能摆盘」搜一个省料的角度。",
       "exportModel": "导出模型",
       "reset": "重置角度",
       "summary": "X {x}° Y {y}° Z {z}° · 支撑 {ratio}% · {weight} g · 层高 {height} mm",
@@ -1369,40 +1377,21 @@
     "privacy": "隐私:所有工具都在浏览器本地计算,模型文件不会上传到服务器,计算结果也不会写进数据库。关掉页面,什么都没留下。",
     "tools": {
       "weight": {
-        "title": "克重计算器",
-        "description": "上传 3D 模型,算出耗材克重、支撑克重,并搜索最佳打印摆盘角度 —— 顺带告诉你这个角度能省多少料。",
-        "tag1": "耗材克重",
-        "tag2": "支撑克重",
+        "title": "打印前工作台",
+        "description": "模型只载入一次,三个视角看同一个模型:打印前自检(反转法向、坏边与破面、壳体封闭性)、耗材与支撑克重、智能摆盘角度 —— 顺带告诉你这个角度能省多少料。",
+        "tag1": "模型检查",
+        "tag2": "耗材克重",
         "tag3": "最优摆盘",
         "tag4": "导出 OBJ"
-      },
-      "modelCheck": {
-        "title": "模型检查",
-        "description": "打印前的自检:反转法向、坏边与破面、壳体与封闭性,按 WJP 全彩工艺标准给出结论,问题位置在 3D 里直接标色。",
-        "tag1": "反转法向",
-        "tag2": "坏边破面",
-        "tag3": "壳体封闭性",
-        "tag4": "WJP 工艺评估"
       }
     }
   },
   "ModelInspector": {
-    "page": {
-      "eyebrow": "模型检查",
-      "title": "打印前,先确认模型没有破面",
-      "description": "反转法向、缝隙与平面孔洞、退化面与非流形边、多余壳体与密封内腔 —— 按 WJP 全彩工艺标准一次查完,问题位置在 3D 里直接标色。",
-      "designSpecLink": "几何检查过了?再对照一遍《3D模型设计规范》—— 壁厚、公差、悬臂、孔槽都有硬指标。",
-      "designSpecCta": "查看《3D模型设计规范》"
-    },
     "app": {
       "title": "模型检查",
       "subtitle": "打印前自检(WJP 全彩)",
-      "upload": "上传模型",
       "resetView": "重置视角",
-      "analyzing": "正在分析…",
-      "fileLabel": "选择模型文件",
-      "toWeight": "去量克重",
-      "toWeightTitle": "带着这个模型去克重工具 —— 文件直接跟过去,不用再拖一次"
+      "analyzing": "正在分析…"
     },
     "upload": {
       "dropOverlay": "松开以载入模型"
@@ -1648,7 +1637,7 @@
       "passTitle": "网格自检通过 —— 没有破面、缝隙或多余壳体",
       "issuesTitle": "网格自检发现 {count} 处问题",
       "issues": "{count} 处问题",
-      "details": "在检查工具里看详情"
+      "details": "切到「检查」看详情"
     },
     "warnings": {
       "openEdges": "模型未封闭:{openEdges} 条开放边、{planarHoles} 处平面孔洞、{cracks} 处裂缝 / 破口。",
@@ -1658,12 +1647,6 @@
       "enclosedOpenShells": "{count} 个被外壳包裹的碎片壳。",
       "noiseShells": "{count} 个噪声碎片壳体,打印时会变成游离料点。",
       "multipleShells": "模型由 {count} 个独立壳体组成。"
-    },
-    "empty": {
-      "title": "打印前自检:先看一眼,再上打印机",
-      "desc": "自动检测反转法向、坏边(缝隙 / 平面孔洞 / 退化面 / 重复面 / 非流形边)与壳体问题(多余壳体 / 噪声碎片 / 密封内腔),按 WJP 全彩工艺标准给出评估,问题位置直接在 3D 视图里标色,点击列表即可聚焦。",
-      "drop": "拖入或点击选择模型文件",
-      "local": "文件仅在本地浏览器中解析,不会上传服务器"
     },
     "stats": {
       "notLoaded": "未加载模型",

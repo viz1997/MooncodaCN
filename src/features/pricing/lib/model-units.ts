@@ -161,3 +161,35 @@ export function scalePositions(
   }
   return out;
 }
+
+/**
+ * 按 XYZ 分别缩放一份三角汤(返回**新**数组,不改原来的)
+ *
+ * 克重工具的尺寸面板可以**只拉 Z**(比如把一个扁片立起来)—— 那时缩放因子
+ * 不是均匀的,`scalePositions` 顶不住。
+ *
+ * 打印前工作台的「检查」栏要画的是**缩放后**的模型(支撑外壳的平台平面是
+ * 绝对毫米值,不跟着缩放走),所以它拿到的必须是这份按轴缩放过的几何 ——
+ * 跟克重工具 3D 预览里那份(`ObjViewer` 的 `scale`)是同一个数。
+ */
+export function scalePositionsXYZ(
+  positions: Float32Array,
+  scales: [number, number, number]
+): Float32Array {
+  const [sx, sy, sz] = scales;
+  if (
+    !Number.isFinite(sx) ||
+    !Number.isFinite(sy) ||
+    !Number.isFinite(sz) ||
+    (sx === 1 && sy === 1 && sz === 1)
+  ) {
+    return positions;
+  }
+  const out = new Float32Array(positions.length);
+  for (let i = 0; i + 2 < positions.length; i += 3) {
+    out[i] = positions[i]! * sx;
+    out[i + 1] = positions[i + 1]! * sy;
+    out[i + 2] = positions[i + 2]! * sz;
+  }
+  return out;
+}

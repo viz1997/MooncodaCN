@@ -8,7 +8,9 @@ import {
   Loader2,
   Palette,
   RotateCcw,
+  Scale,
   Shell,
+  ShieldCheck,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
@@ -59,6 +61,33 @@ export type LoadStatus =
 
 export type DimMode = "original" | "custom";
 
+/**
+ * 工作台视角 —— 同一个模型的三种看法
+ *
+ * 2026-11-07 起,模型检查工具**并进**克重工具:两个工具页合成一个工作台,
+ * 模型只载入一次,里面用这三个视角看**同一个**模型。
+ *
+ * | 视角 | 看什么 |
+ * |---|---|
+ * | `check` | 打印前自检(反转法向 / 坏边破面 / 壳体封闭性)—— 整块替换两栏布局 |
+ * | `weight` | 克重(耗材 / 支撑 / 总克重)+ 尺寸调节 + 下单出口 |
+ * | `pose` | 摆盘(最优姿态 + 省了多少料) |
+ *
+ * 「检查」那一栏是**别的组件**渲染的(它有自己的一整套深色视口),父组件
+ * 通过 `check` 插槽递进来 —— 面板只管摆位置。
+ */
+export type WorkspaceTab = "check" | "weight" | "pose";
+
+/** 视角切换条上的三个按钮 —— 顺序就是工作室的流程:先看能不能印,再算料,最后摆盘 */
+const WORKSPACE_TABS: {
+  id: WorkspaceTab;
+  icon: typeof ShieldCheck;
+}[] = [
+  { id: "check", icon: ShieldCheck },
+  { id: "weight", icon: Scale },
+  { id: "pose", icon: Compass },
+];
+
 /** 几何数据（父组件算好 —— 面板不再自己算一份） */
 export type ModelGeometry = {
   volumeCM3: number;
@@ -83,8 +112,32 @@ export type ModelSettingsPanelProps = {
   /**
    * 右栏顶部的内容 —— 克重 + 摆盘结果。
    * 由父组件渲染（它持有 `calc` / `optimalAngle`）。
+   *
+   * **只在「克重」视角显示** —— 摆盘结果挪到 `pose` 插槽了。
    */
   weight?: ReactNode;
+
+  /**
+   * 右栏的「摆盘」视角内容 —— 智能摆盘结果。
+   *
+   * 跟 `weight` 分开是因为它们回答的是两个问题:**要多少料** vs **怎么摆**。
+   * 摆在同一栏里,用户得在一堆数字里找哪个是结论。
+   */
+  pose?: ReactNode;
+
+  /**
+   * 「检查」视角的内容 —— **整块替换两栏布局**。
+   *
+   * 检查面板有自己的一整套深色视口 + 侧栏(那是模型检查工具的老界面),
+   * 塞进两栏布局里会被挤扁,所以它整块占一行。
+   *
+   * 父组件只在「检查」视角下渲染它 —— 不渲染就等于没有这个视角。
+   */
+  check?: ReactNode;
+
+  /** 当前视角 —— 父组件持有(切换视角要重算东西,不能只改显示) */
+  tab: WorkspaceTab;
+  onTabChange: (tab: WorkspaceTab) => void;
 
   /**
    * 右栏最底部的内容 —— 报价条（价格明细 + 合计 + 下单入口）。
@@ -183,6 +236,10 @@ export function ModelSettingsPanel({
   uploadError,
   header,
   weight,
+  pose,
+  check,
+  tab,
+  onTabChange,
   quote,
   dimMode,
   uniformScale,
@@ -351,198 +408,230 @@ export function ModelSettingsPanel({
 
       {/* ---------- 3D 预览 + 尺寸调节 ---------- */}
       {showViewer && model && geometry && (
-        <div className="grid grid-cols-1 lg:grid-cols-2">
-          {/* 左：3D 预览 */}
-          <div className="border-b lg:border-b-0 lg:border-r border-stone-200 flex flex-col">
-            <div className="flex items-center justify-between bg-stone-50 px-3 py-2 border-b border-stone-200">
-              <span className="text-xs font-medium text-stone-600 flex items-center gap-1.5">
-                <Boxes className="size-3.5 text-amber-600" />
-                {t("dialog.preview3d")}
-              </span>
-              <div className="flex items-center gap-2">
-                {loadStatus === "loading-3d" && (
-                  <span className="text-[10px] text-amber-600 font-mono flex items-center gap-1">
-                    <Loader2 className="size-3 animate-spin" />
-                    {loadPercent}%
-                  </span>
-                )}
-                {loadStatus === "ready" && (
-                  <button
-                    type="button"
-                    onClick={() => onOptimizeAngle(scales)}
-                    disabled={angleOptimizing || !angleReady}
-                    className="text-[10px] text-violet-600 hover:text-violet-700 flex items-center gap-1 px-2 py-0.5 rounded border border-violet-300 bg-white hover:bg-violet-50 disabled:opacity-50"
-                  >
-                    {angleOptimizing ? (
-                      <Loader2 className="size-3 animate-spin" />
-                    ) : (
-                      <Compass className="size-3" />
-                    )}
-                    {angleOptimizing
-                      ? `${angleProgress}%`
-                      : t("angle.optimize")}
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* 手动角度调整（仅当已执行智能摆盘后显示） */}
-            {optimalAngle && loadStatus === "ready" && (
-              <div className="px-3 py-2 border-b border-stone-200 bg-violet-50/30">
-                <div className="flex items-center gap-3">
-                  <span className="text-[10px] font-medium text-violet-700 shrink-0">
-                    {t("angle.manualTune")}
-                  </span>
-                  <div className="flex items-center gap-2 flex-1">
-                    <AngleInput
-                      label="X"
-                      value={manualRotX}
-                      onChange={(v) => onManualAngleChange("X", v, scales)}
-                      color="#ef4444"
-                    />
-                    <AngleInput
-                      label="Y"
-                      value={manualRotY}
-                      onChange={(v) => onManualAngleChange("Y", v, scales)}
-                      color="#22c55e"
-                    />
-                    <AngleInput
-                      label="Z"
-                      value={manualRotZ}
-                      onChange={(v) => onManualAngleChange("Z", v, scales)}
-                      color="#3b82f6"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => onOptimizeAngle(scales)}
-                    disabled={angleOptimizing || !angleReady}
-                    className="text-[10px] text-violet-600 hover:text-violet-700 flex items-center gap-1 px-2 py-0.5 rounded border border-violet-300 bg-white hover:bg-violet-50 disabled:opacity-50"
-                  >
-                    <Compass className="size-3" />
-                    {t("angle.reoptimize")}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* 预览区 —— 页面内布局给固定高度（弹窗里靠 flex-1 撑开） */}
-            <div className="relative h-[300px] sm:h-[360px] lg:h-[420px] bg-stone-100">
-              <ObjViewer
-                objText={model.objText}
-                mtlText={model.mtlText}
-                textureBlobUrl={model.previewUrl}
-                textureUrls={model.textureUrls}
-                dims={geometry.dims}
-                rotationX={viewerRotX}
-                rotationY={viewerRotY}
-                rotationZ={viewerRotZ}
-                scale={dimMode === "custom" ? scales : 1}
-                showSupport={showSupport}
-                supportLiftMm={supportLiftMm}
-                showTexture={showTexture}
-                onReady={onViewerReady}
-                onProgress={onViewerProgress}
-              />
-              {loadStatus === "loading-3d" && (
-                <div className="absolute inset-0 bg-stone-100/80 backdrop-blur-sm flex flex-col items-center justify-center text-xs text-stone-500 pointer-events-none">
-                  <div className="size-10 rounded-full bg-amber-100 flex items-center justify-center mb-2">
-                    <Loader2 className="size-5 text-amber-600 animate-spin" />
-                  </div>
-                  <span>{loadProgress || t("dialog.loadingPreview")}</span>
-                  <div className="mt-2 w-32 h-1 bg-stone-200 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-amber-500 rounded-full transition-all duration-300"
-                      style={{ width: `${Math.max(5, loadPercent)}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* ---------- 预览浮层控制条 ----------
-                  与检测工具(/tools/model-check)同一套:显示贴图 / 包裹支撑,
-                  外加支撑比例 —— 比例是「支撑克重 ÷ 本体克重」,
-                  跟右栏克重面板里的算法是同一份数据。 */}
-              {loadStatus === "ready" && (
-                <div className="pointer-events-auto absolute bottom-3 left-1/2 z-10 flex max-w-[95%] -translate-x-1/2 flex-wrap items-center justify-center gap-1.5 rounded-lg border border-stone-300 bg-white/90 px-2.5 py-1.5 shadow-sm backdrop-blur">
-                  {hasTexture && (
-                    <button
-                      type="button"
-                      aria-pressed={showTexture}
-                      title={t("preview.textureTitle")}
-                      onClick={onToggleTexture}
-                      className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${
-                        showTexture
-                          ? "bg-amber-50 text-amber-700"
-                          : "text-stone-500 hover:text-stone-700"
-                      }`}
-                    >
-                      <Palette className="size-3.5" />
-                      {t("preview.texture")}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    aria-pressed={showSupport}
-                    title={t("preview.supportTitle")}
-                    onClick={onToggleSupport}
-                    className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${
-                      showSupport
-                        ? "bg-amber-50 text-amber-700"
-                        : "text-stone-500 hover:text-stone-700"
-                    }`}
-                  >
-                    <Shell className="size-3.5" />
-                    {t("preview.support")}
-                  </button>
-                  {poseSupport ? (
-                    <span className="font-mono text-[10px] text-stone-500">
-                      {t("preview.supportInfo", {
-                        ratio: Math.round(supportRatio * 100),
-                        weight: Math.ceil(poseSupport.supportWeightG),
-                      })}
-                    </span>
-                  ) : (
-                    <span className="text-[10px] text-stone-400">
-                      {t("preview.supportPending")}
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
+        <>
+          {/* ---------- 视角切换（检查 / 克重 / 摆盘）----------
+              三个视角看的是**同一个**模型 —— 模型只载入一次,切换不重新解析。
+              「检查」那一栏是别的组件渲染的(它有自己的一整套深色视口),
+              整块替换下面的两栏布局。 */}
+          <div className="flex items-center gap-1 border-b border-stone-200 bg-stone-50/60 px-3 py-2">
+            {WORKSPACE_TABS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                aria-pressed={tab === item.id}
+                onClick={() => onTabChange(item.id)}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                  tab === item.id
+                    ? "bg-amber-500 text-white shadow-sm"
+                    : "text-stone-600 hover:bg-stone-100 hover:text-stone-900"
+                }`}
+              >
+                <item.icon className="size-3.5" />
+                {t(`tabs.${item.id}`)}
+              </button>
+            ))}
           </div>
 
-          {/* 右：尺寸调节在上，克重（父组件渲染）在下。
+          {tab === "check" && check ? (
+            <>
+              <div>{check}</div>
+              {/* 下单出口在**每一个**视角都在 ——
+                  检查完就该能下单,不该再跳回「克重」那一栏找按钮。 */}
+              {quote}
+            </>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2">
+              {/* 左：3D 预览 */}
+              <div className="border-b lg:border-b-0 lg:border-r border-stone-200 flex flex-col">
+                <div className="flex items-center justify-between bg-stone-50 px-3 py-2 border-b border-stone-200">
+                  <span className="text-xs font-medium text-stone-600 flex items-center gap-1.5">
+                    <Boxes className="size-3.5 text-amber-600" />
+                    {t("dialog.preview3d")}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    {loadStatus === "loading-3d" && (
+                      <span className="text-[10px] text-amber-600 font-mono flex items-center gap-1">
+                        <Loader2 className="size-3 animate-spin" />
+                        {loadPercent}%
+                      </span>
+                    )}
+                    {loadStatus === "ready" && (
+                      <button
+                        type="button"
+                        onClick={() => onOptimizeAngle(scales)}
+                        disabled={angleOptimizing || !angleReady}
+                        className="text-[10px] text-violet-600 hover:text-violet-700 flex items-center gap-1 px-2 py-0.5 rounded border border-violet-300 bg-white hover:bg-violet-50 disabled:opacity-50"
+                      >
+                        {angleOptimizing ? (
+                          <Loader2 className="size-3 animate-spin" />
+                        ) : (
+                          <Compass className="size-3" />
+                        )}
+                        {angleOptimizing
+                          ? `${angleProgress}%`
+                          : t("angle.optimize")}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* 手动角度调整（仅当已执行智能摆盘后显示） */}
+                {optimalAngle && loadStatus === "ready" && (
+                  <div className="px-3 py-2 border-b border-stone-200 bg-violet-50/30">
+                    <div className="flex items-center gap-3">
+                      <span className="text-[10px] font-medium text-violet-700 shrink-0">
+                        {t("angle.manualTune")}
+                      </span>
+                      <div className="flex items-center gap-2 flex-1">
+                        <AngleInput
+                          label="X"
+                          value={manualRotX}
+                          onChange={(v) => onManualAngleChange("X", v, scales)}
+                          color="#ef4444"
+                        />
+                        <AngleInput
+                          label="Y"
+                          value={manualRotY}
+                          onChange={(v) => onManualAngleChange("Y", v, scales)}
+                          color="#22c55e"
+                        />
+                        <AngleInput
+                          label="Z"
+                          value={manualRotZ}
+                          onChange={(v) => onManualAngleChange("Z", v, scales)}
+                          color="#3b82f6"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onOptimizeAngle(scales)}
+                        disabled={angleOptimizing || !angleReady}
+                        className="text-[10px] text-violet-600 hover:text-violet-700 flex items-center gap-1 px-2 py-0.5 rounded border border-violet-300 bg-white hover:bg-violet-50 disabled:opacity-50"
+                      >
+                        <Compass className="size-3" />
+                        {t("angle.reoptimize")}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* 预览区 —— 页面内布局给固定高度（弹窗里靠 flex-1 撑开） */}
+                <div className="relative h-[300px] sm:h-[360px] lg:h-[420px] bg-stone-100">
+                  <ObjViewer
+                    objText={model.objText}
+                    mtlText={model.mtlText}
+                    textureBlobUrl={model.previewUrl}
+                    textureUrls={model.textureUrls}
+                    dims={geometry.dims}
+                    rotationX={viewerRotX}
+                    rotationY={viewerRotY}
+                    rotationZ={viewerRotZ}
+                    scale={dimMode === "custom" ? scales : 1}
+                    showSupport={showSupport}
+                    supportLiftMm={supportLiftMm}
+                    showTexture={showTexture}
+                    onReady={onViewerReady}
+                    onProgress={onViewerProgress}
+                  />
+                  {loadStatus === "loading-3d" && (
+                    <div className="absolute inset-0 bg-stone-100/80 backdrop-blur-sm flex flex-col items-center justify-center text-xs text-stone-500 pointer-events-none">
+                      <div className="size-10 rounded-full bg-amber-100 flex items-center justify-center mb-2">
+                        <Loader2 className="size-5 text-amber-600 animate-spin" />
+                      </div>
+                      <span>{loadProgress || t("dialog.loadingPreview")}</span>
+                      <div className="mt-2 w-32 h-1 bg-stone-200 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-amber-500 rounded-full transition-all duration-300"
+                          style={{ width: `${Math.max(5, loadPercent)}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ---------- 预览浮层控制条 ----------
+                  与「检查」视角同一套:显示贴图 / 包裹支撑,
+                  外加支撑比例 —— 比例是「支撑克重 ÷ 本体克重」,
+                  跟右栏克重面板里的算法是同一份数据。 */}
+                  {loadStatus === "ready" && (
+                    <div className="pointer-events-auto absolute bottom-3 left-1/2 z-10 flex max-w-[95%] -translate-x-1/2 flex-wrap items-center justify-center gap-1.5 rounded-lg border border-stone-300 bg-white/90 px-2.5 py-1.5 shadow-sm backdrop-blur">
+                      {hasTexture && (
+                        <button
+                          type="button"
+                          aria-pressed={showTexture}
+                          title={t("preview.textureTitle")}
+                          onClick={onToggleTexture}
+                          className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${
+                            showTexture
+                              ? "bg-amber-50 text-amber-700"
+                              : "text-stone-500 hover:text-stone-700"
+                          }`}
+                        >
+                          <Palette className="size-3.5" />
+                          {t("preview.texture")}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        aria-pressed={showSupport}
+                        title={t("preview.supportTitle")}
+                        onClick={onToggleSupport}
+                        className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${
+                          showSupport
+                            ? "bg-amber-50 text-amber-700"
+                            : "text-stone-500 hover:text-stone-700"
+                        }`}
+                      >
+                        <Shell className="size-3.5" />
+                        {t("preview.support")}
+                      </button>
+                      {poseSupport ? (
+                        <span className="font-mono text-[10px] text-stone-500">
+                          {t("preview.supportInfo", {
+                            ratio: Math.round(supportRatio * 100),
+                            weight: Math.ceil(poseSupport.supportWeightG),
+                          })}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-stone-400">
+                          {t("preview.supportPending")}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 右：尺寸调节在上，克重（父组件渲染）在下。
               2026-11-01 调整：原来是「克重 → 尺寸调节」。克重是这块面板的
               **结论**，尺寸调节是**输入** —— 输入在前、结论在后，读起来是
               「先调尺寸 → 再看克重多少」。而且克重只有两个大数字，压在顶上
               会把下面真正要操作的尺寸输入挤到视线之外。 */}
-          <div className="p-4 flex flex-col gap-4">
-            <div className="rounded-lg border border-stone-200 overflow-hidden">
-              <div className="flex items-center justify-between bg-stone-50 px-3 py-2 border-b border-stone-200">
-                <span className="text-xs font-medium text-stone-600">
-                  {t("dialog.dimensionAdjust")}
-                </span>
-                <div className="inline-flex rounded-md border border-stone-200 bg-white p-0.5">
-                  <button
-                    type="button"
-                    onClick={() => onDimModeChange("original")}
-                    className={`px-3 py-1 text-xs rounded transition-colors ${dimMode === "original" ? "bg-stone-800 text-white" : "text-stone-600 hover:text-stone-900"}`}
-                  >
-                    {t("dialog.originalSize")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onDimModeChange("custom")}
-                    className={`px-3 py-1 text-xs rounded transition-colors ${dimMode === "custom" ? "bg-amber-500 text-white" : "text-stone-600 hover:text-stone-900"}`}
-                  >
-                    {t("dialog.customSize")}
-                  </button>
-                </div>
-              </div>
+              <div className="p-4 flex flex-col gap-4">
+                <div className="rounded-lg border border-stone-200 overflow-hidden">
+                  <div className="flex items-center justify-between bg-stone-50 px-3 py-2 border-b border-stone-200">
+                    <span className="text-xs font-medium text-stone-600">
+                      {t("dialog.dimensionAdjust")}
+                    </span>
+                    <div className="inline-flex rounded-md border border-stone-200 bg-white p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => onDimModeChange("original")}
+                        className={`px-3 py-1 text-xs rounded transition-colors ${dimMode === "original" ? "bg-stone-800 text-white" : "text-stone-600 hover:text-stone-900"}`}
+                      >
+                        {t("dialog.originalSize")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDimModeChange("custom")}
+                        className={`px-3 py-1 text-xs rounded transition-colors ${dimMode === "custom" ? "bg-amber-500 text-white" : "text-stone-600 hover:text-stone-900"}`}
+                      >
+                        {t("dialog.customSize")}
+                      </button>
+                    </div>
+                  </div>
 
-              <div className="p-3 space-y-3">
-                {/* ---------- 单位横幅 ----------
+                  <div className="p-3 space-y-3">
+                    {/* ---------- 单位横幅 ----------
                     文件坐标不是毫米(AI 生成 / Blender 默认导出都是归一化的),
                     工具已经按「最大边 100mm」替用户归一化过了 —— 这件事必须
                     摆出来,否则用户看到的尺寸跟他想的不是一个东西。
@@ -550,176 +639,182 @@ export function ModelSettingsPanel({
                     托底 5mm 是固定毫米值,不跟着模型缩放:不归一化的话平台会
                     被拉到模型下面 5 个「单位」,支撑比模型本身还高,支撑比例是
                     万倍量级(见 `lib/model-units.ts`)。 */}
-                {unitCheck?.normalized && (
-                  <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2">
-                    <AlertCircle className="size-3.5 shrink-0 mt-px text-amber-600" />
-                    <div className="min-w-0 flex-1 text-[11px] leading-relaxed">
-                      <p className="font-medium text-amber-900">
-                        {t("dialog.unitNotice", {
-                          extent: fmt(unitCheck.originalMaxExtent, 2),
-                        })}
-                      </p>
-                      <p className="text-amber-700">
-                        {dimMode === "custom"
-                          ? t("dialog.unitNoticeHandled", {
-                              size: unitCheck.assumedMaxExtentMm,
-                            })
-                          : t("dialog.unitNoticeUnhandled")}
-                      </p>
-                    </div>
-                    {/* 「改回原始尺寸」只在归一化还生效时给 —— 已经回到原始
+                    {unitCheck?.normalized && (
+                      <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2">
+                        <AlertCircle className="size-3.5 shrink-0 mt-px text-amber-600" />
+                        <div className="min-w-0 flex-1 text-[11px] leading-relaxed">
+                          <p className="font-medium text-amber-900">
+                            {t("dialog.unitNotice", {
+                              extent: fmt(unitCheck.originalMaxExtent, 2),
+                            })}
+                          </p>
+                          <p className="text-amber-700">
+                            {dimMode === "custom"
+                              ? t("dialog.unitNoticeHandled", {
+                                  size: unitCheck.assumedMaxExtentMm,
+                                })
+                              : t("dialog.unitNoticeUnhandled")}
+                          </p>
+                        </div>
+                        {/* 「改回原始尺寸」只在归一化还生效时给 —— 已经回到原始
                         尺寸的话,这个按钮按下去什么都不会变。 */}
-                    {dimMode === "custom" && onRevertUnitScale && (
-                      <button
-                        type="button"
-                        onClick={onRevertUnitScale}
-                        className="shrink-0 text-[11px] font-medium text-amber-700 hover:text-amber-900 underline underline-offset-2 whitespace-nowrap"
-                      >
-                        {t("dialog.revertOriginalUnits")}
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                <div className="space-y-2 min-h-[124px] flex flex-col justify-start">
-                  <div className="grid grid-cols-3 gap-2">
-                    {dimMode === "original" ? (
-                      <>
-                        <DimDisplay
-                          axis="X"
-                          axisColor="#ef4444"
-                          label={t("axis.length")}
-                          value={geometry.originalDims[0]}
-                        />
-                        <DimDisplay
-                          axis="Y"
-                          axisColor="#22c55e"
-                          label={t("axis.width")}
-                          value={geometry.originalDims[1]}
-                        />
-                        <DimDisplay
-                          axis="Z"
-                          axisColor="#3b82f6"
-                          label={t("axis.height")}
-                          value={geometry.originalDims[2]}
-                        />
-                      </>
-                    ) : (
-                      <>
-                        <DimEditor
-                          axis="X"
-                          axisColor="#ef4444"
-                          label={t("axis.length")}
-                          value={geometry.dims[0]}
-                          onChange={(v) => handleDimChange(0, v)}
-                        />
-                        <DimEditor
-                          axis="Y"
-                          axisColor="#22c55e"
-                          label={t("axis.width")}
-                          value={geometry.dims[1]}
-                          onChange={(v) => handleDimChange(1, v)}
-                        />
-                        <DimEditor
-                          axis="Z"
-                          axisColor="#3b82f6"
-                          label={t("axis.height")}
-                          value={geometry.dims[2]}
-                          onChange={(v) => handleDimChange(2, v)}
-                        />
-                      </>
-                    )}
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs h-5">
-                    {dimMode === "original" ? (
-                      <span className="text-stone-500 flex items-center gap-1">
-                        <Info className="size-3" />
-                        {t("dialog.switchToCustom")}
-                      </span>
-                    ) : (
-                      <>
-                        <span className="text-stone-500 flex items-center gap-1">
-                          <Info className="size-3" />
-                          {uniformScale
-                            ? t("dialog.linkedScale")
-                            : t("dialog.independentScale")}
-                        </span>
-                        <div className="flex items-center gap-2">
-                          {/* Radix Switch 渲染的是 button 而不是 input，
-                              用 <label> 包它会被 a11y 规则判为「无关联控件的 label」，
-                              这里改成可点击的按钮 + Switch。 */}
-                          <div className="flex items-center gap-1 text-[11px] text-stone-500">
-                            <button
-                              type="button"
-                              onClick={() => toggleUniformScale(!uniformScale)}
-                              className="cursor-pointer hover:text-stone-700"
-                            >
-                              {t("dialog.uniformScale")}
-                            </button>
-                            <Switch
-                              checked={uniformScale}
-                              onCheckedChange={toggleUniformScale}
-                              className="scale-75"
-                            />
-                          </div>
+                        {dimMode === "custom" && onRevertUnitScale && (
                           <button
                             type="button"
-                            onClick={() => {
-                              onScaleFactorChange(1);
-                              onScaleXChange(1);
-                              onScaleYChange(1);
-                              onScaleZChange(1);
-                            }}
-                            className="text-amber-600 hover:text-amber-700 font-medium flex items-center gap-1"
+                            onClick={onRevertUnitScale}
+                            className="shrink-0 text-[11px] font-medium text-amber-700 hover:text-amber-900 underline underline-offset-2 whitespace-nowrap"
                           >
-                            <RotateCcw className="size-3" />
-                            {t("dialog.restoreOriginal")}
+                            {t("dialog.revertOriginalUnits")}
                           </button>
-                        </div>
-                      </>
+                        )}
+                      </div>
                     )}
-                  </div>
 
-                  <div className="text-[11px] h-6 flex items-center gap-1.5">
-                    {dimMode === "custom" &&
-                      (() => {
-                        const [sx, sy, sz] = scales;
-                        const isUniform = sx === sy && sy === sz;
-                        const k = isUniform ? sx : Math.cbrt(sx * sy * sz);
-                        if (Math.abs(k - 1) < 0.001) return null;
-                        return (
-                          <span className="text-stone-500 bg-amber-50 border border-amber-200 rounded px-2 py-1 flex items-center gap-1.5 w-full">
-                            <AlertCircle className="size-3 text-amber-600 shrink-0" />
-                            {isUniform
-                              ? t("dialog.scaleSummaryUniform", {
-                                  s: fmt(sx, 3),
-                                  v: fmt(sx ** 3, 3),
-                                  a: fmt(sx ** 2, 3),
-                                })
-                              : t("dialog.scaleSummaryAxis", {
-                                  sx: fmt(sx, 3),
-                                  sy: fmt(sy, 3),
-                                  sz: fmt(sz, 3),
-                                  v: fmt(sx * sy * sz, 3),
-                                })}
+                    <div className="space-y-2 min-h-[124px] flex flex-col justify-start">
+                      <div className="grid grid-cols-3 gap-2">
+                        {dimMode === "original" ? (
+                          <>
+                            <DimDisplay
+                              axis="X"
+                              axisColor="#ef4444"
+                              label={t("axis.length")}
+                              value={geometry.originalDims[0]}
+                            />
+                            <DimDisplay
+                              axis="Y"
+                              axisColor="#22c55e"
+                              label={t("axis.width")}
+                              value={geometry.originalDims[1]}
+                            />
+                            <DimDisplay
+                              axis="Z"
+                              axisColor="#3b82f6"
+                              label={t("axis.height")}
+                              value={geometry.originalDims[2]}
+                            />
+                          </>
+                        ) : (
+                          <>
+                            <DimEditor
+                              axis="X"
+                              axisColor="#ef4444"
+                              label={t("axis.length")}
+                              value={geometry.dims[0]}
+                              onChange={(v) => handleDimChange(0, v)}
+                            />
+                            <DimEditor
+                              axis="Y"
+                              axisColor="#22c55e"
+                              label={t("axis.width")}
+                              value={geometry.dims[1]}
+                              onChange={(v) => handleDimChange(1, v)}
+                            />
+                            <DimEditor
+                              axis="Z"
+                              axisColor="#3b82f6"
+                              label={t("axis.height")}
+                              value={geometry.dims[2]}
+                              onChange={(v) => handleDimChange(2, v)}
+                            />
+                          </>
+                        )}
+                      </div>
+
+                      <div className="flex items-center justify-between text-xs h-5">
+                        {dimMode === "original" ? (
+                          <span className="text-stone-500 flex items-center gap-1">
+                            <Info className="size-3" />
+                            {t("dialog.switchToCustom")}
                           </span>
-                        );
-                      })()}
+                        ) : (
+                          <>
+                            <span className="text-stone-500 flex items-center gap-1">
+                              <Info className="size-3" />
+                              {uniformScale
+                                ? t("dialog.linkedScale")
+                                : t("dialog.independentScale")}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              {/* Radix Switch 渲染的是 button 而不是 input，
+                              用 <label> 包它会被 a11y 规则判为「无关联控件的 label」，
+                              这里改成可点击的按钮 + Switch。 */}
+                              <div className="flex items-center gap-1 text-[11px] text-stone-500">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    toggleUniformScale(!uniformScale)
+                                  }
+                                  className="cursor-pointer hover:text-stone-700"
+                                >
+                                  {t("dialog.uniformScale")}
+                                </button>
+                                <Switch
+                                  checked={uniformScale}
+                                  onCheckedChange={toggleUniformScale}
+                                  className="scale-75"
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  onScaleFactorChange(1);
+                                  onScaleXChange(1);
+                                  onScaleYChange(1);
+                                  onScaleZChange(1);
+                                }}
+                                className="text-amber-600 hover:text-amber-700 font-medium flex items-center gap-1"
+                              >
+                                <RotateCcw className="size-3" />
+                                {t("dialog.restoreOriginal")}
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+
+                      <div className="text-[11px] h-6 flex items-center gap-1.5">
+                        {dimMode === "custom" &&
+                          (() => {
+                            const [sx, sy, sz] = scales;
+                            const isUniform = sx === sy && sy === sz;
+                            const k = isUniform ? sx : Math.cbrt(sx * sy * sz);
+                            if (Math.abs(k - 1) < 0.001) return null;
+                            return (
+                              <span className="text-stone-500 bg-amber-50 border border-amber-200 rounded px-2 py-1 flex items-center gap-1.5 w-full">
+                                <AlertCircle className="size-3 text-amber-600 shrink-0" />
+                                {isUniform
+                                  ? t("dialog.scaleSummaryUniform", {
+                                      s: fmt(sx, 3),
+                                      v: fmt(sx ** 3, 3),
+                                      a: fmt(sx ** 2, 3),
+                                    })
+                                  : t("dialog.scaleSummaryAxis", {
+                                      sx: fmt(sx, 3),
+                                      sy: fmt(sy, 3),
+                                      sz: fmt(sz, 3),
+                                      v: fmt(sx * sy * sz, 3),
+                                    })}
+                              </span>
+                            );
+                          })()}
+                      </div>
+                    </div>
                   </div>
                 </div>
+
+                {/* 克重 —— 尺寸调完之后的结果，放最后。
+                mt-auto:右栏比左边预览矮/高的差都让出来,克重贴着栏底,
+                跟预览的底边对齐(挤在中间会像没排完)。
+
+                「摆盘」视角换成摆盘结果 —— 两个问题分两栏看,不挤在一块。 */}
+                <div className="mt-auto">{tab === "pose" ? pose : weight}</div>
+
+                {/* 右栏插槽 —— 报价模式放报价条，工具模式放「报价下单」入口卡片 */}
+                {quote}
               </div>
             </div>
-
-            {/* 克重 —— 尺寸调完之后的结果，放最后。
-                mt-auto:右栏比左边预览矮/高的差都让出来,克重贴着栏底,
-                跟预览的底边对齐(挤在中间会像没排完)。 */}
-            <div className="mt-auto">{weight}</div>
-
-            {/* 右栏插槽 —— 报价模式放报价条，工具模式放「报价下单」入口卡片 */}
-            {quote}
-          </div>
-        </div>
+          )}
+        </>
       )}
     </div>
   );

@@ -18,26 +18,27 @@
  * 是有戒心的。
  */
 
-import { ArrowRight, type LucideIcon, Scale, ShieldCheck } from "lucide-react";
+import { ArrowRight, type LucideIcon, Scale } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/routing";
 
 type ToolEntry = {
-  id: "weight" | "modelCheck";
+  id: "weight";
   href: string;
   icon: LucideIcon;
   /** i18n key 后缀 */
   key: string;
 };
 
+/**
+ * 工具清单 —— **一个**入口
+ *
+ * 2026-11-07:模型检查工具并进了克重工具(两个工具页合成一个打印前工作台),
+ * 所以这里只剩一张卡。清单留着数组 —— 工具还会再加(图片尺寸换算……),
+ * 往后加一条就行。
+ */
 const TOOLS: ToolEntry[] = [
   { id: "weight", href: "/tools/weight", icon: Scale, key: "weight" },
-  {
-    id: "modelCheck",
-    href: "/tools/model-check",
-    icon: ShieldCheck,
-    key: "modelCheck",
-  },
 ];
 
 export function ToolsHub() {

@@ -1182,6 +1182,11 @@
       "varnishFee": "Varnish fee",
       "repairFee": "Repair fee"
     },
+    "tabs": {
+      "check": "Check",
+      "weight": "Weight",
+      "pose": "Pose"
+    },
     "angle": {
       "best": "Best orientation X {x}° Y {y}° Z {z}°",
       "selfSupport": "Self-support {ratio}%",
@@ -1191,6 +1196,9 @@
       "savingTitle": "{before} g original → {after} g optimized, {pct}% saved",
       "savingBadge": "{pct}% less support",
       "compareSupport": "Initial pose 0°,0°: {initial} g → current pose: {current} g",
+      "currentPose": "Current pose X {x}° Y {y}° Z {z}°",
+      "currentSupport": "Support {weight} g · self-support {ratio}%",
+      "noResultHint": "No orientation search yet — hit “Optimize orientation” above to find an angle that saves material.",
       "exportModel": "Export model",
       "reset": "Reset angle",
       "summary": "X {x}° Y {y}° Z {z}° · support {ratio}% · {weight} g · height {height} mm",
@@ -1372,40 +1380,21 @@
     "privacy": "Privacy: every tool computes locally in your browser. Model files are never uploaded to our servers and results are never written to the database. Close the tab and nothing is left behind.",
     "tools": {
       "weight": {
-        "title": "Weight Calculator",
-        "description": "Upload a 3D model to get resin weight, support weight and the best print orientation — plus how much material that angle saves.",
-        "tag1": "Resin weight",
-        "tag2": "Support weight",
+        "title": "Print Pre-flight Workbench",
+        "description": "Load a model once and view it three ways: pre-flight inspection (inverted normals, broken edges and faces, shell watertightness), resin and support weight, and the best print orientation — plus how much material that angle saves.",
+        "tag1": "Model check",
+        "tag2": "Resin weight",
         "tag3": "Best orientation",
         "tag4": "OBJ export"
-      },
-      "modelCheck": {
-        "title": "Model Inspector",
-        "description": "Pre-print check for inverted normals, broken edges and faces, and shell watertightness — judged against WJP full-color rules, with problems marked in 3D.",
-        "tag1": "Inverted normals",
-        "tag2": "Broken edges",
-        "tag3": "Shell integrity",
-        "tag4": "WJP assessment"
       }
     }
   },
   "ModelInspector": {
-    "page": {
-      "eyebrow": "Model Inspector",
-      "title": "Check the mesh before it hits the printer",
-      "description": "Inverted normals, gaps and planar holes, degenerate and non-manifold faces, stray shells and sealed cavities — all judged against WJP full-color rules, with every problem highlighted in 3D.",
-      "designSpecLink": "Geometry checks out? Now check it against the 3D Model Design Specification — wall thickness, tolerances, overhangs and holes all have hard limits.",
-      "designSpecCta": "Read the 3D Model Design Specification"
-    },
     "app": {
       "title": "Model Inspector",
       "subtitle": "Pre-print check (WJP full color)",
-      "upload": "Upload model",
       "resetView": "Reset view",
-      "analyzing": "Analyzing…",
-      "fileLabel": "Choose a model file",
-      "toWeight": "Measure weight",
-      "toWeightTitle": "Take this model to the weight tool — the file comes along, no re-dragging"
+      "analyzing": "Analyzing…"
     },
     "upload": {
       "dropOverlay": "Drop to load the model"
@@ -1651,7 +1640,7 @@
       "passTitle": "Mesh check passed — no open edges, flipped faces or extra shells",
       "issuesTitle": "Mesh check found {count} issue(s)",
       "issues": "{count} issues",
-      "details": "See details in the inspector"
+      "details": "Switch to “Check” for details"
     },
     "warnings": {
       "openEdges": "The mesh is not closed: {openEdges} open edge(s), {planarHoles} planar hole(s), {cracks} crack(s) / tear(s).",
@@ -1661,12 +1650,6 @@
       "enclosedOpenShells": "{count} fragment shell(s) trapped inside the outer shell.",
       "noiseShells": "{count} noise fragment shell(s) — they print as loose blobs.",
       "multipleShells": "The model is made of {count} separate shells."
-    },
-    "empty": {
-      "title": "Before you print: take a look",
-      "desc": "Automatically detects inverted normals, bad edges (gaps / planar holes / degenerate / duplicate faces / non-manifold edges) and shell problems (extra shells / noise fragments / sealed cavities), judges them against WJP full-color rules, and marks every problem in the 3D view — click a list entry to fly to it.",
-      "drop": "Drop a model file here, or click to choose one",
-      "local": "Files are parsed in your browser — nothing is uploaded to the server"
     },
     "stats": {
       "notLoaded": "No model loaded",

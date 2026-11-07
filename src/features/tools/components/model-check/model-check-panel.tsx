@@ -1,5 +1,33 @@
 "use client";
 
+/**
+ * 打印前工作台 —— 「检查」视角
+ *
+ * ## 它是什么
+ *
+ * 2026-11-07 起,模型检查工具**并进**克重工具(`/tools/weight`):两个工具页
+ * 合成一个工作台,模型只载入一次,里面用 **检查 / 克重 / 摆盘** 三个视角
+ * 看同一个模型。
+ *
+ * 本组件就是那个工作台的「检查」视角 —— 它以前是独立的一页
+ * (`model-checker.tsx`,已删),现在由父组件把模型和当前尺寸喂进来。
+ *
+ * ## 一份口径(结构上保证)
+ *
+ * - **几何只有一份** —— 父组件传的 `model.parseResult.positions` 就是克重
+ *   工具那份(同一个 `ModelFile`,同一个 `parseResult`)。以前检查工具会
+ *   **再解析一遍 OBJ** 才能拿到 UV / 材质分组,现在不用了。
+ * - **尺寸跟着当前缩放走** —— `scales` 是克重工具那份生效的缩放因子,
+ *   检查面板按它缩放顶点后再分析,所以画出来的支撑外壳跟克重那一栏的
+ *   支撑克重是**同一个几何**。
+ * - **托底高度跟随后台** —— `clientConfig.supportLiftMm`,跟克重工具、
+ *   跟服务端报价用的是同一个值。
+ *
+ * ## 为什么分析器跑在 Worker 里
+ *
+ * 焊接 + 拓扑分析对大模型要几秒 —— 跑在主线程上整页会卡死。`useAnalyzer()`
+ * 在 Worker 不可用时自动退回主线程(功能不缺,只是会卡一下)。
+ */
 import {
   Boxes,
   CircleAlert,
@@ -7,50 +35,23 @@ import {
   Loader2,
   Palette,
   RotateCcw,
-  Scale,
   Shell,
-  Upload,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-/**
- * 模型检查 · 打印前自检 —— 主界面
- *
- * 左侧:检测卡片;中间:3D 视口(问题位置标色);底部:状态栏。
- *
- * 移植自 wjp-model-checker-source/src/components/model-checker/ModelChecker.tsx,
- * 改动:
- * - 文件读取改用克重工具的解压管线(`@/features/tools/lib/model-loader`);
- * - 去掉「下载全部源码」按钮(源项目用来打包自己源码的,本仓库没有这个路由);
- * - 顶层改成深色圆角面板(页面上面还有浅色 atelier 页头 + 全站 Header/Footer);
- * - 所有文案改成 next-intl。
- */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { TextureDiagnosticNote } from "@/features/pricing/components/texture-diagnostic";
 import {
-  detectModelUnitScale,
   type ModelUnitCheck,
-  measurePositionsSize,
-  scalePositions,
+  scalePositionsXYZ,
 } from "@/features/pricing/lib/model-units";
-import type { TextureDiagnostic } from "@/features/pricing/lib/obj-materials";
+import type { ModelFile } from "@/features/pricing/lib/zip-extractor";
+import type { ClientPrintConfig } from "@/features/print-quote/lib/pricing-settings";
 import { useDropZone } from "@/features/shared/hooks/use-drop-zone";
 import {
   ISSUE_COLORS,
   ISSUE_LABEL_KEYS,
   type IssueCluster,
-  type MessageRef,
 } from "@/features/tools/lib/mesh/types";
-import {
-  stashModelFile,
-  takeModelFile,
-} from "@/features/tools/lib/model-handoff";
-import {
-  loadModelGeometry,
-  MODEL_ACCEPT,
-  ModelLoadError,
-} from "@/features/tools/lib/model-loader";
-import { useRouter } from "@/i18n/routing";
 import Sidebar from "./sidebar";
 import { useAnalyzer } from "./use-analyzer";
 import Viewport, {
@@ -86,35 +87,25 @@ const LEGEND_ITEMS: { key: keyof ViewportVisibility; color: string }[] = [
   { key: "outline", color: ISSUE_COLORS.outline },
 ];
 
-type LoadedState = {
-  /** 三角汤坐标(主线程持有,渲染要用) */
-  positions: Float32Array;
-  /** 展示用文件名 */
-  fileName: string;
-  /** 贴图与材质分组(模型自带 MTL + 贴图时才有内容) */
-  textures: MeshTextureInfo | null;
-  /** 贴图解析诊断 —— 白模时解释断点 */
-  textureDiagnostics: TextureDiagnostic[] | null;
-  /** 释放贴图 blob URL */
-  releaseTextures: () => void;
-};
-
-export function ModelChecker({
-  supportLiftMm,
+export function ModelCheckPanel({
+  model,
+  scales,
+  clientConfig,
+  unitCheck,
+  onFiles,
 }: {
-  /**
-   * 托底高度 (mm) —— 模型悬在平台上方多远
-   *
-   * 不传 = `SUPPORT_LIFT_MM`(5mm)。**2026-11-06 起跟随后台**
-   * (`/admin/print-pricing`)—— 这一页画的支撑跟克重工具算的必须是同一个
-   * 几何,不然工作室会对着两个不一样的支撑看。
-   */
-  supportLiftMm?: number | undefined;
+  /** 当前模型 —— 跟克重工具是**同一个** `ModelFile`(只解析了一遍) */
+  model: ModelFile | null;
+  /** 当前生效的缩放因子 —— 检查面板按它缩放后再分析 */
+  scales: [number, number, number];
+  /** 后台配的打印参数(托底高度等)—— 跟克重工具、服务端报价同一份 */
+  clientConfig?: ClientPrintConfig | undefined;
+  /** 单位判定结果 —— 文件坐标不是毫米时才有值 */
+  unitCheck?: ModelUnitCheck | null | undefined;
+  /** 拖文件进视口 —— 交给上层那个上传管线 */
+  onFiles?: ((files: File[]) => void) | undefined;
 }) {
   const t = useTranslations("ModelInspector");
-  /** 跳去克重工具 —— 只走**客户端跳转**,接力才断不了 */
-  const router = useRouter();
-  const [model, setModel] = useState<LoadedState | null>(null);
   const [visibility, setVisibility] =
     useState<ViewportVisibility>(ALL_VISIBILITY);
   const [showSupport, setShowSupport] = useState(false);
@@ -126,134 +117,47 @@ export function ModelChecker({
     dir?: [number, number, number];
   } | null>(null);
   const [fitSignal, setFitSignal] = useState(0);
-  const [loadError, setLoadError] = useState<MessageRef | null>(null);
-  const [loading, setLoading] = useState(false);
-  /**
-   * 单位判定结果 —— 文件坐标不是毫米时才有值
-   *
-   * 这一页画的支撑跟克重工具算的必须是同一个几何(见 CLAUDE.md),
-   * 而支撑几何用的是**绝对毫米值**(托底 5mm)—— 文件坐标不是毫米时,
-   * 托底会变成「模型下面 5 个单位」,支撑比模型本身还高。
-   */
-  const [unitCheck, setUnitCheck] = useState<ModelUnitCheck | null>(null);
-  const [loadingPct, setLoadingPct] = useState(0);
   const focusSeq = useRef(0);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  /** 当前模型的贴图 blob URL 释放函数(换模型 / 卸载时调用) */
-  const releaseTexturesRef = useRef<(() => void) | null>(null);
+
+  /** 托底高度 —— 跟随后台,跟克重工具同一个值 */
+  const liftMm = clientConfig?.supportLiftMm;
+
   /**
-   * 当前模型的**原始文件** —— 「去量克重」要用它接力过去
+   * 缩放后的几何 —— 分析器跟视口都吃这一份
    *
-   * `model.positions` 是解析 / 归一化之后的几何,不是文件本体;克重工具要
-   * 的是文件(它自己会解压、自己会判单位)。
-   *
-   * 用 state 而不是 ref:顶栏那颗按钮的「能不能点」要跟着它变。
+   * 支撑外壳的平台平面是**绝对毫米值**(托底 5mm),不跟着模型缩放走 ——
+   * 所以这里必须按当前尺寸缩放顶点,否则画出来的支撑跟克重那一栏对不上。
    */
-  const [sourceFile, setSourceFile] = useState<File | null>(null);
-  /** 接力只取一次 —— StrictMode 下 effect 会跑两遍 */
-  const handoffTakenRef = useRef(false);
+  const positions = useMemo(() => {
+    const raw = model?.parseResult.positions;
+    if (!raw) return null;
+    return scalePositionsXYZ(raw, scales);
+  }, [model, scales]);
+
+  /** 贴图与材质分组 —— 全部来自同一个 `ModelFile`(不用再解析一遍 OBJ) */
+  const textures = useMemo<MeshTextureInfo | null>(() => {
+    if (!model) return null;
+    const r = model.parseResult;
+    return {
+      uvs: r.uvs ?? null,
+      materialNames: r.materialNames ?? [],
+      materialIndex: r.materialIndex ?? null,
+      mtlText: model.mtlText ?? null,
+      textureUrls: model.textureUrls ?? null,
+    };
+  }, [model]);
 
   const { state, run } = useAnalyzer();
   const { result, busy, stage, pct, error } = state;
 
   useEffect(() => {
-    if (model) {
-      run({
-        positions: model.positions,
-        fileName: model.fileName,
-        liftMm: supportLiftMm,
-      });
-    }
-  }, [model, run, supportLiftMm]);
-
-  // 卸载时回收贴图 blob URL
-  useEffect(() => {
-    return () => {
-      releaseTexturesRef.current?.();
-      releaseTexturesRef.current = null;
-    };
-  }, []);
-
-  const loadFile = useCallback(async (file: File) => {
-    setLoadError(null);
-    setLoading(true);
-    setLoadingPct(0);
-    // 原始文件留一份 —— 「去量克重」接力要用
-    setSourceFile(file);
-    try {
-      const loaded = await loadModelGeometry(file, (p) =>
-        setLoadingPct(p.percent)
-      );
-      /**
-       * 单位判定 —— 坐标不是毫米的文件(AI 生成 / Blender 默认导出)按最大边
-       * 100mm 归一化
-       *
-       * 跟克重工具同一条规则(`lib/model-units.ts`)。**归一化的是顶点本身**,
-       * 所以视口画的模型、分析器算的问题、支撑外壳画的几何是同一个坐标系 ——
-       * 画出来的支撑跟克重工具算出来的克重才对得上。
-       */
-      const check = detectModelUnitScale(
-        measurePositionsSize(loaded.positions)
-      );
-      setUnitCheck(check.normalized ? check : null);
-      const positions = check.normalized
-        ? scalePositions(loaded.positions, check.scale)
-        : loaded.positions;
-      // 换模型前先把上一个模型的贴图 URL 回收掉
-      releaseTexturesRef.current?.();
-      releaseTexturesRef.current = loaded.releaseTextures;
-      setVisibility(ALL_VISIBILITY);
-      setShowTexture(true);
-      setModel({
-        positions,
-        fileName: loaded.fileName,
-        textures: {
-          uvs: loaded.uvs,
-          materialNames: loaded.materialNames,
-          materialIndex: loaded.materialIndex,
-          mtlText: loaded.mtlText,
-          textureUrls: loaded.textureUrls,
-        },
-        textureDiagnostics: loaded.textureDiagnostics,
-        releaseTextures: loaded.releaseTextures,
-      });
-    } catch (e) {
-      setLoadError(
-        e instanceof ModelLoadError ? e.ref : { key: "errors.parseFailed" }
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  /**
-   * 从克重工具接力过来的文件 —— **挂载时取一次**
-   *
-   * 克重工具那边发现模型有问题时,徽标下面有一个「在检查工具里看详情」——
-   * 点下去文件直接递过来,用户不用再找一遍那个文件、再拖一次。
-   *
-   * 接力只在**客户端跳转**里有效(整页刷新就没了),所以取一次就断 ——
-   * `handoffTakenRef` 保证 StrictMode 下 effect 跑两遍也只取一次。
-   */
-  useEffect(() => {
-    if (handoffTakenRef.current) return;
-    const file = takeModelFile();
-    if (!file) return;
-    handoffTakenRef.current = true;
-    void loadFile(file);
-  }, [loadFile]);
-
-  /**
-   * 「去量克重」—— 带着同一个文件跳过去
-   *
-   * 检查完没问题就接着量克重、接着下单,是这两个工具连着用的主路径。
-   * 文件接力过去,用户不用回文件夹里再找一遍。
-   */
-  const goToWeight = useCallback(() => {
-    if (!sourceFile) return;
-    stashModelFile(sourceFile);
-    router.push("/tools/weight");
-  }, [router, sourceFile]);
+    if (!positions || !model) return;
+    run({
+      positions,
+      fileName: model.objFileName || model.name,
+      liftMm,
+    });
+  }, [positions, model, run, liftMm]);
 
   const focusCluster = useCallback((c: IssueCluster) => {
     focusSeq.current += 1;
@@ -275,18 +179,13 @@ export function ModelChecker({
   /**
    * 拖文件进视口 —— **用共享的那一套**
    *
-   * 以前这里是 `onDragOver` → true / `onDragLeave` → false,那个写法会**闪**:
-   * 遮罩盖在指针下面,它自己成了事件目标,`dragleave` 冒上来把遮罩撤掉,
-   * 撤掉之后 `dragover` 又来 —— 一直闪,模型根本拖不进来。
-   *
    * 计数版的口径见 `features/shared/hooks/use-drop-zone.ts`。
    */
   const handleDroppedFiles = useCallback(
     (files: File[]) => {
-      const file = files[0];
-      if (file) void loadFile(file);
+      onFiles?.(files);
     },
-    [loadFile]
+    [onFiles]
   );
   const { isDragOver: dragOver, dropHandlers } =
     useDropZone<HTMLElement>(handleDroppedFiles);
@@ -314,12 +213,12 @@ export function ModelChecker({
     : [];
   // 模型自带贴图时才显示「显示贴图 / 纯色」开关
   const hasTexture = useMemo(
-    () => Object.keys(model?.textures?.textureUrls ?? {}).length > 0,
+    () => Object.keys(model?.textureUrls ?? {}).length > 0,
     [model]
   );
 
   return (
-    <div className="flex h-[min(820px,78vh)] min-h-[560px] flex-col overflow-hidden rounded-xl border border-border/70 bg-zinc-950 text-zinc-100 shadow-sm">
+    <div className="flex h-[min(820px,78vh)] min-h-[560px] flex-col overflow-hidden bg-zinc-950 text-zinc-100">
       {/* ---------- 顶栏 ---------- */}
       <header className="z-20 flex flex-wrap items-center gap-2 border-b border-zinc-800 bg-zinc-950/95 px-4 py-2.5 backdrop-blur">
         <h1 className="mr-2 flex items-center gap-2 text-base font-bold tracking-tight">
@@ -330,50 +229,11 @@ export function ModelChecker({
           </span>
         </h1>
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept={MODEL_ACCEPT}
-            className="sr-only"
-            aria-label={t("app.fileLabel")}
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void loadFile(f);
-              e.target.value = "";
-            }}
-          />
-          <Button
-            size="sm"
-            variant="outline"
-            className="border-zinc-700 bg-zinc-900 hover:bg-zinc-800"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={loading}
-          >
-            <Upload className="h-4 w-4" />
-            {t("app.upload")}
-          </Button>
-          {/**
-           * 「去量克重」—— 检查完接着量,文件接力过去
-           *
-           * 摆在这儿而不是侧栏底部:这是**下一步**,用户刚看完结论就该走。
-           * 没加载模型时是灰的(没文件可递)。
-           */}
-          <Button
-            size="sm"
-            className="border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 hover:text-emerald-200"
-            onClick={goToWeight}
-            disabled={!sourceFile || loading}
-            title={t("app.toWeightTitle")}
-          >
-            <Scale className="h-4 w-4" />
-            {t("app.toWeight")}
-          </Button>
           <Button
             size="sm"
             variant="outline"
             className="border-zinc-700 bg-zinc-900 hover:bg-zinc-800"
             onClick={() => setFitSignal((v) => v + 1)}
-            disabled={!model}
           >
             <RotateCcw className="h-4 w-4" />
             {t("app.resetView")}
@@ -384,24 +244,17 @@ export function ModelChecker({
       <div className="flex min-h-0 flex-1 flex-col md:flex-row md:overflow-hidden">
         {/* ---------- 侧栏 ---------- */}
         <aside className="order-2 min-h-0 w-full shrink-0 overflow-y-auto border-t border-zinc-800 p-3 md:order-1 md:w-[368px] md:border-t-0 md:border-r">
-          {(loadError || error) && (
+          {error && (
             <div
               className="mb-3 flex items-start gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300"
               role="alert"
             >
               <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>
-                {t(
-                  (loadError ?? error)?.key ?? "errors.parseFailed",
-                  (loadError ?? error)?.params
-                )}
-              </span>
+              <span>{t(error.key, error.params)}</span>
             </div>
           )}
-          {/* 贴图解析诊断 —— 白模时说明「贴图断在哪一步」 */}
-          <TextureDiagnosticNote diagnostics={model?.textureDiagnostics} />
           {/* 单位判定 —— 文件坐标不是毫米时,支撑外壳按归一化后的真实尺寸画 */}
-          {unitCheck && (
+          {unitCheck?.normalized && (
             <output className="mb-3 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
               <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
               <span>
@@ -418,7 +271,7 @@ export function ModelChecker({
           )}
           <Sidebar
             result={result}
-            busy={busy || loading}
+            busy={busy}
             onFocusCluster={focusCluster}
             onFocusPoint={focusPoint}
           />
@@ -431,12 +284,12 @@ export function ModelChecker({
         >
           <Viewport
             result={result}
-            meshPositions={model?.positions ?? null}
-            textures={model?.textures ?? null}
+            meshPositions={positions}
+            textures={textures}
             showTexture={showTexture}
             visibility={visibility}
             showSupport={showSupport}
-            supportLiftMm={supportLiftMm}
+            supportLiftMm={liftMm}
             focusRequest={focusRequest}
             fitSignal={fitSignal}
           />
@@ -507,25 +360,7 @@ export function ModelChecker({
             </div>
           )}
 
-          {/* 进度条 */}
-          {loading && (
-            <output className="absolute left-1/2 top-3 z-10 block w-64 -translate-x-1/2 rounded-lg border border-zinc-700 bg-zinc-900/95 px-3 py-2 shadow-xl">
-              <div className="mb-1.5 flex items-center gap-2 text-xs text-zinc-300">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                {t("phases.loading")}
-                <span className="ml-auto font-mono text-zinc-500">
-                  {Math.round(loadingPct)}%
-                </span>
-              </div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800">
-                <div
-                  className="h-full rounded-full bg-emerald-500 transition-[width] duration-200"
-                  style={{ width: `${loadingPct}%` }}
-                />
-              </div>
-            </output>
-          )}
-
+          {/* 分析进度 */}
           {busy && (
             <output className="absolute left-1/2 top-3 z-10 block w-64 -translate-x-1/2 rounded-lg border border-zinc-700 bg-zinc-900/95 px-3 py-2 shadow-xl">
               <div className="mb-1.5 flex items-center gap-2 text-xs text-zinc-300">
@@ -559,31 +394,6 @@ export function ModelChecker({
               <p className="rounded-lg bg-zinc-900/90 px-4 py-2 text-sm text-emerald-300">
                 {t("upload.dropOverlay")}
               </p>
-            </div>
-          )}
-
-          {/* 空状态 */}
-          {!model && !busy && !loading && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center p-4">
-              <div className="w-full max-w-lg rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6 text-center shadow-2xl backdrop-blur">
-                <h2 className="text-lg font-bold">{t("empty.title")}</h2>
-                <p className="mt-1.5 text-sm leading-relaxed text-zinc-400">
-                  {t("empty.desc")}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="mt-4 flex w-full flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-zinc-700 bg-zinc-900/60 px-4 py-6 transition-colors hover:border-emerald-500/50 hover:bg-emerald-500/5"
-                >
-                  <Upload className="h-6 w-6 text-zinc-400" aria-hidden />
-                  <span className="text-sm font-medium text-zinc-200">
-                    {t("empty.drop")}
-                  </span>
-                  <span className="text-xs text-zinc-500">
-                    {t("empty.local")}
-                  </span>
-                </button>
-              </div>
             </div>
           )}
         </main>

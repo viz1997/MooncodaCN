@@ -41,6 +41,18 @@ export type ObjParseResult = {
    * 能算」的老路径。
    */
   positions?: Float32Array | undefined;
+  /**
+   * 顶点 UV(每个三角形 6 个 float)—— 3D 预览贴图用。
+   *
+   * **2026-11-07 起跟着几何一起带出来**:模型检查(打印前工作台的「检查」
+   * 那一栏)要在同一个模型上画带贴图的 3D 视图。以前它得**再解析一遍 OBJ**
+   * 才能拿到 UV / 材质分组 —— 一个模型解析两次,大模型直接慢一倍。
+   */
+  uvs?: Float32Array | undefined;
+  /** `usemtl` 声明的材质名(按首次出现顺序) */
+  materialNames?: string[] | undefined;
+  /** 每三角形一个材质下标(指向 materialNames) */
+  materialIndex?: Uint16Array | undefined;
 };
 
 const cross = (a: Vec3, b: Vec3): Vec3 => ({

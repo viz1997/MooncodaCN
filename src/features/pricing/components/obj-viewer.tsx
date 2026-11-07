@@ -37,8 +37,8 @@ import {
  * 之前是「整块模型挂一张图」—— 多材质模型必然贴错。
  *
  * 2026-11-03:场景本身(renderer / camera / 灯光 / 控制器 / 渲染循环)交给共用的
- * `<ObjPreview mode="print-bed" />` —— 与模型检查工具(/tools/model-check)是同一个
- * 组件,两个工具的模型观感、贴图表现完全一致。
+ * `<ObjPreview mode="print-bed" />` —— 与「检查」视角是同一个
+ * 组件,两个视角的模型观感、贴图表现完全一致。
  */
 
 type Props = {

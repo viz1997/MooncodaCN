@@ -1,101 +1,41 @@
-import type { Metadata } from "next";
-import { getTranslations } from "next-intl/server";
-import { getPrintPricingSettings } from "@/features/print-quote/lib/pricing-store";
-import { ModelChecker } from "@/features/tools/components/model-check/model-checker";
-import { Link } from "@/i18n/routing";
+import { permanentRedirect } from "next/navigation";
 
 /**
- * 模型检查 —— `/tools/model-check`
+ * `/tools/model-check` —— 旧地址,2026-11-07 起 308 跳到 `/tools/weight`
  *
- * WJP 全彩打印前的自检:反转法向(整体朝内 / 局部翻转)、坏边与破面
- * (缝隙、平面孔洞、退化面、重复面、非流形边)、壳体与封闭性
- * (多余壳体、噪声碎片、密封内腔)。
+ * ## 模型检查工具并进了克重工具
  *
- * 不检测悬空(WJP 用水溶性包裹支撑)、不做壁厚检测(全彩是实心填充)。
+ * 工作室的原话:**「不想分成两个工具页」**。两个工具问的是同一个模型的
+ * 两个问题(能不能印 / 要多少料),以前同一个文件要拖两次、解压两次、量两遍,
+ * 而且中间还要跳页。
  *
- * 全部在浏览器本地跑:模型不上传,结果不入库,不要求登录。
+ * 现在合成**一个**打印前工作台(`/tools/weight`),模型只载入一次,里面用
+ * **检查 / 克重 / 摆盘** 三个视角看同一个模型:
+ *
+ * ```
+ * /tools/weight  →  拖进来  →  检查(能不能印)→ 克重(要多少料)→ 摆盘(怎么摆)
+ * ```
+ *
+ * ## 为什么留一个重定向而不是 404
+ *
+ * 老的链接(导航、书签、分享出去的地址、搜索引擎收录的)不该断。重定向比
+ * 404 多做一件事:把人送到现在唯一正确的那个页面。
+ *
+ * 用 `permanentRedirect` 而不是 `redirect`:这是**永久搬家**,308 才能让搜索
+ * 引擎把权重转给新地址;307 会被当成临时跳转,权重不转移。
+ *
+ * 用 `next/navigation` 的 `permanentRedirect` 而不是 `@/i18n/routing` 里那个:
+ * 后者是从 `next-intl/navigation` 导出的,那个入口在 client 组件里解析到的
+ * 是 react-client 版本(没有 `permanentRedirect`),放进共享模块会在打包时炸。
+ * 这里手写 locale 前缀 —— `localePrefix` 是默认的 `always`,URL 一定带前缀。
+ *
+ * 跟 `/pricing` → `/tools/weight` 是同一套写法。
  */
-export async function generateMetadata({
+export default async function ModelCheckPage({
   params,
 }: {
   params: Promise<{ locale: string }>;
-}): Promise<Metadata> {
+}) {
   const { locale } = await params;
-  const isZh = locale === "zh";
-
-  const title = isZh
-    ? "模型检查 — 反转法向 / 坏边破面 / 壳体封闭性自检"
-    : "Model Inspector — Inverted Normals, Broken Faces, Shell Integrity";
-
-  const description = isZh
-    ? "上传 3D 模型,本地检查反转法向、坏边与破面(开放边 / 平面孔洞 / 退化面 / 重复面 / 非流形边)与壳体问题(多余壳体 / 噪声碎片 / 密封内腔),按 WJP 全彩工艺标准给出结论。问题位置在 3D 里直接标色。模型不上传。"
-    : "Upload a 3D model and check it locally for inverted normals, broken edges and faces (open edges, planar holes, degenerate, duplicate, non-manifold) and shell problems (extra shells, noise fragments, sealed cavities) — judged against WJP full-color rules. Problems are highlighted in 3D. Files are never uploaded.";
-
-  return {
-    title,
-    description,
-    keywords: isZh
-      ? [
-          "3D模型检查",
-          "模型破面检测",
-          "反转法向",
-          "非流形边",
-          "平面孔洞",
-          "密封内腔",
-          "网格封闭性",
-          "WJP全彩",
-          "切片前检查",
-        ]
-      : [
-          "3d model checker",
-          "inverted normals",
-          "non-manifold edges",
-          "planar holes",
-          "sealed cavity",
-          "watertight mesh",
-          "mesh validation",
-          "WJP full color",
-          "printability check",
-        ],
-    openGraph: {
-      title,
-      description,
-      type: "website",
-    },
-  };
-}
-
-export default async function ModelCheckPage() {
-  const t = await getTranslations("ModelInspector");
-
-  // 托底高度 —— 跟随后台(`/admin/print-pricing`,兜底 `PRINT_*` 环境变量)
-  //
-  // 这一页画的包裹支撑跟克重工具(`/tools/weight`)算的是**同一块几何** ——
-  // 托底高度不一样,工作室就会对着两个不一样的支撑看。
-  const settings = await getPrintPricingSettings();
-
-  return (
-    <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8 py-10 lg:py-14">
-      <header className="max-w-2xl mb-8">
-        <p className="eyebrow text-[var(--accent)] mb-4">{t("page.eyebrow")}</p>
-        <h1 className="text-4xl sm:text-5xl font-medium tracking-tight leading-[1.05] text-balance">
-          {t("page.title")}
-        </h1>
-        <p className="mt-4 text-base text-foreground/65 leading-relaxed text-pretty">
-          {t("page.description")}
-        </p>
-        {/* 几何过了不代表能打印 —— 壁厚 / 公差 / 悬臂 / 孔槽另有硬指标 */}
-        <p className="mt-4 text-sm leading-relaxed text-foreground/55">
-          {t("page.designSpecLink")}{" "}
-          <Link
-            href="/legal/design-spec"
-            className="text-[var(--accent)] underline underline-offset-4 hover:no-underline"
-          >
-            {t("page.designSpecCta")}
-          </Link>
-        </p>
-      </header>
-      <ModelChecker supportLiftMm={settings.supportLiftMm} />
-    </div>
-  );
+  permanentRedirect(`/${locale}/tools/weight`);
 }

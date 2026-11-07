@@ -5,14 +5,30 @@ import { getPrintPricingSettings } from "@/features/print-quote/lib/pricing-stor
 import { getServerSession } from "@/lib/auth/server";
 
 /**
- * 3D 打印克重计算器 —— `/tools/weight`
+ * 打印前工作台 —— `/tools/weight`
  *
  * 移植自 `C:\Users\Admin1\Downloads\wjp-source-code`(PolyJet 耗材填充克重
- * 计算器)。整页的克重 / 摆盘 / 解析都在浏览器本地跑:
+ * 计算器)。整页的检查 / 克重 / 摆盘 / 解析都在浏览器本地跑:
  *  - 模型文件**默认**不上传服务器;
  *  - 计算结果不写数据库(「只算不存」);
  *  - 材料参数(密度 / 支撑几何)由后台 `/admin/print-pricing` 统一配置,
  *    访客改不了 —— 页面只读。
+ *
+ * ## 2026-11-07:模型检查工具并进来了 —— 一个页面,三个视角
+ *
+ * 工作室的原话:**「不想分成两个工具页」**。以前模型检查(`/tools/model-check`)
+ * 和克重是**两个页面**,同一个文件要拖两次、解压两次、量两遍,中间还要跳页。
+ *
+ * 现在合成一个工作台,模型**只载入一次**,里面用三个视角看同一个模型:
+ *
+ * ```
+ * 检查 —— 打印前自检(反转法向 / 坏边破面 / 壳体封闭性)
+ * 克重 —— 耗材克重 / 支撑克重 / 总克重
+ * 摆盘 —— 最优姿态 + 省了多少料
+ * ```
+ *
+ * 三栏的数字来自**同一个** `ModelFile`、同一套缩放、同一份后台参数 ——
+ * 结构上就不可能对不上。老地址 `/tools/model-check` 保留 308 跳转。
  *
  * ## 2026-11-06:工具页是打印服务的入口 —— 「加入打印单」
  *
@@ -54,16 +70,17 @@ export async function generateMetadata({
   const isZh = locale === "zh";
 
   const title = isZh
-    ? "3D 打印克重计算器 — 耗材用量预估"
-    : "3D Print Weight Calculator — Resin Usage Estimator";
+    ? "3D 打印前工作台 — 模型检查 / 克重 / 摆盘"
+    : "3D Print Pre-flight Workbench — Check, Weight, Pose";
 
   const description = isZh
-    ? "上传 3D 模型,本地解析体积与表面积,算出耗材克重、支撑克重与最佳打印摆盘角度。量完直接「加入打印单」,在打印单上确认金额再下单 —— 量重量的过程模型不上传。"
-    : "Upload a 3D model and get its resin weight, support weight and best print orientation — computed locally in your browser. Add it to your print order and confirm the total there; nothing is uploaded while measuring.";
+    ? "上传 3D 模型,一次载入三个视角:打印前自检(反转法向、坏边破面、壳体封闭性)、耗材与支撑克重、智能摆盘角度 —— 全部在浏览器本地算,问题位置在 3D 里直接标色。量完直接「加入打印单」,在打印单上确认金额再下单 —— 量重量的过程模型不上传。"
+    : "Upload a 3D model once and view it three ways: pre-flight inspection (inverted normals, broken faces, shell integrity), resin and support weight, and best print orientation — all computed locally in your browser, with problems highlighted in 3D. Add it to your print order and confirm the total there; nothing is uploaded while measuring.";
 
   return {
     title,
     description,
+    // 检查 + 克重两套关键词都留着 —— 合并之前这是两个页面,各自被收录过
     keywords: isZh
       ? [
           "3D打印克重",
@@ -73,6 +90,15 @@ export async function generateMetadata({
           "支撑克重",
           "打印摆盘",
           "用量预估",
+          "3D模型检查",
+          "模型破面检测",
+          "反转法向",
+          "非流形边",
+          "平面孔洞",
+          "密封内腔",
+          "网格封闭性",
+          "WJP全彩",
+          "切片前检查",
         ]
       : [
           "3d print weight calculator",
@@ -81,6 +107,15 @@ export async function generateMetadata({
           "support weight",
           "print orientation",
           "material usage estimator",
+          "3d model checker",
+          "inverted normals",
+          "non-manifold edges",
+          "planar holes",
+          "sealed cavity",
+          "watertight mesh",
+          "mesh validation",
+          "WJP full color",
+          "printability check",
         ],
     openGraph: {
       title,
