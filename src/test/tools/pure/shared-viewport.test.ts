@@ -2,9 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  DRAG_DEG_PER_PX,
   POSE_EULER_ORDER,
-  poseAfterDrag,
   rotatedBBoxMinZ,
   rotatePointXYZ,
 } from "@/features/shared/components/model-viewport/pose";
@@ -43,6 +41,8 @@ import { boxTriangles } from "@/test/tools/fixtures/mesh-fixtures";
  * | 支撑几何是摆盘 Worker 算完姿态时**同一块**几何 | 画面上画的跟算克重的不是同一块 |
  * | 视口的旋转顺序 = 摆盘算法的旋转顺序 | 画面转到 30°,克重还是躺着算的 |
  * | 支撑几何挂在模型组里,不挂姿态组里 | 支撑被转了两次 |
+ * | 转模型用 `TransformControls` 控制器 | 回到「左键拖着模型瞎转」那套 |
+ * | 控制器挂在姿态组上,拖的时候相机让开 | 画面抖 / 转的不是打印姿态 |
  *
  * 纯计算 + 文件扫描 —— 不需要 DB / 网络 / 浏览器。
  */
@@ -62,6 +62,16 @@ function stripComments(src: string): string {
     .split("\n")
     .filter((line) => !/^\s*(\*|\/\/)/.test(line))
     .join("\n");
+}
+
+/**
+ * 把空白压成单个空格
+ *
+ * Biome 会把长表达式折行(JSX 属性、`useCallback(...)` 的参数列表)——
+ * 逐字匹配就断了。压平之后匹配的是**代码**,不是排版。
+ */
+function flat(src: string): string {
+  return src.replace(/\s+/g, " ");
 }
 
 const VIEWPORT_DIR = "src/features/shared/components/model-viewport";
@@ -159,26 +169,28 @@ describe("共用视口 —— 支撑几何来自摆盘 Worker 的同一块", () 
   it("克重那一栏把 Worker 算出来的支撑外壳传进视口", () => {
     const code = stripComments(read(SETTINGS_PANEL));
 
-    expect(code).toContain("supportShell={poseSupport?.shell ?? null}");
-  });
-
-  it("当前姿态的支撑计算顺带回传画出来的那块几何(只在真要画的时候)", () => {
-    const code = stripComments(read(CALCULATOR));
-
-    // 外壳在**算体积的同一次调用**里建出来 —— 画出来的那圈支撑就是算克重
-    // 的那块支撑。但**只在真要画的时候才建**:
-    //  - 「显示支撑」关着 → 不建(默认就是关的)
-    //  - 正在拖动 → 不建(那块几何最贵,拖完由 `poseSettleTick` 补算)
-    expect(code).toContain(
-      "withShell: showSupport && !poseDraggingRef.current"
+    // 外壳跟着那颗开关走 —— 关着就不画(几何留着,画不画是另一回事)
+    expect(flat(code)).toMatch(
+      /supportShell=\{ ?showSupport \? \(poseSupport\?\.shell \?\? null\) : null ?\}/
     );
   });
 
-  it("支撑默认**不画**(用户没点「包裹支撑」之前不建那块几何)", () => {
+  it("当前姿态的支撑计算顺带回传画出来的那块几何", () => {
+    const code = stripComments(read(CALCULATOR));
+
+    // 外壳在**算体积的同一次调用**里建出来 —— 画出来的那圈支撑就是算克重
+    // 的那块支撑。建不建由那颗开关决定(`if (!showSupport) return;`),
+    // 一旦要算就整块要(数字跟画面得是同一次计算的)。
+    expect(code).toContain("withShell: true");
+    expect(code).toContain("if (!showSupport) return;");
+  });
+
+  it("支撑默认**不算**(用户没点「包裹支撑」之前一个支撑都不算)", () => {
     const code = stripComments(read(CALCULATOR));
 
     // 支撑外壳是整套计算里最贵的一块几何 —— 用户没主动要「看看支撑长什么
-    // 样子」之前不该替他算。**数字照样有**(支撑克重跟外壳是两回事)。
+    // 样子」之前不该替他算。工作室的口径(2026-11-07):连**数字**也不给,
+    // 用户摆定角度之后点那颗按钮才算一次。
     expect(code).toMatch(
       /const \[showSupport, setShowSupport\] = useState\(false\)/
     );
@@ -203,56 +215,65 @@ describe("共用视口 —— 支撑几何来自摆盘 Worker 的同一块", () 
   });
 });
 
-describe("共用视口 —— 拖动改的是模型姿态(不是相机)", () => {
-  it("横向拖 → 绕 Z;纵向拖 → 绕 X(Y 拖不出来)", () => {
-    const base = { rotX: 0, rotY: 0, rotZ: 0 };
-
-    const right = poseAfterDrag(base, 100, 0);
-    expect(right.rotZ).toBeCloseTo(100 * DRAG_DEG_PER_PX, 6);
-    expect(right.rotX).toBeCloseTo(0, 6);
-    expect(right.rotY).toBeCloseTo(0, 6);
-
-    const down = poseAfterDrag(base, 0, 100);
-    expect(down.rotX).toBeCloseTo(100 * DRAG_DEG_PER_PX, 6);
-    expect(down.rotZ).toBeCloseTo(0, 6);
-    expect(down.rotY).toBeCloseTo(0, 6);
-  });
-
-  it("从「拖动开始那一下」累加 —— 中间丢几个 pointermove 也不漂", () => {
-    const base = { rotX: 10, rotY: 20, rotZ: 30 };
-
-    // 增量加的话,丢一个事件就少 0.35°;累加的话结果只跟起手姿态有关
-    const once = poseAfterDrag(base, 100, 50);
-    const twice = poseAfterDrag(base, 100, 50);
-    expect(once).toEqual(twice);
-    expect(once.rotX).toBeCloseTo(base.rotX + 50 * DRAG_DEG_PER_PX, 6);
-    expect(once.rotZ).toBeCloseTo(base.rotZ + 100 * DRAG_DEG_PER_PX, 6);
-    // Y 拖不出来 —— 保持不变
-    expect(once.rotY).toBe(base.rotY);
-  });
-
-  it("视口把左键从「转相机」改成「转模型」(滚轮缩放 / 右键平移照旧)", () => {
+describe("共用视口 —— 转模型用**旋转控制器**(业界主流那套)", () => {
+  it("挂 three.js 的 `TransformControls`(模型上套三个彩色圆环)", () => {
     const code = stripComments(read(VIEWPORT));
 
-    // OrbitControls 的左键旋转被关掉 —— 相机的左键旋转会让「拖模型」
-    // 跟「转视角」打架。接了回调才关,没接还是老样子转相机。
-    expect(code).toContain("mouseButtons.LEFT = hasPoseDrag");
-    expect(code).toContain("touches.ONE = hasPoseDrag");
+    // 工作室的原话(2026-11-07):「模型旋转不是这样操作,按照业界主流设计,
+    // 带控制器」—— Blender / Sketchfab 那一套,three.js 里现成就有。
+    expect(code).toContain(
+      'from "three/examples/jsm/controls/TransformControls.js"'
+    );
+    expect(code).toContain("new TransformControls(");
+    // 只给「转」—— 平移 / 缩放不该改打印姿态
+    expect(code).toContain('tc.setMode("rotate")');
+    // 世界坐标轴 —— 环上那三个轴跟角度条上的 rotX / rotY / rotZ 一一对应
+    // (绕模型自身的局部轴转的话,数对不上,用户会懵)
+    expect(code).toContain('tc.setSpace("world")');
+    // helper 得进场景 —— 0.187 起控制器本体不是 Object3D
+    expect(code).toContain("tc.getHelper()");
+    expect(code).toContain("ctx.scene.add(helper)");
+  });
+
+  it("控制器挂在**姿态组**上 —— 姿态组才是「打印姿态」那一份", () => {
+    const code = stripComments(read(VIEWPORT));
+
+    // 挂错组的话:画面上转的是模型,算克重的却是另一个姿态
+    expect(code).toContain("tc.attach(poseGroup)");
+    expect(code).not.toContain("tc.attach(mesh");
+  });
+
+  it("拖环的时候相机让开 —— 否则拖环的同时画面也在转", () => {
+    const code = stripComments(read(VIEWPORT));
+
+    // 控制器按下时左键归它 —— 相机得让开,放手再交回来
+    expect(code).toContain("ctx.controls.enabled = false");
+    expect(code).toContain("ctx.controls.enabled = true");
+  });
+
+  it("控制器写的是 quaternion —— 按仓库口径分解回欧拉角", () => {
+    const code = stripComments(read(VIEWPORT));
+
+    // 不分解的话,角度条上的数跟画面对不上
+    expect(code).toContain("setFromQuaternion");
+    expect(code).toContain("POSE_EULER_ORDER");
+  });
+
+  it("左键不再被从相机手里拿走 —— 空白处拖动还是转相机", () => {
+    const code = stripComments(read(VIEWPORT));
+
+    // 以前是「左键拖 = 转模型」,现在模型由控制器转 —— 相机的左键旋转
+    // 得留着(不然空白处拖一点反应都没有,用户以为页面卡了)。
+    expect(code).not.toContain("mouseButtons.LEFT");
+    expect(code).not.toContain("touches.ONE");
     // 右键平移 / 滚轮缩放没被动
     expect(code).not.toContain("mouseButtons.RIGHT = null");
   });
 
-  it("拖动过程中的支撑几何不实时重算,拖完才补", () => {
-    const code = stripComments(read(CALCULATOR));
+  it("控制器不传回调就不挂(这个视口也可能被别处拿去只看不动)", () => {
+    const code = stripComments(read(VIEWPORT));
 
-    // 拖动 → 节流提交(200ms)→ 克重跟着刷新
-    expect(code).toContain("handlePoseChange");
-    expect(code).toContain("handlePoseDragEnd");
-    expect(code).toContain("poseCommitTimerRef");
-    // 拖动的过程中不建外壳
-    expect(code).toContain("!poseDraggingRef.current");
-    // 拖完补算
-    expect(code).toContain("setPoseSettleTick");
+    expect(code).toContain("if (!onPoseChangeRef.current) return;");
   });
 });
 

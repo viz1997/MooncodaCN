@@ -11,11 +11,8 @@ export {
 // 姿态旋转的纯实现 —— 跟摆盘算法(`rotateSupportMesh`)同一套口径。
 export {
   type BBoxLike,
-  DRAG_DEG_PER_PX,
   POSE_EULER_ORDER,
   type Point3,
-  type PoseAngles,
-  poseAfterDrag,
   rotatedBBoxMinZ,
   rotatePointXYZ,
 } from "./pose";

@@ -11,6 +11,9 @@
  * (`features/tools/lib/mesh/support-shell.ts`),视口这边转的是 three.js 的
  * `rotation.order = "ZYX"`。三处必须指向同一个矩阵,否则对不上。
  *
+ * 画面上的旋转由**旋转控制器**(`TransformControls`)拖出来 —— 它写的是
+ * quaternion,得按同一个顺序分解回欧拉角(见 `model-viewport.tsx`)。
+ *
  * ## 口径:先 X 后 Y 后 Z(外旋)
  *
  * ```
@@ -65,56 +68,6 @@ export function rotatePointXYZ(
   const y3 = x2 * sinZ + y1 * cosZ;
 
   return { x: x3, y: y3, z: z2 };
-}
-
-/**
- * 一个姿态(度)—— 跟 `ViewportPose` 同一个形状
- *
- * 这里单独定义一份,是为了让 `pose.ts` 不依赖 three.js 也不依赖 React
- * (它是纯数学文件,能进 unit project 跑单测)。
- */
-export type PoseAngles = { rotX: number; rotY: number; rotZ: number };
-
-/**
- * 拖一像素转多少度
- *
- * 0.35°/px ≈ 拖 100px 转 35°。太快了会转晕,太慢了拖半天不动。
- */
-export const DRAG_DEG_PER_PX = 0.35;
-
-/**
- * 拖动之后的新姿态 —— 预览里**拖模型**改的是打印姿态,不是相机
- *
- * ## 为什么拖的是模型
- *
- * 摆着看(转相机)跟摆着印(转模型)是两件事 —— **后者决定支撑克重**。
- * 工作室要的是「在预览里拖着看,顺手把这个姿态的克重算出来」,所以左键
- * 拖改的是**模型姿态**;相机那边留给滚轮缩放 + 右键平移。
- *
- * ## 映射
- *
- * - 横向拖 → 绕 **Z** 转(绕打印轴转,像转盘子)
- * - 纵向拖 → 绕 **X** 转(往前 / 往后倾)
- *
- * Y 轴(左右倾)拖不出来 —— 角度条上的输入框填。
- *
- * ## 从「拖动开始那一下」累加,不是每个事件增量加
- *
- * 增量加的话,浏览器把几个 pointermove 合并掉(或者丢掉一个)就会漂 ——
- * 拖出来的角度跟手对不上。累加的话,中间丢几个事件不影响结果。
- */
-export function poseAfterDrag(
-  base: PoseAngles,
-  dx: number,
-  dy: number
-): PoseAngles {
-  return {
-    // 往下拖 → 模型的近端往下沉 → 绕 X 正转
-    rotX: base.rotX + dy * DRAG_DEG_PER_PX,
-    rotY: base.rotY,
-    // 往右拖 → 模型跟着手往右转 → 绕 Z 正转
-    rotZ: base.rotZ + dx * DRAG_DEG_PER_PX,
-  };
 }
 
 /**

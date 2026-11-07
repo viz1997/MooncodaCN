@@ -72,7 +72,10 @@ import {
   type WorkspaceTab,
 } from "@/features/pricing/components/model-settings-panel";
 import { ObjThumbnail } from "@/features/pricing/components/obj-thumbnail";
-import type { PricingModelPayload } from "@/features/pricing/components/pricing-calculator-types";
+import type {
+  EnsureSupportFn,
+  PricingModelPayload,
+} from "@/features/pricing/components/pricing-calculator-types";
 import {
   type InfoDialogKind,
   PricingInfoDialogs,
@@ -85,11 +88,10 @@ import {
   scaleGeometryXYZ,
 } from "@/features/pricing/components/shared";
 import { TextureDiagnosticNote } from "@/features/pricing/components/texture-diagnostic";
-import {
-  type OptimalAngle,
-  resolveSupportDensity,
-  type SupportParams,
-  type SupportPoseResult,
+import type {
+  OptimalAngle,
+  SupportParams,
+  SupportPoseResult,
 } from "@/features/pricing/lib/angle-optimizer";
 import { AngleOptimizerClient } from "@/features/pricing/lib/angle-optimizer-client";
 import {
@@ -154,6 +156,7 @@ export function PricingCalculator({
   onQuoteInput,
   quoteSlot,
   onModelChange,
+  onEnsureSupport,
   clientConfig,
 }: {
   /**
@@ -194,6 +197,18 @@ export function PricingCalculator({
    * 工作室拿到的文件尺寸和报价单上的尺寸对不上。
    */
   onModelChange?: (payload: PricingModelPayload | null) => void;
+
+  /**
+   * 「按当前姿态把支撑算出来」的入口 —— 父组件拿它去补支撑克重
+   *
+   * 支撑**不跟随角度实时重算**(工作室 2026-11-07 的口径):用户把角度摆定
+   * 之后点「包裹支撑」才算一次。但「加入打印单」必须带上支撑克重 ——
+   * 服务端按它重算报价,少了它支撑费会算成 0(收少了钱)。用户没点过那颗
+   * 按钮时,这里现算一次。
+   *
+   * 回调收到的是那个函数本身,父组件把它存起来,在加购之前 await 一下。
+   */
+  onEnsureSupport?: (ensure: EnsureSupportFn) => void;
 
   /**
    * 后台配的材料参数 —— **只读**,访客改不了
@@ -325,11 +340,18 @@ export function PricingCalculator({
   const [angleOptimizing, setAngleOptimizing] = useState(false);
   const [angleProgress, setAngleProgress] = useState(0);
   /**
-   * **当前角度**的包裹支撑数据 —— 摆盘之前也有(初始角度就是 0°,0°)。
+   * **当前角度**的包裹支撑数据 —— 算出来才有
    *
-   * 以前支撑克重只在跑完智能摆盘之后才有,没摆盘时页面上是「—」;
-   * 现在模型一进来就算初始角度的支撑:改尺寸 / 拖角度
-   * 都只改这一个姿态,数字始终对得上当前画面。
+   * 工作室的口径(2026-11-07):**支撑不跟随角度实时变化**。用户把角度摆定
+   * 之后点浮层上那颗「包裹支撑」,这时才算一次 —— 支撑克重 + 总克重 + 画出来
+   * 那圈支撑,三者来自**同一次**计算,数字跟画面必然对得上。
+   *
+   * 所以这个值有两个来源:
+   * 1. 用户点「包裹支撑」→ 算一次(带外壳,画面上那圈就是它)
+   * 2. 用户点「加入打印单」而没点过那颗按钮 → 现算一次(**只要数**,不要
+   *    外壳)—— 服务端重算报价要那个支撑克重,少了它支撑费会算成 0
+   *
+   * 角度一变 → 这个值被清空(见下面那个「作废」的 effect)。
    */
   const [poseSupport, setPoseSupport] = useState<SupportPoseResult | null>(
     null
@@ -341,17 +363,25 @@ export function PricingCalculator({
    * 支撑克重不能因为 Worker 掉链子就永远是「—」。
    */
   const [supportModelReady, setSupportModelReady] = useState(false);
+  /**
+   * 焊接(Worker 加载模型)的 promise —— 拿来**等**它
+   *
+   * 模型刚解析完的时候焊接还在跑(大模型好几秒)。用户要是这时候就点
+   * 「加入打印单」,算支撑得先等焊接完 —— 不然算不出支撑,单子就少了
+   * 支撑费(服务端按 `supportWeightG ?? 0` 算)。
+   */
+  const supportLoadRef = useRef<Promise<unknown> | null>(null);
   /** 支撑算不出来时的原因(页面上一行小字提示,别让用户对着「—」猜) */
   const [supportError, setSupportError] = useState<string | null>(null);
   /**
    * 画不画那圈支撑 —— **默认不画**
    *
-   * 支撑外壳是这一页最贵的一块几何(外壳 + 顶面 + 外壁 + 底板留边,一次
-   * 姿态算下来要好几百毫秒)。用户没主动要「看看支撑长什么样」之前,
-   * 不该替他算 —— 默认关掉,只有点了浮层上那颗「包裹支撑」才建。
+   * 这颗开关就是「算不算支撑」的开关:关着就一点支撑都不算(支撑克重、
+   * 总克重、画面上那圈支撑全都没有),点了才按**当前角度**算一次。
    *
-   * **数字照样有**:支撑克重跟外壳是两回事,外壳只是画出来的那块几何。
-   * 默认关掉外壳,克重那三个数一个都不少。
+   * 支撑外壳是这一页最贵的一块几何(外壳 + 顶面 + 外壁 + 底板留边,一次
+   * 姿态算下来要好几百毫秒)—— 转一下模型就重算一遍,页面卡、数字还在
+   * 一直跳。所以默认关着,用户把角度摆定之后自己点。
    */
   const [showSupport, setShowSupport] = useState(false);
   /**
@@ -366,32 +396,16 @@ export function PricingCalculator({
   const [manualRotY, setManualRotY] = useState(0);
   const [manualRotZ, setManualRotZ] = useState(0);
   /**
-   * 拖动结束后的「再算一次」信号
+   * 当前姿态 —— 给「现算一次支撑」的入口用
    *
-   * 拖动过程中克重是**节流**更新的(每 200ms 一次),支撑外壳**不建** ——
-   * 外壳是这一页最贵的一块几何,每帧建一遍会把页面拖死。拖动一停,这个
-   * tick 加一 → 支撑重算那个 effect 再跑一次 → 外壳补上。
+   * 支撑**不跟随角度实时重算**(工作室 2026-11-07 的口径):用户把角度摆定
+   * 之后点「包裹支撑」才算一次。所以「算支撑」这个动作发生在**事件回调**
+   * 里(点按钮 / 加购),那会儿拿不到最新的 state —— 用这个 ref 兜住。
    *
-   * (ref 变了不会触发 effect 重跑,所以得有个 state 当信号。)
+   * 在渲染期同步(ref 就是「此刻的值」,不是「上一次渲染的值」)。
    */
-  const [poseSettleTick, setPoseSettleTick] = useState(0);
-  /** 正在拖动 —— 拖动中不建支撑外壳 */
-  const poseDraggingRef = useRef(false);
-  /** 待提交的姿态(拖动中被节流,先攒着) */
-  const pendingPoseRef = useRef<{
-    rotX: number;
-    rotY: number;
-    rotZ: number;
-  } | null>(null);
-  /** 节流定时器 —— 拖动中每 200ms 才往 Worker 发一条指令 */
-  const poseCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // 组件卸载时把定时器收掉(别在卸载后再 setState)
-  useEffect(
-    () => () => {
-      if (poseCommitTimerRef.current) clearTimeout(poseCommitTimerRef.current);
-    },
-    []
-  );
+  const manualRotRef = useRef({ x: 0, y: 0, z: 0 });
+  manualRotRef.current = { x: manualRotX, y: manualRotY, z: manualRotZ };
   /**
    * 摆盘 Worker 客户端 —— 焊接 + 625 个候选姿态的支撑搜索都在 Worker 里跑,
    * 主线程只发指令收结果(摆盘期间页面照样能点能拖)。
@@ -405,11 +419,11 @@ export function PricingCalculator({
       angleClientRef.current = null;
     };
   }, []);
-  /** 原始姿态(0°,0°)的支撑克重缓存 —— 只跟尺寸 / 材料密度有关,跟当前角度无关 */
-  const originalSupportRef = useRef<{ key: string; weight: number }>({
-    key: "",
-    weight: 0,
-  });
+  /**
+   * 原始姿态(0°,0°)的支撑克重 —— **智能摆盘自己算好带回来**
+   *
+   * 摆盘的候选姿态里就包含原始姿态,所以「省 X%」那个对比不需要另算一次。
+   */
 
   // ---- 批量 ----
   const [batchItems, setBatchItems] = useState<BatchItem[]>([]);
@@ -470,6 +484,7 @@ export function PricingCalculator({
     if (!client || !positions) {
       setSupportModelReady(false);
       setPoseSupport(null);
+      supportLoadRef.current = null;
       return;
     }
     let cancelled = false;
@@ -479,9 +494,11 @@ export function PricingCalculator({
     setSupportError(null);
     // 换模型 → 旧模型的自检结论作废(新模型还没焊)
     setMeshSummary(null);
-    originalSupportRef.current = { key: "", weight: 0 };
-    client
-      .load("main", positions, fileName ?? undefined)
+    // 焊接的 promise 存一份 —— 「加入打印单」那会儿模型可能**还没焊完**,
+    // 那时算支撑得先等它(见下面 `ensureSupport`)
+    const loading = client.load("main", positions, fileName ?? undefined);
+    supportLoadRef.current = loading;
+    loading
       .then((summary) => {
         if (cancelled) return;
         setSupportModelReady(true);
@@ -500,111 +517,46 @@ export function PricingCalculator({
   }, [model, fileName]);
 
   /**
-   * 支撑克重重算 —— **唯一**的支撑计算入口
+   * 支撑计算 —— **只在用户点「包裹支撑」之后才跑**
    *
-   * 尺寸改了 / 角度改了,都走这里,保证「支撑克重」永远跟
-   * 「当前尺寸 + 当前姿态」一致。之前每条路各算一次,漏了
-   * 「改尺寸」那条 —— 改完尺寸模型克重更新了,支撑克重还停在旧尺寸上,
-   * 支撑比例和报价全是错的。
+   * 工作室的口径(2026-11-07):**支撑不跟随角度实时变化**。用户把角度摆定
+   * 之后点浮层上那颗「包裹支撑」,这时才算一次 —— 支撑克重 + 总克重 + 画出来
+   * 那圈支撑几何,三者来自**同一次**计算,数字跟画面必然对得上。
+   *
+   * 转模型(拖旋转控制器)**不触发**这个 effect —— 依赖数组里**没有角度**。
+   * 角度变了 → 下面那个「作废」的 effect 把上一次的结果清掉 → 用户按新
+   * 角度再点一次「包裹支撑」,重新算。
+   *
+   * 依赖里有 `showSupport`:那颗按钮就是开关 —— 关着就一点支撑都不算
+   * (默认关着,模型刚进来时一个支撑都不算,用户不主动要就不替他算)。
    *
    * 算的是**缩放后**的真实几何:缩放只挪顶点(拓扑不变),不用重新焊接。
-   *
-   * 计算在 Worker 里跑(主线程只发一条指令),所以拖滑块 / 改尺寸时
-   * 页面不会卡 —— 姿态算完再回填数字。
-   *
-   * 没有智能摆盘结果时也要算:**初始角度**(0°,0°)的支撑一开始就显示,
-   * 不用先摆一次盘才知道要多少支撑。
+   * 计算在 Worker 里跑(主线程只发一条指令),页面不会卡。
    */
   useEffect(() => {
+    // 没点「包裹支撑」 → 不算
+    if (!showSupport) return;
     const client = angleClientRef.current;
     if (!client || !supportModelReady || !model) return;
     const [sx, sy, sz] = appliedScales;
-    const modelWeightG =
-      model.parseResult.volumeCM3 * sx * sy * sz * materialDensity;
-    // 原始姿态(摆盘对比用):只跟尺寸 / 支撑密度有关,没变就沿用缓存
-    const originalKey = `${sx}|${sy}|${sz}|${resolveSupportDensity(
-      supportParams
-    )}`;
-    const needOriginal = originalSupportRef.current.key !== originalKey;
     let cancelled = false;
     void (async () => {
       try {
-        const [pose, originalPose] = await Promise.all([
-          client.pose("main", {
-            rotX: manualRotX,
-            rotY: manualRotY,
-            rotZ: manualRotZ,
-            scales: [sx, sy, sz],
-            params: supportParams,
-            // 顺带回传**画出来的**那块支撑几何 —— 3D 预览画的那圈支撑
-            // 必须跟算克重的是同一块(外壳在算体积的同一次调用里建出来)。
-            //
-            // **只在真要画的时候建**:
-            //  - `showSupport` 关着 → 不建(默认就是关的,省掉这块最贵的几何)
-            //  - 正在拖动 → 不建(拖动一停由 `poseSettleTick` 补算)
-            // 支撑克重**不受影响** —— 体积跟外壳是两次独立的计算。
-            withShell: showSupport && !poseDraggingRef.current,
-          }),
-          needOriginal
-            ? client.pose("main", {
-                rotX: 0,
-                rotY: 0,
-                rotZ: 0,
-                scales: [sx, sy, sz],
-                params: supportParams,
-              })
-            : Promise.resolve(null),
-        ]);
+        const pose = await client.pose("main", {
+          rotX: manualRotRef.current.x,
+          rotY: manualRotRef.current.y,
+          rotZ: manualRotRef.current.z,
+          scales: [sx, sy, sz],
+          params: supportParams,
+          // 顺带回传**画出来的**那块支撑几何 —— 3D 预览画的那圈支撑
+          // 必须跟算克重的是同一块(外壳在算体积的同一次调用里建出来)。
+          withShell: true,
+        });
         if (cancelled) return;
-        const supportRatio =
-          modelWeightG > 0 ? pose.supportWeightG / modelWeightG : 0;
-        let originalWeight = originalSupportRef.current.weight;
-        if (originalPose) {
-          originalWeight = originalPose.supportWeightG;
-          originalSupportRef.current = {
-            key: originalKey,
-            weight: originalWeight,
-          };
-        }
         setPoseSupport(pose);
         setSupportError(null);
-        setOptimalAngle((prev) => {
-          if (!prev) return prev;
-          const next = {
-            ...prev,
-            rotX: manualRotX,
-            rotY: manualRotY,
-            selfSupportRatio: supportRatio,
-            totalSupportRatio: supportRatio,
-            totalSupportWeight: pose.supportWeightG,
-            selfSupportArea: pose.supportAreaMM2,
-            supportVolume: pose.supportVolumeMM3,
-            wrapVolume: pose.wrapVolumeMM3,
-            wrapArea: pose.wrapAreaMM2,
-            overhangArea: pose.overhangAreaMM2,
-            coloredDownArea: pose.coloredWrapAreaMM2,
-            rotatedHeight: pose.rotatedHeightMM,
-            originalWeight,
-            originalRatio:
-              pose.supportWeightG > 0
-                ? originalWeight / pose.supportWeightG
-                : 1,
-          };
-          // 值没变就别 setState(否则这个 effect 会因为 optimalAngle 变化再跑一遍)
-          if (
-            prev.totalSupportWeight === next.totalSupportWeight &&
-            prev.selfSupportRatio === next.selfSupportRatio &&
-            prev.rotatedHeight === next.rotatedHeight &&
-            prev.originalWeight === next.originalWeight &&
-            prev.rotX === next.rotX &&
-            prev.rotY === next.rotY
-          ) {
-            return prev;
-          }
-          return next;
-        });
       } catch (err) {
-        console.error("支撑重算失败:", err);
+        console.error("支撑计算失败:", err);
         if (!cancelled) {
           setSupportError(err instanceof Error ? err.message : String(err));
         }
@@ -613,20 +565,23 @@ export function PricingCalculator({
     return () => {
       cancelled = true;
     };
-  }, [
-    appliedScales,
-    manualRotX,
-    manualRotY,
-    manualRotZ,
-    supportParams,
-    materialDensity,
-    model,
-    supportModelReady,
-    // 「显示支撑」开关变了 → 重算一次(这次把外壳建出来)
-    showSupport,
-    // 拖动停了 → 重算一次(把拖动中省掉的外壳补上)
-    poseSettleTick,
-  ]);
+  }, [showSupport, appliedScales, supportParams, model, supportModelReady]);
+
+  /**
+   * 角度变了 → 上一次算出来的支撑**作废**
+   *
+   * 支撑是「某个角度下的一次结果」—— 角度一变,那个数就是**旧角度**的数了。
+   * 不清掉的话:画面上那圈支撑摆在旧角度上,支撑克重也是旧角度的,用户看着
+   * 模型在新角度、数字却在说旧角度 —— 画面跟数字一起骗人。
+   *
+   * 所以角度一改:数字清空(回到「—」)、那圈支撑撤掉、按钮回到关的状态。
+   * 用户按新角度再点一次「包裹支撑」,重新算。
+   */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 依赖就是触发条件 —— 角度一变就作废,effect 体里不用读这三个数
+  useEffect(() => {
+    setPoseSupport(null);
+    setShowSupport(false);
+  }, [manualRotX, manualRotY, manualRotZ]);
 
   const geometry = useMemo((): ModelGeometry | null => {
     if (mode === "upload") {
@@ -666,8 +621,8 @@ export function PricingCalculator({
   /**
    * 当前角度的支撑克重 + 支撑比例(支撑克重 / 模型克重)
    *
-   * 支撑数据来自 Worker 算出来的当前姿态 —— 没跑智能摆盘时就是初始角度
-   * (0°,0°)的支撑,所以模型一进来就有数。
+   * 支撑数据来自 Worker 算出来的当前姿态 —— 用户点「包裹支撑」才有
+   * (支撑不跟随角度实时变化,见上面那个 effect)。
    */
   const supportStats = useMemo(() => {
     if (!poseSupport || !model) return { weightG: 0, ratio: 0 };
@@ -679,6 +634,112 @@ export function PricingCalculator({
       ratio: modelWeightG > 0 ? poseSupport.supportWeightG / modelWeightG : 0,
     };
   }, [poseSupport, model, appliedScales, materialDensity]);
+
+  /**
+   * 当前姿态的支撑结果 —— 给「现算一次」的入口判断用
+   *
+   * 它在**事件回调**里被调用,拿不到最新的 state,所以用 ref 兜住。
+   */
+  const poseSupportRef = useRef<SupportPoseResult | null>(null);
+  poseSupportRef.current = poseSupport;
+  /**
+   * 最近一次抛给父组件的输入 —— 已经算过支撑时直接给出去,不用重算
+   */
+  const quoteInputRef = useRef<PrintQuoteInput | null>(null);
+
+  /**
+   * 「按当前姿态把支撑算出来」—— 外面(加入打印单)要支撑克重时用它
+   *
+   * ## 为什么要有这个入口
+   *
+   * 支撑**不跟随角度实时重算**(工作室 2026-11-07 的口径):用户把角度摆定
+   * 之后点浮层上那颗「包裹支撑」,才算一次(支撑克重 + 总克重 + 画出来那圈
+   * 支撑,三者来自同一次计算)。
+   *
+   * 但「加入打印单」**必须带上支撑克重** —— 服务端按这组数重算报价
+   * (`quote-server.ts` 的 `input.supportWeightG ?? 0`),少了它支撑费会算成 0,
+   * 收少了钱。用户没点过那颗按钮的时候,这里现算一次。
+   *
+   * ## 两点讲究
+   *
+   * 1. **算过了就不重算** —— `poseSupport` 有值就说明当前姿态已经算过
+   *    (角度一变它就被清空了,见上面那个「作废」的 effect)。
+   * 2. **只要数,不要几何** —— 加购要的是支撑克重,那块最贵的外壳不用建。
+   */
+  const ensureSupport =
+    useCallback(async (): Promise<PrintQuoteInput | null> => {
+      // 已经算过当前姿态的支撑 → 把现成的给出去,不重算
+      if (poseSupportRef.current && quoteInputRef.current) {
+        return quoteInputRef.current;
+      }
+      const client = angleClientRef.current;
+      if (!client || !model || !geometry) return null;
+      /**
+       * 模型还没焊完 → **等它**
+       *
+       * 用户刚拖进模型就点「加入打印单」是常事,而焊接大模型要好几秒。
+       * 这时候算支撑得先等焊接完 —— 不然算不出来,加购那一条就带着
+       * `supportWeightG` 缺失过去,服务端的 `input.supportWeightG ?? 0` 会把
+       * 支撑费算成 0(收少了钱)。
+       */
+      if (!supportModelReady) {
+        const loading = supportLoadRef.current;
+        if (!loading) return null;
+        try {
+          await loading;
+        } catch (err) {
+          console.error("模型焊接失败:", err);
+          setSupportError(err instanceof Error ? err.message : String(err));
+          return null;
+        }
+      }
+      const [sx, sy, sz] = appliedScales;
+      const modelWeightG =
+        model.parseResult.volumeCM3 * sx * sy * sz * materialDensity;
+      try {
+        const pose = await client.pose("main", {
+          rotX: manualRotRef.current.x,
+          rotY: manualRotRef.current.y,
+          rotZ: manualRotRef.current.z,
+          scales: [sx, sy, sz],
+          params: supportParams,
+          // 只要数,不要那块几何 —— 加购要的是支撑克重
+          withShell: false,
+        });
+        // 算完了 → 页面上的三个克重数也立刻有(支撑是**当前姿态**的)
+        setPoseSupport(pose);
+        setSupportError(null);
+        return {
+          volumeCM3: geometry.volumeCM3,
+          surfaceAreaCM2: geometry.surfaceAreaCM2,
+          dims: geometry.dims,
+          supportWeightG: Math.ceil(pose.supportWeightG),
+          selfSupportRatio:
+            modelWeightG > 0 ? pose.supportWeightG / modelWeightG : 0,
+        };
+      } catch (err) {
+        console.error("支撑计算失败:", err);
+        setSupportError(err instanceof Error ? err.message : String(err));
+        return null;
+      }
+    }, [
+      supportModelReady,
+      model,
+      geometry,
+      appliedScales,
+      supportParams,
+      materialDensity,
+    ]);
+
+  /**
+   * 把「现算支撑」的入口交给父组件
+   *
+   * 父组件(加入打印单那张卡)在加购之前会 await 它 —— 服务端重算报价要那个
+   * 支撑克重,少了它支撑费会算成 0。
+   */
+  useEffect(() => {
+    onEnsureSupport?.(ensureSupport);
+  }, [ensureSupport, onEnsureSupport]);
 
   const calc = useMemo(() => {
     if (!geometry) return null;
@@ -728,19 +789,24 @@ export function PricingCalculator({
     const notify = onQuoteInputRef.current;
     if (!notify) return;
     if (!geometry) {
+      quoteInputRef.current = null;
       notify(null);
       return;
     }
-    notify({
+    const input: PrintQuoteInput = {
       volumeCM3: geometry.volumeCM3,
       surfaceAreaCM2: geometry.surfaceAreaCM2,
       dims: geometry.dims,
-      // 支撑数据跟当前角度走 —— 没跑智能摆盘时就是初始角度的支撑
+      // 支撑数据是**当前姿态**的 —— 还没点过「包裹支撑」就是 null
+      // (加打印单时由 `ensureSupport()` 现算一次补上)
       supportWeightG: poseSupport
         ? Math.ceil(poseSupport.supportWeightG)
         : null,
       selfSupportRatio: poseSupport ? supportStats.ratio : null,
-    });
+    };
+    // 存一份 —— 「已经算过了就别重算」判断要用
+    quoteInputRef.current = input;
+    notify(input);
   }, [geometry, poseSupport, supportStats]);
 
   // 模型本体也要抛给父组件 —— 下单时要把文件打包上传到 R2
@@ -1027,59 +1093,33 @@ export function PricingCalculator({
   };
 
   /**
-   * 在 3D 预览里**拖动模型** —— 改的是打印姿态,不是相机
+   * 在 3D 预览里**转模型** —— 改的是打印姿态,不是相机
    *
-   * 工作室要的是「在预览里拖着看,顺手把这个姿态的克重算出来」,所以左键
-   * 拖改的是**模型姿态**;相机那边留给滚轮缩放 + 右键平移。
+   * 触发方式是**拖旋转控制器**(三轴彩色圆环,业界主流那套)—— 视口那边
+   * 每转一下就回调一次新姿态。
    *
-   * ## 两层更新
+   * ## 姿态**不**触发支撑重算(工作室 2026-11-07 的口径)
    *
-   * 1. `viewerRot*` —— **每个 pointermove 都改**。画面立刻跟着转(只是
-   *    姿态组的 rotation,几何不重建),拖起来是跟手的。
-   * 2. `manualRot*` —— **节流到 200ms 一次**。这个才是喂给 Worker 去算
-   *    支撑克重的。`AngleOptimizerClient.pose()` 没有请求合并,每个事件
-   *    都发一条的话,Worker 队列会被塞满,页面反而比不节流更卡。
+   * 转模型的时候**什么都不算** —— 支撑不跟随角度实时变化。画面上那圈支撑
+   * 撤掉、支撑克重回到「—」,用户把角度摆定之后点「包裹支撑」再算一次。
    *
-   * 拖动的过程中**不建支撑外壳**(那块几何最贵),拖完再补 —— 见
-   * `poseSettleTick`。
+   * 所以这里**不需要节流**:以前要节流是因为每个事件都要往 Worker 发一条
+   * 指令(`AngleOptimizerClient.pose()` 没有请求合并,发满了页面反而更卡),
+   * 现在不发指令了,直接改 state 就完事。
    */
   const handlePoseChange = useCallback(
     (next: { rotX: number; rotY: number; rotZ: number }) => {
+      // 画面立刻跟着转(只是姿态组的 rotation,几何不重建)
       setViewerRotX(next.rotX);
       setViewerRotY(next.rotY);
       setViewerRotZ(next.rotZ);
-      pendingPoseRef.current = next;
-      poseDraggingRef.current = true;
-      // 已经在节流窗口里了 —— 这一次只更新 pending,等窗口末尾统一提交
-      if (poseCommitTimerRef.current) return;
-      poseCommitTimerRef.current = setTimeout(() => {
-        poseCommitTimerRef.current = null;
-        const p = pendingPoseRef.current;
-        if (!p) return;
-        setManualRotX(p.rotX);
-        setManualRotY(p.rotY);
-        setManualRotZ(p.rotZ);
-      }, 200);
+      // 姿态本身**立刻**跟上 —— 用户点「包裹支撑」时拿到的必须是最新角度
+      setManualRotX(next.rotX);
+      setManualRotY(next.rotY);
+      setManualRotZ(next.rotZ);
     },
     []
   );
-
-  /** 拖动结束 —— 把最后的姿态提交掉,再补算一次支撑外壳 */
-  const handlePoseDragEnd = useCallback(() => {
-    if (poseCommitTimerRef.current) {
-      clearTimeout(poseCommitTimerRef.current);
-      poseCommitTimerRef.current = null;
-    }
-    const p = pendingPoseRef.current;
-    if (p) {
-      setManualRotX(p.rotX);
-      setManualRotY(p.rotY);
-      setManualRotZ(p.rotZ);
-    }
-    poseDraggingRef.current = false;
-    // 拖动中省掉了外壳 —— 这里加个 tick 让重算的 effect 再跑一次补上
-    setPoseSettleTick((n) => n + 1);
-  }, []);
 
   // ---- 导出 ----
   const exportRotatedModel = (scales: [number, number, number]) => {
@@ -1544,6 +1584,7 @@ export function PricingCalculator({
               这个数对应的是**哪个姿态** —— 初始角度 (0°,0°) 还是当前姿态。
               不标出来的话,用户会以为支撑克重跟角度没关系(其实改角度就改
               这个数)。跑没跑过摆盘不算数,只看姿态本身。
+              没算过的时候写清楚怎么才有 —— 别让用户对着「—」猜。
             */}
             <div className="mt-1 h-4 truncate text-[10px] text-zinc-500">
               {poseSupport
@@ -1554,7 +1595,7 @@ export function PricingCalculator({
                       y: poseLabel.y,
                       z: poseLabel.z,
                     })
-                : null}
+                : t("stats.supportPendingHint")}
             </div>
           </div>
 
@@ -1601,9 +1642,9 @@ export function PricingCalculator({
             <Compass className="size-3.5 text-violet-400" />
             <span className="text-xs text-zinc-300">
               {t("angle.best", {
-                x: viewerRotX,
-                y: viewerRotY,
-                z: viewerRotZ,
+                x: optimalAngle.rotX,
+                y: optimalAngle.rotY,
+                z: 0,
               })}
             </span>
             <Badge
@@ -1859,7 +1900,6 @@ export function PricingCalculator({
                     manualRotZ={manualRotZ}
                     onManualAngleChange={handleManualAngleChange}
                     onPoseChange={handlePoseChange}
-                    onPoseDragEnd={handlePoseDragEnd}
                     onResetAngle={resetAngle}
                     onOptimizeAngle={optimizeAngle}
                     angleOptimizing={angleOptimizing}

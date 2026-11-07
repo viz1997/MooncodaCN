@@ -65,6 +65,16 @@ function stripComments(src: string): string {
     .join("\n");
 }
 
+/**
+ * 把空白压成单个空格
+ *
+ * Biome 会把长表达式折行(JSX 属性、`useCallback(...)` 的参数列表)——
+ * 逐字匹配就断了。压平之后匹配的是**代码**,不是排版。
+ */
+function flat(src: string): string {
+  return src.replace(/\s+/g, " ");
+}
+
 const CHECK_PANEL =
   "src/features/tools/components/model-check/model-check-panel.tsx";
 const CHECK_VIEW =
@@ -196,8 +206,12 @@ describe("工作台 —— 共用一个展示区域", () => {
   it("支撑几何永远是摆盘 Worker 算的那块(不是分析器自带的那块)", () => {
     const code = stripComments(read(SETTINGS_PANEL));
 
-    // 算克重的那块支撑 —— 画出来的也得是它,否则转个角度画面就跟数字对不上
-    expect(code).toContain("supportShell={poseSupport?.shell ?? null}");
+    // 算克重的那块支撑 —— 画出来的也得是它,否则转个角度画面就跟数字对不上。
+    // 外壳跟着那颗开关走:关着就不画(支撑不跟随角度实时变化,见
+    // `support-on-demand.test.ts`)。
+    expect(flat(code)).toMatch(
+      /supportShell=\{ ?showSupport \? \(poseSupport\?\.shell \?\? null\) : null ?\}/
+    );
   });
 
   it("模型角度两个视角都吃得到(转的是**模型**,不是视角)", () => {
@@ -224,12 +238,13 @@ describe("工作台 —— 共用一个展示区域", () => {
     expect(code).toContain("md:flex-row");
 
     // 侧栏(`<aside>`):桌面端排在左边
-    const asides = code.match(/<aside className="[^"]*"/g) ?? [];
+    // (className 走 `cn(...)`,所以按整个开标签取,别按 `className="…"` 取)
+    const asides = code.match(/<aside[\s\S]*?>/g) ?? [];
     expect(asides.length).toBeGreaterThan(0);
     for (const tag of asides) expect(tag).toContain("md:order-1");
 
     // 视口那一列:桌面端排在右边(手机上还是在上,所以 DOM 里在前面)
-    expect(code).toMatch(/className="order-1 md:order-2[^"]*"/);
+    expect(code).toContain('"order-1 md:order-2');
   });
 
   it("两个视角的侧栏同宽 —— 不然切一次视角视口宽度就变,相机取景会跑偏", () => {
@@ -247,7 +262,7 @@ describe("工作台 —— 共用一个展示区域", () => {
     expect(code).toContain("bg-zinc-950 text-zinc-100");
 
     // 左栏:检查 / 克重换的是**内容**,外壳统一
-    const asides = code.match(/<aside className="[^"]*"/g) ?? [];
+    const asides = code.match(/<aside[\s\S]*?>/g) ?? [];
     expect(asides.length).toBe(2);
     for (const tag of asides) {
       expect(tag).toContain("md:order-1");
@@ -283,24 +298,37 @@ describe("工作台 —— 共用一个展示区域", () => {
     expect(code).toContain("exitFullscreen");
     expect(code).toContain("fullscreenchange");
 
-    // 整块(头部 / 视角切换 / 信息栏 / 视口)一起放大
-    expect(code).toContain("[:fullscreen]:h-screen");
-    expect(code).toContain("[:fullscreen]:w-screen");
+    // 整块(头部 / 视角切换 / 信息栏 / 视口)一起放大。
+    // 样式**状态驱动**(`fullscreen && "…"`),不用 `[:fullscreen]:` 变体 ——
+    // 变体那套跟工具类名叠在一起时优先级说不清,全屏下有一半没显示。
+    expect(code).toContain("h-screen w-screen");
+    expect(code).toContain("rounded-none");
+    expect(code).toContain("flex flex-col overflow-hidden");
     // 左边那一栏也得能滚(不然全屏下内容被截断)
-    expect(code).toContain("[:fullscreen]:overflow-y-auto");
+    expect(code).toContain("min-h-0 overflow-y-auto");
+    expect(code).not.toContain("[:fullscreen]:");
   });
 
-  it("拖动模型改的是打印姿态(视角那边留给缩放 / 平移)", () => {
+  it("进了全屏要重新取景 —— 比例变了,原来那个距离会把模型裁掉一半", () => {
+    const code = stripComments(read(SETTINGS_PANEL));
+
+    // 视口的宽高比一变(进全屏 / 退全屏),相机得按新比例重新取景
+    expect(code).toContain("setFitSignal");
+    expect(code).toMatch(/\[fullscreen\]/);
+  });
+
+  it("转模型用**旋转控制器**,不是左键拖着模型瞎转", () => {
     const frame = stripComments(read(SETTINGS_PANEL));
 
     // 拖动回调一路传到视口
     expect(frame).toContain("onPoseChange={onPoseChange}");
-    expect(frame).toContain("onPoseDragEnd={onPoseDragEnd}");
 
     const calc = stripComments(read(CALCULATOR));
-    // 拖动 → 克重跟着刷新(节流提交),拖完再补算支撑几何
+    // 控制器改的是 quaternion —— 分解回仓库口径的欧拉角
     expect(calc).toContain("const handlePoseChange");
-    expect(calc).toContain("const handlePoseDragEnd");
+    expect(calc).toContain("setManualRotX");
+    expect(calc).toContain("setManualRotY");
+    expect(calc).toContain("setManualRotZ");
   });
 
   it("空状态(还没拖文件)也是深色的 —— 拖完不换脸", () => {

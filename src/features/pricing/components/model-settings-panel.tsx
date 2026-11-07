@@ -71,14 +71,16 @@ import type { ReactNode } from "react";
  *
  * ## 模型角度是**模型**的旋转,不是**视角**的旋转
  *
- * 工作室的原话:**「模型需要支持旋转角度而不是视角旋转」**。
+ * 工作室的原话:**「模型需要支持旋转角度而不是视角旋转」** +
+ * **「模型旋转不是这样操作,按照业界主流设计,带控制器」**。
  *
  * 摆着看(转相机)跟摆着印(转模型)是两件事 —— 后者决定支撑克重。所以
  * 姿态走**姿态组**(`rotation.order = "ZYX"`,跟摆盘算法 / OBJ 导出同
  * 一套口径),两个视角**都**能转,角度条常驻在展示区上方。
  *
- * **左键拖 = 转模型**(横向 → Z,纵向 → X);相机那边留给滚轮缩放 +
- * 右键平移。见 `shared/components/model-viewport/`。
+ * **转模型用旋转控制器**(三轴彩色圆环,Blender / Sketchfab 那一套)——
+ * 拖圆环转模型;相机那边留给**左键空白处拖动** + **滚轮缩放** +
+ * **右键平移**。见 `shared/components/model-viewport/`。
  *
  * ## 全屏(2026-11-07)
  *
@@ -87,8 +89,15 @@ import type { ReactNode } from "react";
  * 模型看也看不到要多少料。
  *
  * 走浏览器的 Fullscreen API(不是 `position: fixed` 那种假全屏):真全屏
- * 能把标签页收起来,Esc 直接退出来。样式靠 `[:fullscreen]:` 变体
- * (Tailwind 的任意变体,优先级比 `md:` 媒体查询高)。
+ * 能把标签页收起来,Esc 直接退出来。
+ *
+ * **样式靠 React 状态驱动**,不用 `[:fullscreen]:` 变体 —— 变体那套依赖
+ * 「变体规则比 `md:` 媒体查询优先」这条隐含假设,一旦 Tailwind 的排序变了
+ * 就静默失效(全屏下内容被裁掉一半,而且页面上完全看不出来)。
+ *
+ * **切全屏要重新取景** —— 视口的宽高比一变,相机原来那个距离就不对了
+ * (模型会被裁掉一半)。所以 `fullscreen` 一变就推一个 `fitSignal`,
+ * 让视口按**新比例**重新摆一次相机。
  *
  * 几何由父组件算好后传进来（`geometry`）—— 面板不自己重算一遍，
  * 拆成两处只会各自漂移。
@@ -119,6 +128,7 @@ import { useDropZone } from "@/features/shared/hooks/use-drop-zone";
 import { ModelCheckSidePanel } from "@/features/tools/components/model-check/model-check-panel";
 import { useCheckView } from "@/features/tools/components/model-check/use-check-view";
 import { ISSUE_LABEL_KEYS } from "@/features/tools/lib/mesh/types";
+import { cn } from "@/lib/utils";
 
 export type LoadStatus =
   | "idle"
@@ -257,16 +267,14 @@ export type ModelSettingsPanelProps = {
     scales: [number, number, number]
   ) => void;
   /**
-   * 在预览里**拖动模型**改姿态 —— 父组件持有姿态状态
+   * 在预览里**用旋转控制器**改姿态 —— 父组件持有姿态状态
    *
-   * 拖动改的是**打印姿态**(横向 → Z,纵向 → X),支撑克重跟着走 ——
-   * 相机那边留给滚轮缩放 + 右键平移。
+   * 拖控制器上的彩色圆环改的是**打印姿态**,支撑克重跟着走;相机那边留给
+   * 左键空白处拖动 + 滚轮缩放 + 右键平移。
    */
   onPoseChange?:
     | ((pose: { rotX: number; rotY: number; rotZ: number }) => void)
     | undefined;
-  /** 拖动结束 —— 支撑几何可以补算了(拖的过程中不实时重算) */
-  onPoseDragEnd?: (() => void) | undefined;
   /** 角度归零(顺带把摆盘结果也清掉) */
   onResetAngle?: () => void;
   /** 触发智能摆盘；传入当前生效的缩放因子 */
@@ -344,7 +352,6 @@ export function ModelSettingsPanel({
   manualRotZ,
   onManualAngleChange,
   onPoseChange,
-  onPoseDragEnd,
   onResetAngle,
   onOptimizeAngle,
   angleOptimizing,
@@ -386,6 +393,20 @@ export function ModelSettingsPanel({
     document.addEventListener("fullscreenchange", onChange);
     return () => document.removeEventListener("fullscreenchange", onChange);
   }, []);
+
+  /**
+   * 进出全屏 → **相机重新取景**
+   *
+   * 视口的宽高比一换,原来那个相机距离就不对了 —— 相机是按**旧比例**摆的,
+   * 模型会被裁掉一半(工作室反馈的「全屏发现一半没显示」)。
+   *
+   * 推一个 `fitSignal` 让视口按新比例重摆一次。首帧那次是空转(模型还没
+   * 建好),无害。
+   */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 依赖就是触发条件 —— fullscreen 一变就重新取景,effect 体里不用读它
+  useEffect(() => {
+    setFitSignal((v) => v + 1);
+  }, [fullscreen]);
 
   const toggleFullscreen = useCallback(() => {
     const el = appRef.current;
@@ -515,7 +536,12 @@ export function ModelSettingsPanel({
           整块外观不变。 */}
       <div
         ref={appRef}
-        className="rounded-xl border border-zinc-800 bg-zinc-950 text-zinc-100 shadow-sm overflow-hidden [:fullscreen]:h-screen [:fullscreen]:w-screen [:fullscreen]:rounded-none [:fullscreen]:border-0 [:fullscreen]:flex [:fullscreen]:flex-col"
+        className={cn(
+          "rounded-xl border border-zinc-800 bg-zinc-950 text-zinc-100 shadow-sm overflow-hidden",
+          // 全屏 —— **状态驱动**,不用 `[:fullscreen]:` 变体(见文件头)
+          fullscreen &&
+            "h-screen w-screen rounded-none border-0 flex flex-col overflow-hidden"
+        )}
       >
         {/* ---------- 卡片头部（文件身份 + 操作）—— 由父组件渲染 ---------- */}
         {header !== undefined ? (
@@ -622,14 +648,26 @@ export function ModelSettingsPanel({
               断点跟旧检查工具一样是 `md`(768px 就并排)—— 以前那个工具
               在 768px 上就是「侧栏左 + 视口右」,等 1024px 的话这段窗口
               里还摆着老克重工具的方向(视口在上、面板在下)。 */}
-            <div className="flex flex-col md:flex-row md:h-[560px] [:fullscreen]:h-auto [:fullscreen]:flex-1 [:fullscreen]:min-h-0">
+            <div
+              className={cn(
+                "flex flex-col md:flex-row",
+                // 全屏:整块工作台占满屏幕 —— 这一行吃掉剩下的高度,
+                // 视口跟信息栏各占一半(信息栏自己内部滚)
+                fullscreen ? "flex-1 min-h-0 overflow-y-auto" : "md:h-[560px]"
+              )}
+            >
               {/* ---------- 右：共用的展示区域 ----------
                 **只有一个 `ModelViewport`** —— 切视角不卸载它,
                 相机不动、模型不重建,只是喂进去的数据换了。
 
                 这一整列是**深色的**(顶栏 + 角度条 + 视口)—— 它就是那个
                 3D 应用本身,跟以前检查工具的深色视口区是同一块地。 */}
-              <div className="order-1 md:order-2 flex flex-col md:flex-1 min-w-0 [:fullscreen]:min-h-0">
+              <div
+                className={cn(
+                  "order-1 md:order-2 flex flex-col md:flex-1 min-w-0",
+                  fullscreen && "min-h-0"
+                )}
+              >
                 <div className="flex items-center justify-between bg-zinc-950 px-3 py-2 border-b border-zinc-800">
                   <span className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
                     <Boxes className="size-3.5 text-amber-500" />
@@ -690,11 +728,18 @@ export function ModelSettingsPanel({
                   **转的是模型,不是相机** —— 摆着印(转模型)决定支撑克重,
                   摆着看(转相机)决定看得清看不清,是两件事。
                   两个视角都能转:在「检查」那一栏转了模型,切到「克重」
-                  还是这个姿态。 */}
+                  还是这个姿态。
+
+                  **拖画面里那三个彩色圆环** —— 业界主流那套旋转控制器
+                  (Blender / Sketchfab)。左键空白处拖是转相机,滚轮缩放,
+                  右键平移。 */}
                 {loadStatus === "ready" && (
                   <div className="px-3 py-2 border-b border-zinc-800 bg-zinc-900">
                     <div className="flex items-center gap-3">
-                      <span className="text-[10px] font-medium text-violet-300 shrink-0">
+                      <span
+                        className="text-[10px] font-medium text-violet-300 shrink-0"
+                        title={t("angle.gizmoHint")}
+                      >
                         {t("angle.modelAngle")}
                       </span>
                       <div className="flex items-center gap-2 flex-1">
@@ -731,6 +776,10 @@ export function ModelSettingsPanel({
                           {t("angle.resetAngle")}
                         </button>
                       )}
+                      {/* 怎么转模型 —— 拖画面里的彩色圆环(旋转控制器) */}
+                      <span className="hidden sm:inline text-[10px] text-zinc-500 shrink-0">
+                        {t("angle.gizmoHint")}
+                      </span>
                     </div>
                   </div>
                 )}
@@ -739,7 +788,10 @@ export function ModelSettingsPanel({
                   底色跟「检查」那一栏一样是深色 —— 同一个视口组件,
                   三处必须长得一样。 */}
                 <div
-                  className="relative h-[300px] sm:h-[360px] md:h-auto md:flex-1 md:min-h-[300px] bg-[#111418]"
+                  className={cn(
+                    "relative h-[300px] sm:h-[360px] md:h-auto md:flex-1 md:min-h-[300px] bg-[#111418]",
+                    fullscreen && "min-h-0"
+                  )}
                   {...dropHandlers}
                 >
                   <ModelViewport
@@ -752,17 +804,19 @@ export function ModelSettingsPanel({
                     visibility={check.visibility}
                     showSupport={showSupport}
                     /* 支撑几何永远是摆盘 Worker 算的那块 —— 算克重的是它,
-                     画出来的也得是它(否则转个角度画面就跟数字对不上)。 */
-                    supportShell={poseSupport?.shell ?? null}
+                     画出来的也得是它(否则转个角度画面就跟数字对不上)。
+                     **只在「包裹支撑」开着的时候画** —— 按钮关了就不画。 */
+                    supportShell={
+                      showSupport ? (poseSupport?.shell ?? null) : null
+                    }
                     /* 模型姿态 —— 两个视角共用同一个角度 */
                     pose={{
                       rotX: viewerRotX,
                       rotY: viewerRotY,
                       rotZ: viewerRotZ,
                     }}
-                    /* 拖动模型 = 改打印姿态(不是转相机)—— 支撑克重跟着走 */
+                    /* 拖旋转控制器 = 改打印姿态(不是转相机) */
                     onPoseChange={onPoseChange}
-                    onPoseDragEnd={onPoseDragEnd}
                     supportLiftMm={supportLiftMm}
                     focusRequest={tab === "check" ? check.focusRequest : null}
                     fitSignal={fitSignal}
@@ -904,12 +958,22 @@ export function ModelSettingsPanel({
                         <RotateCcw className="size-3.5" />
                         {t("preview.resetView")}
                       </button>
+                      {/*
+                        支撑那一行 —— 三种状态:
+                        - 算出来了 → 比例 + 克重
+                        - 正在算(用户刚点了那颗按钮)→ 「正在算…」
+                        - 没算 → 「点『包裹支撑』按当前角度算」(别让用户对着「—」猜)
+                      */}
                       {poseSupport ? (
                         <span className="font-mono text-[10px] text-zinc-500">
                           {t("preview.supportInfo", {
                             ratio: Math.round(supportRatio * 100),
                             weight: Math.ceil(poseSupport.supportWeightG),
                           })}
+                        </span>
+                      ) : showSupport ? (
+                        <span className="text-[10px] text-zinc-400">
+                          {t("preview.supportComputing")}
                         </span>
                       ) : (
                         <span className="text-[10px] text-zinc-400">
@@ -928,7 +992,13 @@ export function ModelSettingsPanel({
                 **两个视角共用同一个外壳、同一个深色设计** —— 跟以前那个
                 检查工具一个方向(那边就是「侧栏左 + 视口右」)。 */}
               {tab === "check" ? (
-                <aside className="order-2 md:order-1 md:w-[400px] md:shrink-0 p-3 md:overflow-y-auto [:fullscreen]:overflow-y-auto [:fullscreen]:min-h-0 border-t md:border-t-0 md:border-r border-zinc-800">
+                <aside
+                  className={cn(
+                    "order-2 md:order-1 md:w-[400px] md:shrink-0 p-3 md:overflow-y-auto border-t md:border-t-0 md:border-r border-zinc-800",
+                    // 全屏:信息栏自己内部滚(窄屏时整行也滚)
+                    fullscreen && "min-h-0 overflow-y-auto"
+                  )}
+                >
                   <h2 className="mb-3 flex items-center gap-2 text-sm font-bold tracking-tight text-zinc-100">
                     <ShieldCheck className="size-4 text-emerald-400" />
                     {tInspect("app.title")}
@@ -943,7 +1013,13 @@ export function ModelSettingsPanel({
                   />
                 </aside>
               ) : (
-                <aside className="order-2 md:order-1 md:w-[400px] md:shrink-0 p-3 flex flex-col gap-3 md:overflow-y-auto [:fullscreen]:overflow-y-auto [:fullscreen]:min-h-0 border-t md:border-t-0 md:border-r border-zinc-800">
+                <aside
+                  className={cn(
+                    "order-2 md:order-1 md:w-[400px] md:shrink-0 p-3 flex flex-col gap-3 md:overflow-y-auto border-t md:border-t-0 md:border-r border-zinc-800",
+                    // 全屏:信息栏自己内部滚(窄屏时整行也滚)
+                    fullscreen && "min-h-0 overflow-y-auto"
+                  )}
+                >
                   <h2 className="flex items-center gap-2 text-sm font-bold tracking-tight text-zinc-100">
                     <Scale className="size-4 text-amber-400" />
                     {t("tabs.weight")}

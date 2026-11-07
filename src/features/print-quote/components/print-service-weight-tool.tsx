@@ -32,10 +32,13 @@
  * 工具页自己不卖东西,但商城里能一键跳过去量。
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import { PricingCalculator } from "@/features/pricing/components/pricing-calculator";
-import type { PricingModelPayload } from "@/features/pricing/components/pricing-calculator-types";
+import type {
+  EnsureSupportFn,
+  PricingModelPayload,
+} from "@/features/pricing/components/pricing-calculator-types";
 import { PrintServiceAddToOrder } from "@/features/print-quote/components/print-service-add-to-order";
 import type { ClientPrintConfig } from "@/features/print-quote/lib/pricing-settings";
 import type { PrintQuoteInput } from "@/features/print-quote/lib/quote-types";
@@ -83,16 +86,35 @@ export function PrintServiceWeightTool({
     setInput(next);
   }, []);
 
+  /**
+   * 「按当前姿态算支撑」的入口 —— 加打印单之前要 await 它
+   *
+   * 支撑**不跟随角度实时重算**(工作室 2026-11-07 的口径):用户把角度摆定
+   * 之后点「包裹支撑」才算一次。但「加入打印单」必须带上支撑克重 ——
+   * 服务端按它重算报价,少了它支撑费会算成 0(收少了钱)。
+   *
+   * 所以加购之前:没算过就现算一次(计算器那边已经算过就直接给现成的)。
+   */
+  const ensureSupportRef = useRef<EnsureSupportFn | null>(null);
+  const handleEnsureSupport = useCallback((ensure: EnsureSupportFn) => {
+    ensureSupportRef.current = ensure;
+  }, []);
+  const ensureSupport = useCallback(async () => {
+    return (await ensureSupportRef.current?.()) ?? null;
+  }, []);
+
   return (
     <PricingCalculator
       showChrome={false}
       clientConfig={clientConfig}
       onModelChange={handleModelChange}
       onQuoteInput={handleQuoteInput}
+      onEnsureSupport={handleEnsureSupport}
       quoteSlot={
         <PrintServiceAddToOrder
           model={model}
           input={input}
+          ensureSupport={ensureSupport}
           isLoggedIn={isLoggedIn}
           signInUrl={signInUrl}
         />

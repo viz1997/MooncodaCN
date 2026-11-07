@@ -12,6 +12,7 @@
  */
 
 import type { ModelFile } from "@/features/pricing/lib/zip-extractor";
+import type { PrintQuoteInput } from "@/features/print-quote/lib/quote-types";
 
 /**
  * 报价模式下抛给父组件的模型载荷
@@ -23,3 +24,20 @@ export type PricingModelPayload = {
   model: ModelFile;
   scales: [number, number, number];
 };
+
+/**
+ * 「按**当前姿态**把支撑算出来」的入口
+ *
+ * ## 为什么需要它
+ *
+ * 工作室的口径(2026-11-07):**支撑不跟随角度实时重算** —— 用户把角度摆定
+ * 之后,点浮层上那颗「包裹支撑」才算一次(支撑克重 + 总克重 + 画出来那圈
+ * 支撑)。转一下模型就重算一遍,页面卡、数字还在一直跳。
+ *
+ * 但「加入打印单」**必须带上支撑克重** —— 服务端按这组数重算报价,少了它
+ * 支撑费会算成 0(收少了钱)。用户没点过那颗按钮的时候,这里现算一次
+ * (只要数,那块几何不用建)。
+ *
+ * 返回算完之后的 `PrintQuoteInput`(几何 + 支撑);模型还没就绪就返回 null。
+ */
+export type EnsureSupportFn = () => Promise<PrintQuoteInput | null>;

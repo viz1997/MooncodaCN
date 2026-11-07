@@ -1147,7 +1147,8 @@
       "supportWeight": "支撑克重",
       "totalWeight": "总克重",
       "totalWeightNote": "耗材 + 支撑",
-      "supportWeightHint": "上传模型后按当前姿态计算(没摆盘就是初始角度)",
+      "supportWeightHint": "点「包裹支撑」按当前姿态算一次(支撑不跟随角度实时变化)",
+      "supportPendingHint": "点「包裹支撑」按当前角度算",
       "supportWeightError": "支撑克重算不出来：{reason}",
       "poseInitial": "初始角度 0°,0°",
       "poseCurrent": "当前姿态 X {x}° Y {y}° Z {z}°",
@@ -1191,7 +1192,7 @@
       "laidFlat": "已躺平",
       "savingTitle": "原摆放 {before} g → 优化后 {after} g，节省 {pct}%",
       "savingBadge": "省 {pct}% 支撑",
-      "compareSupport": "初始角度 0°,0° 支撑 {initial} g → 当前姿态 {current} g",
+      "compareSupport": "初始角度 0°,0° 支撑 {initial} g → 最优姿态 {current} g",
       "currentPose": "当前姿态 X {x}° Y {y}° Z {z}°",
       "currentSupport": "支撑 {weight} g · 本体支撑 {ratio}%",
       "noResultHint": "还没跑过智能摆盘 —— 点上面「智能摆盘」搜一个省料的角度。",
@@ -1204,15 +1205,17 @@
       "manualTune": "手动微调",
       "reoptimize": "重新优化",
       "resetAngle": "重置角度",
-      "modelAngle": "模型角度"
+      "modelAngle": "模型角度",
+      "gizmoHint": "拖画面里的彩色圆环转模型"
     },
     "preview": {
       "texture": "显示贴图",
       "textureTitle": "显示模型自带的贴图(MTL 里每个材质挂自己的 map_Kd);关掉就是纯色视图",
       "support": "包裹支撑",
-      "supportTitle": "显示包裹模型的半透明支撑外壳、平台占地区域,以及平台到模型之间全部的支撑材料填充(WJP 逐层喷射不存在悬空,打印后水洗去除)",
+      "supportTitle": "按当前角度算一次支撑:半透明支撑外壳、平台占地区域,以及平台到模型之间全部的支撑材料填充(WJP 逐层喷射不存在悬空,打印后水洗去除)。支撑不跟随角度实时变化 —— 转完模型再点这一颗",
       "supportInfo": "支撑比例 {ratio}% · {weight} g",
-      "supportPending": "加载模型后计算支撑比例",
+      "supportPending": "点「包裹支撑」按当前角度算",
+      "supportComputing": "正在按当前角度算支撑…",
       "resetView": "重置视角",
       "resetViewTitle": "把相机摆回默认位置",
       "fullscreen": "全屏",
@@ -1729,7 +1732,8 @@
       "add": "加入打印单",
       "adding": "上传模型中…",
       "errors": {
-        "addFailed": "加入打印单失败,请稍后重试"
+        "addFailed": "加入打印单失败,请稍后重试",
+        "supportUnavailable": "算不出支撑克重,没有加入打印单 —— 等模型处理完再试一次"
       }
     },
     "entry": {

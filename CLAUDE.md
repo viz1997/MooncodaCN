@@ -957,38 +957,112 @@ shared/components/model-viewport/
   初始角度 0°,0°。
 - **两个视角共用同一个姿态** —— 在「检查」那一栏把模型转了,切到「克重」
   还是这个姿态;反之亦然。
-- **改角度 → 支撑克重跟着重算** —— `handleManualAngleChange` 改的是
-  `viewerRotX/Y/Z`,下面的 effect 按新姿态重算(摆盘 Worker 的 `pose()`
-  指令),画面上的支撑外壳也就跟着换。
+- **改角度 → 支撑**不**跟着重算** —— 工作室 2026-11-07 的口径:支撑不跟随
+  角度实时变化。改角度只改 `viewerRotX/Y/Z` + `manualRotX/Y/Z`,
+  **不发任何指令给 Worker**;支撑要用户点「包裹支撑」才按新角度算一次
+  (见下面「支撑按需计算」)。
 
-#### 拖动模型改姿态 / 去掉摆盘视角 / 全屏(2026-11-07)
+#### 旋转控制器 / 支撑按需计算 / 全屏(2026-11-07)
 
-工作室的三条追加要求:「需要支持在预览时旋转、缩放、平移模型」+
+工作室的几条追加要求:「需要支持在预览时旋转、缩放、平移模型」+
 「去掉摆盘tab,然后支持全屏」+「旋转、缩放模型需要刷新克重,但不需要实时
-支撑,默认无支撑,显示支撑时才需要」。
+支撑,默认无支撑,显示支撑时才需要」+「模型旋转不是这样操作,按照业界主流
+设计,带控制器」+「支撑不要跟随变化实时变化,用户确定角度后点击显示支撑才
+计算支撑、总克重」+「全屏发现一半没显示」。
 
-**鼠标怎么分**:
+##### 转模型用**旋转控制器**(业界主流那套)
 
-| 操作 | 效果 | 实现 |
-|---|---|---|
-| **左键拖** | 转**模型**(改打印姿态:横向 → Z,纵向 → X) | OrbitControls 的左键旋转被**关掉**(`mouseButtons.LEFT = null`),自己接 pointer 事件 |
-| **滚轮** | 缩放(相机) | OrbitControls 自带 |
-| **右键拖** | 平移(相机) | OrbitControls 自带 |
+工作室的原话:**「模型旋转不是这样操作,按照业界主流设计,带控制器」**。
 
-- **左键只在接了回调时才从相机手里拿走** —— `hasPoseDrag` 决定
-  `mouseButtons.LEFT` / `touches.ONE` 是 `null` 还是 `ROTATE`。没接
-  `onPoseChange` 的用法,左键还是老样子转相机。
-- **拖动的数学是纯函数** —— `shared/components/model-viewport/pose.ts` 的
-  `poseAfterDrag(base, dx, dy)`:横向 → 绕 Z,纵向 → 绕 X(0.35°/px),
-  **从「拖动开始那一下」的姿态累加**(不是每个事件增量加 —— 浏览器把几个
-  pointermove 合并掉就会漂)。Y 轴拖不出来,角度条上填。
-- **两层更新** —— `viewerRot*` 每个 pointermove 都改(画面立刻跟着转,
-  只改姿态组的 rotation,几何不重建);`manualRot*` **节流 200ms** 一次
-  (`AngleOptimizerClient.pose()` **没有请求合并**,每个事件都发一条会把
-  Worker 队列塞满,页面反而更卡)。松手时(`onPoseDragEnd`)提交最后一个
-  姿态。
+业界主流(BIM / 三维建模 / 在线建模工具)转模型用的都是**三轴旋转控制器**
+—— 模型上套三个彩色圆环,拖着环转。three.js 里有现成的 `TransformControls`
+(Blender / Sketchfab 那一套),不用自己搓一个。
 
-**去掉「摆盘」视角 —— 摆盘结果并进克重栏**:
+| 操作 | 效果 |
+|---|---|
+| **拖彩色圆环** | 转**模型**(改打印姿态)—— 支撑克重按新角度重算 |
+| 左键拖(空白处) | 转**相机** |
+| 滚轮 | 缩放(相机) |
+| 右键拖 | 平移(相机) |
+
+- **控制器挂在**姿态组**上** —— 姿态组才是「打印姿态」那一份(模型 + 问题
+  边线都在里面,`rotation.order = "ZYX"`)。挂到别的组上,画面转的是模型、
+  算克重的却是另一个姿态。
+- **只给「转」** —— `setMode("rotate")`;`setSpace("world")`(世界坐标轴 ——
+  环上那三个轴跟角度条上的 rotX / rotY / rotZ 一一对应,绕局部轴转的话数
+  对不上,用户会懵)。平移 / 缩放不该改打印姿态。
+- **`getHelper()` 得进场景** —— three.js 0.187 起控制器本体不是 `Object3D`,
+  渲染的是它的 helper。
+- **控制器写的是 quaternion** —— 分解回仓库口径的欧拉角:
+  `new THREE.Euler().setFromQuaternion(q, POSE_EULER_ORDER)`(`"ZYX"` =
+  Rz·Ry·Rx = 先 X 后 Y 后 Z),不然角度条上的数跟画面对不上。
+- **拖的时候相机让开** —— `mouseDown` 把 `ctx.controls.enabled` 设成
+  `false`,`mouseUp` 设回 `true`。不这样的话拖环的同时相机也在转,画面抖。
+  (`OrbitControls.onPointerUp` 不看 `enabled`,清理逻辑照跑 —— 不会出现
+  「松手之后左键再也转不动相机」。)
+- **左键不再从相机手里拿走** —— 以前是「左键拖 = 转模型」,现在模型由控制器
+  转,相机的左键旋转得留着(不然空白处拖一点反应都没有)。`mouseButtons.LEFT`
+  / `touches.ONE` 那套改动**删干净了**。
+- **World 空间重转是从「按下那一下」的快照算的** —— `TransformControls` 内部
+  记着 `_quaternionStart`,所以 React 中间写进去的欧拉角不会累积(拖一下
+  转 30°,不是 60°)。
+- 以前那套「拖动 → 绕 Z / 绕 X」的数学(`poseAfterDrag`)**删了** —— 控制器
+  自带角度,不用自己换算。
+
+##### 支撑按需计算 —— 支撑不跟随角度实时变化
+
+工作室的原话:**「支撑不要跟随变化实时变化,用户确定角度后点击显示支撑才计算
+支撑、总克重」**。
+
+```
+转模型(拖旋转控制器)→ 什么都不算(上一次的结果也作废)
+  → 用户点「包裹支撑」→ 算一次 → 支撑克重 + 总克重 + 画出来那圈支撑
+```
+
+三样东西来自**同一次**计算,所以画面跟数字必然对得上。
+
+- **算支撑的 effect 依赖里**没有角度** —— 依赖是
+  `[showSupport, appliedScales, supportParams, model, supportModelReady]`。
+  依赖里有角度的话,拖一下控制器就重算一遍:数字一直跳、Worker 队列一直满
+  (工作室不要这个)。
+- **转模型的回调不发任何指令给 Worker** —— 以前要节流 200ms,是因为每个
+  pointermove 都发一条 `AngleOptimizerClient.pose()`(那个客户端**没有请求
+  合并**,发满了页面反而更卡)。现在不发指令了,直接改 state 就完事,
+  `poseCommitTimerRef` / `handlePoseDragEnd` 全删。
+- **角度一变,上一次的结果作废** —— 支撑是「某个角度下的一次结果」,角度
+  一变那个数就是**旧角度**的数了。不清掉的话:画面上那圈支撑摆在旧角度上,
+  支撑克重也是旧角度的,用户看着模型在新角度、数字却在说旧角度 —— 画面跟
+  数字一起骗人。所以角度一改:数字清空(回到「—」)、那圈支撑撤掉、按钮回到
+  关的状态(`setPoseSupport(null)` + `setShowSupport(false)`)。
+- **默认关** —— `showSupport` 默认 `false`。模型刚进来时**一个支撑都不算**
+  (以前是模型一进来就有支撑克重)。支撑外壳(外壳 + 顶面 + 外壁 + 底板留边)
+  是这一页最贵的一块几何,用户没主动点那颗按钮之前不替他算。
+- **外壳跟着那颗开关走** —— `supportShell={showSupport ? (poseSupport?.shell ?? null) : null}`。
+  算的时候 `withShell: true`(外壳在**算体积的同一次调用**里建出来)。
+
+**但「加入打印单」必须带上支撑克重** —— 服务端按这组数重算报价
+(`quote-server.ts` 的 `input.supportWeightG ?? 0`),少了它支撑费会算成 0,
+**收少了钱**。所以计算器对外留了一个入口:
+
+- `EnsureSupportFn`(`pricing-calculator-types.ts`)——
+  `() => Promise<PrintQuoteInput | null>`,「按**当前姿态**把支撑算出来」。
+- `pricing-calculator.tsx` 的 `ensureSupport`:算过了就返回现成的(不重算),
+  没算过就现算一次(`withShell: false` —— 只要数,不要那块最贵的外壳)。
+- 入口通过 `onEnsureSupport` 交给父组件(`print-service-weight-tool.tsx`),
+  再通过 `ensureSupport`  prop 传到「加入打印单」那张卡
+  (`print-service-add-to-order.tsx`),加购之前 `await ensureSupport()`。
+
+**两道兜底 —— 别让「算不出支撑」变成「收少了钱」**:
+
+- **模型还没焊完 → 等它** —— 用户刚拖进模型就点「加入打印单」是常事,而
+  焊接大模型要好几秒。`ensureSupport` 这时候先 `await` 焊接那个 promise
+  (`supportLoadRef`),再算支撑。
+- **算不出来 → 不加** —— 加购那张卡拿 `ensureSupport()` 的结果,**拿不到就
+  报错退出**,不许退回「只有几何、没有支撑克重」的 `input` 那样去加购:
+  服务端按 `input.supportWeightG ?? 0` 算,支撑费会算成 0(收少了钱),
+  而用户看着像「加成功了」。宁可让用户等模型处理完再试一次。
+
+##### 去掉「摆盘」视角 —— 摆盘结果并进克重栏
 
 - `WorkspaceTab` 从 `"check" | "weight" | "pose"` 变成 `"check" | "weight"`;
   `ModelSettingsPanel` 的 `pose` 插槽删掉,`weight` 插槽吃
@@ -997,31 +1071,30 @@ shared/components/model-viewport/
   支撑克重摆到哪个姿态最省,拆成两栏要用户自己把两个数对上。
 - 「智能摆盘」那颗**按钮留着**,跑完的结果照样摆出来。
 
-**默认不画支撑**:
-
-- `showSupport` 默认 **false** —— 支撑外壳(外壳 + 顶面 + 外壁 + 底板留边)是
-  这一页最贵的一块几何,用户没主动点「包裹支撑」之前不替他算。
-- 支撑几何的开关跟着那个状态走:
-  `withShell: showSupport && !poseDraggingRef.current`。**支撑克重不受影响**
-  —— 体积跟外壳是两次独立的计算,默认关掉外壳,三个克重数一个都不少。
-- 拖动的过程中也不建外壳(拖完由 `poseSettleTick` 这个 tick 补算一次)——
-  每帧重建一次外壳会把页面拖死。
-
-**全屏 = 整块工作台**:
+##### 全屏 = 整块工作台(「一半没显示」修掉了)
 
 - 走浏览器的 **Fullscreen API**(`requestFullscreen` / `exitFullscreen` /
   `fullscreenchange`),不是 `position: fixed` 那种假全屏。
-- 样式靠 `[:fullscreen]:` 变体(Tailwind 的任意变体,优先级比 `md:` 高):
-  整块 `h-screen w-screen` + 圆角归零 + `flex flex-col`,左栏那两栏
-  `overflow-y-auto`(不然全屏下内容被截断)。
+- **样式状态驱动**,不用 `[:fullscreen]:` 变体 —— 变体那套跟工具类名叠在
+  一起时优先级说不清,全屏下有一半没显示。现在是
+  `cn("…", fullscreen && "h-screen w-screen rounded-none border-0 flex flex-col overflow-hidden")`。
+- **相机要重新取景** —— 视口的宽高比一换(进全屏 / 退全屏),原来那个相机
+  距离就不对了:相机是按**旧比例**摆的,模型会被裁掉一半。`fullscreen` 一
+  变就推一个 `fitSignal`,视口按新比例重摆一次。
+- **取景距离要照顾两个方向** —— 只按竖直方向算的话,视口一变成窄高比例
+  (进全屏、竖屏),水平方向就装不下了。`fitCamera` 按
+  `min(vFov, hFov)` 算(包围球在两个方向上都装得下)。
+  **宽高比从画布上量**(`canvas.clientWidth / clientHeight`),别读
+  `camera.aspect` —— 那是渲染循环里更新的,刚切完全屏那一帧它还是旧比例。
 - **不是只放大视口** —— 只放大视口的话,左栏那三个克重数还在屏幕外,
   盯着模型看也看不到要多少料。
 
 - **行为由单测守住** ——
   | 测试 | 守住什么 |
   |---|---|
-  | `src/test/tools/pure/workbench-merge.test.ts` | 整个工作台只挂**一个** `<ModelViewport>` / 检查侧栏不自己挂视口 / **侧栏在左、视口在右** / 分析器只在 `tab === "check"` 时启动 / **视角只有两个**(没有第三个「摆盘」)/ 全屏是整块(`[:fullscreen]:` + `requestFullscreen`) / 拖动回调一路传到视口 |
-  | `src/test/tools/pure/shared-viewport.test.ts` | 检查侧栏不 import 视口 / 姿态无条件传给视口 / 旋转顺序跟 `rotateSupportMesh` 逐点相同 / **`withShell` 跟着「显示支撑」和「正在拖动」** / 支撑默认关 / 拖动的数学(横向 → Z、纵向 → X、从起手姿态累加)/ 左键归模型还是归相机 |
+  | `src/test/tools/pure/workbench-merge.test.ts` | 整个工作台只挂**一个** `<ModelViewport>` / 检查侧栏不自己挂视口 / **侧栏在左、视口在右** / 分析器只在 `tab === "check"` 时启动 / **视角只有两个**(没有第三个「摆盘」)/ 全屏是整块(状态驱动 + `requestFullscreen`)/ 进全屏重新取景 / 控制器回调一路传到视口 |
+  | `src/test/tools/pure/shared-viewport.test.ts` | 检查侧栏不 import 视口 / 姿态无条件传给视口 / 旋转顺序跟 `rotateSupportMesh` 逐点相同 / 支撑几何来自 Worker 的同一块 / **控制器是 `TransformControls`(只转 / 世界轴 / 挂姿态组 / helper 进场景)** / 拖的时候相机让开 / quaternion 按 `POSE_EULER_ORDER` 分解 / 左键不再从相机手里拿走 |
+  | `src/test/tools/pure/support-on-demand.test.ts` | **支撑计算的依赖里没有角度** / 角度一变上一次的结果作废 / 外壳跟着那颗开关走 / 没算过的时候三个数是「—」 / **加购之前会现算一次支撑**(少了它服务端收少了钱) / **算不出来就不加** / **模型没焊完会等它** |
 
 ### 打印定价后台(2026-11-06)
 

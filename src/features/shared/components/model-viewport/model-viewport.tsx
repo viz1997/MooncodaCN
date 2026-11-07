@@ -31,30 +31,37 @@
  * - 姿态组在模型组里面,只管旋转 —— **支撑几何不进姿态组**:外面传进来的
  *   支撑已经是**转好姿态**的坐标,再转一次就转过了。
  *
- * ## 鼠标:左键拖 = 转模型,不是转相机
+ * ## 旋转用**控制器**(gizmo),不是拖着模型瞎转
  *
- * 工作室要的是「在预览里拖着看,顺手把这个姿态的克重算出来」:
+ * 工作室的原话:**「模型旋转不是这样操作,按照业界主流设计,带控制器」**。
+ *
+ * 业界主流(BIM / 三维建模 / 在线建模工具)转模型用的都是**三轴旋转控制器**
+ * —— 模型上套三个彩色圆环,拖着环转。three.js 里有现成的 `TransformControls`
+ * (Blender / Sketchfab 那一套),不用自己搓一个。
  *
  * | 操作 | 效果 |
  * |---|---|
- * | **左键拖** | 转**模型**(改打印姿态:横向 → Z,纵向 → X)—— 支撑克重跟着走 |
+ * | **拖彩色圆环** | 转**模型**(改打印姿态)—— 支撑克重跟着走 |
+ * | 左键拖(空白处) | 转**相机** |
  * | 滚轮 | 缩放(相机) |
  * | 右键拖 | 平移(相机) |
  *
- * 所以 OrbitControls 的左键旋转被**关掉**了 —— 相机转的是「摆着看」,
- * 模型转的是「摆着印」,后者决定支撑克重。两件事别混。
- * (只有接了「拖动改姿态」的回调时才关;没接的话左键还是转相机。)
+ * 拖控制器的时候左键被控制器吃掉了,相机得让开(松手再交回去)—— 否则
+ * 拖环的同时相机也在转,画面跟着抖。
+ *
+ * **转的是模型,不是相机** —— 摆着看(转相机)跟摆着印(转模型)是两件事,
+ * 后者决定支撑克重。控制器挂在**姿态组**上,改的就是那个组的旋转。
  */
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
+import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import {
   parseMtl,
   type TextureUrlMap,
 } from "@/features/pricing/lib/obj-materials";
 import {
   POSE_EULER_ORDER,
-  poseAfterDrag,
   rotatedBBoxMinZ,
 } from "@/features/shared/components/model-viewport/pose";
 import {
@@ -156,22 +163,17 @@ export type ModelViewportProps = {
   /** 当前姿态 —— 不传 = 不转 */
   pose?: ViewportPose | undefined;
   /**
-   * 在预览里**拖动模型**改姿态 —— 回调新的姿态(度)
+   * 在预览里**转模型**改姿态 —— 回调新的姿态(度)
    *
-   * 左键拖 = 转**模型**(改打印姿态),不是转相机:摆着印(转模型)决定
-   * 支撑克重,摆着看(转相机)决定看得清看不清,是两件事。相机那边留给
-   * **滚轮缩放** + **右键拖平移**。
+   * 转的是**模型**(改打印姿态),不是转相机:摆着印(转模型)决定支撑克重,
+   * 摆着看(转相机)决定看得清看不清,是两件事。
    *
-   * 不传这个回调 = 拖动不转模型(相机的左键旋转照旧)。
+   * 触发方式是**拖旋转控制器**(三轴圆环)—— 业界主流那套。相机那边留给
+   * **左键空白处拖动** + **滚轮缩放** + **右键拖平移**。
+   *
+   * 不传这个回调 = 不挂控制器(这个视口也可能被别处拿去只看不动)。
    */
   onPoseChange?: ((pose: ViewportPose) => void) | undefined;
-  /**
-   * 拖动结束 —— 拖的过程中不重算支撑几何,松手了才补算
-   *
-   * 支撑外壳是整套计算里最贵的一块(栅格化 + 距离变换),拖动时每一帧
-   * 都重建一次会卡死。克重数字照常刷新(节流),几何等松手。
-   */
-  onPoseDragEnd?: (() => void) | undefined;
   /**
    * 托底高度 (mm) —— 模型悬在平台上方多远
    *
@@ -304,7 +306,6 @@ export default function ModelViewport({
   fitSignal,
   onReady,
   onPoseChange,
-  onPoseDragEnd,
 }: ModelViewportProps) {
   const t = useTranslations("ModelInspector");
   const tooltipRef = useRef<HTMLDivElement>(null);
@@ -355,21 +356,17 @@ export default function ModelViewport({
   onReadyRef.current = onReady;
   /** 悬停提示文案(事件回调只读 ref,避免每次 pointermove 都跑一遍翻译) */
   const tooltipTextsRef = useRef<Record<string, string>>({});
-  /** 当前姿态 —— 拖动开始那一下要拿它当基准 */
-  const poseRef = useRef<ViewportPose>({ rotX: 0, rotY: 0, rotZ: 0 });
+  /** 旋转控制器 —— 拖环改姿态 */
+  const gizmoRef = useRef<TransformControls | null>(null);
   /** 拖动回调 —— 放进 ref,免得回调换身份就把监听器重挂一遍 */
   const onPoseChangeRef = useRef(onPoseChange);
   onPoseChangeRef.current = onPoseChange;
-  const onPoseDragEndRef = useRef(onPoseDragEnd);
-  onPoseDragEndRef.current = onPoseDragEnd;
   /** 正在拖 —— 悬停提示要躲开(不然一边转模型一边弹问题标签) */
   const draggingRef = useRef(false);
 
   const rotX = pose?.rotX ?? 0;
   const rotY = pose?.rotY ?? 0;
   const rotZ = pose?.rotZ ?? 0;
-  // 每次渲染都同步一份 —— 拖动开始那一下拿到的就是当前姿态
-  poseRef.current = { rotX, rotY, rotZ };
 
   useEffect(() => {
     tooltipTextsRef.current = {
@@ -435,96 +432,27 @@ export default function ModelViewport({
     camera.far = diag * 100;
     camera.updateProjectionMatrix();
     const dir = new THREE.Vector3(1, -1.15, 0.85).normalize();
-    camera.position.copy(center).add(dir.multiplyScalar(diag * 1.7));
+    // 取景距离要**同时照顾竖直和水平**两个方向。
+    //
+    // 只按竖直方向算的话,视口一变成窄高比例(比如进全屏、或者竖屏),
+    // 水平方向就装不下了 —— 模型会被裁掉一半。相机得退到「包围球在两个
+    // 方向上都装得下」的距离。
+    //
+    // **宽高比从画布上量**,别读 `camera.aspect` —— 那是渲染循环里更新的,
+    // 刚切完全屏那一帧它还是旧比例,按旧比例取景就会把模型裁掉一半。
+    const canvas = ctx.renderer.domElement;
+    const aspect =
+      canvas.clientHeight > 0
+        ? canvas.clientWidth / canvas.clientHeight
+        : camera.aspect;
+    const vFov = (camera.fov * Math.PI) / 180;
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * Math.max(aspect, 0.05));
+    const halfMin = Math.min(vFov, hFov) / 2;
+    const dist = Math.max(diag / 2 / Math.sin(halfMin), diag) * 1.3;
+    camera.position.copy(center).add(dir.multiplyScalar(dist));
     controls.target.copy(center);
     controls.update();
   }, []);
-
-  // ---------- 拖动模型改姿态 ----------
-  //
-  // **左键拖 = 转模型**,不是转相机:摆着印(转模型)决定支撑克重。
-  // 相机那边留给滚轮缩放(OrbitControls 自带)+ 右键拖平移(也是自带)。
-  //
-  // 所以接了「拖动改姿态」的回调时,把 OrbitControls 的左键旋转**关掉**
-  // (`mouseButtons.LEFT = null` → OrbitControls 走 default 分支 →
-  // state = NONE,什么都不做),左键改成我们自己的:横向拖转 Z、纵向拖转 X。
-  //
-  // **没接那个回调时左键还是老样子转相机** —— 这个视口也可能被别处拿去
-  // 只看不动。
-  useEffect(() => {
-    const ctx = previewCtx;
-    if (!ctx) return;
-    const el = ctx.renderer.domElement;
-
-    let dragging = false;
-    let startX = 0;
-    let startY = 0;
-    /** 拖动**开始**时的姿态 —— 从这儿累加,中间丢几个事件也不漂 */
-    let base: ViewportPose = { rotX: 0, rotY: 0, rotZ: 0 };
-
-    const onDown = (ev: PointerEvent) => {
-      // 只有左键(触摸也是 button 0)才转模型;右键留给相机平移
-      if (ev.button !== 0) return;
-      if (!onPoseChangeRef.current) return;
-      dragging = true;
-      draggingRef.current = true;
-      startX = ev.clientX;
-      startY = ev.clientY;
-      base = { ...poseRef.current };
-      el.style.cursor = "grabbing";
-      ev.preventDefault();
-    };
-
-    const onMove = (ev: PointerEvent) => {
-      if (!dragging) return;
-      const next = poseAfterDrag(
-        base,
-        ev.clientX - startX,
-        ev.clientY - startY
-      );
-      poseRef.current = next;
-      onPoseChangeRef.current?.(next);
-    };
-
-    const onUp = () => {
-      if (!dragging) return;
-      dragging = false;
-      draggingRef.current = false;
-      el.style.cursor = "";
-      onPoseDragEndRef.current?.();
-    };
-
-    el.addEventListener("pointerdown", onDown);
-    el.addEventListener("pointermove", onMove);
-    el.addEventListener("pointerup", onUp);
-    el.addEventListener("pointercancel", onUp);
-    return () => {
-      el.removeEventListener("pointerdown", onDown);
-      el.removeEventListener("pointermove", onMove);
-      el.removeEventListener("pointerup", onUp);
-      el.removeEventListener("pointercancel", onUp);
-      el.style.cursor = "";
-    };
-  }, [previewCtx]);
-
-  /**
-   * 左键给谁:模型还是相机
-   *
-   * 接了「拖动改姿态」→ 左键转**模型**(打印姿态),相机那边留给滚轮缩放 +
-   * 右键平移。没接 → 左键还是转相机(跟以前一样)。
-   */
-  const hasPoseDrag = Boolean(onPoseChange);
-  useEffect(() => {
-    const ctx = previewCtx;
-    if (!ctx) return;
-    // 左键不再转相机(单指也一样:手机上两根手指才是缩放/平移)
-    ctx.controls.mouseButtons.LEFT = hasPoseDrag
-      ? (null as unknown as THREE.MOUSE)
-      : THREE.MOUSE.ROTATE;
-    ctx.controls.touches.ONE = hasPoseDrag
-      ? (null as unknown as THREE.TOUCH)
-      : THREE.TOUCH.ROTATE;
-  }, [previewCtx, hasPoseDrag]);
 
   // ---------- 场景骨架:模型组 + 姿态组 ----------
   useEffect(() => {
@@ -770,6 +698,81 @@ export default function ModelViewport({
     fitCamera();
     onReadyRef.current?.();
   }, [previewCtx, result, meshPositions, textures, fitCamera]);
+
+  // ---------- 旋转控制器(gizmo) ----------
+  //
+  // 业界主流那套:模型上套三个彩色圆环,拖着环转。three.js 的
+  // `TransformControls` 就是它 —— Blender / Sketchfab 用的同一个。
+  //
+  // 挂在**姿态组**上 —— 姿态组才是「打印姿态」那一份(模型 + 问题边线
+  // 都在里面,`rotation.order = "ZYX"`,跟摆盘算法 / OBJ 导出同一个矩阵)。
+  //
+  // 控制器改的是 **quaternion**,不会顺手更新欧拉角那一栏 —— 得自己按
+  // 仓库口径("ZYX" = 先 X 后 Y 后 Z)分解回去,不然角度条上的数跟画面
+  // 对不上。
+  //
+  // 拖控制器的时候左键被控制器吃掉了,相机得让开 —— 否则拖环的同时相机
+  // 也在转,画面跟着抖。
+  //
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `meshPositions` 是触发条件 —— 换了模型就重建一次控制器,effect 体里不用读它
+  useEffect(() => {
+    const ctx = previewCtx;
+    const poseGroup = poseGroupRef.current;
+    if (!ctx || !poseGroup) return;
+    // 模型还没建好 —— 控制器等它(空场景里挂一圈环没意义)
+    if (!meshRef.current) return;
+    if (!onPoseChangeRef.current) return;
+
+    const tc = new TransformControls(ctx.camera, ctx.renderer.domElement);
+    // 只给「转」—— 打印姿态不该被平移 / 缩放改掉
+    tc.setMode("rotate");
+    // 世界坐标轴 —— 环上那三个轴就是 rotX / rotY / rotZ,跟角度条上的数
+    // 一一对应(绕模型自身的局部轴转的话,数对不上,用户会懵)
+    tc.setSpace("world");
+    tc.size = 0.9;
+    tc.attach(poseGroup);
+    const helper = tc.getHelper();
+    ctx.scene.add(helper);
+
+    const onObjectChange = () => {
+      // 控制器写的是 quaternion —— 分解回仓库口径的欧拉角
+      const e = new THREE.Euler().setFromQuaternion(
+        poseGroup.quaternion,
+        POSE_EULER_ORDER
+      );
+      onPoseChangeRef.current?.({
+        rotX: THREE.MathUtils.radToDeg(e.x),
+        rotY: THREE.MathUtils.radToDeg(e.y),
+        rotZ: THREE.MathUtils.radToDeg(e.z),
+      });
+    };
+    const onMouseDown = () => {
+      draggingRef.current = true;
+      // 相机让开 —— 左键这会儿归控制器
+      ctx.controls.enabled = false;
+    };
+    const onMouseUp = () => {
+      draggingRef.current = false;
+      // 相机让回来 —— 控制器放手了,左键空白处又能转相机了
+      ctx.controls.enabled = true;
+    };
+
+    tc.addEventListener("objectChange", onObjectChange);
+    tc.addEventListener("mouseDown", onMouseDown);
+    tc.addEventListener("mouseUp", onMouseUp);
+    gizmoRef.current = tc;
+
+    return () => {
+      tc.removeEventListener("objectChange", onObjectChange);
+      tc.removeEventListener("mouseDown", onMouseDown);
+      tc.removeEventListener("mouseUp", onMouseUp);
+      tc.detach();
+      ctx.scene.remove(helper);
+      tc.dispose();
+      gizmoRef.current = null;
+    };
+    // `meshPositions` 变了 = 换了个模型 —— 控制器重建一次
+  }, [previewCtx, meshPositions]);
 
   // ---------- 支撑几何 ----------
   //

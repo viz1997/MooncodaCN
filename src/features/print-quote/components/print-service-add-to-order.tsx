@@ -39,7 +39,10 @@ import { ArrowRight, Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useState } from "react";
 
-import type { PricingModelPayload } from "@/features/pricing/components/pricing-calculator-types";
+import type {
+  EnsureSupportFn,
+  PricingModelPayload,
+} from "@/features/pricing/components/pricing-calculator-types";
 import type { PrintQuoteInput } from "@/features/print-quote/lib/quote-types";
 import { uploadModelFile } from "@/features/print-quote/lib/upload-model";
 import { usePrintCart } from "@/features/storefront/hooks/use-print-cart";
@@ -51,6 +54,17 @@ export type PrintServiceAddToOrderProps = {
   model: PricingModelPayload | null;
   /** 计算器抛出来的几何 + 支撑 —— 服务端按这组数重算报价 */
   input: PrintQuoteInput | null;
+  /**
+   * 「按当前姿态把支撑算出来」—— 加购之前要 await 它
+   *
+   * 支撑**不跟随角度实时重算**(工作室 2026-11-07 的口径):用户把角度摆定
+   * 之后点「包裹支撑」才算一次。用户没点过那颗按钮就直接加购的话,这里
+   * 现算一次 —— 服务端按 `supportWeightG` 重算报价,少了它支撑费会算成 0
+   * (收少了钱)。
+   *
+   * 已经算过就返回现成的,不重算。
+   */
+  ensureSupport?: EnsureSupportFn;
   /** 登录了吗 —— 没登录不能加打印单 */
   isLoggedIn: boolean;
   /** 登录链接(带 callbackUrl,登录完回到工具页) */
@@ -60,6 +74,7 @@ export type PrintServiceAddToOrderProps = {
 export function PrintServiceAddToOrder({
   model,
   input,
+  ensureSupport,
   isLoggedIn,
   signInUrl,
 }: PrintServiceAddToOrderProps) {
@@ -89,11 +104,28 @@ export function PrintServiceAddToOrder({
     setPhase("adding");
 
     try {
+      /**
+       * 支撑克重 —— 服务端重算报价要这个数
+       *
+       * 支撑不跟随角度实时重算(用户点「包裹支撑」才算),所以用户可能
+       * 没点过那颗按钮就直接加购了。这里现算一次 —— 少了它,服务端的
+       * `input.supportWeightG ?? 0` 会把支撑费算成 0(收少了钱)。
+       *
+       * **算不出来就不加** —— 宁可让用户重试一次,也不能收少了钱。
+       * 拿几何原样过去看着像「加成功了」,但支撑费是 0。
+       */
+      const fresh = ensureSupport ? await ensureSupport() : input;
+      if (!fresh) {
+        setError(t("printOrder.errors.supportUnavailable"));
+        setPhase("idle");
+        return;
+      }
+
       // 模型文件在这里才离开浏览器 —— 量重量的过程一个字节都没传
       const uploaded = await uploadModelFile(model);
 
       await addPrintLine.mutateAsync({
-        printSpec: buildPrintServiceSpecFromGeometry(input, {
+        printSpec: buildPrintServiceSpecFromGeometry(fresh, {
           fileName: uploaded.fileName,
           objectKey: uploaded.objectKey,
           url: uploaded.url,
@@ -108,7 +140,7 @@ export function PrintServiceAddToOrder({
       setError(t("printOrder.errors.addFailed"));
       setPhase("idle");
     }
-  }, [model, input, t, addPrintLine, router]);
+  }, [model, input, ensureSupport, t, addPrintLine, router]);
 
   return (
     <div className="rounded-lg border border-border bg-card">
