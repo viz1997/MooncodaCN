@@ -51,7 +51,7 @@ export type ExportOptions = {
 
 /**
  * Rotate a single vertex (x, y, z) by base -90° X + rotX° X + rotY° Y + rotZ° Z,
- * matching the visualization rotation used in ObjViewer (Z-up, no base rotation).
+ * matching the visualization rotation used in the 3D viewport (Z-up, no base rotation).
  *
  * Returns the transformed [x', y', z'] in Z-up space (same as OBJ original).
  */

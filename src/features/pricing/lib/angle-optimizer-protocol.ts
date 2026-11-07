@@ -37,6 +37,14 @@ export type AngleWorkerIn =
       rotZ: number;
       scales: [number, number, number];
       params: SupportParams;
+      /**
+       * 顺带回传**画出来的**支撑几何(外壳 / 顶面 / 外壁 / 底板留边)
+       *
+       * 3D 预览画的那圈支撑必须跟算克重的是同一块几何 —— 所以渲染用的
+       * 外壳在算体积的**同一次调用**里建出来。只有真要画的时候才要
+       * (摆盘搜索 625 个姿态不传,省掉大半开销)。
+       */
+      withShell?: boolean | undefined;
     }
   /** 智能摆盘:搜索支撑克重最小的姿态 */
   | {

@@ -695,9 +695,10 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 - **三个视角** —— 视角切换条在**上传模式**里(手动尺寸 / 批量模式没有模型,
   摆不了)。`check` / `weight` / `pose` 三个 tab,`WorkspaceTab` 类型在
   `pricing/components/model-settings-panel.tsx`。
-  - **检查** —— 整块**替换**两栏布局(`ModelCheckPanel` 有自己那套深色
-    视口 + 侧栏,塞进两栏会被挤扁)。它只在切到这个 tab 时才挂载 ⇒ 分析器
-    不在后台偷偷跑。
+  - **检查** —— 整块**替换**两栏布局(`ModelCheckPanel` 有自己那套侧栏,
+    塞进两栏会被挤扁)。它只在切到这个 tab 时才挂载 ⇒ 分析器
+    不在后台偷偷跑。3D 视口跟另外两个视角**共用同一份**(见下面
+    「共用一份 3D 视口」)。
   - **克重** —— 右栏三个数(耗材 / 支撑 / 总)+ 尺寸调节 + 下单出口。
   - **摆盘** —— 智能摆盘结果。没跑过摆盘就摆**当前姿态**(初始角度 0°,0°)
     的样子 + 一句提示(这一栏空着的话用户会以为坏了)。
@@ -782,8 +783,8 @@ dragover → 遮罩出现 → 指针落在**它自己**身上
   共用**同一份栅格**(原点 / 栅格尺寸 / 留边宽度)。外扩走欧氏距离(距离变换
   + 半格修正),不是八邻域。画出来的那一圈 = 「外扩了但没被模型覆盖」的
   格子,跟算进克重的底板占地**逐格相同**。
-- **两个视角都画** —— 检查视角(`model-check/viewport.tsx`,绿 `#2f7255`)
-  和克重视角(`pricing/components/obj-viewer.tsx`,灰 `0xcbd5e1`)。都是平在
+- **两个视角都画** —— 检查视角和克重视角**现在共用一份视口**
+  (`shared/components/model-viewport/`),画法当然一样:绿 `#2f7255`,平在
   平台平面上、`depthWrite: false` + MAX 混合,不跟平台投影打架。
 - **默认关** —— `buildSupportShell` 的 `includeBaseRing` 默认 **false**:
   摆盘搜索一次要建 625 个外壳,每个都做一遍外扩太贵。只在真要画的那两条路
@@ -793,6 +794,55 @@ dragover → 遮罩出现 → 指针落在**它自己**身上
 - **行为由单测守住** —— `src/test/tools/pure/support-shell.test.ts` 的
   「底板留边那一圈」那组:画出来的面积 == `supportAreaMM2 − footprintAreaMM2`
   (算出来的底板占地),环平铺在平台平面上,默认关,留边 0 时为空。
+
+#### 共用一份 3D 视口(2026-11-07)
+
+工作室的原话:**「克重也用检查的3d预览」** + **「需要支持角度调整」**。
+
+以前有**两个**预览:模型检查那一套深色视口(`tools/components/model-check/
+viewport.tsx`)和克重那一套浅色视口(`pricing/components/obj-viewer.tsx`)。
+两套代码、两套相机、两套材质 —— 同一模型在两个视角里长得不一样,支撑的画法
+也不一样(一个是「画出来的近似」,一个是「算出来的那块」)。
+
+现在**只有一份**:`src/features/shared/components/model-viewport/`。
+两个老文件都删了(别有人从老文件里抄回去)。
+
+```
+shared/components/model-viewport/
+├── model-viewport.tsx   # 视口本体(三个视角共用)
+├── pose.ts              # 姿态旋转的纯实现(不碰 three.js)
+└── index.ts
+```
+
+- **支撑几何由外面传进来** —— `supportShell` 是摆盘 Worker 算完姿态时
+  **同一块**几何(外壳 / 顶面 / 外壁 / 底板留边)。`computeSupportAtPose()`
+  的 `opts.withShell` 开关让它**在算体积的同一次调用里**把渲染用的外壳
+  一起建出来 —— 画出来的那圈支撑就是算克重的那块支撑,不是「照着算出来的
+  样子再画一遍」。`includeCurtain` / `includeTopIndex` / `includeBaseRing`
+  都跟着这个开关 —— 不画的时候不建(摆盘搜索一次 625 个姿态,每个都建一遍
+  太贵)。
+- **姿态是变换,不是重算** —— 模型和问题边线装在一个**姿态组**里,改角度
+  只改组的旋转,几何不重建 —— 拖滑块时不会卡。three.js 的
+  `rotation.order = "ZYX"`(Rz·Ry·Rx = 先 X 后 Y 后 Z),跟摆盘算法
+  (`rotateSupportMesh`)、OBJ 导出(`obj-exporter.rotateVertex`)**同一个
+  矩阵**。`pose.ts` 里的纯实现跟 `rotateSupportMesh` 对着算过(单元测试
+  逐点比)。
+- **支撑几何不进姿态组** —— 外面传进来的支撑已经是**转好姿态**的坐标,
+  再转一次就转过了。模型 + 问题边线在姿态组里,支撑挂在模型组上。
+- **平台高度有两个来源** —— 有外壳时用外壳自己的 `groundZ`(那是算支撑
+  体积时用的平台平面,画面跟数字落在同一个平面上);没有外壳时(Worker 还没
+  回话)用模型自己的最低点 + 托底高度,最低点按**旋转后**的包围盒算。
+- **分析器只在「检查」那一栏跑** —— 克重 / 摆盘视角传 `result = null`,
+  问题着色那一层压根不画,分析器也不在后台偷偷跑。
+- **克重视角变深色了** —— 视口统一用 `ObjPreview` 的 `mode="inspect"`
+  (深底)。预览区底色、加载遮罩、浮层控制条都跟着改成深色那一套。
+- **丢了的东西** —— 老 `ObjViewer` 里的包围盒标注、X/Y/Z 轴标注和浅色
+  HTML 浮层没了;右栏的 X/Y/Z 尺寸仍然有(`DimDisplay` / `DimEditor`)。
+  补了一颗「重置视角」按钮(跟检查那一栏顶栏那颗同一个作用)。
+- **行为由单测守住** ——
+  | 测试 | 守住什么 |
+  |---|---|
+  | `src/test/tools/pure/shared-viewport.test.ts` | 三个视角 import 的是同一个 `ModelViewport` / 老的两份视口文件删了 / 支撑几何来自 Worker 的同一块(`withShell`)/ 姿态组跟模型组的成员划分 / 旋转顺序跟 `rotateSupportMesh` 逐点相同 |
 
 ### 打印定价后台(2026-11-06)
 

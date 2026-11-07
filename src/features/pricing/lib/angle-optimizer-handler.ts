@@ -76,7 +76,8 @@ export function handleAngleWorkerMessage(
         msg.rotX,
         msg.rotY,
         msg.rotZ,
-        msg.params
+        msg.params,
+        { withShell: msg.withShell === true }
       );
       post({ type: "pose", seq: msg.seq, result });
       return;

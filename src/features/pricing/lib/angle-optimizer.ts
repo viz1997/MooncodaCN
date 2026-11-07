@@ -71,6 +71,7 @@ import {
   rotateSupportMesh,
   type SupportModel,
 } from "@/features/tools/lib/mesh/support-shell";
+import type { SupportShellData } from "@/features/tools/lib/mesh/types";
 
 export type OptimalAngle = {
   /** 绕 X 轴旋转角度（度） */
@@ -196,6 +197,16 @@ export type SupportPoseResult = {
   supportAreaMM2: number;
   /** 旋转后的模型高度 (mm) */
   rotatedHeightMM: number;
+  /**
+   * **画出来的**那圈支撑几何(外壳 / 顶面 / 外壁 / 底板留边)
+   *
+   * 3D 预览画的那圈支撑必须跟算克重的那块支撑是**同一块几何** —— 所以
+   * 渲染用的外壳跟算体积用的外壳在同一次调用里建出来,不是各建一遍。
+   *
+   * 只有要画的时候才建(摆盘搜索 625 个姿态时不建,省掉大半开销),
+   * 所以它是可选的。
+   */
+  shell?: SupportShellData | undefined;
 };
 
 /**
@@ -225,6 +236,10 @@ export function totalSurfaceAreaMM2(model: SupportModel): number {
  *   默认取 `params.baseMarginMm`,再退回 `SUPPORT_BASE_MARGIN_MM`(5)。
  *   工作室的工艺:底板比模型大一圈。
  * @param opts.coloredFaceMask 每个面的彩色标记(1 = 有贴图)
+ * @param opts.withShell 顺带把**画出来的**支撑几何带回去(外壳 / 顶面 /
+ *   外壁 / 底板留边)。3D 预览画的那圈支撑必须跟算克重的是同一块几何 ——
+ *   渲染用的外壳跟算体积用的外壳在**同一次调用**里建出来,不是各建一遍。
+ *   摆盘搜索(625 个姿态)不传,省掉大半开销。
  */
 export function computeSupportAtPose(
   model: SupportModel,
@@ -236,6 +251,7 @@ export function computeSupportAtPose(
     gridSizeMM?: number | undefined;
     baseMarginMM?: number | undefined;
     coloredFaceMask?: Uint8Array | null | undefined;
+    withShell?: boolean | undefined;
   }
 ): SupportPoseResult {
   const rotated = rotateSupportMesh(model.mesh, rotXDeg, rotYDeg, rotZDeg);
@@ -246,10 +262,16 @@ export function computeSupportAtPose(
   // 同一份,否则外壳画的跟算出来的对不上。
   const liftMm = params.liftMm;
   const baseMarginMM = opts?.baseMarginMM ?? params.baseMarginMm;
+  const withShell = opts?.withShell === true;
   const shell = buildSupportShell(rotated, model.faceEnclosed, {
-    includeCurtain: false,
-    includeTopIndex: false,
+    includeCurtain: withShell,
+    includeTopIndex: withShell,
     liftMm,
+    baseMarginMM,
+    // 底板那一圈的栅格跟算体积用的是**同一个** —— 差半格到几格的话,
+    // 画出来的底板跟算进去的底板就对不上了。
+    gridSizeMM: opts?.gridSizeMM,
+    includeBaseRing: withShell,
   });
   const volume = computeSupportVolume(shell, rotated, {
     gridSizeMM: opts?.gridSizeMM,
@@ -290,6 +312,7 @@ export function computeSupportAtPose(
     projectedAreaMM2: volume.footprintAreaMM2,
     supportAreaMM2: volume.supportAreaMM2,
     rotatedHeightMM: rotated.bboxMax[2] - rotated.bboxMin[2],
+    shell: withShell ? shell : undefined,
   };
 }
 

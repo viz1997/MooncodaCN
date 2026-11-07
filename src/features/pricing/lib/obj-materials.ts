@@ -14,7 +14,7 @@
  *
  * ## 与 viewer 的配合
  *
- * `obj-viewer.tsx` / 模型检查工具的 viewport 拿到本模块的产物后,
+ * 共用的 model-viewport 拿到本模块的产物后,
  * 会把 `map_kd` / `map_ks` / `norm` 三个字段**替换成 blob URL**,
  * 再交给 `MTLLoader.preload()` 同步建材质(贴图异步载入)。
  * 因此这里解析出来的指令名必须与 `MTLLoader` 的字段名一一对应。

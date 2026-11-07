@@ -47,6 +47,13 @@ export type AnglePoseQuery = {
   rotZ: number;
   scales: [number, number, number];
   params: SupportParams;
+  /**
+   * 顺带要**画出来的**支撑几何(外壳 / 顶面 / 外壁 / 底板留边)
+   *
+   * 3D 预览画的那圈支撑跟算克重的是同一块几何 —— 渲染用的外壳在算体积的
+   * 同一次调用里建出来。只有当前姿态要画的时候才传 true。
+   */
+  withShell?: boolean | undefined;
 };
 
 /** 智能摆盘搜索参数 */
@@ -288,6 +295,7 @@ export class AngleOptimizerClient {
             rotZ: query.rotZ,
             scales: query.scales,
             params: query.params,
+            withShell: query.withShell === true,
           },
           undefined,
           this.timeouts.pose
@@ -310,7 +318,8 @@ export class AngleOptimizerClient {
       query.rotX,
       query.rotY,
       query.rotZ,
-      query.params
+      query.params,
+      { withShell: query.withShell === true }
     );
   }
 

@@ -46,6 +46,11 @@ import {
 } from "@/features/pricing/lib/model-units";
 import type { ModelFile } from "@/features/pricing/lib/zip-extractor";
 import type { ClientPrintConfig } from "@/features/print-quote/lib/pricing-settings";
+import {
+  type MeshTextureInfo,
+  ModelViewport,
+  type ViewportVisibility,
+} from "@/features/shared/components/model-viewport";
 import { useDropZone } from "@/features/shared/hooks/use-drop-zone";
 import {
   ISSUE_COLORS,
@@ -54,10 +59,6 @@ import {
 } from "@/features/tools/lib/mesh/types";
 import Sidebar from "./sidebar";
 import { useAnalyzer } from "./use-analyzer";
-import Viewport, {
-  type MeshTextureInfo,
-  type ViewportVisibility,
-} from "./viewport";
 
 /**
  * 图层默认开关:对应参考软件检测面板
@@ -292,7 +293,7 @@ export function ModelCheckPanel({
           className="relative order-1 h-[48vh] min-h-[300px] flex-1 md:order-2 md:h-auto"
           {...dropHandlers}
         >
-          <Viewport
+          <ModelViewport
             result={result}
             meshPositions={positions}
             textures={textures}

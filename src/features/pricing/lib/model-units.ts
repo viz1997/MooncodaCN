@@ -170,7 +170,7 @@ export function scalePositions(
  *
  * 打印前工作台的「检查」栏要画的是**缩放后**的模型(支撑外壳的平台平面是
  * 绝对毫米值,不跟着缩放走),所以它拿到的必须是这份按轴缩放过的几何 ——
- * 跟克重工具 3D 预览里那份(`ObjViewer` 的 `scale`)是同一个数。
+ * 跟克重工具 3D 预览里那份(共用的 model-viewport)是同一个数。
  */
 export function scalePositionsXYZ(
   positions: Float32Array,

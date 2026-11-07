@@ -522,6 +522,9 @@ export function PricingCalculator({
             rotZ: manualRotZ,
             scales: [sx, sy, sz],
             params: supportParams,
+            // 顺带回传**画出来的**那块支撑几何 —— 3D 预览画的那圈支撑
+            // 必须跟算克重的是同一块(外壳在算体积的同一次调用里建出来)。
+            withShell: true,
           }),
           needOriginal
             ? client.pose("main", {
@@ -862,8 +865,9 @@ export function PricingCalculator({
   /**
    * 切换工作台视角
    *
-   * 「检查」视角没有 `ObjViewer`(它有自己的深色视口),所以预览的「就绪」
-   * 状态要照旧置上 —— 否则「导出模型」那几颗按钮会一直灰着。
+   * 「检查」视角整块换成它自己那一套(深色视口 + 侧栏),预览不在这条路上 ——
+   * 所以切过去时预览的「就绪」状态要照旧置上,否则「导出模型」那几颗按钮
+   * 会一直灰着。
    */
   const handleTabChange = useCallback(
     (next: WorkspaceTab) => {
@@ -1756,7 +1760,6 @@ export function PricingCalculator({
                     showSupport={showSupport}
                     onToggleSupport={() => setShowSupport((s) => !s)}
                     supportLiftMm={clientConfig?.supportLiftMm}
-                    supportBaseMarginMm={clientConfig?.supportBaseMarginMm}
                     showTexture={showTexture}
                     onToggleTexture={() => setShowTexture((s) => !s)}
                     onClearModel={clearModel}
@@ -1764,7 +1767,6 @@ export function PricingCalculator({
                       setLoadStatus("ready");
                       setLoadPercent(100);
                     }}
-                    onViewerProgress={(p) => setLoadPercent(p)}
                   />
                   <input
                     ref={fileInputRef}

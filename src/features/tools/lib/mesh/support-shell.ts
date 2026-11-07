@@ -96,8 +96,8 @@ export interface SupportMesh {
  * 托底那层也是支撑材料(打印完一起洗掉),要算进支撑克重 —— 占地就是模型
  * 的投影面积,一个 40×40mm 的手办光托底就 8cm³(5mm 厚)。
  *
- * 这个高度同时决定 3D 预览里模型离平台多远(`obj-viewer.tsx` /
- * `model-check/viewport.tsx` 都直接用这个常量)—— 改了这里,画面跟着变。
+ * 这个高度同时决定 3D 预览里模型离平台多远(共用的
+ * `shared/components/model-viewport` 直接用这个常量)—— 改了这里,画面跟着变。
  */
 export const SUPPORT_LIFT_MM = 5;
 

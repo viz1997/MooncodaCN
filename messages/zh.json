@@ -1212,7 +1212,9 @@
       "support": "包裹支撑",
       "supportTitle": "显示包裹模型的半透明支撑外壳、平台占地区域,以及平台到模型之间全部的支撑材料填充(WJP 逐层喷射不存在悬空,打印后水洗去除)",
       "supportInfo": "支撑比例 {ratio}% · {weight} g",
-      "supportPending": "加载模型后计算支撑比例"
+      "supportPending": "加载模型后计算支撑比例",
+      "resetView": "重置视角",
+      "resetViewTitle": "把相机摆回默认位置"
     },
     "axis": {
       "length": "长 X",

@@ -34,10 +34,9 @@ import type { ReactNode } from "react";
  * i18n 沿用 `MaterialPricing.dialog.*` 命名空间（文案与旧弹窗一致），只是
  * 调用位置从弹窗换成了面板 —— 整个命名空间的重命名留给单独的清理。
  */
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { ObjViewer } from "@/features/pricing/components/obj-viewer";
 import {
   AngleInput,
   DimDisplay,
@@ -48,8 +47,15 @@ import type {
   OptimalAngle,
   SupportPoseResult,
 } from "@/features/pricing/lib/angle-optimizer";
-import type { ModelUnitCheck } from "@/features/pricing/lib/model-units";
+import {
+  type ModelUnitCheck,
+  scalePositionsXYZ,
+} from "@/features/pricing/lib/model-units";
 import type { ModelFile } from "@/features/pricing/lib/zip-extractor";
+import {
+  type MeshTextureInfo,
+  ModelViewport,
+} from "@/features/shared/components/model-viewport";
 
 export type LoadStatus =
   | "idle"
@@ -217,13 +223,6 @@ export type ModelSettingsPanelProps = {
    */
   supportLiftMm?: number | undefined;
   /**
-   * 底板留边 (mm) —— 3D 预览里底板比模型轮廓四周各留多宽
-   *
-   * 不传 = `SUPPORT_BASE_MARGIN_MM`(5mm)。**2026-11-06 起跟随后台**
-   * (`/admin/print-pricing`)—— 画面跟报价必须用同一个值。
-   */
-  supportBaseMarginMm?: number | undefined;
-  /**
    * 是否显示模型自带的贴图 —— 与检测工具的「显示贴图」开关同一套行为:
    * 关掉就是纯色(MTL 的 `Kd` 本色)视图。
    */
@@ -232,7 +231,6 @@ export type ModelSettingsPanelProps = {
 
   onClearModel: () => void;
   onViewerReady: () => void;
-  onViewerProgress: (p: number) => void;
 };
 
 export function ModelSettingsPanel({
@@ -280,14 +278,15 @@ export function ModelSettingsPanel({
   showSupport,
   onToggleSupport,
   supportLiftMm,
-  supportBaseMarginMm,
   showTexture,
   onToggleTexture,
   onClearModel,
   onViewerReady,
-  onViewerProgress,
 }: ModelSettingsPanelProps) {
   const t = useTranslations("MaterialPricing");
+
+  /** 重置视角的信号 —— 视口每次看见新信号就把相机摆回默认位置 */
+  const [fitSignal, setFitSignal] = useState(0);
 
   /** 当前生效的缩放因子（XYZ）—— 由父组件持有的尺寸状态推导 */
   const scales = useMemo((): [number, number, number] => {
@@ -295,6 +294,31 @@ export function ModelSettingsPanel({
     if (uniformScale) return [scaleFactor, scaleFactor, scaleFactor];
     return [scaleX, scaleY, scaleZ];
   }, [dimMode, uniformScale, scaleFactor, scaleX, scaleY, scaleZ]);
+
+  /**
+   * 缩放后的几何 —— 3D 预览画的就是这一份
+   *
+   * 跟算支撑克重用的是**同一个** `scalePositionsXYZ`(检查视角也是它)——
+   * 画面上的模型跟右栏那个克重是同一个尺寸。
+   */
+  const scaledPositions = useMemo((): Float32Array | null => {
+    const raw = model?.parseResult.positions;
+    if (!raw) return null;
+    return scalePositionsXYZ(raw, scales);
+  }, [model, scales]);
+
+  /** 贴图与材质分组 —— 全部来自同一个 `ModelFile`（不用再解析一遍 OBJ） */
+  const textures = useMemo((): MeshTextureInfo | null => {
+    if (!model) return null;
+    const r = model.parseResult;
+    return {
+      uvs: r.uvs ?? null,
+      materialNames: r.materialNames ?? [],
+      materialIndex: r.materialIndex ?? null,
+      mtlText: model.mtlText ?? null,
+      textureUrls: model.textureUrls ?? null,
+    };
+  }, [model]);
 
   /** 切换「统一缩放」：开时取 XYZ 缩放的几何平均，关时把三轴拉到同一值 */
   const toggleUniformScale = (checked: boolean) => {
@@ -523,32 +547,36 @@ export function ModelSettingsPanel({
                   </div>
                 )}
 
-                {/* 预览区 —— 页面内布局给固定高度（弹窗里靠 flex-1 撑开） */}
-                <div className="relative h-[300px] sm:h-[360px] lg:h-[420px] bg-stone-100">
-                  <ObjViewer
-                    objText={model.objText}
-                    mtlText={model.mtlText}
-                    textureBlobUrl={model.previewUrl}
-                    textureUrls={model.textureUrls}
-                    dims={geometry.dims}
-                    rotationX={viewerRotX}
-                    rotationY={viewerRotY}
-                    rotationZ={viewerRotZ}
-                    scale={dimMode === "custom" ? scales : 1}
-                    showSupport={showSupport}
-                    supportLiftMm={supportLiftMm}
-                    supportBaseMarginMm={supportBaseMarginMm}
+                {/* 预览区 —— 页面内布局给固定高度（弹窗里靠 flex-1 撑开）
+                    底色跟「检查」那一栏一样是深色 —— 同一个视口组件,
+                    两处必须长得一样。 */}
+                <div className="relative h-[300px] sm:h-[360px] lg:h-[420px] bg-[#111418]">
+                  {/* 克重 / 摆盘两个视角用的是**检查那一套**视口 ——
+                      同一个模型、同一个相机、同一套画法。 */}
+                  <ModelViewport
+                    result={null}
+                    meshPositions={scaledPositions}
+                    textures={textures}
                     showTexture={showTexture}
+                    showSupport={showSupport}
+                    supportShell={poseSupport?.shell ?? null}
+                    pose={{
+                      rotX: viewerRotX,
+                      rotY: viewerRotY,
+                      rotZ: viewerRotZ,
+                    }}
+                    supportLiftMm={supportLiftMm}
+                    focusRequest={null}
+                    fitSignal={fitSignal}
                     onReady={onViewerReady}
-                    onProgress={onViewerProgress}
                   />
                   {loadStatus === "loading-3d" && (
-                    <div className="absolute inset-0 bg-stone-100/80 backdrop-blur-sm flex flex-col items-center justify-center text-xs text-stone-500 pointer-events-none">
-                      <div className="size-10 rounded-full bg-amber-100 flex items-center justify-center mb-2">
-                        <Loader2 className="size-5 text-amber-600 animate-spin" />
+                    <div className="absolute inset-0 bg-[#111418]/85 backdrop-blur-sm flex flex-col items-center justify-center text-xs text-zinc-400 pointer-events-none">
+                      <div className="size-10 rounded-full bg-amber-500/15 flex items-center justify-center mb-2">
+                        <Loader2 className="size-5 text-amber-400 animate-spin" />
                       </div>
                       <span>{loadProgress || t("dialog.loadingPreview")}</span>
-                      <div className="mt-2 w-32 h-1 bg-stone-200 rounded-full overflow-hidden">
+                      <div className="mt-2 w-32 h-1 bg-zinc-800 rounded-full overflow-hidden">
                         <div
                           className="h-full bg-amber-500 rounded-full transition-all duration-300"
                           style={{ width: `${Math.max(5, loadPercent)}%` }}
@@ -562,7 +590,7 @@ export function ModelSettingsPanel({
                   外加支撑比例 —— 比例是「支撑克重 ÷ 本体克重」,
                   跟右栏克重面板里的算法是同一份数据。 */}
                   {loadStatus === "ready" && (
-                    <div className="pointer-events-auto absolute bottom-3 left-1/2 z-10 flex max-w-[95%] -translate-x-1/2 flex-wrap items-center justify-center gap-1.5 rounded-lg border border-stone-300 bg-white/90 px-2.5 py-1.5 shadow-sm backdrop-blur">
+                    <div className="pointer-events-auto absolute bottom-3 left-1/2 z-10 flex max-w-[95%] -translate-x-1/2 flex-wrap items-center justify-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900/90 px-2.5 py-1.5 shadow-xl backdrop-blur">
                       {hasTexture && (
                         <button
                           type="button"
@@ -571,8 +599,8 @@ export function ModelSettingsPanel({
                           onClick={onToggleTexture}
                           className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${
                             showTexture
-                              ? "bg-amber-50 text-amber-700"
-                              : "text-stone-500 hover:text-stone-700"
+                              ? "bg-amber-500/15 text-amber-300"
+                              : "text-zinc-500 hover:text-zinc-300"
                           }`}
                         >
                           <Palette className="size-3.5" />
@@ -586,22 +614,32 @@ export function ModelSettingsPanel({
                         onClick={onToggleSupport}
                         className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${
                           showSupport
-                            ? "bg-amber-50 text-amber-700"
-                            : "text-stone-500 hover:text-stone-700"
+                            ? "bg-amber-500/15 text-amber-300"
+                            : "text-zinc-500 hover:text-zinc-300"
                         }`}
                       >
                         <Shell className="size-3.5" />
                         {t("preview.support")}
                       </button>
+                      {/* 重置视角 —— 跟「检查」那一栏顶栏那颗同一个作用 */}
+                      <button
+                        type="button"
+                        title={t("preview.resetViewTitle")}
+                        onClick={() => setFitSignal((v) => v + 1)}
+                        className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-zinc-500 transition-colors hover:text-zinc-300"
+                      >
+                        <RotateCcw className="size-3.5" />
+                        {t("preview.resetView")}
+                      </button>
                       {poseSupport ? (
-                        <span className="font-mono text-[10px] text-stone-500">
+                        <span className="font-mono text-[10px] text-zinc-500">
                           {t("preview.supportInfo", {
                             ratio: Math.round(supportRatio * 100),
                             weight: Math.ceil(poseSupport.supportWeightG),
                           })}
                         </span>
                       ) : (
-                        <span className="text-[10px] text-stone-400">
+                        <span className="text-[10px] text-zinc-400">
                           {t("preview.supportPending")}
                         </span>
                       )}

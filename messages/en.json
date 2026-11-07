@@ -1215,7 +1215,9 @@
       "support": "Wrap-around support",
       "supportTitle": "Shows the translucent support shell wrapped around the model, the platform footprint, and all the support material between platform and model (WJP jets layer by layer, so there is no overhang to support; the support is washed off after printing)",
       "supportInfo": "Support {ratio}% · {weight} g",
-      "supportPending": "The support ratio appears once a model is loaded"
+      "supportPending": "The support ratio appears once a model is loaded",
+      "resetView": "Reset view",
+      "resetViewTitle": "Put the camera back to its default position"
     },
     "axis": {
       "length": "L X",
