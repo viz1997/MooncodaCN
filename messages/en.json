@@ -1184,8 +1184,7 @@
     },
     "tabs": {
       "check": "Check",
-      "weight": "Weight",
-      "pose": "Pose"
+      "weight": "Weight"
     },
     "angle": {
       "best": "Best orientation X {x}° Y {y}° Z {z}°",
@@ -1218,7 +1217,11 @@
       "supportInfo": "Support {ratio}% · {weight} g",
       "supportPending": "The support ratio appears once a model is loaded",
       "resetView": "Reset view",
-      "resetViewTitle": "Put the camera back to its default position"
+      "resetViewTitle": "Put the camera back to its default position",
+      "fullscreen": "Fullscreen",
+      "fullscreenTitle": "Fill the screen with the whole workbench (header / view switcher / info column / 3D viewport)",
+      "exitFullscreen": "Exit fullscreen",
+      "exitFullscreenTitle": "Exit fullscreen"
     },
     "axis": {
       "length": "L X",

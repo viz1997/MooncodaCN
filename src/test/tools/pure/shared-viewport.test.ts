@@ -2,7 +2,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  DRAG_DEG_PER_PX,
   POSE_EULER_ORDER,
+  poseAfterDrag,
   rotatedBBoxMinZ,
   rotatePointXYZ,
 } from "@/features/shared/components/model-viewport/pose";
@@ -36,7 +38,7 @@ import { boxTriangles } from "@/test/tools/fixtures/mesh-fixtures";
  *
  * | 守卫 | 为什么 |
  * |---|---|
- * | 克重 / 摆盘 / 检查都 import 同一个 `ModelViewport` | 又冒出第二个预览 |
+ * | 克重 / 检查都 import 同一个 `ModelViewport` | 又冒出第二个预览 |
  * | 老的两份视口文件删掉了 | 有人从老文件里抄回去 |
  * | 支撑几何是摆盘 Worker 算完姿态时**同一块**几何 | 画面上画的跟算克重的不是同一块 |
  * | 视口的旋转顺序 = 摆盘算法的旋转顺序 | 画面转到 30°,克重还是躺着算的 |
@@ -72,8 +74,8 @@ const CHECK_PANEL =
 const ANGLE_OPTIMIZER = "src/features/pricing/lib/angle-optimizer.ts";
 const PROTOCOL = "src/features/pricing/lib/angle-optimizer-protocol.ts";
 
-describe("共用视口 —— 三个视角用的是同一个组件", () => {
-  it("克重 / 摆盘那一栏 import 的是共享视口", () => {
+describe("共用视口 —— 两个视角用的是同一个组件", () => {
+  it("克重那一栏 import 的是共享视口", () => {
     const code = stripComments(read(SETTINGS_PANEL));
 
     expect(code).toContain(
@@ -160,12 +162,26 @@ describe("共用视口 —— 支撑几何来自摆盘 Worker 的同一块", () 
     expect(code).toContain("supportShell={poseSupport?.shell ?? null}");
   });
 
-  it("当前姿态的支撑计算顺带回传画出来的那块几何", () => {
+  it("当前姿态的支撑计算顺带回传画出来的那块几何(只在真要画的时候)", () => {
     const code = stripComments(read(CALCULATOR));
 
-    // `withShell: true` —— 外壳在**算体积的同一次调用**里建出来,
-    // 画出来的那圈支撑就是算克重的那块支撑。
-    expect(code).toContain("withShell: true");
+    // 外壳在**算体积的同一次调用**里建出来 —— 画出来的那圈支撑就是算克重
+    // 的那块支撑。但**只在真要画的时候才建**:
+    //  - 「显示支撑」关着 → 不建(默认就是关的)
+    //  - 正在拖动 → 不建(那块几何最贵,拖完由 `poseSettleTick` 补算)
+    expect(code).toContain(
+      "withShell: showSupport && !poseDraggingRef.current"
+    );
+  });
+
+  it("支撑默认**不画**(用户没点「包裹支撑」之前不建那块几何)", () => {
+    const code = stripComments(read(CALCULATOR));
+
+    // 支撑外壳是整套计算里最贵的一块几何 —— 用户没主动要「看看支撑长什么
+    // 样子」之前不该替他算。**数字照样有**(支撑克重跟外壳是两回事)。
+    expect(code).toMatch(
+      /const \[showSupport, setShowSupport\] = useState\(false\)/
+    );
   });
 
   it("Worker 那头认这个开关,并且把外壳带回来", () => {
@@ -184,6 +200,59 @@ describe("共用视口 —— 支撑几何来自摆盘 Worker 的同一块", () 
     // `includeBaseRing` / `includeCurtain` 只在真的要画的时候才打开
     expect(optimizer).toContain("includeBaseRing: withShell");
     expect(optimizer).toContain("includeCurtain: withShell");
+  });
+});
+
+describe("共用视口 —— 拖动改的是模型姿态(不是相机)", () => {
+  it("横向拖 → 绕 Z;纵向拖 → 绕 X(Y 拖不出来)", () => {
+    const base = { rotX: 0, rotY: 0, rotZ: 0 };
+
+    const right = poseAfterDrag(base, 100, 0);
+    expect(right.rotZ).toBeCloseTo(100 * DRAG_DEG_PER_PX, 6);
+    expect(right.rotX).toBeCloseTo(0, 6);
+    expect(right.rotY).toBeCloseTo(0, 6);
+
+    const down = poseAfterDrag(base, 0, 100);
+    expect(down.rotX).toBeCloseTo(100 * DRAG_DEG_PER_PX, 6);
+    expect(down.rotZ).toBeCloseTo(0, 6);
+    expect(down.rotY).toBeCloseTo(0, 6);
+  });
+
+  it("从「拖动开始那一下」累加 —— 中间丢几个 pointermove 也不漂", () => {
+    const base = { rotX: 10, rotY: 20, rotZ: 30 };
+
+    // 增量加的话,丢一个事件就少 0.35°;累加的话结果只跟起手姿态有关
+    const once = poseAfterDrag(base, 100, 50);
+    const twice = poseAfterDrag(base, 100, 50);
+    expect(once).toEqual(twice);
+    expect(once.rotX).toBeCloseTo(base.rotX + 50 * DRAG_DEG_PER_PX, 6);
+    expect(once.rotZ).toBeCloseTo(base.rotZ + 100 * DRAG_DEG_PER_PX, 6);
+    // Y 拖不出来 —— 保持不变
+    expect(once.rotY).toBe(base.rotY);
+  });
+
+  it("视口把左键从「转相机」改成「转模型」(滚轮缩放 / 右键平移照旧)", () => {
+    const code = stripComments(read(VIEWPORT));
+
+    // OrbitControls 的左键旋转被关掉 —— 相机的左键旋转会让「拖模型」
+    // 跟「转视角」打架。接了回调才关,没接还是老样子转相机。
+    expect(code).toContain("mouseButtons.LEFT = hasPoseDrag");
+    expect(code).toContain("touches.ONE = hasPoseDrag");
+    // 右键平移 / 滚轮缩放没被动
+    expect(code).not.toContain("mouseButtons.RIGHT = null");
+  });
+
+  it("拖动过程中的支撑几何不实时重算,拖完才补", () => {
+    const code = stripComments(read(CALCULATOR));
+
+    // 拖动 → 节流提交(200ms)→ 克重跟着刷新
+    expect(code).toContain("handlePoseChange");
+    expect(code).toContain("handlePoseDragEnd");
+    expect(code).toContain("poseCommitTimerRef");
+    // 拖动的过程中不建外壳
+    expect(code).toContain("!poseDraggingRef.current");
+    // 拖完补算
+    expect(code).toContain("setPoseSettleTick");
   });
 });
 

@@ -265,7 +265,7 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 ### 包裹支撑算法(检查视角 + 克重视角共用)
 
 `src/features/tools/lib/mesh/support-shell.ts` —— **两个视角算/画的是同一块支撑**:
-打印前工作台(`/tools/workbench`)的「检查」视角画它,「克重 / 摆盘」视角按它算克重。
+打印前工作台(`/tools/workbench`)的「检查」视角画它,「克重」视角按它算克重。
 
 - `prepareSupportModel(positions)` → 焊接 + 拓扑(**姿态无关**,只做一次)
 - `rotateSupportMesh(mesh, rotX, rotY, rotZ)` → 刚体旋转顶点与法线(拓扑不变)
@@ -675,13 +675,13 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 
 以前模型检查(`/tools/model-check`)和克重(`/tools/weight`)是**两个页面**,
 同一个文件要拖两次、解压两次、量两遍,中间还要跳页。现在合成**一个**
-工作台(`/tools/workbench`),模型**只载入一次**,里面用三个视角看同一个模型:
+工作台(`/tools/workbench`),模型**只载入一次**,里面用两个视角看同一个模型:
 
 ```
 /tools/workbench  →  拖进来  →  检查(能不能印)→ 克重(要多少料)→ 摆盘(怎么摆)
 ```
 
-**地址为什么叫 `/tools/workbench`** —— 三个视角里没有一个能代表全名:叫
+**地址为什么叫 `/tools/workbench`** —— 两个视角里没有一个能代表全名:叫
 `/tools/weight` 只说了克重,叫 `/tools/model-check` 只说了检查。
 `/tools/workbench` 是唯一说得通的 —— 这是一个**工作台**,里面切视角。
 
@@ -692,7 +692,7 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 没有 `permanentRedirect`,放进共享模块会在打包时炸)。locale 前缀手写 ——
 `localePrefix` 是默认的 `always`,URL 一定带前缀。
 
-- **三个视角** —— 视角切换条在**上传模式**里(手动尺寸 / 批量模式没有模型,
+- **两个视角** —— 视角切换条在**上传模式**里(手动尺寸 / 批量模式没有模型,
   摆不了)。`check` / `weight` / `pose` 三个 tab,`WorkspaceTab` 类型在
   `pricing/components/model-settings-panel.tsx`。
   - **检查** —— **右侧那个 3D 视口不动**(跟另外两个视角是同一个视口,
@@ -712,7 +712,7 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
   缩放顶点,`scales` 是克重工具**生效的**缩放因子,缩完的结果**同一个**
   `Float32Array` 喂给视口和分析器。支撑外壳的平台平面是
   绝对毫米值(托底 5mm),不缩放顶点的话画出来的支撑跟克重那栏对不上。
-- **一份口径(结构上保证)** —— 三个视角的数字来自同一个 `ModelFile`、
+- **一份口径(结构上保证)** —— 两个视角的数字来自同一个 `ModelFile`、
   同一套缩放、同一份后台参数(`ClientPrintConfig`),**不可能**对不上。
 - **自检摘要白捡** —— 摆盘 Worker 焊接模型时本来就在建完整拓扑
   (`weldAndAnalyzeTopology`),以前把除了网格和内腔标记之外的东西全扔了。
@@ -812,7 +812,7 @@ viewport.tsx`)和克重那一套浅色视口(`pricing/components/obj-viewer.tsx`
 
 ```
 shared/components/model-viewport/
-├── model-viewport.tsx   # 视口本体(三个视角共用)
+├── model-viewport.tsx   # 视口本体(两个视角共用)
 ├── pose.ts              # 姿态旋转的纯实现(不碰 three.js)
 └── index.ts
 ```
@@ -835,7 +835,7 @@ shared/components/model-viewport/
 - **平台高度有两个来源** —— 有外壳时用外壳自己的 `groundZ`(那是算支撑
   体积时用的平台平面,画面跟数字落在同一个平面上);没有外壳时(Worker 还没
   回话)用模型自己的最低点 + 托底高度,最低点按**旋转后**的包围盒算。
-- **分析器只在「检查」那一栏跑** —— 克重 / 摆盘视角传 `result = null`,
+- **分析器只在「检查」那一栏跑** —— 克重视角传 `result = null`,
   问题着色那一层压根不画,分析器也不在后台偷偷跑。
 - **克重视角变深色了** —— 视口统一用 `ObjPreview` 的 `mode="inspect"`
   (深底)。预览区底色、加载遮罩、浮层控制条都跟着改成深色那一套。
@@ -845,7 +845,7 @@ shared/components/model-viewport/
 - **行为由单测守住** ——
   | 测试 | 守住什么 |
   |---|---|
-  | `src/test/tools/pure/shared-viewport.test.ts` | 三个视角 import 的是同一个 `ModelViewport` / 老的两份视口文件删了 / 支撑几何来自 Worker 的同一块(`withShell`)/ 姿态组跟模型组的成员划分 / 旋转顺序跟 `rotateSupportMesh` 逐点相同 |
+  | `src/test/tools/pure/shared-viewport.test.ts` | 两个视角 import 的是同一个 `ModelViewport` / 老的两份视口文件删了 / 支撑几何来自 Worker 的同一块(`withShell`)/ 姿态组跟模型组的成员划分 / 旋转顺序跟 `rotateSupportMesh` 逐点相同 |
 
 #### 共用一个展示区域 + 模型角度(2026-11-07)
 
@@ -886,7 +886,7 @@ shared/components/model-viewport/
   还摆着老克重工具的方向(视口在上、面板在下)。
 - **整块工作台是一个深色应用** —— 顶栏(文件身份)、视角切换条、3D 视口那一
   列、**左边的信息栏**,四块都是深色,读起来是**一个 3D 应用**,跟以前检查
-  工具那块是同一块地。三个视角换的是**左栏的内容**,整块外观不变
+  工具那块是同一块地。两个视角换的是**左栏的内容**,整块外观不变
   (见下面「统一用检查工具的深色设计」)。
 - **两个视角的侧栏同宽(`md:w-[400px]`)** —— 不然切一次视角视口宽度就变,
   相机的取景会跑偏(相机只在建模 / 重置时重新取景)。
@@ -905,7 +905,7 @@ shared/components/model-viewport/
 - **拖放区跟着展示区走** —— 遮罩从检查面板搬到了工作台框架
   (`model-settings-panel.tsx`),拖文件进的是**那一个**展示区。
 - **浮层控制条也是共用的** —— 问题图层开关(只有「检查」那栏有)+ 贴图 /
-  包裹支撑 / 重置视角 + 支撑比例,三个视角共用一条。
+  包裹支撑 / 重置视角 + 支撑比例,两个视角共用一条。
 
 #### 统一用检查工具的深色设计(2026-11-07)
 
@@ -919,7 +919,7 @@ shared/components/model-viewport/
    当时是「视口上 + 面板下」,`lg`(1024px)才并排
 
 现在**整块是一个深色应用**:头部(文件身份)→ 视角切换条 → **左边信息栏 +
-右边 3D 视口**。三个视角换的是**左边那一栏的内容**,整块外观不变。
+右边 3D 视口**。两个视角换的是**左边那一栏的内容**,整块外观不变。
 
 ```
 ┌──────────────┬───────────────────────────────────┐
@@ -940,7 +940,7 @@ shared/components/model-viewport/
   (`pricing-calculator.tsx`)/ 自检徽标(`mesh-check-badge.tsx`)/
   贴图诊断(`texture-diagnostic.tsx`)。
 - **「加入打印单」那张卡在深色应用外面** —— 它是页面里的一张浅色卡
-  (工作室的下单按钮),不是 3D 应用的一部分。三个视角都在,检查完就能下单。
+  (工作室的下单按钮),不是 3D 应用的一部分。两个视角都在,检查完就能下单。
 - **行为由单测守住** —— `src/test/tools/pure/workbench-merge.test.ts`:
   整块是深色(`bg-zinc-950 text-zinc-100`)、两个 `<aside>` 都带
   `md:order-1` 且都不许再带 `border-stone-200`(以前克重那一栏是浅色的)。
@@ -955,17 +955,73 @@ shared/components/model-viewport/
 - **角度条常驻** —— 展示区上方那条「模型角度」(`MaterialPricing.angle.modelAngle`)
   在**每个视角**都在,而且**不是「跑过智能摆盘才出现」** —— 模型刚进来就有,
   初始角度 0°,0°。
-- **三个视角共用同一个姿态** —— 在「检查」那一栏把模型转了,切到「克重」
+- **两个视角共用同一个姿态** —— 在「检查」那一栏把模型转了,切到「克重」
   还是这个姿态;反之亦然。
 - **改角度 → 支撑克重跟着重算** —— `handleManualAngleChange` 改的是
   `viewerRotX/Y/Z`,下面的 effect 按新姿态重算(摆盘 Worker 的 `pose()`
   指令),画面上的支撑外壳也就跟着换。
 
+#### 拖动模型改姿态 / 去掉摆盘视角 / 全屏(2026-11-07)
+
+工作室的三条追加要求:「需要支持在预览时旋转、缩放、平移模型」+
+「去掉摆盘tab,然后支持全屏」+「旋转、缩放模型需要刷新克重,但不需要实时
+支撑,默认无支撑,显示支撑时才需要」。
+
+**鼠标怎么分**:
+
+| 操作 | 效果 | 实现 |
+|---|---|---|
+| **左键拖** | 转**模型**(改打印姿态:横向 → Z,纵向 → X) | OrbitControls 的左键旋转被**关掉**(`mouseButtons.LEFT = null`),自己接 pointer 事件 |
+| **滚轮** | 缩放(相机) | OrbitControls 自带 |
+| **右键拖** | 平移(相机) | OrbitControls 自带 |
+
+- **左键只在接了回调时才从相机手里拿走** —— `hasPoseDrag` 决定
+  `mouseButtons.LEFT` / `touches.ONE` 是 `null` 还是 `ROTATE`。没接
+  `onPoseChange` 的用法,左键还是老样子转相机。
+- **拖动的数学是纯函数** —— `shared/components/model-viewport/pose.ts` 的
+  `poseAfterDrag(base, dx, dy)`:横向 → 绕 Z,纵向 → 绕 X(0.35°/px),
+  **从「拖动开始那一下」的姿态累加**(不是每个事件增量加 —— 浏览器把几个
+  pointermove 合并掉就会漂)。Y 轴拖不出来,角度条上填。
+- **两层更新** —— `viewerRot*` 每个 pointermove 都改(画面立刻跟着转,
+  只改姿态组的 rotation,几何不重建);`manualRot*` **节流 200ms** 一次
+  (`AngleOptimizerClient.pose()` **没有请求合并**,每个事件都发一条会把
+  Worker 队列塞满,页面反而更卡)。松手时(`onPoseDragEnd`)提交最后一个
+  姿态。
+
+**去掉「摆盘」视角 —— 摆盘结果并进克重栏**:
+
+- `WorkspaceTab` 从 `"check" | "weight" | "pose"` 变成 `"check" | "weight"`;
+  `ModelSettingsPanel` 的 `pose` 插槽删掉,`weight` 插槽吃
+  `weightColumn`(= 三个克重数 + 摆盘结果卡)。
+- **理由**:摆盘结果(最优姿态 / 自支撑比例 / 省 X%)本来就是克重的一部分 ——
+  支撑克重摆到哪个姿态最省,拆成两栏要用户自己把两个数对上。
+- 「智能摆盘」那颗**按钮留着**,跑完的结果照样摆出来。
+
+**默认不画支撑**:
+
+- `showSupport` 默认 **false** —— 支撑外壳(外壳 + 顶面 + 外壁 + 底板留边)是
+  这一页最贵的一块几何,用户没主动点「包裹支撑」之前不替他算。
+- 支撑几何的开关跟着那个状态走:
+  `withShell: showSupport && !poseDraggingRef.current`。**支撑克重不受影响**
+  —— 体积跟外壳是两次独立的计算,默认关掉外壳,三个克重数一个都不少。
+- 拖动的过程中也不建外壳(拖完由 `poseSettleTick` 这个 tick 补算一次)——
+  每帧重建一次外壳会把页面拖死。
+
+**全屏 = 整块工作台**:
+
+- 走浏览器的 **Fullscreen API**(`requestFullscreen` / `exitFullscreen` /
+  `fullscreenchange`),不是 `position: fixed` 那种假全屏。
+- 样式靠 `[:fullscreen]:` 变体(Tailwind 的任意变体,优先级比 `md:` 高):
+  整块 `h-screen w-screen` + 圆角归零 + `flex flex-col`,左栏那两栏
+  `overflow-y-auto`(不然全屏下内容被截断)。
+- **不是只放大视口** —— 只放大视口的话,左栏那三个克重数还在屏幕外,
+  盯着模型看也看不到要多少料。
+
 - **行为由单测守住** ——
   | 测试 | 守住什么 |
   |---|---|
-  | `src/test/tools/pure/workbench-merge.test.ts` | 整个工作台只挂**一个** `<ModelViewport>` / 检查侧栏不自己挂视口 / **侧栏在左、视口在右**(跟以前那个检查工具一个方向)/ 分析器只在 `tab === "check"` 时启动 / 支撑几何永远是摆盘 Worker 算的那块 / 角度条常驻 |
-  | `src/test/tools/pure/shared-viewport.test.ts` | 检查侧栏不 import 视口 / 姿态无条件传给视口 / 旋转顺序跟 `rotateSupportMesh` 逐点相同 |
+  | `src/test/tools/pure/workbench-merge.test.ts` | 整个工作台只挂**一个** `<ModelViewport>` / 检查侧栏不自己挂视口 / **侧栏在左、视口在右** / 分析器只在 `tab === "check"` 时启动 / **视角只有两个**(没有第三个「摆盘」)/ 全屏是整块(`[:fullscreen]:` + `requestFullscreen`) / 拖动回调一路传到视口 |
+  | `src/test/tools/pure/shared-viewport.test.ts` | 检查侧栏不 import 视口 / 姿态无条件传给视口 / 旋转顺序跟 `rotateSupportMesh` 逐点相同 / **`withShell` 跟着「显示支撑」和「正在拖动」** / 支撑默认关 / 拖动的数学(横向 → Z、纵向 → X、从起手姿态累加)/ 左键归模型还是归相机 |
 
 ### 打印定价后台(2026-11-06)
 

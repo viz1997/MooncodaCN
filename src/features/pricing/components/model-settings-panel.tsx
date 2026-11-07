@@ -6,6 +6,8 @@ import {
   Compass,
   Info,
   Loader2,
+  Maximize2,
+  Minimize2,
   Palette,
   RotateCcw,
   Scale,
@@ -42,7 +44,6 @@ import type { ReactNode } from "react";
  * |---|---|
  * | `check` | 分析结果(问题着色 / 问题边线)+ 图层开关 + 聚焦请求 |
  * | `weight` | 支撑外壳(摆盘 Worker 算的那块)+ 当前姿态 |
- * | `pose` | 同上 |
  *
  * 切视角 = 换几行 prop。**视口不卸载**,相机不动,模型不重建。
  *
@@ -53,13 +54,13 @@ import type { ReactNode } from "react";
  *
  * 合并之后有两处跟旧检查工具对不上:
  *
- * 1. **外观** —— 检查那一栏是深色,克重 / 摆盘是浅色,切一次视角整块换脸
+ * 1. **外观** —— 检查那一栏是深色,克重是浅色,切一次视角整块换脸
  * 2. **排布** —— 旧检查工具是「侧栏左 + 视口右」,`md`(768px)就并排;
  *    工作台当时是「视口上 + 面板下」,`lg`(1024px)才并排 —— 768~1023px
  *    那段窗口还摆着老克重工具的方向
  *
  * 现在**整块是一个深色应用**:头部(文件身份)→ 视角切换条 → 左边信息栏 +
- * 右边 3D 视口。三个视角换的是**左边那一栏的内容**,整块外观不变。
+ * 右边 3D 视口。视角换的是**左边那一栏的内容**,整块外观不变。
  *
  * - **并排断点跟旧检查工具一样(`md`)** —— 侧栏 `md:order-1`、视口
  *   `md:order-2`(手机上视口还在上面,所以 DOM 里它在前面)
@@ -74,7 +75,20 @@ import type { ReactNode } from "react";
  *
  * 摆着看(转相机)跟摆着印(转模型)是两件事 —— 后者决定支撑克重。所以
  * 姿态走**姿态组**(`rotation.order = "ZYX"`,跟摆盘算法 / OBJ 导出同
- * 一套口径),三个视角**都**能转,角度条常驻在展示区上方。
+ * 一套口径),两个视角**都**能转,角度条常驻在展示区上方。
+ *
+ * **左键拖 = 转模型**(横向 → Z,纵向 → X);相机那边留给滚轮缩放 +
+ * 右键平移。见 `shared/components/model-viewport/`。
+ *
+ * ## 全屏(2026-11-07)
+ *
+ * 工作室要的是「**整块工作台**占满屏幕」—— 头部 / 视角切换 / 信息栏 /
+ * 3D 视口一起放大。只把视口放大的话,左栏那三个克重数还在屏幕外,盯着
+ * 模型看也看不到要多少料。
+ *
+ * 走浏览器的 Fullscreen API(不是 `position: fixed` 那种假全屏):真全屏
+ * 能把标签页收起来,Esc 直接退出来。样式靠 `[:fullscreen]:` 变体
+ * (Tailwind 的任意变体,优先级比 `md:` 媒体查询高)。
  *
  * 几何由父组件算好后传进来（`geometry`）—— 面板不自己重算一遍，
  * 拆成两处只会各自漂移。
@@ -82,7 +96,7 @@ import type { ReactNode } from "react";
  * i18n 沿用 `MaterialPricing.dialog.*` 命名空间（文案与旧弹窗一致），只是
  * 调用位置从弹窗换成了面板 —— 整个命名空间的重命名留给单独的清理。
  */
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -117,30 +131,32 @@ export type LoadStatus =
 export type DimMode = "original" | "custom";
 
 /**
- * 工作台视角 —— 同一个模型的三种看法
+ * 工作台视角 —— 同一个模型的两种看法
  *
  * 2026-11-07 起,模型检查工具**并进**克重工具:两个工具页合成一个工作台,
- * 模型只载入一次,里面用这三个视角看**同一个**模型。
+ * 模型只载入一次,里面用这两个视角看**同一个**模型。
  *
  * | 视角 | 看什么 |
  * |---|---|
  * | `check` | 打印前自检(反转法向 / 坏边破面 / 壳体封闭性)—— 左栏换成检查侧栏 |
- * | `weight` | 克重(耗材 / 支撑 / 总克重)+ 尺寸调节 |
- * | `pose` | 摆盘(最优姿态 + 省了多少料) |
+ * | `weight` | 克重(耗材 / 支撑 / 总克重)+ 尺寸调节 + 摆盘结果 |
  *
- * 三个视角**共用右栏那一个展示区域**(同一个 `ModelViewport`)——
+ * 以前还有第三个「摆盘」视角 —— 2026-11-07 **并进克重栏**了:
+ * 摆盘结果(最优姿态 / 省了多少料)本来就跟克重是一件事(支撑克重摆到哪个
+ * 姿态最省),拆成两栏反而要用户自己把两个数对上。
+ *
+ * 两个视角**共用右栏那一个展示区域**(同一个 `ModelViewport`)——
  * 切视角只换喂进去的数据。
  */
-export type WorkspaceTab = "check" | "weight" | "pose";
+export type WorkspaceTab = "check" | "weight";
 
-/** 视角切换条上的三个按钮 —— 顺序就是工作室的流程:先看能不能印,再算料,最后摆盘 */
+/** 视角切换条上的两个按钮 —— 顺序就是工作室的流程:先看能不能印,再算料 */
 const WORKSPACE_TABS: {
   id: WorkspaceTab;
   icon: typeof ShieldCheck;
 }[] = [
   { id: "check", icon: ShieldCheck },
   { id: "weight", icon: Scale },
-  { id: "pose", icon: Compass },
 ];
 
 /** 几何数据（父组件算好 —— 面板不再自己算一份） */
@@ -168,17 +184,9 @@ export type ModelSettingsPanelProps = {
    * 左栏顶部的内容 —— 克重 + 摆盘结果。
    * 由父组件渲染（它持有 `calc` / `optimalAngle`）。
    *
-   * **只在「克重」视角显示** —— 摆盘结果挪到 `pose` 插槽了。
+   * **只在「克重」视角显示** —— 「检查」那一栏换成检查侧栏。
    */
   weight?: ReactNode;
-
-  /**
-   * 左栏的「摆盘」视角内容 —— 智能摆盘结果。
-   *
-   * 跟 `weight` 分开是因为它们回答的是两个问题:**要多少料** vs **怎么摆**。
-   * 摆在同一栏里,用户得在一堆数字里找哪个是结论。
-   */
-  pose?: ReactNode;
 
   /** 当前视角 —— 父组件持有(切换视角要重算东西,不能只改显示) */
   tab: WorkspaceTab;
@@ -233,7 +241,7 @@ export type ModelSettingsPanelProps = {
   /**
    * **模型**的当前角度 —— 视口按它转模型(不是转相机)
    *
-   * 三个视角共用 —— 在「检查」那一栏转了模型,切到「克重」还是这个姿态。
+   * 两个视角共用 —— 在「检查」那一栏转了模型,切到「克重」还是这个姿态。
    */
   viewerRotX: number;
   viewerRotY: number;
@@ -248,6 +256,17 @@ export type ModelSettingsPanelProps = {
     value: number,
     scales: [number, number, number]
   ) => void;
+  /**
+   * 在预览里**拖动模型**改姿态 —— 父组件持有姿态状态
+   *
+   * 拖动改的是**打印姿态**(横向 → Z,纵向 → X),支撑克重跟着走 ——
+   * 相机那边留给滚轮缩放 + 右键平移。
+   */
+  onPoseChange?:
+    | ((pose: { rotX: number; rotY: number; rotZ: number }) => void)
+    | undefined;
+  /** 拖动结束 —— 支撑几何可以补算了(拖的过程中不实时重算) */
+  onPoseDragEnd?: (() => void) | undefined;
   /** 角度归零(顺带把摆盘结果也清掉) */
   onResetAngle?: () => void;
   /** 触发智能摆盘；传入当前生效的缩放因子 */
@@ -297,7 +316,6 @@ export function ModelSettingsPanel({
   uploadError,
   header,
   weight,
-  pose,
   tab,
   onTabChange,
   quote,
@@ -325,6 +343,8 @@ export function ModelSettingsPanel({
   manualRotY,
   manualRotZ,
   onManualAngleChange,
+  onPoseChange,
+  onPoseDragEnd,
   onResetAngle,
   onOptimizeAngle,
   angleOptimizing,
@@ -345,6 +365,37 @@ export function ModelSettingsPanel({
 
   /** 重置视角的信号 —— 视口每次看见新信号就把相机摆回默认位置 */
   const [fitSignal, setFitSignal] = useState(0);
+
+  /**
+   * 全屏 —— **整块工作台**占满屏幕
+   *
+   * 工作室要的是「头部 / 视角切换 / 信息栏 / 3D 视口」整块放大,不是只把
+   * 视口放大 —— 只放大视口的话,左栏那三个克重数还在屏幕外,盯着模型看
+   * 也看不到要多少料。
+   *
+   * 靠浏览器的 Fullscreen API(不是 `position: fixed` 那种假全屏):真全屏
+   * 能把标签页 / 系统菜单收起来,Esc 也能直接退出来。
+   */
+  const appRef = useRef<HTMLDivElement>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+
+  useEffect(() => {
+    const onChange = () => {
+      setFullscreen(document.fullscreenElement === appRef.current);
+    };
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    const el = appRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => {});
+      return;
+    }
+    void el.requestFullscreen().catch(() => {});
+  }, []);
 
   /** 当前生效的缩放因子（XYZ）—— 由父组件持有的尺寸状态推导 */
   const scales = useMemo((): [number, number, number] => {
@@ -460,9 +511,12 @@ export function ModelSettingsPanel({
       {/* ---------- 深色 3D 应用 ----------
           **统一用「以前那个检查工具」的设计** —— 一整块深色应用:
           头部(文件身份)→ 视角切换条 → 左边信息栏 + 右边 3D 视口。
-          克重 / 检查 / 摆盘三个视角换的是**左边那一栏的内容**,
+          克重 / 检查两个视角换的是**左边那一栏的内容**,
           整块外观不变。 */}
-      <div className="rounded-xl border border-zinc-800 bg-zinc-950 text-zinc-100 shadow-sm overflow-hidden">
+      <div
+        ref={appRef}
+        className="rounded-xl border border-zinc-800 bg-zinc-950 text-zinc-100 shadow-sm overflow-hidden [:fullscreen]:h-screen [:fullscreen]:w-screen [:fullscreen]:rounded-none [:fullscreen]:border-0 [:fullscreen]:flex [:fullscreen]:flex-col"
+      >
         {/* ---------- 卡片头部（文件身份 + 操作）—— 由父组件渲染 ---------- */}
         {header !== undefined ? (
           <div className="px-4 py-3 border-b border-zinc-800 bg-zinc-900/60">
@@ -538,8 +592,8 @@ export function ModelSettingsPanel({
         {/* ---------- 共用的展示区域 + 左侧栏 ---------- */}
         {showViewer && model && geometry && (
           <>
-            {/* ---------- 视角切换（检查 / 克重 / 摆盘）----------
-              三个视角看的是**同一个**模型 —— 模型只载入一次,切换不重新解析。
+            {/* ---------- 视角切换（检查 / 克重）----------
+              两个视角看的是**同一个**模型 —— 模型只载入一次,切换不重新解析。
               下面那一个 3D 视口也是**共用的**:切视角只换喂进去的数据。 */}
             <div className="flex items-center gap-1 border-b border-zinc-800 bg-zinc-900/60 px-3 py-2">
               {WORKSPACE_TABS.map((item) => (
@@ -568,14 +622,14 @@ export function ModelSettingsPanel({
               断点跟旧检查工具一样是 `md`(768px 就并排)—— 以前那个工具
               在 768px 上就是「侧栏左 + 视口右」,等 1024px 的话这段窗口
               里还摆着老克重工具的方向(视口在上、面板在下)。 */}
-            <div className="flex flex-col md:flex-row md:h-[560px]">
+            <div className="flex flex-col md:flex-row md:h-[560px] [:fullscreen]:h-auto [:fullscreen]:flex-1 [:fullscreen]:min-h-0">
               {/* ---------- 右：共用的展示区域 ----------
                 **只有一个 `ModelViewport`** —— 切视角不卸载它,
                 相机不动、模型不重建,只是喂进去的数据换了。
 
                 这一整列是**深色的**(顶栏 + 角度条 + 视口)—— 它就是那个
                 3D 应用本身,跟以前检查工具的深色视口区是同一块地。 */}
-              <div className="order-1 md:order-2 flex flex-col md:flex-1 min-w-0">
+              <div className="order-1 md:order-2 flex flex-col md:flex-1 min-w-0 [:fullscreen]:min-h-0">
                 <div className="flex items-center justify-between bg-zinc-950 px-3 py-2 border-b border-zinc-800">
                   <span className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
                     <Boxes className="size-3.5 text-amber-500" />
@@ -605,13 +659,37 @@ export function ModelSettingsPanel({
                           : t("angle.optimize")}
                       </button>
                     )}
+                    {/* ---------- 全屏 ----------
+                        整块工作台占满屏幕(头部 / 视角切换 / 信息栏 / 视口),
+                        不是只把视口放大 —— 只放大视口的话,左栏那三个克重数
+                        还在屏幕外。 */}
+                    <button
+                      type="button"
+                      onClick={toggleFullscreen}
+                      title={
+                        fullscreen
+                          ? t("preview.exitFullscreenTitle")
+                          : t("preview.fullscreenTitle")
+                      }
+                      aria-pressed={fullscreen}
+                      className="text-[10px] text-zinc-300 hover:text-zinc-100 flex items-center gap-1 px-2 py-0.5 rounded border border-zinc-700 bg-white/10 hover:bg-white/20"
+                    >
+                      {fullscreen ? (
+                        <Minimize2 className="size-3" />
+                      ) : (
+                        <Maximize2 className="size-3" />
+                      )}
+                      {fullscreen
+                        ? t("preview.exitFullscreen")
+                        : t("preview.fullscreen")}
+                    </button>
                   </div>
                 </div>
 
                 {/* ---------- 模型角度条 ----------
                   **转的是模型,不是相机** —— 摆着印(转模型)决定支撑克重,
                   摆着看(转相机)决定看得清看不清,是两件事。
-                  三个视角都能转:在「检查」那一栏转了模型,切到「克重」
+                  两个视角都能转:在「检查」那一栏转了模型,切到「克重」
                   还是这个姿态。 */}
                 {loadStatus === "ready" && (
                   <div className="px-3 py-2 border-b border-zinc-800 bg-zinc-900">
@@ -676,12 +754,15 @@ export function ModelSettingsPanel({
                     /* 支撑几何永远是摆盘 Worker 算的那块 —— 算克重的是它,
                      画出来的也得是它(否则转个角度画面就跟数字对不上)。 */
                     supportShell={poseSupport?.shell ?? null}
-                    /* 模型姿态 —— 三个视角共用同一个角度 */
+                    /* 模型姿态 —— 两个视角共用同一个角度 */
                     pose={{
                       rotX: viewerRotX,
                       rotY: viewerRotY,
                       rotZ: viewerRotZ,
                     }}
+                    /* 拖动模型 = 改打印姿态(不是转相机)—— 支撑克重跟着走 */
+                    onPoseChange={onPoseChange}
+                    onPoseDragEnd={onPoseDragEnd}
                     supportLiftMm={supportLiftMm}
                     focusRequest={tab === "check" ? check.focusRequest : null}
                     fitSignal={fitSignal}
@@ -739,7 +820,7 @@ export function ModelSettingsPanel({
                   )}
 
                   {/* ---------- 浮层控制条 ----------
-                    三个视角共用一条:问题图层开关(只有「检查」那一栏有)
+                    两个视角共用一条:问题图层开关(只有「检查」那一栏有)
                     + 显示贴图 / 包裹支撑 / 重置视角 + 支撑比例。 */}
                   {loadStatus === "ready" && (
                     <div className="pointer-events-auto absolute bottom-3 left-1/2 z-10 flex max-w-[95%] -translate-x-1/2 flex-wrap items-center justify-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900/90 px-2.5 py-1.5 shadow-xl backdrop-blur">
@@ -842,13 +923,12 @@ export function ModelSettingsPanel({
 
               {/* ---------- 左:信息栏,按视角换内容 ----------
                 展示区域(3D 视口)是共用的,左边这一栏按视角换 ——
-                「检查」摆检查结论,「克重」摆尺寸调节 + 三个克重,
-                「摆盘」摆智能摆盘结果。
+                「检查」摆检查结论,「克重」摆尺寸调节 + 三个克重 + 摆盘结果。
 
-                **三个视角共用同一个外壳、同一个深色设计** —— 跟以前那个
+                **两个视角共用同一个外壳、同一个深色设计** —— 跟以前那个
                 检查工具一个方向(那边就是「侧栏左 + 视口右」)。 */}
               {tab === "check" ? (
-                <aside className="order-2 md:order-1 md:w-[400px] md:shrink-0 p-3 md:overflow-y-auto border-t md:border-t-0 md:border-r border-zinc-800">
+                <aside className="order-2 md:order-1 md:w-[400px] md:shrink-0 p-3 md:overflow-y-auto [:fullscreen]:overflow-y-auto [:fullscreen]:min-h-0 border-t md:border-t-0 md:border-r border-zinc-800">
                   <h2 className="mb-3 flex items-center gap-2 text-sm font-bold tracking-tight text-zinc-100">
                     <ShieldCheck className="size-4 text-emerald-400" />
                     {tInspect("app.title")}
@@ -863,14 +943,10 @@ export function ModelSettingsPanel({
                   />
                 </aside>
               ) : (
-                <aside className="order-2 md:order-1 md:w-[400px] md:shrink-0 p-3 flex flex-col gap-3 md:overflow-y-auto border-t md:border-t-0 md:border-r border-zinc-800">
+                <aside className="order-2 md:order-1 md:w-[400px] md:shrink-0 p-3 flex flex-col gap-3 md:overflow-y-auto [:fullscreen]:overflow-y-auto [:fullscreen]:min-h-0 border-t md:border-t-0 md:border-r border-zinc-800">
                   <h2 className="flex items-center gap-2 text-sm font-bold tracking-tight text-zinc-100">
-                    {tab === "pose" ? (
-                      <Compass className="size-4 text-violet-400" />
-                    ) : (
-                      <Scale className="size-4 text-amber-400" />
-                    )}
-                    {tab === "pose" ? t("tabs.pose") : t("tabs.weight")}
+                    <Scale className="size-4 text-amber-400" />
+                    {t("tabs.weight")}
                   </h2>
                   <div className="rounded-lg border border-zinc-800 overflow-hidden">
                     <div className="flex items-center justify-between bg-zinc-900 px-3 py-2 border-b border-zinc-800">
@@ -1069,14 +1145,13 @@ export function ModelSettingsPanel({
                     </div>
                   </div>
 
-                  {/* 克重 —— 尺寸调完之后的结果，放最后。
+                  {/* 克重 + 摆盘结果 —— 尺寸调完之后的结果,放最后。
                 mt-auto:侧栏比右边视口矮/高的差都让出来,克重贴着栏底,
                 跟视口的底边对齐(挤在中间会像没排完)。
 
-                「摆盘」视角换成摆盘结果 —— 两个问题分两栏看,不挤在一块。 */}
-                  <div className="mt-auto">
-                    {tab === "pose" ? pose : weight}
-                  </div>
+                摆盘结果也在这一栏 —— 摆盘跟克重本来就是一件事
+                (支撑克重摆到哪个姿态最省),拆两栏要用户自己对数。 */}
+                  <div className="mt-auto">{weight}</div>
                 </aside>
               )}
             </div>

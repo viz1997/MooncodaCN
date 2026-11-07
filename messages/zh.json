@@ -1181,8 +1181,7 @@
     },
     "tabs": {
       "check": "检查",
-      "weight": "克重",
-      "pose": "摆盘"
+      "weight": "克重"
     },
     "angle": {
       "best": "最佳摆盘 X {x}° Y {y}° Z {z}°",
@@ -1215,7 +1214,11 @@
       "supportInfo": "支撑比例 {ratio}% · {weight} g",
       "supportPending": "加载模型后计算支撑比例",
       "resetView": "重置视角",
-      "resetViewTitle": "把相机摆回默认位置"
+      "resetViewTitle": "把相机摆回默认位置",
+      "fullscreen": "全屏",
+      "fullscreenTitle": "整块工作台占满屏幕(头部 / 视角切换 / 信息栏 / 3D 视口一起)",
+      "exitFullscreen": "退出全屏",
+      "exitFullscreenTitle": "退出全屏"
     },
     "axis": {
       "length": "长 X",

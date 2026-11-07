@@ -37,7 +37,7 @@ type ToolEntry = {
  * 所以这里只剩一张卡。清单留着数组 —— 工具还会再加(图片尺寸换算……),
  * 往后加一条就行。
  *
- * 入口地址是 `/tools/workbench` —— 三个视角(检查 / 克重 / 摆盘)都在这一页
+ * 入口地址是 `/tools/workbench` —— 两个视角(检查 / 克重)都在这一页
  * 里,老地址(`/pricing` / `/tools/weight` / `/tools/model-check`)都 308 跳过来。
  */
 const TOOLS: ToolEntry[] = [

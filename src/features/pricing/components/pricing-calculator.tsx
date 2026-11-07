@@ -210,10 +210,13 @@ export function PricingCalculator({
   const [mode, setMode] = useState<Mode>("upload");
   const [infoDialog, setInfoDialog] = useState<InfoDialogKind>(null);
   /**
-   * 工作台视角 —— 检查 / 克重 / 摆盘
+   * 工作台视角 —— 检查 / 克重
    *
-   * 三个视角看的是**同一个**模型。默认落在「克重」上 —— 工作室的主路径是
+   * 两个视角看的是**同一个**模型。默认落在「克重」上 —— 工作室的主路径是
    * 「量克重 → 加进打印单」,检查是可选的一步。
+   *
+   * 以前还有第三个「摆盘」视角 —— 2026-11-07 **并进克重栏**了(摆盘结果
+   * 本来就跟克重是一件事,拆两栏要用户自己把两个数对上)。
    */
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("weight");
 
@@ -340,7 +343,17 @@ export function PricingCalculator({
   const [supportModelReady, setSupportModelReady] = useState(false);
   /** 支撑算不出来时的原因(页面上一行小字提示,别让用户对着「—」猜) */
   const [supportError, setSupportError] = useState<string | null>(null);
-  const [showSupport, setShowSupport] = useState(true);
+  /**
+   * 画不画那圈支撑 —— **默认不画**
+   *
+   * 支撑外壳是这一页最贵的一块几何(外壳 + 顶面 + 外壁 + 底板留边,一次
+   * 姿态算下来要好几百毫秒)。用户没主动要「看看支撑长什么样」之前,
+   * 不该替他算 —— 默认关掉,只有点了浮层上那颗「包裹支撑」才建。
+   *
+   * **数字照样有**:支撑克重跟外壳是两回事,外壳只是画出来的那块几何。
+   * 默认关掉外壳,克重那三个数一个都不少。
+   */
+  const [showSupport, setShowSupport] = useState(false);
   /**
    * 3D 预览是否显示模型自带的贴图 —— 与检测工具的「显示贴图」开关同一套行为。
    * 关掉就是纯色(MTL 的 `Kd` 本色)视图,方便看模型本体形状。
@@ -352,6 +365,33 @@ export function PricingCalculator({
   const [manualRotX, setManualRotX] = useState(0);
   const [manualRotY, setManualRotY] = useState(0);
   const [manualRotZ, setManualRotZ] = useState(0);
+  /**
+   * 拖动结束后的「再算一次」信号
+   *
+   * 拖动过程中克重是**节流**更新的(每 200ms 一次),支撑外壳**不建** ——
+   * 外壳是这一页最贵的一块几何,每帧建一遍会把页面拖死。拖动一停,这个
+   * tick 加一 → 支撑重算那个 effect 再跑一次 → 外壳补上。
+   *
+   * (ref 变了不会触发 effect 重跑,所以得有个 state 当信号。)
+   */
+  const [poseSettleTick, setPoseSettleTick] = useState(0);
+  /** 正在拖动 —— 拖动中不建支撑外壳 */
+  const poseDraggingRef = useRef(false);
+  /** 待提交的姿态(拖动中被节流,先攒着) */
+  const pendingPoseRef = useRef<{
+    rotX: number;
+    rotY: number;
+    rotZ: number;
+  } | null>(null);
+  /** 节流定时器 —— 拖动中每 200ms 才往 Worker 发一条指令 */
+  const poseCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 组件卸载时把定时器收掉(别在卸载后再 setState)
+  useEffect(
+    () => () => {
+      if (poseCommitTimerRef.current) clearTimeout(poseCommitTimerRef.current);
+    },
+    []
+  );
   /**
    * 摆盘 Worker 客户端 —— 焊接 + 625 个候选姿态的支撑搜索都在 Worker 里跑,
    * 主线程只发指令收结果(摆盘期间页面照样能点能拖)。
@@ -498,7 +538,12 @@ export function PricingCalculator({
             params: supportParams,
             // 顺带回传**画出来的**那块支撑几何 —— 3D 预览画的那圈支撑
             // 必须跟算克重的是同一块(外壳在算体积的同一次调用里建出来)。
-            withShell: true,
+            //
+            // **只在真要画的时候建**:
+            //  - `showSupport` 关着 → 不建(默认就是关的,省掉这块最贵的几何)
+            //  - 正在拖动 → 不建(拖动一停由 `poseSettleTick` 补算)
+            // 支撑克重**不受影响** —— 体积跟外壳是两次独立的计算。
+            withShell: showSupport && !poseDraggingRef.current,
           }),
           needOriginal
             ? client.pose("main", {
@@ -577,6 +622,10 @@ export function PricingCalculator({
     materialDensity,
     model,
     supportModelReady,
+    // 「显示支撑」开关变了 → 重算一次(这次把外壳建出来)
+    showSupport,
+    // 拖动停了 → 重算一次(把拖动中省掉的外壳补上)
+    poseSettleTick,
   ]);
 
   const geometry = useMemo((): ModelGeometry | null => {
@@ -839,7 +888,7 @@ export function PricingCalculator({
   /**
    * 切换工作台视角
    *
-   * 三个视角**共用一个展示区域**(同一个 `ModelViewport`,永远挂在左栏),
+   * 两个视角**共用一个展示区域**(同一个 `ModelViewport`,永远挂在左栏),
    * 切视角只换喂进去的数据 —— 视口不卸载,相机不动。
    *
    * 「检查」那一栏的视口数据由分析器回话才有 —— 切过去时预览的「就绪」
@@ -976,6 +1025,61 @@ export function PricingCalculator({
       setViewerRotZ(value);
     }
   };
+
+  /**
+   * 在 3D 预览里**拖动模型** —— 改的是打印姿态,不是相机
+   *
+   * 工作室要的是「在预览里拖着看,顺手把这个姿态的克重算出来」,所以左键
+   * 拖改的是**模型姿态**;相机那边留给滚轮缩放 + 右键平移。
+   *
+   * ## 两层更新
+   *
+   * 1. `viewerRot*` —— **每个 pointermove 都改**。画面立刻跟着转(只是
+   *    姿态组的 rotation,几何不重建),拖起来是跟手的。
+   * 2. `manualRot*` —— **节流到 200ms 一次**。这个才是喂给 Worker 去算
+   *    支撑克重的。`AngleOptimizerClient.pose()` 没有请求合并,每个事件
+   *    都发一条的话,Worker 队列会被塞满,页面反而比不节流更卡。
+   *
+   * 拖动的过程中**不建支撑外壳**(那块几何最贵),拖完再补 —— 见
+   * `poseSettleTick`。
+   */
+  const handlePoseChange = useCallback(
+    (next: { rotX: number; rotY: number; rotZ: number }) => {
+      setViewerRotX(next.rotX);
+      setViewerRotY(next.rotY);
+      setViewerRotZ(next.rotZ);
+      pendingPoseRef.current = next;
+      poseDraggingRef.current = true;
+      // 已经在节流窗口里了 —— 这一次只更新 pending,等窗口末尾统一提交
+      if (poseCommitTimerRef.current) return;
+      poseCommitTimerRef.current = setTimeout(() => {
+        poseCommitTimerRef.current = null;
+        const p = pendingPoseRef.current;
+        if (!p) return;
+        setManualRotX(p.rotX);
+        setManualRotY(p.rotY);
+        setManualRotZ(p.rotZ);
+      }, 200);
+    },
+    []
+  );
+
+  /** 拖动结束 —— 把最后的姿态提交掉,再补算一次支撑外壳 */
+  const handlePoseDragEnd = useCallback(() => {
+    if (poseCommitTimerRef.current) {
+      clearTimeout(poseCommitTimerRef.current);
+      poseCommitTimerRef.current = null;
+    }
+    const p = pendingPoseRef.current;
+    if (p) {
+      setManualRotX(p.rotX);
+      setManualRotY(p.rotY);
+      setManualRotZ(p.rotZ);
+    }
+    poseDraggingRef.current = false;
+    // 拖动中省掉了外壳 —— 这里加个 tick 让重算的 effect 再跑一次补上
+    setPoseSettleTick((n) => n + 1);
+  }, []);
 
   // ---- 导出 ----
   const exportRotatedModel = (scales: [number, number, number]) => {
@@ -1393,7 +1497,8 @@ export function PricingCalculator({
    * 放在上面时,读者先看到两个大数字,再往下找才能改尺寸,真正要操作的
    * 输入被压在视线之外。现在顺序是「调尺寸 → 看克重」。
    *
-   * 2026-11-07:摆盘结果挪到「摆盘」视角(`posePanel`)—— 两个问题分两栏看。
+   * 2026-11-07:摆盘结果并进这一栏(`weightColumn`)—— 摆盘跟克重本来就是
+   * 一件事,拆成两栏要用户自己把两个数对上。
    */
   const weightReadout = calc ? (
     <>
@@ -1480,11 +1585,13 @@ export function PricingCalculator({
   ) : null;
 
   /**
-   * 右栏「摆盘」视角 —— 智能摆盘结果
+   * 摆盘结果 —— 智能摆盘跑出来的「最佳姿态 / 省了多少料」
    *
    * 跑过摆盘才摆得出「最佳姿态 / 省了多少料」;没跑过就摆**当前姿态**
-   * (初始角度 0°,0°)的样子 + 一句提示 —— 这一栏空着的话,用户会以为
-   * 「摆盘」视角坏了。
+   * (初始角度 0°,0°)的样子 + 一句提示 —— 这一块空着的话,用户会以为
+   * 摆盘坏了。
+   *
+   * 2026-11-07:从独立的一栏**并进克重栏**(见 `weightColumn`)。
    */
   const posePanel = (
     <>
@@ -1580,6 +1687,22 @@ export function PricingCalculator({
           </p>
         </div>
       )}
+    </>
+  );
+
+  /**
+   * 克重栏的内容 —— **三个克重数 + 摆盘结果**
+   *
+   * 2026-11-07:摆盘从独立的一栏**并进克重栏**(工作台只剩「检查 / 克重」
+   * 两个视角)。摆盘结果(最优姿态 / 自支撑比例 / 省 X%)本来就是克重的一
+   * 部分 —— 支撑克重摆到哪个姿态最省,拆成两栏要用户自己把两个数对上。
+   *
+   * 顺序:三个克重数在上(这一栏的主菜),摆盘结果在下(补充)。
+   */
+  const weightColumn = (
+    <>
+      {weightReadout}
+      {posePanel}
     </>
   );
 
@@ -1707,8 +1830,7 @@ export function PricingCalculator({
                     loadPercent={loadPercent}
                     uploadError={uploadError}
                     header={modelHeader}
-                    weight={weightReadout}
-                    pose={posePanel}
+                    weight={weightColumn}
                     tab={workspaceTab}
                     onTabChange={handleTabChange}
                     quote={quoteSlot}
@@ -1736,6 +1858,8 @@ export function PricingCalculator({
                     manualRotY={manualRotY}
                     manualRotZ={manualRotZ}
                     onManualAngleChange={handleManualAngleChange}
+                    onPoseChange={handlePoseChange}
+                    onPoseDragEnd={handlePoseDragEnd}
                     onResetAngle={resetAngle}
                     onOptimizeAngle={optimizeAngle}
                     angleOptimizing={angleOptimizing}

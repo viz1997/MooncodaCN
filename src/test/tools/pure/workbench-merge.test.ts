@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * 打印前工作台 —— **一个页面,三个视角**(2026-11-07)
+ * 打印前工作台 —— **一个页面,两个视角**(2026-11-07)
  *
  * ## 背景:两个工具页合成一个
  *
@@ -12,11 +12,14 @@ import { describe, expect, it } from "vitest";
  * 拖两次、解压两次、量两遍,中间还要跳页。
  *
  * 现在合成一个工作台(`/tools/workbench`),模型**只载入一次**,里面用
- * **检查 / 克重 / 摆盘** 三个视角看同一个模型。
+ * **检查 / 克重** 两个视角看同一个模型。
+ *
+ * 以前还有第三个「摆盘」视角 —— 2026-11-07 **并进克重栏**了(摆盘结果跟
+ * 克重本来就是一件事,拆两栏要用户自己把两个数对上)。
  *
  * ## 地址为什么叫 `/tools/workbench`
  *
- * 三个视角里没有一个能代表全名 —— 叫 `/tools/weight` 只说了克重,叫
+ * 两个视角里没有一个能代表全名 —— 叫 `/tools/weight` 只说了克重,叫
  * `/tools/model-check` 只说了检查。`/tools/workbench` 是唯一说得通的:
  * 这是一个**工作台**,里面切视角。
  *
@@ -39,6 +42,8 @@ import { describe, expect, it } from "vitest";
  * | 检查面板按 `scalePositionsXYZ` 缩放 | 尺寸面板改的是**另一边**的几何,两个视角的支撑克重对不上 |
  * | 工具中心只剩一个入口 | 清单里又冒出第二张卡 |
  * | 计算器不再 import 跨页接力模块 | 接力只扛得住客户端路由跳转,扛不住登录往返 |
+ * | 视角只有两个(没有第三个「摆盘」) | 又把摆盘拆出去了 —— 用户得自己对两个数 |
+ * | 全屏是**整块工作台** | 只放大视口的话,左栏那三个克重数还在屏幕外 |
  *
  * 全部是文件扫描 —— 不需要 DB、不需要网络、不需要浏览器。
  */
@@ -195,7 +200,7 @@ describe("工作台 —— 共用一个展示区域", () => {
     expect(code).toContain("supportShell={poseSupport?.shell ?? null}");
   });
 
-  it("模型角度三个视角都吃得到(转的是**模型**,不是视角)", () => {
+  it("模型角度两个视角都吃得到(转的是**模型**,不是视角)", () => {
     const code = stripComments(read(SETTINGS_PANEL));
 
     // 姿态无条件传给视口 —— 不分视角
@@ -235,13 +240,13 @@ describe("工作台 —— 共用一个展示区域", () => {
     expect(new Set(widths).size).toBe(1);
   });
 
-  it("整个工作台统一用检查工具的深色设计 —— 三个视角换的是左栏内容", () => {
+  it("整个工作台统一用检查工具的深色设计 —— 两个视角换的是左栏内容", () => {
     const code = stripComments(read(SETTINGS_PANEL));
 
     // 整块是一个深色应用(以前那个检查工具就是深色的)
     expect(code).toContain("bg-zinc-950 text-zinc-100");
 
-    // 左栏:检查 / 克重 / 摆盘换的是**内容**,外壳统一
+    // 左栏:检查 / 克重换的是**内容**,外壳统一
     const asides = code.match(/<aside className="[^"]*"/g) ?? [];
     expect(asides.length).toBe(2);
     for (const tag of asides) {
@@ -250,6 +255,52 @@ describe("工作台 —— 共用一个展示区域", () => {
       // 跟检查工具的深色设计对不上
       expect(tag).not.toContain("border-stone-200");
     }
+  });
+
+  it("视角只有两个 —— 「摆盘」并进克重栏了", () => {
+    const code = stripComments(read(SETTINGS_PANEL));
+
+    // 切换条上就两颗按钮
+    expect(code).toContain('export type WorkspaceTab = "check" | "weight"');
+    expect(code).toContain('{ id: "check", icon: ShieldCheck }');
+    expect(code).toContain('{ id: "weight", icon: Scale }');
+    // 不许再有第三个视角
+    expect(code).not.toContain('id: "pose"');
+    expect(code).not.toContain('tab === "pose"');
+
+    // 摆盘结果并进克重栏(`weight` 插槽),不再是单独的插槽
+    const calc = stripComments(read(CALCULATOR));
+    expect(calc).toContain("const weightColumn = (");
+    expect(calc).toContain("weight={weightColumn}");
+    expect(calc).not.toContain("pose={");
+  });
+
+  it("全屏是**整块工作台**(不是只放大视口)", () => {
+    const code = stripComments(read(SETTINGS_PANEL));
+
+    // 走浏览器的 Fullscreen API —— 不是 `position: fixed` 那种假全屏
+    expect(code).toContain("requestFullscreen");
+    expect(code).toContain("exitFullscreen");
+    expect(code).toContain("fullscreenchange");
+
+    // 整块(头部 / 视角切换 / 信息栏 / 视口)一起放大
+    expect(code).toContain("[:fullscreen]:h-screen");
+    expect(code).toContain("[:fullscreen]:w-screen");
+    // 左边那一栏也得能滚(不然全屏下内容被截断)
+    expect(code).toContain("[:fullscreen]:overflow-y-auto");
+  });
+
+  it("拖动模型改的是打印姿态(视角那边留给缩放 / 平移)", () => {
+    const frame = stripComments(read(SETTINGS_PANEL));
+
+    // 拖动回调一路传到视口
+    expect(frame).toContain("onPoseChange={onPoseChange}");
+    expect(frame).toContain("onPoseDragEnd={onPoseDragEnd}");
+
+    const calc = stripComments(read(CALCULATOR));
+    // 拖动 → 克重跟着刷新(节流提交),拖完再补算支撑几何
+    expect(calc).toContain("const handlePoseChange");
+    expect(calc).toContain("const handlePoseDragEnd");
   });
 
   it("空状态(还没拖文件)也是深色的 —— 拖完不换脸", () => {

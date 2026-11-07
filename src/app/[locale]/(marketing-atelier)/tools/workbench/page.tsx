@@ -8,32 +8,34 @@ import { getServerSession } from "@/lib/auth/server";
  * 打印前工作台 —— `/tools/workbench`
  *
  * 移植自 `C:\Users\Admin1\Downloads\wjp-source-code`(PolyJet 耗材填充克重
- * 计算器)。整页的检查 / 克重 / 摆盘 / 解析都在浏览器本地跑:
+ * 计算器)。整页的检查 / 克重 / 解析都在浏览器本地跑:
  *  - 模型文件**默认**不上传服务器;
  *  - 计算结果不写数据库(「只算不存」);
  *  - 材料参数(密度 / 支撑几何)由后台 `/admin/print-pricing` 统一配置,
  *    访客改不了 —— 页面只读。
  *
- * ## 2026-11-07:模型检查工具并进来了 —— 一个页面,三个视角
+ * ## 2026-11-07:模型检查工具并进来了 —— 一个页面,两个视角
  *
  * 工作室的原话:**「不想分成两个工具页」**。以前模型检查(`/tools/model-check`)
  * 和克重(`/tools/weight`)是**两个页面**,同一个文件要拖两次、解压两次、量两遍,
  * 中间还要跳页。
  *
- * 现在合成一个工作台,模型**只载入一次**,里面用三个视角看同一个模型:
+ * 现在合成一个工作台,模型**只载入一次**,里面用两个视角看同一个模型:
  *
  * ```
  * 检查 —— 打印前自检(反转法向 / 坏边破面 / 壳体封闭性)
- * 克重 —— 耗材克重 / 支撑克重 / 总克重
- * 摆盘 —— 最优姿态 + 省了多少料
+ * 克重 —— 耗材克重 / 支撑克重 / 总克重 + 智能摆盘的结果
  * ```
  *
- * 三栏的数字来自**同一个** `ModelFile`、同一套缩放、同一份后台参数 ——
+ * (以前还有第三个「摆盘」视角 —— 同日并进克重栏了:摆盘结果跟克重本来
+ * 就是一件事,拆两栏要用户自己把两个数对上。智能摆盘那颗按钮还在。)
+ *
+ * 两栏的数字来自**同一个** `ModelFile`、同一套缩放、同一份后台参数 ——
  * 结构上就不可能对不上。
  *
  * ## 为什么地址叫 `/tools/workbench`
  *
- * 三个视角里没有一个能代表全名:叫 `/tools/weight` 只说了克重,叫
+ * 两个视角里没有一个能代表全名:叫 `/tools/weight` 只说了克重,叫
  * `/tools/model-check` 只说了检查。老地址(`/pricing` / `/tools/weight` /
  * `/tools/model-check`)都 308 跳过来 —— 链接不断,权重也转得过去。
  *
@@ -77,12 +79,12 @@ export async function generateMetadata({
   const isZh = locale === "zh";
 
   const title = isZh
-    ? "3D 打印前工作台 — 模型检查 / 克重 / 摆盘"
-    : "3D Print Pre-flight Workbench — Check, Weight, Pose";
+    ? "3D 打印前工作台 — 模型检查 / 克重"
+    : "3D Print Pre-flight Workbench — Check, Weight";
 
   const description = isZh
-    ? "上传 3D 模型,一次载入三个视角:打印前自检(反转法向、坏边破面、壳体封闭性)、耗材与支撑克重、智能摆盘角度 —— 全部在浏览器本地算,问题位置在 3D 里直接标色。量完直接「加入打印单」,在打印单上确认金额再下单 —— 量重量的过程模型不上传。"
-    : "Upload a 3D model once and view it three ways: pre-flight inspection (inverted normals, broken faces, shell integrity), resin and support weight, and best print orientation — all computed locally in your browser, with problems highlighted in 3D. Add it to your print order and confirm the total there; nothing is uploaded while measuring.";
+    ? "上传 3D 模型,一次载入两个视角:打印前自检(反转法向、坏边破面、壳体封闭性)、耗材与支撑克重(含智能摆盘的最省姿态)—— 全部在浏览器本地算,问题位置在 3D 里直接标色。量完直接「加入打印单」,在打印单上确认金额再下单 —— 量重量的过程模型不上传。"
+    : "Upload a 3D model once and view it two ways: pre-flight inspection (inverted normals, broken faces, shell integrity) and resin / support weight (with the leanest print orientation) — all computed locally in your browser, with problems highlighted in 3D. Add it to your print order and confirm the total there; nothing is uploaded while measuring.";
 
   return {
     title,

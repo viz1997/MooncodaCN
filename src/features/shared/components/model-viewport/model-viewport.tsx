@@ -1,8 +1,8 @@
 "use client";
 
 /**
- * 共用的模型 3D 视口 —— 打印前工作台(`/tools/workbench`)的**三个视角**
- * (检查 / 克重 / 摆盘)用的是同一个组件。
+ * 共用的模型 3D 视口 —— 打印前工作台(`/tools/workbench`)的**两个视角**
+ * (检查 / 克重)用的是同一个组件。
  *
  * ## 为什么抽出来
  *
@@ -30,6 +30,20 @@
  * - 模型组整体平移,使平台落在 `z = 0`、模型悬在平台上方一段托底高度。
  * - 姿态组在模型组里面,只管旋转 —— **支撑几何不进姿态组**:外面传进来的
  *   支撑已经是**转好姿态**的坐标,再转一次就转过了。
+ *
+ * ## 鼠标:左键拖 = 转模型,不是转相机
+ *
+ * 工作室要的是「在预览里拖着看,顺手把这个姿态的克重算出来」:
+ *
+ * | 操作 | 效果 |
+ * |---|---|
+ * | **左键拖** | 转**模型**(改打印姿态:横向 → Z,纵向 → X)—— 支撑克重跟着走 |
+ * | 滚轮 | 缩放(相机) |
+ * | 右键拖 | 平移(相机) |
+ *
+ * 所以 OrbitControls 的左键旋转被**关掉**了 —— 相机转的是「摆着看」,
+ * 模型转的是「摆着印」,后者决定支撑克重。两件事别混。
+ * (只有接了「拖动改姿态」的回调时才关;没接的话左键还是转相机。)
  */
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -40,6 +54,7 @@ import {
 } from "@/features/pricing/lib/obj-materials";
 import {
   POSE_EULER_ORDER,
+  poseAfterDrag,
   rotatedBBoxMinZ,
 } from "@/features/shared/components/model-viewport/pose";
 import {
@@ -72,7 +87,7 @@ export interface ViewportVisibility {
 }
 
 /**
- * 没有任何问题图层时的开关状态 —— 克重 / 摆盘视角没有分析结果,
+ * 没有任何问题图层时的开关状态 —— 克重视角没有分析结果,
  * 传这个就行(问题着色那一层压根不画)。
  */
 const NO_ISSUES: ViewportVisibility = {
@@ -118,7 +133,7 @@ export type ModelViewportProps = {
    * 分析结果 —— **可选**
    *
    * 有它才画问题着色 / 问题边线 / 悬停提示(检查视角);
-   * 克重与摆盘视角传 `null` —— 分析器不在后台偷偷跑。
+   * 克重视角传 `null` —— 分析器不在后台偷偷跑。
    */
   result: AnalysisResult | null;
   /** 三角汤坐标(主线程持有),9 floats per triangle —— **已按当前尺寸缩放** */
@@ -140,6 +155,23 @@ export type ModelViewportProps = {
   supportShell?: SupportShellData | null | undefined;
   /** 当前姿态 —— 不传 = 不转 */
   pose?: ViewportPose | undefined;
+  /**
+   * 在预览里**拖动模型**改姿态 —— 回调新的姿态(度)
+   *
+   * 左键拖 = 转**模型**(改打印姿态),不是转相机:摆着印(转模型)决定
+   * 支撑克重,摆着看(转相机)决定看得清看不清,是两件事。相机那边留给
+   * **滚轮缩放** + **右键拖平移**。
+   *
+   * 不传这个回调 = 拖动不转模型(相机的左键旋转照旧)。
+   */
+  onPoseChange?: ((pose: ViewportPose) => void) | undefined;
+  /**
+   * 拖动结束 —— 拖的过程中不重算支撑几何,松手了才补算
+   *
+   * 支撑外壳是整套计算里最贵的一块(栅格化 + 距离变换),拖动时每一帧
+   * 都重建一次会卡死。克重数字照常刷新(节流),几何等松手。
+   */
+  onPoseDragEnd?: (() => void) | undefined;
   /**
    * 托底高度 (mm) —— 模型悬在平台上方多远
    *
@@ -271,6 +303,8 @@ export default function ModelViewport({
   focusRequest,
   fitSignal,
   onReady,
+  onPoseChange,
+  onPoseDragEnd,
 }: ModelViewportProps) {
   const t = useTranslations("ModelInspector");
   const tooltipRef = useRef<HTMLDivElement>(null);
@@ -321,10 +355,21 @@ export default function ModelViewport({
   onReadyRef.current = onReady;
   /** 悬停提示文案(事件回调只读 ref,避免每次 pointermove 都跑一遍翻译) */
   const tooltipTextsRef = useRef<Record<string, string>>({});
+  /** 当前姿态 —— 拖动开始那一下要拿它当基准 */
+  const poseRef = useRef<ViewportPose>({ rotX: 0, rotY: 0, rotZ: 0 });
+  /** 拖动回调 —— 放进 ref,免得回调换身份就把监听器重挂一遍 */
+  const onPoseChangeRef = useRef(onPoseChange);
+  onPoseChangeRef.current = onPoseChange;
+  const onPoseDragEndRef = useRef(onPoseDragEnd);
+  onPoseDragEndRef.current = onPoseDragEnd;
+  /** 正在拖 —— 悬停提示要躲开(不然一边转模型一边弹问题标签) */
+  const draggingRef = useRef(false);
 
   const rotX = pose?.rotX ?? 0;
   const rotY = pose?.rotY ?? 0;
   const rotZ = pose?.rotZ ?? 0;
+  // 每次渲染都同步一份 —— 拖动开始那一下拿到的就是当前姿态
+  poseRef.current = { rotX, rotY, rotZ };
 
   useEffect(() => {
     tooltipTextsRef.current = {
@@ -394,6 +439,92 @@ export default function ModelViewport({
     controls.target.copy(center);
     controls.update();
   }, []);
+
+  // ---------- 拖动模型改姿态 ----------
+  //
+  // **左键拖 = 转模型**,不是转相机:摆着印(转模型)决定支撑克重。
+  // 相机那边留给滚轮缩放(OrbitControls 自带)+ 右键拖平移(也是自带)。
+  //
+  // 所以接了「拖动改姿态」的回调时,把 OrbitControls 的左键旋转**关掉**
+  // (`mouseButtons.LEFT = null` → OrbitControls 走 default 分支 →
+  // state = NONE,什么都不做),左键改成我们自己的:横向拖转 Z、纵向拖转 X。
+  //
+  // **没接那个回调时左键还是老样子转相机** —— 这个视口也可能被别处拿去
+  // 只看不动。
+  useEffect(() => {
+    const ctx = previewCtx;
+    if (!ctx) return;
+    const el = ctx.renderer.domElement;
+
+    let dragging = false;
+    let startX = 0;
+    let startY = 0;
+    /** 拖动**开始**时的姿态 —— 从这儿累加,中间丢几个事件也不漂 */
+    let base: ViewportPose = { rotX: 0, rotY: 0, rotZ: 0 };
+
+    const onDown = (ev: PointerEvent) => {
+      // 只有左键(触摸也是 button 0)才转模型;右键留给相机平移
+      if (ev.button !== 0) return;
+      if (!onPoseChangeRef.current) return;
+      dragging = true;
+      draggingRef.current = true;
+      startX = ev.clientX;
+      startY = ev.clientY;
+      base = { ...poseRef.current };
+      el.style.cursor = "grabbing";
+      ev.preventDefault();
+    };
+
+    const onMove = (ev: PointerEvent) => {
+      if (!dragging) return;
+      const next = poseAfterDrag(
+        base,
+        ev.clientX - startX,
+        ev.clientY - startY
+      );
+      poseRef.current = next;
+      onPoseChangeRef.current?.(next);
+    };
+
+    const onUp = () => {
+      if (!dragging) return;
+      dragging = false;
+      draggingRef.current = false;
+      el.style.cursor = "";
+      onPoseDragEndRef.current?.();
+    };
+
+    el.addEventListener("pointerdown", onDown);
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerup", onUp);
+    el.addEventListener("pointercancel", onUp);
+    return () => {
+      el.removeEventListener("pointerdown", onDown);
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerup", onUp);
+      el.removeEventListener("pointercancel", onUp);
+      el.style.cursor = "";
+    };
+  }, [previewCtx]);
+
+  /**
+   * 左键给谁:模型还是相机
+   *
+   * 接了「拖动改姿态」→ 左键转**模型**(打印姿态),相机那边留给滚轮缩放 +
+   * 右键平移。没接 → 左键还是转相机(跟以前一样)。
+   */
+  const hasPoseDrag = Boolean(onPoseChange);
+  useEffect(() => {
+    const ctx = previewCtx;
+    if (!ctx) return;
+    // 左键不再转相机(单指也一样:手机上两根手指才是缩放/平移)
+    ctx.controls.mouseButtons.LEFT = hasPoseDrag
+      ? (null as unknown as THREE.MOUSE)
+      : THREE.MOUSE.ROTATE;
+    ctx.controls.touches.ONE = hasPoseDrag
+      ? (null as unknown as THREE.TOUCH)
+      : THREE.TOUCH.ROTATE;
+  }, [previewCtx, hasPoseDrag]);
 
   // ---------- 场景骨架:模型组 + 姿态组 ----------
   useEffect(() => {
@@ -509,7 +640,7 @@ export default function ModelViewport({
           }
         }
       } else {
-        // 没有分析结果(克重 / 摆盘视角)—— 干净面:有贴图或 Kd → 白色,都没有 → 灰色
+        // 没有分析结果(克重视角)—— 干净面:有贴图或 Kd → 白色,都没有 → 灰色
         if (textured || slotHasKd[slot]) {
           color.copy(TEXTURED_COLOR);
         } else {
@@ -893,6 +1024,11 @@ export default function ModelViewport({
       const now = performance.now();
       const tip = tooltipRef.current;
       if (!tip) return;
+      // 正在拖模型 —— 别弹问题标签(一边转一边闪)
+      if (draggingRef.current) {
+        tip.style.display = "none";
+        return;
+      }
       const rect = renderer.domElement.getBoundingClientRect();
       tip.style.left = `${ev.clientX - rect.left + 14}px`;
       tip.style.top = `${ev.clientY - rect.top + 14}px`;
