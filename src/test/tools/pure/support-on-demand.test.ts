@@ -150,6 +150,75 @@ describe("支撑按需计算 —— 支撑不跟随角度实时变化", () => {
   });
 });
 
+/**
+ * 「置于平面」—— 一颗按钮把「落座 + 重算支撑」串成一步(2026-11-07)
+ *
+ * 工作室要的是「转完模型,点一下就齐活」:
+ *
+ * ```
+ * 转模型(拖旋转控制器)→ 上一次的结果作废(数字清空、支撑撤掉)
+ *   → 用户点「置于平面」→ 支撑按当前姿态算一次 → 平台平面按这个姿态重摆
+ *                      → 模型坐在托底上 → 支撑克重 / 总克重同时刷新
+ * ```
+ *
+ * 跟「包裹支撑」那颗的区别:那颗是**开关**(按一下算、再按一下不画),
+ * 这颗是**动作**(永远算一次、永远落在平台上)。
+ */
+describe("「置于平面」—— 一颗按钮把落座 + 重算支撑串成一步", () => {
+  it("浮层控制条上有这颗按钮", () => {
+    const code = stripComments(read(SETTINGS_PANEL));
+
+    expect(code).toContain("onPlaceOnPlane");
+    expect(flat(code)).toContain("onClick={onPlaceOnPlane}");
+    expect(code).toContain('t("preview.placeOnPlane")');
+  });
+
+  it("按下去 = 打开支撑 + 逼着**重算**一次", () => {
+    const code = stripComments(read(CALCULATOR));
+
+    const body = flat(code).match(
+      /const placeOnPlane = useCallback\(\(\) => \{([\s\S]*?)\}, \[\]\);/
+    );
+    expect(body).not.toBeNull();
+    // 支撑打开 —— 画面上要画出来那圈支撑
+    expect(body?.[1] ?? "").toContain("setShowSupport(true)");
+    // 令牌 +1 —— 依赖没变的时候(开关本来就开着 / 上次算失败)也一定重算
+    expect(body?.[1] ?? "").toContain("setSupportRecalcToken");
+  });
+
+  it("令牌在算支撑那个 effect 的依赖里", () => {
+    const code = stripComments(read(CALCULATOR));
+
+    const effect = code.match(
+      /if \(!showSupport\) return;[\s\S]*?\}, \[([^\]]*)\]\);/
+    );
+    expect(effect).not.toBeNull();
+
+    const deps = effect?.[1] ?? "";
+    expect(deps).toContain("supportRecalcToken");
+    // 依赖里**仍然没有角度** —— 落座不许变成「实时重算」
+    expect(deps).not.toContain("rotX");
+    expect(deps).not.toContain("rotY");
+    expect(deps).not.toContain("rotZ");
+  });
+
+  it("落座**不碰角度** —— 它是落座 + 重算,不是改姿态", () => {
+    const code = stripComments(read(CALCULATOR));
+
+    const body = flat(code).match(
+      /const placeOnPlane = useCallback\(\(\) => \{([\s\S]*?)\}, \[\]\);/
+    );
+    expect(body?.[1] ?? "").not.toContain("setManualRot");
+    expect(body?.[1] ?? "").not.toContain("setViewerRot");
+  });
+
+  it("计算器把这颗按钮接到面板上", () => {
+    const code = stripComments(read(CALCULATOR));
+
+    expect(flat(code)).toContain("onPlaceOnPlane={placeOnPlane}");
+  });
+});
+
 describe("支撑按需计算 —— 加购那条路不会收少了钱", () => {
   it("服务端按 `supportWeightG` 重算报价,没这个数就是 0", () => {
     const code = stripComments(read(QUOTE_SERVER));

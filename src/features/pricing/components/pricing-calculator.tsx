@@ -385,6 +385,18 @@ export function PricingCalculator({
    */
   const [showSupport, setShowSupport] = useState(false);
   /**
+   * 「置于平面」的触发令牌 —— 逼着支撑**重算一遍**
+   *
+   * 「置于平面」要做的事是「按当前姿态落座 + 重算支撑」。光把 `showSupport`
+   * 打开**不一定**会重算 —— 下面那个算支撑的 effect 只在依赖变了的时候才跑。
+   * 这两种情况下依赖没变:
+   * - 开关本来就开着(用户没转过模型)→ 已经在算了;
+   * - 上一次算失败(Worker 报错)→ 用户想重试,但依赖也没变。
+   *
+   * 所以另备一个令牌:点一次 +1,effect 的依赖里带着它 —— **一定会重算**。
+   */
+  const [supportRecalcToken, setSupportRecalcToken] = useState(0);
+  /**
    * 3D 预览是否显示模型自带的贴图 —— 与检测工具的「显示贴图」开关同一套行为。
    * 关掉就是纯色(MTL 的 `Kd` 本色)视图,方便看模型本体形状。
    */
@@ -530,9 +542,14 @@ export function PricingCalculator({
    * 依赖里有 `showSupport`:那颗按钮就是开关 —— 关着就一点支撑都不算
    * (默认关着,模型刚进来时一个支撑都不算,用户不主动要就不替他算)。
    *
+   * 依赖里还有 `supportRecalcToken`:「置于平面」每点一次 +1 —— **逼着这个
+   * effect 重算一遍**。光打开 `showSupport` 不够(开关本来就开着、或者
+   * 上一次算失败的时候,依赖没变,effect 不会跑)。
+   *
    * 算的是**缩放后**的真实几何:缩放只挪顶点(拓扑不变),不用重新焊接。
    * 计算在 Worker 里跑(主线程只发一条指令),页面不会卡。
    */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 依赖就是触发条件 —— 「置于平面」点一次令牌 +1 就重算,effect 体里不用读它
   useEffect(() => {
     // 没点「包裹支撑」 → 不算
     if (!showSupport) return;
@@ -565,7 +582,14 @@ export function PricingCalculator({
     return () => {
       cancelled = true;
     };
-  }, [showSupport, appliedScales, supportParams, model, supportModelReady]);
+  }, [
+    showSupport,
+    appliedScales,
+    supportParams,
+    model,
+    supportModelReady,
+    supportRecalcToken,
+  ]);
 
   /**
    * 角度变了 → 上一次算出来的支撑**作废**
@@ -582,6 +606,27 @@ export function PricingCalculator({
     setPoseSupport(null);
     setShowSupport(false);
   }, [manualRotX, manualRotY, manualRotZ]);
+
+  /**
+   * 「置于平面」—— 按当前姿态把模型放到打印平台上(工作室 2026-11-07)
+   *
+   * 一颗按钮把三件事串成**一步**:
+   *
+   * 1. **支撑按当前姿态重算一次** —— 走的就是上面那个 effect
+   *    (`withShell: true`,画出来的那圈支撑跟算克重的是同一块几何);
+   * 2. **平台平面按这个姿态重摆** —— 视口拿这块外壳自己的 `groundZ` 摆
+   *    平台(姿态对不上才不认,见 `shellMatchesPose`),模型因此坐在托底上,
+   *    **不会低过平面**;
+   * 3. **支撑克重 / 总克重同时刷新** —— 三样东西来自**同一次**计算。
+   *
+   * 跟「包裹支撑」那颗的区别:那颗是**开关**(按一下算、再按一下不画),
+   * 这颗是**动作**(永远算一次、永远把模型放在平台上)。用户转完模型点这颗
+   * 就齐活了,不用先点「包裹支撑」。
+   */
+  const placeOnPlane = useCallback(() => {
+    setShowSupport(true);
+    setSupportRecalcToken((t) => t + 1);
+  }, []);
 
   const geometry = useMemo((): ModelGeometry | null => {
     if (mode === "upload") {
@@ -1907,6 +1952,7 @@ export function PricingCalculator({
                     angleReady={supportModelReady}
                     showSupport={showSupport}
                     onToggleSupport={() => setShowSupport((s) => !s)}
+                    onPlaceOnPlane={placeOnPlane}
                     supportLiftMm={clientConfig?.supportLiftMm}
                     supportBaseMarginMm={clientConfig?.supportBaseMarginMm}
                     showTexture={showTexture}

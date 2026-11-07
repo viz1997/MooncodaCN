@@ -8,6 +8,7 @@ import {
   Loader2,
   Maximize2,
   Minimize2,
+  MoveDown,
   Palette,
   RotateCcw,
   Scale,
@@ -289,6 +290,13 @@ export type ModelSettingsPanelProps = {
   showSupport: boolean;
   onToggleSupport: () => void;
   /**
+   * 「置于平面」—— 按当前姿态把模型放到打印平台上(顺带把支撑重算一遍)
+   *
+   * 跟 `onToggleSupport` 分开:那颗是**开关**(按一下算、再按一下不画),
+   * 这颗是**动作**(永远按当前姿态算一次、永远落在平台上)。
+   */
+  onPlaceOnPlane: () => void;
+  /**
    * 托底高度 (mm) —— 3D 预览里模型悬在平台上方多远
    *
    * 不传 = `SUPPORT_LIFT_MM`(5mm)。**2026-11-06 起跟随后台**
@@ -359,6 +367,7 @@ export function ModelSettingsPanel({
   angleReady,
   showSupport,
   onToggleSupport,
+  onPlaceOnPlane,
   supportLiftMm,
   supportBaseMarginMm,
   showTexture,
@@ -947,6 +956,21 @@ export function ModelSettingsPanel({
                       >
                         <Shell className="size-3.5" />
                         {t("preview.support")}
+                      </button>
+                      {/*
+                        置于平面 —— **动作**,不是开关:
+                        按当前姿态把模型放到打印平台上(支撑按这个姿态重算
+                        一次 → 平台平面跟着重摆 → 模型坐在托底上 →
+                        支撑克重 / 总克重同时刷新)。
+                      */}
+                      <button
+                        type="button"
+                        title={t("preview.placeOnPlaneTitle")}
+                        onClick={onPlaceOnPlane}
+                        className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-zinc-500 transition-colors hover:text-zinc-300"
+                      >
+                        <MoveDown className="size-3.5" />
+                        {t("preview.placeOnPlane")}
                       </button>
                       {/* 重置视角 —— 把**相机**摆回默认位置(不是模型角度) */}
                       <button
