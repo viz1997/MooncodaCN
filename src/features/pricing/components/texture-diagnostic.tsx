@@ -29,7 +29,7 @@ export function TextureDiagnosticNote({
   if (failed.length === 0) return null;
 
   return (
-    <div className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-amber-900">
+    <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-amber-200">
       <div className="flex items-center gap-1.5 text-xs font-medium">
         <AlertTriangle className="size-3.5 shrink-0" />
         {t("failedTitle", { failed: failed.length, total: diagnostics.length })}

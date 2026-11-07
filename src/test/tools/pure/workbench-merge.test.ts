@@ -211,25 +211,62 @@ describe("工作台 —— 共用一个展示区域", () => {
     // 工作室的原话:「克重区域应该像之前的检查区域那样,而不是反过来」
     // —— 以前那个模型检查工具是「侧栏左 + 视口右」,所以是**克重那一栏**
     // 改成那个排布,不是把检查那一栏塞进右栏。
+    //
+    // 断点也是跟旧检查工具一样(`md`,768px 就并排)—— 等到 `lg` 的话,
+    // 768~1023px 这段窗口里还摆着老克重工具的方向(视口在上、面板在下)。
 
     // 整块:一行两列
-    expect(code).toContain("lg:flex-row");
+    expect(code).toContain("md:flex-row");
 
     // 侧栏(`<aside>`):桌面端排在左边
     const asides = code.match(/<aside className="[^"]*"/g) ?? [];
     expect(asides.length).toBeGreaterThan(0);
-    for (const tag of asides) expect(tag).toContain("lg:order-1");
+    for (const tag of asides) expect(tag).toContain("md:order-1");
 
     // 视口那一列:桌面端排在右边(手机上还是在上,所以 DOM 里在前面)
-    expect(code).toMatch(/className="order-1 lg:order-2[^"]*"/);
+    expect(code).toMatch(/className="order-1 md:order-2[^"]*"/);
   });
 
   it("两个视角的侧栏同宽 —— 不然切一次视角视口宽度就变,相机取景会跑偏", () => {
     const code = stripComments(read(SETTINGS_PANEL));
 
-    const widths = code.match(/lg:w-\[\d+px\]/g) ?? [];
+    const widths = code.match(/md:w-\[\d+px\]/g) ?? [];
     expect(widths.length).toBeGreaterThan(0);
     expect(new Set(widths).size).toBe(1);
+  });
+
+  it("整个工作台统一用检查工具的深色设计 —— 三个视角换的是左栏内容", () => {
+    const code = stripComments(read(SETTINGS_PANEL));
+
+    // 整块是一个深色应用(以前那个检查工具就是深色的)
+    expect(code).toContain("bg-zinc-950 text-zinc-100");
+
+    // 左栏:检查 / 克重 / 摆盘换的是**内容**,外壳统一
+    const asides = code.match(/<aside className="[^"]*"/g) ?? [];
+    expect(asides.length).toBe(2);
+    for (const tag of asides) {
+      expect(tag).toContain("md:order-1");
+      // 两个侧栏都不许再带浅色底 —— 以前克重那一栏是浅色的,
+      // 跟检查工具的深色设计对不上
+      expect(tag).not.toContain("border-stone-200");
+    }
+  });
+
+  it("空状态(还没拖文件)也是深色的 —— 拖完不换脸", () => {
+    const code = stripComments(read(CALCULATOR));
+
+    // 以前那个模型检查工具**从第一屏就是深色的** —— 拖放区在那块深色面板
+    // 里面。工作台统一用那个设计,空状态也得是深色的:拖完文件之后整块
+    // 不换脸(以前是浅色卡片 → 深色应用,中间整个跳一次)。
+    const dashed = code.match(
+      /className=\{`[^`]*border-2 border-dashed[^`]*`\}/
+    );
+    expect(dashed).not.toBeNull();
+    expect(dashed?.[0]).toContain("bg-zinc-950");
+
+    // 旧的浅色拖放区不许再回来
+    expect(code).not.toContain("bg-stone-50/40");
+    expect(code).not.toContain("border-stone-300");
   });
 });
 

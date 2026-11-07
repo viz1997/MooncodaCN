@@ -53,7 +53,7 @@ export function MeshCheckBadge({
     return (
       <Badge
         variant="outline"
-        className="border-emerald-300 bg-emerald-50 text-emerald-700"
+        className="border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
         title={t("check.passTitle")}
       >
         <CircleCheck className="size-3" aria-hidden />
@@ -67,8 +67,8 @@ export function MeshCheckBadge({
       variant="outline"
       className={
         summary.status === "fail"
-          ? "border-rose-300 bg-rose-50 text-rose-700"
-          : "border-amber-300 bg-amber-50 text-amber-700"
+          ? "border-rose-500/40 bg-rose-500/10 text-rose-300"
+          : "border-amber-500/40 bg-amber-500/10 text-amber-300"
       }
       title={t("check.issuesTitle")}
     >
@@ -97,8 +97,8 @@ export function MeshCheckIssues({
   if (summary.warnings.length === 0) return null;
 
   return (
-    <div className="mt-2 rounded-md border border-amber-200 bg-amber-50/70 px-2.5 py-2">
-      <ul className="list-disc space-y-0.5 pl-4 text-[11px] leading-relaxed text-amber-900">
+    <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-2">
+      <ul className="list-disc space-y-0.5 pl-4 text-[11px] leading-relaxed text-amber-200">
         {summary.warnings.map((w) => (
           <li key={w.key}>{t(w.key, w.params)}</li>
         ))}
@@ -107,7 +107,7 @@ export function MeshCheckIssues({
         <button
           type="button"
           onClick={onInspect}
-          className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-amber-800 underline underline-offset-2 hover:no-underline"
+          className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-amber-300 underline underline-offset-2 hover:no-underline"
         >
           {t("check.details")}
           <ArrowRight className="size-3" aria-hidden />

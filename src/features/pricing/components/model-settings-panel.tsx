@@ -26,7 +26,7 @@ import type { ReactNode } from "react";
  *  3. **和结果卡合并成一张卡**。之前是「上面一张结果卡 + 下面一张模型设置
  *     卡」，同一个模型被劈成两个区域，文件名、体积、摆盘结果各出现两遍。
  *     现在这一张卡就是全部：头部是文件身份 + 几何标签（`header` 插槽，
- *     父组件渲染），左栏 3D 预览，右栏克重 + 摆盘结果（`weight` 插槽，
+ *     父组件渲染），右边 3D 预览，左栏克重 + 摆盘结果（`weight` 插槽，
  *     父组件渲染）+ 尺寸调节。
  *
  * ## 共用一个展示区域(2026-11-07)
@@ -36,7 +36,7 @@ import type { ReactNode } from "react";
  * 以前「检查」那一栏**整块替换**两栏布局,自己挂一个深色视口 —— 切一次
  * 视角,视口就卸载重挂一遍,相机、模型、支撑全得重来。
  *
- * 现在**只有一个 `ModelViewport`**,永远挂在左栏:
+ * 现在**只有一个 `ModelViewport`**,永远挂在右栏:
  *
  * | 视角 | 喂进去的数据 |
  * |---|---|
@@ -45,6 +45,28 @@ import type { ReactNode } from "react";
  * | `pose` | 同上 |
  *
  * 切视角 = 换几行 prop。**视口不卸载**,相机不动,模型不重建。
+ *
+ * ## 统一用「以前那个检查工具」的深色设计(2026-11-07)
+ *
+ * 工作室的原话:**「就是统一用检查那个设计，左边信息栏可以显示克重、检查、
+ * 摆盘」**。
+ *
+ * 合并之后有两处跟旧检查工具对不上:
+ *
+ * 1. **外观** —— 检查那一栏是深色,克重 / 摆盘是浅色,切一次视角整块换脸
+ * 2. **排布** —— 旧检查工具是「侧栏左 + 视口右」,`md`(768px)就并排;
+ *    工作台当时是「视口上 + 面板下」,`lg`(1024px)才并排 —— 768~1023px
+ *    那段窗口还摆着老克重工具的方向
+ *
+ * 现在**整块是一个深色应用**:头部(文件身份)→ 视角切换条 → 左边信息栏 +
+ * 右边 3D 视口。三个视角换的是**左边那一栏的内容**,整块外观不变。
+ *
+ * - **并排断点跟旧检查工具一样(`md`)** —— 侧栏 `md:order-1`、视口
+ *   `md:order-2`(手机上视口还在上面,所以 DOM 里它在前面)
+ * - **两个侧栏同宽(`md:w-[400px]`)** —— 不然切一次视角视口宽度就变,
+ *   相机的取景会跑偏
+ * - **「加入打印单」那张卡在深色应用外面** —— 它是页面里的一张浅色卡
+ *   (工作室的下单按钮),不是 3D 应用的一部分
  *
  * ## 模型角度是**模型**的旋转,不是**视角**的旋转
  *
@@ -102,11 +124,11 @@ export type DimMode = "original" | "custom";
  *
  * | 视角 | 看什么 |
  * |---|---|
- * | `check` | 打印前自检(反转法向 / 坏边破面 / 壳体封闭性)—— 右栏换成检查侧栏 |
+ * | `check` | 打印前自检(反转法向 / 坏边破面 / 壳体封闭性)—— 左栏换成检查侧栏 |
  * | `weight` | 克重(耗材 / 支撑 / 总克重)+ 尺寸调节 |
  * | `pose` | 摆盘(最优姿态 + 省了多少料) |
  *
- * 三个视角**共用左栏那一个展示区域**(同一个 `ModelViewport`)——
+ * 三个视角**共用右栏那一个展示区域**(同一个 `ModelViewport`)——
  * 切视角只换喂进去的数据。
  */
 export type WorkspaceTab = "check" | "weight" | "pose";
@@ -143,7 +165,7 @@ export type ModelSettingsPanelProps = {
   header?: ReactNode;
 
   /**
-   * 右栏顶部的内容 —— 克重 + 摆盘结果。
+   * 左栏顶部的内容 —— 克重 + 摆盘结果。
    * 由父组件渲染（它持有 `calc` / `optimalAngle`）。
    *
    * **只在「克重」视角显示** —— 摆盘结果挪到 `pose` 插槽了。
@@ -151,7 +173,7 @@ export type ModelSettingsPanelProps = {
   weight?: ReactNode;
 
   /**
-   * 右栏的「摆盘」视角内容 —— 智能摆盘结果。
+   * 左栏的「摆盘」视角内容 —— 智能摆盘结果。
    *
    * 跟 `weight` 分开是因为它们回答的是两个问题:**要多少料** vs **怎么摆**。
    * 摆在同一栏里,用户得在一堆数字里找哪个是结论。
@@ -335,7 +357,7 @@ export function ModelSettingsPanel({
    * 缩放后的几何 —— 3D 预览画的就是这一份
    *
    * 跟算支撑克重用的是**同一个** `scalePositionsXYZ`(检查视角也是它)——
-   * 画面上的模型跟右栏那个克重是同一个尺寸。
+   * 画面上的模型跟左栏那个克重是同一个尺寸。
    */
   const scaledPositions = useMemo((): Float32Array | null => {
     const raw = model?.parseResult.positions;
@@ -434,421 +456,447 @@ export function ModelSettingsPanel({
   if (!model && loadStatus === "idle") return null;
 
   return (
-    <div className="rounded-xl border border-stone-200 bg-white shadow-sm overflow-hidden">
-      {/* ---------- 卡片头部（文件身份 + 操作）—— 由父组件渲染 ---------- */}
-      {header !== undefined ? (
-        <div className="px-4 py-3 border-b border-stone-200 bg-stone-50/60">
-          {header}
-        </div>
-      ) : (
-        <div className="flex items-start justify-between gap-3 px-4 py-3 border-b border-stone-200 bg-stone-50/60">
-          <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-stone-800 flex items-center gap-2">
-              <Boxes className="size-4 text-amber-600 shrink-0" />
-              <span className="truncate">
-                {model
-                  ? t("dialog.title", { name: model.name })
-                  : t("dialog.titlePlain")}
-              </span>
+    <div className="space-y-4">
+      {/* ---------- 深色 3D 应用 ----------
+          **统一用「以前那个检查工具」的设计** —— 一整块深色应用:
+          头部(文件身份)→ 视角切换条 → 左边信息栏 + 右边 3D 视口。
+          克重 / 检查 / 摆盘三个视角换的是**左边那一栏的内容**,
+          整块外观不变。 */}
+      <div className="rounded-xl border border-zinc-800 bg-zinc-950 text-zinc-100 shadow-sm overflow-hidden">
+        {/* ---------- 卡片头部（文件身份 + 操作）—— 由父组件渲染 ---------- */}
+        {header !== undefined ? (
+          <div className="px-4 py-3 border-b border-zinc-800 bg-zinc-900/60">
+            {header}
+          </div>
+        ) : (
+          <div className="flex items-start justify-between gap-3 px-4 py-3 border-b border-zinc-800 bg-zinc-900/60">
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
+                <Boxes className="size-4 text-amber-400 shrink-0" />
+                <span className="truncate">
+                  {model
+                    ? t("dialog.title", { name: model.name })
+                    : t("dialog.titlePlain")}
+                </span>
+              </h3>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                {t("dialog.description")}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* ---------- 解析中 ---------- */}
+        {(loadStatus === "uploading" || loadStatus === "parsing") && (
+          <div className="py-12 flex flex-col items-center text-center">
+            <div className="size-16 rounded-full bg-amber-500/15 flex items-center justify-center mb-4">
+              <Loader2 className="size-8 text-amber-400 animate-spin" />
+            </div>
+            <h3 className="text-base font-semibold text-zinc-100 mb-1">
+              {loadStatus === "uploading"
+                ? t("dialog.readingFile")
+                : t("dialog.parsingObj")}
             </h3>
-            <p className="text-xs text-stone-500 mt-0.5">
-              {t("dialog.description")}
+            <p className="text-sm text-zinc-400 max-w-md">
+              {loadProgress || t("dialog.pleaseWait")}
             </p>
-          </div>
-        </div>
-      )}
-
-      {/* ---------- 解析中 ---------- */}
-      {(loadStatus === "uploading" || loadStatus === "parsing") && (
-        <div className="py-12 flex flex-col items-center text-center">
-          <div className="size-16 rounded-full bg-amber-100 flex items-center justify-center mb-4">
-            <Loader2 className="size-8 text-amber-600 animate-spin" />
-          </div>
-          <h3 className="text-base font-semibold text-stone-800 mb-1">
-            {loadStatus === "uploading"
-              ? t("dialog.readingFile")
-              : t("dialog.parsingObj")}
-          </h3>
-          <p className="text-sm text-stone-500 max-w-md">
-            {loadProgress || t("dialog.pleaseWait")}
-          </p>
-          <div className="mt-4 w-full max-w-xs">
-            <div className="h-1.5 bg-stone-200 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-amber-500 rounded-full transition-all duration-300"
-                style={{ width: `${Math.max(5, loadPercent)}%` }}
-              />
-            </div>
-            <div className="mt-1 text-[10px] text-stone-400 font-mono text-right">
-              {loadPercent}%
+            <div className="mt-4 w-full max-w-xs">
+              <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-amber-500 rounded-full transition-all duration-300"
+                  style={{ width: `${Math.max(5, loadPercent)}%` }}
+                />
+              </div>
+              <div className="mt-1 text-[10px] text-zinc-500 font-mono text-right">
+                {loadPercent}%
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* ---------- 解析失败 ---------- */}
-      {loadStatus === "error" && uploadError && (
-        <div className="py-12 flex flex-col items-center text-center">
-          <div className="size-16 rounded-full bg-red-100 flex items-center justify-center mb-4">
-            <AlertCircle className="size-8 text-red-600" />
+        {/* ---------- 解析失败 ---------- */}
+        {loadStatus === "error" && uploadError && (
+          <div className="py-12 flex flex-col items-center text-center">
+            <div className="size-16 rounded-full bg-red-500/15 flex items-center justify-center mb-4">
+              <AlertCircle className="size-8 text-red-400" />
+            </div>
+            <h3 className="text-base font-semibold text-zinc-100 mb-1">
+              {t("dialog.loadFailed")}
+            </h3>
+            <p className="text-sm text-red-400 max-w-md mb-4">{uploadError}</p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onClearModel}
+              className="border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800 hover:text-zinc-100"
+            >
+              {t("dialog.reselectFile")}
+            </Button>
           </div>
-          <h3 className="text-base font-semibold text-stone-800 mb-1">
-            {t("dialog.loadFailed")}
-          </h3>
-          <p className="text-sm text-red-600 max-w-md mb-4">{uploadError}</p>
-          <Button variant="outline" size="sm" onClick={onClearModel}>
-            {t("dialog.reselectFile")}
-          </Button>
-        </div>
-      )}
+        )}
 
-      {/* ---------- 共用的展示区域 + 右侧栏 ---------- */}
-      {showViewer && model && geometry && (
-        <>
-          {/* ---------- 视角切换（检查 / 克重 / 摆盘）----------
+        {/* ---------- 共用的展示区域 + 左侧栏 ---------- */}
+        {showViewer && model && geometry && (
+          <>
+            {/* ---------- 视角切换（检查 / 克重 / 摆盘）----------
               三个视角看的是**同一个**模型 —— 模型只载入一次,切换不重新解析。
-              下面那一个展示区域也是**共用的**:切视角只换喂进去的数据。 */}
-          <div className="flex items-center gap-1 border-b border-stone-200 bg-stone-50/60 px-3 py-2">
-            {WORKSPACE_TABS.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                aria-pressed={tab === item.id}
-                onClick={() => onTabChange(item.id)}
-                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                  tab === item.id
-                    ? "bg-amber-500 text-white shadow-sm"
-                    : "text-stone-600 hover:bg-stone-100 hover:text-stone-900"
-                }`}
-              >
-                <item.icon className="size-3.5" />
-                {t(`tabs.${item.id}`)}
-              </button>
-            ))}
-          </div>
+              下面那一个 3D 视口也是**共用的**:切视角只换喂进去的数据。 */}
+            <div className="flex items-center gap-1 border-b border-zinc-800 bg-zinc-900/60 px-3 py-2">
+              {WORKSPACE_TABS.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  aria-pressed={tab === item.id}
+                  onClick={() => onTabChange(item.id)}
+                  className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                    tab === item.id
+                      ? "bg-amber-500 text-white shadow-sm"
+                      : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+                  }`}
+                >
+                  <item.icon className="size-3.5" />
+                  {t(`tabs.${item.id}`)}
+                </button>
+              ))}
+            </div>
 
-          {/* ---------- 侧栏 + 共用的展示区域 ----------
+            {/* ---------- 侧栏 + 共用的展示区域 ----------
               **侧栏在左,3D 视口在右** —— 跟以前那个模型检查工具一个方向
               (那边是「侧栏左 + 视口右」)。切视角只换**侧栏**的内容,
-              视口不卸载、相机不动、模型不重建。 */}
-          <div className="flex flex-col lg:flex-row lg:h-[560px]">
-            {/* ---------- 右：共用的展示区域 ----------
+              视口不卸载、相机不动、模型不重建。
+
+              断点跟旧检查工具一样是 `md`(768px 就并排)—— 以前那个工具
+              在 768px 上就是「侧栏左 + 视口右」,等 1024px 的话这段窗口
+              里还摆着老克重工具的方向(视口在上、面板在下)。 */}
+            <div className="flex flex-col md:flex-row md:h-[560px]">
+              {/* ---------- 右：共用的展示区域 ----------
                 **只有一个 `ModelViewport`** —— 切视角不卸载它,
                 相机不动、模型不重建,只是喂进去的数据换了。
 
                 这一整列是**深色的**(顶栏 + 角度条 + 视口)—— 它就是那个
                 3D 应用本身,跟以前检查工具的深色视口区是同一块地。 */}
-            <div className="order-1 lg:order-2 flex flex-col lg:flex-1 min-w-0">
-              <div className="flex items-center justify-between bg-zinc-950 px-3 py-2 border-b border-zinc-800">
-                <span className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
-                  <Boxes className="size-3.5 text-amber-500" />
-                  {t("dialog.preview3d")}
-                </span>
-                <div className="flex items-center gap-2">
-                  {loadStatus === "loading-3d" && (
-                    <span className="text-[10px] text-amber-400 font-mono flex items-center gap-1">
-                      <Loader2 className="size-3 animate-spin" />
-                      {loadPercent}%
-                    </span>
-                  )}
-                  {loadStatus === "ready" && (
-                    <button
-                      type="button"
-                      onClick={() => onOptimizeAngle(scales)}
-                      disabled={angleOptimizing || !angleReady}
-                      className="text-[10px] text-violet-300 hover:text-violet-200 flex items-center gap-1 px-2 py-0.5 rounded border border-violet-400/40 bg-white/10 hover:bg-white/20 disabled:opacity-50"
-                    >
-                      {angleOptimizing ? (
+              <div className="order-1 md:order-2 flex flex-col md:flex-1 min-w-0">
+                <div className="flex items-center justify-between bg-zinc-950 px-3 py-2 border-b border-zinc-800">
+                  <span className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
+                    <Boxes className="size-3.5 text-amber-500" />
+                    {t("dialog.preview3d")}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    {loadStatus === "loading-3d" && (
+                      <span className="text-[10px] text-amber-400 font-mono flex items-center gap-1">
                         <Loader2 className="size-3 animate-spin" />
-                      ) : (
-                        <Compass className="size-3" />
-                      )}
-                      {angleOptimizing
-                        ? `${angleProgress}%`
-                        : t("angle.optimize")}
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* ---------- 模型角度条 ----------
-                  **转的是模型,不是相机** —— 摆着印(转模型)决定支撑克重,
-                  摆着看(转相机)决定看得清看不清,是两件事。
-                  三个视角都能转:在「检查」那一栏转了模型,切到「克重」
-                  还是这个姿态。 */}
-              {loadStatus === "ready" && (
-                <div className="px-3 py-2 border-b border-zinc-800 bg-zinc-900">
-                  <div className="flex items-center gap-3">
-                    <span className="text-[10px] font-medium text-violet-300 shrink-0">
-                      {t("angle.modelAngle")}
-                    </span>
-                    <div className="flex items-center gap-2 flex-1">
-                      <AngleInput
-                        label="X"
-                        value={manualRotX}
-                        onChange={(v) => onManualAngleChange("X", v, scales)}
-                        color="#ef4444"
-                        tone="dark"
-                      />
-                      <AngleInput
-                        label="Y"
-                        value={manualRotY}
-                        onChange={(v) => onManualAngleChange("Y", v, scales)}
-                        color="#22c55e"
-                        tone="dark"
-                      />
-                      <AngleInput
-                        label="Z"
-                        value={manualRotZ}
-                        onChange={(v) => onManualAngleChange("Z", v, scales)}
-                        color="#3b82f6"
-                        tone="dark"
-                      />
-                    </div>
-                    {onResetAngle && (
+                        {loadPercent}%
+                      </span>
+                    )}
+                    {loadStatus === "ready" && (
                       <button
                         type="button"
-                        onClick={onResetAngle}
-                        title={t("angle.resetAngle")}
-                        className="text-[10px] text-violet-300 hover:text-violet-200 flex items-center gap-1 px-2 py-0.5 rounded border border-violet-400/40 bg-white/10 hover:bg-white/20"
+                        onClick={() => onOptimizeAngle(scales)}
+                        disabled={angleOptimizing || !angleReady}
+                        className="text-[10px] text-violet-300 hover:text-violet-200 flex items-center gap-1 px-2 py-0.5 rounded border border-violet-400/40 bg-white/10 hover:bg-white/20 disabled:opacity-50"
                       >
-                        <RotateCcw className="size-3" />
-                        {t("angle.resetAngle")}
+                        {angleOptimizing ? (
+                          <Loader2 className="size-3 animate-spin" />
+                        ) : (
+                          <Compass className="size-3" />
+                        )}
+                        {angleOptimizing
+                          ? `${angleProgress}%`
+                          : t("angle.optimize")}
                       </button>
                     )}
                   </div>
                 </div>
-              )}
 
-              {/* ---------- 展示区 ----------
-                  底色跟「检查」那一栏一样是深色 —— 同一个视口组件,
-                  三处必须长得一样。 */}
-              <div
-                className="relative h-[300px] sm:h-[360px] lg:h-auto lg:flex-1 lg:min-h-[300px] bg-[#111418]"
-                {...dropHandlers}
-              >
-                <ModelViewport
-                  /* 「检查」那一栏喂分析结果(问题着色 / 问题边线),
-                     别的视角喂 null —— 问题着色那一层压根不画。 */
-                  result={tab === "check" ? check.result : null}
-                  meshPositions={scaledPositions}
-                  textures={textures}
-                  showTexture={showTexture}
-                  visibility={check.visibility}
-                  showSupport={showSupport}
-                  /* 支撑几何永远是摆盘 Worker 算的那块 —— 算克重的是它,
-                     画出来的也得是它(否则转个角度画面就跟数字对不上)。 */
-                  supportShell={poseSupport?.shell ?? null}
-                  /* 模型姿态 —— 三个视角共用同一个角度 */
-                  pose={{
-                    rotX: viewerRotX,
-                    rotY: viewerRotY,
-                    rotZ: viewerRotZ,
-                  }}
-                  supportLiftMm={supportLiftMm}
-                  focusRequest={tab === "check" ? check.focusRequest : null}
-                  fitSignal={fitSignal}
-                  onReady={onViewerReady}
-                />
-
-                {loadStatus === "loading-3d" && (
-                  <div className="absolute inset-0 bg-[#111418]/85 backdrop-blur-sm flex flex-col items-center justify-center text-xs text-zinc-400 pointer-events-none">
-                    <div className="size-10 rounded-full bg-amber-500/15 flex items-center justify-center mb-2">
-                      <Loader2 className="size-5 text-amber-400 animate-spin" />
-                    </div>
-                    <span>{loadProgress || t("dialog.loadingPreview")}</span>
-                    <div className="mt-2 w-32 h-1 bg-zinc-800 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-amber-500 rounded-full transition-all duration-300"
-                        style={{ width: `${Math.max(5, loadPercent)}%` }}
-                      />
+                {/* ---------- 模型角度条 ----------
+                  **转的是模型,不是相机** —— 摆着印(转模型)决定支撑克重,
+                  摆着看(转相机)决定看得清看不清,是两件事。
+                  三个视角都能转:在「检查」那一栏转了模型,切到「克重」
+                  还是这个姿态。 */}
+                {loadStatus === "ready" && (
+                  <div className="px-3 py-2 border-b border-zinc-800 bg-zinc-900">
+                    <div className="flex items-center gap-3">
+                      <span className="text-[10px] font-medium text-violet-300 shrink-0">
+                        {t("angle.modelAngle")}
+                      </span>
+                      <div className="flex items-center gap-2 flex-1">
+                        <AngleInput
+                          label="X"
+                          value={manualRotX}
+                          onChange={(v) => onManualAngleChange("X", v, scales)}
+                          color="#ef4444"
+                          tone="dark"
+                        />
+                        <AngleInput
+                          label="Y"
+                          value={manualRotY}
+                          onChange={(v) => onManualAngleChange("Y", v, scales)}
+                          color="#22c55e"
+                          tone="dark"
+                        />
+                        <AngleInput
+                          label="Z"
+                          value={manualRotZ}
+                          onChange={(v) => onManualAngleChange("Z", v, scales)}
+                          color="#3b82f6"
+                          tone="dark"
+                        />
+                      </div>
+                      {onResetAngle && (
+                        <button
+                          type="button"
+                          onClick={onResetAngle}
+                          title={t("angle.resetAngle")}
+                          className="text-[10px] text-violet-300 hover:text-violet-200 flex items-center gap-1 px-2 py-0.5 rounded border border-violet-400/40 bg-white/10 hover:bg-white/20"
+                        >
+                          <RotateCcw className="size-3" />
+                          {t("angle.resetAngle")}
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
 
-                {/* ---------- 分析进度(「检查」那一栏) ---------- */}
-                {tab === "check" && check.busy && (
-                  <output className="absolute left-1/2 top-3 z-10 block w-64 -translate-x-1/2 rounded-lg border border-zinc-700 bg-zinc-900/95 px-3 py-2 shadow-xl">
-                    <div className="mb-1.5 flex items-center gap-2 text-xs text-zinc-300">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      {check.stage
-                        ? tInspect(`phases.${check.stage}`)
-                        : tInspect("app.analyzing")}
-                      <span className="ml-auto font-mono text-zinc-500">
-                        {Math.round(check.pct)}%
-                      </span>
-                    </div>
-                    <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800">
-                      <div
-                        className="h-full rounded-full bg-emerald-500 transition-[width] duration-200"
-                        style={{ width: `${check.pct}%` }}
-                      />
-                    </div>
-                  </output>
-                )}
+                {/* ---------- 展示区 ----------
+                  底色跟「检查」那一栏一样是深色 —— 同一个视口组件,
+                  三处必须长得一样。 */}
+                <div
+                  className="relative h-[300px] sm:h-[360px] md:h-auto md:flex-1 md:min-h-[300px] bg-[#111418]"
+                  {...dropHandlers}
+                >
+                  <ModelViewport
+                    /* 「检查」那一栏喂分析结果(问题着色 / 问题边线),
+                     别的视角喂 null —— 问题着色那一层压根不画。 */
+                    result={tab === "check" ? check.result : null}
+                    meshPositions={scaledPositions}
+                    textures={textures}
+                    showTexture={showTexture}
+                    visibility={check.visibility}
+                    showSupport={showSupport}
+                    /* 支撑几何永远是摆盘 Worker 算的那块 —— 算克重的是它,
+                     画出来的也得是它(否则转个角度画面就跟数字对不上)。 */
+                    supportShell={poseSupport?.shell ?? null}
+                    /* 模型姿态 —— 三个视角共用同一个角度 */
+                    pose={{
+                      rotX: viewerRotX,
+                      rotY: viewerRotY,
+                      rotZ: viewerRotZ,
+                    }}
+                    supportLiftMm={supportLiftMm}
+                    focusRequest={tab === "check" ? check.focusRequest : null}
+                    fitSignal={fitSignal}
+                    onReady={onViewerReady}
+                  />
 
-                {/* ---------- 拖拽遮罩 ----------
+                  {loadStatus === "loading-3d" && (
+                    <div className="absolute inset-0 bg-[#111418]/85 backdrop-blur-sm flex flex-col items-center justify-center text-xs text-zinc-400 pointer-events-none">
+                      <div className="size-10 rounded-full bg-amber-500/15 flex items-center justify-center mb-2">
+                        <Loader2 className="size-5 text-amber-400 animate-spin" />
+                      </div>
+                      <span>{loadProgress || t("dialog.loadingPreview")}</span>
+                      <div className="mt-2 w-32 h-1 bg-zinc-800 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-amber-500 rounded-full transition-all duration-300"
+                          style={{ width: `${Math.max(5, loadPercent)}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ---------- 分析进度(「检查」那一栏) ---------- */}
+                  {tab === "check" && check.busy && (
+                    <output className="absolute left-1/2 top-3 z-10 block w-64 -translate-x-1/2 rounded-lg border border-zinc-700 bg-zinc-900/95 px-3 py-2 shadow-xl">
+                      <div className="mb-1.5 flex items-center gap-2 text-xs text-zinc-300">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        {check.stage
+                          ? tInspect(`phases.${check.stage}`)
+                          : tInspect("app.analyzing")}
+                        <span className="ml-auto font-mono text-zinc-500">
+                          {Math.round(check.pct)}%
+                        </span>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800">
+                        <div
+                          className="h-full rounded-full bg-emerald-500 transition-[width] duration-200"
+                          style={{ width: `${check.pct}%` }}
+                        />
+                      </div>
+                    </output>
+                  )}
+
+                  {/* ---------- 拖拽遮罩 ----------
                     `pointer-events-none` —— **必须**
                     遮罩盖在指针下面,它就成了拖放的事件目标:浏览器把
                     「进入遮罩」算成一次 dragenter、把「离开容器」算成一次
                     dragleave,容器跟着撤遮罩 → 遮罩没了 → 又 dragover ……
                     一直闪。遮罩只是给人看的,不吃事件。 */}
-                {dragOver && (
-                  <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center border-2 border-dashed border-emerald-500/60 bg-emerald-500/10 backdrop-blur-sm">
-                    <p className="rounded-lg bg-zinc-900/90 px-4 py-2 text-sm text-emerald-300">
-                      {tInspect("upload.dropOverlay")}
-                    </p>
-                  </div>
-                )}
+                  {dragOver && (
+                    <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center border-2 border-dashed border-emerald-500/60 bg-emerald-500/10 backdrop-blur-sm">
+                      <p className="rounded-lg bg-zinc-900/90 px-4 py-2 text-sm text-emerald-300">
+                        {tInspect("upload.dropOverlay")}
+                      </p>
+                    </div>
+                  )}
 
-                {/* ---------- 浮层控制条 ----------
+                  {/* ---------- 浮层控制条 ----------
                     三个视角共用一条:问题图层开关(只有「检查」那一栏有)
                     + 显示贴图 / 包裹支撑 / 重置视角 + 支撑比例。 */}
-                {loadStatus === "ready" && (
-                  <div className="pointer-events-auto absolute bottom-3 left-1/2 z-10 flex max-w-[95%] -translate-x-1/2 flex-wrap items-center justify-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900/90 px-2.5 py-1.5 shadow-xl backdrop-blur">
-                    {tab === "check" &&
-                      check.activeLegend.map((item) => {
-                        const on = check.visibility[item.key];
-                        return (
-                          <button
-                            key={item.key}
-                            type="button"
-                            aria-pressed={on}
-                            onClick={() =>
-                              check.setVisibility((v) => ({
-                                ...v,
-                                [item.key]: !v[item.key],
-                              }))
-                            }
-                            className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${on ? "bg-zinc-800/80 text-zinc-200" : "text-zinc-500 hover:text-zinc-300"}`}
-                          >
-                            <span
-                              className="inline-block h-2.5 w-2.5 rounded-full transition-opacity"
-                              style={{
-                                background: item.color,
-                                opacity: on ? 1 : 0.25,
-                              }}
-                            />
-                            {tInspect(`legend.${ISSUE_LABEL_KEYS[item.key]}`)}
-                          </button>
-                        );
-                      })}
-                    {tab === "check" &&
-                      check.result &&
-                      check.activeLegend.length === 0 && (
-                        <span className="flex items-center gap-1.5 rounded-md bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300">
-                          {tInspect("legend.clean")}
-                        </span>
+                  {loadStatus === "ready" && (
+                    <div className="pointer-events-auto absolute bottom-3 left-1/2 z-10 flex max-w-[95%] -translate-x-1/2 flex-wrap items-center justify-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900/90 px-2.5 py-1.5 shadow-xl backdrop-blur">
+                      {tab === "check" &&
+                        check.activeLegend.map((item) => {
+                          const on = check.visibility[item.key];
+                          return (
+                            <button
+                              key={item.key}
+                              type="button"
+                              aria-pressed={on}
+                              onClick={() =>
+                                check.setVisibility((v) => ({
+                                  ...v,
+                                  [item.key]: !v[item.key],
+                                }))
+                              }
+                              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${on ? "bg-zinc-800/80 text-zinc-200" : "text-zinc-500 hover:text-zinc-300"}`}
+                            >
+                              <span
+                                className="inline-block h-2.5 w-2.5 rounded-full transition-opacity"
+                                style={{
+                                  background: item.color,
+                                  opacity: on ? 1 : 0.25,
+                                }}
+                              />
+                              {tInspect(`legend.${ISSUE_LABEL_KEYS[item.key]}`)}
+                            </button>
+                          );
+                        })}
+                      {tab === "check" &&
+                        check.result &&
+                        check.activeLegend.length === 0 && (
+                          <span className="flex items-center gap-1.5 rounded-md bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300">
+                            {tInspect("legend.clean")}
+                          </span>
+                        )}
+                      {tab === "check" && check.activeLegend.length > 0 && (
+                        <span
+                          className="mx-0.5 hidden h-4 w-px bg-zinc-700 sm:block"
+                          aria-hidden
+                        />
                       )}
-                    {tab === "check" && check.activeLegend.length > 0 && (
-                      <span
-                        className="mx-0.5 hidden h-4 w-px bg-zinc-700 sm:block"
-                        aria-hidden
-                      />
-                    )}
-                    {hasTexture && (
+                      {hasTexture && (
+                        <button
+                          type="button"
+                          aria-pressed={showTexture}
+                          title={t("preview.textureTitle")}
+                          onClick={onToggleTexture}
+                          className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${
+                            showTexture
+                              ? "bg-amber-500/15 text-amber-300"
+                              : "text-zinc-500 hover:text-zinc-300"
+                          }`}
+                        >
+                          <Palette className="size-3.5" />
+                          {t("preview.texture")}
+                        </button>
+                      )}
                       <button
                         type="button"
-                        aria-pressed={showTexture}
-                        title={t("preview.textureTitle")}
-                        onClick={onToggleTexture}
+                        aria-pressed={showSupport}
+                        title={t("preview.supportTitle")}
+                        onClick={onToggleSupport}
                         className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${
-                          showTexture
+                          showSupport
                             ? "bg-amber-500/15 text-amber-300"
                             : "text-zinc-500 hover:text-zinc-300"
                         }`}
                       >
-                        <Palette className="size-3.5" />
-                        {t("preview.texture")}
+                        <Shell className="size-3.5" />
+                        {t("preview.support")}
                       </button>
-                    )}
-                    <button
-                      type="button"
-                      aria-pressed={showSupport}
-                      title={t("preview.supportTitle")}
-                      onClick={onToggleSupport}
-                      className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${
-                        showSupport
-                          ? "bg-amber-500/15 text-amber-300"
-                          : "text-zinc-500 hover:text-zinc-300"
-                      }`}
-                    >
-                      <Shell className="size-3.5" />
-                      {t("preview.support")}
-                    </button>
-                    {/* 重置视角 —— 把**相机**摆回默认位置(不是模型角度) */}
-                    <button
-                      type="button"
-                      title={t("preview.resetViewTitle")}
-                      onClick={() => setFitSignal((v) => v + 1)}
-                      className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-zinc-500 transition-colors hover:text-zinc-300"
-                    >
-                      <RotateCcw className="size-3.5" />
-                      {t("preview.resetView")}
-                    </button>
-                    {poseSupport ? (
-                      <span className="font-mono text-[10px] text-zinc-500">
-                        {t("preview.supportInfo", {
-                          ratio: Math.round(supportRatio * 100),
-                          weight: Math.ceil(poseSupport.supportWeightG),
-                        })}
-                      </span>
-                    ) : (
-                      <span className="text-[10px] text-zinc-400">
-                        {t("preview.supportPending")}
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* ---------- 左:侧栏,按视角换内容 ----------
-                展示区域(3D 视口)是共用的,侧栏按视角换 —— 「检查」那一栏
-                换成深色的检查侧栏(检查工具的老界面),别的视角是尺寸调节
-                + 克重 / 摆盘结果。 */}
-            {tab === "check" ? (
-              <aside className="order-2 lg:order-1 lg:w-[400px] lg:shrink-0 bg-zinc-950 text-zinc-100 p-3 lg:overflow-y-auto border-t lg:border-t-0 lg:border-r border-zinc-800">
-                <h2 className="mb-3 flex items-center gap-2 text-sm font-bold tracking-tight text-zinc-100">
-                  <ShieldCheck className="size-4 text-emerald-400" />
-                  {tInspect("app.title")}
-                </h2>
-                <ModelCheckSidePanel
-                  result={check.result}
-                  busy={check.busy}
-                  error={check.error}
-                  unitCheck={unitCheck}
-                  onFocusCluster={check.focusCluster}
-                  onFocusPoint={check.focusPoint}
-                />
-              </aside>
-            ) : (
-              <aside className="order-2 lg:order-1 lg:w-[400px] lg:shrink-0 p-4 flex flex-col gap-4 lg:overflow-y-auto border-t lg:border-t-0 lg:border-r border-stone-200">
-                <div className="rounded-lg border border-stone-200 overflow-hidden">
-                  <div className="flex items-center justify-between bg-stone-50 px-3 py-2 border-b border-stone-200">
-                    <span className="text-xs font-medium text-stone-600">
-                      {t("dialog.dimensionAdjust")}
-                    </span>
-                    <div className="inline-flex rounded-md border border-stone-200 bg-white p-0.5">
+                      {/* 重置视角 —— 把**相机**摆回默认位置(不是模型角度) */}
                       <button
                         type="button"
-                        onClick={() => onDimModeChange("original")}
-                        className={`px-3 py-1 text-xs rounded transition-colors ${dimMode === "original" ? "bg-stone-800 text-white" : "text-stone-600 hover:text-stone-900"}`}
+                        title={t("preview.resetViewTitle")}
+                        onClick={() => setFitSignal((v) => v + 1)}
+                        className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-zinc-500 transition-colors hover:text-zinc-300"
                       >
-                        {t("dialog.originalSize")}
+                        <RotateCcw className="size-3.5" />
+                        {t("preview.resetView")}
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => onDimModeChange("custom")}
-                        className={`px-3 py-1 text-xs rounded transition-colors ${dimMode === "custom" ? "bg-amber-500 text-white" : "text-stone-600 hover:text-stone-900"}`}
-                      >
-                        {t("dialog.customSize")}
-                      </button>
+                      {poseSupport ? (
+                        <span className="font-mono text-[10px] text-zinc-500">
+                          {t("preview.supportInfo", {
+                            ratio: Math.round(supportRatio * 100),
+                            weight: Math.ceil(poseSupport.supportWeightG),
+                          })}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-zinc-400">
+                          {t("preview.supportPending")}
+                        </span>
+                      )}
                     </div>
-                  </div>
+                  )}
+                </div>
+              </div>
 
-                  <div className="p-3 space-y-3">
-                    {/* ---------- 单位横幅 ----------
+              {/* ---------- 左:信息栏,按视角换内容 ----------
+                展示区域(3D 视口)是共用的,左边这一栏按视角换 ——
+                「检查」摆检查结论,「克重」摆尺寸调节 + 三个克重,
+                「摆盘」摆智能摆盘结果。
+
+                **三个视角共用同一个外壳、同一个深色设计** —— 跟以前那个
+                检查工具一个方向(那边就是「侧栏左 + 视口右」)。 */}
+              {tab === "check" ? (
+                <aside className="order-2 md:order-1 md:w-[400px] md:shrink-0 p-3 md:overflow-y-auto border-t md:border-t-0 md:border-r border-zinc-800">
+                  <h2 className="mb-3 flex items-center gap-2 text-sm font-bold tracking-tight text-zinc-100">
+                    <ShieldCheck className="size-4 text-emerald-400" />
+                    {tInspect("app.title")}
+                  </h2>
+                  <ModelCheckSidePanel
+                    result={check.result}
+                    busy={check.busy}
+                    error={check.error}
+                    unitCheck={unitCheck}
+                    onFocusCluster={check.focusCluster}
+                    onFocusPoint={check.focusPoint}
+                  />
+                </aside>
+              ) : (
+                <aside className="order-2 md:order-1 md:w-[400px] md:shrink-0 p-3 flex flex-col gap-3 md:overflow-y-auto border-t md:border-t-0 md:border-r border-zinc-800">
+                  <h2 className="flex items-center gap-2 text-sm font-bold tracking-tight text-zinc-100">
+                    {tab === "pose" ? (
+                      <Compass className="size-4 text-violet-400" />
+                    ) : (
+                      <Scale className="size-4 text-amber-400" />
+                    )}
+                    {tab === "pose" ? t("tabs.pose") : t("tabs.weight")}
+                  </h2>
+                  <div className="rounded-lg border border-zinc-800 overflow-hidden">
+                    <div className="flex items-center justify-between bg-zinc-900 px-3 py-2 border-b border-zinc-800">
+                      <span className="text-xs font-medium text-zinc-400">
+                        {t("dialog.dimensionAdjust")}
+                      </span>
+                      <div className="inline-flex rounded-md border border-zinc-700 bg-zinc-900 p-0.5">
+                        <button
+                          type="button"
+                          onClick={() => onDimModeChange("original")}
+                          className={`px-3 py-1 text-xs rounded transition-colors ${dimMode === "original" ? "bg-zinc-700 text-zinc-100" : "text-zinc-400 hover:text-zinc-100"}`}
+                        >
+                          {t("dialog.originalSize")}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onDimModeChange("custom")}
+                          className={`px-3 py-1 text-xs rounded transition-colors ${dimMode === "custom" ? "bg-amber-500 text-white" : "text-zinc-400 hover:text-zinc-100"}`}
+                        >
+                          {t("dialog.customSize")}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="p-3 space-y-3">
+                      {/* ---------- 单位横幅 ----------
                     文件坐标不是毫米(AI 生成 / Blender 默认导出都是归一化的),
                     工具已经按「最大边 100mm」替用户归一化过了 —— 这件事必须
                     摆出来,否则用户看到的尺寸跟他想的不是一个东西。
@@ -856,185 +904,193 @@ export function ModelSettingsPanel({
                     托底 5mm 是固定毫米值,不跟着模型缩放:不归一化的话平台会
                     被拉到模型下面 5 个「单位」,支撑比模型本身还高,支撑比例是
                     万倍量级(见 `lib/model-units.ts`)。 */}
-                    {unitCheck?.normalized && (
-                      <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2">
-                        <AlertCircle className="size-3.5 shrink-0 mt-px text-amber-600" />
-                        <div className="min-w-0 flex-1 text-[11px] leading-relaxed">
-                          <p className="font-medium text-amber-900">
-                            {t("dialog.unitNotice", {
-                              extent: fmt(unitCheck.originalMaxExtent, 2),
-                            })}
-                          </p>
-                          <p className="text-amber-700">
-                            {dimMode === "custom"
-                              ? t("dialog.unitNoticeHandled", {
-                                  size: unitCheck.assumedMaxExtentMm,
-                                })
-                              : t("dialog.unitNoticeUnhandled")}
-                          </p>
-                        </div>
-                        {/* 「改回原始尺寸」只在归一化还生效时给 —— 已经回到原始
+                      {unitCheck?.normalized && (
+                        <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-2">
+                          <AlertCircle className="size-3.5 shrink-0 mt-px text-amber-400" />
+                          <div className="min-w-0 flex-1 text-[11px] leading-relaxed">
+                            <p className="font-medium text-amber-200">
+                              {t("dialog.unitNotice", {
+                                extent: fmt(unitCheck.originalMaxExtent, 2),
+                              })}
+                            </p>
+                            <p className="text-amber-300/80">
+                              {dimMode === "custom"
+                                ? t("dialog.unitNoticeHandled", {
+                                    size: unitCheck.assumedMaxExtentMm,
+                                  })
+                                : t("dialog.unitNoticeUnhandled")}
+                            </p>
+                          </div>
+                          {/* 「改回原始尺寸」只在归一化还生效时给 —— 已经回到原始
                         尺寸的话,这个按钮按下去什么都不会变。 */}
-                        {dimMode === "custom" && onRevertUnitScale && (
-                          <button
-                            type="button"
-                            onClick={onRevertUnitScale}
-                            className="shrink-0 text-[11px] font-medium text-amber-700 hover:text-amber-900 underline underline-offset-2 whitespace-nowrap"
-                          >
-                            {t("dialog.revertOriginalUnits")}
-                          </button>
-                        )}
-                      </div>
-                    )}
+                          {dimMode === "custom" && onRevertUnitScale && (
+                            <button
+                              type="button"
+                              onClick={onRevertUnitScale}
+                              className="shrink-0 text-[11px] font-medium text-amber-300 hover:text-amber-200 underline underline-offset-2 whitespace-nowrap"
+                            >
+                              {t("dialog.revertOriginalUnits")}
+                            </button>
+                          )}
+                        </div>
+                      )}
 
-                    <div className="space-y-2 min-h-[124px] flex flex-col justify-start">
-                      <div className="grid grid-cols-3 gap-2">
-                        {dimMode === "original" ? (
-                          <>
-                            <DimDisplay
-                              axis="X"
-                              axisColor="#ef4444"
-                              label={t("axis.length")}
-                              value={geometry.originalDims[0]}
-                            />
-                            <DimDisplay
-                              axis="Y"
-                              axisColor="#22c55e"
-                              label={t("axis.width")}
-                              value={geometry.originalDims[1]}
-                            />
-                            <DimDisplay
-                              axis="Z"
-                              axisColor="#3b82f6"
-                              label={t("axis.height")}
-                              value={geometry.originalDims[2]}
-                            />
-                          </>
-                        ) : (
-                          <>
-                            <DimEditor
-                              axis="X"
-                              axisColor="#ef4444"
-                              label={t("axis.length")}
-                              value={geometry.dims[0]}
-                              onChange={(v) => handleDimChange(0, v)}
-                            />
-                            <DimEditor
-                              axis="Y"
-                              axisColor="#22c55e"
-                              label={t("axis.width")}
-                              value={geometry.dims[1]}
-                              onChange={(v) => handleDimChange(1, v)}
-                            />
-                            <DimEditor
-                              axis="Z"
-                              axisColor="#3b82f6"
-                              label={t("axis.height")}
-                              value={geometry.dims[2]}
-                              onChange={(v) => handleDimChange(2, v)}
-                            />
-                          </>
-                        )}
-                      </div>
+                      <div className="space-y-2 min-h-[124px] flex flex-col justify-start">
+                        <div className="grid grid-cols-3 gap-2">
+                          {dimMode === "original" ? (
+                            <>
+                              <DimDisplay
+                                axis="X"
+                                axisColor="#ef4444"
+                                label={t("axis.length")}
+                                value={geometry.originalDims[0]}
+                              />
+                              <DimDisplay
+                                axis="Y"
+                                axisColor="#22c55e"
+                                label={t("axis.width")}
+                                value={geometry.originalDims[1]}
+                              />
+                              <DimDisplay
+                                axis="Z"
+                                axisColor="#3b82f6"
+                                label={t("axis.height")}
+                                value={geometry.originalDims[2]}
+                              />
+                            </>
+                          ) : (
+                            <>
+                              <DimEditor
+                                axis="X"
+                                axisColor="#ef4444"
+                                label={t("axis.length")}
+                                value={geometry.dims[0]}
+                                onChange={(v) => handleDimChange(0, v)}
+                              />
+                              <DimEditor
+                                axis="Y"
+                                axisColor="#22c55e"
+                                label={t("axis.width")}
+                                value={geometry.dims[1]}
+                                onChange={(v) => handleDimChange(1, v)}
+                              />
+                              <DimEditor
+                                axis="Z"
+                                axisColor="#3b82f6"
+                                label={t("axis.height")}
+                                value={geometry.dims[2]}
+                                onChange={(v) => handleDimChange(2, v)}
+                              />
+                            </>
+                          )}
+                        </div>
 
-                      <div className="flex items-center justify-between text-xs h-5">
-                        {dimMode === "original" ? (
-                          <span className="text-stone-500 flex items-center gap-1">
-                            <Info className="size-3" />
-                            {t("dialog.switchToCustom")}
-                          </span>
-                        ) : (
-                          <>
-                            <span className="text-stone-500 flex items-center gap-1">
+                        <div className="flex items-center justify-between text-xs h-5">
+                          {dimMode === "original" ? (
+                            <span className="text-zinc-400 flex items-center gap-1">
                               <Info className="size-3" />
-                              {uniformScale
-                                ? t("dialog.linkedScale")
-                                : t("dialog.independentScale")}
+                              {t("dialog.switchToCustom")}
                             </span>
-                            <div className="flex items-center gap-2">
-                              {/* Radix Switch 渲染的是 button 而不是 input，
+                          ) : (
+                            <>
+                              <span className="text-zinc-400 flex items-center gap-1">
+                                <Info className="size-3" />
+                                {uniformScale
+                                  ? t("dialog.linkedScale")
+                                  : t("dialog.independentScale")}
+                              </span>
+                              <div className="flex items-center gap-2">
+                                {/* Radix Switch 渲染的是 button 而不是 input，
                               用 <label> 包它会被 a11y 规则判为「无关联控件的 label」，
                               这里改成可点击的按钮 + Switch。 */}
-                              <div className="flex items-center gap-1 text-[11px] text-stone-500">
+                                <div className="flex items-center gap-1 text-[11px] text-zinc-400">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      toggleUniformScale(!uniformScale)
+                                    }
+                                    className="cursor-pointer hover:text-zinc-200"
+                                  >
+                                    {t("dialog.uniformScale")}
+                                  </button>
+                                  <Switch
+                                    checked={uniformScale}
+                                    onCheckedChange={toggleUniformScale}
+                                    className="scale-75"
+                                  />
+                                </div>
                                 <button
                                   type="button"
-                                  onClick={() =>
-                                    toggleUniformScale(!uniformScale)
-                                  }
-                                  className="cursor-pointer hover:text-stone-700"
+                                  onClick={() => {
+                                    onScaleFactorChange(1);
+                                    onScaleXChange(1);
+                                    onScaleYChange(1);
+                                    onScaleZChange(1);
+                                  }}
+                                  className="text-amber-400 hover:text-amber-300 font-medium flex items-center gap-1"
                                 >
-                                  {t("dialog.uniformScale")}
+                                  <RotateCcw className="size-3" />
+                                  {t("dialog.restoreOriginal")}
                                 </button>
-                                <Switch
-                                  checked={uniformScale}
-                                  onCheckedChange={toggleUniformScale}
-                                  className="scale-75"
-                                />
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  onScaleFactorChange(1);
-                                  onScaleXChange(1);
-                                  onScaleYChange(1);
-                                  onScaleZChange(1);
-                                }}
-                                className="text-amber-600 hover:text-amber-700 font-medium flex items-center gap-1"
-                              >
-                                <RotateCcw className="size-3" />
-                                {t("dialog.restoreOriginal")}
-                              </button>
-                            </div>
-                          </>
-                        )}
-                      </div>
+                            </>
+                          )}
+                        </div>
 
-                      <div className="text-[11px] h-6 flex items-center gap-1.5">
-                        {dimMode === "custom" &&
-                          (() => {
-                            const [sx, sy, sz] = scales;
-                            const isUniform = sx === sy && sy === sz;
-                            const k = isUniform ? sx : Math.cbrt(sx * sy * sz);
-                            if (Math.abs(k - 1) < 0.001) return null;
-                            return (
-                              <span className="text-stone-500 bg-amber-50 border border-amber-200 rounded px-2 py-1 flex items-center gap-1.5 w-full">
-                                <AlertCircle className="size-3 text-amber-600 shrink-0" />
-                                {isUniform
-                                  ? t("dialog.scaleSummaryUniform", {
-                                      s: fmt(sx, 3),
-                                      v: fmt(sx ** 3, 3),
-                                      a: fmt(sx ** 2, 3),
-                                    })
-                                  : t("dialog.scaleSummaryAxis", {
-                                      sx: fmt(sx, 3),
-                                      sy: fmt(sy, 3),
-                                      sz: fmt(sz, 3),
-                                      v: fmt(sx * sy * sz, 3),
-                                    })}
-                              </span>
-                            );
-                          })()}
+                        <div className="text-[11px] h-6 flex items-center gap-1.5">
+                          {dimMode === "custom" &&
+                            (() => {
+                              const [sx, sy, sz] = scales;
+                              const isUniform = sx === sy && sy === sz;
+                              const k = isUniform
+                                ? sx
+                                : Math.cbrt(sx * sy * sz);
+                              if (Math.abs(k - 1) < 0.001) return null;
+                              return (
+                                <span className="text-zinc-300 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-1 flex items-center gap-1.5 w-full">
+                                  <AlertCircle className="size-3 text-amber-400 shrink-0" />
+                                  {isUniform
+                                    ? t("dialog.scaleSummaryUniform", {
+                                        s: fmt(sx, 3),
+                                        v: fmt(sx ** 3, 3),
+                                        a: fmt(sx ** 2, 3),
+                                      })
+                                    : t("dialog.scaleSummaryAxis", {
+                                        sx: fmt(sx, 3),
+                                        sy: fmt(sy, 3),
+                                        sz: fmt(sz, 3),
+                                        v: fmt(sx * sy * sz, 3),
+                                      })}
+                                </span>
+                              );
+                            })()}
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
 
-                {/* 克重 —— 尺寸调完之后的结果，放最后。
+                  {/* 克重 —— 尺寸调完之后的结果，放最后。
                 mt-auto:侧栏比右边视口矮/高的差都让出来,克重贴着栏底,
                 跟视口的底边对齐(挤在中间会像没排完)。
 
                 「摆盘」视角换成摆盘结果 —— 两个问题分两栏看,不挤在一块。 */}
-                <div className="mt-auto">{tab === "pose" ? pose : weight}</div>
-              </aside>
-            )}
-          </div>
+                  <div className="mt-auto">
+                    {tab === "pose" ? pose : weight}
+                  </div>
+                </aside>
+              )}
+            </div>
+          </>
+        )}
+      </div>
 
-          {/* ---------- 下单出口 ----------
-              在**每一个**视角都在 —— 检查完就该能下单,不该再跳回
-              「克重」那一栏找按钮。 */}
-          {quote}
-        </>
-      )}
+      {/* ---------- 下单出口 ----------
+          在**每一个**视角都在 —— 检查完就该能下单,不该再跳回
+          「克重」那一栏找按钮。
+
+          **在深色应用外面** —— 它是页面里的一张浅色卡(工作室的
+          「加入打印单」按钮),不是 3D 应用的一部分。 */}
+      {showViewer && model && geometry && quote}
     </div>
   );
 }

@@ -1225,35 +1225,50 @@ export function PricingCalculator({
       <div className="flex items-start gap-3 flex-1 min-w-0">
         {model && <ObjThumbnail objText={model.objText} size={80} />}
         <div className="min-w-0 flex-1">
-          <h3 className="text-base font-semibold text-stone-800 flex items-center gap-2">
-            <Box className="size-4 text-amber-600 shrink-0" />
+          <h3 className="text-base font-semibold text-zinc-100 flex items-center gap-2">
+            <Box className="size-4 text-amber-400 shrink-0" />
             <span className="truncate">{model?.name ?? fileName ?? ""}</span>
           </h3>
           <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
             {geometry && (
-              <Badge variant="outline" className="font-mono">
+              <Badge
+                variant="outline"
+                className="font-mono border-zinc-700 bg-zinc-900 text-zinc-300"
+              >
                 {fmt(geometry.dims[0], 1)} × {fmt(geometry.dims[1], 1)} ×{" "}
                 {fmt(geometry.dims[2], 1)} mm
               </Badge>
             )}
             {geometry && (
-              <Badge variant="outline" className="font-mono">
+              <Badge
+                variant="outline"
+                className="font-mono border-zinc-700 bg-zinc-900 text-zinc-300"
+              >
                 {t("stats.realVolume")} {fmt(geometry.volumeCM3, 2)} cm³
               </Badge>
             )}
             {geometry && (
-              <Badge variant="outline" className="font-mono">
+              <Badge
+                variant="outline"
+                className="font-mono border-zinc-700 bg-zinc-900 text-zinc-300"
+              >
                 {t("stats.surfaceArea")} {fmt(geometry.surfaceAreaCM2, 2)} cm²
               </Badge>
             )}
             {model && (
-              <Badge variant="outline" className="font-mono">
+              <Badge
+                variant="outline"
+                className="font-mono border-zinc-700 bg-zinc-900 text-zinc-300"
+              >
                 {t("stats.vertexCount")}{" "}
                 {model.parseResult.vertexCount.toLocaleString()}
               </Badge>
             )}
             {model && (
-              <Badge variant="outline" className="font-mono">
+              <Badge
+                variant="outline"
+                className="font-mono border-zinc-700 bg-zinc-900 text-zinc-300"
+              >
                 {t("stats.triangleCount")}{" "}
                 {model.parseResult.triangleCount.toLocaleString()}
               </Badge>
@@ -1261,7 +1276,7 @@ export function PricingCalculator({
             {dimMode === "custom" && (
               <Badge
                 variant="outline"
-                className="font-mono border-amber-300 text-amber-700 bg-amber-50"
+                className="font-mono border-amber-500/40 text-amber-300 bg-amber-500/10"
               >
                 {t("upload.scaledBy", { k: fmt(scaleFactor, 3) })}
               </Badge>
@@ -1281,7 +1296,7 @@ export function PricingCalculator({
             variant="outline"
             size="sm"
             onClick={resetAngle}
-            className="text-violet-600 hover:text-violet-700 border-violet-300 hover:bg-violet-50"
+            className="border-zinc-700 bg-zinc-900 text-violet-300 hover:bg-zinc-800 hover:text-violet-200"
           >
             <RotateCcw className="size-3.5" />
             {t("angle.resetAngle")}
@@ -1292,7 +1307,7 @@ export function PricingCalculator({
             variant="outline"
             size="sm"
             onClick={() => exportRotatedModel(appliedScales)}
-            className="text-emerald-700 hover:text-emerald-800 border-emerald-300 hover:bg-emerald-50"
+            className="border-zinc-700 bg-zinc-900 text-emerald-300 hover:bg-zinc-800 hover:text-emerald-200"
             title={
               optimalAngle
                 ? t("dialog.exportRotatedTitle")
@@ -1309,7 +1324,7 @@ export function PricingCalculator({
               variant="outline"
               size="sm"
               onClick={() => fileInputRef.current?.click()}
-              className="text-stone-500 hover:text-stone-700"
+              className="border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
             >
               <UploadCloud className="size-3.5" />
               <span className="hidden sm:inline">{t("upload.reupload")}</span>
@@ -1318,7 +1333,7 @@ export function PricingCalculator({
               variant="ghost"
               size="icon"
               onClick={clearModel}
-              className="text-stone-400 hover:text-red-600 hover:bg-red-50"
+              className="text-zinc-500 hover:text-red-400 hover:bg-red-500/10"
               title={t("upload.removeModel")}
             >
               <X className="size-4" />
@@ -1392,31 +1407,31 @@ export function PricingCalculator({
         三格结构完全一样 → 数字必然对齐。注解行留空也是占位,
         高度不变,三个数字不会因为谁多一行注解而错位。
       */}
-      <div className="rounded-lg border border-stone-200 bg-stone-50/60 overflow-hidden">
-        <div className="grid grid-cols-3 divide-x divide-stone-200">
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900 overflow-hidden">
+        <div className="grid grid-cols-3 divide-x divide-zinc-800">
           <div className="px-3 py-2.5">
-            <div className="flex items-center gap-1.5 text-[11px] text-stone-500">
+            <div className="flex items-center gap-1.5 text-[11px] text-zinc-400">
               <Scale className="size-3.5 shrink-0" />
               <span className="truncate">{t("stats.materialWeight")}</span>
             </div>
             <div className="mt-1 flex h-9 items-end">
-              <span className="font-mono text-3xl font-semibold leading-none tracking-tight text-amber-700">
+              <span className="font-mono text-3xl font-semibold leading-none tracking-tight text-amber-400">
                 {materialWeightG} g
               </span>
             </div>
             {/* 体积 × 材料密度 —— 把这个数是怎么来的摆出来 */}
-            <div className="mt-1 h-4 truncate font-mono text-[10px] text-stone-400">
+            <div className="mt-1 h-4 truncate font-mono text-[10px] text-zinc-500">
               {fmt(calc.volumeCM3, 2)} cm³ × {fmt(materialDensity, 2)}
             </div>
           </div>
 
           <div className="px-3 py-2.5">
-            <div className="flex items-center gap-1.5 text-[11px] text-stone-500">
+            <div className="flex items-center gap-1.5 text-[11px] text-zinc-400">
               <Compass className="size-3.5 shrink-0" />
               <span className="truncate">{t("stats.supportWeight")}</span>
             </div>
             <div className="mt-1 flex h-9 items-end">
-              <span className="font-mono text-2xl font-semibold leading-none tracking-tight text-stone-700">
+              <span className="font-mono text-2xl font-semibold leading-none tracking-tight text-zinc-200">
                 {poseSupport ? `${supportWeightG} g` : "—"}
               </span>
             </div>
@@ -1425,7 +1440,7 @@ export function PricingCalculator({
               不标出来的话,用户会以为支撑克重跟角度没关系(其实改角度就改
               这个数)。跑没跑过摆盘不算数,只看姿态本身。
             */}
-            <div className="mt-1 h-4 truncate text-[10px] text-stone-400">
+            <div className="mt-1 h-4 truncate text-[10px] text-zinc-500">
               {poseSupport
                 ? poseLabel.isInitial
                   ? t("stats.poseInitial")
@@ -1439,17 +1454,17 @@ export function PricingCalculator({
           </div>
 
           {/* 总克重 = 耗材克重 + 支撑克重 —— 打印出来还没洗支撑时，整块的重量 */}
-          <div className="bg-stone-100/70 px-3 py-2.5">
-            <div className="flex items-center gap-1.5 text-[11px] text-stone-500">
+          <div className="bg-zinc-950/60 px-3 py-2.5">
+            <div className="flex items-center gap-1.5 text-[11px] text-zinc-400">
               <Package className="size-3.5 shrink-0" />
               <span className="truncate">{t("stats.totalWeight")}</span>
             </div>
             <div className="mt-1 flex h-9 items-end">
-              <span className="font-mono text-2xl font-semibold leading-none tracking-tight text-stone-900">
+              <span className="font-mono text-2xl font-semibold leading-none tracking-tight text-zinc-100">
                 {poseSupport ? `${weights.total} g` : "—"}
               </span>
             </div>
-            <div className="mt-1 h-4 truncate text-[10px] text-stone-400">
+            <div className="mt-1 h-4 truncate text-[10px] text-zinc-500">
               {poseSupport ? t("stats.totalWeightNote") : null}
             </div>
           </div>
@@ -1457,7 +1472,7 @@ export function PricingCalculator({
       </div>
 
       {supportError && (
-        <p className="mt-1 text-[11px] text-red-500">
+        <p className="mt-1 text-[11px] text-red-400">
           {t("stats.supportWeightError", { reason: supportError })}
         </p>
       )}
@@ -1474,10 +1489,10 @@ export function PricingCalculator({
   const posePanel = (
     <>
       {optimalAngle ? (
-        <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-2.5">
+        <div className="rounded-lg border border-violet-500/30 bg-violet-500/10 p-2.5">
           <div className="flex items-center gap-2 flex-wrap">
-            <Compass className="size-3.5 text-violet-600" />
-            <span className="text-xs text-stone-600">
+            <Compass className="size-3.5 text-violet-400" />
+            <span className="text-xs text-zinc-300">
               {t("angle.best", {
                 x: viewerRotX,
                 y: viewerRotY,
@@ -1486,7 +1501,7 @@ export function PricingCalculator({
             </span>
             <Badge
               variant="outline"
-              className="text-[10px] font-mono border-violet-300 text-violet-700 bg-violet-50"
+              className="text-[10px] font-mono border-violet-500/40 text-violet-300 bg-violet-500/10"
             >
               {t("angle.selfSupport", {
                 ratio: fmt(optimalAngle.selfSupportRatio * 100, 0),
@@ -1494,7 +1509,7 @@ export function PricingCalculator({
             </Badge>
             <Badge
               variant="outline"
-              className="text-[10px] font-mono border-stone-300 text-stone-600"
+              className="text-[10px] font-mono border-zinc-700 bg-zinc-900 text-zinc-300"
             >
               {t("angle.supportWeight", {
                 weight: Math.ceil(optimalAngle.totalSupportWeight),
@@ -1502,21 +1517,21 @@ export function PricingCalculator({
             </Badge>
             <Badge
               variant="outline"
-              className="text-[10px] font-mono border-stone-300 text-stone-600"
+              className="text-[10px] font-mono border-zinc-700 bg-zinc-900 text-zinc-300"
             >
               {t("angle.height", {
                 h: fmt(optimalAngle.rotatedHeight, 0),
               })}
             </Badge>
             {optimalAngle.laidFlat && (
-              <Badge className="text-[10px] bg-amber-100 text-amber-700 hover:bg-amber-100">
+              <Badge className="text-[10px] border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/10">
                 {t("angle.laidFlat")}
               </Badge>
             )}
             {savingPct >= 1 && (
               <Badge
                 variant="outline"
-                className="text-[10px] font-mono border-emerald-300 text-emerald-700 bg-emerald-50"
+                className="text-[10px] font-mono border-emerald-500/40 text-emerald-300 bg-emerald-500/10"
                 title={t("angle.savingTitle", {
                   before: Math.ceil(optimalAngle.originalWeight ?? 0),
                   after: Math.ceil(optimalAngle.totalSupportWeight),
@@ -1534,7 +1549,7 @@ export function PricingCalculator({
             省得不多的时候,用户还是要知道原本要多少支撑。
           */}
           {poseCompare && poseCompare.initialWeightG !== null && (
-            <div className="mt-1 text-[10px] text-stone-500">
+            <div className="mt-1 text-[10px] text-zinc-400">
               {t("angle.compareSupport", {
                 initial: Math.ceil(poseCompare.initialWeightG),
                 current: Math.ceil(poseCompare.currentWeightG),
@@ -1543,9 +1558,9 @@ export function PricingCalculator({
           )}
         </div>
       ) : (
-        <div className="rounded-lg border border-stone-200 bg-stone-50/60 p-2.5">
-          <div className="flex items-center gap-2 text-xs text-stone-600">
-            <Compass className="size-3.5 text-violet-600" />
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-2.5">
+          <div className="flex items-center gap-2 text-xs text-zinc-300">
+            <Compass className="size-3.5 text-violet-400" />
             {t("angle.currentPose", {
               x: poseLabel.x,
               y: poseLabel.y,
@@ -1553,14 +1568,14 @@ export function PricingCalculator({
             })}
           </div>
           {poseSupport && (
-            <p className="mt-1 font-mono text-[11px] text-stone-500">
+            <p className="mt-1 font-mono text-[11px] text-zinc-400">
               {t("angle.currentSupport", {
                 weight: Math.ceil(poseSupport.supportWeightG),
                 ratio: fmt(supportStats.ratio * 100, 0),
               })}
             </p>
           )}
-          <p className="mt-1 text-[11px] text-stone-500">
+          <p className="mt-1 text-[11px] text-zinc-400">
             {t("angle.noResultHint")}
           </p>
         </div>
@@ -1630,27 +1645,31 @@ export function PricingCalculator({
           {mode === "upload" && (
             <section className="mb-6">
               {!model && loadStatus === "idle" ? (
+                /* ---------- 空状态也是深色的 ----------
+                   以前那个模型检查工具**从第一屏就是深色的** —— 拖放区在
+                   那一块深色面板里面。现在工作台统一用那个设计,空状态
+                   也得是深色的:拖完文件之后整块不换脸。 */
                 <Card
-                  className={`border-2 border-dashed transition-colors cursor-pointer bg-stone-50/40 ${isDragOver ? "border-amber-500 bg-amber-50/60 ring-2 ring-amber-200" : "border-stone-300 hover:border-amber-400"}`}
+                  className={`border-2 border-dashed transition-colors cursor-pointer bg-zinc-950 text-zinc-100 ${isDragOver ? "border-amber-500 bg-amber-500/10 ring-2 ring-amber-500/30" : "border-zinc-700 hover:border-amber-500/60"}`}
                   onClick={() => fileInputRef.current?.click()}
                   {...dropHandlers}
                 >
                   <CardContent className="p-10 flex flex-col items-center text-center">
                     <div
-                      className={`size-16 rounded-full flex items-center justify-center mb-4 transition-colors ${isDragOver ? "bg-amber-200" : "bg-amber-100"}`}
+                      className={`size-16 rounded-full flex items-center justify-center mb-4 transition-colors ${isDragOver ? "bg-amber-500/20" : "bg-zinc-900"}`}
                     >
                       <UploadCloud
-                        className={`size-8 ${isDragOver ? "text-amber-700" : "text-amber-600"}`}
+                        className={`size-8 ${isDragOver ? "text-amber-400" : "text-zinc-400"}`}
                       />
                     </div>
-                    <h3 className="text-base font-semibold text-stone-800 mb-1">
+                    <h3 className="text-base font-semibold text-zinc-100 mb-1">
                       {isDragOver ? t("upload.dropNow") : t("upload.dropTitle")}
                     </h3>
-                    <p className="text-sm text-stone-500 max-w-md">
+                    <p className="text-sm text-zinc-400 max-w-md">
                       {isDragOver ? t("upload.dropSoon") : t("upload.dropHint")}
                     </p>
                     {uploadError && (
-                      <div className="mt-3 flex items-center gap-2 text-sm text-red-600 bg-red-50 border border-red-200 px-3 py-2 rounded-md">
+                      <div className="mt-3 flex items-center gap-2 text-sm text-red-300 bg-red-500/15 border border-red-500/40 px-3 py-2 rounded-md">
                         <AlertCircle className="size-4 shrink-0" />
                         <span>{uploadError}</span>
                       </div>
@@ -1667,7 +1686,7 @@ export function PricingCalculator({
                         type="button"
                         variant="outline"
                         size="sm"
-                        className="mt-4 border-amber-300 text-amber-700 hover:bg-amber-50"
+                        className="mt-4 border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800 hover:text-zinc-100"
                         onClick={(e) => {
                           e.stopPropagation();
                           fileInputRef.current?.click();

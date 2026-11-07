@@ -215,18 +215,18 @@ export function DimDisplay({
   value: number;
 }) {
   return (
-    <div className="rounded-lg border border-stone-200 bg-white p-3 h-[78px] flex flex-col">
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-3 h-[78px] flex flex-col">
       <div className="flex items-center gap-1.5 mb-1.5">
         <span
           className="size-3 rounded-sm"
           style={{ backgroundColor: axisColor }}
         />
-        <span className="text-xs font-medium text-stone-600">{axis}</span>
-        <span className="text-xs text-stone-400 ml-auto">{label}</span>
+        <span className="text-xs font-medium text-zinc-400">{axis}</span>
+        <span className="text-xs text-zinc-500 ml-auto">{label}</span>
       </div>
-      <div className="font-mono text-lg text-stone-800 flex items-center gap-1 flex-1">
+      <div className="font-mono text-lg text-zinc-100 flex items-center gap-1 flex-1">
         <span>{fmt(value, 1)}</span>
-        <span className="text-xs text-stone-400">mm</span>
+        <span className="text-xs text-zinc-500">mm</span>
       </div>
     </div>
   );
@@ -247,14 +247,14 @@ export function DimEditor({
   onChange: (v: number) => void;
 }) {
   return (
-    <div className="rounded-lg border border-stone-300 bg-white p-3 h-[78px] flex flex-col focus-within:border-amber-400 focus-within:ring-1 focus-within:ring-amber-200 transition-colors">
+    <div className="rounded-lg border border-zinc-700 bg-zinc-900 p-3 h-[78px] flex flex-col focus-within:border-amber-400 focus-within:ring-1 focus-within:ring-amber-500/30 transition-colors">
       <div className="flex items-center gap-1.5 mb-1.5">
         <span
           className="size-3 rounded-sm"
           style={{ backgroundColor: axisColor }}
         />
-        <span className="text-xs font-medium text-stone-600">{axis}</span>
-        <span className="text-xs text-stone-400 ml-auto">{label}</span>
+        <span className="text-xs font-medium text-zinc-400">{axis}</span>
+        <span className="text-xs text-zinc-500 ml-auto">{label}</span>
       </div>
       <div className="flex items-center gap-1 flex-1">
         <Input
@@ -263,10 +263,10 @@ export function DimEditor({
           step="0.1"
           value={Number.isFinite(value) ? Math.round(value * 100) / 100 : ""}
           onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
-          className="font-mono text-lg h-7 px-2 py-0 border-0 focus-visible:ring-0"
+          className="font-mono text-lg h-7 px-2 py-0 border-0 bg-transparent text-zinc-100 placeholder:text-zinc-600 focus-visible:ring-0"
           placeholder="0.0"
         />
-        <span className="text-xs text-stone-400 shrink-0">mm</span>
+        <span className="text-xs text-zinc-500 shrink-0">mm</span>
       </div>
     </div>
   );
