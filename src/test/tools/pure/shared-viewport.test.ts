@@ -2,13 +2,20 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  computeSupportAtPose,
+  DEFAULT_SUPPORT_PARAMS,
+} from "@/features/pricing/lib/angle-optimizer";
+import {
   POSE_EULER_ORDER,
   rotatedBBoxMinZ,
   rotatePointXYZ,
+  shellMatchesPose,
 } from "@/features/shared/components/model-viewport/pose";
 import {
+  buildSupportShell,
   prepareSupportModel,
   rotateSupportMesh,
+  SUPPORT_LIFT_MM,
 } from "@/features/tools/lib/mesh/support-shell";
 import { boxTriangles } from "@/test/tools/fixtures/mesh-fixtures";
 
@@ -400,5 +407,153 @@ describe("共用视口 —— 画面上的姿态就是算克重的那个姿态",
 
     // 两个顺序确实不同 —— 顺序写反了,上面那条断言会立刻炸
     expect(zyx.x).not.toBeCloseTo(xyz.x, 3);
+  });
+});
+
+/**
+ * 显示支撑 —— 模型**自动置于平面**,**不会低过平面**(2026-11-07)
+ *
+ * ## 工作室报的现象
+ *
+ * 「显示支撑必须自动置于平面,模型不能低过平面」—— 转过模型之后开支撑,
+ * 模型**沉到平台下面**去了。
+ *
+ * ## 根因
+ *
+ * 平台平面是**从支撑外壳那里拿的**(`shell.groundZ`)。而支撑外壳是
+ * 「**某个姿态下的一次结果**」:
+ *
+ * - 分析器算的那块(检查视角)是**未旋转**的模型 —— 记 (0,0,0);
+ * - 摆盘 Worker 算的那块带**真实**角度。
+ *
+ * 姿态一变,手里那块外壳就成了**旧姿态**的。拿旧姿态的外壳摆平台平面,
+ * 转过之后的模型自然就沉到平台下面去了。
+ *
+ * ## 修法
+ *
+ * 1. 每块外壳都带上**算它时的姿态**(`SupportShellData.pose`);
+ * 2. 视口只认**当前姿态**的那块(`shellMatchesPose`)—— 对不上的不画,
+ *    也不拿它摆平台;
+ * 3. 平台平面统一按**包围盒最低点**定(支撑体积算平台平面也是这个口径),
+ *    包围盒装着模型 ⇒ 平台平面 ≤ 模型最低点 ⇒ **模型永远在平台上面**。
+ */
+describe("显示支撑 —— 模型自动置于平面,不会低过平面", () => {
+  /** 一个不对称的盒子(各边不一样长,转起来才看得出差别) */
+  const BOX = boxTriangles([0, 0, 0], [30, 12, 7]);
+
+  /** 几个有代表性的姿态 */
+  const POSES: [number, number, number][] = [
+    [0, 0, 0],
+    [30, 0, 0],
+    [0, 45, 0],
+    [25, 40, 15],
+    [-70, 20, 130],
+  ];
+
+  /** 模型的**真实**最低点(逐顶点) */
+  function trueMinZ(vertices: Float32Array): number {
+    let min = Infinity;
+    for (let i = 2; i < vertices.length; i += 3) {
+      const z = vertices[i] ?? 0;
+      if (z < min) min = z;
+    }
+    return min;
+  }
+
+  /** 原始包围盒(拿来做 `rotatedBBoxMinZ`) */
+  function bboxOf(mesh: {
+    bboxMin: [number, number, number];
+    bboxMax: [number, number, number];
+  }) {
+    return {
+      min: { x: mesh.bboxMin[0], y: mesh.bboxMin[1], z: mesh.bboxMin[2] },
+      max: { x: mesh.bboxMax[0], y: mesh.bboxMax[1], z: mesh.bboxMax[2] },
+    };
+  }
+
+  it("每块外壳都带着**算它时的姿态**", () => {
+    const model = prepareSupportModel(BOX);
+
+    // 分析器那条路:未旋转的模型 → (0,0,0)
+    const plain = buildSupportShell(model.mesh, model.faceEnclosed);
+    expect(plain.pose).toEqual({ rotX: 0, rotY: 0, rotZ: 0 });
+
+    // 摆盘 Worker 那条路:真实角度
+    const pose = computeSupportAtPose(
+      model,
+      30,
+      40,
+      15,
+      DEFAULT_SUPPORT_PARAMS,
+      { withShell: true }
+    );
+    expect(pose.shell?.pose).toEqual({ rotX: 30, rotY: 40, rotZ: 15 });
+  });
+
+  it("姿态对不上就不认(旧姿态的外壳会把模型摆到平台下面)", () => {
+    const shell = { pose: { rotX: 30, rotY: 0, rotZ: 0 } };
+
+    expect(shellMatchesPose(shell, 30, 0, 0)).toBe(true);
+    // 转过了 —— 不认
+    expect(shellMatchesPose(shell, 0, 0, 0)).toBe(false);
+    expect(shellMatchesPose(shell, 31, 0, 0)).toBe(false);
+    // 没有姿态标记的外壳一律不认 —— 不知道它是哪个姿态的
+    expect(shellMatchesPose({}, 0, 0, 0)).toBe(false);
+  });
+
+  it("平台平面永远**不高于**模型的真实最低点(模型不会低过平台)", () => {
+    const model = prepareSupportModel(BOX);
+
+    for (const [rx, ry, rz] of POSES) {
+      const rotated = rotateSupportMesh(model.mesh, rx, ry, rz);
+      const modelMinZ = trueMinZ(rotated.vertices);
+
+      // ① 有外壳 → 平台平面 = 外壳自己的 `groundZ`
+      const shell = buildSupportShell(rotated, model.faceEnclosed);
+      expect(shell.groundZ).toBeLessThanOrEqual(modelMinZ);
+
+      // ② 没有外壳 → 平台平面 = 包围盒最低点 − 托底
+      const platformZ =
+        rotatedBBoxMinZ(bboxOf(model.mesh), rx, ry, rz) - SUPPORT_LIFT_MM;
+      expect(platformZ).toBeLessThanOrEqual(modelMinZ);
+
+      // 落到世界里:模型最低点必须在平台平面**上面**
+      // (平台平面落在 z=0,模型整组平移 -platformZ)
+      expect(modelMinZ - shell.groundZ).toBeGreaterThan(0);
+      expect(modelMinZ - platformZ).toBeGreaterThan(0);
+    }
+  });
+
+  it("托底高度是固定的那几毫米 —— 模型悬在托底上,不贴平台", () => {
+    const model = prepareSupportModel(BOX);
+
+    for (const [rx, ry, rz] of POSES) {
+      const rotated = rotateSupportMesh(model.mesh, rx, ry, rz);
+      const modelMinZ = trueMinZ(rotated.vertices);
+      const shell = buildSupportShell(rotated, model.faceEnclosed);
+
+      // 模型最低点离平台平面**至少**一个托底高度
+      expect(modelMinZ - shell.groundZ).toBeGreaterThanOrEqual(
+        SUPPORT_LIFT_MM - 1e-6
+      );
+    }
+  });
+
+  it("视口摆平台用的是「当前姿态的那块外壳」", () => {
+    const code = stripComments(read(VIEWPORT));
+
+    // 外壳先过一遍姿态核对 —— 对不上的不认(不画,也不拿它摆平台)
+    expect(code).toContain("shellMatchesPose(shell, rotX, rotY, rotZ)");
+    // 平台平面取的是**认下来的**那块外壳的 `groundZ`
+    expect(code).toContain("shellForPose.groundZ");
+    // 没有外壳时按包围盒最低点托底 —— 跟支撑体积算平台平面同一口径
+    expect(code).toContain("rotatedBBoxMinZ(bbox, rotX, rotY, rotZ)");
+  });
+
+  it("外壳的姿态标记一路传到视口(类型上带着)", () => {
+    const types = stripComments(read("src/features/tools/lib/mesh/types.ts"));
+
+    expect(types).toContain("pose?:");
+    expect(types).toContain("rotX: number");
   });
 });

@@ -19,6 +19,10 @@
  *   **同一块**几何(外壳 / 顶面 / 外壁 / 底板留边)。渲染用的外壳跟算体积
  *   用的外壳在同一次调用里建出来 —— 画出来的那圈支撑就是算克重的那块支撑,
  *   不是「照着算出来的样子再画一遍」。
+ * - **外壳带着算它时的姿态** —— `SupportShellData.pose`。视口只认**当前
+ *   姿态**的那块(`shellMatchesPose`),对不上的不画、也不拿它摆平台 ——
+ *   支撑是「某个姿态下的一次结果」,拿旧姿态的外壳摆平台,转过之后的模型
+ *   会**沉到平台下面**(工作室 2026-11-07 报的「模型不能低过平面」)。
  * - **姿态是变换,不是重算** —— 模型与问题边线装在一个姿态组里,改角度只改
  *   组的旋转(`order = "ZYX"`,口径跟摆盘算法 / OBJ 导出完全一致),几何不重建
  *   —— 拖滑块时不会卡。
@@ -27,7 +31,10 @@
  * ## 坐标系
  *
  * - 场景是 **Z-up**(打印方向),网格地面在 `z = 0`,即打印平台。
- * - 模型组整体平移,使平台落在 `z = 0`、模型悬在平台上方一段托底高度。
+ * - 模型组整体平移,使平台落在 `z = 0`、模型坐在平台上方一段托底高度
+ *   (**自动置于平面**)。平台平面取**包围盒最低点**(支撑体积算平台平面
+ *   也是这个口径)—— 包围盒装着模型 ⇒ 平台平面 ≤ 模型最低点 ⇒
+ *   **模型永远在平台上面,不会低过平面**。
  * - 姿态组在模型组里面,只管旋转 —— **支撑几何不进姿态组**:外面传进来的
  *   支撑已经是**转好姿态**的坐标,再转一次就转过了。
  *
@@ -41,7 +48,7 @@
  *
  * | 操作 | 效果 |
  * |---|---|
- * | **拖彩色圆环** | 转**模型**(改打印姿态)—— 支撑克重跟着走 |
+ * | **拖彩色圆环** | 转**模型**(改打印姿态)—— 支撑**不**跟着重算,摆定角度后点「包裹支撑」才算 |
  * | 左键拖(空白处) | 转**相机** |
  * | 滚轮 | 缩放(相机) |
  * | 右键拖 | 平移(相机) |
@@ -53,7 +60,7 @@
  * 后者决定支撑克重。控制器挂在**姿态组**上,改的就是那个组的旋转。
  */
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import {
@@ -63,6 +70,7 @@ import {
 import {
   POSE_EULER_ORDER,
   rotatedBBoxMinZ,
+  shellMatchesPose,
 } from "@/features/shared/components/model-viewport/pose";
 import {
   addMaterialGroups,
@@ -367,6 +375,26 @@ export default function ModelViewport({
   const rotX = pose?.rotX ?? 0;
   const rotY = pose?.rotY ?? 0;
   const rotZ = pose?.rotZ ?? 0;
+
+  /**
+   * **当前姿态下能用的那块支撑外壳**
+   *
+   * 支撑是「某个姿态下的一次结果」(工作室 2026-11-07 的口径:支撑不跟随
+   * 角度实时变化)。姿态一变,手里那块外壳就是**旧姿态**的 —— 拿旧姿态的
+   * 外壳摆平台平面,转过之后的模型会**低过平台**(工作室报的
+   * 「显示支撑必须自动置于平面,模型不能低过平面」)。
+   *
+   * 外壳上带着算它时的角度(`SupportShellData.pose`),这里核对一下:
+   * **对不上就不认** —— 不画,也不拿它摆平台。
+   *
+   * - 摆盘 Worker 算的那块带真实角度 ✓
+   * - 分析器算的那块(检查视角)是**未旋转**的模型,只在没转过的时候能用
+   */
+  const shellForPose = useMemo(() => {
+    const shell = supportShell ?? result?.supportShell ?? null;
+    if (!shell) return null;
+    return shellMatchesPose(shell, rotX, rotY, rotZ) ? shell : null;
+  }, [supportShell, result, rotX, rotY, rotZ]);
 
   useEffect(() => {
     tooltipTextsRef.current = {
@@ -797,7 +825,7 @@ export default function ModelViewport({
       curtain: null,
     };
 
-    const shell = supportShell ?? result?.supportShell ?? null;
+    const shell = shellForPose;
     if (!shell || shell.positions.length < 9) return;
 
     // ① 支撑体外壳(白,半透明):已剔除下朝向面,该区域由支撑体顶面负责,避免叠加
@@ -916,28 +944,49 @@ export default function ModelViewport({
       group.add(curtainMesh);
       supportRefs.current.curtain = curtainMesh;
     }
-  }, [previewCtx, supportShell, result]);
+  }, [previewCtx, shellForPose]);
 
   // ---------- 平台高度:模型组整体平移 ----------
   //
-  // 平台平面落在世界 z=0,模型悬在平台上方一段托底高度。
+  // 平台平面落在世界 z=0,模型坐在平台上方一段托底高度(**自动置于平面**)。
   //
-  // 优先用支撑外壳自己给的 `groundZ` —— 那就是算支撑体积时用的平台平面,
-  // 画出来的支撑跟算克重的支撑落在同一个平面上。没有外壳时(摆盘 Worker
-  // 还没回话)按模型自己的最低点托底。
+  // ## 平台平面怎么定
+  //
+  // | 有没有「当前姿态的那块外壳」 | 平台平面 |
+  // |---|---|
+  // | 有 | 外壳自己的 `groundZ` —— 那就是算支撑体积时用的平台平面,画出来的支撑跟算克重的支撑落在同一个平面上 |
+  // | 没有 | 当前姿态下**包围盒**的最低点 − 托底高度 |
+  //
+  // 两条路用的是**同一个口径** —— 支撑体积算平台平面也是拿包围盒最低点
+  // (`mesh.bboxMin[2] - 托底`)。所以:
+  //
+  // - 「显示支撑」开关前后模型**不会跳**(只差那 0.05~0.1mm 的安全余量);
+  // - 支撑的外壳底面**不会沉到平台下面**(它就画在平台平面上)。
+  //
+  // ## 为什么模型**不会低过平面**
+  //
+  // 包围盒装着模型 ⇒ **包围盒最低点 ≤ 模型最低点**。
+  //
+  // 平台平面取的就是包围盒最低点(或更低的 `groundZ`)⇒
+  // **平台平面 ≤ 模型最低点** ⇒ 模型永远在平台上面。
+  //
+  // ## 为什么不能用「旧姿态」的外壳
+  //
+  // 支撑是「某个姿态下的一次结果」—— 姿态一变,手里那块外壳就是旧姿态的。
+  // 拿它摆平台平面,转过之后的模型会**沉到平台下面**(工作室 2026-11-07 报
+  // 的「显示支撑必须自动置于平面,模型不能低过平面」)。所以外壳先过一遍
+  // `shellMatchesPose`,对不上的直接不认(见上面的 `shellForPose`)。
   useEffect(() => {
     const group = groupRef.current;
     if (!group) return;
-    const shell = supportShell ?? result?.supportShell ?? null;
-    if (shell) {
-      group.position.z = -shell.groundZ;
-      return;
-    }
     const bbox = bboxRef.current;
     if (!bbox) return;
-    const minZ = rotatedBBoxMinZ(bbox, rotX, rotY, rotZ);
-    group.position.z = -minZ + (supportLiftMmRef.current ?? SUPPORT_LIFT_MM);
-  }, [previewCtx, supportShell, result, meshPositions, rotX, rotY, rotZ]);
+    const platformZ = shellForPose
+      ? shellForPose.groundZ
+      : rotatedBBoxMinZ(bbox, rotX, rotY, rotZ) -
+        (supportLiftMmRef.current ?? SUPPORT_LIFT_MM);
+    group.position.z = -platformZ;
+  }, [previewCtx, shellForPose, meshPositions, rotX, rotY, rotZ]);
 
   // ---------- 姿态:只改组的旋转,几何不重建 ----------
   useEffect(() => {

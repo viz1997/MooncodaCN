@@ -272,6 +272,9 @@ export function computeSupportAtPose(
     // 画出来的底板跟算进去的底板就对不上了。
     gridSizeMM: opts?.gridSizeMM,
     includeBaseRing: withShell,
+    // 外壳带上**算它时的姿态** —— 视口拿它摆平台之前要核对:
+    // 姿态对不上的外壳(旧姿态算的那块)会把模型摆到平台下面去。
+    pose: { rotX: rotXDeg, rotY: rotYDeg, rotZ: rotZDeg },
   });
   const volume = computeSupportVolume(shell, rotated, {
     gridSizeMM: opts?.gridSizeMM,

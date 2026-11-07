@@ -76,8 +76,17 @@ export function rotatePointXYZ(
  * 刚体旋转下,包围盒的 8 个角点转过去就框住了整个旋转结果 —— 不用把
  * 每个顶点都转一遍(大模型几十万个顶点,拖滑块时每帧转一遍太贵)。
  *
- * 用它把模型抬到平台上方一段托底高度:平台平面落在 z=0,模型最低点正好
- * 悬在 `lift` 上。
+ * ## 它是「平台平面」的依据
+ *
+ * 视口拿它把模型抬到平台上方一段托底高度:平台平面落在 z=0,模型最低点
+ * 悬在 `lift` 上。**支撑体积算平台平面用的是同一个口径**
+ * (`mesh.bboxMin[2] - 托底`)—— 两边不一样的话,画面跟克重就对不上。
+ *
+ * ## 关键性质:包围盒最低点 ≤ 模型最低点
+ *
+ * 包围盒装着模型,所以拿它当平台平面**永远是安全的** —— 平台平面不会
+ * 高过模型的最低点,模型**不会低过平台**(工作室 2026-11-07:
+ * 「显示支撑必须自动置于平面,模型不能低过平面」)。
  */
 export function rotatedBBoxMinZ(
   bbox: BBoxLike,
@@ -100,4 +109,37 @@ export function rotatedBBoxMinZ(
     if (p.z < minZ) minZ = p.z;
   }
   return minZ;
+}
+
+/** 姿态差超过这个值就算「不是同一个姿态」(度) */
+const POSE_MATCH_EPSILON_DEG = 0.01;
+
+/**
+ * 这块支撑外壳是不是按**当前姿态**算出来的
+ *
+ * 支撑是「某个姿态下的一次结果」(工作室 2026-11-07 的口径:支撑不跟随角度
+ * 实时变化)。姿态一变,手里那块外壳就是**旧姿态**的 —— 拿它摆平台平面,
+ * 转过之后的模型会**低过平台**(工作室报的「模型不能低过平面」)。
+ *
+ * 外壳上带着算它时的角度(`SupportShellData.pose`):
+ * - 摆盘 Worker 算的那块带**真实**角度;
+ * - 分析器算的那块(检查视角)是**未旋转**的模型,记 (0,0,0)。
+ *
+ * 没有角度标记的外壳一律**不认** —— 不知道它是哪个姿态的,就不能拿它摆平台。
+ */
+export function shellMatchesPose(
+  shell: {
+    pose?: { rotX: number; rotY: number; rotZ: number } | undefined;
+  },
+  rotXDeg: number,
+  rotYDeg: number,
+  rotZDeg: number
+): boolean {
+  const p = shell.pose;
+  if (!p) return false;
+  return (
+    Math.abs(p.rotX - rotXDeg) <= POSE_MATCH_EPSILON_DEG &&
+    Math.abs(p.rotY - rotYDeg) <= POSE_MATCH_EPSILON_DEG &&
+    Math.abs(p.rotZ - rotZDeg) <= POSE_MATCH_EPSILON_DEG
+  );
 }

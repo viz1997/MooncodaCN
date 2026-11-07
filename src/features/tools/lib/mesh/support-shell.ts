@@ -159,6 +159,17 @@ export interface SupportShellOptions {
    * 算克重时的边界会差半格到几格。克重那边算体积默认也是 1mm。
    */
   gridSizeMM?: number | undefined;
+  /**
+   * 这块外壳是**按哪个姿态**算出来的(度)
+   *
+   * 支撑是「某个姿态下的一次结果」—— 姿态一变,手里这块外壳就是**旧姿态**
+   * 的。视口拿它摆平台平面之前要核对(`shellMatchesPose`),对不上就不认:
+   * 不然转过之后的模型会**低过平台**(工作室 2026-11-07 报的
+   * 「模型不能低过平面」)。
+   *
+   * 默认 (0,0,0) —— 分析器算的那块就是**未旋转**的模型。
+   */
+  pose?: { rotX: number; rotY: number; rotZ: number } | undefined;
 }
 
 /**
@@ -350,6 +361,8 @@ export function buildSupportShell(
     downFaces: new Uint32Array(downFaces),
     curtain: new Float32Array(curtain),
     baseRing,
+    // 这块外壳是**哪个姿态**算出来的 —— 视口据此判断能不能拿它摆平台
+    pose: options?.pose ?? { rotX: 0, rotY: 0, rotZ: 0 },
   };
 }
 
