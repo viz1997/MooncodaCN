@@ -696,6 +696,39 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
   网格夹具逐个比「检查工具的 stats / warnings / WJP 报告」和「摘要的
   stats / warnings / WJP 报告」,必须逐字相同。
 
+#### 拖文件进页面(2026-11-07)
+
+模型检查工具(`/tools/model-check`)曾经**拖不进模型** —— 指针一进视口,遮罩
+**一闪一闪**,文件落下不来。
+
+**根因不在浏览器,在遮罩自己身上**:
+
+```
+dragover → 遮罩出现 → 指针落在**它自己**身上
+         → dragleave 从它冒到容器 → 容器把遮罩撤掉
+         → 遮罩没了 → 又 dragover → 又出现 ……
+```
+
+遮罩是拖放区的**子元素**,它盖在指针下面就成了事件目标;`dragleave` 冒泡
+到容器,容器把遮罩撤掉,撤掉之后 `dragover` 又来 —— 无限闪。**文件根本
+进不来**,因为 `dragover` 的 `preventDefault` 被这一轮闪没了。
+
+- **一份口径** —— `src/features/shared/hooks/use-drop-zone.ts` 的
+  `useDropZone()`。三个拖放区都用它:模型检查工具的 3D 视口、克重工具的
+  上传卡、批量模式的空状态卡。**别再自己写一遍** `onDragOver` →
+  true / `onDragLeave` → false —— 那个写法就是会闪的那份。
+- **进出配对计数** —— `dragenter` +1 / `dragleave` −1,**归零才撤高亮**。
+  指针在容器和子元素之间来回移动时深度始终 > 0,高亮不翻。
+- **`dragover` 只 preventDefault** —— 不撤状态。不 `preventDefault` 的话
+  浏览器不让放,文件根本进不来。
+- **窗口级 `dragend` / `drop` 兜底** —— 拖拽被 Esc 取消、文件丢在容器外
+  时清零,不然高亮会**粘**在屏幕上。
+- **遮罩加 `pointer-events-none`** —— **必须**。它只是给人看的,永远不吃
+  事件;不然浏览器会把它算成一次新的进入 / 离开,深度被算乱。
+- **行为由单测守住** —— `src/test/shared/pure/use-drop-zone.test.tsx`
+  (jsdom)模拟那一串事件,守住「高亮不闪」;同一个文件还扫源码,守住
+  「tools / pricing 里不自己写拖放事件」「遮罩带 pointer-events-none」。
+
 ### 打印定价后台(2026-11-06)
 
 工作室的要求:「需要能够在 dashboard 后台设置**克重的计算和计价、材料、

@@ -110,7 +110,7 @@ export function useDropZone<T extends HTMLElement = HTMLDivElement>(
         // 不 preventDefault 的话浏览器不让放 —— 文件根本进不来
         e.preventDefault();
         // 不设的话拖过去显示的是「禁止」光标
-        e.dataTransfer.dropEffect = "copy";
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
       },
       onDragLeave: (_e: DragEvent<T>) => {
         // 离开一层减一;归零才撤高亮 —— 在子元素之间移动时不会闪
@@ -121,7 +121,7 @@ export function useDropZone<T extends HTMLElement = HTMLDivElement>(
         e.preventDefault();
         depthRef.current = 0;
         setIsDragOver(false);
-        const files = Array.from(e.dataTransfer.files ?? []);
+        const files = Array.from(e.dataTransfer?.files ?? []);
         if (files.length > 0) onFiles(files);
       },
     }),
