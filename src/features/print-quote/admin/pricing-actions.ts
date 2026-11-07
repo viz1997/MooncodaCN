@@ -157,6 +157,13 @@ const configSchema = z.object({
   deliveryExpressRate: z.number().min(0).max(1),
   /** 48 小时档加价比例(0~1,0.37 = 37%) */
   deliveryUrgentRate: z.number().min(0).max(1),
+  /**
+   * 访客可见计价(2026-11-07)
+   *
+   * 未登录的人能不能在工具页看到报价。关掉的话,已登录的用户照常看得到
+   * (能下单就能看价)—— 这个开关只管**访客**。
+   */
+  allowGuestPricing: z.boolean(),
 });
 
 /** 材料行的校验 */
@@ -330,6 +337,7 @@ async function resolveConfigBase(): Promise<SavePrintPricingConfigInput> {
       supportBaseMarginMm: configRow.supportBaseMarginMm,
       deliveryExpressRate: configRow.deliveryExpressRate,
       deliveryUrgentRate: configRow.deliveryUrgentRate,
+      allowGuestPricing: configRow.allowGuestPricing,
     };
   }
 
@@ -348,6 +356,7 @@ async function resolveConfigBase(): Promise<SavePrintPricingConfigInput> {
     supportBaseMarginMm: settings.supportBaseMarginMm,
     deliveryExpressRate: settings.deliveryRates.express,
     deliveryUrgentRate: settings.deliveryRates.urgent,
+    allowGuestPricing: settings.allowGuestPricing,
   };
 }
 

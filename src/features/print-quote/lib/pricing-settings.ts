@@ -10,6 +10,7 @@
  * - **支撑加价规则** —— 自支撑阈值 + **分段**(1:1~1:2 一档,超 1:2 另一档)
  * - **交期三档比例** —— 标准 0 / 加急 / 特急,按小计的百分比收
  * - **支撑几何参数** —— 托底高度、底板留边
+ * - **访客可见计价** —— 2026-11-07 加的开关:未登录的人能不能看到报价
  *
  * ## 生效值的回退链(逐字段取第一个非空)
  *
@@ -94,6 +95,16 @@ export type PrintPricingConfigLite = {
   deliveryExpressRate: number;
   /** 特急(48h)比例 0~1 */
   deliveryUrgentRate: number;
+  /**
+   * 访客能不能看到计价(2026-11-07)
+   *
+   * 工作室的原话:「现在不登录也允许计价显示」—— 工具页的「加入打印单」
+   * 那张卡上摆出预估报价,没登录也摆。
+   *
+   * 关掉的话,未登录的人看不到金额(**登录后照常看得到** —— 登录了就能下单,
+   * 价必须看得到)。这只管**访客**,不管已登录用户。
+   */
+  allowGuestPricing: boolean;
 };
 
 /**
@@ -152,13 +163,23 @@ export type PrintPricingSettings = {
   supportBaseMarginMm: number;
   /** 各档交期加价比例(标准档恒为 0) */
   deliveryRates: DeliveryRates;
+  /**
+   * 访客可见计价(2026-11-07)
+   *
+   * 关掉的话,`POST /api/print-quote` 对未登录的人回 403
+   * (`GUEST_PRICING_DISABLED`),工具页那张卡就摆「登录后可见报价」。
+   *
+   * **登录了的人不受影响** —— 能下单就能看价。
+   */
+  allowGuestPricing: boolean;
 };
 
 /**
  * 客户端需要的子集
  *
- * 工具页只显示**克重**,不显示价格 —— 所以它只要密度和支撑几何。
- * 单价 / 后处理 / 阈值 / 交期比例**一律服务端算**,不往浏览器里发。
+ * 工具页的**克重**是本地算的 —— 所以它只要密度和支撑几何。
+ * 单价 / 后处理 / 阈值 / 交期比例**一律服务端算**,不往浏览器里发
+ * (那张卡上的预估价是问服务端要的,不是本地算的)。
  */
 export type ClientPrintConfig = {
   /** 模型材料密度 g/cm³ */
@@ -260,6 +281,7 @@ function rateOr(value: number, fallback: number): number {
  * | `PRINT_SUPPORT_BASE_MARGIN_MM` | 底板留边 mm | 5 |
  * | `PRINT_DELIVERY_EXPRESS_RATE` | 72 小时档加价比例(0~1) | 0.1 |
  * | `PRINT_DELIVERY_URGENT_RATE` | 48 小时档加价比例(0~1) | 0.37 |
+ * | `PRINT_ALLOW_GUEST_PRICING` | 访客可见计价(`"false"` 才关) | 开 |
  *
  * 注意:本仓库的 `.gitignore` 把 `.env*` 整个排掉了(`.env.example` 也一样),
  * 所以这份说明放在代码里 —— 环境变量的名字跟着代码走,不会因为
@@ -332,6 +354,9 @@ export function readPrintPricingFallback(): PrintPricingSettings {
         DEFAULT_DELIVERY_RATES.urgent
       ),
     },
+    // 访客可见计价 —— **默认开**(工作室 2026-11-07:「现在不登录也允许
+    // 计价显示」)。只有显式写 "false" 才关。
+    allowGuestPricing: process.env.PRINT_ALLOW_GUEST_PRICING !== "false",
   };
 }
 
@@ -454,6 +479,9 @@ export function resolvePrintPricingSettings(input: {
       fallback.supportBaseMarginMm
     ),
     deliveryRates,
+    // 访客可见计价 —— 配置行优先,没有就(env / 默认值)那一档
+    allowGuestPricing:
+      configRow?.allowGuestPricing ?? fallback.allowGuestPricing,
   };
 }
 

@@ -57,6 +57,7 @@ const SETTINGS: PrintPricingSettings = {
   supportLiftMm: 5,
   supportBaseMarginMm: 5,
   deliveryRates: { standard: 0, express: 0.1, urgent: 0.37 },
+  allowGuestPricing: true,
 };
 
 /** 第一档 / 第二档的单位 —— 元/g(引擎内部用元) */

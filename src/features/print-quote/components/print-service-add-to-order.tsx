@@ -12,7 +12,12 @@
  *     → /print-order(打印列表 + 下单金额 + 收货地址 + 提交)
  *
  * 报价台(`/quote`)整页删掉之后,打印服务对外只有两页:工具页(量)、
- * 打印单(价 + 下单)。**工具里不显示价格** —— 价格只在打印单上出现。
+ * 打印单(价 + 下单)。**工具里不自己算价** —— 价格是服务端算的。
+ *
+ * 2026-11-07 起,这张卡上多了一个**预估报价**(工作室的原话:「现在不登录
+ * 也允许计价显示」):那是问服务端要的(`POST /api/print-quote`),不是本地
+ * 算的;访客能不能看由后台 `/admin/print-pricing` 的「访客可见计价」开关
+ * 决定。**最终金额仍在打印单上确认。**
  *
  * ## 加进去的三步
  *
@@ -43,6 +48,7 @@ import type {
   EnsureSupportFn,
   PricingModelPayload,
 } from "@/features/pricing/components/pricing-calculator-types";
+import { PrintServiceQuotePreview } from "@/features/print-quote/components/print-service-quote-preview";
 import type { PrintQuoteInput } from "@/features/print-quote/lib/quote-types";
 import { uploadModelFile } from "@/features/print-quote/lib/upload-model";
 import { usePrintCart } from "@/features/storefront/hooks/use-print-cart";
@@ -154,6 +160,9 @@ export function PrintServiceAddToOrder({
         <p className="text-xs text-muted-foreground">
           {isLoggedIn ? t("entry.desc") : t("entry.descSignIn")}
         </p>
+
+        {/* 预估报价(2026-11-07)—— 访客也能看,后台一个开关管着 */}
+        <PrintServiceQuotePreview input={input} />
 
         {isLoggedIn ? (
           <button

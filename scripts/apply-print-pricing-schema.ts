@@ -31,6 +31,13 @@
  * `ON CONFLICT DO NOTHING` —— 工作室在后台把 `builtin-model` 的密度
  * 改成 1.15 之后,再跑一遍这个脚本**不会**把它改回去。
  *
+ * ## 2026-11-07:多一列 `allow_guest_pricing`
+ *
+ * 「访客可见计价」那个开关的列。线上那张表是 2026-11-06 建的,少这一列 ——
+ * 而少了它,读配置那条 `SELECT` 会整条报错(读不到 → 整份退回环境变量兜底,
+ * 后台看到的是「读不到定价配置」)。所以这个脚本里有一句 `ALTER TABLE …
+ * ADD COLUMN IF NOT EXISTS`,跑一遍就补上,幂等。
+ *
  * ## 为什么手写而不是 `db:generate`
  *
  * `db:generate` 生成的迁移文件会**顺着整张 schema 的历史**走一遍,跟库里
@@ -129,9 +136,21 @@ async function main() {
         "support_base_margin_mm" numeric(8,2) NOT NULL DEFAULT '5.00',
         "delivery_express_rate" numeric(6,4) NOT NULL DEFAULT '0.1000',
         "delivery_urgent_rate" numeric(6,4) NOT NULL DEFAULT '0.3700',
+        "allow_guest_pricing" boolean NOT NULL DEFAULT true,
         "created_at" timestamp NOT NULL DEFAULT now(),
         "updated_at" timestamp NOT NULL DEFAULT now()
       );`,
+    },
+    {
+      // 2026-11-07:「访客可见计价」那个开关。线上那张表是 2026-11-06 建的,
+      // 少这一列 —— 而少了它,`SELECT *` 会整条报错(读不到配置 → 整份退回
+      // 环境变量兜底,后台看到的是「读不到定价配置」)。所以补一列。
+      //
+      // 幂等:跑几遍都安全。默认值 true = 跟代码里的默认值一致
+      // (工作室的原话是「现在不登录也允许计价显示」)。
+      label: "ALTER TABLE print_pricing_config ADD allow_guest_pricing",
+      query: `ALTER TABLE "print_pricing_config"
+        ADD COLUMN IF NOT EXISTS "allow_guest_pricing" boolean NOT NULL DEFAULT true;`,
     },
     {
       label: "CREATE INDEX print_material_code_uniq_idx",

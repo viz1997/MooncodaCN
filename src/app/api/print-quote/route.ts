@@ -13,6 +13,21 @@
  *
  * 2026-11-01:要登录。整个打印服务改成「登录后下单」,报价接口同步收口 ——
  * 页面本身已经拦了未登录的人,接口不留后门。
+ *
+ * 2026-11-07:**访客也能报价了** —— 工作室的原话「现在不登录也允许计价
+ * 显示」。工具页的「加入打印单」那张卡上摆出预估报价,没登录也摆。
+ *
+ * 但**不是无条件放开** —— 后台(`/admin/print-pricing`)有一个「访客可见
+ * 计价」的开关:
+ *
+ * | 情况 | 结果 |
+ * |---|---|
+ * | 已登录 | 照常报价(开关不管已登录的人 —— 能下单就能看价) |
+ * | 未登录 + 开关开 | 报价(200) |
+ * | 未登录 + 开关关 | **403 `GUEST_PRICING_DISABLED`** —— 界面摆「登录后可见报价」 |
+ *
+ * 开关的值在 `PrintPricingSettings.allowGuestPricing`(后台配的,兜底
+ * `PRINT_ALLOW_GUEST_PRICING` 环境变量,默认**开**)。
  */
 
 import { type NextRequest, NextResponse } from "next/server";
@@ -67,12 +82,19 @@ async function handle(request: NextRequest) {
     return createRateLimitResponse(rl);
   }
 
-  // 打印服务要登录 —— 未登录直接拒
+  // 价从哪儿来:后台 `/admin/print-pricing` 配的值 → `PRINT_*` env → 默认值
+  // (开关也在这一份里 —— 访客能不能报价,读的是它)
+  const settings = await getPrintPricingSettings();
+
+  // 登录了吗 —— 访客能不能报价由后台那个开关说了算
   const user = await getPrintOrderUser();
-  if (!user) {
+  if (!user && !settings.allowGuestPricing) {
     return NextResponse.json(
-      { success: false, error: "请先登录" },
-      { status: 401, headers: getRateLimitHeaders(rl) }
+      {
+        error: "GUEST_PRICING_DISABLED",
+        message: "访客看不到报价,登录后就能看",
+      },
+      { status: 403, headers: getRateLimitHeaders(rl) }
     );
   }
 
@@ -107,8 +129,7 @@ async function handle(request: NextRequest) {
     deliveryTier: parsed.data.deliveryTier ?? null,
   };
 
-  // 价从哪儿来:后台 `/admin/print-pricing` 配的值 → `PRINT_*` env → 默认值
-  const settings = await getPrintPricingSettings();
+  // 价从哪儿来:后台 `/admin/print-pricing` 配的值(上面已经读过了)
   const quote = computePrintQuote(settings, input);
   if (!quote) {
     return NextResponse.json(

@@ -91,6 +91,7 @@ function toConfigLite(
     supportBaseMarginMm: num(row.supportBaseMarginMm),
     deliveryExpressRate: num(row.deliveryExpressRate),
     deliveryUrgentRate: num(row.deliveryUrgentRate),
+    allowGuestPricing: row.allowGuestPricing,
   };
 }
 
@@ -210,6 +211,8 @@ export type SavePrintPricingConfigInput = {
   /** 0~1 的小数(0.1 = 10%) */
   deliveryExpressRate: number;
   deliveryUrgentRate: number;
+  /** 访客可见计价(2026-11-07)—— 未登录的人能不能看到报价 */
+  allowGuestPricing: boolean;
 };
 
 /**
@@ -234,6 +237,7 @@ export async function savePrintPricingConfig(
     supportBaseMarginMm: String(input.supportBaseMarginMm),
     deliveryExpressRate: String(input.deliveryExpressRate),
     deliveryUrgentRate: String(input.deliveryUrgentRate),
+    allowGuestPricing: input.allowGuestPricing,
     updatedAt: new Date(),
   };
 

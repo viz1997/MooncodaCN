@@ -2831,6 +2831,16 @@ export const printPricingConfig = pgTable("print_pricing_config", {
   })
     .notNull()
     .default("0.3700"),
+  /**
+   * 访客可见计价 —— **默认开**(2026-11-07)
+   *
+   * 工作室的原话:「现在不登录也允许计价显示」—— 工具页的「加入打印单」
+   * 那张卡上摆出预估报价,没登录也摆。
+   *
+   * 关掉的话,未登录的人看不到金额(登录后照常看得到)。**这只管访客** ——
+   * 已登录用户能下单,价必须看得到。
+   */
+  allowGuestPricing: boolean("allow_guest_pricing").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

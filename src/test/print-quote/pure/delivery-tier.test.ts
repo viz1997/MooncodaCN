@@ -52,6 +52,7 @@ const SETTINGS: PrintPricingSettings = {
   supportLiftMm: 5,
   supportBaseMarginMm: 5,
   deliveryRates: DEFAULT_DELIVERY_RATES,
+  allowGuestPricing: true,
 };
 
 describe("normalizeDeliveryTier", () => {

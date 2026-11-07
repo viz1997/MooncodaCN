@@ -102,6 +102,8 @@ type ConfigFormValues = {
   /** 百分比(37 = 37%)—— 提交时换算成 0.37 */
   deliveryExpressPercent: number | null;
   deliveryUrgentPercent: number | null;
+  /** 访客可见计价(2026-11-07) */
+  allowGuestPricing: boolean;
 };
 
 /** 材料行的表单值 —— 金额是**元** */
@@ -166,6 +168,7 @@ function toFormValues(settings: PrintPricingSettings): ConfigFormValues {
     supportBaseMarginMm: settings.supportBaseMarginMm,
     deliveryExpressPercent: round4(settings.deliveryRates.express * 100),
     deliveryUrgentPercent: round4(settings.deliveryRates.urgent * 100),
+    allowGuestPricing: settings.allowGuestPricing,
   };
 }
 
@@ -275,6 +278,8 @@ export function PrintPricingAdminView() {
       // 百分比 → 小数(服务端那边存的就是小数)
       deliveryExpressRate: (values.deliveryExpressPercent ?? 0) / 100,
       deliveryUrgentRate: (values.deliveryUrgentPercent ?? 0) / 100,
+      // 访客可见计价 —— 只管访客,已登录的用户照常看得到
+      allowGuestPricing: values.allowGuestPricing ?? true,
     });
   };
 
@@ -703,6 +708,10 @@ export function PrintPricingAdminView() {
             label="支撑加价"
             value={settings.supportEnabled ? "已开启" : "未开启"}
           />
+          <Readonly
+            label="访客可见计价"
+            value={settings.allowGuestPricing ? "已开启" : "未开启"}
+          />
         </div>
       </section>
 
@@ -741,6 +750,19 @@ export function PrintPricingAdminView() {
                 placeholder="未指定(走环境变量)"
                 options={supportMaterialOptions}
               />
+            </Form.Item>
+          </div>
+
+          {/* 访客可见计价 —— 工作室 2026-11-07 加的开关 */}
+          <div className="mb-4 flex items-center justify-between gap-4 rounded-md bg-muted/40 px-3 py-2">
+            <div>
+              <p className="text-xs font-medium">访客可见计价</p>
+              <p className="text-[11px] text-muted-foreground">
+                关掉:没登录的人在工具页看不到报价(登录后照常看得到)。默认开
+              </p>
+            </div>
+            <Form.Item name="allowGuestPricing" noStyle>
+              <Switch />
             </Form.Item>
           </div>
 

@@ -1721,6 +1721,16 @@
       "total": "Total",
       "stale": "Price updating, please wait"
     },
+    "preview": {
+      "label": "Estimated price",
+      "quoting": "Pricing…",
+      "error": "Can't estimate the price",
+      "signInRequired": "Sign in to see the price",
+      "signInHint": "Prices are shown to signed-in users — sign in to see the amount",
+      "supportPending": "not counted",
+      "supportPendingHint": "Support isn't computed yet — click \"Show support\" or \"Place on plane\" once for a closer estimate",
+      "estimateHint": "Estimate — the final amount is confirmed on the print order"
+    },
     "delivery": {
       "label": "Delivery",
       "hint": "Surcharged as a share of the quote",
@@ -1743,7 +1753,7 @@
     },
     "entry": {
       "title": "Add to print order",
-      "desc": "Add the model you measured to your print order — confirm the total, delivery tier and address there.",
+      "desc": "Add the model you measured to your print order — the estimate below is a preview; the final total, delivery tier and address are confirmed on the print order.",
       "descSignIn": "Print orders are tied to your account. Sign in first, then measure — otherwise the model is lost when the page reloads.",
       "signInCta": "Sign in",
       "empty": "Pick a model file above to add it to your print order.",

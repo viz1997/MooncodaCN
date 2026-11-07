@@ -93,6 +93,7 @@ const FALLBACK: PrintPricingSettings = {
   supportLiftMm: 5,
   supportBaseMarginMm: 5,
   deliveryRates: { standard: 0, express: 0.1, urgent: 0.37 },
+  allowGuestPricing: true,
 };
 
 /** 配置行的默认值 —— 测试里只改要测的那几个字段 */
@@ -114,6 +115,7 @@ function configRow(
     supportBaseMarginMm: 5,
     deliveryExpressRate: 0.1,
     deliveryUrgentRate: 0.37,
+    allowGuestPricing: true,
     ...overrides,
   };
 }
@@ -351,6 +353,54 @@ describe("readPrintPricingFallback —— 环境变量那一档", () => {
 
     vi.stubEnv("PRINT_SUPPORT_TIER2_PRICE_CENTS_PER_GRAM", "");
     expect(readPrintPricingFallback().supportTier2PriceCentsPerGram).toBe(100);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/*  访客可见计价                                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 「访客可见计价」那个开关(2026-11-07)
+ *
+ * 工作室的原话:「现在不登录也允许计价显示,后台需要做一个开关」。
+ *
+ * 默认**开** —— 工作室现在就要这个行为。回退链跟其余字段一样:
+ * DB 配置行 → `PRINT_ALLOW_GUEST_PRICING` 环境变量 → 默认(开)。
+ */
+describe("访客可见计价 —— 回退链", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("默认开 —— 不配环境变量时访客也能看到报价", () => {
+    vi.stubEnv("PRINT_ALLOW_GUEST_PRICING", "");
+    expect(readPrintPricingFallback().allowGuestPricing).toBe(true);
+  });
+
+  it("环境变量写成 false → 关掉", () => {
+    vi.stubEnv("PRINT_ALLOW_GUEST_PRICING", "false");
+    expect(readPrintPricingFallback().allowGuestPricing).toBe(false);
+  });
+
+  it("配置行说了算 —— 后台存过就以后台为准(环境变量再改也不影响)", () => {
+    const settings = resolvePrintPricingSettings({
+      configRow: configRow({ allowGuestPricing: false }),
+      materials: [],
+      fallback: { ...FALLBACK, allowGuestPricing: true },
+    });
+    expect(settings.allowGuestPricing).toBe(false);
+  });
+
+  it("还没有配置行 → 走环境变量那一档", () => {
+    vi.stubEnv("PRINT_ALLOW_GUEST_PRICING", "false");
+    const fallback = readPrintPricingFallback();
+    const settings = resolvePrintPricingSettings({
+      configRow: null,
+      materials: [],
+      fallback,
+    });
+    expect(settings.allowGuestPricing).toBe(false);
   });
 });
 
