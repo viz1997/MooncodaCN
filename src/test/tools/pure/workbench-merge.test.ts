@@ -11,9 +11,17 @@ import { describe, expect, it } from "vitest";
  * (`/tools/model-check`)和克重(`/tools/weight`)是两个页面,同一个文件要
  * 拖两次、解压两次、量两遍,中间还要跳页。
  *
- * 现在合成一个工作台(`/tools/weight`),模型**只载入一次**,里面用
- * **检查 / 克重 / 摆盘** 三个视角看同一个模型。老地址 `/tools/model-check`
- * 308 跳到新地址(308 而不是 307:这是永久搬家,权重要转移)。
+ * 现在合成一个工作台(`/tools/workbench`),模型**只载入一次**,里面用
+ * **检查 / 克重 / 摆盘** 三个视角看同一个模型。
+ *
+ * ## 地址为什么叫 `/tools/workbench`
+ *
+ * 三个视角里没有一个能代表全名 —— 叫 `/tools/weight` 只说了克重,叫
+ * `/tools/model-check` 只说了检查。`/tools/workbench` 是唯一说得通的:
+ * 这是一个**工作台**,里面切视角。
+ *
+ * 三个老地址(`/pricing` / `/tools/weight` / `/tools/model-check`)都 **308
+ * 跳**到它 —— 308 而不是 307:这是永久搬家,搜索引擎的权重要转过去。
  *
  * ## 这个测试守住什么
  *
@@ -26,6 +34,7 @@ import { describe, expect, it } from "vitest";
  * | 守卫 | 为什么 |
  * |---|---|
  * | 老地址只重定向,不再有独立页面 | 两个工具页又回来了 |
+ * | 三个老地址都 308 跳到 `/tools/workbench` | 权重不转移,或者跳去一个不存在的地方 |
  * | 检查面板吃父组件的 `parseResult`,不自己解析 OBJ | 模型被解析两遍,慢一倍,还可能解析出两个不一样的几何 |
  * | 检查面板按 `scalePositionsXYZ` 缩放 | 尺寸面板改的是**另一边**的几何,两个视角的支撑克重对不上 |
  * | 工具中心只剩一个入口 | 清单里又冒出第二张卡 |
@@ -55,35 +64,46 @@ const CHECK_PANEL =
   "src/features/tools/components/model-check/model-check-panel.tsx";
 const CALCULATOR = "src/features/pricing/components/pricing-calculator.tsx";
 const TOOLS_HUB = "src/features/tools/components/tools-hub.tsx";
-const MODEL_CHECK_PAGE =
-  "src/app/[locale]/(marketing-atelier)/tools/model-check/page.tsx";
-const WEIGHT_PAGE =
-  "src/app/[locale]/(marketing-atelier)/tools/weight/page.tsx";
+const WORKBENCH_PAGE =
+  "src/app/[locale]/(marketing-atelier)/tools/workbench/page.tsx";
+
+/** 三个老地址 —— 都只该剩一个 308 跳转 */
+const LEGACY_PAGES = {
+  "/pricing": "src/app/[locale]/(marketing-atelier)/pricing/page.tsx",
+  "/tools/weight": "src/app/[locale]/(marketing-atelier)/tools/weight/page.tsx",
+  "/tools/model-check":
+    "src/app/[locale]/(marketing-atelier)/tools/model-check/page.tsx",
+} as const;
 
 describe("工作台 —— 老地址只重定向", () => {
-  it("/tools/model-check 308 跳到 /tools/weight", () => {
-    const code = read(MODEL_CHECK_PAGE);
+  for (const [path, file] of Object.entries(LEGACY_PAGES)) {
+    it(`${path} 308 跳到 /tools/workbench`, () => {
+      const code = read(file);
 
-    // `permanentRedirect` = 308。`redirect` 是 307(临时)—— 权重不转移
-    expect(code).toContain("permanentRedirect");
-    expect(code).not.toMatch(/\bredirect\(\s*`\/\$\{locale\}/);
+      // `permanentRedirect` = 308。`redirect` 是 307(临时)—— 权重不转移
+      expect(code).toContain("permanentRedirect");
+      expect(code).not.toMatch(/\bredirect\(\s*`\/\$\{locale\}/);
 
-    // 跳的目标是那个唯一的工作台
-    // (用正则匹配字面量 —— 免得 lint 把 `${` 当成漏写的模板串)
-    expect(code).toMatch(/`\/\$\{locale\}\/tools\/weight`/);
+      // 跳的目标是那个唯一的工作台
+      // (用正则匹配字面量 —— 免得 lint 把 `${` 当成漏写的模板串)
+      expect(code).toMatch(/`\/\$\{locale\}\/tools\/workbench`/);
+    });
+  }
+
+  it("老地址那一格里没有第二个工具的实现(不再是一页独立的工具)", () => {
+    for (const file of Object.values(LEGACY_PAGES)) {
+      const code = stripComments(read(file));
+
+      // 一旦有人把工具的界面搬回这个文件,这个测试会炸
+      expect(code).not.toContain("ModelCheckPanel");
+      expect(code).not.toContain("useAnalyzer");
+      expect(code).not.toContain("<Viewport");
+      expect(code).not.toContain("PricingCalculator");
+    }
   });
 
-  it("重定向页里没有第二个工具的实现(不再是一页独立的检查工具)", () => {
-    const code = stripComments(read(MODEL_CHECK_PAGE));
-
-    // 一旦有人把检查工具的界面搬回这个文件,这个测试会炸
-    expect(code).not.toContain("ModelCheckPanel");
-    expect(code).not.toContain("useAnalyzer");
-    expect(code).not.toContain("<Viewport");
-  });
-
-  it("工具页的 metadata 带上了检查那一套关键词", () => {
-    const code = read(WEIGHT_PAGE);
+  it("工作台页带上了检查那一套关键词", () => {
+    const code = read(WORKBENCH_PAGE);
 
     // 检查工具以前是独立页面,各自被收录过 —— 合并后两套关键词都得留着
     expect(code).toContain("3D模型检查");
@@ -140,10 +160,13 @@ describe("工作台 —— 模型只解析一遍", () => {
 });
 
 describe("工作台 —— 工具中心只剩一个入口", () => {
-  it("工具清单里只有 /tools/weight", () => {
-    const code = read(TOOLS_HUB);
+  it("工具清单里只有 /tools/workbench", () => {
+    // 去掉注释 —— 注释里写着「老地址都 308 跳过来」不算违规,
+    // 违规的是**代码里**还挂着一个指向老地址的链接
+    const code = stripComments(read(TOOLS_HUB));
 
-    expect(code).toContain("/tools/weight");
+    expect(code).toContain("/tools/workbench");
     expect(code).not.toContain("/tools/model-check");
+    expect(code).not.toContain("/tools/weight");
   });
 });

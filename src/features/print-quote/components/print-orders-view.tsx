@@ -70,7 +70,7 @@ export function PrintOrdersView({
         description={t("list.emptyHint")}
         action={
           <Button asChild className="rounded-full px-7">
-            <Link href="/tools/weight">{t("list.emptyCta")}</Link>
+            <Link href="/tools/workbench">{t("list.emptyCta")}</Link>
           </Button>
         }
       />

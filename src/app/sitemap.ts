@@ -23,16 +23,15 @@ export default function sitemap(): MetadataRoute.Sitemap {
     "/blog",
     "/pseo",
     // 工具中心(2026-11-01):打印前工作台(检查 / 克重 / 摆盘)
-    // `/pricing` 不再进 sitemap —— 它 308 跳到 `/tools/weight`,留旧地址在
-    // sitemap 里等于告诉搜索引擎「这个页面也是正式页面」。
-    // `/tools/model-check` 同样不进 —— 2026-11-07 起它 308 跳到
-    // `/tools/weight`(两个工具页合成一个)。
+    // 三个老地址都不进 sitemap —— 它们各自 308 跳到 `/tools/workbench`,
+    // 留旧地址在 sitemap 里等于告诉搜索引擎「这个页面也是正式页面」。
+    // (`/pricing` / `/tools/weight` / `/tools/model-check`)
     "/tools",
-    "/tools/weight",
+    "/tools/workbench",
     // 打印服务:**不进 sitemap** —— 打印单(`/print-order`)是每个用户自己的
     // 一页(打印列表 + 下单金额),对爬虫没有内容;报价台(`/quote`)2026-11-06
     // 已整页删掉,只留一个重定向。打印服务对外的公开入口是打印前工作台
-    // (`/tools/weight`,上面已经在列表里)。
+    // (`/tools/workbench`,上面已经在列表里)。
   ];
 
   // Generate static routes for each locale

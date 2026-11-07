@@ -7,7 +7,7 @@
  * 只改了 import 路径与悬停提示文案(改为 next-intl)。
  *
  * 2026-11-03:场景本身(renderer / camera / 灯光 / 控制器 / 渲染循环)交给共用的
- * `<ObjPreview mode="inspect" />` —— 与克重工具(/tools/weight)是同一个组件,
+ * `<ObjPreview mode="inspect" />` —— 与打印前工作台(/tools/workbench)是同一个组件,
  * 两个工具的模型观感、贴图表现完全一致。
  */
 import { useTranslations } from "next-intl";

@@ -7,7 +7,7 @@ import { redirect, type routing } from "@/i18n/routing";
  *
  * 工作室把打印服务的流程收成两步:
  *
- *   /tools/weight(量重量的工具,公开)
+ *   /tools/workbench(量重量的工具,公开)
  *     → 量好 → 点「加入打印单」
  *     → /print-order(打印列表 + 下单金额 + 收货地址 + 提交)
  *

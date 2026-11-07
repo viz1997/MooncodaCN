@@ -21,9 +21,9 @@
  * 2026-11-06 起流程收成两步 —— 报价台(`/quote`)整页删掉,只留一个重定向到
  * 这一页:
  *
- *   /tools/weight(量重量的工具)→ 点「加入打印单」→ /print-order(这一页)
+ *   /tools/workbench(量重量的工具)→ 点「加入打印单」→ /print-order(这一页)
  *
- * 所以这一页的「再加一个模型」指向 `/tools/weight`,空打印单的引导也是它。
+ * 所以这一页的「再加一个模型」指向 `/tools/workbench`,空打印单的引导也是它。
  *
  * ## 金额口径:没有运费
  *
@@ -166,7 +166,7 @@ export function PrintOrderView({
           还没有要打印的模型 —— 去克重工具量一个,点「加入打印单」就能下单。
         </p>
         <Button asChild className="rounded-full px-7">
-          <Link href="/tools/weight">去量一个模型</Link>
+          <Link href="/tools/workbench">去量一个模型</Link>
         </Button>
       </div>
     );
@@ -205,7 +205,7 @@ export function PrintOrderView({
         </div>
         {/* 想再加一个模型 —— 回克重工具量 */}
         <Button asChild variant="ghost" size="sm" className="rounded-full">
-          <Link href="/tools/weight">再加一个模型</Link>
+          <Link href="/tools/workbench">再加一个模型</Link>
         </Button>
       </div>
 

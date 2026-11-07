@@ -1,7 +1,7 @@
 import { permanentRedirect } from "next/navigation";
 
 /**
- * `/pricing` —— 旧地址,2026-11-01 起 308 跳到 `/tools/weight`。
+ * `/pricing` —— 旧地址,2026-11-01 起 308 跳到 `/tools/workbench`。
  *
  * 克重计算器从「商城里的一个品类」改成了「工具中心里的一个工具」,导航只留
  * 一个「工具」入口。老地址不能断 —— 已经被搜索引擎收录,也被分享过。
@@ -20,5 +20,5 @@ export default async function PricingPage({
   params: Promise<{ locale: string }>;
 }) {
   const { locale } = await params;
-  permanentRedirect(`/${locale}/tools/weight`);
+  permanentRedirect(`/${locale}/tools/workbench`);
 }

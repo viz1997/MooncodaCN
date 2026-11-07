@@ -12,7 +12,7 @@ Mooncoda is a production-ready Next.js SaaS template. It provides a complete fou
 
 | 系统 | 职责 | 技术栈 |
 |---|---|---|
-| **NextDevTpl**(本仓库) | AI 生图 SaaS 后端:user / credits / photo / imageJob / AI 路由 / WeChat 小程序登录 **+ 商品目录(商品 / SKU 变体 / 价格)+ 定价 + 购物车(`/cart`)+ 订单事实 + 收货地址 + 打印工单(克重工具 `/tools/weight` 量 → 「加入打印单」→ 打印单 `/print-order` → `print_order`,按 `user_id` 归属,登录后下单;报价台 `/quote` 已删,只留重定向;打印服务**不走商城购物袋**,见「打印服务走「打印单」」)** | Next.js 16 + Drizzle + PostgreSQL |
+| **NextDevTpl**(本仓库) | AI 生图 SaaS 后端:user / credits / photo / imageJob / AI 路由 / WeChat 小程序登录 **+ 商品目录(商品 / SKU 变体 / 价格)+ 定价 + 购物车(`/cart`)+ 订单事实 + 收货地址 + 打印工单(打印前工作台 `/tools/workbench` 量 → 「加入打印单」→ 打印单 `/print-order` → `print_order`,按 `user_id` 归属,登录后下单;报价台 `/quote` 已删,只留重定向;打印服务**不走商城购物袋**,见「打印服务走「打印单」」)** | Next.js 16 + Drizzle + PostgreSQL |
 | **微信支付 / 支付宝**(外部服务) | **自己直连的收款通道**:钱直接进我们自己的商户号 / 账户,没有中间层抽成,定价完全由本仓库说了算。**代码写好了,商户号 / 应用还没走完开通流程** —— 界面上摆出来但选不了(见「两个支付通道」的两道闸) | 微信支付 V3 Native(扫码)+ 支付宝电脑网站支付 |
 | **Shopify**(外部服务)**已下线** | 曾经只做银行卡 / Shop Pay 的收银台(草稿订单,逐分相等)。2026-11-05 工作室决定只用微信 + 支付宝,**不再接新单** —— 代码留着给老单用,整目录待拆 | Shopify Admin GraphQL API + 草稿订单 |
 | **Sellbase**(独立服务)**过渡期保留** | 旧收款路:Sellbase 建单 + Stripe 付款页。**不再接新单**(已建好的旧单还能重取支付入口)。两个新通道跑通后整个 `src/features/sellbase/` 拆掉 | Supabase Edge Functions(**跟本仓库同一个 Supabase 项目**)+ Stripe(MIT) |
@@ -265,7 +265,7 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 ### 包裹支撑算法(检查视角 + 克重视角共用)
 
 `src/features/tools/lib/mesh/support-shell.ts` —— **两个视角算/画的是同一块支撑**:
-打印前工作台(`/tools/weight`)的「检查」视角画它,「克重 / 摆盘」视角按它算克重。
+打印前工作台(`/tools/workbench`)的「检查」视角画它,「克重 / 摆盘」视角按它算克重。
 
 - `prepareSupportModel(positions)` → 焊接 + 拓扑(**姿态无关**,只做一次)
 - `rotateSupportMesh(mesh, rotX, rotY, rotZ)` → 刚体旋转顶点与法线(拓扑不变)
@@ -456,7 +456,7 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 
 ### 打印工单交期档位(2026-11-05)
 
-打印工单(`/tools/weight` 量 → 打印单 `/print-order` → `print_order`)有三档
+打印工单(`/tools/workbench` 量 → 打印单 `/print-order` → `print_order`)有三档
 交期,**加价按比例收**,不是固定金额:
 
 | 档位 | 时限 | 比例 | 默认 |
@@ -497,7 +497,7 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 **一行目录商品都不会出现**。
 
 ```
-工具页 /tools/weight:选模型 → 量克重(几何全在浏览器里算)
+工具页 /tools/workbench:选模型 → 量克重(几何全在浏览器里算)
   → 点「加入打印单」→ 模型打包上传 R2(按用户分区)
   → POST /api/store/print-carts/{id}/line-items(带 printSpec)
   → 服务端**重算**一遍价 → 落打印单
@@ -572,7 +572,7 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
   哨兵值 `service_print_3d`,拿去 `findProductById()` 查不到是**预期**的)。
   共享契约在 `src/features/storefront/lib/print-service.ts`(纯文件,客户端
   和服务端都 import —— 不能在里面 import 服务端模块)。
-- **价格只在服务端一处算** —— 工具页(`/tools/weight`)**不显示价格**;它只
+- **价格只在服务端一处算** —— 工具页(`/tools/workbench`)**不显示价格**;它只
   把几何数据(体积 / 表面积 / 尺寸 / 支撑克重)作为 `printSpec` 抛给服务端,
   价由服务端重算(`print-quote/lib/quote-server.ts`)。要改价格口径,只改
   服务端那一处。
@@ -581,7 +581,7 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 
 #### 工具页的出口是「加入打印单」(2026-11-06)
 
-- 工具页(`/tools/weight`)右栏那张「加入打印单」卡片就是出口 —— 点下去上传
+- 工具页(`/tools/workbench`)右栏那张「加入打印单」卡片就是出口 —— 点下去上传
   模型、落打印单,然后跳 `/print-order` 确认金额再提交。
 - **卡片按登录态分两种**:未登录是「去登录」(跳登录页,带 `callbackUrl`
   回工具页);已登录是「加入打印单」。登录态由页面 RSC 查好传下去。
@@ -632,12 +632,12 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 
 ### 模型从工具页直接进打印单(2026-11-06)
 
-打印服务对外只有两页:**工具页**(`/tools/weight`,量克重)和**打印单**
+打印服务对外只有两页:**工具页**(`/tools/workbench`,量克重)和**打印单**
 (`/print-order`,下单)。报价台(`/quote`)整页删掉,只留一个重定向到
 `/print-order`。
 
 ```
-/tools/weight  →  「加入打印单」  →  /print-order  →  提交  →  一次付款
+/tools/workbench  →  「加入打印单」  →  /print-order  →  提交  →  一次付款
 ```
 
 - **量完直接加,不再绕一圈** —— 工具页右栏那张「加入打印单」卡片是唯一
@@ -665,14 +665,22 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 
 以前模型检查(`/tools/model-check`)和克重(`/tools/weight`)是**两个页面**,
 同一个文件要拖两次、解压两次、量两遍,中间还要跳页。现在合成**一个**
-工作台(`/tools/weight`),模型**只载入一次**,里面用三个视角看同一个模型:
+工作台(`/tools/workbench`),模型**只载入一次**,里面用三个视角看同一个模型:
 
 ```
-/tools/weight  →  拖进来  →  检查(能不能印)→ 克重(要多少料)→ 摆盘(怎么摆)
+/tools/workbench  →  拖进来  →  检查(能不能印)→ 克重(要多少料)→ 摆盘(怎么摆)
 ```
 
-老地址 `/tools/model-check` **308 跳**到 `/tools/weight`
-(`permanentRedirect` —— 永久搬家,权重要转移;307 会被当成临时跳转)。
+**地址为什么叫 `/tools/workbench`** —— 三个视角里没有一个能代表全名:叫
+`/tools/weight` 只说了克重,叫 `/tools/model-check` 只说了检查。
+`/tools/workbench` 是唯一说得通的 —— 这是一个**工作台**,里面切视角。
+
+三个老地址(`/pricing` / `/tools/weight` / `/tools/model-check`)都 **308 跳**
+到 `/tools/workbench`(`permanentRedirect` —— 永久搬家,权重要转移;307 会被
+当成临时跳转)。用 `next/navigation` 的 `permanentRedirect`,不是
+`@/i18n/routing` 里那个(后者从 `next-intl/navigation` 导出,client 入口
+没有 `permanentRedirect`,放进共享模块会在打包时炸)。locale 前缀手写 ——
+`localePrefix` 是默认的 `always`,URL 一定带前缀。
 
 - **三个视角** —— 视角切换条在**上传模式**里(手动尺寸 / 批量模式没有模型,
   摆不了)。`check` / `weight` / `pose` 三个 tab,`WorkspaceTab` 类型在
@@ -708,15 +716,15 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
   `print-quote/lib/model-handoff.ts` 都已删。跨页接力只扛得住**客户端路由
   跳转**,扛不住**登录往返**(登录完是整页跳转,必然断)—— 现在根本不需要
   接力了:同一个页面里切 tab,模型一直在。
-- **SEO 关键词两套都留** —— 合并之前这是两个页面,各自被收录过。工具页
-  的 `generateMetadata()` 带上了检查那一套(`3D模型检查` / `反转法向` /
+- **SEO 关键词两套都留** —— 合并之前这是两个页面,各自被收录过。工作台的
+  `generateMetadata()` 带上了检查那一套(`3D模型检查` / `反转法向` /
   `非流形边` …)+ 克重那一套。
-- **sitemap 里没有 `/tools/model-check`** —— 它现在只是个 308,留在 sitemap
-  里等于告诉搜索引擎「这个页面也是正式页面」。
+- **sitemap 里只有 `/tools/workbench`** —— 三个老地址现在都只是 308,留在
+  sitemap 里等于告诉搜索引擎「这个页面也是正式页面」。
 - **行为由单测守住** ——
   | 测试 | 守住什么 |
   |---|---|
-  | `src/test/tools/pure/workbench-merge.test.ts` | 老地址只重定向 / 检查面板不自己解析 OBJ / 按同一份缩放 / 工具中心只剩一个入口 |
+  | `src/test/tools/pure/workbench-merge.test.ts` | 三个老地址只 308 跳到 `/tools/workbench` / 检查面板不自己解析 OBJ / 按同一份缩放 / 工具中心只剩一个入口 |
   | `src/test/tools/pure/mesh-summary.test.ts` | 摘要的 stats / warnings / WJP 报告跟检查面板**逐字相同**(6 个网格夹具) |
 
 #### 拖文件进页面(2026-11-07)

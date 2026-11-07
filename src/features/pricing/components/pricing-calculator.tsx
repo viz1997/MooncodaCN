@@ -161,7 +161,7 @@ export function PricingCalculator({
    * 是否渲染工具自带的页头 / 页脚。
    *
    * true  —— 独立成页（源项目的形态），自带 header + footer。
-   * false —— 挂在站点自己的 layout 里（公开页 `/pricing`）：页头 / 页脚 /
+   * false —— 挂在站点自己的 layout 里（公开页 `/tools/workbench`）：页头 / 页脚 /
    *         标题块 / 工具按钮一律不渲染，避免双 Header 双 Footer 和页面里
    *         重复出现一遍标题。
    */
@@ -181,7 +181,7 @@ export function PricingCalculator({
   /**
    * 右栏插槽 —— 渲染在右栏克重面板下方。
    *
-   * `/tools/weight` 放的是「加入打印单」卡片 —— 工具里不显示价格,只给一个
+   * `/tools/workbench` 放的是「加入打印单」卡片 —— 工具里不显示价格,只给一个
    * 把模型加进打印单的出口。
    *
    * 传了才渲染,不传就是空的。

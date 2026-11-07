@@ -159,7 +159,7 @@ export function printServiceSpecHashParts(spec: PrintServiceSpec): string[] {
 /* -------------------------------------------------------------------------- */
 
 /**
- * 工具页(`/tools/weight`)算出来的几何 → 打印服务规格
+ * 工具页(`/tools/workbench`)算出来的几何 → 打印服务规格
  *
  * ## 为什么要有这个函数
  *
