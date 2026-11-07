@@ -134,6 +134,31 @@ export interface SupportShellOptions {
    * `/admin/print-pricing` 里配** —— 不传就退回 5mm(行为跟以前一样)。
    */
   liftMm?: number | undefined;
+  /**
+   * 是否生成**底板留边**那一圈的几何
+   *
+   * 工作室的工艺:底板比模型轮廓四周各留一圈边(默认 5mm),那圈边也是
+   * 实心支撑 —— 克重那边**算进去了**,画面上原来没画。两个视角并排看,
+   * 差的就是这一圈。
+   *
+   * 默认**关**:摆盘搜索一次要算 625 个姿态,每个姿态都做一遍栅格外扩太贵。
+   * 只在真的要画的那两条路(检查视角 / 克重视角)打开。
+   */
+  includeBaseRing?: boolean | undefined;
+  /**
+   * 底板留边 (mm) —— 底板比模型轮廓四周各留多宽
+   *
+   * 默认 `SUPPORT_BASE_MARGIN_MM`(5mm)。跟克重那边算支撑体积用的是
+   * **同一个数**(都跟随后台 `/admin/print-pricing`)。
+   */
+  baseMarginMM?: number | undefined;
+  /**
+   * 栅格精度 (mm) —— 画底板那一圈用的栅格
+   *
+   * 默认 1mm。**要跟算支撑体积那一路用同一个值**,否则画出来的底板边界跟
+   * 算克重时的边界会差半格到几格。克重那边算体积默认也是 1mm。
+   */
+  gridSizeMM?: number | undefined;
 }
 
 /**
@@ -301,6 +326,20 @@ export function buildSupportShell(
       capped = true;
   }
 
+  // ---- 底板留边那一圈(可选) ----
+  //
+  // 底板比模型轮廓四周各留一圈边,那圈边也是实心支撑 —— 克重那边算进去了,
+  // 画面上原来没画。栅格 / 膨胀 / 外扩距离跟算体积那一条路**完全共用**
+  // (`rasterizeFootprint` + `dilateMaskByDistance`),所以画出来的底板边界
+  // 就是算克重时的底板边界,不是「差不多」。
+  const baseRing = options?.includeBaseRing
+    ? buildBasePlateRing(mesh, {
+        baseMarginMM: options?.baseMarginMM,
+        gridSizeMM: options?.gridSizeMM,
+        z: groundZ,
+      })
+    : new Float32Array(0);
+
   return {
     positions,
     index: mesh.faceVertex,
@@ -310,6 +349,7 @@ export function buildSupportShell(
     groundZ,
     downFaces: new Uint32Array(downFaces),
     curtain: new Float32Array(curtain),
+    baseRing,
   };
 }
 
@@ -669,91 +709,81 @@ export function dilateMaskByDistance(
   return out;
 }
 
-/** 支撑体积计算结果 */
-export interface SupportVolumeResult {
-  /** 包裹支撑体积 (mm³) —— 支撑材料本身 */
-  volumeMM3: number;
+/**
+ * 支撑体积 / 底板留边共用的栅格 —— **一份口径**
+ *
+ * 「模型在平台上的投影」这个概念有两处要用:
+ *
+ *   ① 算支撑体积(`computeSupportVolume`)—— 底板留边那圈是实心支撑
+ *   ② 画底板(`buildBasePlateRing`)—— 画面上要看得见那圈边
+ *
+ * 两处必须用**同一张栅格**:栅格原点 / 格边长 / 留边宽度一旦有一处不一样,
+ * 画出来的底板边界跟算克重时的底板边界就会差半格到几格 —— 两个视角并排看
+ * 的时候一眼就看出来。所以栅格只在这里建一次,两边共用。
+ */
+export interface FootprintGrid {
+  /** 栅格原点(模型坐标 mm) */
+  originX: number;
+  originY: number;
+  /** 格边长 (mm) */
+  gridSize: number;
+  gridW: number;
+  gridH: number;
+  cellCount: number;
+  /** 每格面积 (mm²) */
+  cellArea: number;
+  /** 底板留边 (mm) —— 栅格比模型包围盒大一圈 */
+  marginMM: number;
+  /** 格心落在模型轮廓内的格子 */
+  covered: Uint8Array;
+  /** 每一列下朝向面的最高 z —— 支撑材料的上边界 */
+  underZ: Float32Array;
+  /** 每一列模型材料的最低 z */
+  modelLo: Float32Array;
+  /** 每一列模型材料的最高 z */
+  modelHi: Float32Array;
+  /** z 交点(按面收集,后面按格归拢) */
+  crossZ: Float32Array;
+  /** 每个交点属于哪一格 */
+  crossCell: Uint32Array;
+  /** 掠射交点标记(格心正好落在面的边界上) */
+  crossGraz: Uint8Array;
+  crossCount: number;
+}
+
+/** 栅格化选项 */
+export interface FootprintOptions {
+  /** 栅格精度 (mm),默认 1 */
+  gridSizeMM?: number | undefined;
+  /** 栅格格数上限,默认 200_000(超了就放大栅格) */
+  maxCells?: number | undefined;
   /**
-   * 全包裹体积 (mm³) —— 平台到模型顶的整块(支撑 + 模型)
+   * 底板留边 (mm) —— 底板比模型轮廓四周各留多宽
    *
-   * 逐列取「模型在该列的最高点 − 平台」再乘格子面积求和。
-   * 支撑克重 = 全包裹克重 − 模型克重 —— 全包裹就是这一整块,
-   * 减去模型自己占的那部分,剩下的才是支撑材料。
+   * 默认 `SUPPORT_BASE_MARGIN_MM`(5mm)。跟克重那边算支撑体积用的是
+   * **同一个数**(都跟随后台 `/admin/print-pricing`)。
    */
-  wrapVolumeMM3: number;
-  /** 模型 XY 投影面积 (mm²) —— 支撑底面 / 占地区域 */
-  footprintAreaMM2: number;
-  /** 有支撑的投影面积 (mm²) */
-  supportAreaMM2: number;
-  /** 支撑体最高点(相对平台) (mm) */
-  maxHeightMM: number;
-  /** 下朝向面总面积 (mm²) —— 支撑顶面与模型的接触面积 */
-  contactAreaMM2: number;
+  baseMarginMM?: number | undefined;
 }
 
 /**
- * 包裹支撑体积(按列算 · 列内材料按奇偶配对求 · 真几何)
+ * 把模型栅格化成 XY 高度场 —— 算体积 / 画底板共用的那一份
  *
- * 每个 XY 格子是一根垂直视线,穿过模型表面得到一串 z 交点:
+ * 逐面把三角形投影到 XY 栅格里,每格记下:模型材料的高度区间、下朝向面的
+ * 上边界、以及穿过这一列的 z 交点(奇偶配对用)。
  *
- *   - 交点按 z 排序后相邻两个之间是**模型材料**,再往下是**空腔**(填支撑)
- *   - 列高 = 顶交点 − 平台
- *   - 支撑高 = 列高 − 材料总长
- *
- * 列高(平台到模型顶)逐列加起来就是**全包裹体积** —— 打印出来那一整块
- * (支撑 + 模型)。所以支撑克重 = 全包裹克重 − 模型克重:整块称重,
- * 减去模型自己那份,剩下的才是支撑。
- *
- * 奇偶配对跟法线朝向无关,只看交点个数 —— 封闭网格的交点个数必然是偶数,
- * 配对出来的区间就是真正的材料段。这样同一列里模型上下两截时
- * (宽底座 + 细身体、悬空手臂、封闭内腔)中间的空腔不会被误当成模型。
- *
- * 竖直面与视线相切,不算「穿越」(上下沿各记一个会打乱奇偶配对),
- * 只保留 min/max 用于兜底:一列里若没有可配对的交点(开口网格、
- * 只有竖直面),退回「实心列」估算。
- *
- * **用真几何,不用外壳**:交点取自 `mesh.vertices`(模型自己的顶点),
- * 不是 `shell.positions`(沿法线外扩过的外壳)。模型克重用的是真网格的
- * 解析体积,支撑克重必须同一口径 —— 外壳间隙(对角线 2%,0.8~5mm)是
- * 可视化用的,算进体积会让支撑克重系统性地高 10~30%。
- *
- * 平台取模型最低点下方 5mm(`SUPPORT_LIFT_MM`):有支撑时支撑先在平台上
- * 长一层 5mm 托住模型,模型整个悬在托底上,不直接贴平台。托底那层也是
- * 支撑材料(打印完一起洗掉),算进支撑体积 —— 占地就是模型的投影面积。
- * `shell.groundZ` 还要再低 0.05~0.1mm(避免平台投影跟模型底面
- * z-fighting),那点缝不是材料,不算进支撑。
- *
- * @param shell buildSupportShell 的输出(必须是**旋转后**网格算出来的)
- * @param mesh  与 shell 对应的(旋转后)网格 —— 用来取顶点、面索引和面积
+ * @param isDown 下朝向面标记(1 = 支撑材料的上边界)。传 `null` = 不需要
+ *   `underZ`(画底板时用不上),省掉一次写数组。
  */
-export function computeSupportVolume(
-  shell: SupportShellData,
+function rasterizeFootprint(
   mesh: SupportMesh,
-  options?: SupportVolumeOptions
-): SupportVolumeResult {
+  isDown: Uint8Array | null,
+  options?: FootprintOptions
+): FootprintGrid | null {
   const positions = mesh.vertices;
-  // 平台面比模型最低点低 5mm:支撑先长一层托底,模型悬在托底上(见
-  // `SUPPORT_LIFT_MM`)。托底那层也是支撑材料,算进支撑体积。
-  const liftMm = options?.liftMm ?? SUPPORT_LIFT_MM;
-  const platformZ = mesh.bboxMin[2] - liftMm;
   const faceVertex = mesh.faceVertex;
-  const faceAreas = mesh.faceAreas;
 
-  const empty: SupportVolumeResult = {
-    volumeMM3: 0,
-    wrapVolumeMM3: 0,
-    footprintAreaMM2: 0,
-    supportAreaMM2: 0,
-    maxHeightMM: 0,
-    contactAreaMM2: 0,
-  };
-
-  // 下朝向面标记(shell.downFaces 是索引表)
-  const isDown = new Uint8Array(mesh.faceCount);
-  for (let i = 0; i < shell.downFaces.length; i++)
-    isDown[shell.downFaces[i]] = 1;
-
-  // 外壳包围盒(支撑体的占地区域)
+  // 模型 XY 包围盒(支撑体的占地区域)
   let minX = Infinity,
     maxX = -Infinity,
     minY = Infinity,
@@ -767,7 +797,7 @@ export function computeSupportVolume(
     if (y < minY) minY = y;
     if (y > maxY) maxY = y;
   }
-  if (!Number.isFinite(minX) || !Number.isFinite(minY)) return empty;
+  if (!Number.isFinite(minX) || !Number.isFinite(minY)) return null;
   // 底板留边:底板比模型轮廓四周各留一圈 —— 栅格要比模型包围盒大一圈,
   // 留边那部分落在模型轮廓外面(底板是实心的,那圈也是 5mm 厚的支撑)。
   const marginMM = Math.max(0, options?.baseMarginMM ?? SUPPORT_BASE_MARGIN_MM);
@@ -775,7 +805,7 @@ export function computeSupportVolume(
   const originY = minY - marginMM;
   const width = maxX - minX + marginMM * 2;
   const height = maxY - minY + marginMM * 2;
-  if (width <= 0 || height <= 0) return empty;
+  if (width <= 0 || height <= 0) return null;
 
   // 栅格(格数超上限就放大栅格)
   const maxCells = options?.maxCells ?? 200_000;
@@ -789,7 +819,7 @@ export function computeSupportVolume(
     gridW = Math.ceil(width / gridSize);
     gridH = Math.ceil(height / gridSize);
   }
-  if (gridW <= 0 || gridH <= 0) return empty;
+  if (gridW <= 0 || gridH <= 0) return null;
   const cellCount = gridW * gridH;
   const cellArea = gridSize * gridSize;
 
@@ -906,10 +936,221 @@ export function computeSupportVolume(
         }
 
         // 下朝向面 = 支撑材料的上边界
-        if (isDown[f] && zLocal > underZ[idx]) underZ[idx] = zLocal;
+        if (isDown?.[f] && zLocal > underZ[idx]) underZ[idx] = zLocal;
       }
     }
   }
+
+  return {
+    originX,
+    originY,
+    gridSize,
+    gridW,
+    gridH,
+    cellCount,
+    cellArea,
+    marginMM,
+    covered,
+    underZ,
+    modelLo,
+    modelHi,
+    crossZ,
+    crossCell,
+    crossGraz,
+    crossCount,
+  };
+}
+
+/** 底板留边那一圈的几何选项 */
+export interface BasePlateRingOptions extends FootprintOptions {
+  /** 底板所在平面的 z(模型坐标) —— 平台平面 */
+  z: number;
+}
+
+/**
+ * 底板留边那一圈的几何(三角汤,无索引)
+ *
+ * 工作室的工艺:底板**比模型轮廓四周各留一圈边**再铺 5mm 托底 —— 那圈边
+ * 也是实心支撑材料。`computeSupportVolume` 把它的体积算进支撑克重,这里
+ * 把它的形状画出来 —— **同一张栅格、同一套欧氏距离外扩**,所以画出来的
+ * 边界就是算克重时的边界。
+ *
+ * 外扩走**欧氏距离**(距离变换 + 半格修正),不是八邻域 —— 八邻域是切比雪夫
+ * 距离,底板会变成方角,面积跟工作室对不上。
+ *
+ * @returns 每个格子两个三角形;没有留边时返回空数组
+ */
+export function buildBasePlateRing(
+  mesh: SupportMesh,
+  options: BasePlateRingOptions
+): Float32Array {
+  const marginMM = Math.max(0, options.baseMarginMM ?? SUPPORT_BASE_MARGIN_MM);
+  if (marginMM <= 0) return new Float32Array(0);
+
+  const grid = rasterizeFootprint(mesh, null, {
+    baseMarginMM: marginMM,
+    gridSizeMM: options.gridSizeMM,
+    maxCells: options.maxCells,
+  });
+  if (!grid) return new Float32Array(0);
+
+  const { originX, originY, gridSize, gridW, gridH, cellCount, covered } = grid;
+  const dilated = dilateMaskByDistance(
+    covered,
+    gridW,
+    gridH,
+    marginMM,
+    gridSize
+  );
+
+  // 先数一遍有几格是「外扩出来的」—— 没有就不建几何
+  let extraCells = 0;
+  for (let i = 0; i < cellCount; i++) {
+    if (dilated[i] && !covered[i]) extraCells++;
+  }
+  if (extraCells === 0) return new Float32Array(0);
+
+  // 每格两个三角形(6 个顶点 × 3 个 float)
+  const out = new Float32Array(extraCells * 18);
+  const z = options.z;
+  let w = 0;
+  for (let gy = 0; gy < gridH; gy++) {
+    for (let gx = 0; gx < gridW; gx++) {
+      const i = gy * gridW + gx;
+      if (!dilated[i] || covered[i]) continue;
+      const x0 = originX + gx * gridSize;
+      const y0 = originY + gy * gridSize;
+      const x1 = x0 + gridSize;
+      const y1 = y0 + gridSize;
+      // 三角形 1:(x0,y0) (x1,y0) (x1,y1)
+      out[w++] = x0;
+      out[w++] = y0;
+      out[w++] = z;
+      out[w++] = x1;
+      out[w++] = y0;
+      out[w++] = z;
+      out[w++] = x1;
+      out[w++] = y1;
+      out[w++] = z;
+      // 三角形 2:(x0,y0) (x1,y1) (x0,y1)
+      out[w++] = x0;
+      out[w++] = y0;
+      out[w++] = z;
+      out[w++] = x1;
+      out[w++] = y1;
+      out[w++] = z;
+      out[w++] = x0;
+      out[w++] = y1;
+      out[w++] = z;
+    }
+  }
+  return out;
+}
+
+/** 支撑体积计算结果 */
+export interface SupportVolumeResult {
+  /** 包裹支撑体积 (mm³) —— 支撑材料本身 */
+  volumeMM3: number;
+  /**
+   * 全包裹体积 (mm³) —— 平台到模型顶的整块(支撑 + 模型)
+   *
+   * 逐列取「模型在该列的最高点 − 平台」再乘格子面积求和。
+   * 支撑克重 = 全包裹克重 − 模型克重 —— 全包裹就是这一整块,
+   * 减去模型自己占的那部分,剩下的才是支撑材料。
+   */
+  wrapVolumeMM3: number;
+  /** 模型 XY 投影面积 (mm²) —— 支撑底面 / 占地区域 */
+  footprintAreaMM2: number;
+  /** 有支撑的投影面积 (mm²) */
+  supportAreaMM2: number;
+  /** 支撑体最高点(相对平台) (mm) */
+  maxHeightMM: number;
+  /** 下朝向面总面积 (mm²) —— 支撑顶面与模型的接触面积 */
+  contactAreaMM2: number;
+}
+
+/**
+ * 包裹支撑体积(按列算 · 列内材料按奇偶配对求 · 真几何)
+ *
+ * 每个 XY 格子是一根垂直视线,穿过模型表面得到一串 z 交点:
+ *
+ *   - 交点按 z 排序后相邻两个之间是**模型材料**,再往下是**空腔**(填支撑)
+ *   - 列高 = 顶交点 − 平台
+ *   - 支撑高 = 列高 − 材料总长
+ *
+ * 列高(平台到模型顶)逐列加起来就是**全包裹体积** —— 打印出来那一整块
+ * (支撑 + 模型)。所以支撑克重 = 全包裹克重 − 模型克重:整块称重,
+ * 减去模型自己那份,剩下的才是支撑。
+ *
+ * 奇偶配对跟法线朝向无关,只看交点个数 —— 封闭网格的交点个数必然是偶数,
+ * 配对出来的区间就是真正的材料段。这样同一列里模型上下两截时
+ * (宽底座 + 细身体、悬空手臂、封闭内腔)中间的空腔不会被误当成模型。
+ *
+ * 竖直面与视线相切,不算「穿越」(上下沿各记一个会打乱奇偶配对),
+ * 只保留 min/max 用于兜底:一列里若没有可配对的交点(开口网格、
+ * 只有竖直面),退回「实心列」估算。
+ *
+ * **用真几何,不用外壳**:交点取自 `mesh.vertices`(模型自己的顶点),
+ * 不是 `shell.positions`(沿法线外扩过的外壳)。模型克重用的是真网格的
+ * 解析体积,支撑克重必须同一口径 —— 外壳间隙(对角线 2%,0.8~5mm)是
+ * 可视化用的,算进体积会让支撑克重系统性地高 10~30%。
+ *
+ * 平台取模型最低点下方 5mm(`SUPPORT_LIFT_MM`):有支撑时支撑先在平台上
+ * 长一层 5mm 托住模型,模型整个悬在托底上,不直接贴平台。托底那层也是
+ * 支撑材料(打印完一起洗掉),算进支撑体积 —— 占地就是模型的投影面积。
+ * `shell.groundZ` 还要再低 0.05~0.1mm(避免平台投影跟模型底面
+ * z-fighting),那点缝不是材料,不算进支撑。
+ *
+ * @param shell buildSupportShell 的输出(必须是**旋转后**网格算出来的)
+ * @param mesh  与 shell 对应的(旋转后)网格 —— 用来取顶点、面索引和面积
+ */
+export function computeSupportVolume(
+  shell: SupportShellData,
+  mesh: SupportMesh,
+  options?: SupportVolumeOptions
+): SupportVolumeResult {
+  // 平台面比模型最低点低 5mm:支撑先长一层托底,模型悬在托底上(见
+  // `SUPPORT_LIFT_MM`)。托底那层也是支撑材料,算进支撑体积。
+  const liftMm = options?.liftMm ?? SUPPORT_LIFT_MM;
+  const platformZ = mesh.bboxMin[2] - liftMm;
+  const faceAreas = mesh.faceAreas;
+
+  const empty: SupportVolumeResult = {
+    volumeMM3: 0,
+    wrapVolumeMM3: 0,
+    footprintAreaMM2: 0,
+    supportAreaMM2: 0,
+    maxHeightMM: 0,
+    contactAreaMM2: 0,
+  };
+
+  // 下朝向面标记(shell.downFaces 是索引表)
+  const isDown = new Uint8Array(mesh.faceCount);
+  for (let i = 0; i < shell.downFaces.length; i++)
+    isDown[shell.downFaces[i]] = 1;
+
+  // 栅格化 —— **跟画底板共用同一份**(`rasterizeFootprint`)
+  //
+  // 栅格原点 / 格边长 / 留边宽度一旦有一处不一样,算出来的底板边界跟画出来的
+  // 底板边界就会差几格。所以两边走同一个函数,不各写一遍。
+  const grid = rasterizeFootprint(mesh, isDown, options);
+  if (!grid) return empty;
+  const {
+    gridSize,
+    gridW,
+    gridH,
+    cellCount,
+    cellArea,
+    marginMM,
+    covered,
+    underZ,
+    modelLo,
+    modelHi,
+    crossZ,
+    crossCell,
+    crossGraz,
+    crossCount,
+  } = grid;
 
   // ---- 按格归拢交点(计数排序)----
   const offsets = new Uint32Array(cellCount + 1);

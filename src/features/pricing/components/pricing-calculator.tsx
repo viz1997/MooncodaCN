@@ -1756,6 +1756,7 @@ export function PricingCalculator({
                     showSupport={showSupport}
                     onToggleSupport={() => setShowSupport((s) => !s)}
                     supportLiftMm={clientConfig?.supportLiftMm}
+                    supportBaseMarginMm={clientConfig?.supportBaseMarginMm}
                     showTexture={showTexture}
                     onToggleTexture={() => setShowTexture((s) => !s)}
                     onClearModel={clearModel}

@@ -41,6 +41,14 @@ export interface AnalyzerInput {
    * 同一个几何。
    */
   liftMm?: number | undefined;
+  /**
+   * 底板留边 (mm) —— 底板比模型轮廓四周各留多宽
+   *
+   * 不传 = `SUPPORT_BASE_MARGIN_MM`(5mm)。**跟随后台**
+   * (`/admin/print-pricing`)—— 检查视角画的底板跟克重工具算的支撑克重
+   * 必须是同一个几何(那一圈边也是实心支撑,算进克重)。
+   */
+  baseMarginMm?: number | undefined;
 }
 
 export function useAnalyzer() {
@@ -78,7 +86,8 @@ export function useAnalyzer() {
             if (seqRef.current !== seq) return;
             setState((s) => ({ ...s, busy: pct < 100, stage, pct }));
           },
-          input.liftMm
+          input.liftMm,
+          input.baseMarginMm
         );
         if (seqRef.current !== seq) return;
         setState({
@@ -185,6 +194,7 @@ export function useAnalyzer() {
         positions: input.positions,
         fileName: input.fileName,
         liftMm: input.liftMm,
+        baseMarginMm: input.baseMarginMm,
       });
     },
     [ensureWorker, runOnMainThread]

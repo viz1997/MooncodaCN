@@ -192,6 +192,8 @@ export default function Viewport({
   const meshRef = useRef<THREE.Mesh | null>(null);
   const supportRef = useRef<THREE.Mesh | null>(null);
   const supportProjRef = useRef<THREE.Mesh | null>(null);
+  /** 底板留边那一圈(底板比模型轮廓外扩 5mm)—— 跟克重那边算的是同一圈 */
+  const supportRingRef = useRef<THREE.Mesh | null>(null);
   const supportCurtainRef = useRef<THREE.Mesh | null>(null);
   const supportUnderRef = useRef<THREE.Mesh | null>(null);
   /** 模型组:承载模型+支撑+问题边线,整体平移使模型最低点贴住平台(z=0) */
@@ -241,6 +243,7 @@ export default function Viewport({
     showSupportRef.current = showSupport;
     if (supportRef.current) supportRef.current.visible = showSupport;
     if (supportProjRef.current) supportProjRef.current.visible = showSupport;
+    if (supportRingRef.current) supportRingRef.current.visible = showSupport;
     if (supportCurtainRef.current)
       supportCurtainRef.current.visible = showSupport;
     if (supportUnderRef.current) supportUnderRef.current.visible = showSupport;
@@ -309,6 +312,7 @@ export default function Viewport({
         meshRef.current,
         supportRef.current,
         supportProjRef.current,
+        supportRingRef.current,
         supportCurtainRef.current,
         supportUnderRef.current,
       ]) {
@@ -322,6 +326,7 @@ export default function Viewport({
       meshRef.current = null;
       supportRef.current = null;
       supportProjRef.current = null;
+      supportRingRef.current = null;
       supportCurtainRef.current = null;
       supportUnderRef.current = null;
       for (const key of Object.keys(lineRefs.current)) {
@@ -548,7 +553,35 @@ export default function Viewport({
       group.add(projMesh);
       supportProjRef.current = projMesh;
 
-      // ④ 支撑体外壁(绿):下朝向区域边界边竖直向下挤出至平台
+      // ④ 底板留边那一圈(绿):底板比模型轮廓四周各留一圈边(默认 5mm),
+      //    那圈边也是实心支撑 —— 克重那边**算进去了**,画面上也得画出来。
+      //
+      //    跟 ③ 平台投影画在同一个平面、同一套 MAX 混合,所以两片合起来读成
+      //    一整块底板:投影是模型轮廓,这一圈是轮廓外扩出来的那圈边。
+      if (shell.baseRing.length >= 9) {
+        const rg = new THREE.BufferGeometry();
+        rg.setAttribute(
+          "position",
+          new THREE.BufferAttribute(shell.baseRing, 3)
+        );
+        const rm = new THREE.MeshBasicMaterial({
+          color: "#2f7255",
+          side: THREE.DoubleSide,
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.CustomBlending,
+          blendEquation: THREE.MaxEquation,
+          blendSrc: THREE.OneFactor,
+          blendDst: THREE.OneFactor,
+        });
+        const ringMesh = new THREE.Mesh(rg, rm);
+        ringMesh.visible = showSupportRef.current;
+        ringMesh.renderOrder = -1;
+        group.add(ringMesh);
+        supportRingRef.current = ringMesh;
+      }
+
+      // ⑤ 支撑体外壁(绿):下朝向区域边界边竖直向下挤出至平台
       if (shell.curtain.length >= 9) {
         const cg = new THREE.BufferGeometry();
         cg.setAttribute(

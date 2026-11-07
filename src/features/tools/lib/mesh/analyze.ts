@@ -30,13 +30,14 @@ export function analyzeNewMesh(
   positions: Float32Array,
   fileName: string,
   onProgress: ProgressFn,
-  liftMm?: number
+  liftMm?: number,
+  baseMarginMm?: number
 ): { state: WorkerState | null; result: AnalysisResult } {
   const t0 = performance.now();
   onProgress("weld", 8);
   const topo = weldAndAnalyzeTopology(positions);
   const state: WorkerState = { topo, fileName };
-  const result = runAnalysis(state, onProgress, liftMm);
+  const result = runAnalysis(state, onProgress, liftMm, baseMarginMm);
   result.stats.analysisMs = Math.round(performance.now() - t0);
   return { state, result };
 }
@@ -44,7 +45,8 @@ export function analyzeNewMesh(
 export function runAnalysis(
   state: WorkerState,
   onProgress: ProgressFn,
-  liftMm?: number
+  liftMm?: number,
+  baseMarginMm?: number
 ): AnalysisResult {
   const { topo, fileName } = state;
   const mesh = topo.mesh;
@@ -225,7 +227,18 @@ export function runAnalysis(
     const info = topo.components[c];
     if (info && (info.isCavity || info.isDebris)) faceEnclosed[f] = 1;
   }
-  const supportShell = buildSupportShell(mesh, faceEnclosed, { liftMm });
+  // 支撑外壳 —— **带底板留边那一圈**
+  //
+  // 工作室的工艺:底板比模型轮廓四周各留一圈边(默认 5mm),那圈边也是实心
+  // 支撑 —— 克重那边**算进去了**(`computeSupportVolume` 的 baseMargin),
+  // 画面上原来没画。两个视角并排看,差的就是这一圈。
+  //
+  // 外扩走欧氏距离(不是八邻域),跟算克重那一条路共用同一张栅格。
+  const supportShell = buildSupportShell(mesh, faceEnclosed, {
+    liftMm,
+    baseMarginMM: baseMarginMm,
+    includeBaseRing: true,
+  });
   onProgress("done", 100);
 
   /**

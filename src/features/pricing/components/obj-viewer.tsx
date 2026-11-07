@@ -73,6 +73,14 @@ type Props = {
    */
   supportLiftMm?: number | undefined;
   /**
+   * 底板留边 (mm) —— 底板比模型轮廓四周各留多宽
+   *
+   * 不传 = `SUPPORT_BASE_MARGIN_MM`(5mm)。**2026-11-06 起由工作室在
+   * `/admin/print-pricing` 里配** —— 画出来的底板边界必须跟算克重那边
+   * (那圈边也是实心支撑,算进支撑克重)是同一圈。
+   */
+  supportBaseMarginMm?: number | undefined;
+  /**
    * 是否显示模型自带的贴图。默认 true。
    *
    * 关掉时材质退回 MTL 的 `Kd` 本色(纯色视图)—— 贴图本体留在
@@ -153,6 +161,7 @@ export function ObjViewer({
   scale,
   showSupport,
   supportLiftMm,
+  supportBaseMarginMm,
   showTexture,
   onReady,
   onProgress,
@@ -177,6 +186,9 @@ export function ObjViewer({
   // 用 ref 读,免得改一个数就把整条建模流程重跑一遍。
   const supportLiftMmRef = useRef(supportLiftMm);
   supportLiftMmRef.current = supportLiftMm;
+  // 底板留边 —— 同一个数要喂给:支撑外壳的底板外扩(画出来的那圈边)
+  const supportBaseMarginMmRef = useRef(supportBaseMarginMm);
+  supportBaseMarginMmRef.current = supportBaseMarginMm;
   // 贴图开关 —— 同理:建模是异步的,必须读 ref 拿到最新值
   const showTextureRef = useRef(showTexture);
   showTextureRef.current = showTexture;
@@ -504,6 +516,10 @@ export function ObjViewer({
     );
     const shell = buildSupportShell(rotated, scaledModel.faceEnclosed, {
       liftMm,
+      // 底板留边 —— 算支撑克重那边(`computeSupportVolume`)用的是同一个数,
+      // 画面上把这圈边画出来,两个视角才是一块底板
+      baseMarginMM: supportBaseMarginMmRef.current,
+      includeBaseRing: true,
     });
     if (shell.positions.length < 9) return;
 
@@ -603,7 +619,31 @@ export function ObjViewer({
       group.add(mesh);
     }
 
-    // ④ 支撑外壁:下朝向区域的边界边竖直挤到平台
+    // ④ 底板留边那一圈:底板比模型轮廓四周各留一圈边(默认 5mm),那圈边
+    //    也是实心支撑 —— 支撑克重里**算进去了**,画面上也得画出来。
+    //    跟 ③ 平台投影同一个平面、同一套 MAX 混合 → 合起来读成一块底板。
+    if (shell.baseRing.length >= 9) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute(
+        "position",
+        new THREE.BufferAttribute(toWorldPositions(shell.baseRing), 3)
+      );
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xcbd5e1,
+        side: THREE.DoubleSide,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.CustomBlending,
+        blendEquation: THREE.MaxEquation,
+        blendSrc: THREE.OneFactor,
+        blendDst: THREE.OneFactor,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.renderOrder = -1;
+      group.add(mesh);
+    }
+
+    // ⑤ 支撑外壁:下朝向区域的边界边竖直挤到平台
     if (shell.curtain.length >= 9) {
       const geo = new THREE.BufferGeometry();
       geo.setAttribute(
@@ -853,7 +893,7 @@ export function ObjViewer({
   // biome-ignore lint/correctness/useExhaustiveDependencies: 支撑壳层依赖当前模型状态
   useEffect(() => {
     updateSupportShell(!!showSupport);
-  }, [showSupport, supportLiftMm]);
+  }, [showSupport, supportLiftMm, supportBaseMarginMm]);
 
   // Apply rotation when rotationX/rotationY/rotationZ change (for optimal print angle + manual fine-tuning)
   // Also re-applies scale so changes to dimensions are reflected in the 3D preview.
@@ -910,7 +950,15 @@ export function ObjViewer({
     }
     // 旋转/缩放后更新支撑壳层位置
     updateSupportShell(!!showSupport);
-  }, [rotationX, rotationY, rotationZ, scale, showSupport, supportLiftMm]);
+  }, [
+    rotationX,
+    rotationY,
+    rotationZ,
+    scale,
+    showSupport,
+    supportLiftMm,
+    supportBaseMarginMm,
+  ]);
 
   return (
     <ObjPreview

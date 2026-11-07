@@ -238,6 +238,71 @@ describe("底板留边(2026-11-04):底板比模型轮廓四周各留一圈", () 
   });
 });
 
+describe("底板留边那一圈:画面跟克重是同一圈(2026-11-07)", () => {
+  /**
+   * 画底板用的外壳 —— **栅格跟算体积那边保持一致**
+   *
+   * 两边共用同一张栅格(`rasterizeFootprint`),所以这里必须传同一个
+   * `gridSizeMM`:栅格不一样,画出来的边界跟算出来的边界就会差几格。
+   */
+  function shellWithRing(positions: Float32Array, gridSizeMM: number) {
+    const model = prepareSupportModel(positions);
+    const shell = buildSupportShell(model.mesh, model.faceEnclosed, {
+      includeBaseRing: true,
+      baseMarginMM: SUPPORT_BASE_MARGIN_MM,
+      gridSizeMM,
+      liftMm: 5,
+    });
+    const volume = computeSupportVolume(shell, model.mesh, {
+      gridSizeMM,
+      baseMarginMM: SUPPORT_BASE_MARGIN_MM,
+      liftMm: 5,
+    });
+    return { shell, volume };
+  }
+
+  it("画出来的环 == 算进克重的那圈边", () => {
+    const { shell, volume } = shellWithRing(CUBE, 0.25);
+
+    // 环 = 外扩出来的那圈格子(每格两个三角形 = 18 个 float)
+    const cells = shell.baseRing.length / 18;
+    const ringArea = cells * 0.25 * 0.25;
+    // 算进克重的那圈 = 底板占地 − 模型投影面积
+    expect(ringArea).toBeCloseTo(
+      volume.supportAreaMM2 - volume.footprintAreaMM2,
+      3
+    );
+    // 20×20 的轮廓外扩 5mm → 底板 877,模型 400,留边那圈 477 mm²
+    expect(ringArea).toBeCloseTo(477, -1.5);
+  });
+
+  it("环平铺在平台平面上", () => {
+    const { shell } = shellWithRing(CUBE, 0.25);
+
+    expect(shell.baseRing.length).toBeGreaterThan(0);
+    for (let i = 2; i < shell.baseRing.length; i += 3) {
+      expect(shell.baseRing[i]).toBeCloseTo(shell.groundZ, 6);
+    }
+  });
+
+  it("默认不画环(摆盘搜索一次要建 625 个外壳,太贵)", () => {
+    const model = prepareSupportModel(CUBE);
+    const shell = buildSupportShell(model.mesh, model.faceEnclosed, undefined);
+
+    expect(shell.baseRing.length).toBe(0);
+  });
+
+  it("留边 0 = 没有环(底板照着模型轮廓裁)", () => {
+    const model = prepareSupportModel(CUBE);
+    const shell = buildSupportShell(model.mesh, model.faceEnclosed, {
+      includeBaseRing: true,
+      baseMarginMM: 0,
+    });
+
+    expect(shell.baseRing.length).toBe(0);
+  });
+});
+
 describe("尺寸缩放(2026-11-03)", () => {
   it("均匀缩放 k 倍:空腔按 k³ 走,底板按 k² 走(留边是固定的 5mm)", () => {
     const base = prepareSupportModel(TABLE);

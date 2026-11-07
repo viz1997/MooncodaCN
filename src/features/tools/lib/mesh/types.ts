@@ -185,6 +185,17 @@ export interface SupportShellData {
    * 判定口径和检测工具画支撑体时完全一致。
    */
   downFaces: Uint32Array;
+  /**
+   * 底板留边那一圈(三角汤,无索引):模型轮廓按欧氏距离外扩 `baseMarginMM`
+   * 之后多出来的那圈格子,平铺在平台平面上。
+   *
+   * 工作室的工艺:底板比模型轮廓四周各留一圈边,那圈边也是实心支撑 ——
+   * **克重那边算进去了**,画面上原来没画。两个视角并排看,差的就是这一圈。
+   *
+   * 跟算支撑体积用的是**同一张栅格 + 同一套外扩**,所以画出来的边界就是
+   * 算克重时的边界。没有留边时是空数组。
+   */
+  baseRing: Float32Array;
 }
 
 /** 分析进度阶段(UI 层按 locale 显示) */
@@ -204,6 +215,14 @@ export type WorkerInMessage =
        * 必须是同一个几何。
        */
       liftMm?: number | undefined;
+      /**
+       * 底板留边 (mm) —— 底板比模型轮廓四周各留多宽
+       *
+       * 不传 = `SUPPORT_BASE_MARGIN_MM`(5mm)。**跟随后台**
+       * (`/admin/print-pricing`)—— 检查视角画的底板跟克重工具算的支撑克重
+       * 必须是同一个几何(那一圈边也是实心支撑,算进克重)。
+       */
+      baseMarginMm?: number | undefined;
     }
   | { type: "reset" };
 

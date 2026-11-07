@@ -217,6 +217,13 @@ export type ModelSettingsPanelProps = {
    */
   supportLiftMm?: number | undefined;
   /**
+   * 底板留边 (mm) —— 3D 预览里底板比模型轮廓四周各留多宽
+   *
+   * 不传 = `SUPPORT_BASE_MARGIN_MM`(5mm)。**2026-11-06 起跟随后台**
+   * (`/admin/print-pricing`)—— 画面跟报价必须用同一个值。
+   */
+  supportBaseMarginMm?: number | undefined;
+  /**
    * 是否显示模型自带的贴图 —— 与检测工具的「显示贴图」开关同一套行为:
    * 关掉就是纯色(MTL 的 `Kd` 本色)视图。
    */
@@ -273,6 +280,7 @@ export function ModelSettingsPanel({
   showSupport,
   onToggleSupport,
   supportLiftMm,
+  supportBaseMarginMm,
   showTexture,
   onToggleTexture,
   onClearModel,
@@ -529,6 +537,7 @@ export function ModelSettingsPanel({
                     scale={dimMode === "custom" ? scales : 1}
                     showSupport={showSupport}
                     supportLiftMm={supportLiftMm}
+                    supportBaseMarginMm={supportBaseMarginMm}
                     showTexture={showTexture}
                     onReady={onViewerReady}
                     onProgress={onViewerProgress}

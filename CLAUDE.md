@@ -298,6 +298,16 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
   外扩走**欧氏距离**(距离变换 + 半格修正),不是八邻域(那会切出方角,面积
   跟工作室对不上)。留边是固定 5mm,不跟着模型缩放 —— 缩放 k 倍时底板占地
   不是精确 k²(实测 2.82 倍)。
+- **画出来的那圈跟算进去的那圈是同一圈(2026-11-07)**:检查视角画的「包裹
+  支撑」原先只画模型轮廓(平台投影),**没画底板留边那一圈** —— 克重那边算
+  进去了,画面上没有。两个视角并排看,这个差看得出来。修法:把
+  `computeSupportVolume` 里那套栅格化抽成 `rasterizeFootprint()`,两边共用
+  **同一份栅格**(原点 / 栅格尺寸 / 留边),`buildBasePlateRing()` 在同一张栅格
+  上做欧氏距离外扩,把「外扩了但没被模型覆盖」的格子发出来 —— 画出来的
+  那一圈跟算进克重的底板占地**逐格相同**。`includeBaseRing` **默认关**:
+  摆盘搜索一次要建 625 个外壳,每个都做一遍外扩太贵,只在真要画的那两条路
+  (检查视角 / 克重视角)打开。留边宽度两处都跟随后台
+  (`/admin/print-pricing` 的 `supportBaseMarginMm`)。
 - **托底是固定的 5mm,不跟着模型缩放**:打印机在平台上长一层 5mm,不是
   模型的一部分。所以均匀缩放 k 倍时,空腔按 k³ 走、托底只按占地 k² 走
   (支撑体积比值 = (2000·k² + 空腔·k³) / 总量,不是精确的 k³)。
@@ -759,6 +769,30 @@ dragover → 遮罩出现 → 指针落在**它自己**身上
 - **行为由单测守住** —— `src/test/shared/pure/use-drop-zone.test.tsx`
   (jsdom)模拟那一串事件,守住「高亮不闪」;同一个文件还扫源码,守住
   「tools / pricing 里不自己写拖放事件」「遮罩带 pointer-events-none」。
+
+#### 底板留边那一圈:画面跟克重是同一圈(2026-11-07)
+
+工作台合并之后,「检查」和「克重」两个视角并排看 —— **画出来的底板跟算
+进去的底板必须一模一样**。原先检查视角画的「包裹支撑」只有模型轮廓(平
+台投影),**少了底板留边那一圈**(轮廓四周外扩 5mm):克重那边把它算进支撑
+克重了,画面上没画。
+
+- **一份栅格** —— `computeSupportVolume` 里那套栅格化抽成了
+  `rasterizeFootprint()`,`computeSupportVolume` 和 `buildBasePlateRing()`
+  共用**同一份栅格**(原点 / 栅格尺寸 / 留边宽度)。外扩走欧氏距离(距离变换
+  + 半格修正),不是八邻域。画出来的那一圈 = 「外扩了但没被模型覆盖」的
+  格子,跟算进克重的底板占地**逐格相同**。
+- **两个视角都画** —— 检查视角(`model-check/viewport.tsx`,绿 `#2f7255`)
+  和克重视角(`pricing/components/obj-viewer.tsx`,灰 `0xcbd5e1`)。都是平在
+  平台平面上、`depthWrite: false` + MAX 混合,不跟平台投影打架。
+- **默认关** —— `buildSupportShell` 的 `includeBaseRing` 默认 **false**:
+  摆盘搜索一次要建 625 个外壳,每个都做一遍外扩太贵。只在真要画的那两条路
+  打开。
+- **留边宽度跟随后台** —— 两边都读 `ClientPrintConfig.supportBaseMarginMm`
+  (`/admin/print-pricing` 配的),不是写死的 5mm。
+- **行为由单测守住** —— `src/test/tools/pure/support-shell.test.ts` 的
+  「底板留边那一圈」那组:画出来的面积 == `supportAreaMM2 − footprintAreaMM2`
+  (算出来的底板占地),环平铺在平台平面上,默认关,留边 0 时为空。
 
 ### 打印定价后台(2026-11-06)
 

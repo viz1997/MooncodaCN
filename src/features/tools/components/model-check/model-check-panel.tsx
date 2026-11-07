@@ -123,6 +123,15 @@ export function ModelCheckPanel({
   const liftMm = clientConfig?.supportLiftMm;
 
   /**
+   * 底板留边 —— 跟随后台,跟克重工具同一个值
+   *
+   * 底板比模型轮廓四周各留一圈边(默认 5mm),那圈边也是实心支撑:
+   * 克重那边**算进去了**,画面上也得画出来 —— 两个视角并排看时,
+   * 差的就是这一圈。
+   */
+  const baseMarginMm = clientConfig?.supportBaseMarginMm;
+
+  /**
    * 缩放后的几何 —— 分析器跟视口都吃这一份
    *
    * 支撑外壳的平台平面是**绝对毫米值**(托底 5mm),不跟着模型缩放走 ——
@@ -156,8 +165,9 @@ export function ModelCheckPanel({
       positions,
       fileName: model.objFileName || model.name,
       liftMm,
+      baseMarginMm,
     });
-  }, [positions, model, run, liftMm]);
+  }, [positions, model, run, liftMm, baseMarginMm]);
 
   const focusCluster = useCallback((c: IssueCluster) => {
     focusSeq.current += 1;

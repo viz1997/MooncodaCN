@@ -18,13 +18,14 @@ function post(msg: WorkerOutMessage) {
 self.onmessage = (e: MessageEvent<WorkerInMessage>) => {
   const msg = e.data;
   if (msg.type !== "analyze") return;
-  const { seq, positions, fileName, liftMm } = msg;
+  const { seq, positions, fileName, liftMm, baseMarginMm } = msg;
   try {
     const { result } = analyzeNewMesh(
       positions,
       fileName,
       (stage, pct) => post({ type: "progress", seq, stage, pct }),
-      liftMm
+      liftMm,
+      baseMarginMm
     );
     post({ type: "result", seq, result });
   } catch (err) {
