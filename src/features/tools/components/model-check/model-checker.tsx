@@ -7,6 +7,7 @@ import {
   Loader2,
   Palette,
   RotateCcw,
+  Scale,
   Shell,
   Upload,
 } from "lucide-react";
@@ -40,10 +41,15 @@ import {
   type MessageRef,
 } from "@/features/tools/lib/mesh/types";
 import {
+  stashModelFile,
+  takeModelFile,
+} from "@/features/tools/lib/model-handoff";
+import {
   loadModelGeometry,
   MODEL_ACCEPT,
   ModelLoadError,
 } from "@/features/tools/lib/model-loader";
+import { useRouter } from "@/i18n/routing";
 import Sidebar from "./sidebar";
 import { useAnalyzer } from "./use-analyzer";
 import Viewport, {
@@ -105,6 +111,8 @@ export function ModelChecker({
   supportLiftMm?: number | undefined;
 }) {
   const t = useTranslations("ModelInspector");
+  /** 跳去克重工具 —— 只走**客户端跳转**,接力才断不了 */
+  const router = useRouter();
   const [model, setModel] = useState<LoadedState | null>(null);
   const [visibility, setVisibility] =
     useState<ViewportVisibility>(ALL_VISIBILITY);
@@ -133,6 +141,17 @@ export function ModelChecker({
   const fileInputRef = useRef<HTMLInputElement>(null);
   /** 当前模型的贴图 blob URL 释放函数(换模型 / 卸载时调用) */
   const releaseTexturesRef = useRef<(() => void) | null>(null);
+  /**
+   * 当前模型的**原始文件** —— 「去量克重」要用它接力过去
+   *
+   * `model.positions` 是解析 / 归一化之后的几何,不是文件本体;克重工具要
+   * 的是文件(它自己会解压、自己会判单位)。
+   *
+   * 用 state 而不是 ref:顶栏那颗按钮的「能不能点」要跟着它变。
+   */
+  const [sourceFile, setSourceFile] = useState<File | null>(null);
+  /** 接力只取一次 —— StrictMode 下 effect 会跑两遍 */
+  const handoffTakenRef = useRef(false);
 
   const { state, run } = useAnalyzer();
   const { result, busy, stage, pct, error } = state;
@@ -159,6 +178,8 @@ export function ModelChecker({
     setLoadError(null);
     setLoading(true);
     setLoadingPct(0);
+    // 原始文件留一份 —— 「去量克重」接力要用
+    setSourceFile(file);
     try {
       const loaded = await loadModelGeometry(file, (p) =>
         setLoadingPct(p.percent)
@@ -204,6 +225,35 @@ export function ModelChecker({
       setLoading(false);
     }
   }, []);
+
+  /**
+   * 从克重工具接力过来的文件 —— **挂载时取一次**
+   *
+   * 克重工具那边发现模型有问题时,徽标下面有一个「在检查工具里看详情」——
+   * 点下去文件直接递过来,用户不用再找一遍那个文件、再拖一次。
+   *
+   * 接力只在**客户端跳转**里有效(整页刷新就没了),所以取一次就断 ——
+   * `handoffTakenRef` 保证 StrictMode 下 effect 跑两遍也只取一次。
+   */
+  useEffect(() => {
+    if (handoffTakenRef.current) return;
+    const file = takeModelFile();
+    if (!file) return;
+    handoffTakenRef.current = true;
+    void loadFile(file);
+  }, [loadFile]);
+
+  /**
+   * 「去量克重」—— 带着同一个文件跳过去
+   *
+   * 检查完没问题就接着量克重、接着下单,是这两个工具连着用的主路径。
+   * 文件接力过去,用户不用回文件夹里再找一遍。
+   */
+  const goToWeight = useCallback(() => {
+    if (!sourceFile) return;
+    stashModelFile(sourceFile);
+    router.push("/tools/weight");
+  }, [router, sourceFile]);
 
   const focusCluster = useCallback((c: IssueCluster) => {
     focusSeq.current += 1;
@@ -292,6 +342,22 @@ export function ModelChecker({
           >
             <Upload className="h-4 w-4" />
             {t("app.upload")}
+          </Button>
+          {/**
+           * 「去量克重」—— 检查完接着量,文件接力过去
+           *
+           * 摆在这儿而不是侧栏底部:这是**下一步**,用户刚看完结论就该走。
+           * 没加载模型时是灰的(没文件可递)。
+           */}
+          <Button
+            size="sm"
+            className="border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 hover:text-emerald-200"
+            onClick={goToWeight}
+            disabled={!sourceFile || loading}
+            title={t("app.toWeightTitle")}
+          >
+            <Scale className="h-4 w-4" />
+            {t("app.toWeight")}
           </Button>
           <Button
             size="sm"

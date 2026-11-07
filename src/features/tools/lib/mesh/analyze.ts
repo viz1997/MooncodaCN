@@ -7,12 +7,13 @@
  */
 // @ts-nocheck —— 同 weld.ts:全是 typedArray 下标访问,逐个加 `!` 会淹没移植 diff。
 // 行为由 src/test/tools/pure/wjp-mesh.test.ts 守住。
+
+import { buildCheckStats, buildCheckWarnings, classifyShells } from "./summary";
 import { buildSupportShell } from "./support-shell";
 import {
   type AnalysisResult,
   FACE_FLAG,
   type IssueCluster,
-  type MessageRef,
   type ProgressStage,
   type ShellInfo,
 } from "./types";
@@ -49,72 +50,55 @@ export function runAnalysis(
   const mesh = topo.mesh;
   const faceCount = mesh.faceCount;
   const t0 = performance.now();
-  const warnings: MessageRef[] = [];
 
   // 基础标记:退化 + 重复 + 法线翻转(拓扑属性,由 weld 阶段完成)
   const flags = new Uint8Array(faceCount);
-  let duplicateFaceCount = 0;
   for (let f = 0; f < faceCount; f++) {
     flags[f] =
       topo.flags[f] &
       (FACE_FLAG.DEGENERATE | FACE_FLAG.DUPLICATE | FACE_FLAG.FLIPPED);
-    if (flags[f] & FACE_FLAG.DUPLICATE) duplicateFaceCount++;
   }
 
   // ---------- 壳体分类:主壳体 / 非主壳体 / 噪声壳体 ----------
+  //
+  // 分类口径在 `summary.ts` 的 `classifyShells()` 里 —— 克重工具的自检
+  // 摘要走的是**同一个函数**,所以两个工具不可能给出相反的结论。
   onProgress("shells", 30);
   const compCount = topo.componentCount;
-  let primaryComp = -1;
-  let primaryVolume = -Infinity;
-  for (let c = 0; c < compCount; c++) {
-    const info = topo.components[c];
-    if (info.faceCount === 0) continue;
-    const v = Math.abs(info.volume);
-    if (v > primaryVolume) {
-      primaryVolume = v;
-      primaryComp = c;
-    }
-  }
-  const modelDiag = mesh.diag;
-  const noiseDiagLimit = modelDiag * 0.05;
+  const shells = classifyShells(topo);
   const shellInfos: ShellInfo[] = [];
+  const shellIndexMap = new Map<number, ShellInfo>();
   for (let c = 0; c < compCount; c++) {
     const info = topo.components[c];
     if (info.faceCount === 0) continue;
+    const kind = shells.kinds[c] ?? "extra";
     const dx = info.bboxMax[0] - info.bboxMin[0];
     const dy = info.bboxMax[1] - info.bboxMin[1];
     const dz = info.bboxMax[2] - info.bboxMin[2];
-    const bboxDiag = Math.sqrt(dx * dx + dy * dy + dz * dz);
-    const isNoise =
-      !info.isCavity && c !== primaryComp && bboxDiag < noiseDiagLimit;
-    shellInfos.push({
+    const shellInfo: ShellInfo = {
       index: c,
       faceCount: info.faceCount,
       volume: info.volume,
       closed: info.closed,
       openEdges: info.openEdges,
       nonManifoldEdges: info.nonManifoldEdges,
-      bboxDiag,
+      bboxDiag: Math.sqrt(dx * dx + dy * dy + dz * dz),
       centroid: [
         (info.bboxMin[0] + info.bboxMax[0]) / 2,
         (info.bboxMin[1] + info.bboxMax[1]) / 2,
         (info.bboxMin[2] + info.bboxMax[2]) / 2,
       ],
-      isPrimary: c === primaryComp,
+      isPrimary: kind === "primary",
       isCavity: info.isCavity,
       isDebris: info.isDebris,
-      isNoise,
+      isNoise: kind === "noise",
       globalInverted: info.globalInverted,
-    });
+    };
+    shellInfos.push(shellInfo);
+    shellIndexMap.set(c, shellInfo);
   }
-  let noiseShellCount = 0;
-  let extraShellCount = 0;
-  const shellIndexMap = new Map<number, ShellInfo>();
-  for (const s of shellInfos) {
-    shellIndexMap.set(s.index, s);
-    if (s.isNoise) noiseShellCount++;
-    else if (!s.isPrimary) extraShellCount++;
-  }
+  // 噪声 / 多余壳体的计数在 `shells` 里 —— 统计和提示都由 `buildCheckStats`
+  // / `buildCheckWarnings` 统一取,这里不重复数一遍。
   for (let f = 0; f < faceCount; f++) {
     if (flags[f] & FACE_FLAG.DEGENERATE) continue;
     const c = topo.faceComponent[f];
@@ -233,57 +217,6 @@ export function runAnalysis(
   }
 
   // ---------- 汇总 ----------
-  const watertight =
-    faceCount > 0 &&
-    topo.openEdgeVerts.length === 0 &&
-    topo.nonManifoldVerts.length === 0;
-
-  if (topo.openEdgeVerts.length > 0) {
-    warnings.push({
-      key: "warnings.openEdges",
-      params: {
-        openEdges: topo.openEdgeVerts.length / 6,
-        planarHoles: topo.planarHoleCount,
-        cracks: topo.crackChainCount,
-      },
-    });
-  }
-  if (topo.globalInvertedShellCount > 0) {
-    warnings.push({
-      key: "warnings.globalInverted",
-      params: { count: topo.globalInvertedShellCount },
-    });
-  }
-  if (topo.flippedFaceCount > 0) {
-    warnings.push({
-      key: "warnings.flippedFaces",
-      params: { count: topo.flippedFaceCount },
-    });
-  }
-  if (topo.sealedHollow) {
-    warnings.push({
-      key: "warnings.sealedHollow",
-      params: { count: topo.cavityShellCount },
-    });
-  }
-  if (topo.enclosedOpenShellCount > 0) {
-    warnings.push({
-      key: "warnings.enclosedOpenShells",
-      params: { count: topo.enclosedOpenShellCount },
-    });
-  }
-  if (noiseShellCount > 0) {
-    warnings.push({
-      key: "warnings.noiseShells",
-      params: { count: noiseShellCount },
-    });
-  }
-  if (compCount > 1) {
-    warnings.push({
-      key: "warnings.multipleShells",
-      params: { count: compCount },
-    });
-  }
   onProgress("support", 92);
   const faceEnclosed = new Uint8Array(faceCount);
   for (let f = 0; f < faceCount; f++) {
@@ -294,6 +227,19 @@ export function runAnalysis(
   }
   const supportShell = buildSupportShell(mesh, faceEnclosed, { liftMm });
   onProgress("done", 100);
+
+  /**
+   * 统计 —— **跟克重工具的自检摘要同一个来源**(`buildCheckStats`)
+   *
+   * 两边吃的是同一个函数,所以「检查工具说 3 处破面、克重工具徽标说 3 处
+   * 破面」这件事是**结构上保证**的,不是靠两边手写一致。
+   */
+  const stats = buildCheckStats(topo, shells, {
+    fileName,
+    analysisMs: Math.round(performance.now() - t0),
+  });
+  // 提示清单 —— 同样共用(`buildCheckWarnings`)
+  const warnings = buildCheckWarnings(stats);
 
   return {
     flags,
@@ -306,31 +252,6 @@ export function runAnalysis(
     clusters,
     warnings,
     supportShell,
-    stats: {
-      fileName,
-      vertexCount: mesh.vertexCount,
-      triangleCount: faceCount,
-      componentCount: compCount,
-      watertight,
-      volumeMm3: topo.volume,
-      bboxMin: mesh.bboxMin,
-      bboxMax: mesh.bboxMax,
-      flippedFaceCount: topo.flippedFaceCount,
-      globalInvertedShellCount: topo.globalInvertedShellCount,
-      degenerateCount: topo.degenerateCount,
-      duplicateFaceCount,
-      duplicatePairCount: topo.duplicatePairCount,
-      openEdgeCount: topo.openEdgeVerts.length / 6,
-      crackChainCount: topo.crackChainCount,
-      holeCount: topo.holeCount,
-      planarHoleCount: topo.planarHoleCount,
-      nonManifoldEdgeCount: topo.nonManifoldVerts.length / 6,
-      extraShellCount,
-      noiseShellCount,
-      cavityShellCount: topo.cavityShellCount,
-      enclosedOpenShellCount: topo.enclosedOpenShellCount,
-      sealedHollow: topo.sealedHollow,
-      analysisMs: Math.round(performance.now() - t0),
-    },
+    stats,
   };
 }

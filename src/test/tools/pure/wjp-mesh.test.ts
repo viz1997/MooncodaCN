@@ -120,7 +120,7 @@ describe("analyzeNewMesh —— 网格夹具", () => {
 describe("evaluateWjp —— 工艺评估", () => {
   it("完整立方体:pass", () => {
     const { result } = analyze(perfectCube());
-    const report = evaluateWjp(result);
+    const report = evaluateWjp(result.stats);
 
     expect(report.tone).toBe("pass");
     expect(report.criticalCount).toBe(0);
@@ -135,7 +135,7 @@ describe("evaluateWjp —— 工艺评估", () => {
 
   it("破损模型:fail,坏边与破面各报一条", () => {
     const { result } = analyze(brokenMesh());
-    const report = evaluateWjp(result);
+    const report = evaluateWjp(result.stats);
 
     expect(report.tone).toBe("fail");
     expect(report.criticalCount).toBeGreaterThanOrEqual(1);
@@ -161,7 +161,7 @@ describe("evaluateWjp —— 工艺评估", () => {
 
   it("密封内腔:critical", () => {
     const { result } = analyze(hollowShell());
-    const report = evaluateWjp(result);
+    const report = evaluateWjp(result.stats);
 
     expect(report.tone).toBe("fail");
     const cavity = report.findings.find(
@@ -173,7 +173,7 @@ describe("evaluateWjp —— 工艺评估", () => {
 
   it("整体反转:法向结论为 critical", () => {
     const { result } = analyze(invertedNormals());
-    const report = evaluateWjp(result);
+    const report = evaluateWjp(result.stats);
 
     expect(report.tone).toBe("fail");
     const inverted = report.findings.find(
@@ -184,7 +184,7 @@ describe("evaluateWjp —— 工艺评估", () => {
 
   it("局部翻转:法向结论为 critical", () => {
     const { result } = analyze(localFlip());
-    const report = evaluateWjp(result);
+    const report = evaluateWjp(result.stats);
 
     const flipped = report.findings.find(
       (f) => f.key === "normals.critical.localFlipped"
@@ -195,7 +195,7 @@ describe("evaluateWjp —— 工艺评估", () => {
 
   it("多壳体:给出装配间隙提示", () => {
     const { result } = analyze(multiShell());
-    const report = evaluateWjp(result);
+    const report = evaluateWjp(result.stats);
 
     const assembly = report.findings.find(
       (f) => f.key === "assembly.info.multiple"

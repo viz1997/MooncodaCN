@@ -44,7 +44,14 @@ import { useTranslations } from "next-intl";
  *    2026-11-06 起进一步改成**后台统一配置**、访客只读；
  *  - 文案全部改为 t() 调用（i18n）。
  */
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -120,9 +127,19 @@ import {
 import type { ClientPrintConfig } from "@/features/print-quote/lib/pricing-settings";
 import type { PrintQuoteInput } from "@/features/print-quote/lib/quote-types";
 import {
+  MeshCheckBadge,
+  MeshCheckIssues,
+} from "@/features/tools/components/mesh-check-badge";
+import type { MeshCheckSummary } from "@/features/tools/lib/mesh/summary";
+import {
   SUPPORT_BASE_MARGIN_MM,
   SUPPORT_LIFT_MM,
 } from "@/features/tools/lib/mesh/support-shell";
+import {
+  stashModelFile,
+  takeModelFile,
+} from "@/features/tools/lib/model-handoff";
+import { useRouter } from "@/i18n/routing";
 
 type Mode = "upload" | "manual" | "batch";
 
@@ -192,6 +209,8 @@ export function PricingCalculator({
   clientConfig?: ClientPrintConfig;
 }) {
   const t = useTranslations("MaterialPricing");
+  /** 跳去模型检查工具 —— 只走**客户端跳转**,接力才断不了 */
+  const router = useRouter();
 
   const [mode, setMode] = useState<Mode>("upload");
   const [infoDialog, setInfoDialog] = useState<InfoDialogKind>(null);
@@ -204,8 +223,23 @@ export function PricingCalculator({
   const [uploadError, setUploadError] = useState<string | null>(null);
   /** 正在解析的文件名 —— 解析完成前 `model` 还是 null，头部要靠它显示文件名 */
   const [fileName, setFileName] = useState<string | null>(null);
+  /**
+   * 原始文件本体 —— 「去检查工具看详情」要用它接力过去
+   *
+   * `ModelFile` 里只有解析出来的文本和贴图 blob,原始的 `File` 不在里面。
+   */
+  const [sourceFile, setSourceFile] = useState<File | null>(null);
+  /**
+   * 网格自检摘要 —— **焊接的时候顺手算出来的**
+   *
+   * 摆盘 Worker 焊接模型时本来就要建完整拓扑,摘要吃的就是那份拓扑 ——
+   * 不多焊一次。头部那枚「打印前检查」徽标吃它。
+   */
+  const [meshSummary, setMeshSummary] = useState<MeshCheckSummary | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
+  /** 接力只取一次 —— StrictMode 下 effect 会跑两遍 */
+  const handoffTakenRef = useRef(false);
 
   // ---- 手动模式尺寸 ----
   const [length, setLength] = useState(68.3);
@@ -410,11 +444,16 @@ export function PricingCalculator({
     // 换模型 → 旧模型的支撑数据作废
     setPoseSupport(null);
     setSupportError(null);
+    // 换模型 → 旧模型的自检结论作废(新模型还没焊)
+    setMeshSummary(null);
     originalSupportRef.current = { key: "", weight: 0 };
     client
-      .load("main", positions)
-      .then(() => {
-        if (!cancelled) setSupportModelReady(true);
+      .load("main", positions, fileName ?? undefined)
+      .then((summary) => {
+        if (cancelled) return;
+        setSupportModelReady(true);
+        // 焊接时顺带算出来的自检摘要 —— 头部那枚徽标吃它
+        setMeshSummary(summary);
       })
       .catch((err) => {
         console.error("摆盘 Worker 加载模型失败:", err);
@@ -425,7 +464,7 @@ export function PricingCalculator({
     return () => {
       cancelled = true;
     };
-  }, [model]);
+  }, [model, fileName]);
 
   /**
    * 支撑克重重算 —— **唯一**的支撑计算入口
@@ -672,91 +711,136 @@ export function PricingCalculator({
   }, [model, appliedScales]);
 
   // ---- 文件上传 ----
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploadError(null);
-    setFileName(file.name);
-    setLoadPercent(0);
-    setDimMode("original");
-    setScaleFactor(1);
-    setUniformScale(true);
-    setScaleX(1);
-    setScaleY(1);
-    setScaleZ(1);
-    setOptimalAngle(null);
-    setViewerRotX(0);
-    setViewerRotY(0);
-    setViewerRotZ(0);
-    setManualRotX(0);
-    setManualRotY(0);
-    setManualRotZ(0);
-    // 换模型 → 支撑数据作废(新模型要重新焊接 + 重算)
-    setPoseSupport(null);
-    // 换模型 → 贴图开关复位(新模型可能压根没有贴图)
-    setShowTexture(true);
-    setLoadStatus("uploading");
-    setLoadProgress(t("upload.reading"));
-    await yieldToUI();
-    try {
-      setLoadStatus("parsing");
-      setLoadProgress(t("upload.parsing"));
-      setLoadPercent(10);
+  /**
+   * 载入一个模型文件 —— 拖拽 / 选择文件 / **从检查工具接力过来**都走这里
+   *
+   * 单独抽出来是因为接力:模型检查工具把文件递过来时,这边要能直接
+   * `loadFile(file)`,不用伪造一个 `change` 事件。
+   */
+  const loadFile = useCallback(
+    async (file: File) => {
+      setUploadError(null);
+      setFileName(file.name);
+      setSourceFile(file);
+      setLoadPercent(0);
+      setDimMode("original");
+      setScaleFactor(1);
+      setUniformScale(true);
+      setScaleX(1);
+      setScaleY(1);
+      setScaleZ(1);
+      setOptimalAngle(null);
+      setViewerRotX(0);
+      setViewerRotY(0);
+      setViewerRotZ(0);
+      setManualRotX(0);
+      setManualRotY(0);
+      setManualRotZ(0);
+      // 换模型 → 支撑数据作废(新模型要重新焊接 + 重算)
+      setPoseSupport(null);
+      // 换模型 → 自检结论作废(新模型还没焊)
+      setMeshSummary(null);
+      // 换模型 → 贴图开关复位(新模型可能压根没有贴图)
+      setShowTexture(true);
+      setLoadStatus("uploading");
+      setLoadProgress(t("upload.reading"));
       await yieldToUI();
-      const result = await extractModelZip(file, (p) => {
-        setLoadProgress(
-          p.phase === "unzip"
-            ? t("upload.extracting")
-            : `${t("upload.parsingProgress")} ${p.percent}%`
+      try {
+        setLoadStatus("parsing");
+        setLoadProgress(t("upload.parsing"));
+        setLoadPercent(10);
+        await yieldToUI();
+        const result = await extractModelZip(file, (p) => {
+          setLoadProgress(
+            p.phase === "unzip"
+              ? t("upload.extracting")
+              : `${t("upload.parsingProgress")} ${p.percent}%`
+          );
+          setLoadPercent(p.percent);
+        });
+        if (result.error) {
+          setUploadError(result.error);
+          // 解析失败也要把上一个模型的贴图 URL 回收掉(否则 blob 一直占着)
+          revokeModelTextureUrls(model);
+          setModel(null);
+          setLoadStatus("error");
+          setLoadProgress("");
+          setLoadPercent(0);
+        } else if (result.model) {
+          revokeModelTextureUrls(model);
+          setModel(result.model);
+          setLoadStatus("loading-3d");
+          setLoadProgress(t("upload.rendering"));
+          setLoadPercent(95);
+
+          /**
+           * 单位判定 —— 文件坐标不是毫米(AI 生成 / Blender 默认导出)就自动归一化
+           *
+           * 归一化走的是「自选尺寸」那条**已有的**路:缩放因子一填,几何、支撑
+           * 几何、3D 预览一起进毫米空间重算(托底 5mm 也就落在正确的位置)。
+           *
+           * 不这么做的话,平台会被拉到模型下面 5 个**单位**(托底是固定毫米值),
+           * 支撑比模型本身还高 3.5 倍,支撑比例算出来是几万倍 —— 报价全错。
+           * 详见 `model-units.ts` 的文件头。
+           */
+          const check = detectModelUnitScale(
+            result.model.parseResult.boundingBox.size
+          );
+          setUnitCheck(check.normalized ? check : null);
+          if (check.normalized) {
+            setDimMode("custom");
+            setUniformScale(true);
+            setScaleFactor(check.scale);
+          }
+        }
+      } catch (err) {
+        setUploadError(
+          `${t("upload.failed")}${err instanceof Error ? err.message : String(err)}`
         );
-        setLoadPercent(p.percent);
-      });
-      if (result.error) {
-        setUploadError(result.error);
-        // 解析失败也要把上一个模型的贴图 URL 回收掉(否则 blob 一直占着)
-        revokeModelTextureUrls(model);
-        setModel(null);
         setLoadStatus("error");
         setLoadProgress("");
         setLoadPercent(0);
-      } else if (result.model) {
-        revokeModelTextureUrls(model);
-        setModel(result.model);
-        setLoadStatus("loading-3d");
-        setLoadProgress(t("upload.rendering"));
-        setLoadPercent(95);
-
-        /**
-         * 单位判定 —— 文件坐标不是毫米(AI 生成 / Blender 默认导出)就自动归一化
-         *
-         * 归一化走的是「自选尺寸」那条**已有的**路:缩放因子一填,几何、支撑
-         * 几何、3D 预览一起进毫米空间重算(托底 5mm 也就落在正确的位置)。
-         *
-         * 不这么做的话,平台会被拉到模型下面 5 个**单位**(托底是固定毫米值),
-         * 支撑比模型本身还高 3.5 倍,支撑比例算出来是几万倍 —— 报价全错。
-         * 详见 `model-units.ts` 的文件头。
-         */
-        const check = detectModelUnitScale(
-          result.model.parseResult.boundingBox.size
-        );
-        setUnitCheck(check.normalized ? check : null);
-        if (check.normalized) {
-          setDimMode("custom");
-          setUniformScale(true);
-          setScaleFactor(check.scale);
-        }
       }
-    } catch (err) {
-      setUploadError(
-        `${t("upload.failed")}${err instanceof Error ? err.message : String(err)}`
-      );
-      setLoadStatus("error");
-      setLoadProgress("");
-      setLoadPercent(0);
-    } finally {
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
+    },
+    [model, t]
+  );
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    void loadFile(file);
+    // 同一个文件再选一次也要能重新触发 change
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
+
+  /**
+   * 从模型检查工具接力过来的文件 —— **挂载时取一次**
+   *
+   * 检查工具那边点「去量克重」会把文件递过来(`tools/lib/model-handoff.ts`),
+   * 用户不用再拖一次、也不用再解压一次。
+   *
+   * 接力只在**客户端跳转**里有效(整页刷新就没了),所以取一次就断 ——
+   * `handoffTakenRef` 保证 StrictMode 下 effect 跑两遍也只取一次。
+   */
+  useEffect(() => {
+    if (handoffTakenRef.current) return;
+    const file = takeModelFile();
+    if (!file) return;
+    handoffTakenRef.current = true;
+    void loadFile(file);
+  }, [loadFile]);
+
+  /**
+   * 「在检查工具里看详情」—— 带着同一个文件跳过去
+   *
+   * 检查工具要的是**完整分析结果**(问题位置标色、聚类),克重工具这边只
+   * 摆结论 —— 想看细节就跳过去,文件不用再拖一次。
+   */
+  const openModelCheck = useCallback(() => {
+    if (!sourceFile) return;
+    stashModelFile(sourceFile);
+    router.push("/tools/model-check");
+  }, [router, sourceFile]);
 
   const clearModel = () => {
     revokeModelTextureUrls(model);
@@ -775,6 +859,9 @@ export function PricingCalculator({
     setUnitCheck(null);
     setOptimalAngle(null);
     setPoseSupport(null);
+    // 换模型 → 原始文件本体和自检结论一起作废(不然「看详情」会递一个旧文件)
+    setSourceFile(null);
+    setMeshSummary(null);
   };
 
   /**
@@ -1164,7 +1251,11 @@ export function PricingCalculator({
                 {t("upload.scaledBy", { k: fmt(scaleFactor, 3) })}
               </Badge>
             )}
+            {/* 打印前检查 —— 焊接时顺手算出来的,跟检查工具同一套判定 */}
+            <MeshCheckBadge summary={meshSummary} />
           </div>
+          {/* 有问题才渲染 —— 摆结论 + 一个「去检查工具看详情」入口 */}
+          <MeshCheckIssues summary={meshSummary} onInspect={openModelCheck} />
           {/* 贴图没解析出来时,把断点摆出来(全正常时不渲染) */}
           <TextureDiagnosticNote diagnostics={model?.textureDiagnostics} />
         </div>

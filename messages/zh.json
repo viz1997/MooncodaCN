@@ -1400,7 +1400,9 @@
       "upload": "上传模型",
       "resetView": "重置视角",
       "analyzing": "正在分析…",
-      "fileLabel": "选择模型文件"
+      "fileLabel": "选择模型文件",
+      "toWeight": "去量克重",
+      "toWeightTitle": "带着这个模型去克重工具 —— 文件直接跟过去,不用再拖一次"
     },
     "upload": {
       "dropOverlay": "松开以载入模型"
@@ -1641,6 +1643,12 @@
           }
         }
       }
+    },
+    "check": {
+      "passTitle": "网格自检通过 —— 没有破面、缝隙或多余壳体",
+      "issuesTitle": "网格自检发现 {count} 处问题",
+      "issues": "{count} 处问题",
+      "details": "在检查工具里看详情"
     },
     "warnings": {
       "openEdges": "模型未封闭:{openEdges} 条开放边、{planarHoles} 处平面孔洞、{cracks} 处裂缝 / 破口。",

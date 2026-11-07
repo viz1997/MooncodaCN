@@ -69,7 +69,8 @@ const TONE_BADGE: Record<WjpTone, string> = {
 
 function WjpCard({ result }: { result: AnalysisResult }) {
   const t = useTranslations("ModelInspector");
-  const wjp = useMemo(() => evaluateWjp(result), [result]);
+  // 判定只吃统计 —— 克重工具的自检徽标走的是同一个 `evaluateWjp(stats)`
+  const wjp = useMemo(() => evaluateWjp(result.stats), [result]);
 
   return (
     <section

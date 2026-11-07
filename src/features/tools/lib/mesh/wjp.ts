@@ -9,7 +9,7 @@
  * **本文件不拼字符串** —— 每条结论只给 i18n key + 参数,文案在 messages/*.json
  * 里各写一份,UI 层用 next-intl 渲染。这样中文 / 英文页面读到的都是对应语言。
  */
-import type { AnalysisResult } from "./types";
+import type { AnalysisStats } from "./types";
 
 export const WJP_RULES = {
   /** 尺寸精度:100mm 以内公差 mm */
@@ -50,9 +50,18 @@ export interface WjpReport {
   findings: WjpFinding[];
 }
 
-/** 依据分析结果,评估模型对 WJP 全彩工艺的适配性 */
-export function evaluateWjp(result: AnalysisResult): WjpReport {
-  const s = result.stats;
+/**
+ * 依据统计,评估模型对 WJP 全彩工艺的适配性
+ *
+ * ## 为什么吃 `AnalysisStats` 而不是 `AnalysisResult`
+ *
+ * 判定只需要统计里的那几个数。吃 `stats` 的好处是:**克重工具也能用同一份
+ * 判定** —— 摆盘 Worker 焊接时顺手算出来的拓扑统计,跟检查工具那份
+ * `AnalysisResult.stats` 是**同一个形状**,于是两边对同一个模型的结论
+ * 必然一致(见 `summary.ts`)。
+ */
+export function evaluateWjp(stats: AnalysisStats): WjpReport {
+  const s = stats;
   const findings: WjpFinding[] = [];
 
   // ---------- 1. 反转法向 ----------

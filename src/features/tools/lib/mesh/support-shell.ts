@@ -53,6 +53,7 @@
  */
 // @ts-nocheck —— 同 weld.ts / analyze.ts:全是 typedArray 下标访问,逐个加 `!`
 // 会淹没 diff。行为由 src/test/tools/pure/wjp-mesh.test.ts 守住。
+import { type MeshCheckSummary, summarizeTopology } from "./summary";
 import type { SupportShellData } from "./types";
 import { type TopologyResult, weldAndAnalyzeTopology } from "./weld";
 
@@ -487,22 +488,46 @@ export function markEnclosedFaces(topo: TopologyResult): Uint8Array {
   return faceEnclosed;
 }
 
-/** 摆盘用的模型:焊接后的网格 + 内腔标记 */
+/** 摆盘用的模型:焊接后的网格 + 内腔标记 + 自检摘要 */
 export interface SupportModel {
   mesh: SupportMesh;
   faceEnclosed: Uint8Array;
+  /**
+   * 网格自检摘要 —— **焊接的时候顺手算出来的**
+   *
+   * 焊接 / 拓扑本来就要跑一遍(摆盘要靠它建边-面映射),自检摘要只是把
+   * 这份拓扑**再读一遍**得出结论,不额外焊接。
+   *
+   * 克重工具的「打印前检查」徽标吃的就是它 —— 用户不用把同一个文件再拖
+   * 进检查工具。
+   *
+   * 摘要里的结论(状态 / 问题清单)跟**尺寸无关**,所以缩放不用重算。
+   * 但 `stats` 里的尺寸和体积是**焊接时那份网格**的(文件里的原始坐标)——
+   * 徽标不显示它们,页面上显示的尺寸在尺寸面板里(那里用的是缩放后的值)。
+   */
+  summary: MeshCheckSummary;
 }
 
 /**
  * 把三角汤(OBJ 解析出来的 9 float/面)备成摆盘用的模型。
  *
  * 焊接 + 拓扑一次性做完 —— 后面每个候选姿态只旋转,不重算。
+ *
+ * 自检摘要也在这里出:它吃的就是刚算出来的那份拓扑,**不多焊一次**。
  */
-export function prepareSupportModel(positions: Float32Array): SupportModel {
+export function prepareSupportModel(
+  positions: Float32Array,
+  options?: { fileName?: string | undefined }
+): SupportModel {
+  const t0 = performance.now();
   const topo = weldAndAnalyzeTopology(positions);
   return {
     mesh: topo.mesh,
     faceEnclosed: markEnclosedFaces(topo),
+    summary: summarizeTopology(topo, {
+      fileName: options?.fileName,
+      analysisMs: Math.round(performance.now() - t0),
+    }),
   };
 }
 
@@ -522,6 +547,8 @@ export function scaleSupportModel(
   return {
     mesh: scaleSupportMesh(model.mesh, sx, sy, sz),
     faceEnclosed: model.faceEnclosed,
+    // 摘要的结论跟尺寸无关(拓扑不变),原样带着走
+    summary: model.summary,
   };
 }
 

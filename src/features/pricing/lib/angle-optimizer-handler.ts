@@ -39,9 +39,17 @@ export function handleAngleWorkerMessage(
   try {
     if (msg.type === "load") {
       // 焊接 + 拓扑:CPU 密集,放在 Worker 里
-      const model = prepareSupportModel(msg.positions);
+      // 自检摘要也在这一步出 —— 吃的就是刚焊出来的那份拓扑,不多焊一次
+      const model = prepareSupportModel(msg.positions, {
+        fileName: msg.fileName,
+      });
       models.set(msg.modelId, model);
-      post({ type: "loaded", seq: msg.seq, modelId: msg.modelId });
+      post({
+        type: "loaded",
+        seq: msg.seq,
+        modelId: msg.modelId,
+        summary: model.summary,
+      });
       return;
     }
 

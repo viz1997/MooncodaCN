@@ -14,11 +14,19 @@ import type {
   SupportParams,
   SupportPoseResult,
 } from "@/features/pricing/lib/angle-optimizer";
+import type { MeshCheckSummary } from "@/features/tools/lib/mesh/summary";
 
 /** 主线程 → Worker */
 export type AngleWorkerIn =
   /** 交几何:Worker 里焊接 + 建拓扑(这一步最吃 CPU,别放主线程) */
-  | { type: "load"; seq: number; modelId: string; positions: Float32Array }
+  | {
+      type: "load";
+      seq: number;
+      modelId: string;
+      positions: Float32Array;
+      /** 文件名 —— 自检摘要里要显示,不带就空着 */
+      fileName?: string | undefined;
+    }
   /** 算单个姿态的支撑(拖角度滑块 / 初始角度都用它) */
   | {
       type: "pose";
@@ -43,7 +51,18 @@ export type AngleWorkerIn =
 
 /** Worker → 主线程 */
 export type AngleWorkerOut =
-  | { type: "loaded"; seq: number; modelId: string }
+  /**
+   * 焊接完成
+   *
+   * `summary` 是**网格自检摘要** —— 焊接时顺手算出来的,主线程拿来显示
+   * 「打印前检查」徽标(用户不用把同一个文件再拖进检查工具)。
+   */
+  | {
+      type: "loaded";
+      seq: number;
+      modelId: string;
+      summary: MeshCheckSummary;
+    }
   | { type: "pose"; seq: number; result: SupportPoseResult }
   | { type: "progress"; seq: number; percent: number }
   | { type: "search"; seq: number; result: OptimalAngle }

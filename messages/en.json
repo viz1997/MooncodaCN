@@ -1403,7 +1403,9 @@
       "upload": "Upload model",
       "resetView": "Reset view",
       "analyzing": "Analyzing…",
-      "fileLabel": "Choose a model file"
+      "fileLabel": "Choose a model file",
+      "toWeight": "Measure weight",
+      "toWeightTitle": "Take this model to the weight tool — the file comes along, no re-dragging"
     },
     "upload": {
       "dropOverlay": "Drop to load the model"
@@ -1644,6 +1646,12 @@
           }
         }
       }
+    },
+    "check": {
+      "passTitle": "Mesh check passed — no open edges, flipped faces or extra shells",
+      "issuesTitle": "Mesh check found {count} issue(s)",
+      "issues": "{count} issues",
+      "details": "See details in the inspector"
     },
     "warnings": {
       "openEdges": "The mesh is not closed: {openEdges} open edge(s), {planarHoles} planar hole(s), {cracks} crack(s) / tear(s).",

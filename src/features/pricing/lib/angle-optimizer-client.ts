@@ -20,6 +20,7 @@ import type {
   AngleWorkerIn,
   AngleWorkerOut,
 } from "@/features/pricing/lib/angle-optimizer-protocol";
+import type { MeshCheckSummary } from "@/features/tools/lib/mesh/summary";
 import {
   prepareSupportModel,
   type SupportModel,
@@ -108,6 +109,8 @@ export class AngleOptimizerClient {
    * 主线程这份不占额外的内存;焊接才是贵的那个,所以只在真降级时才做。
    */
   private localPositions: Float32Array | null = null;
+  /** 主线程兜底那份模型的文件名(自检摘要里要显示) */
+  private localFileName: string | undefined = undefined;
 
   constructor(options: AngleOptimizerOptions = {}) {
     this.timeouts = { ...TIMEOUT_MS, ...options.timeoutMs };
@@ -125,7 +128,9 @@ export class AngleOptimizerClient {
   private getLocalModel(): SupportModel {
     if (!this.localModel) {
       if (!this.localPositions) throw new Error("模型还没加载");
-      this.localModel = prepareSupportModel(this.localPositions);
+      this.localModel = prepareSupportModel(this.localPositions, {
+        fileName: this.localFileName,
+      });
     }
     return this.localModel;
   }
@@ -154,7 +159,7 @@ export class AngleOptimizerClient {
         // 上游等它才发下一步的地方(比如「模型进来就算初始角度的支撑」)
         // 就永远等不到,支撑数字一直是「—」。
         if (msg.type === "loaded") {
-          entry.resolve(undefined as never);
+          entry.resolve(msg.summary as never);
           return;
         }
         if (msg.type === "pose") {
@@ -235,18 +240,25 @@ export class AngleOptimizerClient {
    * 把模型几何交给客户端(焊接在 Worker 里做)
    *
    * `positions` 是三角汤(每个三角形 9 个 float)。
+   *
+   * 返回**网格自检摘要** —— 焊接时顺手算出来的,主线程拿它显示「打印前
+   * 检查」徽标,用户不用把同一个文件再拖进检查工具。
    */
-  async load(modelId: string, positions: Float32Array): Promise<void> {
+  async load(
+    modelId: string,
+    positions: Float32Array,
+    fileName?: string
+  ): Promise<MeshCheckSummary> {
     if (this.disposed) throw new Error("摆盘客户端已释放");
     this.localPositions = positions;
+    this.localFileName = fileName;
     if (this.worker && !this.workerBroken) {
       try {
-        await this.send(
-          { type: "load", modelId, positions },
+        return await this.send(
+          { type: "load", modelId, positions, fileName },
           undefined,
           this.timeouts.load
         );
-        return;
       } catch (err) {
         // 已经释放了 → 别再退回主线程白焊一遍(大模型要卡好几秒)
         if (this.disposed) throw err;
@@ -256,7 +268,8 @@ export class AngleOptimizerClient {
       }
     }
     // 降级:主线程焊接(会卡一下,只在没有 Worker 的环境里发生)
-    this.localModel = prepareSupportModel(positions);
+    this.localModel = prepareSupportModel(positions, { fileName });
+    return this.localModel.summary;
   }
 
   /** 算单个姿态的包裹支撑(初始角度 / 拖滑块都用它) */
@@ -362,5 +375,6 @@ export class AngleOptimizerClient {
     this.pending.clear();
     this.localModel = null;
     this.localPositions = null;
+    this.localFileName = undefined;
   }
 }
