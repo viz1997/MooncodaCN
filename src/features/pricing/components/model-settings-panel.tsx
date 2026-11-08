@@ -537,16 +537,20 @@ export function ModelSettingsPanel({
   if (!model && loadStatus === "idle") return null;
 
   return (
-    <div className="space-y-4">
+    <div className={cn(!fullscreen && "xl:flex xl:items-start xl:gap-4")}>
       {/* ---------- 深色 3D 应用 ----------
           **统一用「以前那个检查工具」的设计** —— 一整块深色应用:
           头部(文件身份)→ 视角切换条 → 左边信息栏 + 右边 3D 视口。
           克重 / 检查两个视角换的是**左边那一栏的内容**,
-          整块外观不变。 */}
+          整块外观不变。
+
+          `xl:flex-1 xl:min-w-0` —— 右侧让出「加入打印单」那一栏的位置。 */}
       <div
         ref={appRef}
         className={cn(
           "rounded-xl border border-zinc-800 bg-zinc-950 text-zinc-100 shadow-sm overflow-hidden",
+          // 让出右侧「加入打印单」那一栏(全屏时整块占屏,不需要)
+          !fullscreen && "xl:min-w-0 xl:flex-1",
           // 全屏 —— **状态驱动**,不用 `[:fullscreen]:` 变体(见文件头)
           fullscreen &&
             "h-screen w-screen rounded-none border-0 flex flex-col overflow-hidden"
@@ -1259,13 +1263,26 @@ export function ModelSettingsPanel({
         )}
       </div>
 
-      {/* ---------- 下单出口 ----------
+      {/* ---------- 下单出口(右侧那一栏) ----------
           在**每一个**视角都在 —— 检查完就该能下单,不该再跳回
           「克重」那一栏找按钮。
 
           **在深色应用外面** —— 它是页面里的一张浅色卡(工作室的
-          「加入打印单」按钮),不是 3D 应用的一部分。 */}
-      {showViewer && model && geometry && quote}
+          「加入打印单」按钮),不是 3D 应用的一部分。
+
+          **摆在右侧**(2026-11-08)—— 原来它在整块工作台**下面**,
+          量完重量的用户得往下滚才看得见那颗按钮。放在右边那一栏:
+          模型在左,下单按钮在右,眼睛不用来回找。
+
+          **断点用 `xl`(1280px),不是 `lg`** —— 页面主容器封顶 1280px,
+          右边这一栏 320px + 间距 16px 之后,工作台那块只剩
+          `1280 − 32 − 336 = 912px`(侧栏 400 + 视口 ~500)。用 `lg`(1024)
+          的话视口只剩 ~250px,3D 视口挤得没法看。窄屏仍然是上下排。 */}
+      {showViewer && model && geometry && quote && (
+        <div className="mt-4 w-full xl:mt-0 xl:w-[320px] xl:shrink-0">
+          {quote}
+        </div>
+      )}
     </div>
   );
 }

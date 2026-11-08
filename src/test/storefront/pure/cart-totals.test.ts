@@ -67,15 +67,17 @@ function line(
 }
 
 describe("computeCartTotals", () => {
-  it("空购物车 → 全是 0", () => {
+  it("空购物车 → 全是 0(没有目录商品就没有运费)", () => {
     expect(computeCartTotals([])).toEqual({
       subtotalCents: 0,
       rawSubtotalCents: 0,
       discountCents: 0,
-      shippingCents: 800,
-      totalCents: 800,
+      catalogSubtotalCents: 0,
+      printSubtotalCents: 0,
+      shippingCents: 0,
+      totalCents: 0,
       itemCount: 0,
-      remainingForFreeShippingCents: 9900,
+      remainingForFreeShippingCents: 0,
     });
   });
 
@@ -134,9 +136,10 @@ describe("computeCartTotals", () => {
     expect(totals.totalCents).toBe(totals.subtotalCents + totals.shippingCents);
   });
 
-  it("打印服务行(数量恒为 1)不需要特殊处理", () => {
-    // 打印服务按克重计价,单价是服务端算出来的绝对值 —— 在这套算法里
-    // 它就是个「数量为 1 的普通行」
+  it("打印服务行(数量恒为 1)在折扣上不需要特殊处理", () => {
+    // 打印服务按克重计价,单价是服务端算出来的绝对值 —— 在**折扣**这套算法里
+    // 它就是个「数量为 1 的普通行」(数量阶梯折扣对它不生效)。
+    // 运费上的区别在 `merged-cart-totals.test.ts` 里。
     const totals = computeCartTotals([line("print", 5581, 1)]);
 
     expect(totals.subtotalCents).toBe(5581);

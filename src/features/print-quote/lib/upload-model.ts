@@ -27,6 +27,10 @@ import {
   buildModelZipBlob,
   exportRotatedObj,
 } from "@/features/pricing/lib/obj-exporter";
+import {
+  RequestError,
+  toRequestError,
+} from "@/features/shared/lib/request-error";
 
 /** 上传结果 */
 export type UploadedModelFile = {
@@ -73,10 +77,9 @@ export async function uploadModelFile(
     body: JSON.stringify({ fileName, size: blob.size }),
   });
   if (!presignRes.ok) {
-    const body = (await presignRes.json().catch(() => null)) as {
-      error?: string;
-    } | null;
-    throw new Error(body?.error ?? "presign failed");
+    const body = await presignRes.json().catch(() => null);
+    // 带 code 的错误 —— 界面据此显示「R2 未配置」还是「请先登录」
+    throw toRequestError(body, presignRes.status);
   }
 
   const presign = (await presignRes.json()) as {
@@ -92,7 +95,8 @@ export async function uploadModelFile(
     body: blob,
   });
   if (!putRes.ok) {
-    throw new Error(`R2 PUT failed: ${putRes.status}`);
+    // 直传失败 —— 绝大多数是 CORS(桶没给站点开 PUT)或签名过期
+    throw new RequestError(`R2 PUT failed: ${putRes.status}`, putRes.status);
   }
 
   return {

@@ -70,6 +70,8 @@ import {
 
 import { classifyPaymentIssue } from "@/features/storefront/lib/payment-issue";
 
+import { decidePrintOrderPaymentEntry } from "./payment-entry";
+
 /** 工单的收款状态 —— 跟 DB 列的枚举同名 */
 export type {
   PrintOrderPaymentChannel,
@@ -353,6 +355,7 @@ export type PaymentLinkResult =
         | "PAYMENT_NOT_CONFIGURED"
         | "ORDER_NOT_FOUND"
         | "ALREADY_PAID"
+        | "PAY_VIA_STOREFRONT"
         | "LINK_FAILED";
     };
 
@@ -366,6 +369,16 @@ export type PaymentLinkResult =
  *
  * 已经付过的不给入口 —— 付完了还让人付一次是事故。
  *
+ * ## 跟着商城订单结的账 —— **不给入口**(2026-11-08)
+ *
+ * 打印服务并进商城购物袋之后,打印服务行是**商城购物袋里的一行**,工单是
+ * 跟着商城订单建的(`storefront_order_id`)。钱由**商城订单**收:整张车一次
+ * 付款,回调标 paid 时按 `storefront_order_id` 把工单一起标上。
+ *
+ * 所以这一类工单**自己不再建支付会话**。不守这一条 = 用户在工单详情页点
+ * 「去支付」,在这里付一次工单的价,再回商城订单付一次整车的价 ——
+ * **收两次钱**。
+ *
  * ## 重建时用**存下来的**总价,不重新报价
  *
  * `total_price_cents` 是下单那一刻服务端重算出来的总价。重建会话时用它
@@ -375,8 +388,13 @@ export type PaymentLinkResult =
 export async function ensurePrintOrderPaymentLink(
   order: PrintOrderRow
 ): Promise<PaymentLinkResult> {
-  if (order.paymentStatus === "paid") {
-    return { ok: false, code: "ALREADY_PAID" };
+  // 能不能自己开一个付款入口 —— 规则在纯函数里(见 `payment-entry.ts`)
+  const entry = decidePrintOrderPaymentEntry({
+    paymentStatus: order.paymentStatus,
+    storefrontOrderId: order.storefrontOrderId,
+  });
+  if (!entry.allowed) {
+    return { ok: false, code: entry.code };
   }
 
   // 新路(微信 / 支付宝 / Shopify)—— 跟旧路完全分开

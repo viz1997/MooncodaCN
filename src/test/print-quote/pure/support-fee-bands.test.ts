@@ -258,11 +258,11 @@ describe("computePrintQuote —— 分段支撑费接进报价", () => {
       selfSupportRatio: 1.5,
     });
     expect(quote).not.toBeNull();
-    // 6.667 g × ¥0.50/g = ¥3.33
-    expect(quote?.supportFeeCents).toBe(333);
+    // 6.667 g × ¥0.50/g = ¥3.3333 → **向上取整 ¥3.34**
+    expect(quote?.supportFeeCents).toBe(334);
     expect(quote?.supportFeeBands).toHaveLength(1);
     expect(at(quote?.supportFeeBands ?? [], 0).priceCentsPerGram).toBe(50);
-    expect(at(quote?.supportFeeBands ?? [], 0).feeCents).toBe(333);
+    expect(at(quote?.supportFeeBands ?? [], 0).feeCents).toBe(334);
   });
 
   it("超过 1:2 → 两档都收", () => {
@@ -280,7 +280,8 @@ describe("computePrintQuote —— 分段支撑费接进报价", () => {
   });
 
   it("各档之和恒等于支撑加价(明细加起来 = 合计)", () => {
-    // 取整的差额由最后一档吸收 —— 逐档取整再相加可能跟总额取整差 1 分
+    // **向上取整之后各档加起来 ≥ 总额**,多出来的那一两分从最后一档往下扣
+    // (扣到 0 就不扣了 —— 不会出现负数的一档)。
     for (const W of [7, 13.3, 20, 33.7, 101.9]) {
       for (const r of [1.05, 1.5, 2, 2.37, 3, 5.5]) {
         const quote = computePrintQuote(SETTINGS, {
@@ -293,6 +294,10 @@ describe("computePrintQuote —— 分段支撑费接进报价", () => {
           0
         );
         expect(sum).toBe(quote?.supportFeeCents);
+        // 没有负数的一档
+        for (const band of quote?.supportFeeBands ?? []) {
+          expect(band.feeCents).toBeGreaterThanOrEqual(0);
+        }
       }
     }
   });

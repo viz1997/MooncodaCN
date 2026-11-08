@@ -15,6 +15,12 @@
  * 唯一的差别是单位:引擎内部用「元」,这里对外一律「分」。转换只发生在
  * 两个边界上(元 → 分),中间不碰。
  *
+ * ## 取整口径:**向上取整**(2026-11-08)
+ *
+ * 元 → 分那一刀**一律向上取整**(`rounding.ts`)。交期加价也是 —— 那是用户
+ * 付的钱,同样向上(见 `delivery-tier.ts`)。工作室的原话:「计价需要向上
+ * 取整」。
+ *
  * ## 价格从哪儿来(2026-11-06)
  *
  * 以前是这个文件里的 `PRINT_QUOTE_CONFIG` —— 模块级常量,导入时读一次
@@ -52,6 +58,7 @@ import type {
   PrintQuoteInput,
   PrintSupportFeeBand,
 } from "./quote-types";
+import { yuanToCentsCeil } from "./rounding";
 
 /**
  * 把「生效设置」翻译成引擎认识的 `PricingConfig`
@@ -106,34 +113,44 @@ export function computePrintQuote(
   if (!result) return null;
 
   // 各项先取整再相加:明细加起来必须等于合计,差一分钱都会被用户看出来
-  const weightFeeCents = Math.round(result.weightFee * 100);
-  const varnishFeeCents = Math.round(result.varnishFee * 100);
-  const supportFeeCents = Math.round(result.supportFee * 100);
+  //
+  // **向上取整**(2026-11-08 工作室的要求)—— 见 `rounding.ts` 的文件头:
+  // 计价一律向上取整到分,少收那一分钱就是真亏损。
+  const weightFeeCents = yuanToCentsCeil(result.weightFee);
+  const varnishFeeCents = yuanToCentsCeil(result.varnishFee);
+  const supportFeeCents = yuanToCentsCeil(result.supportFee);
 
   /**
    * 支撑加价的分段明细 —— 换到「分」
    *
    * 引擎那边算的是「元」(浮点),这里换成分。**各档之和必须等于
-   * `supportFeeCents`** —— 逐档取整再相加,跟总额取整可能差 1 分,差额由
-   * **最后一档**吸收。否则打印单上会出现「8.3 g × ¥0.50/g + 4.2 g ×
+   * `supportFeeCents`** —— 否则打印单上会出现「8.3 g × ¥0.50/g + 4.2 g ×
    * ¥1.00/g」跟「支撑加价 ¥6.60」对不上(明细加起来 ≠ 合计)。
+   *
+   * **向上取整之后,各档加起来 ≥ 总额**(每一档都往上走了,加起来只会多)。
+   * 多出来的那一两分**从最后一档开始往下扣**,扣到 0 就不扣了 —— 不会出现
+   * 负数的一档。
    */
   const supportFeeBands: PrintSupportFeeBand[] = result.supportFeeBands.map(
     (band) => ({
       fromRatio: band.fromRatio,
       upToRatio: band.upToRatio,
-      priceCentsPerGram: Math.round(band.price * 100),
+      priceCentsPerGram: yuanToCentsCeil(band.price),
       weightG: band.weightG,
-      feeCents: Math.round(band.fee * 100),
+      feeCents: yuanToCentsCeil(band.fee),
     })
   );
-  const lastBand = supportFeeBands[supportFeeBands.length - 1];
-  if (lastBand) {
-    const sumOfBands = supportFeeBands.reduce(
-      (sum, band) => sum + band.feeCents,
-      0
-    );
-    lastBand.feeCents += supportFeeCents - sumOfBands;
+  const sumOfBands = supportFeeBands.reduce(
+    (sum, band) => sum + band.feeCents,
+    0
+  );
+  let residual = supportFeeCents - sumOfBands;
+  for (let i = supportFeeBands.length - 1; i >= 0 && residual < 0; i -= 1) {
+    const band = supportFeeBands[i];
+    if (!band) continue;
+    const take = Math.min(band.feeCents, -residual);
+    band.feeCents -= take;
+    residual += take;
   }
 
   // 交期加价 —— 按**小计**的比例收(见 delivery-tier.ts)。

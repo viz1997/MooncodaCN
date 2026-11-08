@@ -19,6 +19,12 @@
  *
  * 付完了还让人付一次是事故。已经付过的单返回 409。
  *
+ * ## 跟着商城订单结的账也不给链接(2026-11-08)
+ *
+ * 打印服务并进商城购物袋之后,工单是**跟着商城订单**建的 —— 钱由商城订单
+ * 收(整张车一次付款)。这里再开一个会话 = 用户**付两次**。
+ * 这种单返回 409 `PAY_VIA_STOREFRONT`,一句话指到「我的订单」。
+ *
  * ## 限流桶:printOrder(120/min)
  *
  * 这个接口会打 Sellbase(建单 / 重发链接),比纯本地查询贵。但它是用户
@@ -94,6 +100,20 @@ async function handle(
           success: false,
           error: "ALREADY_PAID",
           message: "这单已经付过了",
+        },
+        { status: 409, headers: getRateLimitHeaders(rl) }
+      );
+    }
+    // 跟着商城订单结的账 —— 钱由商城订单收,这里**不能再开一个会话**
+    //
+    // 给了入口 = 用户在这里付一次工单的价,再回商城订单付一次整车的价。
+    // 409 + 一句指路的话(去「我的订单」付)。
+    if (result.code === "PAY_VIA_STOREFRONT") {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "PAY_VIA_STOREFRONT",
+          message: "这一单跟商城订单一起付款 —— 去「我的订单」里付",
         },
         { status: 409, headers: getRateLimitHeaders(rl) }
       );

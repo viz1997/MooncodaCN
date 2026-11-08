@@ -1726,7 +1726,7 @@
       "signInHint": "价格只对登录用户显示 —— 登录后就能看到金额",
       "supportPending": "未计入",
       "supportPendingHint": "支撑还没算 —— 点「包裹支撑」或「置于平面」算一次,金额会更准",
-      "estimateHint": "预估 —— 最终金额以打印单为准"
+      "estimateHint": "预估 —— 最终金额以购物袋为准"
     },
     "delivery": {
       "label": "交期",
@@ -1741,20 +1741,31 @@
       }
     },
     "printOrder": {
-      "add": "加入打印单",
+      "add": "加入购物袋",
       "adding": "上传模型中…",
       "errors": {
-        "addFailed": "加入打印单失败,请稍后重试",
-        "supportUnavailable": "算不出支撑克重,没有加入打印单 —— 等模型处理完再试一次"
+        "addFailed": "加入购物袋失败,请稍后重试",
+        "supportUnavailable": "算不出支撑克重,没有加入购物袋 —— 等模型处理完再试一次",
+        "codes": {
+          "authRequired": "登录状态失效了 —— 重新登录再试一次",
+          "storageNotConfigured": "文件存储没配好,暂时加不了 —— 联系工作室",
+          "modelNotFound": "模型文件没找到 —— 重新拖一次模型,再点「加入购物袋」",
+          "modelUrlInvalid": "模型文件地址不合法 —— 重新拖一次模型,再点「加入购物袋」",
+          "cartNotFound": "购物袋拿不到了 —— 刷新页面再试一次",
+          "invalidInput": "模型数据不完整 —— 重新量一遍再试",
+          "invalidType": "这个文件格式不支持 —— 换一个 OBJ / STL / ZIP 试试",
+          "presignFailed": "生成上传地址失败 —— 请稍后重试",
+          "serverFailed": "服务端处理失败 —— 请稍后重试(详情见浏览器控制台)"
+        }
       }
     },
     "entry": {
-      "title": "加入打印单",
-      "desc": "量好的模型直接加进打印单 —— 下面是预估价,最终金额、交期和收货地址在打印单上确认。",
+      "title": "加入购物袋",
+      "desc": "量好的模型直接加进商城购物袋 —— 下面是预估价,最终金额、交期和收货地址在购物袋上确认。",
       "descSignIn": "打印服务要挂在你的账号名下。先登录再量,免得量完再登录,模型白选一遍。",
       "signInCta": "去登录",
-      "empty": "先在上面选好模型文件,才能加进打印单。",
-      "ready": "模型已就绪 —— 点一下就加进打印单。",
+      "empty": "先在上面选好模型文件,才能加进购物袋。",
+      "ready": "模型已就绪 —— 点一下就加进购物袋。",
       "errors": {
         "noModel": "还没有模型 —— 先在上面选一个文件。"
       }
@@ -1829,6 +1840,8 @@
       "paid": "已付款",
       "refunded": "已退款",
       "offlineHint": "在线支付没配好,可以联系工作室线下付款",
+      "payViaStorefront": "去我的订单付款",
+      "viaStorefrontHint": "这一单跟商城订单一起付款 —— 整张购物袋一次付清",
       "qrTitle": "微信扫码支付",
       "qrHint": "用微信扫一扫,付款完成后会自动更新",
       "errors": {

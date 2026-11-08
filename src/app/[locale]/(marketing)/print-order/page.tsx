@@ -1,85 +1,33 @@
+import { redirect, type routing } from "@/i18n/routing";
+
 /**
- * `/print-order` —— **打印单**页
+ * `/print-order` —— **已下线**,重定向到 `/cart`
  *
- * ## 打印服务不走商城购物袋
+ * ## 2026-11-08:打印单并进商城购物袋
  *
- * 工作室的要求:「模型打印是不走商城正常的购物车的,而是走打印下单,即展示
- * 打印列表和下单金额」。所以打印服务有**另一张车**(另一个 cookie
- * `wjp_print_cart_id`、另一种性质 `kind = "print"`),也**另一个页面** ——
- * 商城购物袋(`/cart`)、购物袋抽屉、`/checkout` 里一行打印服务都不会出现。
+ * 工作室的说法:**「不要 print-order,进入商城那个」**。
  *
- * ## 页面摆三样东西
+ * 2026-11-06 到 2026-11-08 之间,打印服务走的是**自己的**打印单:另一张车
+ * (另一个 cookie `wjp_print_cart_id`、另一种性质 `kind = "print"`)、另一个
+ * 页面(`/print-order`)、另一个加购接口(`/api/store/print-carts/**`)。
  *
- * 1. **打印列表** —— 每个模型一行(尺寸 / 克重 / 交期 / 单价 / 删一行)
- * 2. **下单金额** —— Σ 每行的报价(**没有运费**:打印服务的价就是报价本身)
- * 3. **提交打印单** —— 一次付款,钱到了才开工单
+ * 现在**只有一张车**了 —— 打印服务跟目录商品装同一个购物袋,同一个 `/cart`
+ * 页面、同一个抽屉、同一个 `/checkout`,一次付款。服务端在结算的同一个
+ * 事务里落一张商城订单 + N 张打印工单(见 `storefront/lib/checkout.ts`)。
  *
- * ## 为什么在 `(marketing)` 而不是 `(marketing-atelier)`
+ * ## 为什么留一个重定向而不是 404
  *
- * 打印服务是**官网**那条路(量重量的工具 → 打印单 → 付款),不是商城那条路。
- * 挂在商城那组会带着商城的购物袋抽屉,反而把「打印服务不跟商城混」这件事
- * 搅浑。
- *
- * ## 读打印单用 `getCart`,不用 `getOrCreatePrintCart`
- *
- * `getOrCreatePrintCart()` 会**写 cookie**,而写 cookie 在 Server Component
- * 里是非法的。这里只读:cookie 里有 id 就取那张车,没有就当空打印单。
+ * 老的链接(导航、书签、分享出去的地址、工单邮件里的链接)不该断。重定向比
+ * 404 多做一件事:把人送到现在唯一正确的那个页面。
  */
-
-import type { Metadata } from "next";
-
-import { listUserAddresses } from "@/features/address/queries";
-import { PrintOrderView } from "@/features/storefront/components/print-order-view";
-import { getCart, getPrintCartId } from "@/features/storefront/lib/cart-store";
-import { getServerSession } from "@/lib/auth/server";
-
-export async function generateMetadata({
-  params,
-}: {
-  params: Promise<{ locale: string }>;
-}): Promise<Metadata> {
-  const { locale } = await params;
-  const isZh = locale === "zh";
-
-  const title = isZh ? "打印单 — Mooncoda 梦可达" : "Print order — Mooncoda";
-  const description = isZh
-    ? "你要打印的模型都在这儿 —— 每一件的几何、交期、单价都摆明白,确认金额再提交。"
-    : "Every model you want printed — geometry, delivery tier and price for each, then confirm the total and submit.";
-
-  return {
-    title,
-    description,
-    openGraph: { title, description, type: "website" },
-  };
-}
-
 export default async function PrintOrderPage({
   params,
 }: {
   params: Promise<{ locale: string }>;
 }) {
   const { locale } = await params;
-
-  const session = await getServerSession();
-  const userId = session?.user?.id ?? null;
-
-  // 只读 cookie —— 见文件头
-  const cartId = await getPrintCartId();
-  const cart = cartId ? await getCart(cartId) : null;
-
-  const addresses = userId ? await listUserAddresses(userId) : [];
-
-  // 登录链接带 callbackUrl —— 登录完回到打印单,打印单还在
-  const signInUrl = `/sign-in?callbackUrl=${encodeURIComponent(
-    `/${locale}/print-order`
-  )}`;
-
-  return (
-    <PrintOrderView
-      initialCart={cart}
-      addresses={addresses}
-      isLoggedIn={Boolean(userId)}
-      signInUrl={signInUrl}
-    />
-  );
+  redirect({
+    href: "/cart",
+    locale: locale as (typeof routing.locales)[number],
+  });
 }

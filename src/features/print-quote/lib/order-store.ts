@@ -422,6 +422,8 @@ export function toUserPrintOrder(row: PrintOrderRow): UserPrintOrder {
     paymentUrl: row.paymentUrl,
     paymentQrCodeUrl: row.paymentQrCodeUrl,
     paymentChannel: row.paymentChannel,
+    // 跟着商城订单结的账 —— 界面据此不给「去支付」(见 `quote-types.ts`)
+    viaStorefrontOrder: row.storefrontOrderId !== null,
   };
 }
 

@@ -1,23 +1,22 @@
 "use client";
 
 /**
- * 结算的「付款」那一块 —— 商城结算页和打印单页共用
+ * 结算的「付款」那一块 —— 商城结算页共用
  *
  * ## 它管什么
  *
  * 选收款通道 → 提交结算 → 拿到付款入口 → 微信扫码 → 轮询到钱到了。
- * 这些状态**全部在组件自己里** —— 父组件(结算页 / 打印单页)只负责把
- * 「选了哪个地址」「留言是什么」传进来,以及在钱到了之后刷新自己的缓存。
+ * 这些状态**全部在组件自己里** —— 父组件(结算页)只负责把「选了哪个地址」
+ * 「留言是什么」传进来,以及在钱到了之后刷新自己的缓存。
  *
- * ## 两种车走同一个接口
+ * ## 只有**一张车**(2026-11-08)
  *
- * `POST /api/store/checkout` 带一个 `cartKind`:
+ * 打印服务并进商城购物袋了(工作室的说法:「不要 print-order,进入商城那个」),
+ * 所以结算**只结算一张车** —— 目录商品和打印服务装在一起,一次付款。
  *
- * - `storefront` 商城购物袋 —— 目录商品,运费按 ¥99 门槛算
- * - `print` 打印单 —— 打印服务,没有运费
- *
- * 钱到了之后要作废哪份缓存,也跟着 `cartKind` 走(见 `use-cart.ts` /
- * `use-print-cart.ts` 的 invalidate)。
+ * 车里有没有打印服务行,服务端自己看得见(行上有 `printSpec`),付款成功
+ * 之后会把生成的打印工单号一起回传(`printOrderNos`)—— 这一块只负责把
+ * 那些号摆出来。
  */
 
 import { useQueryClient } from "@tanstack/react-query";
@@ -31,24 +30,18 @@ import { PaymentQrCode } from "@/features/payments/components/payment-qr";
 import { Link } from "@/i18n/routing";
 
 import { invalidateCartCache } from "../hooks/use-cart";
-import { invalidatePrintCartCache } from "../hooks/use-print-cart";
-
-/** 结算哪张车 */
-export type CheckoutCartKind = "storefront" | "print";
 
 export function CheckoutPaymentPanel({
-  cartKind,
   addressId,
   note,
   submitLabel = "去支付",
   onPaid,
 }: {
-  cartKind: CheckoutCartKind;
   /** 选中的收货地址 id —— 没有就不给提交 */
   addressId: string | null;
   /** 用户留言 */
   note?: string | null;
-  /** 提交按钮上的字(「去支付」/「提交打印单」) */
+  /** 提交按钮上的字(「去支付」) */
   submitLabel?: string;
   /** 钱到了 —— 父组件可以在这里刷新自己的东西 */
   onPaid?: (orderNo: string) => void;
@@ -93,8 +86,6 @@ export function CheckoutPaymentPanel({
         body: JSON.stringify({
           addressId,
           note: note?.trim() ? note.trim() : null,
-          // 结算哪张车 —— 商城购物袋 / 打印单
-          cartKind,
           // 打印工单的邮件通知语言 —— 跟着订单落库
           locale,
           // 收款通道 —— 用户选的那个
@@ -194,14 +185,10 @@ export function CheckoutPaymentPanel({
   useEffect(() => {
     if (!scanPaid) return;
     void (async () => {
-      if (cartKind === "print") {
-        await invalidatePrintCartCache(queryClient);
-      } else {
-        await invalidateCartCache(queryClient);
-      }
+      await invalidateCartCache(queryClient);
       onPaid?.(createdOrderNo ?? "");
     })();
-  }, [scanPaid, queryClient, cartKind, createdOrderNo, onPaid]);
+  }, [scanPaid, queryClient, createdOrderNo, onPaid]);
 
   /* ---------------------------------------------------------------------- */
   /*  微信扫码 —— 页面留在原地画码,不跳页                                      */
@@ -246,16 +233,19 @@ export function CheckoutPaymentPanel({
             className="w-full rounded-full"
             variant={scanPaid ? "default" : "outline"}
           >
-            <Link
-              href={
-                cartKind === "print"
-                  ? "/account/print-orders"
-                  : "/account/orders"
-              }
-            >
-              我的订单
-            </Link>
+            <Link href="/account/orders">我的订单</Link>
           </Button>
+          {/* 这一单里有打印服务 → 同时给一个去打印工单的入口 */}
+          {createdPrintOrderNos.length > 0 && (
+            <Button
+              asChild
+              size="sm"
+              className="w-full rounded-full"
+              variant="outline"
+            >
+              <Link href="/account/print-orders">查看打印工单</Link>
+            </Button>
+          )}
         </div>
       </div>
     );

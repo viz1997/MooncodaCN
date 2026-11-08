@@ -151,11 +151,12 @@ export const mainNav: NavItem[] = [
   { title: "Image Gen", href: "/image-gen" },
   { title: "Docs", href: "/docs" },
   { title: "Pricing", href: "/#pricing" },
-  // 打印服务 —— 2026-11-01 新增,2026-11-06 改指打印单。
-  // 报价台(`/quote`)整页删掉后,打印服务唯一的对外页面就是打印单:
-  // 打印列表 + 下单金额 + 收货地址。空打印单那一页会把人引到打印前工作台
-  // (`/tools/workbench`),量完直接「加入打印单」就回到这里。
-  { title: "Print", href: "/print-order" },
+  // 打印服务 —— 2026-11-01 新增。
+  // 2026-11-06 改指打印单(`/print-order`),2026-11-08 又改回商城购物袋
+  // (`/cart`):工作室的说法是「不要 print-order,进入商城那个」。打印服务
+  // 现在跟目录商品装同一个购物袋,同一个结算流程,一次付款。
+  // `/print-order` 和 `/quote` 都留着重定向到 `/cart`。
+  { title: "Print", href: "/cart" },
   // 工具中心 —— 公开工具页(克重计算器 / 模型检查),浏览器本地算,不需登录
   // 2026-11-01：导航只留一个「工具」位,工具清单在 /tools 里列
   { title: "Tools", href: "/tools" },
@@ -170,8 +171,9 @@ export const footerNav = {
   product: [
     { title: "Pricing", href: "/#pricing" },
     { title: "Tools", href: "/tools" },
-    // 打印服务 —— 2026-11-01 新增,2026-11-06 改指打印单(报价台已删)
-    { title: "Print", href: "/print-order" },
+    // 打印服务 —— 2026-11-01 新增,2026-11-08 改指商城购物袋
+    // (打印单 `/print-order` 和报价台 `/quote` 都只是重定向)
+    { title: "Print", href: "/cart" },
     { title: "Changelog", href: "/blog" },
     {
       title: "Contact Us",

@@ -1729,7 +1729,7 @@
       "signInHint": "Prices are shown to signed-in users — sign in to see the amount",
       "supportPending": "not counted",
       "supportPendingHint": "Support isn't computed yet — click \"Show support\" or \"Place on plane\" once for a closer estimate",
-      "estimateHint": "Estimate — the final amount is confirmed on the print order"
+      "estimateHint": "Estimate — the final amount is confirmed in your cart"
     },
     "delivery": {
       "label": "Delivery",
@@ -1744,20 +1744,31 @@
       }
     },
     "printOrder": {
-      "add": "Add to print order",
+      "add": "Add to cart",
       "adding": "Uploading model…",
       "errors": {
-        "addFailed": "Could not add to the print order — please try again",
-        "supportUnavailable": "Support weight could not be computed, so nothing was added — wait for the model to finish processing and try again"
+        "addFailed": "Could not add to the cart — please try again",
+        "supportUnavailable": "Support weight could not be computed, so nothing was added — wait for the model to finish processing and try again",
+        "codes": {
+          "authRequired": "Your session expired — sign in again and retry",
+          "storageNotConfigured": "File storage is not configured — the studio needs to fix it",
+          "modelNotFound": "The model file was not found — drop the model in again and retry",
+          "modelUrlInvalid": "The model file address is not valid — drop the model in again and retry",
+          "cartNotFound": "The cart could not be reached — refresh the page and retry",
+          "invalidInput": "The model data is incomplete — measure it again and retry",
+          "invalidType": "That file format is not supported — try an OBJ / STL / ZIP instead",
+          "presignFailed": "Could not create the upload URL — please try again",
+          "serverFailed": "The server could not process the request — please try again (details in the browser console)"
+        }
       }
     },
     "entry": {
-      "title": "Add to print order",
-      "desc": "Add the model you measured to your print order — the estimate below is a preview; the final total, delivery tier and address are confirmed on the print order.",
+      "title": "Add to cart",
+      "desc": "Add the model you measured to your cart — the estimate below is a preview; the final total, delivery tier and address are confirmed in your cart.",
       "descSignIn": "Print orders are tied to your account. Sign in first, then measure — otherwise the model is lost when the page reloads.",
       "signInCta": "Sign in",
-      "empty": "Pick a model file above to add it to your print order.",
-      "ready": "Model ready — one click adds it to your print order.",
+      "empty": "Pick a model file above to add it to your cart.",
+      "ready": "Model ready — one click adds it to your cart.",
       "errors": {
         "noModel": "No model yet — pick a file above first."
       }
@@ -1832,6 +1843,8 @@
       "paid": "Paid",
       "refunded": "Refunded",
       "offlineHint": "Online payment isn't set up — ask the studio for an offline transfer",
+      "payViaStorefront": "Pay in my orders",
+      "viaStorefrontHint": "This order is paid together with your store order — one payment for the whole cart",
       "qrTitle": "Scan to pay with WeChat",
       "qrHint": "Scan with WeChat — this updates once the payment lands",
       "errors": {

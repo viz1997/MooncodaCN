@@ -31,6 +31,7 @@ import { ArrowLeft, Box, FileText, Mail, Phone, User } from "lucide-react";
 import { useFormatter, useTranslations } from "next-intl";
 import { useEffect } from "react";
 
+import { Button } from "@/components/ui/button";
 import { OrderCancelButton } from "@/features/print-quote/components/order-cancel-button";
 import { OrderPaymentButton } from "@/features/print-quote/components/order-payment-button";
 import { OrderTimeline } from "@/features/print-quote/components/order-timeline";
@@ -135,13 +136,39 @@ export function PrintOrderDetailView({
         </div>
 
         <div className="flex flex-wrap items-start gap-2">
-          {/* 收款入口 —— 未付的单在这儿付 */}
-          <OrderPaymentButton
-            orderNo={order.orderNo}
-            paymentUrl={order.paymentUrl}
-            paymentQrCodeUrl={order.paymentQrCodeUrl}
-            paymentStatus={order.paymentStatus}
-          />
+          {/*
+            收款入口 —— 未付的单在这儿付
+            *
+            **跟商城订单一起结的账除外**:那种工单的钱由商城订单收(整张购物
+            袋一次付款),这里**不能再开一个入口** —— 开了就是让用户付两次
+            (工单一次、商城订单一次)。指到「我的订单」那一张去付。
+          */}
+          {order.viaStorefrontOrder &&
+          (order.paymentStatus === "unpaid" ||
+            order.paymentStatus === "failed") ? (
+            <div className="flex flex-col items-end gap-1.5">
+              <Button
+                asChild
+                size="sm"
+                variant="outline"
+                className="rounded-full"
+              >
+                <Link href="/account/orders">
+                  {t("payment.payViaStorefront")}
+                </Link>
+              </Button>
+              <p className="max-w-[16rem] text-right text-[11px] text-muted-foreground">
+                {t("payment.viaStorefrontHint")}
+              </p>
+            </div>
+          ) : (
+            <OrderPaymentButton
+              orderNo={order.orderNo}
+              paymentUrl={order.paymentUrl}
+              paymentQrCodeUrl={order.paymentQrCodeUrl}
+              paymentStatus={order.paymentStatus}
+            />
+          )}
           {cancellable ? (
             <OrderCancelButton
               orderNo={order.orderNo}

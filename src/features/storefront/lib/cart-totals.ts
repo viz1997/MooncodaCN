@@ -19,16 +19,20 @@
  * 这跟结算时服务端重算的口径一致(见 `lib/cart-store.ts` 的
  * `repriceLineItem()`),也跟收银台「逐分相等」的要求一致。
  *
- * ## 打印服务行不需要特殊分支
+ * ## 运费只看**目录商品**那一部分(2026-11-08)
  *
- * 打印服务数量恒为 1(一活一模型),在这套算法里就是个「数量为 1 的普通行」。
+ * 打印服务跟目录商品装**同一张车**了(工作室的说法:「不要 print-order,
+ * 进入商城那个」)。但运费规则还是两套:
  *
- * ## 运费看**车的性质**(2026-11-06)
+ * - 目录商品:¥8,目录商品那部分小计到 ¥99 免
+ * - 打印服务:没有运费 —— 价就是报价本身(见 `print-quote/lib/payment.ts`:
+ *   工单的支付金额恒等于 `total_price_cents`)
  *
- * 商城购物袋有运费(¥8,小计到 ¥99 免),**打印单没有** —— 打印服务的价就是
- * 报价本身,打印单上显示多少、这里显示多少、实际收多少,是同一个数。
+ * 所以运费的基数是**目录商品的折后小计**。打印服务的钱**不计入**运费
+ * 门槛(它不产生快递费,也不该替目录商品把 ¥99 凑满)。
  *
- * 传 `kind` 就是为了这一条;不传按商城购物袋算。
+ * 规则本身在 `pricing-constants.ts` 的 `shippingCentsForCart()` —— 客户端
+ * 和服务端用**同一份**。
  *
  * ## 这个文件是**纯**的
  *
@@ -37,27 +41,31 @@
  */
 
 import type { CartLineItem } from "../types";
-import { type CartKind, STOREFRONT_CART_KIND } from "./cart-kind";
 import {
   calculateRemainingForFreeShipping,
   shippingCentsForCart,
 } from "./pricing-constants";
+import { getPrintServiceSpec } from "./print-service";
 
 /** 购物车金额汇总 */
 export interface CartTotals {
-  /** 小计(分)—— Σ(折后单价 × 数量) */
+  /** 小计(分)—— Σ(折后单价 × 数量),**全部行** */
   subtotalCents: number;
   /** 折扣前的小计(分)—— Σ(原价 × 数量) */
   rawSubtotalCents: number;
   /** 数量折扣(分)—— 折扣前小计 − 小计 */
   discountCents: number;
-  /** 运费(分)—— 达到免运费门槛就是 0 */
+  /** 目录商品那部分的折后小计(分)—— **运费的基数** */
+  catalogSubtotalCents: number;
+  /** 打印服务那部分的折后小计(分)—— 不产生运费 */
+  printSubtotalCents: number;
+  /** 运费(分)—— 按目录商品那部分算;车里没有目录商品就是 0 */
   shippingCents: number;
   /** 合计(分)—— 小计 + 运费 */
   totalCents: number;
   /** 总件数 */
   itemCount: number;
-  /** 距离免运费还差多少(分)—— 0 = 已免运费 */
+  /** 距离免运费还差多少(分)—— 0 = 已免运费 / 车里有目录商品但已满 ¥99 */
   remainingForFreeShippingCents: number;
 }
 
@@ -65,35 +73,43 @@ export interface CartTotals {
  * 算一张车的金额
  *
  * @param items 车上的行(服务端算好的折后单价 —— 见 `cart-store.ts`)
- * @param kind 车的性质 —— 决定有没有运费(不传 = 商城购物袋)
  */
-export function computeCartTotals(
-  items: CartLineItem[],
-  kind: CartKind = STOREFRONT_CART_KIND
-): CartTotals {
+export function computeCartTotals(items: CartLineItem[]): CartTotals {
   let subtotalCents = 0;
   let rawSubtotalCents = 0;
+  let catalogSubtotalCents = 0;
+  let printSubtotalCents = 0;
   let itemCount = 0;
 
   for (const item of items) {
-    subtotalCents += item.discountedUnitPriceCents * item.quantity;
+    const lineTotalCents = item.discountedUnitPriceCents * item.quantity;
+    subtotalCents += lineTotalCents;
     rawSubtotalCents += item.unitPriceCents * item.quantity;
     itemCount += item.quantity;
+
+    // 判据是「有没有 printSpec」—— 打印服务不在目录里(见 `print-service.ts`)
+    if (getPrintServiceSpec(item.metadata)) {
+      printSubtotalCents += lineTotalCents;
+    } else {
+      catalogSubtotalCents += lineTotalCents;
+    }
   }
 
-  const shippingCents = shippingCentsForCart(kind, subtotalCents);
+  const shippingCents = shippingCentsForCart(catalogSubtotalCents);
 
   return {
     subtotalCents,
     rawSubtotalCents,
     discountCents: rawSubtotalCents - subtotalCents,
+    catalogSubtotalCents,
+    printSubtotalCents,
     shippingCents,
     totalCents: subtotalCents + shippingCents,
     itemCount,
-    // 打印单没有运费 → 没有「还差多少免运费」这回事
+    // 车里没有目录商品 → 没有「还差多少免运费」这回事
     remainingForFreeShippingCents:
-      kind === STOREFRONT_CART_KIND
-        ? calculateRemainingForFreeShipping(subtotalCents)
+      catalogSubtotalCents > 0
+        ? calculateRemainingForFreeShipping(catalogSubtotalCents)
         : 0,
   };
 }

@@ -28,10 +28,10 @@ export default function sitemap(): MetadataRoute.Sitemap {
     // (`/pricing` / `/tools/weight` / `/tools/model-check`)
     "/tools",
     "/tools/workbench",
-    // 打印服务:**不进 sitemap** —— 打印单(`/print-order`)是每个用户自己的
-    // 一页(打印列表 + 下单金额),对爬虫没有内容;报价台(`/quote`)2026-11-06
-    // 已整页删掉,只留一个重定向。打印服务对外的公开入口是打印前工作台
-    // (`/tools/workbench`,上面已经在列表里)。
+    // 打印服务:**不进 sitemap** —— 打印单(`/print-order`)2026-11-08 整页
+    // 删掉(打印服务并进商城购物袋),只留一个重定向到 `/cart`;报价台
+    // (`/quote`)2026-11-06 也已整页删掉。打印服务对外的公开入口是打印前
+    // 工作台(`/tools/workbench`,上面已经在列表里)。
   ];
 
   // Generate static routes for each locale

@@ -167,7 +167,7 @@ describe("printServiceSpecHashParts", () => {
   });
 });
 
-describe("buildPrintServiceSpecFromGeometry(工具页 → 打印单)", () => {
+describe("buildPrintServiceSpecFromGeometry(工具页 → 购物袋)", () => {
   const UPLOADED = {
     fileName: "cat.zip",
     objectKey: "print-orders/abc123/cat.zip",
@@ -201,7 +201,7 @@ describe("buildPrintServiceSpecFromGeometry(工具页 → 打印单)", () => {
     expect(spec.selfSupportRatio).toBeNull();
   });
 
-  it("交期一律标准档 —— 工具页不选交期,用户在打印单上改", () => {
+  it("交期一律标准档 —— 工具页不选交期,用户在购物袋上改", () => {
     const spec = buildPrintServiceSpecFromGeometry(
       { ...GEOMETRY, deliveryTier: "urgent" },
       UPLOADED
@@ -219,7 +219,7 @@ describe("buildPrintServiceSpecFromGeometry(工具页 → 打印单)", () => {
     expect(spec.modelSizeBytes).toBe(1024);
   });
 
-  it("往返一圈几何不变 —— 打印单上的报价跟工具页量的是同一组数", () => {
+  it("往返一圈几何不变 —— 购物袋上的报价跟工具页量的是同一组数", () => {
     const spec = buildPrintServiceSpecFromGeometry(GEOMETRY, UPLOADED);
     const back = printServiceSpecToQuoteInput(spec);
     expect(back.volumeCM3).toBe(GEOMETRY.volumeCM3);

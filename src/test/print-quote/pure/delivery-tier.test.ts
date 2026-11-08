@@ -14,6 +14,12 @@ import { describe, expect, it } from "vitest";
  *   3. 比例写死成 37% —— 工作室想调价只能改代码发版
  *
  * 这几条都是纯函数的判断,写反例比在 dev 环境手动点便宜得多。
+ *
+ * ## 取整口径(2026-11-08)
+ *
+ * 计价**一律向上取整到分** —— 工作室的原话「计价需要向上取整」。加价也是
+ * 用户付的钱,同样向上。所以工作室那张参考表在 ¥55.81 的活上,
+ * 72 小时那档从 +¥5.58 变成 **+¥5.59**(48 小时那档不变)。
  */
 
 import {
@@ -96,16 +102,17 @@ describe("getDeliveryTier", () => {
 });
 
 describe("computeDeliveryFeeCents", () => {
-  it("加价 = round(小计 × 比例)", () => {
+  it("加价 = ceil(小计 × 比例)", () => {
     expect(computeDeliveryFeeCents(10_000, "express")).toBe(1000);
     expect(computeDeliveryFeeCents(10_000, "urgent")).toBe(3700);
     expect(computeDeliveryFeeCents(10_000, "standard")).toBe(0);
   });
 
-  it("工作室那张表:¥55.81 的活 → 48 小时 +¥20.65 / 72 小时 +¥5.58 / 96 小时 +¥0.00", () => {
+  it("工作室那张表:¥55.81 的活 → 48 小时 +¥20.65 / 72 小时 +¥5.59 / 96 小时 +¥0.00", () => {
     const subtotal = 5581; // 分
     expect(computeDeliveryFeeCents(subtotal, "urgent")).toBe(2065);
-    expect(computeDeliveryFeeCents(subtotal, "express")).toBe(558);
+    // 5581 × 0.10 = 558.1 → **向上取整 559**(原来是四舍五入的 558)
+    expect(computeDeliveryFeeCents(subtotal, "express")).toBe(559);
     expect(computeDeliveryFeeCents(subtotal, "standard")).toBe(0);
   });
 
@@ -118,11 +125,27 @@ describe("computeDeliveryFeeCents", () => {
     expect(ratio).toBeLessThan(3.8);
   });
 
-  it("四舍五入到分 —— 明细加起来必须等于合计", () => {
+  it("向上取整到分 —— 明细加起来必须等于合计", () => {
     // 5581 × 0.37 = 2064.97 → 2065
     expect(computeDeliveryFeeCents(5581, "urgent")).toBe(2065);
-    // 1001 × 0.37 = 370.37 → 370
-    expect(computeDeliveryFeeCents(1001, "urgent")).toBe(370);
+    // 1001 × 0.37 = 370.37 → **371**(向上取整;四舍五入是 370)
+    expect(computeDeliveryFeeCents(1001, "urgent")).toBe(371);
+  });
+
+  it("**绝不向下取整** —— 有一丝零头就往上一分", () => {
+    // 999 × 0.1 = 99.9 → 100(不是 99)
+    expect(computeDeliveryFeeCents(999, "express")).toBe(100);
+    // 1 × 0.37 = 0.37 → 1(不是 0)
+    expect(computeDeliveryFeeCents(1, "urgent")).toBe(1);
+  });
+
+  it("浮点不许多收那一分 —— 1.1 × 100 是 110.00000000000001", () => {
+    // 1001 × 0.1 = 100.10000000000001 → 101(真值 100.1 → 101)
+    expect(computeDeliveryFeeCents(1001, "express")).toBe(101);
+    // 1000 × 0.1 = 100.00000000000001 → 100(**不是 101** —— 浮点误差不能变成钱)
+    expect(computeDeliveryFeeCents(1000, "express")).toBe(100);
+    // 1000 × 0.37 = 370.00000000000006 → 371? 真值 370 → 370
+    expect(computeDeliveryFeeCents(1000, "urgent")).toBe(370);
   });
 
   it("基数是 0 / 负数 / 非数 → 0(不加价,不报错)", () => {
@@ -163,7 +186,7 @@ describe("computePrintQuote —— 交期加价接进报价", () => {
     expect(quote?.deliveryHours).toBe(96);
   });
 
-  it("加急档的加价 = round(小计 × 比例)", () => {
+  it("加急档的加价 = ceil(小计 × 比例)", () => {
     const quote = computePrintQuote(SETTINGS, {
       ...base,
       deliveryTier: "express",

@@ -22,8 +22,6 @@ import type {
 } from "@/features/print-quote/lib/delivery-tier";
 import type { PrintSupportFeeBand } from "@/features/print-quote/lib/quote-types";
 
-import type { CartKind } from "./lib/cart-kind";
-
 /* -------------------------------------------------------------------------- */
 /*  Product / Variant(对齐 atelier store 的 Product 契约)                     */
 /* -------------------------------------------------------------------------- */
@@ -332,13 +330,6 @@ export interface CartLineItem {
 
 export interface Cart {
   id: string;
-  /**
-   * 车的性质(2026-11-06)
-   *
-   * `storefront` 商城购物袋 / `print` 打印单。打印服务**不走商城购物袋**
-   * —— 工作室的说法:「模型打印是不走商城正常的购物车的,而是走打印下单」。
-   */
-  kind: CartKind;
   /** 单币种 CNY(简化,见 plan) */
   currencyCode: typeof PRICE_CURRENCY;
   /** 区域代码 */

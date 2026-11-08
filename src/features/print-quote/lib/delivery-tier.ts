@@ -34,6 +34,8 @@
  * 各写一份迟早漂移(前端显示 37%、后端收 35%)。
  */
 
+import { ceilCents } from "@/features/print-quote/lib/rounding";
+
 /* -------------------------------------------------------------------------- */
 /*  档位                                                                      */
 /* -------------------------------------------------------------------------- */
@@ -103,14 +105,18 @@ export function getDeliveryTier(id: DeliveryTierId): DeliveryTier {
  * 交期加价(分)
  *
  * ```
- * fee = round(小计 × 比例)
+ * fee = ceil(小计 × 比例)
  * ```
  *
  * 基数是**报价小计**(克重费 + 后处理 + 支撑加价),不是总价 —— 加价不能自己
  * 把自己算进去(拿含加价的总价当基数,就成了「加价 = (小计 + 加价) × 比例」,
  * 解出来的加价比直觉高,而且用户看到的合计跟明细对不上)。
  *
- * 四舍五入到分 —— 明细加起来必须等于合计,差一分钱用户都会来问。
+ * **向上取整到分**(2026-11-08 工作室的要求)—— 计价一律向上取整,详见
+ * `rounding.ts` 的文件头。加价也是用户付的钱,同样向上取整。
+ *
+ * > 工作室那张参考表(¥55.81 的活:48 小时 +¥20.65 / 72 小时 +¥5.58)
+ * > 在向上取整的口径下,72 小时那档变成 **+¥5.59**(48 小时那档不变)。
  */
 export function computeDeliveryFeeCents(
   subtotalCents: number,
@@ -120,5 +126,5 @@ export function computeDeliveryFeeCents(
   if (!Number.isFinite(subtotalCents) || subtotalCents <= 0) return 0;
   const rate = rates[tierId] ?? 0;
   if (!Number.isFinite(rate) || rate <= 0) return 0;
-  return Math.round(subtotalCents * rate);
+  return ceilCents(subtotalCents * rate);
 }

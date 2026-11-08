@@ -88,7 +88,10 @@ export function PrintOrdersView({
         description={t("list.count", { count: orders.length })}
         action={
           <Button asChild variant="ghost" size="sm" className="rounded-full">
-            <Link href="/print-order">{t("list.newOrder")}</Link>
+            {/* 「新建」＝去工具页量一个模型 —— 打印服务并进商城购物袋后,
+                没有独立的打印单页了(工作室的说法:「不要 print-order,
+                进入商城那个」)。 */}
+            <Link href="/tools/workbench">{t("list.newOrder")}</Link>
           </Button>
         }
       />

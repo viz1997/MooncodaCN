@@ -37,7 +37,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { getUserAddress } from "@/features/address/queries";
-import { cartCookieName } from "@/features/storefront/lib/cart-store";
+import { CART_COOKIE_NAME } from "@/features/storefront/lib/cart-store";
 import { CheckoutError, checkout } from "@/features/storefront/lib/checkout";
 import { withApiLogging } from "@/lib/api-logger";
 import { getSessionFromRequest } from "@/lib/auth/request-session";
@@ -65,16 +65,6 @@ const checkoutSchema = z.object({
    */
   locale: z.enum(["en", "zh"]).nullish(),
   /**
-   * 结算哪张车(2026-11-06)
-   *
-   * `storefront` 商城购物袋(默认)/ `print` 打印单。两种车的钱不一样:
-   * 打印单没有运费(打印服务的价就是报价本身)。
-   *
-   * **车从 cookie 取**,不接受客户端指定 id —— 商城购物袋读
-   * `wjp_cart_id`,打印单读 `wjp_print_cart_id`。
-   */
-  cartKind: z.enum(["storefront", "print"]).nullish(),
-  /**
    * 收款通道(2026-11-05)
    *
    * 不传 = 服务端挑第一个「开放了而且配好了」的通道(`ENABLED_PAYMENT_CHANNELS`
@@ -93,8 +83,6 @@ function statusForCode(code: CheckoutError["code"]): number {
     case "CART_NOT_FOUND":
       return 404;
     case "CART_EMPTY":
-      return 400;
-    case "CART_KIND_MISMATCH":
       return 400;
     case "PRICING_FAILED":
       return 422;
@@ -159,20 +147,12 @@ async function handle(request: NextRequest) {
 
   // 4. 车 —— 从 cookie 拿,不接受客户端指定
   //
-  //    商城购物袋和打印单是**两个 cookie**(2026-11-06):`wjp_cart_id` /
-  //    `wjp_print_cart_id`。结算哪张车由 `cartKind` 决定,车本身永远从
-  //    cookie 取 —— 客户端指定 id 的话,就能拿别人的车去结算。
-  const cartKind = parsed.data.cartKind ?? "storefront";
-  const cartId = (await cookies()).get(cartCookieName(cartKind))?.value;
+  //    现在只有**一张车**(2026-11-08):打印服务跟目录商品装同一个购物袋。
+  //    车永远从 cookie 取 —— 客户端指定 id 的话,就能拿别人的车去结算。
+  const cartId = (await cookies()).get(CART_COOKIE_NAME)?.value;
   if (!cartId) {
     return NextResponse.json(
-      {
-        error: "CART_NOT_FOUND",
-        message:
-          cartKind === "print"
-            ? "打印单不存在或已过期"
-            : "购物车不存在或已过期",
-      },
+      { error: "CART_NOT_FOUND", message: "购物车不存在或已过期" },
       { status: 404, headers: getRateLimitHeaders(rl) }
     );
   }
@@ -181,7 +161,6 @@ async function handle(request: NextRequest) {
   try {
     const result = await checkout({
       cartId,
-      cartKind,
       userId: user.id,
       email: user.email,
       address: {

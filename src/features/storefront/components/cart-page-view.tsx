@@ -31,11 +31,17 @@
  * 一版(`cart-drawer.tsx` / `checkout-view.tsx` 都是)。这一页跟着走,别单独
  * 开一套 i18n(那会让「中文抽屉 → 英文购物袋页 → 中文结算页」更割裂)。
  *
- * ## 这一页**只有目录商品**
+ * ## 这一页**两种行都有**(2026-11-08)
  *
- * 打印服务走自己的「打印单」(`/print-order`)—— 工作室的要求:「模型打印是
- * 不走商城正常的购物车的,而是走打印下单」。所以这一页不判 printSpec、不
- * 画包裹图标、不给「恒为一件」的特例。
+ * 打印服务并进商城购物袋了 —— 工作室的说法:「不要 print-order,进入商城
+ * 那个」。所以这一页上:
+ *
+ * - **目录商品行** —— 有缩略图、有 +/− 数量(阶梯折扣按数量算)
+ * - **打印服务行** —— 画包裹图标、**没有 +/−**(一件活一个模型)、多一个
+ *   交期档位选择器
+ *
+ * 判据是「`metadata` 里有没有 `printSpec`」—— 不是 `productId`(打印服务在
+ * 目录里没有对应的商品,`productId` 是个哨兵值)。
  */
 
 import { Minus, Plus, ShoppingBag, Trash2, Zap } from "lucide-react";
@@ -49,14 +55,17 @@ import { useCart } from "../hooks/use-cart";
 import { computeCartTotals } from "../lib/cart-totals";
 import { findAccessoryVariant } from "../lib/mock-catalog";
 import { PRICING_CONSTANTS } from "../lib/pricing-constants";
+import { getPrintServiceSpec } from "../lib/print-service";
 import { formatSizeWithInches } from "../lib/size-format";
 import type { Cart, CartLineItem } from "../types";
+import { PrintLineRow } from "./print-line-row";
 
 export function CartPageView({ initialCart }: { initialCart: Cart | null }) {
   const {
     cart: cachedCart,
     items: cachedItems,
     updateLineItemQuantity,
+    updateDeliveryTier,
     removeLineItem,
   } = useCart();
 
@@ -70,10 +79,27 @@ export function CartPageView({ initialCart }: { initialCart: Cart | null }) {
 
   const totals = useMemo(() => computeCartTotals(items), [items]);
 
+  /**
+   * 分成两种行 —— 目录商品 / 打印服务
+   *
+   * 打印服务不画缩略图、也不给 +/− 数量(一活一模型),所以两种行分开渲染。
+   */
+  const printItems = useMemo(
+    () => items.filter((item) => getPrintServiceSpec(item.metadata) !== null),
+    [items]
+  );
+  const catalogItems = useMemo(
+    () => items.filter((item) => getPrintServiceSpec(item.metadata) === null),
+    [items]
+  );
+
   const remainingCents = totals.remainingForFreeShippingCents;
+  // 进度条按**目录商品**那部分算 —— 打印服务不产生快递费,也不该替目录
+  // 商品把 ¥99 的门槛凑满(见 `lib/cart-totals.ts`)。
   const progressPercent = Math.min(
     100,
-    (totals.subtotalCents / PRICING_CONSTANTS.FREE_SHIPPING_THRESHOLD_CENTS) *
+    (totals.catalogSubtotalCents /
+      PRICING_CONSTANTS.FREE_SHIPPING_THRESHOLD_CENTS) *
       100
   );
 
@@ -119,34 +145,38 @@ export function CartPageView({ initialCart }: { initialCart: Cart | null }) {
       <div className="grid lg:grid-cols-[1fr_360px] gap-8 lg:gap-12 items-start">
         {/* 左栏:行列表 */}
         <div className="space-y-6">
-          {/* 免运费进度条 —— 跟抽屉同一套口径 */}
-          <div className="px-5 py-4 bg-secondary/50 border border-border rounded-sm">
-            <p className="text-sm text-foreground/80 mb-2 text-pretty">
-              {remainingCents > 0 ? (
-                <>
-                  还差
-                  <span className="font-semibold text-foreground mx-1">
-                    {formatCents(remainingCents)}
+          {/* 免运费进度条 —— 跟抽屉同一套口径
+              车里没有目录商品时**不摆** —— 打印服务不产生快递费,
+              摆一条「已解锁免运费」是误导。 */}
+          {totals.catalogSubtotalCents > 0 && (
+            <div className="px-5 py-4 bg-secondary/50 border border-border rounded-sm">
+              <p className="text-sm text-foreground/80 mb-2 text-pretty">
+                {remainingCents > 0 ? (
+                  <>
+                    还差
+                    <span className="font-semibold text-foreground mx-1">
+                      {formatCents(remainingCents)}
+                    </span>
+                    即可免运费
+                  </>
+                ) : (
+                  <span className="font-medium text-foreground">
+                    🎉 已解锁免运费
                   </span>
-                  即可免运费
-                </>
-              ) : (
-                <span className="font-medium text-foreground">
-                  🎉 已解锁免运费
-                </span>
-              )}
-            </p>
-            <div className="h-1.5 bg-border rounded-full overflow-hidden">
-              <div
-                className="h-full bg-accent rounded-full transition-all duration-500"
-                style={{ width: `${progressPercent}%` }}
-              />
+                )}
+              </p>
+              <div className="h-1.5 bg-border rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-accent rounded-full transition-all duration-500"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
             </div>
-          </div>
+          )}
 
           {/* 行列表 */}
           <ul className="divide-y divide-border border-y border-border">
-            {items.map((item) => (
+            {catalogItems.map((item) => (
               <CartLineItemRow
                 key={item.id}
                 item={item}
@@ -162,12 +192,34 @@ export function CartPageView({ initialCart }: { initialCart: Cart | null }) {
                 onRemove={() => removeLineItem.mutate({ lineItemId: item.id })}
               />
             ))}
+            {printItems.map((item) => (
+              <PrintLineRow
+                key={item.id}
+                item={item}
+                busy={updateDeliveryTier.isPending || removeLineItem.isPending}
+                onTierChange={(deliveryTier) =>
+                  updateDeliveryTier.mutate({
+                    lineItemId: item.id,
+                    deliveryTier,
+                  })
+                }
+                onRemove={() => removeLineItem.mutate({ lineItemId: item.id })}
+              />
+            ))}
           </ul>
 
-          {/* 改数量 / 删行失败时的提示 */}
-          {(updateLineItemQuantity.error || removeLineItem.error) && (
+          {/* 改数量 / 改交期 / 删行失败时的提示 */}
+          {(updateLineItemQuantity.error ||
+            updateDeliveryTier.error ||
+            removeLineItem.error) && (
             <p className="text-xs text-destructive">
-              {(updateLineItemQuantity.error ?? removeLineItem.error)?.message}
+              {
+                (
+                  updateLineItemQuantity.error ??
+                  updateDeliveryTier.error ??
+                  removeLineItem.error
+                )?.message
+              }
             </p>
           )}
         </div>
@@ -183,6 +235,14 @@ export function CartPageView({ initialCart }: { initialCart: Cart | null }) {
                 {formatCents(totals.subtotalCents)}
               </dd>
             </div>
+            {totals.printSubtotalCents > 0 && (
+              <div className="flex items-center justify-between">
+                <dt className="text-muted-foreground">其中打印服务</dt>
+                <dd className="font-medium">
+                  {formatCents(totals.printSubtotalCents)}
+                </dd>
+              </div>
+            )}
             {totals.discountCents > 0 && (
               <div className="flex items-center justify-between">
                 <dt className="text-muted-foreground">数量折扣</dt>
@@ -240,12 +300,10 @@ function CartLineItemRow({
   onRemove: () => void;
 }) {
   /**
-   * 商城购物袋里只有目录商品
+   * 目录商品行
    *
-   * 打印服务走自己的「打印单」(`/print-order`)—— 工作室的要求:「模型打印
-   * 是不走商城正常的购物车的,而是走打印下单」。这一页不判 printSpec、不
-   * 画包裹图标:读车的时候服务端已经按车的性质过滤过了(见 `cart-store.ts`
-   * 的 `toCart()`)。
+   * 打印服务行走 `PrintLineRow`(包裹图标 / 没有 +/− / 多一个交期档位
+   * 选择器)。这一页按 `printSpec` 把两种行分开渲染。
    */
 
   // 配件名从字典反查 —— metadata 只存 id,改名/下架不用迁移存量 cart
