@@ -204,13 +204,14 @@ export type ModelSettingsPanelProps = {
   onTabChange: (tab: WorkspaceTab) => void;
 
   /**
-   * 卡片最下面的内容 —— 报价条（价格明细 + 合计 + 下单入口）。
+   * 浮层控制条上**额外挂的东西** —— 2026-11-09
    *
-   * 2026-11-01 新增:打印服务报价页要把价格接在克重下面,所以这里开了个
-   * 插槽。**工具模式不传这个 prop** —— 克重工具仍然只显示克重,不显示
-   * 任何价格(见 pricing-calculator.tsx 的边界说明)。
+   * 打印服务把「报价」那颗按钮挂在这儿(3D 视口底下那条控制条)—— 点一下
+   * 弹报价弹窗,弹窗里下单。以前是右栏一整列(288px),把视口挤扁了。
+   *
+   * **控制条是深色的** —— 挂进来的东西要自己按深色配色写。
    */
-  quote?: ReactNode;
+  toolbarExtra?: ReactNode;
 
   /** 尺寸调节状态 —— 父组件持有，改动即时生效 */
   dimMode: DimMode;
@@ -334,7 +335,7 @@ export function ModelSettingsPanel({
   weight,
   tab,
   onTabChange,
-  quote,
+  toolbarExtra,
   dimMode,
   uniformScale,
   scaleFactor,
@@ -537,20 +538,19 @@ export function ModelSettingsPanel({
   if (!model && loadStatus === "idle") return null;
 
   return (
-    <div className={cn(!fullscreen && "xl:flex xl:items-start xl:gap-4")}>
+    <div>
       {/* ---------- 深色 3D 应用 ----------
           **统一用「以前那个检查工具」的设计** —— 一整块深色应用:
           头部(文件身份)→ 视角切换条 → 左边信息栏 + 右边 3D 视口。
           克重 / 检查两个视角换的是**左边那一栏的内容**,
           整块外观不变。
 
-          `xl:flex-1 xl:min-w-0` —— 右侧让出「提交打印订单」那一栏的位置。 */}
+          2026-11-09:右边那一栏(288px 的报价卡)整个撤掉了 —— 报价改成视口
+          底下那条控制条上的「报价」按钮 + 一个弹窗。视口因此宽了一大截。 */}
       <div
         ref={appRef}
         className={cn(
           "rounded-xl border border-zinc-800 bg-zinc-950 text-zinc-100 shadow-sm overflow-hidden",
-          // 让出右侧「提交打印订单」那一栏(全屏时整块占屏,不需要)
-          !fullscreen && "xl:min-w-0 xl:flex-1",
           // 全屏 —— **状态驱动**,不用 `[:fullscreen]:` 变体(见文件头)
           fullscreen &&
             "h-screen w-screen rounded-none border-0 flex flex-col overflow-hidden"
@@ -1008,6 +1008,22 @@ export function ModelSettingsPanel({
                           {t("preview.supportPending")}
                         </span>
                       )}
+                      {/*
+                        额外挂的东西(2026-11-09)—— 打印服务的「报价」按钮
+                        挂在这儿:点一下弹报价弹窗,弹窗里下单。
+
+                        以前是右栏一整列(288px),把 3D 视口挤扁了
+                        (工作室的原话:「把预览区挤到了左边」)。
+                      */}
+                      {toolbarExtra ? (
+                        <>
+                          <span
+                            className="mx-0.5 hidden h-4 w-px bg-zinc-700 sm:block"
+                            aria-hidden
+                          />
+                          {toolbarExtra}
+                        </>
+                      ) : null}
                     </div>
                   )}
                 </div>
@@ -1262,30 +1278,6 @@ export function ModelSettingsPanel({
           </>
         )}
       </div>
-
-      {/* ---------- 下单出口(右侧那一栏) ----------
-          在**每一个**视角都在 —— 检查完就该能下单,不该再跳回
-          「克重」那一栏找按钮。
-
-          **在深色应用外面** —— 它是页面里的一张浅色卡(工作室的
-          「提交打印订单」按钮),不是 3D 应用的一部分。
-
-          **摆在右侧**(2026-11-08)—— 原来它在整块工作台**下面**,
-          量完重量的用户得往下滚才看得见那颗按钮。放在右边那一栏:
-          模型在左,下单按钮在右,眼睛不用来回找。
-
-          **断点用 `xl`(1280px),不是 `lg`** —— 窄屏并排的话视口只剩
-          ~250px,3D 视口挤得没法看。窄屏仍然是上下排。
-
-          **这一栏 288px**(2026-11-09)—— 以前 320px。加上右边这一栏之后,
-          3D 视口被挤到只剩 ~500px(工作室的原话:「把预览区挤到了左边」)。
-          那一栏里只摆**预估报价 + 「填写下单信息」那颗按钮** —— 下单表单
-          是展开在**工作台下面**的,不是塞在这一栏里 —— 所以 288px 够用。 */}
-      {showViewer && model && geometry && quote && (
-        <div className="mt-4 w-full xl:mt-0 xl:w-[288px] xl:shrink-0">
-          {quote}
-        </div>
-      )}
     </div>
   );
 }

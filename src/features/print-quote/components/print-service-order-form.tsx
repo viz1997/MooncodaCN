@@ -1,13 +1,18 @@
 "use client";
 
 /**
- * 打印服务的下单表单 —— **展开在工作台下面**,不是弹窗
+ * 打印服务的下单表单 —— 住在**报价弹窗**里(2026-11-09)
  *
- * ## 为什么在下面,不在这张卡里
+ * ## 它现在住在哪儿
  *
- * 这张卡在右栏,只有 320px 宽。表单要装的东西不少:称呼 / 电话 / 备注 /
- * 收货地址(还要能新建)/ 交期三档 / 支付方式 / 打印须知 —— 塞进 320px 会挤
- * 成一列窄输入框。展开在工作台下面,一屏能看完。
+ * ```
+ * /tools/workbench → 视口底下那条控制条上点「报价」
+ *   → 弹窗:预估报价 + 这张表单 → 提交 → 服务端重算报价 + 建工单
+ * ```
+ *
+ * 以前它在工作台**下面**展开(右栏那张 288px 的卡里装不下这么多字段)。
+ * 现在整块搬进报价弹窗 —— 工作室的原话:「点击后显示报价弹窗,弹窗里面去
+ * 下单」。
  *
  * ## 表单自己不碰网络
  *
@@ -116,6 +121,22 @@ export type PrintServiceOrderFormProps = {
   onSubmit: (values: PrintServiceOrderValues) => void;
   /** 收起表单 */
   onCancel: () => void;
+  /**
+   * 外壳的 className —— 2026-11-09
+   *
+   * 默认是一张**卡片**(以前展开在工作台下面)。现在这张表单住在**报价弹窗**
+   * 里(`print-service-quote-dialog.tsx`),弹窗自己就是一层壳,再套一张
+   * 带边框的卡片会变成「框里套框」—— 所以那边传的是去掉边框的 className。
+   */
+  className?: string;
+  /**
+   * 表单头上那个总额要不要摆 —— 2026-11-09
+   *
+   * **默认摆**。报价弹窗里传 `false` —— 弹窗上方那块**预估报价**已经摆着
+   * 同一个数(应付净额 = 报价合计 − 服务端算的优惠),两个大字号金额摞在
+   * 一屏里,用户会以为算了两遍。
+   */
+  showTotal?: boolean;
 };
 
 export function PrintServiceOrderForm({
@@ -138,6 +159,8 @@ export function PrintServiceOrderForm({
   onApplyCoupon,
   onSubmit,
   onCancel,
+  className = "mt-6 rounded-xl border border-border bg-card p-5 shadow-sm",
+  showTotal = true,
 }: PrintServiceOrderFormProps) {
   const t = useTranslations("PrintQuote");
 
@@ -211,10 +234,7 @@ export function PrintServiceOrderForm({
   };
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="mt-6 rounded-xl border border-border bg-card p-5 shadow-sm"
-    >
+    <form onSubmit={handleSubmit} className={className}>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-base font-semibold text-foreground">
@@ -224,7 +244,7 @@ export function PrintServiceOrderForm({
             {t("order.formSubtitle")}
           </p>
         </div>
-        {quote && (
+        {quote && showTotal && (
           <div className="text-right">
             <p className="text-[11px] text-muted-foreground">
               {t("quote.total")}

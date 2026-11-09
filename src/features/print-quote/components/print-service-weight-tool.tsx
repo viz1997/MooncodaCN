@@ -5,10 +5,11 @@
  *
  * ## 它是打印服务的**第一步**
  *
- * 工作室的流程(2026-11-08 改):
+ * 工作室的流程(2026-11-09 改):
  *
  *   /tools/workbench(量重量的工具,公开)
- *     → 量好 → 点「填写下单信息」→ 表单展开在下面
+ *     → 量好 → 视口底下那条控制条上点「报价」
+ *     → 弹窗:服务端算的预估价 + 下单表单
  *     → 提交 → 服务端重算报价 + 建工单
  *     → 跳 `/account/print-orders/{orderNo}` —— 钱在那儿付
  *
@@ -24,7 +25,7 @@
  *
  * | 页面 | 是什么 | 出口 |
  * |---|---|---|
- * | `/tools/workbench` | **工具**:只算不存;右栏那张卡摆一个服务端算的预估价 | 「填写下单信息」→ 表单 → 提交 |
+ * | `/tools/workbench` | **工具**:只算不存;区域内一颗「报价」按钮 | 点「报价」→ 弹窗里填单 → 提交 |
  * | `/account/print-orders` | **我的打印订单**:工单列表 | 详情页付款 / 看进度 |
  *
  * ## 两条边界照旧
@@ -38,36 +39,25 @@
  * 工具页自己不卖东西,但商城里能一键跳过去量。
  */
 
+import { Receipt } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useRef, useState } from "react";
 
 import type { AddressView } from "@/features/address/types";
-import type {
-  CouponErrorCode,
-  CouponView,
-} from "@/features/coupon/lib/coupon-calc";
 import { PricingCalculator } from "@/features/pricing/components/pricing-calculator";
 import type {
   EnsureSupportFn,
   PricingModelPayload,
 } from "@/features/pricing/components/pricing-calculator-types";
-import {
-  PrintServiceOrderForm,
-  type PrintServiceOrderFormProps,
-  type PrintServiceOrderValues,
-} from "@/features/print-quote/components/print-service-order-form";
-import { PrintServiceSubmitCard } from "@/features/print-quote/components/print-service-submit-card";
+import type { PrintServiceOrderValues } from "@/features/print-quote/components/print-service-order-form";
+import { PrintServiceQuoteDialog } from "@/features/print-quote/components/print-service-quote-dialog";
 import {
   DEFAULT_DELIVERY_TIER,
-  type DeliveryRates,
   type DeliveryTierId,
 } from "@/features/print-quote/lib/delivery-tier";
 import type { ClientPrintConfig } from "@/features/print-quote/lib/pricing-settings";
 import { printOrderErrorMessageKey } from "@/features/print-quote/lib/print-order-error";
-import type {
-  PrintQuote,
-  PrintQuoteInput,
-} from "@/features/print-quote/lib/quote-types";
+import type { PrintQuoteInput } from "@/features/print-quote/lib/quote-types";
 import { uploadModelFile } from "@/features/print-quote/lib/upload-model";
 import { toRequestError } from "@/features/shared/lib/request-error";
 import { useRouter } from "@/i18n/routing";
@@ -119,23 +109,18 @@ export function PrintServiceWeightTool({
   /*  下单状态                                                            */
   /* ------------------------------------------------------------------ */
 
-  /** 表单展开了没有 —— 点右栏那颗「填写下单信息」才展开 */
-  const [formOpen, setFormOpen] = useState(false);
+  /**
+   * 报价弹窗开着没有 —— 2026-11-09
+   *
+   * 「报价」那颗按钮在**工作台区域内**(视口底下那条浮层控制条上)—— 点一下
+   * 弹这个窗,弹窗里是服务端算的预估价 + 下单表单。
+   */
+  const [quoteOpen, setQuoteOpen] = useState(false);
 
   /** 交期档位 —— 默认标准档,加价由服务端按比例算 */
   const [deliveryTier, setDeliveryTier] = useState<DeliveryTierId>(
     DEFAULT_DELIVERY_TIER
   );
-
-  /**
-   * 服务端报价
-   *
-   * **只在新报价到达时更新** —— 换档位的那一下会重新去服务端问价,那几百毫
-   * 秒里报价是「旧的」。要是这时候把报价清成 null,交期选择器就**没有比例
-   * 了**(比例是报价带回来的)—— 三档的加价会整块消失。
-   */
-  const [quote, setQuote] = useState<PrintQuote | null>(null);
-  const [rates, setRates] = useState<DeliveryRates | null>(null);
 
   /** 选中的收货地址 */
   const [addressId, setAddressId] = useState<string | null>(
@@ -144,20 +129,6 @@ export function PrintServiceWeightTool({
 
   /** 选中的收款通道 —— null = 让服务端挑第一个「开放了而且配好了」的 */
   const [channel, setChannel] = useState<string | null>(null);
-
-  /**
-   * 优惠码(2026-11-08)
-   *
-   * - `couponCode` —— 用户输的码(只是**码**,不带钱)
-   * - `coupon` —— 服务端算好的优惠快照(减了多少)
-   * - `couponError` —— 券不可用的精确原因码
-   *
-   * **折扣金额是服务端算的** —— 客户端一个加法都不做(能被改)。
-   * 预览组件问一次价,顺带把这三样抬上来。
-   */
-  const [couponCode, setCouponCode] = useState<string | null>(null);
-  const [coupon, setCoupon] = useState<CouponView | null>(null);
-  const [couponError, setCouponError] = useState<CouponErrorCode | null>(null);
 
   /** 提交进度 / 上一次失败的话 */
   const [phase, setPhase] = useState<"idle" | "submitting">("idle");
@@ -172,47 +143,6 @@ export function PrintServiceWeightTool({
 
   const handleQuoteInput = useCallback((next: PrintQuoteInput | null) => {
     setInput(next);
-  }, []);
-
-  const handleQuote = useCallback((next: PrintQuote | null) => {
-    if (!next) return;
-    setQuote(next);
-    setRates(next.deliveryRates);
-  }, []);
-
-  /**
-   * 优惠结果 —— 预览组件问价时顺带带回来的
-   *
-   * **服务端算的** —— 客户端只负责显示。
-   */
-  const handleCoupon = useCallback(
-    (nextCoupon: CouponView | null, nextError: CouponErrorCode | null) => {
-      setCoupon(nextCoupon);
-      setCouponError(nextError);
-    },
-    []
-  );
-
-  /**
-   * 应用 / 摘掉优惠码
-   *
-   * **只是把码记下来** —— 真正算钱的是预览组件那一次问价(服务端算)。
-   * 码一变,预览组件的 effect 重跑一次,新的优惠结果就回来了。
-   *
-   * 空串 = 摘掉。
-   */
-  const handleApplyCoupon = useCallback((code: string) => {
-    const trimmed = code.trim();
-    if (!trimmed) {
-      setCouponCode(null);
-      setCoupon(null);
-      setCouponError(null);
-      return;
-    }
-    setCouponCode(trimmed);
-    // 上一次的结果作废 —— 新码还没问过价
-    setCoupon(null);
-    setCouponError(null);
   }, []);
 
   /**
@@ -309,27 +239,6 @@ export function PrintServiceWeightTool({
     [model, ensureSupport, locale, router, t]
   );
 
-  const formProps: Omit<
-    PrintServiceOrderFormProps,
-    "phase" | "error" | "onSubmit" | "onCancel"
-  > = {
-    quote,
-    rates,
-    deliveryTier,
-    onDeliveryTierChange: setDeliveryTier,
-    addresses,
-    addressId,
-    onAddressChange: setAddressId,
-    user,
-    modelName: model?.model?.name ?? "",
-    channel,
-    onChannelChange: setChannel,
-    couponCode,
-    coupon,
-    couponError,
-    onApplyCoupon: handleApplyCoupon,
-  };
-
   return (
     <>
       <PricingCalculator
@@ -338,34 +247,62 @@ export function PrintServiceWeightTool({
         onModelChange={handleModelChange}
         onQuoteInput={handleQuoteInput}
         onEnsureSupport={handleEnsureSupport}
-        quoteSlot={
-          <PrintServiceSubmitCard
-            input={input}
-            deliveryTier={deliveryTier}
-            onQuote={handleQuote}
-            couponCode={couponCode}
-            onCoupon={handleCoupon}
-            onStart={() => setFormOpen(true)}
-            formOpen={formOpen}
-            isLoggedIn={isLoggedIn}
-            signInUrl={signInUrl}
-          />
-        }
+        quoteActionSlot={<QuoteButton onClick={() => setQuoteOpen(true)} />}
       />
 
-      {formOpen && isLoggedIn ? (
-        <PrintServiceOrderForm
-          {...formProps}
-          phase={phase}
-          error={error}
-          onSubmit={handleSubmit}
-          onCancel={() => {
-            setFormOpen(false);
-            setError(null);
-          }}
-        />
-      ) : null}
+      {/*
+        报价弹窗 —— 预估价 + 下单表单都在里面(2026-11-09)
+
+        报价 / 交期比例 / 优惠码的结果**住在弹窗里** —— 外面不留一份旧的,
+        免得弹窗里摆着上一次的价。
+      */}
+      <PrintServiceQuoteDialog
+        open={quoteOpen}
+        onOpenChange={(next) => {
+          setQuoteOpen(next);
+          if (!next) setError(null);
+        }}
+        input={input}
+        deliveryTier={deliveryTier}
+        onDeliveryTierChange={setDeliveryTier}
+        addresses={addresses}
+        addressId={addressId}
+        onAddressChange={setAddressId}
+        user={user}
+        modelName={model?.model?.name ?? ""}
+        phase={phase}
+        error={error}
+        channel={channel}
+        onChannelChange={setChannel}
+        isLoggedIn={isLoggedIn}
+        signInUrl={signInUrl}
+        onSubmit={handleSubmit}
+      />
     </>
+  );
+}
+
+/**
+ * 「报价」那颗按钮 —— 挂在视口底下那条浮层控制条上(2026-11-09)
+ *
+ * **控制条是深色的** —— 所以这颗按钮也按深色写(亮底 = 主行动)。
+ *
+ * 以前这一块是右栏一整列(288px 的「提交打印订单」卡片)—— 那一列把 3D 视口
+ * 挤到只剩 ~500px(工作室的原话:「把预览区挤到了左边」)。
+ */
+function QuoteButton({ onClick }: { onClick: () => void }) {
+  const t = useTranslations("PrintQuote");
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={t("entry.quoteTitle")}
+      className="flex items-center gap-1.5 rounded-md bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-900 transition-colors hover:bg-white"
+    >
+      <Receipt className="size-3.5" />
+      {t("entry.quote")}
+    </button>
   );
 }
 

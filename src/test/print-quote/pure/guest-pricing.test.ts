@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
  *
  * ```
  * /tools/workbench(公开工具页)
- *   → 量完模型 →「提交打印订单」那张卡上摆一个**预估报价**
+ *   → 量完模型 → 区域内点「报价」→ 弹窗里摆一个**预估报价**
  *   → 访客也能看到(工作室现在就要这个行为)
  *   → 后台 `/admin/print-pricing` 一个开关能随时关掉
  * ```
@@ -63,8 +63,15 @@ const SETTINGS = "src/features/print-quote/lib/pricing-settings.ts";
 const STORE = "src/features/print-quote/lib/pricing-store.ts";
 const PREVIEW =
   "src/features/print-quote/components/print-service-quote-preview.tsx";
-const SUBMIT_CARD =
-  "src/features/print-quote/components/print-service-submit-card.tsx";
+/**
+ * 报价弹窗 —— 2026-11-09
+ *
+ * 以前预估报价在右栏那张「提交打印订单」卡片里(`print-service-submit-card.tsx`,
+ * 2026-11-09 删掉了)。现在整块搬进**报价弹窗** —— 工作室的原话:「报价不放在
+ * 右侧了,直接在区域内用一个报价按钮,点击后显示报价弹窗,弹窗里面去下单」。
+ */
+const QUOTE_DIALOG =
+  "src/features/print-quote/components/print-service-quote-dialog.tsx";
 
 describe("访客可见计价 —— 后台那个开关", () => {
   it("后台的计价设置里有一颗开关", () => {
@@ -185,10 +192,22 @@ describe("访客可见计价 —— 工具页那个预估报价", () => {
     expect(code).toContain("QUOTE_DEBOUNCE_MS");
   });
 
-  it("那张卡上确实挂着这个预估报价", () => {
-    const code = stripComments(read(SUBMIT_CARD));
+  it("报价弹窗里确实挂着这个预估报价", () => {
+    const code = stripComments(read(QUOTE_DIALOG));
 
     expect(code).toContain("PrintServiceQuotePreview");
     expect(flat(code)).toContain("<PrintServiceQuotePreview input={input}");
+  });
+
+  it("访客也能看到那个数 —— 弹窗对没登录的人也摆报价", () => {
+    const code = stripComments(read(QUOTE_DIALOG));
+
+    // 报价预览在「有没有登录」那个分支**外面** —— 访客也看得到
+    const previewAt = code.indexOf("<PrintServiceQuotePreview");
+    const guestBranch = code.indexOf("isLoggedIn ? (");
+    expect(previewAt).toBeGreaterThan(-1);
+    expect(guestBranch).toBeGreaterThan(-1);
+    // 预览在分支之前 ⇒ 访客路径也走得到它
+    expect(previewAt).toBeLessThan(guestBranch);
   });
 });

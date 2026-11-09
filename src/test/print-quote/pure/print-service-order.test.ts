@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
  *
  * ```
  * /tools/workbench(量克重,公开工具页)
- *   → 点「填写下单信息」→ 表单展开在下面
+ *   → 区域内点「报价」→ 弹窗(预估报价 + 下单表单)
  *   → 提交 → 服务端重算报价 + 建一张 print_order
  *   → 跳 /account/print-orders/{orderNo} —— 钱在那儿付(微信扫码 / 支付宝跳转)
  * ```
@@ -59,8 +59,14 @@ const CART_LINE_ITEMS_ROUTE =
   "src/app/api/store/carts/[id]/line-items/route.ts";
 const WEIGHT_TOOL =
   "src/features/print-quote/components/print-service-weight-tool.tsx";
-const SUBMIT_CARD =
-  "src/features/print-quote/components/print-service-submit-card.tsx";
+/**
+ * 报价弹窗 —— 2026-11-09
+ *
+ * 以前下单入口在右栏那张「提交打印订单」卡片里(`print-service-submit-card.tsx`,
+ * 2026-11-09 删掉了)。现在:工作台区域内一颗「报价」按钮 → 弹窗 → 弹窗里下单。
+ */
+const QUOTE_DIALOG =
+  "src/features/print-quote/components/print-service-quote-dialog.tsx";
 const DETAIL_VIEW =
   "src/features/print-quote/components/print-order-detail-view.tsx";
 const ORDER_STORE = "src/features/print-quote/lib/order-store.ts";
@@ -193,18 +199,27 @@ describe("打印服务直接建工单 —— 归属校验在服务端", () => {
   });
 });
 
-describe("打印服务直接建工单 —— 那张卡是入口,不是报价条", () => {
-  it("按钮是「填写下单信息」,不是「加入购物袋」", () => {
-    const code = stripComments(read(SUBMIT_CARD));
+describe("打印服务直接建工单 —— 弹窗是入口,不是报价条", () => {
+  it("工作台**区域内**有一颗「报价」按钮,不是右栏一整列", () => {
+    const code = stripComments(read(WEIGHT_TOOL));
 
-    expect(code).toContain('t("order.start")');
-    expect(code).toContain('t("order.continueEditing")');
+    expect(code).toContain('t("entry.quote")');
+    // 挂在视口底下那条浮层控制条上(以前是右栏 288px 那一列)
+    expect(code).toContain("quoteActionSlot={");
     // 购物袋那套词不许再出现
     expect(code).not.toContain("cart");
   });
 
+  it("点开报价弹窗 —— 弹窗里面下单", () => {
+    const code = stripComments(read(QUOTE_DIALOG));
+
+    expect(code).toContain("<PrintServiceQuotePreview");
+    expect(code).toContain("<PrintServiceOrderForm");
+    expect(code).toContain('t("entry.quoteDialogTitle")');
+  });
+
   it("没登录给的是「去登录」,不是「加入购物袋」", () => {
-    const code = stripComments(read(SUBMIT_CARD));
+    const code = stripComments(read(QUOTE_DIALOG));
 
     expect(code).toContain('t("entry.signInCta")');
     expect(code).toContain("href={signInUrl}");

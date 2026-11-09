@@ -1792,20 +1792,17 @@
       }
     },
     "entry": {
-      "title": "Submit print order",
-      "desc": "The measured model becomes a print work order — below is the estimate; confirm the shipping address, delivery tier and total in the form underneath.",
+      "quote": "Quote",
+      "quoteTitle": "See the estimate and fill in the order details",
+      "quoteDialogTitle": "Quote & order",
+      "quoteDialogDesc": "Below is the estimate computed by the server — submit the order details and the work order shows up under “My print orders”, where you pay.",
       "descSignIn": "Print orders are tied to your account. Sign in first, then measure — otherwise the model is lost when the page reloads.",
       "signInCta": "Sign in",
-      "empty": "Pick a model file above before submitting a print order.",
-      "ready": "Model is ready — click to fill in the order details.",
       "errors": {
         "noModel": "No model yet — pick a file above first."
-      },
-      "formHint": "The order form is below the workbench — submit it and the order shows up under “My print orders”, where you pay."
+      }
     },
     "order": {
-      "start": "Enter order details",
-      "continueEditing": "Order details open",
       "formTitle": "Enter order details",
       "formSubtitle": "We'll contact you within one business day to confirm material, colour and lead time.",
       "modelUploadHint": "Your model file is packaged and uploaded only after you submit — for production only, never for training.",

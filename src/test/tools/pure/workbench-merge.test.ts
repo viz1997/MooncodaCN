@@ -349,6 +349,41 @@ describe("工作台 —— 共用一个展示区域", () => {
   });
 });
 
+describe("工作台 —— 报价按钮在区域内,不在右栏(2026-11-09)", () => {
+  it("右栏那一列(288px)整个撤掉了 —— 它把 3D 视口挤成了窄条", () => {
+    const code = stripComments(read(SETTINGS_PANEL));
+
+    // 以前工作台右边有一列 288px 的「提交打印订单」卡片(报价 + 下单入口)。
+    // 工作室把报价改成区域内一颗按钮 ⇒ 那一列没有存在理由了。
+    expect(code).not.toContain("xl:w-[288px]");
+    expect(code).not.toContain("xl:shrink-0");
+  });
+
+  it("报价按钮挂在视口底下那条浮层控制条上", () => {
+    const code = stripComments(read(SETTINGS_PANEL));
+
+    // `toolbarExtra` 插槽 —— 打印服务把「报价」那颗按钮挂在这儿
+    expect(code).toContain("toolbarExtra?: ReactNode");
+    expect(code).toContain("{toolbarExtra ? (");
+
+    // 它得在**控制条**里,不是在别处 —— 控制条上还有「包裹支撑」/「置于平面」/
+    // 「重置视角」。`toolbarExtra` 排在「置于平面」之后 ⇒ 同一控制条。
+    expect(code).toContain("onPlaceOnPlane");
+    expect(code.indexOf("{toolbarExtra ? (")).toBeGreaterThan(
+      code.indexOf("onClick={onPlaceOnPlane}")
+    );
+  });
+
+  it("计算器把 `quoteActionSlot` 接到工作台框架的 `toolbarExtra` 上", () => {
+    const calc = stripComments(read(CALCULATOR));
+
+    expect(calc).toContain("quoteActionSlot?: ReactNode");
+    expect(calc).toContain("toolbarExtra={quoteActionSlot}");
+    // 以前那个插槽叫 `quoteSlot` —— 挂的是整张卡,不是按钮
+    expect(calc).not.toContain("quoteSlot");
+  });
+});
+
 describe("工作台 —— 工具中心只剩一个入口", () => {
   it("工具清单里只有 /tools/workbench", () => {
     // 去掉注释 —— 注释里写着「老地址都 308 跳过来」不算违规,

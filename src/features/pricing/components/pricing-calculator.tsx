@@ -159,7 +159,7 @@ const yieldToUI = (): Promise<void> =>
 export function PricingCalculator({
   showChrome = true,
   onQuoteInput,
-  quoteSlot,
+  quoteActionSlot,
   onModelChange,
   onEnsureSupport,
   clientConfig,
@@ -185,15 +185,18 @@ export function PricingCalculator({
   onQuoteInput?: (input: PrintQuoteInput | null) => void;
 
   /**
-   * 右栏插槽 —— 渲染在右栏克重面板下方。
+   * 工作台区域里的**报价入口** —— 2026-11-09
    *
-   * `/tools/workbench` 放的是「提交打印订单」卡片 —— 卡片上摆服务端算出来的
-   * **预估报价**（2026-11-07 起，访客也能看，后台一个开关管着），出口还是
-   * 把模型加进打印单。
+   * 渲染在 3D 视口底下那条浮层控制条上（`ModelSettingsPanel` 的
+   * `toolbarExtra` 插槽）。`/tools/workbench` 挂的是「报价」那颗按钮 ——
+   * 点一下弹报价弹窗，弹窗里下单。
+   *
+   * **以前是右栏一整列**（288px 的「提交打印订单」卡片）—— 那一列把 3D
+   * 视口挤到只剩 ~500px（工作室的原话：「把预览区挤到了左边」）。
    *
    * 传了才渲染,不传就是空的。
    */
-  quoteSlot?: ReactNode;
+  quoteActionSlot?: ReactNode;
 
   /**
    * 模型就绪回调 —— 父组件要用模型文件本体时用它。
@@ -1930,7 +1933,7 @@ export function PricingCalculator({
                     weight={weightColumn}
                     tab={workspaceTab}
                     onTabChange={handleTabChange}
-                    quote={quoteSlot}
+                    toolbarExtra={quoteActionSlot}
                     dimMode={dimMode}
                     uniformScale={uniformScale}
                     scaleFactor={scaleFactor}
