@@ -620,6 +620,18 @@ async function sendDraftOrder(params: {
 export async function createShopifyDraftOrder(
   request: PaymentRequest
 ): Promise<ShopifyDraftOrder> {
+  // **这条路不支持优惠码**(2026-11-08)
+  //
+  // 草稿单里没有折扣的概念(`acceptAutomaticDiscounts: false`),一个草稿单
+  // 只能设一个总价。带着 `discountCents` 跑 → 我们这边减了折扣、Shopify
+  // 按原价建单 ⇒ **对不上账**(收银台收的比订单应付多)。
+  //
+  // **不要**把折扣摊进各 item 的单价 —— 摊分会引入 `round` 误差,
+  // `Σ round(xᵢ)` 跟 `round(Σ xᵢ)` 不一定相等,逐分相等直接被破坏。
+  if ((request.discountCents ?? 0) > 0) {
+    throw new PaymentProviderError("shopify", "这条通道不支持优惠码");
+  }
+
   // 本仓库的价一律是 `PRICE_CURRENCY` —— 换算由 Shopify 做
   const requestCurrency = request.currency.toUpperCase();
   if (requestCurrency !== PRICE_CURRENCY) {

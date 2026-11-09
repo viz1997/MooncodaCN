@@ -42,6 +42,10 @@ import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useRef, useState } from "react";
 
 import type { AddressView } from "@/features/address/types";
+import type {
+  CouponErrorCode,
+  CouponView,
+} from "@/features/coupon/lib/coupon-calc";
 import { PricingCalculator } from "@/features/pricing/components/pricing-calculator";
 import type {
   EnsureSupportFn,
@@ -141,6 +145,20 @@ export function PrintServiceWeightTool({
   /** 选中的收款通道 —— null = 让服务端挑第一个「开放了而且配好了」的 */
   const [channel, setChannel] = useState<string | null>(null);
 
+  /**
+   * 优惠码(2026-11-08)
+   *
+   * - `couponCode` —— 用户输的码(只是**码**,不带钱)
+   * - `coupon` —— 服务端算好的优惠快照(减了多少)
+   * - `couponError` —— 券不可用的精确原因码
+   *
+   * **折扣金额是服务端算的** —— 客户端一个加法都不做(能被改)。
+   * 预览组件问一次价,顺带把这三样抬上来。
+   */
+  const [couponCode, setCouponCode] = useState<string | null>(null);
+  const [coupon, setCoupon] = useState<CouponView | null>(null);
+  const [couponError, setCouponError] = useState<CouponErrorCode | null>(null);
+
   /** 提交进度 / 上一次失败的话 */
   const [phase, setPhase] = useState<"idle" | "submitting">("idle");
   const [error, setError] = useState<string | null>(null);
@@ -160,6 +178,41 @@ export function PrintServiceWeightTool({
     if (!next) return;
     setQuote(next);
     setRates(next.deliveryRates);
+  }, []);
+
+  /**
+   * 优惠结果 —— 预览组件问价时顺带带回来的
+   *
+   * **服务端算的** —— 客户端只负责显示。
+   */
+  const handleCoupon = useCallback(
+    (nextCoupon: CouponView | null, nextError: CouponErrorCode | null) => {
+      setCoupon(nextCoupon);
+      setCouponError(nextError);
+    },
+    []
+  );
+
+  /**
+   * 应用 / 摘掉优惠码
+   *
+   * **只是把码记下来** —— 真正算钱的是预览组件那一次问价(服务端算)。
+   * 码一变,预览组件的 effect 重跑一次,新的优惠结果就回来了。
+   *
+   * 空串 = 摘掉。
+   */
+  const handleApplyCoupon = useCallback((code: string) => {
+    const trimmed = code.trim();
+    if (!trimmed) {
+      setCouponCode(null);
+      setCoupon(null);
+      setCouponError(null);
+      return;
+    }
+    setCouponCode(trimmed);
+    // 上一次的结果作废 —— 新码还没问过价
+    setCoupon(null);
+    setCouponError(null);
   }, []);
 
   /**
@@ -232,6 +285,8 @@ export function PrintServiceWeightTool({
             addressId: values.addressId,
             locale,
             channel: values.channel,
+            // 优惠码 —— 只传**码**,折扣由服务端算(见 `evaluateCoupon`)
+            couponCode: values.couponCode || null,
           }),
         });
 
@@ -269,6 +324,10 @@ export function PrintServiceWeightTool({
     modelName: model?.model?.name ?? "",
     channel,
     onChannelChange: setChannel,
+    couponCode,
+    coupon,
+    couponError,
+    onApplyCoupon: handleApplyCoupon,
   };
 
   return (
@@ -284,6 +343,8 @@ export function PrintServiceWeightTool({
             input={input}
             deliveryTier={deliveryTier}
             onQuote={handleQuote}
+            couponCode={couponCode}
+            onCoupon={handleCoupon}
             onStart={() => setFormOpen(true)}
             formOpen={formOpen}
             isLoggedIn={isLoggedIn}

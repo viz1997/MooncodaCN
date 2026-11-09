@@ -42,6 +42,14 @@ export type AdminPrintOrder = {
   deliveryFeeCents: number;
   /** 承诺交期(小时) */
   deliveryHours: number;
+  /**
+   * 优惠码(2026-11-08)
+   *
+   * `totalPriceCents` 存的是**应付净额**(= 四项费用之和 − 优惠),
+   * 四个费用列存的是**折前**的 —— 所以后台摆明细时必须补一行「优惠」。
+   */
+  couponCode: string | null;
+  couponDiscountCents: number;
   totalPriceCents: number;
   contactName: string;
   contactEmail: string;
@@ -97,6 +105,8 @@ export function toAdminPrintOrder(row: PrintOrderRow): AdminPrintOrder {
     deliveryTier: row.deliveryTier,
     deliveryFeeCents: row.deliveryFeeCents,
     deliveryHours: getDeliveryTier(row.deliveryTier).hours,
+    couponCode: row.couponCode,
+    couponDiscountCents: row.couponDiscountCents,
     totalPriceCents: row.totalPriceCents,
     contactName: row.contactName,
     contactEmail: row.contactEmail,

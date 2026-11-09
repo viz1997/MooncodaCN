@@ -6,6 +6,7 @@ import {
   Cpu,
   FolderOpen,
   Frame,
+  Gift,
   Globe,
   Headset,
   Image,
@@ -361,6 +362,14 @@ export const adminNav: NavGroup[] = [
         title: "文件管理",
         href: "/admin/files",
         icon: FolderOpen,
+      },
+      // 2026-11-08：优惠码后台 —— 订单级优惠码(满减 / 百分比 / 免运费 /
+      // 新人首单),商城订单和打印工单都能用。折扣由服务端算,这一页只管
+      // 「这张券长什么样、什么时候能用、谁能用」。
+      {
+        title: "优惠码",
+        href: "/admin/coupons",
+        icon: Gift,
       },
       {
         title: "商品管理",

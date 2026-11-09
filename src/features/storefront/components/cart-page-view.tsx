@@ -52,11 +52,13 @@ import { findAccessoryVariant } from "../lib/mock-catalog";
 import { PRICING_CONSTANTS } from "../lib/pricing-constants";
 import { formatSizeWithInches } from "../lib/size-format";
 import type { Cart, CartLineItem } from "../types";
+import { CouponField } from "./coupon-field";
 
 export function CartPageView({ initialCart }: { initialCart: Cart | null }) {
   const {
     cart: cachedCart,
     items: cachedItems,
+    coupon: cachedCoupon,
     updateLineItemQuantity,
     removeLineItem,
   } = useCart();
@@ -69,7 +71,19 @@ export function CartPageView({ initialCart }: { initialCart: Cart | null }) {
    */
   const items = cachedCart ? cachedItems : (initialCart?.items ?? []);
 
-  const totals = useMemo(() => computeCartTotals(items), [items]);
+  /**
+   * 优惠效果 —— 跟行同一个来源
+   *
+   * **折扣金额是服务端算的**(`cart.coupon` 这个快照),客户端一个加法都不做。
+   * 优惠码住在车上(`cart.coupon_code`),每次读车都**现算**一遍 —— 车里的行数
+   * 变了,门槛可能就不满足了。
+   */
+  const coupon = cachedCart ? cachedCoupon : (initialCart?.coupon ?? null);
+
+  const totals = useMemo(
+    () => computeCartTotals(items, coupon),
+    [items, coupon]
+  );
 
   const remainingCents = totals.remainingForFreeShippingCents;
   const progressPercent = Math.min(
@@ -179,6 +193,11 @@ export function CartPageView({ initialCart }: { initialCart: Cart | null }) {
         <aside className="lg:sticky lg:top-6 border border-border rounded-sm p-6 bg-card">
           <h2 className="eyebrow text-muted-foreground mb-4">金额</h2>
 
+          {/* 优惠码 —— 跟抽屉 / 结算页共用一份 */}
+          <div className="mb-5">
+            <CouponField />
+          </div>
+
           <dl className="space-y-2.5 text-sm">
             <div className="flex items-center justify-between">
               <dt className="text-muted-foreground">小计</dt>
@@ -191,6 +210,14 @@ export function CartPageView({ initialCart }: { initialCart: Cart | null }) {
                 <dt className="text-muted-foreground">数量折扣</dt>
                 <dd className="font-medium text-accent">
                   -{formatCents(totals.discountCents)}
+                </dd>
+              </div>
+            )}
+            {totals.couponDiscountCents > 0 && (
+              <div className="flex items-center justify-between">
+                <dt className="text-muted-foreground">优惠</dt>
+                <dd className="font-medium text-accent">
+                  -{formatCents(totals.couponDiscountCents)}
                 </dd>
               </div>
             )}

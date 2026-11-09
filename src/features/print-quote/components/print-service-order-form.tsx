@@ -36,6 +36,10 @@ import { useState } from "react";
 
 import { AddressSection } from "@/features/address/components/address-section";
 import type { AddressView } from "@/features/address/types";
+import type {
+  CouponErrorCode,
+  CouponView,
+} from "@/features/coupon/lib/coupon-calc";
 import { PaymentChannelPicker } from "@/features/payments/components/payment-channel-picker";
 import { DeliveryTierPicker } from "@/features/print-quote/components/delivery-tier-picker";
 import type {
@@ -54,6 +58,12 @@ export type PrintServiceOrderValues = {
   addressId: string;
   deliveryTier: DeliveryTierId;
   channel: string | null;
+  /**
+   * 优惠码(2026-11-08)
+   *
+   * 只传**码** —— 折扣是服务端算的(能被改)。空 = 不用券。
+   */
+  couponCode: string;
 };
 
 export type PrintServiceOrderFormProps = {
@@ -80,6 +90,28 @@ export type PrintServiceOrderFormProps = {
   /** 选中的收款通道 —— null = 让服务端挑第一个可用的 */
   channel: string | null;
   onChannelChange: (channel: string) => void;
+  /**
+   * 优惠码(2026-11-08)—— 用户输的码
+   *
+   * null = 还没输 / 摘掉了。
+   */
+  couponCode: string | null;
+  /**
+   * 优惠效果 —— **服务端算好的快照**
+   *
+   * null = 没有码,或者券不可用。
+   */
+  coupon: CouponView | null;
+  /**
+   * 券不可用的精确原因码 —— null = 没有码,或者券完全可用
+   */
+  couponError: CouponErrorCode | null;
+  /**
+   * 应用 / 摘掉优惠码 —— 父组件去问服务端要新的报价
+   *
+   * 传空串 = 摘掉。
+   */
+  onApplyCoupon: (code: string) => void;
   /** 提交 —— 父组件负责算支撑 + 上传 + 建单 */
   onSubmit: (values: PrintServiceOrderValues) => void;
   /** 收起表单 */
@@ -100,6 +132,10 @@ export function PrintServiceOrderForm({
   error,
   channel,
   onChannelChange,
+  couponCode,
+  coupon,
+  couponError,
+  onApplyCoupon,
   onSubmit,
   onCancel,
 }: PrintServiceOrderFormProps) {
@@ -111,6 +147,13 @@ export function PrintServiceOrderForm({
   const [phone, setPhone] = useState("");
   const [note, setNote] = useState("");
   const [fieldError, setFieldError] = useState<string | null>(null);
+  /**
+   * 优惠码输入框里的内容(2026-11-08)
+   *
+   * **只是输入框里的字** —— 真正的码在父组件那儿(`couponCode`),折扣是
+   * 服务端算的。点「应用」才把它交上去。
+   */
+  const [couponInput, setCouponInput] = useState(couponCode ?? "");
 
   const busy = phase !== "idle";
 
@@ -130,6 +173,17 @@ export function PrintServiceOrderForm({
    */
   const subtotalCents = quote
     ? quote.totalPriceCents - quote.deliveryFeeCents
+    : null;
+
+  /**
+   * 应付净额(2026-11-08)
+   *
+   * 报价合计 − 优惠。**折扣是服务端算的**(`coupon.discountCents`),
+   * 客户端只做这一个减法 —— 减的是服务端给的数,不是自己算的价。
+   */
+  const couponDiscountCents = coupon?.discountCents ?? 0;
+  const payableCents = quote
+    ? Math.max(0, quote.totalPriceCents - couponDiscountCents)
     : null;
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -152,6 +206,7 @@ export function PrintServiceOrderForm({
       addressId,
       deliveryTier,
       channel,
+      couponCode: couponCode ?? "",
     });
   };
 
@@ -175,9 +230,77 @@ export function PrintServiceOrderForm({
               {t("quote.total")}
             </p>
             <p className="font-mono text-lg font-semibold text-foreground">
-              {formatCents(quote.totalPriceCents)}
+              {formatCents(payableCents ?? quote.totalPriceCents)}
             </p>
+            {couponDiscountCents > 0 ? (
+              <p className="font-mono text-[11px] text-muted-foreground">
+                {t("coupon.row")} -{formatCents(couponDiscountCents)}
+              </p>
+            ) : null}
           </div>
+        )}
+      </div>
+
+      {/*
+        优惠码(2026-11-08)—— **就地展开,不开弹窗**
+        - 输入框 + 「应用」/「去掉」
+        - 服务端算好的折扣 / 用不了的原因,直接摆在下面
+      */}
+      <div className="mb-4 rounded-lg border border-border bg-muted/40 p-3">
+        <label
+          htmlFor="pq-coupon"
+          className="mb-1.5 block text-xs font-medium text-foreground"
+        >
+          {t("coupon.label")}
+        </label>
+        <div className="flex gap-2">
+          <input
+            id="pq-coupon"
+            type="text"
+            value={couponInput}
+            onChange={(e) => setCouponInput(e.target.value)}
+            maxLength={64}
+            disabled={busy}
+            placeholder={t("coupon.placeholder")}
+            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm uppercase outline-none transition-colors focus:border-foreground disabled:bg-muted/40"
+          />
+          {couponCode ? (
+            <button
+              type="button"
+              onClick={() => {
+                setCouponInput("");
+                onApplyCoupon("");
+              }}
+              disabled={busy}
+              className="shrink-0 rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted/40 disabled:opacity-50"
+            >
+              {t("coupon.remove")}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => onApplyCoupon(couponInput)}
+            disabled={busy || !couponInput.trim()}
+            className="shrink-0 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+          >
+            {t("coupon.apply")}
+          </button>
+        </div>
+        {couponError ? (
+          <p className="mt-1.5 text-[11px] text-destructive">
+            {t(`coupon.errors.${couponError}`)}
+          </p>
+        ) : coupon ? (
+          <p className="mt-1.5 text-[11px] text-muted-foreground">
+            {t("coupon.applied", { code: coupon.code })}
+            {coupon.discountCents > 0
+              ? ` · ${t("coupon.row")} -${formatCents(coupon.discountCents)}`
+              : ""}
+          </p>
+        ) : (
+          <p className="mt-1.5 text-[11px] text-muted-foreground">
+            {t("coupon.hint")}
+          </p>
         )}
       </div>
 

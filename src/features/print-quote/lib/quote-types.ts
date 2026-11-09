@@ -209,6 +209,18 @@ export type PrintOrderCreated = {
   orderNo: string;
   /** 服务端重算后的报价(客户端显示的是这个,不是自己算的) */
   quote: PrintQuote;
+  /**
+   * 优惠码(2026-11-08)—— null = 没用券
+   */
+  couponCode: string | null;
+  /** 这一单优惠了多少(分)—— 0 = 没用券 */
+  couponDiscountCents: number;
+  /**
+   * 应付净额(分)—— 收银台按这个数收
+   *
+   * = `quote.totalPriceCents − couponDiscountCents`。
+   */
+  payableCents: number;
   createdAt: string;
   /** 建单时的 updatedAt —— 乐观插入的那一行要带上,轮询才认得出它 */
   updatedAt: string;
@@ -250,7 +262,20 @@ export type UserPrintOrder = {
   materialWeightG: number;
   supportWeightG: number | null;
   dims: [number, number, number];
+  /**
+   * 应付总额(分)
+   *
+   * **2026-11-08:这一列现在是「优惠后」的净额** —— 用了券的话
+   * `totalPriceCents = 报价合计 − 优惠`。要收多少钱就只有这一列,列表 /
+   * 详情 / 邮件都读它,不会读到「折前总额」那种对不上的数。
+   */
   totalPriceCents: number;
+  /**
+   * 优惠码(2026-11-08)—— null = 没用券
+   */
+  couponCode: string | null;
+  /** 这一单优惠了多少(分)—— 0 = 没用券 */
+  couponDiscountCents: number;
   createdAt: string;
   /**
    * 最后一次变更时间

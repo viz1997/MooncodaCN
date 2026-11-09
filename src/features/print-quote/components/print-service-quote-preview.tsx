@@ -44,6 +44,10 @@
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 
+import type {
+  CouponErrorCode,
+  CouponView,
+} from "@/features/coupon/lib/coupon-calc";
 import type { DeliveryTierId } from "@/features/print-quote/lib/delivery-tier";
 import type {
   PrintQuote,
@@ -79,12 +83,30 @@ export type PrintServiceQuotePreviewProps = {
    */
   deliveryTier?: DeliveryTierId | undefined;
   /**
+   * 优惠码(2026-11-08)
+   *
+   * 带了它去问价,服务端会顺带算这张码能减多少 —— **折扣是服务端算的**,
+   * 客户端一个加法都不做。
+   *
+   * 码不可用**不会**让这个接口失败:报价照给,响应里多一个 `couponError`。
+   */
+  couponCode?: string | null | undefined;
+  /**
    * 把报价抬给父组件(2026-11-08)
    *
    * 父组件要拿 `quote.deliveryRates`(三档的比例)摆交期选择器,拿
    * 小计算选择器上那三档的加价 —— 比例只能由服务端给,前端不自己认一份。
    */
   onQuote?: ((quote: PrintQuote | null) => void) | undefined;
+  /**
+   * 把优惠结果抬给父组件(2026-11-08)
+   *
+   * `coupon` = 服务端算好的优惠快照;`error` = 券不可用的精确原因码。
+   * 父组件把它传给下单表单 —— 表单要显示「这张码减了多少钱」/「为什么用不了」。
+   */
+  onCoupon?:
+    | ((coupon: CouponView | null, error: CouponErrorCode | null) => void)
+    | undefined;
 };
 
 /** 报价请求防抖(毫秒)—— 拖尺寸滑块时别一路发 */
@@ -93,10 +115,22 @@ const QUOTE_DEBOUNCE_MS = 400;
 export function PrintServiceQuotePreview({
   input,
   deliveryTier,
+  couponCode,
   onQuote,
+  onCoupon,
 }: PrintServiceQuotePreviewProps) {
   const t = useTranslations("PrintQuote");
   const [state, setState] = useState<PreviewState>({ kind: "empty" });
+
+  /**
+   * 优惠结果 —— **服务端算好的快照**
+   *
+   * `coupon` = 这张码减了多少;`couponError` = 用不了的精确原因码。
+   *
+   * 客户端一个加法都不做 —— 折扣金额是服务端算的(能被改)。
+   */
+  const [coupon, setCoupon] = useState<CouponView | null>(null);
+  const [couponError, setCouponError] = useState<CouponErrorCode | null>(null);
 
   useEffect(() => {
     if (!input) {
@@ -110,11 +144,11 @@ export function PrintServiceQuotePreview({
     const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
-        // 交期档位带进报价 —— 用户选的那一档,金额要按它算
-        const payload: PrintQuoteInput = {
-          ...input,
-          deliveryTier: deliveryTier ?? null,
-        };
+        // 交期档位 + 优惠码带进报价 —— 用户选的那一档 / 那张码,金额要按它算
+        const payload: PrintQuoteInput & {
+          couponCode?: string | null;
+        } = { ...input, deliveryTier: deliveryTier ?? null };
+        if (couponCode) payload.couponCode = couponCode;
 
         const response = await fetch("/api/print-quote", {
           method: "POST",
@@ -133,12 +167,18 @@ export function PrintServiceQuotePreview({
           return;
         }
 
-        const data = (await response.json()) as { quote?: PrintQuote };
+        const data = (await response.json()) as {
+          quote?: PrintQuote;
+          coupon?: CouponView | null;
+          couponError?: CouponErrorCode | null;
+        };
         if (!data.quote) {
           setState({ kind: "error" });
           return;
         }
         setState({ kind: "ready", quote: data.quote });
+        setCoupon(data.coupon ?? null);
+        setCouponError(data.couponError ?? null);
       } catch (error) {
         // 几何又变了 → 上一次请求被取消 —— 不是错误
         if (error instanceof Error && error.name === "AbortError") return;
@@ -151,13 +191,20 @@ export function PrintServiceQuotePreview({
       controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input, deliveryTier]);
+  }, [input, deliveryTier, couponCode]);
 
   // 把报价抬给父组件 —— 父组件要拿它摆交期选择器
   const liftedQuote = state.kind === "ready" ? state.quote : null;
   useEffect(() => {
     onQuote?.(liftedQuote);
   }, [liftedQuote, onQuote]);
+
+  // 把优惠结果抬给父组件
+  const liftedCoupon = coupon;
+  const liftedCouponError = couponError;
+  useEffect(() => {
+    onCoupon?.(liftedCoupon, liftedCouponError);
+  }, [liftedCoupon, liftedCouponError, onCoupon]);
 
   if (state.kind === "empty") return null;
 
@@ -190,12 +237,28 @@ export function PrintServiceQuotePreview({
   // 支撑还没算 —— 服务端按 0 算,那个价是偏低的,得说清楚
   const supportPending = quote.supportWeightG === null;
 
+  /**
+   * 优惠 —— **服务端算好的**
+   *
+   * `discountCents` 是服务端算的(能被改),客户端只负责把它显示出来。
+   * 优惠基数是「合计 − 交期加价」,所以减完之后交期加价那部分不变。
+   */
+  const couponDiscountCents = coupon?.discountCents ?? 0;
+  const payableCents = Math.max(0, quote.totalPriceCents - couponDiscountCents);
+
   return (
     <div className="rounded-md border border-border bg-muted/40 px-3 py-2">
       <p className="text-[11px] text-muted-foreground">{t("preview.label")}</p>
       <p className="text-lg font-semibold leading-tight tabular-nums">
-        {formatCents(quote.totalPriceCents)}
+        {formatCents(payableCents)}
       </p>
+      {couponDiscountCents > 0 ? (
+        <p className="mt-0.5 text-[11px] text-muted-foreground">
+          {t("coupon.row")} -{formatCents(couponDiscountCents)}
+          {" · "}
+          {coupon?.code}
+        </p>
+      ) : null}
       <p className="mt-1 text-[11px] text-muted-foreground">
         {t("quote.weightFee")} {formatCents(quote.weightFeeCents)}
         {" · "}

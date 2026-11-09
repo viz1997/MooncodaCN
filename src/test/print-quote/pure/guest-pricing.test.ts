@@ -179,8 +179,9 @@ describe("访客可见计价 —— 工具页那个预估报价", () => {
   it("几何变了就重新报价 —— 支撑算出来之后金额会跟着变", () => {
     const code = stripComments(read(PREVIEW));
 
-    // 依赖里有几何和**交期档位** —— 换档位要重新问价
-    expect(code).toContain("}, [input, deliveryTier]);");
+    // 依赖里有几何、**交期档位**和**优惠码** —— 换档位 / 换码都要重新问价
+    // (优惠是订单级的,码变了金额就变了)
+    expect(code).toContain("}, [input, deliveryTier, couponCode]);");
     expect(code).toContain("QUOTE_DEBOUNCE_MS");
   });
 

@@ -49,6 +49,16 @@ export type QuoteBreakdownValues = {
   deliveryHours: number;
   /** 合计(分) */
   totalPriceCents: number;
+  /**
+   * 优惠码减掉的钱(分)—— 2026-11-08
+   *
+   * **可选** —— `PrintQuote` 没有它(报价不认优惠,优惠是订单级的),
+   * `UserPrintOrderDetail` 有它。
+   *
+   * 有它的时候必须摆出「优惠」这一行 —— 否则明细加起来 ≠ 合计:
+   * 四个费用列存的是**折前**的,`totalPriceCents` 存的是**净额**。
+   */
+  couponDiscountCents?: number | undefined;
 };
 
 export function QuoteBreakdown({
@@ -92,6 +102,18 @@ export function QuoteBreakdown({
             : t("delivery.free")
         }
       />
+      {/*
+        优惠(2026-11-08)
+        ——
+        四个费用列存的是**折前**的,合计存的是**净额**(优惠后)。这一行不摆
+        出来的话,「明细加起来 ≠ 合计」—— 用户会以为算错了。
+      */}
+      {values.couponDiscountCents && values.couponDiscountCents > 0 ? (
+        <Row
+          label={t("coupon.row")}
+          value={`-${formatCents(values.couponDiscountCents)}`}
+        />
+      ) : null}
       <div className="flex items-baseline justify-between border-t border-border pt-3 mt-3">
         <dt className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
           {t("quote.total")}

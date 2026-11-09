@@ -999,7 +999,8 @@
       "gptImageOrders": "订单管理",
       "printOrders": "打印订单",
       "printPricing": "打印定价",
-      "files": "文件管理"
+      "files": "文件管理",
+      "coupons": "优惠码"
     }
   },
   "AdminOrders": {
@@ -1766,6 +1767,27 @@
         }
       }
     },
+    "coupon": {
+      "row": "优惠",
+      "label": "优惠码",
+      "placeholder": "有优惠码?填这里",
+      "apply": "应用",
+      "remove": "去掉",
+      "applied": "已应用优惠码 {code}",
+      "hint": "折扣由服务端算 —— 码填错了会提示你,不会偷偷按原价收。",
+      "errors": {
+        "COUPON_NOT_FOUND": "优惠码不存在,检查一下有没有输错",
+        "COUPON_INACTIVE": "这个优惠码已经停用了",
+        "COUPON_NOT_STARTED": "这个优惠码还没开始生效",
+        "COUPON_EXPIRED": "这个优惠码已经过期了",
+        "COUPON_SCOPE_MISMATCH": "这个优惠码不适用于当前订单",
+        "COUPON_NOT_APPLICABLE": "这个优惠码不适用于当前订单",
+        "COUPON_MIN_AMOUNT_NOT_MET": "还没达到这个优惠码的使用门槛",
+        "COUPON_LIMIT_REACHED": "这个优惠码已经被用完了",
+        "COUPON_PER_USER_LIMIT_REACHED": "这个优惠码你用过了,每人限用次数已到",
+        "COUPON_NOT_FIRST_ORDER": "这个优惠码只限新用户的第一单使用"
+      }
+    },
     "entry": {
       "title": "提交打印订单",
       "desc": "量好的模型直接建一张打印工单 —— 下面是预估价,收货地址、交期和金额在下面的表单里确认。",
@@ -2121,6 +2143,118 @@
       "NOT_FOUND": "对象不存在",
       "DELETE_FAILED": "删除失败 —— 看服务端日志",
       "DOWNLOAD_FAILED": "取下载地址失败 —— 看服务端日志"
+    }
+  },
+  "AdminCoupons": {
+    "title": "优惠码",
+    "subtitle": "订单级优惠 —— 商城购物袋和打印工单都能用。折扣由服务端算,用户输入的只是码。停用不删:用过的订单还引得到它。",
+    "presets": {
+      "title": "快速开一张",
+      "subtitle": "点一个预设,表单会填成那个形状 —— 改两个数就能发。",
+      "amount": "满减",
+      "percent": "百分比",
+      "freeShipping": "免运费",
+      "firstOrder": "新人首单",
+      "blank": "空白一张"
+    },
+    "form": {
+      "create": "新增优惠码",
+      "edit": "编辑优惠码",
+      "code": "优惠码",
+      "codeHint": "2~32 个字符,只能用字母、数字、连字符和下划线。用户输入不区分大小写。",
+      "name": "名称",
+      "nameHint": "后台列表里显示的名字,用户看不到。",
+      "namePlaceholder": "双十一满减",
+      "kind": "优惠类型",
+      "kindAmount": "满减(减固定金额)",
+      "kindPercent": "百分比折扣",
+      "kindFreeShipping": "免运费",
+      "amount": "面额(元)",
+      "amountHint": "直接减掉多少钱。",
+      "discount": "折扣率(%)",
+      "discountHint": "减掉百分之几。",
+      "maxDiscount": "折扣封顶(元)",
+      "maxDiscountHint": "留空 = 不封顶。",
+      "minAmount": "使用门槛(元)",
+      "minAmountHint": "满多少才用。0 = 没有门槛。",
+      "scope": "适用范围",
+      "scopeHint": "这张券能在哪种单子上用。",
+      "scopeMall": "商城订单",
+      "scopePrint": "打印工单",
+      "scopeBoth": "两者都行",
+      "usageLimit": "总次数上限",
+      "usageLimitHint": "留空 = 不限。",
+      "perUserLimit": "每人限用次数",
+      "perUserLimitHint": "留空 = 不限。游客用不了限次券。",
+      "startsAt": "生效时间",
+      "startsAtHint": "留空 = 立即生效。",
+      "endsAt": "失效时间",
+      "endsAtHint": "留空 = 永不过期。",
+      "modifiers": "附加条件",
+      "firstOrder": "仅限新人首单",
+      "firstOrderHint": "用户下过任何一单(商城或打印)就不能再用。",
+      "active": "启用",
+      "activeHint": "停用之后用户用不了这张券,但历史订单还查得到它。",
+      "scopePrintWarning": "打印工单没有运费行 —— 「免运费」券用在打印工单上没有意义,会被判成「不适用于当前订单」。",
+      "save": "保存",
+      "saving": "保存中…",
+      "cancel": "取消",
+      "required": "这一项必填",
+      "codePattern": "只能用字母、数字、连字符和下划线",
+      "codeLength": "长度 2~32 个字符"
+    },
+    "table": {
+      "code": "优惠码",
+      "type": "类型",
+      "benefit": "优惠",
+      "scope": "适用范围",
+      "usage": "用量",
+      "validity": "有效期",
+      "status": "状态",
+      "actions": "操作",
+      "firstOrderTag": "新人首单",
+      "amountDesc": "满 {min} 减 {amount}",
+      "amountDescNoMin": "减 {amount}",
+      "percentDesc": "满 {min} 减 {percent}%",
+      "percentDescNoMin": "减 {percent}%",
+      "percentDescCapped": "{percent}(封顶 {cap})",
+      "freeShippingDesc": "满 {min} 免运费",
+      "freeShippingDescNoMin": "免运费"
+    },
+    "actions": {
+      "edit": "编辑",
+      "deactivate": "停用"
+    },
+    "kinds": {
+      "amount": "满减",
+      "percent": "百分比",
+      "free_shipping": "免运费"
+    },
+    "scopes": {
+      "mall": "商城订单",
+      "print": "打印工单",
+      "both": "两者都行"
+    },
+    "status": {
+      "active": "启用中",
+      "inactive": "已停用"
+    },
+    "messages": {
+      "loading": "正在读优惠码…",
+      "loadFailed": "读优惠码失败 —— 看服务端日志",
+      "saveSuccess": "已保存",
+      "deactivateSuccess": "已停用",
+      "instant": "立即生效",
+      "forever": "永不过期",
+      "empty": "还没有优惠码 —— 点上面的预设开一张",
+      "instantEffect": "保存后立刻生效,不用重新部署。折扣由服务端算,后台填的数只是规则。"
+    },
+    "errors": {
+      "CODE_DUPLICATE": "这个优惠码已经存在了 —— 换一个码",
+      "COUPON_NOT_FOUND": "找不到这一张券 —— 刷新一下再试",
+      "INVALID_RULE": "规则不自洽 —— 满减要有面额、百分比要有折扣率、失效时间不能早于生效时间",
+      "MIGRATION_MISSING": "优惠码的表还不存在 —— 先跑 pnpm migrate:apply-coupon",
+      "SAVE_FAILED": "保存失败 —— 看服务端日志"
     }
   }
 }

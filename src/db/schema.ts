@@ -2426,7 +2426,34 @@ export const printOrder = pgTable(
       .default("standard"),
     /** 交期加价(分)—— 按小计的比例收,标准档是 0 */
     deliveryFeeCents: integer("delivery_fee_cents").notNull().default(0),
-    /** 合计 */
+    /**
+     * 优惠码(2026-11-08)
+     *
+     * 大写归一化后的码。下单那一刻**重新校验过**。
+     */
+    couponCode: text("coupon_code"),
+    /**
+     * 优惠码减掉的金额(分)—— 正数
+     *
+     * 打折基数是 `总报价 − 交期加价`(交期加价是加急费,不是货款,跟运费
+     * 一个待遇 —— 优惠不碰它)。
+     */
+    couponDiscountCents: integer("coupon_discount_cents").notNull().default(0),
+    /**
+     * 应付净额(分)
+     *
+     * ```
+     * total_price_cents = weight_fee + varnish_fee + support_fee
+     *                  + delivery_fee - coupon_discount_cents
+     * ```
+     *
+     * 上面四个费用列存的是**折前**的,这一列存的是**要收的**。
+     *
+     * **为什么不另加一列「应付」** —— 代码里有一堆地方把 `total_price_cents`
+     * 当成「用户要付多少」显示(工单邮件 / 列表 / 详情页 / 后台)。要是同时
+     * 存在两个金额列,任何一个读成折前总额,用户就会看到「邮件里写 ¥74.82、
+     * 实际收 ¥69.82」—— 正是「逐分相等」要防的那种不一致。
+     */
     totalPriceCents: integer("total_price_cents").notNull(),
     // ---- 联系方式 ----
     contactName: text("contact_name").notNull(),
@@ -2733,9 +2760,12 @@ export const printPricingConfig = pgTable("print_pricing_config", {
    *
    * null = 没指定 → 走环境变量 / 默认值那条路。
    */
-  modelMaterialId: text("model_material_id").references(() => printMaterial.id, {
-    onDelete: "set null",
-  }),
+  modelMaterialId: text("model_material_id").references(
+    () => printMaterial.id,
+    {
+      onDelete: "set null",
+    }
+  ),
   /** 当前生效的**支撑**材料 —— 同上 */
   supportMaterialId: text("support_material_id").references(
     () => printMaterial.id,
@@ -2779,9 +2809,7 @@ export const printPricingConfig = pgTable("print_pricing_config", {
    *
    * 1:1~1:2 之间那部分支撑按这个价收。
    */
-  supportTier1PriceCentsPerGram: integer(
-    "support_tier1_price_cents_per_gram"
-  )
+  supportTier1PriceCentsPerGram: integer("support_tier1_price_cents_per_gram")
     .notNull()
     .default(50),
   /**
@@ -2789,9 +2817,7 @@ export const printPricingConfig = pgTable("print_pricing_config", {
    *
    * 超过 1:2 那部分支撑按这个价收。
    */
-  supportTier2PriceCentsPerGram: integer(
-    "support_tier2_price_cents_per_gram"
-  )
+  supportTier2PriceCentsPerGram: integer("support_tier2_price_cents_per_gram")
     .notNull()
     .default(100),
   /**
@@ -2970,7 +2996,28 @@ export const storefrontOrder = pgTable(
     discountCents: integer("discount_cents").notNull().default(0),
     /** 运费(分)—— 满 ¥99 免运费,否则 ¥8 */
     shippingCents: integer("shipping_cents").notNull().default(0),
-    /** 合计(分) = subtotal - discount + shipping */
+    /**
+     * 优惠码(2026-11-08)
+     *
+     * 大写归一化后的码。下单那一刻**重新校验过**(车上的旧结果不算数),
+     * 存下来是为了订单详情页能显示「用了什么码」。
+     */
+    couponCode: text("coupon_code"),
+    /**
+     * 优惠码减掉的金额(分)—— 正数
+     *
+     * **跟 `discount_cents` 分开** —— `discount_cents` 是**数量阶梯折扣**
+     * (折在单价上),优惠码是**订单级**的,两码事,两列。
+     *
+     * 合计恒等式:
+     * `total_cents = subtotal_cents - discount_cents - coupon_discount_cents + shipping_cents`
+     */
+    couponDiscountCents: integer("coupon_discount_cents").notNull().default(0),
+    /**
+     * 合计(分) = subtotal - discount - coupon_discount + shipping
+     *
+     * 免运费券不体现在这一列里 —— 它减的是 `shipping_cents`。
+     */
     totalCents: integer("total_cents").notNull(),
     /** 币种(iso 大写);本轮全链路 CNY */
     currency: text("currency").notNull().default("CNY"),
@@ -3116,6 +3163,15 @@ export const cart = pgTable(
     currencyCode: text("currency_code").notNull().default("CNY"),
     /** 区域 —— 运费规则的分区键 */
     regionId: text("region_id").notNull().default("china"),
+    /**
+     * 车上的优惠码(2026-11-08)
+     *
+     * **只存码,不存折扣金额** —— 折扣每次读车时**现算**:车里的行数会变,
+     * 存的金额会过期。折扣是**订单级**的,不属于任何一行。
+     *
+     * 存的是**大写归一化后**的码(用户输入不区分大小写)。
+     */
+    couponCode: text("coupon_code"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
@@ -3264,3 +3320,171 @@ export const cartItemRelations = relations(cartItem, ({ one }) => ({
     references: [cart.id],
   }),
 }));
+
+// ============================================
+// 优惠码 (Coupon) —— 2026-11-08
+// ============================================
+
+/**
+ * 优惠码(订单级)
+ *
+ * 工作室要的是**订单级**的优惠码 —— 跟已有的「数量阶梯折扣」是两码事:
+ * 阶梯折扣折在**单价**上(先折单价再乘数量),优惠码减的是**整单**。
+ *
+ * ## 三种类型 + 一个修饰
+ *
+ * | kind | 折扣 | 封顶 |
+ * |---|---|---|
+ * | `amount` | 减固定金额 | 天然封顶在小计里 |
+ * | `percent` | 按比例减 | `max_discount_cents` |
+ * | `free_shipping` | 商品不打折,运费置 0 | — |
+ *
+ * 「**新人首单券**」不是第四种类型 —— 它是 `first_order_only = true`
+ * 这个**布尔修饰**,可以叠在任意一种 `kind` 上面。
+ *
+ * ## 金额一律整数分
+ *
+ * 全仓库的钱都是整数分(`src/config/currency.ts` 是人民币)。
+ * `discount_rate` 是**比例**(0.15 = 减 15%),后台界面用百分比输入框。
+ */
+export const coupon = pgTable(
+  "coupon",
+  {
+    id: text("id").primaryKey(),
+    /**
+     * 优惠码 —— **大写归一化后存**(用户输入不区分大小写)
+     *
+     * 唯一。归一化规则:`trim()` → 转大写。
+     */
+    code: text("code").notNull(),
+    /** 名称 —— 后台列表显示(「双十一满减」);用户侧显示的是 `kind` 算出来的文案 */
+    name: text("name").notNull(),
+    /**
+     * 优惠类型
+     *
+     * - `amount`        —— 满减(减固定金额)
+     * - `percent`       —— 百分比折扣
+     * - `free_shipping` —— 免运费
+     */
+    kind: text("kind", {
+      enum: ["amount", "percent", "free_shipping"],
+    }).notNull(),
+    /** 面额(分)—— `kind = "amount"` 时用;其它类型为 null */
+    amountCents: integer("amount_cents"),
+    /**
+     * 折扣率(0~1)—— `kind = "percent"` 时用
+     *
+     * 0.15 = 减 15%。**小数**,不是百分比(后台界面用百分比输入框,
+     * 提交时换算)。
+     */
+    discountRate: numeric("discount_rate", { precision: 6, scale: 4 }),
+    /** 折扣封顶(分)—— `kind = "percent"` 时用;null = 不封顶 */
+    maxDiscountCents: integer("max_discount_cents"),
+    /** 满多少才用(分)—— 跟**折后小计**比(用户看得见的那个数);0 = 没门槛 */
+    minAmountCents: integer("min_amount_cents").notNull().default(0),
+    /**
+     * 适用范围
+     *
+     * - `mall`  —— 只能用于商城订单
+     * - `print` —— 只能用于打印工单
+     * - `both`  —— 两个都行
+     *
+     * **免运费券只能是 `mall`** —— 打印工单没有运费行,它的
+     * `delivery_fee_cents` 是**交期加价**(加急费),不是运费。
+     */
+    scope: text("scope", { enum: ["mall", "print", "both"] })
+      .notNull()
+      .default("both"),
+    /**
+     * 新人首单券 —— 叠加在任意 `kind` 上的修饰
+     *
+     * 判定「首单」:商城订单和打印工单**两边都查**,任一有记录就不是新人。
+     * 待付款的单**也算**下过单(不然能同一张卡无限次占券)。
+     */
+    firstOrderOnly: boolean("first_order_only").notNull().default(false),
+    /** 总次数上限 —— null = 不限 */
+    usageLimit: integer("usage_limit"),
+    /** 每人限用次数 —— null = 不限 */
+    perUserLimit: integer("per_user_limit"),
+    /** 已用次数 —— 建单成功时 +1 */
+    usedCount: integer("used_count").notNull().default(0),
+    /** 生效时间 —— null = 立即生效 */
+    startsAt: timestamp("starts_at"),
+    /** 失效时间 —— null = 永不过期 */
+    endsAt: timestamp("ends_at"),
+    /** 停用而不是删(工单留档要引得到) */
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("coupon_code_uniq_idx").on(t.code),
+    // 后台列表:只看在用的 + 按创建时间倒序
+    index("coupon_active_created_idx").on(t.isActive, t.createdAt),
+  ]
+);
+
+export type CouponRow = typeof coupon.$inferSelect;
+export type NewCouponRow = typeof coupon.$inferInsert;
+
+/**
+ * 优惠码使用记录
+ *
+ * 记录「谁在哪个单上用了哪个码,减了多少」。
+ *
+ * ## 唯一索引是 `(order_kind, order_id)`
+ *
+ * 幂等性要的是「**一单只记一次**」—— 建单请求重投不能把 `used_count` 加两遍。
+ * `coupon_id` **不进唯一键**,因为一单只可能用一个码。
+ */
+export const couponRedemption = pgTable(
+  "coupon_redemption",
+  {
+    id: text("id").primaryKey(),
+    /** 用的哪个码 */
+    couponId: text("coupon_id")
+      .notNull()
+      .references(() => coupon.id, { onDelete: "cascade" }),
+    /** 谁用的 —— 游客券(免运费券)用不了,所以这里一定非空 */
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    /**
+     * 订单种类
+     *
+     * - `storefront` —— 商城订单(`storefront_order.id`)
+     * - `print`     —— 打印工单(`print_order.id`)
+     */
+    orderKind: text("order_kind", { enum: ["storefront", "print"] }).notNull(),
+    /** 对应订单的 id —— 不加外键(两张表都存得下,而且删了单不该留记录) */
+    orderId: text("order_id").notNull(),
+    /** 这一单优惠了多少(分) */
+    discountCents: integer("discount_cents").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    // 幂等:一单只记一次
+    uniqueIndex("coupon_redemption_order_uniq_idx").on(t.orderKind, t.orderId),
+    // 「这个人用过这个码几次」—— 每人限用次数的判定靠它
+    index("coupon_redemption_coupon_user_idx").on(t.couponId, t.userId),
+    // 按码查用量
+    index("coupon_redemption_coupon_created_idx").on(t.couponId, t.createdAt),
+  ]
+);
+
+export type CouponRedemptionRow = typeof couponRedemption.$inferSelect;
+export type NewCouponRedemptionRow = typeof couponRedemption.$inferInsert;
+
+export const couponRelations = relations(coupon, ({ many }) => ({
+  redemptions: many(couponRedemption),
+}));
+
+export const couponRedemptionRelations = relations(
+  couponRedemption,
+  ({ one }) => ({
+    coupon: one(coupon, {
+      fields: [couponRedemption.couponId],
+      references: [coupon.id],
+    }),
+  })
+);

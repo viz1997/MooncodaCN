@@ -57,6 +57,24 @@ export const PRINT_ORDER_ERROR_KEYS: Record<string, string> = {
   // 服务端处理失败
   CREATE_ORDER_FAILED: "printOrder.errors.codes.createOrderFailed",
   PRESIGN_FAILED: "printOrder.errors.codes.presignFailed",
+
+  /*
+   * 优惠码(2026-11-08)
+   *
+   * 下单时券不可用 → 服务端回 400 + 精确原因码。这十个码**跟表单里那份
+   * inline 提示共用同一套文案**(`coupon.errors.*`)—— 一张码只有一句话,
+   * 两处各写一份迟早漂移。
+   */
+  COUPON_NOT_FOUND: "coupon.errors.COUPON_NOT_FOUND",
+  COUPON_INACTIVE: "coupon.errors.COUPON_INACTIVE",
+  COUPON_NOT_STARTED: "coupon.errors.COUPON_NOT_STARTED",
+  COUPON_EXPIRED: "coupon.errors.COUPON_EXPIRED",
+  COUPON_SCOPE_MISMATCH: "coupon.errors.COUPON_SCOPE_MISMATCH",
+  COUPON_NOT_APPLICABLE: "coupon.errors.COUPON_NOT_APPLICABLE",
+  COUPON_MIN_AMOUNT_NOT_MET: "coupon.errors.COUPON_MIN_AMOUNT_NOT_MET",
+  COUPON_LIMIT_REACHED: "coupon.errors.COUPON_LIMIT_REACHED",
+  COUPON_PER_USER_LIMIT_REACHED: "coupon.errors.COUPON_PER_USER_LIMIT_REACHED",
+  COUPON_NOT_FIRST_ORDER: "coupon.errors.COUPON_NOT_FIRST_ORDER",
 };
 
 /**

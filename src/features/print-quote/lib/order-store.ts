@@ -66,6 +66,21 @@ export type CreatePrintOrderInput = {
   storefrontOrderId?: string | null;
   /** 收货地址快照 —— 走商城结算时跟商城订单共用一份 */
   shippingAddress?: ShippingAddressSnapshot | null;
+  /**
+   * 优惠码(2026-11-08)
+   *
+   * 只存**码**,不存折扣金额 —— 折扣是建单那一刻服务端算出来的
+   * (`evaluateCoupon`),客户端带来的任何金额都不采信。
+   */
+  couponCode?: string | null;
+  /**
+   * 这一单优惠了多少(分)
+   *
+   * **`total_price_cents` 存的是应付净额**(= 报价合计 − 这个数)——
+   * 收银台就是按那一列收钱的。四个费用列(`weight` / `varnish` /
+   * `support` / `delivery`)存的是**折前**的,不动。
+   */
+  couponDiscountCents?: number | null;
 };
 
 /**
@@ -85,6 +100,28 @@ export async function createPrintOrder(
   input: CreatePrintOrderInput,
   tx?: DbOrTx
 ): Promise<PrintOrderRow> {
+  /**
+   * 应付净额(2026-11-08)
+   *
+   * `total_price_cents` 存**要收多少钱** —— 报价合计减去优惠。
+   *
+   * 为什么不是「折前总额另存一列应付」—— 代码里有一堆地方读
+   * `totalPriceCents` 当成「用户要付多少」来显示(工单邮件、列表、详情页、
+   * 后台)。有两个金额列的话,任何一个读成折前总额,用户就会看到
+   * 「邮件里写 ¥74.82、实际收 ¥69.82」—— 正是「逐分相等」要防的那种
+   * 不一致。**要收多少钱,就只有那一列。**
+   *
+   * 四个费用列照旧抄**折前**的(它们是「这单收了什么费」的明细)。
+   */
+  const couponDiscountCents = Math.max(
+    0,
+    Math.round(input.couponDiscountCents ?? 0)
+  );
+  const payableCents = Math.max(
+    0,
+    input.quote.totalPriceCents - couponDiscountCents
+  );
+
   const run = async (executor: DbOrTx): Promise<PrintOrderRow> => {
     const [row] = await executor
       .insert(printOrder)
@@ -113,7 +150,10 @@ export async function createPrintOrder(
         supportFeeCents: input.quote.supportFeeCents,
         deliveryTier: input.quote.deliveryTier,
         deliveryFeeCents: input.quote.deliveryFeeCents,
-        totalPriceCents: input.quote.totalPriceCents,
+        // 应付净额(2026-11-08)—— 收银台按这一列收钱
+        totalPriceCents: payableCents,
+        couponCode: input.couponCode ?? null,
+        couponDiscountCents,
         contactName: input.contactName,
         contactEmail: input.contactEmail,
         contactPhone: input.contactPhone,
@@ -416,6 +456,9 @@ export function toUserPrintOrder(row: PrintOrderRow): UserPrintOrder {
       row.supportWeightG === null ? null : Number(row.supportWeightG),
     dims: [Number(row.dimX), Number(row.dimY), Number(row.dimZ)],
     totalPriceCents: row.totalPriceCents,
+    // 优惠码(2026-11-08)—— 列表上也要显示「减了多少」
+    couponCode: row.couponCode,
+    couponDiscountCents: row.couponDiscountCents,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     paymentStatus: row.paymentStatus,

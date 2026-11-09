@@ -65,6 +65,15 @@ import {
   storefrontOrder,
   storefrontOrderItem,
 } from "@/db/schema";
+import type { CouponErrorCode } from "@/features/coupon/lib/coupon-calc";
+import {
+  evaluateCoupon,
+  evaluateCouponEffect,
+} from "@/features/coupon/lib/coupon-service";
+import {
+  CouponUsageLimitError,
+  redeemCoupon,
+} from "@/features/coupon/lib/coupon-store";
 import {
   getPaymentProvider,
   isPaymentChannelEnabled,
@@ -170,6 +179,10 @@ export interface CheckoutSuccess {
   discountCents: number;
   /** 运费(分) */
   shippingCents: number;
+  /** 优惠码减掉的金额(分)—— 订单级,0 = 没用券 */
+  couponDiscountCents: number;
+  /** 用了的优惠码 —— null = 没用券 */
+  couponCode: string | null;
   /** 合计(分) */
   totalCents: number;
   /** 币种 */
@@ -199,13 +212,25 @@ export type CheckoutErrorCode =
   | "PRICING_FAILED"
   | "CARRIER_NOT_FOUND"
   | "PAYMENT_CHANNEL_UNAVAILABLE"
+  /** 优惠码不可用 —— 精确原因看 `CheckoutError.couponErrorCode` */
+  | "COUPON_INVALID"
   | "FAILED";
 
 /** 结算失败 —— 带机器可读的 code,Route Handler 翻译成响应 */
 export class CheckoutError extends Error {
   constructor(
     readonly code: CheckoutErrorCode,
-    message: string
+    message: string,
+    /**
+     * 优惠码场景下的**精确原因**(2026-11-08)
+     *
+     * 商城侧只加一个 `"COUPON_INVALID"` —— 它决定 HTTP 状态码,不该膨胀成
+     * 10 个。精确原因(过期 / 没满门槛 / 超限 …)走这个可选字段,界面按它
+     * 查文案表说人话。
+     *
+     * > `exactOptionalPropertyTypes` 下可选参数必须显式写 `| undefined`。
+     */
+    readonly couponErrorCode?: CouponErrorCode | undefined
   ) {
     super(message);
     this.name = "CheckoutError";
@@ -369,12 +394,32 @@ export function resolveCheckoutChannel(
  * 送过去的单价是**折后单价**(分)。「先折单价,再乘数量」—— 阶梯折扣在这一层
  * 就已经折过了,通道不参与定价。
  *
+ * ## `discountCents` —— 订单级优惠(2026-11-08)
+ *
+ * 优惠码是**订单级**的 —— 折扣不减在任何一行的单价上,而是减整单。
+ *
+ * 而收银台的总额是**从各行算出来的**(微信只发 `amount.total`、支付宝的
+ * `biz_content` 只有 `total_amount`,都没有 `goods_detail`)。
+ *
+ * ⇒ 给 `PaymentRequest` 加一个可选字段,两个通道各减**一次**:
+ *
+ * ```
+ * computeTotalCents = Σ(折后单价 × 数量) + 运费 − 优惠
+ *                    = discountedSubtotal + shipping − couponDiscount
+ *                    = storefront_order.total_cents   ✅ 逐分相等
+ * ```
+ *
+ * **不按比例摊到各行单价上** —— 摊完要除回单价,除不尽(100 分摊到 3 件
+ * = 33.33),单价必须是整数 ⇒ 摊不平;而且摊分会引入 `round` 误差,
+ * `Σ round(xᵢ)` 跟 `round(Σ xᵢ)` 不一定相等,逐分相等直接被破坏。
  */
 export function buildPaymentRequest(params: {
   orderNo: string;
   email: string;
   lines: PricedLine[];
   shippingCents: number;
+  /** 订单级优惠(分)—— 缺省 0(= 没有优惠) */
+  discountCents?: number;
   shippingAddress: ShippingAddressSnapshot;
   note: string | null;
   successUrl: string;
@@ -405,6 +450,8 @@ export function buildPaymentRequest(params: {
     email: params.email,
     items,
     shippingCents: params.shippingCents,
+    // 订单级优惠 —— 通道从总额里减一次
+    discountCents: params.discountCents ?? 0,
     shippingAddress: {
       recipientName: params.shippingAddress.recipientName,
       phone: params.shippingAddress.phone,
@@ -428,12 +475,26 @@ export function buildPaymentRequest(params: {
  *
  * 步骤:
  * 1. 读购物车 → **过户**给账号 → 重算每一行的价
- * 2. 定通道(用户选的;没配好的通道直接报错)
- * 3. 看看有没有一张**可以复用**的待付款订单(同一批货 + 同一地址 + 同一留言)
- * 4. 解析每一行的 Sellbase 载体变体(**只有旧路需要**)
- * 5. 落 `storefront_order` + `storefront_order_item`
- * 6. 建支付会话(旧路 = Sellbase 订单;新路 = 通道的支付会话)
- * 7. 回写 `payment_channel` + `provider_order_id` + 付款入口
+ * 2. 算优惠码的**效果**(不判资格)→ 算出合计
+ * 3. 定通道(用户选的;没配好的通道直接报错)
+ * 4. 看看有没有一张**可以复用**的待付款订单(同一批货 + 同一地址 + 同一留言)
+ * 5. 没命中复用 → **判券的资格**(过期 / 没满门槛 / 超限 / 不是新人)
+ * 6. 解析每一行的 Sellbase 载体变体(**只有旧路需要**)
+ * 7. 落 `storefront_order` + `storefront_order_item` + **记一次用券**(同一个事务)
+ * 8. 建支付会话(旧路 = Sellbase 订单;新路 = 通道的支付会话)
+ * 9. 回写 `payment_channel` + `provider_order_id` + 付款入口
+ *
+ * ## 「复用」为什么排在「判券」前面(2026-11-08)
+ *
+ * 上一张待付款单是**券还有效的时候**建的,折扣已经锁死在它的合计里了。
+ * 后来券过期了 / 额度被别人抢完了 —— 用户要付的还是**那张单上的价**
+ * (下单时同意的价)。
+ *
+ * 先判资格的话:首单券建的那张单已经算作「下过单」⇒ 再判一次就是
+ * `NOT_FIRST_ORDER` ⇒ **用户连自己那张单都付不了**。
+ *
+ * 所以顺序是「先算效果 → 拿合计去比那张单 → 命中就复用 → 再判资格」。
+ * 详见 2b / 4b 两步的注释。
  *
  * ## 购物车**不在这里清空**(2026-11-05)
  *
@@ -507,12 +568,72 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
   // 规则本身在 `pricing-constants.ts` 的 `calculateShippingCents()` ——
   // 客户端的购物袋页 / 抽屉 / 结算页跟这里用**同一份**,不会「页面没运费、
   // 结算收了」。
-  const shippingCents = calculateShippingCents(discountedSubtotalCents);
-  const totalCents = discountedSubtotalCents + shippingCents;
+  //
+  // **门槛在优惠之前算** —— 优惠把金额压到 ¥99 以下反而多收运费,那是坑用户。
+  const grossShippingCents = calculateShippingCents(discountedSubtotalCents);
+
+  // 2b. 优惠码(2026-11-08)—— **先算效果,后判资格**
+  //
+  //     这一步**只算「这张券能减多少」**,不判它还能不能用。
+  //
+  //     ## 为什么分成两步
+  //
+  //     第 4 步(复用上一张待付款单)要拿**合计**去比那张单。那张单是**券还有效
+  //     的时候**建的,折扣已经锁死在它的合计里了;后来券过期了 / 额度被别人抢
+  //     完了 —— 用户要付的还是**那张单上的价**(下单时同意的价)。
+  //
+  //     先算效果 → 算出同一个合计 → 命中就复用。复用成功之后,券现在还能不能
+  //     用**不重要** —— 那笔优惠早就在那张单上了。
+  //
+  //     顺序反过来会出事:首单券建的那张单已经算作「下过单」⇒ 再判一次就是
+  //     `NOT_FIRST_ORDER` ⇒ **用户连自己那张单都付不了**。
+  //
+  //     折扣金额跟下面的完整判定走**同一份**纯函数(`computeCouponEffect`),
+  //     两处各算一遍迟早对不上。
+  const couponEffect = cart.couponCode
+    ? await evaluateCouponEffect({
+        code: cart.couponCode,
+        couponBaseCents: discountedSubtotalCents,
+        shippingCents: grossShippingCents,
+      })
+    : null;
+
+  // 车里有码但查不到这张券 → **码不存在**
+  //
+  // 券只停用不删,所以「查不到」= 这张券从来没存在过(或者库读挂了)。
+  // 直接报,别悄悄按原价收 —— 用户会问「我的码呢」。
+  if (cart.couponCode && !couponEffect) {
+    throw new CheckoutError(
+      "COUPON_INVALID",
+      "这个优惠码用不了",
+      "COUPON_NOT_FOUND"
+    );
+  }
+
+  const couponCode = couponEffect?.code ?? null;
+  const couponDiscountCents = couponEffect?.discountCents ?? 0;
+  // **只有免运费券动运费** —— 百分比 / 满减不碰运费(运费不是商品)
+  const shippingCents = couponEffect?.freeShipping ? 0 : grossShippingCents;
+  const totalCents =
+    discountedSubtotalCents - couponDiscountCents + shippingCents;
 
   // 3. 通道
   const channel = resolveCheckoutChannel(input.channel);
   const legacy = channel === "stripe";
+
+  // 3b. 旧路(Sellbase + Stripe)**不支持优惠码**
+  //
+  //     那条路逐项换算,没有折扣概念,也表达不了「免运费」——
+  //     带券的订单走它必然对不上账。
+  //
+  //     新订单永远走不到这里(`ENABLED_PAYMENT_CHANNELS` 里没有 stripe),
+  //     这是防御性的闸。
+  if (legacy && couponDiscountCents > 0) {
+    throw new CheckoutError(
+      "PAYMENT_CHANNEL_UNAVAILABLE",
+      "这条支付方式不支持优惠码,请换一个支付方式"
+    );
+  }
 
   // 4. 复用:同一批货 → 用上一张还没付的单
   //
@@ -531,10 +652,38 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
     totalCents,
     address: input.address,
     note: input.note ?? null,
+    couponCode,
   });
   if (reusable) {
     return reusePendingOrder(reusable, channel);
   }
+
+  // 4b. 券还能不能用?(额度 / 身份)
+  //
+  //     **在复用之后判** —— 复用成功的话,那张单上的折扣早就锁死了,券现在
+  //     过期了 / 额度被抢完了,都不影响「用户付那张单」。
+  //
+  //     没命中复用才走完整判定:**重新校验、重新算** —— 不信车上的旧结果。
+  //     车里的码可能在这几秒里过期了 / 被人用完了 / 车里的行数变了(门槛不再
+  //     满足)。
+  //
+  //     码不可用 → **400 + 精确原因码**,不静默按原价收(用户会问「我的码呢」)。
+  const couponEvaluation = await evaluateCoupon({
+    code: cart.couponCode,
+    orderKind: "mall",
+    couponBaseCents: discountedSubtotalCents,
+    shippingCents: grossShippingCents,
+    // 结算**必须登录** —— 身份就在手上,直接给
+    resolveUserId: async () => input.userId,
+  });
+  if (couponEvaluation.error) {
+    throw new CheckoutError(
+      "COUPON_INVALID",
+      "这个优惠码用不了",
+      couponEvaluation.error
+    );
+  }
+  const coupon = couponEvaluation.coupon;
 
   // 5. 载体变体 —— **只有旧路需要**
   //
@@ -563,48 +712,85 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
   const orderId = `so_${nanoid(16)}`;
   const now = new Date();
 
-  await db.transaction(async (tx) => {
-    await tx.insert(storefrontOrder).values({
-      id: orderId,
-      orderNo,
-      userId: input.userId,
-      email: input.email,
-      status: "unpaid",
-      paymentStatus: "unpaid",
-      subtotalCents,
-      discountCents,
-      shippingCents,
-      totalCents,
-      currency: PRICE_CURRENCY,
-      shippingAddress: input.address,
-      note: input.note ?? null,
-      // 通道先记上 —— 建支付会话失败时也知道这单本来该走哪条路
-      paymentChannel: channel,
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    for (const [index, line] of lines.entries()) {
-      const carrier = carriers?.[index] ?? null;
-      await tx.insert(storefrontOrderItem).values({
-        id: `soi_${nanoid(16)}`,
-        orderId,
-        productId: line.item.productId,
-        productHandle: line.item.productHandle,
-        productTitle: line.item.productTitle,
-        productThumbnail: line.item.productThumbnail || null,
-        // 旧路挂 Sellbase 的载体变体;新路没有载体 —— 价是本仓库自己给的
-        variantId: carrier?.variantId ?? null,
-        sku: carrier?.sku ?? line.item.productHandle,
-        unitPriceCents: line.unitPriceCents,
-        discountedUnitPriceCents: line.discountedUnitPriceCents,
-        quantity: line.quantity,
-        lineTotalCents: line.lineTotalCents,
-        metadata: line.item.metadata as unknown as Record<string, unknown>,
+  try {
+    await db.transaction(async (tx) => {
+      await tx.insert(storefrontOrder).values({
+        id: orderId,
+        orderNo,
+        userId: input.userId,
+        email: input.email,
+        status: "unpaid",
+        paymentStatus: "unpaid",
+        subtotalCents,
+        discountCents,
+        shippingCents,
+        // 优惠码 —— 订单级,减整单,不落在任何一行上
+        couponCode,
+        couponDiscountCents,
+        totalCents,
+        currency: PRICE_CURRENCY,
+        shippingAddress: input.address,
+        note: input.note ?? null,
+        // 通道先记上 —— 建支付会话失败时也知道这单本来该走哪条路
+        paymentChannel: channel,
         createdAt: now,
+        updatedAt: now,
       });
+
+      for (const [index, line] of lines.entries()) {
+        const carrier = carriers?.[index] ?? null;
+        await tx.insert(storefrontOrderItem).values({
+          id: `soi_${nanoid(16)}`,
+          orderId,
+          productId: line.item.productId,
+          productHandle: line.item.productHandle,
+          productTitle: line.item.productTitle,
+          productThumbnail: line.item.productThumbnail || null,
+          // 旧路挂 Sellbase 的载体变体;新路没有载体 —— 价是本仓库自己给的
+          variantId: carrier?.variantId ?? null,
+          sku: carrier?.sku ?? line.item.productHandle,
+          unitPriceCents: line.unitPriceCents,
+          discountedUnitPriceCents: line.discountedUnitPriceCents,
+          quantity: line.quantity,
+          lineTotalCents: line.lineTotalCents,
+          metadata: line.item.metadata as unknown as Record<string, unknown>,
+          createdAt: now,
+        });
+      }
+
+      // 6b. 记一次用券(2026-11-08)—— **在建单这个事务里**
+      //
+      //     **建单就记**,不等付款 —— 不然用户可以下 N 张待付款的单把额度占光。
+      //
+      //     幂等靠 `coupon_redemption` 的唯一索引 `(order_kind, order_id)`:
+      //     同一张单重投不会把用量加两遍。
+      //
+      //     **跟建单同一个事务** —— 券的总量上限是**硬闸**:额度满了就**不让
+      //     这一单成立**(回滚),而不是「单建了、券超发一次」。超发一次 = 工作室
+      //     的预算多让出去一次。
+      if (coupon) {
+        await redeemCoupon({
+          couponId: coupon.couponId,
+          userId: input.userId,
+          orderKind: "storefront",
+          orderId,
+          discountCents: couponDiscountCents,
+          usageLimit: coupon.usageLimit,
+          tx,
+        });
+      }
+    });
+  } catch (error) {
+    // 额度满了 → 这一单不成立(事务已经回滚)
+    if (error instanceof CouponUsageLimitError) {
+      throw new CheckoutError(
+        "COUPON_INVALID",
+        "这个优惠码已经用完了",
+        "COUPON_LIMIT_REACHED"
+      );
     }
-  });
+    throw error;
+  }
 
   // 7. 建支付会话
   let paymentUrl: string | null = null;
@@ -680,6 +866,7 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
           email: input.email,
           lines,
           shippingCents,
+          discountCents: couponDiscountCents,
           shippingAddress: input.address,
           note: input.note ?? null,
           successUrl: buildStorefrontSuccessUrl(orderNo),
@@ -739,6 +926,8 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
     subtotalCents,
     discountCents,
     shippingCents,
+    couponDiscountCents,
+    couponCode,
     totalCents,
     currency: PRICE_CURRENCY,
     paymentIssue,
@@ -784,6 +973,8 @@ async function reusePendingOrder(
     subtotalCents: reusable.order.subtotalCents,
     discountCents: reusable.order.discountCents,
     shippingCents: reusable.order.shippingCents,
+    couponDiscountCents: reusable.order.couponDiscountCents ?? 0,
+    couponCode: reusable.order.couponCode ?? null,
     totalCents: reusable.order.totalCents,
     currency: reusable.order.currency,
     // 「没配好」和「这次挂了」要分开 —— 前者重试没用(见 `payment-issue.ts`)

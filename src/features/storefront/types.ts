@@ -16,6 +16,10 @@
  */
 
 import type { PRICE_CURRENCY } from "@/config/currency";
+import type {
+  CouponErrorCode,
+  CouponView,
+} from "@/features/coupon/lib/coupon-calc";
 
 /* -------------------------------------------------------------------------- */
 /*  Product / Variant(对齐 atelier store 的 Product 契约)                     */
@@ -239,6 +243,26 @@ export interface Cart {
   /** 区域代码 */
   regionId: string;
   items: CartLineItem[];
+  /**
+   * 车上的优惠码(2026-11-08)—— 大写归一化后的码
+   *
+   * **只存码,不存折扣金额** —— 折扣每次读车时现算(车里的行数会变,
+   * 存的金额会过期)。
+   */
+  couponCode: string | null;
+  /**
+   * 服务端算好的优惠效果 —— null = 没有券,或者券不可用
+   *
+   * **折扣金额是服务端算的** —— 客户端一个加法都不做。
+   */
+  coupon: CouponView | null;
+  /**
+   * 上次应用失败的原因码 —— null = 没有码,或者券完全可用
+   *
+   * 界面拿它渲染一句人话(「这个券过期了」),并给一个「去掉优惠码」按钮 ——
+   * **不能悄悄按原价收**:用户会问「我的码呢」。
+   */
+  couponError: CouponErrorCode | null;
   /** ISO 时间戳 */
   createdAt: string;
   updatedAt: string;

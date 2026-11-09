@@ -31,8 +31,12 @@
  *
  * ## 合计**读 hook 的数**,不自己加(2026-11-08)
  *
- * 抽屉 / 购物袋详情页 / 结算页共用 `lib/cart-totals.ts` 这**一份**口径 ——
- * 三处各算一遍,迟早算出三个数。
+ * 优惠码是**订单级**的 —— 折扣减整单,不落在任何一行上。所以
+ * `小计 + 运费` 那个式子在有券的时候是错的(少减了一次优惠)。
+ *
+ * 合计、免运费进度、优惠行全部读 `useCart()` 给的数 —— 那边跟购物袋详情页 /
+ * 结算页共用 `lib/cart-totals.ts` 这**一份**口径。三处各算一遍,迟早算出
+ * 三个数。
  */
 
 "use client";
@@ -55,6 +59,7 @@ import { findAccessoryVariant } from "../lib/mock-catalog";
 import { PRICING_CONSTANTS } from "../lib/pricing-constants";
 import { formatSizeWithInches } from "../lib/size-format";
 import type { CartLineItem } from "../types";
+import { CouponField } from "./coupon-field";
 
 const FREE_SHIPPING_THRESHOLD_CENTS =
   PRICING_CONSTANTS.FREE_SHIPPING_THRESHOLD_CENTS;
@@ -69,6 +74,8 @@ export function CartDrawer() {
     isLoading,
     subtotalCents,
     shippingCents,
+    coupon,
+    couponDiscountCents,
     totalCents,
     remainingForFreeShippingCents,
     itemCount,
@@ -79,7 +86,8 @@ export function CartDrawer() {
   /**
    * 免运费进度条 —— **读 hook 的数**,不自己再算一遍
    *
-   * 门槛按**折后小计**算,跟购物袋详情页 / 结算页是同一个数。
+   * 免运费券下 `remainingForFreeShippingCents` 已经是 0(运费本来就是 0),
+   * 这时候不该再催用户「再买 ¥X 免运费」。
    */
   const remainingCents = remainingForFreeShippingCents;
   const progressPercent = Math.min(
@@ -137,6 +145,8 @@ export function CartDrawer() {
                   </span>
                   即可免运费
                 </>
+              ) : coupon?.freeShipping ? (
+                <span className="font-medium text-foreground">🎉 已免运费</span>
               ) : (
                 <span className="font-medium text-foreground">
                   🎉 已解锁免运费
@@ -204,12 +214,23 @@ export function CartDrawer() {
         {items.length > 0 && (
           <div className="border-t bg-background">
             <div className="px-5 py-4 space-y-2.5">
+              {/* 优惠码 —— 跟购物袋页 / 结算页共用一份 */}
+              <CouponField />
+
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">小计</span>
                 <span className="font-medium">
                   {formatCents(subtotalCents)}
                 </span>
               </div>
+              {couponDiscountCents > 0 && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">优惠</span>
+                  <span className="font-medium text-accent">
+                    -{formatCents(couponDiscountCents)}
+                  </span>
+                </div>
+              )}
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">运费</span>
                 <span className="font-medium">

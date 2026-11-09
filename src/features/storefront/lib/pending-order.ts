@@ -23,6 +23,16 @@
  * - 合计一样(分)—— 定价规则改了就不算同一单
  * - 收货地址一样
  * - 留言一样
+ * - **优惠码一样**(2026-11-08)—— 见下面「为什么码也要比」
+ *
+ * ## 为什么码也要比
+ *
+ * 两个不同的码**可能算出同一个合计**(比如「满 50 减 10」和「9 折」在一张
+ * ¥100 的单上都减 ¥10)。那时候单子上记的是**先那个码**,用户看到的却是
+ * 他后来输的那个 —— 订单详情页摆的码跟用户输的不一样。
+ *
+ * ⇒ 复用判据里**显式加上 `couponCode`**,严格相等才复用。
+ *
  * ## 为什么是「复用」不是「取消旧的」
  *
  * 取消旧单会有个**要命**的副作用:用户可能已经扫了旧单的付款码,钱正准备
@@ -74,6 +84,13 @@ export async function findReusablePendingOrder(params: {
   address: ShippingAddressSnapshot;
   /** 这次的留言 */
   note: string | null;
+  /**
+   * 这次的优惠码(2026-11-08)—— null = 没用券
+   *
+   * 大写归一化后的码。两个不同的码可能算出同一个合计,只比合计会把它们
+   * 当成同一单 —— 单子上记的是先那个码,用户看到的却是后来输的那个。
+   */
+  couponCode: string | null;
 }): Promise<ReusablePendingOrder | null> {
   const channels = [...ENABLED_PAYMENT_CHANNELS];
   if (channels.length === 0) return null;
@@ -99,6 +116,7 @@ export async function findReusablePendingOrder(params: {
   for (const order of orders) {
     if (order.totalCents !== params.totalCents) continue;
     if ((order.note ?? "") !== (params.note ?? "")) continue;
+    if ((order.couponCode ?? null) !== (params.couponCode ?? null)) continue;
     if (!isSameAddress(order.shippingAddress, params.address)) continue;
 
     const items = await db

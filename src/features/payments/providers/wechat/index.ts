@@ -26,6 +26,7 @@
  * 「我付好了吗」的轮询只是给用户看的,钱到没到以回调为准。
  */
 
+import { computeTotalCents } from "@/features/payments/lib/total";
 import {
   PaymentNotConfiguredError,
   type PaymentProvider,
@@ -40,19 +41,16 @@ import { buildDescription, createNativeOrderWithConfig } from "./native";
 /**
  * 算应付总额(分)
  *
- * 每行的「折后单价 × 数量」加起来,最后加上运费。运费也是分,先加总再
- * 交给微信 —— 分和元混着加会出那一分钱的差。
+ * **实现在 `payments/lib/total.ts`** —— 微信和支付宝共用同一份。
  *
- * 折后单价**已经是**最终价 —— 阶梯折扣在算价那一层就折过了,通道不参与
- * 定价(见 `payments/lib/types.ts` 的 `PaymentRequestItem.unitPriceCents`)。
+ * ```
+ * total = Σ(折后单价 × 数量) + 运费 − 订单级优惠
+ *        = storefront_order.total_cents   ✅ 逐分相等
+ * ```
+ *
+ * 这里只是**转出去**,免得别处 import 微信这一支的时候绕路。
  */
-export function computeTotalCents(request: PaymentRequest): number {
-  const itemsTotal = request.items.reduce(
-    (sum, item) => sum + Math.round(item.unitPriceCents * item.quantity),
-    0
-  );
-  return itemsTotal + Math.round(request.shippingCents);
-}
+export { computeTotalCents };
 
 /**
  * 拼商品描述

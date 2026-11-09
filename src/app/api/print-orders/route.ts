@@ -47,11 +47,18 @@
 
 import { after, type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { db } from "@/db";
 import type { PrintOrderRow, ShippingAddressSnapshot } from "@/db/schema";
 import { getUserAddress } from "@/features/address/queries";
+import { evaluateCoupon } from "@/features/coupon/lib/coupon-service";
+import {
+  CouponUsageLimitError,
+  redeemCoupon,
+} from "@/features/coupon/lib/coupon-store";
 import { isR2Configured, objectExists } from "@/features/image-gen/lib/r2";
 import { isPaymentChannelEnabled } from "@/features/payments/lib/registry";
 import { getPrintOrderUser } from "@/features/print-quote/lib/auth";
+import { printCouponBaseCents } from "@/features/print-quote/lib/coupon-base";
 import { notifyPrintOrderCreated } from "@/features/print-quote/lib/notifications";
 import {
   createPrintOrder,
@@ -140,6 +147,16 @@ const orderSchema = z.object({
    * 收款。
    */
   channel: z.enum(["wechat", "alipay", "shopify", "stripe"]).nullish(),
+  /**
+   * 优惠码(2026-11-08)
+   *
+   * 传了 = 让服务端算一下这张码在这单上能减多少。**码本身不带钱** ——
+   * 折扣是服务端算的,客户端传来的任何金额一律不信(跟总价一样)。
+   *
+   * 券不可用 → **400 + 精确原因码**,不建单。悄悄按原价收是坑用户 ——
+   * 用户会问「我的码呢」。
+   */
+  couponCode: z.string().max(64).nullish(),
 });
 
 async function handleList(request: NextRequest) {
@@ -329,24 +346,106 @@ async function handle(request: NextRequest) {
   // 不是「谁点的那个按钮」的语言
   const locale = normalizePrintOrderLocale(parsed.data.locale);
 
+  /**
+   * 优惠码(2026-11-08)
+   *
+   * **在报价之后算,在建单之前算** —— 报价不认优惠(报价是「这活要多少料多少
+   * 钱」,优惠是「这一单便宜多少」)。
+   *
+   * 基数 = 报价合计 − 交期加价(加急费不参与优惠,跟运费一个待遇)。
+   * 跟报价预览走的是**同一个** `printCouponBaseCents()` —— 两处各算一遍
+   * 迟早对不上(用户会看到「预览减 ¥20、提交减 ¥18」)。
+   */
+  const coupon = parsed.data.couponCode
+    ? await evaluateCoupon({
+        code: parsed.data.couponCode,
+        orderKind: "print",
+        couponBaseCents: printCouponBaseCents(quote),
+        // 打印工单没有运费行 —— 免运费券在这儿会被直接拒掉
+        shippingCents: 0,
+        resolveUserId: async () => user.id,
+      })
+    : null;
+
+  // 券不可用 → **不建单**,把精确原因码带给界面
+  //
+  // 悄悄按原价收是坑用户 —— 用户会问「我的码呢」。界面拿到码之后说人话
+  // (见 `print-order-error.ts`)。
+  if (coupon?.error) {
+    return NextResponse.json(
+      {
+        error: coupon.error,
+        message: "这个优惠码用不了",
+      },
+      { status: 400, headers: getRateLimitHeaders(rl) }
+    );
+  }
+
+  const couponCode = coupon?.coupon?.code ?? null;
+  const couponDiscountCents = coupon?.coupon?.discountCents ?? 0;
+
   let row: PrintOrderRow;
   try {
-    row = await createPrintOrder({
-      orderNo,
-      userId: user.id,
-      modelFileName: input.modelFileName,
-      modelUrl: input.modelUrl,
-      modelSizeBytes: input.modelSizeBytes,
-      quote,
-      contactName: input.contactName,
-      // 联系邮箱以账号邮箱为准,不采信客户端
-      contactEmail: user.email,
-      contactPhone: input.contactPhone,
-      note: input.note,
-      locale,
-      shippingAddress,
+    /**
+     * 建单 + 记一次用券 —— **同一个事务**(2026-11-08)
+     *
+     * 券的总量上限是**硬闸**:额度满了就**不让这一单成立**(回滚),而不是
+     * 「单建了、券超发一次」。超发一次 = 工作室的预算多让出去一次。
+     *
+     * 幂等靠 `coupon_redemption` 的唯一索引 `(order_kind, order_id)`:
+     * 同一张单重投不会把用量加两遍。
+     */
+    row = await db.transaction(async (tx) => {
+      const created = await createPrintOrder(
+        {
+          orderNo,
+          userId: user.id,
+          modelFileName: input.modelFileName,
+          modelUrl: input.modelUrl,
+          modelSizeBytes: input.modelSizeBytes,
+          quote,
+          contactName: input.contactName,
+          // 联系邮箱以账号邮箱为准,不采信客户端
+          contactEmail: user.email,
+          contactPhone: input.contactPhone,
+          note: input.note,
+          locale,
+          shippingAddress,
+          couponCode,
+          couponDiscountCents,
+        },
+        tx
+      );
+
+      // **有券就记** —— 不看折扣是不是 0
+      //
+      // 折扣 0 的券(比如免运费券)也是**用了这张券**:不记,额度就少算一次,
+      // 同一张券会被用出去比上限多一次。两口子(商城 / 打印)口径必须一样。
+      if (coupon?.coupon) {
+        await redeemCoupon({
+          couponId: coupon.coupon.couponId,
+          userId: user.id,
+          orderKind: "print",
+          orderId: created.id,
+          discountCents: couponDiscountCents,
+          usageLimit: coupon.coupon.usageLimit,
+          tx,
+        });
+      }
+
+      return created;
     });
   } catch (error) {
+    // 额度满了 → 这一单不成立(事务已经回滚)
+    if (error instanceof CouponUsageLimitError) {
+      return NextResponse.json(
+        {
+          error: "COUPON_LIMIT_REACHED",
+          message: "这个优惠码已经用完了",
+        },
+        { status: 400, headers: getRateLimitHeaders(rl) }
+      );
+    }
     // 23505 = unique_violation —— orderNo 撞车(极小概率)
     if (isUniqueViolation(error)) {
       return NextResponse.json(
@@ -398,6 +497,12 @@ async function handle(request: NextRequest) {
     {
       orderNo,
       quote,
+      /** 优惠码(2026-11-08)—— null = 没用券 */
+      couponCode: row.couponCode,
+      /** 这一单减了多少(分)—— 0 = 没用券 */
+      couponDiscountCents: row.couponDiscountCents,
+      /** 应付净额(分)—— 收银台按这个数收 */
+      payableCents: row.totalPriceCents,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
       locale: row.locale,

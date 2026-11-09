@@ -1590,6 +1590,272 @@ pnpm tsx scripts/apply-currency-schema.ts --force-reprice # 真要按代码字�
 | `src/test/storefront/pure/db-price.test.ts` | `pricing.ts` 接受 `priceSource` 第二参 / `price-source.ts` 存在且含 `connection()` / 基础价取自 `priceSource` / `mock-catalog.ts` **不** import `@/db` / `price-source.ts` **不**被 client 组件 import / `checkout.ts` 在 `degraded` 时抛 `PRICING_FAILED` / `apply-currency-schema.ts` 含 `--force-reprice` / `bulkUpdateProductVariantsAction` 的 schema **不含** `priceCents` / `generateVariantsForProductInDb` 传了 DB 基础价 |
 | `src/test/storefront/pure/accessory-variant-unique.test.ts` | `variantCode` 全局唯一(配件加价能按它查到唯一一行) |
 
+### 优惠码(订单级)(2026-11-08)
+
+仓库里以前**一个优惠码都没有** —— 现有的「折扣」只有**数量阶梯折扣**,而且是
+**折在单价上**的(先折单价,再乘数量),**不是订单级**。
+
+工作室要的是**订单级**的优惠码,而且**商城 + 打印工单两个口子都要能用**
+(拍板的口径)。
+
+#### 两种折扣,两码事 —— 落两个列
+
+| | 数量阶梯折扣 | 订单级优惠码 |
+|---|---|---|
+| 怎么算 | 按**行数量**,**折在单价上** | 整单减,落在**总额**上 |
+| 落哪一列 | `storefront_order.discount_cents` | `storefront_order.coupon_discount_cents` |
+
+**两个列,不混在一起** —— 数量阶梯折扣的口径一个字不动,优惠码叠在它后面。
+
+#### 三种类型 + 一个修饰
+
+| kind | 折扣 | 封顶 |
+|---|---|---|
+| `amount` 满减 | 减固定金额 | 天然封顶在基数里 |
+| `percent` 百分比 | `floor(基数 × 费率)` | `max_discount_cents` |
+| `free_shipping` 免运费 | 商品不打折,运费置 0 | — |
+
+「**新人首单券**」不是第四种类型 —— 它是 `firstOrderOnly = true` 这个**布尔修饰**,
+叠在任意一种 `kind` 上面。**适用范围** `scope` = `mall` / `print` / `both`。
+
+**免运费券在打印工单上没有意义** —— 打印单的 `delivery_fee_cents` 是**交期加价**
+(加急费),不是运费 ⇒ 后台 `free_shipping` 券的 scope 只能选 mall;万一有 print / both 的,
+打印侧回 `COUPON_NOT_APPLICABLE` 并说人话。
+
+#### 钱一律整数分
+
+`coupon-calc.ts` **零 import**(不引 `@/db`、不引 `server-only` ⇒ 客户端组件也能安全
+import 它的类型)—— 连百分比折扣都用整数运算:`discount = floor(base × rateUnits ÷ 10000)`。
+
+**百分比为什么向下取整** —— 仓库的铁律是「**我们收的钱,一律向上取整到分**」。
+优惠额向下取整 ⇒ 收上去的合计 = `ceil(基数 × (1 − 费率))` ⇒ **合计向上取整**。
+两个方向必须配套,不能各取各的。
+
+#### 商城那条路的代数
+
+```
+rawSubtotal        = Σ(原价单价 × 数量)
+discountedSubtotal = Σ(折后单价 × 数量)          ← 用户看到的小计
+tierDiscount       = rawSubtotal − discountedSubtotal
+shipping           = calculateShippingCents(discountedSubtotal)  ← 门槛按**折后小计**算
+couponBase         = discountedSubtotal
+couponDiscount     = 按类型算(整数分)
+shippingAfter      = kind === "free_shipping" ? 0 : shipping
+total              = discountedSubtotal − couponDiscount + shippingAfter
+```
+
+- **为什么运费门槛在优惠之前算** —— 优惠把金额压到 ¥99 以下反而**多收**运费,那是坑用户。
+- **满减 / 百分比不碰运费**(运费不是商品),只有「免运费」券动它。
+- `storefront_order.total_cents = subtotal − discount − coupon_discount + shipping`
+  (schema 里那条注释也跟着改了 —— 少一项的注释会骗人)。
+
+#### 打印工单那条路的代数
+
+```
+quote.totalPriceCents = 克重费 + 后处理费 + 支撑费 + 交期加价
+couponBase            = totalPriceCents − deliveryFeeCents   ← **不含交期加价**
+payable               = totalPriceCents − couponDiscount
+```
+
+- **交期加价是加急费,不是货款** —— 跟运费一个待遇,优惠不碰它。
+- **打印工单没有运费行** —— 它的 `delivery_fee_cents` 是加急费,所以免运费券在这儿没有意义。
+- **`print_order.total_price_cents` 存的是应付净额**(优惠后),**四个费用列存的是折前的**。
+
+> **为什么不另加一列「应付」** —— 代码里有一堆地方读 `totalPriceCents` 当成
+> 「用户要付多少」来显示(工单邮件 / 工单列表 / 详情页 / 后台工单页)。任何一个读成
+> 折前总额,用户就会看到「邮件里写 ¥74.82、实际收 ¥69.82」—— **正是「逐分相等」
+> 要防的那种不一致**。所以:**要收多少钱,就只有那一列**。
+
+- **`PrintQuote` 本身不动** —— 它的 `totalPriceCents ≡ 四项之和` 那条恒等式不能破
+  (客户端的交期档位选择器靠 `total − deliveryFee` 算小计,报价台的加价档位预览也靠它)。
+  **优惠是订单级的,不属于「报价」** —— 报价是「这活要多少料多少钱」,优惠是「这一单便宜多少」。
+- 优惠基数是**纯函数**(`print-quote/lib/coupon-base.ts`)—— 报价接口和下单接口都用它,
+  两处各算一遍迟早对不上(用户会看到「预览说减 ¥20、提交说减 ¥18」)。
+
+#### 优惠码住在车上,不在结算的 body 里
+
+`POST /api/store/checkout` 的 body **不加** `couponCode` 字段 —— 车是服务端从 DB 读的,
+码就在 `cart.coupon_code` 那一行上。**少一个入口,少一处能传错的地方。**
+
+- `cart.coupon_code` **只存码,不存折扣金额** —— 折扣每次读车时**现算**
+  (车里的行数会变,存的金额会过期)。
+- 新接口 **`POST /api/store/carts/[id]/coupon`**,body `{ code }`,**空串 = 摘掉**。
+  失败 → **一个字节都不写库**,返 400 + 精确原因码,车上的码原样保留
+  (写坏了的后果:购物袋里摆着「省了 ¥20」的标签,结算时却没有那 20 块的优惠)。
+  归属校验在**数据层**(cookie 里那张车 / 已过户给这个账号的车),查不到返 **404**
+  (不是 403 —— id 能被枚举)。
+- `Cart` 类型多三个字段:`couponCode`(车上存的码)/ `coupon`(服务端算好的效果快照)/
+  `couponError`(上次失败的原因)。**折扣金额是服务端算的**,客户端一个加法都不做。
+- **结算时重新校验、重新算** —— 不信车上的旧结果。码无效 → 400 + 具体 code +
+  一个「去掉优惠码」按钮(**不能悄悄按原价收** —— 用户会问「我的码呢」)。
+- `computeCartTotals(items, coupon?)` 加一个**可选第二参**(纯函数,不碰 DB):
+  优惠额**夹在 0 和小计之间**(不夹会出现负数合计);免运费券下
+  `remainingForFreeShippingCents` 也是 0(不然进度条还在催「再买 ¥X 免运费」,而运费已经是 0)。
+- **购物袋抽屉不自己算合计** —— 合计从 `useCart()` 的 `totalCents` 来,hook 用的是
+  **同一份** `computeCartTotals(items, coupon)`。抽屉自己加一遍 ⇒ 用了券的购物袋跟
+  结算页必然显示两个数。
+- **结算后摘行时清 `coupon_code`** —— 车空了还留着上一张券,下一单就带着用户没选过的券
+  (而且是上一单用掉的那张,可能已超限)。
+- **`mergeUserCarts`** 合并游客车和用户车时:用户车有券 → **用户的赢**;用户车没券、
+  游客车有券 → 采纳但**必须重新校验**(可能已过期 / 已超限),过不了就丢;
+  合并后**重新算 totals**(合并会改小计 ⇒ 门槛可能不再满足)。
+
+#### 「新人首单」怎么判
+
+`user` 表**没有**订单数字段 ⇒ 两个来源都查:`storefront_order`(`status != 'cancelled'`)
+和 `print_order`(`status != 'CANCELLED'`)。**两边都查,任一有记录就不是新人。**
+
+- **待付款的单也算下过单** —— 不然用户可以用同一张卡无限次占券。
+- **游客(没登录)用「首单券」/「每人限用」的券 → 直接拒** —— 这两种券要判身份,游客没法判。
+
+#### 十个错误码,判定顺序短路(第一个失败即返回,**顺序不能改**)
+
+```
+NOT_FOUND → INACTIVE → NOT_STARTED → EXPIRED → SCOPE_MISMATCH
+→ NOT_APPLICABLE → MIN_AMOUNT_NOT_MET → LIMIT_REACHED → PER_USER_LIMIT_REACHED → NOT_FIRST_ORDER
+```
+
+- `SCOPE_MISMATCH` 要排在 `MIN_AMOUNT_NOT_MET` **前面** —— 券不适用于这张单,
+  提示应该是「这张券不能用于当前订单」,而不是「没满 99 减 10」。
+- **单一来源**在 `coupon-calc.ts`。商城侧 `CheckoutErrorCode` 只加一个
+  `"COUPON_INVALID"`(它决定 HTTP 状态码,不该膨胀成十个),精确原因靠
+  `CheckoutError.couponErrorCode` 带出来;打印侧 `print-quote/lib/print-order-error.ts`
+  追加这 10 个码。各处文案查同一张表。
+
+#### 「复用上一张待付款单」排在「判券」之前(2026-11-08 复查)
+
+结算的顺序是**先算效果 → 再找复用 → 最后判资格**:
+
+```
+2b. evaluateCouponEffect()    ← 只算「这张券能减多少」,不判资格
+3.  定通道
+4.  findReusablePendingOrder() ← 拿合计去比上一张待付款单
+4b. evaluateCoupon()           ← 判资格(过期 / 没满门槛 / 超限 / 不是新人)
+```
+
+**为什么不能反** —— 上一张待付款单是**券还有效的时候**建的,折扣已经锁死在
+它的合计里了。后来券过期了 / 额度被别人抢完了 —— 用户要付的还是**那张单上的价**
+(下单时同意的价)。
+
+顺序反过来会出事:首单券建的那张单已经算作「下过单」⇒ 再判一次就是
+`NOT_FIRST_ORDER` ⇒ **用户连自己那张单都付不了**(购物袋还在,但结不了账)。
+
+- **两个口径** ——「能减多少」(`coupon-calc.ts` 的 `computeCouponEffect`,纯函数)
+  和「还能不能用」(`checkCouponApplicable`)。**折扣金额两边必须一致** ⇒
+  两处都调 `computeCouponEffect()` 这一份。
+- **车里有码但查不到这张券 → 直接报 `COUPON_NOT_FOUND`** —— 券只停用不删,
+  所以「查不到」= 这张券从来没存在过。别悄悄按原价收(用户会问「我的码呢」)。
+
+#### 券的总量上限是**硬闸**(2026-11-08 复查)
+
+`used_count` 的自增带 `used_count < usage_limit` 的守卫。**守卫不通过 = 这张券
+被超发了一次** —— 超发一次 = 工作室的预算多让出去一次 ⇒ **不能让这一单成立**。
+
+- **记账跟建单在同一个事务里** —— 商城那条路在 `checkout.ts` 的
+  `db.transaction`(订单 + 订单行 + 记用券),打印那条路在
+  `src/app/api/print-orders/route.ts` 的 `db.transaction`(工单 + 记用券)。
+  守卫不通过 → 抛 `CouponUsageLimitError` → 事务回滚 → 订单不成立。
+- **`redeemCoupon()` 收 `tx`** —— 不传就自己开一个事务(插入 + 自增同生共死,
+  不会出现「记了用券、额度没加」那种半截状态)。
+- **额度满了给用户一句人话** —— 商城侧 `CheckoutError("COUPON_INVALID", …,
+  "COUPON_LIMIT_REACHED")` → 400;打印侧 400 + `error: "COUPON_LIMIT_REACHED"`。
+- **折扣 0 的券也记** —— 免运费券在商品上减 0,但它**用了这张券**。不记,额度就
+  少算一次,同一张券会被用出去比上限多一次。**两个口子口径必须一样**
+  (打印那条路原来写的是 `couponDiscountCents > 0`,已去掉)。
+
+#### 两张新表
+
+- `coupon` —— 码(唯一,**大写归一化**后存 —— 用户输入不区分大小写)/ 名称 / 类型 /
+  面额或费率 / 折扣封顶 / 满多少 / 适用范围 / 新人首单开关 / 有效期 /
+  总次数上限 / 每人限用次数 / 已用次数 / 启用停用。**停用而不是删**。
+- `coupon_redemption` —— 谁在哪个单上用了哪个码。**唯一索引 `(order_kind, order_id)`** ——
+  幂等性要的是「**一单只记一次**」,重投的建单请求不能把 `used_count` 加两遍。
+  `coupon_id` **不进**唯一键(一单只可能用一个码)。
+
+#### 收银台的总额公式**只有一份**
+
+优惠是**订单级**的 —— 优惠不会落到任何一行的单价上,而收银台的总额是**从各行算出来的**。
+微信 Native 只发 `amount.total`,支付宝 `buildBizContent` 只有 `total_amount` + `subject`,
+**都没有 goods_detail** ⇒ 给 `PaymentRequest` 加一个**可选**字段 `discountCents?: number`。
+
+**总额公式提到 `src/features/payments/lib/total.ts`** —— 微信和支付宝**都 import 它**
+(原来两边各写一份一模一样 —— 改了一份忘了另一份,逐分相等就只在一条通道上破了,
+而那种 bug 要等到真收钱那天才看得出来)。`computeTotalCents()` 带两道闸:
+折扣不能为负、不能超过总额。
+
+```
+computeTotalCents = Σ(折后单价 × 数量) + 运费 − 优惠
+                   = discountedSubtotal + shipping − couponDiscount
+                   = storefront_order.total_cents     ✅ 一分不差
+```
+
+**折扣不摊到各行单价上** —— 摊完要除回单价,**除不尽**(100 分摊到 3 件 = 33.33),
+单价必须是整数 ⇒ 摊不平。摊分会引入 `round` 误差(`Σ round(xᵢ)` ≠ `round(Σ xᵢ)`),
+逐分相等直接被破坏。
+
+#### 三个必须堵的口子
+
+1. **`order-payment.ts` 的「重新获取付款入口」** 用 order 行 + item 行**重建**
+   `PaymentRequest`,原来不带任何优惠信息 ⇒ 用户点一下,重建出来的总额**比订单应付
+   多出优惠那一份** ⇒ **多收钱**。**必须补 `discountCents: order.couponDiscountCents`。**
+2. **旧 Sellbase 通道**逐项换算,**没有折扣概念**,也支持不了「免运费」⇒ 带券的订单
+   走这条路必然对不上账。legacy 分支入口加硬闸:带优惠码就抛错。这条路新订单永远
+   走不到(`ENABLED_PAYMENT_CHANNELS = ["wechat","alipay"]`),是防御性的。
+3. **Shopify provider 显式炸** —— 草稿单只能设一个总价,`acceptAutomaticDiscounts: false`。
+   带着 `discountCents` 跑 ⇒ 我们减了折扣、Shopify 按原价建单 ⇒ 对不上账。
+   `discountCents > 0` 时抛 `PaymentProviderError`。
+
+#### 后台 `/admin/coupons`
+
+照 `/admin/print-pricing` 的样子:**就地展开编辑,不开弹窗**(工作室的口味)。
+
+| 文件 | 干什么 |
+|---|---|
+| `src/app/[locale]/(admin)/admin/coupons/page.tsx` | RSC **只**渲染 `<CouponsAdminView />`(RBAC 由父 layout 守) |
+| `src/features/coupon/admin/types.ts` | 视图模型 + 错误码联合类型(**类型放这儿,不在 `"use server"` 文件里**) |
+| `src/features/coupon/admin/actions.ts` | `"use server"` + `adminAction`;写操作返 `{ok:true}` / `{ok:false,code}`,**不 throw** |
+| `src/features/coupon/admin/components/coupons-admin-view.tsx` | antd `Form` + `Table`,`editingId` 状态机 |
+| `src/features/coupon/lib/coupon-store.ts` | Drizzle 读写 |
+| `src/features/coupon/lib/coupon-calc.ts` | 纯函数(**零 import**) |
+
+界面给 4 个预设按钮(满减 / 百分比 / 免运费 / 新人首单)—— 底层 `kind` 只有 3 个值。
+金额输入框**收整数分**,折扣率用百分比(填 15 → 提交转 0.15)。
+
+#### 迁移脚本(**只写,不跑**)
+
+`scripts/apply-coupon-schema.ts` —— 建两张表 + 给 `cart` / `storefront_order` /
+`print_order` 加列,幂等,支持 `--dry-run` 只打印 SQL。
+
+```bash
+pnpm migrate:apply-coupon   # = tsx scripts/apply-coupon-schema.ts
+```
+
+**不代跑** —— 用户的生产库由用户自己执行。**老订单的金额一个都不能变** ——
+迁移只加列,不重算历史应付。
+
+#### 不做 / 另开一次改动
+
+- 不做按商品 / 分类限定的券(订单级,整单减)。
+- 不把优惠码发给小程序(小程序调 `/api/store/**`,加券要改 SDK)—— 但
+  `/api/store/products` 的**响应结构不变**,所以改价那部分小程序零改动。
+- **支付回调的金额校验**(`settle.ts` 现在**不比对**渠道通知的金额)—— **独立的风控问题**,
+  跟这两个功能无关,**另开一次改动**,别把「优惠码上线」和「支付风控」混在一个提交里。
+- **打印工单建单**不是幂等的 —— 现在只有两道软闸:客户端 `phase === "submitting"`
+  把按钮禁掉 + 服务端 `strict` 限流 3 次/分钟。**重复提交会建出两张工单**
+  (用户看到两条待付款,可能付两次)。要做真正的幂等得加一个**幂等键**
+  (客户端生成 + 一列 + 唯一索引 + 建单时按键查),那是**一次单独的改动**
+  (要迁移脚本、要改 SDK)。**先记着,别当成已经解决了。**
+
+#### 行为由单测守住
+
+| 测试 | 守住什么 |
+|---|---|
+| `src/test/coupon/pure/coupon-calc.test.ts` | 满减封顶 / 百分比**向下取整**(⇒ 合计向上取整)/ 免运费 / 门槛判定 / 零小计 / 三种 scope / 首单判定 / 限额 / 时窗 / **效果**(`computeCouponEffect`:只算能减多少,**不判资格** —— 过期的券、额度用完的券也**算得出效果**) |
+| `src/test/storefront/pure/coupon-in-cart.test.ts` | 购物袋合计口径(优惠行 / 免运费 / 合计 = 小计 − 优惠 + 运费) |
+| `src/test/coupon/pure/coupon-flow.test.ts` | 两个 provider **共用一份**总额实现 / `PaymentRequest` 有 `discountCents` / **`order-payment.ts` 传了 `order.couponDiscountCents`** / `checkout.ts` 读 `cart.coupon_code` / `cart-totals.ts` **不** import `@/db` / `coupon-calc.ts` **零 import** / `print-order-error.ts` 含 10 个码 / `pending-order.ts` 比较 `couponCode` / 摘行时清 `coupon_code` / `shopify/draft-order.ts` 对 `discountCents > 0` 抛错 / **抽屉不自己算合计** / **⑫ 复用排在判资格之前** / **⑬ 记用券在建单事务里** / **⑭ 额度是硬闸(超发就抛)** / **⑮ 打印工单同事务 + 额度满了回 400** / **⑯ `evaluateCouponEffect` 不判资格** / **⑰ 购物袋兜底价保留阶梯折扣** |
+| `src/test/coupon/pure/coupon-admin.test.ts` | 后台页在不在 / 迁移脚本补没补那几列 / `"use server"` 文件**没** re-export 类型 / 中英文 `AdminCoupons` 键一样 / 每个错误码两种语言都摆得上话 |
+| `src/test/payments/pure/payment-discount.test.ts` | **逐分相等**:带优惠的请求,总额 = 订单应付 / 负折扣抛错 / 折扣超过总额抛错 / 两个 provider 是不是同一个函数 |
+
 ### 「提交打印订单」失败:失败的话要说人话(2026-11-08)
 
 > **这一节的前半段(「缺一列就全线 500」)已经作废。**

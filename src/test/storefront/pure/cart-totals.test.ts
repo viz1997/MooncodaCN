@@ -76,6 +76,7 @@ describe("computeCartTotals", () => {
       rawSubtotalCents: 0,
       discountCents: 0,
       shippingCents: 800,
+      couponDiscountCents: 0,
       totalCents: 800,
       itemCount: 0,
       remainingForFreeShippingCents: 9900,

@@ -380,9 +380,10 @@ async function removeOrderedLinesFromCart(order: OrderLookup): Promise<void> {
   /**
    * 摘车(2026-11-08)
    *
-   * 现在只有**一张车**了 —— 打印服务跟目录商品装同一个购物袋(工作室的说法:
-   * 「不要 print-order,进入商城那个」)。所以买掉哪几行就在哪张车上摘,
-   * 不用再按「有没有 printSpec」分两张车去摘。
+   * 商城购物袋里**只有目录商品**(工作室的说法:「不要放入购物车,放在这里
+   * account/print-orders」)。打印服务是另一条线 —— 工单自己建、自己收款。
+   *
+   * 所以这里摘的就是目录商品那几行:买掉哪几行就在车上摘哪几行。
    */
   await removeOrderedLinesFromCarts(order.userId, snapshot);
 }

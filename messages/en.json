@@ -1002,7 +1002,8 @@
       "gptImageOrders": "Orders",
       "printOrders": "Print Orders",
       "printPricing": "Print Pricing",
-      "files": "Files"
+      "files": "Files",
+      "coupons": "Coupons"
     }
   },
   "AdminOrders": {
@@ -1769,6 +1770,27 @@
         }
       }
     },
+    "coupon": {
+      "row": "Discount",
+      "label": "Coupon code",
+      "placeholder": "Got a code? Enter it here",
+      "apply": "Apply",
+      "remove": "Remove",
+      "applied": "Coupon {code} applied",
+      "hint": "The server computes the discount — a bad code tells you so, it never silently charges full price.",
+      "errors": {
+        "COUPON_NOT_FOUND": "That coupon code does not exist — check for typos",
+        "COUPON_INACTIVE": "This coupon has been deactivated",
+        "COUPON_NOT_STARTED": "This coupon is not active yet",
+        "COUPON_EXPIRED": "This coupon has expired",
+        "COUPON_SCOPE_MISMATCH": "This coupon does not apply to this order",
+        "COUPON_NOT_APPLICABLE": "This coupon does not apply to this order",
+        "COUPON_MIN_AMOUNT_NOT_MET": "This order does not reach the minimum spend for that coupon",
+        "COUPON_LIMIT_REACHED": "This coupon has been fully used",
+        "COUPON_PER_USER_LIMIT_REACHED": "You have already used this coupon — your per-person limit is reached",
+        "COUPON_NOT_FIRST_ORDER": "This coupon is only valid on a new customer first order"
+      }
+    },
     "entry": {
       "title": "Submit print order",
       "desc": "The measured model becomes a print work order — below is the estimate; confirm the shipping address, delivery tier and total in the form underneath.",
@@ -2124,6 +2146,118 @@
       "NOT_FOUND": "That object no longer exists",
       "DELETE_FAILED": "Delete failed — check the server log",
       "DOWNLOAD_FAILED": "Could not sign a download URL — check the server log"
+    }
+  },
+  "AdminCoupons": {
+    "title": "Coupons",
+    "subtitle": "Order-level discounts — usable on mall orders and print orders alike. The discount is computed on the server; users only type the code. Deactivated, never deleted: past orders can still find it.",
+    "presets": {
+      "title": "Quick start",
+      "subtitle": "Pick a preset and the form fills in that shape — change two numbers and it is ready.",
+      "amount": "Fixed amount",
+      "percent": "Percentage",
+      "freeShipping": "Free shipping",
+      "firstOrder": "First order",
+      "blank": "Blank"
+    },
+    "form": {
+      "create": "New coupon",
+      "edit": "Edit coupon",
+      "code": "Code",
+      "codeHint": "2 to 32 characters; letters, digits, hyphens and underscores only. Users may type it in any case.",
+      "name": "Name",
+      "nameHint": "Shown in this admin list. Users never see it.",
+      "namePlaceholder": "Autumn sale",
+      "kind": "Discount type",
+      "kindAmount": "Fixed amount off",
+      "kindPercent": "Percentage off",
+      "kindFreeShipping": "Free shipping",
+      "amount": "Amount (CNY)",
+      "amountHint": "How much comes off.",
+      "discount": "Rate (%)",
+      "discountHint": "How many percent comes off.",
+      "maxDiscount": "Cap (CNY)",
+      "maxDiscountHint": "Leave empty for no cap.",
+      "minAmount": "Minimum spend (CNY)",
+      "minAmountHint": "Spend at least this much. 0 means no minimum.",
+      "scope": "Applies to",
+      "scopeHint": "Which kind of order this coupon can be used on.",
+      "scopeMall": "Mall orders",
+      "scopePrint": "Print orders",
+      "scopeBoth": "Both",
+      "usageLimit": "Total uses",
+      "usageLimitHint": "Leave empty for unlimited.",
+      "perUserLimit": "Uses per person",
+      "perUserLimitHint": "Leave empty for unlimited. Guests cannot use limited coupons.",
+      "startsAt": "Starts at",
+      "startsAtHint": "Leave empty to take effect immediately.",
+      "endsAt": "Ends at",
+      "endsAtHint": "Leave empty for never expires.",
+      "modifiers": "Extra conditions",
+      "firstOrder": "First order only",
+      "firstOrderHint": "Once a user has any order (mall or print), this stops working.",
+      "active": "Active",
+      "activeHint": "Once deactivated users cannot use it, but past orders can still find it.",
+      "scopePrintWarning": "Print orders have no shipping line — a free shipping coupon on a print order means nothing and is rejected as not applicable.",
+      "save": "Save",
+      "saving": "Saving…",
+      "cancel": "Cancel",
+      "required": "This field is required",
+      "codePattern": "Only letters, digits, hyphens and underscores",
+      "codeLength": "Between 2 and 32 characters"
+    },
+    "table": {
+      "code": "Code",
+      "type": "Type",
+      "benefit": "Benefit",
+      "scope": "Applies to",
+      "usage": "Usage",
+      "validity": "Validity",
+      "status": "Status",
+      "actions": "Actions",
+      "firstOrderTag": "First order",
+      "amountDesc": "{amount} off when you spend {min}",
+      "amountDescNoMin": "{amount} off",
+      "percentDesc": "{percent}% off when you spend {min}",
+      "percentDescNoMin": "{percent}% off",
+      "percentDescCapped": "{percent} (capped at {cap})",
+      "freeShippingDesc": "Free shipping when you spend {min}",
+      "freeShippingDescNoMin": "Free shipping"
+    },
+    "actions": {
+      "edit": "Edit",
+      "deactivate": "Deactivate"
+    },
+    "kinds": {
+      "amount": "Fixed amount",
+      "percent": "Percentage",
+      "free_shipping": "Free shipping"
+    },
+    "scopes": {
+      "mall": "Mall orders",
+      "print": "Print orders",
+      "both": "Both"
+    },
+    "status": {
+      "active": "Active",
+      "inactive": "Deactivated"
+    },
+    "messages": {
+      "loading": "Loading coupons…",
+      "loadFailed": "Could not load coupons — check the server log",
+      "saveSuccess": "Saved",
+      "deactivateSuccess": "Deactivated",
+      "instant": "Immediately",
+      "forever": "Never expires",
+      "empty": "No coupons yet — pick a preset above to create one",
+      "instantEffect": "Takes effect immediately, no redeploy needed. The server computes the discount; the numbers here are only the rules."
+    },
+    "errors": {
+      "CODE_DUPLICATE": "This code already exists — pick another one",
+      "COUPON_NOT_FOUND": "Coupon not found — refresh and try again",
+      "INVALID_RULE": "The rule does not add up — a fixed amount needs an amount, a percentage needs a rate, and it cannot end before it starts",
+      "MIGRATION_MISSING": "The coupon tables do not exist yet — run pnpm migrate:apply-coupon",
+      "SAVE_FAILED": "Save failed — check the server log"
     }
   }
 }

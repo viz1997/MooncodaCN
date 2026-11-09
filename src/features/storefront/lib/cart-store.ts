@@ -60,12 +60,18 @@ import { cookies } from "next/headers";
 import { PRICE_CURRENCY, PRICE_REGION_ID } from "@/config/currency";
 import { db } from "@/db";
 import { type CartItemRow, type CartRow, cart, cartItem } from "@/db/schema";
+import {
+  type CouponErrorCode,
+  normalizeCouponCode,
+} from "@/features/coupon/lib/coupon-calc";
+import { evaluateCoupon } from "@/features/coupon/lib/coupon-service";
 import type { Cart, CartLineItem, CartLineItemMetadata } from "../types";
 import { computeSpecHash } from "./cart-spec";
 import { findProductById } from "./mock-catalog";
 import { getPriceSource } from "./price-source";
 import type { PriceSource } from "./price-source-types";
 import { calculatePricing, computeQuantityDiscount } from "./pricing";
+import { calculateShippingCents } from "./pricing-constants";
 
 /* -------------------------------------------------------------------------- */
 /*  Cookie helper                                                            */
@@ -214,8 +220,57 @@ function toCart(row: CartRow, items: CartItemRow[], source: PriceSource): Cart {
     currencyCode: row.currencyCode as typeof PRICE_CURRENCY,
     regionId: row.regionId,
     items: items.map((item) => repriceLineItem(item, source)),
+    couponCode: row.couponCode,
+    // 优惠效果是**异步**算的(要查库)—— 见 `buildCart`
+    coupon: null,
+    couponError: null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+/**
+ * cart 行 → domain Cart(**带优惠效果**)
+ *
+ * ## 优惠码每次读车都**现算**
+ *
+ * 车上的 `coupon_code` 只存**码**,不存折扣金额 —— 车里的行数会变
+ * (加一件 / 删一件),存的金额会过期。
+ *
+ * 算的时候用**折后小计**(用户看得见的那个数)当门槛基准,跟结算完全一致。
+ *
+ * ## 算不出来不抛
+ *
+ * 券过期 / 停用 / 没满门槛 → `coupon = null` + `couponError = 原因码`。
+ * 界面据此说人话 + 给一个「去掉优惠码」按钮。
+ * **购物袋是给人看的**,不该因为一张失效的券整个打不开。
+ */
+async function buildCart(
+  row: CartRow,
+  items: CartItemRow[],
+  source: PriceSource
+): Promise<Cart> {
+  const cart = toCart(row, items, source);
+  if (!row.couponCode) return cart;
+
+  const subtotalCents = cart.items.reduce(
+    (sum, item) => sum + item.discountedUnitPriceCents * item.quantity,
+    0
+  );
+  const evaluation = await evaluateCoupon({
+    code: row.couponCode,
+    orderKind: "mall",
+    couponBaseCents: subtotalCents,
+    // 运费门槛按**折后小计**算(优惠之前)
+    shippingCents: calculateShippingCents(subtotalCents),
+    // 只有「新人首单券」/「每人限用」的券才会真的调它 —— 热路径不查会话
+    resolveUserId: getCurrentUserId,
+  });
+
+  return {
+    ...cart,
+    coupon: evaluation.coupon,
+    couponError: evaluation.error,
   };
 }
 
@@ -262,6 +317,9 @@ export async function createCart(userId?: string | null): Promise<Cart> {
     currencyCode: PRICE_CURRENCY,
     regionId: PRICE_REGION_ID,
     items: [],
+    couponCode: null,
+    coupon: null,
+    couponError: null,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
   };
@@ -279,7 +337,7 @@ export async function getCart(cartId: string): Promise<Cart | null> {
   if (!row) return null;
   const items = await loadCartItemRows(cartId);
   const source = await getPriceSource();
-  return toCart(row, items, source);
+  return buildCart(row, items, source);
 }
 
 /**
@@ -337,7 +395,7 @@ export async function getOrCreateCart(): Promise<Cart> {
       }
       const items = await loadCartItemRows(cookieId);
       const source = await getPriceSource();
-      return toCart(row, items, source);
+      return buildCart(row, items, source);
     }
     // cookie 指向的 cart 没了(被删了 / 换了库)→ 清掉 cookie 往下走
     store.delete(CART_COOKIE_NAME);
@@ -362,7 +420,7 @@ export async function getOrCreateCart(): Promise<Cart> {
       await setCartId(row.id);
       const items = await loadCartItemRows(row.id);
       const source = await getPriceSource();
-      return toCart(row, items, source);
+      return buildCart(row, items, source);
     }
   }
 
@@ -386,6 +444,21 @@ export async function getOrCreateCart(): Promise<Cart> {
  *
  * `(cart_id, spec_hash)` 是唯一索引 —— 搬过去可能撞上同样的规格,撞上了
  * 就把数量加起来(跟 `addLineItem()` 的 `ON CONFLICT DO UPDATE` 一个口径)。
+ *
+ * 打印服务行**不累加数量** —— 一件活一个模型,数量恒为 1(见
+ * `addLineItem()`)。同一个模型在两张车里各一行,合并之后还是一件。
+ *
+ * ## 优惠码:主车的赢(2026-11-08)
+ *
+ * 主车 = 用户自己的车(有过户的那张),游客车是「额外的车」。
+ *
+ * - **主车有券** → 主车的赢,游客车那张券丢掉
+ * - **主车没券、游客车有券** → 采纳游客车那张
+ *
+ * 采纳的那张**会被重新校验** —— 因为优惠码每次读车都现算(见
+ * `buildCart()`),合并之后小计变了(门槛可能不再满足)、时间也过了(可能
+ * 过期)、额度也可能用完了。校验不过就是 `coupon = null` +
+ * `couponError` 说人话,**不静默按原价收**。
  */
 async function mergeUserCarts(
   primaryId: string,
@@ -434,6 +507,19 @@ async function mergeUserCarts(
           },
         });
     }
+
+    // 主车没券、游客车有券 → 采纳游客车那张(读车时会重新校验)
+    const primary = await loadCartRow(primaryId);
+    if (primary && !primary.couponCode) {
+      const extra = await loadCartRow(extraId);
+      if (extra?.couponCode) {
+        await db
+          .update(cart)
+          .set({ couponCode: extra.couponCode, updatedAt: now })
+          .where(eq(cart.id, primaryId));
+      }
+    }
+
     await db.delete(cart).where(eq(cart.id, extraId));
   }
 
@@ -453,6 +539,97 @@ export async function stampCartOwner(
     .update(cart)
     .set({ userId, updatedAt: new Date() })
     .where(eq(cart.id, cartId));
+}
+
+/* -------------------------------------------------------------------------- */
+/*  优惠码                                                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 给车**应用**一个优惠码
+ *
+ * ## 失败时**一个字都不写库**
+ *
+ * 码不存在 / 过期 / 停用 / 范围不对 / 没满门槛 / 超限 —— 全部返回
+ * `{ ok: false, code }`,车的 `coupon_code` **保持原样**。
+ *
+ * 写坏了的后果:用户在购物袋里看到一个「省了 ¥20」的标签,结算时却没有那
+ * 20 块的优惠 —— 用户会问「我的码呢」。
+ *
+ * ## 空串 = 去掉优惠码
+ *
+ * 用户明确要摘掉时走这条路 —— 直接把 `coupon_code` 清成 null。
+ *
+ * ## `options.userId` —— 判身份用的用户 id
+ *
+ * 「新人首单券」「每人限用」这两种券要判身份。不传就退回去查 cookie 会话
+ * (浏览器那条路);调用方已经解析出会话了(比如 Bearer 那条路)就直接传进来,
+ * 别再查一次。
+ *
+ * 传 `null` = **明确**表示「这个人没登录」—— 跟「不传」不是一回事。
+ */
+export async function setCartCoupon(
+  cartId: string,
+  code: string,
+  options: { userId?: string | null } = {}
+): Promise<{ cart: Cart; error: CouponErrorCode | null }> {
+  const normalized = normalizeCouponCode(code);
+
+  const resolveUserId = async (): Promise<string | null> => {
+    if (options.userId !== undefined) return options.userId;
+    return getCurrentUserId();
+  };
+
+  // 去掉优惠码
+  if (!normalized) {
+    await db
+      .update(cart)
+      .set({ couponCode: null, updatedAt: new Date() })
+      .where(eq(cart.id, cartId));
+    const cleared = await getCart(cartId);
+    if (!cleared) throw new Error(`cart ${cartId} 不存在`);
+    return { cart: cleared, error: null };
+  }
+
+  const row = await loadCartRow(cartId);
+  if (!row) throw new Error(`cart ${cartId} 不存在`);
+  const items = await loadCartItemRows(cartId);
+  const source = await getPriceSource();
+  const current = toCart(row, items, source);
+
+  const subtotalCents = current.items.reduce(
+    (sum, item) => sum + item.discountedUnitPriceCents * item.quantity,
+    0
+  );
+  const evaluation = await evaluateCoupon({
+    code: normalized,
+    orderKind: "mall",
+    couponBaseCents: subtotalCents,
+    shippingCents: calculateShippingCents(subtotalCents),
+    resolveUserId,
+  });
+
+  if (evaluation.error || !evaluation.coupon) {
+    // **不写库** —— 车上的码原样保留
+    return {
+      cart: current,
+      error: evaluation.error ?? "COUPON_NOT_FOUND",
+    };
+  }
+
+  await db
+    .update(cart)
+    .set({ couponCode: normalized, updatedAt: new Date() })
+    .where(eq(cart.id, cartId));
+
+  const fresh = await getCart(cartId);
+  if (!fresh) throw new Error(`cart ${cartId} 不存在`);
+  // 以**这次**判定为准 —— `getCart()` 内部查的是 cookie 会话,
+  // 调用方传了 `userId` 的话这里可能不是同一个判断。
+  return {
+    cart: { ...fresh, coupon: evaluation.coupon, couponError: null },
+    error: null,
+  };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -688,6 +865,14 @@ export async function clearCartItems(cartId: string): Promise<void> {
  * `cart.user_id` —— 结算时打过户(见 `stampCartOwner`),所以这一列找得到
  * 这个人的所有购物车(换设备登录也在内)。已经买过的规格,别的设备上也不该
  * 再留着让人重复下单。
+ *
+ * ## 顺手**清掉优惠码**(2026-11-08)
+ *
+ * 优惠码是**订单级**的 —— 这一单已经用它了。留着的话,下一单会**自动**
+ * 带着上一张券(用户没选过),而且那张券可能已经超限 / 过期。
+ *
+ * 留着它的后果是「用户没输码,却莫名其妙便宜了」—— 下一次结账时金额跟
+ * 购物袋里看到的不一样,用户会问「我的码呢」。
  */
 export async function removeOrderedLinesFromCarts(
   userId: string,
@@ -717,25 +902,26 @@ export async function removeOrderedLinesFromCarts(
         inArray(cartItem.specHash, [...bought.keys()])
       )
     );
-  if (rows.length === 0) return;
 
   const now = new Date();
-  for (const row of rows) {
-    const quantity = bought.get(row.specHash);
-    if (quantity === undefined) continue;
-    const remaining = row.quantity - quantity;
-    if (remaining > 0) {
-      await db
-        .update(cartItem)
-        .set({ quantity: remaining, updatedAt: now })
-        .where(eq(cartItem.id, row.id));
-    } else {
-      await db.delete(cartItem).where(eq(cartItem.id, row.id));
+  if (rows.length > 0) {
+    for (const row of rows) {
+      const quantity = bought.get(row.specHash);
+      if (quantity === undefined) continue;
+      const remaining = row.quantity - quantity;
+      if (remaining > 0) {
+        await db
+          .update(cartItem)
+          .set({ quantity: remaining, updatedAt: now })
+          .where(eq(cartItem.id, row.id));
+      } else {
+        await db.delete(cartItem).where(eq(cartItem.id, row.id));
+      }
     }
   }
 
   await db
     .update(cart)
-    .set({ updatedAt: now })
+    .set({ couponCode: null, updatedAt: now })
     .where(inArray(cart.id, cartIds));
 }

@@ -63,6 +63,7 @@ export function AdminSidebar() {
       打印订单: t("nav.printOrders"),
       打印定价: t("nav.printPricing"),
       文件管理: t("nav.files"),
+      优惠码: t("nav.coupons"),
     };
     return titleMap[title] || title;
   };

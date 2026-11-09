@@ -28,11 +28,29 @@
  * 所以这里没有「打印服务那部分」这种分支了 —— 车上的每一行都是要寄出去的
  * 实物,运费按整张小计算,¥8,到 ¥99 免。
  *
+ * ## 优惠码(2026-11-08)
+ *
+ * 优惠码是**订单级**的 —— 折扣不减在任何一行上,而是减整单。所以它跟
+ * 「数量阶梯折扣」是**两码事**:
+ *
+ * - 数量阶梯折扣 → 折在**单价**上 → `discountCents`(折扣前小计 − 小计)
+ * - 优惠码 → 减**整单** → `couponDiscountCents`
+ *
+ * 合计恒等式:
+ *
+ * ```
+ * totalCents = subtotalCents − couponDiscountCents + shippingCents
+ * ```
+ *
+ * 优惠效果是**服务端算好的**(`CouponView`)—— 这个函数只做加法。
+ *
  * ## 这个文件是**纯**的
  *
  * 购物袋详情页和结算页都是客户端组件,都 import 它 —— 不能引入任何服务端
  * 模块。
  */
+
+import type { CouponView } from "@/features/coupon/lib/coupon-calc";
 
 import type { CartLineItem } from "../types";
 import {
@@ -48,9 +66,11 @@ export interface CartTotals {
   rawSubtotalCents: number;
   /** 数量折扣(分)—— 折扣前小计 − 小计 */
   discountCents: number;
-  /** 运费(分)—— 达到免运费门槛就是 0 */
+  /** 运费(分)—— 达到免运费门槛就是 0;免运费券下也是 0 */
   shippingCents: number;
-  /** 合计(分)—— 小计 + 运费 */
+  /** 优惠码减掉的金额(分)—— 订单级,不落在任何一行上 */
+  couponDiscountCents: number;
+  /** 合计(分)—— 小计 − 优惠 + 运费 */
   totalCents: number;
   /** 总件数 */
   itemCount: number;
@@ -62,13 +82,28 @@ export interface CartTotals {
  * 算一张车的金额
  *
  * @param items 车上的行(服务端算好的折后单价 —— 见 `cart-store.ts`)
+ * @param coupon 服务端算好的优惠效果(见 `coupon-service.ts`)—— 没有券就省略
  *
- * ## 运费门槛按**折后小计**算
+ * ## 钱的顺序
  *
- * 阶梯折扣落在单价上,所以「用户看得见的那个数」就是折后小计 —— 免运费的
- * 门槛看它,不是折扣前的小计。
+ * ```
+ * 小计       = Σ(折后单价 × 数量)      ← 用户看得见的那个数
+ * 运费       = calculateShippingCents(小计)   ← **门槛按折后小计算**
+ * 优惠       = 券算出来的(封顶在小计里)
+ * 合计       = 小计 − 优惠 + 运费
+ * ```
+ *
+ * ## 运费门槛**在优惠之前**算
+ *
+ * 优惠把金额压到 ¥99 以下反而**多收**运费,那是坑用户。所以门槛看的是
+ * **折后小计**(还没减优惠码的那个数)。
+ *
+ * 而**百分比 / 满减不碰运费** —— 运费不是商品。只有「免运费」券动它。
  */
-export function computeCartTotals(items: CartLineItem[]): CartTotals {
+export function computeCartTotals(
+  items: CartLineItem[],
+  coupon?: CouponView | null
+): CartTotals {
   let subtotalCents = 0;
   let rawSubtotalCents = 0;
   let itemCount = 0;
@@ -79,17 +114,31 @@ export function computeCartTotals(items: CartLineItem[]): CartTotals {
     itemCount += item.quantity;
   }
 
-  // 门槛按**折后小计**算
-  const shippingCents = calculateShippingCents(subtotalCents);
+  // 门槛按**折后小计**算 —— 优惠之前
+  const grossShippingCents = calculateShippingCents(subtotalCents);
+  const shippingCents = coupon?.freeShipping ? 0 : grossShippingCents;
+  // 优惠额**封顶在小计里** —— 合计永远不是负数
+  //
+  // 服务端那一侧已经封过顶(`computeCouponDiscount` 的 `min(discount, base)`),
+  // 这里再封一道是**兜底**:优惠额是服务端给的快照,车里的行数万一在这
+  // 之间变了(用户删了一件),快照就比小计大了 —— 没有这道兜底,界面上会摆出
+  // 一个负数合计。
+  const couponDiscountCents = Math.min(
+    Math.max(0, coupon?.discountCents ?? 0),
+    subtotalCents
+  );
 
   return {
     subtotalCents,
     rawSubtotalCents,
     discountCents: rawSubtotalCents - subtotalCents,
     shippingCents,
-    totalCents: subtotalCents + shippingCents,
+    couponDiscountCents,
+    totalCents: subtotalCents - couponDiscountCents + shippingCents,
     itemCount,
-    remainingForFreeShippingCents:
-      calculateRemainingForFreeShipping(subtotalCents),
+    // 免运费券下**不要再催用户** —— 运费已经是 0 了
+    remainingForFreeShippingCents: coupon?.freeShipping
+      ? 0
+      : calculateRemainingForFreeShipping(subtotalCents),
   };
 }

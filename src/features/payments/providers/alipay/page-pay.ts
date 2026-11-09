@@ -26,6 +26,7 @@
  */
 
 import { centsToAmountString } from "@/features/payments/lib/money";
+import { computeTotalCents } from "@/features/payments/lib/total";
 import type { PaymentRequest } from "@/features/payments/lib/types";
 
 import { ALIPAY_RETURN_PATH, type AlipayConfig } from "./env";
@@ -57,16 +58,16 @@ export interface AlipayBizContent {
 /**
  * 算应付总额(分)
  *
- * 每行的「折后单价 × 数量」再加起来,最后加上运费。运费也是分,先加总再
- * 转元 —— 分和元混着加会出那一分钱的差。
+ * **实现在 `payments/lib/total.ts`** —— 微信和支付宝共用同一份。
+ *
+ * ```
+ * total = Σ(折后单价 × 数量) + 运费 − 订单级优惠
+ *        = storefront_order.total_cents   ✅ 逐分相等
+ * ```
+ *
+ * 这里只是**转出去** —— 免得别处 import 支付宝这一支的时候绕路。
  */
-export function computeTotalCents(request: PaymentRequest): number {
-  const itemsTotal = request.items.reduce(
-    (sum, item) => sum + Math.round(item.unitPriceCents * item.quantity),
-    0
-  );
-  return itemsTotal + Math.round(request.shippingCents);
-}
+export { computeTotalCents };
 
 /**
  * 拼标题

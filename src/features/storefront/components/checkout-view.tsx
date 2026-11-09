@@ -41,11 +41,13 @@ import type { AddressView } from "@/features/address/types";
 import { Link } from "@/i18n/routing";
 import { formatCents } from "@/lib/money";
 
+import { useCart } from "../hooks/use-cart";
 import { computeCartTotals } from "../lib/cart-totals";
 import { findAccessoryVariant } from "../lib/mock-catalog";
 import { formatSizeWithInches } from "../lib/size-format";
 import type { Cart, CartLineItem } from "../types";
 import { CheckoutPaymentPanel } from "./checkout-payment-panel";
+import { CouponField } from "./coupon-field";
 
 export function CheckoutView({
   cart,
@@ -59,7 +61,22 @@ export function CheckoutView({
   /** 登录链接(带 callbackUrl) */
   signInUrl: string;
 }) {
-  const items = cart?.items ?? [];
+  const {
+    cart: cachedCart,
+    items: cachedItems,
+    coupon: cachedCoupon,
+  } = useCart();
+
+  /**
+   * 行和优惠 —— **缓存优先,服务端那份兜底**
+   *
+   * 服务端渲染的那份(`cart` prop)是首屏;缓存回来之后换成缓存里的 ——
+   * 用户在**这一页**输了优惠码,缓存里的券立刻生效,页面上的合计跟着变。
+   *
+   * 跟购物袋详情页是同一套口径(见 `cart-page-view.tsx`)。
+   */
+  const items = cachedCart ? cachedItems : (cart?.items ?? []);
+  const coupon = cachedCart ? cachedCoupon : (cart?.coupon ?? null);
 
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(
     addresses.find((a) => a.isDefault)?.id ?? addresses[0]?.id ?? null
@@ -68,7 +85,10 @@ export function CheckoutView({
 
   // 金额 —— 全部来自服务端算好的数;口径跟购物袋详情页共用一份
   // (见 `lib/cart-totals.ts` —— 两页显示的合计必须是同一个数)
-  const totals = useMemo(() => computeCartTotals(items), [items]);
+  const totals = useMemo(
+    () => computeCartTotals(items, coupon),
+    [items, coupon]
+  );
 
   /* ---------------------------------------------------------------------- */
   /*  空购物车                                                                */
@@ -161,6 +181,11 @@ export function CheckoutView({
         <aside className="lg:sticky lg:top-6 border border-border rounded-sm p-6 bg-card">
           <h2 className="eyebrow text-muted-foreground mb-4">订单金额</h2>
 
+          {/* 优惠码 —— 跟购物袋 / 抽屉共用一份 */}
+          <div className="mb-5">
+            <CouponField />
+          </div>
+
           <dl className="space-y-2.5 text-sm">
             <div className="flex items-center justify-between">
               <dt className="text-muted-foreground">小计</dt>
@@ -173,6 +198,14 @@ export function CheckoutView({
                 <dt className="text-muted-foreground">数量折扣</dt>
                 <dd className="font-medium text-accent">
                   -{formatCents(totals.discountCents)}
+                </dd>
+              </div>
+            )}
+            {totals.couponDiscountCents > 0 && (
+              <div className="flex items-center justify-between">
+                <dt className="text-muted-foreground">优惠</dt>
+                <dd className="font-medium text-accent">
+                  -{formatCents(totals.couponDiscountCents)}
                 </dd>
               </div>
             )}

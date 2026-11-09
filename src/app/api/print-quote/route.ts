@@ -32,7 +32,9 @@
 
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { evaluateCoupon } from "@/features/coupon/lib/coupon-service";
 import { getPrintOrderUser } from "@/features/print-quote/lib/auth";
+import { printCouponBaseCents } from "@/features/print-quote/lib/coupon-base";
 import { getPrintPricingSettings } from "@/features/print-quote/lib/pricing-store";
 import { computePrintQuote } from "@/features/print-quote/lib/quote-server";
 import type { PrintQuoteInput } from "@/features/print-quote/lib/quote-types";
@@ -73,6 +75,15 @@ const quoteInputSchema = z.object({
    * 不传 = 标准档。传了不认识的 zod 会拒掉 —— 那是 400,不是「按最贵的算」。
    */
   deliveryTier: z.enum(["standard", "express", "urgent"]).nullish(),
+  /**
+   * 优惠码(2026-11-08)
+   *
+   * 传了 = 让服务端算一下这张码在这单上能减多少。不传 = 不用券。
+   *
+   * **码不可用不会让这个接口失败** —— 报价还是给(用户得先看到价),只是
+   * 响应里多一个 `couponError`(精确原因码),界面据此说人话。
+   */
+  couponCode: z.string().max(64).nullish(),
 });
 
 async function handle(request: NextRequest) {
@@ -138,7 +149,35 @@ async function handle(request: NextRequest) {
     );
   }
 
-  return NextResponse.json({ quote }, { headers: getRateLimitHeaders(rl) });
+  /**
+   * 优惠码(2026-11-08)
+   *
+   * **券不可用不让这个接口失败** —— 报价照给(用户得先看到价),只是多带
+   * 一个 `couponError`。下单那条路才会硬拒(见 `POST /api/print-orders`)。
+   *
+   * 基数 = 报价合计 − 交期加价(加急费不参与优惠)。
+   */
+  const coupon = parsed.data.couponCode
+    ? await evaluateCoupon({
+        code: parsed.data.couponCode,
+        orderKind: "print",
+        couponBaseCents: printCouponBaseCents(quote),
+        // 打印工单没有运费行 —— 免运费券在这儿没有意义,会被直接拒掉
+        shippingCents: 0,
+        resolveUserId: async () => user?.id ?? null,
+      })
+    : null;
+
+  return NextResponse.json(
+    {
+      quote,
+      /** 优惠效果(服务端算的)—— null = 没有码,或者券不可用 */
+      coupon: coupon?.coupon ?? null,
+      /** 券不可用的精确原因 —— null = 没有码,或者券完全可用 */
+      couponError: coupon?.error ?? null,
+    },
+    { headers: getRateLimitHeaders(rl) }
+  );
 }
 
 export const POST = withApiLogging(handle);

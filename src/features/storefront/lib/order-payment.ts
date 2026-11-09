@@ -148,6 +148,17 @@ export async function ensureStorefrontOrderPaymentLink(
     return { ok: false, code: "PAYMENT_NOT_CONFIGURED" };
   }
 
+  // **旧路不支持优惠码**(2026-11-08)
+  //
+  // 那条路逐项换算,没有折扣概念,也表达不了「免运费」—— 带券的订单走它
+  // 必然对不上账(我们减了折扣、收银台按原价收)。
+  //
+  // 新订单永远走不到这里(`ENABLED_PAYMENT_CHANNELS` 里没有 stripe),
+  // 这是防御性的闸。
+  if ((order.couponDiscountCents ?? 0) > 0) {
+    return { ok: false, code: "LINK_FAILED" };
+  }
+
   if (order.paymentUrl) {
     return { ok: true, paymentUrl: order.paymentUrl, paymentQrCodeUrl: null };
   }
@@ -283,6 +294,14 @@ async function ensureNewChannelPaymentLink(
     email: order.email,
     items: requestItems,
     shippingCents: order.shippingCents,
+    // **订单级优惠必须带上**(2026-11-08)
+    //
+    // 少了它,重建出来的总额 = Σ(折后单价 × 数量) + 运费 —— **比订单应付多出
+    // 优惠码减免的那一份** ⇒ 用户点一下「重新获取付款入口」就被多收钱。
+    //
+    // 优惠额是订单上**存下来的**那个数,不是现算的 —— 用户下单时同意的就是
+    // 那个价。
+    discountCents: order.couponDiscountCents ?? 0,
     shippingAddress: address
       ? {
           recipientName: address.recipientName,

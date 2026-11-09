@@ -31,6 +31,10 @@ import {
 } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 
+import type {
+  CouponErrorCode,
+  CouponView,
+} from "@/features/coupon/lib/coupon-calc";
 import { toRequestError } from "@/features/shared/lib/request-error";
 
 import { computeCartTotals } from "../lib/cart-totals";
@@ -131,6 +135,56 @@ async function removeLineItemFetch(
   );
 }
 
+/**
+ * 应用 / 摘掉优惠码(2026-11-08)
+ *
+ * **空串 = 摘掉**优惠码。
+ *
+ * 失败时服务端返 400 + `{ error: "COUPON_INVALID", couponErrorCode }` ——
+ * 这里把 `couponErrorCode` 一起抛出去,界面按它说人话(「这个券过期了」)
+ * 而不是一句笼统的「用不了」。
+ */
+async function applyCouponFetch(
+  cartId: string,
+  code: string
+): Promise<{ cart: Cart }> {
+  const res = await fetch(`/api/store/carts/${cartId}/coupon`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    const error = toRequestError(body, res.status);
+    // 精确原因(过期 / 没满门槛 / 超限 …)—— 界面按它查文案
+    const couponErrorCode =
+      body && typeof body === "object"
+        ? ((body as Record<string, unknown>).couponErrorCode as
+            | CouponErrorCode
+            | undefined)
+        : undefined;
+    if (couponErrorCode) {
+      throw new CouponRequestError(couponErrorCode, error.message, error);
+    }
+    throw error;
+  }
+
+  return res.json() as Promise<{ cart: Cart }>;
+}
+
+/** 优惠码不可用 —— 带着**精确原因码** */
+export class CouponRequestError extends Error {
+  readonly code: CouponErrorCode;
+
+  constructor(code: CouponErrorCode, message: string, cause?: unknown) {
+    super(message, { cause });
+    this.name = "CouponRequestError";
+    this.code = code;
+  }
+}
+
 /* -------------------------------------------------------------------------- */
 /*  Main hook                                                                 */
 /* -------------------------------------------------------------------------- */
@@ -162,6 +216,15 @@ export interface UseCartResult {
     Error,
     { lineItemId: string }
   >;
+  /**
+   * 应用优惠码(2026-11-08)
+   *
+   * 传**空串** = 摘掉优惠码。
+   *
+   * 失败时抛 `CouponRequestError`(带精确原因码)—— 界面按它说人话,
+   * 并给一个「去掉优惠码」按钮。
+   */
+  applyCoupon: UseMutationResult<{ cart: Cart }, Error, { code: string }>;
   /** 小计(分) */
   subtotalCents: number;
   /** 总件数 */
@@ -171,7 +234,17 @@ export interface UseCartResult {
   /** 运费(分) */
   shippingCents: number;
   /**
-   * 合计(分)—— 小计 + 运费
+   * 优惠码减掉的金额(分)—— 0 = 没用券
+   *
+   * **服务端算的** —— 客户端一个加法都不做。
+   */
+  couponDiscountCents: number;
+  /** 生效的优惠码效果 —— null = 没有券,或者券不可用 */
+  coupon: CouponView | null;
+  /** 优惠码不可用的原因码 —— null = 没有码,或者券完全可用 */
+  couponError: CouponErrorCode | null;
+  /**
+   * 合计(分)—— 小计 − 优惠 + 运费
    *
    * **唯一的一份** —— 抽屉 / 购物袋页 / 结算页都读它,免得三处各算一遍
    * 算出三个数。
@@ -235,8 +308,33 @@ export function useCart(): UseCartResult {
     },
   });
 
+  /**
+   * 优惠码(2026-11-08)
+   *
+   * **失败时不写缓存** —— 服务端失败时一个字节都没写库,车上的码原样保留。
+   * 所以 `onError` 里**不要**动缓存,让界面按 `couponError` 说人话。
+   */
+  const applyCouponMutation = useMutation({
+    mutationFn: async ({ code }: { code: string }) => {
+      const cart = query.data ?? (await ensureCart());
+      return applyCouponFetch(cart.id, code);
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(CART_QUERY_KEY, data.cart);
+    },
+  });
+
   // 3. selectors
   const items = query.data?.items ?? [];
+
+  /**
+   * 优惠码效果 —— **服务端算好的快照**
+   *
+   * `cart.coupon` 是服务端读车时算的(折扣金额是**服务端**算的,客户端一个
+   * 加法都不做)。`cart.couponError` 是它不可用的原因码。
+   */
+  const coupon = query.data?.coupon ?? null;
+  const couponError = query.data?.couponError ?? null;
 
   /**
    * 金额 —— **跟购物袋页 / 结算页用同一份口径**
@@ -244,9 +342,12 @@ export function useCart(): UseCartResult {
    * `computeCartTotals()` 是纯函数(见 `lib/cart-totals.ts`),购物袋详情页
    * 和结算页都 import 它。这里也用它,免得抽屉里的运费跟页面上摆的不一样。
    *
-   * 运费按**整张折后小计**算 —— 车里的每一行都是要寄出去的实物。
+   * **第二个参数是优惠效果** —— 优惠码是订单级的,减整单,不落在任何一行上。
    */
-  const totals = useMemo(() => computeCartTotals(items), [items]);
+  const totals = useMemo(
+    () => computeCartTotals(items, coupon),
+    [items, coupon]
+  );
   const itemCount = totals.itemCount;
 
   // 4. refetch helper
@@ -260,10 +361,14 @@ export function useCart(): UseCartResult {
     addLineItem: addLineItemMutation,
     updateLineItemQuantity: updateQuantityMutation,
     removeLineItem: removeLineItemMutation,
+    applyCoupon: applyCouponMutation,
     subtotalCents: totals.subtotalCents,
     itemCount,
     remainingForFreeShippingCents: totals.remainingForFreeShippingCents,
     shippingCents: totals.shippingCents,
+    couponDiscountCents: totals.couponDiscountCents,
+    coupon,
+    couponError,
     totalCents: totals.totalCents,
     refetch,
   };

@@ -90,6 +90,10 @@ function statusForCode(code: CheckoutError["code"]): number {
       return 503;
     case "PAYMENT_CHANNEL_UNAVAILABLE":
       return 503;
+    // 券的问题是**可预期的用户输入错误**(过期 / 没满门槛 / 超限 …)——
+    // 400,不是 500。客户端按 `couponErrorCode` 说人话。
+    case "COUPON_INVALID":
+      return 400;
     default:
       return 500;
   }
@@ -180,7 +184,15 @@ async function handle(request: NextRequest) {
   } catch (error) {
     if (error instanceof CheckoutError) {
       return NextResponse.json(
-        { error: error.code, message: error.message },
+        {
+          error: error.code,
+          message: error.message,
+          // 优惠码场景带上**精确原因**(过期 / 没满门槛 / 超限 …)——
+          // 客户端按它查文案表说人话,拿不到就退化到通用文案。
+          ...(error.couponErrorCode
+            ? { couponErrorCode: error.couponErrorCode }
+            : {}),
+        },
         { status: statusForCode(error.code), headers: getRateLimitHeaders(rl) }
       );
     }

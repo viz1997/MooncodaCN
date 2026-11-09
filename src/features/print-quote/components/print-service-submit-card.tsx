@@ -43,6 +43,10 @@
 import { ArrowRight, ClipboardList } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import type {
+  CouponErrorCode,
+  CouponView,
+} from "@/features/coupon/lib/coupon-calc";
 import { PrintServiceQuotePreview } from "@/features/print-quote/components/print-service-quote-preview";
 import type { DeliveryTierId } from "@/features/print-quote/lib/delivery-tier";
 import type {
@@ -71,6 +75,18 @@ export type PrintServiceSubmitCardProps = {
    * 由服务端给,前端不自己认一份。
    */
   onQuote?: (quote: PrintQuote | null) => void;
+  /**
+   * 优惠码(2026-11-08)
+   *
+   * 带了它去问价,服务端顺带算这张码能减多少。null = 没用券。
+   */
+  couponCode?: string | null;
+  /**
+   * 把优惠结果抬给父组件(2026-11-08)
+   *
+   * `coupon` = 服务端算好的优惠快照;`error` = 券不可用的精确原因码。
+   */
+  onCoupon?: (coupon: CouponView | null, error: CouponErrorCode | null) => void;
   /** 展开下单表单 —— 父组件把表单摆在工作台下面 */
   onStart: () => void;
   /** 表单已经展开了 */
@@ -85,6 +101,8 @@ export function PrintServiceSubmitCard({
   input,
   deliveryTier,
   onQuote,
+  couponCode,
+  onCoupon,
   onStart,
   formOpen,
   isLoggedIn,
@@ -112,7 +130,9 @@ export function PrintServiceSubmitCard({
         <PrintServiceQuotePreview
           input={input}
           deliveryTier={deliveryTier}
+          couponCode={couponCode}
           onQuote={onQuote}
+          onCoupon={onCoupon}
         />
 
         {isLoggedIn ? (

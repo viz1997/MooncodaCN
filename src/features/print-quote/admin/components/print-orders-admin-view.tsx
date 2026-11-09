@@ -718,6 +718,15 @@ export function PrintOrdersAdminView() {
                 label="交期加价"
                 value={formatCurrency(detail.deliveryFeeCents / 100)}
               />
+              {/* 优惠(2026-11-08)—— 上面四行是折前的,合计是净额,中间差的就是这一行 */}
+              {detail.couponDiscountCents > 0 ? (
+                <InfoRow
+                  label={
+                    detail.couponCode ? `优惠(${detail.couponCode})` : "优惠"
+                  }
+                  value={`- ${formatCurrency(detail.couponDiscountCents / 100)}`}
+                />
+              ) : null}
               <InfoRow
                 label="合计"
                 value={formatCurrency(detail.totalPriceCents / 100)}
