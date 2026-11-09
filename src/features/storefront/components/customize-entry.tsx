@@ -23,13 +23,27 @@
  *
  * ## 代表商品怎么来的
  *
- * 每个品类取 `MOCK_PRODUCTS` 里该 `seriesId` 的第一件。选完品类后
+ * 每个品类取商品列表里该 `seriesId` 的第一件。选完品类后
  * CustomWorkshop 的 Configure 阶段仍然能改尺寸 / 材质 / 刻字,代表商品只提供
  * 品类骨架(aiStyles / sizes / materials / 价格档),不会锁死用户的选择。
  *
  * 挂载在 `(marketing-atelier)/layout.tsx`,与 CartDrawer / ProductQuickView /
  * CustomWorkshop 并列。portal 指向 `.atelier-root`,否则拿不到 atelier 的
  * 颜色 token(见 use-atelier-container.ts)。
+ *
+ * ## 商品从服务端来(2026-11-08)
+ *
+ * 以前这里直接 `import { MOCK_PRODUCTS }` —— 价是**代码常量**,后台
+ * `/admin/products` 改了基础价,品类选择层上那个「起 ¥19」不会变。
+ *
+ * 现在走 `useProducts()` —— 它打的是 `/api/store/products`,那个接口读
+ * **DB 的价**(见 `price-source.ts`)。客户端**一个价都不算**,价是服务端给的。
+ *
+ * **为什么这里用 hook 而不是 props** —— 这个组件挂在
+ * `(marketing-atelier)/layout.tsx` 上,而那个 layout 管着 `/cart` /
+ * `/checkout` / `/product/[handle]`(12 个 SSG 页)。要传 props 就得让 layout
+ * 取价,layout 一变动态,**整组页面都跟着变成动态渲染** —— 那些页面本来
+ * 不显示目录价,不值当。`wjp-store-header.tsx` 早就是这个写法了。
  */
 
 "use client";
@@ -41,12 +55,13 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { WJP_SERIES } from "@/features/marketing/components/storefront/wjp-store-data";
+import { resolveSeriesFromPrices } from "@/features/storefront/lib/series-pricing";
 import { formatCents } from "@/lib/money";
 
 import { useAtelierContainer } from "../hooks/use-atelier-container";
+import { useProducts } from "../hooks/use-products";
 import { useRequireSignIn } from "../hooks/use-require-sign-in";
 import { useStorefrontModal } from "../hooks/use-storefront-modal";
-import { MOCK_PRODUCTS } from "../lib/mock-catalog";
 
 export function CustomizeEntry() {
   const locale = useLocale();
@@ -59,15 +74,25 @@ export function CustomizeEntry() {
   const requireSignIn = useRequireSignIn();
   const container = useAtelierContainer();
 
+  // 商品(价来自 DB)—— 跟 store header 走同一个接口
+  const { data } = useProducts({ limit: 50 });
+  const products = React.useMemo(() => data?.products ?? [], [data]);
+
   // 每个品类的代表商品。filter 保持 WJP_SERIES 的顺序,找不到的品类不渲染 ——
   // 宁可少一个卡片,也不要拿一个空壳商品进工作台(那一步会直接报错退出)。
   const entries = React.useMemo(
     () =>
       WJP_SERIES.map((series) => ({
         series,
-        product: MOCK_PRODUCTS.find((p) => p.seriesId === series.id) ?? null,
+        product: products.find((p) => p.seriesId === series.id) ?? null,
       })).filter((e) => e.product !== null),
-    []
+    [products]
+  );
+
+  // 品类「起售价」—— 从商品算(DB 的价),查不到退回静态兜底值
+  const seriesFrom = React.useMemo(
+    () => resolveSeriesFromPrices(products, WJP_SERIES),
+    [products]
   );
 
   const pick = (product: (typeof entries)[number]["product"]) => {
@@ -149,9 +174,10 @@ export function CustomizeEntry() {
                 <div className="mt-auto pt-3 flex items-center justify-between gap-2">
                   <p className="text-xs text-muted-foreground">
                     {isZh ? "起 " : "from "}
-                    {formatCents(series.fromPriceCents, {
-                      locale: isZh ? "zh-CN" : "en",
-                    })}
+                    {formatCents(
+                      seriesFrom.get(series.id) ?? series.fromPriceCents,
+                      { locale: isZh ? "zh-CN" : "en" }
+                    )}
                   </p>
                   <ArrowRight className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-[var(--accent)]" />
                 </div>

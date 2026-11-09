@@ -36,6 +36,7 @@ import {
   generateVariantsForProductInDb,
   getProductsFromDb,
   getVariantsFromDb,
+  recomputeProductVariantPricesInDb,
   updateProductInDb,
 } from "@/features/image-gen/lib/db-products";
 import {
@@ -874,6 +875,26 @@ const productFormSchema = z.object({
   sortOrder: z.number().int().default(0),
 });
 
+/**
+ * 商城那几页也读 DB 的价 —— 后台改完价要清它们的缓存。
+ *
+ * 商城页是 `force-dynamic` + `connection()`(见
+ * `src/features/storefront/lib/price-source.ts`),所以**每次请求都重算** ——
+ * 这几个 `revalidatePath` 清的是**客户端 Router Cache** 和 Full Route
+ * Cache,不是「价的缓存」。留着是为了用户改完价点回商城时看到的是新价,
+ * 而不是浏览器里那个旧的 RSC 载荷。
+ *
+ * 路径跟 `src/app/[locale]/` 下的实际路由对应:
+ *   `/[locale]`                        → (marketing-atelier)/page.tsx
+ *   `/[locale]/marketing/products`     → (marketing)/marketing/products/page.tsx
+ *   `/[locale]/product/[handle]`       → (marketing-atelier)/product/[handle]/page.tsx
+ */
+function revalidateStorefrontProductPaths(): void {
+  revalidatePath("/[locale]", "page");
+  revalidatePath("/[locale]/marketing/products", "page");
+  revalidatePath("/[locale]/product/[handle]", "page");
+}
+
 /** 商品列表（含 SKU / 配件变体统计） */
 export const listProductsAdminAction = withImageGenAdminAction("listProducts")
   .schema(z.void().optional())
@@ -916,10 +937,22 @@ export const createProductAdminAction = withImageGenAdminAction("createProduct")
     if (!created) throw new Error("创建失败");
 
     revalidatePath("/admin/products");
+    revalidateStorefrontProductPaths();
     return { product: created };
   });
 
-/** 更新商品资料（不含 SKU —— SKU 走 bulkUpdateProductVariants） */
+/**
+ * 更新商品资料（不含 SKU —— SKU 的价由基础价自动算）
+ *
+ * ## 改了基础价 → 已有 SKU 的绝对价跟着重算
+ *
+ * 基础价是**唯一**的价源(工作室 2026-11-08 拍板)。SKU 的绝对价 =
+ * `基础价 + 尺寸阶梯 + 配件加价`,所以改基础价必须把那批 SKU 行一起改 ——
+ * 否则小程序按 SKU 拿到的绝对价跟商城对不上,又是一轮「改了不生效」。
+ *
+ * 重算只改 `price_cents`,`sellbase_variant_id` / `is_active` /
+ * `sort_order` 一个都不动。
+ */
 export const updateProductAdminAction = withImageGenAdminAction("updateProduct")
   .schema(
     z.object({
@@ -933,9 +966,19 @@ export const updateProductAdminAction = withImageGenAdminAction("updateProduct")
     const updated = await updateProductInDb(parsedInput.code, updates);
     if (!updated) throw new Error("商品不存在");
 
+    // 基础价变了 → 重算这个商品已有 SKU 行的绝对价
+    let recomputedVariants = 0;
+    if (updates.basePriceCents !== undefined) {
+      recomputedVariants = await recomputeProductVariantPricesInDb(
+        parsedInput.code,
+        updates.basePriceCents
+      );
+    }
+
     revalidatePath("/admin/products");
     revalidatePath(`/admin/products/${parsedInput.code}`);
-    return { product: updated };
+    revalidateStorefrontProductPaths();
+    return { product: updated, recomputedVariants };
   });
 
 /** 删除商品（连带其全部 SKU 行） */
@@ -946,6 +989,7 @@ export const deleteProductAdminAction = withImageGenAdminAction("deleteProduct")
     if (!ok) throw new Error("商品不存在");
 
     revalidatePath("/admin/products");
+    revalidateStorefrontProductPaths();
     return { success: true };
   });
 
@@ -960,9 +1004,15 @@ export const listProductVariantsAdminAction = withImageGenAdminAction(
   });
 
 /**
- * 批量改 SKU 价 / 上下架。
+ * 批量改 SKU 的上下架。
  *
- * 前端一次提交所有改动行（对比初始值后只发变化了的），避免逐行往返。
+ * **这里没有「改价」** —— SKU 的绝对价由**基础价**决定。改基础价就改
+ * `updateProductAdminAction` 的 `basePriceCents`,那一批 SKU 的价会自动
+ * 重算(`recomputeProductVariantPricesInDb`)。
+ *
+ * schema 里**故意没有** `priceCents` —— 留着就等于留了个后门:管理员能再把
+ * SKU 价改成跟基础价不一致,直接破坏「基础价说了算」这条不变式。
+ * 被 zod 拒掉是**故意的**,不是 bug。
  */
 export const bulkUpdateProductVariantsAction = withImageGenAdminAction(
   "bulkUpdateProductVariants"
@@ -974,7 +1024,6 @@ export const bulkUpdateProductVariantsAction = withImageGenAdminAction(
         .array(
           z.object({
             id: z.string().min(1),
-            priceCents: z.number().int().min(0).optional(),
             isActive: z.boolean().optional(),
           })
         )
@@ -985,7 +1034,6 @@ export const bulkUpdateProductVariantsAction = withImageGenAdminAction(
     const count = await bulkUpdateVariantsInDb(
       parsedInput.updates.map((u) => ({
         id: u.id,
-        priceCents: u.priceCents,
         isActive: u.isActive,
       }))
     );

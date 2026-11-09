@@ -23,7 +23,10 @@ import type {
 import { product, productAccessoryVariant, productVariant } from "@/db/schema";
 import { getProductType } from "@/features/gpt-image/lib/product-catalog";
 
-import { buildAllVariantSeeds } from "./product-variant-sku";
+import {
+  buildAllVariantSeeds,
+  recomputeVariantPrices,
+} from "./product-variant-sku";
 
 /* -------------------------------------------------------------------------- */
 /*  运行时类型（时间戳转 ISO，给 client component / server action 用）          */
@@ -351,73 +354,126 @@ export async function deleteProductInDb(code: string): Promise<boolean> {
   return result.length > 0;
 }
 
-/** 单个 SKU 改价 / 上下架 */
-export async function updateVariantInDb(
-  id: string,
-  updates: { priceCents?: number; isActive?: boolean }
-): Promise<boolean> {
-  const data: Partial<ProductVariantRow> = { updatedAt: new Date() };
-  if (updates.priceCents !== undefined) data.priceCents = updates.priceCents;
-  if (updates.isActive !== undefined) data.isActive = updates.isActive;
-  const result = await db
-    .update(productVariant)
-    .set(data)
-    .where(eq(productVariant.id, id))
-    .returning();
-  return result.length > 0;
-}
-
 /**
- * 批量改价 + 上下架。
+ * 批量改上下架。
  *
- * 一行一变体的 UPDATE 在 Neon 上往返太多，按「同一组 (priceCents,
- * isActive) 值」合并成一条 SQL —— 运营从列表页勾几行改价时通常值都不同，
- * 所以退化成 N 条也是对的，只是别让常见情况（整页只改上下架 / 只改一个价）
- * 变成上百条。priceCents / isActive 为 undefined 的字段不覆盖。
+ * **这里没有「改价」** —— SKU 的绝对价由**基础价**决定(工作室 2026-11-08
+ * 拍板:基础价是唯一的价源)。要改价就改商品的基础价,那一行 SKU 的价
+ * 由 `recomputeProductVariantPricesInDb()` 自动跟着走。
+ *
+ * 留着「批量改价」就是留了个后门:管理员能再把 SKU 价改成跟基础价不一致,
+ * 小程序按 SKU 拿到的绝对价就跟商城对不上 —— 又是一轮「改了不生效」。
+ *
+ * 一行一变体的 UPDATE 在 Neon 上往返太多,按「同一组 isActive 值」合并成
+ * 一条 SQL —— 整页只改上下架是最常见的情况,别让它变成上百条往返。
  */
 export async function bulkUpdateVariantsInDb(
   updates: Array<{
     id: string;
     // 显式带 `| undefined`：调用方来自 zod 推断，可选字段天然含 undefined，
-    // 而 exactOptionalPropertyTypes 下 `priceCents?: number` 不接受它。
-    priceCents?: number | undefined;
+    // 而 exactOptionalPropertyTypes 下 `isActive?: boolean` 不接受它。
     isActive?: boolean | undefined;
   }>
 ): Promise<number> {
-  const actionable = updates.filter(
-    (u) => u.priceCents !== undefined || u.isActive !== undefined
-  );
+  const actionable = updates.filter((u) => u.isActive !== undefined);
   if (actionable.length === 0) return 0;
 
-  const groups = new Map<
-    string,
-    {
-      ids: string[];
-      priceCents: number | undefined;
-      isActive: boolean | undefined;
-    }
-  >();
+  const groups = new Map<string, { ids: string[]; isActive: boolean }>();
   for (const u of actionable) {
-    const key = `${u.priceCents ?? "x"}:${u.isActive ?? "x"}`;
-    const g = groups.get(key) ?? {
-      ids: [],
-      priceCents: u.priceCents,
-      isActive: u.isActive,
-    };
+    if (u.isActive === undefined) continue;
+    const key = u.isActive ? "1" : "0";
+    const g = groups.get(key) ?? { ids: [], isActive: u.isActive };
     g.ids.push(u.id);
     groups.set(key, g);
   }
 
   for (const g of groups.values()) {
-    const set: Partial<ProductVariantRow> = { updatedAt: new Date() };
-    if (g.priceCents !== undefined) set.priceCents = g.priceCents;
-    if (g.isActive !== undefined) set.isActive = g.isActive;
     await db
       .update(productVariant)
-      .set(set)
+      .set({ isActive: g.isActive, updatedAt: new Date() })
       .where(inArray(productVariant.id, g.ids));
   }
   return actionable.length;
+}
+
+/**
+ * 按**新的基础价**重算某个商品已有 SKU 行的绝对价。
+ *
+ * 基础价改了,SKU 的绝对价必须跟着改 —— 否则小程序按 SKU 拿到的价跟商城
+ * 的价对不上。算式在 `product-variant-sku.ts` 的 `recomputeVariantPrices()`
+ * (纯函数),这里只管「读出来 → 算 → 写回去」。
+ *
+ * **只改 `price_cents`** —— `sellbase_variant_id` / `is_active` /
+ * `sort_order` 一个都不动(重新播种会把那些弄丢)。
+ *
+ * @returns 实际改动的行数
+ */
+export async function recomputeProductVariantPricesInDb(
+  code: string,
+  basePriceCents: number
+): Promise<number> {
+  const productType = getProductType(code);
+  if (!productType) throw new Error(`未知的产品码 ${code}`);
+
+  const [existingRows, accessoryRows] = await Promise.all([
+    db
+      .select({
+        id: productVariant.id,
+        sizeCode: productVariant.sizeCode,
+        accessoryCode: productVariant.accessoryCode,
+        variantCode: productVariant.variantCode,
+        priceCents: productVariant.priceCents,
+      })
+      .from(productVariant)
+      .where(eq(productVariant.productCode, code)),
+    db
+      .select()
+      .from(productAccessoryVariant)
+      .where(eq(productAccessoryVariant.productTypeCode, code)),
+  ]);
+  if (existingRows.length === 0) return 0;
+
+  const recomputed = recomputeVariantPrices({
+    basePriceCents,
+    productType,
+    accessoryVariants: accessoryRows.map((r) => ({
+      accessoryCode: r.accessoryCode,
+      variantCode: r.variantCode,
+      priceDeltaCents: r.priceDeltaCents,
+      sortOrder: r.sortOrder,
+    })),
+    existingRows: existingRows.map((r) => ({
+      id: r.id,
+      sizeCode: r.sizeCode,
+      accessoryCode: r.accessoryCode,
+      variantCode: r.variantCode,
+    })),
+  });
+
+  // 价相同的行合成一条 UPDATE —— 改基础价通常整组行的价都一样(没配件的
+  // 那些),按价分组能把几十条往返压成几条。
+  const byPrice = new Map<number, string[]>();
+  for (const r of recomputed) {
+    const ids = byPrice.get(r.priceCents) ?? [];
+    ids.push(r.id);
+    byPrice.set(r.priceCents, ids);
+  }
+
+  let changed = 0;
+  for (const [priceCents, ids] of byPrice) {
+    // 价没变的行不必写 —— 少一次写 = 少一次 updatedAt 抖动
+    const stale = ids.filter((id) => {
+      const row = existingRows.find((r) => r.id === id);
+      return row ? row.priceCents !== priceCents : false;
+    });
+    if (stale.length === 0) continue;
+    await db
+      .update(productVariant)
+      .set({ priceCents, updatedAt: new Date() })
+      .where(inArray(productVariant.id, stale));
+    changed += stale.length;
+  }
+  return changed;
 }
 
 /**

@@ -19,19 +19,32 @@
  *
  * 两条轴同时生效时取交集。筛选值在 `useShopFilter` 里 —— 品类导航条和场合
  * 色带都在这个网格之外,没法靠 props 传。
+ *
+ * ## `products` 从 props 来(2026-11-08)
+ *
+ * 以前这个组件直接 `import { MOCK_PRODUCTS }` —— 价是**代码常量**,
+ * 后台 `/admin/products` 改了基础价,商城网页不变。
+ *
+ * 现在商品由**服务端父组件**取好传下来(价已经是 DB 里的),客户端**一个价
+ * 都不算**。
  */
 
 import { X } from "lucide-react";
 
 import { useShopFilter } from "@/features/storefront/hooks/use-shop-filter";
-import { MOCK_PRODUCTS } from "@/features/storefront/lib/mock-catalog";
 import type { StorefrontProduct } from "@/features/storefront/types";
 
 import { OCCASIONS } from "./occasion-data";
 import { ProductCard } from "./product-card";
 import { WJP_SERIES } from "./wjp-store-data";
 
-export function ShopGrid({ locale }: { locale: "zh" | "en" }) {
+export function ShopGrid({
+  locale,
+  products,
+}: {
+  locale: "zh" | "en";
+  products: StorefrontProduct[];
+}) {
   const isZh = locale === "zh";
   const series = useShopFilter((s) => s.series);
   const occasion = useShopFilter((s) => s.occasion);
@@ -43,7 +56,7 @@ export function ShopGrid({ locale }: { locale: "zh" | "en" }) {
     : null;
   const occasionHandles = new Set(occasionDef?.handles ?? []);
 
-  const shown: StorefrontProduct[] = MOCK_PRODUCTS.filter(
+  const shown: StorefrontProduct[] = products.filter(
     (p) =>
       (series === "all" || p.seriesId === series) &&
       (!occasionDef || occasionHandles.has(p.handle))

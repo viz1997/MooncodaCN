@@ -2,10 +2,17 @@
 
 import { motion } from "framer-motion";
 import { ArrowRight, Upload } from "lucide-react";
+import * as React from "react";
 import { useStorefrontModal } from "@/features/storefront/hooks/use-storefront-modal";
-import { findProductByHandle } from "@/features/storefront/lib/mock-catalog";
+import {
+  pickByHandle,
+  resolveSeriesFromPrices,
+} from "@/features/storefront/lib/series-pricing";
+import type { StorefrontProduct } from "@/features/storefront/types";
 import { Link } from "@/i18n/routing";
 import { formatCents } from "@/lib/money";
+
+import { WJP_SERIES } from "./wjp-store-data";
 
 /**
  * WJP 商店首页 Hero —— 移植自 atelier `store-hero.tsx`。
@@ -61,13 +68,39 @@ const HERO_HANDLES = [
   "magnet-leather-badge",
 ] as const;
 
-export function StoreHero({ locale }: { locale: "zh" | "en" }) {
+/**
+ * 首屏那三行价格锚点 —— **品类 id 对上 `WJP_SERIES` 的 id**
+ *
+ * 以前这三行是写死的字符串(「钥匙扣 ¥19 起」)。后台改了基础价,首屏还是
+ * ¥19 —— 又是「改了不生效」。现在从**商品**算:每个品类取最便宜那件的
+ * 基础价(= 文案上说的「起」)。
+ */
+const PRICE_ANCHOR_SERIES = [
+  { seriesId: "s_keychain", zh: "钥匙扣", en: "Keychains" },
+  { seriesId: "s_magnet", zh: "冰箱贴", en: "Magnets" },
+  { seriesId: "s_figure", zh: "Q 版手办", en: "Figures" },
+] as const;
+
+export function StoreHero({
+  locale,
+  products,
+}: {
+  locale: "zh" | "en";
+  products: StorefrontProduct[];
+}) {
   const isZh = locale === "zh";
   // 「上传照片开始」→ CustomizeEntry(选品类)→ CustomWorkshop
   const openCustomizePicker = useStorefrontModal((s) => s.openCustomizePicker);
 
-  const featured = HERO_HANDLES.map((h) => findProductByHandle(h)).filter(
-    (p): p is NonNullable<typeof p> => p !== null
+  const featured = React.useMemo(
+    () => pickByHandle(products, HERO_HANDLES),
+    [products]
+  );
+
+  // 起售价 —— DB 的价优先,查不到退回 `WJP_SERIES` 里的静态兜底值
+  const seriesFrom = React.useMemo(
+    () => resolveSeriesFromPrices(products, WJP_SERIES),
+    [products]
   );
 
   return (
@@ -118,13 +151,27 @@ export function StoreHero({ locale }: { locale: "zh" | "en" }) {
                 : "Upload a photo, pick an AI style, and we print it in full-colour resin — keychains, Q-version figures, fridge magnets. Hand-finished."}
             </p>
 
-            {/* 价格锚点 —— 商城首屏必须给数字 */}
+            {/* 价格锚点 —— 商城首屏必须给数字
+                价从商品算(DB 的基础价),不是写死的字符串。 */}
             <p className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-sm text-foreground/80">
-              <span>{isZh ? "钥匙扣 ¥19 起" : "Keychains from ¥19"}</span>
-              <span className="text-border">·</span>
-              <span>{isZh ? "冰箱贴 ¥39 起" : "Magnets from ¥39"}</span>
-              <span className="text-border">·</span>
-              <span>{isZh ? "Q 版手办 ¥199 起" : "Figures from ¥199"}</span>
+              {PRICE_ANCHOR_SERIES.map((anchor, i) => {
+                const price = formatCents(
+                  seriesFrom.get(anchor.seriesId) ?? 0,
+                  {
+                    locale: isZh ? "zh-CN" : "en",
+                  }
+                );
+                return (
+                  <React.Fragment key={anchor.seriesId}>
+                    {i > 0 ? <span className="text-border">·</span> : null}
+                    <span>
+                      {isZh
+                        ? `${anchor.zh} ${price} 起`
+                        : `${anchor.en} from ${price}`}
+                    </span>
+                  </React.Fragment>
+                );
+              })}
             </p>
 
             <div className="mt-9 flex flex-wrap items-center gap-3">

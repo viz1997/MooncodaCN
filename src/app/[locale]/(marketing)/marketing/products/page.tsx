@@ -7,6 +7,16 @@ import { FeaturedProducts } from "@/features/marketing/components/storefront/fea
 import { HowItWorks } from "@/features/marketing/components/storefront/how-it-works";
 import { SeriesShowcase } from "@/features/marketing/components/storefront/series-showcase";
 import { StoreHero } from "@/features/marketing/components/storefront/store-hero";
+import { getStorefrontProducts } from "@/features/storefront/lib/price-source";
+
+/**
+ * 这一页**不能静态预渲染** —— 价必须是当下的。
+ *
+ * 理由跟首页一样(`(marketing-atelier)/page.tsx`):`connection()` 是唯一的
+ * 「别静态」声明处,这里再显式写一遍 `force-dynamic` 是双保险 ——
+ * 构建期把价烤进 HTML,后台改完价刷新还是旧价。
+ */
+export const dynamic = "force-dynamic";
 
 /**
  * 生成作品集列表页 Metadata
@@ -52,6 +62,11 @@ export default async function MarketingProductsPage({
   const { locale } = await params;
   const isZh = locale === "zh";
 
+  // 商品(价来自 DB)—— 服务端取一次,传给三个客户端组件。
+  // `getStorefrontProducts()` 内部有 `await connection()`,所以这一页
+  // **不会**被静态预渲染 —— 价必须是当下的。
+  const products = await getStorefrontProducts();
+
   return (
     <>
       <BreadcrumbJsonLd
@@ -65,10 +80,10 @@ export default async function MarketingProductsPage({
       />
 
       {/* atelier-style 品牌 store 页面 (5 段拼装) */}
-      <StoreHero locale={isZh ? "zh" : "en"} />
-      <SeriesShowcase />
+      <StoreHero locale={isZh ? "zh" : "en"} products={products} />
+      <SeriesShowcase products={products} />
       <HowItWorks />
-      <FeaturedProducts locale={isZh ? "zh" : "en"} />
+      <FeaturedProducts locale={isZh ? "zh" : "en"} products={products} />
       <CraftStory />
       <CommunityWall />
     </>

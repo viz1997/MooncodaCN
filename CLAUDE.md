@@ -1454,6 +1454,142 @@ pnpm migrate:apply-print-pricing   # = tsx scripts/apply-print-pricing-schema.ts
 |---|---|
 | `src/test/print-quote/pure/guest-pricing.test.ts` | 后台那颗开关在不在 / 回退链(逐字段)/ 迁移脚本补那一列 / **未登录不再一律 401** / 403 `GUEST_PRICING_DISABLED` / **已登录的人不受开关管** / 工具页那个数是**问服务端要的**(不许本地算价) / 支撑没算时说「未计入」 |
 
+### 后台改价能生效:价从 DB 来(2026-11-08)
+
+工作室的反馈:**「我在后台改了价,商城还是老价」**。
+
+- **根因** —— 商城网页那条链路从头到尾读的是**代码里的常量**
+  (`mock-catalog.ts` 的 `BASE_PRICE_CENTS`),不是 DB。小程序那一侧
+  **早就是 DB 优先** ⇒ 后台改基础价 → **小程序变了、商城网页没变**。
+- **配件加价**也是同一处漂移:商城读代码常量 `PRODUCT_ACCESSORY_VARIANTS`,
+  小程序读 DB `product_accessory_variant.price_delta_cents`。
+
+#### 真理源搬到 DB
+
+| 项 | 真理源 | 兜底 |
+|---|---|---|
+| 基础价 | **DB `product.base_price_cents`** | 代码常量 `BASE_PRICE_CENTS` |
+| 配件加价 | **DB `product_accessory_variant.price_delta_cents`** | 代码常量 `PRODUCT_ACCESSORY_VARIANTS` |
+| 尺寸加价 | 代码 `idx × 500` | 三处口径本来就一致,**不动** |
+| 材料 / 风格 / 刻字 / 加急 | 代码常量 | 后台没有旋钮,**不动** |
+| SKU 绝对价 | **由基础价自动算** | 没有独立旋钮了 |
+
+工作室拍板的口径是**「基础价说了算」** —— 基础价是**唯一**的价源,
+SKU 绝对价由它**自动算出来**,后台 SKU 页的价格字段改成**只读**。
+
+#### 两个新文件(拆开是因为一个要能进 unit project)
+
+- `src/features/storefront/lib/price-source-types.ts` —— **纯类型**
+  (`PriceSource`)。单独一个文件的原因:`pricing.ts` 是纯函数,一旦它 import
+  了 `@/db` 就既进不了 `unit` project 也进不了客户端组件。
+- `src/features/storefront/lib/price-source.ts` —— **只准服务端 import**。
+  `getPriceSource()` 用 React 的 `cache()` 包一层(跟 `print-quote/lib/pricing-store.ts`
+  一个套路)—— **一个请求只查一次库**,不是每行一次。
+
+#### ⚠️ 必须 `await connection()` —— 否则「改了不生效」原地复发
+
+商城页现在是**构建期静态预渲染**的(`(marketing)` / `(marketing-atelier)` 两个组里
+**一个** `export const dynamic` 都没有)。价从 DB 读、而不告诉 Next「这一页不能静态」⇒
+**构建时把当时的价烤进 HTML**,改完价刷新页面**还是旧价** —— 症状一模一样,只是换了个原因。
+
+- `getPriceSource()` 里调一次 **`await connection()`** 就够 —— 凡是显示价格的页面
+  因此都变成动态渲染,不用给每个页面加 `force-dynamic`(那会让整个营销站永远动态,动静太大)。
+- `connection()` 放在 `cache()` **外面** —— React 的 `cache()` 会把结果按请求缓存,
+  放在里面的话第一次调用就被冻住了。
+- `connection()` 在**没有请求作用域**时(脚本 / 单测直接调)抛 `E251` ⇒ **只吞这一种**,
+  别的错照常抛。
+- 后台改完价还要 `revalidatePath` 商城路径(清 RSC 载荷缓存 / 客户端 Router Cache):
+  `revalidatePath("/[locale]", "page")` / `revalidatePath("/[locale]/marketing/products", "page")`
+  / `revalidatePath("/[locale]/product/[handle]", "page")`。
+
+#### 价怎么进 `calculatePricing`
+
+`calculatePricing(spec, priceSource?)` —— 加一个**可选第二参**,DB 的价塞在参数里,
+纯函数自己不碰 DB:
+
+- 基础价:`priceSource?.basePriceCentsByTypeCode.get(spec.productTypeCode) ?? product.basePriceCents`
+- 配件加价:`priceSource?.accessoryDeltaCentsByVariantId.get(variantId) ?? variant.surchargeCents`
+- `priceSource` 缺省 → **退回代码常量**(纯函数调用、单测、客户端预览都不受影响)。
+
+#### DB 读失败怎么办 —— **两个地方不一样**
+
+| 地方 | DB 读失败时 | 为什么 |
+|---|---|---|
+| **购物袋 / 商品页**(给人看的) | **降级到代码常量**,页面照常显示 + 一条日志 | 展示价低了一档还能接受 |
+| **结算 / 下单**(要收钱的) | **直接抛 `CheckoutError("PRICING_FAILED")`** | **绝不允许按旧价收款** |
+
+⇒ `getPriceSource()` **不抛错**,把「查没查到」放进 `degraded` 标志;**抛不抛由调用点决定**。
+购物袋显示 ¥19 而结算报「价格暂时无法确认,请稍后重试」—— 这是**故意的**:
+宁可下不了单,也不能按一个**已经作废的价**收钱。
+
+#### 配件的键 = `acc_${variantCode}`
+
+跟 `spec.accessoryVariantIds` 里那个字符串**一模一样**。DB 的行 id 是
+`pav_<型号>_<配件>_<变体>`,**跟商城的键不是一回事** ⇒ 价格表查出来之后**自己拼键**。
+
+- 不变式:**`variantCode` 全局唯一**(19 条配件变体零重复,只出现在 R / M 两个型号上)。
+  哪天同一个 `variantCode` 出现在两个型号下,加价就变成「取到哪个算哪个」⇒
+  有单测守着(`accessory-variant-unique.test.ts`)。
+- DB 里查到**歧义**的行直接**丢掉并记日志** —— 宁可少一条配件加价,也不能算错。
+
+#### 客户端组件里一份价都不许算
+
+`shop-grid` / `featured-products` / `store-hero` / `category-strip` 原来直接 import
+静态目录,现在**价从 props 来**,服务端父组件取价传下去。`customize-entry`、
+商品详情页、`/api/store/products` 那几个 server 入口改用
+`getStorefrontProducts()` / `getStorefrontProduct(handle)`。
+
+> `/api/store/products` 的**响应体结构不变**(只是数据源从静态常量换成 DB)
+> ⇒ **小程序 SDK 零改动**。
+
+#### 改基础价 → SKU 绝对价自动重算
+
+- `recomputeVariantPrices()`(`product-variant-sku.ts`)—— 按新基础价重算**已经在库里的那些行**,
+  **只改价**,**不动** `sellbase_variant_id` / `is_active` / `sort_order`。
+- **不能重新播种** —— 会丢 `sellbase_variant_id`、丢软下架状态。
+- 尺寸码在字典里找不到 → **跳过那一行**,别当成 0(那样会静默把价改错);
+  配件变体查不到 → 同样跳过。
+- `generateVariantsForProductInDb` 走 `buildAllVariantSeeds()`,**必须把 DB 的
+  `base_price_cents` 传进去** —— 否则改完基础价,「生成变体」出来的新 SKU 又是老价,
+  跟重算过的旧 SKU 打架。
+- ⚠️ **SKU 价和商城价不是一个东西** —— SKU 价 = 基础价 + 尺寸 + 配件(**裸价**);
+  商城单价 = 基础价 + 材料 + 尺寸 + 风格 + 配件 + 刻字 + 加急(**配齐后的价**)。
+  两者不是同一个数,这次只让 SKU 价跟着基础价走。
+
+#### 后台 SKU 页的价格字段改成只读
+
+- 删掉整条草稿 / 保存价格的路径,改成「由基础价自动算」的只读展示。
+- **`bulkUpdateProductVariantsAction` 的 zod schema 里删掉 `priceCents`** ——
+  留着就等于留了个后门:管理员能再把 SKU 价改成跟基础价不一致,直接破坏上面那条不变式。
+- `bulkUpdateVariantsInDb` 按 `(priceCents, isActive)` 分组的逻辑改成**只按 `isActive`** ——
+  否则传同一个 `priceCents` 会误改一批行的价。
+- `isActive` 的开关留着(那个还是能改的)。
+
+#### `apply-currency-schema.ts` 不再覆盖 DB 里的价
+
+价源搬到 DB 之后,那个脚本会把工作室改的价**悄悄改回去**。现在**默认只读校验 +
+醒目警告**(列出 DB 里跟代码字典不一致的行),**要重刷必须显式加 `--force-reprice`**。
+其余职责(币种对齐)不动。
+
+```bash
+pnpm tsx scripts/apply-currency-schema.ts                 # 只读校验,不改价
+pnpm tsx scripts/apply-currency-schema.ts --force-reprice # 真要按代码字典重刷才加
+```
+
+#### ⚠️ 还有**第二份目录**(不在订单链路里)
+
+`src/features/products/lib/data.ts` 是**另一份目录**(7 件作品集,¥49 / ¥89 / ¥299 /
+¥199 / ¥159,**不在 DB 里、不可下单**),给 `/marketing/products/[slug]` 和
+`wjp-store-header.tsx` 用。**本次不动它** —— 但**必须跟工作室说清楚**:那几件的价格
+仍然是写死的,后台改不了,别让他们改完发现「那几件没变」以为功能坏了。
+
+#### 行为由单测守住
+
+| 测试 | 守住什么 |
+|---|---|
+| `src/test/storefront/pure/db-price.test.ts` | `pricing.ts` 接受 `priceSource` 第二参 / `price-source.ts` 存在且含 `connection()` / 基础价取自 `priceSource` / `mock-catalog.ts` **不** import `@/db` / `price-source.ts` **不**被 client 组件 import / `checkout.ts` 在 `degraded` 时抛 `PRICING_FAILED` / `apply-currency-schema.ts` 含 `--force-reprice` / `bulkUpdateProductVariantsAction` 的 schema **不含** `priceCents` / `generateVariantsForProductInDb` 传了 DB 基础价 |
+| `src/test/storefront/pure/accessory-variant-unique.test.ts` | `variantCode` 全局唯一(配件加价能按它查到唯一一行) |
+
 ### 「提交打印订单」失败:失败的话要说人话(2026-11-08)
 
 > **这一节的前半段(「缺一列就全线 500」)已经作废。**

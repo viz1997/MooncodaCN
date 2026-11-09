@@ -19,13 +19,20 @@
  *
  * 滚动实现:snap-x + scrollBy 按钮(桌面端没有可见滚动条,必须有按钮
  * 才知道下面还有东西)。卡片宽度固定,容器 overflow-x-auto。
+ *
+ * ## `products` 从 props 来(2026-11-08)
+ *
+ * 以前直接 `import { MOCK_PRODUCTS }` —— 价是**代码常量**,后台
+ * `/admin/products` 改了基础价,商城网页不变。
+ *
+ * 现在商品由**服务端父组件**取好传下来(价已经是 DB 里的),客户端**一个价
+ * 都不算**。
  */
 
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import * as React from "react";
 
 import { useShopFilter } from "@/features/storefront/hooks/use-shop-filter";
-import { MOCK_PRODUCTS } from "@/features/storefront/lib/mock-catalog";
 import type { StorefrontProduct } from "@/features/storefront/types";
 
 import { ProductCard } from "./product-card";
@@ -33,7 +40,13 @@ import { WJP_SERIES } from "./wjp-store-data";
 
 type SeriesFilter = "all" | string;
 
-export function FeaturedProducts({ locale }: { locale: "zh" | "en" }) {
+export function FeaturedProducts({
+  locale,
+  products,
+}: {
+  locale: "zh" | "en";
+  products: StorefrontProduct[];
+}) {
   const isZh = locale === "zh";
   const series = useShopFilter((s) => s.series);
   const selectSeries = useShopFilter((s) => s.selectSeries);
@@ -42,9 +55,7 @@ export function FeaturedProducts({ locale }: { locale: "zh" | "en" }) {
   const [atEnd, setAtEnd] = React.useState(false);
 
   const shown: StorefrontProduct[] =
-    series === "all"
-      ? MOCK_PRODUCTS
-      : MOCK_PRODUCTS.filter((p) => p.seriesId === series);
+    series === "all" ? products : products.filter((p) => p.seriesId === series);
 
   // 滚动位置 → 两端按钮的禁用态
   const syncEdges = React.useCallback(() => {

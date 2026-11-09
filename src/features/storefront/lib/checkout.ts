@@ -108,6 +108,8 @@ import {
   findReusablePendingOrder,
   type ReusablePendingOrder,
 } from "./pending-order";
+import { getPriceSource } from "./price-source";
+import type { PriceSource } from "./price-source-types";
 import { calculatePricing } from "./pricing";
 import { calculateShippingCents } from "./pricing-constants";
 
@@ -256,8 +258,12 @@ export interface PricedLine {
  * **车里只有目录商品**(2026-11-08)—— 打印服务不进商城购物袋,工单自己建、
  * 自己收款(见 `POST /api/print-orders`)。
  *
+ * ## `source` —— DB 里的价(2026-11-08)
+ *
+ * 基础价 / 配件加价取自 DB(后台 `/admin/products` 改的就是它),
+ * 查不到才退回代码常量。
  */
-function repriceLine(item: CartLineItem): PricedLine {
+function repriceLine(item: CartLineItem, source: PriceSource): PricedLine {
   const metadata = item.metadata;
 
   const product = findProductById(item.productId);
@@ -270,20 +276,23 @@ function repriceLine(item: CartLineItem): PricedLine {
 
   let pricing: PricingResult;
   try {
-    pricing = calculatePricing({
-      productId: item.productId,
-      productHandle: product.handle,
-      productTypeCode: product.productTypeCode,
-      materialId: metadata.materialId,
-      sizeId: metadata.sizeId,
-      aiStyleId: metadata.aiStyleId,
-      engravingText: metadata.engravingText,
-      rushOrder: metadata.rushOrder,
-      accessoryVariantIds: metadata.accessoryVariantIds ?? [],
-      quantity: item.quantity,
-      previewImageUrl: metadata.previewImage,
-      originalImageUrl: metadata.originalImage,
-    });
+    pricing = calculatePricing(
+      {
+        productId: item.productId,
+        productHandle: product.handle,
+        productTypeCode: product.productTypeCode,
+        materialId: metadata.materialId,
+        sizeId: metadata.sizeId,
+        aiStyleId: metadata.aiStyleId,
+        engravingText: metadata.engravingText,
+        rushOrder: metadata.rushOrder,
+        accessoryVariantIds: metadata.accessoryVariantIds ?? [],
+        quantity: item.quantity,
+        previewImageUrl: metadata.previewImage,
+        originalImageUrl: metadata.originalImage,
+      },
+      source
+    );
   } catch (error) {
     throw new CheckoutError(
       "PRICING_FAILED",
@@ -466,7 +475,22 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
   await stampCartOwner(input.cartId, input.userId);
 
   // 1. 重算每一行
-  const lines = cart.items.map((item) => repriceLine(item));
+  //
+  //    ## 价从 DB 来(2026-11-08)
+  //
+  //    后台 `/admin/products` 改的是 DB 的 `product.base_price_cents` /
+  //    `product_accessory_variant.price_delta_cents`。这条链路原先读的是
+  //    **代码常量** ⇒ 后台改价,商城网页不变。
+  //
+  //    **DB 读失败时这里直接失败** —— 绝不允许按一个已经作废的价收款。
+  //    购物袋那边可以降级(显示代码常量的价),这边不行:
+  //    宁可下不了单,也不能收错钱。
+  const source = await getPriceSource();
+  if (source.degraded) {
+    throw new CheckoutError("PRICING_FAILED", "价格暂时无法确认,请稍后重试");
+  }
+
+  const lines = cart.items.map((item) => repriceLine(item, source));
 
   // 2. 金额
   const subtotalCents = lines.reduce(

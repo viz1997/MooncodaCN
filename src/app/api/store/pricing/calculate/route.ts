@@ -4,10 +4,20 @@
  * 对齐 atelier `/api/pricing/calculate`。
  * 定价的真理源在本仓库 —— 结算时服务端会用 pricing.ts 重算一遍,
  * 这个 Route 只是给前端预览用,不会转发到任何外部定价服务。
+ *
+ * ## 价从 DB 来(2026-11-08)
+ *
+ * 后台 `/admin/products` 改的是 DB 的价,而这个预览接口原先读的是**代码
+ * 常量** ⇒ 定制页显示 ¥19、结算按 ¥25 收,用户看着像「改了不生效」。
+ * 这里跟结算走**同一份**价格源(`price-source.ts`),预览跟实收一致。
+ *
+ * **DB 读失败时降级到代码常量**(预览而已,不是收钱的地方)——
+ * 那种情况下结算会直接失败(`PRICING_FAILED`),不会有「按旧价收款」。
  */
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { getPriceSource } from "@/features/storefront/lib/price-source";
 import { calculatePricing } from "@/features/storefront/lib/pricing";
 import { withApiLogging } from "@/lib/api-logger";
 
@@ -53,7 +63,8 @@ async function handle(request: Request) {
   }
 
   try {
-    const result = calculatePricing(parsed.data);
+    const source = await getPriceSource();
+    const result = calculatePricing(parsed.data, source);
     return NextResponse.json({ pricing: result });
   } catch (error) {
     return NextResponse.json(

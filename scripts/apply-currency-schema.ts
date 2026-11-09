@@ -30,7 +30,7 @@
  * | `storefront_order.currency` 列默认值 | 改成 `PRICE_CURRENCY` |
  * | `cart.currency_code` / `cart.region_id` 列默认值 | 改成 `PRICE_CURRENCY` / `PRICE_REGION_ID` |
  * | 已有购物车行 | 改成当前币种 / 区域(购物车是**在途状态**,不是历史) |
- * | 商品目录三张表的价格 | 按代码里的字典**重新定价** |
+ * | 商品目录三张表的价格 | **默认只读校验**(见下面「重定价要显式加 `--force-reprice`」) |
  * | **历史订单**(`storefront_order` 的行) | **一行不动** |
  *
  * ### 历史订单为什么不动
@@ -60,8 +60,24 @@
  * `product-accessory-variants.ts`),不是从 DB 取 —— DB 里那些数就是旧的
  * 那一套。
  *
- * **会覆盖 admin 改过的价。** 改币种就是换一套价,没有「旧币种的价 + 新币种
- * 的币种」这种说法。跑完在 `/admin/products` 里按新价重新调一遍。
+ * ## ⚠️ 重定价要**显式**加 `--force-reprice`(2026-11-08)
+ *
+ * **价源在 2026-11-08 搬到 DB 了** —— 基础价(`product.base_price_cents`)
+ * 是**唯一的**价源,后台 `/admin/products` 改的就是它,SKU 的绝对价由它
+ * **自动重算**。
+ *
+ * ⇒ 这个脚本**默认只读**:把 DB 里跟代码字典不一致的行**列出来 + 警告**,
+ * **一个字都不写**。理由很简单 —— 代码字典里的价是**兜底值**(迁移脚本
+ * 没跑 / 某个型号还没播种时用它),不是**真理源**。工作室在后台调过的价
+ * 才是真理源,脚本把它悄悄改回去,就是又一轮「改了不生效」。
+ *
+ * 真要按代码字典重刷(比如刚改完币种,整目录要换一套价),显式加:
+ *
+ * ```
+ * pnpm tsx scripts/apply-currency-schema.ts --force-reprice
+ * ```
+ *
+ * **会覆盖 admin 改过的价** —— 这是显式选择,不是默认行为。
  *
  * ## 幂等
  *
@@ -69,7 +85,8 @@
  * `ALTER ... SET DEFAULT`,没有 `ADD COLUMN`,不需要「跑一次就删」。
  *
  * 用法:
- *   pnpm tsx scripts/apply-currency-schema.ts
+ *   pnpm tsx scripts/apply-currency-schema.ts                  # 默认:只读校验
+ *   pnpm tsx scripts/apply-currency-schema.ts --force-reprice  # 显式重定价
  *
  * 跑完之后建议再跑一遍两个 seed(补上新增的配件变体):
  *   pnpm tsx src/db/seed-product-accessory-variants.ts
@@ -101,6 +118,9 @@ async function main(): Promise<void> {
     console.error("[apply-currency] 缺少 DATABASE_URL");
     process.exit(1);
   }
+
+  // 重定价是**破坏性**的(会覆盖 admin 在后台改过的价)⇒ 必须显式要。
+  const FORCE_REPRICE = process.argv.includes("--force-reprice");
 
   const currency = PRICE_CURRENCY.toUpperCase();
   const region = PRICE_REGION_ID;
@@ -166,7 +186,22 @@ async function main(): Promise<void> {
       `(行内的价不用改 —— 读的时候按目录重算)`
   );
 
-  /* ── 3. 商品目录:按代码里的字典重新定价 ───────────────────────────── */
+  /* ── 3. 商品目录:默认只读校验,加了 --force-reprice 才重定价 ─────────── */
+
+  // 价源在 2026-11-08 搬到 DB(基础价 = 唯一的价源,后台改的就是它)。
+  // 代码字典里的价退化成**兜底值** ⇒ 这个脚本默认**只读**:
+  //   · 校验「SKU 价 = 基础价 + 尺寸阶梯 + 配件加价」这条不变式(对不上就是真问题)
+  //   · 报告「基础价跟代码字典不一致」(只是提示 —— 后台改过是正常的)
+  // **一个字都不写。** 要重刷必须显式加 --force-reprice。
+  console.log(
+    FORCE_REPRICE
+      ? "\n[商品目录] --force-reprice:按代码里的字典重定价" +
+          "(⚠ 会覆盖 admin 在后台改过的价)"
+      : "\n[商品目录] 默认**只读校验** —— 不改任何价。" +
+          "价源在 2026-11-08 搬到 DB 了(基础价 = 唯一的价源)," +
+          "后台改的价才是真理源,脚本把它改回去就是又一轮「改了不生效」。" +
+          "\n           真要按代码字典重刷:加 --force-reprice"
+  );
 
   // 3.1 product.base_price_cents
   const productRows = await client.query<{
@@ -174,24 +209,46 @@ async function main(): Promise<void> {
     base_price_cents: number;
   }>(`SELECT "code", "base_price_cents" FROM "product"`);
 
-  let productUpdated = 0;
+  const productDiffs: Array<{
+    code: string;
+    from: number;
+    to: number;
+  }> = [];
   for (const row of productRows.rows) {
     const next = BASE_PRICE_CENTS[row.code];
     if (next === undefined) continue; // 字典里没有这个型号 → 不动
     if (next === row.base_price_cents) continue;
-    await client.query(
-      `UPDATE "product"
-          SET "base_price_cents" = $1, "updated_at" = now()
-        WHERE "code" = $2;`,
-      [next, row.code]
-    );
-    productUpdated += 1;
-    console.log(
-      `  · product ${row.code}: ${row.base_price_cents} → ${next} 分` +
-        `(${money(row.base_price_cents, currency)} → ${money(next, currency)})`
-    );
+    productDiffs.push({
+      code: row.code,
+      from: row.base_price_cents,
+      to: next,
+    });
   }
-  console.log(`✓ product.base_price_cents:改写 ${productUpdated} 行`);
+
+  if (FORCE_REPRICE) {
+    for (const d of productDiffs) {
+      await client.query(
+        `UPDATE "product"
+            SET "base_price_cents" = $1, "updated_at" = now()
+          WHERE "code" = $2;`,
+        [d.to, d.code]
+      );
+    }
+    console.log(`✓ product.base_price_cents:改写 ${productDiffs.length} 行`);
+  } else if (productDiffs.length === 0) {
+    console.log("✓ product.base_price_cents:跟代码字典一致");
+  } else {
+    console.log(
+      `⚠ product.base_price_cents:有 ${productDiffs.length} 行跟代码字典不一致` +
+        "(未改动 —— 后台调过的价是真理源)"
+    );
+    for (const d of productDiffs) {
+      console.log(
+        `  · product ${d.code}: ${d.from} → ${d.to} 分` +
+          `(${money(d.from, currency)} → ${money(d.to, currency)})`
+      );
+    }
+  }
 
   // 3.2 product_accessory_variant.price_delta_cents
   //     键 = 产品码 | 配件码 | 变体码
@@ -213,7 +270,11 @@ async function main(): Promise<void> {
        FROM "product_accessory_variant"`
   );
 
-  let accUpdated = 0;
+  const accDiffs: Array<{
+    key: [string, string, string];
+    from: number;
+    to: number;
+  }> = [];
   let accUnmatched = 0;
   for (const row of accRows.rows) {
     const key = accKey(
@@ -228,31 +289,59 @@ async function main(): Promise<void> {
       continue;
     }
     if (next === row.price_delta_cents) continue;
-    await client.query(
-      `UPDATE "product_accessory_variant"
-          SET "price_delta_cents" = $1, "updated_at" = now()
-        WHERE "product_type_code" = $2
-          AND "accessory_code" = $3
-          AND "variant_code" = $4;`,
-      [next, row.product_type_code, row.accessory_code, row.variant_code]
-    );
-    accUpdated += 1;
+    accDiffs.push({
+      key: [row.product_type_code, row.accessory_code, row.variant_code],
+      from: row.price_delta_cents,
+      to: next,
+    });
   }
-  console.log(
-    `✓ product_accessory_variant.price_delta_cents:改写 ${accUpdated} 行` +
-      (accUnmatched > 0 ? `(${accUnmatched} 行不在代码字典里,原样保留)` : "")
-  );
+
+  if (FORCE_REPRICE) {
+    for (const d of accDiffs) {
+      await client.query(
+        `UPDATE "product_accessory_variant"
+            SET "price_delta_cents" = $1, "updated_at" = now()
+          WHERE "product_type_code" = $2
+            AND "accessory_code" = $3
+            AND "variant_code" = $4;`,
+        [d.to, d.key[0], d.key[1], d.key[2]]
+      );
+    }
+    console.log(
+      `✓ product_accessory_variant.price_delta_cents:改写 ${accDiffs.length} 行` +
+        (accUnmatched > 0 ? `(${accUnmatched} 行不在代码字典里,原样保留)` : "")
+    );
+  } else if (accDiffs.length === 0) {
+    console.log("✓ product_accessory_variant.price_delta_cents:跟代码字典一致");
+  } else {
+    console.log(
+      `⚠ product_accessory_variant.price_delta_cents:有 ${accDiffs.length} 行跟代码字典不一致(未改动)`
+    );
+    for (const d of accDiffs) {
+      console.log(
+        `  · ${d.key.join("|")}: ${d.from} → ${d.to} 分` +
+          `(${money(d.from, currency)} → ${money(d.to, currency)})`
+      );
+    }
+  }
 
   // 3.3 product_variant.price_cents
-  //     = 新基础价 + 尺寸档位 × SIZE_STEP_CENTS + 配件变体加价
-  //     公式跟 buildAllVariantSeeds() 一致 —— 两边对不上就是 SKU 矩阵错了
+  //     = 基础价 + 尺寸档位 × SIZE_STEP_CENTS + 配件变体加价
+  //     公式跟 buildAllVariantSeeds() / recomputeVariantPrices() 一致
+  //
+  //     **只读模式下查的是「不变式」**(用 DB 里自己的基础价和配件加价);
+  //     **--force-reprice 模式下用的是代码字典的值**(先刷基础价、再刷配件
+  //     加价,SKU 价跟着刷)。
   const newBase = new Map<string, number>();
   for (const row of productRows.rows) {
     const next = BASE_PRICE_CENTS[row.code];
-    newBase.set(row.code, next ?? row.base_price_cents);
+    newBase.set(
+      row.code,
+      FORCE_REPRICE ? (next ?? row.base_price_cents) : row.base_price_cents
+    );
   }
 
-  // 配件加价:优先用代码字典,字典没有的用 DB 里的(上面已经改过了)
+  // 配件加价:重定价模式用代码字典,只读模式用 DB 里自己的
   const accDelta = new Map<string, number>();
   for (const row of accRows.rows) {
     const key = accKey(
@@ -260,7 +349,12 @@ async function main(): Promise<void> {
       row.accessory_code,
       row.variant_code
     );
-    accDelta.set(key, codeAccMap.get(key) ?? row.price_delta_cents);
+    accDelta.set(
+      key,
+      FORCE_REPRICE
+        ? (codeAccMap.get(key) ?? row.price_delta_cents)
+        : row.price_delta_cents
+    );
   }
 
   const variantRows = await client.query<{
@@ -275,7 +369,11 @@ async function main(): Promise<void> {
        FROM "product_variant"`
   );
 
-  let variantUpdated = 0;
+  const variantDiffs: Array<{
+    sku: string;
+    from: number;
+    to: number;
+  }> = [];
   let variantUnmatched = 0;
   for (const row of variantRows.rows) {
     const productType = PRODUCT_TYPES.find(
@@ -286,6 +384,8 @@ async function main(): Promise<void> {
       continue;
     }
     const sizeIdx = productType.sizes.indexOf(row.size_code);
+    // 尺寸码不在字典里 → 当成 0 阶梯(跟 buildAllVariantSeeds 一样),
+    // 但这种行**不参与重算**(找不到尺寸阶梯,算出来的价是猜的)
     const sizeDelta = (sizeIdx < 0 ? 0 : sizeIdx) * SIZE_STEP_CENTS;
     const delta = accDelta.get(
       accKey(row.product_code, row.accessory_code, row.variant_code)
@@ -293,20 +393,47 @@ async function main(): Promise<void> {
     const next =
       (newBase.get(row.product_code) ?? 0) + sizeDelta + (delta ?? 0);
     if (next === row.price_cents) continue;
-    await client.query(
-      `UPDATE "product_variant"
-          SET "price_cents" = $1, "updated_at" = now()
-        WHERE "sku" = $2;`,
-      [next, row.sku]
-    );
-    variantUpdated += 1;
+    variantDiffs.push({ sku: row.sku, from: row.price_cents, to: next });
   }
-  console.log(
-    `✓ product_variant.price_cents:改写 ${variantUpdated} 行` +
-      (variantUnmatched > 0
-        ? `(${variantUnmatched} 行对不上字典,原样保留)`
-        : "")
-  );
+
+  if (FORCE_REPRICE) {
+    for (const d of variantDiffs) {
+      await client.query(
+        `UPDATE "product_variant"
+            SET "price_cents" = $1, "updated_at" = now()
+          WHERE "sku" = $2;`,
+        [d.to, d.sku]
+      );
+    }
+    console.log(
+      `✓ product_variant.price_cents:改写 ${variantDiffs.length} 行` +
+        (variantUnmatched > 0
+          ? `(${variantUnmatched} 行对不上字典,原样保留)`
+          : "")
+    );
+  } else if (variantDiffs.length === 0) {
+    console.log(
+      "✓ product_variant.price_cents:跟「基础价 + 尺寸阶梯 + 配件加价」一致"
+    );
+  } else {
+    console.log(
+      `⚠ product_variant.price_cents:有 ${variantDiffs.length} 行跟` +
+        "「基础价 + 尺寸阶梯 + 配件加价」对不上(未改动)"
+    );
+    for (const d of variantDiffs.slice(0, 20)) {
+      console.log(
+        `  · ${d.sku}: ${d.from} → ${d.to} 分` +
+          `(${money(d.from, currency)} → ${money(d.to, currency)})`
+      );
+    }
+    if (variantDiffs.length > 20) {
+      console.log(`  · …还有 ${variantDiffs.length - 20} 行`);
+    }
+    console.log(
+      "    这几行要么是历史脏数据,要么是改基础价时漏了重算 —— " +
+        "在 /admin/products 存一次基础价就会重算(或者跑 --force-reprice)。"
+    );
+  }
 
   /* ── 4. 历史订单:只报告,不动 ──────────────────────────────────────── */
 
@@ -380,6 +507,12 @@ async function main(): Promise<void> {
       "  pnpm tsx src/db/seed-product-accessory-variants.ts\n" +
       "  pnpm tsx src/db/seed-products.ts"
   );
+  if (!FORCE_REPRICE) {
+    console.log(
+      "\n[提示] 这次是**只读校验** —— 商品目录的价一个字都没改。\n" +
+        "       要按代码字典重刷:pnpm tsx scripts/apply-currency-schema.ts --force-reprice"
+    );
+  }
 }
 
 /** 分 → 展示文本(给日志用,别拿它去算钱) */

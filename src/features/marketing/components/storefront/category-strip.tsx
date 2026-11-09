@@ -16,13 +16,25 @@
  * 点品类 = 设筛选 + 滚到商品网格(`#works`)。筛选值存在
  * `useShopFilter` 里 —— 品类导航条和商品网格是两棵子树,中间隔着场合色带,
  * 没法靠 props 传。
+ *
+ * ## `products` 从 props 来(2026-11-08)
+ *
+ * 以前直接 `import { findProductByHandle }` —— 价是**代码常量**,后台
+ * `/admin/products` 改了基础价,首页品类条上的「¥19 起」不会变。
+ *
+ * 现在商品由**服务端父组件**取好传下来(价已经是 DB 里的)。品类「起售价」
+ * 也从这些商品算(每个品类最便宜那件的基础价),客户端**一个价都不算**。
  */
 
 import { LayoutGrid } from "lucide-react";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 
 import { useShopFilter } from "@/features/storefront/hooks/use-shop-filter";
-import { findProductByHandle } from "@/features/storefront/lib/mock-catalog";
+import {
+  pickByHandle,
+  resolveSeriesFromPrices,
+} from "@/features/storefront/lib/series-pricing";
+import type { StorefrontProduct } from "@/features/storefront/types";
 import { formatCents } from "@/lib/money";
 
 import { WJP_SERIES } from "./wjp-store-data";
@@ -47,14 +59,27 @@ const PREVIEW_HANDLES = [
   "magnet-couple-fridge",
 ] as const;
 
-export function CategoryStrip({ locale }: { locale: "zh" | "en" }) {
+export function CategoryStrip({
+  locale,
+  products,
+}: {
+  locale: "zh" | "en";
+  products: StorefrontProduct[];
+}) {
   const isZh = locale === "zh";
   const series = useShopFilter((s) => s.series);
   const selectSeries = useShopFilter((s) => s.selectSeries);
   const resetAll = useShopFilter((s) => s.resetAll);
 
-  const preview = PREVIEW_HANDLES.map((h) => findProductByHandle(h)).filter(
-    (p): p is NonNullable<typeof p> => p !== null
+  const preview = useMemo(
+    () => pickByHandle(products, PREVIEW_HANDLES),
+    [products]
+  );
+
+  // 品类「起售价」—— 从商品算(DB 的价),查不到退回静态兜底值
+  const seriesFrom = useMemo(
+    () => resolveSeriesFromPrices(products, WJP_SERIES),
+    [products]
   );
 
   const scrollToShop = useCallback(() => {
@@ -163,7 +188,7 @@ export function CategoryStrip({ locale }: { locale: "zh" | "en" }) {
                   {isZh ? s.name : s.nameEn}
                 </span>
                 <span className="mt-1 block text-xs text-muted-foreground">
-                  {formatCents(s.fromPriceCents, {
+                  {formatCents(seriesFrom.get(s.id) ?? s.fromPriceCents, {
                     locale: isZh ? "zh-CN" : "en",
                   })}{" "}
                   {isZh ? "起" : "from"}

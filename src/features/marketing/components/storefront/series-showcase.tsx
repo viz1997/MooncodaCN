@@ -2,6 +2,9 @@
 
 import { motion } from "framer-motion";
 import { ArrowRight } from "lucide-react";
+import * as React from "react";
+import { resolveSeriesFromPrices } from "@/features/storefront/lib/series-pricing";
+import type { StorefrontProduct } from "@/features/storefront/types";
 import { Link } from "@/i18n/routing";
 import { formatCents } from "@/lib/money";
 import { WJP_SERIES } from "./wjp-store-data";
@@ -19,8 +22,22 @@ import { WJP_SERIES } from "./wjp-store-data";
  * 链接说明:原来链 `/products?s=${handle}`,但 `/products` 的 page.tsx 从来
  * 不读 searchParams —— 点了不会过滤。现改指 `/#all` 网格,品类信息以卡片上
  * 的色点呈现,不再假装能筛选。
+ *
+ * ## `products` 从 props 来(2026-11-08)
+ *
+ * 「起 ¥19」以前是 `WJP_SERIES[].fromPriceCents` 这个**代码常量** ——
+ * 后台改基础价,这一段不动。现在从商品算(DB 的价),查不到才退回静态兜底。
  */
-export function SeriesShowcase() {
+export function SeriesShowcase({
+  products,
+}: {
+  products: StorefrontProduct[];
+}) {
+  const seriesFrom = React.useMemo(
+    () => resolveSeriesFromPrices(products, WJP_SERIES),
+    [products]
+  );
+
   return (
     <section
       id="categories"
@@ -67,7 +84,8 @@ export function SeriesShowcase() {
                     {s.tagline}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    起 {formatCents(s.fromPriceCents)} · {s.count} 款
+                    起 {formatCents(seriesFrom.get(s.id) ?? s.fromPriceCents)} ·{" "}
+                    {s.count} 款
                   </p>
                 </div>
                 <ArrowRight className="size-4 shrink-0 ml-auto text-muted-foreground/50 group-hover:text-[var(--accent)] group-hover:translate-x-0.5 transition-all" />

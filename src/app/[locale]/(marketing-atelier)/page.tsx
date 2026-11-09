@@ -7,6 +7,21 @@ import { OccasionShelf } from "@/features/marketing/components/storefront/occasi
 import { ShopAnnouncement } from "@/features/marketing/components/storefront/shop-announcement";
 import { ShopGrid } from "@/features/marketing/components/storefront/shop-grid";
 import { StoreHero } from "@/features/marketing/components/storefront/store-hero";
+import { getStorefrontProducts } from "@/features/storefront/lib/price-source";
+
+/**
+ * 这一页**不能静态预渲染** —— 价必须是当下的。
+ *
+ * `getStorefrontProducts()` 内部有 `await connection()`,正常情况下它就够
+ * (那是「这一页别静态」的唯一声明处)。这里再显式写一遍
+ * `force-dynamic` 是**双保险**:构建期预渲染万一因为别的原因没走到
+ * `connection()`,价会被烤进 HTML —— 后台改完价刷新还是旧价,
+ * **「改了不生效」原地复发,只是换了个原因**。
+ *
+ * 只加在**显示目录价的两个页面**上 —— 博客 / 价格页 / 法律页那些不显示
+ * 目录价,不受影响。
+ */
+export const dynamic = "force-dynamic";
 
 /**
  * 生成首页 Metadata
@@ -120,6 +135,11 @@ export default async function HomePage({
   const { locale } = await params;
   const isZh = locale === "zh";
 
+  // 商品(价来自 DB)—— 服务端取一次,传给出图的所有客户端组件。
+  // `getStorefrontProducts()` 内部有 `await connection()`,所以这一页
+  // **不会**被静态预渲染 —— 价必须是当下的,不能烤进构建产物里。
+  const products = await getStorefrontProducts();
+
   return (
     <>
       {/* 商城动线(2026-11-01):
@@ -127,9 +147,9 @@ export default async function HomePage({
           → 场合促销行 → 流程 → 工艺 + 真实订单。
           商品目录只有网格这一处,场合色带只做导购入口。 */}
       <ShopAnnouncement locale={isZh ? "zh" : "en"} />
-      <StoreHero locale={isZh ? "zh" : "en"} />
-      <CategoryStrip locale={isZh ? "zh" : "en"} />
-      <ShopGrid locale={isZh ? "zh" : "en"} />
+      <StoreHero locale={isZh ? "zh" : "en"} products={products} />
+      <CategoryStrip locale={isZh ? "zh" : "en"} products={products} />
+      <ShopGrid locale={isZh ? "zh" : "en"} products={products} />
       <OccasionShelf locale={isZh ? "zh" : "en"} />
       <HowItWorks />
       <CraftGallery />

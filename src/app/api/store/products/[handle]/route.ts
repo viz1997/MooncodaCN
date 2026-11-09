@@ -5,13 +5,18 @@
  *
  * 商品目录的真理源在本仓库,Sellbase 只做收银台 —— 这个 Route 永远读
  * 本仓库的数据,不会转发出去。
+ *
+ * ## 价从 DB 来(2026-11-08)
+ *
+ * 详情页的价格走的就是这个接口 —— 它读 DB 的基础价 / 配件加价,
+ * 所以后台改价,详情页刷新就变(不用重新部署)。
  */
 
 import { NextResponse } from "next/server";
 import {
-  findProductByHandle,
-  findRelatedProducts,
-} from "@/features/storefront/lib/mock-catalog";
+  getRelatedStorefrontProducts,
+  getStorefrontProduct,
+} from "@/features/storefront/lib/price-source";
 import { withApiLogging } from "@/lib/api-logger";
 
 export const runtime = "nodejs";
@@ -21,7 +26,7 @@ async function handle(
   context: { params: Promise<{ handle: string }> }
 ) {
   const { handle } = await context.params;
-  const product = findProductByHandle(handle);
+  const product = await getStorefrontProduct(handle);
 
   if (!product) {
     return NextResponse.json(
@@ -30,7 +35,7 @@ async function handle(
     );
   }
 
-  const related = findRelatedProducts(handle, 4);
+  const related = await getRelatedStorefrontProducts(handle, 4);
 
   return NextResponse.json({ product, related });
 }

@@ -255,3 +255,94 @@ export function buildAllVariantSeeds(opts: {
   }
   return out;
 }
+
+/* -------------------------------------------------------------------------- */
+/*  重算已有 SKU 行的价                                                        */
+/* -------------------------------------------------------------------------- */
+
+/** 已存在的 product_variant 行 —— 重算只需要这几个字段 */
+export interface ExistingVariantRow {
+  readonly id: string;
+  readonly sizeCode: string;
+  readonly accessoryCode: string;
+  readonly variantCode: string;
+}
+
+/** 重算结果 —— 只回 id 和新价,调用方自己决定怎么落库 */
+export interface RecomputedVariantPrice {
+  readonly id: string;
+  readonly priceCents: number;
+}
+
+/**
+ * 按**新的基础价**重算已有 SKU 行的绝对价 —— 纯函数
+ *
+ * ## 为什么需要它
+ *
+ * 基础价是**唯一**的价源(工作室 2026-11-08 拍板)。后台改基础价,
+ * `product_variant.price_cents` 必须跟着变 —— 否则小程序按 SKU 拿到的
+ * 绝对价跟商城的价对不上,又是一轮「改了不生效」。
+ *
+ * ## 为什么不是「重新播种」
+ *
+ * `buildVariantSeeds()` 是**生成全部行**,重算要动的是**已经在库里的那些行** ——
+ * 重新播种会丢 `sellbase_variant_id`(Sellbase 那边认这个 id)、会丢
+ * `is_active` 的软下架状态、还会跟唯一的 SKU 索引打架。
+ *
+ * ## 算式跟播种完全一致
+ *
+ * ```
+ * price = 基础价 + 尺寸阶梯(idx × 500) + 配件变体加价
+ * ```
+ *
+ * 跟 `buildVariantSeeds()` 里的公式逐字一致 —— 两处算出来的价必须相同。
+ *
+ * ## 查不到就**跳过那一行**,不当成 0
+ *
+ * - **尺寸码不在字典里** —— 当成 0 会把那一行的尺寸加价**悄悄抹掉**,
+ *   价直接算错。跳过 = 那一行保持原价(宁可不改,也不能改错)。
+ * - **配件变体查不到加价** —— 同理,跳过。
+ *
+ * 「配件有码但没有变体行」(`variantCode = N-A`)**不是**查不到 ——
+ * 播种时它就是 `base + 尺寸阶梯`,不加配件价。这条要跟播种口径一致。
+ */
+export function recomputeVariantPrices(opts: {
+  basePriceCents: number;
+  productType: ProductType;
+  accessoryVariants: readonly AccessoryVariantLike[];
+  existingRows: readonly ExistingVariantRow[];
+}): RecomputedVariantPrice[] {
+  const { basePriceCents, productType, accessoryVariants, existingRows } = opts;
+
+  // 尺寸码 → 阶梯加价(下标 × 500)
+  const sizeDeltaByCode = new Map<string, number>();
+  productType.sizes.forEach((sizeCode, idx) => {
+    sizeDeltaByCode.set(sizeCode, idx * SIZE_STEP_CENTS);
+  });
+
+  // (配件码, 变体码) → 加价
+  const deltaByKey = new Map<string, number>();
+  for (const v of accessoryVariants) {
+    deltaByKey.set(`${v.accessoryCode}::${v.variantCode}`, v.priceDeltaCents);
+  }
+
+  const out: RecomputedVariantPrice[] = [];
+  for (const row of existingRows) {
+    const sizeDelta = sizeDeltaByCode.get(row.sizeCode);
+    if (sizeDelta === undefined) continue; // 尺寸不在字典里 → 跳过,别当成 0
+
+    let accessoryDelta = 0;
+    const hasVariant = row.variantCode !== NO_SEGMENT && row.variantCode !== "";
+    if (hasVariant) {
+      const found = deltaByKey.get(`${row.accessoryCode}::${row.variantCode}`);
+      if (found === undefined) continue; // 配件变体查不到 → 跳过,别当成 0
+      accessoryDelta = found;
+    }
+
+    out.push({
+      id: row.id,
+      priceCents: basePriceCents + sizeDelta + accessoryDelta,
+    });
+  }
+  return out;
+}

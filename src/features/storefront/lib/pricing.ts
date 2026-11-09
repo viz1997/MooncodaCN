@@ -17,6 +17,20 @@
  * 为什么不按「先乘数量再折总价」:那会跟 Sellbase 的行合计
  * (`unit_price_amount × quantity`)差最多 ⌊qty/2⌋ 分 —— 结算页显示的价跟
  * 实际收的价不是同一个数。先折单价再乘数量,两边**逐分相等**。
+ *
+ * ## 价从哪儿来 —— `priceSource` 这个可选第二参
+ *
+ * 后台 `/admin/products` 改的是 DB,但这个函数**不查库**(它是同步纯函数)。
+ * DB 的价由外面查好、当参数传进来 —— 见 `price-source.ts`。
+ *
+ * **不传就退回代码常量**(`BASE_PRICE_CENTS` / `PRODUCT_ACCESSORY_VARIANTS`),
+ * 所以纯函数调用、单测、离线脚本都还照旧能用。
+ *
+ * ## 这个文件**不 import `@/db`**
+ *
+ * `PriceSource` 这个**类型**住在纯文件 `price-source-types.ts` 里,
+ * 这里只 `import type` —— 编译期就被抹掉,不会把 `@/db` 拖进任何
+ * 客户端 bundle。
  */
 
 import type { CustomizationSpec, PricingResult } from "../types";
@@ -27,6 +41,7 @@ import {
   findProductById,
   findSize,
 } from "./mock-catalog";
+import type { PriceSource } from "./price-source-types";
 import {
   calculateRemainingForFreeShipping,
   calculateShippingCents,
@@ -100,8 +115,16 @@ export function computeQuantityDiscount(
  *
  * unit = base + material + size + aiStyle + accessory + engraving + rush
  * total = round(unit * (1 - tierRate)) * quantity
+ *
+ * ## `priceSource` —— DB 里的价(可选)
+ *
+ * 传了就用 DB 的基础价 / 配件加价;**没传就退回代码常量**。
+ * 详见文件头。
  */
-export function calculatePricing(spec: CustomizationSpec): PricingResult {
+export function calculatePricing(
+  spec: CustomizationSpec,
+  priceSource?: PriceSource
+): PricingResult {
   // 校验 quantity
   if (
     !Number.isInteger(spec.quantity) ||
@@ -142,10 +165,12 @@ export function calculatePricing(spec: CustomizationSpec): PricingResult {
     );
   }
 
-  // 从 mock-catalog 拿 basePriceCents
+  // 基础价 —— DB 优先,查不到就退回代码常量(mock-catalog 里那个)
   const product = findProductById(spec.productId);
   if (!product) throw new Error(`未知产品: ${spec.productId}`);
-  const baseCents = product.basePriceCents;
+  const baseCents =
+    priceSource?.basePriceCentsByTypeCode.get(spec.productTypeCode) ??
+    product.basePriceCents;
 
   // 刻字能力按型号走 —— 手办(M)/冰箱贴(P)不做表面刻字,前端不渲染刻字框,
   // 这里再挡一道:有人直接调 API 塞刻字文本也不能收进钱。
@@ -192,7 +217,10 @@ export function calculatePricing(spec: CustomizationSpec): PricingResult {
     ) {
       throw new Error(`配件 ${variant.name} 不适用于 ${size.cm}cm 尺寸`);
     }
-    accessoryCents += variant.surchargeCents;
+    // 配件加价 —— DB 优先,查不到就退回代码常量
+    accessoryCents +=
+      priceSource?.accessoryDeltaCentsByVariantId.get(variantId) ??
+      variant.surchargeCents;
   }
 
   const unitPriceCents =

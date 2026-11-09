@@ -3,27 +3,28 @@
 /**
  * 商品 SKU 管理 - Admin（2026-10-21 新增）
  *
- * /admin/products/[code]：左边改商品资料，右边改 SKU 变体的绝对价和上下架。
+ * /admin/products/[code]：左边改商品资料，右边看 SKU 变体的绝对价和上下架。
  *
  * 对外对应 GET /api/image-gen/products 里每个 ProductCapability.variants[]：
  *   { sku, sizeCode, accessoryCode, variantCode, priceCents, isActive }
  * 小程序按 (sizeCode, accessoryCode, variantCode) 匹配到一行拿绝对价。
  *
- * 交互设计：
- *  - 表格内直接改价 / 切上下架，改动打「脏标记」不立即发请求
- *  - 底部「保存 N 处改动」一次性提交 —— 避免每敲一个数字打一次接口
- *  - 切上下架即时保存（它是一句话的事，且误操作成本低）
+ * ## 价格是**只读**的(2026-11-08)
+ *
+ * 基础价是**唯一**的价源(工作室拍板)。SKU 的绝对价 =
+ * `基础价 + 尺寸阶梯 + 配件加价`,所以它**由基础价自动算出来** ——
+ * 左边改基础价保存,右边的绝对价立刻跟着变(`recomputeProductVariantPricesInDb`)。
+ *
+ * 这里**不给改价的输入框**,`bulkUpdateProductVariantsAction` 的 schema 里
+ * 也**没有** `priceCents` —— 留着就等于留了个后门:管理员能再把 SKU 价改成
+ * 跟基础价不一致,小程序按 SKU 拿到的绝对价就跟商城对不上,又是一轮
+ * 「改了不生效」。
+ *
+ * 上下架开关**保留** —— 那个跟价无关,它是一句话的事。
  */
 
-import { App, Badge, Button, Form, InputNumber, Switch, Tooltip } from "antd";
-import {
-  AlertTriangle,
-  ArrowLeft,
-  RefreshCw,
-  RotateCcw,
-  Save,
-  Wand2,
-} from "lucide-react";
+import { App, Button, Form, Switch, Tooltip } from "antd";
+import { AlertTriangle, ArrowLeft, RefreshCw, Save, Wand2 } from "lucide-react";
 import { useAction } from "next-safe-action/hooks";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -42,21 +43,10 @@ import type {
   AdminProduct,
   AdminProductVariant,
 } from "@/features/image-gen/lib/db-products";
-import {
-  formatCurrency,
-  ModuleHeader,
-} from "@/features/mooncada/components/shared";
+import { ModuleHeader } from "@/features/mooncada/components/shared";
 import { Link, useRouter } from "@/i18n/routing";
+import { formatCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
-
-/**
- * 表格里「改了单价但还没保存」的行状态。
- *
- * 只有单价进草稿 —— 上下架开关是点一下立刻存盘的，不走批量提交。
- */
-interface VariantDraft {
-  priceYuan: number;
-}
 
 interface VariantViewProps {
   /** 路由参数 code */
@@ -78,8 +68,6 @@ export function ProductVariantsView({ productCode }: VariantViewProps) {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
-  /** id → 未保存的改动 */
-  const [drafts, setDrafts] = useState<Record<string, VariantDraft>>({});
   /** 上下架开关即时保存用 */
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
@@ -96,7 +84,6 @@ export function ProductVariantsView({ productCode }: VariantViewProps) {
       setProduct(res.data.product);
       setVariants(res.data.variants ?? []);
       form.setFieldsValue(productToFormValues(res.data.product));
-      setDrafts({});
     } catch (err) {
       const msg = err instanceof Error ? err.message : "加载商品失败";
       if (msg.includes("不存在")) setNotFound(true);
@@ -118,8 +105,13 @@ export function ProductVariantsView({ productCode }: VariantViewProps) {
   const { execute: saveProduct, isPending: isSavingProduct } = useAction(
     updateProductAdminAction,
     {
-      onSuccess: () => {
-        message.success("商品资料已保存，对外最长 10 分钟后生效（CDN 缓存）");
+      onSuccess: ({ data }) => {
+        const recomputed = data?.recomputedVariants ?? 0;
+        message.success(
+          recomputed > 0
+            ? `商品资料已保存，${recomputed} 个 SKU 的价格已按新基础价重算（对外最长 10 分钟后生效）`
+            : "商品资料已保存，对外最长 10 分钟后生效（CDN 缓存）"
+        );
         reload();
       },
       onError: ({ error }) => {
@@ -155,31 +147,22 @@ export function ProductVariantsView({ productCode }: VariantViewProps) {
   };
 
   /* ---------------------------------------------------------------------- */
-  /*  SKU 批量改价                                                            */
+  /*  SKU 上下架(价格是只读的 —— 由基础价自动算)                              */
   /* ---------------------------------------------------------------------- */
 
-  const { execute: bulkUpdate, isPending: isSavingVariants } = useAction(
-    bulkUpdateProductVariantsAction,
-    {
-      onSuccess: ({ data }) => {
-        setTogglingId(null);
-        message.success(
-          `已保存 ${data?.count ?? 0} 处改动，对外最长 10 分钟后生效（CDN 缓存）`
-        );
-        reload();
-      },
-      onError: ({ error }) => {
-        setTogglingId(null);
-        message.error(error.serverError ?? "保存失败");
-      },
-    }
-  );
-
-  /** 表格里显示的值：有草稿用草稿，否则用 DB 值 */
-  const displayPrice = (v: AdminProductVariant): number =>
-    drafts[v.id]?.priceYuan ?? v.priceCents / 100;
-
-  const dirtyIds = useMemo(() => Object.keys(drafts), [drafts]);
+  const { execute: bulkUpdate } = useAction(bulkUpdateProductVariantsAction, {
+    onSuccess: ({ data }) => {
+      setTogglingId(null);
+      message.success(
+        `已保存 ${data?.count ?? 0} 处改动，对外最长 10 分钟后生效（CDN 缓存）`
+      );
+      reload();
+    },
+    onError: ({ error }) => {
+      setTogglingId(null);
+      message.error(error.serverError ?? "保存失败");
+    },
+  });
 
   // 按 (配件分组, 尺寸, SKU) 排序 —— 必须在所有 early return 之前算，
   // 否则「商品还没加载出来 → 后来加载到了」会触发 hooks 顺序错乱
@@ -202,23 +185,9 @@ export function ProductVariantsView({ productCode }: VariantViewProps) {
   );
 
   const activeCount = variants.filter((v) => v.isActive).length;
-  const prices = variants.map((v) => displayPrice(v));
+  const prices = variants.map((v) => v.priceCents);
 
-  const setDraft = (id: string, priceYuan: number) => {
-    setDrafts((prev) => ({ ...prev, [id]: { priceYuan } }));
-  };
-
-  const discardDrafts = () => setDrafts({});
-
-  const handleSaveVariants = () => {
-    const updates = dirtyIds.map((id) => ({
-      id,
-      priceCents: Math.round((drafts[id]?.priceYuan ?? 0) * 100),
-    }));
-    bulkUpdate({ productCode, updates });
-  };
-
-  /** 上下架开关：即时保存，不进草稿 */
+  /** 上下架开关：即时保存 */
   const handleToggleActive = (v: AdminProductVariant, next: boolean) => {
     setTogglingId(v.id);
     bulkUpdate({
@@ -368,12 +337,15 @@ export function ProductVariantsView({ productCode }: VariantViewProps) {
                   <span className="ml-2 text-xs font-normal text-muted-foreground">
                     在售 {activeCount} / 共 {variants.length}
                     {prices.length > 0
-                      ? ` · 价格区间 ${formatCurrency(Math.min(...prices))} ~ ${formatCurrency(Math.max(...prices))}`
+                      ? ` · 价格区间 ${formatCents(Math.min(...prices))} ~ ${formatCents(Math.max(...prices))}`
                       : ""}
                   </span>
                 </h3>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  改价填「元」，保存时换算成分。开关切换即时生效。
+                  价格由左侧的
+                  <span className="font-medium text-foreground">基础价</span>
+                  自动算出来（基础价 + 尺寸阶梯 +
+                  配件加价），这里只读。要改价就改基础价。 开关切换即时生效。
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -386,13 +358,6 @@ export function ProductVariantsView({ productCode }: VariantViewProps) {
                     补齐缺失 SKU
                   </Button>
                 </Tooltip>
-                <Button
-                  onClick={discardDrafts}
-                  disabled={dirtyIds.length === 0}
-                  icon={<RotateCcw className="h-4 w-4" />}
-                >
-                  放弃改动
-                </Button>
               </div>
             </div>
 
@@ -432,7 +397,7 @@ export function ProductVariantsView({ productCode }: VariantViewProps) {
                         规格
                       </th>
                       <th className="font-medium text-xs text-muted-foreground px-3 py-2 text-right whitespace-nowrap">
-                        单价（元）
+                        单价（自动算）
                       </th>
                       <th className="font-medium text-xs text-muted-foreground px-3 py-2 text-center whitespace-nowrap">
                         在售
@@ -441,47 +406,24 @@ export function ProductVariantsView({ productCode }: VariantViewProps) {
                   </thead>
                   <tbody>
                     {sorted.map((v) => {
-                      const dirty = drafts[v.id] !== undefined;
                       const active = v.isActive;
                       return (
                         <tr
                           key={v.id}
                           className={cn(
                             "border-b last:border-0",
-                            dirty && "bg-amber-500/5",
                             !active && "opacity-60"
                           )}
                         >
                           <td className="px-3 py-1.5">
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-mono text-xs">{v.sku}</span>
-                              {dirty ? (
-                                <Badge
-                                  count={
-                                    <span className="bg-amber-500 text-white text-[9px] px-1 rounded">
-                                      未保存
-                                    </span>
-                                  }
-                                />
-                              ) : null}
-                            </div>
+                            <span className="font-mono text-xs">{v.sku}</span>
                           </td>
                           <td className="px-3 py-1.5 text-xs text-muted-foreground whitespace-nowrap">
                             {v.label}
                           </td>
-                          <td className="px-3 py-1.5 text-right">
-                            <InputNumber
-                              size="small"
-                              className="w-24"
-                              min={0}
-                              step={1}
-                              precision={2}
-                              value={displayPrice(v)}
-                              disabled={!active || togglingId === v.id}
-                              onChange={(val) =>
-                                setDraft(v.id, Number(val ?? 0))
-                              }
-                            />
+                          {/* 价格只读 —— 由基础价自动算 */}
+                          <td className="px-3 py-1.5 text-right font-mono text-xs tabular-nums">
+                            {formatCents(v.priceCents)}
                           </td>
                           <td className="px-3 py-1.5 text-center">
                             <Switch
@@ -498,29 +440,6 @@ export function ProductVariantsView({ productCode }: VariantViewProps) {
                 </table>
               </div>
             )}
-
-            {/* 保存条 */}
-            {dirtyIds.length > 0 ? (
-              <div className="p-3 border-t bg-amber-500/5 flex items-center justify-between gap-3">
-                <p className="text-xs text-amber-800 dark:text-amber-300">
-                  {dirtyIds.length} 处未保存的改动
-                </p>
-                <div className="flex items-center gap-2">
-                  <Button size="small" onClick={discardDrafts}>
-                    放弃
-                  </Button>
-                  <Button
-                    size="small"
-                    type="primary"
-                    onClick={handleSaveVariants}
-                    loading={isSavingVariants}
-                    icon={<Save className="h-4 w-4" />}
-                  >
-                    保存 {dirtyIds.length} 处改动
-                  </Button>
-                </div>
-              </div>
-            ) : null}
           </div>
         </div>
       </div>

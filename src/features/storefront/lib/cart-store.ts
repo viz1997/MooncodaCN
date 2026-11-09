@@ -63,7 +63,9 @@ import { type CartItemRow, type CartRow, cart, cartItem } from "@/db/schema";
 import type { Cart, CartLineItem, CartLineItemMetadata } from "../types";
 import { computeSpecHash } from "./cart-spec";
 import { findProductById } from "./mock-catalog";
-import { calculatePricing } from "./pricing";
+import { getPriceSource } from "./price-source";
+import type { PriceSource } from "./price-source-types";
+import { calculatePricing, computeQuantityDiscount } from "./pricing";
 
 /* -------------------------------------------------------------------------- */
 /*  Cookie helper                                                            */
@@ -131,8 +133,19 @@ async function getCurrentUserId(): Promise<string | null> {
  *
  * 算不出来就退回存的值 —— 定价规则变了(材质下架 / 配件停售)不该让
  * 整张购物车打不开,但那一行的价得让用户看见(或者让用户自己删掉)。
+ *
+ * ## `source` —— DB 里的价(2026-11-08)
+ *
+ * 后台 `/admin/products` 改的是 DB(`product.base_price_cents` /
+ * `product_accessory_variant.price_delta_cents`),而这条链路原先读的是**代码
+ * 常量** ⇒ 后台改价,商城网页不变。这里把 DB 的价传进来。
+ *
+ * **购物袋可以降级** —— DB 读失败时 `source.degraded` 为 true,价退回代码
+ * 常量,页面照常显示(见 `price-source.ts` 的文件头)。
+ * **收钱的地方不许降级** —— 那是 `checkout.ts` 的事,那里直接抛
+ * `PRICING_FAILED`。
  */
-function repriceLineItem(row: CartItemRow): CartLineItem {
+function repriceLineItem(row: CartItemRow, source: PriceSource): CartLineItem {
   const metadata = row.metadata as unknown as CartLineItemMetadata;
 
   let unitPriceCents = row.unitPriceCents;
@@ -141,24 +154,40 @@ function repriceLineItem(row: CartItemRow): CartLineItem {
   const product = findProductById(row.productId);
   if (product) {
     try {
-      const pricing = calculatePricing({
-        productId: row.productId,
-        productHandle: product.handle,
-        productTypeCode: product.productTypeCode,
-        materialId: metadata.materialId,
-        sizeId: metadata.sizeId,
-        aiStyleId: metadata.aiStyleId,
-        engravingText: metadata.engravingText,
-        rushOrder: metadata.rushOrder,
-        accessoryVariantIds: metadata.accessoryVariantIds ?? [],
-        quantity: row.quantity,
-        previewImageUrl: metadata.previewImage,
-        originalImageUrl: metadata.originalImage,
-      });
+      const pricing = calculatePricing(
+        {
+          productId: row.productId,
+          productHandle: product.handle,
+          productTypeCode: product.productTypeCode,
+          materialId: metadata.materialId,
+          sizeId: metadata.sizeId,
+          aiStyleId: metadata.aiStyleId,
+          engravingText: metadata.engravingText,
+          rushOrder: metadata.rushOrder,
+          accessoryVariantIds: metadata.accessoryVariantIds ?? [],
+          quantity: row.quantity,
+          previewImageUrl: metadata.previewImage,
+          originalImageUrl: metadata.originalImage,
+        },
+        source
+      );
       unitPriceCents = pricing.unitPriceCents;
       discountedUnitPriceCents = pricing.discountedUnitPriceCents;
     } catch {
       // 定价失败 → 用存着的价兜底
+      //
+      // **但阶梯折扣要留着** —— `row.unitPriceCents` 存的是**折前**单价
+      // (加购那一刻 `pricing.unitPriceCents` 就是折前的那个)。直接拿它当
+      // 折后单价,「买 10 件减 10%」那一档就**丢了** ⇒ 购物袋里摆的价比
+      // 结算收的价**高**(结算那边走 `calculatePricing`,折扣是在的)。
+      //
+      // 兜底跟正算的差别,只在这一档折扣上 —— 别的地方两边一样。
+      const fallback = computeQuantityDiscount(
+        row.unitPriceCents,
+        row.quantity
+      );
+      unitPriceCents = row.unitPriceCents;
+      discountedUnitPriceCents = fallback.discountedUnitPriceCents;
     }
   }
 
@@ -179,12 +208,12 @@ function repriceLineItem(row: CartItemRow): CartLineItem {
 }
 
 /** cart 行 → domain Cart(带 items) */
-function toCart(row: CartRow, items: CartItemRow[]): Cart {
+function toCart(row: CartRow, items: CartItemRow[], source: PriceSource): Cart {
   return {
     id: row.id,
     currencyCode: row.currencyCode as typeof PRICE_CURRENCY,
     regionId: row.regionId,
-    items: items.map((item) => repriceLineItem(item)),
+    items: items.map((item) => repriceLineItem(item, source)),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -242,12 +271,15 @@ export async function createCart(userId?: string | null): Promise<Cart> {
  * 取购物车(含行)
  *
  * 找不到返回 null。单价是**重算**过的,不是存的值。
+ *
+ * 价格源在**这个请求里只查一次**(`cache()`),车有几行都只查一次库。
  */
 export async function getCart(cartId: string): Promise<Cart | null> {
   const row = await loadCartRow(cartId);
   if (!row) return null;
   const items = await loadCartItemRows(cartId);
-  return toCart(row, items);
+  const source = await getPriceSource();
+  return toCart(row, items, source);
 }
 
 /**
@@ -304,7 +336,8 @@ export async function getOrCreateCart(): Promise<Cart> {
         await mergeUserCarts(row.id, row.userId);
       }
       const items = await loadCartItemRows(cookieId);
-      return toCart(row, items);
+      const source = await getPriceSource();
+      return toCart(row, items, source);
     }
     // cookie 指向的 cart 没了(被删了 / 换了库)→ 清掉 cookie 往下走
     store.delete(CART_COOKIE_NAME);
@@ -328,7 +361,8 @@ export async function getOrCreateCart(): Promise<Cart> {
       );
       await setCartId(row.id);
       const items = await loadCartItemRows(row.id);
-      return toCart(row, items);
+      const source = await getPriceSource();
+      return toCart(row, items, source);
     }
   }
 
@@ -459,20 +493,27 @@ export async function addLineItem(
   const quantity = input.quantity ?? 1;
 
   // 定价永远是服务端算的 —— 客户端带来的价一律不信
-  const pricing = calculatePricing({
-    productId: input.productId,
-    productHandle: product.handle,
-    productTypeCode: product.productTypeCode,
-    materialId: input.spec.materialId,
-    sizeId: input.spec.sizeId,
-    aiStyleId: input.spec.aiStyleId,
-    engravingText: input.spec.engravingText,
-    rushOrder: input.spec.rushOrder,
-    accessoryVariantIds: input.spec.accessoryVariantIds ?? [],
-    quantity,
-    previewImageUrl: input.spec.previewImage,
-    originalImageUrl: input.spec.originalImage,
-  });
+  //
+  // 价从 **DB** 来(后台 `/admin/products` 改的就是它)——
+  // 查不到就退回代码常量,购物袋可以降级(见 `price-source.ts`)。
+  const source = await getPriceSource();
+  const pricing = calculatePricing(
+    {
+      productId: input.productId,
+      productHandle: product.handle,
+      productTypeCode: product.productTypeCode,
+      materialId: input.spec.materialId,
+      sizeId: input.spec.sizeId,
+      aiStyleId: input.spec.aiStyleId,
+      engravingText: input.spec.engravingText,
+      rushOrder: input.spec.rushOrder,
+      accessoryVariantIds: input.spec.accessoryVariantIds ?? [],
+      quantity,
+      previewImageUrl: input.spec.previewImage,
+      originalImageUrl: input.spec.originalImage,
+    },
+    source
+  );
 
   const productId = input.productId;
   const productHandle = product.handle;
@@ -531,7 +572,7 @@ export async function addLineItem(
 
   return {
     cart: fresh,
-    lineItem: repriceLineItem(row),
+    lineItem: repriceLineItem(row, source),
   };
 }
 
@@ -572,9 +613,10 @@ export async function updateLineItemQuantity(
   const fresh = await getCart(cartId);
   if (!fresh) throw new Error(`cart ${cartId} 不存在`);
 
+  const source = await getPriceSource();
   return {
     cart: fresh,
-    lineItem: repriceLineItem(row),
+    lineItem: repriceLineItem(row, source),
   };
 }
 
@@ -601,9 +643,10 @@ export async function removeLineItem(
   const fresh = await getCart(cartId);
   if (!fresh) throw new Error(`cart ${cartId} 不存在`);
 
+  const source = await getPriceSource();
   return {
     cart: fresh,
-    lineItem: repriceLineItem(row),
+    lineItem: repriceLineItem(row, source),
   };
 }
 
