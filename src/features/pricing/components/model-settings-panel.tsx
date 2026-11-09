@@ -65,9 +65,9 @@ import type { ReactNode } from "react";
  *
  * - **并排断点跟旧检查工具一样(`md`)** —— 侧栏 `md:order-1`、视口
  *   `md:order-2`(手机上视口还在上面,所以 DOM 里它在前面)
- * - **两个侧栏同宽(`md:w-[400px]`)** —— 不然切一次视角视口宽度就变,
+ * - **两个侧栏同宽(`md:w-[360px]`)** —— 不然切一次视角视口宽度就变,
  *   相机的取景会跑偏
- * - **「加入打印单」那张卡在深色应用外面** —— 它是页面里的一张浅色卡
+ * - **「提交打印订单」那张卡在深色应用外面** —— 它是页面里的一张浅色卡
  *   (工作室的下单按钮),不是 3D 应用的一部分
  *
  * ## 模型角度是**模型**的旋转,不是**视角**的旋转
@@ -544,12 +544,12 @@ export function ModelSettingsPanel({
           克重 / 检查两个视角换的是**左边那一栏的内容**,
           整块外观不变。
 
-          `xl:flex-1 xl:min-w-0` —— 右侧让出「加入打印单」那一栏的位置。 */}
+          `xl:flex-1 xl:min-w-0` —— 右侧让出「提交打印订单」那一栏的位置。 */}
       <div
         ref={appRef}
         className={cn(
           "rounded-xl border border-zinc-800 bg-zinc-950 text-zinc-100 shadow-sm overflow-hidden",
-          // 让出右侧「加入打印单」那一栏(全屏时整块占屏,不需要)
+          // 让出右侧「提交打印订单」那一栏(全屏时整块占屏,不需要)
           !fullscreen && "xl:min-w-0 xl:flex-1",
           // 全屏 —— **状态驱动**,不用 `[:fullscreen]:` 变体(见文件头)
           fullscreen &&
@@ -1022,7 +1022,7 @@ export function ModelSettingsPanel({
               {tab === "check" ? (
                 <aside
                   className={cn(
-                    "order-2 md:order-1 md:w-[400px] md:shrink-0 p-3 md:overflow-y-auto border-t md:border-t-0 md:border-r border-zinc-800",
+                    "order-2 md:order-1 md:w-[360px] md:shrink-0 p-3 md:overflow-y-auto border-t md:border-t-0 md:border-r border-zinc-800",
                     // 全屏:信息栏自己内部滚(窄屏时整行也滚)
                     fullscreen && "min-h-0 overflow-y-auto"
                   )}
@@ -1043,7 +1043,7 @@ export function ModelSettingsPanel({
               ) : (
                 <aside
                   className={cn(
-                    "order-2 md:order-1 md:w-[400px] md:shrink-0 p-3 flex flex-col gap-3 md:overflow-y-auto border-t md:border-t-0 md:border-r border-zinc-800",
+                    "order-2 md:order-1 md:w-[360px] md:shrink-0 p-3 flex flex-col gap-3 md:overflow-y-auto border-t md:border-t-0 md:border-r border-zinc-800",
                     // 全屏:信息栏自己内部滚(窄屏时整行也滚)
                     fullscreen && "min-h-0 overflow-y-auto"
                   )}
@@ -1268,18 +1268,21 @@ export function ModelSettingsPanel({
           「克重」那一栏找按钮。
 
           **在深色应用外面** —— 它是页面里的一张浅色卡(工作室的
-          「加入打印单」按钮),不是 3D 应用的一部分。
+          「提交打印订单」按钮),不是 3D 应用的一部分。
 
           **摆在右侧**(2026-11-08)—— 原来它在整块工作台**下面**,
           量完重量的用户得往下滚才看得见那颗按钮。放在右边那一栏:
           模型在左,下单按钮在右,眼睛不用来回找。
 
-          **断点用 `xl`(1280px),不是 `lg`** —— 页面主容器封顶 1280px,
-          右边这一栏 320px + 间距 16px 之后,工作台那块只剩
-          `1280 − 32 − 336 = 912px`(侧栏 400 + 视口 ~500)。用 `lg`(1024)
-          的话视口只剩 ~250px,3D 视口挤得没法看。窄屏仍然是上下排。 */}
+          **断点用 `xl`(1280px),不是 `lg`** —— 窄屏并排的话视口只剩
+          ~250px,3D 视口挤得没法看。窄屏仍然是上下排。
+
+          **这一栏 288px**(2026-11-09)—— 以前 320px。加上右边这一栏之后,
+          3D 视口被挤到只剩 ~500px(工作室的原话:「把预览区挤到了左边」)。
+          那一栏里只摆**预估报价 + 「填写下单信息」那颗按钮** —— 下单表单
+          是展开在**工作台下面**的,不是塞在这一栏里 —— 所以 288px 够用。 */}
       {showViewer && model && geometry && quote && (
-        <div className="mt-4 w-full xl:mt-0 xl:w-[320px] xl:shrink-0">
+        <div className="mt-4 w-full xl:mt-0 xl:w-[288px] xl:shrink-0">
           {quote}
         </div>
       )}

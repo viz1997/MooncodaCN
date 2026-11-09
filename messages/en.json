@@ -1730,7 +1730,7 @@
       "signInHint": "Prices are shown to signed-in users — sign in to see the amount",
       "supportPending": "not counted",
       "supportPendingHint": "Support isn't computed yet — click \"Show support\" or \"Place on plane\" once for a closer estimate",
-      "estimateHint": "Estimate — the final amount is confirmed in your cart"
+      "estimateHint": "Estimate — the final amount is confirmed on the order"
     },
     "delivery": {
       "label": "Delivery",
@@ -1745,11 +1745,11 @@
       }
     },
     "printOrder": {
-      "add": "Add to cart",
+      "add": "Submit print order",
       "adding": "Uploading model…",
       "errors": {
-        "addFailed": "Could not add to the cart — please try again",
-        "supportUnavailable": "Support weight could not be computed, so nothing was added — wait for the model to finish processing and try again",
+        "addFailed": "Could not submit the print order — please try again",
+        "supportUnavailable": "Could not compute the support weight, so the order was not submitted — wait for the model to finish processing and try again",
         "codes": {
           "authRequired": "Your session expired — sign in again and retry",
           "storageNotConfigured": "File storage is not configured — the studio needs to fix it",
@@ -1759,20 +1759,27 @@
           "invalidInput": "The model data is incomplete — measure it again and retry",
           "invalidType": "That file format is not supported — try an OBJ / STL / ZIP instead",
           "presignFailed": "Could not create the upload URL — please try again",
-          "serverFailed": "The server could not process the request — please try again (details in the browser console)"
+          "serverFailed": "The server could not process the request — please try again (details in the browser console)",
+          "addressNotFound": "Shipping address not found — pick another address",
+          "quoteUnavailable": "Could not price this geometry — re-measure and try again",
+          "orderNoConflict": "Order number conflict — please retry",
+          "createOrderFailed": "The server could not create the order — please try again (details in the browser console)",
+          "paymentChannelUnavailable": "This payment method is temporarily unavailable — pick another one or contact the studio",
+          "storefrontUnavailable": "This order was already settled together with a store order — pay it under “My Orders”"
         }
       }
     },
     "entry": {
-      "title": "Add to cart",
-      "desc": "Add the model you measured to your cart — the estimate below is a preview; the final total, delivery tier and address are confirmed in your cart.",
+      "title": "Submit print order",
+      "desc": "The measured model becomes a print work order — below is the estimate; confirm the shipping address, delivery tier and total in the form underneath.",
       "descSignIn": "Print orders are tied to your account. Sign in first, then measure — otherwise the model is lost when the page reloads.",
       "signInCta": "Sign in",
-      "empty": "Pick a model file above to add it to your cart.",
-      "ready": "Model ready — one click adds it to your cart.",
+      "empty": "Pick a model file above before submitting a print order.",
+      "ready": "Model is ready — click to fill in the order details.",
       "errors": {
         "noModel": "No model yet — pick a file above first."
-      }
+      },
+      "formHint": "The order form is below the workbench — submit it and the order shows up under “My print orders”, where you pay."
     },
     "order": {
       "start": "Enter order details",
@@ -1790,7 +1797,7 @@
       "uploading": "Uploading model…",
       "submitting": "Submitting…",
       "cancel": "Back",
-      "payHint": "You'll be taken to the payment page — production starts once payment lands.",
+      "payHint": "After submitting you land on the order page to pay; production starts once it is paid.",
       "policyNotice": "Please read these before you order — they are hard requirements of the print service, and following them saves a round of rework.",
       "policyPrintNotice": "Print Notice",
       "policyDesignSpec": "3D Model Design Specification",
@@ -1810,8 +1817,10 @@
         "name": "Please enter your name",
         "noModel": "No model to order yet",
         "submit": "Submission failed, please try again",
-        "quoteStale": "The size changed and the price was updated — go back and confirm it again"
-      }
+        "quoteStale": "The size changed and the price was updated — go back and confirm it again",
+        "address": "Pick a shipping address — the studio ships against it"
+      },
+      "addressLabel": "Shipping address"
     },
     "list": {
       "title": "My print orders",

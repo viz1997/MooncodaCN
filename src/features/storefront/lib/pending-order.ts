@@ -23,7 +23,6 @@
  * - 合计一样(分)—— 定价规则改了就不算同一单
  * - 收货地址一样
  * - 留言一样
- *
  * ## 为什么是「复用」不是「取消旧的」
  *
  * 取消旧单会有个**要命**的副作用:用户可能已经扫了旧单的付款码,钱正准备
@@ -37,7 +36,6 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
-  printOrder,
   type ShippingAddressSnapshot,
   type StorefrontOrderItemRow,
   type StorefrontOrderRow,
@@ -59,8 +57,6 @@ export interface ReusablePendingOrder {
   order: StorefrontOrderRow;
   /** 那一单的行 */
   items: StorefrontOrderItemRow[];
-  /** 那一单里的打印工单号 */
-  printOrderNos: string[];
 }
 
 /**
@@ -119,16 +115,7 @@ export async function findReusablePendingOrder(params: {
     );
     if (!isSameLineSnapshot(orderSnapshot, params.snapshot)) continue;
 
-    const printRows = await db
-      .select({ orderNo: printOrder.orderNo })
-      .from(printOrder)
-      .where(eq(printOrder.storefrontOrderId, order.id));
-
-    return {
-      order,
-      items,
-      printOrderNos: printRows.map((row) => row.orderNo),
-    };
+    return { order, items };
   }
 
   return null;

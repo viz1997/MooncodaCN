@@ -29,9 +29,9 @@ import { describe, expect, it } from "vitest";
  * | 角度一变,上一次的结果作废 | 画面上摆着旧角度的支撑,数字却说是新角度的 |
  * | 外壳跟着那颗开关走 | 关着还画一圈绿 —— 用户以为那是当前姿态的支撑 |
  * | 没算过的时候三个数是「—」 | 摆出一个数,但用户不知道是哪个角度算的 |
- * | 加购之前会现算一次支撑 | 服务端按 `supportWeightG ?? 0` 重算报价,少了它**收少了钱** |
- * | 算不出来就不加 | 拿几何原样去加购 → 支撑费算成 0,收少了钱 |
- * | 模型没焊完会等它 | 刚拖进来就点加购 → 算不出支撑,还是收少了钱 |
+ * | 提交之前会现算一次支撑 | 服务端按 `supportWeightG ?? 0` 重算报价,少了它**收少了钱** |
+ * | 算不出来就不提交 | 拿几何原样去下单 → 支撑费算成 0,收少了钱 |
+ * | 模型没焊完会等它 | 刚拖进来就点提交 → 算不出支撑,还是收少了钱 |
  *
  * 全部是文件扫描 —— 不需要 DB / 网络 / 浏览器。
  */
@@ -68,8 +68,6 @@ const SETTINGS_PANEL =
   "src/features/pricing/components/model-settings-panel.tsx";
 const WEIGHT_TOOL =
   "src/features/print-quote/components/print-service-weight-tool.tsx";
-const ADD_TO_ORDER =
-  "src/features/print-quote/components/print-service-add-to-order.tsx";
 const QUOTE_SERVER = "src/features/print-quote/lib/quote-server.ts";
 
 describe("支撑按需计算 —— 支撑不跟随角度实时变化", () => {
@@ -219,11 +217,11 @@ describe("「置于平面」—— 一颗按钮把落座 + 重算支撑串成一
   });
 });
 
-describe("支撑按需计算 —— 加购那条路不会收少了钱", () => {
+describe("支撑按需计算 —— 提交订单那条路不会收少了钱", () => {
   it("服务端按 `supportWeightG` 重算报价,没这个数就是 0", () => {
     const code = stripComments(read(QUOTE_SERVER));
 
-    // 这就是为什么加购之前必须把支撑算出来 —— 少了它,支撑费收成 0
+    // 这就是为什么提交之前必须把支撑算出来 —— 少了它,支撑费收成 0
     expect(code).toContain(
       "supportWeight: useSupport ? (input.supportWeightG ?? 0) : 0"
     );
@@ -243,37 +241,40 @@ describe("支撑按需计算 —— 加购那条路不会收少了钱", () => {
     expect(code).toContain("onEnsureSupport?.(ensureSupport)");
   });
 
-  it("加入打印单之前会 await 那次计算", () => {
-    const code = stripComments(read(ADD_TO_ORDER));
+  it("提交订单之前会 await 那次计算", () => {
+    const code = stripComments(read(WEIGHT_TOOL));
 
-    // 用户没点过那颗按钮就直接加购 → 这里现算一次
+    // 用户没点过那颗按钮就直接提交 → 这里现算一次
     expect(code).toContain("await ensureSupport()");
-    // 算出来的支撑克重得进规格里 —— 服务端按它重算报价
-    expect(code).toContain("buildPrintServiceSpecFromGeometry(fresh, {");
+    // 算出来的支撑克重直接进报价输入 —— 服务端按它重算报价
+    expect(code).toContain(
+      "quote: { ...fresh, deliveryTier: values.deliveryTier }"
+    );
   });
 
-  it("**算不出来就不加** —— 宁可让用户重试,也不能收少了钱", () => {
-    const code = stripComments(read(ADD_TO_ORDER));
+  it("**算不出来就不提交** —— 宁可让用户重试,也不能收少了钱", () => {
+    const code = stripComments(read(WEIGHT_TOOL));
 
-    // 算不出来 → 报错 + 退出,**不许**拿几何原样(没支撑克重)去加购
+    // 算不出来 → 报错 + 退出,**不许**拿几何原样(没支撑克重)去下单
     expect(code).toContain('t("printOrder.errors.supportUnavailable")');
-    // 不许有「算不出来就退回 input」的兜底 —— 那条路会让支撑费收成 0
+    // 不许有「算不出来就退回 input」的兜底 —— 那条路会让支撑费算成 0
     expect(code).not.toContain("?? input");
   });
 
-  it("模型还没焊完的时候,加购会**等**焊接", () => {
+  it("模型还没焊完的时候,提交订单会**等**焊接", () => {
     const code = stripComments(read(CALCULATOR));
 
-    // 用户刚拖进来就点「加入打印单」是常事 —— 焊接大模型要好几秒
+    // 用户刚拖进来就点「提交打印订单」是常事 —— 焊接大模型要好几秒
     expect(code).toContain("await loading;");
     // 等的是焊接那个 promise
     expect(code).toContain("supportLoadRef.current");
   });
 
-  it("工具页把那个入口一路传到「加入打印单」那张卡", () => {
+  it("工具页把那个入口接住了 —— 计算器 → 工具 → 提交订单", () => {
     const tool = stripComments(read(WEIGHT_TOOL));
 
     expect(tool).toContain("onEnsureSupport={handleEnsureSupport}");
-    expect(tool).toContain("ensureSupport={ensureSupport}");
+    // 提交的时候走的是同一个 ensureSupport
+    expect(tool).toContain("const fresh = await ensureSupport();");
   });
 });

@@ -67,17 +67,18 @@ function line(
 }
 
 describe("computeCartTotals", () => {
-  it("空购物车 → 全是 0(没有目录商品就没有运费)", () => {
+  it("空购物车 → 小计是 0,运费还是 ¥8(免运费差额按 ¥99 算)", () => {
+    // 运费规则只有一条:目录商品小计不到 ¥99 就收 ¥8,到了免。
+    // 空车的小计是 0 → 收 ¥8 —— 这是 2026-11-08 退回去之后的行为
+    // (打印服务并进商城购物袋那一版给空车开了个 0 的口子,现在没有了)。
     expect(computeCartTotals([])).toEqual({
       subtotalCents: 0,
       rawSubtotalCents: 0,
       discountCents: 0,
-      catalogSubtotalCents: 0,
-      printSubtotalCents: 0,
-      shippingCents: 0,
-      totalCents: 0,
+      shippingCents: 800,
+      totalCents: 800,
       itemCount: 0,
-      remainingForFreeShippingCents: 0,
+      remainingForFreeShippingCents: 9900,
     });
   });
 
@@ -136,14 +137,19 @@ describe("computeCartTotals", () => {
     expect(totals.totalCents).toBe(totals.subtotalCents + totals.shippingCents);
   });
 
-  it("打印服务行(数量恒为 1)在折扣上不需要特殊处理", () => {
-    // 打印服务按克重计价,单价是服务端算出来的绝对值 —— 在**折扣**这套算法里
-    // 它就是个「数量为 1 的普通行」(数量阶梯折扣对它不生效)。
-    // 运费上的区别在 `merged-cart-totals.test.ts` 里。
-    const totals = computeCartTotals([line("print", 5581, 1)]);
+  it("车里**只有目录商品**(2026-11-08)—— 没有「打印服务那部分」这种分支", () => {
+    // 工作室的说法:「不要放入购物车,放在这里 account/print-orders」。
+    // 打印服务是另一条线(工单自己建、自己收款),不进商城购物袋。
+    //
+    // 所以运费只有一种情况:目录商品。小计到 ¥99 免,不到收 ¥8 ——
+    // 「运费只看目录商品那部分」那套逻辑(合并时期才有)整个退回去了。
+    const totals = computeCartTotals([line("a", 5581, 1)]);
 
     expect(totals.subtotalCents).toBe(5581);
     expect(totals.itemCount).toBe(1);
     expect(totals.discountCents).toBe(0);
+    // ¥55.81 不到 ¥99 → 收 ¥8
+    expect(totals.shippingCents).toBe(800);
+    expect(totals.totalCents).toBe(5581 + 800);
   });
 });

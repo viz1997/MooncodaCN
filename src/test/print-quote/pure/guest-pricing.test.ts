@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
  *
  * ```
  * /tools/workbench(公开工具页)
- *   → 量完模型 →「加入打印单」那张卡上摆一个**预估报价**
+ *   → 量完模型 →「提交打印订单」那张卡上摆一个**预估报价**
  *   → 访客也能看到(工作室现在就要这个行为)
  *   → 后台 `/admin/print-pricing` 一个开关能随时关掉
  * ```
@@ -63,8 +63,8 @@ const SETTINGS = "src/features/print-quote/lib/pricing-settings.ts";
 const STORE = "src/features/print-quote/lib/pricing-store.ts";
 const PREVIEW =
   "src/features/print-quote/components/print-service-quote-preview.tsx";
-const ADD_TO_ORDER =
-  "src/features/print-quote/components/print-service-add-to-order.tsx";
+const SUBMIT_CARD =
+  "src/features/print-quote/components/print-service-submit-card.tsx";
 
 describe("访客可见计价 —— 后台那个开关", () => {
   it("后台的计价设置里有一颗开关", () => {
@@ -179,14 +179,15 @@ describe("访客可见计价 —— 工具页那个预估报价", () => {
   it("几何变了就重新报价 —— 支撑算出来之后金额会跟着变", () => {
     const code = stripComments(read(PREVIEW));
 
-    expect(code).toContain("}, [input]);");
+    // 依赖里有几何和**交期档位** —— 换档位要重新问价
+    expect(code).toContain("}, [input, deliveryTier]);");
     expect(code).toContain("QUOTE_DEBOUNCE_MS");
   });
 
   it("那张卡上确实挂着这个预估报价", () => {
-    const code = stripComments(read(ADD_TO_ORDER));
+    const code = stripComments(read(SUBMIT_CARD));
 
     expect(code).toContain("PrintServiceQuotePreview");
-    expect(flat(code)).toContain("<PrintServiceQuotePreview input={input} />");
+    expect(flat(code)).toContain("<PrintServiceQuotePreview input={input}");
   });
 });

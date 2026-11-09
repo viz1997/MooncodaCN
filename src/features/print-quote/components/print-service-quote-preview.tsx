@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * 「加入打印单」那张卡上的**预估报价**(2026-11-07)
+ * 「提交打印订单」那张卡上的**预估报价**(2026-11-07)
  *
  * 工作室的原话:「现在不登录也允许计价显示」。
  *
@@ -44,6 +44,7 @@
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 
+import type { DeliveryTierId } from "@/features/print-quote/lib/delivery-tier";
 import type {
   PrintQuote,
   PrintQuoteInput,
@@ -70,6 +71,20 @@ export type PrintServiceQuotePreviewProps = {
    * null = 还没有模型(什么都不摆)。
    */
   input: PrintQuoteInput | null;
+  /**
+   * 交期档位(2026-11-08)
+   *
+   * 打印服务**不再进商城购物袋**了,交期档位是在**下单表单**里选的。
+   * 选中的那一档要带进报价 —— 否则卡片上摆的预估价跟用户选的那一档对不上。
+   */
+  deliveryTier?: DeliveryTierId | undefined;
+  /**
+   * 把报价抬给父组件(2026-11-08)
+   *
+   * 父组件要拿 `quote.deliveryRates`(三档的比例)摆交期选择器,拿
+   * 小计算选择器上那三档的加价 —— 比例只能由服务端给,前端不自己认一份。
+   */
+  onQuote?: ((quote: PrintQuote | null) => void) | undefined;
 };
 
 /** 报价请求防抖(毫秒)—— 拖尺寸滑块时别一路发 */
@@ -77,6 +92,8 @@ const QUOTE_DEBOUNCE_MS = 400;
 
 export function PrintServiceQuotePreview({
   input,
+  deliveryTier,
+  onQuote,
 }: PrintServiceQuotePreviewProps) {
   const t = useTranslations("PrintQuote");
   const [state, setState] = useState<PreviewState>({ kind: "empty" });
@@ -93,10 +110,16 @@ export function PrintServiceQuotePreview({
     const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
+        // 交期档位带进报价 —— 用户选的那一档,金额要按它算
+        const payload: PrintQuoteInput = {
+          ...input,
+          deliveryTier: deliveryTier ?? null,
+        };
+
         const response = await fetch("/api/print-quote", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(input),
+          body: JSON.stringify(payload),
           signal: controller.signal,
         });
 
@@ -127,7 +150,14 @@ export function PrintServiceQuotePreview({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [input]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [input, deliveryTier]);
+
+  // 把报价抬给父组件 —— 父组件要拿它摆交期选择器
+  const liftedQuote = state.kind === "ready" ? state.quote : null;
+  useEffect(() => {
+    onQuote?.(liftedQuote);
+  }, [liftedQuote, onQuote]);
 
   if (state.kind === "empty") return null;
 

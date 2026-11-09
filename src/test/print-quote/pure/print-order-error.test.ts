@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 /**
- * 「加入购物袋」失败 —— code 翻译成人话。
+ * 「提交打印订单」失败 —— code 翻译成人话。
  *
  * ## 为什么值得测
  *
  * 2026-11-08 线上踩过一次:生产库的 `cart` 表少了 `kind` 那一列 → 加行
  * 接口 500 → 界面上只摆「加入打印单失败,请稍后重试」。**那句话把真原因
- * 盖住了** —— 排查靠的是翻 R2 看有没有留下对象(上传在加购之前,所以文件
- * 进了桶,加行却炸了)。
+ * 盖住了** —— 排查靠的是翻 R2 看有没有留下对象(上传在下单之前,所以文件
+ * 进了桶,落库却炸了)。
  *
  * 从那以后,服务端每次失败都带一个稳定的 `code`,前端按 code 查文案表。
  * 这层映射写错了 = 用户看到的还是那句「请稍后重试」,或者更糟:摆一句
@@ -19,7 +19,7 @@ import { describe, expect, it } from "vitest";
  * 1. **code → 文案 key 的映射不认错** —— 每个 code 都得有一句人话
  * 2. **认不出来的 code 退回 `null`** —— 界面退回笼统那句,不崩
  * 3. **服务端两种错误约定都认** —— `error` 字段有人话版(上传地址那个
- *    路由)和码版(加行那个路由)
+ *    路由)和码版(建工单那个路由)
  *
  * ## 依赖
  *
@@ -45,7 +45,7 @@ describe("服务端 code 的提取", () => {
     ).toBe("R2_NOT_CONFIGURED");
   });
 
-  it("error 字段是码形状时也认(加行那个路由的约定)", () => {
+  it("error 字段是码形状时也认(建工单那个路由的约定)", () => {
     expect(extractErrorCode({ error: "MODEL_NOT_FOUND" })).toBe(
       "MODEL_NOT_FOUND"
     );
@@ -118,17 +118,25 @@ describe("code → 文案 key 的映射", () => {
       "AUTH_REQUIRED",
       "R2_NOT_CONFIGURED",
       "MODEL_NOT_FOUND",
-      "CART_NOT_FOUND",
-      "ADD_LINE_ITEM_FAILED",
+      "ADDRESS_NOT_FOUND",
+      "QUOTE_UNAVAILABLE",
+      "CREATE_ORDER_FAILED",
     ]) {
       expect(PRINT_ORDER_ERROR_KEYS[code]).toBeTruthy();
     }
   });
 
-  it("「加错车」这个 code 没有了 —— 2026-11-08 起只有一张车", () => {
-    // 打印服务并进商城购物袋之后,不存在「放错车」这回事。
-    // 这个 code 留在表里的话,界面会摆一句指向已经不存在的打印单页面的话。
-    expect(PRINT_ORDER_ERROR_KEYS.CART_KIND_MISMATCH).toBeUndefined();
+  it("购物袋那套 code 没有了 —— 2026-11-08 起打印服务**不进**商城购物袋", () => {
+    // 打印服务直接建工单(工单自己建、自己收款)之后,工单这条路**不碰**
+    // 商城购物袋 —— 所以「车找不到」「加行失败」「放错车」这三个 code 都是
+    // 死的。留在表里的话,界面会摆一句指向已经不存在的那条路的话。
+    for (const code of [
+      "CART_NOT_FOUND",
+      "ADD_LINE_ITEM_FAILED",
+      "CART_KIND_MISMATCH",
+    ]) {
+      expect(PRINT_ORDER_ERROR_KEYS[code]).toBeUndefined();
+    }
   });
 
   it("认不出来的 code → null(界面退回笼统那句)", () => {

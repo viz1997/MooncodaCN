@@ -1727,7 +1727,7 @@
       "signInHint": "价格只对登录用户显示 —— 登录后就能看到金额",
       "supportPending": "未计入",
       "supportPendingHint": "支撑还没算 —— 点「包裹支撑」或「置于平面」算一次,金额会更准",
-      "estimateHint": "预估 —— 最终金额以购物袋为准"
+      "estimateHint": "预估 —— 最终金额以工单为准"
     },
     "delivery": {
       "label": "交期",
@@ -1742,11 +1742,11 @@
       }
     },
     "printOrder": {
-      "add": "加入购物袋",
+      "add": "提交打印订单",
       "adding": "上传模型中…",
       "errors": {
-        "addFailed": "加入购物袋失败,请稍后重试",
-        "supportUnavailable": "算不出支撑克重,没有加入购物袋 —— 等模型处理完再试一次",
+        "addFailed": "提交打印订单失败,请稍后重试",
+        "supportUnavailable": "算不出支撑克重,没有提交订单 —— 等模型处理完再试一次",
         "codes": {
           "authRequired": "登录状态失效了 —— 重新登录再试一次",
           "storageNotConfigured": "文件存储没配好,暂时加不了 —— 联系工作室",
@@ -1756,20 +1756,27 @@
           "invalidInput": "模型数据不完整 —— 重新量一遍再试",
           "invalidType": "这个文件格式不支持 —— 换一个 OBJ / STL / ZIP 试试",
           "presignFailed": "生成上传地址失败 —— 请稍后重试",
-          "serverFailed": "服务端处理失败 —— 请稍后重试(详情见浏览器控制台)"
+          "serverFailed": "服务端处理失败 —— 请稍后重试(详情见浏览器控制台)",
+          "addressNotFound": "收货地址不存在 —— 重新选一个地址",
+          "quoteUnavailable": "这组几何算不出报价 —— 重新量一遍再试",
+          "orderNoConflict": "订单号冲突 —— 请重试一次",
+          "createOrderFailed": "服务端建单失败 —— 请稍后重试(详情见浏览器控制台)",
+          "paymentChannelUnavailable": "这个支付方式暂时不可用 —— 换一个,或者联系工作室",
+          "storefrontUnavailable": "这一单已经跟商城订单一起结过账了 —— 去「我的订单」付款"
         }
       }
     },
     "entry": {
-      "title": "加入购物袋",
-      "desc": "量好的模型直接加进商城购物袋 —— 下面是预估价,最终金额、交期和收货地址在购物袋上确认。",
+      "title": "提交打印订单",
+      "desc": "量好的模型直接建一张打印工单 —— 下面是预估价,收货地址、交期和金额在下面的表单里确认。",
       "descSignIn": "打印服务要挂在你的账号名下。先登录再量,免得量完再登录,模型白选一遍。",
       "signInCta": "去登录",
-      "empty": "先在上面选好模型文件,才能加进购物袋。",
-      "ready": "模型已就绪 —— 点一下就加进购物袋。",
+      "empty": "先在上面选好模型文件,才能提交打印订单。",
+      "ready": "模型已就绪 —— 点一下填写下单信息。",
       "errors": {
         "noModel": "还没有模型 —— 先在上面选一个文件。"
-      }
+      },
+      "formHint": "下单信息在工作台下面 —— 填完提交,工单会出现在「我的打印订单」里,钱在那儿付。"
     },
     "order": {
       "start": "填写下单信息",
@@ -1787,7 +1794,7 @@
       "uploading": "上传模型中…",
       "submitting": "提交中…",
       "cancel": "返回",
-      "payHint": "提交后进入支付,付完才开工。",
+      "payHint": "提交后进入工单详情页付款,付完才开工。",
       "policyNotice": "下单前请先读一遍下面这几份 —— 它们是打印服务的硬性要求,照做能少一轮返工。",
       "policyPrintNotice": "打印须知",
       "policyDesignSpec": "3D模型设计规范",
@@ -1807,8 +1814,10 @@
         "name": "请填写称呼",
         "noModel": "还没有可下单的模型",
         "submit": "提交失败,请稍后重试",
-        "quoteStale": "尺寸改过了,价格已更新 —— 请返回重新确认报价"
-      }
+        "quoteStale": "尺寸改过了,价格已更新 —— 请返回重新确认报价",
+        "address": "请选一个收货地址 —— 工作室照着单子寄出去"
+      },
+      "addressLabel": "收货地址"
     },
     "list": {
       "title": "我的打印订单",

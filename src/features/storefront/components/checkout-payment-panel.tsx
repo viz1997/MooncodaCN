@@ -9,14 +9,12 @@
  * 这些状态**全部在组件自己里** —— 父组件(结算页)只负责把「选了哪个地址」
  * 「留言是什么」传进来,以及在钱到了之后刷新自己的缓存。
  *
- * ## 只有**一张车**(2026-11-08)
+ * ## 车里**只有目录商品**(2026-11-08)
  *
- * 打印服务并进商城购物袋了(工作室的说法:「不要 print-order,进入商城那个」),
- * 所以结算**只结算一张车** —— 目录商品和打印服务装在一起,一次付款。
+ * 工作室的说法:「不要放入购物车,放在这里 account/print-orders」。打印服务
+ * 是另一条线 —— 工单自己建、自己收款(见 `POST /api/print-orders`)。
  *
- * 车里有没有打印服务行,服务端自己看得见(行上有 `printSpec`),付款成功
- * 之后会把生成的打印工单号一起回传(`printOrderNos`)—— 这一块只负责把
- * 那些号摆出来。
+ * 所以这一块结算的就是**目录商品**那一辆车,不涉及打印工单。
  */
 
 import { useQueryClient } from "@tanstack/react-query";
@@ -53,10 +51,6 @@ export function CheckoutPaymentPanel({
   const [isPaying, setIsPaying] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
   const [createdOrderNo, setCreatedOrderNo] = useState<string | null>(null);
-  /** 这一单里生成的打印工单号(`PO-…`)—— 支付入口没生成时给用户一个凭据 */
-  const [createdPrintOrderNos, setCreatedPrintOrderNos] = useState<string[]>(
-    []
-  );
   /** 选中的收款通道 —— null = 还没选(服务端挑第一个可用的) */
   const [channel, setChannel] = useState<string | null>(null);
   /**
@@ -102,9 +96,6 @@ export function CheckoutPaymentPanel({
       }
 
       setCreatedOrderNo(body?.orderNo ?? null);
-      setCreatedPrintOrderNos(
-        Array.isArray(body?.printOrderNos) ? body.printOrderNos : []
-      );
 
       // 微信 Native —— 扫码,页面留在原地画码
       if (body?.paymentQrCodeUrl) {
@@ -221,11 +212,6 @@ export function CheckoutPaymentPanel({
             订单号:{createdOrderNo}
           </p>
         )}
-        {createdPrintOrderNos.length > 0 && (
-          <p className="mt-1 text-[11px] text-muted-foreground text-center">
-            打印工单号:{createdPrintOrderNos.join("、")}
-          </p>
-        )}
         <div className="mt-4 flex flex-col gap-2">
           <Button
             asChild
@@ -235,17 +221,6 @@ export function CheckoutPaymentPanel({
           >
             <Link href="/account/orders">我的订单</Link>
           </Button>
-          {/* 这一单里有打印服务 → 同时给一个去打印工单的入口 */}
-          {createdPrintOrderNos.length > 0 && (
-            <Button
-              asChild
-              size="sm"
-              className="w-full rounded-full"
-              variant="outline"
-            >
-              <Link href="/account/print-orders">查看打印工单</Link>
-            </Button>
-          )}
         </div>
       </div>
     );
@@ -270,11 +245,6 @@ export function CheckoutPaymentPanel({
           {createdOrderNo && (
             <p className="mt-1 text-muted-foreground">
               订单号:{createdOrderNo}
-            </p>
-          )}
-          {createdPrintOrderNos.length > 0 && (
-            <p className="mt-1 text-muted-foreground">
-              打印工单号:{createdPrintOrderNos.join("、")}
             </p>
           )}
         </div>

@@ -30,14 +30,7 @@ import {
   computeSpecHash,
   computeSpecHashForLine,
 } from "@/features/storefront/lib/cart-spec";
-import {
-  buildPrintServiceMetadata,
-  PRINT_SERVICE_PRODUCT_ID,
-} from "@/features/storefront/lib/print-service";
-import type {
-  CartLineItemMetadata,
-  PrintServiceSpec,
-} from "@/features/storefront/types";
+import type { CartLineItemMetadata } from "@/features/storefront/types";
 
 /** 一份基准规格(跟加购时手拼的一样) */
 const BASE: CartSpecInput = {
@@ -68,19 +61,8 @@ const METADATA: CartLineItemMetadata = {
   originalImage: "https://r2.example/original/1.png",
 };
 
-/** 一份打印服务规格 */
-const PRINT_SPEC: PrintServiceSpec = {
-  volumeCM3: 12.5,
-  surfaceAreaCM2: 30.25,
-  dims: [20, 15, 10],
-  supportWeightG: 1.5,
-  selfSupportRatio: 0.2,
-  deliveryTier: "standard",
-  modelFileName: "model.zip",
-  modelObjectKey: "users/u_1/models/m_1/model.zip",
-  modelUrl: "https://r2.example/users/u_1/models/m_1/model.zip",
-  modelSizeBytes: 1024,
-};
+/** 一份打印服务规格 —— 打印服务**不进商城购物袋**(2026-11-08),所以车里
+ * 只有目录商品,没有「打印服务行」这一说 */
 
 describe("computeSpecHashForLine —— 订单行的 hash 必须等于购物车行的 hash", () => {
   it("跟加购时手拼的规格算出同一个 hash", () => {
@@ -91,8 +73,8 @@ describe("computeSpecHashForLine —— 订单行的 hash 必须等于购物车�
 
   it("product id 用**行上那个**,不是 metadata 里那个", () => {
     // `metadata.productId` 是客户端带来的 id,行上的 `product_id` 是服务端
-    // 解析过的那个 —— 打印服务行的哨兵值 `service_print_3d` 就是在这儿
-    // 换掉的。hash 必须跟**行上那个**走,否则永远对不上 `cart_item.spec_hash`
+    // 解析过的那个。hash 必须跟**行上那个**走,否则永远对不上
+    // `cart_item.spec_hash`
     const metadata = { ...METADATA, productId: "client_said_this" };
     const lineProductId = "server_resolved_this";
 
@@ -107,45 +89,6 @@ describe("computeSpecHashForLine —— 订单行的 hash 必须等于购物车�
       computeSpecHashForLine({ productId: lineProductId, metadata })
     ).not.toBe(
       computeSpecHashForLine({ productId: metadata.productId, metadata })
-    );
-  });
-
-  it("打印服务行:hash 跟购物车加购时算的那个一样", () => {
-    // 购物车落库时用的是「行上的 productId + metadata 里的 printSpec」
-    const metadata = buildPrintServiceMetadata({ spec: PRINT_SPEC });
-
-    expect(
-      computeSpecHashForLine({
-        productId: PRINT_SERVICE_PRODUCT_ID,
-        metadata,
-      })
-    ).toBe(
-      computeSpecHash({
-        ...BASE,
-        productId: PRINT_SERVICE_PRODUCT_ID,
-        printSpec: PRINT_SPEC,
-      })
-    );
-  });
-
-  it("打印服务行:服务端回填的耗材克重**不影响** hash", () => {
-    // 服务端重算之后会往 printSpec 里回填 materialWeightG(纯展示用),
-    // 订单行存的是回填之后的那份 —— hash 必须跟购物车里的那份一样
-    const metadata = buildPrintServiceMetadata({ spec: PRINT_SPEC });
-    const repriced = buildPrintServiceMetadata({
-      spec: { ...PRINT_SPEC, materialWeightG: 3.75 },
-    });
-
-    expect(
-      computeSpecHashForLine({
-        productId: PRINT_SERVICE_PRODUCT_ID,
-        metadata: repriced,
-      })
-    ).toBe(
-      computeSpecHashForLine({
-        productId: PRINT_SERVICE_PRODUCT_ID,
-        metadata,
-      })
     );
   });
 });

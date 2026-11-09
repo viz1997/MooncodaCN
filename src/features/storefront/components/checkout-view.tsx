@@ -7,16 +7,12 @@
  * 那一列)。客户端不重算 —— 客户端算的数只配用来显示,收多少钱由
  * `POST /api/store/checkout` 在服务端重算一遍决定。
  *
- * ## 这一页**两种行都有**(2026-11-08)
+ * ## 这一页**只有目录商品**(2026-11-08)
  *
- * 打印服务并进商城购物袋了 —— 工作室的说法:「不要 print-order,进入商城
- * 那个」。所以这一页上:
+ * 工作室的说法:「不要放入购物车,放在这里 account/print-orders」。打印服务
+ * 是另一条线 —— 工单自己建、自己收款(见 `POST /api/print-orders`)。
  *
- * - **目录商品行** —— 缩略图 + 规格 + 数量
- * - **打印服务行** —— 包裹图标 + 尺寸 / 克重 / 支撑加价(用
- *   `<PrintLineRow>`,跟购物袋页、抽屉同一份画法)
- *
- * 一次付款全走完:服务端在同一个事务里落一张商城订单 + N 张打印工单。
+ * 所以这一页上每一行都是目录商品:缩略图 + 规格 + 数量。
  *
  * ## 收货地址和付款是**共用**的两块
  *
@@ -47,11 +43,9 @@ import { formatCents } from "@/lib/money";
 
 import { computeCartTotals } from "../lib/cart-totals";
 import { findAccessoryVariant } from "../lib/mock-catalog";
-import { getPrintServiceSpec } from "../lib/print-service";
 import { formatSizeWithInches } from "../lib/size-format";
 import type { Cart, CartLineItem } from "../types";
 import { CheckoutPaymentPanel } from "./checkout-payment-panel";
-import { PrintLineRow } from "./print-line-row";
 
 export function CheckoutView({
   cart,
@@ -75,21 +69,6 @@ export function CheckoutView({
   // 金额 —— 全部来自服务端算好的数;口径跟购物袋详情页共用一份
   // (见 `lib/cart-totals.ts` —— 两页显示的合计必须是同一个数)
   const totals = useMemo(() => computeCartTotals(items), [items]);
-
-  /**
-   * 分成两种行 —— 目录商品 / 打印服务
-   *
-   * 判据是「metadata 里有没有 printSpec」—— 不是 `productId`(打印服务在
-   * 目录里没有对应的商品,`productId` 是个哨兵值)。
-   */
-  const printItems = useMemo(
-    () => items.filter((item) => getPrintServiceSpec(item.metadata) !== null),
-    [items]
-  );
-  const catalogItems = useMemo(
-    () => items.filter((item) => getPrintServiceSpec(item.metadata) === null),
-    [items]
-  );
 
   /* ---------------------------------------------------------------------- */
   /*  空购物车                                                                */
@@ -148,11 +127,8 @@ export function CheckoutView({
           <section>
             <h2 className="eyebrow text-muted-foreground mb-4">商品</h2>
             <ul className="divide-y divide-border border-y border-border">
-              {catalogItems.map((item) => (
+              {items.map((item) => (
                 <CheckoutLineItem key={item.id} item={item} />
-              ))}
-              {printItems.map((item) => (
-                <PrintLineRow key={item.id} item={item} size="sm" />
               ))}
             </ul>
           </section>
@@ -192,14 +168,6 @@ export function CheckoutView({
                 {formatCents(totals.subtotalCents)}
               </dd>
             </div>
-            {totals.printSubtotalCents > 0 && (
-              <div className="flex items-center justify-between">
-                <dt className="text-muted-foreground">其中打印服务</dt>
-                <dd className="font-medium">
-                  {formatCents(totals.printSubtotalCents)}
-                </dd>
-              </div>
-            )}
             {totals.discountCents > 0 && (
               <div className="flex items-center justify-between">
                 <dt className="text-muted-foreground">数量折扣</dt>

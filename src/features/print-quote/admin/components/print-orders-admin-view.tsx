@@ -300,7 +300,7 @@ export function PrintOrdersAdminView() {
     <div className="space-y-6">
       <ModuleHeader
         title="打印订单"
-        description="按克重计价的 3D 打印工单 —— 官网工具页(/tools/workbench)量好后加入购物袋下单,金额为服务端重算后的报价"
+        description="按克重计价的 3D 打印工单 —— 官网工具页(/tools/workbench)量好后提交打印订单,金额为服务端重算后的报价"
         actions={
           <Button icon={<RefreshCw className="h-4 w-4" />} onClick={reload}>
             刷新

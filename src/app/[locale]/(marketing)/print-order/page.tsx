@@ -1,19 +1,28 @@
 import { redirect, type routing } from "@/i18n/routing";
 
 /**
- * `/print-order` —— **已下线**,重定向到 `/cart`
+ * `/print-order` —— **已下线**,重定向到 `/account/print-orders`
  *
- * ## 2026-11-08:打印单并进商城购物袋
+ * ## 2026-11-08:打印服务直接建工单
  *
- * 工作室的说法:**「不要 print-order,进入商城那个」**。
+ * 工作室的说法:**「不要放入购物车,放在这里 account/print-orders」**。
  *
- * 2026-11-06 到 2026-11-08 之间,打印服务走的是**自己的**打印单:另一张车
- * (另一个 cookie `wjp_print_cart_id`、另一种性质 `kind = "print"`)、另一个
- * 页面(`/print-order`)、另一个加购接口(`/api/store/print-carts/**`)。
+ * 打印服务是**另一条线**,跟商城购物袋彻底分家:
  *
- * 现在**只有一张车**了 —— 打印服务跟目录商品装同一个购物袋,同一个 `/cart`
- * 页面、同一个抽屉、同一个 `/checkout`,一次付款。服务端在结算的同一个
- * 事务里落一张商城订单 + N 张打印工单(见 `storefront/lib/checkout.ts`)。
+ * ```
+ * /tools/workbench(量重量的工具,公开)
+ *   → 点「填写下单信息」→ 服务端重算报价 + 建一张打印工单
+ *   → /account/print-orders/{orderNo} —— 钱在那儿付(工单自己收款)
+ * ```
+ *
+ * 商城购物袋**只装目录商品**(钥匙扣 / 冰箱贴 / 相框 …)。工单落在
+ * `/account/print-orders` 那一个列表里,工单详情页给付款入口。
+ *
+ * ## 为什么重定向到这儿,而不是 `/tools/workbench`
+ *
+ * `/print-order` 这个地址的意思是「我的打印单」。用户点它是要看自己的单子,
+ * 不是要重新量一个模型 —— 所以送到列表页。列表页的空状态和页头都摆着
+ * 「新建打印订单」,点一下才去工作台。
  *
  * ## 为什么留一个重定向而不是 404
  *
@@ -27,7 +36,7 @@ export default async function PrintOrderPage({
 }) {
   const { locale } = await params;
   redirect({
-    href: "/cart",
+    href: "/account/print-orders",
     locale: locale as (typeof routing.locales)[number],
   });
 }

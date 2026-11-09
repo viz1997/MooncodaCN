@@ -6,19 +6,18 @@
  * - mutations:
  *   - ensureCart() — POST /api/store/carts(创建或取现有)
  *   - addLineItem(spec) —— 目录商品
- *   - addPrintLine(printSpec) —— 打印服务(用户自带 3D 模型,按克重计价)
  *   - updateLineItemQuantity(lineItemId, quantity)
- *   - updateDeliveryTier(lineItemId, tier) —— 打印服务行的交期档位
  *   - removeLineItem(lineItemId)
  *
  * 购物车现在落库了(见 `lib/cart-store.ts`),重启 dev server 不会丢。
  *
- * ## 一张车(2026-11-08)
+ * ## 车里**只有目录商品**(2026-11-08)
  *
- * 打印服务**并进商城购物袋**了 —— 工作室的说法:「不要 print-order,进入商城
- * 那个」。所以只有**一个** query key、**一个** cookie、**一个**接口。
- * 2026-11-06 到 2026-11-08 之间有过「两张车」的版本(另有一个
- * `use-print-cart.ts` + `["store", "print-cart"]` 缓存),那一版已经删掉了。
+ * 工作室的说法:「不要放入购物车,放在这里 account/print-orders」。打印服务
+ * 是另一条线 —— 工单自己建、自己收款(见 `POST /api/print-orders`)。
+ *
+ * 所以这里只有**一个** query key、**一个** cookie、**一个**接口,车上的每一
+ * 行都是要寄出去的实物。
  */
 
 "use client";
@@ -32,11 +31,9 @@ import {
 } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 
-import type { DeliveryTierId } from "@/features/print-quote/lib/delivery-tier";
 import { toRequestError } from "@/features/shared/lib/request-error";
 
 import { computeCartTotals } from "../lib/cart-totals";
-import { getPrintServiceSpec } from "../lib/print-service";
 import type { Cart, CartLineItem, CartLineItemMetadata } from "../types";
 
 export const CART_QUERY_KEY = ["store", "cart"] as const;
@@ -58,22 +55,6 @@ type AddLineItemInput = {
   productId: string;
   spec: CartLineItemMetadata;
   quantity?: number;
-};
-
-/** 打印服务行 —— 几何 + 交期 + 模型文件 */
-export type PrintLineInput = {
-  printSpec: {
-    volumeCM3: number;
-    surfaceAreaCM2: number;
-    dims: [number, number, number];
-    supportWeightG: number | null;
-    selfSupportRatio: number | null;
-    deliveryTier: DeliveryTierId;
-    modelFileName: string;
-    modelObjectKey: string;
-    modelUrl: string;
-    modelSizeBytes: number | null;
-  };
 };
 
 /* -------------------------------------------------------------------------- */
@@ -126,36 +107,6 @@ async function addLineItemFetch(
   );
 }
 
-/**
- * 加一行打印服务 —— 跟目录商品**同一个接口**(2026-11-08)
- *
- * 服务端按「`spec` 里有没有 `printSpec`」分两条路(见
- * `app/api/store/carts/[id]/line-items/route.ts`):打印服务那一路多三道
- * 校验(登录 / 归属 / 文件存在),metadata 由服务端重建。
- */
-async function addPrintLineFetch(
-  cartId: string,
-  input: PrintLineInput
-): Promise<{ cart: Cart; lineItem: CartLineItem }> {
-  return fetchJson<{ cart: Cart; lineItem: CartLineItem }>(
-    `/api/store/carts/${cartId}/line-items`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        productId: "service_print_3d",
-        spec: {
-          productId: "service_print_3d",
-          productHandle: "print-service",
-          productTitle: "定制打印(按克重)",
-          productThumbnail: "",
-          printSpec: input.printSpec,
-        },
-        quantity: 1,
-      }),
-    }
-  );
-}
-
 async function updateQuantityFetch(
   cartId: string,
   lineItemId: string,
@@ -166,21 +117,6 @@ async function updateQuantityFetch(
     {
       method: "PUT",
       body: JSON.stringify({ quantity }),
-    }
-  );
-}
-
-/** 改打印服务行的交期档位 */
-async function updateTierFetch(
-  cartId: string,
-  lineItemId: string,
-  deliveryTier: DeliveryTierId
-): Promise<{ cart: Cart; lineItem: CartLineItem }> {
-  return fetchJson<{ cart: Cart; lineItem: CartLineItem }>(
-    `/api/store/carts/${cartId}/line-items/${lineItemId}`,
-    {
-      method: "PATCH",
-      body: JSON.stringify({ deliveryTier }),
     }
   );
 }
@@ -214,23 +150,11 @@ export interface UseCartResult {
     Error,
     AddLineItemInput
   >;
-  /** 添加打印服务行到购物车(用户自带模型) */
-  addPrintLine: UseMutationResult<
-    { cart: Cart; lineItem: CartLineItem },
-    Error,
-    PrintLineInput
-  >;
   /** 更新数量(qty=0 等同删除) */
   updateLineItemQuantity: UseMutationResult<
     { cart: Cart; lineItem: CartLineItem },
     Error,
     { lineItemId: string; quantity: number }
-  >;
-  /** 改打印服务行的交期档位 */
-  updateDeliveryTier: UseMutationResult<
-    { cart: Cart; lineItem: CartLineItem },
-    Error,
-    { lineItemId: string; deliveryTier: DeliveryTierId }
   >;
   /** 删除 line item */
   removeLineItem: UseMutationResult<
@@ -238,18 +162,21 @@ export interface UseCartResult {
     Error,
     { lineItemId: string }
   >;
-  /** 小计(分)—— 全部行(目录商品 + 打印服务) */
+  /** 小计(分) */
   subtotalCents: number;
-  /** 目录商品那部分的小计(分)—— **运费的基数** */
-  catalogSubtotalCents: number;
-  /** 打印服务那部分的小计(分) */
-  printSubtotalCents: number;
   /** 总件数 */
   itemCount: number;
   /** 距离免运费还差多少(分,0 = 已免运费) */
   remainingForFreeShippingCents: number;
-  /** 运费(分)—— 只按目录商品那部分算 */
+  /** 运费(分) */
   shippingCents: number;
+  /**
+   * 合计(分)—— 小计 + 运费
+   *
+   * **唯一的一份** —— 抽屉 / 购物袋页 / 结算页都读它,免得三处各算一遍
+   * 算出三个数。
+   */
+  totalCents: number;
   /** 强制重新拉 cart */
   refetch: () => Promise<unknown>;
 }
@@ -280,18 +207,6 @@ export function useCart(): UseCartResult {
     },
   });
 
-  const addPrintLineMutation = useMutation({
-    mutationFn: async (input: PrintLineInput) => {
-      // 缓存还没回来就问服务端要这张车 —— 否则「刚打开页面就点加入」会报
-      // 「购物车还没准备好」。
-      const cart = query.data ?? (await ensureCart());
-      return addPrintLineFetch(cart.id, input);
-    },
-    onSuccess: (data) => {
-      queryClient.setQueryData(CART_QUERY_KEY, data.cart);
-    },
-  });
-
   const updateQuantityMutation = useMutation({
     mutationFn: async ({
       lineItemId,
@@ -304,22 +219,6 @@ export function useCart(): UseCartResult {
       // 否则「页面刚打开就点 +」会直接报「cart 还没准备好」。
       const cart = query.data ?? (await ensureCart());
       return updateQuantityFetch(cart.id, lineItemId, quantity);
-    },
-    onSuccess: (data) => {
-      queryClient.setQueryData(CART_QUERY_KEY, data.cart);
-    },
-  });
-
-  const updateTierMutation = useMutation({
-    mutationFn: async ({
-      lineItemId,
-      deliveryTier,
-    }: {
-      lineItemId: string;
-      deliveryTier: DeliveryTierId;
-    }) => {
-      const cart = query.data ?? (await ensureCart());
-      return updateTierFetch(cart.id, lineItemId, deliveryTier);
     },
     onSuccess: (data) => {
       queryClient.setQueryData(CART_QUERY_KEY, data.cart);
@@ -345,8 +244,7 @@ export function useCart(): UseCartResult {
    * `computeCartTotals()` 是纯函数(见 `lib/cart-totals.ts`),购物袋详情页
    * 和结算页都 import 它。这里也用它,免得抽屉里的运费跟页面上摆的不一样。
    *
-   * 运费的基数是**目录商品那部分** —— 打印服务不产生快递费(见
-   * `pricing-constants.ts` 的 `shippingCentsForCart()`)。
+   * 运费按**整张折后小计**算 —— 车里的每一行都是要寄出去的实物。
    */
   const totals = useMemo(() => computeCartTotals(items), [items]);
   const itemCount = totals.itemCount;
@@ -360,16 +258,13 @@ export function useCart(): UseCartResult {
     isLoading: query.isLoading,
     error: query.error,
     addLineItem: addLineItemMutation,
-    addPrintLine: addPrintLineMutation,
     updateLineItemQuantity: updateQuantityMutation,
-    updateDeliveryTier: updateTierMutation,
     removeLineItem: removeLineItemMutation,
     subtotalCents: totals.subtotalCents,
-    catalogSubtotalCents: totals.catalogSubtotalCents,
-    printSubtotalCents: totals.printSubtotalCents,
     itemCount,
     remainingForFreeShippingCents: totals.remainingForFreeShippingCents,
     shippingCents: totals.shippingCents,
+    totalCents: totals.totalCents,
     refetch,
   };
 }
@@ -397,19 +292,3 @@ export const useCartUi = create<CartUiState>((set) => ({
   closeCart: () => set({ isOpen: false }),
   toggleCart: () => set((s) => ({ isOpen: !s.isOpen })),
 }));
-
-/* -------------------------------------------------------------------------- */
-/*  Helpers                                                                   */
-/* -------------------------------------------------------------------------- */
-
-/**
- * 这一行是不是**打印服务行**
- *
- * 判据是「metadata 里有没有 printSpec」—— 不是 `productId`(打印服务在目录
- * 里没有对应的商品,`productId` 是个哨兵值)。见 `lib/print-service.ts`。
- *
- * 购物袋页 / 抽屉 / 结算页都要按这个分两套画法,所以放一个地方。
- */
-export function isPrintLine(item: CartLineItem): boolean {
-  return Boolean(getPrintServiceSpec(item.metadata));
-}

@@ -22,22 +22,22 @@
  * 用 `discountedUnitPriceCents × quantity` —— 跟结算页显示的价、跟实际收
  * 的钱是同一个数。
  *
- * ## 抽屉里**两种行都有**(2026-11-08)
+ * ## 抽屉里**只有目录商品**(2026-11-08)
  *
- * 打印服务并进商城购物袋了 —— 工作室的说法:「不要 print-order,进入商城
- * 那个」。所以这一行在抽屉里也出现:
+ * 工作室的说法:「不要放入购物车,放在这里 account/print-orders」。打印服务
+ * 是另一条线 —— 工单自己建、自己收款(见 `POST /api/print-orders`)。
  *
- * - **目录商品行** —— 缩略图 + +/− 数量
- * - **打印服务行** —— 包裹图标、**没有 +/−**(一件活一个模型)、没有交期
- *   选择器(抽屉太窄,去详情页改)
+ * 所以这个抽屉里的每一行都是要寄出去的实物:缩略图 + +/− 数量。
  *
- * 判据是「`metadata` 里有没有 `printSpec`」—— 见 `lib/print-service.ts`。
+ * ## 合计**读 hook 的数**,不自己加(2026-11-08)
+ *
+ * 抽屉 / 购物袋详情页 / 结算页共用 `lib/cart-totals.ts` 这**一份**口径 ——
+ * 三处各算一遍,迟早算出三个数。
  */
 
 "use client";
 
 import { Minus, Plus, ShoppingBag, Trash2, X, Zap } from "lucide-react";
-import { useMemo } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -53,10 +53,8 @@ import { useAtelierContainer } from "../hooks/use-atelier-container";
 import { useCart, useCartUi } from "../hooks/use-cart";
 import { findAccessoryVariant } from "../lib/mock-catalog";
 import { PRICING_CONSTANTS } from "../lib/pricing-constants";
-import { getPrintServiceSpec } from "../lib/print-service";
 import { formatSizeWithInches } from "../lib/size-format";
 import type { CartLineItem } from "../types";
-import { PrintLineRow } from "./print-line-row";
 
 const FREE_SHIPPING_THRESHOLD_CENTS =
   PRICING_CONSTANTS.FREE_SHIPPING_THRESHOLD_CENTS;
@@ -70,32 +68,23 @@ export function CartDrawer() {
     items,
     isLoading,
     subtotalCents,
-    catalogSubtotalCents,
     shippingCents,
+    totalCents,
+    remainingForFreeShippingCents,
     itemCount,
     updateLineItemQuantity,
     removeLineItem,
   } = useCart();
 
-  const totalCents = subtotalCents + shippingCents;
-  // 免运费门槛按**目录商品**那部分算 —— 打印服务不产生快递费
-  const remainingCents = Math.max(
-    0,
-    FREE_SHIPPING_THRESHOLD_CENTS - catalogSubtotalCents
-  );
+  /**
+   * 免运费进度条 —— **读 hook 的数**,不自己再算一遍
+   *
+   * 门槛按**折后小计**算,跟购物袋详情页 / 结算页是同一个数。
+   */
+  const remainingCents = remainingForFreeShippingCents;
   const progressPercent = Math.min(
     100,
-    (catalogSubtotalCents / FREE_SHIPPING_THRESHOLD_CENTS) * 100
-  );
-
-  /** 分成两种行 —— 目录商品 / 打印服务 */
-  const printItems = useMemo(
-    () => items.filter((item) => getPrintServiceSpec(item.metadata) !== null),
-    [items]
-  );
-  const catalogItems = useMemo(
-    () => items.filter((item) => getPrintServiceSpec(item.metadata) === null),
-    [items]
+    (subtotalCents / FREE_SHIPPING_THRESHOLD_CENTS) * 100
   );
 
   const handleCheckout = () => {
@@ -136,8 +125,8 @@ export function CartDrawer() {
           </div>
         </SheetHeader>
 
-        {/* 免运费进度条 —— 车里没有目录商品时不摆(打印服务不产生快递费) */}
-        {catalogSubtotalCents > 0 && (
+        {/* 免运费进度条 —— 车里没东西时不摆 */}
+        {subtotalCents > 0 && (
           <div className="px-5 py-4 bg-secondary/50 border-b">
             <p className="text-sm text-foreground/80 mb-2 text-pretty">
               {remainingCents > 0 ? (
@@ -189,7 +178,7 @@ export function CartDrawer() {
             </div>
           ) : (
             <ul className="divide-y divide-border">
-              {catalogItems.map((item) => (
+              {items.map((item) => (
                 <DrawerCatalogRow
                   key={item.id}
                   item={item}
@@ -202,18 +191,6 @@ export function CartDrawer() {
                       quantity,
                     })
                   }
-                  onRemove={() =>
-                    removeLineItem.mutate({ lineItemId: item.id })
-                  }
-                />
-              ))}
-              {printItems.map((item) => (
-                <PrintLineRow
-                  key={item.id}
-                  item={item}
-                  size="sm"
-                  className="px-5 py-4"
-                  busy={removeLineItem.isPending}
                   onRemove={() =>
                     removeLineItem.mutate({ lineItemId: item.id })
                   }
@@ -236,9 +213,8 @@ export function CartDrawer() {
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">运费</span>
                 <span className="font-medium">
-                  {/* 车里没有目录商品 → 没有要寄的东西 → 没有运费 */}
-                  {catalogSubtotalCents <= 0
-                    ? "无"
+                  {shippingCents === 0
+                    ? "免运费"
                     : remainingCents > 0
                       ? "结算时计算"
                       : "免运费"}

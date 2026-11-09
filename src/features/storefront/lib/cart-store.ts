@@ -40,26 +40,18 @@
  * 游客浏览时不做会话查询 —— 那是热路径,每次读购物车都查一次 session 表
  * 太贵。用户登录后 cookie 里还是游客那张车,结算时再打上 user_id。
  *
- * ## 一张车(2026-11-08)
+ * ## 一张车 = **只有目录商品**(2026-11-08)
  *
- * 打印服务**并进商城购物袋** —— 工作室的说法:「不要 print-order,进入商城
- * 那个」。所以现在**只有一张车**:目录商品和打印服务(用户自带模型、按克重
- * 计价)都装在 `wjp_cart_id` 这一个 cookie 指向的购物车里,走同一个 `/cart`
- * 页面、同一个 `/checkout` 结算、一次付款。
+ * 工作室的说法:**「不要放入购物车,放在这里 account/print-orders」**。
  *
- * 2026-11-06 到 2026-11-08 之间有过「两张车」的版本(商城购物袋 + 打印单,
- * 同一张表靠 `cart.kind` 区分)。那一版的 `kind` 列已经**从 schema 里删掉**
- * 了 —— 它带来的两个问题都不值得留:
+ * 打印服务**不进商城购物袋** —— 它是另一条线:工单自己建、自己收款
+ * (`print_order` 那张表,列表在 `/account/print-orders`)。所以这张车里
+ * 装的每一行都是**要寄出去的实物**,运费按整张小计算,¥8,到 ¥99 免。
  *
- * 1. **生产库缺这一列 → 商城购物袋和打印单全线 500**(Drizzle 查车时带上
- *    了库里没有的列,PG 报 42703)。删掉 `kind` 之后这类错**根本不会再发生**
- *    —— 代码不再引用它。
- * 2. **两个出口让用户不知道钱付到哪儿去了** —— 「加入打印单」和「加购」是
- *    两件事,结算也是两条路。现在只有一条。
- *
- * 打印服务的**定价**还是另一套(按克重,见 `computePrintServiceLinePrice()`),
- * 运费规则也还是另一条(见 `pricing-constants.ts` 的 `shippingCentsForCart()`)
- * —— 但那是**钱**的口径,不是**车**的口径。
+ * 2026-11-08 之前短暂地试过「打印服务并进商城购物袋」(整张车一次付款)
+ * —— 那条路整个退回去了。顺带把 `cart.kind` 那一列从 schema 里删掉了:
+ * 两张车合成一张,那个维度就没用了,而它在生产库上缺过一次,导致商城购物袋
+ * 和打印单全线 500(Drizzle 查车时带上了库里没有的列,PG 报 42703)。
  */
 
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -68,21 +60,10 @@ import { cookies } from "next/headers";
 import { PRICE_CURRENCY, PRICE_REGION_ID } from "@/config/currency";
 import { db } from "@/db";
 import { type CartItemRow, type CartRow, cart, cartItem } from "@/db/schema";
-import type { DeliveryTierId } from "@/features/print-quote/lib/delivery-tier";
-import type { PrintPricingSettings } from "@/features/print-quote/lib/pricing-settings";
-import { getPrintPricingSettings } from "@/features/print-quote/lib/pricing-store";
-import { computePrintServiceLinePrice } from "@/features/print-quote/lib/quote-server";
 import type { Cart, CartLineItem, CartLineItemMetadata } from "../types";
 import { computeSpecHash } from "./cart-spec";
 import { findProductById } from "./mock-catalog";
 import { calculatePricing } from "./pricing";
-import {
-  getPrintServiceSpec,
-  PRINT_SERVICE_HANDLE,
-  PRINT_SERVICE_PRODUCT_ID,
-  PRINT_SERVICE_TITLE,
-  printServiceSpecToQuoteInput,
-} from "./print-service";
 
 /* -------------------------------------------------------------------------- */
 /*  Cookie helper                                                            */
@@ -150,70 +131,34 @@ async function getCurrentUserId(): Promise<string | null> {
  *
  * 算不出来就退回存的值 —— 定价规则变了(材质下架 / 配件停售)不该让
  * 整张购物车打不开,但那一行的价得让用户看见(或者让用户自己删掉)。
- *
- * 打印服务行走的是另一套定价(按克重),见 `computePrintServiceLinePrice()`。
- *
- * `settings` 是生效中的打印定价设置(后台配的)—— **必须显式传**:
- * 打印服务行的价整条跟着它走,漏传就是按错价收钱。
  */
-function repriceLineItem(
-  row: CartItemRow,
-  settings: PrintPricingSettings
-): CartLineItem {
-  let metadata = row.metadata as unknown as CartLineItemMetadata;
+function repriceLineItem(row: CartItemRow): CartLineItem {
+  const metadata = row.metadata as unknown as CartLineItemMetadata;
 
   let unitPriceCents = row.unitPriceCents;
   let discountedUnitPriceCents = row.unitPriceCents;
 
-  const printSpec = getPrintServiceSpec(metadata);
-  if (printSpec) {
-    // 打印服务行:按克重计价,不查目录
-    const priced = computePrintServiceLinePrice(
-      settings,
-      printServiceSpecToQuoteInput(printSpec)
-    );
-    if (priced) {
-      unitPriceCents = priced.unitPriceCents;
-      discountedUnitPriceCents = priced.discountedUnitPriceCents;
-      // 耗材克重 / 交期加价 / 各档比例 / 支撑分段 由**服务端**回填 —— 客户端
-      // 没有材料密度,也不认一份加价比例(比例可以在后台调)。
-      // 都只影响展示(购物车里显示「XX g」、打印单上摆出三档的加价、支撑
-      // 加价按哪一段收),不参与定价。
-      metadata = {
-        ...metadata,
-        printSpec: {
-          ...printSpec,
-          materialWeightG: priced.quote.materialWeightG,
-          deliveryFeeCents: priced.quote.deliveryFeeCents,
-          deliveryRates: priced.quote.deliveryRates,
-          supportFeeCents: priced.quote.supportFeeCents,
-          supportFeeBands: priced.quote.supportFeeBands,
-        },
-      };
-    }
-  } else {
-    const product = findProductById(row.productId);
-    if (product) {
-      try {
-        const pricing = calculatePricing({
-          productId: row.productId,
-          productHandle: product.handle,
-          productTypeCode: product.productTypeCode,
-          materialId: metadata.materialId,
-          sizeId: metadata.sizeId,
-          aiStyleId: metadata.aiStyleId,
-          engravingText: metadata.engravingText,
-          rushOrder: metadata.rushOrder,
-          accessoryVariantIds: metadata.accessoryVariantIds ?? [],
-          quantity: row.quantity,
-          previewImageUrl: metadata.previewImage,
-          originalImageUrl: metadata.originalImage,
-        });
-        unitPriceCents = pricing.unitPriceCents;
-        discountedUnitPriceCents = pricing.discountedUnitPriceCents;
-      } catch {
-        // 定价失败 → 用存着的价兜底
-      }
+  const product = findProductById(row.productId);
+  if (product) {
+    try {
+      const pricing = calculatePricing({
+        productId: row.productId,
+        productHandle: product.handle,
+        productTypeCode: product.productTypeCode,
+        materialId: metadata.materialId,
+        sizeId: metadata.sizeId,
+        aiStyleId: metadata.aiStyleId,
+        engravingText: metadata.engravingText,
+        rushOrder: metadata.rushOrder,
+        accessoryVariantIds: metadata.accessoryVariantIds ?? [],
+        quantity: row.quantity,
+        previewImageUrl: metadata.previewImage,
+        originalImageUrl: metadata.originalImage,
+      });
+      unitPriceCents = pricing.unitPriceCents;
+      discountedUnitPriceCents = pricing.discountedUnitPriceCents;
+    } catch {
+      // 定价失败 → 用存着的价兜底
     }
   }
 
@@ -234,16 +179,12 @@ function repriceLineItem(
 }
 
 /** cart 行 → domain Cart(带 items) */
-function toCart(
-  row: CartRow,
-  items: CartItemRow[],
-  settings: PrintPricingSettings
-): Cart {
+function toCart(row: CartRow, items: CartItemRow[]): Cart {
   return {
     id: row.id,
     currencyCode: row.currencyCode as typeof PRICE_CURRENCY,
     regionId: row.regionId,
-    items: items.map((item) => repriceLineItem(item, settings)),
+    items: items.map((item) => repriceLineItem(item)),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -306,8 +247,7 @@ export async function getCart(cartId: string): Promise<Cart | null> {
   const row = await loadCartRow(cartId);
   if (!row) return null;
   const items = await loadCartItemRows(cartId);
-  const settings = await getPrintPricingSettings();
-  return toCart(row, items, settings);
+  return toCart(row, items);
 }
 
 /**
@@ -355,7 +295,6 @@ export async function deleteCart(cartId: string): Promise<boolean> {
 export async function getOrCreateCart(): Promise<Cart> {
   const store = await cookies();
   const cookieId = store.get(CART_COOKIE_NAME)?.value ?? null;
-  const settings = await getPrintPricingSettings();
 
   if (cookieId) {
     const row = await loadCartRow(cookieId);
@@ -365,7 +304,7 @@ export async function getOrCreateCart(): Promise<Cart> {
         await mergeUserCarts(row.id, row.userId);
       }
       const items = await loadCartItemRows(cookieId);
-      return toCart(row, items, settings);
+      return toCart(row, items);
     }
     // cookie 指向的 cart 没了(被删了 / 换了库)→ 清掉 cookie 往下走
     store.delete(CART_COOKIE_NAME);
@@ -389,7 +328,7 @@ export async function getOrCreateCart(): Promise<Cart> {
       );
       await setCartId(row.id);
       const items = await loadCartItemRows(row.id);
-      return toCart(row, items, settings);
+      return toCart(row, items);
     }
   }
 
@@ -413,9 +352,6 @@ export async function getOrCreateCart(): Promise<Cart> {
  *
  * `(cart_id, spec_hash)` 是唯一索引 —— 搬过去可能撞上同样的规格,撞上了
  * 就把数量加起来(跟 `addLineItem()` 的 `ON CONFLICT DO UPDATE` 一个口径)。
- *
- * 打印服务行**不累加数量** —— 一件活一个模型,数量恒为 1(见
- * `addLineItem()`)。同一个模型在两张车里各一行,合并之后还是一件。
  */
 async function mergeUserCarts(
   primaryId: string,
@@ -440,9 +376,6 @@ async function mergeUserCarts(
       .from(cartItem)
       .where(eq(cartItem.cartId, extraId));
     for (const item of rows) {
-      const isPrint = Boolean(
-        getPrintServiceSpec(item.metadata as unknown as CartLineItemMetadata)
-      );
       await db
         .insert(cartItem)
         .values({
@@ -462,9 +395,7 @@ async function mergeUserCarts(
         .onConflictDoUpdate({
           target: [cartItem.cartId, cartItem.specHash],
           set: {
-            quantity: isPrint
-              ? 1
-              : sql`${cartItem.quantity} + ${item.quantity}`,
+            quantity: sql`${cartItem.quantity} + ${item.quantity}`,
             updatedAt: now,
           },
         });
@@ -509,15 +440,11 @@ export interface AddLineItemInput {
  * 合并用 `ON CONFLICT DO UPDATE` + 数据库里的 `quantity + excluded.quantity`
  * —— 原子操作,两个并发请求不会合并出两行,也不会丢掉一次加购。
  *
- * ## 打印服务行
+ * ## 这张车**只有目录商品**(2026-11-08)
  *
- * `spec.printSpec` 有值就是打印服务行:
- * - 不查目录(打印服务不在 `mock-catalog` 里)
- * - 定价走 `computePrintServiceLinePrice()`(按克重)
- * - **数量恒为 1** —— 一件活一个模型,客户端传什么都按 1 算
- *
- * 打印服务和目录商品**装同一张车**(2026-11-08)—— 判据是「有没有
- * `printSpec`」,不是哪张车(见 `storefront/lib/print-service.ts`)。
+ * 打印服务**不进商城购物袋** —— 工单自己建、自己收款(见
+ * `POST /api/print-orders`)。所以这里没有「打印服务行」那条分支:每一行
+ * 都是目录里的商品,都查 `mock-catalog`,都按数量阶梯折扣算价。
  */
 export async function addLineItem(
   cartId: string,
@@ -526,62 +453,32 @@ export async function addLineItem(
   const cartRow = await loadCartRow(cartId);
   if (!cartRow) throw new Error(`cart ${cartId} 不存在`);
 
-  const printSpec = getPrintServiceSpec(input.spec);
+  const product = findProductById(input.productId);
+  if (!product) throw new Error(`产品 ${input.productId} 不存在`);
 
-  let productId: string;
-  let productHandle: string;
-  let productTitle: string;
-  let productThumbnail: string;
-  let unitPriceCents: number;
-  let quantity: number;
+  const quantity = input.quantity ?? 1;
 
-  if (printSpec) {
-    // 打印服务行 —— 按克重计价,不走目录
-    const priced = computePrintServiceLinePrice(
-      await getPrintPricingSettings(),
-      printServiceSpecToQuoteInput(printSpec)
-    );
-    if (!priced) {
-      throw new Error("这组模型数据算不出报价,请回工具页重新测量");
-    }
-    unitPriceCents = priced.unitPriceCents;
-    // productId 用**服务端**的哨兵值,不信客户端传来的
-    productId = PRINT_SERVICE_PRODUCT_ID;
-    productHandle = PRINT_SERVICE_HANDLE;
-    productTitle = PRINT_SERVICE_TITLE;
-    // 打印服务行**没有封面图** —— 手上有的是模型文件(一个 zip)。
-    // 塞 zip 的 URL 进 `<img src>` 只会显示裂图;购物车认到 printSpec
-    // 会改画包裹图标。
-    productThumbnail = "";
-    // 打印服务恒为一件 —— 数量阶梯折扣对它没有意义
-    quantity = 1;
-  } else {
-    const product = findProductById(input.productId);
-    if (!product) throw new Error(`产品 ${input.productId} 不存在`);
+  // 定价永远是服务端算的 —— 客户端带来的价一律不信
+  const pricing = calculatePricing({
+    productId: input.productId,
+    productHandle: product.handle,
+    productTypeCode: product.productTypeCode,
+    materialId: input.spec.materialId,
+    sizeId: input.spec.sizeId,
+    aiStyleId: input.spec.aiStyleId,
+    engravingText: input.spec.engravingText,
+    rushOrder: input.spec.rushOrder,
+    accessoryVariantIds: input.spec.accessoryVariantIds ?? [],
+    quantity,
+    previewImageUrl: input.spec.previewImage,
+    originalImageUrl: input.spec.originalImage,
+  });
 
-    quantity = input.quantity ?? 1;
-
-    // 定价永远是服务端算的 —— 客户端带来的价一律不信
-    const pricing = calculatePricing({
-      productId: input.productId,
-      productHandle: product.handle,
-      productTypeCode: product.productTypeCode,
-      materialId: input.spec.materialId,
-      sizeId: input.spec.sizeId,
-      aiStyleId: input.spec.aiStyleId,
-      engravingText: input.spec.engravingText,
-      rushOrder: input.spec.rushOrder,
-      accessoryVariantIds: input.spec.accessoryVariantIds ?? [],
-      quantity,
-      previewImageUrl: input.spec.previewImage,
-      originalImageUrl: input.spec.originalImage,
-    });
-    unitPriceCents = pricing.unitPriceCents;
-    productId = input.productId;
-    productHandle = product.handle;
-    productTitle = product.title;
-    productThumbnail = product.thumbnail;
-  }
+  const productId = input.productId;
+  const productHandle = product.handle;
+  const productTitle = product.title;
+  const productThumbnail = product.thumbnail;
+  const unitPriceCents = pricing.unitPriceCents;
 
   const specHash = computeSpecHash({
     productId,
@@ -592,20 +489,11 @@ export async function addLineItem(
     rushOrder: input.spec.rushOrder,
     accessoryVariantIds: input.spec.accessoryVariantIds ?? [],
     previewImage: input.spec.previewImage,
-    printSpec: printSpec ?? undefined,
   });
 
   const now = new Date();
 
   // 命中已有行 → 数量累加;否则插新行
-  //
-  // 打印服务行的数量**恒为 1** —— 同一个模型加购两次不是「两件」,还是一件
-  // (两件得是两个不同的模型文件,而模型对象键在 hash 里,不同模型本来就
-  // 是两行)。所以这里不累加,直接置 1。
-  const conflictQuantity = printSpec
-    ? 1
-    : sql`${cartItem.quantity} + ${quantity}`;
-
   const inserted = await db
     .insert(cartItem)
     .values({
@@ -626,7 +514,7 @@ export async function addLineItem(
       target: [cartItem.cartId, cartItem.specHash],
       set: {
         // 数量原子累加 —— 单价用最新的定价覆盖
-        quantity: conflictQuantity,
+        quantity: sql`${cartItem.quantity} + ${quantity}`,
         unitPriceCents,
         updatedAt: now,
       },
@@ -643,15 +531,12 @@ export async function addLineItem(
 
   return {
     cart: fresh,
-    lineItem: repriceLineItem(row, await getPrintPricingSettings()),
+    lineItem: repriceLineItem(row),
   };
 }
 
 /**
  * 改数量(qty < 1 等同于删除)
- *
- * 打印服务行的数量**恒为 1** —— 一件活一个模型,加购两次还是那一件
- * (要买两件就得是两个不同的模型文件,那本来就是两行)。客户端传 3 也按 1 写。
  */
 export async function updateLineItemQuantity(
   cartId: string,
@@ -663,19 +548,16 @@ export async function updateLineItemQuantity(
   }
 
   const existing = await db
-    .select({ id: cartItem.id, metadata: cartItem.metadata })
+    .select({ id: cartItem.id })
     .from(cartItem)
     .where(and(eq(cartItem.id, lineItemId), eq(cartItem.cartId, cartId)))
     .limit(1);
   const existingRow = existing[0];
   if (!existingRow) throw new Error(`line item ${lineItemId} 不存在`);
 
-  const metadata = existingRow.metadata as unknown as CartLineItemMetadata;
-  const finalQuantity = getPrintServiceSpec(metadata) ? 1 : quantity;
-
   const rows = await db
     .update(cartItem)
-    .set({ quantity: finalQuantity, updatedAt: new Date() })
+    .set({ quantity, updatedAt: new Date() })
     .where(and(eq(cartItem.id, lineItemId), eq(cartItem.cartId, cartId)))
     .returning();
 
@@ -692,7 +574,7 @@ export async function updateLineItemQuantity(
 
   return {
     cart: fresh,
-    lineItem: repriceLineItem(row, await getPrintPricingSettings()),
+    lineItem: repriceLineItem(row),
   };
 }
 
@@ -721,7 +603,7 @@ export async function removeLineItem(
 
   return {
     cart: fresh,
-    lineItem: repriceLineItem(row, await getPrintPricingSettings()),
+    lineItem: repriceLineItem(row),
   };
 }
 
@@ -734,82 +616,6 @@ export async function clearCartItems(cartId: string): Promise<void> {
     .update(cart)
     .set({ updatedAt: new Date() })
     .where(eq(cart.id, cartId));
-}
-
-/**
- * 改打印服务行的交期档位
- *
- * ## 为什么不直接 UPDATE 那一行
- *
- * 档位参与「同 spec 合并」的 hash(见 `print-service.ts` 的
- * `printServiceSpecHashParts()`)—— 改了档位,hash 就变了,那一行的
- * `spec_hash` 也得跟着改。直接改 metadata 而不改 hash,这一行就跟自己的
- * 规格对不上了:后面再加同样规格的东西,合并判据会失灵(算出两个 hash)。
- *
- * ## 所以是「先加后删」
- *
- * 1. 按新档位 `addLineItem()` —— 走同一套合并逻辑(万一已经有一行同样
- *    规格的,合并进去,数量仍然是 1)
- * 2. 再把旧行删掉
- *
- * 顺序反了会出事:先删再加的话,加的那一步失败,用户的这一行就凭空没了。
- * 现在这个顺序里,加失败 → 旧行还在(什么都没变),加成功 → 旧行删掉。
- *
- * 档位没变 → 什么都不做(直接返回这一行)。不然「先加后删」会把自己
- * 刚加的那行删掉(同一份规格,hash 一样,合并到自己头上)。
- */
-export async function updatePrintLineDeliveryTier(
-  cartId: string,
-  lineItemId: string,
-  deliveryTier: DeliveryTierId
-): Promise<{ cart: Cart; lineItem: CartLineItem }> {
-  const existing = await db
-    .select()
-    .from(cartItem)
-    .where(and(eq(cartItem.id, lineItemId), eq(cartItem.cartId, cartId)))
-    .limit(1);
-  const existingRow = existing[0];
-  if (!existingRow) throw new Error(`line item ${lineItemId} 不存在`);
-
-  const metadata = existingRow.metadata as unknown as CartLineItemMetadata;
-  const printSpec = getPrintServiceSpec(metadata);
-  if (!printSpec) {
-    throw new Error("这一行不是打印服务行,没有交期档位");
-  }
-
-  if (printSpec.deliveryTier === deliveryTier) {
-    const fresh = await getCart(cartId);
-    if (!fresh) throw new Error(`cart ${cartId} 不存在`);
-    return {
-      cart: fresh,
-      lineItem: repriceLineItem(existingRow, await getPrintPricingSettings()),
-    };
-  }
-
-  // 1. 按新档位加一行(价格服务端重算 —— 加价是按小计的比例收的)
-  const added = await addLineItem(cartId, {
-    productId: PRINT_SERVICE_PRODUCT_ID,
-    spec: {
-      ...metadata,
-      printSpec: { ...printSpec, deliveryTier },
-    } as CartLineItemMetadata,
-    quantity: 1,
-  });
-
-  // 2. 删掉旧行
-  await db
-    .delete(cartItem)
-    .where(and(eq(cartItem.id, lineItemId), eq(cartItem.cartId, cartId)));
-
-  await db
-    .update(cart)
-    .set({ updatedAt: new Date() })
-    .where(eq(cart.id, cartId));
-
-  const fresh = await getCart(cartId);
-  if (!fresh) throw new Error(`cart ${cartId} 不存在`);
-
-  return { cart: fresh, lineItem: added.lineItem };
 }
 
 /**

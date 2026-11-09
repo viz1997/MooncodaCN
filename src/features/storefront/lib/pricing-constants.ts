@@ -79,6 +79,15 @@ export function getQuantityTier(quantity: number): QuantityTier {
 
 /**
  * 运费(到达免运费门槛则 0)
+ *
+ * ## 运费规则只有这一处(2026-11-08)
+ *
+ * 客户端(购物袋页 / 抽屉 / 结算页)和服务端(`checkout.ts`)都调它 —— 两处各
+ * 写一遍的话,改了一处忘了另一处,就会出现「页面上没有运费、结算时收了
+ * 一笔」。
+ *
+ * 打印服务**不在商城购物袋里**(工作室的说法:「不要放入购物车,放在这里
+ * account/print-orders」),所以运费只有一种情况:目录商品。
  */
 export function calculateShippingCents(subtotalCents: number): number {
   return subtotalCents >= PRICING_CONSTANTS.FREE_SHIPPING_THRESHOLD_CENTS
@@ -96,39 +105,4 @@ export function calculateRemainingForFreeShipping(
     0,
     PRICING_CONSTANTS.FREE_SHIPPING_THRESHOLD_CENTS - subtotalCents
   );
-}
-
-/**
- * 这张车的运费 —— **只看目录商品那一部分**(2026-11-08)
- *
- * ## 口径
- *
- * 打印服务跟目录商品**装同一张车**了(工作室的说法:「不要 print-order,
- * 进入商城那个」)。但两者的**钱**还是两套:
- *
- * - **目录商品**有运费:¥8,目录商品那部分小计到 ¥99 免
- * - **打印服务没有运费** —— 打印服务的价**就是报价本身**:购物袋里显示
- *   多少、工单上写多少、收银台收多少,是同一个数(见
- *   `print-quote/lib/payment.ts`:工单的支付金额恒等于 `total_price_cents`)。
- *   到结算时再加一笔运费,用户看到的总价跟实际收的钱就对不上了。
- *
- * 所以运费的**基数是目录商品那部分的折后小计**,打印服务的钱**不计入**
- * (它不产生快递费,也不该替目录商品把 ¥99 的门槛凑满)。
- *
- * ## 车里没有目录商品 → 运费 0
- *
- * 一车全是打印服务时,没有要寄的东西 —— 运费 0。这时候传进来的
- * `catalogSubtotalCents` 就是 0。
- *
- * ## 为什么放在这里
- *
- * 客户端(购物袋页 / 结算页)和服务端(结算)**都要**用这条规则。两处各写
- * 一遍的话,改了一处忘了另一处,就会出现「页面上没有运费、结算时收了一笔」。
- * 所以它跟 `calculateShippingCents()` 放在同一个文件里 —— 运费规则只有
- * 一处定义。
- */
-export function shippingCentsForCart(catalogSubtotalCents: number): number {
-  // 没有目录商品 → 没有要寄的东西 → 没有运费
-  if (catalogSubtotalCents <= 0) return 0;
-  return calculateShippingCents(catalogSubtotalCents);
 }

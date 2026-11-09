@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { listUserAddresses } from "@/features/address/queries";
 import { PrintServiceWeightTool } from "@/features/print-quote/components/print-service-weight-tool";
 import { toClientPrintConfig } from "@/features/print-quote/lib/pricing-settings";
 import { getPrintPricingSettings } from "@/features/print-quote/lib/pricing-store";
@@ -39,35 +40,41 @@ import { getServerSession } from "@/lib/auth/server";
  * `/tools/model-check` 只说了检查。老地址(`/pricing` / `/tools/weight` /
  * `/tools/model-check`)都 308 跳过来 —— 链接不断,权重也转得过去。
  *
- * ## 2026-11-08:工具页是打印服务的入口 —— 「加入购物袋」
+ * ## 2026-11-08:工具页是打印服务的入口 —— 直接建工单
+ *
+ * 工作室的说法:**「不要放入购物车,放在这里 account/print-orders」**。
  *
  * 流程收成两步:
  *
- *   /tools/workbench(量重量的工具,公开)→ 点「加入购物袋」→ /cart(商城购物袋)
+ *   /tools/workbench(量重量的工具,公开)
+ *     → 点「填写下单信息」→ 表单展开在下面(收货地址 / 交期 / 支付方式)
+ *     → 提交 → 服务端重算报价 + 建一张打印工单
+ *     → 跳 `/account/print-orders/{orderNo}` —— 钱在那儿付
+ *
+ * **打印服务不进商城购物袋** —— 商城购物袋只装目录商品(钥匙扣 / 冰箱贴 …),
+ * 打印服务是另一条线:工单自己建、自己收款。
  *
  * 报价台(`/quote`)2026-11-06 整页删掉了 —— 它跟工具页用的是**同一个**克重
- * 计算器,重复了一份「报价 + 交期 + 加进打印单」的下单控件。
+ * 计算器,重复了一份「报价 + 交期 + 下单」的下单控件。
  *
- * 打印单(`/print-order`)2026-11-08 也整页删掉了 —— 工作室的说法:**「不要
- * print-order,进入商城那个」**。打印服务跟目录商品装**同一个购物袋**,同
- * 一个 `/cart` 页面、同一个抽屉、同一个 `/checkout`,一次付款。
+ * 打印单(`/print-order`)2026-11-08 也整页删掉了 —— 打印单**不是一个页面**,
+ * 是 `/account/print-orders` 那一个列表 + 工单详情页。
  *
  * 两条边界照旧:
  * - **工具页不自己算价** —— 价格是服务端算的,工具页只出几何(体积 / 表面积 /
- *   尺寸 / 支撑克重),交给服务端重算报价。价格、交期、下单全在商城购物袋那
- *   一条路上。
- *   (2026-11-07 起,「加入购物袋」那张卡上多了一个**预估报价** —— 那是问
+ *   尺寸 / 支撑克重),交给服务端重算报价。
+ *   (2026-11-07 起,右栏那张卡上多了一个**预估报价** —— 那是问
  *   服务端要的,不是本地算的;访客也能看,后台 `/admin/print-pricing` 的
  *   「访客可见计价」开关管着)
- * - **模型不上传** —— 上传是**加购动作**的一部分,不是量重量的副产品
+ * - **模型不上传** —— 上传是**提交订单**的一部分,不是量重量的副产品
  *
  * ## 登录要在量之前
  *
- * 加购要登录(工单挂在账号名下,模型文件也落到用户自己的 R2 分区)。
+ * 下单要登录(工单挂在账号名下,模型文件也落到用户自己的 R2 分区)。
  * 登录那一下是**整页跳转**,浏览器里的模型会没 —— 所以卡片上的按钮在没登录
  * 时是「去登录」,文案写的是「先登录再量」,而不是让人量完再被弹去登录。
  *
- * 登录态由页面的 RSC 查好传下去。
+ * 登录态、地址簿、账号称呼由页面的 RSC 查好传下去。
  *
  * ## 为什么从 `/pricing` 挪出来
  *
@@ -90,8 +97,8 @@ export async function generateMetadata({
     : "3D Print Pre-flight Workbench — Check, Weight";
 
   const description = isZh
-    ? "上传 3D 模型,一次载入两个视角:打印前自检(反转法向、坏边破面、壳体封闭性)、耗材与支撑克重(含智能摆盘的最省姿态)—— 全部在浏览器本地算,问题位置在 3D 里直接标色。量完直接「加入购物袋」,在购物袋上确认金额再下单 —— 量重量的过程模型不上传。"
-    : "Upload a 3D model once and view it two ways: pre-flight inspection (inverted normals, broken faces, shell integrity) and resin / support weight (with the leanest print orientation) — all computed locally in your browser, with problems highlighted in 3D. Add it to your cart and confirm the total there; nothing is uploaded while measuring.";
+    ? "上传 3D 模型,一次载入两个视角:打印前自检(反转法向、坏边破面、壳体封闭性)、耗材与支撑克重(含智能摆盘的最省姿态)—— 全部在浏览器本地算,问题位置在 3D 里直接标色。量完直接提交打印订单,收货地址、交期和金额在工单上确认 —— 量重量的过程模型不上传。"
+    : "Upload a 3D model once and view it two ways: pre-flight inspection (inverted normals, broken faces, shell integrity) and resin / support weight (with the leanest print orientation) — all computed locally in your browser, with problems highlighted in 3D. Submit a print order straight from the workbench and confirm the address, delivery and total on the order; nothing is uploaded while measuring.";
 
   return {
     title,
@@ -165,11 +172,23 @@ export default async function WorkbenchPage({
   // 服务端要的(`POST /api/print-quote`)。
   const clientConfig = toClientPrintConfig(await getPrintPricingSettings());
 
+  // 地址簿 —— 下单要选收货地址(2026-11-08)
+  //
+  // 没登录就空着 —— 表单那一路压根到不了(卡片上是「去登录」)。
+  const addresses = session?.user?.id
+    ? await listUserAddresses(session.user.id)
+    : [];
+
   return (
     <PrintServiceWeightTool
       isLoggedIn={isLoggedIn}
       signInUrl={signInUrl}
       clientConfig={clientConfig}
+      addresses={addresses}
+      user={{
+        name: session?.user?.name ?? "",
+        email: session?.user?.email ?? "",
+      }}
     />
   );
 }

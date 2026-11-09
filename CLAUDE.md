@@ -12,7 +12,7 @@ Mooncoda is a production-ready Next.js SaaS template. It provides a complete fou
 
 | 系统 | 职责 | 技术栈 |
 |---|---|---|
-| **NextDevTpl**(本仓库) | AI 生图 SaaS 后端:user / credits / photo / imageJob / AI 路由 / WeChat 小程序登录 **+ 商品目录(商品 / SKU 变体 / 价格)+ 定价 + 购物车(`/cart`)+ 订单事实 + 收货地址 + 打印工单(打印前工作台 `/tools/workbench` 量 → 「加入购物袋」→ 商城购物袋 `/cart` → `/checkout` 一次付款 → `print_order`,按 `user_id` 归属;打印服务**并进商城购物袋**,只有一张车,见「打印服务并进商城购物袋」)** | Next.js 16 + Drizzle + PostgreSQL |
+| **NextDevTpl**(本仓库) | AI 生图 SaaS 后端:user / credits / photo / imageJob / AI 路由 / WeChat 小程序登录 **+ 商品目录(商品 / SKU 变体 / 价格)+ 定价 + 购物车(`/cart`)+ 订单事实 + 收货地址 + 打印工单(打印前工作台 `/tools/workbench` 量 → 「提交打印订单」→ `POST /api/print-orders` → `print_order`,按 `user_id` 归属,列表在 `/account/print-orders`,工单**自己收款**;打印服务**不进**商城购物袋,车里只有目录商品,见「打印服务直接建工单」)** | Next.js 16 + Drizzle + PostgreSQL |
 | **微信支付 / 支付宝**(外部服务) | **自己直连的收款通道**:钱直接进我们自己的商户号 / 账户,没有中间层抽成,定价完全由本仓库说了算。**代码写好了,商户号 / 应用还没走完开通流程** —— 界面上摆出来但选不了(见「两个支付通道」的两道闸) | 微信支付 V3 Native(扫码)+ 支付宝电脑网站支付 |
 | **Shopify**(外部服务)**已下线** | 曾经只做银行卡 / Shop Pay 的收银台(草稿订单,逐分相等)。2026-11-05 工作室决定只用微信 + 支付宝,**不再接新单** —— 代码留着给老单用,整目录待拆 | Shopify Admin GraphQL API + 草稿订单 |
 | **Sellbase**(独立服务)**过渡期保留** | 旧收款路:Sellbase 建单 + Stripe 付款页。**不再接新单**(已建好的旧单还能重取支付入口)。两个新通道跑通后整个 `src/features/sellbase/` 拆掉 | Supabase Edge Functions(**跟本仓库同一个 Supabase 项目**)+ Stripe(MIT) |
@@ -21,7 +21,7 @@ Mooncoda is a production-ready Next.js SaaS template. It provides a complete fou
 **接入形态 = 「本仓库算价,收银台只负责收钱」**(2026-11-05 取代 Sellbase 单通道):
 - 本仓库算的价 = `items[].unit_price_amount`;收银台那边只是**载体** + 一个能看懂的标题
 - 商城结算:`购物车(DB) → 服务端重算每行价 → 落 storefront_order(_item) → 建支付会话 → 回写 provider_order_id + payment_url(+ 微信的 payment_qr_code_url)→ 前端跳转 / 画码`
-- 打印工单:同一套结算 + 同一个 webhook 体系 —— 两条支付链合一
+- 打印工单:**独立一条线** —— 工单自己建、自己收款(同一个 webhook 体系,同一个状态机),不跟商城订单合账
 - **逐分相等**:`discountedUnitPriceCents × quantity` == 收银台实际收的金额(阶梯折扣必须「先折单价,再乘数量」)
 - 两个新通道的细节见「两个支付通道(2026-11-05)」;旧路的细节见「Sellbase 集成(2026-11-04)」
 
@@ -247,10 +247,10 @@ All tables use `text` primary keys with `nanoid()` defaults.
 | 表 | 干什么 |
 |---|---|
 | `product` / `product_variant` | 商品目录(本仓库是真理源);`product_variant.sellbase_variant_id` 是同步到 Sellbase 后的载体变体指针 |
-| `cart` / `cart_item` | 车落库(**只有一张车** —— 2026-11-08 起打印服务也装这儿,cookie 是 `wjp_cart_id`);`cart_item.spec_hash` + `(cart_id, spec_hash)` 唯一索引负责「同规格合并」 |
+| `cart` / `cart_item` | 车落库(**只有一张车** —— 车里**只有目录商品**,打印服务不进车;cookie 是 `wjp_cart_id`);`cart_item.spec_hash` + `(cart_id, spec_hash)` 唯一索引负责「同规格合并」 |
 | `storefront_order` / `storefront_order_item` | 商城订单事实;`status`(订单状态)和 `payment_status`(支付状态)**分两列**;收款相关列:`payment_channel`(这单走哪个通道)、`provider_order_id`(平台侧单号,回调反查)、`payment_qr_code_url`(微信扫码的 `code_url`)、`payment_url`(支付宝 / Shopify 的跳转地址)、`sellbase_order_id`(旧路,唯一索引)、`paid_at` |
 | `address` | 收货地址簿 —— **必须留在本仓库**,Sellbase 的 `customer.addresses` 只读,没有创建地址的路由 |
-| `print_order` | 打印工单;收款相关列跟商城订单同一套:`payment_status` / `payment_channel` / `provider_order_id` / `payment_qr_code_url` / `payment_url` / `paid_at`(外加旧路的 `sellbase_order_id`);另有交期两列 `delivery_tier` / `delivery_fee_cents`(见「打印工单交期档位」);走商城结算的工单挂 `storefront_order_id`(见「打印服务并进商城购物袋」) |
+| `print_order` | 打印工单;收款相关列跟商城订单同一套:`payment_status` / `payment_channel` / `provider_order_id` / `payment_qr_code_url` / `payment_url` / `paid_at`(外加旧路的 `sellbase_order_id`);另有交期两列 `delivery_tier` / `delivery_fee_cents`(见「打印工单交期档位」);**独立工单**(`storefront_order_id` = null,工单自己收款,见「打印服务直接建工单」);旧单(2026-11-08 之前跟着商城订单结的账)才挂 `storefront_order_id` |
 
 `user.sellbase_customer_id`(原 `medusa_customer_id`)只是**加速指针** —— Sellbase 的 customer 按 **email** upsert,真正的 join key 永远是 email。
 
@@ -262,7 +262,7 @@ All tables use `text` primary keys with `nanoid()` defaults.
 
 Handles three concerns in order:
 1. **API rate limiting** — Pattern-matched per-route (auth, upload)
-2. **Auth protection** — `/dashboard/**`、`/admin/**` require session token cookie, auth routes redirect if logged in(`/quote` 和 `/print-order` 2026-11-08 都只剩重定向 —— 都指到公开的 `/cart`)
+2. **Auth protection** — `/dashboard/**`、`/admin/**` require session token cookie, auth routes redirect if logged in(`/quote` 2026-11-06 和 `/print-order` 2026-11-08 都只剩重定向 —— 前者指到公开的 `/tools/workbench`,后者指到 `/account/print-orders`)
 3. **i18n routing** — next-intl locale prefix handling
 
 ### AI Provider Abstraction (`src/lib/ai/openai.ts`)
@@ -473,7 +473,7 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 
 ### 打印工单交期档位(2026-11-05)
 
-打印工单(`/tools/workbench` 量 → 商城购物袋 `/cart` → `print_order`)有三档
+打印工单(`/tools/workbench` 量 → 提交打印订单 → `print_order`)有三档
 交期,**加价按比例收**,不是固定金额:
 
 | 档位 | 时限 | 比例 | 默认 |
@@ -560,7 +560,7 @@ epsilon 比真实的最小零头(0.01 分)小七个数量级 —— **绝不会�
 **扣到 0 就不扣了**(不会出现负数的一档)。
 
 - 不变的是那条恒等式:**各档 `feeCents` 之和恒等于 `supportFeeCents`**。
-- 界面上看不到这个差额 —— 购物袋只摆「支撑加价 ¥X(6.7 g × ¥0.50/g +
+- 界面上看不到这个差额 —— 工单只摆「支撑加价 ¥X(6.7 g × ¥0.50/g +
   6.7 g × ¥1.00/g)」,**不摆每一档的金额**。
 
 #### 行为由单测守住
@@ -571,139 +571,121 @@ epsilon 比真实的最小零头(0.01 分)小七个数量级 —— **绝不会�
 | `src/test/print-quote/pure/delivery-tier.test.ts` | 交期加价向上取整(工作室那张表现在是 **+¥20.65 / +¥5.59**)/ 浮点不多收那一分 |
 | `src/test/print-quote/pure/support-fee-bands.test.ts` | 各档之和恒等于支撑加价 / **没有负数的一档** / 支撑费向上取整 |
 
-### 打印服务并进商城购物袋(2026-11-08)
+### 打印服务直接建工单(2026-11-08)
 
-工作室 2026-11-06 的原话是:**「模型打印是不走商城正常的购物车的,而是走
-打印下单,即展示打印列表和下单金额」**。
+工作室的原话(2026-11-08):**「不要放入购物车,放在这里 account/print-orders」**。
 
-**2026-11-08 改口了**:**「不要 print-order,进入商城那个」**。
-
-所以打印服务**不再有自己那张车、自己那个页面** —— 打印服务行就是商城购物
-袋里的一行,跟钥匙扣、冰箱贴摆在一起,同一个抽屉、同一个 `/cart`、同一
-个 `/checkout`、**同一次付款**。
+**打印服务跟商城购物袋彻底分家** —— 商城购物袋只装**目录商品**(钥匙扣 /
+冰箱贴 / 相框 …),打印服务是**另一条线**:工单自己建、自己收款。
 
 ```
 工具页 /tools/workbench:选模型 → 量克重(几何全在浏览器里算)
-  → 点「加入购物袋」→ 模型打包上传 R2(按用户分区)
-  → POST /api/store/carts/{id}/line-items(带 printSpec)
-  → 服务端**重算**一遍价 → 落购物袋
-  → 商城购物袋 /cart:目录商品 + 打印服务行 + 交期档位 + 金额明细
-  → 结算 /checkout → 同一个事务里落 storefront_order + print_order → 一次付款
+  → 点「填写下单信息」→ 表单展开在工作台下面(称呼 / 电话 / 备注 / 收货地址 / 交期 / 支付方式)
+  → 提交 → 算支撑 → 模型打包上传 R2(按用户分区)
+  → POST /api/print-orders(只带几何 + 地址 id)
+  → 服务端**重算**一遍价 → 落一张 print_order → 建支付会话
+  → 跳 /account/print-orders/{orderNo} —— 钱在那儿付(微信扫码 / 支付宝跳转)
 ```
 
-- **`/print-order` 和 `/quote` 都只剩重定向** —— 两个都指到 `/cart`
-  (`(marketing)` 组下的两个 `page.tsx`,`redirect({href: "/cart"})`)。
-  **以前发出去的链接不会 404**,只是落到了购物袋。
-- **`cart.kind` 那一列删了** —— 两张车合成一张,`kind` 就没用了。
-  `scripts/apply-print-cart-schema.ts` 一并删掉,**不用跑迁移**。
-  > 顺带把 2026-11-08 那个「少一列全线 500」的坑一起消掉了(见下面
-  > 「「加入购物袋」失败」那一节):Drizzle 查车时会把 `kind` 列进 SELECT,
-  > 库里没有就报 42703 → 商城购物袋 + 打印单**全线 500**。列没了,
-  > 这个坑也没了。
-- **两个 cookie 合成一个** —— 只剩 `wjp_cart_id`(`wjp_print_cart_id` 不再用)。
-- **接口合成一套** —— `/api/store/carts/**` 一套打天下,
-  `/api/store/print-carts/**` 全部删掉。
-- **购物袋页摆得下两种行** —— 目录商品行是图 + 标题 + 数量 + 单价;打印服务
-  行是包裹图标 + 模型名 + 克重 + 交期档位 + 单价,**没有 +/−**(一活一模型)。
-- **判据还是 `metadata.printSpec` 在不在**,不是 `productId`(`productId` 是个
-  哨兵值 `service_print_3d`,拿去 `findProductById()` 查不到是**预期**的)。
-  共享契约在 `src/features/storefront/lib/print-service.ts`(纯文件,客户端
-  和服务端都 import —— 不能在里面 import 服务端模块)。
+- **工单列表在 `/account/print-orders`** —— 跟商城的「我的订单」(`/account/orders`)
+  并排,都在电商首页头像下拉里(见「买家的三样东西搬出控制台」)。
+- **`/print-order` → 跳 `/account/print-orders`**,**`/quote` → 跳
+  `/tools/workbench`**(`(marketing)` 组下的两个 `page.tsx`,
+  `redirect({href, locale})`)。**以前发出去的链接不会 404**,只是落到了现在
+  唯一正确的那个页面。
+- **商城购物袋回到「只装目录商品」** —— `cart` 表的 `kind` 列在两张车合一的
+  时候就删了,现在**车里的每一行都是目录商品**。运费规则回到**一条**:
+  目录商品小计不到 ¥99 收 ¥8,到了免(`pricing-constants.ts` 的
+  `calculateShippingCents()`);`computeCartTotals()` 也回到**没有**
+  `catalogSubtotalCents` / `printSubtotalCents` 那两个字段。
+- **打印服务那套购物袋代码整个删掉** ——
+  `storefront/lib/print-service.ts`、`storefront/components/print-line-row.tsx`、
+  `print-quote/components/print-service-add-to-order.tsx` 都不在了;
+  `/api/store/carts/**` 只收目录商品(`catalogLineSchema`),**不认 `printSpec`**。
 
-#### 运费只看**目录商品**那部分(2026-11-08)
+#### 工单自己收款(2026-11-08)
 
-两件事装在一张车里,但**钱**还是两套:
-
-- **目录商品**有运费:¥8,目录商品那部分小计到 ¥99 免
-- **打印服务没有运费** —— 打印服务的价**就是报价本身**:购物袋里显示多少、
-  工单上写多少、收银台收多少,是**同一个数**(见
-  `print-quote/lib/payment.ts`:工单的支付金额恒等于 `total_price_cents`)。
-  到结算时再加一笔运费,用户看到的总价跟实际收的钱对不上 —— 这种对不上
-  用户是**一眼看出来的**,只会认为是系统算错,直接不买了。
-
-还有一个更要紧的:**打印服务的钱不该替目录商品把 ¥99 的门槛凑满**。它不
-产生快递费,凭什么替人省运费。
-
-- **规则只有一处** —— `pricing-constants.ts` 的
-  `shippingCentsForCart(catalogSubtotalCents)`:车里没有目录商品就恒为 0。
-  客户端(购物袋页 / 抽屉 / 结算页)和服务端(`checkout.ts`)**用同一份** ——
-  两处各写一遍就会出现「页面没运费、结算收了一笔」。
-- **汇总口径** —— `storefront/lib/cart-totals.ts` 的 `computeCartTotals()`
-  多两个字段:`catalogSubtotalCents` / `printSubtotalCents`,合计是两者相加。
-
-#### 工单不自己收款(2026-11-08)
-
-钱由**商城订单**收(整张车一次付款),工单是**跟着商城订单**建的
-(`print_order.storefront_order_id`),回调标 paid 时按它把工单一起标上
-(`payments/lib/settle.ts` 的 `syncLinkedPrintOrders()`)。
-
-所以工单**自己不再建支付会话**:
+钱由**工单自己**收 —— 建单时建支付会话(微信 Native 扫码 / 支付宝电脑网站
+支付),工单详情页给付款入口。
 
 - **服务端** —— `print-quote/lib/payment.ts` 的
   `ensurePrintOrderPaymentLink()` 先问纯函数
   `print-quote/lib/payment-entry.ts` 的 `decidePrintOrderPaymentEntry()`:
-  挂着商城订单 → 返 `PAY_VIA_STOREFRONT`,**不给入口**。
-  不守这一条 = 用户在工单详情页付一次工单的价,再回商城订单付一次整车的
-  价 —— **收两次钱**。
-- **接口** —— `POST /api/print-orders/[orderNo]/payment-link` 对这种单回
-  **409 `PAY_VIA_STOREFRONT`**,附一句指路的话。
-- **界面** —— 工单详情页(`/account/print-orders/[orderNo]`)不给「去支付」,
-  给一个「去我的订单付款」的链接(指到 `/account/orders`)。用户侧视图上多
-  一个布尔值 `viaStorefrontOrder`(`quote-types.ts` 的 `UserPrintOrder`),
-  摆的是**布尔**不是内部 id。
+  `paymentStatus === "paid"` → `ALREADY_PAID`;**挂着商城订单** → 返
+  `PAY_VIA_STOREFRONT`(不给入口);**独立工单** → 给入口。
+- **接口** —— `POST /api/print-orders/[orderNo]/payment-link` 对「挂着商城
+  订单」那种单回 **409 `PAY_VIA_STOREFRONT`**,附一句指路的话。
+- **界面** —— 工单详情页(`/account/print-orders/[orderNo]`)摆
+  `<OrderPaymentButton>`(独立工单)或者一个「去我的订单付款」的链接(旧单)。
+  用户侧视图上多一个布尔值 `viaStorefrontOrder`(`quote-types.ts` 的
+  `UserPrintOrder`),摆的是**布尔**不是内部 id。
+- **`PAY_VIA_STOREFRONT` 还留着** —— 2026-11-08 之前「打印服务并进商城购物袋」
+  那一版建出来的工单**跟着商城订单走**,那些单子还在库里,用户还能点开详情页。
+  那种单子**不能再开一个入口** —— 开了就是让用户付两次(工单一次、商城订单
+  一次)。**收两次钱。**
+
+#### 收货地址(2026-11-08)
+
+- **必填** —— 工作室照着单子寄出去,没有收货地址的单子没法开工。
+- **客户端只给 `addressId`**,地址内容由服务端从地址簿取
+  (`address/queries.ts` 的 `getUserAddress(userId, addressId)`)——
+  **归属校验在数据层**,别人的地址查出来是 null(返 404 `ADDRESS_NOT_FOUND`)。
+- **地址快照存进订单** —— `print_order.shipping_address`
+  (`ShippingAddressSnapshot`)—— 用户后来改地址簿不改写历史工单。
+- **联系邮箱不采信客户端** —— 取账号邮箱(`contactEmail: user.email`)。
 
 #### 交期档位
 
-- **工具页加进来时一律标准档**,用户在**购物袋那一行**上改(交期档位进
-  规格 hash,所以改档位是「先加一行再删一行」,不是原地改)。
-- **加价摆出来靠服务端回填** —— 服务端重算报价时把 `deliveryFeeCents` /
-  `deliveryRates` 填进 `printSpec`(见 `cart-store.ts` 的
-  `repriceLineItem()`),客户端据此反推「不含加价的小计」,于是三档的加价
-  (「48 小时 +¥20.65」)在点加急之前就摆出来。只影响展示,不参与定价。
+- **工具页加进来时一律标准档**,用户在**下单表单里**改(表单里摆着三档的
+  加价)。
+- **加价比例由服务端给** —— 服务端重算报价时把 `deliveryFeeCents` /
+  `deliveryRates` 带回来,前端用**同一个** `computeDeliveryFeeCents()` 算三档
+  的预览价,所以「页面显示的加价」一定等于「服务端收的加价」。
 
-#### 打印服务行的几条硬规矩
+#### 打印服务下单的几条硬规矩
 
-- **打印服务行恒为一件** —— 一活一模型,没有数量阶梯折扣,不给 +/− 按钮。
-- **打印服务行没有封面图** —— 手上是模型文件(一个 zip),不是图片。metadata
-  的 `productThumbnail` 是空串,画一个包裹图标。
-- **服务端重建 metadata** —— 客户端带来的标题 / 封面 / handle 一律不采信
-  (`buildPrintServiceMetadata()`)。
+- **价格只在服务端一处算** —— 工具页(`/tools/workbench`)**不自己算价**;它
+  只把几何数据(体积 / 表面积 / 尺寸 / 支撑克重)抛给服务端,价由服务端重算
+  (`print-quote/lib/quote-server.ts`)。要改价格口径,只改服务端那一处。
+- **模型只在用户点「提交打印订单」那一刻才上传** —— 量重量的过程模型一个
+  字节都不出浏览器。上传是下单动作的一部分,不是量重量的副产品。
 - **模型归属校验在服务端** —— `isOwnModelUrl(url, objectKey, userId)` +
   `objectExists(objectKey)`:别人的模型、伪造的 URL、指向空对象的链接都不行。
-- **价格只在服务端一处算** —— 工具页(`/tools/workbench`)**不自己算价**;它
-  只把几何数据(体积 / 表面积 / 尺寸 / 支撑克重)作为 `printSpec` 抛给服务端,
-  价由服务端重算(`print-quote/lib/quote-server.ts`)。要改价格口径,只改
-  服务端那一处。
-- **模型只在用户点「加入购物袋」那一刻才上传** —— 量重量的过程模型一个
-  字节都不出浏览器。上传是加购动作的一部分,不是量重量的副产品。
+- **收款通道由服务端挑** —— 客户端可以选 `channel`,不传就让服务端挑第一个
+  「开放了而且配好了」的(`isPaymentChannelEnabled`)。
+- **建单失败不许只摆「请稍后重试」** —— 服务端每个失败都带一个稳定的
+  `code`,客户端按 code 查文案表(`print-quote/lib/print-order-error.ts`)。
+  购物袋那套 code(`CART_NOT_FOUND` / `ADD_LINE_ITEM_FAILED` /
+  `CART_KIND_MISMATCH`)已经**死了** —— 打印服务不碰购物袋。
 
-#### 工具页的出口是「加入购物袋」
+#### 工具页的出口是「提交打印订单」
 
-- 工具页(`/tools/workbench`)**右边那一栏**那张「加入购物袋」卡片就是出口
-  —— 点下去上传模型、落购物袋,然后跳 `/cart` 确认金额再结算。
+- 工具页(`/tools/workbench`)**右边那一栏**那张「提交打印订单」卡片就是出口
+  —— 点「填写下单信息」,表单展开在工作台下面,填完提交。
+- **表单不弹窗** —— 右栏只有 288px,塞不下称呼 / 电话 / 备注 / 地址 / 交期 /
+  支付方式。展开在工作台下面一屏看完(跟工作室「配置 UI 不要弹窗挡住别的
+  内容」的口味一致)。
 - **卡片按登录态分两种**:未登录是「去登录」(跳登录页,带 `callbackUrl`
-  回工具页);已登录是「加入购物袋」。登录态由页面 RSC 查好传下去。
-- **打开工具页不会建空车** —— 真的点了「加入购物袋」才去要那张车(否则每个
-  访客都留一行 DB + 一个 cookie)。
-- **必须先登录再量** —— 加购接口要 session(401 `AUTH_REQUIRED`),而登录完
+  回工具页);已登录是「填写下单信息」。登录态由页面 RSC 查好传下去。
+- **必须先登录再量** —— 下单接口要 session(401 `AUTH_REQUIRED`),而登录完
   回来是**整页跳转**(`sign-in-form.tsx` 走 `window.location.href`),内存里
   那个模型选不回来。所以登录得放在量之前 —— 卡片上就是这么写的,别再搞
   「量完再登录,登录后把模型带回来」那套接力(接力模块
   `print-quote/lib/model-handoff.ts` 已经删掉)。
-- **旧路(直接提交订单)留着但界面上不走** ——
-  `order-form.tsx` / `order-created-card.tsx` / `POST /api/print-orders` 都
-  还在树里。两个出口会让用户不知道钱付到哪儿去了,而且旧路**不收收货地址**
-  (只有称呼 + 电话)—— 工作室照着单子寄不出去。
+- **提交前会现算一次支撑** —— 支撑**不跟随角度实时重算**(用户点「包裹支撑」
+  才算),所以用户可能没点过那颗按钮就直接提交了。提交时 `await
+  ensureSupport()` 现算一次 —— 少了它,服务端的 `input.supportWeightG ?? 0`
+  会把支撑费算成 0(**收少了钱**)。**算不出来就不提交** —— 宁可让用户重试。
 
 #### 行为由单测守住
 
 | 测试 | 守住什么 |
 |---|---|
-| `src/test/storefront/pure/merged-cart-totals.test.ts` | **一张车**的金额口径:运费只看目录商品那部分 / 打印服务的钱不替目录商品凑满 ¥99 / 车里只有打印服务 → 合计 = 小计 |
-| `src/test/storefront/pure/print-service-cart.test.ts` | 打印服务行的判据 / hash / 形状 + 工具页传出来的几何原样搬运 |
-| `src/test/storefront/pure/cart-totals.test.ts` | 商城购物袋的金额口径(折扣落在单价上) |
-| `src/test/print-quote/pure/payment-entry.test.ts` | **工单不自己收款** —— 跟着商城订单结的账 → 不给付款入口(不收两次钱) |
-| `src/test/sellbase/pure/linked-print-order.test.ts` | 工单跟着商城订单变 |
+| `src/test/print-quote/pure/print-service-order.test.ts` | 工具页发给 `/api/print-orders` / **不碰**商城购物袋 / 建完跳工单详情页 / 商城购物袋接口**只收目录商品** / 服务端重算报价 / 请求体里**没有总价** / 工单**不挂**商城订单 / 地址必填 + 归属校验在数据层 / 模型归属 + 存在性校验 / 邮箱不采信客户端 |
+| `src/test/print-quote/pure/payment-entry.test.ts` | **独立工单 → 给付款入口**;**旧单(挂着商城订单)→ 不给入口**(不收两次钱) |
+| `src/test/print-quote/pure/print-order-error.test.ts` | code → 文案 key 的映射 / 购物袋那套 code **已经死了** / 认不出来的 code 退回 `null` |
+| `src/test/storefront/pure/cart-totals.test.ts` | 商城购物袋的金额口径(折扣落在单价上 / 运费只有一条规则) |
+| `src/test/sellbase/pure/linked-print-order.test.ts` | 旧单:工单跟着商城订单变 |
 
 ### 商城购物袋详情页 `/cart`(2026-11-06)
 
@@ -720,37 +702,39 @@ epsilon 比真实的最小零头(0.01 分)小七个数量级 —— **绝不会�
 - **缓存优先,服务端那份兜底** —— `useCart()` 是活的真相(改数量 / 删行走
   的是它,抽屉里改了这页也跟着变);`initialCart` 是首屏,缓存还没回来的那一
   瞬间用它,用户不会看到「空的购物袋」闪一下。
-- **这一页有两种行** —— 目录商品 + 打印服务(2026-11-08 起打印服务也装这儿)。
+- **车里的每一行都是目录商品** —— 打印服务 2026-11-08 起**不进**购物袋(它
+  自己建工单,见「打印服务直接建工单」)。
 - 页面在 `(marketing-atelier)` 组(跟 `/checkout` 一条路)—— 商城这一套
   (`/cart` / `/checkout` / 购物袋抽屉)共用商城的头部 + 抽屉。**工具页
-  (`/tools/workbench`)也在这一组**(量完直接回购物袋)。
+  (`/tools/workbench`)也在这一组**(量完直接提交打印订单)。
 
-### 模型从工具页直接进购物袋(2026-11-08)
+### 模型从工具页直接建工单(2026-11-08)
 
-打印服务对外只有**一个出口**:工具页(`/tools/workbench`,量克重)→ 商城
-购物袋(`/cart`)→ 结算(`/checkout`)。
+打印服务对外只有**一个出口**:工具页(`/tools/workbench`,量克重)→ 提交打印
+订单 → `/account/print-orders/{orderNo}`(工单详情页付款)。
 
 ```
-/tools/workbench  →  「加入购物袋」  →  /cart  →  结算  →  一次付款
+/tools/workbench  →  「填写下单信息」  →  /account/print-orders/{orderNo}  →  付款
 ```
 
-- **量完直接加,不再绕一圈** —— 工具页右边那张「加入购物袋」卡片是唯一
-  出口。点下去:模型打包上传 R2 → `POST /api/store/carts/{id}/line-items`
-  (带 `printSpec`)→ 服务端重算价 → 落购物袋 → 跳 `/cart`。
-- **几何数据走 `printSpec`,价格走服务端** —— 计算器把体积 / 表面积 / 尺寸 /
-  支撑克重推给父组件(`PricingCalculator` 的 `onQuoteInput`),加购时一起
-  发上去;**价不在这儿算**,服务端重算(见 `cart-store.ts` 的
-  `repriceLineItem()`)。
+- **量完直接下单,不再绕一圈** —— 工具页右边那张「提交打印订单」卡片是唯一
+  出口。点「填写下单信息」→ 表单展开在工作台下面 → 提交:算支撑 → 模型打包
+  上传 R2 → `POST /api/print-orders`(只带几何 + 地址 id)→ 服务端重算价 →
+  落一张 `print_order` → 建支付会话 → 跳工单详情页。
+- **几何数据走请求体,价格走服务端** —— 计算器把体积 / 表面积 / 尺寸 /
+  支撑克重推给父组件(`PricingCalculator` 的 `onQuoteInput`),提交时一起发
+  上去;**价不在这儿算**,服务端重算(见 `print-quote/lib/quote-server.ts` 的
+  `computePrintQuote(settings, input)`)。
 - **计算器不再有「报价模式」** —— 早先 `quoteMode` 控制着「几何要不要抛给
   父组件」,报价台删掉之后这个开关没了,几何**一直**推给父组件。
 - **工具有两个出口状态** —— 未登录:卡片显示「去登录」;已登录:显示
-  「加入购物袋」。
-- **先登录再量** —— 加购接口要 session(401 `AUTH_REQUIRED`),而登录完回来
-  是**整页跳转**(`sign-in-form.tsx` 的 `window.location.href`),内存里的
+  「填写下单信息」。
+- **先登录再量** —— 下单接口要 session(401 `AUTH_REQUIRED`),而登录完回来
+  是**整页跳转**(`sign-in-form.tsx` 走 `window.location.href`),内存里的
   模型选不回来。所以登录放在量之前,卡片文案里写明了这一条。
   早先那套「模型接力」(`print-quote/lib/model-handoff.ts`,靠模块级变量
   跨路由跳转)已经删掉 —— 接力只扛得住客户端路由跳转,扛不住登录往返。
-- **摆盘结果不接力** —— 加进购物袋的是**当前姿态**的支撑克重(智能摆盘
+- **摆盘结果不接力** —— 提交上去的是**当前姿态**的支撑克重(智能摆盘
   跑过就是最优姿态的,没跑就是初始角度的)。
 
 ### 打印前工作台:检查 / 克重 / 摆盘(2026-11-07)
@@ -804,7 +788,7 @@ epsilon 比真实的最小零头(0.01 分)小七个数量级 —— **绝不会�
   是**同一个函数**(`tools/lib/mesh/summary.ts` 的 `classifyShells()` /
   `buildCheckStats()` / `buildCheckWarnings()` / `evaluateWjp()`)——
   两个视角**不可能**对同一个模型给出相反的结论。
-- **徽标只摆事实,不拦人** —— 有问题照样能加入购物袋(工作室可能有特殊处理
+- **徽标只摆事实,不拦人** —— 有问题照样能提交打印订单(工作室可能有特殊处理
   办法)。加一道「确认」就多一个决策,而工作室要的是「少操作」。
 - **徽标只显示跟尺寸无关的结论** —— 状态 + 提示清单。带尺寸的 WJP 结论
   (外形尺寸那条)不摆 —— 摘要是在**原始文件单位**下算的,尺寸结论会跟
@@ -972,7 +956,7 @@ shared/components/model-viewport/
   列、**左边的信息栏**,四块都是深色,读起来是**一个 3D 应用**,跟以前检查
   工具那块是同一块地。两个视角换的是**左栏的内容**,整块外观不变
   (见下面「统一用检查工具的深色设计」)。
-- **两个视角的侧栏同宽(`md:w-[400px]`)** —— 不然切一次视角视口宽度就变,
+- **两个视角的侧栏同宽(`md:w-[360px]`)** —— 不然切一次视角视口宽度就变,
   相机的取景会跑偏(相机只在建模 / 重置时重新取景)。
 - **检查侧栏只剩那一块** —— `ModelCheckPanel` 改成了
   `ModelCheckSidePanel`(`tools/components/model-check/model-check-panel.tsx`),
@@ -1023,7 +1007,7 @@ shared/components/model-viewport/
   / `DimDisplay` / `DimEditor`(`shared.tsx`)/ 克重读数 / 摆盘面板
   (`pricing-calculator.tsx`)/ 自检徽标(`mesh-check-badge.tsx`)/
   贴图诊断(`texture-diagnostic.tsx`)。
-- **「加入购物袋」那张卡在深色应用外面** —— 它是页面里的一张浅色卡
+- **「提交打印订单」那张卡在深色应用外面** —— 它是页面里的一张浅色卡
   (工作室的下单按钮),不是 3D 应用的一部分。两个视角都在,检查完就能下单。
 - **行为由单测守住** —— `src/test/tools/pure/workbench-merge.test.ts`:
   整块是深色(`bg-zinc-950 text-zinc-100`)、两个 `<aside>` 都带
@@ -1124,7 +1108,7 @@ shared/components/model-viewport/
 - **外壳跟着那颗开关走** —— `supportShell={showSupport ? (poseSupport?.shell ?? null) : null}`。
   算的时候 `withShell: true`(外壳在**算体积的同一次调用**里建出来)。
 
-**但「加入购物袋」必须带上支撑克重** —— 服务端按这组数重算报价
+**但「提交打印订单」必须带上支撑克重** —— 服务端按这组数重算报价
 (`quote-server.ts` 的 `input.supportWeightG ?? 0`),少了它支撑费会算成 0,
 **收少了钱**。所以计算器对外留了一个入口:
 
@@ -1133,16 +1117,16 @@ shared/components/model-viewport/
 - `pricing-calculator.tsx` 的 `ensureSupport`:算过了就返回现成的(不重算),
   没算过就现算一次(`withShell: false` —— 只要数,不要那块最贵的外壳)。
 - 入口通过 `onEnsureSupport` 交给父组件(`print-service-weight-tool.tsx`),
-  再通过 `ensureSupport`  prop 传到「加入购物袋」那张卡
-  (`print-service-add-to-order.tsx`),加购之前 `await ensureSupport()`。
+  提交之前在那儿 `await ensureSupport()` —— 提交那条路自己会算,不用用户点
+  「包裹支撑」那颗按钮。
 
 **两道兜底 —— 别让「算不出支撑」变成「收少了钱」**:
 
-- **模型还没焊完 → 等它** —— 用户刚拖进模型就点「加入购物袋」是常事,而
+- **模型还没焊完 → 等它** —— 用户刚拖进模型就点「提交打印订单」是常事,而
   焊接大模型要好几秒。`ensureSupport` 这时候先 `await` 焊接那个 promise
   (`supportLoadRef`),再算支撑。
-- **算不出来 → 不加** —— 加购那张卡拿 `ensureSupport()` 的结果,**拿不到就
-  报错退出**,不许退回「只有几何、没有支撑克重」的 `input` 那样去加购:
+- **算不出来 → 不提交** —— 提交那条路拿 `ensureSupport()` 的结果,**拿不到就
+  报错退出**,不许退回「只有几何、没有支撑克重」的 `input` 那样去提交:
   服务端按 `input.supportWeightG ?? 0` 算,支撑费会算成 0(收少了钱),
   而用户看着像「加成功了」。宁可让用户等模型处理完再试一次。
 
@@ -1334,12 +1318,12 @@ r > b        再超出部分 × 第二档单价(1 元/g)
 - **纯函数**在 `pricing-engine.ts` 的 `computeSupportFeeBands()`;报价层
   换算成「分」在 `quote-server.ts`。
 - **各档 `feeCents` 之和恒等于 `supportFeeCents`** —— 逐档取整再相加跟总额
-  取整可能差 1 分,差额由**最后一档**吸收。否则购物袋上会出现「8.3 g ×
+  取整可能差 1 分,差额由**最后一档**吸收。否则工单上会出现「8.3 g ×
   ¥0.50/g + 4.2 g × ¥1.00/g」跟「支撑加价 ¥6.60」对不上。
 - **默认关**(`support_enabled = false`)—— 默认开的话每一单都会悄悄多收
   一笔支撑费,而克重工具那边从不收这个钱,两边对不上。
-- 购物袋上摆出「支撑加价 ¥x(6.7 g × ¥0.50/g)」—— 服务端回填到 `printSpec`
-  的 `supportFeeCents` / `supportFeeBands`,**纯展示用,不参与定价**。
+- 工单上摆出「支撑加价 ¥x(6.7 g × ¥0.50/g)」—— 服务端重算报价时把
+  `supportFeeCents` / `supportFeeBands` 带回来,**纯展示用,不参与定价**。
 
 #### 工具页跟随后台,访客改不了
 
@@ -1442,7 +1426,7 @@ DB 配置行 → PRINT_ALLOW_GUEST_PRICING 环境变量 → 默认(开)
   浏览器,`ClientPrintConfig` 只有两个密度 + 两个几何参数)。它把几何 POST 到
   `/api/print-quote`,拿回服务端 `computePrintQuote(settings, input)` 的结果。
   **服务端算的价才是要收的钱**,客户端算的那个只是预览。
-- **摆在哪** —— 「加入购物袋」那张卡里,按钮上面。**总额 + 一行明细**
+- **摆在哪** —— 「提交打印订单」那张卡里,按钮上面。**总额 + 一行明细**
   (克重费 · 后处理费 · 支撑费)。
 - **支撑没算的时候明说「未计入」** —— 支撑要用户点「包裹支撑」/「置于平面」
   才算出来,没算之前 `supportWeightG` 是 null,支撑费算成 0 ⇒ **那个预估是
@@ -1470,12 +1454,12 @@ pnpm migrate:apply-print-pricing   # = tsx scripts/apply-print-pricing-schema.ts
 |---|---|
 | `src/test/print-quote/pure/guest-pricing.test.ts` | 后台那颗开关在不在 / 回退链(逐字段)/ 迁移脚本补那一列 / **未登录不再一律 401** / 403 `GUEST_PRICING_DISABLED` / **已登录的人不受开关管** / 工具页那个数是**问服务端要的**(不许本地算价) / 支撑没算时说「未计入」 |
 
-### 「加入购物袋」失败:失败的话要说人话(2026-11-08)
+### 「提交打印订单」失败:失败的话要说人话(2026-11-08)
 
 > **这一节的前半段(「缺一列就全线 500」)已经作废。**
 >
-> 2026-11-08 打印服务并进商城购物袋之后,`cart` 表的 **`kind` 那一列删了**
-> —— 两张车合成一张,那个维度没用了。Drizzle 查车时不再把 `kind` 列进
+> 2026-11-08 打印服务「并进商城购物袋」那一版把 `cart` 表的 **`kind` 那一列
+> 删了** —— 两张车合成一张,那个维度没用了。Drizzle 查车时不再把 `kind` 列进
 > SELECT,**42703 那个坑跟着一起没了**。
 >
 > `scripts/apply-print-cart-schema.ts` 一并删掉,**不用跑那条迁移**。
@@ -1512,19 +1496,39 @@ pnpm migrate:apply-print-pricing   # = tsx scripts/apply-print-pricing-schema.ts
   **服务端日志**(「数据库缺表 / 缺列(迁移脚本没跑?)」),响应体只给一句
   人话。原始 SQL 不往外发。
 
-#### 「加入购物袋」那张卡搬到右侧(2026-11-08)
+#### 「提交打印订单」那张卡搬到右侧(2026-11-08)
 
-工作室的要求:**「加入购物袋放在右侧」**。
+工作室的要求:**「加入购物袋放在右侧」** —— 那时候它还叫「加入购物袋」,现在
+叫「提交打印订单」,位置没变。
 
 - 以前那张卡在**工作台下面**(整页宽度);现在它是工作台**右边那一栏**
   (`xl` 断点以上并排,窄屏还是在下面)。
 - 实现:`pricing/components/model-settings-panel.tsx` 的根容器加
   `xl:flex xl:items-start xl:gap-4`,深色应用那块加 `xl:min-w-0 xl:flex-1`,
-  卡片那个 `div` 加 `xl:w-[320px] xl:shrink-0`。
-- **断点用 `xl`(1280px),不是 `lg`** —— 页面主容器封顶 1280px。右边这一栏
-  320px + 间距 16px 之后,工作台那块只剩 `1280 − 32 − 336 = 912px`
-  (侧栏 400 + 视口 ~500);用 `lg`(1024)的话视口只剩 ~250px,3D 视口挤得
-  没法看。
+  卡片那个 `div` 加 `xl:w-[288px] xl:shrink-0`。
+- **断点用 `xl`(1280px),不是 `lg`** —— 用 `lg`(1024)的话视口只剩
+  ~250px,3D 视口挤得没法看。
+
+#### 视口被挤扁了(2026-11-09)
+
+工作室的原话:**「现在工具多了右边的报价后把预览区挤到了左边」**。
+
+- **根因** —— 页面主容器封顶 **1280px**,右边这一栏 320px + 间距 16px
+  之后,工作台那块只剩 `1280 − 48 − 336 = 896px`;再减去 400px 的侧栏,
+  **3D 视口只剩 ~496px** —— 一个竖着的窄条,没法看模型。
+- **三个数一起改**(2026-11-09):
+
+  | 什么 | 以前 | 现在 |
+  |---|---|---|
+  | 页面主容器(`pricing-calculator.tsx` 的 `<main>`) | `max-w-[1280px]` | **`max-w-[1600px]`** |
+  | 左侧信息栏(`md:w-[*]`) | 400px | **360px** |
+  | 右边「提交打印订单」那一栏(`xl:w-[*]`) | 320px | **288px** |
+
+- **介绍 / 模式切换那两段仍然是 1280px**(`max-w-[1280px] mx-auto`)——
+  它们跟页面头部对齐;只有下面那块 3D 工作台用满 1600px。
+- **那一栏窄到 288px 够用** —— 它只摆**预估报价 + 「填写下单信息」那颗
+  按钮**;**下单表单展开在工作台下面**(整页宽度),不是塞在这一栏里。
+- **1440px 宽的屏上**:视口从 ~496px 涨到 ~730px。
 - **全屏不受影响** —— 那张卡本来就在全屏那个元素**外面**(它是页面里的一张
   浅色卡,不是 3D 应用的一部分)。
 
@@ -1665,9 +1669,9 @@ sha256 不可逆,但**用户表是有限的** —— 把表里每个 userId 都�
   (`sellbase/lib/orders.ts` 的 `buildPrintOrderSuccessUrl`)全指向
   `/account/*`。
 - **「我的打印订单」装的是** `print_order` 里 `user_id` = 当前用户的那些单 ——
-  打印服务并进商城购物袋之后,**从商城购物袋结算出来的工单也在这个列表里**
-  (`checkout()` 在同一个事务里落 `storefront_order` + `print_order`,工单带
-  `user_id`)。**「我的订单」(`/account/orders`)是商城订单那一张** —— 钱在
+  打印服务现在**直接建工单**(`POST /api/print-orders`),工单带 `user_id` ——
+  这个列表装的就是它们。**旧单**(从商城购物袋结算出来的那种)也在这个列表里,
+  那种的钱在商城订单那边付。**「我的订单」(`/account/orders`)是商城订单那一张** —— 钱在
   那边付;「我的打印订单」是**工单那一张** —— 做活到哪一步了。
   两张页面各管一件事,别把它们混成一个。
 
@@ -1866,7 +1870,7 @@ providers/
   `ensurePrintOrderPaymentLink()` 工单)都先查通道配好没,通不过就直接回
   `PAYMENT_NOT_CONFIGURED`,不白跑一趟网络。
   > 工单那个入口**还多一道**:跟着商城订单结的账一律不给入口(返
-  > `PAY_VIA_STOREFRONT`),见「打印服务并进商城购物袋」一节 —— 给了就是
+  > `PAY_VIA_STOREFRONT`),见「打印服务直接建工单」一节 —— 给了就是
   > 让用户付两次。
 
 #### 环境变量
@@ -1979,7 +1983,7 @@ webhook 的 HMAC 密钥**。app 要装在店铺上、且跟店铺同一个组织
      —— 建 `cart` + `cart_item`
      > **`apply-print-cart` 那条 2026-11-08 删掉了** —— 打印服务并进商城
      > 购物袋之后,`cart` 表不再有 `kind` 列,那条迁移不用跑(见
-     > 「打印服务并进商城购物袋」一节)。
+     > 「打印服务直接建工单」一节)。
    - `pnpm migrate:apply-print-order` / `migrate:apply-print-order-event` /
      `migrate:apply-print-order-storefront-link` / `migrate:apply-print-pricing`
      —— 打印工单那套表和定价配置
@@ -1994,10 +1998,10 @@ webhook 的 HMAC 密钥**。app 要装在店铺上、且跟店铺同一个组织
 4. **各通道都要用小额真单试一遍** —— 微信扫一次码、支付宝跳一次,确认
    「钱到了 → 订单变 paid → 挂在下面的工单也跟着变 paid → **买掉的那几行
    没了**」。两个通道 webhook 的验签路径不一样,只有真单能验出来。
-   **打印服务行也试一遍** —— 工具页量一个模型 → 加入购物袋 → 结算,确认
-   「一张车一次付款 → 商城订单 paid → 挂在下面的工单也 paid →
-   **工单详情页不给「去支付」**(钱在商城订单那边付,见「打印服务并进商城
-   购物袋」一节)」。
+   **打印服务也试一遍** —— 工具页量一个模型 → 提交打印订单,确认「工单建出来了
+   → 工单详情页**给**付款入口 → 钱到了 → 工单变 paid → 订单号跟工作室那边
+   对得上」。**旧单**(跟着商城订单结的账那种)也点开看一眼:工单详情页
+   **不给**「去支付」,只指到「我的订单」(见「打印服务直接建工单」一节)。
 5. **小程序端的微信支付暂时别开** —— 微信 Native 是扫码,在小程序里扫不了
    自己屏幕上的码。小程序要收微信支付得走 JSAPI(`wx.requestPayment`),
    本仓库**还没实现**

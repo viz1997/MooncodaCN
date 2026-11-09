@@ -9,6 +9,19 @@
  * - `POST` —— 下单
  * - `GET`  —— 当前用户的工单列表(给「我的打印订单」页轮询用)
  *
+ * ## 2026-11-08:打印服务**不进商城购物袋**,直接建工单
+ *
+ * 工作室的说法:「不要放入购物车,放在这里 account/print-orders」。所以这
+ * 条路是打印服务的**唯一**下单出口 —— 商城购物袋只装目录商品。
+ *
+ * 建完单钱由**工单自己收**(建单时建支付会话:微信扫码 / 支付宝跳转),
+ * 工单详情页给付款入口。
+ *
+ * ## 收货地址(2026-11-08)
+ *
+ * 客户端只给 `addressId`,地址内容由服务端从地址簿取 —— 归属校验在数据层。
+ * 没有地址的单子没法开工(工作室照着单子寄不出去),所以这一个是必填。
+ *
  * ## 服务端重算价格
  *
  * 客户端会带着它自己算的报价来,但**这里不信** —— 只取几何和支撑信息,
@@ -34,7 +47,8 @@
 
 import { after, type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import type { PrintOrderRow } from "@/db/schema";
+import type { PrintOrderRow, ShippingAddressSnapshot } from "@/db/schema";
+import { getUserAddress } from "@/features/address/queries";
 import { isR2Configured, objectExists } from "@/features/image-gen/lib/r2";
 import { isPaymentChannelEnabled } from "@/features/payments/lib/registry";
 import { getPrintOrderUser } from "@/features/print-quote/lib/auth";
@@ -101,6 +115,17 @@ const orderSchema = z.object({
   contactPhone: z.string().max(40).nullish(),
   note: z.string().max(1000).nullish(),
   /**
+   * 收货地址(id)—— 2026-11-08
+   *
+   * **只收 id,地址内容由服务端从地址簿解析** —— 归属校验在数据层
+   * (`address/queries.ts` 的 `getUserAddress` 按 userId 过滤),客户端带来
+   * 什么地址内容都不采信。
+   *
+   * 工作室要照着单子寄出去,没有收货地址的单子没法开工 —— 所以这一个是
+   * **必填**,不是可选。
+   */
+  addressId: z.string().min(1).max(64),
+  /**
    * 这单的邮件通知语言
    *
    * 客户端传当前界面语言(`useLocale()`)。服务端兜底 zh ——
@@ -129,7 +154,7 @@ async function handleList(request: NextRequest) {
   const user = await getPrintOrderUser();
   if (!user) {
     return NextResponse.json(
-      { success: false, error: "请先登录" },
+      { error: "AUTH_REQUIRED", message: "请先登录" },
       { status: 401, headers: getRateLimitHeaders(rl) }
     );
   }
@@ -156,7 +181,7 @@ async function handle(request: NextRequest) {
   const user = await getPrintOrderUser();
   if (!user) {
     return NextResponse.json(
-      { success: false, error: "请先登录" },
+      { error: "AUTH_REQUIRED", message: "请先登录" },
       { status: 401, headers: getRateLimitHeaders(rl) }
     );
   }
@@ -254,6 +279,36 @@ async function handle(request: NextRequest) {
     );
   }
 
+  // 收货地址 —— **归属校验在数据层**
+  //
+  // 客户端只给地址 id,地址内容由服务端从地址簿取 —— 别人的地址查出来是
+  // null(见 `address/queries.ts` 的 `getUserAddress`),客户端带来什么地址
+  // 内容都不采信。
+  //
+  // 为什么必填:工作室要照着单子把成品寄出去,没有收货地址的单子没法开工
+  // (2026-11-06 工作室自己提的:旧那条路只收称呼 + 电话,「照着单子寄不
+  // 出去」)。
+  const addressView = await getUserAddress(user.id, parsed.data.addressId);
+  if (!addressView) {
+    return NextResponse.json(
+      {
+        error: "ADDRESS_NOT_FOUND",
+        message: "收货地址不存在,请重新选择",
+      },
+      { status: 404 }
+    );
+  }
+
+  /** 地址快照 —— 存进订单,用户后来改地址簿不改写历史工单 */
+  const shippingAddress: ShippingAddressSnapshot = {
+    recipientName: addressView.recipientName,
+    phone: addressView.phone,
+    province: addressView.province,
+    city: addressView.city,
+    district: addressView.district,
+    detail: addressView.detail,
+  };
+
   // 服务端重算报价 —— 客户端传来的总价一律不信
   //
   // 价从哪儿来:后台 `/admin/print-pricing` 配的值 → `PRINT_*` env → 默认值
@@ -289,6 +344,7 @@ async function handle(request: NextRequest) {
       contactPhone: input.contactPhone,
       note: input.note,
       locale,
+      shippingAddress,
     });
   } catch (error) {
     // 23505 = unique_violation —— orderNo 撞车(极小概率)

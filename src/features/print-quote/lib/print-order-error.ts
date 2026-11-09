@@ -1,5 +1,5 @@
 /**
- * 「加入打印单」失败 —— 服务端的 code 翻译成人话
+ * 「提交打印订单」失败 —— 服务端的 code 翻译成人话
  *
  * ## 为什么不再只摆一句「请稍后重试」
  *
@@ -38,15 +38,24 @@ export const PRINT_ORDER_ERROR_KEYS: Record<string, string> = {
   // 模型文件那一份不见了 —— 重传就行
   MODEL_NOT_FOUND: "printOrder.errors.codes.modelNotFound",
   INVALID_MODEL_URL: "printOrder.errors.codes.modelUrlInvalid",
-  // 购物车的问题
-  CART_NOT_FOUND: "printOrder.errors.codes.cartNotFound",
   // 请求本身不合法
   INVALID_INPUT: "printOrder.errors.codes.invalidInput",
   INVALID_TYPE: "printOrder.errors.codes.invalidType",
   INVALID_JSON: "printOrder.errors.codes.invalidInput",
   BAD_BODY: "printOrder.errors.codes.invalidInput",
+  // 收货地址 —— 重新选一个就行
+  ADDRESS_NOT_FOUND: "printOrder.errors.codes.addressNotFound",
+  // 这组几何算不出报价 —— 重新量一遍
+  QUOTE_UNAVAILABLE: "printOrder.errors.codes.quoteUnavailable",
+  // 订单号撞车(极小概率)—— 重试
+  ORDER_NO_CONFLICT: "printOrder.errors.codes.orderNoConflict",
+  // 收款通道没配好 / 被关了
+  PAYMENT_CHANNEL_UNAVAILABLE:
+    "printOrder.errors.codes.paymentChannelUnavailable",
+  // 这一单已经跟着商城订单结过账了 —— 去「我的订单」付那张
+  PAY_VIA_STOREFRONT: "printOrder.errors.codes.storefrontUnavailable",
   // 服务端处理失败
-  ADD_LINE_ITEM_FAILED: "printOrder.errors.codes.serverFailed",
+  CREATE_ORDER_FAILED: "printOrder.errors.codes.createOrderFailed",
   PRESIGN_FAILED: "printOrder.errors.codes.presignFailed",
 };
 

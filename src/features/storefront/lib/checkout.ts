@@ -76,19 +76,9 @@ import type {
   PaymentRequest,
   PaymentRequestItem,
 } from "@/features/payments/lib/types";
-import { createPrintOrder } from "@/features/print-quote/lib/order-store";
-import type { PrintPricingSettings } from "@/features/print-quote/lib/pricing-settings";
-import { getPrintPricingSettings } from "@/features/print-quote/lib/pricing-store";
-import {
-  computePrintServiceLinePrice,
-  generatePrintOrderNo,
-} from "@/features/print-quote/lib/quote-server";
-import type { PrintQuote } from "@/features/print-quote/lib/quote-types";
-import { normalizePrintOrderLocale } from "@/features/print-quote/lib/quote-types";
 import {
   CarrierNotFoundError,
   resolveCarrierVariant,
-  resolvePrintServiceCarrier,
   sizeCodeFromSpecSizeId,
 } from "@/features/sellbase/lib/carrier";
 import { backfillSellbaseCustomerId } from "@/features/sellbase/lib/customer";
@@ -119,11 +109,7 @@ import {
   type ReusablePendingOrder,
 } from "./pending-order";
 import { calculatePricing } from "./pricing";
-import { shippingCentsForCart } from "./pricing-constants";
-import {
-  getPrintServiceSpec,
-  printServiceSpecToQuoteInput,
-} from "./print-service";
+import { calculateShippingCents } from "./pricing-constants";
 
 /* -------------------------------------------------------------------------- */
 /*  入参 / 出参                                                               */
@@ -186,13 +172,6 @@ export interface CheckoutSuccess {
   totalCents: number;
   /** 币种 */
   currency: string;
-  /**
-   * 这一单里包含的打印工单号(2026-11-05)
-   *
-   * 购物车里每一条打印服务行都会生成一张工单(`PO-…`)—— 工作室照着工单
-   * 生产,用户照着工单号查进度。没有打印服务行时是空数组。
-   */
-  printOrderNos: string[];
   /**
    * 付款入口为什么没生成(2026-11-05)
    *
@@ -264,10 +243,8 @@ export interface PricedLine {
   unitPriceCents: number;
   /** 行合计(分) */
   lineTotalCents: number;
-  /** 这一行的数量 —— 打印服务行恒为 1 */
+  /** 这一行的数量 */
   quantity: number;
-  /** 打印服务行的报价明细(不是打印服务行就是 null) */
-  printQuote: PrintQuote | null;
 }
 
 /**
@@ -276,41 +253,12 @@ export interface PricedLine {
  * 算不出来就抛 —— 结算的时候不能「按旧价收」,也不能「按 0 收」。
  * 用户会看到「这件商品的价格算不出来,请刷新购物车」,把那一行删掉重下。
  *
- * 打印服务行走的是另一套:按克重计价(`computePrintServiceLinePrice()`),
- * 不查目录。
+ * **车里只有目录商品**(2026-11-08)—— 打印服务不进商城购物袋,工单自己建、
+ * 自己收款(见 `POST /api/print-orders`)。
  *
- * `settings` 是**生效中的打印定价设置**(后台 `/admin/print-pricing` 配的,
- * 兜底到 `PRINT_*` 环境变量)—— 价从哪儿来由它决定,这里是权威值。
  */
-function repriceLine(
-  item: CartLineItem,
-  settings: PrintPricingSettings
-): PricedLine {
+function repriceLine(item: CartLineItem): PricedLine {
   const metadata = item.metadata;
-
-  // 打印服务行 —— 按克重计价
-  const printSpec = getPrintServiceSpec(metadata);
-  if (printSpec) {
-    const priced = computePrintServiceLinePrice(
-      settings,
-      printServiceSpecToQuoteInput(printSpec)
-    );
-    if (!priced) {
-      throw new CheckoutError(
-        "PRICING_FAILED",
-        "打印服务这组模型数据算不出报价,请回到工具页重新测量"
-      );
-    }
-    // 打印服务恒为一件 —— 数量阶梯折扣对它没有意义
-    return {
-      item,
-      unitPriceCents: priced.unitPriceCents,
-      discountedUnitPriceCents: priced.discountedUnitPriceCents,
-      lineTotalCents: priced.discountedUnitPriceCents,
-      quantity: 1,
-      printQuote: priced.quote,
-    };
-  }
 
   const product = findProductById(item.productId);
   if (!product) {
@@ -349,7 +297,6 @@ function repriceLine(
     discountedUnitPriceCents: pricing.discountedUnitPriceCents,
     lineTotalCents: pricing.discountedUnitPriceCents * item.quantity,
     quantity: item.quantity,
-    printQuote: null,
   };
 }
 
@@ -412,6 +359,7 @@ export function resolveCheckoutChannel(
  *
  * 送过去的单价是**折后单价**(分)。「先折单价,再乘数量」—— 阶梯折扣在这一层
  * 就已经折过了,通道不参与定价。
+ *
  */
 export function buildPaymentRequest(params: {
   orderNo: string;
@@ -426,22 +374,11 @@ export function buildPaymentRequest(params: {
   const items: PaymentRequestItem[] = params.lines.map((line) => {
     // 附加信息 —— 各通道自己决定怎么用(Shopify 落成行属性,微信/支付宝塞进描述)
     //
-    // 用**对象字面量**而不是 `attributes["克重"] = …` —— 后者是计算属性访问,
+    // 用**对象字面量**而不是 `attributes["刻字"] = …` —— 后者是计算属性访问,
     // biome 的 `useLiteralKeys` 会报(而且中文标识符的点号写法读着别扭)。
-    const quote = line.printQuote;
     const engraving = line.item.metadata.engravingText;
 
     const attributes: Record<string, string> = {
-      ...(quote
-        ? {
-            克重: `${quote.materialWeightG} g`,
-            ...(quote.supportWeightG != null
-              ? { 支撑: `${quote.supportWeightG} g` }
-              : {}),
-            尺寸: `${quote.dims[0]}×${quote.dims[1]}×${quote.dims[2]} mm`,
-            交期: `${quote.deliveryHours} 小时`,
-          }
-        : {}),
       ...(engraving ? { 刻字: engraving } : {}),
     };
 
@@ -512,11 +449,12 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
   }
 
   /**
-   * 车的性质对得上吗(2026-11-06)
+   * 车里**只有目录商品**(2026-11-08)
    *
-   * 2026-11-08 起**只有一张车**了 —— 打印服务并进商城购物袋(工作室的说法:
-   * 「不要 print-order,进入商城那个」)。所以这里不再有「拿错车」这回事,
-   * 运费也不再按车选,而是按**目录商品那部分**算(见下面)。
+   * 工作室的说法:「不要放入购物车,放在这里 account/print-orders」。打印服务
+   * 是另一条线 —— 工单自己建、自己收款(见 `POST /api/print-orders`)。
+   *
+   * 所以这张车里每一行都是要寄出去的实物,运费按整张小计算。
    */
 
   // 0. 购物车过户
@@ -528,11 +466,7 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
   await stampCartOwner(input.cartId, input.userId);
 
   // 1. 重算每一行
-  //
-  //    打印服务行的价来自**生效中的打印定价设置** —— 后台改过密度 / 单价 /
-  //    支撑规则之后,这里立刻按新口径重算(跟购物车每次读都重算一个道理)。
-  const printSettings = await getPrintPricingSettings();
-  const lines = cart.items.map((item) => repriceLine(item, printSettings));
+  const lines = cart.items.map((item) => repriceLine(item));
 
   // 2. 金额
   const subtotalCents = lines.reduce(
@@ -546,19 +480,10 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
   const discountCents = subtotalCents - discountedSubtotalCents;
   // 免运费门槛按**折后**金额算 —— 用户看到的、付的小计就是折后那个
   //
-  // 运费的基数是**目录商品那部分**(2026-11-08):打印服务并进商城购物袋了,
-  // 但它**不产生快递费** —— 打印服务的价就是报价本身(见
-  // `print-quote/lib/payment.ts`:工单的支付金额恒等于 `total_price_cents`)。
-  // 到结算时再给它加一笔运费,用户看到的总价跟实际收的钱就对不上了。
-  //
-  // 规则本身在 `pricing-constants.ts` 的 `shippingCentsForCart()` —— 客户端
-  // 的购物袋页 / 结算页跟这里用**同一份**,不会「页面没运费、结算收了」。
-  const catalogSubtotalCents = lines.reduce(
-    (sum, l) =>
-      getPrintServiceSpec(l.item.metadata) ? sum : sum + l.lineTotalCents,
-    0
-  );
-  const shippingCents = shippingCentsForCart(catalogSubtotalCents);
+  // 规则本身在 `pricing-constants.ts` 的 `calculateShippingCents()` ——
+  // 客户端的购物袋页 / 抽屉 / 结算页跟这里用**同一份**,不会「页面没运费、
+  // 结算收了」。
+  const shippingCents = calculateShippingCents(discountedSubtotalCents);
   const totalCents = discountedSubtotalCents + shippingCents;
 
   // 3. 通道
@@ -570,9 +495,6 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
   //    购物车改成「付款成功才清空」之后,用户没付钱又点一次「去支付」会攒出
   //    两张一样的单 —— 工作室那边多一张永远不付的僵尸单,用户那边可能付了
   //    旧的那张码、系统却标的是新的那张(或者两张都付)。
-  //
-  //    复用还顺带避免了重复开工单:打印服务行每一次下单都会开一张 `PO-…`,
-  //    复用就只开一张。
   const reusable = await findReusablePendingOrder({
     userId: input.userId,
     snapshot: buildLineSnapshot(
@@ -594,14 +516,10 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
   //
   //    新通道的价是本仓库给的,不经过 Sellbase 的载体变体(所以新通道不
   //    需要把商品目录同步过去)。
-  //    打印服务行走**专用**的载体行(「打印服务(按克重)」),不按型号找。
   const carriers = legacy
     ? await Promise.all(
         lines.map(async (line) => {
           try {
-            if (getPrintServiceSpec(line.item.metadata)) {
-              return await resolvePrintServiceCarrier();
-            }
             const product = findProductById(line.item.productId);
             const productCode = product?.productTypeCode ?? "";
             const sizeCode = sizeCodeFromSpecSizeId(line.item.metadata.sizeId);
@@ -620,8 +538,6 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
   const orderNo = generateStorefrontOrderNo();
   const orderId = `so_${nanoid(16)}`;
   const now = new Date();
-
-  const printOrderNos: string[] = [];
 
   await db.transaction(async (tx) => {
     await tx.insert(storefrontOrder).values({
@@ -663,42 +579,6 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
         metadata: line.item.metadata as unknown as Record<string, unknown>,
         createdAt: now,
       });
-    }
-
-    // 打印服务行 → 建工单
-    //
-    // **在同一个事务里** —— 商城订单和工单要么都成,要么都不成。
-    // 「收了钱但没有工单」比「整笔下单失败」更难收拾:钱已经进了收银台,
-    // 工作室那边看不到要干的活。
-    //
-    // 工单的 `sellbase_order_id` 留空 —— 整张购物车共用**一张**支付订单,
-    // 而 `print_order.sellbase_order_id` 是唯一索引,挂不上。工单靠
-    // `storefront_order_id` 跟商城订单关联,回调标 paid 时按它反查。
-    const locale = normalizePrintOrderLocale(input.locale);
-    for (const line of lines) {
-      const printSpec = getPrintServiceSpec(line.item.metadata);
-      if (!printSpec || !line.printQuote) continue;
-
-      const printOrderNo = generatePrintOrderNo();
-      await createPrintOrder(
-        {
-          orderNo: printOrderNo,
-          userId: input.userId,
-          modelFileName: printSpec.modelFileName,
-          modelUrl: printSpec.modelUrl,
-          modelSizeBytes: printSpec.modelSizeBytes,
-          quote: line.printQuote,
-          contactName: input.address.recipientName,
-          contactEmail: input.email,
-          contactPhone: input.address.phone,
-          note: input.note ?? null,
-          locale,
-          storefrontOrderId: orderId,
-          shippingAddress: input.address,
-        },
-        tx
-      );
-      printOrderNos.push(printOrderNo);
     }
   });
 
@@ -837,7 +717,6 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
     shippingCents,
     totalCents,
     currency: PRICE_CURRENCY,
-    printOrderNos,
     paymentIssue,
   };
 }
@@ -883,7 +762,6 @@ async function reusePendingOrder(
     shippingCents: reusable.order.shippingCents,
     totalCents: reusable.order.totalCents,
     currency: reusable.order.currency,
-    printOrderNos: reusable.printOrderNos,
     // 「没配好」和「这次挂了」要分开 —— 前者重试没用(见 `payment-issue.ts`)
     paymentIssue: link.ok
       ? null

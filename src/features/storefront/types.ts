@@ -16,11 +16,6 @@
  */
 
 import type { PRICE_CURRENCY } from "@/config/currency";
-import type {
-  DeliveryRates,
-  DeliveryTierId,
-} from "@/features/print-quote/lib/delivery-tier";
-import type { PrintSupportFeeBand } from "@/features/print-quote/lib/quote-types";
 
 /* -------------------------------------------------------------------------- */
 /*  Product / Variant(对齐 atelier store 的 Product 契约)                     */
@@ -187,95 +182,11 @@ export interface StorefrontProduct {
 /* -------------------------------------------------------------------------- */
 
 /**
- * 打印服务购物车行 —— 几何 + 交期 + 模型文件
- *
- * ## 为什么打印服务是「服务行」而不是「商品行」
- *
- * 商城里别的行是**目录商品 + 规格**(尺寸 / 材质 / 配件),价格由
- * `calculatePricing()` 按目录算。打印服务不是目录商品:它是来料加工 ——
- * 用户自带 3D 模型,按克重计价,没有对应的 SKU 可选。
- *
- * 所以打印服务行走的是另一套定价:`computePrintQuote()`(几何 → 克重 → 价),
- * 载体变体也换成专门的「打印服务」载体行(见 `sellbase/lib/carrier.ts`)。
- *
- * ## 字段跟 `PrintQuoteInput` 对齐
- *
- * 几何那几个字段直接就是 `PrintQuoteInput` 的字段 —— 购物车里存的这份
- * 规格,结算时会被原样交给 `computePrintQuote()` 重算一遍(客户端带来的价
- * 一律不信)。多出来的三个 `model*` 字段是**模型文件**:工作室照着它取件。
- */
-export interface PrintServiceSpec {
-  /** 体积 cm³ */
-  volumeCM3: number;
-  /** 表面积 cm² */
-  surfaceAreaCM2: number;
-  /** 成品尺寸 mm:X=长 Y=宽 Z=高 */
-  dims: [number, number, number];
-  /** 智能摆盘算出的支撑克重 g;没跑摆盘是 null */
-  supportWeightG: number | null;
-  /** 本体支撑比例(1 = 1:1);没跑摆盘是 null */
-  selfSupportRatio: number | null;
-  /** 交期档位 —— 加价按小计比例收 */
-  deliveryTier: DeliveryTierId;
-  /** 模型文件名(用户上传时的原名) */
-  modelFileName: string;
-  /** 模型文件在 R2 上的对象键 —— 归属校验靠它 */
-  modelObjectKey: string;
-  /** 模型文件在 R2 上的永久 URL */
-  modelUrl: string;
-  /** 模型文件字节数 */
-  modelSizeBytes: number | null;
-  /**
-   * 耗材克重 g —— **纯展示用**
-   *
-   * 服务端算报价时按「体积 × 材料密度」算出来的,客户端拿不到密度(那是服务端
-   * 的配置),所以这个数由**服务端**在重算之后回填(见 `cart-store.ts` 的
-   * `repriceLineItem()`)。
-   *
-   * 它不参与定价 —— 定价只看几何(体积 / 表面积 / 尺寸 / 支撑)。所以客户端
-   * 传错也收不到钱,只是购物车里的克重显示会不对。
-   */
-  materialWeightG?: number | null;
-  /**
-   * 这一行的交期加价(分)—— **纯展示用**(2026-11-06)
-   *
-   * 服务端重算报价时算出来的,同样在读的时候回填。
-   *
-   * 有了它,客户端就能反推出「不含加价的小计」(`行价 - 加价`),于是打印单
-   * 上能把**三档**的加价都摆出来(「48 小时 +¥20.65」)—— 用户在点加急之前
-   * 就知道要加多少钱,而不是点了之后才发现价跳了。
-   */
-  deliveryFeeCents?: number | null;
-  /**
-   * 各档加价比例 —— **纯展示用**(2026-11-06)
-   *
-   * 服务端给的(比例可以用环境变量调,见 `quote-server.ts`)。客户端不自己
-   * 认一份 —— 两边各认一份就会出现「页面写 +¥20.65、实际收 ¥19.85」。
-   */
-  deliveryRates?: DeliveryRates | null;
-  /**
-   * 这一行的支撑加价(分)—— **纯展示用**(2026-11-06)
-   *
-   * 服务端重算报价时算出来的,同样在读购物车的时候回填。
-   *
-   * 支撑加价默认**关着**(后台 `/admin/print-pricing` 里开),所以大多数行
-   * 上这个是 null —— 界面按它 > 0 才摆出来。
-   */
-  supportFeeCents?: number | null;
-  /**
-   * 支撑加价的**分段明细** —— **纯展示用**(2026-11-06)
-   *
-   * 工作室的规则是分段的(1:1~1:2 按 0.5 元/g,超 1:2 按 1 元/g),一笔支撑
-   * 费不是一个数,得说清哪一段按哪个价收的。
-   *
-   * 各档 `feeCents` 之和恒等于 `supportFeeCents`。
-   */
-  supportFeeBands?: PrintSupportFeeBand[] | null;
-}
-
-/**
  * CartLineItem.metadata 存的 customize 规格(来自 CustomizationSpec)
  * 与 atelier src/lib/store/customization-spec.ts 的 specToMetadata() 兼容
+ *
+ * **车里只有目录商品**(2026-11-08)—— 打印服务不进商城购物袋,工单自己建、
+ * 自己收款(见 `POST /api/print-orders`)。所以这里没有「打印服务规格」那一项。
  */
 export interface CartLineItemMetadata {
   productId: string;
@@ -295,13 +206,6 @@ export interface CartLineItemMetadata {
   previewImage: string;
   /** 渲染前原图 URL(R2) */
   originalImage: string;
-  /**
-   * 打印服务规格 —— **有这一项的行就是打印服务行**
-   *
-   * 判据是「有没有这个字段」,不看 `productId` —— 打印服务在目录里没有
-   * 对应的商品,`productId` 是个固定的哨兵值(见 `lib/print-service.ts`)。
-   */
-  printSpec?: PrintServiceSpec;
 }
 
 export interface CartLineItem {

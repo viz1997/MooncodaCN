@@ -35,7 +35,7 @@ import { useTranslations } from "next-intl";
  * 里 —— `calculatePrice()` 是克重的唯一来源，`unitPrice` 非法会让它返回 null，
  * 连克重一起消失，所以这些 state 绝不删，只是不再渲染。
  *
- * **预估报价不是这里算的**（2026-11-07）：「加入打印单」那张卡上会摆一个
+ * **预估报价不是这里算的**（2026-11-07）：「提交打印订单」那张卡上会摆一个
  * 预估报价 —— 那是**问服务端要的**（`POST /api/print-quote`），访客也能看
  * （后台 `/admin/print-pricing` 一个开关管着）。计算器自己依然不碰价格:
  * 客户端算的价不能信。
@@ -177,9 +177,8 @@ export function PricingCalculator({
   /**
    * 几何变化回调 —— 把「几何 + 支撑」抛给父组件。
    *
-   * 传 null 表示「当前没有模型」。父组件拿它去拼打印服务的规格
-   * （`printSpec`：体积 / 表面积 / 尺寸 / 支撑克重）—— 服务端按这组数
-   * 重算报价。
+   * 传 null 表示「当前没有模型」。父组件拿它去建打印工单(体积 / 表面积 /
+   * 尺寸 / 支撑克重)—— 服务端按这组数重算报价。
    *
    * **这里只抛输入,不抛价格** —— 价格必须服务端算(客户端能改)。
    */
@@ -188,7 +187,7 @@ export function PricingCalculator({
   /**
    * 右栏插槽 —— 渲染在右栏克重面板下方。
    *
-   * `/tools/workbench` 放的是「加入打印单」卡片 —— 卡片上摆服务端算出来的
+   * `/tools/workbench` 放的是「提交打印订单」卡片 —— 卡片上摆服务端算出来的
    * **预估报价**（2026-11-07 起，访客也能看，后台一个开关管着），出口还是
    * 把模型加进打印单。
    *
@@ -208,11 +207,11 @@ export function PricingCalculator({
    * 「按当前姿态把支撑算出来」的入口 —— 父组件拿它去补支撑克重
    *
    * 支撑**不跟随角度实时重算**(工作室 2026-11-07 的口径):用户把角度摆定
-   * 之后点「包裹支撑」才算一次。但「加入打印单」必须带上支撑克重 ——
+   * 之后点「包裹支撑」才算一次。但「提交打印订单」必须带上支撑克重 ——
    * 服务端按它重算报价,少了它支撑费会算成 0(收少了钱)。用户没点过那颗
    * 按钮时,这里现算一次。
    *
-   * 回调收到的是那个函数本身,父组件把它存起来,在加购之前 await 一下。
+   * 回调收到的是那个函数本身,父组件把它存起来,在提交之前 await 一下。
    */
   onEnsureSupport?: (ensure: EnsureSupportFn) => void;
 
@@ -354,7 +353,7 @@ export function PricingCalculator({
    *
    * 所以这个值有两个来源:
    * 1. 用户点「包裹支撑」→ 算一次(带外壳,画面上那圈就是它)
-   * 2. 用户点「加入打印单」而没点过那颗按钮 → 现算一次(**只要数**,不要
+   * 2. 用户点「提交打印订单」而没点过那颗按钮 → 现算一次(**只要数**,不要
    *    外壳)—— 服务端重算报价要那个支撑克重,少了它支撑费会算成 0
    *
    * 角度一变 → 这个值被清空(见下面那个「作废」的 effect)。
@@ -373,7 +372,7 @@ export function PricingCalculator({
    * 焊接(Worker 加载模型)的 promise —— 拿来**等**它
    *
    * 模型刚解析完的时候焊接还在跑(大模型好几秒)。用户要是这时候就点
-   * 「加入打印单」,算支撑得先等焊接完 —— 不然算不出支撑,单子就少了
+   * 「提交打印订单」,算支撑得先等焊接完 —— 不然算不出支撑,单子就少了
    * 支撑费(服务端按 `supportWeightG ?? 0` 算)。
    */
   const supportLoadRef = useRef<Promise<unknown> | null>(null);
@@ -418,7 +417,7 @@ export function PricingCalculator({
    *
    * 支撑**不跟随角度实时重算**(工作室 2026-11-07 的口径):用户把角度摆定
    * 之后点「包裹支撑」才算一次。所以「算支撑」这个动作发生在**事件回调**
-   * 里(点按钮 / 加购),那会儿拿不到最新的 state —— 用这个 ref 兜住。
+   * 里(点按钮 / 提交),那会儿拿不到最新的 state —— 用这个 ref 兜住。
    *
    * 在渲染期同步(ref 就是「此刻的值」,不是「上一次渲染的值」)。
    */
@@ -512,7 +511,7 @@ export function PricingCalculator({
     setSupportError(null);
     // 换模型 → 旧模型的自检结论作废(新模型还没焊)
     setMeshSummary(null);
-    // 焊接的 promise 存一份 —— 「加入打印单」那会儿模型可能**还没焊完**,
+    // 焊接的 promise 存一份 —— 「提交打印订单」那会儿模型可能**还没焊完**,
     // 那时算支撑得先等它(见下面 `ensureSupport`)
     const loading = client.load("main", positions, fileName ?? undefined);
     supportLoadRef.current = loading;
@@ -699,7 +698,7 @@ export function PricingCalculator({
   const quoteInputRef = useRef<PrintQuoteInput | null>(null);
 
   /**
-   * 「按当前姿态把支撑算出来」—— 外面(加入打印单)要支撑克重时用它
+   * 「按当前姿态把支撑算出来」—— 外面(提交打印订单)要支撑克重时用它
    *
    * ## 为什么要有这个入口
    *
@@ -707,7 +706,7 @@ export function PricingCalculator({
    * 之后点浮层上那颗「包裹支撑」,才算一次(支撑克重 + 总克重 + 画出来那圈
    * 支撑,三者来自同一次计算)。
    *
-   * 但「加入打印单」**必须带上支撑克重** —— 服务端按这组数重算报价
+   * 但「提交打印订单」**必须带上支撑克重** —— 服务端按这组数重算报价
    * (`quote-server.ts` 的 `input.supportWeightG ?? 0`),少了它支撑费会算成 0,
    * 收少了钱。用户没点过那颗按钮的时候,这里现算一次。
    *
@@ -715,7 +714,7 @@ export function PricingCalculator({
    *
    * 1. **算过了就不重算** —— `poseSupport` 有值就说明当前姿态已经算过
    *    (角度一变它就被清空了,见上面那个「作废」的 effect)。
-   * 2. **只要数,不要几何** —— 加购要的是支撑克重,那块最贵的外壳不用建。
+   * 2. **只要数,不要几何** —— 提交要的是支撑克重,那块最贵的外壳不用建。
    */
   const ensureSupport =
     useCallback(async (): Promise<PrintQuoteInput | null> => {
@@ -728,8 +727,8 @@ export function PricingCalculator({
       /**
        * 模型还没焊完 → **等它**
        *
-       * 用户刚拖进模型就点「加入打印单」是常事,而焊接大模型要好几秒。
-       * 这时候算支撑得先等焊接完 —— 不然算不出来,加购那一条就带着
+       * 用户刚拖进模型就点「提交打印订单」是常事,而焊接大模型要好几秒。
+       * 这时候算支撑得先等焊接完 —— 不然算不出来,提交那一条就带着
        * `supportWeightG` 缺失过去,服务端的 `input.supportWeightG ?? 0` 会把
        * 支撑费算成 0(收少了钱)。
        */
@@ -754,7 +753,7 @@ export function PricingCalculator({
           rotZ: manualRotRef.current.z,
           scales: [sx, sy, sz],
           params: supportParams,
-          // 只要数,不要那块几何 —— 加购要的是支撑克重
+          // 只要数,不要那块几何 —— 提交要的是支撑克重
           withShell: false,
         });
         // 算完了 → 页面上的三个克重数也立刻有(支撑是**当前姿态**的)
@@ -785,7 +784,7 @@ export function PricingCalculator({
   /**
    * 把「现算支撑」的入口交给父组件
    *
-   * 父组件(加入打印单那张卡)在加购之前会 await 它 —— 服务端重算报价要那个
+   * 父组件(提交打印订单那张卡)在提交之前会 await 它 —— 服务端重算报价要那个
    * 支撑克重,少了它支撑费会算成 0。
    */
   useEffect(() => {
@@ -1811,9 +1810,15 @@ export function PricingCalculator({
           </header>
         )}
 
-        <main className="flex-1 max-w-[1280px] w-full mx-auto px-4 sm:px-6 py-6 sm:py-10">
+        {/* 容器封顶 1600px(2026-11-09)
+            —— 以前是 1280px。右边多了一张「提交打印订单」卡(320px)之后,
+            3D 视口只剩 `1280 − 48 − 336 − 400 ≈ 496px` —— 挤得没法看。
+
+            **介绍 / 模式切换那两段仍然是 1280px**(`max-w-[1280px] mx-auto`)
+            —— 它们跟页面头部对齐,只有下面那块 3D 工作台用满 1600px。 */}
+        <main className="flex-1 max-w-[1600px] w-full mx-auto px-4 sm:px-6 py-6 sm:py-10">
           {/* ---------- 介绍 ---------- */}
-          <section className="mb-6">
+          <section className="mb-6 max-w-[1280px] mx-auto">
             <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">
               {t("intro.title")}
             </h2>
@@ -1827,7 +1832,7 @@ export function PricingCalculator({
           </section>
 
           {/* ---------- 模式切换 ---------- */}
-          <section className="mb-6">
+          <section className="mb-6 max-w-[1280px] mx-auto">
             <div className="inline-flex rounded-lg border border-stone-200 bg-white p-1 shadow-sm">
               <button
                 type="button"
