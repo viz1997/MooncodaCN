@@ -2,7 +2,10 @@
 // 与 Mooncoda 现有 /api/upload/presigned 独立，使用 R2_* 环境变量，免登录场景适用
 import {
   CopyObjectCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -90,6 +93,164 @@ export async function presignUpload(opts: {
     objectKey: opts.objectKey,
     headers: { "Content-Type": opts.contentType },
   };
+}
+
+/**
+ * 公开访问域名配了没有
+ *
+ * `getPublicUrl()` 在没配 `R2_PUBLIC_BASE_URL` 时会退化成 S3 API 地址
+ * (`https://<account>.r2.cloudflarestorage.com/<bucket>/<key>`)—— 那个地址在
+ * 浏览器里**打不开**(要签名),拿它当 `<img src>` 就是一个裂图。
+ *
+ * 所以后台的文件管理页要先问一句这个:配了才能摆缩略图 / 直接预览。
+ */
+export function hasPublicBase(): boolean {
+  return Boolean(publicBaseUrl);
+}
+
+/**
+ * 签一个**下载**用的临时 URL(GetObject)
+ *
+ * ## 为什么不用公开链接下载
+ *
+ * 公开链接要求「这个对象是公开可读的」。桶里的对象**不一定**都是公开的,而且
+ * 公开链接一旦发出去就长期有效 —— 工作室把模型文件链接发到微信里,那条链接
+ * 就一直能用。签名 URL 有时效(默认 15 分钟),下载完就废。
+ *
+ * ## 强制下载
+ *
+ * 给 `filename` 就带上 `response-content-disposition: attachment` —— 浏览器
+ * 直接把文件存下来,而不是在标签页里打开(模型 zip 在浏览器里打开就是一堆
+ * 乱码)。
+ *
+ * 这个参数是**签进签名里**的(走 `GetObjectCommand` 的 `ResponseContentDisposition`,
+ * 不是事后往 URL 上挂 query)—— 事后挂会让签名对不上。
+ *
+ * ## 失败语义
+ *
+ * 对象不存在 → 抛错(调用方决定是 404 还是别的)。
+ */
+export async function presignDownload(
+  objectKey: string,
+  opts: { expiresIn?: number; filename?: string } = {}
+): Promise<string> {
+  const client = getR2Client();
+  const cmd = new GetObjectCommand({
+    Bucket: bucket,
+    Key: objectKey,
+    ...(opts.filename
+      ? {
+          ResponseContentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(opts.filename)}`,
+        }
+      : {}),
+  });
+  return getSignedUrl(client, cmd, { expiresIn: opts.expiresIn ?? 900 });
+}
+
+/**
+ * 列出桶里的对象 —— 后台文件管理页用
+ *
+ * ## delimiter 是干什么的
+ *
+ * `Delimiter: "/"` 让 R2 在「这一层」停下:
+ *
+ * - `CommonPrefixes` = 这一层的**子目录**(以 `/` 结尾的前缀)
+ * - `Contents` = 这一层**直接放着**的文件
+ *
+ * 这正好是文件管理页要的「文件夹 + 文件」两层视图。不用 delimiter 的话
+ * 一次会把这个前缀下**所有**子目录的文件全倒出来。
+ *
+ * ## 翻页
+ *
+ * 返回 `nextContinuationToken` —— 下一次带着它再调一次就接着往后翻。
+ * 这个 token 是**不透明**的,只能原样传回去,别自己拼。
+ *
+ * 注意:带 delimiter 时,一次返回的条目数(目录 + 文件)合起来算 `MaxKeys`。
+ */
+export interface R2ObjectSummary {
+  /** 对象键(完整路径) */
+  key: string;
+  /** 字节数 */
+  size: number;
+  /** 最后修改时间(ISO 字符串) */
+  lastModified: string;
+  /** ETag(去掉引号) */
+  etag: string;
+}
+
+/** 一次列目录的结果 */
+export interface R2Listing {
+  /** 这一层直接放着的文件 */
+  objects: R2ObjectSummary[];
+  /** 这一层的子目录(以 `/` 结尾的前缀) */
+  prefixes: string[];
+  /** 下一页的游标;null = 没有下一页 */
+  nextContinuationToken: string | null;
+  /** 还有没有下一页 */
+  isTruncated: boolean;
+}
+
+export async function listObjects(
+  opts: {
+    /** 只看这个前缀下面的 */
+    prefix?: string;
+    /** 目录分隔符 —— 后台文件管理页传 `"/"` */
+    delimiter?: string;
+    /** 上一页给的游标 */
+    continuationToken?: string;
+    /** 一页最多几个条目(目录 + 文件合起来) */
+    maxKeys?: number;
+  } = {}
+): Promise<R2Listing> {
+  const client = getR2Client();
+  const res = await client.send(
+    new ListObjectsV2Command({
+      Bucket: bucket,
+      ...(opts.prefix ? { Prefix: opts.prefix } : {}),
+      ...(opts.delimiter ? { Delimiter: opts.delimiter } : {}),
+      ...(opts.continuationToken
+        ? { ContinuationToken: opts.continuationToken }
+        : {}),
+      MaxKeys: opts.maxKeys ?? 200,
+    })
+  );
+
+  return {
+    objects: (res.Contents ?? []).map((o) => ({
+      key: o.Key ?? "",
+      size: o.Size ?? 0,
+      lastModified: o.LastModified?.toISOString() ?? "",
+      etag: (o.ETag ?? "").replace(/^"|"$/g, ""),
+    })),
+    prefixes: (res.CommonPrefixes ?? [])
+      .map((p) => p.Prefix ?? "")
+      .filter(Boolean),
+    nextContinuationToken: res.NextContinuationToken ?? null,
+    isTruncated: Boolean(res.IsTruncated),
+  };
+}
+
+/**
+ * 删一个对象
+ *
+ * ## 可能失败 —— 而且失败是**常态**
+ *
+ * 这个桶的桶策略锁着对象(`ObjectLockedByBucketPolicy`,HTTP 409)—— 2026-11-01
+ * 实测过一次。桶策略是在 Cloudflare 后台配的,**代码改不了**。
+ *
+ * 所以这里**原样把错误抛出去**,让上层去分「桶策略锁着」和「真出错了」:
+ * 前者要跟用户说「要去 Cloudflare 后台改桶策略」,后者才是「重试有用」。
+ *
+ * 用法上唯一的硬规矩:**别拿它做清理脚本** —— 删不掉,还会把真错误盖住。
+ */
+export async function deleteObject(objectKey: string): Promise<void> {
+  const client = getR2Client();
+  await client.send(
+    new DeleteObjectCommand({
+      Bucket: bucket,
+      Key: objectKey,
+    })
+  );
 }
 
 export async function objectExists(objectKey: string): Promise<boolean> {

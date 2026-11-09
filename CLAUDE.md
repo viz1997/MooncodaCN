@@ -1534,6 +1534,94 @@ pnpm migrate:apply-print-pricing   # = tsx scripts/apply-print-pricing-schema.ts
 |---|---|
 | `src/test/print-quote/pure/print-order-error.test.ts` | code → 文案 key 的映射 / **认不出来的 code 退回 `null`** / 两种服务端错误约定都认 / 原始 SQL 不进响应体 / **`CART_KIND_MISMATCH` 没有了** |
 
+### 后台文件管理(2026-11-08)
+
+工作室的要求:**「后台需要增加文件管理」**。范围 = **整个 R2 桶**,落地页默认停在
+`print-orders/`(工作室日常看的是打印模型那一支),**做删除按钮**(桶策略真拒了
+就把真原因摆出来),**要显示归属**(用户名 + 邮箱)。
+
+- **路由** —— `/admin/files`(侧边栏「文件管理」)。RSC 只渲染
+  `<FilesAdminView />`,RBAC 由父 layout 的 `checkAdmin()` 守。
+- **模块** —— `src/features/storage/admin/`
+
+  | 文件 | 干什么 |
+  |---|---|
+  | `types.ts` | 视图模型(`AdminFileObject` / `AdminFileFolder` / `AdminFilesListing` / 错误码)。**不在 `"use server"` 文件里** —— 那种文件 re-export 类型会让 Turbopack 注册出一个不存在的 action,运行时 `ReferenceError` → 整页 500 |
+  | `lib/paths.ts` | 纯函数:前缀 / 对象键的校验、`folderName()` / `parentPrefix()` / `buildBreadcrumb()` / `fileExt()` / `fileKind()` / `printOrderScopeFromKey()` / `rawUserIdFromKey()` |
+  | `lib/owner-map.ts` | 纯函数:`buildOwnerIndex(users)` → `{byId, byScope}`;`resolveFileOwner(key, index)` |
+  | `lib/owner-store.ts` | 服务端:读 `user` 表(id/name/email)→ 喂给 `buildOwnerIndex`。**读库失败不抛** —— 归属显示不出来而已,不该让整个文件列表打不开 |
+  | `lib/errors.ts` | 纯函数:R2 抛回来的东西 → 稳定的码 |
+  | `actions.ts` | `"use server"` + `adminAction` |
+  | `components/files-admin-view.tsx` | 客户端视图 |
+
+- **这一页管的是 R2 桶(`R2_*`),不是头像桶** —— `features/storage/providers/s3.ts`
+  那个桶走 `STORAGE_*` 环境变量,跟这一页没关系。走错桶 = 页面空着。
+
+#### 键的形状
+
+```
+print-orders/<scope>/<YYYY-MM-DD>/<时间戳>-<nanoid>.<ext>   打印模型(按用户分区)
+gpt-image/…  image-gen/…  canvas/results/<userId>/…  user-uploads/<userId>/…
+public-uploads/…  orders/…
+```
+
+- `<scope>` = `sha256(userId)` 的前 16 位(`print-quote/lib/upload-key.ts` 的
+  `printOrderScope()`)—— **必须 import 同一个函数**,自己另写一份 sha256 两边
+  对不上,谁也认不出谁。
+- 2026-11-01 之前的老键是 `print-orders/<日期>/…`,**没有分区** —— 那一支
+  认不出归属,显示「—」是对的。
+- 桶里现存的 1089 个对象,每一段都长成 `[\w.-]+`(已核对,零例外),也没有一个
+  键含 `..`。校验规则就是照这个定的:前缀 = `""` 或 `段(/段)*` + 结尾斜杠;
+  对象键 = `段(/段)*`,不能以斜杠结尾。**服务端校验**,不收客户端的路径。
+
+#### 归属是**反查**出来的
+
+sha256 不可逆,但**用户表是有限的** —— 把表里每个 userId 都算一遍哈希,建一张
+「哈希 → 用户」的表就能反查。这是**枚举**,不是破解。
+
+- `print-orders/<scope>/…` → 查 `byScope`
+- `user-uploads/<userId>/…` 和 `canvas/results/<userId>/…` → 直接是裸 userId,
+  查 `byId`
+- 其它(`gpt-image/` / `orders/` / `public-uploads/`)→ 认不出来,摆「—」,**不猜**
+
+用户表只有几百到几千行,只取三列,同一个请求内只查一次(`cache()`)—— 成本很低。
+
+#### 「文件夹 + 文件」两层视图 = `Delimiter: "/"`
+
+`ListObjectsV2` 传 `Delimiter: "/"` → R2 在「这一层」停下,返回
+`CommonPrefixes`(子目录)+ `Contents`(本层文件)。不传 delimiter 的话一次会把这个
+前缀下**所有**子目录的文件全倒出来。翻页用不透明的 `NextContinuationToken`,
+原样传回去。
+
+#### 公开链接 ≠ 下载链接
+
+- `getPublicUrl()` 在**没配** `R2_PUBLIC_BASE_URL` 时会退化成 S3 API 地址
+  (`https://<account>.r2.cloudflarestorage.com/<bucket>/<key>`)—— 那个地址在
+  浏览器里**打不开**(要签名)。所以 `hasPublicBase()` 为假的时候:不摆缩略图、
+  「复制链接」只摆一句提示。
+- 「下载 / 预览」走 **15 分钟的签名 URL**(`presignDownload`)。强制下载靠
+  `GetObjectCommand` 的 `ResponseContentDisposition`(`attachment; filename*=…`)
+  —— 这个参数是**签进签名里**的,不是事后往 URL 上挂 query(挂了签名就对不上)。
+
+#### 删除大概率会失败 —— 而且失败是**预期内**的
+
+这个桶的桶策略锁着对象(`ObjectLockedByBucketPolicy`,HTTP 409,2026-11-01 实测
+过一次)。桶策略在 Cloudflare 后台配,**代码改不了**。
+
+- `ObjectLockedByBucketPolicy` / 409 → `R2_DELETE_BLOCKED` → 界面摆
+  **「桶策略锁着这个对象,删不掉 —— 要删得去 Cloudflare 后台改桶策略」**
+- 404 / `NoSuchKey` → `NOT_FOUND`
+- 其它 → `DELETE_FAILED`
+
+**重试对 `R2_DELETE_BLOCKED` 没用** —— 所以那句提示必须说清楚要去找谁改。哪天
+桶策略解锁了,这个按钮**不用改**就能删。
+
+#### 行为由单测守住
+
+| 测试 | 守住什么 |
+|---|---|
+| `src/test/storage/pure/files-admin.test.ts` | 列的是 **R2 桶**不是头像桶 / 前缀和对象键在**服务端**校验 / 删除把 `ObjectLockedByBucketPolicy` 映射成 `R2_DELETE_BLOCKED` / 归属用 `printOrderScope`(同一个 sha256)/ 认三种归属形状 / **「use server」文件不 re-export 类型** / 中英文 `AdminFiles` 键一样 / 侧边栏有这一项 |
+
 ### 买家的三样东西搬出控制台(2026-11-06)
 
 工作室的原话:**「打印订单、购物订单、地址管理不放在控制台里面,而是电商首页

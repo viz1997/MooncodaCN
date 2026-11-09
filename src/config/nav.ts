@@ -4,6 +4,7 @@ import {
   Box,
   Boxes,
   Cpu,
+  FolderOpen,
   Frame,
   Globe,
   Headset,
@@ -353,6 +354,13 @@ export const adminNav: NavGroup[] = [
         title: "打印定价",
         href: "/admin/print-pricing",
         icon: SlidersHorizontal,
+      },
+      // 2026-11-08：后台文件管理 —— 浏览整个 R2 桶（打印模型 / 生图结果 /
+      // 画布产物 / 上传件）。看的是 `R2_*` 那个桶,不是头像桶(`STORAGE_*`)。
+      {
+        title: "文件管理",
+        href: "/admin/files",
+        icon: FolderOpen,
       },
       {
         title: "商品管理",

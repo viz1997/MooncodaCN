@@ -998,7 +998,8 @@
       "gptImageTemplates": "模板管理",
       "gptImageOrders": "订单管理",
       "printOrders": "打印订单",
-      "printPricing": "打印定价"
+      "printPricing": "打印定价",
+      "files": "文件管理"
     }
   },
   "AdminOrders": {
@@ -2041,5 +2042,76 @@
     "qrHint": "用微信扫一扫,付款完成后会自动更新",
     "qrPaidTitle": "支付成功",
     "qrPaid": "已经收到款,马上开始制作。"
+  },
+  "AdminFiles": {
+    "title": "文件管理",
+    "subtitle": "R2 存储桶里的全部文件 —— 打印模型、生图结果、画布产物、上传件",
+    "breadcrumb": {
+      "root": "全部文件"
+    },
+    "table": {
+      "folder": "目录",
+      "name": "文件名",
+      "size": "大小",
+      "type": "类型",
+      "owner": "归属",
+      "updatedAt": "上传时间",
+      "actions": "操作"
+    },
+    "actions": {
+      "open": "打开",
+      "copyLink": "复制链接",
+      "preview": "预览",
+      "download": "下载",
+      "delete": "删除",
+      "cancel": "取消",
+      "refresh": "刷新",
+      "loadMore": "加载更多"
+    },
+    "filter": {
+      "placeholder": "按文件名过滤(当前层)"
+    },
+    "sort": {
+      "timeDesc": "上传时间 ↓",
+      "timeAsc": "上传时间 ↑",
+      "sizeDesc": "大小 ↓"
+    },
+    "types": {
+      "image": "图片",
+      "model": "模型",
+      "archive": "压缩包",
+      "document": "文档",
+      "other": "其他"
+    },
+    "owner": {
+      "unknown": "—"
+    },
+    "messages": {
+      "loading": "加载中…",
+      "loadingHint": "正在从 R2 列目录",
+      "empty": "这一层没有文件",
+      "emptyHint": "换个目录看看,或者点「全部文件」回根目录",
+      "loadFailed": "列目录失败 —— 看服务端日志",
+      "loadMoreFailed": "加载更多失败",
+      "copied": "链接已复制",
+      "copyFailed": "复制失败 —— 浏览器没给剪贴板权限",
+      "publicBaseMissing": "没配 R2_PUBLIC_BASE_URL —— 公开链接在浏览器里打不开,用「下载」",
+      "downloadFailed": "取下载地址失败",
+      "deleteTitle": "确认删除这个文件?",
+      "deleteContent": "对象键:{key}",
+      "deleteSuccess": "已删除",
+      "deleteFailed": "删除失败",
+      "total": "本层 {count} 个文件 · {size}"
+    },
+    "errors": {
+      "R2_NOT_CONFIGURED": "R2 没配置 —— 检查 R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY",
+      "INVALID_PREFIX": "路径不合法",
+      "INVALID_KEY": "对象键不合法",
+      "LIST_FAILED": "列目录失败 —— 看服务端日志",
+      "R2_DELETE_BLOCKED": "桶策略锁着这个对象,删不掉 —— 要删得去 Cloudflare 后台改桶策略",
+      "NOT_FOUND": "对象不存在",
+      "DELETE_FAILED": "删除失败 —— 看服务端日志",
+      "DOWNLOAD_FAILED": "取下载地址失败 —— 看服务端日志"
+    }
   }
 }

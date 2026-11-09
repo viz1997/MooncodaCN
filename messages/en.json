@@ -1001,7 +1001,8 @@
       "gptImageTemplates": "Templates",
       "gptImageOrders": "Orders",
       "printOrders": "Print Orders",
-      "printPricing": "Print Pricing"
+      "printPricing": "Print Pricing",
+      "files": "Files"
     }
   },
   "AdminOrders": {
@@ -2044,5 +2045,76 @@
     "qrHint": "Scan with WeChat — this updates once the payment lands",
     "qrPaidTitle": "Payment received",
     "qrPaid": "Payment received — we will start right away."
+  },
+  "AdminFiles": {
+    "title": "Files",
+    "subtitle": "Every file in the R2 bucket — print models, generated images, canvas results, uploads",
+    "breadcrumb": {
+      "root": "All files"
+    },
+    "table": {
+      "folder": "Folder",
+      "name": "Name",
+      "size": "Size",
+      "type": "Type",
+      "owner": "Owner",
+      "updatedAt": "Uploaded",
+      "actions": "Actions"
+    },
+    "actions": {
+      "open": "Open",
+      "copyLink": "Copy link",
+      "preview": "Preview",
+      "download": "Download",
+      "delete": "Delete",
+      "cancel": "Cancel",
+      "refresh": "Refresh",
+      "loadMore": "Load more"
+    },
+    "filter": {
+      "placeholder": "Filter by file name in this folder"
+    },
+    "sort": {
+      "timeDesc": "Newest first",
+      "timeAsc": "Oldest first",
+      "sizeDesc": "Largest first"
+    },
+    "types": {
+      "image": "Image",
+      "model": "Model",
+      "archive": "Archive",
+      "document": "Document",
+      "other": "Other"
+    },
+    "owner": {
+      "unknown": "—"
+    },
+    "messages": {
+      "loading": "Loading…",
+      "loadingHint": "Listing the bucket",
+      "empty": "Nothing here",
+      "emptyHint": "Pick another folder, or go back to All files",
+      "loadFailed": "Could not list this folder — check the server log",
+      "loadMoreFailed": "Could not load more",
+      "copied": "Link copied",
+      "copyFailed": "Copy failed — the browser denied clipboard access",
+      "publicBaseMissing": "R2_PUBLIC_BASE_URL is not set — public links do not open in a browser, use Download instead",
+      "downloadFailed": "Could not get a download URL",
+      "deleteTitle": "Delete this file?",
+      "deleteContent": "Object key: {key}",
+      "deleteSuccess": "Deleted",
+      "deleteFailed": "Delete failed",
+      "total": "{count} files in this folder · {size}"
+    },
+    "errors": {
+      "R2_NOT_CONFIGURED": "R2 is not configured — check R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY",
+      "INVALID_PREFIX": "That path is not allowed",
+      "INVALID_KEY": "That object key is not allowed",
+      "LIST_FAILED": "Could not list the bucket — check the server log",
+      "R2_DELETE_BLOCKED": "The bucket policy locks this object, so it cannot be deleted — change the bucket policy in the Cloudflare dashboard",
+      "NOT_FOUND": "That object no longer exists",
+      "DELETE_FAILED": "Delete failed — check the server log",
+      "DOWNLOAD_FAILED": "Could not sign a download URL — check the server log"
+    }
   }
 }
