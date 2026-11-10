@@ -24,6 +24,23 @@ export const siteConfig = {
   /** 站点名称 */
   name: "Mooncoda",
 
+  /**
+   * 海外独立站(Shopify)的顾客访问地址 —— **没配 = 不显示入口**
+   *
+   * 走环境变量 `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL`。空字符串 ⇒ 英文站上
+   * 既没有顶部公告条、也没有导航按钮(别留一条指向空地址的死链)。
+   *
+   * ⚠️ **这跟 `src/features/payments/providers/shopify/` 那个支付通道不是
+   * 一回事** —— 那个 2026-11-05 就下线了(`SHOPIFY_STORE_DOMAIN` 那套是
+   * Admin API,给收款用的)。这里说的是**另一个 Shopify 店铺的顾客访问
+   * 地址**:工作室的独立站在境外,境外的买家在那儿下单。
+   *
+   * `NEXT_PUBLIC_*` 是**构建期内联**的 ⇒ 改完环境变量要**重新部署**才生效,
+   * 不是改完环境变量刷新页面就行。
+   */
+  internationalStoreUrl:
+    process.env.NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL?.trim() || "",
+
   /** 中文站点名（页面标题 / 邮件签名使用） */
   nameZh: "Mooncoda 梦可达",
 

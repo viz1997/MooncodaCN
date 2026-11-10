@@ -12,11 +12,12 @@ Mooncoda is a production-ready Next.js SaaS template. It provides a complete fou
 
 | 系统 | 职责 | 技术栈 |
 |---|---|---|
-| **NextDevTpl**(本仓库) | AI 生图 SaaS 后端:user / credits / photo / imageJob / AI 路由 / WeChat 小程序登录 **+ 商品目录(商品 / SKU 变体 / 价格)+ 定价 + 购物车(`/cart`)+ 订单事实 + 收货地址 + 打印工单(打印前工作台 `/tools/workbench` 量 → 点「报价」→ 弹窗里下单 → `POST /api/print-orders` → `print_order`,按 `user_id` 归属,列表在 `/account/print-orders`,工单**自己收款**;打印服务**不进**商城购物袋,车里只有目录商品,见「打印服务直接建工单」)** | Next.js 16 + Drizzle + PostgreSQL |
+| **NextDevTpl**(本仓库) | AI 生图 SaaS 后端:user / credits / photo / imageJob / AI 路由 / WeChat 小程序登录 **+ 商品目录(商品 / SKU 变体 / 价格)+ 定价 + 购物车(`/cart`)+ 订单事实 + 收货地址 + 打印工单(打印前工作台 `/tools/workbench` 量 → 点「报价」→ 弹窗里下单 → `POST /api/print-orders` → `print_order`,按 `user_id` 归属,列表在 `/account/print-orders`,工单**自己收款**;打印服务**不进**商城购物袋,车里只有目录商品,见「打印服务直接建工单」)+ 磁吸孔切割工具(`/tools/magnet`,纯前端,**不进工单**,见「磁吸孔切割工具」)** | Next.js 16 + Drizzle + PostgreSQL |
 | **微信支付 / 支付宝**(外部服务) | **自己直连的收款通道**:钱直接进我们自己的商户号 / 账户,没有中间层抽成,定价完全由本仓库说了算。**代码写好了,商户号 / 应用还没走完开通流程** —— 界面上摆出来但选不了(见「两个支付通道」的两道闸) | 微信支付 V3 Native(扫码)+ 支付宝电脑网站支付 |
-| **Shopify**(外部服务)**已下线** | 曾经只做银行卡 / Shop Pay 的收银台(草稿订单,逐分相等)。2026-11-05 工作室决定只用微信 + 支付宝,**不再接新单** —— 代码留着给老单用,整目录待拆 | Shopify Admin GraphQL API + 草稿订单 |
+| **Shopify**(外部服务)**已下线** | 曾经只做银行卡 / Shop Pay 的收银台(草稿订单,逐分相等)。2026-11-05 工作室决定只用微信 + 支付宝,**不再接新单** —— 代码留着给老单用,整目录待拆。⚠️ **这一行说的是「收款通道」** —— 工作室**境外那个独立站**(另一个 Shopify 店铺)跟它**不是一回事**,见「外国访客 → 海外独立站」 | Shopify Admin GraphQL API + 草稿订单 |
 | **Sellbase**(独立服务)**过渡期保留** | 旧收款路:Sellbase 建单 + Stripe 付款页。**不再接新单**(已建好的旧单还能重取支付入口)。两个新通道跑通后整个 `src/features/sellbase/` 拆掉 | Supabase Edge Functions(**跟本仓库同一个 Supabase 项目**)+ Stripe(MIT) |
 | **微信小程序 / 浏览器访客**(外部客户端) | 调 NextDevTpl AI 接口拿候选图 **+ 调 `/api/image-gen/products` 拿商品与 SKU**;调 NextDevTpl `/api/store/**` 加购 + 结算 | Taro 4 + React 18(小程序);Next.js(浏览器) |
+| **海外独立站**(外部服务,工作室自营) | **境外 Shopify 店铺** —— 境外的买家在那儿下单。本仓库**只提供一个入口**:`/en` 页面的顶部公告条 + 导航按钮,地址走 `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL`。**不接单、不算价、不碰钱** | Shopify 店铺前端(独立部署) |
 
 **接入形态 = 「本仓库算价,收银台只负责收钱」**(2026-11-05 取代 Sellbase 单通道):
 - 本仓库算的价 = `items[].unit_price_amount`;收银台那边只是**载体** + 一个能看懂的标题
@@ -1538,6 +1539,67 @@ components/
 | `src/test/magnet/pure/magnet-cut.test.ts` | **真跑 manifold**:立方体切顶面 → 体积减少 ≈ π·r²·d / 结果是流形(能再切一次不炸) / 太薄的板子被拒 / 非流形输入被拒 / 六个面里挑出平整度最高的 |
 | `src/test/magnet/pure/write-obj.test.ts` | 三角汤 → OBJ 文本 / 顶点索引 / Blob |
 | `src/test/magnet/pure/magnet-page.test.ts` | 路由在 / 工具中心登记了 / **视口是复用的那一份** / **不进工单**(不碰报价、工单、R2)/ 拖放用 `useDropZone` / 焊接走 `weldAndAnalyzeTopology` / `Manifold.cylinder` 不加 `new` / **孔径是绝对毫米**(`EXPECTED_WIDTH_MM` 不许进代码)/ wasm 提交进仓库 / 中英文 key 一致 |
+
+### 外国访客 → 海外独立站(2026-11-10)
+
+工作室的独立站是**另一个 Shopify 店铺**(境外的那个)。境外访客落到本仓库之后,
+看到的是人民币价格、境内物流、境内客服 —— 看着就不是给他准备的。要给他一个
+**明确的出口**。
+
+> ⚠️ **这跟 `src/features/payments/providers/shopify/` 那个支付通道不是一回事**
+> —— 那个 2026-11-05 就退出 `ENABLED_PAYMENT_CHANNELS` 了(`SHOPIFY_STORE_DOMAIN`
+> 那套是 Admin API,给收款用的)。这里是**顾客访问地址**。两个变量名也刻意不一样:
+> `SHOPIFY_STORE_DOMAIN` vs `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL`。
+
+#### 「外国访客」在本仓库里就是 `/en` 那一侧
+
+本仓库有 `/en` 和 `/zh` 两个 locale,`localePrefix` 默认 `always` ⇒ URL 一定带
+前缀。**仓库里没有 geo / IP / `navigator.language` 判断**(现在一个都没有,也不该
+为了这个加)—— 「外国访客」就落在 `/en`。
+
+这也避开了 MEMORY 里那条「**不许用 `typeof window` 分支**,SSR 和客户端必须渲染
+一样的 href」:公告条是 **server component**,locale 从 layout 的 `params` 拿,
+两端渲染出来的是同一份 HTML。
+
+#### 四条口径
+
+| 什么 | 口径 |
+|---|---|
+| 出现的位置 | **只在 `/en`** —— 中文站的访客**一点痕迹都看不到**(返回 null,不是「藏起来」) |
+| 公告条 | 顶部一条细条,**挂在头上面**(头是 sticky 的,条在头下面会被盖住) |
+| 导航按钮 | 商城那个头(`WjpStoreHeader`)里的一项,桌面端 + 移动端 Sheet **两处** |
+| 没配地址 | **不显示入口** —— 宁可没有,也不要一条指向空地址的死链 |
+
+- **可见性判定只有一份** —— `shouldShowInternationalStore(locale, url)`
+  (`international-store.ts`,纯函数)。公告条(server)和导航按钮(client)共用它,
+  **两处不可能漂** —— 而且它能进 `unit` project 跑单测,不用起浏览器。
+- **公告条挂在两个 layout 上** —— `(marketing-atelier)`(商城 + 工具页 + 账户页)
+  和 `(marketing)`(博客 / 作品集 / 法律页)。两个 layout 现在都读
+  `params: Promise<{ locale: string }>` —— **读 params 不会把页面变成动态渲染**
+  (`[locale]/layout.tsx` 已经有 `generateStaticParams`,locale 在构建期就是确定的)。
+  别顺手加 `await connection()`。
+- **导航项是站外链接** —— 直接 `<a href target="_blank" rel="noopener noreferrer">`,
+  **不用 next-intl 的 `<Link>`**(那个是给站内路由加 locale 前缀的)。
+- **文案走 i18n** —— `InternationalStore.{bar,barCta,nav}`,en / zh 两份键完全一致。
+  导航项的标题**不在** `occasion-data.ts` 里写死 —— 那一支 `kind: "external"`
+  刻意**不带** `label` / `labelEn`,标题从 `InternationalStore.nav` 来,
+  两份文案不会重复。
+
+#### 环境变量
+
+`NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL` —— 独立站的顾客访问地址。
+
+- **没配就是空字符串**(`src/config/site.ts` 的 `siteConfig.internationalStoreUrl`),
+  空 ⇒ 两边都不显示入口。
+- **`NEXT_PUBLIC_*` 是构建期内联的** ⇒ 改完环境变量要**重新部署**才生效,
+  不是改完刷新页面就行。
+- `.env.example` 被 gitignore ⇒ 变量说明写在 `src/config/site.ts` 的**文件头注释**里。
+
+#### 行为由单测守住
+
+| 测试 | 守住什么 |
+|---|---|
+| `src/test/marketing/pure/international-store.test.ts` | 可见性判定(英文站 + 配了地址才出现;中文站不出现;空地址不出现)/ 地址读 `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL` / **`SHOPIFY_STORE_DOMAIN` 不许进新代码**(别跟已下线的支付通道混)/ 公告条挂在两个 layout 上且在 header **上面** / 布局读了 `params` / `STORE_NAV` 有 `external` 这一支 / 渲染成 `<a target=_blank>` / 桌面端 + 移动端两处都处理了 / 中英文 key 一致 |
 
 ### 打印定价后台(2026-11-06)
 

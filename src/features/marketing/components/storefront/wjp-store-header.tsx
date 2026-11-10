@@ -86,6 +86,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ChevronRight,
+  ExternalLink,
   LayoutDashboard,
   Loader2,
   LogOut,
@@ -95,7 +96,7 @@ import {
   Search,
   ShoppingBag,
 } from "lucide-react";
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import * as React from "react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -114,6 +115,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { siteConfig } from "@/config/site";
 // 头像的 URL 要过一次 getAvatarUrl —— `user.image` 可能是**存储键名**
 // (自己在「账户信息」页上传的头像),不是 URL。直接拿它当 src 会是一张
 // 裂图。刻意从 utils 导入,不走 "@/features/storage" 桶文件(那会把
@@ -126,7 +128,7 @@ import { useStorefrontModal } from "@/features/storefront/hooks/use-storefront-m
 import { Link, usePathname, useRouter } from "@/i18n/routing";
 import { signOut, useSession } from "@/lib/auth/client";
 import { formatCents } from "@/lib/money";
-
+import { shouldShowInternationalStore } from "./international-store";
 import { STORE_NAV } from "./occasion-data";
 
 /**
@@ -162,6 +164,23 @@ function getInitials(name?: string | null, email?: string | null): string {
 export function WjpStoreHeader() {
   const locale = useLocale();
   const isZh = locale === "zh";
+  // 海外独立站那一项的标题走 i18n(别的几项标题写死在 STORE_NAV 里)
+  const tStore = useTranslations("InternationalStore");
+
+  /**
+   * 海外独立站入口要不要出现(2026-11-10)
+   *
+   * 两个条件都要满足:① **英文站**(中文站的境内外访客看到的是同一个站,
+   * 给中文站挂一条「请去境外店」是添乱)② **配了地址**(没配就别留一条
+   * 指向空地址的死链)。
+   *
+   * locale 用 next-intl 的 `useLocale()`(SSR 可见)—— 不用
+   * `typeof window` 分支,两端渲染出来的是同一个导航。
+   */
+  const showExternal = shouldShowInternationalStore(
+    locale,
+    siteConfig.internationalStoreUrl
+  );
 
   const [scrolled, setScrolled] = React.useState(false);
   const [mobileOpen, setMobileOpen] = React.useState(false);
@@ -313,6 +332,22 @@ export function WjpStoreHeader() {
                       >
                         {navLabel(link, isZh)}
                       </button>
+                    ) : link.kind === "external" ? (
+                      // 海外独立站 —— 跳**站外**的另一个 Shopify 店铺,
+                      // 所以是 `<a target="_blank">` 而不是 `<Link>`。
+                      // 只在英文站 + 配了地址时出现(见 showExternal)。
+                      showExternal ? (
+                        <a
+                          key={link.id}
+                          href={link.href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 px-4 py-3 text-sm font-medium hover:bg-muted transition-colors rounded-md"
+                        >
+                          {tStore("nav")}
+                          <ExternalLink className="size-3.5" />
+                        </a>
+                      ) : null
                     ) : (
                       <Link
                         key={link.id}
@@ -438,6 +473,21 @@ export function WjpStoreHeader() {
                   >
                     {navLabel(link, isZh)}
                   </button>
+                ) : link.kind === "external" ? (
+                  // 海外独立站 —— 站外链接用 `<a target="_blank">`,
+                  // 不走 next-intl 的 `<Link>`(那个是给站内路由加前缀的)
+                  showExternal ? (
+                    <a
+                      key={link.id}
+                      href={link.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-sm font-medium text-foreground/70 hover:text-[var(--primary)] transition-colors"
+                    >
+                      {tStore("nav")}
+                      <ExternalLink className="size-3" />
+                    </a>
+                  ) : null
                 ) : (
                   <Link
                     key={link.id}

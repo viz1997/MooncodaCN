@@ -39,6 +39,7 @@
  *    整屏色带,统一版式)/ HowItWorks / CraftGallery(工艺 + 真实订单合并))
  *    + `/product/[handle]/page.tsx` 渲染 `<ProductDetail />`
  */
+import { InternationalStoreBar } from "@/features/marketing/components/storefront/international-store-bar";
 import { StoreFooter } from "@/features/marketing/components/storefront/store-footer";
 import { WjpStoreHeader } from "@/features/marketing/components/storefront/wjp-store-header";
 import { CartDrawer } from "@/features/storefront/components/cart-drawer";
@@ -46,11 +47,17 @@ import { CustomWorkshop } from "@/features/storefront/components/custom-workshop
 import { CustomizeEntry } from "@/features/storefront/components/customize-entry";
 import { ProductQuickView } from "@/features/storefront/components/product-quick-view";
 
-export default function MarketingAtelierLayout({
+export default async function MarketingAtelierLayout({
   children,
+  params,
 }: {
   children: React.ReactNode;
+  params: Promise<{ locale: string }>;
 }) {
+  // 海外独立站公告条只挂在英文站(2026-11-10)—— locale 在构建期就是确定的,
+  // 所以 `/en` 的页面在构建期就不带条、`/zh` 的带。读 params **不会**把页面
+  // 变成动态渲染(`[locale]/layout.tsx` 已经有 generateStaticParams)。
+  const { locale } = await params;
   return (
     <>
       {/* atelier 设计语言局部注入 —— 只罩本 route group 子树 */}
@@ -112,6 +119,8 @@ export default function MarketingAtelierLayout({
       `}</style>
 
       <div className="atelier-root min-h-screen flex flex-col bg-background text-foreground">
+        {/* 海外独立站公告条 —— 只在英文站出现,挂在头上面 */}
+        <InternationalStoreBar locale={locale} />
         <WjpStoreHeader />
         <main className="flex-1">{children}</main>
         <StoreFooter />
