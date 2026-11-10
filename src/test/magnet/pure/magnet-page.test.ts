@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * `/tools/magnet` 页面这一层的守卫(2026-11-10)
+ * `/tools/magnet` 页面这一层的守卫(2026-11-10,**2026-11-11 补了三条**)
  *
  * 纯函数那一层(切刀数学 / 布尔 / OBJ 写出)由 `magnet-params.test.ts` 和
  * `magnet-cut.test.ts` 守住。这个文件守的是**页面与接线**那一层:
@@ -19,8 +19,17 @@ import { describe, expect, it } from "vitest";
  * 6. **焊接走仓库唯一公开入口** —— `weldAndAnalyzeTopology()`;
  *    `weldVertices` 是模块私有的,拿不到
  * 7. **孔径是绝对毫米** —— Blender 脚本里那个「孔径跟着模型最大边缩放」的
- *    临时假设**不许**被搬进来
+ *    临时假设**不许**被搬进来(2026-11-11 起孔径**可调**,但**仍然是绝对
+ *    毫米** —— 孔是实物磁铁的尺寸,不是模型的比例)
  * 8. **wasm 提交进仓库** —— 新克隆的机器不用先跑脚本
+ *
+ * 2026-11-11 工作室提的三条,也在这一层守着:
+ *
+ * - **① 磁吸沉孔可调** —— 页面上有孔径 / 深度两个输入,走 `normalizeHoleParams`
+ * - **② 智能识别背面** —— `magnet-backface.ts` 那份「按面积找最大平面区域」
+ *   接进了分析链路,页面能选具体哪一块(`patch:N`)
+ * - **③ 导出保留材质贴图** —— 导出走 `writeObjFromSoup` + `downloadModelZip`,
+ *   OBJ 里有 `vt` / `usemtl` / `mtllib`
  *
  * 全部是文件扫描 + 常量 —— 不需要 DB / 网络 / 浏览器。
  */
@@ -47,10 +56,37 @@ function stripComments(src: string): string {
     .join("\n");
 }
 
+/**
+ * 把一棵对象树摊平成「点号路径 → 值」
+ *
+ * 中英文 key 一致**要递归比** —— 只比第一层的话,`hole.diaLabel` 这种
+ * 少写一个,上层看到的还是「两边都有 hole」,漏过去了。
+ */
+function flattenKeys(obj: unknown, prefix = ""): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
+    out[prefix] = obj;
+    return out;
+  }
+  for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      Object.assign(out, flattenKeys(value, path));
+    } else {
+      out[path] = value;
+    }
+  }
+  return out;
+}
+
 const ROUTE = "src/app/[locale]/(marketing-atelier)/tools/magnet/page.tsx";
 const TOOL = "src/features/magnet/components/magnet-cutter-tool.tsx";
 const HANDLER = "src/features/magnet/lib/magnet-cutter-handler.ts";
 const PARAMS = "src/features/magnet/lib/magnet-params.ts";
+const BACKFACE = "src/features/magnet/lib/magnet-backface.ts";
+const WRITE_OBJ = "src/features/magnet/lib/write-obj.ts";
+const PROTOCOL = "src/features/magnet/lib/magnet-cutter-protocol.ts";
+const ERROR_MAP = "src/features/magnet/lib/magnet-error.ts";
 const HUB = "src/features/tools/components/tools-hub.tsx";
 
 describe("磁吸孔工具页面", () => {
@@ -91,8 +127,9 @@ describe("磁吸孔工具页面", () => {
     expect(src).not.toMatch(/@\/features\/print-quote/);
     // 不引 DB
     expect(src).not.toMatch(/@\/db/);
-    // 切完是**本地下载**(OBJ blob),不上传
-    expect(src).toContain("objBlobFromSoup");
+    // 切完是**本地下载**(OBJ / ZIP blob),不上传
+    expect(src).toContain("writeObjFromSoup");
+    expect(src).toContain("downloadModelZip");
     expect(src).toContain("URL.createObjectURL");
   });
 
@@ -116,7 +153,7 @@ describe("磁吸孔工具页面", () => {
     expect(src).not.toMatch(/new\s+(runtime\.)?Manifold\.cylinder/);
   });
 
-  it("孔径是绝对毫米 —— 固定 Ø20.7mm / 深 1.3mm", () => {
+  it("孔径是绝对毫米 —— **可调**,但默认仍是实物尺寸 Ø20.7 / 深 1.3", () => {
     const src = read(PARAMS);
     expect(src).toContain("MAGNET_HOLE_DIA_MM = 20.7");
     expect(src).toContain("MAGNET_HOLE_DEPTH_MM = 1.3");
@@ -125,6 +162,70 @@ describe("磁吸孔工具页面", () => {
     expect(stripComments(src)).not.toContain("EXPECTED_WIDTH_MM");
     // 半径是绝对值,不是「半径 × 比例」
     expect(src).toContain("MAGNET_HOLE_RADIUS_MM = MAGNET_HOLE_DIA_MM / 2");
+    // 可调 ⇒ 有「归一化」这一层(收敛到合法范围)—— 不是直接拿输入值用
+    expect(src).toContain("normalizeHoleParams");
+  });
+
+  it("① 孔径 / 深度在页面上可调(工作室 2026-11-11)", () => {
+    const src = read(TOOL);
+    // 两个输入 + 走归一化那一层
+    expect(src).toContain("holeDiaText");
+    expect(src).toContain("holeDepthText");
+    expect(src).toContain("normalizeHoleParams");
+    // 归一化函数本身要有 —— 参数收敛到合法范围(不是 NaN 直接进计算)
+    const params = read(PARAMS);
+    expect(params).toContain("MAGNET_HOLE_DIA_MIN_MM");
+    expect(params).toContain("MAGNET_HOLE_DIA_MAX_MM");
+    expect(params).toContain("MAGNET_HOLE_DEPTH_MIN_MM");
+    expect(params).toContain("MAGNET_HOLE_DEPTH_MAX_MM");
+    // 改孔参数要重算分析(页面上的厚度 / 净空是旧参数的话,用户照着切就切错了)
+    expect(src).toMatch(
+      /holeParams[\s\S]{0,400}runAnalyze|runAnalyze[\s\S]{0,400}holeParams/
+    );
+  });
+
+  it("② 智能识别背面 —— 按面积找最大平面区域,跟模型朝向无关", () => {
+    // 那个检测器得在
+    expect(existsSync(join(ROOT, BACKFACE))).toBe(true);
+    const backface = read(BACKFACE);
+    expect(backface).toContain("detectFlatPatches");
+    expect(backface).toContain("pickBackFace");
+    // 分析链路真的接上了(不是写了个文件没人用)
+    expect(read(HANDLER)).toContain("detectFlatPatches");
+    // 页面默认目标 = 「智能识别」那一块
+    const src = read(TOOL);
+    expect(src).toContain("MAGNET_TARGET_AUTO");
+    // 并且**用户能自己换**哪一块(六面里挑一个,不是只能吃自动的)
+    expect(src).toContain("patchTargetId");
+    expect(src).toContain("parsePatchTarget");
+    expect(read(PARAMS)).toContain("patchTargetId");
+  });
+
+  it("③ 导出保留原来的材质贴图(工作室 2026-11-11)", () => {
+    // 导出走 OBJ 写出器 + ZIP 打包器(带 MTL / 纹理)
+    const src = read(TOOL);
+    expect(src).toContain("writeObjFromSoup");
+    expect(src).toContain("downloadModelZip");
+    // 贴图三件套传进去了
+    expect(src).toContain("uvs");
+    expect(src).toContain("materialIndex");
+    expect(src).toContain("materialNames");
+    expect(src).toContain("mtlFileName");
+    // 切的时候把原模型的贴图信息**传进布尔运算**(不然布尔出来的件没有 UV)
+    expect(src).toContain("sourceTexture");
+    expect(src).toMatch(/client\.cut\([\s\S]{0,200}sourceTexture/);
+
+    // OBJ 写出器要真的写 `vt` / `usemtl` / `mtllib`
+    const writer = read(WRITE_OBJ);
+    expect(writer).toContain("vt ");
+    expect(writer).toContain("usemtl ");
+    expect(writer).toContain("mtllib ");
+  });
+
+  it("预料之外的错单独一个码 —— 不再一律报成 BOOLEAN_FAILED", () => {
+    expect(read(PROTOCOL)).toContain("UNEXPECTED");
+    expect(read(ERROR_MAP)).toContain("UNEXPECTED");
+    expect(read(HANDLER)).toContain("UNEXPECTED");
   });
 
   it("wasm 提交进仓库(新克隆的机器不用先跑脚本)", () => {
@@ -138,8 +239,9 @@ describe("磁吸孔工具页面", () => {
     const zh = messages("zh");
     const en = messages("en");
 
-    const zhMagnet = zh.Magnet as Record<string, unknown>;
-    const enMagnet = en.Magnet as Record<string, unknown>;
+    // **递归比** —— 只比第一层的话,`hole.diaLabel` 少写一个上层看不出来
+    const zhMagnet = flattenKeys(zh.Magnet);
+    const enMagnet = flattenKeys(en.Magnet);
     expect(Object.keys(enMagnet).sort()).toEqual(Object.keys(zhMagnet).sort());
 
     const zhTool = (zh.ToolsCenter as Record<string, unknown>).tools as Record<
@@ -150,9 +252,33 @@ describe("磁吸孔工具页面", () => {
       string,
       unknown
     >;
-    expect(Object.keys(zhTool.magnet as object).sort()).toEqual(
-      Object.keys(enTool.magnet as object).sort()
+    expect(Object.keys(flattenKeys(zhTool.magnet)).sort()).toEqual(
+      Object.keys(flattenKeys(enTool.magnet)).sort()
     );
+  });
+
+  it("2026-11-11 那三条要用到的文案,两种语言都有", () => {
+    const zh = flattenKeys(messages("zh").Magnet);
+    const en = flattenKeys(messages("en").Magnet);
+
+    // ① 孔参数可调
+    for (const key of ["hole.diaLabel", "hole.depthLabel", "hole.reset"]) {
+      expect(zh[key], `zh 缺 ${key}`).toBeTruthy();
+      expect(en[key], `en 缺 ${key}`).toBeTruthy();
+    }
+    // ② 智能识别背面
+    for (const key of ["back.title", "back.auto", "back.none"]) {
+      expect(zh[key], `zh 缺 ${key}`).toBeTruthy();
+      expect(en[key], `en 缺 ${key}`).toBeTruthy();
+    }
+    // ③ 导出保留材质贴图
+    for (const key of ["download.withTexture", "download.solidColor"]) {
+      expect(zh[key], `zh 缺 ${key}`).toBeTruthy();
+      expect(en[key], `en 缺 ${key}`).toBeTruthy();
+    }
+    // 预料之外的错
+    expect(zh["errors.codes.unexpected"]).toBeTruthy();
+    expect(en["errors.codes.unexpected"]).toBeTruthy();
   });
 
   it("文案里没有 markdown 粗体(仓库的消息文件不用 **)", () => {

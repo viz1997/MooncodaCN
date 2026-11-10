@@ -134,6 +134,45 @@ function invertedCubeSoup(size: number): Float32Array {
   return out;
 }
 
+/** 绕 X 轴把整个三角汤转 `deg` 度(刚体旋转,拓扑不动) */
+function rotateSoupX(soup: Float32Array, deg: number): Float32Array {
+  const rad = (deg * Math.PI) / 180;
+  const c = Math.cos(rad);
+  const s = Math.sin(rad);
+  const out = new Float32Array(soup.length);
+  for (let i = 0; i < soup.length; i += 3) {
+    const x = soup[i]!;
+    const y = soup[i + 1]!;
+    const z = soup[i + 2]!;
+    out[i] = x;
+    out[i + 1] = y * c - z * s;
+    out[i + 2] = y * s + z * c;
+  }
+  return out;
+}
+
+/** 立方体的 UV(每三角形 6 个 float)—— 每个三角形给一组**互不相同**的 UV */
+function cubeUvs(triangleCount: number): Float32Array {
+  const uvs = new Float32Array(triangleCount * 6);
+  for (let t = 0; t < triangleCount; t++) {
+    uvs[t * 6 + 0] = t / triangleCount;
+    uvs[t * 6 + 1] = 0;
+    uvs[t * 6 + 2] = (t + 1) / triangleCount;
+    uvs[t * 6 + 3] = 0;
+    uvs[t * 6 + 4] = t / triangleCount;
+    uvs[t * 6 + 5] = 1 / triangleCount;
+  }
+  return uvs;
+}
+
+/** 立方体的材质分组 —— 顶面(三角形 2、3)是材质 1,其余是材质 0 */
+function cubeMaterialIndex(triangleCount: number): Uint16Array {
+  const out = new Uint16Array(triangleCount);
+  out[2] = 1;
+  out[3] = 1;
+  return out;
+}
+
 describe("磁吸孔切割(真跑 manifold)", () => {
   it("切掉的体积跟「64 边形截面积 × 沉孔深」分毫不差", async () => {
     const result = await cutMagnetPocket(cubeSoup(40), "posZ");
@@ -239,5 +278,181 @@ describe("磁吸孔切割(真跑 manifold)", () => {
     // 切掉的厚度 = 沉孔深;40 - 1.3 = 38.7
     const expected = expectedRemovedVolumeMm3(MAGNET_HOLE_DEPTH_MM);
     expect(result.removedVolume).toBeCloseTo(expected, 3);
+  });
+});
+
+describe("孔参数可调(工作室 2026-11-11)", () => {
+  it("Ø10 / 深 2mm ⇒ 去掉 156.83 mm³", async () => {
+    const hole = { holeDiaMm: 10, holeDepthMm: 2 };
+    const result = await cutMagnetPocket(cubeSoup(40), "posZ", hole);
+
+    const expected = expectedRemovedVolumeMm3(2, 5);
+    expect(expected).toBeCloseTo(156.8274, 3);
+
+    const error = Math.abs(result.removedVolume - expected) / expected;
+    expect(error).toBeLessThan(0.0001);
+    expect(result.expectedRemovedVolume).toBeCloseTo(expected, 3);
+  });
+
+  it("**孔径是绝对毫米** —— 模型放大一倍,孔还是那么粗", async () => {
+    const hole = { holeDiaMm: 10, holeDepthMm: 2 };
+    const small = await cutMagnetPocket(cubeSoup(40), "posZ", hole);
+    const big = await cutMagnetPocket(cubeSoup(80), "posZ", hole);
+    // 去掉的是同一块料 —— 孔不跟模型缩放
+    expect(big.removedVolume).toBeCloseTo(small.removedVolume, 3);
+  });
+
+  it("调浅了 ⇒ 1mm 的薄板也切得动(默认 1.3mm 会捅穿)", async () => {
+    const hole = { holeDiaMm: 20.7, holeDepthMm: 0.5 };
+    const analysis = await analyzeModel(plateSoup(1), hole);
+    const top = analysis.faces.find((f) => f.faceId === "posZ")!;
+    // 0.5 + 0.3 = 0.8mm ≤ 1mm ⇒ 不算太薄
+    expect(top.verdict).toBe("ok");
+
+    const result = await cutMagnetPocket(plateSoup(1), "posZ", hole);
+    const expected = expectedRemovedVolumeMm3(0.5, 10.35);
+    expect(result.removedVolume).toBeCloseTo(expected, 3);
+  });
+
+  it("调深了 ⇒ 同一个面判成「太薄」,切不得", async () => {
+    const analysis = await analyzeModel(plateSoup(1), {
+      holeDiaMm: 20.7,
+      holeDepthMm: 2,
+    });
+    const top = analysis.faces.find((f) => f.faceId === "posZ")!;
+    expect(top.verdict).toBe("too_thin");
+
+    await expect(
+      cutMagnetPocket(plateSoup(1), "posZ", {
+        holeDiaMm: 20.7,
+        holeDepthMm: 2,
+      })
+    ).rejects.toThrow(/捅穿/);
+  });
+});
+
+describe("智能识别背面(工作室 2026-11-11)", () => {
+  it("立方体 ⇒ 找出 6 块平面,最大那块就是背面", async () => {
+    const analysis = await analyzeModel(cubeSoup(40));
+
+    expect(analysis.patches).toHaveLength(6);
+    expect(analysis.backFace).not.toBeNull();
+    // 每个面 40×40 = 1600mm²
+    expect(analysis.backFace!.areaMm2).toBeCloseTo(1600, 3);
+    expect(analysis.backFace!.faceCount).toBe(2);
+    // 面积从大到小排
+    for (let i = 1; i < analysis.patches.length; i++) {
+      expect(analysis.patches[i]!.areaMm2).toBeLessThanOrEqual(
+        analysis.patches[i - 1]!.areaMm2
+      );
+    }
+  });
+
+  it("长方体 ⇒ 挑面积最大的那块(不是「最平的那个轴向面」)", async () => {
+    const analysis = await analyzeModel(plateSoup(10));
+    // 40×40 = 1600 > 40×10 = 400
+    expect(analysis.backFace!.areaMm2).toBeCloseTo(1600, 3);
+  });
+
+  it("**模型歪了照样找得到** —— 原脚本只在六个轴向里找,歪了就找不着", async () => {
+    const tilted = rotateSoupX(plateSoup(10), 37);
+    const analysis = await analyzeModel(tilted);
+
+    expect(analysis.backFace).not.toBeNull();
+    expect(analysis.backFace!.areaMm2).toBeCloseTo(1600, 3);
+    expect(analysis.backFace!.verdict).toBe("ok");
+    // 法线跟着模型转了 —— 不是 [0,0,1]
+    expect(analysis.backFace!.normal[2]).not.toBeCloseTo(1, 3);
+  });
+
+  it("`auto` 切的就是那块平面", async () => {
+    const result = await cutMagnetPocket(cubeSoup(40), "auto");
+    const expected = expectedRemovedVolumeMm3();
+    expect(result.removedVolume).toBeCloseTo(expected, 3);
+  });
+
+  it("`auto` 在歪着的模型上也切得动", async () => {
+    const tilted = rotateSoupX(plateSoup(10), 37);
+    const result = await cutMagnetPocket(tilted, "auto");
+    const expected = expectedRemovedVolumeMm3();
+    expect(result.removedVolume).toBeCloseTo(expected, 3);
+  });
+
+  it("`patch:1` 切第二块候选平面", async () => {
+    const result = await cutMagnetPocket(cubeSoup(40), "patch:1");
+    const expected = expectedRemovedVolumeMm3();
+    expect(result.removedVolume).toBeCloseTo(expected, 3);
+  });
+});
+
+describe("导出要保留原来的材质贴图(工作室 2026-11-11)", () => {
+  it("UV 和材质分组布尔之后都还在", async () => {
+    const soup = cubeSoup(40);
+    const triangleCount = soup.length / 9;
+    const uvs = cubeUvs(triangleCount);
+    const materialIndex = cubeMaterialIndex(triangleCount);
+
+    const result = await cutMagnetPocket(soup, "posZ", null, {
+      uvs,
+      materialIndex,
+      materialNames: ["Base", "Top"],
+    });
+
+    // --- UV ---
+    expect(result.uvs).not.toBeNull();
+    expect(result.uvs!.length).toBe(result.triangleCount * 6);
+
+    // 原来 12 个三角形的 UV 一组都没丢
+    const original = new Set<string>();
+    for (let t = 0; t < triangleCount; t++) {
+      for (let k = 0; k < 3; k++) {
+        original.add(`${uvs[t * 6 + k * 2]},${uvs[t * 6 + k * 2 + 1]}`);
+      }
+    }
+    const survived = new Set<string>();
+    for (let t = 0; t < result.triangleCount; t++) {
+      for (let k = 0; k < 3; k++) {
+        survived.add(
+          `${result.uvs![t * 6 + k * 2]},${result.uvs![t * 6 + k * 2 + 1]}`
+        );
+      }
+    }
+    for (const uv of original) {
+      expect(survived.has(uv)).toBe(true);
+    }
+
+    // --- 材质分组 ---
+    expect(result.materialIndex).not.toBeNull();
+    expect(result.materialIndex!.length).toBe(result.triangleCount);
+    expect(result.materialNames).toEqual(["Base", "Top"]);
+
+    const used = new Set(result.materialIndex!);
+    expect(used.has(0)).toBe(true);
+    expect(used.has(1)).toBe(true);
+
+    // 孔壁 / 孔底是新生成的三角形 ⇒ 归到「被切那个面」的材质(材质 1)
+    const topCount = [...result.materialIndex!].filter((m) => m === 1).length;
+    expect(topCount).toBeGreaterThan(2);
+  });
+
+  it("没贴图的模型 ⇒ UV / 材质是 null(不硬塞一个空的)", async () => {
+    const result = await cutMagnetPocket(cubeSoup(40), "posZ");
+    expect(result.uvs).toBeNull();
+    expect(result.materialIndex).toBeNull();
+    expect(result.materialNames).toBeNull();
+  });
+
+  it("切完之后还是封闭流形 —— 带贴图那条路也是", async () => {
+    const soup = cubeSoup(40);
+    const triangleCount = soup.length / 9;
+    const result = await cutMagnetPocket(soup, "posZ", null, {
+      uvs: cubeUvs(triangleCount),
+      materialIndex: cubeMaterialIndex(triangleCount),
+      materialNames: ["Base", "Top"],
+    });
+
+    // 再切一次 ⇒ 不抛错
+    const again = await cutMagnetPocket(result.positions, "posZ");
+    expect(again.removedVolume).toBeGreaterThan(0);
   });
 });

@@ -1393,7 +1393,7 @@ shared/components/model-viewport/
 | `src/test/pricing/pure/obj-text.test.ts` | BOM 嗅探 / NUL 密度嗅探(**LE ⇒ 奇数位、BE ⇒ 偶数位**)/ UTF-16LE·BE 解码 / UTF-8 BOM 摘掉 / 空文件的两种说法 |
 | `src/test/tools/pure/workbench-merge.test.ts` | 一个视口 / 侧栏在左 / **主出口在左栏底部固定条**(`primaryAction`)/ **浮层药丸只管「看图」** |
 
-### 磁吸孔切割工具 `/tools/magnet`(2026-11-10)
+### 磁吸孔切割工具 `/tools/magnet`(2026-11-10,**2026-11-11 加了三条**)
 
 工作室给了一段 Blender Python 脚本:把模型**最平的那个面**上挖一个**盲孔**
 (圆柱沉孔),挖完导出 `relief_final.obj` 给打印用。以前这段脚本**只能在工作室
@@ -1417,42 +1417,102 @@ radius = ((HOLE_DIA_MM + TOLERANCE) / 2000.0) * ratio
 临时加的假设。**网页端知道最终打印尺寸,不需要这个假设** —— 照搬会让一个 40mm
 宽的模型只得到 Ø13.8mm 的孔。
 
-⇒ **孔径按实物毫米固定**:Ø20.7mm / 深 1.3mm(磁铁是固定尺寸的实体)。
-`magnet-params.ts` 里**没有** `EXPECTED_WIDTH_MM`(单测守着这条)。
+⇒ **孔径按实物毫米**:默认 Ø20.7mm / 深 1.3mm(磁铁是固定尺寸的实体),
+2026-11-11 起**用户可以调**,但**调完仍然是绝对毫米**(孔是实物的尺寸,不是模型
+的比例)。`magnet-params.ts` 里**没有** `EXPECTED_WIDTH_MM`(单测守着这条)。
 
 #### 四条口径(跟工作室确认过)
 
 | 决定 | 口径 |
 |---|---|
 | 工具位置 | **独立页面 `/tools/magnet`** —— 不塞进打印工作台 |
-| 孔径 | **固定 Ø20.7mm / 深 1.3mm** —— 不跟模型缩放 |
+| 孔径 | **绝对毫米**(默认 Ø20.7 / 深 1.3,**可调**)—— 不跟模型缩放 |
 | 与工单的关系 | **不进工单** —— 只本地下载,下单时仍传原始模型,工作室自己在 Blender 里切 |
 | 独立站入口 | **只在 `/en` 页面**:顶部公告条 + 导航按钮 |
 
 「不进工单」这一条把风险面砍掉了一大半:**钱的那条链路一行都不动**(报价、工单、
 R2 上传、支撑克重全部原样)。工具是纯前端的、独立的、可下载的。
 
+#### 2026-11-11 工作室追加的三条
+
+| 原话 | 改成了什么 |
+|---|---|
+| **①「磁吸沉孔需要可调」** | 孔径 / 深度两个输入,**默认仍是实物尺寸**;输入走 `normalizeHoleParams()` 收敛到合法范围(孔径 2~60mm / 深度 0.3~10mm,NaN 退回默认) |
+| **②「为什么没有按照原来脚本那样智能识别背面」** | 原脚本只在**六个轴向**里找 —— 那个模型在 Blender 里是轴对齐的,所以背面正好平行于某个轴,看起来像「智能」。模型一歪,六面里就**没有背面了**。现在按**面积找最大的平面区域,跟模型朝向无关** |
+| **③「导出模型需要保留原来的材质贴图」** | 布尔运算**保得住** UV / 材质分组(Manifold3D 的属性通道)⇒ 导出写 `vt` / `usemtl` / `mtllib`,带材质时导 ZIP(OBJ + MTL + 纹理) |
+
+##### ① 孔参数可调 —— 但**仍然是绝对毫米**
+
+- `normalizeHoleParams()` 是**唯一的入口** —— 页面、handler 都调它,自己不
+  夹范围。夹的范围:`MAGNET_HOLE_DIA_MIN_MM(2)` ~ `MAX(60)`、
+  `MAGNET_HOLE_DEPTH_MIN_MM(0.3)` ~ `MAX(10)`。
+- **「可调」不等于「跟模型缩放」** —— 同一个孔参数放在 20mm 和 2000mm 的面上,
+  切掉的体积**一模一样**。单测守着这条(模型放大一倍 ⇒ 去掉量不变)。
+- **改孔参数要重算分析** —— 页面上的厚度 / 净空是**旧参数**的话,用户照着它切,
+  切出来的孔跟界面上写的对不上。防抖 400ms(`RECALC_DEBOUNCE_MS`)。
+- 切刀摆放 / 「太薄」判定**都跟着孔参数走** —— 深 2mm 的孔在 1mm 板上会捅穿,
+  判定必须用同一个深度。
+
+##### ② 智能识别背面 —— 按面积,不按轴向
+
+`src/features/magnet/lib/magnet-backface.ts`(纯函数,不碰 manifold):
+
+- `detectFlatPatches(mesh, { angleTolDeg, minAreaMm2 })` —— **区域生长**:
+  邻居要同时满足「跟种子法线夹角在容差内」**和**「跟当前区域的面积加权
+  平均法线夹角在容差内」才并进来。结果**按面积从大到小排**,面积一样时
+  挑更平的。
+- `pickBackFace(patches)` —— 挑最大的那块。
+- **模型歪了照样找得到** —— 绕 X 轴转 37° 的长方体照样找出 1600mm² 那块
+  (法线跟着转,不再是 `[0,0,1]`)。这是「智能」跟「六面探测」的分界线。
+- **用户能自己换** —— 页面上摆一张平面区域的表格(面积 / 平整度 / 厚度 / 能不能切),
+  选中的目标是 `patch:<下标>`;`"auto"` = 智能识别出来的那块。
+  目标 id 的编解码在 `magnet-params.ts` 的 `parsePatchTarget()` / `patchTargetId()`。
+- 旧的**六面表格还在**(轴向那六个面,各有各的射线厚度测量)—— 两套并存:
+  六面表回答「沿某个轴看过去是哪一面」,平面区域表回答「哪块平面最大」。
+
+##### ③ 导出保留材质贴图
+
+- **贴图信息在切的时候就传进布尔运算** —— `client.cut(positions, target, holeParams, sourceTexture)`。
+  不传的话布尔出来的件没有 UV,后面补不回来。
+- **Manifold3D 的属性通道** —— `numProp = 5` ⇒ `[x,y,z,u,v]` **逐角点**。
+  输入三角形要**按材质重排成连续的 run**,再配 `runIndex`(单位是**顶点**,
+  是 3 的倍数)+ `runOriginalID`(`Manifold.reserveIDs(n)` 返回的那个 base
+  **必须**用返回值,不能自己算)。`mergeFromVert` / `mergeToVert` 把重复角点
+  映到同一个标准角点。
+- ⚠️ **`runOriginalID` 里装的是「预留 id」,不是「材质下标」** —— 建
+  「预留 id → 材质下标」那张表时**键是 id、值是下标**。写反了会让**整个材质
+  分组悄悄丢光**(每个三角形都掉进 fallback),而且**不报错** —— 只有对着
+  有材质的模型跑一遍才看得出来。
+- **导出**:`writeObjFromSoup()` 写 `vt` / `usemtl` / `mtllib`(面按材质分组
+  —— `usemtl` 是状态指令,面不分组会把后面别的材质的面也改了);带材质时走
+  `downloadModelZip()`(OBJ + MTL + 纹理,MTL 沿用原模型那份,纹理按 basename
+  平铺到 zip 根目录并改写引用)。
+- **没材质的模型** —— 照旧导纯 OBJ(没有 `vt` / `usemtl` / `mtllib`)。
+- **新切出来的孔壁 / 孔底**继承被切那个面的材质(靠 `findMaterialAtPoint` 找
+  最近的面,找不到才落 fallback)。
+
 #### 模块布局(`src/features/magnet/`)
 
 ```
 lib/
-├── magnet-params.ts          # 纯常量 + 切刀摆放数学 —— 零依赖,能进 unit project
+├── magnet-params.ts          # 纯常量 + 切刀摆放数学 + 孔参数归一化 + 目标 id 编解码
+├── magnet-backface.ts        # 智能识别背面(平面区域生长)—— 零依赖,能进 unit project
 ├── magnet-cutter-protocol.ts # worker 收/发消息类型 + 错误码联合
 ├── magnet-cutter-handler.ts  # 真正干活的那一段(焊接 → 校验 → 挑面 → 布尔 → 出料)
 ├── magnet-cutter-client.ts   # promise 客户端(Worker + 主线程兜底)
 ├── magnet-error.ts           # 错误码 → 文案 key
-└── write-obj.ts              # 三角汤 → OBJ 文本 + Blob
+└── write-obj.ts              # 三角汤 → OBJ 文本(+ UV / 材质分组)+ Blob
 workers/
 └── magnet-cutter.worker.ts   # worker 壳(跟 angle-optimizer.worker.ts 一个形状)
 components/
-└── magnet-cutter-tool.tsx    # 客户端 UI(拖放 / 尺寸 / 选面 / 切 / 下载)
+└── magnet-cutter-tool.tsx    # 客户端 UI(拖放 / 尺寸 / 孔参数 / 选面 / 切 / 下载)
 ```
 
 #### 切刀摆放的数学(照搬脚本,去掉 ratio)
 
 ```
-半径 r      = 10.35mm(= MAGNET_HOLE_DIA_MM / 2)
-沉孔深 d    = 1.3mm
+半径 r      = 10.35mm(= MAGNET_HOLE_DIA_MM / 2)   ← 可调时 = 用户填的孔径 / 2
+沉孔深 d    = 1.3mm                                   ← 可调时 = 用户填的深度
 切刀外伸 p  = 0.5mm
 切刀总高 h  = d + 2p = 2.3mm
 切刀中心    = facePoint + inward * (d/2 - p)   ← facePoint + inward * 0.15
@@ -1493,6 +1553,7 @@ components/
 | 面数没变(没切进去) | `NOTHING_CUT` |
 | 体积没减少(切了个寂寞) | `VOLUME_UNCHANGED` |
 | 去掉量比理论值少太多(孔切到边上去了) | `HOLE_SPILLED` |
+| **预料之外的错**(以前一律报成 `BOOLEAN_FAILED`) | **`UNEXPECTED`** |
 
 #### 六个面:表格给用户挑
 
@@ -1503,6 +1564,7 @@ components/
 - 默认选「平整度最高且能切」的那一个(脚本的自动挑面偶尔会挑到一个很小的边面,
   **用户能自己换是必须的**)。
 - `thickness < depth + MAGNET_MIN_WALL_MM(0.3mm)` ⇒ 太薄,切下去会捅穿。
+  **depth 是用户填的那个** —— 判定跟切刀用同一个深度。
 - 孔圆在面内放不下 ⇒ ⚠ 会切到边上。
 
 #### 复用仓库里已有的东西(别重写)
@@ -1514,9 +1576,8 @@ components/
 | 单位判定 | `src/features/pricing/lib/model-units.ts` 的 `detectModelUnitScale()` —— 7000mm 那个问题仓库已经解了 |
 | 视口 | `src/features/shared/components/model-viewport/` 的 `ModelViewport` —— **整个仓库只有这一份视口**,别再写第二个 |
 | 焊接 / 拓扑 | `src/features/tools/lib/mesh/weld.ts` 的 `weldAndAnalyzeTopology()` |
+| **导 ZIP** | `src/features/pricing/lib/obj-exporter.ts` 的 `downloadModelZip()` —— 别自己再写一套打包 |
 
-- **导出不带 `vt` / `vn`** —— 布尔运算不保留 UV / 材质组,导出的是纯色件。
-  **界面上必须写明**(模型原本有贴图的话,切完贴图没了)。
 - **尺寸只有一档** —— 「目标最大边(mm)」单值 + 均匀缩放。XYZ 三轴分别调对这个
   工具没必要(孔径是绝对尺寸,只要整体大小对就行)。
 
@@ -1529,16 +1590,22 @@ components/
 | **`Manifold.cylinder` 是静态方法** | 加 `new` ⇒ TS7009 |
 | `intersection` / `difference` **只有静态版** | 实例上没有 |
 | `Mat4` = 16 元组 **列主序**;`Vec3 = [x,y,z]` | 传错顺序 ⇒ 变换整个错位 |
+| **属性通道 `numProp = 5`** | `[x,y,z,u,v]` **逐角点** —— UV 在这儿,不在 `Mesh` 上 |
+| **`runIndex` 的单位是顶点**(3 的倍数) | 拿三角形下标当它用 ⇒ run 全乱 |
+| **`runOriginalID` 要用 `reserveIDs()` 返回的 base** | 自己算 base ⇒ 材质对不上(而且**不报错**) |
+| **输入三角形要按材质重排成连续 run** | 不重排 ⇒ `usemtl` 分组对不上 |
+| **`Mesh.faceID` 会被 manifold 覆写** | 它**不是**输入三角形下标 |
 | wasm 放 `public/manifold.wasm`(541KB) | **产物提交进仓库** —— 免得新克隆的机器没跑脚本就白屏;`pnpm magnet:wasm` 重新拷 |
 
 #### 行为由单测守住
 
 | 测试 | 守住什么 |
 |---|---|
-| `src/test/magnet/pure/magnet-params.test.ts` | 切刀摆放数学(近端在面外 1mm、远端在面内 1.3mm)/ 半径 10.35 / 六个面的方向映射 / 太薄判定 |
-| `src/test/magnet/pure/magnet-cut.test.ts` | **真跑 manifold**:立方体切顶面 → 体积减少 ≈ π·r²·d / 结果是流形(能再切一次不炸) / 太薄的板子被拒 / 非流形输入被拒 / 六个面里挑出平整度最高的 |
-| `src/test/magnet/pure/write-obj.test.ts` | 三角汤 → OBJ 文本 / 顶点索引 / Blob |
-| `src/test/magnet/pure/magnet-page.test.ts` | 路由在 / 工具中心登记了 / **视口是复用的那一份** / **不进工单**(不碰报价、工单、R2)/ 拖放用 `useDropZone` / 焊接走 `weldAndAnalyzeTopology` / `Manifold.cylinder` 不加 `new` / **孔径是绝对毫米**(`EXPECTED_WIDTH_MM` 不许进代码)/ wasm 提交进仓库 / 中英文 key 一致 |
+| `src/test/magnet/pure/magnet-params.test.ts` | 切刀摆放数学(近端在面外 1mm、远端在面内 1.3mm)/ 半径 10.35 / 六个面的方向映射 / 太薄判定 / **孔参数可调**(默认值、夹范围、NaN 退回默认、同一组参数在 20mm 和 2000mm 的面上切掉一样多)/ **目标 id 编解码**(`auto` / `patch:3` / 非法值) |
+| `src/test/magnet/pure/magnet-cut.test.ts` | **真跑 manifold**:立方体切顶面 → 体积减少 ≈ π·r²·d / 结果是流形(能再切一次不炸) / 太薄的板子被拒 / 非流形输入被拒 / 六个面里挑出平整度最高的 / **可调孔参数**(Ø10 深 2 → 去掉 156.83mm³,误差 <0.01%)/ **智能识别背面**(立方体 6 块、歪 37° 照样找得到、`auto` 与 `patch:N` 都切得动)/ **导出保留材质**(36 组 UV 全在、两个材质都在、孔壁继承被切面的材质) |
+| `src/test/magnet/pure/magnet-backface.test.ts` | 平面区域生长(立方体 6 块 × 1600mm²、面积下限过滤、退化面剔除、空网格不炸)/ **歪了也找得到**/ `pickBackFace` 的面积 + 平整度排序 |
+| `src/test/magnet/pure/write-obj.test.ts` | 三角汤 → OBJ 文本 / 顶点去重 / 1-based 索引 / `-0` 归一化 / **UV 写出(`vt` + `f v/vt`)** / **材质分组(`usemtl` + `mtllib`,面按材质连续)** |
+| `src/test/magnet/pure/magnet-page.test.ts` | 路由在 / 工具中心登记了 / **视口是复用的那一份** / **不进工单**(不碰报价、工单、R2)/ 拖放用 `useDropZone` / 焊接走 `weldAndAnalyzeTopology` / `Manifold.cylinder` 不加 `new` / **孔径是绝对毫米**(可调,但 `EXPECTED_WIDTH_MM` 不许进代码)/ **① 可调** / **② 智能识别背面** / **③ 导出保留材质** / `UNEXPECTED` 码在位 / wasm 提交进仓库 / **中英文 key 递归一致** |
 
 ### 外国访客 → 海外独立站(2026-11-10)
 

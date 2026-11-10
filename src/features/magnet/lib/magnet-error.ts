@@ -34,6 +34,13 @@ export const MAGNET_ERROR_KEYS: Record<MagnetErrorCode, string> = {
   VOLUME_UNCHANGED: "errors.codes.volumeUnchanged",
   HOLE_SPILLED: "errors.codes.holeSpilled",
   FACE_NOT_CUTTABLE: "errors.codes.faceNotCuttable",
+  /**
+   * 预料之外的错(Worker 崩了 / 超时了 / 某个 TypeError)
+   *
+   * 以前这些一律报成 `BOOLEAN_FAILED` —— 用户看到的是「布尔运算在这个模型上
+   * 失败了」,但真因跟模型**没关系**。分开放,界面才能说对那句话。
+   */
+  UNEXPECTED: "errors.codes.unexpected",
 };
 
 /**

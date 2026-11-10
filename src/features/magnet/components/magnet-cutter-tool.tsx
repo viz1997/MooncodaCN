@@ -5,9 +5,19 @@
  *
  * ## 它做什么
  *
- * 把模型**最平的那个面**上挖一个**盲孔**(Ø20.7mm / 深 1.3mm),切完下载
- * OBJ 给打印用。工作室原来给的是一段 Blender Python 脚本,只能在工作室
+ * 把模型**最平的那个面**上挖一个**盲孔**(默认 Ø20.7mm / 深 1.3mm),切完下载
+ * 模型给打印用。工作室原来给的是一段 Blender Python 脚本,只能在工作室
  * 本地跑 —— 客户拿不到这个能力,工作室每单也要手工过一道。
+ *
+ * ## 工作室 2026-11-11 提的三条
+ *
+ * 1. **磁吸沉孔需要可调** —— 孔径 / 深度能填了(默认仍是实物磁铁的尺寸)。
+ *    「不跟模型缩放」这条**不变** —— 孔径是实物尺寸,不是模型的比例。
+ * 2. **智能识别背面** —— 原来只在六个轴向里找,模型一歪就找不着。现在改成
+ *    **按面积找模型上最大的平面区域**(跟朝向无关),用户也能在候选列表里
+ *    换一块。
+ * 3. **导出要保留原来的材质贴图** —— Manifold3D 的属性通道能保住 UV,
+ *    材质分组也保得住。导出的是 ZIP(OBJ + MTL + 纹理),不是纯色件。
  *
  * ## 三条边界
  *
@@ -15,8 +25,7 @@
  *   在 Blender 里切。所以这个工具**一行都不碰**报价 / 工单 / R2 上传 /
  *   支撑克重那条链路。
  * - **模型不上传** —— 解析、焊接、布尔运算全在浏览器里跑(Worker)。
- * - **孔径是固定实物尺寸** —— 磁铁是固定尺寸的实体,孔径**不跟模型缩放**。
- *   界面上的孔参数**不设旋钮**(那是给实物定的,不是给模型定的)。
+ * - **孔径是实物尺寸** —— 磁铁是固定尺寸的实体,孔径**不跟模型缩放**。
  *
  * ## 用的都是仓库里已有的东西(别重写)
  *
@@ -28,6 +37,7 @@
  * | 视口 | `shared/components/model-viewport/` —— **整个仓库只有这一份视口** |
  * | 焊接 / 拓扑 | `tools/lib/mesh/weld.ts` 的 `weldAndAnalyzeTopology()` |
  * | 布尔运算 | `manifold-3d`(WASM)—— Blender EXACT 求解器背后的那个引擎 |
+ * | 导出 ZIP | `pricing/lib/obj-exporter.ts` 的 `downloadModelZip()` |
  *
  * ## 深色外观
  *
@@ -40,6 +50,7 @@ import {
   Boxes,
   CircleDot,
   Download,
+  Layers,
   Loader2,
   Magnet,
   RotateCcw,
@@ -55,29 +66,43 @@ import type {
   MagnetAnalyzeOutcome,
   MagnetCutOutcome,
   MagnetFaceReport,
+  MagnetPatchReport,
+  MagnetTextureInput,
 } from "@/features/magnet/lib/magnet-cutter-protocol";
 import { magnetErrorMessageKey } from "@/features/magnet/lib/magnet-error";
 import {
   MAGNET_FACE_IDS,
   MAGNET_FACE_LABELS,
+  MAGNET_HOLE_DEPTH_MAX_MM,
+  MAGNET_HOLE_DEPTH_MIN_MM,
   MAGNET_HOLE_DEPTH_MM,
+  MAGNET_HOLE_DIA_MAX_MM,
+  MAGNET_HOLE_DIA_MIN_MM,
   MAGNET_HOLE_DIA_MM,
-  type MagnetFaceId,
-  pickDefaultFace,
+  MAGNET_TARGET_AUTO,
+  type MagnetHoleParams,
+  type MagnetTargetId,
+  normalizeHoleParams,
+  parsePatchTarget,
+  patchTargetId,
 } from "@/features/magnet/lib/magnet-params";
-import { objBlobFromSoup } from "@/features/magnet/lib/write-obj";
+import { writeObjFromSoup } from "@/features/magnet/lib/write-obj";
 import {
   detectModelUnitScale,
   type ModelUnitCheck,
   measurePositionsSize,
   scalePositions,
 } from "@/features/pricing/lib/model-units";
+import { downloadModelZip } from "@/features/pricing/lib/obj-exporter";
 import {
   extractModelZip,
   type ModelFile,
   revokeModelTextureUrls,
 } from "@/features/pricing/lib/zip-extractor";
-import { ModelViewport } from "@/features/shared/components/model-viewport";
+import {
+  type MeshTextureInfo,
+  ModelViewport,
+} from "@/features/shared/components/model-viewport";
 import { useDropZone } from "@/features/shared/hooks/use-drop-zone";
 
 /** 尺寸改完停多久重算一次(毫秒)—— 别让滑块一直跳数字 */
@@ -86,6 +111,13 @@ const RECALC_DEBOUNCE_MS = 400;
 /** 目标最大边的取值范围(mm)—— 低于这个数切不出 Ø20.7 的孔 */
 const MIN_TARGET_MM = 25;
 const MAX_TARGET_MM = 400;
+
+/** 导出的文件名(跟工作室脚本一致 —— `relief_final.obj`) */
+const CUT_OBJ_NAME = "relief_final.obj";
+const CUT_MTL_NAME = "relief_final.mtl";
+const CUT_ZIP_NAME = "relief_final.zip";
+const ORIGINAL_OBJ_NAME = "model.obj";
+const ORIGINAL_ZIP_NAME = "model.zip";
 
 type SizeMode = "auto" | "custom";
 
@@ -112,16 +144,41 @@ export function MagnetCutterTool() {
   const [targetMaxEdgeMm, setTargetMaxEdgeMm] = useState(100);
 
   /* ------------------------------------------------------------------ */
+  /*  孔参数(可调)                                                        */
+  /* ------------------------------------------------------------------ */
+
+  const [holeDiaText, setHoleDiaText] = useState(String(MAGNET_HOLE_DIA_MM));
+  const [holeDepthText, setHoleDepthText] = useState(
+    String(MAGNET_HOLE_DEPTH_MM)
+  );
+
+  /**
+   * 孔参数(收敛到合法范围)
+   *
+   * **不跟模型缩放** —— 孔径是实物磁铁的尺寸,不是模型的比例。
+   */
+  const holeParams: MagnetHoleParams = useMemo(
+    () =>
+      normalizeHoleParams({
+        holeDiaMm: Number(holeDiaText),
+        holeDepthMm: Number(holeDepthText),
+      }),
+    [holeDiaText, holeDepthText]
+  );
+
+  /* ------------------------------------------------------------------ */
   /*  分析 / 切割                                                          */
   /* ------------------------------------------------------------------ */
 
   const [analysis, setAnalysis] = useState<MagnetAnalyzeOutcome | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
-  const [selectedFace, setSelectedFace] = useState<MagnetFaceId | null>(null);
+  /** 切哪儿 —— `"auto"` = 智能识别出来的那块平面 */
+  const [target, setTarget] = useState<MagnetTargetId>(MAGNET_TARGET_AUTO);
   const [cutResult, setCutResult] = useState<MagnetCutOutcome | null>(null);
   const [cutting, setCutting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fitSignal, setFitSignal] = useState(0);
+  const [showTexture, setShowTexture] = useState(true);
 
   /* ------------------------------------------------------------------ */
   /*  Worker 客户端                                                       */
@@ -144,8 +201,7 @@ export function MagnetCutterTool() {
    * 换模型时把上一个模型的贴图 blob URL 收掉
    *
    * `extractModelZip()` 会给每张贴图造一个 object URL —— 不 revoke 的话,
-   * 换几次模型浏览器就把内存吃满了。这个工具**不显示贴图**(布尔运算不保留
-   * UV),但那些 URL 照样被造出来了,照样得收。
+   * 换几次模型浏览器就把内存吃满了。
    */
   const modelRef = useRef<ModelFile | null>(null);
   useEffect(() => {
@@ -204,7 +260,7 @@ export function MagnetCutterTool() {
       setError(null);
       setAnalysis(null);
       setCutResult(null);
-      setSelectedFace(null);
+      setTarget(MAGNET_TARGET_AUTO);
       try {
         const result = await extractModelZip(file, (p) => {
           // 进度只在「读文件」阶段有意义,解析在 worker 里
@@ -276,7 +332,26 @@ export function MagnetCutterTool() {
   );
 
   /* ------------------------------------------------------------------ */
-  /*  分析(挑面)                                                          */
+  /*  贴图信息(给布尔运算 + 视口 + 导出用)                                 */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * 原模型的贴图信息 —— **逐三角形对齐** `positions`
+   *
+   * 布尔运算靠它保住 UV 与材质分组(见 `magnet-cutter-handler.ts` 的
+   * `buildTexturedMeshInput`)。没有贴图的模型传 `null` —— 走纯几何那条路。
+   */
+  const sourceTexture = useMemo<MagnetTextureInput | null>(() => {
+    if (!model) return null;
+    const uvs = model.parseResult.uvs ?? null;
+    const materialIndex = model.parseResult.materialIndex ?? null;
+    const materialNames = model.parseResult.materialNames ?? null;
+    if (!uvs && !materialIndex) return null;
+    return { uvs, materialIndex, materialNames };
+  }, [model]);
+
+  /* ------------------------------------------------------------------ */
+  /*  分析(挑面 + 智能识别背面)                                            */
   /* ------------------------------------------------------------------ */
 
   /** 分析的序号 —— 过期回包直接丢(防抖期间连发两条) */
@@ -288,17 +363,20 @@ export function MagnetCutterTool() {
       const seq = ++analyzeSeqRef.current;
       setAnalyzing(true);
       try {
-        const result = await client.analyze(positions);
+        const result = await client.analyze(positions, holeParams);
         if (seq !== analyzeSeqRef.current) return; // 过期
         setAnalysis(result);
         setError(null);
-        // 默认挑「最平且能切」的那个面 —— 用户可以自己改
-        const fallback = pickDefaultFace(result.faces)?.faceId ?? null;
-        setSelectedFace((prev) => {
-          if (!prev) return fallback;
-          const still = result.faces.find((f) => f.faceId === prev);
-          if (still && still.verdict === "ok") return prev;
-          return fallback;
+        // 目标失效了(候选列表变了)⇒ 退回「智能识别」那块
+        setTarget((prev) => {
+          if (prev === MAGNET_TARGET_AUTO) return prev;
+          const idx = parsePatchTarget(prev);
+          if (idx !== null) {
+            return result.patches[idx] ? prev : MAGNET_TARGET_AUTO;
+          }
+          return result.faces.some((f) => f.faceId === prev)
+            ? prev
+            : MAGNET_TARGET_AUTO;
         });
       } catch (err) {
         if (seq !== analyzeSeqRef.current) return;
@@ -309,13 +387,13 @@ export function MagnetCutterTool() {
         if (seq === analyzeSeqRef.current) setAnalyzing(false);
       }
     },
-    [client, t]
+    [client, holeParams, t]
   );
 
   /**
-   * 尺寸变了就重算一遍 —— 但**防抖**
+   * 尺寸 / 孔参数变了就重算一遍 —— 但**防抖**
    *
-   * 不重算的话,页面上的厚度 / 净空是**旧尺寸**的,用户照着它切,切出来的
+   * 不重算的话,页面上的厚度 / 净空是**旧参数**的,用户照着它切,切出来的
    * 孔跟界面上写的对不上。
    *
    * 防抖是因为拖滑块会连着触发 —— 每拖一下就重算一遍,Worker 队列一直满。
@@ -328,30 +406,39 @@ export function MagnetCutterTool() {
       void runAnalyze(scaledPositions);
     }, RECALC_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [scaledPositions, runAnalyze]);
+  }, [scaledPositions, holeParams, runAnalyze]);
 
   /* ------------------------------------------------------------------ */
   /*  切割                                                                */
   /* ------------------------------------------------------------------ */
 
-  const selectedFaceReport: MagnetFaceReport | null = useMemo(() => {
-    if (!analysis || !selectedFace) return null;
-    return analysis.faces.find((f) => f.faceId === selectedFace) ?? null;
-  }, [analysis, selectedFace]);
+  /** 当前选中的那个面(轴向面或候选平面)—— 用来判「能不能切」 */
+  const selectedReport: MagnetFaceReport | MagnetPatchReport | null =
+    useMemo(() => {
+      if (!analysis) return null;
+      if (target === MAGNET_TARGET_AUTO) return analysis.backFace;
+      const idx = parsePatchTarget(target);
+      if (idx !== null) return analysis.patches[idx] ?? null;
+      return analysis.faces.find((f) => f.faceId === target) ?? null;
+    }, [analysis, target]);
 
   const canCut =
     Boolean(scaledPositions) &&
-    Boolean(selectedFace) &&
-    selectedFaceReport?.verdict === "ok" &&
+    selectedReport?.verdict === "ok" &&
     !cutting &&
     !analyzing;
 
   const handleCut = useCallback(async () => {
-    if (!client || !scaledPositions || !selectedFace) return;
+    if (!client || !scaledPositions) return;
     setCutting(true);
     setError(null);
     try {
-      const result = await client.cut(scaledPositions, selectedFace);
+      const result = await client.cut(
+        scaledPositions,
+        target,
+        holeParams,
+        sourceTexture
+      );
       setCutResult(result);
       // 切完几何变了 —— 相机重新取景,不然孔可能落在画面外
       setFitSignal((v) => v + 1);
@@ -362,40 +449,72 @@ export function MagnetCutterTool() {
     } finally {
       setCutting(false);
     }
-  }, [client, scaledPositions, selectedFace, t]);
+  }, [client, scaledPositions, target, holeParams, sourceTexture, t]);
 
   /* ------------------------------------------------------------------ */
   /*  下载                                                                */
   /* ------------------------------------------------------------------ */
 
   /**
-   * 下载 OBJ
+   * 下载切好的模型
    *
-   * 切完就下载**切完的**那一份;没切的话下载原模型(用户自己拿去 Blender 切)。
+   * **带材质贴图的导 ZIP**(OBJ + MTL + 纹理),没材质的导纯 OBJ。
    *
-   * **不带贴图 / 材质** —— 布尔运算不保留 UV,导出来的是纯色件。
+   * MTL 直接**沿用原模型的那份** —— 材质名、`map_Kd` 引用全都不变,切出来
+   * 的 UV 直接对得上原贴图。纹理按 basename 平铺到 zip 根目录,MTL 里的
+   * 引用同步改写(`buildModelZipBlob` 干的)。
    */
-  const handleDownload = useCallback(() => {
+  const handleDownload = useCallback(async () => {
     const positions = cutResult?.positions ?? scaledPositions;
     if (!positions) return;
-    const blob = objBlobFromSoup(positions, {
+
+    const uvs = cutResult ? cutResult.uvs : (model?.parseResult.uvs ?? null);
+    const materialIndex = cutResult
+      ? cutResult.materialIndex
+      : (model?.parseResult.materialIndex ?? null);
+    const materialNames = cutResult
+      ? cutResult.materialNames
+      : (model?.parseResult.materialNames ?? null);
+    const mtlText = model?.mtlText;
+    const hasMaterials =
+      Boolean(mtlText) && Boolean(materialNames && materialNames.length > 0);
+
+    const objText = writeObjFromSoup(positions, {
       header: [
         "Mooncoda magnet pocket cutter",
-        `hole_dia_mm=${MAGNET_HOLE_DIA_MM}`,
-        `depth_mm=${MAGNET_HOLE_DEPTH_MM}`,
-        `face=${selectedFace ?? "none"}`,
+        `hole_dia_mm=${holeParams.holeDiaMm}`,
+        `depth_mm=${holeParams.holeDepthMm}`,
+        `target=${target}`,
         `target_max_edge_mm=${targetMaxEdgeMm.toFixed(2)}`,
       ],
+      uvs,
+      materialIndex,
+      materialNames: hasMaterials ? materialNames : null,
+      mtlFileName: hasMaterials ? CUT_MTL_NAME : null,
     });
+
+    if (hasMaterials) {
+      await downloadModelZip(
+        objText,
+        mtlText,
+        model?.textureBlobs,
+        cutResult ? CUT_OBJ_NAME : ORIGINAL_OBJ_NAME,
+        CUT_MTL_NAME,
+        cutResult ? CUT_ZIP_NAME : ORIGINAL_ZIP_NAME
+      );
+      return;
+    }
+
+    const blob = new Blob([objText], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = cutResult ? "relief_final.obj" : "model.obj";
+    a.download = cutResult ? CUT_OBJ_NAME : ORIGINAL_OBJ_NAME;
     document.body.appendChild(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(url);
-  }, [cutResult, scaledPositions, selectedFace, targetMaxEdgeMm]);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }, [cutResult, scaledPositions, model, holeParams, target, targetMaxEdgeMm]);
 
   /* ------------------------------------------------------------------ */
   /*  渲染                                                                */
@@ -403,6 +522,34 @@ export function MagnetCutterTool() {
 
   /** 视口里画的那份几何 —— 切完之前是原模型,切完是带孔的那份 */
   const displayPositions = cutResult?.positions ?? scaledPositions;
+
+  /**
+   * 视口的贴图信息
+   *
+   * 切完的 UV / 材质分组是**布尔运算带回来的** —— 视口直接吃,不用再算一遍。
+   */
+  const viewportTextures: MeshTextureInfo | null = useMemo(() => {
+    if (!model) return null;
+    const uvs = cutResult ? cutResult.uvs : (model.parseResult.uvs ?? null);
+    const materialIndex = cutResult
+      ? cutResult.materialIndex
+      : (model.parseResult.materialIndex ?? null);
+    const materialNames = cutResult
+      ? cutResult.materialNames
+      : (model.parseResult.materialNames ?? null);
+    if (!uvs && !materialIndex) return null;
+    return {
+      uvs: uvs ?? null,
+      materialNames: materialNames ?? [],
+      materialIndex: materialIndex ?? null,
+      mtlText: model.mtlText ?? null,
+      textureUrls: model.textureUrls ?? null,
+    };
+  }, [model, cutResult]);
+
+  const hasTexture = Boolean(
+    model?.textureBlobs && model.textureBlobs.length > 0
+  );
 
   return (
     <div className="mx-auto w-full max-w-[1600px] px-4 py-8 sm:px-6 lg:px-8">
@@ -594,19 +741,134 @@ export function MagnetCutterTool() {
                   </section>
                 )}
 
-                {/* ---- 孔参数(固定,不给旋钮) ---- */}
+                {/* ---- 孔参数(可调) ---- */}
                 <section className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
                   <h3 className="mb-2 flex items-center gap-1.5 text-xs font-bold text-zinc-200">
                     <CircleDot className="size-3.5 text-zinc-400" />
                     {t("hole.title")}
                   </h3>
-                  <p className="text-[11px] leading-relaxed text-zinc-400">
-                    {t("hole.fixed", {
-                      dia: MAGNET_HOLE_DIA_MM,
-                      depth: MAGNET_HOLE_DEPTH_MM,
-                    })}
+                  <div className="grid grid-cols-2 gap-2">
+                    <NumberField
+                      id="magnet-hole-dia"
+                      label={t("hole.diaLabel")}
+                      value={holeDiaText}
+                      min={MAGNET_HOLE_DIA_MIN_MM}
+                      max={MAGNET_HOLE_DIA_MAX_MM}
+                      step={0.1}
+                      onChange={setHoleDiaText}
+                    />
+                    <NumberField
+                      id="magnet-hole-depth"
+                      label={t("hole.depthLabel")}
+                      value={holeDepthText}
+                      min={MAGNET_HOLE_DEPTH_MIN_MM}
+                      max={MAGNET_HOLE_DEPTH_MAX_MM}
+                      step={0.1}
+                      onChange={setHoleDepthText}
+                    />
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHoleDiaText(String(MAGNET_HOLE_DIA_MM));
+                        setHoleDepthText(String(MAGNET_HOLE_DEPTH_MM));
+                      }}
+                      className="flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-400 transition-colors hover:text-zinc-200"
+                    >
+                      <RotateCcw className="size-3" />
+                      {t("hole.reset")}
+                    </button>
+                  </div>
+                  <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+                    {t("hole.hint")}
                   </p>
                 </section>
+
+                {/* ---- 智能识别背面 ---- */}
+                {model && (
+                  <section className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
+                    <h3 className="mb-2 flex items-center gap-1.5 text-xs font-bold text-zinc-200">
+                      <Layers className="size-3.5 text-zinc-400" />
+                      {t("back.title")}
+                    </h3>
+                    {analyzing && !analysis && (
+                      <p className="flex items-center gap-1.5 text-[11px] text-zinc-400">
+                        <Loader2 className="size-3 animate-spin" />
+                        {t("faces.analyzing")}
+                      </p>
+                    )}
+                    {analysis && analysis.patches.length === 0 && (
+                      <p className="text-[11px] leading-relaxed text-zinc-500">
+                        {t("back.none")}
+                      </p>
+                    )}
+                    {analysis && analysis.patches.length > 0 && (
+                      <div className="overflow-hidden rounded-md border border-zinc-800">
+                        <table className="w-full text-left text-[11px]">
+                          <thead className="bg-zinc-900 text-zinc-500">
+                            <tr>
+                              <th className="px-2 py-1.5 font-medium">
+                                {t("back.col.area")}
+                              </th>
+                              <th className="px-2 py-1.5 font-medium">
+                                {t("back.col.flatness")}
+                              </th>
+                              <th className="px-2 py-1.5 font-medium">
+                                {t("back.col.thickness")}
+                              </th>
+                              <th className="px-2 py-1.5 font-medium">
+                                {t("back.col.verdict")}
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {analysis.patches.map((patch, index) => {
+                              const id = patchTargetId(index);
+                              const active =
+                                target === id ||
+                                (index === 0 && target === MAGNET_TARGET_AUTO);
+                              return (
+                                <tr
+                                  key={id}
+                                  onClick={() => setTarget(id)}
+                                  className={`cursor-pointer border-t border-zinc-800/80 transition-colors ${
+                                    active
+                                      ? "bg-amber-500/15 text-amber-200"
+                                      : "text-zinc-400 hover:bg-zinc-800/60"
+                                  }`}
+                                >
+                                  <td className="px-2 py-1.5 font-mono">
+                                    {index === 0 ? t("back.auto") : `#${index}`}
+                                    <span className="ml-1 text-zinc-500">
+                                      {patch.areaMm2.toFixed(0)}
+                                    </span>
+                                  </td>
+                                  <td className="px-2 py-1.5 font-mono">
+                                    {patch.meanDeviationDeg.toFixed(1)}°
+                                  </td>
+                                  <td className="px-2 py-1.5 font-mono">
+                                    {patch.thicknessMm == null
+                                      ? "—"
+                                      : `${patch.thicknessMm.toFixed(1)}`}
+                                  </td>
+                                  <td className="px-2 py-1.5">
+                                    {t(`faces.verdict.${patch.verdict}`)}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    {analysis && analysis.patches.length > 0 && (
+                      <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+                        {t("back.hint")}
+                      </p>
+                    )}
+                  </section>
+                )}
 
                 {/* ---- 六个面 ---- */}
                 {model && (
@@ -615,12 +877,6 @@ export function MagnetCutterTool() {
                       <Ruler className="size-3.5 text-zinc-400" />
                       {t("faces.title")}
                     </h3>
-                    {analyzing && !analysis && (
-                      <p className="flex items-center gap-1.5 text-[11px] text-zinc-400">
-                        <Loader2 className="size-3 animate-spin" />
-                        {t("faces.analyzing")}
-                      </p>
-                    )}
                     {analysis && (
                       <div className="overflow-hidden rounded-md border border-zinc-800">
                         <table className="w-full text-left text-[11px]">
@@ -646,11 +902,11 @@ export function MagnetCutterTool() {
                                 (f) => f.faceId === id
                               );
                               if (!face) return null;
-                              const active = face.faceId === selectedFace;
+                              const active = face.faceId === target;
                               return (
                                 <tr
                                   key={id}
-                                  onClick={() => setSelectedFace(id)}
+                                  onClick={() => setTarget(id)}
                                   className={`cursor-pointer border-t border-zinc-800/80 transition-colors ${
                                     active
                                       ? "bg-amber-500/15 text-amber-200"
@@ -747,14 +1003,16 @@ export function MagnetCutterTool() {
                 <button
                   type="button"
                   disabled={!displayPositions}
-                  onClick={handleDownload}
+                  onClick={() => void handleDownload()}
                   className="flex w-full items-center justify-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2 text-xs font-medium text-zinc-200 transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:text-zinc-600"
                 >
                   <Download className="size-3.5" />
                   {cutResult ? t("download.cut") : t("download.original")}
                 </button>
                 <p className="text-center text-[10px] leading-relaxed text-zinc-600">
-                  {t("download.solidColor")}
+                  {hasTexture
+                    ? t("download.withTexture")
+                    : t("download.solidColor")}
                 </p>
               </div>
             </aside>
@@ -766,14 +1024,26 @@ export function MagnetCutterTool() {
                   <Boxes className="size-3.5 text-amber-500" />
                   {t("viewport.title")}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => setFitSignal((v) => v + 1)}
-                  className="flex items-center gap-1 rounded border border-zinc-700 bg-white/10 px-2 py-0.5 text-[10px] text-zinc-300 hover:bg-white/20"
-                >
-                  <RotateCcw className="size-3" />
-                  {t("viewport.reset")}
-                </button>
+                <div className="flex items-center gap-2">
+                  {hasTexture && (
+                    <button
+                      type="button"
+                      onClick={() => setShowTexture((v) => !v)}
+                      className="flex items-center gap-1 rounded border border-zinc-700 bg-white/10 px-2 py-0.5 text-[10px] text-zinc-300 hover:bg-white/20"
+                    >
+                      <Layers className="size-3" />
+                      {t("viewport.texture")}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setFitSignal((v) => v + 1)}
+                    className="flex items-center gap-1 rounded border border-zinc-700 bg-white/10 px-2 py-0.5 text-[10px] text-zinc-300 hover:bg-white/20"
+                  >
+                    <RotateCcw className="size-3" />
+                    {t("viewport.reset")}
+                  </button>
+                </div>
               </div>
 
               <div
@@ -785,9 +1055,9 @@ export function MagnetCutterTool() {
                   result={null}
                   /* 切完之前是原模型,切完是带孔的那份 */
                   meshPositions={displayPositions}
-                  /* 布尔运算不保留 UV —— 视口跟导出都按纯色件处理 */
-                  textures={null}
-                  showTexture={false}
+                  /* 贴图跟材质分组 —— 布尔运算带回来的 */
+                  textures={viewportTextures}
+                  showTexture={showTexture}
                   showSupport={false}
                   focusRequest={{ seq: 0, point: null }}
                   fitSignal={fitSignal}
@@ -821,6 +1091,60 @@ export function MagnetCutterTool() {
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 一个数字输入框
+ *
+ * **输入框存的是字符串** —— 受控的 `type="number"` 每敲一个键就夹一次值,
+ * 输「0.5」会变成「0.3」再变成「0.35」,根本没法输。字符串 + 失焦时
+ * 归一化才靠谱。
+ */
+function NumberField({
+  id,
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (next: string) => void;
+}) {
+  return (
+    <div>
+      <label htmlFor={id} className="mb-1 block text-[11px] text-zinc-400">
+        {label}
+      </label>
+      <div className="flex items-center gap-1">
+        <input
+          id={id}
+          type="number"
+          inputMode="decimal"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={() => {
+            const n = Number(value);
+            const clamped = Number.isFinite(n)
+              ? Math.min(max, Math.max(min, n))
+              : min;
+            onChange(String(clamped));
+          }}
+          className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-amber-500 focus:outline-none"
+        />
+        <span className="shrink-0 text-[11px] text-zinc-500">mm</span>
       </div>
     </div>
   );

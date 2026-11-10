@@ -23,10 +23,14 @@ import type {
   MagnetAnalyzeOutcome,
   MagnetCutOutcome,
   MagnetErrorCode,
+  MagnetTextureInput,
   MagnetWorkerIn,
   MagnetWorkerOut,
 } from "@/features/magnet/lib/magnet-cutter-protocol";
-import type { MagnetFaceId } from "@/features/magnet/lib/magnet-params";
+import type {
+  MagnetHoleParams,
+  MagnetTargetId,
+} from "@/features/magnet/lib/magnet-params";
 
 type Pending = {
   resolve: (value: never) => void;
@@ -124,7 +128,7 @@ export class MagnetCutterClient {
       worker.onerror = () => {
         // worker 崩了:这一轮的请求全部失败,后续降级到主线程
         this.killWorker(
-          new MagnetClientError("BOOLEAN_FAILED", "切割 Worker 崩溃")
+          new MagnetClientError("UNEXPECTED", "切割 Worker 崩溃")
         );
       };
       return worker;
@@ -164,7 +168,7 @@ export class MagnetCutterClient {
     const worker = this.worker;
     if (!worker || this.workerBroken) {
       return Promise.reject(
-        new MagnetClientError("BOOLEAN_FAILED", "Worker 不可用")
+        new MagnetClientError("UNEXPECTED", "Worker 不可用")
       );
     }
     const seq = ++this.seq;
@@ -175,13 +179,13 @@ export class MagnetCutterClient {
         // 超时 = Worker 不再可信(可能压根没接上 onmessage)
         this.killWorker(
           new MagnetClientError(
-            "BOOLEAN_FAILED",
+            "UNEXPECTED",
             `切割 Worker ${timeoutMs / 1000}s 没响应,已退回主线程`
           )
         );
         reject(
           new MagnetClientError(
-            "BOOLEAN_FAILED",
+            "UNEXPECTED",
             `切割 Worker 超时(${timeoutMs / 1000}s)`
           )
         );
@@ -195,15 +199,24 @@ export class MagnetCutterClient {
     });
   }
 
-  /** 分析:挑面 + 报体积 */
-  async analyze(positions: Float32Array): Promise<MagnetAnalyzeOutcome> {
+  /** 分析:挑面 + 智能识别背面 + 报体积 */
+  async analyze(
+    positions: Float32Array,
+    hole?: MagnetHoleParams | null,
+    texture?: MagnetTextureInput | null
+  ): Promise<MagnetAnalyzeOutcome> {
     if (this.disposed) {
-      throw new MagnetClientError("BOOLEAN_FAILED", "切割客户端已释放");
+      throw new MagnetClientError("UNEXPECTED", "切割客户端已释放");
     }
     if (this.worker && !this.workerBroken) {
       try {
         return await this.send(
-          { type: "analyze", positions },
+          {
+            type: "analyze",
+            positions,
+            hole: hole ?? null,
+            texture: texture ?? null,
+          },
           this.timeouts.analyze
         );
       } catch (err) {
@@ -213,7 +226,7 @@ export class MagnetCutterClient {
       }
     }
     try {
-      return await analyzeModel(positions);
+      return await analyzeModel(positions, hole);
     } catch (err) {
       throw toClientError(err);
     }
@@ -222,15 +235,23 @@ export class MagnetCutterClient {
   /** 切一个磁吸孔 */
   async cut(
     positions: Float32Array,
-    faceId: MagnetFaceId
+    target: MagnetTargetId = "auto",
+    hole?: MagnetHoleParams | null,
+    texture?: MagnetTextureInput | null
   ): Promise<MagnetCutOutcome> {
     if (this.disposed) {
-      throw new MagnetClientError("BOOLEAN_FAILED", "切割客户端已释放");
+      throw new MagnetClientError("UNEXPECTED", "切割客户端已释放");
     }
     if (this.worker && !this.workerBroken) {
       try {
         return await this.send(
-          { type: "cut", positions, faceId },
+          {
+            type: "cut",
+            positions,
+            target,
+            hole: hole ?? null,
+            texture: texture ?? null,
+          },
           this.timeouts.cut
         );
       } catch (err) {
@@ -239,7 +260,7 @@ export class MagnetCutterClient {
       }
     }
     try {
-      return await cutMagnetPocket(positions, faceId);
+      return await cutMagnetPocket(positions, target, hole, texture);
     } catch (err) {
       throw toClientError(err);
     }
@@ -254,7 +275,7 @@ export class MagnetCutterClient {
     // 上游 await 在那里一直挂着。
     for (const [seq, entry] of this.pending) {
       this.settle(seq);
-      entry.reject(new MagnetClientError("BOOLEAN_FAILED", "切割客户端已释放"));
+      entry.reject(new MagnetClientError("UNEXPECTED", "切割客户端已释放"));
     }
     this.pending.clear();
   }
@@ -267,7 +288,7 @@ function toClientError(err: unknown): MagnetClientError {
     return new MagnetClientError(err.code, err.message);
   }
   return new MagnetClientError(
-    "BOOLEAN_FAILED",
+    "UNEXPECTED",
     err instanceof Error ? err.message : String(err)
   );
 }

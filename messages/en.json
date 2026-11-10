@@ -1421,7 +1421,7 @@
   },
   "Magnet": {
     "title": "Magnet Pocket Cutter",
-    "subtitle": "Cut a Ø20.7 mm × 1.3 mm blind magnet pocket into the flattest face of your model, then download the OBJ. Everything runs locally in your browser — the model is never uploaded, and this tool never places an order.",
+    "subtitle": "Cut a magnet pocket into your model — adjust the diameter and depth, and the tool finds the flattest region automatically. Everything runs locally in your browser — the model is never uploaded, and this tool never places an order.",
     "file": {
       "noFile": "No model loaded",
       "hint": "Drop a model in, or pick a file below. OBJ / STL / PLY / GLB / ZIP are all fine.",
@@ -1445,11 +1445,26 @@
       "title": "Print size",
       "label": "Target largest edge (mm)",
       "reset": "Reset",
-      "hint": "The pocket is a fixed physical size (Ø20.7 mm) — it does not scale with the model. Set the print size first, then pick the face."
+      "hint": "The pocket is a physical magnet size — it does not scale with the model. Set the print size first, then pick the face."
     },
     "hole": {
       "title": "Magnet pocket",
-      "fixed": "Ø{dia} mm · {depth} mm deep — fixed to the real magnet size, not adjustable."
+      "diaLabel": "Diameter (mm)",
+      "depthLabel": "Depth (mm)",
+      "reset": "Restore defaults",
+      "hint": "Fill in the real magnet size — Ø20.7 mm × 1.3 mm deep by default. Both values are absolute millimetres; they do not scale with the model."
+    },
+    "back": {
+      "title": "Smart back-face detection",
+      "hint": "Finds the largest flat region on the model by area, whatever way the model is oriented. Click a row to use a different one.",
+      "auto": "Auto",
+      "none": "No flat region large enough was found on this model — pick one manually under “Candidate faces” below.",
+      "col": {
+        "area": "Area (mm²)",
+        "flatness": "Flatness",
+        "thickness": "Thickness",
+        "verdict": "Verdict"
+      }
     },
     "faces": {
       "title": "Candidate faces",
@@ -1476,16 +1491,18 @@
       "expected": "Expected",
       "volume": "Volume",
       "tris": "Triangles",
-      "note": "The pocket is blind — the floor is still there. The exported OBJ is a single-colour solid: the boolean does not keep UVs."
+      "note": "The pocket is blind — the floor is still there. The original UVs and material groups survive the cut, so the download still carries your textures."
     },
     "download": {
-      "cut": "Download the cut OBJ",
-      "original": "Download the original OBJ",
-      "solidColor": "The exported OBJ has no UVs or materials — it is a single-colour solid."
+      "cut": "Download the cut model",
+      "original": "Download the original model",
+      "withTexture": "You get a ZIP (OBJ + MTL + textures) — the original materials and textures are all still there.",
+      "solidColor": "This model has no materials or textures — you get a single-colour OBJ."
     },
     "viewport": {
       "title": "3D preview",
       "reset": "Reset view",
+      "texture": "Show texture",
       "empty": "Drop a model to get started"
     },
     "errors": {
@@ -1500,7 +1517,8 @@
         "nothingCut": "The pocket did not cut into the model, so it was rejected — the original model was kept.",
         "volumeUnchanged": "The model's volume did not change, so the cut was rejected — the original model was kept.",
         "holeSpilled": "The pocket spilled over the edge of the model, so it was rejected. Pick a face with more room around it.",
-        "faceNotCuttable": "That face cannot be cut — pick another one."
+        "faceNotCuttable": "That face cannot be cut — pick another one.",
+        "unexpected": "The cut hit an unexpected problem (nothing to do with your model) — please try again; if it keeps happening, try a different model."
       }
     }
   },

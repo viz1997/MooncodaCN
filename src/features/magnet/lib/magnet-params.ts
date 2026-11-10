@@ -11,8 +11,12 @@
  * SLOT_DEPTH_MM = 1.3
  * ```
  *
- * 磁铁是**固定尺寸的实体**,所以孔径按**实物毫米固定**(Ø20.7mm / 深 1.3mm),
- * **不跟模型缩放**。
+ * 磁铁是**固定尺寸的实体**,所以孔径按**实物毫米**算(Ø20.7mm / 深 1.3mm 是
+ * 实物磁铁的尺寸),**不跟模型缩放**。
+ *
+ * > **2026-11-11 工作室要求「磁吸沉孔需要可调」** ⇒ 孔径 / 沉孔深改成
+ * > **可调参数**,默认值仍是 Ø20.7 / 1.3。「不跟模型缩放」这条**不变** ——
+ * > 孔径是实物尺寸,不是模型尺寸的比例。
  *
  * ## 跟 Blender 脚本不一样的那一处(重要)
  *
@@ -46,7 +50,7 @@ export type MagnetVec3 = [number, number, number];
  */
 export type MagnetFaceId = "posX" | "negX" | "posY" | "negY" | "posZ" | "negZ";
 
-/** 孔径(mm)—— 磁铁是固定尺寸的实体,这个数**不可调** */
+/** 孔径(mm)—— 磁铁是固定尺寸的实体,这个数是**默认值** */
 export const MAGNET_HOLE_DIA_MM = 20.7;
 
 /** 孔半径(mm) */
@@ -54,6 +58,69 @@ export const MAGNET_HOLE_RADIUS_MM = MAGNET_HOLE_DIA_MM / 2;
 
 /** 沉孔深(mm)—— 从面向里挖多深 */
 export const MAGNET_HOLE_DEPTH_MM = 1.3;
+
+/**
+ * 孔参数的取值范围
+ *
+ * 下限不是「随便定的」:
+ *
+ * - 孔径下限 2mm —— 再小切刀就是针,布尔出来没有意义
+ * - 沉孔深下限 0.3mm —— 比最小壁厚还浅,切了个寂寞
+ * - 沉孔深上限 10mm —— 再深就超出「磁铁沉孔」这个用途了
+ */
+export const MAGNET_HOLE_DIA_MIN_MM = 2;
+export const MAGNET_HOLE_DIA_MAX_MM = 60;
+export const MAGNET_HOLE_DEPTH_MIN_MM = 0.3;
+export const MAGNET_HOLE_DEPTH_MAX_MM = 10;
+
+/**
+ * 沉孔参数(孔径 + 深度)
+ *
+ * **可调** —— 工作室 2026-11-11 明确要求「磁吸沉孔需要可调」。
+ * 默认值仍然是实物磁铁的尺寸(Ø20.7 / 深 1.3),但不同批次的磁铁、
+ * 不同厚度的板子需要不同的孔。
+ */
+export type MagnetHoleParams = {
+  /** 孔径(mm) */
+  holeDiaMm: number;
+  /** 沉孔深(mm) */
+  holeDepthMm: number;
+};
+
+/** 默认孔参数 —— 实物磁铁的尺寸 */
+export const MAGNET_DEFAULT_HOLE_PARAMS: MagnetHoleParams = {
+  holeDiaMm: MAGNET_HOLE_DIA_MM,
+  holeDepthMm: MAGNET_HOLE_DEPTH_MM,
+};
+
+/**
+ * 把用户填的孔参数收敛到合法范围
+ *
+ * 非法值(NaN / 负数 / 超范围)**一律夹回范围**,不留「半截值」。
+ */
+export function normalizeHoleParams(
+  params?: Partial<MagnetHoleParams> | null
+): MagnetHoleParams {
+  const dia = Number(params?.holeDiaMm);
+  const depth = Number(params?.holeDepthMm);
+  const clampedDia = Number.isFinite(dia)
+    ? Math.min(MAGNET_HOLE_DIA_MAX_MM, Math.max(MAGNET_HOLE_DIA_MIN_MM, dia))
+    : MAGNET_HOLE_DIA_MM;
+  const clampedDepth = Number.isFinite(depth)
+    ? Math.min(
+        MAGNET_HOLE_DEPTH_MAX_MM,
+        Math.max(MAGNET_HOLE_DEPTH_MIN_MM, depth)
+      )
+    : MAGNET_HOLE_DEPTH_MM;
+  return { holeDiaMm: clampedDia, holeDepthMm: clampedDepth };
+}
+
+/** 孔参数 → 半径(mm) */
+export function holeRadiusMm(
+  params?: Partial<MagnetHoleParams> | null
+): number {
+  return normalizeHoleParams(params).holeDiaMm / 2;
+}
 
 /** 切刀圆柱的圆周段数 —— 跟 Blender 脚本一样是 64 */
 export const MAGNET_CUTTER_SEGMENTS = 64;
@@ -195,18 +262,21 @@ export type MagnetCutterPlacement = {
  *
  * @param facePoint    命中点(切刀在这上面开孔)
  * @param outwardNormal 命中面的**朝外**单位法线
+ * @param hole         孔参数(孔径 / 沉孔深)—— 省略就是实物磁铁的默认尺寸
  */
 export function computeCutterPlacement(
   facePoint: MagnetVec3,
-  outwardNormal: MagnetVec3
+  outwardNormal: MagnetVec3,
+  hole?: Partial<MagnetHoleParams> | null
 ): MagnetCutterPlacement {
-  const depth = MAGNET_HOLE_DEPTH_MM;
+  const { holeDiaMm, holeDepthMm } = normalizeHoleParams(hole);
+  const depth = holeDepthMm;
   const pen = MAGNET_CUTTER_PENETRATION_MM;
   const axis = normalizeVec(outwardNormal);
   const inward: MagnetVec3 = [-axis[0], -axis[1], -axis[2]];
   return {
     center: addScaled(facePoint, inward, depth / 2 - pen),
-    radius: MAGNET_HOLE_RADIUS_MM,
+    radius: holeDiaMm / 2,
     height: depth + 2 * pen,
     segments: MAGNET_CUTTER_SEGMENTS,
     nearOffsetMm: -2 * pen,
@@ -281,9 +351,10 @@ export function polygonAreaMm2(
  * **少了**说明孔切到边上去了(或者实体比想象的薄)。
  */
 export function expectedRemovedVolumeMm3(
-  depthMm: number = MAGNET_HOLE_DEPTH_MM
+  depthMm: number = MAGNET_HOLE_DEPTH_MM,
+  radiusMm: number = MAGNET_HOLE_RADIUS_MM
 ): number {
-  return polygonAreaMm2(MAGNET_HOLE_RADIUS_MM) * depthMm;
+  return polygonAreaMm2(radiusMm) * depthMm;
 }
 
 /**
@@ -320,18 +391,19 @@ export type MagnetFaceMetrics = {
  *
  * - **太薄** —— 厚度 < 沉孔深 + 最小壁厚 ⇒ 切下去会捅穿
  * - **切到边上** —— 净空 < 孔半径 ⇒ 孔会有一截跑到面外面(磁铁会掉出去)
+ *
+ * 阈值跟**当前的孔参数**走 —— 孔调大了,「太薄」「切到边上」的门槛也跟着变。
  */
 export function judgeFaceVerdict(
-  metrics: MagnetFaceMetrics
+  metrics: MagnetFaceMetrics,
+  hole?: Partial<MagnetHoleParams> | null
 ): MagnetFaceVerdict {
+  const { holeDiaMm, holeDepthMm } = normalizeHoleParams(hole);
   if (metrics.thicknessMm == null) return "no_hit";
-  if (metrics.thicknessMm < MAGNET_HOLE_DEPTH_MM + MAGNET_MIN_WALL_MM) {
+  if (metrics.thicknessMm < holeDepthMm + MAGNET_MIN_WALL_MM) {
     return "too_thin";
   }
-  if (
-    metrics.clearanceMm != null &&
-    metrics.clearanceMm < MAGNET_HOLE_RADIUS_MM
-  ) {
+  if (metrics.clearanceMm != null && metrics.clearanceMm < holeDiaMm / 2) {
     return "edge_spill";
   }
   return "ok";
@@ -353,4 +425,35 @@ export function pickDefaultFace<
   return cuttable.reduce((best, f) =>
     f.flatnessDeg < best.flatnessDeg ? f : best
   );
+}
+
+/**
+ * 切割目标 —— 要么是六个轴向面之一,要么是「智能识别出来的那个平面」
+ *
+ * `"auto"` = `magnet-backface.ts` 检测出来的**最大平面区域**(面积最大、
+ * 法线最平的那一块)。工作室 2026-11-11 问的那句「为什么没有按照原来脚本
+ * 那样智能识别背面」就是这条。
+ *
+ * `` `patch:${n}` `` = 第 n 块候选平面区域(下标跟分析结果里的 `patches` 对齐)。
+ */
+export type MagnetTargetId = MagnetFaceId | "auto" | `patch:${number}`;
+
+/** `"auto"` —— 智能识别出来的那块平面 */
+export const MAGNET_TARGET_AUTO = "auto";
+
+/**
+ * 把 `patch:3` 这种目标 id 解析成下标
+ *
+ * 不是 `patch:3` 就返回 null(轴向面走另一条路)。
+ */
+export function parsePatchTarget(target: string): number | null {
+  if (!target.startsWith("patch:")) return null;
+  const n = Number(target.slice("patch:".length));
+  if (!Number.isInteger(n) || n < 0) return null;
+  return n;
+}
+
+/** 给「智能识别的那块平面」拼一个 target id */
+export function patchTargetId(index: number): MagnetTargetId {
+  return `patch:${index}`;
 }

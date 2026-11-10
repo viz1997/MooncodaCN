@@ -11,9 +11,11 @@ import {
   alignZTo,
   computeCutterPlacement,
   expectedRemovedVolumeMm3,
+  holeRadiusMm,
   judgeFaceVerdict,
   MAGNET_CUTTER_PENETRATION_MM,
   MAGNET_CUTTER_SEGMENTS,
+  MAGNET_DEFAULT_HOLE_PARAMS,
   MAGNET_FACE_DIRECTIONS,
   MAGNET_FACE_IDS,
   MAGNET_FACE_LABELS,
@@ -21,13 +23,17 @@ import {
   MAGNET_HOLE_DIA_MM,
   MAGNET_HOLE_RADIUS_MM,
   MAGNET_MIN_WALL_MM,
+  MAGNET_TARGET_AUTO,
   type MagnetVec3,
+  normalizeHoleParams,
+  parsePatchTarget,
+  patchTargetId,
   pickDefaultFace,
   polygonAreaMm2,
 } from "@/features/magnet/lib/magnet-params";
 
 describe("磁吸孔参数", () => {
-  it("孔径是固定的实物尺寸 —— Ø20.7mm / 深 1.3mm", () => {
+  it("孔径的**默认值**是实物尺寸 —— Ø20.7mm / 深 1.3mm", () => {
     // 脚本里 HOLE_DIA_MM = 20.5 + TOLERANCE = 0.2
     expect(MAGNET_HOLE_DIA_MM).toBe(20.7);
     expect(MAGNET_HOLE_RADIUS_MM).toBe(10.35);
@@ -225,5 +231,130 @@ describe("六个面的命名", () => {
     expect(MAGNET_FACE_DIRECTIONS.negY).toEqual([0, -1, 0]);
     expect(MAGNET_FACE_DIRECTIONS.posZ).toEqual([0, 0, 1]);
     expect(MAGNET_FACE_DIRECTIONS.negZ).toEqual([0, 0, -1]);
+  });
+});
+
+describe("孔参数可调(工作室 2026-11-11)", () => {
+  it("默认值就是实物磁铁的尺寸", () => {
+    expect(MAGNET_DEFAULT_HOLE_PARAMS).toEqual({
+      holeDiaMm: 20.7,
+      holeDepthMm: 1.3,
+    });
+  });
+
+  it("不传参数 ⇒ 走默认值", () => {
+    expect(normalizeHoleParams()).toEqual(MAGNET_DEFAULT_HOLE_PARAMS);
+    expect(normalizeHoleParams(null)).toEqual(MAGNET_DEFAULT_HOLE_PARAMS);
+  });
+
+  it("用户填的值原样保留(在范围内)", () => {
+    expect(normalizeHoleParams({ holeDiaMm: 10, holeDepthMm: 2 })).toEqual({
+      holeDiaMm: 10,
+      holeDepthMm: 2,
+    });
+  });
+
+  it("超范围 ⇒ 夹回范围(不留半截值)", () => {
+    expect(normalizeHoleParams({ holeDiaMm: 0.1, holeDepthMm: 2 })).toEqual({
+      holeDiaMm: 2,
+      holeDepthMm: 2,
+    });
+    expect(normalizeHoleParams({ holeDiaMm: 999, holeDepthMm: 2 })).toEqual({
+      holeDiaMm: 60,
+      holeDepthMm: 2,
+    });
+    expect(normalizeHoleParams({ holeDiaMm: 10, holeDepthMm: 0 })).toEqual({
+      holeDiaMm: 10,
+      holeDepthMm: 0.3,
+    });
+    expect(normalizeHoleParams({ holeDiaMm: 10, holeDepthMm: 999 })).toEqual({
+      holeDiaMm: 10,
+      holeDepthMm: 10,
+    });
+  });
+
+  it("NaN ⇒ 退回默认值", () => {
+    expect(normalizeHoleParams({ holeDiaMm: Number.NaN })).toEqual(
+      MAGNET_DEFAULT_HOLE_PARAMS
+    );
+  });
+
+  it("半径跟着孔径走", () => {
+    expect(holeRadiusMm({ holeDiaMm: 10, holeDepthMm: 2 })).toBe(5);
+    expect(holeRadiusMm()).toBe(10.35);
+  });
+
+  it("切刀摆放跟着孔参数走 —— Ø10 / 深 2", () => {
+    const p = computeCutterPlacement([0, 0, 20], [0, 0, 1], {
+      holeDiaMm: 10,
+      holeDepthMm: 2,
+    });
+    expect(p.radius).toBeCloseTo(5, 6);
+    expect(p.height).toBeCloseTo(3, 6); // 2 + 2×0.5
+    expect(p.nearOffsetMm).toBeCloseTo(-1, 6);
+    expect(p.farOffsetMm).toBeCloseTo(2, 6);
+    // 中心 = 面点 + 朝内 × (d/2 − p) = 20 − 0.5
+    expect(p.center[2]).toBeCloseTo(19.5, 6);
+  });
+
+  it("**孔径是绝对毫米** —— 切刀半径不跟模型大小走", () => {
+    // 同一个孔参数,模型面在哪儿都一样
+    const a = computeCutterPlacement([0, 0, 20], [0, 0, 1], {
+      holeDiaMm: 10,
+      holeDepthMm: 2,
+    });
+    const b = computeCutterPlacement([0, 0, 2000], [0, 0, 1], {
+      holeDiaMm: 10,
+      holeDepthMm: 2,
+    });
+    expect(a.radius).toBe(b.radius);
+    expect(a.height).toBe(b.height);
+  });
+
+  it("判定跟着孔参数走 —— 深 2mm 的孔要求更厚的料", () => {
+    const hole = { holeDiaMm: 10, holeDepthMm: 2 };
+    // 2 + 0.3 = 2.3mm
+    expect(judgeFaceVerdict({ thicknessMm: 2.2, clearanceMm: 20 }, hole)).toBe(
+      "too_thin"
+    );
+    expect(judgeFaceVerdict({ thicknessMm: 2.3, clearanceMm: 20 }, hole)).toBe(
+      "ok"
+    );
+  });
+
+  it("判定跟着孔参数走 —— Ø10 的孔对净空的要求更低", () => {
+    const hole = { holeDiaMm: 10, holeDepthMm: 2 };
+    expect(judgeFaceVerdict({ thicknessMm: 10, clearanceMm: 4.9 }, hole)).toBe(
+      "edge_spill"
+    );
+    expect(judgeFaceVerdict({ thicknessMm: 10, clearanceMm: 5 }, hole)).toBe(
+      "ok"
+    );
+  });
+});
+
+describe("切割目标 id", () => {
+  it("`auto` 就是智能识别出来的那块平面", () => {
+    expect(MAGNET_TARGET_AUTO).toBe("auto");
+  });
+
+  it("`patch:3` ⇒ 下标 3", () => {
+    expect(parsePatchTarget("patch:3")).toBe(3);
+    expect(parsePatchTarget("patch:0")).toBe(0);
+  });
+
+  it("不是 `patch:` 开头 ⇒ null(轴向面走另一条路)", () => {
+    expect(parsePatchTarget("posZ")).toBeNull();
+    expect(parsePatchTarget("auto")).toBeNull();
+  });
+
+  it("下标不是整数 / 是负数 ⇒ null", () => {
+    expect(parsePatchTarget("patch:-1")).toBeNull();
+    expect(parsePatchTarget("patch:abc")).toBeNull();
+    expect(parsePatchTarget("patch:1.5")).toBeNull();
+  });
+
+  it("下标 ↔ id 能往返", () => {
+    expect(parsePatchTarget(patchTargetId(5))).toBe(5);
   });
 });
