@@ -1400,6 +1400,99 @@
         "tag2": "耗材克重",
         "tag3": "最优摆盘",
         "tag4": "导出 OBJ"
+      },
+      "magnet": {
+        "title": "磁吸孔切割",
+        "description": "在模型最平的那个面上挖一个 Ø20.7mm × 1.3mm 的磁吸沉孔,切完直接下载 OBJ。布尔运算在浏览器本地跑 —— 模型不上传,也不会替你下单。",
+        "tag1": "盲孔沉孔",
+        "tag2": "自动挑面",
+        "tag3": "本地布尔",
+        "tag4": "导出 OBJ"
+      }
+    }
+  },
+  "Magnet": {
+    "title": "磁吸孔切割",
+    "subtitle": "在模型最平的那个面上挖一个 Ø20.7mm、深 1.3mm 的磁吸沉孔,切完下载 OBJ。全程在浏览器本地跑 —— 模型不上传,这个工具也不替你下单。",
+    "file": {
+      "noFile": "还没载入模型",
+      "hint": "把模型拖进来,或者点下面的按钮选文件。OBJ / STL / PLY / GLB / ZIP 都行。",
+      "summary": "{faces} 个三角面 · {size} mm",
+      "choose": "选择文件",
+      "replace": "换一个文件",
+      "parsing": "正在读取模型…",
+      "parsingHint": "解析跑在 worker 里,页面不会卡住。",
+      "loadFailed": "这个模型读不出来"
+    },
+    "drop": {
+      "hint": "把模型文件拖到右边的预览区,或者点下面的按钮选一个。",
+      "choose": "选择模型文件",
+      "overlay": "松开以载入模型"
+    },
+    "unit": {
+      "banner": "这个文件的坐标不像毫米(最大边 {extent}),已经归一化到最大边 100mm。不对的话改一下目标尺寸。",
+      "restore": "改回原始尺寸"
+    },
+    "size": {
+      "title": "打印尺寸",
+      "label": "目标最大边(mm)",
+      "reset": "重置",
+      "hint": "孔径是固定的实物尺寸(Ø20.7mm),不跟模型缩放 —— 先把打印尺寸定下来,再挑面。"
+    },
+    "hole": {
+      "title": "磁吸沉孔",
+      "fixed": "Ø{dia}mm · 深 {depth}mm —— 按实物磁铁尺寸固定,不可调。"
+    },
+    "faces": {
+      "title": "候选面",
+      "analyzing": "正在量各个面…",
+      "col": {
+        "face": "面",
+        "flatness": "平整度",
+        "thickness": "厚度",
+        "verdict": "判定"
+      },
+      "verdict": {
+        "ok": "可以切",
+        "too_thin": "太薄",
+        "edge_spill": "会切到边上",
+        "no_hit": "这个方向没有面"
+      },
+      "hint": "平整度是面跟探针方向的夹角 —— 0° 就是完全平的。厚度是沉孔能挖多深而不捅穿。"
+    },
+    "cut": {
+      "button": "切磁吸孔",
+      "working": "正在切…",
+      "done": "孔切好了",
+      "removed": "去掉多少料",
+      "expected": "理论值",
+      "volume": "体积",
+      "tris": "三角面数",
+      "note": "这是盲孔 —— 底还在。导出的 OBJ 是纯色件:布尔运算不保留 UV。"
+    },
+    "download": {
+      "cut": "下载切好的 OBJ",
+      "original": "下载原始 OBJ",
+      "solidColor": "导出的 OBJ 没有 UV、没有材质 —— 是纯色件。"
+    },
+    "viewport": {
+      "title": "3D 预览",
+      "reset": "重置视角",
+      "empty": "拖一个模型进来开始"
+    },
+    "errors": {
+      "generic": "出了点问题 —— 请再试一次。",
+      "noGeometry": "这个文件里读不出几何。",
+      "codes": {
+        "notManifold": "这个模型不是封闭实体(有开放边或非流形边),布尔运算切不了。先去「打印前工作台 → 检查」看看问题在哪儿。",
+        "invertedWinding": "这个模型的三角形绕序整体反了 —— 已经自动纠正,请再切一次。",
+        "emptyModel": "这个模型是空的或者退化的 —— 没有东西可切。",
+        "booleanFailed": "布尔运算在这个模型上失败了。试试从建模软件里重新导出一份再拖进来。",
+        "faceCountCollapsed": "切完的结果是坏的(面数塌了),已经拒绝 —— 原始模型还在。",
+        "nothingCut": "这一刀没切进去,已经拒绝 —— 原始模型还在。",
+        "volumeUnchanged": "模型的体积没变,已经拒绝 —— 原始模型还在。",
+        "holeSpilled": "沉孔切到模型边缘去了,已经拒绝。换一个周围更空的面试试。",
+        "faceNotCuttable": "这个面切不了 —— 换一个。"
       }
     }
   },

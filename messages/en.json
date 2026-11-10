@@ -1403,6 +1403,99 @@
         "tag2": "Resin weight",
         "tag3": "Best orientation",
         "tag4": "OBJ export"
+      },
+      "magnet": {
+        "title": "Magnet Pocket Cutter",
+        "description": "Cut a Ø20.7 mm × 1.3 mm blind magnet pocket into the flattest face of your model and download the OBJ. The boolean runs locally — nothing is uploaded, and it does not place an order.",
+        "tag1": "Blind pocket",
+        "tag2": "Flattest face",
+        "tag3": "Local boolean",
+        "tag4": "OBJ export"
+      }
+    }
+  },
+  "Magnet": {
+    "title": "Magnet Pocket Cutter",
+    "subtitle": "Cut a Ø20.7 mm × 1.3 mm blind magnet pocket into the flattest face of your model, then download the OBJ. Everything runs locally in your browser — the model is never uploaded, and this tool never places an order.",
+    "file": {
+      "noFile": "No model loaded",
+      "hint": "Drop a model in, or pick a file below. OBJ / STL / PLY / GLB / ZIP are all fine.",
+      "summary": "{faces} triangles · {size} mm",
+      "choose": "Choose file",
+      "replace": "Replace file",
+      "parsing": "Reading the model…",
+      "parsingHint": "Parsing runs in a worker, so the page stays responsive.",
+      "loadFailed": "Could not read this model"
+    },
+    "drop": {
+      "hint": "Drag a model file onto the preview area, or pick one below.",
+      "choose": "Choose a model file",
+      "overlay": "Drop to load the model"
+    },
+    "unit": {
+      "banner": "This file's coordinates don't look like millimetres (largest edge {extent}), so it was normalised to a 100 mm largest edge. Change the target size if that isn't right.",
+      "restore": "Use the file's original size"
+    },
+    "size": {
+      "title": "Print size",
+      "label": "Target largest edge (mm)",
+      "reset": "Reset",
+      "hint": "The pocket is a fixed physical size (Ø20.7 mm) — it does not scale with the model. Set the print size first, then pick the face."
+    },
+    "hole": {
+      "title": "Magnet pocket",
+      "fixed": "Ø{dia} mm · {depth} mm deep — fixed to the real magnet size, not adjustable."
+    },
+    "faces": {
+      "title": "Candidate faces",
+      "analyzing": "Measuring the faces…",
+      "col": {
+        "face": "Face",
+        "flatness": "Flatness",
+        "thickness": "Thickness",
+        "verdict": "Verdict"
+      },
+      "verdict": {
+        "ok": "OK",
+        "too_thin": "Too thin",
+        "edge_spill": "Would spill over the edge",
+        "no_hit": "No face here"
+      },
+      "hint": "Flatness is the angle between the face and the probe — 0° is perfectly flat. Thickness is how deep the pocket can go before it breaks through."
+    },
+    "cut": {
+      "button": "Cut magnet pocket",
+      "working": "Cutting…",
+      "done": "Pocket cut",
+      "removed": "Material removed",
+      "expected": "Expected",
+      "volume": "Volume",
+      "tris": "Triangles",
+      "note": "The pocket is blind — the floor is still there. The exported OBJ is a single-colour solid: the boolean does not keep UVs."
+    },
+    "download": {
+      "cut": "Download the cut OBJ",
+      "original": "Download the original OBJ",
+      "solidColor": "The exported OBJ has no UVs or materials — it is a single-colour solid."
+    },
+    "viewport": {
+      "title": "3D preview",
+      "reset": "Reset view",
+      "empty": "Drop a model to get started"
+    },
+    "errors": {
+      "generic": "Something went wrong — please try again.",
+      "noGeometry": "No geometry could be read from this file.",
+      "codes": {
+        "notManifold": "This model is not a closed solid (it has open or non-manifold edges), so a boolean cannot cut it. Check it in the Print Pre-flight Workbench first.",
+        "invertedWinding": "This model's faces were wound inside-out — that has been corrected automatically. Please try again.",
+        "emptyModel": "This model is empty or degenerate — there is nothing to cut.",
+        "booleanFailed": "The boolean operation failed on this model. Try exporting it again from your modelling tool and re-importing it.",
+        "faceCountCollapsed": "The result came out broken (the face count collapsed), so it was rejected — the original model was kept.",
+        "nothingCut": "The pocket did not cut into the model, so it was rejected — the original model was kept.",
+        "volumeUnchanged": "The model's volume did not change, so the cut was rejected — the original model was kept.",
+        "holeSpilled": "The pocket spilled over the edge of the model, so it was rejected. Pick a face with more room around it.",
+        "faceNotCuttable": "That face cannot be cut — pick another one."
       }
     }
   },

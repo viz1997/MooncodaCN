@@ -146,6 +146,9 @@ pnpm migrate:apply-print-order       # 打印工单表
 pnpm migrate:apply-print-pricing     # 打印定价配置 + 材料库
 pnpm migrate:apply-currency          # 币种 / 默认值对齐到代码
 pnpm migrate:apply-payment-channel   # 收款通道那几列
+
+# 资产准备 —— 产物提交进仓库,新克隆的机器不用跑
+pnpm magnet:wasm          # 把 manifold-3d 的 wasm 拷进 public/
 ```
 
 Tests live in `src/test/` (not colocated), run sequentially to avoid DB race conditions, with 30s timeout for integration tests. Test env vars loaded from `.env.test`.
@@ -1388,6 +1391,153 @@ shared/components/model-viewport/
 | `src/test/pricing/pure/support-cache-key.test.ts` | 同一组参数 ⇒ 同一个键 / 改尺寸 ⇒ 换键 / 转姿态 ⇒ 换键 / **0.0001° 抖动算同一个键、0.01° 算另一个** / 姿态和尺寸都参与 / 键里存的是取整后的值 / 缺省缩放当 1 |
 | `src/test/pricing/pure/obj-text.test.ts` | BOM 嗅探 / NUL 密度嗅探(**LE ⇒ 奇数位、BE ⇒ 偶数位**)/ UTF-16LE·BE 解码 / UTF-8 BOM 摘掉 / 空文件的两种说法 |
 | `src/test/tools/pure/workbench-merge.test.ts` | 一个视口 / 侧栏在左 / **主出口在左栏底部固定条**(`primaryAction`)/ **浮层药丸只管「看图」** |
+
+### 磁吸孔切割工具 `/tools/magnet`(2026-11-10)
+
+工作室给了一段 Blender Python 脚本:把模型**最平的那个面**上挖一个**盲孔**
+(圆柱沉孔),挖完导出 `relief_final.obj` 给打印用。以前这段脚本**只能在工作室
+本地的 Blender 里跑** —— 客户拿不到这个能力,工作室每单也要手工过一道。
+
+网页端复刻这条链路,核心是**布尔运算**。脚本自己已经暴露了「为什么要好引擎」:
+它用 EXACT 求解器、还带 FAST 兜底,切完还要专门清法线 —— 说明 BSP 那种布尔在
+这个模型上不够干净。而 **Manifold3D 正是 Blender EXACT 求解器背后的那个引擎**
+(elalish/manifold,Apache-2.0),它保证输出是流形,并能修复非流形输入。
+
+#### 跟 Blender 脚本**不一样**的那一处(重要)
+
+脚本里有这么一段:
+
+```python
+ratio = max_dim_mm / EXPECTED_WIDTH_MM   # EXPECTED_WIDTH_MM = 60.0
+radius = ((HOLE_DIA_MM + TOLERANCE) / 2000.0) * ratio
+```
+
+孔径**跟着模型最大边一起缩放**。那是当年为了绕开「Meshy 导出来的 7000mm」问题
+临时加的假设。**网页端知道最终打印尺寸,不需要这个假设** —— 照搬会让一个 40mm
+宽的模型只得到 Ø13.8mm 的孔。
+
+⇒ **孔径按实物毫米固定**:Ø20.7mm / 深 1.3mm(磁铁是固定尺寸的实体)。
+`magnet-params.ts` 里**没有** `EXPECTED_WIDTH_MM`(单测守着这条)。
+
+#### 四条口径(跟工作室确认过)
+
+| 决定 | 口径 |
+|---|---|
+| 工具位置 | **独立页面 `/tools/magnet`** —— 不塞进打印工作台 |
+| 孔径 | **固定 Ø20.7mm / 深 1.3mm** —— 不跟模型缩放 |
+| 与工单的关系 | **不进工单** —— 只本地下载,下单时仍传原始模型,工作室自己在 Blender 里切 |
+| 独立站入口 | **只在 `/en` 页面**:顶部公告条 + 导航按钮 |
+
+「不进工单」这一条把风险面砍掉了一大半:**钱的那条链路一行都不动**(报价、工单、
+R2 上传、支撑克重全部原样)。工具是纯前端的、独立的、可下载的。
+
+#### 模块布局(`src/features/magnet/`)
+
+```
+lib/
+├── magnet-params.ts          # 纯常量 + 切刀摆放数学 —— 零依赖,能进 unit project
+├── magnet-cutter-protocol.ts # worker 收/发消息类型 + 错误码联合
+├── magnet-cutter-handler.ts  # 真正干活的那一段(焊接 → 校验 → 挑面 → 布尔 → 出料)
+├── magnet-cutter-client.ts   # promise 客户端(Worker + 主线程兜底)
+├── magnet-error.ts           # 错误码 → 文案 key
+└── write-obj.ts              # 三角汤 → OBJ 文本 + Blob
+workers/
+└── magnet-cutter.worker.ts   # worker 壳(跟 angle-optimizer.worker.ts 一个形状)
+components/
+└── magnet-cutter-tool.tsx    # 客户端 UI(拖放 / 尺寸 / 选面 / 切 / 下载)
+```
+
+#### 切刀摆放的数学(照搬脚本,去掉 ratio)
+
+```
+半径 r      = 10.35mm(= MAGNET_HOLE_DIA_MM / 2)
+沉孔深 d    = 1.3mm
+切刀外伸 p  = 0.5mm
+切刀总高 h  = d + 2p = 2.3mm
+切刀中心    = facePoint + inward * (d/2 - p)   ← facePoint + inward * 0.15
+切刀轴      = inward(切刀的 +Z 对齐 inward)
+切刀近端    = facePoint + inward * (-2p)  ← 在面**外面** 1.0mm
+切刀远端    = facePoint + inward * ( d )  ← 在面**里面** 1.3mm
+```
+
+外伸那 1mm 是**必须的**:切刀跟面完全共面时布尔会出退化结果(脚本里 `penetration`
+就是干这个的)。**别以后有人「优化」掉它。**
+
+- **矩阵而不是欧拉角** —— `transform(Mat4)` 对齐切刀的 +Z 到面法线。矩阵没有
+  「旋转顺序」的歧义(仓库自己的 `POSE_EULER_ORDER = "ZYX"` 那个坑不必再踩一遍)。
+- **`Manifold.cylinder` 是静态方法** —— **不加 `new`**。加了 TS 直接报 TS7009。
+
+#### 三道闸(脚本没有,网页端必须有)
+
+**① 焊接走仓库唯一公开入口** —— `weldAndAnalyzeTopology(positions)`
+(`src/features/tools/lib/mesh/weld.ts`)。`weldVertices` 是模块私有的,拿不到。
+它返回的 `WeldedMesh` 字段**正好就是 manifold 要的形状**(`vertices` →
+`vertProperties`、`faceVertex` → `triVerts`),不用再转一次。
+
+**② 流形校验 —— 不是可选项** —— 工作室的模型是 AI 生成的(Meshy),**非流形是常态**。
+不拦的话 EXACT 布尔会静默切出个烂件,用户看着像工具坏了:
+
+| 判据 | 动作 |
+|---|---|
+| 开放边 / 非流形边 > 0 | **拒绝**(`NOT_MANIFOLD`)+ 一句人话 + 指到 `/tools/workbench` |
+| 整体法线朝内 | 翻转三角形绕序后继续(`INVERTED_WINDING` —— manifold 对整体反向宽容,对局部反向不宽容) |
+| `manifold.status() !== "NoError"` | 拒绝(`BOOLEAN_FAILED`),把 status 原文带出来 |
+
+**③ 切完的收尾检查** —— 失败时**保留原模型**,界面显示具体原因,不给一个坏件:
+
+| 检查 | 错误码 |
+|---|---|
+| `result.isEmpty()` | `EMPTY_MODEL` |
+| 面数锐减(切坏了) | `FACE_COUNT_COLLAPSED` |
+| 面数没变(没切进去) | `NOTHING_CUT` |
+| 体积没减少(切了个寂寞) | `VOLUME_UNCHANGED` |
+| 去掉量比理论值少太多(孔切到边上去了) | `HOLE_SPILLED` |
+
+#### 六个面:表格给用户挑
+
+一次建流形 + 12 次射线(6 个方向各两条:一条找外表面,一条量局部厚度),
+一次算出 **6 行表格**(面 / 平整度 / 局部厚度 / 能不能切)。用 **manifold 自带的
+`rayCast(origin, endpoint)`** —— 比自己写 Möller–Trumbore 稳,还能直接拿到法线。
+
+- 默认选「平整度最高且能切」的那一个(脚本的自动挑面偶尔会挑到一个很小的边面,
+  **用户能自己换是必须的**)。
+- `thickness < depth + MAGNET_MIN_WALL_MM(0.3mm)` ⇒ 太薄,切下去会捅穿。
+- 孔圆在面内放不下 ⇒ ⚠ 会切到边上。
+
+#### 复用仓库里已有的东西(别重写)
+
+| 要的 | 用哪个 |
+|---|---|
+| 拖放 | `src/features/shared/hooks/use-drop-zone.ts` 的 `useDropZone()` —— 仓库**强制**用它,自己写 `onDragOver` 那个写法就是会闪的那份 |
+| 解析 OBJ | `src/features/pricing/lib/zip-extractor.ts` 的 `extractModelZip()` |
+| 单位判定 | `src/features/pricing/lib/model-units.ts` 的 `detectModelUnitScale()` —— 7000mm 那个问题仓库已经解了 |
+| 视口 | `src/features/shared/components/model-viewport/` 的 `ModelViewport` —— **整个仓库只有这一份视口**,别再写第二个 |
+| 焊接 / 拓扑 | `src/features/tools/lib/mesh/weld.ts` 的 `weldAndAnalyzeTopology()` |
+
+- **导出不带 `vt` / `vn`** —— 布尔运算不保留 UV / 材质组,导出的是纯色件。
+  **界面上必须写明**(模型原本有贴图的话,切完贴图没了)。
+- **尺寸只有一档** —— 「目标最大边(mm)」单值 + 均匀缩放。XYZ 三轴分别调对这个
+  工具没必要(孔径是绝对尺寸,只要整体大小对就行)。
+
+#### Manifold3D 的 API 表面(踩过的坑,别再踩)
+
+| 事实 | 后果 |
+|---|---|
+| `export default Module`,`Module` 是个 **async 工厂** | `await Module({locateFile})` 才拿得到运行时 |
+| **`ManifoldToplevel.setup()` 必须调** | 不调的话整个 JS API 层都不存在 |
+| **`Manifold.cylinder` 是静态方法** | 加 `new` ⇒ TS7009 |
+| `intersection` / `difference` **只有静态版** | 实例上没有 |
+| `Mat4` = 16 元组 **列主序**;`Vec3 = [x,y,z]` | 传错顺序 ⇒ 变换整个错位 |
+| wasm 放 `public/manifold.wasm`(541KB) | **产物提交进仓库** —— 免得新克隆的机器没跑脚本就白屏;`pnpm magnet:wasm` 重新拷 |
+
+#### 行为由单测守住
+
+| 测试 | 守住什么 |
+|---|---|
+| `src/test/magnet/pure/magnet-params.test.ts` | 切刀摆放数学(近端在面外 1mm、远端在面内 1.3mm)/ 半径 10.35 / 六个面的方向映射 / 太薄判定 |
+| `src/test/magnet/pure/magnet-cut.test.ts` | **真跑 manifold**:立方体切顶面 → 体积减少 ≈ π·r²·d / 结果是流形(能再切一次不炸) / 太薄的板子被拒 / 非流形输入被拒 / 六个面里挑出平整度最高的 |
+| `src/test/magnet/pure/write-obj.test.ts` | 三角汤 → OBJ 文本 / 顶点索引 / Blob |
+| `src/test/magnet/pure/magnet-page.test.ts` | 路由在 / 工具中心登记了 / **视口是复用的那一份** / **不进工单**(不碰报价、工单、R2)/ 拖放用 `useDropZone` / 焊接走 `weldAndAnalyzeTopology` / `Manifold.cylinder` 不加 `new` / **孔径是绝对毫米**(`EXPECTED_WIDTH_MM` 不许进代码)/ wasm 提交进仓库 / 中英文 key 一致 |
 
 ### 打印定价后台(2026-11-06)
 

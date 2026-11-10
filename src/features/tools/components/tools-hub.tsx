@@ -18,12 +18,12 @@
  * 是有戒心的。
  */
 
-import { ArrowRight, type LucideIcon, Scale } from "lucide-react";
+import { ArrowRight, type LucideIcon, Magnet, Scale } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/routing";
 
 type ToolEntry = {
-  id: "weight";
+  id: string;
   href: string;
   icon: LucideIcon;
   /** i18n key 后缀 */
@@ -31,17 +31,20 @@ type ToolEntry = {
 };
 
 /**
- * 工具清单 —— **一个**入口
+ * 工具清单
  *
- * 2026-11-07:模型检查工具并进了克重工具(两个工具页合成一个打印前工作台),
- * 所以这里只剩一张卡。清单留着数组 —— 工具还会再加(图片尺寸换算……),
- * 往后加一条就行。
+ * 2026-11-07:模型检查工具并进了克重工具(两个工具页合成一个打印前工作台)。
+ * 2026-11-10:加了磁吸孔切割(`/tools/magnet`)—— **独立页面**,不进工单,
+ * 切完只本地下载。
+ *
+ * 清单留着数组 —— 工具还会再加(图片尺寸换算……),往后加一条就行。
  *
  * 入口地址是 `/tools/workbench` —— 两个视角(检查 / 克重)都在这一页
  * 里,老地址(`/pricing` / `/tools/weight` / `/tools/model-check`)都 308 跳过来。
  */
 const TOOLS: ToolEntry[] = [
   { id: "weight", href: "/tools/workbench", icon: Scale, key: "weight" },
+  { id: "magnet", href: "/tools/magnet", icon: Magnet, key: "magnet" },
 ];
 
 export function ToolsHub() {
