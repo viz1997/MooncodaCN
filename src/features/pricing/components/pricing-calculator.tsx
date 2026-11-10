@@ -9,10 +9,13 @@ import {
   Download,
   FileArchive,
   ListChecks,
+  Loader2,
+  MoveDown,
   Package,
   Pencil,
   RotateCcw,
   Scale,
+  Shell,
   UploadCloud,
   X,
 } from "lucide-react";
@@ -127,6 +130,7 @@ import {
   type PricingInput,
   type RepairMode,
 } from "@/features/pricing/lib/pricing-engine";
+import { supportCacheKey } from "@/features/pricing/lib/support-cache-key";
 import {
   extractModelZip,
   type ModelFile,
@@ -145,7 +149,8 @@ import {
   SUPPORT_LIFT_MM,
 } from "@/features/tools/lib/mesh/support-shell";
 
-type Mode = "upload" | "manual" | "batch";
+/** 页面可以有的三个模式 —— 打印工作台只开「上传」 */
+export type Mode = "upload" | "manual" | "batch";
 
 /**
  * 模型载荷的类型定义在 `pricing-calculator-types.ts` —— 从这里再导出一次,
@@ -156,8 +161,19 @@ export type { PricingModelPayload };
 const yieldToUI = (): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, 0));
 
+/**
+ * 支撑重算的**防抖** —— 拖旋转控制器 / 拖尺寸滑块时用的
+ *
+ * 工作室 2026-11-07 的口径:「支撑不要跟随变化实时变化」—— 数字别一直跳,
+ * Worker 队列别一直满。所以「改尺寸 / 转姿态」之后等 400ms 安静下来再算。
+ *
+ * 400ms 是「人停下来看一眼」的时间 —— 不长不短。
+ */
+const SUPPORT_RECALC_DEBOUNCE_MS = 400;
+
 export function PricingCalculator({
   showChrome = true,
+  modes,
   onQuoteInput,
   quoteActionSlot,
   onModelChange,
@@ -175,6 +191,21 @@ export function PricingCalculator({
   showChrome?: boolean;
 
   /**
+   * 这个页面**开放哪几个模式** —— 2026-11-10
+   *
+   * 默认三个全开(上传 / 手动尺寸 / 批量克重)。**打印工作台只开「上传」** ——
+   *
+   * - 「手动尺寸」是**死路**:手动模式**没有模型文件**,而打印工单必须上传
+   *   模型文件到 R2 —— 它永远走不到下单。
+   * - 「批量克重」是**另一个工具**(批量量重),没有下单出口。
+   *
+   * 只剩一个模式时**整段模式切换不渲染** —— 一颗只有一个选项的切换器是噪音。
+   * 代码不删(`batch-mode-section.tsx` / `batch-processor.ts` 原样留在树里),
+   * 想恢复只要把模式放回这个数组。
+   */
+  modes?: Mode[];
+
+  /**
    * 几何变化回调 —— 把「几何 + 支撑」抛给父组件。
    *
    * 传 null 表示「当前没有模型」。父组件拿它去建打印工单(体积 / 表面积 /
@@ -187,12 +218,14 @@ export function PricingCalculator({
   /**
    * 工作台区域里的**报价入口** —— 2026-11-09
    *
-   * 渲染在 3D 视口底下那条浮层控制条上（`ModelSettingsPanel` 的
-   * `toolbarExtra` 插槽）。`/tools/workbench` 挂的是「报价」那颗按钮 ——
-   * 点一下弹报价弹窗，弹窗里下单。
+   * 渲染在**左栏底部的固定条**上（`ModelSettingsPanel` 的 `primaryAction`
+   * 插槽）。`/tools/workbench` 挂的是「报价」那颗按钮 —— 点一下弹报价弹窗,
+   * 弹窗里下单。
    *
    * **以前是右栏一整列**（288px 的「提交打印订单」卡片）—— 那一列把 3D
    * 视口挤到只剩 ~500px（工作室的原话：「把预览区挤到了左边」）。
+   * 再后来挂在浮层药丸的尾巴上 —— 埋得太深(工作室 2026-11-10 的原话:
+   * 「主出口被埋」)。现在是左栏底部固定条:**每个视角都在**,一眼能找到。
    *
    * 传了才渲染,不传就是空的。
    */
@@ -230,7 +263,25 @@ export function PricingCalculator({
 }) {
   const t = useTranslations("MaterialPricing");
 
-  const [mode, setMode] = useState<Mode>("upload");
+  /**
+   * 这个页面**开放哪几个模式**
+   *
+   * 默认三个全开;打印工作台只开「上传」(见 `modes` 那个 prop 的说明)。
+   */
+  const availableModes = useMemo(
+    () => modes ?? (["upload", "manual", "batch"] as Mode[]),
+    [modes]
+  );
+  const [mode, setMode] = useState<Mode>(availableModes[0] ?? "upload");
+  /**
+   * 当前模式被藏起来了 → 回到第一个开放的模式
+   *
+   * 不然一个用户看不见的模式还活着(页面上没有按钮能切出去)。
+   */
+  useEffect(() => {
+    if (availableModes.includes(mode)) return;
+    setMode(availableModes[0] ?? "upload");
+  }, [availableModes, mode]);
   const [infoDialog, setInfoDialog] = useState<InfoDialogKind>(null);
   /**
    * 工作台视角 —— 检查 / 克重
@@ -348,22 +399,28 @@ export function PricingCalculator({
   const [angleOptimizing, setAngleOptimizing] = useState(false);
   const [angleProgress, setAngleProgress] = useState(0);
   /**
-   * **当前角度**的包裹支撑数据 —— 算出来才有
+   * **当前尺寸 + 当前姿态**的包裹支撑数据
    *
-   * 工作室的口径(2026-11-07):**支撑不跟随角度实时变化**。用户把角度摆定
-   * 之后点浮层上那颗「包裹支撑」,这时才算一次 —— 支撑克重 + 总克重 + 画出来
-   * 那圈支撑,三者来自**同一次**计算,数字跟画面必然对得上。
+   * 2026-11-10:支撑改成**自动计算** —— 模型一进来就算一次,改尺寸、转姿态
+   * 之后自动重算(400ms 防抖)。以前是「点「包裹支撑」才算」,模型刚进来时
+   * 三个克重数里有两个是「—」(工作室点名的那条)。
    *
-   * 所以这个值有两个来源:
-   * 1. 用户点「包裹支撑」→ 算一次(带外壳,画面上那圈就是它)
-   * 2. 用户点「提交打印订单」而没点过那颗按钮 → 现算一次(**只要数**,不要
-   *    外壳)—— 服务端重算报价要那个支撑克重,少了它支撑费会算成 0
+   * 这份结果是「**某一组尺寸 + 某一个姿态**」算出来的 —— 配一个**缓存键**
+   * (`supportKey`,见下面)记下它是按哪一组参数算的:
    *
-   * 角度一变 → 这个值被清空(见下面那个「作废」的 effect)。
+   * - 键对得上 ⇒ 这份数就是当前尺寸 / 当前姿态的数 ⇒ 可以直接用
+   * - 键对不上 ⇒ 这是**旧参数**的数 ⇒ 读数摆「更新中…」,报价输入里的
+   *   支撑克重摆 `null`(**不许**拿旧数当新的用)
    */
   const [poseSupport, setPoseSupport] = useState<SupportPoseResult | null>(
     null
   );
+  /**
+   * 这份 `poseSupport` 是按**哪一组参数**算出来的 —— 缓存键
+   *
+   * null = 还没算过。键对不上当前的那把 ⇒ 这份结果是旧的。
+   */
+  const [supportKey, setSupportKey] = useState<string | null>(null);
   /**
    * 模型已经进了摆盘客户端(可以开始算姿态了)
    *
@@ -384,12 +441,12 @@ export function PricingCalculator({
   /**
    * 画不画那圈支撑 —— **默认不画**
    *
-   * 这颗开关就是「算不算支撑」的开关:关着就一点支撑都不算(支撑克重、
-   * 总克重、画面上那圈支撑全都没有),点了才按**当前角度**算一次。
+   * 2026-11-10:这颗开关**只管画不画**,不再管「算不算」——
+   * 支撑改成自动计算了(模型一进来就有三个数),外壳本来就在**同一次**
+   * 计算里带回来了,所以「画不画」跟「算不算」分开了。
    *
    * 支撑外壳是这一页最贵的一块几何(外壳 + 顶面 + 外壁 + 底板留边,一次
-   * 姿态算下来要好几百毫秒)—— 转一下模型就重算一遍,页面卡、数字还在
-   * 一直跳。所以默认关着,用户把角度摆定之后自己点。
+   * 姿态算下来要好几百毫秒)—— 默认不画,用户想看那圈支撑时自己点。
    */
   const [showSupport, setShowSupport] = useState(false);
   /**
@@ -504,6 +561,9 @@ export function PricingCalculator({
     if (!client || !positions) {
       setSupportModelReady(false);
       setPoseSupport(null);
+      // 换模型 → 缓存键也清掉(不然旧模型的键还挂着,新的那把算出来之前
+      // 「新鲜度」判断会误判)
+      setSupportKey(null);
       supportLoadRef.current = null;
       return;
     }
@@ -511,6 +571,8 @@ export function PricingCalculator({
     setSupportModelReady(false);
     // 换模型 → 旧模型的支撑数据作废
     setPoseSupport(null);
+    // 换模型 → 缓存键清空 —— 新模型焊好后**立刻**算一次(不等 400ms)
+    setSupportKey(null);
     setSupportError(null);
     // 换模型 → 旧模型的自检结论作废(新模型还没焊)
     setMeshSummary(null);
@@ -537,33 +599,84 @@ export function PricingCalculator({
   }, [model, fileName]);
 
   /**
-   * 支撑计算 —— **只在用户点「包裹支撑」之后才跑**
+   * 当前尺寸 + 当前姿态的**缓存键**
    *
-   * 工作室的口径(2026-11-07):**支撑不跟随角度实时变化**。用户把角度摆定
-   * 之后点浮层上那颗「包裹支撑」,这时才算一次 —— 支撑克重 + 总克重 + 画出来
-   * 那圈支撑几何,三者来自**同一次**计算,数字跟画面必然对得上。
+   * 支撑克重是「某一组尺寸 + 某一个姿态」算出来的结果 —— 键变了就说明
+   * 手上那份是**旧参数**的数(改完尺寸 / 转完模型之后)。
    *
-   * 转模型(拖旋转控制器)**不触发**这个 effect —— 依赖数组里**没有角度**。
-   * 角度变了 → 下面那个「作废」的 effect 把上一次的结果清掉 → 用户按新
-   * 角度再点一次「包裹支撑」,重新算。
-   *
-   * 依赖里有 `showSupport`:那颗按钮就是开关 —— 关着就一点支撑都不算
-   * (默认关着,模型刚进来时一个支撑都不算,用户不主动要就不替他算)。
-   *
-   * 依赖里还有 `supportRecalcToken`:「置于平面」每点一次 +1 —— **逼着这个
-   * effect 重算一遍**。光打开 `showSupport` 不够(开关本来就开着、或者
-   * 上一次算失败的时候,依赖没变,effect 不会跑)。
-   *
-   * 算的是**缩放后**的真实几何:缩放只挪顶点(拓扑不变),不用重新焊接。
-   * 计算在 Worker 里跑(主线程只发一条指令),页面不会卡。
+   * 纯函数在 `pricing/lib/support-cache-key.ts`。姿态用 `manualRot*`(打印
+   * 姿态),**不是** `viewerRot*`(相机)—— 转相机不该重算支撑。
    */
-  // biome-ignore lint/correctness/useExhaustiveDependencies: 依赖就是触发条件 —— 「置于平面」点一次令牌 +1 就重算,effect 体里不用读它
+  const currentSupportKey = useMemo(
+    () =>
+      supportCacheKey(
+        { x: manualRotX, y: manualRotY, z: manualRotZ },
+        appliedScales
+      ),
+    [manualRotX, manualRotY, manualRotZ, appliedScales]
+  );
+  /**
+   * 活的键 —— 给事件回调里的异步代码读
+   *
+   * `ensureSupport()` 是提交时调用的(事件回调),那会儿拿不到最新的 state ——
+   * 用这个 ref 兜住。
+   */
+  const currentSupportKeyRef = useRef(currentSupportKey);
+  currentSupportKeyRef.current = currentSupportKey;
+  /**
+   * 这份 `poseSupport` 是按**哪一把键**算出来的
+   *
+   * 跟 `supportKey` 同步 —— 给 `ensureSupport()` 的事件回调读(它拿不到
+   * state)。
+   */
+  const supportKeyRef = useRef<string | null>(null);
+  supportKeyRef.current = supportKey;
+
+  /**
+   * **防抖后**的请求键 —— 算支撑那个 effect 的唯一触发条件
+   *
+   * 拖旋转控制器的时候每帧都在变 —— 直接拿活的键去触发 effect,等于
+   * 「实时重算」(工作室 2026-11-07 明说要的:数字别跳、Worker 队列别满)。
+   *
+   * 所以分两级:
+   * - 活的键 `currentSupportKey` 变了 → 这里等 400ms 安静下来
+   * - 安静下来了 → 写 `supportRequestKey` → 算支撑的 effect 才跑
+   *
+   * **第一次不等** —— 模型刚进来,三个克重数要立刻齐全。
+   */
+  const [supportRequestKey, setSupportRequestKey] = useState<string | null>(
+    null
+  );
+
+  /**
+   * 支撑计算 —— **自动算**(尺寸 / 姿态变了就重算)
+   *
+   * 工作室 2026-11-07 的口径是「支撑不跟随角度实时变化」—— 那时候支撑要
+   * 用户点「包裹支撑」才算,模型刚进来三个克重数里有两个是「—」(工作室
+   * 2026-11-10 点名的那条)。
+   *
+   * 现在改成**自动算**:
+   *
+   * - 模型焊好(首次)→ **立刻**算一次 —— 三个数立刻齐全
+   * - 改尺寸 / 转姿态 → 400ms 防抖后算一次 —— 「改尺寸要重算」不是
+   *   「实时重算」(尺寸变了,支撑克重就是另一个数,不重算就是把旧尺寸的
+   *   支撑费按新尺寸的单子收 —— **少收钱**)
+   * - 点「置于平面」→ 令牌 +1 → **立刻**重算一次
+   *
+   * 「显示支撑」那颗开关**只管画不画** —— 外壳本来就在**同一次**计算里
+   * 带回来了(数字跟画出来的那圈必须是同一块几何,CLAUDE.md 的硬口径)。
+   *
+   * 依赖里有 `supportRequestKey`(防抖后的键),**没有角度** —— 拖一下
+   * 控制器不会重跑这个 effect(只重跑防抖那个),Worker 队列不会满。
+   */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 依赖就是触发条件 —— 防抖键 + 「置于平面」令牌 +1 就重算,effect 体里不用读它们
   useEffect(() => {
-    // 没点「包裹支撑」 → 不算
-    if (!showSupport) return;
+    if (!supportRequestKey) return;
     const client = angleClientRef.current;
-    if (!client || !supportModelReady || !model) return;
+    if (!client || !supportModelReady) return;
     const [sx, sy, sz] = appliedScales;
+    // 这次用的键 —— 算完写回时对照,用户算的过程中又动了就丢掉这份
+    const usedKey = supportRequestKey;
     let cancelled = false;
     void (async () => {
       try {
@@ -578,7 +691,11 @@ export function PricingCalculator({
           withShell: true,
         });
         if (cancelled) return;
+        // 算的过程中用户又动了(改了尺寸 / 转了姿态)→ 这份结果过期,丢掉。
+        // 新的那一次请求 400ms 后会来。
+        if (usedKey !== currentSupportKeyRef.current) return;
         setPoseSupport(pose);
+        setSupportKey(usedKey);
         setSupportError(null);
       } catch (err) {
         console.error("支撑计算失败:", err);
@@ -591,29 +708,42 @@ export function PricingCalculator({
       cancelled = true;
     };
   }, [
-    showSupport,
+    supportRequestKey,
     appliedScales,
     supportParams,
-    model,
     supportModelReady,
     supportRecalcToken,
   ]);
 
   /**
-   * 角度变了 → 上一次算出来的支撑**作废**
+   * 防抖 —— 活的键变了就等 400ms 安静下来再触发计算
    *
-   * 支撑是「某个角度下的一次结果」—— 角度一变,那个数就是**旧角度**的数了。
-   * 不清掉的话:画面上那圈支撑摆在旧角度上,支撑克重也是旧角度的,用户看着
-   * 模型在新角度、数字却在说旧角度 —— 画面跟数字一起骗人。
-   *
-   * 所以角度一改:数字清空(回到「—」)、那圈支撑撤掉、按钮回到关的状态。
-   * 用户按新角度再点一次「包裹支撑」,重新算。
+   * **第一次不等**:模型刚进来(还没算过)→ 立刻算,三个克重数立刻齐全。
    */
-  // biome-ignore lint/correctness/useExhaustiveDependencies: 依赖就是触发条件 —— 角度一变就作废,effect 体里不用读这三个数
   useEffect(() => {
-    setPoseSupport(null);
-    setShowSupport(false);
-  }, [manualRotX, manualRotY, manualRotZ]);
+    if (!model) {
+      setSupportRequestKey(null);
+      return;
+    }
+    // 还没算过 → 立刻算一次(不用等 400ms)
+    if (supportKey === null) {
+      setSupportRequestKey(currentSupportKey);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setSupportRequestKey(currentSupportKey);
+    }, SUPPORT_RECALC_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [currentSupportKey, model, supportKey]);
+
+  /**
+   * 手上这份支撑是**当前**尺寸 + 当前姿态的吗?
+   *
+   * 不是 ⇒ 屏幕上摆的是旧参数的结果 ⇒ 读数摆「更新中…」,报价输入里的
+   * 支撑克重摆 `null`(**不许**拿旧数当新的用 —— 那会让预估价偏低、
+   * 让提交上去的工单少收支撑费)。
+   */
+  const supportFresh = supportKey !== null && supportKey === currentSupportKey;
 
   /**
    * 「置于平面」—— 按当前姿态把模型放到打印平台上(工作室 2026-11-07)
@@ -634,6 +764,9 @@ export function PricingCalculator({
   const placeOnPlane = useCallback(() => {
     setShowSupport(true);
     setSupportRecalcToken((t) => t + 1);
+    // 立刻按**当前**尺寸与姿态重算一次 —— 令牌只管「重算」,
+    // 键得是最新的那把(用户可能刚改完尺寸,防抖还没到)。
+    setSupportRequestKey(currentSupportKeyRef.current);
   }, []);
 
   const geometry = useMemo((): ModelGeometry | null => {
@@ -672,10 +805,10 @@ export function PricingCalculator({
   }, [mode, model, length, width, height, solidRatio, appliedScales]);
 
   /**
-   * 当前角度的支撑克重 + 支撑比例(支撑克重 / 模型克重)
+   * 当前尺寸 + 当前姿态的支撑克重 + 支撑比例(支撑克重 / 模型克重)
    *
-   * 支撑数据来自 Worker 算出来的当前姿态 —— 用户点「包裹支撑」才有
-   * (支撑不跟随角度实时变化,见上面那个 effect)。
+   * 支撑数据来自 Worker 算出来的 —— **自动算**(模型焊好就算一次,改尺寸 /
+   * 转姿态之后防抖 400ms 再算一次,见上面那两个 effect)。
    */
   const supportStats = useMemo(() => {
     if (!poseSupport || !model) return { weightG: 0, ratio: 0 };
@@ -705,24 +838,42 @@ export function PricingCalculator({
    *
    * ## 为什么要有这个入口
    *
-   * 支撑**不跟随角度实时重算**(工作室 2026-11-07 的口径):用户把角度摆定
-   * 之后点浮层上那颗「包裹支撑」,才算一次(支撑克重 + 总克重 + 画出来那圈
-   * 支撑,三者来自同一次计算)。
-   *
-   * 但「提交打印订单」**必须带上支撑克重** —— 服务端按这组数重算报价
+   * 「提交打印订单」**必须带上支撑克重** —— 服务端按这组数重算报价
    * (`quote-server.ts` 的 `input.supportWeightG ?? 0`),少了它支撑费会算成 0,
-   * 收少了钱。用户没点过那颗按钮的时候,这里现算一次。
+   * 收少了钱。所以提交那一刻现算一次(自动算的那次可能还没落地)。
    *
-   * ## 两点讲究
+   * ## 三点讲究
    *
-   * 1. **算过了就不重算** —— `poseSupport` 有值就说明当前姿态已经算过
-   *    (角度一变它就被清空了,见上面那个「作废」的 effect)。
+   * 1. **缓存键对得上才算过** —— 光看「有没有算过」不够:改完尺寸,
+   *    手上那份是**旧尺寸**的支撑克重,发去下单就是**少收支撑费**。
+   *    所以要 `supportKeyRef.current === currentSupportKeyRef.current`。
    * 2. **只要数,不要几何** —— 提交要的是支撑克重,那块最贵的外壳不用建。
+   * 3. **不写 `poseSupport`** —— 显示状态由「自动算」那个 effect 独家管。
+   *    这里算出来的是**无外壳**的结果,写进去会把用户正在看的那圈支撑擦掉。
    */
   const ensureSupport =
     useCallback(async (): Promise<PrintQuoteInput | null> => {
-      // 已经算过当前姿态的支撑 → 把现成的给出去,不重算
-      if (poseSupportRef.current && quoteInputRef.current) {
+      /**
+       * 缓存键对得上 ⇒ 当前尺寸 + 姿态已经算过 ⇒ 把现成的给出去
+       *
+       * 三个条件都要成立:
+       *
+       * 1. `poseSupportRef.current` —— 有算过的结果
+       * 2. `quoteInputRef.current.supportWeightG !== null` —— 那份输入里**真的
+       *    带上了**支撑克重(少了这一条,缓存可能拿着「未计入」的那份)
+       * 3. `supportKeyRef.current === currentSupportKeyRef.current` —— 键对得上
+       *    **当前**的尺寸与姿态
+       *
+       * 第 3 条是**钱的守卫**:改完尺寸直接提交,发上去的必须是**新尺寸**的
+       * 支撑克重 —— 旧尺寸那个数会让服务端按 `input.supportWeightG ?? 0`
+       * **少收支撑费**。
+       */
+      if (
+        poseSupportRef.current &&
+        quoteInputRef.current &&
+        quoteInputRef.current.supportWeightG !== null &&
+        supportKeyRef.current === currentSupportKeyRef.current
+      ) {
         return quoteInputRef.current;
       }
       const client = angleClientRef.current;
@@ -759,8 +910,6 @@ export function PricingCalculator({
           // 只要数,不要那块几何 —— 提交要的是支撑克重
           withShell: false,
         });
-        // 算完了 → 页面上的三个克重数也立刻有(支撑是**当前姿态**的)
-        setPoseSupport(pose);
         setSupportError(null);
         return {
           volumeCM3: geometry.volumeCM3,
@@ -850,17 +999,23 @@ export function PricingCalculator({
       volumeCM3: geometry.volumeCM3,
       surfaceAreaCM2: geometry.surfaceAreaCM2,
       dims: geometry.dims,
-      // 支撑数据是**当前姿态**的 —— 还没点过「包裹支撑」就是 null
-      // (加打印单时由 `ensureSupport()` 现算一次补上)
-      supportWeightG: poseSupport
-        ? Math.ceil(poseSupport.supportWeightG)
-        : null,
-      selfSupportRatio: poseSupport ? supportStats.ratio : null,
+      /**
+       * 支撑克重**只在新鲜的时候**给
+       *
+       * 不新鲜 = 手上那份是**旧尺寸 / 旧姿态**的结果。拿它去报价,弹窗里的
+       * 预估价会**偏低**(服务端按这组数算)—— 所以不新鲜就摆 `null`
+       * (界面摆「未计入」),由 `ensureSupport()` 在提交那一刻现算。
+       */
+      supportWeightG:
+        supportFresh && poseSupport
+          ? Math.ceil(poseSupport.supportWeightG)
+          : null,
+      selfSupportRatio: supportFresh && poseSupport ? supportStats.ratio : null,
     };
     // 存一份 —— 「已经算过了就别重算」判断要用
     quoteInputRef.current = input;
     notify(input);
-  }, [geometry, poseSupport, supportStats]);
+  }, [geometry, poseSupport, supportStats, supportFresh]);
 
   // 模型本体也要抛给父组件 —— 下单时要把文件打包上传到 R2
   const onModelChangeRef = useRef(onModelChange);
@@ -901,6 +1056,8 @@ export function PricingCalculator({
       setManualRotZ(0);
       // 换模型 → 支撑数据作废(新模型要重新焊接 + 重算)
       setPoseSupport(null);
+      // 换模型 → 缓存键清空(新模型焊好后立刻算一次,不等 400ms 防抖)
+      setSupportKey(null);
       // 换模型 → 自检结论作废(新模型还没焊)
       setMeshSummary(null);
       // 换模型 → 贴图开关复位(新模型可能压根没有贴图)
@@ -1593,6 +1750,27 @@ export function PricingCalculator({
    * 2026-11-07:摆盘结果并进这一栏(`weightColumn`)—— 摆盘跟克重本来就是
    * 一件事,拆成两栏要用户自己把两个数对上。
    */
+  /**
+   * 支撑那格的**四态**
+   *
+   * - `computing` —— 还没算出来(模型刚进来 / 正在焊)
+   * - `updating` —— 算过,但**键对不上**(用户刚改了尺寸 / 转了姿态,新的
+   *   还在路上)
+   * - `ready` —— 新鲜
+   * - `error` —— 算失败了
+   *
+   * 「—」不再是常态 —— 工作室 2026-11-10 点名的那条:模型刚进来三个克重数
+   * 里有两个是「—」,用户以为工具坏了。现在自动算,数会自己出来。
+   */
+  const supportState: "computing" | "updating" | "ready" | "error" =
+    supportError
+      ? "error"
+      : supportFresh
+        ? "ready"
+        : poseSupport
+          ? "updating"
+          : "computing";
+
   const weightReadout = calc ? (
     <>
       {/*
@@ -1630,17 +1808,26 @@ export function PricingCalculator({
             </div>
             <div className="mt-1 flex h-9 items-end">
               <span className="font-mono text-2xl font-semibold leading-none tracking-tight text-zinc-200">
-                {poseSupport ? `${supportWeightG} g` : "—"}
+                {supportState === "ready" ? (
+                  `${supportWeightG} g`
+                ) : supportState === "error" ? (
+                  "—"
+                ) : (
+                  <span className="text-base font-normal text-zinc-500">
+                    {supportState === "updating"
+                      ? t("stats.supportUpdating")
+                      : t("stats.supportComputing")}
+                  </span>
+                )}
               </span>
             </div>
             {/*
               这个数对应的是**哪个姿态** —— 初始角度 (0°,0°) 还是当前姿态。
               不标出来的话,用户会以为支撑克重跟角度没关系(其实改角度就改
               这个数)。跑没跑过摆盘不算数,只看姿态本身。
-              没算过的时候写清楚怎么才有 —— 别让用户对着「—」猜。
             */}
             <div className="mt-1 h-4 truncate text-[10px] text-zinc-500">
-              {poseSupport
+              {supportState === "ready"
                 ? poseLabel.isInitial
                   ? t("stats.poseInitial")
                   : t("stats.poseCurrent", {
@@ -1648,7 +1835,13 @@ export function PricingCalculator({
                       y: poseLabel.y,
                       z: poseLabel.z,
                     })
-                : t("stats.supportPendingHint")}
+                : supportState === "updating"
+                  ? t("stats.supportPendingHint")
+                  : supportState === "error"
+                    ? t("stats.supportWeightError", {
+                        reason: supportError ?? "",
+                      })
+                    : t("stats.supportWeightHint")}
             </div>
           </div>
 
@@ -1660,17 +1853,27 @@ export function PricingCalculator({
             </div>
             <div className="mt-1 flex h-9 items-end">
               <span className="font-mono text-2xl font-semibold leading-none tracking-tight text-zinc-100">
-                {poseSupport ? `${weights.total} g` : "—"}
+                {supportState === "ready" ? (
+                  `${weights.total} g`
+                ) : supportState === "error" ? (
+                  "—"
+                ) : (
+                  <span className="text-base font-normal text-zinc-500">
+                    {supportState === "updating"
+                      ? t("stats.supportUpdating")
+                      : t("stats.supportComputing")}
+                  </span>
+                )}
               </span>
             </div>
             <div className="mt-1 h-4 truncate text-[10px] text-zinc-500">
-              {poseSupport ? t("stats.totalWeightNote") : null}
+              {supportState === "ready" ? t("stats.totalWeightNote") : null}
             </div>
           </div>
         </div>
       </div>
 
-      {supportError && (
+      {supportError && supportState === "error" && (
         <p className="mt-1 text-[11px] text-red-400">
           {t("stats.supportWeightError", { reason: supportError })}
         </p>
@@ -1785,24 +1988,135 @@ export function PricingCalculator({
   );
 
   /**
-   * 克重栏的内容 —— **三个克重数 + 摆盘结果**
+   * **姿态与支撑卡** —— 2026-11-10
+   *
+   * 以前「跟姿态有关」的东西散在**三处**:智能摆盘在视口顶栏、包裹支撑 /
+   * 置于平面在浮层药丸、支撑状态文字也在药丸里。药丸上挤着七样东西,
+   * 用户得满屏找 —— 工作室的原话:「浮层药丸混语义 + 会换行」。
+   *
+   * 现在归一处 —— 克重侧栏的这一张卡:
+   *
+   * - **智能摆盘**(搜一个省料的角度)
+   * - **当前姿态读数**(X° Y° Z°)
+   * - **画出支撑**(只管画不画)+ **置于平面**(落座 + 重算)
+   * - **支撑状态**(比例 · 克重 / 计算中… / 更新中… / 失败)
+   * - **摆盘结果**(原来那块 `posePanel`)
+   *
+   * 浮层药丸从此**只管「看图」**(显示贴图 / 重置视角)。
+   */
+  const poseSupportCard = (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-1.5 text-xs font-medium text-zinc-300">
+          <Compass className="size-3.5 text-violet-400" />
+          {t("preview.poseAndSupport")}
+        </span>
+        {/* 智能摆盘 —— 从视口顶栏搬过来(所有跟姿态有关的归一处) */}
+        <button
+          type="button"
+          onClick={() => void optimizeAngle(appliedScales)}
+          disabled={angleOptimizing || !supportModelReady}
+          className="text-[10px] text-violet-300 hover:text-violet-200 flex items-center gap-1 px-2 py-0.5 rounded border border-violet-400/40 bg-white/10 hover:bg-white/20 disabled:opacity-50"
+        >
+          {angleOptimizing ? (
+            <Loader2 className="size-3 animate-spin" />
+          ) : (
+            <Compass className="size-3" />
+          )}
+          {angleOptimizing ? `${angleProgress}%` : t("angle.optimize")}
+        </button>
+      </div>
+
+      {/* 当前姿态 —— 跟视口顶上那条角度条是同一份 */}
+      <p className="mt-1.5 font-mono text-[11px] text-zinc-400">
+        {t("angle.currentPose", {
+          x: poseLabel.x,
+          y: poseLabel.y,
+          z: poseLabel.z,
+        })}
+      </p>
+
+      {/* 两个动作 —— 一个是开关(画不画),一个是动作(落座 + 重算) */}
+      <div className="mt-2 flex items-center gap-1.5">
+        <button
+          type="button"
+          aria-pressed={showSupport}
+          title={t("preview.supportTitle")}
+          onClick={() => setShowSupport((s) => !s)}
+          className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${
+            showSupport
+              ? "bg-amber-500/15 text-amber-300"
+              : "text-zinc-500 hover:text-zinc-300"
+          }`}
+        >
+          <Shell className="size-3.5" />
+          {t("preview.support")}
+        </button>
+        <button
+          type="button"
+          title={t("preview.placeOnPlaneTitle")}
+          onClick={placeOnPlane}
+          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-zinc-500 transition-colors hover:text-zinc-300"
+        >
+          <MoveDown className="size-3.5" />
+          {t("preview.placeOnPlane")}
+        </button>
+      </div>
+
+      {/* 支撑状态 —— 跟上面那个支撑克重是同一件事 */}
+      <p className="mt-1.5 text-[11px] text-zinc-400">
+        {supportState === "ready" ? (
+          <span className="font-mono text-zinc-400">
+            {t("preview.supportInfo", {
+              ratio: Math.round(supportStats.ratio * 100),
+              weight: Math.ceil(poseSupport?.supportWeightG ?? 0),
+            })}
+          </span>
+        ) : supportState === "updating" ? (
+          t("preview.supportPending")
+        ) : supportState === "error" ? (
+          <span className="text-red-400">
+            {t("stats.supportWeightError", { reason: supportError ?? "" })}
+          </span>
+        ) : (
+          t("preview.supportComputing")
+        )}
+      </p>
+      <p className="mt-0.5 text-[10px] text-zinc-500">
+        {t("stats.supportAutoHint")}
+      </p>
+
+      {/* 摆盘结果 */}
+      {posePanel}
+    </div>
+  );
+
+  /**
+   * 克重栏的内容 —— **三个克重数 + 姿态与支撑**
    *
    * 2026-11-07:摆盘从独立的一栏**并进克重栏**(工作台只剩「检查 / 克重」
    * 两个视角)。摆盘结果(最优姿态 / 自支撑比例 / 省 X%)本来就是克重的一
    * 部分 —— 支撑克重摆到哪个姿态最省,拆成两栏要用户自己把两个数对上。
    *
-   * 顺序:三个克重数在上(这一栏的主菜),摆盘结果在下(补充)。
+   * 顺序:三个克重数在上(这一栏的主菜),姿态与支撑卡在下。
    */
   const weightColumn = (
     <>
       {weightReadout}
-      {posePanel}
+      {poseSupportCard}
     </>
   );
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="text-stone-900">
+      {/*
+        **整页一张脸(深色)** —— 2026-11-10
+
+        以前上半截是浅色 stone(介绍段 + 模式切换),下半截是深色应用 ——
+        工作室的原话:「页面两张脸」。现在整个外壳都是 `bg-zinc-950
+        text-zinc-100`,深色那块工作台落在一块同色的底上,只剩一条边框。
+      */}
+      <div className="bg-zinc-950 text-zinc-100 min-h-full">
         {/* ---------- 顶部工具条 ---------- */}
         {showChrome && (
           <header className="border-b border-stone-200/80 bg-white/70 backdrop-blur sticky top-0 z-10">
@@ -1815,54 +2129,63 @@ export function PricingCalculator({
 
         {/* 容器封顶 1600px(2026-11-09)
             —— 以前是 1280px。右边多了一张「提交打印订单」卡(320px)之后,
-            3D 视口只剩 `1280 − 48 − 336 − 400 ≈ 496px` —— 挤得没法看。
-
-            **介绍 / 模式切换那两段仍然是 1280px**(`max-w-[1280px] mx-auto`)
-            —— 它们跟页面头部对齐,只有下面那块 3D 工作台用满 1600px。 */}
+            3D 视口只剩 `1280 − 48 − 336 − 400 ≈ 496px` —— 挤得没法看。 */}
         <main className="flex-1 max-w-[1600px] w-full mx-auto px-4 sm:px-6 py-6 sm:py-10">
-          {/* ---------- 介绍 ---------- */}
-          <section className="mb-6 max-w-[1280px] mx-auto">
-            <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">
-              {t("intro.title")}
-            </h2>
-            <p className="mt-2 text-sm text-stone-600 max-w-3xl leading-relaxed">
-              {t.rich("intro.body", {
-                strong: (chunks) => (
-                  <strong className="text-stone-800">{chunks}</strong>
-                ),
-              })}
-            </p>
-          </section>
+          {/*
+            **介绍段删掉了**(2026-11-10)
 
-          {/* ---------- 模式切换 ---------- */}
-          <section className="mb-6 max-w-[1280px] mx-auto">
-            <div className="inline-flex rounded-lg border border-stone-200 bg-white p-1 shadow-sm">
-              <button
-                type="button"
-                onClick={() => setMode("upload")}
-                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${mode === "upload" ? "bg-amber-500 text-white shadow-sm" : "text-stone-600 hover:text-stone-900 hover:bg-stone-50"}`}
-              >
-                <UploadCloud className="size-4" />
-                {t("modes.upload")}
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode("manual")}
-                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${mode === "manual" ? "bg-amber-500 text-white shadow-sm" : "text-stone-600 hover:text-stone-900 hover:bg-stone-50"}`}
-              >
-                <Pencil className="size-4" />
-                {t("modes.manual")}
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode("batch")}
-                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${mode === "batch" ? "bg-amber-500 text-white shadow-sm" : "text-stone-600 hover:text-stone-900 hover:bg-stone-50"}`}
-              >
-                <ListChecks className="size-4" />
-                {t("modes.batch")}
-              </button>
-            </div>
-          </section>
+            那一大段 h2 + p 是「克重计算器」独立首页的自我介绍,挂在打印
+            工作台上是噪音 —— 而且它是**浅色**的,正是「两张脸」的来源。
+            算法细节本来就在「克重算法」弹窗里(`info.algorithm.*`),不丢信息。
+
+            页脚被 `showChrome={false}` 挡着,所以 `footer.tagline` 那句
+            「计算在本地浏览器完成」得**在这里**单独摆一次 —— 打印服务最需要
+            让用户知道的就是「模型不上传」。
+          */}
+          {!showChrome && (
+            <p className="mb-4 max-w-[1600px] mx-auto text-xs text-zinc-500">
+              {t("footer.tagline")}
+            </p>
+          )}
+
+          {/* ---------- 模式切换 ----------
+           **只有一个模式就不摆**(一颗只有一个选项的切换器是噪音)。 */}
+          {availableModes.length > 1 && (
+            <section className="mb-6 max-w-[1280px] mx-auto">
+              <div className="inline-flex rounded-lg border border-zinc-800 bg-zinc-900 p-1">
+                {availableModes.includes("upload") && (
+                  <button
+                    type="button"
+                    onClick={() => setMode("upload")}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${mode === "upload" ? "bg-amber-500 text-white shadow-sm" : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800"}`}
+                  >
+                    <UploadCloud className="size-4" />
+                    {t("modes.upload")}
+                  </button>
+                )}
+                {availableModes.includes("manual") && (
+                  <button
+                    type="button"
+                    onClick={() => setMode("manual")}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${mode === "manual" ? "bg-amber-500 text-white shadow-sm" : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800"}`}
+                  >
+                    <Pencil className="size-4" />
+                    {t("modes.manual")}
+                  </button>
+                )}
+                {availableModes.includes("batch") && (
+                  <button
+                    type="button"
+                    onClick={() => setMode("batch")}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${mode === "batch" ? "bg-amber-500 text-white shadow-sm" : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800"}`}
+                  >
+                    <ListChecks className="size-4" />
+                    {t("modes.batch")}
+                  </button>
+                )}
+              </div>
+            </section>
+          )}
 
           {/* ---------- 上传模式 ---------- */}
           {mode === "upload" && (
@@ -1933,7 +2256,7 @@ export function PricingCalculator({
                     weight={weightColumn}
                     tab={workspaceTab}
                     onTabChange={handleTabChange}
-                    toolbarExtra={quoteActionSlot}
+                    primaryAction={quoteActionSlot}
                     dimMode={dimMode}
                     uniformScale={uniformScale}
                     scaleFactor={scaleFactor}
@@ -1950,7 +2273,6 @@ export function PricingCalculator({
                     onRevertUnitScale={revertToOriginalUnits}
                     geometry={geometry}
                     poseSupport={poseSupport}
-                    supportRatio={supportStats.ratio}
                     viewerRotX={viewerRotX}
                     viewerRotY={viewerRotY}
                     viewerRotZ={viewerRotZ}
@@ -1960,13 +2282,7 @@ export function PricingCalculator({
                     onManualAngleChange={handleManualAngleChange}
                     onPoseChange={handlePoseChange}
                     onResetAngle={resetAngle}
-                    onOptimizeAngle={optimizeAngle}
-                    angleOptimizing={angleOptimizing}
-                    angleProgress={angleProgress}
-                    angleReady={supportModelReady}
                     showSupport={showSupport}
-                    onToggleSupport={() => setShowSupport((s) => !s)}
-                    onPlaceOnPlane={placeOnPlane}
                     supportLiftMm={clientConfig?.supportLiftMm}
                     supportBaseMarginMm={clientConfig?.supportBaseMarginMm}
                     showTexture={showTexture}

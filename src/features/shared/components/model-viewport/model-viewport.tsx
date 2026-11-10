@@ -506,7 +506,18 @@ export default function ModelViewport({
     if (!ctx || !poseGroup) return;
 
     // 清掉旧模型与旧问题线
-    disposeMesh(meshRef.current);
+    //
+    // **先摘,再 dispose** —— 只 dispose 是不够的:
+    // three.js 的 `BufferGeometry.dispose()` 只释放 GPU 缓冲,几何体的
+    // `attributes` 还在 CPU 侧,下一次绘制时 `WebGLGeometries` 会把属性
+    // **重新上传**。所以一个「dispose 过但仍然挂在 poseGroup 上」的旧 mesh
+    // 会**继续被画出来** —— 用户改一次尺寸,画面上就多一个旧尺寸的模型
+    // (工作室报的「调整尺寸后预览出现两个尺寸模型」)。
+    const oldMesh = meshRef.current;
+    if (oldMesh) {
+      poseGroup.remove(oldMesh);
+      disposeMesh(oldMesh);
+    }
     meshRef.current = null;
     for (const key of Object.keys(lineRefs.current)) {
       const lines = lineRefs.current[key];
@@ -636,19 +647,26 @@ export default function ModelViewport({
         geo.addGroup(0, triCount * 3, 0);
       }
     }
-    const mat = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      flatShading: true,
-      side: THREE.DoubleSide,
-      roughness: 0.75,
-      metalness: 0.05,
-      polygonOffset: true,
-      polygonOffsetFactor: 1,
-      polygonOffsetUnits: 1,
-    });
+    /**
+     * 材质 —— **只在真的用得上的时候才建**
+     *
+     * `slots`(按 OBJ 的 `usemtl` 分组)或 `single`(单材质)有值时,下面那个
+     * 兜底材质用不上 —— 以前是**无条件** new 的,于是每改一次尺寸就漏一个
+     * 材质(`disposeMesh` 只 dispose 挂在 mesh 上的那一个)。
+     */
     const mesh = new THREE.Mesh(
       geo,
-      slots.length > 0 ? slots : (single ?? mat)
+      (slots.length > 0 ? slots : single) ??
+        new THREE.MeshStandardMaterial({
+          vertexColors: true,
+          flatShading: true,
+          side: THREE.DoubleSide,
+          roughness: 0.75,
+          metalness: 0.05,
+          polygonOffset: true,
+          polygonOffsetFactor: 1,
+          polygonOffsetUnits: 1,
+        })
     );
     poseGroup.add(mesh);
     meshRef.current = mesh;

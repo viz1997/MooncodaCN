@@ -8,7 +8,7 @@
  * 工作室的流程(2026-11-09 改):
  *
  *   /tools/workbench(量重量的工具,公开)
- *     → 量好 → 视口底下那条控制条上点「报价」
+ *     → 量好 → 左栏底部固定条上点「报价」
  *     → 弹窗:服务端算的预估价 + 下单表单
  *     → 提交 → 服务端重算报价 + 建工单
  *     → 跳 `/account/print-orders/{orderNo}` —— 钱在那儿付
@@ -112,8 +112,8 @@ export function PrintServiceWeightTool({
   /**
    * 报价弹窗开着没有 —— 2026-11-09
    *
-   * 「报价」那颗按钮在**工作台区域内**(视口底下那条浮层控制条上)—— 点一下
-   * 弹这个窗,弹窗里是服务端算的预估价 + 下单表单。
+   * 「报价」那颗按钮在**工作台区域内**(左栏底部的固定条上,两个视角都在)——
+   * 点一下弹这个窗,弹窗里是服务端算的预估价 + 下单表单。
    */
   const [quoteOpen, setQuoteOpen] = useState(false);
 
@@ -148,11 +148,15 @@ export function PrintServiceWeightTool({
   /**
    * 「按当前姿态算支撑」的入口 —— 提交订单之前要 await 它
    *
-   * 支撑**不跟随角度实时重算**(工作室 2026-11-07 的口径):用户把角度摆定
-   * 之后点「包裹支撑」才算一次。但提交订单必须带上支撑克重 ——
-   * 服务端按它重算报价,少了它支撑费会算成 0(收少了钱)。
+   * 支撑**按当前尺寸与姿态自动算**(2026-11-10 改的):模型一焊好就算一次,
+   * 改尺寸 / 转姿态之后防抖 400ms 再算一次。所以正常情况下这里拿到的是
+   * **现成的**那份。
    *
-   * 所以提交之前:没算过就现算一次(计算器那边已经算过就直接给现成的)。
+   * 但提交订单**必须**带上支撑克重 —— 服务端按它重算报价,少了它支撑费会
+   * 算成 0(收少了钱)。所以这里仍然 await 一次:计算器那边有**新鲜**的
+   * (尺寸 + 姿态的缓存键对得上)就直接给现成的,没有就现算一次。
+   *
+   * 拿不到就**不提交**(见 `handleSubmit`)。
    */
   const ensureSupportRef = useRef<EnsureSupportFn | null>(null);
   const handleEnsureSupport = useCallback((ensure: EnsureSupportFn) => {
@@ -184,9 +188,9 @@ export function PrintServiceWeightTool({
         /**
          * 支撑克重 —— 服务端重算报价要这个数
          *
-         * 支撑不跟随角度实时重算(用户点「包裹支撑」才算),所以用户可能
-         * 没点过那颗按钮就直接提交了。这里现算一次 —— 少了它,服务端的
-         * `input.supportWeightG ?? 0` 会把支撑费算成 0(收少了钱)。
+         * 支撑按当前尺寸与姿态自动算(2026-11-10),但用户完全可能刚拖完
+         * 尺寸滑块就点了提交(防抖还没到)。这里 await 一次 —— 计算器那边
+         * 有新鲜的直接给现成的,没有就现算一次。
          *
          * **算不出来就不提交** —— 宁可让用户重试一次,也不能收少了钱。
          */
@@ -241,8 +245,18 @@ export function PrintServiceWeightTool({
 
   return (
     <>
+      {/*
+        **只开「上传」这一个模式**(2026-11-10)
+
+        「手动尺寸」对打印服务是**死路** —— 手动模式没有模型文件,而打印工单
+        必须把模型上传到 R2,它永远走不到下单。
+        「批量克重」是**另一个工具**(批量量重),没有下单出口。
+
+        代码不删(在 `features/pricing/` 里原样留着),想恢复只要把模式放回去。
+      */}
       <PricingCalculator
         showChrome={false}
+        modes={["upload"]}
         clientConfig={clientConfig}
         onModelChange={handleModelChange}
         onQuoteInput={handleQuoteInput}
@@ -283,12 +297,25 @@ export function PrintServiceWeightTool({
 }
 
 /**
- * 「报价」那颗按钮 —— 挂在视口底下那条浮层控制条上(2026-11-09)
+ * 「报价」那颗按钮 —— **左栏底部的固定条**上的主 CTA(2026-11-10)
  *
- * **控制条是深色的** —— 所以这颗按钮也按深色写(亮底 = 主行动)。
+ * ## 为什么它长这样
+ *
+ * 工作室点了名的第一件事就是**「主出口被埋」**:这颗按钮以前挂在视口底下
+ * 那条浮层药丸的**尾巴**上,跟「显示贴图」「重置视角」挤在一起,还是个
+ * 不起眼的小白按钮 —— 一眼看不出它是这个工具唯一的出口。
+ *
+ * 现在它搬到**左栏底部的固定条**(两个视角都在,切 tab 不消失),整行宽、
+ * 琥珀底 —— 一眼就找得到。
  *
  * 以前这一块是右栏一整列(288px 的「提交打印订单」卡片)—— 那一列把 3D 视口
  * 挤到只剩 ~500px(工作室的原话:「把预览区挤到了左边」)。
+ *
+ * ## 行为一个字没改
+ *
+ * 点开还是那个报价弹窗。弹窗里**未登录时摆「去登录」**(工单要挂在账号
+ * 名下),但**预估价照样看得见** —— 访客可见计价是后台 `/admin/print-pricing`
+ * 的开关管着的,别在出口上把它掐掉。
  */
 function QuoteButton({ onClick }: { onClick: () => void }) {
   const t = useTranslations("PrintQuote");
@@ -298,9 +325,9 @@ function QuoteButton({ onClick }: { onClick: () => void }) {
       type="button"
       onClick={onClick}
       title={t("entry.quoteTitle")}
-      className="flex items-center gap-1.5 rounded-md bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-900 transition-colors hover:bg-white"
+      className="flex w-full items-center justify-center gap-2 rounded-lg bg-amber-500 px-4 py-2.5 text-sm font-semibold text-zinc-950 shadow-sm transition-colors hover:bg-amber-400 active:bg-amber-600"
     >
-      <Receipt className="size-3.5" />
+      <Receipt className="size-4" />
       {t("entry.quote")}
     </button>
   );

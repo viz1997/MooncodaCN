@@ -186,18 +186,20 @@ describe("共用视口 —— 支撑几何来自摆盘 Worker 的同一块", () 
     const code = stripComments(read(CALCULATOR));
 
     // 外壳在**算体积的同一次调用**里建出来 —— 画出来的那圈支撑就是算克重
-    // 的那块支撑。建不建由那颗开关决定(`if (!showSupport) return;`),
-    // 一旦要算就整块要(数字跟画面得是同一次计算的)。
+    // 的那块支撑。一旦要算就整块要(数字跟画面得是同一次计算的)。
+    //
+    // 2026-11-10:算支撑变成**自动**的(模型焊好就算一次),所以这里不再有
+    // 「`if (!showSupport) return;`」那种「开关关着就不算」的早退 ——
+    // 那颗开关现在只管**画不画**。
     expect(code).toContain("withShell: true");
-    expect(code).toContain("if (!showSupport) return;");
+    expect(code).not.toContain("if (!showSupport) return;");
   });
 
-  it("支撑默认**不算**(用户没点「包裹支撑」之前一个支撑都不算)", () => {
+  it("支撑外壳默认**不画**(但数字照样自动算)", () => {
     const code = stripComments(read(CALCULATOR));
 
-    // 支撑外壳是整套计算里最贵的一块几何 —— 用户没主动要「看看支撑长什么
-    // 样子」之前不该替他算。工作室的口径(2026-11-07):连**数字**也不给,
-    // 用户摆定角度之后点那颗按钮才算一次。
+    // 「画出支撑」那颗开关默认关着 —— 画面上不画那圈绿。
+    // **数字**是另一回事:自动算(工作室 2026-11-10 点名「克重默认两个「—」」)。
     expect(code).toMatch(
       /const \[showSupport, setShowSupport\] = useState\(false\)/
     );

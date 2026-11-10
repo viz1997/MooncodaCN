@@ -99,7 +99,12 @@ self.onmessage = function (e) {
     var objText = data.objText || '';
     var sendGeometry = !!data.sendGeometry;
     if (!objText) {
-      self.postMessage({ type: 'error', message: '空 OBJ 文本' });
+      // 把「收到的是什么」写清楚 —— 只说「空 OBJ 文本」的话,
+      // 用户会以为自己的模型文件坏了(工作室 2026-11-10 报的就是这个:
+      // 「实际不是空的」—— 其实浏览器拿到的就是个 0 字节的空壳)。
+      //
+      // ⚠️ 这段源码在 TS 模板字符串里 —— **不能写模板插值占位符**(会被插值)。
+      self.postMessage({ type: 'error', message: '空 OBJ 文本(收到 0 个字符)' });
       return;
     }
 
@@ -395,13 +400,87 @@ function getWorkerUrl(): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * 主线程兜底 —— Worker 挂了就地解析,别让工作室传不了模型
+ *
+ * worker 源码是一段**自包含**的脚本(只用 `self.onmessage` /
+ * `self.postMessage`,没有任何 worker 专属 API),所以可以在主线程里用
+ * `new Function` 原样跑一遍 —— 跟 Node 单测里那套 harness 一个路子
+ * (`src/test/pricing/pure/obj-worker-materials.test.ts`)。
+ *
+ * ## 代价
+ *
+ * 大模型会**卡主线程**好几秒(Worker 那条路不卡)。所以只在 Worker 真的
+ * 出错时才走它 —— 宁可卡一下,也不能让工作室的模型传不进来。
+ *
+ * ## 什么时候会走到这里
+ *
+ * - Worker 起不来(浏览器 / CSP / 扩展把它挡了)
+ * - Worker 报解析错误
+ *
+ * CSP 禁了 `unsafe-eval` 的话 `new Function` 会抛 —— 捕获住,返回 `null`,
+ * 让调用方报**原来那条**错误(别把真原因换成「兜底也失败了」)。
+ */
+export function parseObjOnMainThread(
+  objText: string,
+  sendGeometry = false
+): ObjWorkerResult | null {
+  if (!objText) return null;
+  let result: ObjWorkerResult | null = null;
+  try {
+    const scope = {
+      onmessage: null as null | ((e: { data: unknown }) => void),
+      postMessage: (msg: {
+        type: string;
+        result?: ObjWorkerResult;
+        message?: string;
+      }) => {
+        if (msg.type === "result" && msg.result) result = msg.result;
+      },
+    };
+    // worker 源码是一段自包含脚本,这里直接当函数体执行
+    const factory = new Function("self", `${WORKER_SOURCE}\nreturn self;`);
+    const instance = factory(scope) as typeof scope;
+    instance.onmessage?.({ data: { objText, sendGeometry } });
+  } catch (err) {
+    // CSP 禁了 unsafe-eval / 别的运行时问题 —— 返回 null,让调用方报原错误
+    console.error("主线程兜底解析失败:", err);
+    return null;
+  }
+  return result;
+}
+
+/**
  * Parse an OBJ file in a Web Worker.
  *
  * @param objText Raw OBJ text (UTF-8).
  * @param options { sendGeometry, onProgress, timeoutMs }
  * @returns Promise<ObjWorkerResult>
  */
-export function parseObjInWorker(
+export async function parseObjInWorker(
+  objText: string,
+  options: ObjWorkerOptions = {}
+): Promise<ObjWorkerResult> {
+  try {
+    return await parseInWorker(objText, options);
+  } catch (err) {
+    /**
+     * **超时不做兜底** —— 那说明模型大到 Worker 跑 30 秒都跑不完,
+     * 主线程跑只会更久(而且会把整个页面冻住)。这种模型本来也不该走
+     * 浏览器这条路。
+     */
+    if (err instanceof Error && err.message.includes("解析超时")) throw err;
+    // Worker 挂了就主线程兜底 —— 宁可卡一下,也不能传不了模型
+    const fallback = parseObjOnMainThread(
+      objText,
+      options.sendGeometry ?? false
+    );
+    if (fallback) return fallback;
+    throw err;
+  }
+}
+
+/** 真正跑 Worker 的那条路(出错抛给上面那层做兜底判断) */
+function parseInWorker(
   objText: string,
   options: ObjWorkerOptions = {}
 ): Promise<ObjWorkerResult> {

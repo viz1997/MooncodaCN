@@ -3,16 +3,13 @@
 import {
   AlertCircle,
   Boxes,
-  Compass,
   Info,
   Loader2,
   Maximize2,
   Minimize2,
-  MoveDown,
   Palette,
   RotateCcw,
   Scale,
-  Shell,
   ShieldCheck,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -128,7 +125,6 @@ import {
 import { useDropZone } from "@/features/shared/hooks/use-drop-zone";
 import { ModelCheckSidePanel } from "@/features/tools/components/model-check/model-check-panel";
 import { useCheckView } from "@/features/tools/components/model-check/use-check-view";
-import { ISSUE_LABEL_KEYS } from "@/features/tools/lib/mesh/types";
 import { cn } from "@/lib/utils";
 
 export type LoadStatus =
@@ -204,14 +200,19 @@ export type ModelSettingsPanelProps = {
   onTabChange: (tab: WorkspaceTab) => void;
 
   /**
-   * 浮层控制条上**额外挂的东西** —— 2026-11-09
+   * **主出口** —— 左栏底部固定条上的那颗主按钮 —— 2026-11-10
    *
-   * 打印服务把「报价」那颗按钮挂在这儿(3D 视口底下那条控制条)—— 点一下
-   * 弹报价弹窗,弹窗里下单。以前是右栏一整列(288px),把视口挤扁了。
+   * 打印服务把「报价」挂在这儿:点一下弹报价弹窗,弹窗里下单。
    *
-   * **控制条是深色的** —— 挂进来的东西要自己按深色配色写。
+   * **为什么从浮层药丸搬到底部固定条**(工作室 2026-11-10 的原话:
+   * 「主出口提到左栏底部固定条」):药丸上挤着「显示贴图」「重置视角」那些
+   * 看图的工具,主出口埋在那条药丸的尾巴上,还是一个不起眼的小白按钮 ——
+   * 一眼看过去不知道那是个**出口**。底部固定条是**每一个视角都在**的位置
+   * (切一下 tab 它不会消失),而且那一格只放它一个东西,想找不到都难。
+   *
+   * **固定条是深色的** —— 挂进来的东西要自己按深色配色写。
    */
-  toolbarExtra?: ReactNode;
+  primaryAction?: ReactNode;
 
   /** 尺寸调节状态 —— 父组件持有，改动即时生效 */
   dimMode: DimMode;
@@ -248,8 +249,6 @@ export type ModelSettingsPanelProps = {
    * 支撑比例 + 克重。
    */
   poseSupport: SupportPoseResult | null;
-  /** 当前姿态的支撑比例(支撑克重 / 模型克重)—— 面板自己算不了(要模型克重) */
-  supportRatio: number;
   /**
    * **模型**的当前角度 —— 视口按它转模型(不是转相机)
    *
@@ -279,24 +278,14 @@ export type ModelSettingsPanelProps = {
     | undefined;
   /** 角度归零(顺带把摆盘结果也清掉) */
   onResetAngle?: () => void;
-  /** 触发智能摆盘；传入当前生效的缩放因子 */
-  onOptimizeAngle: (scales: [number, number, number]) => void;
-  angleOptimizing: boolean;
-  angleProgress: number;
   /**
-   * 模型是否已经进了摆盘客户端 —— 没进去之前点「智能摆盘」只会报错,
-   * 按钮直接置灰。
-   */
-  angleReady: boolean;
-  showSupport: boolean;
-  onToggleSupport: () => void;
-  /**
-   * 「置于平面」—— 按当前姿态把模型放到打印平台上(顺带把支撑重算一遍)
+   * 要不要**画出来**那圈支撑外壳
    *
-   * 跟 `onToggleSupport` 分开:那颗是**开关**(按一下算、再按一下不画),
-   * 这颗是**动作**(永远按当前姿态算一次、永远落在平台上)。
+   * **只管画不画,不管算不算** —— 支撑克重现在是自动算的(见
+   * `pricing-calculator.tsx`),外壳跟数字来自**同一次**计算,外壳只是
+   * 「要不要画出来」。
    */
-  onPlaceOnPlane: () => void;
+  showSupport: boolean;
   /**
    * 托底高度 (mm) —— 3D 预览里模型悬在平台上方多远
    *
@@ -335,7 +324,7 @@ export function ModelSettingsPanel({
   weight,
   tab,
   onTabChange,
-  toolbarExtra,
+  primaryAction,
   dimMode,
   uniformScale,
   scaleFactor,
@@ -352,7 +341,6 @@ export function ModelSettingsPanel({
   onRevertUnitScale,
   geometry,
   poseSupport,
-  supportRatio,
   viewerRotX,
   viewerRotY,
   viewerRotZ,
@@ -362,13 +350,7 @@ export function ModelSettingsPanel({
   onManualAngleChange,
   onPoseChange,
   onResetAngle,
-  onOptimizeAngle,
-  angleOptimizing,
-  angleProgress,
-  angleReady,
   showSupport,
-  onToggleSupport,
-  onPlaceOnPlane,
   supportLiftMm,
   supportBaseMarginMm,
   showTexture,
@@ -693,23 +675,6 @@ export function ModelSettingsPanel({
                         {loadPercent}%
                       </span>
                     )}
-                    {loadStatus === "ready" && (
-                      <button
-                        type="button"
-                        onClick={() => onOptimizeAngle(scales)}
-                        disabled={angleOptimizing || !angleReady}
-                        className="text-[10px] text-violet-300 hover:text-violet-200 flex items-center gap-1 px-2 py-0.5 rounded border border-violet-400/40 bg-white/10 hover:bg-white/20 disabled:opacity-50"
-                      >
-                        {angleOptimizing ? (
-                          <Loader2 className="size-3 animate-spin" />
-                        ) : (
-                          <Compass className="size-3" />
-                        )}
-                        {angleOptimizing
-                          ? `${angleProgress}%`
-                          : t("angle.optimize")}
-                      </button>
-                    )}
                     {/* ---------- 全屏 ----------
                         整块工作台占满屏幕(头部 / 视角切换 / 信息栏 / 视口),
                         不是只把视口放大 —— 只放大视口的话,左栏那三个克重数
@@ -887,50 +852,20 @@ export function ModelSettingsPanel({
                   )}
 
                   {/* ---------- 浮层控制条 ----------
-                    两个视角共用一条:问题图层开关(只有「检查」那一栏有)
-                    + 显示贴图 / 包裹支撑 / 重置视角 + 支撑比例。 */}
+                    **只管「看图」**(工作室 2026-11-10:「药丸只留看图的工具」)。
+
+                    以前这条药丸里挤着七样东西:问题图层开关、显示贴图、
+                    包裹支撑、置于平面、重置视角、支撑状态文字、报价按钮 ——
+                    语义混着,窄屏还换行成两排,主出口埋在那条尾巴上。
+
+                    现在:
+                    - 「显示贴图」「重置视角」留下 —— 都是**看**的工具
+                    - 问题图层开关 → 检查侧栏顶部(那是**面板状态**,不是工具)
+                    - 包裹支撑 / 置于平面 / 支撑状态 → 克重侧栏的「姿态与支撑卡」
+                    - 报价按钮 → 左栏底部固定条(主出口)
+                    */}
                   {loadStatus === "ready" && (
-                    <div className="pointer-events-auto absolute bottom-3 left-1/2 z-10 flex max-w-[95%] -translate-x-1/2 flex-wrap items-center justify-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900/90 px-2.5 py-1.5 shadow-xl backdrop-blur">
-                      {tab === "check" &&
-                        check.activeLegend.map((item) => {
-                          const on = check.visibility[item.key];
-                          return (
-                            <button
-                              key={item.key}
-                              type="button"
-                              aria-pressed={on}
-                              onClick={() =>
-                                check.setVisibility((v) => ({
-                                  ...v,
-                                  [item.key]: !v[item.key],
-                                }))
-                              }
-                              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${on ? "bg-zinc-800/80 text-zinc-200" : "text-zinc-500 hover:text-zinc-300"}`}
-                            >
-                              <span
-                                className="inline-block h-2.5 w-2.5 rounded-full transition-opacity"
-                                style={{
-                                  background: item.color,
-                                  opacity: on ? 1 : 0.25,
-                                }}
-                              />
-                              {tInspect(`legend.${ISSUE_LABEL_KEYS[item.key]}`)}
-                            </button>
-                          );
-                        })}
-                      {tab === "check" &&
-                        check.result &&
-                        check.activeLegend.length === 0 && (
-                          <span className="flex items-center gap-1.5 rounded-md bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300">
-                            {tInspect("legend.clean")}
-                          </span>
-                        )}
-                      {tab === "check" && check.activeLegend.length > 0 && (
-                        <span
-                          className="mx-0.5 hidden h-4 w-px bg-zinc-700 sm:block"
-                          aria-hidden
-                        />
-                      )}
+                    <div className="pointer-events-auto absolute bottom-3 left-1/2 z-10 flex max-w-[95%] -translate-x-1/2 flex-nowrap items-center justify-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900/90 px-2.5 py-1.5 shadow-xl backdrop-blur">
                       {hasTexture && (
                         <button
                           type="button"
@@ -947,35 +882,6 @@ export function ModelSettingsPanel({
                           {t("preview.texture")}
                         </button>
                       )}
-                      <button
-                        type="button"
-                        aria-pressed={showSupport}
-                        title={t("preview.supportTitle")}
-                        onClick={onToggleSupport}
-                        className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${
-                          showSupport
-                            ? "bg-amber-500/15 text-amber-300"
-                            : "text-zinc-500 hover:text-zinc-300"
-                        }`}
-                      >
-                        <Shell className="size-3.5" />
-                        {t("preview.support")}
-                      </button>
-                      {/*
-                        置于平面 —— **动作**,不是开关:
-                        按当前姿态把模型放到打印平台上(支撑按这个姿态重算
-                        一次 → 平台平面跟着重摆 → 模型坐在托底上 →
-                        支撑克重 / 总克重同时刷新)。
-                      */}
-                      <button
-                        type="button"
-                        title={t("preview.placeOnPlaneTitle")}
-                        onClick={onPlaceOnPlane}
-                        className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-zinc-500 transition-colors hover:text-zinc-300"
-                      >
-                        <MoveDown className="size-3.5" />
-                        {t("preview.placeOnPlane")}
-                      </button>
                       {/* 重置视角 —— 把**相机**摆回默认位置(不是模型角度) */}
                       <button
                         type="button"
@@ -986,44 +892,6 @@ export function ModelSettingsPanel({
                         <RotateCcw className="size-3.5" />
                         {t("preview.resetView")}
                       </button>
-                      {/*
-                        支撑那一行 —— 三种状态:
-                        - 算出来了 → 比例 + 克重
-                        - 正在算(用户刚点了那颗按钮)→ 「正在算…」
-                        - 没算 → 「点『包裹支撑』按当前角度算」(别让用户对着「—」猜)
-                      */}
-                      {poseSupport ? (
-                        <span className="font-mono text-[10px] text-zinc-500">
-                          {t("preview.supportInfo", {
-                            ratio: Math.round(supportRatio * 100),
-                            weight: Math.ceil(poseSupport.supportWeightG),
-                          })}
-                        </span>
-                      ) : showSupport ? (
-                        <span className="text-[10px] text-zinc-400">
-                          {t("preview.supportComputing")}
-                        </span>
-                      ) : (
-                        <span className="text-[10px] text-zinc-400">
-                          {t("preview.supportPending")}
-                        </span>
-                      )}
-                      {/*
-                        额外挂的东西(2026-11-09)—— 打印服务的「报价」按钮
-                        挂在这儿:点一下弹报价弹窗,弹窗里下单。
-
-                        以前是右栏一整列(288px),把 3D 视口挤扁了
-                        (工作室的原话:「把预览区挤到了左边」)。
-                      */}
-                      {toolbarExtra ? (
-                        <>
-                          <span
-                            className="mx-0.5 hidden h-4 w-px bg-zinc-700 sm:block"
-                            aria-hidden
-                          />
-                          {toolbarExtra}
-                        </>
-                      ) : null}
                     </div>
                   )}
                 </div>
@@ -1038,61 +906,88 @@ export function ModelSettingsPanel({
               {tab === "check" ? (
                 <aside
                   className={cn(
-                    "order-2 md:order-1 md:w-[360px] md:shrink-0 p-3 md:overflow-y-auto border-t md:border-t-0 md:border-r border-zinc-800",
+                    "order-2 md:order-1 md:w-[360px] md:shrink-0 flex flex-col border-t md:border-t-0 md:border-r border-zinc-800",
                     // 全屏:信息栏自己内部滚(窄屏时整行也滚)
                     fullscreen && "min-h-0 overflow-y-auto"
                   )}
                 >
-                  <h2 className="mb-3 flex items-center gap-2 text-sm font-bold tracking-tight text-zinc-100">
-                    <ShieldCheck className="size-4 text-emerald-400" />
-                    {tInspect("app.title")}
-                  </h2>
-                  <ModelCheckSidePanel
-                    result={check.result}
-                    busy={check.busy}
-                    error={check.error}
-                    unitCheck={unitCheck}
-                    onFocusCluster={check.focusCluster}
-                    onFocusPoint={check.focusPoint}
-                  />
+                  {/* 内容区自己滚 —— 底部固定条不跟着滚 */}
+                  <div className="flex-1 min-h-0 overflow-y-auto p-3">
+                    <h2 className="mb-3 flex items-center gap-2 text-sm font-bold tracking-tight text-zinc-100">
+                      <ShieldCheck className="size-4 text-emerald-400" />
+                      {tInspect("app.title")}
+                    </h2>
+                    <ModelCheckSidePanel
+                      result={check.result}
+                      busy={check.busy}
+                      error={check.error}
+                      unitCheck={unitCheck}
+                      onFocusCluster={check.focusCluster}
+                      onFocusPoint={check.focusPoint}
+                      legend={check.activeLegend}
+                      visibility={check.visibility}
+                      onToggleVisibility={(key) =>
+                        check.setVisibility((v) => ({
+                          ...v,
+                          [key]: !v[key],
+                        }))
+                      }
+                      clean={Boolean(
+                        check.result && check.activeLegend.length === 0
+                      )}
+                    />
+                  </div>
+                  {/*
+                    **底部固定条** —— 主出口(报价)永远在这一格(2026-11-10)
+
+                    固定条**不参与滚动**(`shrink-0`),内容区自己滚。
+                    两个视角都摆这一条 —— 切一下 tab 出口不该消失。
+                  */}
+                  {primaryAction ? (
+                    <div className="shrink-0 border-t border-zinc-800 p-3">
+                      {primaryAction}
+                    </div>
+                  ) : null}
                 </aside>
               ) : (
                 <aside
                   className={cn(
-                    "order-2 md:order-1 md:w-[360px] md:shrink-0 p-3 flex flex-col gap-3 md:overflow-y-auto border-t md:border-t-0 md:border-r border-zinc-800",
+                    "order-2 md:order-1 md:w-[360px] md:shrink-0 flex flex-col border-t md:border-t-0 md:border-r border-zinc-800",
                     // 全屏:信息栏自己内部滚(窄屏时整行也滚)
                     fullscreen && "min-h-0 overflow-y-auto"
                   )}
                 >
-                  <h2 className="flex items-center gap-2 text-sm font-bold tracking-tight text-zinc-100">
-                    <Scale className="size-4 text-amber-400" />
-                    {t("tabs.weight")}
-                  </h2>
-                  <div className="rounded-lg border border-zinc-800 overflow-hidden">
-                    <div className="flex items-center justify-between bg-zinc-900 px-3 py-2 border-b border-zinc-800">
-                      <span className="text-xs font-medium text-zinc-400">
-                        {t("dialog.dimensionAdjust")}
-                      </span>
-                      <div className="inline-flex rounded-md border border-zinc-700 bg-zinc-900 p-0.5">
-                        <button
-                          type="button"
-                          onClick={() => onDimModeChange("original")}
-                          className={`px-3 py-1 text-xs rounded transition-colors ${dimMode === "original" ? "bg-zinc-700 text-zinc-100" : "text-zinc-400 hover:text-zinc-100"}`}
-                        >
-                          {t("dialog.originalSize")}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onDimModeChange("custom")}
-                          className={`px-3 py-1 text-xs rounded transition-colors ${dimMode === "custom" ? "bg-amber-500 text-white" : "text-zinc-400 hover:text-zinc-100"}`}
-                        >
-                          {t("dialog.customSize")}
-                        </button>
+                  {/* 内容区自己滚 —— 底部固定条不跟着滚 */}
+                  <div className="flex-1 min-h-0 overflow-y-auto p-3 flex flex-col gap-3">
+                    <h2 className="flex items-center gap-2 text-sm font-bold tracking-tight text-zinc-100">
+                      <Scale className="size-4 text-amber-400" />
+                      {t("tabs.weight")}
+                    </h2>
+                    <div className="rounded-lg border border-zinc-800 overflow-hidden">
+                      <div className="flex items-center justify-between bg-zinc-900 px-3 py-2 border-b border-zinc-800">
+                        <span className="text-xs font-medium text-zinc-400">
+                          {t("dialog.dimensionAdjust")}
+                        </span>
+                        <div className="inline-flex rounded-md border border-zinc-700 bg-zinc-900 p-0.5">
+                          <button
+                            type="button"
+                            onClick={() => onDimModeChange("original")}
+                            className={`px-3 py-1 text-xs rounded transition-colors ${dimMode === "original" ? "bg-zinc-700 text-zinc-100" : "text-zinc-400 hover:text-zinc-100"}`}
+                          >
+                            {t("dialog.originalSize")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onDimModeChange("custom")}
+                            className={`px-3 py-1 text-xs rounded transition-colors ${dimMode === "custom" ? "bg-amber-500 text-white" : "text-zinc-400 hover:text-zinc-100"}`}
+                          >
+                            {t("dialog.customSize")}
+                          </button>
+                        </div>
                       </div>
-                    </div>
 
-                    <div className="p-3 space-y-3">
-                      {/* ---------- 单位横幅 ----------
+                      <div className="p-3 space-y-3">
+                        {/* ---------- 单位横幅 ----------
                     文件坐标不是毫米(AI 生成 / Blender 默认导出都是归一化的),
                     工具已经按「最大边 100mm」替用户归一化过了 —— 这件事必须
                     摆出来,否则用户看到的尺寸跟他想的不是一个东西。
@@ -1100,178 +995,191 @@ export function ModelSettingsPanel({
                     托底 5mm 是固定毫米值,不跟着模型缩放:不归一化的话平台会
                     被拉到模型下面 5 个「单位」,支撑比模型本身还高,支撑比例是
                     万倍量级(见 `lib/model-units.ts`)。 */}
-                      {unitCheck?.normalized && (
-                        <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-2">
-                          <AlertCircle className="size-3.5 shrink-0 mt-px text-amber-400" />
-                          <div className="min-w-0 flex-1 text-[11px] leading-relaxed">
-                            <p className="font-medium text-amber-200">
-                              {t("dialog.unitNotice", {
-                                extent: fmt(unitCheck.originalMaxExtent, 2),
-                              })}
-                            </p>
-                            <p className="text-amber-300/80">
-                              {dimMode === "custom"
-                                ? t("dialog.unitNoticeHandled", {
-                                    size: unitCheck.assumedMaxExtentMm,
-                                  })
-                                : t("dialog.unitNoticeUnhandled")}
-                            </p>
-                          </div>
-                          {/* 「改回原始尺寸」只在归一化还生效时给 —— 已经回到原始
+                        {unitCheck?.normalized && (
+                          <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-2">
+                            <AlertCircle className="size-3.5 shrink-0 mt-px text-amber-400" />
+                            <div className="min-w-0 flex-1 text-[11px] leading-relaxed">
+                              <p className="font-medium text-amber-200">
+                                {t("dialog.unitNotice", {
+                                  extent: fmt(unitCheck.originalMaxExtent, 2),
+                                })}
+                              </p>
+                              <p className="text-amber-300/80">
+                                {dimMode === "custom"
+                                  ? t("dialog.unitNoticeHandled", {
+                                      size: unitCheck.assumedMaxExtentMm,
+                                    })
+                                  : t("dialog.unitNoticeUnhandled")}
+                              </p>
+                            </div>
+                            {/* 「改回原始尺寸」只在归一化还生效时给 —— 已经回到原始
                         尺寸的话,这个按钮按下去什么都不会变。 */}
-                          {dimMode === "custom" && onRevertUnitScale && (
-                            <button
-                              type="button"
-                              onClick={onRevertUnitScale}
-                              className="shrink-0 text-[11px] font-medium text-amber-300 hover:text-amber-200 underline underline-offset-2 whitespace-nowrap"
-                            >
-                              {t("dialog.revertOriginalUnits")}
-                            </button>
-                          )}
-                        </div>
-                      )}
+                            {dimMode === "custom" && onRevertUnitScale && (
+                              <button
+                                type="button"
+                                onClick={onRevertUnitScale}
+                                className="shrink-0 text-[11px] font-medium text-amber-300 hover:text-amber-200 underline underline-offset-2 whitespace-nowrap"
+                              >
+                                {t("dialog.revertOriginalUnits")}
+                              </button>
+                            )}
+                          </div>
+                        )}
 
-                      <div className="space-y-2 min-h-[124px] flex flex-col justify-start">
-                        <div className="grid grid-cols-3 gap-2">
-                          {dimMode === "original" ? (
-                            <>
-                              <DimDisplay
-                                axis="X"
-                                axisColor="#ef4444"
-                                label={t("axis.length")}
-                                value={geometry.originalDims[0]}
-                              />
-                              <DimDisplay
-                                axis="Y"
-                                axisColor="#22c55e"
-                                label={t("axis.width")}
-                                value={geometry.originalDims[1]}
-                              />
-                              <DimDisplay
-                                axis="Z"
-                                axisColor="#3b82f6"
-                                label={t("axis.height")}
-                                value={geometry.originalDims[2]}
-                              />
-                            </>
-                          ) : (
-                            <>
-                              <DimEditor
-                                axis="X"
-                                axisColor="#ef4444"
-                                label={t("axis.length")}
-                                value={geometry.dims[0]}
-                                onChange={(v) => handleDimChange(0, v)}
-                              />
-                              <DimEditor
-                                axis="Y"
-                                axisColor="#22c55e"
-                                label={t("axis.width")}
-                                value={geometry.dims[1]}
-                                onChange={(v) => handleDimChange(1, v)}
-                              />
-                              <DimEditor
-                                axis="Z"
-                                axisColor="#3b82f6"
-                                label={t("axis.height")}
-                                value={geometry.dims[2]}
-                                onChange={(v) => handleDimChange(2, v)}
-                              />
-                            </>
-                          )}
-                        </div>
+                        <div className="space-y-2 min-h-[124px] flex flex-col justify-start">
+                          <div className="grid grid-cols-3 gap-2">
+                            {dimMode === "original" ? (
+                              <>
+                                <DimDisplay
+                                  axis="X"
+                                  axisColor="#ef4444"
+                                  label={t("axis.length")}
+                                  value={geometry.originalDims[0]}
+                                />
+                                <DimDisplay
+                                  axis="Y"
+                                  axisColor="#22c55e"
+                                  label={t("axis.width")}
+                                  value={geometry.originalDims[1]}
+                                />
+                                <DimDisplay
+                                  axis="Z"
+                                  axisColor="#3b82f6"
+                                  label={t("axis.height")}
+                                  value={geometry.originalDims[2]}
+                                />
+                              </>
+                            ) : (
+                              <>
+                                <DimEditor
+                                  axis="X"
+                                  axisColor="#ef4444"
+                                  label={t("axis.length")}
+                                  value={geometry.dims[0]}
+                                  onChange={(v) => handleDimChange(0, v)}
+                                />
+                                <DimEditor
+                                  axis="Y"
+                                  axisColor="#22c55e"
+                                  label={t("axis.width")}
+                                  value={geometry.dims[1]}
+                                  onChange={(v) => handleDimChange(1, v)}
+                                />
+                                <DimEditor
+                                  axis="Z"
+                                  axisColor="#3b82f6"
+                                  label={t("axis.height")}
+                                  value={geometry.dims[2]}
+                                  onChange={(v) => handleDimChange(2, v)}
+                                />
+                              </>
+                            )}
+                          </div>
 
-                        <div className="flex items-center justify-between text-xs h-5">
-                          {dimMode === "original" ? (
-                            <span className="text-zinc-400 flex items-center gap-1">
-                              <Info className="size-3" />
-                              {t("dialog.switchToCustom")}
-                            </span>
-                          ) : (
-                            <>
+                          <div className="flex items-center justify-between text-xs h-5">
+                            {dimMode === "original" ? (
                               <span className="text-zinc-400 flex items-center gap-1">
                                 <Info className="size-3" />
-                                {uniformScale
-                                  ? t("dialog.linkedScale")
-                                  : t("dialog.independentScale")}
+                                {t("dialog.switchToCustom")}
                               </span>
-                              <div className="flex items-center gap-2">
-                                {/* Radix Switch 渲染的是 button 而不是 input，
+                            ) : (
+                              <>
+                                <span className="text-zinc-400 flex items-center gap-1">
+                                  <Info className="size-3" />
+                                  {uniformScale
+                                    ? t("dialog.linkedScale")
+                                    : t("dialog.independentScale")}
+                                </span>
+                                <div className="flex items-center gap-2">
+                                  {/* Radix Switch 渲染的是 button 而不是 input，
                               用 <label> 包它会被 a11y 规则判为「无关联控件的 label」，
                               这里改成可点击的按钮 + Switch。 */}
-                                <div className="flex items-center gap-1 text-[11px] text-zinc-400">
+                                  <div className="flex items-center gap-1 text-[11px] text-zinc-400">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        toggleUniformScale(!uniformScale)
+                                      }
+                                      className="cursor-pointer hover:text-zinc-200"
+                                    >
+                                      {t("dialog.uniformScale")}
+                                    </button>
+                                    <Switch
+                                      checked={uniformScale}
+                                      onCheckedChange={toggleUniformScale}
+                                      className="scale-75"
+                                    />
+                                  </div>
                                   <button
                                     type="button"
-                                    onClick={() =>
-                                      toggleUniformScale(!uniformScale)
-                                    }
-                                    className="cursor-pointer hover:text-zinc-200"
+                                    onClick={() => {
+                                      onScaleFactorChange(1);
+                                      onScaleXChange(1);
+                                      onScaleYChange(1);
+                                      onScaleZChange(1);
+                                    }}
+                                    className="text-amber-400 hover:text-amber-300 font-medium flex items-center gap-1"
                                   >
-                                    {t("dialog.uniformScale")}
+                                    <RotateCcw className="size-3" />
+                                    {t("dialog.restoreOriginal")}
                                   </button>
-                                  <Switch
-                                    checked={uniformScale}
-                                    onCheckedChange={toggleUniformScale}
-                                    className="scale-75"
-                                  />
                                 </div>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    onScaleFactorChange(1);
-                                    onScaleXChange(1);
-                                    onScaleYChange(1);
-                                    onScaleZChange(1);
-                                  }}
-                                  className="text-amber-400 hover:text-amber-300 font-medium flex items-center gap-1"
-                                >
-                                  <RotateCcw className="size-3" />
-                                  {t("dialog.restoreOriginal")}
-                                </button>
-                              </div>
-                            </>
-                          )}
-                        </div>
+                              </>
+                            )}
+                          </div>
 
-                        <div className="text-[11px] h-6 flex items-center gap-1.5">
-                          {dimMode === "custom" &&
-                            (() => {
-                              const [sx, sy, sz] = scales;
-                              const isUniform = sx === sy && sy === sz;
-                              const k = isUniform
-                                ? sx
-                                : Math.cbrt(sx * sy * sz);
-                              if (Math.abs(k - 1) < 0.001) return null;
-                              return (
-                                <span className="text-zinc-300 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-1 flex items-center gap-1.5 w-full">
-                                  <AlertCircle className="size-3 text-amber-400 shrink-0" />
-                                  {isUniform
-                                    ? t("dialog.scaleSummaryUniform", {
-                                        s: fmt(sx, 3),
-                                        v: fmt(sx ** 3, 3),
-                                        a: fmt(sx ** 2, 3),
-                                      })
-                                    : t("dialog.scaleSummaryAxis", {
-                                        sx: fmt(sx, 3),
-                                        sy: fmt(sy, 3),
-                                        sz: fmt(sz, 3),
-                                        v: fmt(sx * sy * sz, 3),
-                                      })}
-                                </span>
-                              );
-                            })()}
+                          <div className="text-[11px] h-6 flex items-center gap-1.5">
+                            {dimMode === "custom" &&
+                              (() => {
+                                const [sx, sy, sz] = scales;
+                                const isUniform = sx === sy && sy === sz;
+                                const k = isUniform
+                                  ? sx
+                                  : Math.cbrt(sx * sy * sz);
+                                if (Math.abs(k - 1) < 0.001) return null;
+                                return (
+                                  <span className="text-zinc-300 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-1 flex items-center gap-1.5 w-full">
+                                    <AlertCircle className="size-3 text-amber-400 shrink-0" />
+                                    {isUniform
+                                      ? t("dialog.scaleSummaryUniform", {
+                                          s: fmt(sx, 3),
+                                          v: fmt(sx ** 3, 3),
+                                          a: fmt(sx ** 2, 3),
+                                        })
+                                      : t("dialog.scaleSummaryAxis", {
+                                          sx: fmt(sx, 3),
+                                          sy: fmt(sy, 3),
+                                          sz: fmt(sz, 3),
+                                          v: fmt(sx * sy * sz, 3),
+                                        })}
+                                  </span>
+                                );
+                              })()}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
 
-                  {/* 克重 + 摆盘结果 —— 尺寸调完之后的结果,放最后。
-                mt-auto:侧栏比右边视口矮/高的差都让出来,克重贴着栏底,
-                跟视口的底边对齐(挤在中间会像没排完)。
+                    {/* 克重 + 姿态与支撑 + 摆盘结果 —— 尺寸调完之后的结果,放最后。
 
                 摆盘结果也在这一栏 —— 摆盘跟克重本来就是一件事
-                (支撑克重摆到哪个姿态最省),拆两栏要用户自己对数。 */}
-                  <div className="mt-auto">{weight}</div>
+                (支撑克重摆到哪个姿态最省),拆两栏要用户自己对数。
+
+                **不再用 `mt-auto` 贴着栏底** —— 内容区现在自己滚,底部固定条
+                单独占一格;贴着栏底会让内容区在视口矮的时候挤成一团。 */}
+                    <div>{weight}</div>
+                  </div>
+                  {/*
+                    **底部固定条** —— 主出口(报价)永远在这一格(2026-11-10)
+
+                    固定条**不参与滚动**(`shrink-0`),内容区自己滚。
+                    两个视角都摆这一条 —— 切一下 tab 出口不该消失。
+                  */}
+                  {primaryAction ? (
+                    <div className="shrink-0 border-t border-zinc-800 p-3">
+                      {primaryAction}
+                    </div>
+                  ) : null}
                 </aside>
               )}
             </div>

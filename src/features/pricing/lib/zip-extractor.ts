@@ -29,6 +29,7 @@ import {
   type TextureUrlMap,
 } from "./obj-materials";
 import type { ObjParseResult, Vec3 } from "./obj-parser";
+import { decodeObjBytes, describeEmptyObjFile } from "./obj-text";
 import { type ObjWorkerResult, parseObjInWorker } from "./obj-worker-client";
 import { loadUnrarWasm } from "./unrar-wasm-loader";
 
@@ -203,8 +204,32 @@ export async function extractDirectObj(
   try {
     onProgress?.({ phase: "unzip", percent: 5 });
 
-    const objText = await file.text();
+    /**
+     * 读**字节**再自己解 —— 不用 `file.text()`
+     *
+     * `file.text()` 只给一段字符串,不告诉你文件多大、也不管编码:
+     *
+     * - 读出来是空的时候,页面只摆一句「空 OBJ 文本」,用户看着像**自己的
+     *   模型坏了**(工作室 2026-11-10 报的就是这个:「实际不是空的」——
+     *   其实浏览器拿到的就是个 0 字节的空壳:从压缩包里直接拖文件、云盘
+     *   占位符没下载完,都会这样)。
+     * - `File.text()` 永远按 UTF-8 解,Windows 工具导出的 **UTF-16** OBJ
+     *   会解成一堆带 NUL 的乱码 —— worker 一个顶点都认不出来。
+     *
+     * 详见 `pricing/lib/obj-text.ts`。
+     */
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const objText = decodeObjBytes(bytes);
     onProgress?.({ phase: "unzip", percent: 25 });
+
+    if (!objText.trim()) {
+      // 说清楚是「浏览器拿到的就是个空壳」还是「文件编码不对」
+      return {
+        model: null,
+        allFiles: [{ name: file.name, size: file.size }],
+        error: describeEmptyObjFile(file.size),
+      };
+    }
 
     // Yield so the UI can paint the "parsing…" state before we kick off the worker
     await yieldToUI();
@@ -832,17 +857,30 @@ export async function extractZip(
     onProgress?.({ phase: "unzip", percent: 28 });
 
     // 读出所有 MTL 文本
+    //
+    // **走字节 + `decodeObjBytes`** —— 不是 `entry.async("text")`：MTL 跟 OBJ
+    // 是同一个工具导出的,编码也一样(Windows 上不少是 UTF-16)。按 UTF-8 解
+    // 出来是乱码的话,OBJ 里的 `usemtl` 名字跟 MTL 里的对不上 —— 材质全丢,
+    // 模型只剩一块白。
     const mtlTexts = new Map<string, string>();
     for (const m of mtlFiles) {
-      mtlTexts.set(m.name, await m.entry.async("text"));
+      mtlTexts.set(m.name, decodeObjBytes(await m.entry.async("uint8array")));
     }
     const mtlCandidates = [...mtlTexts.keys()];
 
     // 每个 OBJ 按自己的 `mtllib` 找配套 MTL，再合并（组合模型）
+    //
+    // **走字节 + `decodeObjBytes`** —— 不是 `entry.async("text")`：后者永远
+    // 按 UTF-8 解，而 Windows 上不少工具导出的 OBJ 是 UTF-16（解出来是一堆
+    // 带 NUL 的乱码，worker 一个顶点都认不出来）。顺带把 UTF-8 的 BOM 摘掉。
     const sources = [];
+    // 包里那几个 OBJ 一共多少字节 —— 空的时候用来判断「是空壳还是编码不对」
+    let totalObjBytes = 0;
     for (let i = 0; i < objFiles.length; i++) {
       const { entry, name } = objFiles[i]!;
-      const text: string = await entry.async("text");
+      const bytes = await entry.async("uint8array");
+      totalObjBytes += bytes.length;
+      const text = decodeObjBytes(bytes);
       const picked = pickMtlFileName(parseMtllibNames(text), mtlCandidates);
       sources.push({
         objText: text,
@@ -866,6 +904,21 @@ export async function extractZip(
         ? objFiles[0]!.name
         : `${objFiles.length} 个 OBJ 合并`;
     onProgress?.({ phase: "unzip", percent: 30 });
+
+    // 包里的 OBJ 是空的 —— 说清楚是「空壳」还是「编码不对」
+    //
+    // 跟另外两条路一个口径(`describeEmptyObjFile`):0 字节 ⇒ 压缩包里那个
+    // .obj 本身就是空壳(打包的时候没放进去 / 放的是快捷方式 / 云盘占位符);
+    // 有字节但解不出来 ⇒ 编码不对。
+    if (!objText.trim()) {
+      return {
+        model: null,
+        allFiles,
+        error:
+          `压缩包里的 OBJ 读出来是空的(${objFileName})—— ` +
+          describeEmptyObjFile(totalObjBytes),
+      };
+    }
 
     // Yield so the UI can paint before kicking off the worker
     await yieldToUI();
@@ -1042,19 +1095,27 @@ export async function extractRar(
     onProgress?.({ phase: "unzip", percent: 30 });
 
     // 每个 OBJ 按自己的 `mtllib` 找配套 MTL，再合并（组合模型）
-    const decoder = new TextDecoder();
+    //
+    // **解码走 `decodeObjBytes`** —— 不是 `TextDecoder`：它永远按 UTF-8 解，
+    // 而 Windows 上不少工具导出的 OBJ 是 UTF-16（按 UTF-8 解出来是一堆带
+    // NUL 的乱码，worker 一个顶点都认不出来）。顺带把 UTF-8 的 BOM 摘掉。
+    //
+    // MTL 也走同一套 —— 它跟 OBJ 是同一个工具导出的,编码一样。MTL 解成乱码
+    // 的话,OBJ 里的 `usemtl` 跟 MTL 里的材质名对不上,模型只剩一块白。
     const sources = [];
+    let totalObjBytes = 0;
     for (const obj of objFiles) {
       const content = fileContents.get(obj.name);
       if (!content) continue;
-      const text = decoder.decode(content);
+      totalObjBytes += content.length;
+      const text = decodeObjBytes(content);
       const picked = pickMtlFileName(parseMtllibNames(text), mtlFiles);
       const mtlContent = picked ? fileContents.get(picked) : undefined;
       sources.push({
         objText: text,
         objFileName: obj.name,
         mtlFileName: picked,
-        mtlText: mtlContent ? decoder.decode(mtlContent) : undefined,
+        mtlText: mtlContent ? decodeObjBytes(mtlContent) : undefined,
       });
     }
 
@@ -1070,6 +1131,25 @@ export async function extractRar(
     onProgress?.({ phase: "unzip", percent: 30 });
 
     await yieldToUI();
+
+    /**
+     * 合并后的 OBJ 是空的 —— 说清楚**是哪一种空**
+     *
+     * 跟直接拖进来的那条路一个口径(`describeEmptyObjFile`):
+     *
+     * - 全是 0 字节 ⇒ 压缩包里那几个 `.obj` **本身就是空壳**(打包的时候
+     *   没把文件放进去 / 放的是快捷方式 / 云盘占位符)
+     * - 有字节但解不出来 ⇒ 编码不对(UTF-32 之类)
+     *
+     * 不说清楚的话,用户只会看到「空 OBJ 文本」,以为自己的模型坏了。
+     */
+    if (!objText.trim()) {
+      return {
+        model: null,
+        allFiles,
+        error: `压缩包里的 OBJ 读出来是空的(${objFileName})—— ${describeEmptyObjFile(totalObjBytes)}`,
+      };
+    }
 
     // Parse OBJ via Web Worker
     const workerResult = await parseObjInWorker(objText, {

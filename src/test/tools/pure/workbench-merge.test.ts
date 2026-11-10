@@ -359,28 +359,87 @@ describe("工作台 —— 报价按钮在区域内,不在右栏(2026-11-09)", (
     expect(code).not.toContain("xl:shrink-0");
   });
 
-  it("报价按钮挂在视口底下那条浮层控制条上", () => {
+  it("报价按钮挂在**左栏底部的固定条**上(2026-11-10)", () => {
     const code = stripComments(read(SETTINGS_PANEL));
 
-    // `toolbarExtra` 插槽 —— 打印服务把「报价」那颗按钮挂在这儿
-    expect(code).toContain("toolbarExtra?: ReactNode");
-    expect(code).toContain("{toolbarExtra ? (");
+    // `primaryAction` 插槽 —— 打印服务把「报价」那颗按钮挂在这儿
+    expect(code).toContain("primaryAction?: ReactNode");
+    expect(code).toContain("{primaryAction ? (");
+    // 以前那个插槽叫 `toolbarExtra` —— 挂在浮层药丸的尾巴上,主出口被埋
+    expect(code).not.toContain("toolbarExtra");
 
-    // 它得在**控制条**里,不是在别处 —— 控制条上还有「包裹支撑」/「置于平面」/
-    // 「重置视角」。`toolbarExtra` 排在「置于平面」之后 ⇒ 同一控制条。
-    expect(code).toContain("onPlaceOnPlane");
-    expect(code.indexOf("{toolbarExtra ? (")).toBeGreaterThan(
-      code.indexOf("onClick={onPlaceOnPlane}")
-    );
+    // **两个视角的侧栏都摆这一条** —— 切一下 tab,出口不该消失
+    const asideBlocks = code.match(/<aside[\s\S]*?<\/aside>/g) ?? [];
+    expect(asideBlocks).toHaveLength(2);
+    for (const block of asideBlocks) {
+      expect(block).toContain("{primaryAction ? (");
+      // 固定条**不参与滚动**(`shrink-0`),内容区自己滚
+      expect(block).toContain("shrink-0");
+      expect(block).toContain("min-h-0 overflow-y-auto");
+    }
   });
 
-  it("计算器把 `quoteActionSlot` 接到工作台框架的 `toolbarExtra` 上", () => {
+  it("计算器把 `quoteActionSlot` 接到工作台框架的 `primaryAction` 上", () => {
     const calc = stripComments(read(CALCULATOR));
 
     expect(calc).toContain("quoteActionSlot?: ReactNode");
-    expect(calc).toContain("toolbarExtra={quoteActionSlot}");
+    expect(calc).toContain("primaryAction={quoteActionSlot}");
     // 以前那个插槽叫 `quoteSlot` —— 挂的是整张卡,不是按钮
     expect(calc).not.toContain("quoteSlot");
+    expect(calc).not.toContain("toolbarExtra");
+  });
+});
+
+describe("工作台 —— 浮层药丸只管「看图」(2026-11-10)", () => {
+  /** 药丸那一块 —— 「显示贴图」「重置视角」 */
+  function pill(code: string): string {
+    const m = code.match(
+      /pointer-events-auto absolute bottom-3[\s\S]*?<\/div>/
+    );
+    expect(m).not.toBeNull();
+    return m?.[0] ?? "";
+  }
+
+  it("药丸**永不换行**", () => {
+    const code = stripComments(read(SETTINGS_PANEL));
+
+    // 以前是 `flex-wrap` —— 窄屏换行成两排,七样东西挤在一起
+    const p = pill(code);
+    expect(p).toContain("flex-nowrap");
+    expect(p).not.toContain("flex-wrap");
+    // 宽度收到 95% —— 加上 `flex-nowrap`,物理上不可能换行
+    expect(p).toContain("max-w-[95%]");
+  });
+
+  it("药丸里只剩「看图」的工具", () => {
+    const code = stripComments(read(SETTINGS_PANEL));
+    const p = pill(code);
+
+    // 留着的:显示贴图 / 重置视角
+    expect(p).toContain("onToggleTexture");
+    expect(p).toContain("setFitSignal");
+
+    // 搬走的:包裹支撑 / 置于平面 / 主出口
+    expect(p).not.toContain("onToggleSupport");
+    expect(p).not.toContain("onPlaceOnPlane");
+    expect(p).not.toContain("primaryAction");
+  });
+
+  it("检查图层开关搬进**检查侧栏**了 —— 那是面板状态,不是工具", () => {
+    const frame = stripComments(read(SETTINGS_PANEL));
+
+    // 框架把图层开关喂给侧栏
+    expect(frame).toContain("legend={check.activeLegend}");
+    expect(frame).toContain("visibility={check.visibility}");
+    expect(frame).toContain("onToggleVisibility");
+
+    // 侧栏自己摆那些 chips(条目文案走 `ISSUE_LABEL_KEYS`,不新增 i18n key)
+    const panel = stripComments(read(CHECK_PANEL));
+    expect(panel).toContain("ISSUE_LABEL_KEYS");
+    expect(panel).toContain("onToggleVisibility");
+
+    // 药丸里不许再有图层开关
+    expect(pill(frame)).not.toContain("activeLegend");
   });
 });
 

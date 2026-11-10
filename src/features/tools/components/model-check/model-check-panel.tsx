@@ -33,12 +33,20 @@
 import { CircleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 import type { ModelUnitCheck } from "@/features/pricing/lib/model-units";
+import type { ViewportVisibility } from "@/features/shared/components/model-viewport";
 import type {
   AnalysisResult,
   IssueCluster,
   MessageRef,
 } from "@/features/tools/lib/mesh/types";
+import { ISSUE_LABEL_KEYS } from "@/features/tools/lib/mesh/types";
 import Sidebar from "./sidebar";
+
+/** 图例项 —— 跟 `use-check-view` 的 `LEGEND_ITEMS` 一个形状 */
+export type CheckLegendItem = {
+  key: keyof ViewportVisibility;
+  color: string;
+};
 
 export function ModelCheckSidePanel({
   result,
@@ -47,6 +55,10 @@ export function ModelCheckSidePanel({
   unitCheck,
   onFocusCluster,
   onFocusPoint,
+  legend,
+  visibility,
+  onToggleVisibility,
+  clean,
 }: {
   /** 分析结果 —— 侧栏吃它,视口也吃**同一份** */
   result: AnalysisResult | null;
@@ -60,12 +72,68 @@ export function ModelCheckSidePanel({
   onFocusCluster: (c: IssueCluster) => void;
   /** 点一个问题点 → 相机飞过去 */
   onFocusPoint: (p: [number, number, number], radius: number) => void;
+  /**
+   * **图层开关** —— 2026-11-10 从浮层药丸搬进侧栏
+   *
+   * 以前那排彩色的图例 chips 挤在视口底下那条药丸里,跟「显示贴图」
+   * 「重置视角」混着,窄屏还换行。问题图层开关是**面板状态**(看哪几层),
+   * 不是工具 —— 摆回侧栏顶部,跟结论在一处。
+   *
+   * 只列**真检出来的**类别(`use-check-view` 的 `activeLegend` 已经过滤过)——
+   * 摆一个永远点不动的按钮比不摆更糟。
+   */
+  legend: CheckLegendItem[];
+  /** 当前开着哪几层 */
+  visibility: ViewportVisibility;
+  /** 开关一层 */
+  onToggleVisibility: (key: keyof ViewportVisibility) => void;
+  /** 分析完了、一类问题都没检出 */
+  clean: boolean;
 }) {
   const t = useTranslations("ModelInspector");
   const stats = result?.stats ?? null;
 
   return (
     <div className="flex flex-col gap-3">
+      {/*
+        图层开关 —— 检出的类别,点一下开关一层
+      */}
+      {legend.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900 p-2">
+          {legend.map((item) => {
+            const on = visibility[item.key];
+            return (
+              <button
+                key={item.key}
+                type="button"
+                aria-pressed={on}
+                onClick={() => onToggleVisibility(item.key)}
+                className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${
+                  on
+                    ? "bg-zinc-800/80 text-zinc-200"
+                    : "text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                <span
+                  className="inline-block h-2.5 w-2.5 rounded-full transition-opacity"
+                  style={{
+                    background: item.color,
+                    opacity: on ? 1 : 0.25,
+                  }}
+                />
+                {t(`legend.${ISSUE_LABEL_KEYS[item.key]}`)}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        clean && (
+          <div className="flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-2 text-xs text-emerald-300">
+            {t("legend.clean")}
+          </div>
+        )
+      )}
+
       {error && (
         <div
           className="flex items-start gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300"
