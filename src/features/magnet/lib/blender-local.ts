@@ -29,6 +29,16 @@
  *   (插件里已经带了)。Safari 早期版本会直接拦 —— 那种情况下界面要能说清楚
  *   「换 Chrome / Edge」。
  *
+ * ## 网页**起不了**本机程序 —— 「一键启动」只能是下载一个脚本
+ *
+ * 浏览器没有「启动本机 exe」的能力(更没有理由给它这个能力)。所以页面
+ * **只能连接一个已经在跑的桥接**,不能自己把 Blender 拉起来。
+ *
+ * ⇒ 「一键启动便携版 Blender」落地成**下载一个启动脚本**:
+ * `public/magnet/start_blender.cmd`(Windows)/ `start_blender.sh`(macOS /
+ * Linux)。脚本自己找 blender.exe(便携版解压出来的 / 装好的),带上
+ * `--python blender_bridge.py` 把桥接拉起来。用户双击一下就行。
+ *
  * ## 纯函数优先
  *
  * `fetchImpl` 是**注入**的 —— 单测里塞一个假 fetch 就能验协议和错误映射,
@@ -95,6 +105,21 @@ export const MAGNET_BLENDER_PORTABLE_URL = "https://www.blender.org/download/";
  */
 export const MAGNET_BLENDER_ADDON_URL = "/magnet/blender_bridge.py";
 
+/**
+ * 一键启动脚本(Windows)
+ *
+ * **网页永远起不了本机程序** —— 所以「一键启动」只能是**下载一个脚本**,
+ * 让用户双击它:脚本自己找到 blender.exe,带上 `--python blender_bridge.py`
+ * 把桥接拉起来。
+ *
+ * 以前用户得手工:开 Blender → Scripting → 新建 → 粘脚本 → Run Script。
+ * 现在下载 + 双击就完事(脚本跟 bridge 放同一个文件夹时最省事)。
+ */
+export const MAGNET_BLENDER_LAUNCHER_URL = "/magnet/start_blender.cmd";
+
+/** 一键启动脚本(macOS / Linux) */
+export const MAGNET_BLENDER_LAUNCHER_SH_URL = "/magnet/start_blender.sh";
+
 /** ping 的超时(ms)—— 本机回环,慢一点就说明插件没起 */
 export const MAGNET_BLENDER_PING_TIMEOUT_MS = 2500;
 
@@ -143,6 +168,17 @@ export type BlenderCutStats = {
   solver: string | null;
   /** 插件那边顺带提的提醒(比如「模型不是封闭的,已尽力修复」) */
   warnings: string[];
+  /**
+   * 临时封上了几处破口
+   *
+   * **这是「不修用户的模型」那条口径的证据** —— 破口封上只是为了切,
+   * 切完就摘掉(`lidStripped` 是摘掉了几张盖面)。
+   */
+  lidCapped: number | null;
+  /** 临时盖面一共几张 */
+  lidFaces: number | null;
+  /** 切完摘掉了张盖面(用户的模型上不多出几何) */
+  lidStripped: number | null;
 };
 
 /** 切完的结果 —— zip(OBJ + MTL + 纹理)+ 一堆数 */
@@ -413,6 +449,9 @@ export function parseStatsHeader(raw: string | null): BlenderCutStats {
     face: null,
     solver: null,
     warnings: [],
+    lidCapped: null,
+    lidFaces: null,
+    lidStripped: null,
   };
   if (!raw) return empty;
   try {

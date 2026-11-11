@@ -1526,6 +1526,9 @@
       "checking": "Checking…",
       "online": "Connected — Blender {version}",
       "offline": "Cannot reach the local Blender",
+      "launcher": "One-click start (Windows)",
+      "launcherSh": "One-click start (macOS / Linux)",
+      "launcherHint": "A web page cannot launch programs on your computer — download this script, put it next to the portable Blender and double-click it. That starts the bridge.",
       "downloadBlender": "Download the portable Blender",
       "downloadBlenderHint": "The official site offers a “Windows portable (.zip)” build — unzip it and run it, no installer needed.",
       "addon": "Download the add-on",
@@ -1533,6 +1536,8 @@
       "faceNote": "The local Blender picks the largest flat region on the model itself — the candidate-face tables above are not used.",
       "solver": "Solver",
       "warnings": "Warnings",
+      "lidNotice": "Open cracks were capped for the cut and the caps were removed again — your model gains no extra geometry.",
+      "lidCapped": "{count} crack(s) capped temporarily.",
       "resultNote": "The cut model came back from the Blender on your own machine."
     },
     "errors": {

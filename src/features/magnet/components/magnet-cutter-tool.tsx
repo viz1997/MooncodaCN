@@ -89,6 +89,8 @@ import {
   cutWithLocalBlender,
   MAGNET_BLENDER_ADDON_URL,
   MAGNET_BLENDER_DEFAULT_PORT,
+  MAGNET_BLENDER_LAUNCHER_SH_URL,
+  MAGNET_BLENDER_LAUNCHER_URL,
   MAGNET_BLENDER_PORTABLE_URL,
   type MagnetEngine,
   normalizeBlenderPort,
@@ -1167,31 +1169,55 @@ export function MagnetCutterTool() {
                         </p>
                       )}
 
-                      {/* ---- 指引:下便携版 Blender + 插件 ---- */}
+                      {/* ---- 指引:一键启动 / 下便携版 Blender + 插件 ---- */}
                       <div className="rounded-md border border-zinc-800 bg-zinc-950/60 p-2">
-                        <a
-                          href={MAGNET_BLENDER_PORTABLE_URL}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1 text-[11px] font-medium text-amber-300 underline underline-offset-2 hover:text-amber-200"
-                        >
-                          <ExternalLink className="size-3" />
-                          {t("engine.downloadBlender")}
-                        </a>
+                        {/* 一键启动 —— 网页起不了本机程序,只能给一个脚本 */}
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                          <a
+                            href={MAGNET_BLENDER_LAUNCHER_URL}
+                            download
+                            className="flex items-center gap-1 text-[11px] font-medium text-amber-300 underline underline-offset-2 hover:text-amber-200"
+                          >
+                            <Download className="size-3" />
+                            {t("engine.launcher")}
+                          </a>
+                          <a
+                            href={MAGNET_BLENDER_LAUNCHER_SH_URL}
+                            download
+                            className="flex items-center gap-1 text-[11px] font-medium text-amber-300 underline underline-offset-2 hover:text-amber-200"
+                          >
+                            <Download className="size-3" />
+                            {t("engine.launcherSh")}
+                          </a>
+                        </div>
                         <p className="mt-1 text-[10px] leading-relaxed text-zinc-500">
-                          {t("engine.downloadBlenderHint")}
+                          {t("engine.launcherHint")}
                         </p>
-                        <a
-                          href={MAGNET_BLENDER_ADDON_URL}
-                          download
-                          className="mt-2 flex items-center gap-1 text-[11px] font-medium text-amber-300 underline underline-offset-2 hover:text-amber-200"
-                        >
-                          <Download className="size-3" />
-                          {t("engine.addon")}
-                        </a>
-                        <p className="mt-1 text-[10px] leading-relaxed text-zinc-500">
-                          {t("engine.addonHint")}
-                        </p>
+                        <div className="mt-2 border-t border-zinc-800 pt-2">
+                          <a
+                            href={MAGNET_BLENDER_PORTABLE_URL}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 text-[11px] font-medium text-amber-300 underline underline-offset-2 hover:text-amber-200"
+                          >
+                            <ExternalLink className="size-3" />
+                            {t("engine.downloadBlender")}
+                          </a>
+                          <p className="mt-1 text-[10px] leading-relaxed text-zinc-500">
+                            {t("engine.downloadBlenderHint")}
+                          </p>
+                          <a
+                            href={MAGNET_BLENDER_ADDON_URL}
+                            download
+                            className="mt-2 flex items-center gap-1 text-[11px] font-medium text-amber-300 underline underline-offset-2 hover:text-amber-200"
+                          >
+                            <Download className="size-3" />
+                            {t("engine.addon")}
+                          </a>
+                          <p className="mt-1 text-[10px] leading-relaxed text-zinc-500">
+                            {t("engine.addonHint")}
+                          </p>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -1704,6 +1730,21 @@ export function MagnetCutterTool() {
                         />
                       )}
                     </dl>
+                    {/* 临时盖面 —— 跟浏览器那条路一个口径:破口只是临时封上
+                        再切,切完原样还给你(中性的告知,不是「改了模型」) */}
+                    {blenderResult.stats.lidCapped != null &&
+                      blenderResult.stats.lidCapped > 0 && (
+                        <div className="mt-2 border-t border-emerald-500/20 pt-2">
+                          <p className="text-[11px] leading-relaxed text-zinc-300">
+                            {t("engine.lidNotice")}
+                          </p>
+                          <p className="mt-1 text-[10px] leading-relaxed text-zinc-400">
+                            {t("engine.lidCapped", {
+                              count: blenderResult.stats.lidCapped,
+                            })}
+                          </p>
+                        </div>
+                      )}
                     {blenderResult.stats.warnings.length > 0 && (
                       <div className="mt-2 border-t border-emerald-500/20 pt-2">
                         <p className="text-[11px] font-medium text-emerald-200">

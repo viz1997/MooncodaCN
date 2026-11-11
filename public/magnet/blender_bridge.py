@@ -23,6 +23,21 @@
 
 模型**不出这台电脑** —— 全程只跟 127.0.0.1 说话,没有上传、没有账号。
 
+## 破口怎么办:临时封上,切完原样还给你(2026-11-11)
+
+工作室的原话:**「不需要修复用户的模型,只需要完成磁铁孔」**。
+
+模型不是封闭实体(有开放边 / 非流形边)时,布尔运算需要闭合的实体 ⇒
+这里给每条边界环生成一张**临时盖面**,只喂给布尔运算,**切完立刻摘掉**。
+
+⇒ 用户拿到的还是他自己的模型 —— 只是多了一个磁吸孔,破口**还在那儿**。
+
+盖面靠一个**临时材质槽**认出来(``__magnet_lid__``):布尔之后按材质下标
+把那些面删掉。跟网页端那套「单独一个 run id」的认法是同一个思路。
+
+跟浏览器那条路(``magnet-lid.ts``)是**同一套数学** ⇒ 两条引擎切出来的
+模型,破口处理方式一模一样。
+
 ## 为什么挑「最大的一块平面」而不是「六个轴向」
 
 工作室原来那段脚本只在六个轴向里找背面 —— 那个模型在 Blender 里是轴对齐的,
@@ -87,6 +102,16 @@ CUT_TIMEOUT_SECONDS = 900
 
 #: 平面聚类的法线容差(度)—— 超过这个角度就不算同一块平面
 FLAT_CLUSTER_TOLERANCE_DEG = 20.0
+
+#: 临时盖面用的材质槽名字 —— 布尔之后靠它把盖面从结果里摘掉
+LID_MATERIAL_NAME = "__magnet_lid__"
+
+#: 占位材质槽 —— **没有材质**的模型上,临时槽不能占 0 号(所有面的材质
+#: 下标都是 0)⇒ 先垫一个占位槽,临时槽落在 1 号,切完一起撤掉
+PLACEHOLDER_MATERIAL_NAME = "__magnet_placeholder__"
+
+#: 临时材质的前缀 —— 切完在用户的 Blender 里一个都不留
+TEMP_MATERIAL_PREFIX = "__magnet_"
 
 # ---------------------------------------------------------------------------
 # 运行期状态
@@ -442,6 +467,222 @@ def _repair_mesh(obj):
     mesh.update()
 
 
+# ---------------------------------------------------------------------------
+# 临时盖面 —— 破口临时封上,切完原样还给你
+# ---------------------------------------------------------------------------
+
+
+def _find_boundary_loops(bm):
+    """找出网格上的边界环(洞 / 裂缝)—— 顺着相邻面的走向走
+
+    返回:顶点**下标**的列表(每个环一串)。
+
+    「顺着相邻面的走向」很重要:环的绕序跟相邻面一致 ⇒ 拿它生成的盖面
+    法线朝**实体内部** ⇒ 盖面要反过来才朝外(见 ``_cap_boundary_loops``)。
+
+    ⚠️ **键一律用下标,不能拿 bmesh 元素当字典键** —— bmesh 每次访问
+    同一个元素都会给你一个新的 Python 包装对象,拿它当键等于每次都是
+    一把新钥匙 ⇒ 查出来永远是空(这个坑踩过一次:环永远找不到)。
+    """
+    bm.verts.ensure_lookup_table()
+    bm.verts.index_update()
+    bm.edges.ensure_lookup_table()
+    bm.edges.index_update()
+
+    # 边界边 = 只被一张面用到的边
+    boundary = [e for e in bm.edges if len(e.link_faces) == 1]
+    if not boundary:
+        return []
+
+    # 每条边界边在相邻面里的走向(from → to)
+    # 走向 = 顺着**相邻面**的绕序走 ⇒ 盖面要反过来(法线才朝外)
+    direction = {}
+    for edge in boundary:
+        face = edge.link_faces[0]
+        for loop in face.loops:
+            if loop.edge == edge:
+                # BMLoop 没有 other_vert —— 边的另一个端点问 BMEdge 拿
+                direction[edge.index] = (
+                    loop.vert.index,
+                    edge.other_vert(loop.vert).index,
+                )
+                break
+
+    # 从某个顶点出发能接上哪条边
+    #
+    # 键是边的**起点**顶点 —— 一条边 a→b 的下一条是「从 b 出发」的那条
+    # (按终点查会查回它自己 ⇒ 环永远走不出去)
+    next_from = {}
+    for edge in boundary:
+        pair = direction.get(edge.index)
+        if pair is None:
+            continue
+        next_from.setdefault(pair[0], []).append(edge.index)
+
+    visited = set()
+    loops = []
+    for edge in boundary:
+        if edge.index in visited:
+            continue
+        start = direction.get(edge.index)
+        if start is None:
+            continue
+        visited.add(edge.index)
+        loop_verts = [start[0], start[1]]
+        current = start[1]
+        guard = len(boundary) + 2
+        while guard > 0:
+            guard -= 1
+            nxt = -1
+            for candidate in next_from.get(current) or []:
+                if candidate in visited:
+                    continue
+                nxt = candidate
+                break
+            if nxt < 0:
+                break  # 开口链 —— 到头了
+            visited.add(nxt)
+            pair = direction.get(nxt)
+            if pair is None:
+                break
+            if pair[1] == loop_verts[0]:
+                break  # 环闭合
+            loop_verts.append(pair[1])
+            current = pair[1]
+        if len(loop_verts) >= 3:
+            loops.append(loop_verts)
+    return loops
+
+
+def _count_boundary_edges(bm):
+    """还剩几条没被两个面共用的边 —— 盖完之后应该归零"""
+    return len([e for e in bm.edges if len(e.link_faces) < 2])
+
+
+def _cap_boundary_loops(obj):
+    """给破口**临时**盖上 —— 切完摘掉,用户的模型上不会多出任何面
+
+    盖面用一个**临时材质槽**( ``LID_MATERIAL_NAME`` )标记 ⇒ 布尔之后按
+    材质下标就能把它们精确地认出来摘掉(不靠「位置对不对得上」那种猜法
+    —— 布尔会把面拆开、挪顶点,位置对不上)。
+
+    返回 dict::
+
+        {"materialIndex": int | None, "cappedLoops": int,
+         "lidFaces": int, "closed": bool}
+    """
+    empty = {
+        "materialIndex": None,
+        "cappedLoops": 0,
+        "lidFaces": 0,
+        "closed": True,
+    }
+    mesh = obj.data
+
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    loops = _find_boundary_loops(bm)
+    if not loops:
+        # 没找到破口 ⇒ 网格本来就是封闭的 ⇒ 什么都不用加
+        bm.free()
+        return empty
+
+    # 临时材质槽 —— 加在**最后**,原面的材质下标一个都不动
+    #
+    # 材质槽住在**网格**上(BMesh 没有 materials 属性)⇒ 加在网格上
+    #
+    # ⚠️ **没有材质的模型不能直接拿 0 号槽当临时槽** —— 那种模型所有面的
+    # 材质下标都是 0,临时槽占了 0 就等于「模型上每张面都是盖面」⇒
+    # 切完一摘,整个模型没了(这个坑踩过一次)。所以先垫一个占位槽,
+    # 临时槽落在 1 号 —— 占位槽切完连同临时槽一起撤掉。
+    placeholder = None
+    if len(mesh.materials) == 0:
+        placeholder = bpy.data.materials.new(PLACEHOLDER_MATERIAL_NAME)
+        mesh.materials.append(placeholder)
+    lid_material = bpy.data.materials.new(LID_MATERIAL_NAME)
+    mesh.materials.append(lid_material)
+    lid_index = len(mesh.materials) - 1
+
+    capped = 0
+    for loop_verts in loops:
+        try:
+            # 盖面要用**反过来**那个环 —— 顺着相邻面走向的环,右手定则算出来
+            # 的法线朝着实体**内部**,正着盖会得到一块往里凹的坏件
+            # (跟网页端 `magnet-lid.ts` 同一个口径)
+            face = bm.faces.new([bm.verts[i] for i in reversed(loop_verts)])
+        except ValueError:
+            # 环自交 / 顶点重复 —— 这条盖不上,留着让布尔去报错
+            continue
+        face.material_index = lid_index
+        capped += 1
+
+    if capped == 0:
+        # 一条都没盖上 ⇒ 网格还是破的(布尔那边会自己想办法)
+        closed = _count_boundary_edges(bm) == 0
+        bm.free()
+        # 临时材质槽用不上 —— 撤掉,别在用户的网格上留垃圾
+        _drop_material_slots(mesh, lid_index, placeholder)
+        return {
+            "materialIndex": None,
+            "cappedLoops": 0,
+            "lidFaces": 0,
+            "closed": closed,
+        }
+
+    # 盖完网格就闭合了 ⇒ 让 Blender 重算法线(只改朝向,一个顶点都不动)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+
+    # n-gon 切三角 —— 布尔求解器不吃 n-gon
+    ngons = [f for f in bm.faces if len(f.verts) > 3]
+    if ngons:
+        bmesh.ops.triangulate(bm, faces=ngons)
+
+    lid_faces = len([f for f in bm.faces if f.material_index == lid_index])
+    closed = _count_boundary_edges(bm) == 0
+
+    bm.to_mesh(mesh)
+    bm.free()
+    mesh.update()
+    return {
+        "materialIndex": lid_index,
+        "cappedLoops": capped,
+        "lidFaces": lid_faces,
+        "closed": closed,
+    }
+
+
+def _drop_material_slots(mesh, lid_index, placeholder=None):
+    """把临时材质槽(和占位槽)从网格上撤掉 —— 用户的网格上不留垃圾"""
+    for index in sorted(
+        [i for i in (lid_index,) if i is not None] + ([] if placeholder is None else [0]),
+        reverse=True,
+    ):
+        try:
+            if index < len(mesh.materials):
+                mesh.materials.pop(index=index)
+        except Exception:
+            pass
+
+
+def _strip_lid_faces(mesh, lid_index):
+    """把临时盖面从布尔结果里摘掉 —— 用户的模型上不会多出任何几何
+
+    摘掉之后破口**还在那儿**(开放边又回来了)⇒ 拿到的确实是
+    「用户自己的模型 + 一个孔」。
+    """
+    if lid_index is None:
+        return 0
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    doomed = [f for f in bm.faces if f.material_index == lid_index]
+    if doomed:
+        bmesh.ops.delete(bm, geom=doomed, context="FACES")
+        bm.to_mesh(mesh)
+        mesh.update()
+    bm.free()
+    return len(doomed)
+
+
 def _mesh_volume(target):
     """体积(mm³)—— Blender 单位在这里就是 mm
 
@@ -453,6 +694,20 @@ def _mesh_volume(target):
     volume = abs(bm.calc_volume(signed=True))
     bm.free()
     return volume
+
+
+def _triangle_count(mesh):
+    """切完的**三角形**数 —— 跟导出的文件里那张面数对得上
+
+    布尔出来的面里混着 n-gon(带洞的那张底面就是),导出时全三角化了 ⇒
+    这里也得数三角,不能数多边形(否则界面上摆的数跟用户看到的文件对不上)。
+    """
+    try:
+        mesh.calc_loop_triangles()
+        return len(mesh.loop_triangles)
+    except Exception:
+        # 兜底 —— n-gon 拆成三角的数量(n − 2)
+        return sum(max(0, len(poly.vertices) - 2) for poly in mesh.polygons)
 
 
 # ---------------------------------------------------------------------------
@@ -699,13 +954,17 @@ def _make_cutter(obj, center, inward, radius, height, material_index):
     return bpy.data.objects.new("MooncodaCutter", mesh)
 
 
-def _boolean_cut(obj, cutter):
+def _boolean_cut(obj, cutter, hole_tolerant=True):
     """布尔切孔 —— EXACT 失败退 FAST
 
     返回 (切完的网格, 用的哪个求解器)。
 
     **不用 bpy.ops.object.modifier_apply** —— 算子要上下文,timer 里调不稳;
     取 evaluated 网格一样稳。
+
+    ``hole_tolerant`` —— 网格已经封好了就别让求解器「顺手」补洞:
+    Blender 的容错模式会把破口**补上**(那就是**改了用户的模型**)。
+    只有还有盖不上的破口时才开 —— 那时候宁可让求解器补,也不能切不成。
     """
     obj.modifiers.new("MooncodaPocket", "BOOLEAN")
     modifier = obj.modifiers["MooncodaPocket"]
@@ -716,7 +975,7 @@ def _boolean_cut(obj, cutter):
     except Exception:
         pass
     try:
-        modifier.use_hole_tolerant = True
+        modifier.use_hole_tolerant = bool(hole_tolerant)
     except Exception:
         pass
 
@@ -750,6 +1009,14 @@ def _export_obj(mesh, material_names, out_dir, mtl_name):
     bm.verts.ensure_lookup_table()
     bm.faces.ensure_lookup_table()
     bm.verts.index_update()
+
+    # 三角化交给 Blender 自己
+    #
+    # ⚠️ **不能用扇形三角化**(从第一个点往后扇)—— 布尔出来的面是「带洞的
+    # n-gon」(拆成几块、用桥边连着),扇形三角化会把桥边用成 4 次 ⇒
+    # 导出来的模型出现非流形边(工作室拿去切片会报警)。
+    # Blender 自己的三角化器知道桥边怎么劈。
+    bmesh.ops.triangulate(bm, faces=bm.faces[:])
 
     uv_layer = bm.loops.layers.uv.active
     uv_index = {}
@@ -792,26 +1059,23 @@ def _export_obj(mesh, material_names, out_dir, mtl_name):
                 else:
                     loop_uvs.append(None)
             corner = [v.index for v in face.verts]
-            # 扇形三角化 —— OBJ 的 n-gon 不保险
-            for i in range(1, len(corner) - 1):
-                tri = [corner[0], corner[i], corner[i + 1]]
-                tri_uv = [loop_uvs[0], loop_uvs[i], loop_uvs[i + 1]]
-                if all(value is not None for value in tri_uv):
-                    face_lines.append(
-                        "f %d/%d %d/%d %d/%d"
-                        % (
-                            tri[0] + 1,
-                            tri_uv[0],
-                            tri[1] + 1,
-                            tri_uv[1],
-                            tri[2] + 1,
-                            tri_uv[2],
-                        )
+            # 三角化过了 —— 每张面就是三个点
+            tri = corner
+            tri_uv = loop_uvs
+            if len(tri_uv) == 3 and all(value is not None for value in tri_uv):
+                face_lines.append(
+                    "f %d/%d %d/%d %d/%d"
+                    % (
+                        tri[0] + 1,
+                        tri_uv[0],
+                        tri[1] + 1,
+                        tri_uv[1],
+                        tri[2] + 1,
+                        tri_uv[2],
                     )
-                else:
-                    face_lines.append(
-                        "f %d %d %d" % (tri[0] + 1, tri[1] + 1, tri[2] + 1)
-                    )
+                )
+            else:
+                face_lines.append("f %d %d %d" % (tri[0] + 1, tri[1] + 1, tri[2] + 1))
 
     vt_lines = ["vt %.6f %.6f" % (u, v) for u, v in uv_list]
     obj_text = "\n".join(head + vert_lines + vt_lines + face_lines) + "\n"
@@ -909,10 +1173,6 @@ def _run_cut(payload):
         _repair_mesh(obj)
         bpy.context.view_layer.update()
 
-        before = _mesh_volume(obj)
-        if before <= 0:
-            warnings.append("模型不是封闭的,体积算不准")
-
         region = _pick_flat_region(obj)
         point = region["point"]
         normal = region["normal"]
@@ -941,7 +1201,25 @@ def _run_cut(payload):
         )
         collection.objects.link(cutter)
 
-        mesh, solver = _boolean_cut(obj, cutter)
+        # ---- 临时盖面:破口封上,切完摘掉 ----
+        #
+        # 盖面必须在**挑面 / 量厚度 / 试孔之后** —— 盖上的那块也是一块
+        # 「平面」,提前盖会让工具把孔切在裂缝上,而不是背面。
+        #
+        # 盖面只喂给布尔运算 ⇒ 用户的模型上不会多出任何几何(工作室
+        # 2026-11-11:「不需要修复用户的模型,只需要完成磁铁孔」)。
+        lid = _cap_boundary_loops(obj)
+        if lid["cappedLoops"] > 0:
+            warnings.append("破口临时封上再切,切完原样还给你")
+        if not lid["closed"]:
+            warnings.append("有些破口没能封上,那些地方可能被补上")
+
+        # 体积在**盖完之后**量 —— 盖完才是实体,量出来的才是真体积
+        before = _mesh_volume(obj)
+        if before <= 0 or not lid["closed"]:
+            warnings.append("模型不是封闭的,体积算不准")
+
+        mesh, solver = _boolean_cut(obj, cutter, hole_tolerant=not lid["closed"])
 
         after = _mesh_volume(mesh)
         removed = before - after
@@ -954,6 +1232,9 @@ def _run_cut(payload):
                 % (removed, expected)
             )
 
+        # 盖面摘掉 —— 破口还在那儿,用户拿到的还是他自己的模型
+        stripped = _strip_lid_faces(mesh, lid["materialIndex"])
+
         exported = _export_obj(mesh, slot_names, out_dir, mtl_name)
         zip_bytes_out = _pack_result(exported, src_dir, out_dir, mtl_name)
 
@@ -962,10 +1243,16 @@ def _run_cut(payload):
             "volumeAfterMm3": after,
             "removedVolumeMm3": removed,
             "expectedRemovedVolumeMm3": expected,
-            "triangleCount": len(mesh.polygons),
+            # **三角数**,不是多边形数 —— 布尔出来的面里混着 n-gon
+            # (带洞的底面就是),导出的文件里全成了三角形 ⇒ 摆多边形数
+            # 会跟用户看到的文件对不上
+            "triangleCount": _triangle_count(mesh),
             "face": "最大平面 %.1f mm²" % region["area"],
             "solver": solver,
             "warnings": warnings,
+            "lidCapped": lid["cappedLoops"],
+            "lidFaces": lid["lidFaces"],
+            "lidStripped": stripped,
         }
         return zip_bytes_out, stats
     finally:
@@ -987,6 +1274,14 @@ def _run_cut(payload):
                 bpy.data.meshes.remove(mesh)
             except Exception:
                 pass
+        # 临时盖面 / 占位槽那两个材质 —— 别留在用户的 Blender 里
+        # (切一次留一个就成垃圾了)
+        for material in list(bpy.data.materials):
+            if material.name.startswith(TEMP_MATERIAL_PREFIX) and material.users == 0:
+                try:
+                    bpy.data.materials.remove(material)
+                except Exception:
+                    pass
         if collection is not None:
             try:
                 bpy.context.scene.collection.children.unlink(collection)

@@ -75,3 +75,12 @@ tmp-*.ts
 # 需要部署时跑:pnpm tsx scripts/fetch-sellbase-assets.ts
 supabase/functions/
 supabase/.temp/
+
+# Python 字节码缓存(2026-11-11)
+#
+# ⚠️ **插件脚本旁边那个 __pycache__ 是个坑** —— Python 校验 .pyc 只看
+# 「秒级 mtime + 字节数」,改脚本改到同一秒、字节数又一样时,它会拿**旧代码**
+# 跑(实测踩过:新代码跑出旧报错,查了半天是缓存)。
+# 插件脚本在仓库里 → 缓存绝不能入库。
+__pycache__/
+*.pyc

@@ -1490,6 +1490,61 @@ EXACT → FAST 兜底 + 一堆修复 pass,正好治这个。**所以这条是兜
 - **下载语义** —— Blender 模式下,切好的 zip **原样下载**(材质/纹理是 Blender
   那边导出来的,不经我们重新导出);浏览器模式下还是走原来那条 OBJ/ZIP 导出。
 
+#### 「为什么没有调用便携版 Blender」(2026-11-11 工作室问的)
+
+工作室原话:**「为什么没有调用便携版blender」**。答案分两半,一半是**浏览器的
+硬限制**,一半是**真的缺陷**(已修)。
+
+**① 网页**起不了**本机程序** —— 没有这种 API。浏览器沙箱里没有 `fork` /
+`exec`,页面**唯一**能做的就是跟一个**已经在跑**的进程说话。所以:
+
+- 「一键启动便携版 Blender」**只能是给用户一个可执行的启动脚本**(下载下来
+  双击)—— 网页**不可能**替用户把程序拉起来。
+- 页面侧栏现在摆三样东西:**启动脚本**(`.cmd` / `.sh`)+ **便携版 Blender
+  下载链接** + **插件下载链接**,外加一句「双击启动脚本 → 回到网页点检测」。
+- `MAGNET_BLENDER_LAUNCHER_URL` / `MAGNET_BLENDER_LAUNCHER_SH_URL`
+  (`blender-local.ts` 里唯一定义的地方)。**页面不许出现任何
+  `child_process` / `spawn` / `execFile`** —— 那在浏览器里根本不存在。
+- 启动脚本做的事:找 `blender.exe`(便携版解压出来的 / 装好的那几处常见路径)
+  → 找 `blender_bridge.py` → **清掉旁边的 `__pycache__`** → `blender --python
+  blender_bridge.py`。找不到就**说清楚缺什么、去哪下**(`blender.org/download/`)。
+
+**② Blender 那条路以前会「修」用户的模型** —— 现在**跟浏览器那条一样**:
+破口**临时封上**再切,切完把封面**摘掉**,用户的模型上**不多出任何几何**。
+
+| | 浏览器那条路 | Blender 那条路 |
+|---|---|---|
+| 怎么认封口的面 | **manifold 的 run id**(预留 id) | **临时材质槽** `__magnet_lid__` |
+| 怎么保证不落在 0 号槽 | 预留 id 从 1 起 | 另加一个 `__magnet_placeholder__` 占位 |
+| 切完怎么摘 | 按 run id 摘掉那一组三角形 | 按材质槽摘掉那几张面 |
+| 布尔用不用 `use_hole_tolerant` | 不用(它会**悄悄修**模型) | **盖上了就关掉**(`hole_tolerant=not lid["closed"]`) |
+| 摘完之后 | 破口**还在**(拿到的确实是「你的模型 + 一个孔」) | 同左 |
+
+- 插件里的对应实现:`_find_boundary_loops` / `_cap_boundary_loops` /
+  `_drop_material_slots` / `_strip_lid_faces`,材质槽前缀 `__magnet_`。
+- 统计里多三个数:`lidCapped`(封了几处破口)/ `lidFaces`(封了几张面)/
+  `lidStripped`(摘掉了几张面)⇒ 界面摆一条**中性**的告知(灰色,不是琥珀色):
+  「破口临时封上再切,切完原样还给你」。
+
+#### ⚠️ Python 字节码缓存那个坑(2026-11-11 实测踩过)
+
+现象:**新代码跑出旧报错** —— 报错里的行号指向旧文件,打印出来的源码行却是新的。
+
+- **根因** —— Python 校验 `.pyc` **只看「秒级 mtime + 字节数」**。脚本改到
+  **同一秒**、字节数**又一样**时,它认为缓存**有效** ⇒ 拿**旧代码**跑。
+- **生产路径不受影响** —— `blender --python script.py` 跑的是 `__main__`,
+  **不写也不读**字节码缓存。只有**模块 import**(装成插件 / 测试夹具)才踩。
+- **两处修法** —— ① `.gitignore` 加 `__pycache__/` + `*.pyc`(仓库里那份脚本
+  旁边绝不能有缓存);② **启动脚本启动前先 `rmdir` / `rm -rf` 一次**
+  (用户自己改过插件就会遇到)。
+
+#### 统计里的 `triangleCount` 是**三角形数**(2026-11-11 修)
+
+布尔出来的面里混着 n-gon(带洞的底面就是),**导出的文件里全成了三角形**
+⇒ 摆多边形数会跟用户看到的文件对不上(77 vs 268)。现在统计走
+`_triangle_count(mesh)`(`mesh.calc_loop_triangles()`,兜底是
+`Σ(len(poly.vertices) − 2)`)⇒ **跟导出的文件逐个对得上**。
+
 #### 切割失败要说人话(2026-11-11 改的四个码)
 
 工作室报的那句「切割过程出了意外(不是模型的问题)」是**一句套话** —— 所有失败
@@ -1741,13 +1796,17 @@ workers/
 components/
 └── magnet-cutter-tool.tsx    # 客户端 UI(引擎开关 / 拖放 / 尺寸 / 孔参数 / 选面 / 切 / 下载)
 public/magnet/
-└── blender_bridge.py         # Blender 插件(桥接)—— 页面直接给下载链接
+├── blender_bridge.py         # Blender 插件(桥接)—— 页面直接给下载链接
+├── start_blender.cmd         # Windows 一键启动(找 blender.exe → 起桥接)
+└── start_blender.sh          # macOS / Linux 一键启动(同上)
 ```
 
 - **`blender-local.ts` 里 `fetchImpl` 是注入的** —— 单测塞一个假 fetch 就能验
   协议和错误映射,不用起浏览器、不用装 Blender、不用联网。
 - **插件那份脚本提交进仓库** —— 跟 `public/manifold.wasm` 一个道理(新克隆的
   机器不用跑脚本就能用)。
+- **启动脚本也提交进仓库** —— 页面给的就是这两个文件的下载链接(网页**起不了**
+  本机程序,见上面「为什么没有调用便携版 Blender」)。
 
 #### 切刀摆放的数学(照搬脚本,去掉 ratio)
 
@@ -1911,7 +1970,7 @@ public/magnet/
 | `src/test/magnet/pure/write-obj.test.ts` | 三角汤 → OBJ 文本 / 顶点去重 / 1-based 索引 / `-0` 归一化 / **UV 写出(`vt` + `f v/vt`)** / **材质分组(`usemtl` + `mtllib`,面按材质连续)** |
 | `src/test/magnet/pure/magnet-page.test.ts` | 路由在 / 工具中心登记了 / **视口是复用的那一份** / **不进工单**(不碰报价、工单、R2)/ 拖放用 `useDropZone` / 焊接走 `weldAndAnalyzeTopology` / **焊接在清理之前**(磁吸孔自己那份容差阶梯)/ `Manifold.cylinder` 不加 `new` / **孔径是绝对毫米**(可调,但 `EXPECTED_WIDTH_MM` 不许进代码)/ **① 可调** / **② 智能识别背面** / **③ 导出保留材质** / **④ 不是封闭实体 ⇒ 临时盖面再切**(拒绝发生在盖面**之后**)/ **⑤ 先焊接、再清理(「不需要修复」)**/ **⑥ 临时盖面切完要摘掉**(模型上不多出几何)/ **⑦ XYZ 分别调尺寸**(`scalePositionsXYZ`)/ `UNEXPECTED` 码在位 / wasm 提交进仓库 / **中英文 key 递归一致** |
 | `src/test/magnet/pure/magnet-cutter-client.test.ts` | **Worker 回过话**之后超时 ⇒ 报 `WORKER_TIMEOUT`、**不退回主线程** / 崩了 ⇒ `WORKER_CRASHED`、**不退回主线程** / **从没回过话** ⇒ 退回主线程照样切得出来 / Worker 压根没有 ⇒ 退回主线程 / 引擎报的模型错**原样带上来** / 切割超时是 **300 秒**、分析 **60 秒** |
-| `src/test/magnet/pure/magnet-blender-local.test.ts` | 端口归一化(非法 ⇒ 默认)/ **base URL 写死回环** / 探活带协议头 / 协议对不上 ⇒ `BLENDER_BAD_RESPONSE` / 连不上 ⇒ `BLENDER_NOT_RUNNING` / 没回话 ⇒ `BLENDER_TIMEOUT` / 切割的**包 + 头**都对 / 插件报错 ⇒ `BLENDER_FAILED` 且 detail 带着它自己的 code / 回的不是 zip ⇒ `BLENDER_BAD_RESPONSE` / **插件只绑 `127.0.0.1`** / 带 `Access-Control-Allow-Private-Network` / **EXACT → FAST** / **不调 `bpy.ops`** / 切刀摆放跟网页端同一套数学 / **页面有引擎开关** / **不碰工单链路** / **不往我们的服务器发模型** / **指引下便携版 Blender + 插件** / **Blender 模式不跑浏览器的分析** |
+| `src/test/magnet/pure/magnet-blender-local.test.ts` | 端口归一化(非法 ⇒ 默认)/ **base URL 写死回环** / 探活带协议头 / 协议对不上 ⇒ `BLENDER_BAD_RESPONSE` / 连不上 ⇒ `BLENDER_NOT_RUNNING` / 没回话 ⇒ `BLENDER_TIMEOUT` / 切割的**包 + 头**都对 / 插件报错 ⇒ `BLENDER_FAILED` 且 detail 带着它自己的 code / 回的不是 zip ⇒ `BLENDER_BAD_RESPONSE` / **插件只绑 `127.0.0.1`** / 带 `Access-Control-Allow-Private-Network` / **EXACT → FAST** / **不调 `bpy.ops`** / 切刀摆放跟网页端同一套数学 / **页面有引擎开关** / **不碰工单链路** / **不往我们的服务器发模型** / **指引下便携版 Blender + 插件** / **Blender 模式不跑浏览器的分析** / **插件那条路也不修用户的模型**(临时盖面 + 切完摘掉)/ 统计里带 `lidCapped` / `lidFaces` / `lidStripped` / **一键启动脚本在仓库里**(`.cmd` / `.sh`)/ **页面不许 `child_process` / `spawn` / `execFile`** |
 | `src/test/magnet/pure/magnet-engine-load.test.ts` | **wasm 地址必须是绝对地址**(普通页面 / blob Worker / 普通 Worker / opaque origin 不炸)/ `locateFile` 走 `resolveWasmUrl()` / **proxy 的 matcher 把 `wasm` / `py` / `/magnet/*` 排除掉**(静态文件别被 locale 前缀劫持)/ 页面路由与 API 路由照常走 / `ENGINE_LOAD_FAILED` 有中英文文案 |
 
 ### 外国访客 → 海外独立站(2026-11-10)

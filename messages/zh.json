@@ -1523,6 +1523,9 @@
       "checking": "检测中…",
       "online": "连上了 —— Blender {version}",
       "offline": "连不上本地 Blender",
+      "launcher": "一键启动(Windows)",
+      "launcherSh": "一键启动(macOS / Linux)",
+      "launcherHint": "网页没法直接启动你电脑上的程序 —— 下载这个脚本,跟便携版 Blender 放同一个文件夹,双击它,桥接就起了。",
       "downloadBlender": "下载便携版 Blender",
       "downloadBlenderHint": "官网上有「Windows 便携版(.zip)」—— 解压就能用,不用装。",
       "addon": "下载插件",
@@ -1530,6 +1533,8 @@
       "faceNote": "本地 Blender 自己挑模型上最大的一块平面 —— 上面的候选面表格用不着了。",
       "solver": "求解器",
       "warnings": "提醒",
+      "lidNotice": "破口临时封上再切,切完原样还给你 —— 你的模型上不会多出任何几何。",
+      "lidCapped": "临时封住了 {count} 处破口。",
       "resultNote": "切好的模型是从你本机的 Blender 导回来的。"
     },
     "errors": {

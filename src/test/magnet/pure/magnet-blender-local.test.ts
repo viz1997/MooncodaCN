@@ -33,6 +33,8 @@ import {
   type FetchLike,
   MAGNET_BLENDER_ADDON_URL,
   MAGNET_BLENDER_DEFAULT_PORT,
+  MAGNET_BLENDER_LAUNCHER_SH_URL,
+  MAGNET_BLENDER_LAUNCHER_URL,
   MAGNET_BLENDER_PORTABLE_URL,
   MAGNET_BLENDER_PROTOCOL_VERSION,
   normalizeBlenderPort,
@@ -336,6 +338,90 @@ describe("本地 Blender —— 统计头解析", () => {
     expect(stats.solver).toBe("EXACT");
     expect(stats.warnings).toHaveLength(1);
   });
+
+  it("盖面的数也解析得出来 —— 界面要能说「封了几处」", () => {
+    const stats = parseStatsHeader(
+      JSON.stringify({ lidCapped: 2, lidFaces: 2, lidStripped: 2 })
+    );
+    expect(stats.lidCapped).toBe(2);
+    expect(stats.lidFaces).toBe(2);
+    expect(stats.lidStripped).toBe(2);
+  });
+
+  it("插件没报盖面 ⇒ 摆 null(别当成「封了 0 处」)", () => {
+    const stats = parseStatsHeader(JSON.stringify({ solver: "EXACT" }));
+    expect(stats.lidCapped).toBeNull();
+    expect(stats.lidFaces).toBeNull();
+    expect(stats.lidStripped).toBeNull();
+  });
+});
+
+describe("插件那条路也**不修用户的模型**(2026-11-11)", () => {
+  const ADDON = "public/magnet/blender_bridge.py";
+
+  it("临时盖面用专门的材质槽标记 —— 切完能精确摘掉", () => {
+    const src = read(ADDON);
+    expect(src).toContain('LID_MATERIAL_NAME = "__magnet_lid__"');
+    expect(src).toContain("_cap_boundary_loops");
+    expect(src).toContain("_strip_lid_faces");
+    // 临时材质切完别留在用户的 Blender 里
+    expect(src).toContain("TEMP_MATERIAL_PREFIX");
+  });
+
+  it("封上了就别让求解器「顺手」补洞 —— 那会把用户的模型改掉", () => {
+    const src = read(ADDON);
+    // hole_tolerant 只在**盖不上**的时候才开(那时是没办法)
+    expect(src).toContain('hole_tolerant=not lid["closed"]');
+  });
+
+  it("统计里带着盖面的数(封了几处 / 摘了几张)", () => {
+    const src = read(ADDON);
+    expect(src).toContain('"lidCapped"');
+    expect(src).toContain('"lidFaces"');
+    expect(src).toContain('"lidStripped"');
+  });
+
+  it("**不用 bpy.ops** —— 算子要上下文,timer 里调不稳(改网格的那些也一样)", () => {
+    const src = read(ADDON);
+    expect(src).not.toMatch(/bpy\.ops\.[a-z_]+\s*\(/);
+    // 盖面走 bmesh
+    expect(src).toContain("bmesh.ops");
+  });
+});
+
+describe("一键启动脚本(public/magnet/start_blender.*)", () => {
+  it("在仓库里 —— 页面直接给下载链接", () => {
+    expect(existsSync(join(ROOT, "public/magnet/start_blender.cmd"))).toBe(
+      true
+    );
+    expect(existsSync(join(ROOT, "public/magnet/start_blender.sh"))).toBe(true);
+    expect(MAGNET_BLENDER_LAUNCHER_URL).toBe("/magnet/start_blender.cmd");
+    expect(MAGNET_BLENDER_LAUNCHER_SH_URL).toBe("/magnet/start_blender.sh");
+  });
+
+  it("脚本自己找 blender,带上 --python 把桥接拉起来", () => {
+    const cmd = read("public/magnet/start_blender.cmd");
+    expect(cmd).toContain("blender.exe");
+    expect(cmd).toContain("blender_bridge.py");
+    expect(cmd).toContain("--python");
+
+    const sh = read("public/magnet/start_blender.sh");
+    expect(sh).toContain("blender_bridge.py");
+    expect(sh).toContain("--python");
+  });
+
+  it("**网页起不了本机程序** —— 页面只能给一个下载链接", () => {
+    const src = read("src/features/magnet/components/magnet-cutter-tool.tsx");
+    expect(src).toContain("MAGNET_BLENDER_LAUNCHER_URL");
+    expect(src).toContain("MAGNET_BLENDER_LAUNCHER_SH_URL");
+    // 页面里不许有任何「拉起本机程序」的假象
+    expect(src).not.toMatch(/child_process|execFile|\bspawn\(/);
+  });
+
+  it("启动脚本在 /magnet/ 下 ⇒ 不被 locale 前缀劫持(跟插件同一条规矩)", () => {
+    const src = read("src/proxy.ts");
+    expect(src).toContain("magnet/.*");
+  });
 });
 
 describe("插件那份脚本(public/magnet/blender_bridge.py)", () => {
@@ -428,6 +514,12 @@ describe("页面那一层", () => {
     expect(MAGNET_BLENDER_PORTABLE_URL).toContain("blender.org");
   });
 
+  it("给一键启动脚本的下载链接 —— 网页起不了本机程序,只能给脚本", () => {
+    const src = read(TOOL);
+    expect(src).toContain("MAGNET_BLENDER_LAUNCHER_URL");
+    expect(src).toContain("MAGNET_BLENDER_LAUNCHER_SH_URL");
+  });
+
   it("本地 Blender 那条路**不跑浏览器的分析** —— 浏览器那套修不好的时候它照样能切", () => {
     const src = read(TOOL);
     expect(src).toMatch(/engine === "blender"\) return/);
@@ -476,9 +568,14 @@ describe("文案", () => {
       "check",
       "online",
       "offline",
+      "launcher",
+      "launcherSh",
+      "launcherHint",
       "downloadBlender",
       "addon",
       "faceNote",
+      "lidNotice",
+      "lidCapped",
     ]) {
       expect(engineZh[key], `zh 缺 engine.${key}`).toBeTruthy();
       expect(engineEn[key], `en 缺 engine.${key}`).toBeTruthy();
