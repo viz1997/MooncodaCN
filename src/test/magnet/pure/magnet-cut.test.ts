@@ -9,10 +9,12 @@
  * 1. 切掉的体积**分毫不差** —— 跟「64 边形截面积 × 1.3mm」对上
  * 2. 切完的网格**还是封闭流形**(能再切一次不炸)
  * 3. **太薄**的面切不得(会捅穿)
- * 4. **不是封闭实体的模型**(有开放边 / 非流形边)⇒ **自动修好再切**,
+ * 4. **不是封闭实体的模型**(有开放边 / 非流形边)⇒ **临时盖面再切**,
  *    不因为这个拒绝(工作室 2026-11-11)
- * 5. 六个面里挑出**平整度最高**的
- * 6. 整体法线朝内的模型 —— manifold 自己不报错,**得我们翻过来**
+ * 5. **切完用户的模型一个字节都没改** —— 临时盖面切完就摘掉,破口还在
+ *    (工作室 2026-11-11:「不需要修复用户的模型,只需要完成磁铁孔」)
+ * 6. 六个面里挑出**平整度最高**的
+ * 7. 整体法线朝内的模型 —— manifold 自己不报错,**得我们翻过来**
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -20,6 +22,7 @@ import {
   cutMagnetPocket,
   MagnetCutterError,
 } from "@/features/magnet/lib/magnet-cutter-handler";
+import { scanMagnetBoundary } from "@/features/magnet/lib/magnet-lid";
 import type { MagnetVec3 } from "@/features/magnet/lib/magnet-params";
 import {
   expectedRemovedVolumeMm3,
@@ -115,6 +118,30 @@ function openCubeSoup(size: number): Float32Array {
 }
 
 /**
+ * 三角汤 → 索引面表(按「坐标完全一样」焊)
+ *
+ * 用来数开放边 —— 切完的模型**是不是还带着用户自己的破口**,就看这个数。
+ */
+function indexSoup(soup: Float32Array): number[] {
+  const map = new Map<string, number>();
+  const faceVertex: number[] = [];
+  const triCount = soup.length / 9;
+  for (let t = 0; t < triCount; t++) {
+    for (let k = 0; k < 3; k++) {
+      const i = t * 9 + k * 3;
+      const key = `${soup[i]!}|${soup[i + 1]!}|${soup[i + 2]!}`;
+      let id = map.get(key);
+      if (id === undefined) {
+        id = map.size;
+        map.set(key, id);
+      }
+      faceVertex.push(id);
+    }
+  }
+  return faceVertex;
+}
+
+/**
  * 每个面的三个顶点**各复制一份**并加一点点扰动
  *
  * 这就是 AI 生成模型的典型样子:同一个逻辑顶点,不同面各自算了一遍,
@@ -137,23 +164,29 @@ function jitteredCubeSoup(size: number, jitter: number): Float32Array {
   return out;
 }
 
-/** 整体法线朝内 —— manifold 自己不报错,体积是负的 */
+/**
+ * 整体法线朝内 —— manifold 自己不报错,体积是负的
+ *
+ * ⚠️ **这里换的是「整个顶点」** —— 把每张面的第 2、第 3 个顶点对调,
+ * 绕序就反了,几何一点没变(还是那 8 个立方体的角)。
+ *
+ * (早先那版换的是「顶点 2 的 x / z 分量」—— 那是把顶点**镜像**了一下,
+ *  面跟面之间的边对不上了,整个网格是**破的**(8 条开放边 / 3 条非流形边),
+ *  压根不是「朝内」。它当年能过,是因为修复那一层会**补洞**把它糊起来 ——
+ *  补洞那套 2026-11-11 已经退役了(工作室:「不需要修复用户的模型」),
+ *  所以夹具得改成真的朝内。)
+ */
 function invertedCubeSoup(size: number): Float32Array {
   const src = cubeSoup(size);
   const out = new Float32Array(src.length);
+  out.set(src);
   for (let f = 0; f < src.length / 9; f++) {
+    const base = f * 9;
     for (let k = 0; k < 3; k++) {
-      out[f * 9 + k * 3] = src[f * 9 + k * 3]!;
-      out[f * 9 + k * 3 + 1] = src[f * 9 + k * 3 + 1]!;
-      out[f * 9 + k * 3 + 2] = src[f * 9 + k * 3 + 2]!;
+      const v1 = out[base + 3 + k]!;
+      out[base + 3 + k] = out[base + 6 + k]!;
+      out[base + 6 + k] = v1;
     }
-    // 交换后两个顶点 ⇒ 绕序反转
-    const t1 = out[f * 9 + 3]!;
-    const t2 = out[f * 9 + 4]!;
-    const t3 = out[f * 9 + 5]!;
-    out[f * 9 + 3] = t3;
-    out[f * 9 + 4] = t2;
-    out[f * 9 + 5] = t1;
   }
   return out;
 }
@@ -250,18 +283,39 @@ describe("磁吸孔切割(真跑 manifold)", () => {
     await expect(cutMagnetPocket(plateSoup(1), "posZ")).rejects.toThrow(/捅穿/);
   });
 
-  it("**不是封闭实体的模型也能切** —— 自动补洞(工作室 2026-11-11)", async () => {
+  it("**不是封闭实体的模型也能切** —— 临时盖面,切完摘掉(工作室 2026-11-11)", async () => {
     // 缺一个面的立方体:有开放边,不是封闭流形。
     // 早先这一条是「拒收」—— 工作室的原话是「不要因为这个问题切不了」。
     const broken = openCubeSoup(40);
 
-    // 修好之后照样切得动
+    // 临时盖上之后照样切得动
     const result = await cutMagnetPocket(broken, "posZ");
     const expected = expectedRemovedVolumeMm3();
-    // 切掉的体积跟完好的立方体**分毫不差** ⇒ 补出来的那个面就在正确的位置
+    // 切掉的体积跟完好的立方体**分毫不差** ⇒ 盖面就在正确的位置
     expect(result.removedVolume).toBeCloseTo(expected, 3);
-    // 切之前的体积是完整的 40³(补出来的盖面把体积补回来了)
+    // 切之前的体积是完整的 40³(临时盖面把体积补回来了 —— 只是给布尔用的)
     expect(result.volumeBefore).toBeCloseTo(64000, 0);
+  });
+
+  it("**不需要修复用户的模型** —— 切完用户的破口还在,一个面都没多(工作室 2026-11-11)", async () => {
+    const broken = openCubeSoup(40);
+    const solid = cubeSoup(40);
+
+    const open = await cutMagnetPocket(broken, "posZ");
+    const closed = await cutMagnetPocket(solid, "posZ");
+
+    // 孔切得一模一样
+    expect(open.removedVolume).toBeCloseTo(closed.removedVolume, 6);
+
+    // **临时盖面被摘掉了** ⇒ 破的那个立方体切出来的面数比完好的少一张
+    // (完好的那个:盖面 = 缺掉的那半张 −X 面;破的那个:那张盖面没了)
+    expect(open.triangleCount).toBe(closed.triangleCount - 1);
+
+    // **破口还在** —— 完好的那个是封闭的,破的那个不是
+    expect(scanMagnetBoundary(indexSoup(closed.positions)).openEdges).toBe(0);
+    const openScan = scanMagnetBoundary(indexSoup(open.positions));
+    expect(openScan.openEdges).toBeGreaterThan(0);
+    expect(openScan.loops.length).toBeGreaterThan(0);
   });
 
   it("**近重合顶点的模型照样切** —— 焊回去就好,**不用修复**(工作室 2026-11-11)", async () => {
@@ -277,8 +331,8 @@ describe("磁吸孔切割(真跑 manifold)", () => {
 
     // **而且一丁点几何都没改** —— 没补洞、没删面、没翻绕序
     const analysis = await analyzeModel(jittered);
-    expect(analysis.repair?.filledLoops).toBe(0);
-    expect(analysis.repair?.capFaces).toBe(0);
+    expect(analysis.repair?.cappedLoops).toBe(0);
+    expect(analysis.repair?.lidFaces).toBe(0);
     expect(analysis.repair?.droppedDegenerate).toBe(0);
     expect(analysis.repair?.droppedDuplicate).toBe(0);
     expect(analysis.repair?.droppedNonManifold).toBe(0);
@@ -289,8 +343,8 @@ describe("磁吸孔切割(真跑 manifold)", () => {
     expect(analysis.repair?.weldedNearDuplicates).toBeGreaterThan(0);
   });
 
-  it("自动修复之后还是破的 ⇒ 那才拒收(而且说清楚还剩几条)", async () => {
-    // 一张孤零零的三角形:补上盖面之后「封闭」了,但它**没有厚度**
+  it("临时盖面也封不上 ⇒ 那才拒收(而且说清楚还剩几条)", async () => {
+    // 一张孤零零的三角形:临时盖上之后「封闭」了,但它**没有厚度**
     // (体积是 0)⇒ 布尔那一步会拒。自己先拦下来,说人话。
     const shards = new Float32Array([
       0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0,
@@ -299,21 +353,28 @@ describe("磁吸孔切割(真跑 manifold)", () => {
       (err: unknown) =>
         err instanceof MagnetCutterError &&
         err.code === "NOT_MANIFOLD" &&
-        /自动修复之后/.test(err.message)
+        /没有实体|厚度/.test(err.message)
     );
   });
 
-  it("**改了用户的模型就得告诉用户** —— 分析结果里带着修复的经过", async () => {
+  it("**用户的模型一个字节都没改** —— 分析结果里说的就是「临时封上,切完摘掉」", async () => {
     const analysis = await analyzeModel(openCubeSoup(40));
     expect(analysis.repair).not.toBeNull();
-    expect(analysis.repair?.changed).toBe(true);
-    // 补了一个洞(缺的那一面)
-    expect(analysis.repair?.filledLoops).toBe(1);
-    expect(analysis.repair?.closed).toBe(true);
+    // **模型本身还是破的**(我们没有补它)
+    expect(analysis.repair?.closed).toBe(false);
+    expect(analysis.repair?.openEdgesAfter).toBeGreaterThan(0);
+    // 但**临时封上之后能参与布尔运算**
+    expect(analysis.repair?.closedForBoolean).toBe(true);
+    // 临时盖面补了几处
+    expect(analysis.repair?.cappedLoops).toBe(1);
+    expect(analysis.repair?.lidFaces).toBe(1);
+    // **一丁点几何都没动** —— 盖面是临时的,不算「改过」
+    expect(analysis.repair?.changed).toBe(false);
 
     // 完好的模型 —— **一个字节都没动**
     const clean = await analyzeModel(cubeSoup(40));
     expect(clean.repair?.changed).toBe(false);
+    expect(clean.repair?.cappedLoops).toBe(0);
   });
 
   it("整体法线朝内的模型 —— 自己翻过来照样能切", async () => {

@@ -1443,9 +1443,12 @@
     },
     "size": {
       "title": "Print size",
+      "modeUniform": "Uniform",
+      "modePerAxis": "X · Y · Z",
       "label": "Target largest edge (mm)",
       "reset": "Reset",
-      "hint": "The pocket is a physical magnet size — it does not scale with the model. Set the print size first, then pick the face."
+      "hint": "The pocket is a physical magnet size — it does not scale with the model. Set the print size first, then pick the face.",
+      "hintPerAxis": "Type each axis in millimetres — the pocket is a physical magnet size and does not scale with the model. Set the print size first, then pick the face."
     },
     "hole": {
       "title": "Magnet pocket",
@@ -1455,8 +1458,10 @@
       "hint": "Fill in the real magnet size — Ø20.7 mm × 1.3 mm deep by default. Both values are absolute millimetres; they do not scale with the model."
     },
     "repair": {
-      "title": "This model had gaps — they are repaired",
-      "detail": "Filled {holes} gap(s) · dropped {dropped} bad face(s) · flipped {flipped} face(s) with reversed winding · split {split} pinched vertex/vertices. What you get back is the repaired model.",
+      "title": "The model was touched before cutting",
+      "detail": "Dropped {dropped} bad face(s) · flipped {flipped} face(s) with reversed winding · split {split} pinched vertex/vertices. The dropped faces are put back after the cut.",
+      "lidTitle": "This model has gaps — they were not filled",
+      "lidDetail": "This model has {open} open edge(s). For the cut only, {loops} area(s) are temporarily capped so the boolean can run — the caps are removed again right after. Your model keeps its gaps; not a single face was added.",
       "welded": "{welded} vertex/vertices were actually the same point (less than {tol} mm apart) — they have been welded back together, and the shape of the model is unchanged."
     },
     "back": {
@@ -1513,7 +1518,7 @@
     "engine": {
       "title": "Cutting engine",
       "browser": "Cut in the browser",
-      "browserHint": "Nothing to install — models that are not closed solids (open or non-manifold edges) are repaired automatically and then cut.",
+      "browserHint": "Nothing to install — models that are not closed solids (open or non-manifold edges) are temporarily capped for the cut and handed back exactly as they were.",
       "blender": "Cut with local Blender",
       "blenderHint": "Cuts on your own machine — non-manifold and self-intersecting models work too. The model only goes to 127.0.0.1; it never leaves this computer.",
       "portLabel": "Port",
@@ -1534,7 +1539,7 @@
       "generic": "Something went wrong — please try again.",
       "noGeometry": "No geometry could be read from this file.",
       "codes": {
-        "notManifold": "Even after automatic repair this model still cannot take part in a boolean (it still has open or non-manifold edges, or it has no thickness at all). Try a different model, or check it in the Print Pre-flight Workbench first.",
+        "notManifold": "This model cannot take part in a boolean (the temporary caps do not close it either, or it has no thickness at all). Try a different model, or check it in the Print Pre-flight Workbench first.",
         "invertedWinding": "This model's faces are wound inside-out, so the boolean engine cannot compute a correct result. Fix the normals in the Print Pre-flight Workbench first.",
         "emptyModel": "This model is empty or degenerate — there is nothing to cut.",
         "booleanFailed": "The boolean operation failed on this model. Try exporting it again from your modelling tool and re-importing it.",

@@ -1,25 +1,28 @@
 /**
- * 网格修复 —— 让「不是封闭实体」的模型也能切(工作室 2026-11-11)
+ * 网格清理 —— 让「不是封闭实体」的模型也能切(工作室 2026-11-11)
  *
  * 工作室的原话:**「不用装任何东西 —— 但模型不是封闭实体(有开放边 /
  * 非流形边)时会切不了 / 不要因为这个问题切不了」**。
  *
- * 所以这一层要守住的是:**模型破成什么样,都得能修成能参与布尔运算的流形。**
+ * 后来又追加了一条:**「不需要修复用户的模型,只需要完成磁铁孔」**。
  *
- * 修的每一样都在这儿钉死:
+ * ⇒ 这一层只做**清理**(剔废面、翻绕序、拆蝴蝶结顶点),**不补洞** ——
+ * 补洞交给「临时盖面」那一层(`magnet-lid.ts`),盖面只喂给布尔运算,
+ * 切完就摘掉 ⇒ **用户的模型上不会多出任何几何**。
  *
- * | 毛病 | 修法 | 断言 |
+ * 清的每一样都在这儿钉死:
+ *
+ * | 毛病 | 做法 | 断言 |
  * |---|---|---|
- * | 缺一个面(洞) | 补面 | 封闭 + 体积正好是立方体 |
- * | 盖面方向反了 | 用反过来的环 | 体积是 **+8**(不是 -8) |
+ * | 缺一个面(洞) | **不动**(临时盖面那一层的事) | 洞还在 / 体积是缺的那一半 |
  * | 有一个面绕序翻了 | 翻少数派 | 体积还是 8 |
  * | 重复面 | 只留一张 | 剔掉一张,封闭 |
  * | 退化面(零面积) | 删掉 | 剔掉,封闭 |
- * | 非流形边(鳍) | 删掉多出来的面 | 剔掉,封闭 |
+ * | 非流形边(鳍) | 删掉多出来的面 | 剔掉,封闭(切完会放回去) |
  * | 蝴蝶结顶点 | 拆成两份顶点 | 两个壳各自封闭 |
  * | 本来就是好的 | 什么都不动 | `changed === false` |
  *
- * 另外守住 **UV / 材质跟面走** —— 修网会删面、加面、翻面,UV 必须跟着
+ * 另外守住 **UV / 材质跟面走** —— 清网会删面、翻面,UV 必须跟着
  * 对齐,不然贴图会花(切出来的东西贴错图)。
  */
 import { describe, expect, it } from "vitest";
@@ -158,8 +161,8 @@ function repair(positions: Float32Array) {
   return { result, after };
 }
 
-describe("网格修复 —— 洞 / 破面 / 非流形(工作室 2026-11-11)", () => {
-  it("缺一个面的立方体 ⇒ 补上洞,变成封闭流形", () => {
+describe("网格清理 —— 破面 / 破边 / 非流形(工作室 2026-11-11)", () => {
+  it("缺一个面的立方体 ⇒ **洞还在**(这一层不补洞)", () => {
     // 去掉 -X 面里的一个三角形 ⇒ 留一个三角洞
     const broken = soup(
       CUBE_V,
@@ -168,20 +171,31 @@ describe("网格修复 —— 洞 / 破面 / 非流形(工作室 2026-11-11)", (
     expect(edgeStats(broken).open).toBeGreaterThan(0);
 
     const { result, after } = repair(broken);
-    expect(result.report.filledLoops).toBe(1);
-    expect(result.report.capFaces).toBe(1);
-    expect(after.open).toBe(0);
+    // **这一层不补洞** —— 补洞是「临时盖面」那一层的事(切完就摘掉,
+    // 用户的模型上不会多出任何面)。见 `magnet-lid.test.ts`。
+    expect(result.report.cappedLoops).toBe(0);
+    expect(result.report.lidFaces).toBe(0);
+    // 模型自己还是破的 —— 界面上的告知要按这个口径写
+    expect(result.report.closed).toBe(false);
+    // 破口还在
+    expect(after.open).toBeGreaterThan(0);
     expect(after.nonManifold).toBe(0);
   });
 
-  it("补上的盖面**方向是对的** —— 体积是 +8(不是 -8)", () => {
+  it("缺的那个面**没有被偷偷补上** —— 体积就是缺的那一半", () => {
     const broken = soup(
       CUBE_V,
       CUBE_F.filter((_, i) => i !== CUBE_F.length - 1)
     );
     const { result } = repair(broken);
-    // 边长 2 的立方体 ⇒ 体积 8
-    expect(signedVolume(result.positions)).toBeCloseTo(8, 4);
+    // 边长 2 的立方体 ⇒ 体积 8;缺掉 −X 面的一半(一个三角形)⇒ 8 − 2/3
+    // (那个 2/3 是那个三角形跟原点构成的四面体)
+    //
+    // (盖面的方向对不对,在 `magnet-lid.test.ts` 里查 —— 那是临时盖面
+    //  那一层的事,跟这一层无关。)
+    expect(signedVolume(result.positions)).toBeCloseTo(8 - 2 / 3, 4);
+    // **没有被补成完好的立方体** —— 破口还在
+    expect(signedVolume(result.positions)).toBeLessThan(8);
   });
 
   it("有一个面的绕序是翻着的 ⇒ 修好,体积还是 8", () => {

@@ -128,6 +128,7 @@ import {
   type ModelUnitCheck,
   measurePositionsSize,
   scalePositions,
+  scalePositionsXYZ,
 } from "@/features/pricing/lib/model-units";
 import {
   buildModelZipBlob,
@@ -154,6 +155,17 @@ const MAX_TARGET_MM = 400;
 /** 目标最大边的默认值(mm)—— 归一化之后的标准尺寸 */
 const DEFAULT_TARGET_MM = 100;
 
+/**
+ * 单轴尺寸的取值范围(mm)
+ *
+ * 比「目标最大边」宽得多 —— 「目标最大边」那个上限 400mm 是给**归一化之后**
+ * 的模型用的,单轴模式下模型本身可能就有 500mm 大(工作室那边不少是按实物
+ * 尺寸导出的)。下限 1mm:再小就没法切 Ø20.7 的孔了,但**不拦** ——
+ * 拦了用户就改不了尺寸,只能换模型。
+ */
+const MIN_AXIS_MM = 1;
+const MAX_AXIS_MM = 2000;
+
 /** 导出的文件名(跟工作室脚本一致 —— `relief_final.obj`) */
 const CUT_OBJ_NAME = "relief_final.obj";
 const CUT_MTL_NAME = "relief_final.mtl";
@@ -162,6 +174,23 @@ const ORIGINAL_OBJ_NAME = "model.obj";
 const ORIGINAL_ZIP_NAME = "model.zip";
 
 type SizeMode = "auto" | "custom";
+
+/**
+ * 尺寸怎么给 —— 跟打印前工作台那套一样
+ *
+ * - `uniform` —— 三个轴**一起**缩(一个「目标最大边」说了算)
+ * - `perAxis` —— X / Y / Z **分别**填(毫米)
+ */
+type AxisMode = "uniform" | "perAxis";
+
+/** 三个轴的尺寸(毫米) */
+type TargetSize = { x: number; y: number; z: number };
+
+/** 三个轴的尺寸(输入框里正在敲的那串字) */
+type TargetSizeText = { x: string; y: string; z: string };
+
+/** 三个轴的配色 —— 跟打印前工作台那套一致 */
+const AXIS_COLORS = { x: "#ef4444", y: "#22c55e", z: "#3b82f6" } as const;
 
 export function MagnetCutterTool() {
   const t = useTranslations("Magnet");
@@ -196,6 +225,25 @@ export function MagnetCutterTool() {
   const [targetMaxEdgeText, setTargetMaxEdgeText] = useState(
     String(DEFAULT_TARGET_MM)
   );
+  /**
+   * 「三个轴一起缩」还是「X / Y / Z 分别填」
+   *
+   * 跟打印前工作台的尺寸面板一个路子 —— 那边能只拉 Z(把扁片立起来),
+   * 这边也得能:磁吸孔切在**背面**,模型压扁了背面就更好下刀。
+   */
+  const [axisMode, setAxisMode] = useState<AxisMode>("uniform");
+  /** X / Y / Z 的目标尺寸(mm)—— 只在 `perAxis` 模式下生效 */
+  const [targetSizeMm, setTargetSizeMm] = useState<TargetSize>({
+    x: DEFAULT_TARGET_MM,
+    y: DEFAULT_TARGET_MM,
+    z: DEFAULT_TARGET_MM,
+  });
+  /** 输入框里正在敲的那串字(X / Y / Z 各一份 —— 跟上面那个一个路子) */
+  const [targetSizeText, setTargetSizeText] = useState<TargetSizeText>({
+    x: String(DEFAULT_TARGET_MM),
+    y: String(DEFAULT_TARGET_MM),
+    z: String(DEFAULT_TARGET_MM),
+  });
 
   /* ------------------------------------------------------------------ */
   /*  孔参数(可调)                                                        */
@@ -246,6 +294,43 @@ export function MagnetCutterTool() {
     const clamped = Math.min(MAX_TARGET_MM, Math.max(MIN_TARGET_MM, mm));
     setTargetMaxEdgeMm(clamped);
     setTargetMaxEdgeText(formatMm(clamped));
+  }, []);
+
+  /**
+   * 设 X / Y / Z 的目标尺寸 —— 数字和输入框里那串字**一起**改
+   *
+   * 跟 `applyTargetMaxEdge` 一个路子:两份状态必须同步,否则输入框里显示的
+   * 跟实际用的不是一个数。
+   */
+  const applyTargetSize = useCallback((next: TargetSize) => {
+    const clamp = (v: number) =>
+      Math.min(MAX_AXIS_MM, Math.max(MIN_AXIS_MM, v));
+    const size: TargetSize = {
+      x: clamp(next.x),
+      y: clamp(next.y),
+      z: clamp(next.z),
+    };
+    setTargetSizeMm(size);
+    setTargetSizeText({
+      x: formatMm(size.x),
+      y: formatMm(size.y),
+      z: formatMm(size.z),
+    });
+  }, []);
+
+  /**
+   * 单轴输入框里正在敲的字 → 几何
+   *
+   * **先存字,别急着夹** —— 受控的 number 输入每敲一个键就夹一次的话,
+   * 「150」会先变成「1」再变成「15」。敲到一半(空 / 非法)先不动几何 ——
+   * 免得模型在眼前乱跳。
+   */
+  const updateAxisText = useCallback((axis: keyof TargetSize, text: string) => {
+    setTargetSizeText((prev) => ({ ...prev, [axis]: text }));
+    const v = Number(text);
+    if (text.trim() !== "" && Number.isFinite(v) && v > 0) {
+      setTargetSizeMm((prev) => ({ ...prev, [axis]: v }));
+    }
   }, []);
 
   /**
@@ -336,7 +421,14 @@ export function MagnetCutterTool() {
    * 算完尺寸之后的几何(mm)
    *
    * 两步:① 文件单位 → mm(单位判定那一步,必要时归一化到最大边 100mm)
-   * ② mm → 用户定的目标最大边(均匀缩放)
+   * ② mm → 用户定的目标尺寸
+   *
+   * ② 有两条路:
+   *
+   * - **统一** —— 一个「目标最大边」说了算,三个轴同一个系数
+   * - **X / Y / Z 分别** —— 每一轴按「目标尺寸 ÷ 基准尺寸」缩放
+   *   (跟打印前工作台的尺寸面板一个路子 —— 那边能只拉 Z 把扁片立起来,
+   *   这边也得能:磁吸孔切在**背面**,模型压扁了背面更好下刀)
    *
    * **孔径是绝对毫米** ⇒ 厚度 / 净空这些数必须跑在**最终尺寸**上 ——
    * 拿缩放前的几何量厚度,量出来的数跟切出来的孔对不上。
@@ -345,19 +437,95 @@ export function MagnetCutterTool() {
     if (!rawPositions || !unitCheck) return null;
     const base = scalePositions(rawPositions, unitCheck.scale);
     const baseSize = measurePositionsSize(base);
+
+    if (axisMode === "perAxis") {
+      // 每一轴按「目标尺寸 ÷ 基准尺寸」缩放
+      const sx = baseSize.x > 0 ? targetSizeMm.x / baseSize.x : 1;
+      const sy = baseSize.y > 0 ? targetSizeMm.y / baseSize.y : 1;
+      const sz = baseSize.z > 0 ? targetSizeMm.z / baseSize.z : 1;
+      if (
+        !Number.isFinite(sx) ||
+        !Number.isFinite(sy) ||
+        !Number.isFinite(sz) ||
+        sx <= 0 ||
+        sy <= 0 ||
+        sz <= 0
+      ) {
+        return base;
+      }
+      return scalePositionsXYZ(base, [sx, sy, sz]);
+    }
+
     const maxEdge = Math.max(baseSize.x, baseSize.y, baseSize.z);
     if (!Number.isFinite(maxEdge) || maxEdge <= 0) return base;
     const target =
       sizeMode === "custom" ? targetMaxEdgeMm : unitCheck.assumedMaxExtentMm;
     if (!Number.isFinite(target) || target <= 0) return base;
     return scalePositions(base, target / maxEdge);
-  }, [rawPositions, unitCheck, sizeMode, targetMaxEdgeMm]);
+  }, [
+    rawPositions,
+    unitCheck,
+    sizeMode,
+    targetMaxEdgeMm,
+    axisMode,
+    targetSizeMm,
+  ]);
 
   /** 最终尺寸下的包围盒(mm) */
   const scaledSize = useMemo(() => {
     if (!scaledPositions) return null;
     return measurePositionsSize(scaledPositions);
   }, [scaledPositions]);
+
+  /**
+   * 统一模式下算出来的三个轴尺寸(mm)
+   *
+   * 切到「X · Y · Z」那一档时用它**初始化**三个输入框 —— 这样模型不会在
+   * 眼前跳一下(三个轴各填各的,数值上等价于现在的统一缩放)。
+   *
+   * 重置按钮也用它:「回到统一模式算出来的那个尺寸」。
+   */
+  const uniformSize = useMemo(() => {
+    if (!rawPositions || !unitCheck) return null;
+    const base = scalePositions(rawPositions, unitCheck.scale);
+    const baseSize = measurePositionsSize(base);
+    const maxEdge = Math.max(baseSize.x, baseSize.y, baseSize.z);
+    if (!Number.isFinite(maxEdge) || maxEdge <= 0) return baseSize;
+    const target =
+      sizeMode === "custom" ? targetMaxEdgeMm : unitCheck.assumedMaxExtentMm;
+    if (!Number.isFinite(target) || target <= 0) return baseSize;
+    const k = target / maxEdge;
+    return { x: baseSize.x * k, y: baseSize.y * k, z: baseSize.z * k };
+  }, [rawPositions, unitCheck, sizeMode, targetMaxEdgeMm]);
+
+  /**
+   * 换尺寸模式 —— 「统一」还是「X · Y · Z」
+   *
+   * 切到「X · Y · Z」时把三个轴填成**当前**的尺寸,模型不跳。
+   */
+  const switchAxisMode = useCallback(
+    (next: AxisMode) => {
+      setAxisMode(next);
+      if (next === "perAxis" && uniformSize) {
+        applyTargetSize(uniformSize);
+      }
+    },
+    [uniformSize, applyTargetSize]
+  );
+
+  /** 单轴输入框失焦 —— 归一化(范围 / 类型都对上了才落定) */
+  const commitAxis = useCallback(
+    (axis: keyof TargetSize) => {
+      const text = targetSizeText[axis];
+      const v = Number(text);
+      const next =
+        text.trim() !== "" && Number.isFinite(v) && v > 0
+          ? v
+          : targetSizeMm[axis];
+      applyTargetSize({ ...targetSizeMm, [axis]: next });
+    },
+    [targetSizeText, targetSizeMm, applyTargetSize]
+  );
 
   /* ------------------------------------------------------------------ */
   /*  载入模型                                                            */
@@ -1073,63 +1241,138 @@ export function MagnetCutterTool() {
                       <Ruler className="size-3.5 text-zinc-400" />
                       {t("size.title")}
                     </h3>
-                    <label
-                      htmlFor="magnet-target-max-edge"
-                      className="mb-1 block text-[11px] text-zinc-400"
-                    >
-                      {t("size.label")}
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        id="magnet-target-max-edge"
-                        type="number"
-                        inputMode="decimal"
-                        min={MIN_TARGET_MM}
-                        max={MAX_TARGET_MM}
-                        step={1}
-                        value={targetMaxEdgeText}
-                        onChange={(e) => {
-                          const text = e.target.value;
-                          setSizeMode("custom");
-                          // **先存字,别急着夹** —— 受控的 number 输入每敲一个键
-                          // 就夹一次的话,「150」会先变成「1」再变成「15」。
-                          setTargetMaxEdgeText(text);
-                          const v = Number(text);
-                          // 敲到一半(空 / 非法)先不动几何 —— 免得模型在眼前乱跳
-                          if (
-                            text.trim() !== "" &&
-                            Number.isFinite(v) &&
-                            v > 0
-                          ) {
-                            setTargetMaxEdgeMm(v);
-                          }
-                        }}
-                        onBlur={() => {
-                          // 失焦才归一化 —— 范围、类型都对上了才落定
-                          const v = Number(targetMaxEdgeText);
-                          applyTargetMaxEdge(
-                            Number.isFinite(v) ? v : MIN_TARGET_MM
-                          );
-                        }}
-                        className="w-24 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-amber-500 focus:outline-none"
-                      />
-                      <span className="text-[11px] text-zinc-500">mm</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSizeMode("auto");
-                          if (unitCheck) {
-                            applyTargetMaxEdge(unitCheck.assumedMaxExtentMm);
-                          }
-                        }}
-                        className="ml-auto flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-[11px] text-zinc-400 transition-colors hover:text-zinc-200"
-                      >
-                        <RotateCcw className="size-3" />
-                        {t("size.reset")}
-                      </button>
+
+                    {/* 「统一」还是「X · Y · Z」—— 两档,跟打印前工作台一个路子 */}
+                    <div className="mb-2 grid grid-cols-2 gap-1 rounded-md border border-zinc-800 bg-zinc-950 p-1">
+                      {(["uniform", "perAxis"] as const).map((mode) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() => switchAxisMode(mode)}
+                          className={`rounded px-2 py-1 text-[11px] transition-colors ${
+                            axisMode === mode
+                              ? "bg-amber-500 font-semibold text-zinc-950"
+                              : "text-zinc-400 hover:text-zinc-200"
+                          }`}
+                        >
+                          {t(
+                            mode === "uniform"
+                              ? "size.modeUniform"
+                              : "size.modePerAxis"
+                          )}
+                        </button>
+                      ))}
                     </div>
+
+                    {axisMode === "uniform" ? (
+                      <>
+                        <label
+                          htmlFor="magnet-target-max-edge"
+                          className="mb-1 block text-[11px] text-zinc-400"
+                        >
+                          {t("size.label")}
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            id="magnet-target-max-edge"
+                            type="number"
+                            inputMode="decimal"
+                            min={MIN_TARGET_MM}
+                            max={MAX_TARGET_MM}
+                            step={1}
+                            value={targetMaxEdgeText}
+                            onChange={(e) => {
+                              const text = e.target.value;
+                              setSizeMode("custom");
+                              // **先存字,别急着夹** —— 受控的 number 输入每敲一个键
+                              // 就夹一次的话,「150」会先变成「1」再变成「15」。
+                              setTargetMaxEdgeText(text);
+                              const v = Number(text);
+                              // 敲到一半(空 / 非法)先不动几何 —— 免得模型在眼前乱跳
+                              if (
+                                text.trim() !== "" &&
+                                Number.isFinite(v) &&
+                                v > 0
+                              ) {
+                                setTargetMaxEdgeMm(v);
+                              }
+                            }}
+                            onBlur={() => {
+                              // 失焦才归一化 —— 范围、类型都对上了才落定
+                              const v = Number(targetMaxEdgeText);
+                              applyTargetMaxEdge(
+                                Number.isFinite(v) ? v : MIN_TARGET_MM
+                              );
+                            }}
+                            className="w-24 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-amber-500 focus:outline-none"
+                          />
+                          <span className="text-[11px] text-zinc-500">mm</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSizeMode("auto");
+                              if (unitCheck) {
+                                applyTargetMaxEdge(
+                                  unitCheck.assumedMaxExtentMm
+                                );
+                              }
+                            }}
+                            className="ml-auto flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-[11px] text-zinc-400 transition-colors hover:text-zinc-200"
+                          >
+                            <RotateCcw className="size-3" />
+                            {t("size.reset")}
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-3 gap-2">
+                          {(
+                            [
+                              ["x", "X", AXIS_COLORS.x],
+                              ["y", "Y", AXIS_COLORS.y],
+                              ["z", "Z", AXIS_COLORS.z],
+                            ] as const
+                          ).map(([axis, label, color]) => (
+                            <AxisSizeField
+                              key={axis}
+                              id={`magnet-target-${axis}`}
+                              axis={label}
+                              color={color}
+                              value={targetSizeText[axis]}
+                              onChange={(next) => updateAxisText(axis, next)}
+                              onCommit={() => commitAxis(axis)}
+                            />
+                          ))}
+                        </div>
+                        <div className="mt-2 flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (uniformSize) applyTargetSize(uniformSize);
+                            }}
+                            className="flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-400 transition-colors hover:text-zinc-200"
+                          >
+                            <RotateCcw className="size-3" />
+                            {t("size.reset")}
+                          </button>
+                          {scaledSize && (
+                            <span className="ml-auto font-mono text-[10px] text-zinc-500">
+                              {scaledSize.x.toFixed(1)} ×{" "}
+                              {scaledSize.y.toFixed(1)} ×{" "}
+                              {scaledSize.z.toFixed(1)}
+                            </span>
+                          )}
+                        </div>
+                      </>
+                    )}
+
                     <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
-                      {t("size.hint")}
+                      {t(
+                        axisMode === "uniform"
+                          ? "size.hint"
+                          : "size.hintPerAxis"
+                      )}
                     </p>
                   </section>
                 )}
@@ -1188,7 +1431,23 @@ export function MagnetCutterTool() {
                   </p>
                 )}
 
-                {/* ---- 自动修复的告知(模型不是封闭实体时)---- */}
+                {/* ---- 临时盖面的告知(模型有洞 —— 但我们**没有**补它)---- */}
+                {(analysis?.repair?.cappedLoops ?? 0) > 0 && (
+                  <section className="rounded-lg border border-zinc-700 bg-zinc-900/60 p-3">
+                    <h3 className="mb-1 flex items-center gap-1.5 text-xs font-bold text-zinc-300">
+                      <Layers className="size-3.5 text-zinc-400" />
+                      {t("repair.lidTitle")}
+                    </h3>
+                    <p className="text-[11px] leading-relaxed text-zinc-400">
+                      {t("repair.lidDetail", {
+                        loops: analysis?.repair?.cappedLoops ?? 0,
+                        open: analysis?.repair?.openEdgesAfter ?? 0,
+                      })}
+                    </p>
+                  </section>
+                )}
+
+                {/* ---- 动过手的告知(剔了废面 / 翻了绕序 / 拆了顶点)---- */}
                 {analysis?.repair?.changed && (
                   <section className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
                     <h3 className="mb-1 flex items-center gap-1.5 text-xs font-bold text-amber-200">
@@ -1197,7 +1456,6 @@ export function MagnetCutterTool() {
                     </h3>
                     <p className="text-[11px] leading-relaxed text-amber-100/80">
                       {t("repair.detail", {
-                        holes: analysis.repair.filledLoops,
                         dropped:
                           analysis.repair.droppedDegenerate +
                           analysis.repair.droppedDuplicate +
@@ -1642,6 +1900,55 @@ function NumberField({
           className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-amber-500 focus:outline-none"
         />
         <span className="shrink-0 text-[11px] text-zinc-500">mm</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 单个轴的尺寸输入 —— 跟打印前工作台那套一个路子(轴色的小方块 + 输入框)
+ *
+ * **输入框存的是字符串**,几何用的数字由父组件管 —— 受控的 `type="number"`
+ * 每敲一个键就夹一次值的话,「150」会先变成「1」再变成「15」。
+ */
+function AxisSizeField({
+  id,
+  axis,
+  color,
+  value,
+  onChange,
+  onCommit,
+}: {
+  id: string;
+  axis: "X" | "Y" | "Z";
+  color: string;
+  value: string;
+  onChange: (next: string) => void;
+  onCommit: () => void;
+}) {
+  return (
+    <div className="flex h-[62px] flex-col rounded-lg border border-zinc-700 bg-zinc-900 p-2 transition-colors focus-within:border-amber-400 focus-within:ring-1 focus-within:ring-amber-500/30">
+      <div className="mb-1 flex items-center gap-1.5">
+        <span
+          className="size-2.5 rounded-sm"
+          style={{ backgroundColor: color }}
+        />
+        <span className="text-[11px] font-medium text-zinc-400">{axis}</span>
+      </div>
+      <div className="flex flex-1 items-center gap-1">
+        <input
+          id={id}
+          type="number"
+          inputMode="decimal"
+          min={MIN_AXIS_MM}
+          max={MAX_AXIS_MM}
+          step={1}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={onCommit}
+          className="w-full min-w-0 rounded-md border border-zinc-700 bg-zinc-950 px-1.5 py-1 font-mono text-xs text-zinc-100 focus:border-amber-500 focus:outline-none"
+        />
+        <span className="shrink-0 text-[10px] text-zinc-500">mm</span>
       </div>
     </div>
   );

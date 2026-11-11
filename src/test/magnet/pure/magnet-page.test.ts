@@ -33,10 +33,16 @@ import { describe, expect, it } from "vitest";
  * - **③ 导出保留材质贴图** —— 导出走 `writeObjFromSoup` + `downloadModelZip`,
  *   OBJ 里有 `vt` / `usemtl` / `mtllib`
  *
- * 2026-11-11 工作室追加的一条(「**不要因为这个问题切不了**」)也在这一层:
+ * 2026-11-11 工作室追加的两条也在这一层:
  *
- * - **④ 模型不是封闭实体 ⇒ 自动修好再切** —— `magnet-repair.ts` 那份纯函数
- *   补洞 / 剔重复面 / 拆蝴蝶结顶点 / 翻绕序,接在布尔运算**之前**
+ * - **④ 模型不是封闭实体 ⇒ 照样切** —— `magnet-repair.ts` 那份纯函数做
+ *   网格清理(剔重复面 / 拆蝴蝶结顶点 / 翻绕序),`magnet-lid.ts` 那份做
+ *   **临时盖面**,接在布尔运算**之前**
+ * - **⑤ 不需要修复用户的模型** —— 盖面是**临时的**:只喂给布尔运算,切完
+ *   从输出里摘掉 ⇒ 用户的模型上不会多出任何几何(工作室原话:
+ *   「不需要修复用户的模型,只需要完成磁铁孔」)
+ * - **⑥ XYZ 分别调尺寸** —— 像打印工作台那样:统一缩放 / X·Y·Z 分别两档,
+ *   走仓库同一个 `scalePositionsXYZ`
  *
  * 全部是文件扫描 + 常量 —— 不需要 DB / 网络 / 浏览器。
  */
@@ -97,6 +103,9 @@ const ERROR_MAP = "src/features/magnet/lib/magnet-error.ts";
 const HUB = "src/features/tools/components/tools-hub.tsx";
 const REPAIR = "src/features/magnet/lib/magnet-repair.ts";
 const WELD = "src/features/magnet/lib/magnet-weld.ts";
+const LID = "src/features/magnet/lib/magnet-lid.ts";
+const MODEL_UNITS = "src/features/pricing/lib/model-units.ts";
+const BENCH_SHARED = "src/features/pricing/components/shared.tsx";
 
 describe("磁吸孔工具页面", () => {
   it("路由在(挂在 (marketing-atelier) 组 —— 跟打印工作台同组)", () => {
@@ -266,8 +275,8 @@ describe("磁吸孔工具页面", () => {
     expect(writer).toContain("mtllib ");
   });
 
-  it("**不是封闭实体也照样切** —— 先自动修好再切(工作室 2026-11-11)", () => {
-    // 修模型的那份纯函数模块得在
+  it("**不是封闭实体也照样切** —— 临时盖上再切(工作室 2026-11-11)", () => {
+    // 网格清理的那份纯函数模块得在
     expect(existsSync(join(ROOT, REPAIR))).toBe(true);
     const repair = read(REPAIR);
     expect(repair).toContain("repairMagnetGeometry");
@@ -279,24 +288,67 @@ describe("磁吸孔工具页面", () => {
     expect(handler).toContain("splitMagnetVertices");
     expect(handler).toMatch(/from "\.\/magnet-repair"/);
 
-    // **不许**因为「不是封闭实体」就提前拒收 —— 那道闸现在是「修完还破才拒」
-    // (拒绝发生在修复之后,不是在修复之前)
+    // **不许**因为「不是封闭实体」就提前拒收 —— 那道闸现在是
+    // 「临时盖完还封不上才拒」(拒绝发生在盖面**之后**)
     const repairAt = handler.indexOf("repairMagnetGeometry(");
+    const lidAt = handler.indexOf("buildTemporaryLid(");
     const rejectAt = handler.indexOf('"NOT_MANIFOLD"');
     expect(repairAt).toBeGreaterThan(-1);
-    expect(rejectAt).toBeGreaterThan(repairAt);
+    expect(lidAt).toBeGreaterThan(repairAt);
+    expect(rejectAt).toBeGreaterThan(lidAt);
 
-    // 页面上摆的那句「不用装任何东西」也得说清楚会自己修
+    // 页面上摆的那句「不用装任何东西」也得说清楚会临时封上再切
     const zh = flattenKeys(messages("zh").Magnet);
     const en = flattenKeys(messages("en").Magnet);
-    expect(zh["engine.browserHint"]).toContain("修");
-    expect(en["engine.browserHint"]).toContain("repair");
+    expect(zh["engine.browserHint"]).toContain("临时");
+    expect(en["engine.browserHint"]).toMatch(/temporar/i);
     // 旧文案那句「会切不了」不许再出现
     expect(zh["engine.browserHint"]).not.toContain("会切不了");
   });
 
-  it("**改了用户的模型就得告诉用户** —— 修复的经过摆在页面上", () => {
-    // 分析结果里带着「修了什么」
+  it("**不需要修复用户的模型** —— 盖面是临时的,切完就摘掉(工作室 2026-11-11)", () => {
+    // 临时盖面那一层得在
+    expect(existsSync(join(ROOT, LID))).toBe(true);
+    const lid = read(LID);
+    expect(lid).toContain("scanMagnetBoundary");
+    expect(lid).toContain("buildMagnetLid");
+
+    // handler 接上了
+    const handler = read(HANDLER);
+    expect(handler).toMatch(/from "\.\/magnet-lid"/);
+    expect(handler).toContain("buildTemporaryLid");
+
+    // **盖面从输出里摘掉** —— 这是「用户的模型一个字节都没改」的关键
+    expect(handler).toContain("lidRunId");
+    expect(handler).toContain("findRunTriangles");
+
+    // 网格清理那一层**不补洞** —— 补洞是临时盖面那一层的事
+    const repair = read(REPAIR);
+    expect(repair).not.toContain("filledLoops");
+    expect(repair).toContain("cappedLoops");
+
+    // 报告里带着「临时盖了几处」
+    expect(handler).toContain("repair.cappedLoops");
+    expect(handler).toContain("repair.lidFaces");
+    expect(handler).toContain("closedForBoolean");
+
+    // 界面把这件事告诉用户(灰色那一块,跟「改了模型」的琥珀色分开)
+    const tool = read(TOOL);
+    expect(tool).toContain("analysis?.repair?.cappedLoops");
+    expect(tool).toContain('t("repair.lidTitle")');
+    expect(tool).toContain('t("repair.lidDetail"');
+
+    // 中英文都有
+    const zh = flattenKeys(messages("zh").Magnet);
+    const en = flattenKeys(messages("en").Magnet);
+    expect(zh["repair.lidTitle"]).toBeTruthy();
+    expect(en["repair.lidTitle"]).toBeTruthy();
+    expect(zh["repair.lidDetail"]).toBeTruthy();
+    expect(en["repair.lidDetail"]).toBeTruthy();
+  });
+
+  it("**改了用户的模型就得告诉用户** —— 动过的部分摆在页面上", () => {
+    // 分析结果里带着「动了什么」
     expect(read(HANDLER)).toMatch(/repair:\s*prepared\.topology\.repair/);
     expect(read(PROTOCOL)).toContain("repair");
     // 页面上真的渲染了那一段
@@ -311,6 +363,45 @@ describe("磁吸孔工具页面", () => {
     expect(en["repair.title"]).toBeTruthy();
     expect(zh["repair.detail"]).toBeTruthy();
     expect(en["repair.detail"]).toBeTruthy();
+  });
+
+  it("**XYZ 分别调尺寸** —— 像打印工作台那样(工作室 2026-11-11)", () => {
+    const tool = read(TOOL);
+
+    // 两种模式:统一缩放 / X·Y·Z 分别
+    expect(tool).toContain('"uniform"');
+    expect(tool).toContain('"perAxis"');
+    expect(tool).toContain("axisMode");
+
+    // 分别模式的三个输入
+    expect(tool).toContain("targetSizeMm");
+    expect(tool).toContain("targetSizeText");
+
+    // 走仓库那个**逐轴**缩放(打印工作台同一个函数)
+    expect(tool).toMatch(/from "@\/features\/pricing\/lib\/model-units"/);
+    expect(tool).toContain("scalePositionsXYZ");
+    expect(read(MODEL_UNITS)).toContain("scalePositionsXYZ");
+
+    // 打印工作台的尺寸编辑器还在(磁吸孔是**照着它**做的,不是另发明一套)
+    expect(existsSync(join(ROOT, BENCH_SHARED))).toBe(true);
+    expect(read(BENCH_SHARED)).toContain("DimEditor");
+
+    // **孔径仍然是绝对毫米** —— 逐轴缩放不许把孔一起缩放
+    expect(tool).toContain("normalizeHoleParams");
+    expect(tool).not.toMatch(/targetSizeMm[^)]*hole/);
+
+    // 中英文 key 都有
+    const zh = flattenKeys(messages("zh").Magnet);
+    const en = flattenKeys(messages("en").Magnet);
+    for (const key of [
+      "size.modeUniform",
+      "size.modePerAxis",
+      "size.hintPerAxis",
+      "size.reset",
+    ]) {
+      expect(zh[key], `zh 缺 ${key}`).toBeTruthy();
+      expect(en[key], `en 缺 ${key}`).toBeTruthy();
+    }
   });
 
   it("预料之外的错单独一个码 —— 不再一律报成 BOOLEAN_FAILED", () => {

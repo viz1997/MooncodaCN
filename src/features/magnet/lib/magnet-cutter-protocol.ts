@@ -131,11 +131,14 @@ export type MagnetAnalyzeOutcome = {
   bboxMin: [number, number, number];
   bboxMax: [number, number, number];
   /**
-   * 修了什么 —— 模型**不是封闭实体**时,浏览器那条路**自己修**(2026-11-11)
+   * 动了什么 —— 模型**不是封闭实体**时,浏览器那条路会**临时**封上再切
    *
    * `changed === false` = 模型本来就是好的,一个字节都没动。
-   * 界面拿这个告诉用户「你的模型有破口,我们补上了」—— **不能悄悄改
-   * 用户的模型**。
+   * `cappedLoops > 0` = 模型有破口,切的时候**临时**盖了几处,切完摘掉 ——
+   * 用户的模型上**没有**多出任何面(见 `magnet-lid.ts`)。
+   *
+   * 界面拿这个告诉用户「你的模型有破口,我们临时封上,切完原样还给你」——
+   * **不能悄悄改用户的模型**。
    */
   repair: MagnetRepairReport | null;
 };

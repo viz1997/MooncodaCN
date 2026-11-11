@@ -85,6 +85,11 @@ import type {
   MagnetWorkerOut,
 } from "./magnet-cutter-protocol";
 import {
+  buildMagnetLid,
+  type MagnetLid,
+  scanMagnetBoundary,
+} from "./magnet-lid";
+import {
   alignZTo,
   computeCutterPlacement,
   expectedRemovedVolumeMm3,
@@ -101,6 +106,7 @@ import {
   parsePatchTarget,
 } from "./magnet-params";
 import {
+  type MagnetDroppedFaces,
   type MagnetRepairReport,
   repairMagnetGeometry,
   splitMagnetVertices,
@@ -272,6 +278,16 @@ function fingerprintTexture(texture?: MagnetTextureInput | null): string {
   return parts.join("|");
 }
 
+/** 喂给布尔引擎的一张三角形 */
+interface MagnetTriangle {
+  /** 原模型里的面号(用来查 UV / 材质) */
+  face: number;
+  /** 三个顶点号(绕序已经修好) */
+  verts: [number, number, number];
+  /** 三个角在**原面**里的下标(绕序翻了的时候跟 `verts` 不一一对应) */
+  corners: [number, number, number];
+}
+
 /** 焊接 + 修复之后的东西 —— 按位置指纹缓存 */
 type Topology = {
   /** 再焊一次的拓扑(壳 / 整体朝向 / 退化标记都在这儿) */
@@ -286,6 +302,16 @@ type Topology = {
   corrected: MagnetIndexedMesh;
   /** 要翻绕序的那些面(面号) */
   flippedFaces: Set<number>;
+  /**
+   * 真正喂给布尔引擎的三角形(退化面已剔、绕序已修)
+   *
+   * **边界扫描跟它用的是同一份** —— 少算一张面,盖面就跟边界对不上了。
+   */
+  triangles: MagnetTriangle[];
+  /** 临时盖面(切完要摘掉)—— 见 `magnet-lid.ts` */
+  lid: MagnetLid;
+  /** 被剔掉的面(非流形边上多出来的那些)—— 切完放回输出 */
+  droppedFaces: MagnetDroppedFaces;
   /** 修了什么 —— 给界面 / 日志看 */
   repair: MagnetRepairReport;
 };
@@ -399,7 +425,11 @@ function prepareTopology(
     weldToleranceMm: weld.toleranceMm,
   };
 
-  // 修完还是不封闭 ⇒ 真的切不了
+  // 修完还是不封闭 ⇒ 给它**临时**盖上,切完再摘掉(见 `magnet-lid.ts`)
+  //
+  // ⚠️ **盖面是临时的** —— 工作室的原话是「不需要修复用户的模型,只需要
+  // 完成磁铁孔」。往模型里补洞等于给用户塞了几张本来不存在的面 ⇒ 切完
+  // 必须把盖面从输出里摘掉,用户的模型上**不留下任何多出来的几何**。
   const openEdges = topo1.components.reduce((s, c) => s + c.openEdges, 0);
   const nonManifoldEdges = topo1.components.reduce(
     (s, c) => s + c.nonManifoldEdges,
@@ -409,31 +439,52 @@ function prepareTopology(
   repair.nonManifoldEdgesAfter = nonManifoldEdges;
   repair.closed = openEdges === 0 && nonManifoldEdges === 0;
 
-  if (!repair.closed) {
+  const repaired: MagnetIndexedMesh = {
+    vertices: phaseB.vertices,
+    faceVertex: phaseB.faceVertex,
+  };
+  const { corrected, flippedFaces } = buildCorrectedMesh(topo1, repaired);
+
+  // 真正喂给布尔引擎的三角形(退化面剔掉、绕序修好)
+  const triangles = collectTriangles(topo1, repaired, flippedFaces);
+
+  // 临时盖面 —— 有洞就封上,切完摘掉
+  const { lid, closedForBoolean } = buildTemporaryLid(
+    repaired.vertices,
+    triangles
+  );
+  repair.cappedLoops = lid.cappedLoops;
+  repair.lidFaces = lid.lidFaces;
+  repair.closedForBoolean = closedForBoolean;
+
+  if (!closedForBoolean) {
     throw new MagnetCutterError(
       "NOT_MANIFOLD",
-      `自动修复之后这个模型还是不封闭(还剩 ${openEdges} 条开放边 / ${nonManifoldEdges} 条非流形边)` +
-        "—— 破得太厉害了,布尔运算切不了。" +
+      `这个模型有 ${openEdges} 条开放边 / ${nonManifoldEdges} 条非流形边,` +
+        "临时盖面也封不上 —— 布尔运算切不了。" +
         "换个模型,或者先用「打印前工作台 → 检查」把破的地方修好。"
     );
   }
 
   // 封闭 ≠ 有实体 —— 一张孤零零的三角形补上盖面之后「封闭」了,但它
   // 没有厚度(体积是 0),布尔那一步照样会拒。自己先拦下来,说人话。
-  const volume = Math.abs(signedVolumeOfSoup(phaseA.positions));
+  const volume = Math.abs(
+    signedVolumeOfTriangles(repaired.vertices, [
+      ...triangles,
+      ...lid.triangles.map((tri) => ({
+        verts: tri as [number, number, number],
+        corners: [0, 1, 2] as [number, number, number],
+        face: -1,
+      })),
+    ])
+  );
   if (volume < 1e-6) {
     throw new MagnetCutterError(
       "NOT_MANIFOLD",
-      "自动修复之后这个模型还是没有实体(没有厚度)—— 布尔运算切不了。" +
+      "这个模型还是没有实体(没有厚度)—— 布尔运算切不了。" +
         "换一个有点厚度的模型试试。"
     );
   }
-
-  const repaired: MagnetIndexedMesh = {
-    vertices: phaseB.vertices,
-    faceVertex: phaseB.faceVertex,
-  };
-  const { corrected, flippedFaces } = buildCorrectedMesh(topo1, repaired);
 
   const topology: Topology = {
     topo: topo1,
@@ -442,6 +493,9 @@ function prepareTopology(
     materialIndex: phaseA.materialIndex,
     corrected,
     flippedFaces,
+    triangles,
+    lid,
+    droppedFaces: phaseA.droppedFaces,
     repair,
   };
   topologyCache = { key, topology };
@@ -449,23 +503,93 @@ function prepareTopology(
 }
 
 /**
- * 三角汤的有符号体积(正 = 法线朝外)
+ * 真正喂给布尔引擎的三角形(退化面剔掉、绕序修好)
+ *
+ * **边界扫描用的也是这一份** —— 少算一张面,盖面就跟模型的边界对不上,
+ * 布尔那一步会以「Not manifold」拒收。
+ */
+function collectTriangles(
+  topo: ReturnType<typeof weldAndAnalyzeTopology>,
+  mesh: MagnetIndexedMesh,
+  flippedFaces: Set<number>
+): MagnetTriangle[] {
+  const out: MagnetTriangle[] = [];
+  const faceCount = mesh.faceVertex.length / 3;
+  for (let f = 0; f < faceCount; f++) {
+    if ((topo.flags[f] ?? 0) & FACE_FLAG.DEGENERATE) continue;
+    const a = mesh.faceVertex[f * 3]!;
+    const b = mesh.faceVertex[f * 3 + 1]!;
+    const c = mesh.faceVertex[f * 3 + 2]!;
+    if (flippedFaces.has(f)) {
+      out.push({ face: f, verts: [a, c, b], corners: [0, 2, 1] });
+    } else {
+      out.push({ face: f, verts: [a, b, c], corners: [0, 1, 2] });
+    }
+  }
+  return out;
+}
+
+/**
+ * 临时盖面 —— 模型有洞就给它封上,切完再摘掉
+ *
+ * 详见 `magnet-lid.ts` 的文件头。返回的 `closedForBoolean` 说的是
+ * 「盖完之后能不能参与布尔运算」——
+ *
+ * - `closed === false` 但 `closedForBoolean === true` 是**正常**的:
+ *   意思是「模型有洞,我们临时封上参与运算,切完把盖面摘掉」。
+ * - `closedForBoolean === false` ⇒ 封不上 ⇒ 真的切不了。
+ */
+function buildTemporaryLid(
+  vertices: Float32Array,
+  triangles: MagnetTriangle[]
+): { lid: MagnetLid; closedForBoolean: boolean } {
+  const flat: number[] = [];
+  for (const t of triangles) flat.push(t.verts[0], t.verts[1], t.verts[2]);
+
+  const scan = scanMagnetBoundary(flat);
+  const lid = buildMagnetLid(vertices, scan.loops);
+
+  if (!lid.triangles.length) {
+    // 没有洞 ⇒ 模型本身就是封闭的
+    return {
+      lid,
+      closedForBoolean: scan.openEdges === 0 && scan.nonManifoldEdges === 0,
+    };
+  }
+
+  // 盖完再扫一遍 —— 应该没有开放边了,还有的话就是有环没盖上
+  const capped = flat.slice();
+  for (const tri of lid.triangles) capped.push(tri[0]!, tri[1]!, tri[2]!);
+  const after = scanMagnetBoundary(capped);
+  return {
+    lid,
+    closedForBoolean: after.openEdges === 0 && after.nonManifoldEdges === 0,
+  };
+}
+
+/**
+ * indexed 网格的有符号体积(正 = 法线朝外)
  *
  * 用来判「这个模型到底有没有实体」—— 封闭但**没有厚度**的壳(比如一张
  * 孤零零的三角形补了个盖面)体积是 0,布尔那一步会拒。
+ *
+ * 算的是**盖上临时盖面之后**的体积 —— 盖面也是实体的一部分。
  */
-function signedVolumeOfSoup(positions: Float32Array): number {
+function signedVolumeOfTriangles(
+  vertices: Float32Array,
+  triangles: { verts: [number, number, number] }[]
+): number {
   let vol = 0;
-  for (let f = 0; f < positions.length / 9; f++) {
-    const ax = positions[f * 9]!,
-      ay = positions[f * 9 + 1]!,
-      az = positions[f * 9 + 2]!;
-    const bx = positions[f * 9 + 3]!,
-      by = positions[f * 9 + 4]!,
-      bz = positions[f * 9 + 5]!;
-    const cx = positions[f * 9 + 6]!,
-      cy = positions[f * 9 + 7]!,
-      cz = positions[f * 9 + 8]!;
+  for (const { verts } of triangles) {
+    const ax = vertices[verts[0] * 3]!,
+      ay = vertices[verts[0] * 3 + 1]!,
+      az = vertices[verts[0] * 3 + 2]!;
+    const bx = vertices[verts[1] * 3]!,
+      by = vertices[verts[1] * 3 + 1]!,
+      bz = vertices[verts[1] * 3 + 2]!;
+    const cx = vertices[verts[2] * 3]!,
+      cy = vertices[verts[2] * 3 + 1]!,
+      cz = vertices[verts[2] * 3 + 2]!;
     vol +=
       (ax * (by * cz - bz * cy) +
         ay * (bz * cx - bx * cz) +
@@ -579,6 +703,12 @@ type BuiltModel = {
    * 布尔之后靠这个把输出三角形的 run id 对回原模型的材质。空数组 = 没贴图。
    */
   materialIds: number[];
+  /**
+   * 临时盖面自己的预留 id —— 切完靠它把盖面从输出里摘掉
+   *
+   * `null` = 这个模型本来就是封闭的,没有盖面。
+   */
+  lidRunId: number | null;
 };
 
 /**
@@ -596,11 +726,13 @@ async function buildModel(
 
   let input: ManifoldMeshInput;
   let materialIds: number[];
+  let lidRunId: number | null;
   if (texture) {
     try {
       const built = buildTexturedMeshInput(runtime, topology, texture);
       input = built.input;
       materialIds = built.materialIds;
+      lidRunId = built.lidRunId;
     } catch (err) {
       // `buildTexturedMeshInput` 自己抛的 `MagnetCutterError` 原样放行
       if (err instanceof MagnetCutterError) throw err;
@@ -608,8 +740,10 @@ async function buildModel(
       throw engineError("带贴图的网格构建", err);
     }
   } else {
-    input = buildPlainMeshInput(topology);
+    const built = buildPlainMeshInput(runtime, topology);
+    input = built.input;
     materialIds = [];
+    lidRunId = built.lidRunId;
   }
 
   let model: Manifold;
@@ -619,7 +753,7 @@ async function buildModel(
     throw new MagnetCutterError(
       "NOT_MANIFOLD",
       `布尔引擎还是拒绝了这个模型(${describeManifoldError(err)})—— ` +
-        "自动修复没能把它变成能参与布尔运算的实体。" +
+        "临时盖面没能把它变成能参与布尔运算的实体。" +
         "换一个模型,或者先用「打印前工作台 → 检查」看看问题在哪儿。"
     );
   }
@@ -662,6 +796,7 @@ async function buildModel(
     maxDim,
     topology,
     materialIds,
+    lidRunId,
   };
 }
 
@@ -671,38 +806,62 @@ async function buildModel(
  * 三件事:
  *
  * 1. **用修复后的网格**(不是原始焊接的)—— 退化面已经在修复那一步删了,
- *    洞也补上了,绕序也统一了。
+ *    绕序也统一了。
  * 2. **再剔一次退化面**(零面积 / 顶点重合)—— 修复之后**又焊了一次**,
  *    那次焊接可能又标出新的退化面(几乎不会,但 manifold 收不了)。
  * 3. **逐个连通分量翻绕序**(见 `buildCorrectedMesh`)。
+ *
+ * ## 临时盖面走**独立的 run**
+ *
+ * 盖面在网格输入里是**单独一个 run**(单独一个预留 id)⇒ 布尔之后靠
+ * **run id** 就能精确地把它认出来摘掉 —— 不靠「位置对不对得上」那种
+ * 猜法(布尔会把面拆开、挪顶点,位置对不上)。
+ *
+ * 实测(40mm 立方体缺一张面 + 盖面):布尔之后输出有 3 个 run,
+ * 盖面那一个**原样保留**(runOriginalID = 盖面的 id,区间正好是那 2 张
+ * 三角形)⇒ 摘得掉。
  */
-function buildPlainMeshInput(topology: Topology): ManifoldMeshInput {
-  const { topo, repaired, flippedFaces } = topology;
+function buildPlainMeshInput(
+  runtime: ManifoldToplevel,
+  topology: Topology
+): { input: ManifoldMeshInput; lidRunId: number | null } {
+  const { repaired, triangles, lid } = topology;
 
-  const faceCount = repaired.faceVertex.length / 3;
-  const triVerts = new Uint32Array(faceCount * 3);
+  const total = triangles.length + lid.triangles.length;
+  const triVerts = new Uint32Array(total * 3);
   let w = 0;
-  for (let f = 0; f < faceCount; f++) {
-    if ((topo.flags[f] ?? 0) & FACE_FLAG.DEGENERATE) continue;
-    const a = repaired.faceVertex[f * 3]!;
-    const b = repaired.faceVertex[f * 3 + 1]!;
-    const c = repaired.faceVertex[f * 3 + 2]!;
-    if (flippedFaces.has(f)) {
-      triVerts[w++] = a;
-      triVerts[w++] = c;
-      triVerts[w++] = b;
-    } else {
-      triVerts[w++] = a;
-      triVerts[w++] = b;
-      triVerts[w++] = c;
-    }
+  for (const t of triangles) {
+    triVerts[w++] = t.verts[0];
+    triVerts[w++] = t.verts[1];
+    triVerts[w++] = t.verts[2];
+  }
+  const modelTriangles = w / 3;
+  for (const tri of lid.triangles) {
+    triVerts[w++] = tri[0]!;
+    triVerts[w++] = tri[1]!;
+    triVerts[w++] = tri[2]!;
   }
 
-  return {
+  const input: ManifoldMeshInput = {
     numProp: 3,
     vertProperties: repaired.vertices,
     triVerts: triVerts.subarray(0, w),
   };
+
+  // 没有盖面 ⇒ 不用 run(跟以前一样)
+  if (!lid.triangles.length) return { input, lidRunId: null };
+
+  // 预留两个 id:模型一份、盖面一份
+  const idBase = runtime.Manifold.reserveIDs(2);
+  const lidRunId = idBase + 1;
+  input.runIndex = new Uint32Array([
+    0,
+    modelTriangles * 3,
+    (modelTriangles + lid.triangles.length) * 3,
+  ]);
+  input.runOriginalID = new Uint32Array([idBase, lidRunId]);
+
+  return { input, lidRunId };
 }
 
 /**
@@ -731,28 +890,31 @@ function buildTexturedMeshInput(
   runtime: ManifoldToplevel,
   topology: Topology,
   texture: MagnetTextureInput
-): { input: ManifoldMeshInput; materialIds: number[] } {
-  const { topo, repaired, flippedFaces } = topology;
+): {
+  input: ManifoldMeshInput;
+  materialIds: number[];
+  lidRunId: number | null;
+} {
+  const { repaired, triangles, lid } = topology;
   const mesh = repaired;
   // ⚠️ **用修复后的 UV / 材质**,不是原始那份 ——
-  // 修复会删面、加面(补洞)、翻面 ⇒ 原始那份跟现在的面**对不上号**了。
-  // 用原始那份 ⇒ 贴图整个错位(补出来的盖面拿不到 UV,翻过的面 UV 反了)。
+  // 修复会删面、翻面 ⇒ 原始那份跟现在的面**对不上号**了。
+  // 用原始那份 ⇒ 贴图整个错位(翻过的面 UV 反了)。
   const uvs = topology.uvs;
   const materialIndex = topology.materialIndex;
   const materialCount = Math.max(1, texture.materialNames?.length ?? 1);
 
   // --- ① 有效面(剔掉退化面)+ 每个面的材质 ---
-  const facesByMaterial = new Map<number, number[]>();
-  for (let f = 0; f < mesh.faceVertex.length / 3; f++) {
-    if ((topo.flags[f] ?? 0) & FACE_FLAG.DEGENERATE) continue;
-    const raw = materialIndex?.[f];
+  const facesByMaterial = new Map<number, MagnetTriangle[]>();
+  for (const tri of triangles) {
+    const raw = materialIndex?.[tri.face];
     const mat =
       raw === undefined || !Number.isFinite(raw)
         ? 0
         : Math.min(materialCount - 1, Math.max(0, raw));
     const list = facesByMaterial.get(mat);
-    if (list) list.push(f);
-    else facesByMaterial.set(mat, [f]);
+    if (list) list.push(tri);
+    else facesByMaterial.set(mat, [tri]);
   }
   const materials = [...facesByMaterial.keys()].sort((a, b) => a - b);
   if (materials.length === 0) {
@@ -763,19 +925,22 @@ function buildTexturedMeshInput(
   }
 
   // --- ② 给每个材质预留一个 id(布尔之后靠它对回材质)---
-  const idBase = runtime.Manifold.reserveIDs(materials.length);
+  // 多预留一个 = 临时盖面自己的 id(切完靠它把盖面摘掉)
+  const idBase = runtime.Manifold.reserveIDs(materials.length + 1);
   const materialIds: number[] = [];
   materials.forEach((mat, i) => {
     materialIds[mat] = idBase + i;
   });
+  const lidRunId = lid.triangles.length ? idBase + materials.length : null;
 
   // --- ③ 按材质排成连续的三角形 ---
-  const orderedFaces: number[] = [];
+  const orderedFaces: MagnetTriangle[] = [];
   for (const mat of materials) orderedFaces.push(...facesByMaterial.get(mat)!);
 
   // --- ④ 逐角建属性顶点 ---
   const numProp = 5;
-  const nCorners = orderedFaces.length * 3;
+  const totalTriangles = orderedFaces.length + lid.triangles.length;
+  const nCorners = totalTriangles * 3;
   const vertProperties = new Float32Array(nCorners * numProp);
   const triVerts = new Uint32Array(nCorners);
   const mergeFrom: number[] = [];
@@ -783,20 +948,17 @@ function buildTexturedMeshInput(
   /** 顶点号 → 第一个用它的角(规范角) */
   const canonical = new Map<number, number>();
 
-  orderedFaces.forEach((f, t) => {
-    // 绕序翻了的话,新三角形是 (0, 2, 1) —— UV 也要跟着换角
-    const flipped = flippedFaces.has(f);
-    const cornerOrder = flipped ? [0, 2, 1] : [0, 1, 2];
+  orderedFaces.forEach((tri, t) => {
     for (let k = 0; k < 3; k++) {
       const ci = t * 3 + k;
-      const oi = cornerOrder[k]!;
-      const weldedVert = mesh.faceVertex[f * 3 + oi]!;
+      const oi = tri.corners[k]!;
+      const weldedVert = tri.verts[k]!;
       vertProperties[ci * numProp] = mesh.vertices[weldedVert * 3]!;
       vertProperties[ci * numProp + 1] = mesh.vertices[weldedVert * 3 + 1]!;
       vertProperties[ci * numProp + 2] = mesh.vertices[weldedVert * 3 + 2]!;
       if (uvs) {
-        vertProperties[ci * numProp + 3] = uvs[f * 6 + oi * 2] ?? 0;
-        vertProperties[ci * numProp + 4] = uvs[f * 6 + oi * 2 + 1] ?? 0;
+        vertProperties[ci * numProp + 3] = uvs[tri.face * 6 + oi * 2] ?? 0;
+        vertProperties[ci * numProp + 4] = uvs[tri.face * 6 + oi * 2 + 1] ?? 0;
       }
       triVerts[ci] = ci;
 
@@ -809,7 +971,34 @@ function buildTexturedMeshInput(
     }
   });
 
-  // --- ⑤ 材质 run ---
+  // --- ④b 临时盖面的角(UV 填 0,合并到模型自己的角上)---
+  //
+  // 盖面必须**合并**到模型边界上的那些角 —— 不合并的话 manifold 看到的是
+  // 「两个位置相同但没连上的顶点」⇒ 判定不是流形。
+  const lidStart = orderedFaces.length;
+  lid.triangles.forEach((tri, t) => {
+    for (let k = 0; k < 3; k++) {
+      const ci = (lidStart + t) * 3 + k;
+      const weldedVert = tri[k]!;
+      vertProperties[ci * numProp] = mesh.vertices[weldedVert * 3]!;
+      vertProperties[ci * numProp + 1] = mesh.vertices[weldedVert * 3 + 1]!;
+      vertProperties[ci * numProp + 2] = mesh.vertices[weldedVert * 3 + 2]!;
+      vertProperties[ci * numProp + 3] = 0;
+      vertProperties[ci * numProp + 4] = 0;
+      triVerts[ci] = ci;
+
+      const canon = canonical.get(weldedVert);
+      // 盖面的角一定在模型的面里出现过(它就是某条边界边的端点)⇒
+      // 规范角必然找得到。找不到就**不加合并** —— 那会让网格变成非流形,
+      // 布尔那一步会明明白白拒掉,比悄悄产出一个坏件好。
+      if (canon !== undefined) {
+        mergeFrom.push(ci);
+        mergeTo.push(canon);
+      }
+    }
+  });
+
+  // --- ⑤ 材质 run(+ 盖面那一个 run)---
   const runIndex: number[] = [];
   const runOriginalID: number[] = [];
   let cursor = 0;
@@ -817,6 +1006,11 @@ function buildTexturedMeshInput(
     runIndex.push(cursor * 3);
     runOriginalID.push(materialIds[mat]!);
     cursor += facesByMaterial.get(mat)!.length;
+  }
+  if (lidRunId !== null) {
+    runIndex.push(cursor * 3);
+    runOriginalID.push(lidRunId);
+    cursor += lid.triangles.length;
   }
   runIndex.push(cursor * 3);
 
@@ -831,6 +1025,7 @@ function buildTexturedMeshInput(
       runOriginalID: new Uint32Array(runOriginalID),
     },
     materialIds,
+    lidRunId,
   };
 }
 
@@ -1365,27 +1560,83 @@ export async function cutMagnetPocket(
 
   let output: ReturnType<typeof extractOutput>;
   try {
-    output = extractOutput(mesh, prepared.materialIds, fallbackMaterial);
+    output = extractOutput(
+      mesh,
+      prepared.materialIds,
+      fallbackMaterial,
+      prepared.lidRunId
+    );
   } catch (err) {
     throw engineError("读取切完的三角形", err);
   }
 
+  // 非流形边上「多出来的」那些面 —— 运算前剔掉,**运算后放回去**
+  // ⇒ 用户的模型不会少东西(工作室:不需要修复用户的模型)
+  const final = appendDroppedFaces(output, prepared.topology.droppedFaces);
+
   return {
-    ...output,
+    ...final,
     volumeBefore: prepared.volume,
     volumeAfter,
     removedVolume,
     expectedRemovedVolume,
-    triangleCount: newTri,
+    triangleCount: final.positions.length / 9,
     materialNames: texture?.materialNames ?? null,
   };
+}
+
+/**
+ * 把运算前剔掉的面**放回输出**
+ *
+ * 非流形边上「多出来的」那些面是用户模型的一部分。布尔运算收不了它们
+ * ⇒ 运算前剔掉,运算后放回去 ⇒ 用户的模型不会少东西。
+ */
+function appendDroppedFaces(
+  output: {
+    positions: Float32Array;
+    uvs: Float32Array | null;
+    materialIndex: Uint16Array | null;
+  },
+  dropped: MagnetDroppedFaces
+): {
+  positions: Float32Array;
+  uvs: Float32Array | null;
+  materialIndex: Uint16Array | null;
+} {
+  const extra = dropped.positions.length / 9;
+  if (extra === 0) return output;
+
+  const positions = new Float32Array(
+    output.positions.length + dropped.positions.length
+  );
+  positions.set(output.positions, 0);
+  positions.set(dropped.positions, output.positions.length);
+
+  let uvs: Float32Array | null = null;
+  if (output.uvs && dropped.uvs) {
+    uvs = new Float32Array(output.uvs.length + dropped.uvs.length);
+    uvs.set(output.uvs, 0);
+    uvs.set(dropped.uvs, output.uvs.length);
+  }
+
+  let materialIndex: Uint16Array | null = null;
+  if (output.materialIndex && dropped.materialIndex) {
+    materialIndex = new Uint16Array(
+      output.materialIndex.length + dropped.materialIndex.length
+    );
+    materialIndex.set(output.materialIndex, 0);
+    materialIndex.set(dropped.materialIndex, output.materialIndex.length);
+  }
+
+  return { positions, uvs, materialIndex };
 }
 
 /** manifold 的 indexed 网格 → 三角汤(+ UV / 材质) */
 function extractOutput(
   mesh: Mesh,
   materialIds: number[],
-  fallbackMaterial: number
+  fallbackMaterial: number,
+  lidRunId: number | null
 ): {
   positions: Float32Array;
   uvs: Float32Array | null;
@@ -1393,28 +1644,63 @@ function extractOutput(
 } {
   const numProp = mesh.numProp;
   const triCount = mesh.triVerts.length / 3;
-  const positions = new Float32Array(triCount * 9);
   const hasProps = numProp >= 5;
-  const uvs = hasProps ? new Float32Array(triCount * 6) : null;
 
-  for (let i = 0, t = 0; i < mesh.triVerts.length; i += 3, t++) {
+  // 临时盖面 —— 切完**摘掉**(工作室:不需要修复用户的模型)
+  const lidTris =
+    lidRunId === null ? new Set<number>() : findRunTriangles(mesh, lidRunId);
+  const keep: number[] = [];
+  for (let t = 0; t < triCount; t++) if (!lidTris.has(t)) keep.push(t);
+
+  const positions = new Float32Array(keep.length * 9);
+  const uvs = hasProps ? new Float32Array(keep.length * 6) : null;
+
+  keep.forEach((t, out) => {
     for (let k = 0; k < 3; k++) {
-      const vi = mesh.triVerts[i + k]! * numProp;
-      positions[t * 9 + k * 3] = mesh.vertProperties[vi]!;
-      positions[t * 9 + k * 3 + 1] = mesh.vertProperties[vi + 1]!;
-      positions[t * 9 + k * 3 + 2] = mesh.vertProperties[vi + 2]!;
+      const vi = mesh.triVerts[t * 3 + k]! * numProp;
+      positions[out * 9 + k * 3] = mesh.vertProperties[vi]!;
+      positions[out * 9 + k * 3 + 1] = mesh.vertProperties[vi + 1]!;
+      positions[out * 9 + k * 3 + 2] = mesh.vertProperties[vi + 2]!;
       if (uvs) {
-        uvs[t * 6 + k * 2] = mesh.vertProperties[vi + 3]!;
-        uvs[t * 6 + k * 2 + 1] = mesh.vertProperties[vi + 4]!;
+        uvs[out * 6 + k * 2] = mesh.vertProperties[vi + 3]!;
+        uvs[out * 6 + k * 2 + 1] = mesh.vertProperties[vi + 4]!;
       }
     }
-  }
+  });
 
-  return {
-    positions,
-    uvs,
-    materialIndex: extractMaterialIndex(mesh, materialIds, fallbackMaterial),
-  };
+  const materialByTri = extractMaterialIndex(
+    mesh,
+    materialIds,
+    fallbackMaterial
+  );
+  const materialIndex = materialByTri
+    ? new Uint16Array(keep.map((t) => materialByTri[t]!))
+    : null;
+
+  return { positions, uvs, materialIndex };
+}
+
+/**
+ * 输出里属于「临时盖面」的那些三角形 —— 切完要摘掉
+ *
+ * 靠 **run id** 认:盖面在输入里是单独一个 run(单独一个预留 id)⇒ 布尔
+ * 之后那几段三角形还带着这个 id。
+ *
+ * ⚠️ 一个 id 可能对应**多段**(布尔把盖面切开了)⇒ 收全部。
+ */
+function findRunTriangles(mesh: Mesh, runId: number): Set<number> {
+  const out = new Set<number>();
+  const runIndex = mesh.runIndex;
+  const runOriginalID = mesh.runOriginalID;
+  if (!runIndex || !runOriginalID) return out;
+  const triCount = mesh.triVerts.length / 3;
+  for (let r = 0; r < runOriginalID.length; r++) {
+    if (runOriginalID[r] !== runId) continue;
+    const from = (runIndex[r] ?? 0) / 3;
+    const to = (runIndex[r + 1] ?? mesh.triVerts.length) / 3;
+    for (let t = from; t < to && t < triCount; t++) out.add(t);
+  }
+  return out;
 }
 
 /**
