@@ -177,6 +177,16 @@ export type MagnetErrorCode =
    */
   | "ENGINE_FAILED"
   /**
+   * 切割引擎(wasm)**没加载出来**
+   *
+   * 不是模型的问题 —— 是 `manifold.wasm` 那个文件没拿到(404 / 被 locale
+   * 前缀重定向劫持 / URL 解不出来)。
+   *
+   * 2026-11-11 线上踩的就是这条:胶水在 Worker 里读 wasm 用的是同步 XHR,
+   * URL 又是根相对路径 ⇒ `xhr.open()` 抛 `Invalid URL` ⇒ 运行时整个没起来。
+   */
+  | "ENGINE_LOAD_FAILED"
+  /**
    * 出了个**预料之外**的错(不是上面那几种已知的)
    *
    * 以前所有非 `MagnetCutterError` 的抛出都一律报成 `BOOLEAN_FAILED` ——

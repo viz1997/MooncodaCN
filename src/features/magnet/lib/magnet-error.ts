@@ -60,6 +60,13 @@ export const MAGNET_ERROR_KEYS: Record<MagnetErrorCode, string> = {
    */
   ENGINE_FAILED: "errors.codes.engineFailed",
   /**
+   * 切割引擎(wasm)没加载出来 —— **不是模型的问题**
+   *
+   * `manifold.wasm` 那个文件没拿到(404 / 被 locale 前缀劫持 / URL 解不出来)。
+   * 详情里带原始报错。
+   */
+  ENGINE_LOAD_FAILED: "errors.codes.engineLoadFailed",
+  /**
    * 预料之外的错(不在上面那几种之列的)
    *
    * 以前所有非 `MagnetCutterError` 的抛出都一律报成 `BOOLEAN_FAILED` ——

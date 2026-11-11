@@ -232,10 +232,21 @@ export const config = {
      *   不走 intlMiddleware 避免 next-intl 把 /manifest.webmanifest 重定向到 /zh/manifest.webmanifest)
      * - sitemap.xml / robots.txt (Next.js MetadataRoute 文件)
      * - /plugins/* (画布本地插件清单 public/plugins/index.json，避开 locale 前缀重定向)
-     * - 静态图片扩展
+     * - /magnet/* (磁吸孔工具的静态资源:public/magnet/blender_bridge.py 插件脚本)
+     * - 静态资源扩展(svg/png/…/ico + **wasm** + **py** + zip/glb/gltf)
+     *
+     * ⚠️ **wasm / py 必须在名单里**(2026-11-11 线上踩的坑):
+     * `public/` 下的静态文件默认会走进 intlMiddleware —— next-intl 的
+     * `localePrefix: "always"` 会把 `/manifold.wasm` **307 重定向到
+     * `/zh/manifold.wasm`**,那个地址是 404 ⇒ 切割引擎的 wasm 永远拿不到
+     * ⇒ 页面报「切割过程出了意外」。同理 `/magnet/blender_bridge.py`
+     * (插件下载链接)也是 404。
+     *
+     * 判定方式:凡是要**按原样发出去**的静态文件(浏览器要拿它的字节、
+     * 不是拿一个 HTML),都得躲开 locale 前缀重定向。
      *
      * 注意: 现在包含 /api 路由以便进行限流
      */
-    "/((?!_next/static|_next/image|favicon.ico|manifest\\.webmanifest|sitemap\\.xml|robots\\.txt|plugins(?:/.*)?|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|manifest\\.webmanifest|sitemap\\.xml|robots\\.txt|plugins(?:/.*)?|magnet/.*|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|wasm|py|zip|glb|gltf)$).*)",
   ],
 };

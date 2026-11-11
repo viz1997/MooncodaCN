@@ -1542,6 +1542,7 @@
         "workerCrashed": "The cutting engine crashed on this model — usually because the geometry self-intersects or has too many faces. Check it in the Print Pre-flight Workbench for problem edges.",
         "workerUnavailable": "This browser could not start the cutting Worker, and the main-thread fallback did not work either — refresh the page and try again, or use a different browser.",
         "engineFailed": "The cutting engine failed at one step — the exact step is in the raw detail below.",
+        "engineLoadFailed": "The cutting engine could not be loaded — this is not a model problem, the engine file was not delivered. Reload the page and try again; if it still fails, tell the studio.",
         "unexpected": "The cut hit an unexpected problem — the raw detail below says what happened.",
         "blenderNotRunning": "Could not reach the Blender on your own machine — check that the add-on is running and that the port matches the one on this page.",
         "blenderFailed": "The cut failed inside your Blender — the raw detail below says why.",

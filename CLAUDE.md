@@ -1499,6 +1499,7 @@ EXACT → FAST 兜底 + 一堆修复 pass,正好治这个。
 | `WORKER_CRASHED` | 引擎算到一半炸了 | 几何太复杂,引擎崩了 |
 | `WORKER_UNAVAILABLE` | Worker 压根起不来(退回主线程也没成) | 浏览器 / 打包问题 |
 | `ENGINE_FAILED` | 引擎某一步抛了预料之外的错 | **带原始信息**,一眼看出哪一步炸的 |
+| `ENGINE_LOAD_FAILED` | **引擎(wasm)压根没加载出来** | 不是模型的问题,是引擎文件没拿到 |
 | `BLENDER_NOT_RUNNING` | 连不上 `127.0.0.1`(插件没起) | **不是模型的问题** |
 | `BLENDER_FAILED` | 本地 Blender 自己报的错 | 原因在详情里(面太薄 / 切到边上 …) |
 | `BLENDER_TIMEOUT` | 本地 Blender 没在规定时间内回话 | 大模型切太久,别重复点 |
@@ -1510,6 +1511,34 @@ EXACT → FAST 兜底 + 一堆修复 pass,正好治这个。
   会把页面冻住,而且算出来还是同一个结果);**从没回过话** ⇒ 退回主线程(老路,
   能用)。`magnet-cutter-client.test.ts` 守着这条。
 - **界面上是「标题 + 原始信息」两行** —— 标题是人话,原始信息是引擎的原文。
+
+#### 引擎(wasm)加载不出来:两个叠在一起的原因(2026-11-11 线上事故)
+
+工作室线上报的原文:
+
+```
+切割过程中出了意外 —— 具体原因见下面那行原始信息。
+Aborted(SyntaxError: Failed to execute 'open' on 'XMLHttpRequest': Invalid URL). Build with -sASSERTIONS for more info.
+```
+
+那是 Emscripten 胶水的 `abort()`。**两个独立的原因叠在一起**,只修一个还是拿不到
+wasm:
+
+| # | 原因 | 修法 |
+|---|---|---|
+| ① | **URL 解不出来**(报出来的那条)—— 胶水在 **Worker** 里读 wasm 走的是**同步 XHR**(`xhr.open("GET", url, false)`)。我们给的 `locateFile` 返回根相对路径 `"/manifold.wasm"`,而 Worker 里的相对 URL 是跟**worker 脚本自己的地址**解的 —— 打包器把 worker 装进 `blob:` URL 之后,blob 的路径是**不透明**的,`new URL("/manifold.wasm", "blob:…")` 直接抛 `Invalid URL` | `locateFile` 给**绝对地址** —— `resolveWasmUrl()`(候选:`self.location.origin` → `self.location.href` → `import.meta.url`,第一个解得出 http(s) 的胜出) |
+| ② | **那个文件压根取不到**(潜伏的那条)—— `public/` 下的静态文件默认会走进 `intlMiddleware`,next-intl 的 `localePrefix: "always"` 把 `/manifold.wasm` **307 重定向到 `/zh/manifold.wasm`** —— 那是 404。实测线上:`/manifold.wasm` → 307 → 404;`/magnet/blender_bridge.py`(插件下载链接)同样 404 | `src/proxy.ts` 的 matcher 把 **`wasm` / `py`**(以及 `/magnet/*`)排除掉,跟 `/plugins/*` 一个道理 |
+
+- **改完的实测**(本地 dev):`/manifold.wasm` → **200 `application/wasm` 541470 字节**;
+  `/magnet/blender_bridge.py` → 200;`/zh/tools/magnet` → 200(页面照常走 locale)。
+  ⚠️ **线上要重新部署才生效**(matcher 是构建产物的一部分)。
+- **新增一个码 `ENGINE_LOAD_FAILED`** —— 「引擎没加载出来,**不是模型的问题**,
+  是引擎文件没拿到」。以前这种错会掉进 `UNEXPECTED`(笼统那句「切割过程出了意外」)。
+- **行为由单测守住** —— `src/test/magnet/pure/magnet-engine-load.test.ts`:
+  绝对 URL(普通页面 / blob Worker / 普通 Worker / opaque origin 不炸)/
+  `locateFile` 走 `resolveWasmUrl()` / **matcher 锚定整条路径**后
+  `/manifold.wasm` 与 `/magnet/blender_bridge.py` 不走 intl、页面路由照常走 /
+  新码有中英文文案且中文那条不带 `**`。
 
 #### 2026-11-11 工作室追加的三条
 
@@ -1697,6 +1726,7 @@ public/magnet/
 | `src/test/magnet/pure/magnet-page.test.ts` | 路由在 / 工具中心登记了 / **视口是复用的那一份** / **不进工单**(不碰报价、工单、R2)/ 拖放用 `useDropZone` / 焊接走 `weldAndAnalyzeTopology` / `Manifold.cylinder` 不加 `new` / **孔径是绝对毫米**(可调,但 `EXPECTED_WIDTH_MM` 不许进代码)/ **① 可调** / **② 智能识别背面** / **③ 导出保留材质** / `UNEXPECTED` 码在位 / wasm 提交进仓库 / **中英文 key 递归一致** |
 | `src/test/magnet/pure/magnet-cutter-client.test.ts` | **Worker 回过话**之后超时 ⇒ 报 `WORKER_TIMEOUT`、**不退回主线程** / 崩了 ⇒ `WORKER_CRASHED`、**不退回主线程** / **从没回过话** ⇒ 退回主线程照样切得出来 / Worker 压根没有 ⇒ 退回主线程 / 引擎报的模型错**原样带上来** / 切割超时是 **300 秒**、分析 **60 秒** |
 | `src/test/magnet/pure/magnet-blender-local.test.ts` | 端口归一化(非法 ⇒ 默认)/ **base URL 写死回环** / 探活带协议头 / 协议对不上 ⇒ `BLENDER_BAD_RESPONSE` / 连不上 ⇒ `BLENDER_NOT_RUNNING` / 没回话 ⇒ `BLENDER_TIMEOUT` / 切割的**包 + 头**都对 / 插件报错 ⇒ `BLENDER_FAILED` 且 detail 带着它自己的 code / 回的不是 zip ⇒ `BLENDER_BAD_RESPONSE` / **插件只绑 `127.0.0.1`** / 带 `Access-Control-Allow-Private-Network` / **EXACT → FAST** / **不调 `bpy.ops`** / 切刀摆放跟网页端同一套数学 / **页面有引擎开关** / **不碰工单链路** / **不往我们的服务器发模型** / **指引下便携版 Blender + 插件** / **Blender 模式不跑浏览器的分析** |
+| `src/test/magnet/pure/magnet-engine-load.test.ts` | **wasm 地址必须是绝对地址**(普通页面 / blob Worker / 普通 Worker / opaque origin 不炸)/ `locateFile` 走 `resolveWasmUrl()` / **proxy 的 matcher 把 `wasm` / `py` / `/magnet/*` 排除掉**(静态文件别被 locale 前缀劫持)/ 页面路由与 API 路由照常走 / `ENGINE_LOAD_FAILED` 有中英文文案 |
 
 ### 外国访客 → 海外独立站(2026-11-10)
 

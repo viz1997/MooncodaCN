@@ -109,6 +109,51 @@ import {
  */
 export const MAGNET_WASM_URL = "/manifold.wasm";
 
+/**
+ * wasm 的**绝对**地址
+ *
+ * ## 为什么不能只给 "/manifold.wasm"(2026-11-11 线上踩的坑)
+ *
+ * Worker 里的相对 URL 是跟 **worker 脚本自己的地址**解的。打包器把 worker
+ * 装进 blob: URL 的时候(`new Worker(blobUrl)`),blob 的路径是**不透明**的 ——
+ * `new URL("/manifold.wasm", "blob:https://host/uuid")` 直接抛
+ * `Invalid URL`。
+ *
+ * Emscripten 的胶水在 Worker 里读 wasm 走的是**同步 XHR**
+ * (`xhr.open("GET", url, false)`)—— 那一步炸了 → 运行时整个加载失败 →
+ * 报 `Aborted(SyntaxError: Failed to execute 'open' on 'XMLHttpRequest': Invalid URL)`。
+ * 工作室线上报的就是这一条。
+ *
+ * ## 候选顺序(第一个解得出 http(s) 绝对地址的胜出)
+ *
+ * 1. `self.location.origin` —— blob Worker 里 origin 是**创建者的 origin**
+ *    (还是站点 origin)✓;主线程里就是 `window.location.origin` ✓
+ * 2. `self.location.href` —— 普通 Worker(脚本自己是个真 chunk URL)✓
+ * 3. `import.meta.url` —— 打包后本模块所在 chunk 的地址 ✓
+ *
+ * 都解不出来才退回根相对路径(Node 单测那条路压根不传 `locateFile`)。
+ */
+export function resolveWasmUrl(): string {
+  const bases: string[] = [];
+  if (typeof self !== "undefined" && self.location) {
+    bases.push(self.location.origin);
+    bases.push(self.location.href);
+  }
+  bases.push(import.meta.url);
+  for (const base of bases) {
+    if (!base) continue;
+    try {
+      const url = new URL(MAGNET_WASM_URL, base);
+      if (url.protocol === "http:" || url.protocol === "https:") {
+        return url.href;
+      }
+    } catch {
+      // 这个 base 解不出绝对地址(blob: 的不透明路径)—— 试下一个
+    }
+  }
+  return MAGNET_WASM_URL;
+}
+
 /** 带稳定 code 的错 —— 界面按 code 查文案表 */
 export class MagnetCutterError extends Error {
   readonly code: MagnetErrorCode;
@@ -143,7 +188,10 @@ export function loadManifoldRuntime(): Promise<ManifoldToplevel> {
     runtimePromise = createRuntime().catch((err) => {
       // 失败不要缓存 —— 万一是网络抖动,下一次还能重试
       runtimePromise = null;
-      throw err;
+      throw new MagnetCutterError(
+        "ENGINE_LOAD_FAILED",
+        `切割引擎(wasm)没加载出来 —— ${describeManifoldError(err)}`
+      );
     });
   }
   return runtimePromise;
@@ -155,7 +203,8 @@ async function createRuntime(): Promise<ManifoldToplevel> {
     typeof process !== "undefined" &&
     typeof process.versions?.node === "string";
   const runtime = await mod.default(
-    isNode ? undefined : { locateFile: () => MAGNET_WASM_URL }
+    // ⚠️ 必须给**绝对**地址 —— 见 `resolveWasmUrl()` 的文件头
+    isNode ? undefined : { locateFile: () => resolveWasmUrl() }
   );
   // ★ 必须调 —— 不调的话整个 JS API 层(`Mesh` / `triangulate`)都不存在
   runtime.setup();
