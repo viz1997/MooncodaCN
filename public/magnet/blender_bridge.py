@@ -3,7 +3,7 @@
 
 网页版(/tools/magnet)的「本地 Blender」那条路靠它。
 
-用法(两种都行):
+用法(三种都行):
 
   A. **直接跑**(最省事)
      Blender → Scripting → 新建文本 → 把本文件整个粘进去 → Run Script
@@ -13,6 +13,19 @@
      把本文件压成 ``blender_bridge.zip``(压缩包里就这一个文件),
      Blender → Edit → Preferences → Add-ons → Install… → 选那个 zip,
      然后在 3D 视图右侧(N 面板)→ Mooncoda 里点「启动桥接」。
+
+  C. **命令执行(不打开 GUI)** —— 网页给的一键启动脚本走的就是这条
+     ``blender --background --factory-startup --python blender_bridge.py``
+
+     ⚠️ **``--background`` 有个坑**:跑完 ``--python`` 脚本 Blender 就退出,
+     GUI 的事件循环压根不存在 ⇒ ``bpy.app.timers`` **永远不会触发** ⇒
+     作业堆在队列里,网页端只等到一个没头没尾的超时。
+     所以后台模式下脚本**自己不返回** —— ``_pump_forever()`` 在主线程里
+     轮询队列(跟 GUI 里那个定时器干的是同一件事:跑活必须在主线程,
+     bpy 的上下文只能主线程碰)。Ctrl+C 退出。
+
+     图形界面模式(A / B)跟后台模式(C)**两条都能用**,由
+     ``bpy.app.background`` 自己分。
 
 它做什么:
 
@@ -63,8 +76,10 @@ import math
 import os
 import queue
 import shutil
+import sys
 import tempfile
 import threading
+import time
 import traceback
 import zipfile
 
@@ -170,11 +185,39 @@ def _ensure_timer():
     global _timer_registered
     if _timer_registered:
         return
+    if bpy.app.background:
+        # --background 模式下 **事件循环压根不存在** ⇒ 定时器永远不触发
+        # ⇒ 作业堆在队列里,HTTP 线程干等到超时。
+        # 后台模式改走 _pump_forever()(脚本自己阻塞,在主线程里轮询)。
+        return
     try:
         bpy.app.timers.register(_drain_jobs, persistent=True)
         _timer_registered = True
     except Exception:
         print("[Mooncoda] 定时器注册失败:", traceback.format_exc())
+
+
+def _pump_forever():
+    """后台模式(``--background``)下的「主线程泵」。
+
+    **为什么需要这个** —— ``blender --background --python xxx.py`` 跑完脚本就
+    退出,GUI 的事件循环压根不存在 ⇒ ``bpy.app.timers`` 永远不触发 ⇒ 作业堆在
+    队列里,HTTP 线程干等到 900 秒超时,网页端只看到一个没头没尾的 `BLENDER_TIMEOUT`。
+
+    所以后台模式下**脚本自己不返回**:在主线程里轮询队列,跟 GUI 里那个定时器
+    干的是同一件事(跑活必须在主线程 —— bpy 的上下文只能主线程碰)。
+
+    Ctrl+C 退出。
+    """
+    print("[Mooncoda] 后台模式(无 GUI):在主线程里跑活,Ctrl+C 退出")
+    try:
+        while True:
+            _drain_jobs()
+            time.sleep(0.05)
+    except KeyboardInterrupt:
+        print("[Mooncoda] 收到 Ctrl+C,退出")
+    finally:
+        stop_bridge()
 
 
 # ---------------------------------------------------------------------------
@@ -1388,7 +1431,21 @@ def unregister():
             pass
 
 
-# 直接跑(粘到 Scripting 里 Run Script)→ 立刻起桥接
+# 直接跑(粘到 Scripting 里 Run Script / 或者 `blender --background --python
+# 本文件`)→ 立刻起桥接
 if __name__ == "__main__":
+    # 输出别被缓冲 —— 命令执行(重定向到文件 / 管道)时 Python 默认是块缓冲,
+    # 「桥接已启动」那行要等很久才出来,用户会以为没起来
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except Exception:
+        pass
     register()
-    start_bridge(DEFAULT_PORT)
+    _port = start_bridge(DEFAULT_PORT)
+    if _port is None:
+        raise SystemExit(1)
+    if bpy.app.background:
+        # 后台模式:**脚本不能返回**(返回了 Blender 就退出了)
+        _pump_forever()
+    else:
+        print("[Mooncoda] 图形界面模式:关掉这个窗口就停桥接")

@@ -422,6 +422,16 @@ describe("一键启动脚本(public/magnet/start_blender.*)", () => {
     const src = read("src/proxy.ts");
     expect(src).toContain("magnet/.*");
   });
+
+  it("**命令执行,不打开 GUI** —— 便携版是当命令跑的,不该弹一个 Blender 窗口", () => {
+    const cmd = read("public/magnet/start_blender.cmd");
+    expect(cmd).toContain("--background");
+    expect(cmd).toContain("--factory-startup");
+
+    const sh = read("public/magnet/start_blender.sh");
+    expect(sh).toContain("--background");
+    expect(sh).toContain("--factory-startup");
+  });
 });
 
 describe("插件那份脚本(public/magnet/blender_bridge.py)", () => {
@@ -479,6 +489,29 @@ describe("插件那份脚本(public/magnet/blender_bridge.py)", () => {
     expect(src).toContain("HOLE_SPILLED");
     expect(src).toContain("FACE_NOT_CUTTABLE");
     expect(src).toContain("BOOLEAN_FAILED");
+  });
+
+  it("**后台模式自己阻塞跑活** —— --background 下定时器永远不触发", () => {
+    const src = read(ADDON);
+    // --background 跑完 --python 脚本 Blender 就退出,事件循环压根不存在
+    // ⇒ bpy.app.timers 永远不触发 ⇒ 作业堆在队列里干等到超时
+    expect(src).toContain("bpy.app.background");
+    expect(src).toContain("def _pump_forever");
+    // 图形界面模式才注册定时器
+    const timer = src.slice(src.indexOf("def _ensure_timer"));
+    expect(timer.slice(0, 400)).toContain("bpy.app.background");
+  });
+
+  it("后台模式的泵调的是**同一个** _drain_jobs —— 跑活必须在主线程", () => {
+    const src = read(ADDON);
+    const pump = src.slice(src.indexOf("def _pump_forever"));
+    expect(pump).toContain("while True");
+    expect(pump).toContain("_drain_jobs()");
+  });
+
+  it("输出不被缓冲 —— 「桥接已启动」那行要立刻出来,不然用户以为没起来", () => {
+    const src = read(ADDON);
+    expect(src).toContain("sys.stdout.reconfigure(line_buffering=True)");
   });
 });
 

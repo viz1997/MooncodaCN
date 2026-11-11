@@ -1525,7 +1525,7 @@
       "offline": "连不上本地 Blender",
       "launcher": "一键启动(Windows)",
       "launcherSh": "一键启动(macOS / Linux)",
-      "launcherHint": "网页没法直接启动你电脑上的程序 —— 下载这个脚本,跟便携版 Blender 放同一个文件夹,双击它,桥接就起了。",
+      "launcherHint": "网页没法直接启动你电脑上的程序 —— 下载这个脚本,跟便携版 Blender 放同一个文件夹,双击它,桥接就在后台起了(不打开 Blender 界面)。",
       "downloadBlender": "下载便携版 Blender",
       "downloadBlenderHint": "官网上有「Windows 便携版(.zip)」—— 解压就能用,不用装。",
       "addon": "下载插件",

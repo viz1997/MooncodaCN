@@ -39,7 +39,9 @@ echo   Blender:  %BLENDER%
 echo   桥接脚本:  %BRIDGE%
 echo.
 echo   桥接只开在 http://127.0.0.1:8765(本机回环,模型不出这台电脑)。
-echo   切完之后可以把这个黑窗口关掉。
+echo.
+echo   这个黑窗口就是桥接 —— **别关**。切完回网页点「检测」。
+echo   用完了按 Ctrl+C(或直接关掉这个窗口)就停。
 echo.
 
 rem ---- 清掉旧字节码缓存 ----
@@ -48,11 +50,15 @@ rem 拿**旧代码**跑(用户自己改了插件就会遇到)。启动前清一�
 for %%F in ("%BRIDGE%") do set "BRIDGEDIR=%%~dpF"
 if exist "%BRIDGEDIR%__pycache__" rmdir /s /q "%BRIDGEDIR%__pycache__" 2>nul
 
-start "Mooncoda Magnet Bridge" "%BLENDER%" --python "%BRIDGE%"
-echo   Blender 起来了 —— 切回网页,点「检测」。
-echo.
-timeout /t 6 >nul
-exit /b 0
+rem ---- 命令执行,不打开 GUI ----
+rem --background:没有界面,纯后台跑。
+rem ⚠️ --background 跑完 --python 脚本 Blender 就退出了,事件循环压根不存在
+rem    ⇒ bpy.app.timers 永远不触发 ⇒ 作业堆在队列里干等到超时。
+rem    桥接脚本在后台模式下改成**自己阻塞**(主线程泵),所以它不会返回。
+rem --factory-startup:不加载用户的启动项和插件(用户装了个坏插件也不该
+rem    把桥接带崩)。
+"%BLENDER%" --background --factory-startup --python "%BRIDGE%"
+exit /b %ERRORLEVEL%
 
 :no_blender
 echo   [Mooncoda] 没找到 blender.exe

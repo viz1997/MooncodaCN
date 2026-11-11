@@ -1528,7 +1528,7 @@
       "offline": "Cannot reach the local Blender",
       "launcher": "One-click start (Windows)",
       "launcherSh": "One-click start (macOS / Linux)",
-      "launcherHint": "A web page cannot launch programs on your computer — download this script, put it next to the portable Blender and double-click it. That starts the bridge.",
+      "launcherHint": "A web page cannot launch programs on your computer — download this script, put it next to the portable Blender and double-click it. The bridge starts in the background (no Blender window).",
       "downloadBlender": "Download the portable Blender",
       "downloadBlenderHint": "The official site offers a “Windows portable (.zip)” build — unzip it and run it, no installer needed.",
       "addon": "Download the add-on",

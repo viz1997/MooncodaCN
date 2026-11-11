@@ -83,7 +83,9 @@ echo "  Blender:   $BLENDER"
 echo "  桥接脚本:  $BRIDGE"
 echo
 echo "  桥接只开在 http://127.0.0.1:8765(本机回环,模型不出这台电脑)。"
-echo "  切完之后可以把这个终端关掉。"
+echo
+echo "  这个终端就是桥接 —— 别关。切完回网页点「检测」。"
+echo "  用完了按 Ctrl+C(或直接关掉这个窗口)就停。"
 echo
 
 # ---- 清掉旧字节码缓存 ----
@@ -92,4 +94,11 @@ echo
 BRIDGE_DIR="$(cd "$(dirname "$BRIDGE")" && pwd)"
 rm -rf "$BRIDGE_DIR/__pycache__" 2>/dev/null || true
 
-exec "$BLENDER" --python "$BRIDGE"
+# ---- 命令执行,不打开 GUI ----
+# --background:没有界面,纯后台跑。
+# ⚠️ --background 跑完 --python 脚本 Blender 就退出了,事件循环压根不存在
+#    ⇒ bpy.app.timers 永远不触发 ⇒ 作业堆在队列里干等到超时。
+#    桥接脚本在后台模式下改成**自己阻塞**(主线程泵),所以它不会返回。
+# --factory-startup:不加载用户的启动项和插件(用户装了个坏插件也不该
+#    把桥接带崩)。
+exec "$BLENDER" --background --factory-startup --python "$BRIDGE"

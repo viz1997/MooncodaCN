@@ -1506,8 +1506,10 @@ EXACT → FAST 兜底 + 一堆修复 pass,正好治这个。**所以这条是兜
   (`blender-local.ts` 里唯一定义的地方)。**页面不许出现任何
   `child_process` / `spawn` / `execFile`** —— 那在浏览器里根本不存在。
 - 启动脚本做的事:找 `blender.exe`(便携版解压出来的 / 装好的那几处常见路径)
-  → 找 `blender_bridge.py` → **清掉旁边的 `__pycache__`** → `blender --python
-  blender_bridge.py`。找不到就**说清楚缺什么、去哪下**(`blender.org/download/`)。
+  → 找 `blender_bridge.py` → **清掉旁边的 `__pycache__`** → `blender --background
+  --factory-startup --python blender_bridge.py`。找不到就**说清楚缺什么、去哪下**
+  (`blender.org/download/`)。**命令执行,不打开 GUI** —— 便携版是当命令跑的,
+  不该弹一个 Blender 窗口出来。
 
 **② Blender 那条路以前会「修」用户的模型** —— 现在**跟浏览器那条一样**:
 破口**临时封上**再切,切完把封面**摘掉**,用户的模型上**不多出任何几何**。
@@ -1525,6 +1527,53 @@ EXACT → FAST 兜底 + 一堆修复 pass,正好治这个。**所以这条是兜
 - 统计里多三个数:`lidCapped`(封了几处破口)/ `lidFaces`(封了几张面)/
   `lidStripped`(摘掉了几张面)⇒ 界面摆一条**中性**的告知(灰色,不是琥珀色):
   「破口临时封上再切,切完原样还给你」。
+
+#### 「为什么还要端口?为什么还要探活?」(2026-11-11 工作室问的)
+
+工作室的第二句:**「便携版是命令执行的不会打开GUI,为什么需要端口检查本地
+blender」**。两件事要分开看:
+
+**① 端口 = 传输通道,跟有没有界面无关。**
+
+模型在**浏览器的内存里**,切孔在**另一个操作系统进程**里。网页能跟本机另一个
+进程说话的方式只有一条:**回环上的 socket**。另一条路(网页往某个文件夹里
+写文件、Blender 去盯着那个文件夹)浏览器给不了 —— File System Access API
+要用户逐个授权目录,而且只有 Chromium 系支持。所以端口**不是**「因为要开个
+GUI」,是**因为模型得从浏览器搬到另一个进程里**。
+
+**「命令执行」≠「一次性跑完」** —— 如果桥接真是一次性命令(跑一次、吐一个
+文件),用户就得**手动**把模型拷进去、再把结果拷回来,而且网页**不知道**它
+什么时候跑完。端口让它变成「网页点一下 → 那个进程干完 → 网页拿到结果」。
+
+**② 探活 = 握手 + 故障分诊,不是「检查 Blender 还在不在」。**
+
+`GET /ping` 干三件具体的事:
+
+| 干什么 | 不探活会怎样 |
+|---|---|
+| **协议版本对一下**(页面要 v1) | 插件版本对不上时,切割请求会以一种没法解释的方式失败 |
+| **拿 Blender 版本号**摆给用户看(「连上了 —— Blender 5.2.0 LTS」) | 用户不知道自己连上的是哪个 Blender |
+| **把失败分诊**:`BLENDER_NOT_RUNNING`(没起)/ `BLENDER_FAILED`(切失败)/ `BLENDER_TIMEOUT`(切太久) | 对着一个没开的端口 fetch,浏览器只抛一个 `TypeError: Failed to fetch` —— 用户看到的是「切割失败」,真因其实是「你还没启动桥接」 |
+
+**③ 顺手修的:桥接真的改成无 GUI 了**
+
+`--background` 有个坑:**跑完 `--python` 脚本 Blender 就退出**,GUI 的事件循环
+压根不存在 ⇒ `bpy.app.timers` **永远不会触发** ⇒ 作业堆在队列里,HTTP 线程
+干等到 900 秒超时,网页端只看到一个没头没尾的 `BLENDER_TIMEOUT`。
+
+⇒ 后台模式下**脚本自己不返回** —— `_pump_forever()` 在**主线程**里轮询队列
+(跑活必须在主线程:bpy 的上下文只能主线程碰)。图形界面模式(粘到 Scripting
+里跑 / 装成插件)照旧用定时器,两条路**由 `bpy.app.background` 自己分**。
+
+- 另加 `sys.stdout.reconfigure(line_buffering=True)` —— 输出重定向到文件时
+  Python 默认块缓冲,「桥接已启动」那行会等很久才出来,用户会以为没起来。
+
+**本机 Blender 5.2 两条路都实测过**(真的走 HTTP):
+
+| 模式 | 闭合立方体 | 破口立方体 |
+|---|---|---|
+| `--background`(命令执行,无 GUI) | 去掉 436.79mm³ / 三角 268 / 开放边 0 / 非流形 0 | 去掉 **436.79mm³(一模一样)** / 三角 266 / **开放边 4(破口还在)** / 非流形 0 |
+| 图形界面(定时器那条路) | 同上,数一模一样 | 同上,数一模一样 |
 
 #### ⚠️ Python 字节码缓存那个坑(2026-11-11 实测踩过)
 
@@ -1970,7 +2019,7 @@ public/magnet/
 | `src/test/magnet/pure/write-obj.test.ts` | 三角汤 → OBJ 文本 / 顶点去重 / 1-based 索引 / `-0` 归一化 / **UV 写出(`vt` + `f v/vt`)** / **材质分组(`usemtl` + `mtllib`,面按材质连续)** |
 | `src/test/magnet/pure/magnet-page.test.ts` | 路由在 / 工具中心登记了 / **视口是复用的那一份** / **不进工单**(不碰报价、工单、R2)/ 拖放用 `useDropZone` / 焊接走 `weldAndAnalyzeTopology` / **焊接在清理之前**(磁吸孔自己那份容差阶梯)/ `Manifold.cylinder` 不加 `new` / **孔径是绝对毫米**(可调,但 `EXPECTED_WIDTH_MM` 不许进代码)/ **① 可调** / **② 智能识别背面** / **③ 导出保留材质** / **④ 不是封闭实体 ⇒ 临时盖面再切**(拒绝发生在盖面**之后**)/ **⑤ 先焊接、再清理(「不需要修复」)**/ **⑥ 临时盖面切完要摘掉**(模型上不多出几何)/ **⑦ XYZ 分别调尺寸**(`scalePositionsXYZ`)/ `UNEXPECTED` 码在位 / wasm 提交进仓库 / **中英文 key 递归一致** |
 | `src/test/magnet/pure/magnet-cutter-client.test.ts` | **Worker 回过话**之后超时 ⇒ 报 `WORKER_TIMEOUT`、**不退回主线程** / 崩了 ⇒ `WORKER_CRASHED`、**不退回主线程** / **从没回过话** ⇒ 退回主线程照样切得出来 / Worker 压根没有 ⇒ 退回主线程 / 引擎报的模型错**原样带上来** / 切割超时是 **300 秒**、分析 **60 秒** |
-| `src/test/magnet/pure/magnet-blender-local.test.ts` | 端口归一化(非法 ⇒ 默认)/ **base URL 写死回环** / 探活带协议头 / 协议对不上 ⇒ `BLENDER_BAD_RESPONSE` / 连不上 ⇒ `BLENDER_NOT_RUNNING` / 没回话 ⇒ `BLENDER_TIMEOUT` / 切割的**包 + 头**都对 / 插件报错 ⇒ `BLENDER_FAILED` 且 detail 带着它自己的 code / 回的不是 zip ⇒ `BLENDER_BAD_RESPONSE` / **插件只绑 `127.0.0.1`** / 带 `Access-Control-Allow-Private-Network` / **EXACT → FAST** / **不调 `bpy.ops`** / 切刀摆放跟网页端同一套数学 / **页面有引擎开关** / **不碰工单链路** / **不往我们的服务器发模型** / **指引下便携版 Blender + 插件** / **Blender 模式不跑浏览器的分析** / **插件那条路也不修用户的模型**(临时盖面 + 切完摘掉)/ 统计里带 `lidCapped` / `lidFaces` / `lidStripped` / **一键启动脚本在仓库里**(`.cmd` / `.sh`)/ **页面不许 `child_process` / `spawn` / `execFile`** |
+| `src/test/magnet/pure/magnet-blender-local.test.ts` | 端口归一化(非法 ⇒ 默认)/ **base URL 写死回环** / 探活带协议头 / 协议对不上 ⇒ `BLENDER_BAD_RESPONSE` / 连不上 ⇒ `BLENDER_NOT_RUNNING` / 没回话 ⇒ `BLENDER_TIMEOUT` / 切割的**包 + 头**都对 / 插件报错 ⇒ `BLENDER_FAILED` 且 detail 带着它自己的 code / 回的不是 zip ⇒ `BLENDER_BAD_RESPONSE` / **插件只绑 `127.0.0.1`** / 带 `Access-Control-Allow-Private-Network` / **EXACT → FAST** / **不调 `bpy.ops`** / 切刀摆放跟网页端同一套数学 / **页面有引擎开关** / **不碰工单链路** / **不往我们的服务器发模型** / **指引下便携版 Blender + 插件** / **Blender 模式不跑浏览器的分析** / **插件那条路也不修用户的模型**(临时盖面 + 切完摘掉)/ 统计里带 `lidCapped` / `lidFaces` / `lidStripped` / **一键启动脚本在仓库里**(`.cmd` / `.sh`)/ **页面不许 `child_process` / `spawn` / `execFile`** / **启动脚本走 `--background`(命令执行,不打开 GUI)** / **后台模式自己阻塞跑活**(`_pump_forever`,定时器在后台模式永远不触发)/ 输出不被缓冲 |
 | `src/test/magnet/pure/magnet-engine-load.test.ts` | **wasm 地址必须是绝对地址**(普通页面 / blob Worker / 普通 Worker / opaque origin 不炸)/ `locateFile` 走 `resolveWasmUrl()` / **proxy 的 matcher 把 `wasm` / `py` / `/magnet/*` 排除掉**(静态文件别被 locale 前缀劫持)/ 页面路由与 API 路由照常走 / `ENGINE_LOAD_FAILED` 有中英文文案 |
 
 ### 外国访客 → 海外独立站(2026-11-10)
