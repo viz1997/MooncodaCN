@@ -88,6 +88,7 @@ import {
   BlenderLocalError,
   cutWithLocalBlender,
   MAGNET_BLENDER_ADDON_URL,
+  MAGNET_BLENDER_ADDON_ZIP_URL,
   MAGNET_BLENDER_DEFAULT_PORT,
   MAGNET_BLENDER_LAUNCHER_SH_URL,
   MAGNET_BLENDER_LAUNCHER_URL,
@@ -1117,6 +1118,16 @@ export function MagnetCutterTool() {
 
                   {engine === "blender" && (
                     <div className="mt-3 space-y-2 border-t border-zinc-800 pt-3">
+                      {/* ---- 为什么需要这条 ---- */}
+                      {/* 「插件」这个词把人绕进去了:那不是装进 Blender 的
+                          扩展,就是那份 bridge 脚本,双击启动脚本就跑起来了。
+                          现在**真的做成插件了**(能 Install from Disk 的那个
+                          zip),但「不装任何东西」那条路也得留着 —— 把两条
+                          都说清楚,用户才知道自己要不要走这条路。 */}
+                      <p className="text-[10px] leading-relaxed text-zinc-500">
+                        {t("engine.blenderWhy")}
+                      </p>
+
                       {/* ---- 端口 + 探活 ---- */}
                       <div className="flex items-end gap-2">
                         <div className="min-w-0 flex-1">
@@ -1206,8 +1217,9 @@ export function MagnetCutterTool() {
                           <p className="mt-1 text-[10px] leading-relaxed text-zinc-500">
                             {t("engine.downloadBlenderHint")}
                           </p>
+                          {/* ---- 插件:装成真正的 Blender 插件(推荐) ---- */}
                           <a
-                            href={MAGNET_BLENDER_ADDON_URL}
+                            href={MAGNET_BLENDER_ADDON_ZIP_URL}
                             download
                             className="mt-2 flex items-center gap-1 text-[11px] font-medium text-amber-300 underline underline-offset-2 hover:text-amber-200"
                           >
@@ -1216,6 +1228,18 @@ export function MagnetCutterTool() {
                           </a>
                           <p className="mt-1 text-[10px] leading-relaxed text-zinc-500">
                             {t("engine.addonHint")}
+                          </p>
+                          {/* ---- 不想装插件的话:那份 .py 给启动脚本用 ---- */}
+                          <a
+                            href={MAGNET_BLENDER_ADDON_URL}
+                            download
+                            className="mt-2 flex items-center gap-1 text-[11px] font-medium text-amber-300 underline underline-offset-2 hover:text-amber-200"
+                          >
+                            <Download className="size-3" />
+                            {t("engine.addonScript")}
+                          </a>
+                          <p className="mt-1 text-[10px] leading-relaxed text-zinc-500">
+                            {t("engine.addonScriptHint")}
                           </p>
                         </div>
                       </div>

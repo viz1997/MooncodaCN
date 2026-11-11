@@ -99,9 +99,29 @@ export const MAGNET_BLENDER_PROTOCOL_VERSION = 1;
 export const MAGNET_BLENDER_PORTABLE_URL = "https://www.blender.org/download/";
 
 /**
- * 插件(桥接脚本)的下载地址
+ * 插件包(能直接装进 Blender 的那个 zip)的下载地址
  *
- * 仓库里 `public/magnet/blender_bridge.py` —— 静态资源直接挂在 `/magnet/` 下。
+ * 工作室 2026-11-11 的原话:**「在 Blender 里 Scripting → 新建文本 → 把插件
+ * 粘进去 → Run Script,桥接就起了。做出插件」** —— 「粘进去跑一下」太别扭,
+ * 用户得自己动手。
+ *
+ * ⇒ 页面给的是**这个 zip**:
+ * `Edit → Preferences → Add-ons → Install from Disk… → 选它 → 勾上启用`。
+ * 装完**一打开 Blender 桥接就自动起了**(端口在插件偏好里改)。
+ *
+ * zip 是**构建产物**(`pnpm magnet:addon`),内容就是
+ * `public/magnet/blender_bridge.py` 那份实现(原样拷进去)⇒ 插件跟网页那份
+ * 永远是一个东西,不会漂。
+ */
+export const MAGNET_BLENDER_ADDON_ZIP_URL = "/magnet/mooncoda_magnet_bridge.zip";
+
+/**
+ * 桥接脚本(`.py`)的下载地址
+ *
+ * **给「不装插件」那条路用的** —— 一键启动脚本要 `--python blender_bridge.py`,
+ * 所以那个 `.py` 得跟启动脚本放在同一个文件夹里。
+ *
+ * 装成插件的话用不着这个(插件包里已经带了同一份实现)。
  */
 export const MAGNET_BLENDER_ADDON_URL = "/magnet/blender_bridge.py";
 
@@ -113,7 +133,10 @@ export const MAGNET_BLENDER_ADDON_URL = "/magnet/blender_bridge.py";
  * 把桥接拉起来。
  *
  * 以前用户得手工:开 Blender → Scripting → 新建 → 粘脚本 → Run Script。
- * 现在下载 + 双击就完事(脚本跟 bridge 放同一个文件夹时最省事)。
+ * 现在两条路都能走:
+ * - **装成插件**(推荐):下载 zip → Preferences → Add-ons → 装上 → 勾上启用
+ *   ⇒ 一打开 Blender 桥接就自动起了(见 `MAGNET_BLENDER_ADDON_ZIP_URL`)
+ * - **不装任何东西**:下载这个启动脚本 + 那份 `.py`,放同一个文件夹,双击就完事
  */
 export const MAGNET_BLENDER_LAUNCHER_URL = "/magnet/start_blender.cmd";
 

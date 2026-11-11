@@ -150,6 +150,10 @@ pnpm migrate:apply-payment-channel   # 收款通道那几列
 
 # 资产准备 —— 产物提交进仓库,新克隆的机器不用跑
 pnpm magnet:wasm          # 把 manifold-3d 的 wasm 拷进 public/
+pnpm magnet:addon         # 把 Blender 桥接打成可安装的插件 zip
+
+# 磁吸孔的 MCP 服务器(stdio)—— 让 AI 客户端直接切磁吸孔
+pnpm magnet:mcp
 ```
 
 Tests live in `src/test/` (not colocated), run sequentially to avoid DB race conditions, with 30s timeout for integration tests. Test env vars loaded from `.env.test`.
@@ -1458,6 +1462,30 @@ Blender**」。工作室后面又补了三句,把这条路彻底定死了:
 修不了 —— 那种模型 manifold 的 EXACT 布尔算不出来。Blender 那边有
 EXACT → FAST 兜底 + 一堆修复 pass,正好治这个。**所以这条是兜底,不是必经之路。**
 
+#### 「为什么需要插件」—— 页面自己得回答这个问题(工作室 2026-11-11 问的)
+
+工作室的原话:**「为什么需要插件」**。答案有三层,**页面上必须说清楚**,不然
+用户看到「本地 Blender 切」就以为要装插件,直接走了:
+
+| 问题 | 答案 |
+|---|---|
+| **必须装吗?** | **不用** —— 默认那条「浏览器内切」**什么都不用装**(wasm 引擎在浏览器里跑) |
+| **那这条是干嘛的?** | 兜底 —— 只给**自相交**那种浏览器引擎算不出来的模型 |
+| **「插件」是什么?** | **不是装进 Blender 的扩展** —— 就是那份 `blender_bridge.py`,**双击启动脚本**就跑起来了(Blender 以 `--background` 在后台跑,不开界面) |
+
+- **它只做一件事** —— 在你电脑的**回环地址**上开一个端口,让网页把模型递进去、
+  把切好的模型拿回来(Blender 自己没有 HTTP 服务,网页也没法直接跟桌面程序说话)。
+- **侧栏有一句 `engine.blenderWhy`** —— 上面那三条都写在里面(切到「本地 Blender
+  切」那一栏才出现)。
+- **`BLENDER_NOT_RUNNING` 的文案说**两个**可能的原因** —— ① 桥接没在跑(双击启动
+  脚本)② 浏览器拦了「公网页面访问本机」(Chrome 新版的本地网络权限)。以前只说
+  「确认插件已经跑起来」,把②那条路堵死了 —— 用户桥接明明起着,还是看到同一句。
+  **文案里同时指着零安装那条路**(「不想折腾就用默认的「浏览器内切」」)。
+- **浏览器引擎布尔失败时 ⇒ 指到本地那条路** —— `errors.codes.booleanFailed` 里
+  补了一句「常见原因是几何自相交 —— 浏览器里的引擎算不了这种模型,可以切到
+  「本地 Blender」那条路」。**兜底路径要在用户需要的时候被指出来**,不是摆在
+  侧栏里等人自己发现。
+
 **本地 Blender 那条路不跑浏览器的分析** —— 浏览器的分析(以及修复)管的是
 **封闭实体**那一套,插件自己挑面(按面积找最大的平面,跟工作室脚本一个口径)。
 所以那条路**必须能在浏览器分析失败时照样切**。侧栏的候选面表格在 Blender
@@ -2021,6 +2049,97 @@ public/magnet/
 | `src/test/magnet/pure/magnet-cutter-client.test.ts` | **Worker 回过话**之后超时 ⇒ 报 `WORKER_TIMEOUT`、**不退回主线程** / 崩了 ⇒ `WORKER_CRASHED`、**不退回主线程** / **从没回过话** ⇒ 退回主线程照样切得出来 / Worker 压根没有 ⇒ 退回主线程 / 引擎报的模型错**原样带上来** / 切割超时是 **300 秒**、分析 **60 秒** |
 | `src/test/magnet/pure/magnet-blender-local.test.ts` | 端口归一化(非法 ⇒ 默认)/ **base URL 写死回环** / 探活带协议头 / 协议对不上 ⇒ `BLENDER_BAD_RESPONSE` / 连不上 ⇒ `BLENDER_NOT_RUNNING` / 没回话 ⇒ `BLENDER_TIMEOUT` / 切割的**包 + 头**都对 / 插件报错 ⇒ `BLENDER_FAILED` 且 detail 带着它自己的 code / 回的不是 zip ⇒ `BLENDER_BAD_RESPONSE` / **插件只绑 `127.0.0.1`** / 带 `Access-Control-Allow-Private-Network` / **EXACT → FAST** / **不调 `bpy.ops`** / 切刀摆放跟网页端同一套数学 / **页面有引擎开关** / **不碰工单链路** / **不往我们的服务器发模型** / **指引下便携版 Blender + 插件** / **Blender 模式不跑浏览器的分析** / **插件那条路也不修用户的模型**(临时盖面 + 切完摘掉)/ 统计里带 `lidCapped` / `lidFaces` / `lidStripped` / **一键启动脚本在仓库里**(`.cmd` / `.sh`)/ **页面不许 `child_process` / `spawn` / `execFile`** / **启动脚本走 `--background`(命令执行,不打开 GUI)** / **后台模式自己阻塞跑活**(`_pump_forever`,定时器在后台模式永远不触发)/ 输出不被缓冲 |
 | `src/test/magnet/pure/magnet-engine-load.test.ts` | **wasm 地址必须是绝对地址**(普通页面 / blob Worker / 普通 Worker / opaque origin 不炸)/ `locateFile` 走 `resolveWasmUrl()` / **proxy 的 matcher 把 `wasm` / `py` / `/magnet/*` 排除掉**(静态文件别被 locale 前缀劫持)/ 页面路由与 API 路由照常走 / `ENGINE_LOAD_FAILED` 有中英文文案 |
+
+### 磁吸孔的两条新路:可安装的 Blender 插件 + MCP 服务器(2026-11-11)
+
+工作室的原话:**「在 Blender 里 Scripting → 新建文本 → 把插件粘进去 → Run
+Script,桥接就起了。做出插件,或者 mcp 协议」**。
+
+那一句是在转述用户**装插件**的别扭姿势(工作室在问「能不能做成个插件」)。
+两条路都做了:
+
+| 路 | 是什么 | 谁用 |
+|---|---|---|
+| **可安装的插件** | `public/magnet/mooncoda_magnet_bridge.zip` —— Edit → Preferences → Add-ons → Install from Disk… | 工作室自己 / 拿 Blender 切孔的人 |
+| **MCP 服务器** | `pnpm magnet:mcp` —— 一个 stdio 的 MCP server,三个工具 | 能驱动 MCP 的 AI 客户端(Claude Code / Claude Desktop) |
+
+#### 一、可安装的 Blender 插件
+
+- **产物提交进仓库** —— `public/magnet/mooncoda_magnet_bridge.zip`(跟
+  `public/manifold.wasm` 一个道理)。构建:`pnpm magnet:addon`
+  (`scripts/build-blender-addon.ts`)。
+- **zip 的形状** —— Blender 装 zip 插件要求:**压缩包里只有一个顶层目录**,
+  目录名 = 模块名(这里 `mooncoda_magnet_bridge/`)。包里两个文件:
+  - `__init__.py` —— 把 `bl_info` / `register` / `unregister` 从 `bridge.py`
+    **再导出一次**。**不许在入口里再抄一份 `bl_info`** —— 抄了就会跟实现
+    漂移(改了实现忘了抄,插件装上还是旧行为)。
+  - `bridge.py` —— 跟 `public/magnet/blender_bridge.py` **一个字节都不差**
+    (单测守着 ⇒ 插件跟网页那份**永远是一个东西**)。
+- **装完自动起** —— `AddonPreferences`(端口在偏好里改)+ 面板
+  `MOONCODA_PT_bridge` + 操作器 `mooncoda.start_bridge` /
+  `mooncoda.stop_bridge` / `mooncoda.open_web`。
+- **老路没删** —— 「Scripting → 粘进去 → Run Script」那条路照旧能用
+  (`blender_bridge.py` 还是**真理源**)。插件只是把它包起来。
+- **页面给得到那个 zip** —— `MAGNET_BLENDER_ADDON_ZIP_URL`;`src/proxy.ts`
+  的 matcher 把 `/magnet/*` 排除掉(不然 `/magnet/xxx.zip` 会被 307 到
+  `/zh/magnet/xxx.zip` → 404)。
+
+#### 二、MCP 服务器
+
+- **位置** —— `scripts/magnet-mcp-server.ts`(stdio 传输)。跑起来:`pnpm
+  magnet:mcp`。
+- **协议** —— MCP 的 stdio 传输 = **一行一个 JSON-RPC**(不是 LSP 那种
+  `Content-Length` 分帧)。`initialize` 协商版本(支持 `2025-06-18` /
+  `2025-03-26` / `2024-11-05`)/ `tools/list` / `tools/call`;**通知(没有
+  `id`)一律不回**(回了客户端也不认);工具不存在回 `-32602`。
+- **三个工具**:
+
+  | 工具 | 干什么 | 主要入参 |
+  |---|---|---|
+  | `magnet_analyze` | 分析模型(体积 / 六个面 / 智能识别的平面 / 候选面 / 模型状态) | `path` / `holeDiaMm` / `holeDepthMm` |
+  | `magnet_cut` | **浏览器那条路**(Manifold3D wasm)切孔,写回磁盘 | 同上 + `outPath` / `target` |
+  | `magnet_cut_blender` | **本地 Blender 那条路**切孔(自相交那种模型) | 同上 + `outPath` / `port` |
+
+- **引擎是**同一份代码** —— 服务器调的就是网页那条路调的那两个函数
+  (`magnet-cutter-handler.ts` 的 `analyzeModel()` / `cutMagnetPocket()`)
+  ⇒ **网页上算出来的数,这边算出来是同一个数**。不是「另写一套 MCP 版算法」。
+- **分层** —— 协议层(`src/features/magnet/lib/mcp-protocol.ts`)与排版层
+  (`src/features/magnet/lib/mcp-report.ts`)**零 import 的纯函数**,放在
+  `src/features/` 里能进 `unit` project 跑单测;文件 IO + 引擎调用 +
+  stdio 循环在 `scripts/`(那目录**不在 `tsconfig.json` 里** ⇒ 不进
+  typecheck;tsx 走 CJS ⇒ **不许顶层 await**)。
+- **stdout 是协议通道** —— 服务器往 stdout 写的**只有** JSON-RPC 响应;
+  所有日志走 **stderr**。往 stdout 写一行日志就把协议搅乱了。
+- **三条硬规矩跟网页那条路一样** —— ① **模型不出这台电脑**(文件从磁盘读、
+  结果写回磁盘)② **不进工单**(不碰报价 / 工单 / R2 上传 / 支撑克重)③
+  **不悄悄改用户的模型**(破口临时封上、切完摘掉)。
+- **不会悄悄缩放模型** —— AI 导出的模型坐标常常是归一化的(±1),不是毫米。
+  `magnet_analyze` 的输出里有一行 ⚠️ 提醒(`looksLikeNotMillimeters`),**但
+  工具不自己改尺寸** —— 缩放多少是人的决定。尺寸不对会表现为「孔比模型还大
+  / `FACE_NOT_CUTTABLE`」。
+- **Blender 那条路也只跟 `127.0.0.1` 说话** —— 端口默认 8765,只绑回环
+  (测试守着:脚本里不许出现 `http://localhost:` 或任何别的 `http(s)://`)。
+
+**MCP 客户端那边这样配**(Claude Code):
+
+```json
+{
+  "mcpServers": {
+    "mooncoda-magnet": {
+      "command": "pnpm",
+      "args": ["magnet:mcp"],
+      "cwd": "/path/to/MooncodaCN"
+    }
+  }
+}
+```
+
+#### 行为由单测守住
+
+| 测试 | 守住什么 |
+|---|---|
+| `src/test/magnet/pure/magnet-addon.test.ts` | 插件包在仓库里 / zip **只有一个顶层目录**、目录名 = 模块名 / 包里的 `bridge.py` 跟源码**一个字节都不差**(不会漂)/ 入口 re-export `bl_info` / `register` / `unregister` 且**不抄第二份 `bl_info`** / 源码里有 `AddonPreferences` / 面板 / 操作器 / 协议版本对得上 / **只绑 `127.0.0.1`**(不许 `0.0.0.0`)/ **proxy 的 matcher 放 `/magnet/*` 过**(页面路由照常走 locale)/ 构建脚本在仓库里 + `package.json` 登记了 `magnet:addon` |
+| `src/test/magnet/pure/magnet-mcp.test.ts` | 协议合规(版本协商 / **通知不回** / 工具不存在回 `-32602` / 不认识的方法回 `-32601` / 不是 2.0 回 `-32600` / 解不了 JSON 回 `-32700`)/ 工具炸了也给一份看得懂的内容(标 `isError`)/ 排版说人话(「可以切」/「太薄 —— 切下去会捅穿」/「一个字节都没改」/「临时封上了 … 不会多出几何」)/ **坐标不像毫米时要提醒**(不悄悄缩放)/ **引擎是同一份代码**/ **只跟 `127.0.0.1` 说话**/ **stdout 只写一次**(协议通道)/ **不进工单**(不碰报价 / 工单 / R2)/ 协议层与排版层住在 `src/features/magnet/lib/`(能进 unit project) |
 
 ### 外国访客 → 海外独立站(2026-11-10,**2026-11-11 改了口径**)
 

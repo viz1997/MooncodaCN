@@ -35,6 +35,8 @@
     "sellbase:bootstrap": "tsx scripts/bootstrap-sellbase-store.ts",
     "sellbase:configure-jobs": "tsx scripts/configure-sellbase-jobs.ts",
     "sellbase:fetch-assets": "tsx scripts/fetch-sellbase-assets.ts",
+    "magnet:addon": "tsx scripts/build-blender-addon.ts",
+    "magnet:mcp": "tsx scripts/magnet-mcp-server.ts",
     "magnet:wasm": "tsx scripts/copy-manifold-wasm.ts",
     "sync:sellbase-catalog": "tsx scripts/sync-sellbase-catalog.ts",
     "webhook:register-sellbase": "tsx scripts/register-sellbase-webhook.ts",

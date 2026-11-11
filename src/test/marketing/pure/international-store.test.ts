@@ -107,6 +107,18 @@ describe("海外独立站入口", () => {
       expect(src).toContain("internationalStoreUrl");
     });
 
+    it("文件头得写清楚「构建期内联 ⇒ 配完要重新部署」这个坑", () => {
+      // **入口整个不出现**的最常见原因就是这个:环境变量配了,
+      // 但线上跑的还是配之前那次构建(NEXT_PUBLIC_* 是构建期内联的)。
+      // 变量说明只能写在 `src/config/site.ts` 的文件头里
+      // (`.env.example` 被 gitignore,新克隆的机器上没有那个文件)。
+      const src = read(SITE);
+      expect(src).toContain("NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL");
+      // 「构建期内联」和「重新部署」这两件事得写在说明里
+      expect(src).toMatch(/构建期/);
+      expect(src).toMatch(/重新部署/);
+    });
+
     it("别跟已下线的 Shopify **支付通道**搞混", () => {
       // SHOPIFY_STORE_DOMAIN 是收款通道的 Admin API 域名(2026-11-05 下线)
       // —— 新代码里不许再出现它(注释里可以**提**它,那是解释区别)

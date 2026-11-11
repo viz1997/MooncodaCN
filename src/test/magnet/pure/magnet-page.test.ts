@@ -417,6 +417,39 @@ describe("磁吸孔工具页面", () => {
     expect(statSync(wasm).size).toBeGreaterThan(400_000);
   });
 
+  it("**为什么需要插件** —— 页面自己要说清楚(工作室 2026-11-11 问的)", () => {
+    const zh = flattenKeys(messages("zh").Magnet);
+    const en = flattenKeys(messages("en").Magnet);
+
+    // ① 「插件」不是装进 Blender 的扩展 —— 就是那份 bridge 脚本,
+    //    双击启动脚本就跑起来了。页面上得把这件事说清楚,
+    //    否则用户以为要装插件,直接走了。
+    expect(zh["engine.blenderWhy"]).toBeTruthy();
+    expect(en["engine.blenderWhy"]).toBeTruthy();
+    expect(zh["engine.blenderWhy"]).toContain("插件");
+    expect(en["engine.blenderWhy"]).toMatch(/add-on/i);
+    // 「为什么」本身也要有 —— 这条路是给浏览器引擎算不出来的模型兜底的
+    expect(zh["engine.blenderWhy"]).toContain("为什么");
+    expect(en["engine.blenderWhy"]).toMatch(/^why/i);
+    // 回环地址 —— 「模型不出这台电脑」这句的依据
+    expect(zh["engine.blenderWhy"]).toContain("回环");
+    expect(en["engine.blenderWhy"]).toMatch(/loopback/i);
+    // 页面上真的摆出来了(不只是文案躺在语言包里)
+    expect(read(TOOL)).toContain('t("engine.blenderWhy")');
+
+    // ② 连不上的时候要说出**两个**可能的原因,并且指着零安装那条路
+    expect(zh["engine.offline"]).toContain("启动脚本");
+    expect(en["engine.offline"]).toMatch(/launcher/i);
+    expect(zh["engine.offline"]).toContain("浏览器内切");
+    expect(en["engine.offline"]).toMatch(/browser/i);
+    expect(zh["errors.codes.blenderNotRunning"]).toContain("启动脚本");
+    expect(en["errors.codes.blenderNotRunning"]).toMatch(/launcher/i);
+
+    // ③ 浏览器引擎布尔失败 ⇒ 指到本地那条路(自相交是常见原因)
+    expect(zh["errors.codes.booleanFailed"]).toContain("本地 Blender");
+    expect(en["errors.codes.booleanFailed"]).toMatch(/local Blender/i);
+  });
+
   it("中英文 key 一致(Magnet 命名空间 + 工具中心那一条)", () => {
     const zh = messages("zh");
     const en = messages("en");

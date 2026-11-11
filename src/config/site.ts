@@ -30,6 +30,9 @@ export const siteConfig = {
    * 走环境变量 `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL`。空字符串 ⇒ **所有语言
    * 站上**既没有顶部公告条、也没有导航按钮(别留一条指向空地址的死链)。
    *
+   * 配上了就**所有语言站都出现**(2026-11-11 工作室改的口径:「不是 en 才是,
+   * 所有都要」—— 中文站上也有境外买家)。
+   *
    * ⚠️ **这跟 `src/features/payments/providers/shopify/` 那个支付通道不是
    * 一回事** —— 那个 2026-11-05 就下线了(`SHOPIFY_STORE_DOMAIN` 那套是
    * Admin API,给收款用的)。这里说的是**另一个 Shopify 店铺的顾客访问

@@ -5,14 +5,22 @@
 
 用法(三种都行):
 
-  A. **直接跑**(最省事)
+  A. **装成插件**(推荐 —— 一次装好,以后打开 Blender 就自动起)
+     下载网页给的 ``mooncoda_magnet_bridge.zip``,然后
+     Blender → Edit → Preferences → Add-ons → Install…(Install from Disk)→
+     选那个 zip → 勾上「Mooncoda Magnet Bridge」启用。
+
+     启用之后**桥接自动就起了**(端口在偏好设置里改);要手动开关就点
+     3D 视图右侧(N 面板)→ Mooncoda →「启动桥接 / 停止桥接」。
+
+     ⚠️ **那个 zip 是从这个文件构建出来的** —— 内容完全一样,只是包成了
+     Blender 认的插件结构(``mooncoda_magnet_bridge/__init__.py`` +
+     ``bridge.py``)。改了这份源码要重新构建:
+     ``pnpm magnet:addon``。
+
+  B. **直接跑**(临时用一下)
      Blender → Scripting → 新建文本 → 把本文件整个粘进去 → Run Script
      跑完桥接就起了,控制台会打印端口(默认 8765)。
-
-  B. **装成插件**
-     把本文件压成 ``blender_bridge.zip``(压缩包里就这一个文件),
-     Blender → Edit → Preferences → Add-ons → Install… → 选那个 zip,
-     然后在 3D 视图右侧(N 面板)→ Mooncoda 里点「启动桥接」。
 
   C. **命令执行(不打开 GUI)** —— 网页给的一键启动脚本走的就是这条
      ``blender --background --factory-startup --python blender_bridge.py``
@@ -61,7 +69,7 @@
 bl_info = {
     "name": "Mooncoda Magnet Bridge",
     "author": "Mooncoda",
-    "version": (1, 0, 0),
+    "version": (1, 1, 0),
     "blender": (3, 0, 0),
     "location": "View3D > Sidebar > Mooncoda",
     "description": "让网页版的磁吸孔切割工具调用本机 Blender 切孔(模型不出这台电脑)",
@@ -127,6 +135,31 @@ PLACEHOLDER_MATERIAL_NAME = "__magnet_placeholder__"
 
 #: 临时材质的前缀 —— 切完在用户的 Blender 里一个都不留
 TEMP_MATERIAL_PREFIX = "__magnet_"
+
+#: 磁吸孔页面 —— 面板上那颗「打开页面」按钮用它
+MAGNET_PAGE_URL = "https://aimake3d.com/zh/tools/magnet"
+
+
+# ---------------------------------------------------------------------------
+# 「我是个插件模块吗?」
+# ---------------------------------------------------------------------------
+#
+# 这份文件有**三种身份**:
+#
+# - **装成 zip 插件** ⇒ 模块名 ``mooncoda_magnet_bridge.bridge``
+#   (包名 + 子模块名)
+# - **装成 legacy .py 插件** ⇒ 模块名 ``blender_bridge``
+# - **直接跑**(粘到 Text Editor / ``--python``)⇒ ``__main__``
+#
+# 插件偏好(AddonPreferences)的 ``bl_idname`` 跟模块名对得上,Blender 才能
+# 在 ``bpy.context.preferences.addons[<模块名>]`` 里找到它 ——
+# 而「直接跑」那种身份压根不在那张表里(所以那边拿不到偏好,端口走默认值)。
+def _addon_module_name():
+    return (__name__ or "__main__").split(".")[0]
+
+
+#: 这个模块在 Blender 里的名字(插件偏好按它注册)
+ADDON_MODULE = _addon_module_name()
 
 # ---------------------------------------------------------------------------
 # 运行期状态
@@ -1367,6 +1400,71 @@ def _clamp(value, low, high):
 # ---------------------------------------------------------------------------
 
 
+def _prefs(context=None):
+    """拿插件偏好 —— 没有就返回 None。
+
+    查的是 ``bpy.context.preferences.addons[<模块名>]`` ——
+    只有**装成插件**才在那个表里;直接跑(``--python`` / 粘到 Text Editor)
+    时不在 ⇒ 那边端口走默认值。
+    """
+    try:
+        ctx = context or bpy.context
+        addon = ctx.preferences.addons.get(ADDON_MODULE)
+        if addon is None:
+            return None
+        return addon.preferences
+    except Exception:
+        return None
+
+
+def _bridge_port(prefs=None):
+    """当前该用哪个端口 —— 偏好里改了就用偏好里的。"""
+    raw = getattr(prefs, "port", None) if prefs is not None else None
+    try:
+        port = int(raw)
+    except (TypeError, ValueError):
+        port = DEFAULT_PORT
+    if port < 1024 or port > 65535:
+        port = DEFAULT_PORT
+    return port
+
+
+class MOONCODA_AddonPreferences(bpy.types.AddonPreferences):
+    """插件偏好 —— 端口 + 启用时自动启动。
+
+    Blender 会**自动**把这个类的 ``draw()`` 画在
+    Preferences → Add-ons → Mooncoda Magnet Bridge 下面(不用另写面板)。
+    """
+
+    # ⚠️ 必须跟模块名一致 —— Blender 靠它把偏好跟插件对上
+    bl_idname = ADDON_MODULE
+
+    port: bpy.props.IntProperty(
+        name="端口",
+        description="桥接在本机开的端口 —— 网页端那边填一样的数(改完要重启桥接)",
+        default=DEFAULT_PORT,
+        min=1024,
+        max=65535,
+    )
+    auto_start: bpy.props.BoolProperty(
+        name="启用时自动启动桥接",
+        description="一打开 Blender 就把桥接起上(不用每次手动点)",
+        default=True,
+    )
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "port")
+        layout.prop(self, "auto_start")
+        layout.separator()
+        if _server is not None:
+            layout.label(text="桥接运行中:%d" % _server_port, icon="CHECKMARK")
+        else:
+            layout.label(text="桥接没起", icon="INFO")
+        layout.operator("mooncoda.start_bridge", icon="PLAY")
+        layout.operator("mooncoda.stop_bridge", icon="PAUSE")
+
+
 class MOONCODA_PT_bridge(bpy.types.Panel):
     bl_label = "Mooncoda 磁吸孔桥接"
     bl_idname = "MOONCODA_PT_bridge"
@@ -1381,7 +1479,17 @@ class MOONCODA_PT_bridge(bpy.types.Panel):
             layout.label(text="网页端选「本地 Blender」就能用了")
         else:
             layout.label(text="桥接没起", icon="INFO")
-            layout.operator("mooncoda.start_bridge", icon="PLAY")
+
+        prefs = _prefs(context)
+        row = layout.row()
+        if prefs is not None:
+            row.prop(prefs, "port")
+        else:
+            row.label(text="端口 %d" % DEFAULT_PORT)
+        row.operator("mooncoda.start_bridge", icon="PLAY")
+        layout.operator("mooncoda.stop_bridge", icon="PAUSE")
+        layout.separator()
+        layout.operator("mooncoda.open_web", icon="URL")
 
 
 class MOONCODA_OT_start_bridge(bpy.types.Operator):
@@ -1392,8 +1500,16 @@ class MOONCODA_OT_start_bridge(bpy.types.Operator):
     )
 
     def execute(self, context):
-        port = start_bridge(DEFAULT_PORT)
-        if port is None:
+        prefs = _prefs(context)
+        port = _bridge_port(prefs)
+        if _server is not None:
+            if _server_port == port:
+                self.report({"INFO"}, "桥接已经在跑了:127.0.0.1:%d" % _server_port)
+                return {"FINISHED"}
+            # 端口改过了 —— 重起,不然还挂在旧端口上
+            stop_bridge()
+        started = start_bridge(port)
+        if started is None:
             self.report({"ERROR"}, "端口 %d 起不来(可能已被占用)" % DEFAULT_PORT)
         else:
             self.report({"INFO"}, "桥接已启动:127.0.0.1:%d" % port)
@@ -1410,16 +1526,47 @@ class MOONCODA_OT_stop_bridge(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class MOONCODA_OT_open_web(bpy.types.Operator):
+    bl_idname = "mooncoda.open_web"
+    bl_label = "打开磁吸孔页面"
+    bl_description = "在浏览器里打开网页版的磁吸孔切割工具"
+
+    def execute(self, context):
+        try:
+            bpy.ops.wm.url_open(url=MAGNET_PAGE_URL)
+        except Exception:
+            self.report({"ERROR"}, "打不开页面,手动访问 %s" % MAGNET_PAGE_URL)
+        return {"FINISHED"}
+
+
 _CLASSES = (
+    MOONCODA_AddonPreferences,
     MOONCODA_PT_bridge,
     MOONCODA_OT_start_bridge,
     MOONCODA_OT_stop_bridge,
+    MOONCODA_OT_open_web,
 )
 
 
 def register():
     for cls in _CLASSES:
+        # 插件偏好只在**装成插件**时才有意义 —— 直接跑的时候 Blender 的
+        # 插件表里没有这一条,注册了也取不到(老版本 Blender 还会直接报错)
+        if cls is MOONCODA_AddonPreferences and ADDON_MODULE == "__main__":
+            continue
         bpy.utils.register_class(cls)
+    # 装成插件之后,**一打开 Blender 就把桥接起上** —— 装一次就行,
+    # 不用每次都去面板里点一下「启动桥接」。
+    # 偏好拿不到(直接跑 / --factory-startup)就按默认来。
+    #
+    # ⚠️ **后台模式不自动起** —— `--background` 下没有事件循环,起来了
+    # 也没人跑活(作业会堆在队列里等到超时),而且 `register()` 里不能阻塞
+    # (会把整个 Blender 卡住)。后台模式由 `__main__` 那条路显式起 +
+    # `_pump_forever()` 自己泵。
+    prefs = _prefs()
+    auto = True if prefs is None else bool(getattr(prefs, "auto_start", True))
+    if auto and not bpy.app.background:
+        start_bridge(_bridge_port(prefs))
 
 
 def unregister():
