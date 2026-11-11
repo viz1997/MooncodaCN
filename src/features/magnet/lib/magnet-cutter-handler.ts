@@ -220,7 +220,13 @@ function prepareTopology(positions: Float32Array): Topology {
   const key = fingerprint(positions);
   if (topologyCache && topologyCache.key === key) return topologyCache.topology;
 
-  const topo = weldAndAnalyzeTopology(positions);
+  let topo: ReturnType<typeof weldAndAnalyzeTopology>;
+  try {
+    topo = weldAndAnalyzeTopology(positions);
+  } catch (err) {
+    // 焊接在极端几何(退化面 / NaN 顶点)上会抛 —— 原始信息得留住
+    throw engineError("网格焊接", err);
+  }
 
   if (topo.mesh.faceCount === 0) {
     throw new MagnetCutterError(
@@ -370,9 +376,23 @@ async function buildModel(
   const runtime = await loadManifoldRuntime();
   const topology = prepareTopology(positions);
 
-  const { input, materialIds } = texture
-    ? buildTexturedMeshInput(runtime, topology, texture)
-    : { input: buildPlainMeshInput(topology), materialIds: [] as number[] };
+  let input: ManifoldMeshInput;
+  let materialIds: number[];
+  if (texture) {
+    try {
+      const built = buildTexturedMeshInput(runtime, topology, texture);
+      input = built.input;
+      materialIds = built.materialIds;
+    } catch (err) {
+      // `buildTexturedMeshInput` 自己抛的 `MagnetCutterError` 原样放行
+      if (err instanceof MagnetCutterError) throw err;
+      // `reserveIDs()` 之类的调用炸了 —— 说清楚是哪一步
+      throw engineError("带贴图的网格构建", err);
+    }
+  } else {
+    input = buildPlainMeshInput(topology);
+    materialIds = [];
+  }
 
   let model: Manifold;
   try {
@@ -599,6 +619,22 @@ function describeManifoldError(err: unknown): string {
   }
   if (err instanceof Error) return err.message;
   return "未知错误";
+}
+
+/**
+ * 引擎那一步抛了个预料之外的错 → `ENGINE_FAILED`
+ *
+ * **带上原始信息** —— 工作室要能一眼看出是哪一步炸的(「建网格失败」/
+ * 「切刀摆放失败」/「取结果失败」),而不是一句「出了个预料之外的错」。
+ *
+ * 以前这些错一路冒到最外层,全被归成 `UNEXPECTED`,原始信息全丢了 ——
+ * 工作室看到的只有一句「切割过程出了意外(不是模型的问题)」。
+ */
+function engineError(what: string, err: unknown): MagnetCutterError {
+  return new MagnetCutterError(
+    "ENGINE_FAILED",
+    `${what}失败:${describeManifoldError(err)}`
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1006,15 +1042,21 @@ export async function cutMagnetPocket(
    * 第 5 个参数 `center = true` = 圆柱**居中**(默认是底面在原点)——
    * 切刀中心是 `facePoint + inward × (d/2 − p)`,不是底面。
    */
-  const cutter = runtime.Manifold.cylinder(
-    placement.height,
-    placement.radius,
-    placement.radius,
-    placement.segments,
-    true
-  )
-    .transform(alignZTo(placement.axis) as unknown as Mat4)
-    .translate(placement.center as Vec3);
+  let cutter: Manifold;
+  try {
+    cutter = runtime.Manifold.cylinder(
+      placement.height,
+      placement.radius,
+      placement.radius,
+      placement.segments,
+      true
+    )
+      .transform(alignZTo(placement.axis) as unknown as Mat4)
+      .translate(placement.center as Vec3);
+  } catch (err) {
+    // 切刀造不出来(参数非法 / 引擎抽风)—— 说清楚是哪一步
+    throw engineError("切刀摆放", err);
+  }
 
   let result: Manifold;
   try {
@@ -1079,7 +1121,12 @@ export async function cutMagnetPocket(
     );
   }
 
-  const mesh = result.getMesh();
+  let mesh: Mesh;
+  try {
+    mesh = result.getMesh();
+  } catch (err) {
+    throw engineError("取切完的结果", err);
+  }
   // 孔壁是新生成的三角形 —— 它们属于「被切的那个面」的材质
   const fallbackMaterial = findMaterialAtPoint(
     prepared.topology.corrected,
@@ -1088,8 +1135,15 @@ export async function cutMagnetPocket(
     0
   );
 
+  let output: ReturnType<typeof extractOutput>;
+  try {
+    output = extractOutput(mesh, prepared.materialIds, fallbackMaterial);
+  } catch (err) {
+    throw engineError("读取切完的三角形", err);
+  }
+
   return {
-    ...extractOutput(mesh, prepared.materialIds, fallbackMaterial),
+    ...output,
     volumeBefore: prepared.volume,
     volumeAfter,
     removedVolume,

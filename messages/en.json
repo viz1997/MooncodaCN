@@ -1505,6 +1505,26 @@
       "texture": "Show texture",
       "empty": "Drop a model to get started"
     },
+    "engine": {
+      "title": "Cutting engine",
+      "browser": "Cut in the browser",
+      "browserHint": "Nothing to install — but models that are not closed solids (open or non-manifold edges) cannot be cut this way.",
+      "blender": "Cut with local Blender",
+      "blenderHint": "Cuts on your own machine — non-manifold and self-intersecting models work too. The model only goes to 127.0.0.1; it never leaves this computer.",
+      "portLabel": "Port",
+      "check": "Check Blender",
+      "checking": "Checking…",
+      "online": "Connected — Blender {version}",
+      "offline": "Cannot reach the local Blender",
+      "downloadBlender": "Download the portable Blender",
+      "downloadBlenderHint": "The official site offers a “Windows portable (.zip)” build — unzip it and run it, no installer needed.",
+      "addon": "Download the add-on",
+      "addonHint": "In Blender: Scripting → New → paste the add-on → Run Script. That starts the bridge.",
+      "faceNote": "The local Blender picks the largest flat region on the model itself — the candidate-face tables above are not used.",
+      "solver": "Solver",
+      "warnings": "Warnings",
+      "resultNote": "The cut model came back from the Blender on your own machine."
+    },
     "errors": {
       "generic": "Something went wrong — please try again.",
       "noGeometry": "No geometry could be read from this file.",
@@ -1518,7 +1538,15 @@
         "volumeUnchanged": "The model's volume did not change, so the cut was rejected — the original model was kept.",
         "holeSpilled": "The pocket spilled over the edge of the model, so it was rejected. Pick a face with more room around it.",
         "faceNotCuttable": "That face cannot be cut — pick another one.",
-        "unexpected": "The cut hit an unexpected problem (nothing to do with your model) — please try again; if it keeps happening, try a different model."
+        "workerTimeout": "The cut ran for several minutes without finishing — this model is too heavy for the browser (AI-generated models often have hundreds of thousands of faces, and the exact boolean is genuinely slow). Decimate it in your modelling tool first, or try a different model.",
+        "workerCrashed": "The cutting engine crashed on this model — usually because the geometry self-intersects or has too many faces. Check it in the Print Pre-flight Workbench for problem edges.",
+        "workerUnavailable": "This browser could not start the cutting Worker, and the main-thread fallback did not work either — refresh the page and try again, or use a different browser.",
+        "engineFailed": "The cutting engine failed at one step — the exact step is in the raw detail below.",
+        "unexpected": "The cut hit an unexpected problem — the raw detail below says what happened.",
+        "blenderNotRunning": "Could not reach the Blender on your own machine — check that the add-on is running and that the port matches the one on this page.",
+        "blenderFailed": "The cut failed inside your Blender — the raw detail below says why.",
+        "blenderTimeout": "Your Blender is still working on it — the model may be too large. Try decimating it first.",
+        "blenderBadResponse": "Your Blender sent back something unexpected — the add-on version may not match this page. Download the add-on again and retry."
       }
     }
   },

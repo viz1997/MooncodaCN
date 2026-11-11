@@ -24,8 +24,26 @@
  * - **不进工单** —— 切完只本地下载。下单时仍然传**原始模型**,工作室自己
  *   在 Blender 里切。所以这个工具**一行都不碰**报价 / 工单 / R2 上传 /
  *   支撑克重那条链路。
- * - **模型不上传** —— 解析、焊接、布尔运算全在浏览器里跑(Worker)。
+ * - **模型不上传** —— 两条引擎都在用户自己这台机器上跑(见下面「两条引擎」),
+ *   **没有服务器**。
  * - **孔径是实物尺寸** —— 磁铁是固定尺寸的实体,孔径**不跟模型缩放**。
+ *
+ * ## 两条引擎(用户自己选,2026-11-11 加)
+ *
+ * | 引擎 | 干什么 | 适合谁 |
+ * |---|---|---|
+ * | **浏览器**(默认) | Manifold3D(WASM)在 Worker 里跑 | 模型是干净的(流形、闭合) |
+ * | **本地 Blender** | 装一个插件,切孔在**用户自己电脑上**跑 | AI 生成的模型(非流形是常态) |
+ *
+ * - **浏览器那条路会拒掉非流形模型**(`NOT_MANIFOLD`)—— 工作室的模型是
+ *   Meshy 出来的,非流形是常态。所以有了第二条路。
+ * - **本地 Blender 那条路不跑浏览器的分析** —— 浏览器那套分析会先拒掉
+ *   非流形模型,而插件自己挑面(最大的平面)。
+ * - **只跟 `127.0.0.1` 说话** —— 走回环地址,**不是**我们的服务器。没有
+ *   上传、没有登录、没有 API 路由。模型不出用户自己的电脑。
+ * - **插件在仓库里**(`public/magnet/blender_bridge.py`)—— 页面直接给下载
+ *   链接;页面同时指引用户去下**便携版 Blender**(官网上每个版本都有
+ *   Windows 便携版 .zip,解压就能用,不用装)。
  *
  * ## 用的都是仓库里已有的东西(别重写)
  *
@@ -49,15 +67,29 @@ import {
   AlertCircle,
   Boxes,
   CircleDot,
+  Cpu,
   Download,
+  ExternalLink,
   Layers,
   Loader2,
   Magnet,
+  Plug,
   RotateCcw,
   Ruler,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type BlenderCutStats,
+  BlenderLocalError,
+  cutWithLocalBlender,
+  MAGNET_BLENDER_ADDON_URL,
+  MAGNET_BLENDER_DEFAULT_PORT,
+  MAGNET_BLENDER_PORTABLE_URL,
+  type MagnetEngine,
+  normalizeBlenderPort,
+  pingLocalBlender,
+} from "@/features/magnet/lib/blender-local";
 import {
   MagnetClientError,
   MagnetCutterClient,
@@ -93,7 +125,10 @@ import {
   measurePositionsSize,
   scalePositions,
 } from "@/features/pricing/lib/model-units";
-import { downloadModelZip } from "@/features/pricing/lib/obj-exporter";
+import {
+  buildModelZipBlob,
+  downloadModelZip,
+} from "@/features/pricing/lib/obj-exporter";
 import {
   extractModelZip,
   type ModelFile,
@@ -111,6 +146,9 @@ const RECALC_DEBOUNCE_MS = 400;
 /** 目标最大边的取值范围(mm)—— 低于这个数切不出 Ø20.7 的孔 */
 const MIN_TARGET_MM = 25;
 const MAX_TARGET_MM = 400;
+
+/** 目标最大边的默认值(mm)—— 归一化之后的标准尺寸 */
+const DEFAULT_TARGET_MM = 100;
 
 /** 导出的文件名(跟工作室脚本一致 —— `relief_final.obj`) */
 const CUT_OBJ_NAME = "relief_final.obj";
@@ -141,7 +179,19 @@ export function MagnetCutterTool() {
   /** 「按文件单位算」还是「按我填的目标最大边算」 */
   const [sizeMode, setSizeMode] = useState<SizeMode>("auto");
   /** 目标最大边(mm)—— 只在 `custom` 模式下生效 */
-  const [targetMaxEdgeMm, setTargetMaxEdgeMm] = useState(100);
+  const [targetMaxEdgeMm, setTargetMaxEdgeMm] = useState(DEFAULT_TARGET_MM);
+  /**
+   * 输入框里正在敲的那串字
+   *
+   * **为什么单独存一份字符串** —— 受控的 `type="number"` 每敲一个键就夹一次
+   * 值:输「150」会先变成「1」(夹到下限 25)再变成「15」,根本敲不进去 ——
+   * 工作室报的「无法直接改数字」就是这条。
+   *
+   * 字符串 + **失焦时**归一化才靠谱(跟下面那个 `NumberField` 一个路子)。
+   */
+  const [targetMaxEdgeText, setTargetMaxEdgeText] = useState(
+    String(DEFAULT_TARGET_MM)
+  );
 
   /* ------------------------------------------------------------------ */
   /*  孔参数(可调)                                                        */
@@ -151,6 +201,48 @@ export function MagnetCutterTool() {
   const [holeDepthText, setHoleDepthText] = useState(
     String(MAGNET_HOLE_DEPTH_MM)
   );
+
+  /* ------------------------------------------------------------------ */
+  /*  切割引擎(浏览器内 / 本地 Blender)                                   */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * 用哪条引擎切孔
+   *
+   * - `browser` —— 浏览器里的 Manifold3D(默认,什么都不用装)
+   * - `blender` —— **用户自己电脑上的** Blender(要装插件)
+   *
+   * 两条路**都不上传模型** —— 后者走 `127.0.0.1`,模型压根不出那台电脑。
+   */
+  const [engine, setEngine] = useState<MagnetEngine>("browser");
+
+  /** 本地 Blender 的端口(输入框里那串字) */
+  const [blenderPortText, setBlenderPortText] = useState(
+    String(MAGNET_BLENDER_DEFAULT_PORT)
+  );
+
+  /** 探活的结果 —— 「连上了 / 连不上」要说人话 */
+  const [blenderPing, setBlenderPing] = useState<BlenderPingState>({
+    status: "idle",
+  });
+
+  /** 本地 Blender 切完的结果(它导回来的 zip + 报回来的数 + 预览用的模型) */
+  const [blenderResult, setBlenderResult] = useState<BlenderCutOutcome | null>(
+    null
+  );
+
+  /**
+   * 设目标最大边 —— 数字和输入框里那串字**一起**改
+   *
+   * 两份状态必须同步:一份是几何用的数字,一份是输入框显示的字。
+   * 只改其中一份 ⇒ 输入框里显示的跟实际用的不是一个数(工作室看不出模型
+   * 到底按多大算的)。
+   */
+  const applyTargetMaxEdge = useCallback((mm: number) => {
+    const clamped = Math.min(MAX_TARGET_MM, Math.max(MIN_TARGET_MM, mm));
+    setTargetMaxEdgeMm(clamped);
+    setTargetMaxEdgeText(formatMm(clamped));
+  }, []);
 
   /**
    * 孔参数(收敛到合法范围)
@@ -176,7 +268,7 @@ export function MagnetCutterTool() {
   const [target, setTarget] = useState<MagnetTargetId>(MAGNET_TARGET_AUTO);
   const [cutResult, setCutResult] = useState<MagnetCutOutcome | null>(null);
   const [cutting, setCutting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<MagnetErrorReport | null>(null);
   const [fitSignal, setFitSignal] = useState(0);
   const [showTexture, setShowTexture] = useState(true);
 
@@ -208,6 +300,20 @@ export function MagnetCutterTool() {
     return () => {
       revokeModelTextureUrls(modelRef.current);
       modelRef.current = null;
+    };
+  }, []);
+
+  /**
+   * 本地 Blender 导回来的那个模型
+   *
+   * 它的贴图也是 object URL(`extractModelZip` 造的)—— 换一次要收一次,
+   * 不收的话浏览器内存就漏了。
+   */
+  const blenderModelRef = useRef<ModelFile | null>(null);
+  useEffect(() => {
+    return () => {
+      revokeModelTextureUrls(blenderModelRef.current);
+      blenderModelRef.current = null;
     };
   }, []);
 
@@ -293,7 +399,7 @@ export function MagnetCutterTool() {
         const check = detectModelUnitScale(size);
         setUnitCheck(check);
         setSizeMode("auto");
-        setTargetMaxEdgeMm(check.assumedMaxExtentMm);
+        applyTargetMaxEdge(check.assumedMaxExtentMm);
       } catch (err) {
         console.error("[Magnet] 解析模型失败", err);
         setLoadError(t("errors.generic"));
@@ -301,7 +407,7 @@ export function MagnetCutterTool() {
         setLoading(false);
       }
     },
-    [t]
+    [t, applyTargetMaxEdge]
   );
 
   const handleDroppedFiles = useCallback(
@@ -402,11 +508,18 @@ export function MagnetCutterTool() {
     if (!scaledPositions) return;
     // 尺寸变了 ⇒ 之前那个孔作废(它是按旧尺寸切的)
     setCutResult(null);
+    setBlenderResult(null);
+    // 本地 Blender 那条路**不跑浏览器的分析** ——
+    // ① 那套分析会拒掉非流形模型,而本地 Blender 正是为了切这种模型
+    // ② 插件自己挑面(最大的平面),浏览器的候选面表格用不着
+    if (engine === "blender") return;
     const timer = setTimeout(() => {
       void runAnalyze(scaledPositions);
     }, RECALC_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [scaledPositions, holeParams, runAnalyze]);
+    // `holeParams` 不必单列 —— `runAnalyze` 的依赖里就有它,它一变
+    // `runAnalyze` 的身份就变,这个 effect 照样会重跑(等价,少一个依赖)。
+  }, [scaledPositions, runAnalyze, engine]);
 
   /* ------------------------------------------------------------------ */
   /*  切割                                                                */
@@ -424,32 +537,146 @@ export function MagnetCutterTool() {
 
   const canCut =
     Boolean(scaledPositions) &&
-    selectedReport?.verdict === "ok" &&
-    !cutting &&
-    !analyzing;
+    (engine === "blender" ||
+      (selectedReport?.verdict === "ok" && !analyzing)) &&
+    !cutting;
+
+  /* ------------------------------------------------------------------ */
+  /*  本地 Blender 那条路                                                  */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * 换引擎 —— **两边的结果都清掉**
+   *
+   * 不清的话:浏览器切的那个孔还摆在视口里,用户以为本地 Blender 也切了。
+   */
+  const switchEngine = useCallback((next: MagnetEngine) => {
+    setEngine(next);
+    setCutResult(null);
+    setBlenderResult(null);
+    revokeModelTextureUrls(blenderModelRef.current);
+    blenderModelRef.current = null;
+    setError(null);
+  }, []);
+
+  /**
+   * 探一下本地 Blender 在不在
+   *
+   * **探活不是「能不能用本地那条路」的判据** —— 用户没装插件很正常,
+   * 界面要能一边探一边说人话,不能因此把「浏览器那条路」也堵上。
+   */
+  const checkBlender = useCallback(async () => {
+    setBlenderPing({ status: "checking" });
+    try {
+      const result = await pingLocalBlender({ port: blenderPortText });
+      setBlenderPing({ status: "online", version: result.blender });
+    } catch (err) {
+      console.warn("[Magnet] 连不上本地 Blender", err);
+      setBlenderPing({
+        status: "offline",
+        detail: err instanceof Error ? err.message : undefined,
+      });
+    }
+  }, [blenderPortText]);
+
+  /**
+   * 让**用户本机的 Blender**切一刀
+   *
+   * 发过去的是**已经按打印尺寸缩放好的**几何 —— 浏览器缩的,跟视口里
+   * 看到的是同一份。「看到的」跟「切的」一致,两个引擎对尺寸的判断才不会
+   * 打架(工作室拿到的孔径得跟页面上一模一样)。
+   *
+   * 送过去的包 = OBJ + MTL + 纹理(跟导给用户的那份一样)—— 插件那边要靠
+   * MTL 认材质,纹理也要跟着走,切完导回来才带得回去。
+   */
+  const cutWithBlender = useCallback(async (): Promise<BlenderCutOutcome> => {
+    if (!scaledPositions) {
+      throw new Error("没有模型");
+    }
+    const uvs = model?.parseResult.uvs ?? null;
+    const materialIndex = model?.parseResult.materialIndex ?? null;
+    const materialNames = model?.parseResult.materialNames ?? null;
+    const mtlText = model?.mtlText;
+    const hasMaterials =
+      Boolean(mtlText) && Boolean(materialNames && materialNames.length > 0);
+
+    const objText = writeObjFromSoup(scaledPositions, {
+      header: [
+        "Mooncoda magnet pocket cutter (local Blender)",
+        `hole_dia_mm=${holeParams.holeDiaMm}`,
+        `depth_mm=${holeParams.holeDepthMm}`,
+        `target_max_edge_mm=${targetMaxEdgeMm.toFixed(2)}`,
+      ],
+      uvs,
+      materialIndex,
+      materialNames: hasMaterials ? materialNames : null,
+      mtlFileName: hasMaterials ? CUT_MTL_NAME : null,
+    });
+
+    const zip = await buildModelZipBlob(
+      objText,
+      hasMaterials ? mtlText : undefined,
+      model?.textureBlobs,
+      CUT_OBJ_NAME,
+      hasMaterials ? CUT_MTL_NAME : undefined
+    );
+
+    const result = await cutWithLocalBlender({
+      port: blenderPortText,
+      zip,
+      hole: holeParams,
+    });
+
+    // 解开它导回来的 zip —— 视口要预览切完的那份
+    const file = new File([result.blob], CUT_ZIP_NAME);
+    const extracted = await extractModelZip(file);
+
+    return { blob: result.blob, stats: result.stats, model: extracted.model };
+  }, [scaledPositions, model, holeParams, targetMaxEdgeMm, blenderPortText]);
 
   const handleCut = useCallback(async () => {
-    if (!client || !scaledPositions) return;
+    if (!scaledPositions) return;
     setCutting(true);
     setError(null);
     try {
-      const result = await client.cut(
-        scaledPositions,
-        target,
-        holeParams,
-        sourceTexture
-      );
-      setCutResult(result);
+      if (engine === "blender") {
+        const outcome = await cutWithBlender();
+        // 换模型的时候要把上一个的贴图 URL 收掉
+        revokeModelTextureUrls(blenderModelRef.current);
+        blenderModelRef.current = outcome.model;
+        setBlenderResult(outcome);
+        setCutResult(null);
+      } else {
+        if (!client) return;
+        const result = await client.cut(
+          scaledPositions,
+          target,
+          holeParams,
+          sourceTexture
+        );
+        setCutResult(result);
+        setBlenderResult(null);
+      }
       // 切完几何变了 —— 相机重新取景,不然孔可能落在画面外
       setFitSignal((v) => v + 1);
     } catch (err) {
       console.error("[Magnet] 切割失败", err);
       setCutResult(null);
+      setBlenderResult(null);
       setError(describeError(err, t));
     } finally {
       setCutting(false);
     }
-  }, [client, scaledPositions, target, holeParams, sourceTexture, t]);
+  }, [
+    client,
+    scaledPositions,
+    target,
+    holeParams,
+    sourceTexture,
+    engine,
+    cutWithBlender,
+    t,
+  ]);
 
   /* ------------------------------------------------------------------ */
   /*  下载                                                                */
@@ -465,6 +692,13 @@ export function MagnetCutterTool() {
    * 引用同步改写(`buildModelZipBlob` 干的)。
    */
   const handleDownload = useCallback(async () => {
+    // 本地 Blender 切完的那份 —— **直接下载它导回来的那个 zip**
+    // (材质、纹理、MTL 都是它那边的原件,不该再过一遍我们的导出)
+    if (blenderResult?.blob) {
+      downloadBlob(blenderResult.blob, CUT_ZIP_NAME);
+      return;
+    }
+
     const positions = cutResult?.positions ?? scaledPositions;
     if (!positions) return;
 
@@ -514,14 +748,25 @@ export function MagnetCutterTool() {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }, [cutResult, scaledPositions, model, holeParams, target, targetMaxEdgeMm]);
+  }, [
+    cutResult,
+    blenderResult,
+    scaledPositions,
+    model,
+    holeParams,
+    target,
+    targetMaxEdgeMm,
+  ]);
 
   /* ------------------------------------------------------------------ */
   /*  渲染                                                                */
   /* ------------------------------------------------------------------ */
 
   /** 视口里画的那份几何 —— 切完之前是原模型,切完是带孔的那份 */
-  const displayPositions = cutResult?.positions ?? scaledPositions;
+  const displayPositions =
+    blenderResult?.model?.parseResult.positions ??
+    cutResult?.positions ??
+    scaledPositions;
 
   /**
    * 视口的贴图信息
@@ -529,6 +774,21 @@ export function MagnetCutterTool() {
    * 切完的 UV / 材质分组是**布尔运算带回来的** —— 视口直接吃,不用再算一遍。
    */
   const viewportTextures: MeshTextureInfo | null = useMemo(() => {
+    // 本地 Blender 切完的那份 —— 贴图是它导回来的
+    if (blenderResult?.model) {
+      const src = blenderResult.model;
+      const uvs = src.parseResult.uvs ?? null;
+      const materialIndex = src.parseResult.materialIndex ?? null;
+      const materialNames = src.parseResult.materialNames ?? null;
+      if (!uvs && !materialIndex) return null;
+      return {
+        uvs,
+        materialNames: materialNames ?? [],
+        materialIndex,
+        mtlText: src.mtlText ?? null,
+        textureUrls: src.textureUrls ?? null,
+      };
+    }
     if (!model) return null;
     const uvs = cutResult ? cutResult.uvs : (model.parseResult.uvs ?? null);
     const materialIndex = cutResult
@@ -545,7 +805,7 @@ export function MagnetCutterTool() {
       mtlText: model.mtlText ?? null,
       textureUrls: model.textureUrls ?? null,
     };
-  }, [model, cutResult]);
+  }, [model, cutResult, blenderResult]);
 
   const hasTexture = Boolean(
     model?.textureBlobs && model.textureBlobs.length > 0
@@ -644,6 +904,126 @@ export function MagnetCutterTool() {
             {/* ---------- 左栏 ---------- */}
             <aside className="order-2 flex flex-col border-t border-zinc-800 md:order-1 md:w-[360px] md:shrink-0 md:border-r md:border-t-0">
               <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3">
+                {/* ---- 切割引擎(浏览器内 / 本地 Blender)---- */}
+                <section className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
+                  <h3 className="mb-2 flex items-center gap-1.5 text-xs font-bold text-zinc-200">
+                    <Cpu className="size-3.5 text-zinc-400" />
+                    {t("engine.title")}
+                  </h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => switchEngine("browser")}
+                      className={`rounded-md border px-2 py-1.5 text-[11px] font-medium transition-colors ${
+                        engine === "browser"
+                          ? "border-amber-500/60 bg-amber-500/15 text-amber-200"
+                          : "border-zinc-700 bg-zinc-950 text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      {t("engine.browser")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => switchEngine("blender")}
+                      className={`rounded-md border px-2 py-1.5 text-[11px] font-medium transition-colors ${
+                        engine === "blender"
+                          ? "border-amber-500/60 bg-amber-500/15 text-amber-200"
+                          : "border-zinc-700 bg-zinc-950 text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      {t("engine.blender")}
+                    </button>
+                  </div>
+                  <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+                    {engine === "blender"
+                      ? t("engine.blenderHint")
+                      : t("engine.browserHint")}
+                  </p>
+
+                  {engine === "blender" && (
+                    <div className="mt-3 space-y-2 border-t border-zinc-800 pt-3">
+                      {/* ---- 端口 + 探活 ---- */}
+                      <div className="flex items-end gap-2">
+                        <div className="min-w-0 flex-1">
+                          <label
+                            htmlFor="magnet-blender-port"
+                            className="mb-1 block text-[11px] text-zinc-400"
+                          >
+                            {t("engine.portLabel")}
+                          </label>
+                          <input
+                            id="magnet-blender-port"
+                            type="number"
+                            inputMode="numeric"
+                            value={blenderPortText}
+                            onChange={(e) => setBlenderPortText(e.target.value)}
+                            onBlur={() =>
+                              setBlenderPortText(
+                                String(normalizeBlenderPort(blenderPortText))
+                              )
+                            }
+                            className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-amber-500 focus:outline-none"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void checkBlender()}
+                          disabled={blenderPing.status === "checking"}
+                          className="flex shrink-0 items-center gap-1 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-[11px] text-zinc-300 transition-colors hover:text-zinc-100 disabled:opacity-50"
+                        >
+                          {blenderPing.status === "checking" ? (
+                            <Loader2 className="size-3 animate-spin" />
+                          ) : (
+                            <Plug className="size-3" />
+                          )}
+                          {blenderPing.status === "checking"
+                            ? t("engine.checking")
+                            : t("engine.check")}
+                        </button>
+                      </div>
+
+                      {blenderPing.status === "online" && (
+                        <p className="flex items-center gap-1.5 text-[11px] text-emerald-300">
+                          <span className="size-1.5 rounded-full bg-emerald-400" />
+                          {t("engine.online", { version: blenderPing.version })}
+                        </p>
+                      )}
+                      {blenderPing.status === "offline" && (
+                        <p className="text-[11px] leading-relaxed text-amber-300/90">
+                          {t("engine.offline")}
+                        </p>
+                      )}
+
+                      {/* ---- 指引:下便携版 Blender + 插件 ---- */}
+                      <div className="rounded-md border border-zinc-800 bg-zinc-950/60 p-2">
+                        <a
+                          href={MAGNET_BLENDER_PORTABLE_URL}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 text-[11px] font-medium text-amber-300 underline underline-offset-2 hover:text-amber-200"
+                        >
+                          <ExternalLink className="size-3" />
+                          {t("engine.downloadBlender")}
+                        </a>
+                        <p className="mt-1 text-[10px] leading-relaxed text-zinc-500">
+                          {t("engine.downloadBlenderHint")}
+                        </p>
+                        <a
+                          href={MAGNET_BLENDER_ADDON_URL}
+                          download
+                          className="mt-2 flex items-center gap-1 text-[11px] font-medium text-amber-300 underline underline-offset-2 hover:text-amber-200"
+                        >
+                          <Download className="size-3" />
+                          {t("engine.addon")}
+                        </a>
+                        <p className="mt-1 text-[10px] leading-relaxed text-zinc-500">
+                          {t("engine.addonHint")}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </section>
+
                 {/* ---- 空状态:提示拖文件 ---- */}
                 {!model && (
                   <div className="rounded-lg border border-dashed border-zinc-700 bg-zinc-900/50 p-4 text-center">
@@ -672,7 +1052,7 @@ export function MagnetCutterTool() {
                       type="button"
                       onClick={() => {
                         setSizeMode("custom");
-                        setTargetMaxEdgeMm(unitCheck.originalMaxExtent);
+                        applyTargetMaxEdge(unitCheck.originalMaxExtent);
                       }}
                       className="mt-2 text-[11px] font-medium text-amber-300 underline underline-offset-2 hover:text-amber-200"
                     >
@@ -698,24 +1078,32 @@ export function MagnetCutterTool() {
                       <input
                         id="magnet-target-max-edge"
                         type="number"
+                        inputMode="decimal"
                         min={MIN_TARGET_MM}
                         max={MAX_TARGET_MM}
                         step={1}
-                        value={
-                          Number.isFinite(targetMaxEdgeMm)
-                            ? targetMaxEdgeMm
-                            : ""
-                        }
+                        value={targetMaxEdgeText}
                         onChange={(e) => {
-                          const v = Number(e.target.value);
+                          const text = e.target.value;
                           setSizeMode("custom");
-                          setTargetMaxEdgeMm(
-                            Number.isFinite(v)
-                              ? Math.min(
-                                  MAX_TARGET_MM,
-                                  Math.max(MIN_TARGET_MM, v)
-                                )
-                              : MIN_TARGET_MM
+                          // **先存字,别急着夹** —— 受控的 number 输入每敲一个键
+                          // 就夹一次的话,「150」会先变成「1」再变成「15」。
+                          setTargetMaxEdgeText(text);
+                          const v = Number(text);
+                          // 敲到一半(空 / 非法)先不动几何 —— 免得模型在眼前乱跳
+                          if (
+                            text.trim() !== "" &&
+                            Number.isFinite(v) &&
+                            v > 0
+                          ) {
+                            setTargetMaxEdgeMm(v);
+                          }
+                        }}
+                        onBlur={() => {
+                          // 失焦才归一化 —— 范围、类型都对上了才落定
+                          const v = Number(targetMaxEdgeText);
+                          applyTargetMaxEdge(
+                            Number.isFinite(v) ? v : MIN_TARGET_MM
                           );
                         }}
                         className="w-24 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-amber-500 focus:outline-none"
@@ -726,7 +1114,7 @@ export function MagnetCutterTool() {
                         onClick={() => {
                           setSizeMode("auto");
                           if (unitCheck) {
-                            setTargetMaxEdgeMm(unitCheck.assumedMaxExtentMm);
+                            applyTargetMaxEdge(unitCheck.assumedMaxExtentMm);
                           }
                         }}
                         className="ml-auto flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-[11px] text-zinc-400 transition-colors hover:text-zinc-200"
@@ -785,8 +1173,8 @@ export function MagnetCutterTool() {
                   </p>
                 </section>
 
-                {/* ---- 智能识别背面 ---- */}
-                {model && (
+                {/* ---- 智能识别背面(本地 Blender 那条路不用)---- */}
+                {model && engine === "browser" && (
                   <section className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
                     <h3 className="mb-2 flex items-center gap-1.5 text-xs font-bold text-zinc-200">
                       <Layers className="size-3.5 text-zinc-400" />
@@ -870,8 +1258,8 @@ export function MagnetCutterTool() {
                   </section>
                 )}
 
-                {/* ---- 六个面 ---- */}
-                {model && (
+                {/* ---- 六个面(本地 Blender 那条路不用)---- */}
+                {model && engine === "browser" && (
                   <section className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
                     <h3 className="mb-2 flex items-center gap-1.5 text-xs font-bold text-zinc-200">
                       <Ruler className="size-3.5 text-zinc-400" />
@@ -944,6 +1332,15 @@ export function MagnetCutterTool() {
                   </section>
                 )}
 
+                {/* ---- 本地 Blender:它自己挑面,不用候选面表格 ---- */}
+                {model && engine === "blender" && (
+                  <section className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
+                    <p className="text-[11px] leading-relaxed text-zinc-400">
+                      {t("engine.faceNote")}
+                    </p>
+                  </section>
+                )}
+
                 {/* ---- 切割结果 ---- */}
                 {cutResult && (
                   <section className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-3">
@@ -974,13 +1371,75 @@ export function MagnetCutterTool() {
                   </section>
                 )}
 
+                {/* ---- 切割结果(本地 Blender)---- */}
+                {blenderResult && (
+                  <section className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-3">
+                    <h3 className="mb-2 text-xs font-bold text-emerald-200">
+                      {t("cut.done")}
+                    </h3>
+                    <dl className="space-y-1 text-[11px] text-emerald-100/80">
+                      {blenderResult.stats.removedVolumeMm3 != null && (
+                        <Row
+                          label={t("cut.removed")}
+                          value={`${blenderResult.stats.removedVolumeMm3.toFixed(1)} mm³`}
+                        />
+                      )}
+                      {blenderResult.stats.expectedRemovedVolumeMm3 != null && (
+                        <Row
+                          label={t("cut.expected")}
+                          value={`${blenderResult.stats.expectedRemovedVolumeMm3.toFixed(1)} mm³`}
+                        />
+                      )}
+                      {blenderResult.stats.volumeBeforeMm3 != null &&
+                        blenderResult.stats.volumeAfterMm3 != null && (
+                          <Row
+                            label={t("cut.volume")}
+                            value={`${blenderResult.stats.volumeBeforeMm3.toFixed(1)} → ${blenderResult.stats.volumeAfterMm3.toFixed(1)} mm³`}
+                          />
+                        )}
+                      {blenderResult.stats.triangleCount != null && (
+                        <Row
+                          label={t("cut.tris")}
+                          value={String(blenderResult.stats.triangleCount)}
+                        />
+                      )}
+                      {blenderResult.stats.solver && (
+                        <Row
+                          label={t("engine.solver")}
+                          value={blenderResult.stats.solver}
+                        />
+                      )}
+                    </dl>
+                    {blenderResult.stats.warnings.length > 0 && (
+                      <div className="mt-2 border-t border-emerald-500/20 pt-2">
+                        <p className="text-[11px] font-medium text-emerald-200">
+                          {t("engine.warnings")}
+                        </p>
+                        <ul className="mt-1 space-y-0.5 text-[10px] leading-relaxed text-emerald-100/70">
+                          {blenderResult.stats.warnings.map((warning) => (
+                            <li key={warning}>· {warning}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    <p className="mt-2 text-[11px] leading-relaxed text-emerald-200/70">
+                      {t("engine.resultNote")}
+                    </p>
+                  </section>
+                )}
+
                 {/* ---- 报错 ---- */}
                 {error && (
                   <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-3">
                     <p className="flex items-start gap-1.5 text-[11px] leading-relaxed text-red-300">
                       <AlertCircle className="mt-px size-3.5 shrink-0" />
-                      {error}
+                      {error.headline}
                     </p>
+                    {error.detail ? (
+                      <p className="mt-1.5 break-words border-t border-red-500/20 pt-1.5 font-mono text-[10px] leading-relaxed text-red-300/70">
+                        {error.detail}
+                      </p>
+                    ) : null}
                   </div>
                 )}
               </div>
@@ -1007,7 +1466,9 @@ export function MagnetCutterTool() {
                   className="flex w-full items-center justify-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2 text-xs font-medium text-zinc-200 transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:text-zinc-600"
                 >
                   <Download className="size-3.5" />
-                  {cutResult ? t("download.cut") : t("download.original")}
+                  {cutResult || blenderResult
+                    ? t("download.cut")
+                    : t("download.original")}
                 </button>
                 <p className="text-center text-[10px] leading-relaxed text-zinc-600">
                   {hasTexture
@@ -1161,14 +1622,87 @@ function Row({ label, value }: { label: string; value: string }) {
 }
 
 /**
- * 把一次失败变成一句**用户看得懂**的话
+ * 探活的结果
+ *
+ * `offline` **不是错误状态** —— 用户没装插件很正常,界面要能一边探一边
+ * 说人话,不能因此把「浏览器那条路」也堵上。
+ */
+type BlenderPingState =
+  | { status: "idle" }
+  | { status: "checking" }
+  | { status: "online"; version: string }
+  | { status: "offline"; detail?: string | undefined };
+
+/** 本地 Blender 切完的结果 */
+type BlenderCutOutcome = {
+  /** 它导回来的 zip(下载时直接用它) */
+  blob: Blob;
+  /** 它报回来的数 */
+  stats: BlenderCutStats;
+  /** 解开 zip 解析出来的模型 —— 给视口预览用 */
+  model: ModelFile | null;
+};
+
+/** 下载一个 blob —— 建 object URL → 点一下 → 收回 */
+function downloadBlob(blob: Blob, filename: string): void {
+  if (typeof document === "undefined") return;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/**
+ * 一次失败的**两段话**
+ *
+ * - `headline` —— 一句人话,给用户看
+ * - `detail` —— 引擎返回的原始信息,给工作室看
+ *
+ * 以前只有 headline,**原始信息全被丢掉**了 —— 工作室看到的只有一句
+ * 「切割过程出了意外(不是模型的问题)」,什么线索都没有,连「是超时了还是
+ * 崩了了」都分不出来。2026-11-11 起把原始信息摆出来。
+ */
+type MagnetErrorReport = {
+  headline: string;
+  detail?: string | undefined;
+};
+
+/**
+ * 把一次失败变成**一段用户看得懂的话 + 一行原始信息**
  *
  * 切割的失败都带稳定的 code —— 认得就摆具体的,认不出才退回笼统那句。
  * 映射表在 `features/magnet/lib/magnet-error.ts`(纯文件,有单测守着)。
+ *
+ * ⚠️ **原始信息不能丢** —— code 只说「哪一类」,原始信息才说「哪一步、
+ * 什么原因」。两个都摆出来,工作室才查得动。
  */
-function describeError(err: unknown, t: (key: string) => string): string {
+function describeError(
+  err: unknown,
+  t: (key: string) => string
+): MagnetErrorReport {
   const key = magnetErrorMessageKey(err);
-  if (key) return t(key);
-  if (err instanceof MagnetClientError) return err.message;
-  return t("errors.generic");
+  // 本地 Blender 那边带回来的详情比 message 更有用 —— message 是我们自己
+  // 写的通用句,detail 才是插件说的真原因(「面太薄 1.2mm,切 1.3mm 会捅穿」)
+  const detail =
+    err instanceof BlenderLocalError
+      ? (err.detail ?? (err.message ? err.message : undefined))
+      : err instanceof Error && err.message
+        ? err.message
+        : undefined;
+  if (key) {
+    return { headline: t(key), detail };
+  }
+  if (err instanceof MagnetClientError) {
+    return { headline: err.message, detail: undefined };
+  }
+  return { headline: t("errors.generic"), detail };
+}
+
+/** 毫米数 → 输入框里显示的字(最多两位小数,别拖一堆 0) */
+function formatMm(mm: number): string {
+  return String(Math.round(mm * 100) / 100);
 }

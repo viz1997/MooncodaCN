@@ -1502,6 +1502,26 @@
       "texture": "显示贴图",
       "empty": "拖一个模型进来开始"
     },
+    "engine": {
+      "title": "切割引擎",
+      "browser": "浏览器内切",
+      "browserHint": "不用装任何东西 —— 但模型不是封闭实体(有开放边 / 非流形边)时会切不了。",
+      "blender": "本地 Blender 切",
+      "blenderHint": "在你自己的电脑上切 —— 非流形、自相交那些模型也能切。模型只送到 127.0.0.1,不出这台电脑。",
+      "portLabel": "端口",
+      "check": "检测 Blender",
+      "checking": "检测中…",
+      "online": "连上了 —— Blender {version}",
+      "offline": "连不上本地 Blender",
+      "downloadBlender": "下载便携版 Blender",
+      "downloadBlenderHint": "官网上有「Windows 便携版(.zip)」—— 解压就能用,不用装。",
+      "addon": "下载插件",
+      "addonHint": "在 Blender 里 Scripting → 新建文本 → 把插件粘进去 → Run Script,桥接就起了。",
+      "faceNote": "本地 Blender 自己挑模型上最大的一块平面 —— 上面的候选面表格用不着了。",
+      "solver": "求解器",
+      "warnings": "提醒",
+      "resultNote": "切好的模型是从你本机的 Blender 导回来的。"
+    },
     "errors": {
       "generic": "出了点问题 —— 请再试一次。",
       "noGeometry": "这个文件里读不出几何。",
@@ -1515,7 +1535,15 @@
         "volumeUnchanged": "模型的体积没变,已经拒绝 —— 原始模型还在。",
         "holeSpilled": "沉孔切到模型边缘去了,已经拒绝。换一个周围更空的面试试。",
         "faceNotCuttable": "这个面切不了 —— 换一个。",
-        "unexpected": "切割过程出了意外(不是模型的问题)—— 请再试一次;一直这样就换一个模型试试。"
+        "workerTimeout": "切割算了几分钟还没完 —— 这个模型对浏览器来说太重了(AI 生成的模型动辄几十万面,精确布尔运算本来就慢)。可以先在建模软件里减面,或者换一个模型。",
+        "workerCrashed": "切割引擎在这个模型上崩了 —— 常见于几何自相交或面数太大。先去「打印前工作台 → 检查」看看有没有问题边线。",
+        "workerUnavailable": "这个浏览器里起不来切割 Worker,退回主线程也没成 —— 刷新页面再试一次,或者换个浏览器。",
+        "engineFailed": "切割引擎在某一步失败了 —— 具体是哪一步,见下面那行原始信息。",
+        "unexpected": "切割过程中出了意外 —— 具体原因见下面那行原始信息。",
+        "blenderNotRunning": "连不上你本机的 Blender —— 确认插件已经跑起来、端口跟页面上填的一致。",
+        "blenderFailed": "本机 Blender 那边切失败了 —— 具体原因见下面那行原始信息。",
+        "blenderTimeout": "本机 Blender 那边算了太久还没完 —— 模型可能太大了,可以先减面再试。",
+        "blenderBadResponse": "本机 Blender 回的不是预期的东西 —— 插件版本可能跟网页端对不上,重新下载插件再试。"
       }
     }
   },

@@ -1393,7 +1393,7 @@ shared/components/model-viewport/
 | `src/test/pricing/pure/obj-text.test.ts` | BOM 嗅探 / NUL 密度嗅探(**LE ⇒ 奇数位、BE ⇒ 偶数位**)/ UTF-16LE·BE 解码 / UTF-8 BOM 摘掉 / 空文件的两种说法 |
 | `src/test/tools/pure/workbench-merge.test.ts` | 一个视口 / 侧栏在左 / **主出口在左栏底部固定条**(`primaryAction`)/ **浮层药丸只管「看图」** |
 
-### 磁吸孔切割工具 `/tools/magnet`(2026-11-10,**2026-11-11 加了三条**)
+### 磁吸孔切割工具 `/tools/magnet`(2026-11-10,**2026-11-11 加了三条 + 两条引擎**)
 
 工作室给了一段 Blender Python 脚本:把模型**最平的那个面**上挖一个**盲孔**
 (圆柱沉孔),挖完导出 `relief_final.obj` 给打印用。以前这段脚本**只能在工作室
@@ -1432,6 +1432,84 @@ radius = ((HOLE_DIA_MM + TOLERANCE) / 2000.0) * ratio
 
 「不进工单」这一条把风险面砍掉了一大半:**钱的那条链路一行都不动**(报价、工单、
 R2 上传、支撑克重全部原样)。工具是纯前端的、独立的、可下载的。
+
+#### 两条引擎(2026-11-11 加,工作室拍板「让用户自己选」)
+
+工作室 2026-11-11 的三条追加要求之外,又定了「**让用户选择是否开启使用便携版
+Blender**」。工作室后面又补了三句,把这条路彻底定死了:
+
+| 工作室的原话 | 落成了什么 |
+|---|---|
+| **「不需要服务器,所有都在本地处理」** | 走 `http://127.0.0.1:<端口>`,**没有 API 路由、没有上传、没有登录** |
+| **「是运行用户自己本地的 Blender」** | 切孔在**用户自己那台电脑**的 Blender 里跑(不是我们的服务器) |
+| **「可以指引用户下载便携版 Blender」** | 侧栏摆**官方便携版下载链接** + **插件下载链接** + 装法说明 |
+
+**两条引擎,用户自己选**(侧栏顶部那颗开关):
+
+| 引擎 | 干什么 | 适合谁 |
+|---|---|---|
+| **浏览器**(默认) | Manifold3D(WASM)在 Worker 里跑 | 模型是干净的(流形、闭合) |
+| **本地 Blender** | 装一个插件,切孔在用户自己电脑上跑 | AI 生成的模型(**非流形是常态**) |
+
+**为什么要有第二条路** —— 浏览器那条路在**非流形 / 自相交**的模型上会直接
+拒绝(`NOT_MANIFOLD`)。工作室的模型是 Meshy 出来的,非流形是常态 ⇒ 客户
+拿着模型点「切割」只看到一句「这个模型不是封闭流形」。Blender 那边有
+EXACT → FAST 兜底 + 一堆修复 pass,正好治这个。
+
+**本地 Blender 那条路不跑浏览器的分析** —— 浏览器的分析会**先拒掉**非流形
+模型,而插件自己挑面(按面积找最大的平面,跟工作室脚本一个口径)。所以那条路
+**必须能在浏览器分析失败时照样切**。侧栏的候选面表格在 Blender 模式下**隐藏**
+(那一块换成了 `engine.faceNote`)。
+
+**三条硬规矩**(都在 `blender-local.ts` 的文件头里写着):
+
+1. **模型不出这台电脑** —— 走回环地址,不是我们的服务器。
+2. **只跟 `127.0.0.1` 说话** —— `blenderBaseUrl()` **写死**回环,端口以外的
+   一概不接受(别让它变成一个能往公网发数据的代理)。
+3. **每个失败都有稳定的 code** —— 四个新码见下。
+
+**协议(网页端 ↔ 插件)**,协议版本 `1`,两边必须对得上:
+
+| 方向 | 请求 | 响应 |
+|---|---|---|
+| 探活 | `GET /ping` + 头 `x-magnet-protocol` | JSON `{ protocol, blender, addOn }` |
+| 切割 | `POST /cut`,body = zip(OBJ+MTL+纹理),头 `x-magnet-params`(孔径/深度)+ `x-magnet-protocol` | zip(切好的模型)+ 头 `x-magnet-stats`(统计 JSON) |
+
+- **插件在仓库里** —— `public/magnet/blender_bridge.py`,页面直接给下载链接。
+  它**只绑 `127.0.0.1`**、带 `Access-Control-Allow-Private-Network: true`
+  (Chrome 的私有网络访问 —— 不带这个头,公网页面**连不上**本机插件)、
+  **不用 `bpy.ops`**(算子要上下文,timer 里调不稳)、布尔运算 EXACT 失败退 FAST。
+- **混合内容不是问题** —— 浏览器把 `http://127.0.0.1` 当「可信来源」,所以
+  https 页面 fetch 它**不会被拦**。Safari 早期版本会拦 ⇒ 界面要能说清楚
+  「换 Chrome / Edge」。
+- **发过去的是「浏览器缩放好」的几何** —— 「看到的」跟「切的」是同一份,两个
+  引擎对尺寸和朝向的判断才不会打架。
+- **超时给得足** —— ping 2.5s,切割 **10 分钟**(大模型在 Blender 里切要好几分钟)。
+- **下载语义** —— Blender 模式下,切好的 zip **原样下载**(材质/纹理是 Blender
+  那边导出来的,不经我们重新导出);浏览器模式下还是走原来那条 OBJ/ZIP 导出。
+
+#### 切割失败要说人话(2026-11-11 改的四个码)
+
+工作室报的那句「切割过程出了意外(不是模型的问题)」是**一句套话** —— 所有失败
+都归成 `UNEXPECTED`,什么线索都没有。现在**分开放**:
+
+| 码 | 什么时候 | 界面能说什么 |
+|---|---|---|
+| `WORKER_TIMEOUT` | 切割超时(**跟模型有关**) | 模型太重,浏览器算不完 |
+| `WORKER_CRASHED` | 引擎算到一半炸了 | 几何太复杂,引擎崩了 |
+| `WORKER_UNAVAILABLE` | Worker 压根起不来(退回主线程也没成) | 浏览器 / 打包问题 |
+| `ENGINE_FAILED` | 引擎某一步抛了预料之外的错 | **带原始信息**,一眼看出哪一步炸的 |
+| `BLENDER_NOT_RUNNING` | 连不上 `127.0.0.1`(插件没起) | **不是模型的问题** |
+| `BLENDER_FAILED` | 本地 Blender 自己报的错 | 原因在详情里(面太薄 / 切到边上 …) |
+| `BLENDER_TIMEOUT` | 本地 Blender 没在规定时间内回话 | 大模型切太久,别重复点 |
+| `BLENDER_BAD_RESPONSE` | 回的不是 zip / 协议版本对不上 | 重新下载插件 |
+
+- **超时时间给足** —— 切割 **300 秒**(原来 60 秒太紧,会把一个能算出来的模型
+  判成死的),分析 60 秒。
+- **退回主线程的规则** —— Worker **回过话**之后超时/崩了 ⇒ **不退回**(主线程
+  会把页面冻住,而且算出来还是同一个结果);**从没回过话** ⇒ 退回主线程(老路,
+  能用)。`magnet-cutter-client.test.ts` 守着这条。
+- **界面上是「标题 + 原始信息」两行** —— 标题是人话,原始信息是引擎的原文。
 
 #### 2026-11-11 工作室追加的三条
 
@@ -1500,13 +1578,21 @@ lib/
 ├── magnet-cutter-protocol.ts # worker 收/发消息类型 + 错误码联合
 ├── magnet-cutter-handler.ts  # 真正干活的那一段(焊接 → 校验 → 挑面 → 布尔 → 出料)
 ├── magnet-cutter-client.ts   # promise 客户端(Worker + 主线程兜底)
+├── blender-local.ts          # 本地 Blender 那条路(端口 / 协议 / 错误映射)—— fetch 可注入
 ├── magnet-error.ts           # 错误码 → 文案 key
 └── write-obj.ts              # 三角汤 → OBJ 文本(+ UV / 材质分组)+ Blob
 workers/
 └── magnet-cutter.worker.ts   # worker 壳(跟 angle-optimizer.worker.ts 一个形状)
 components/
-└── magnet-cutter-tool.tsx    # 客户端 UI(拖放 / 尺寸 / 孔参数 / 选面 / 切 / 下载)
+└── magnet-cutter-tool.tsx    # 客户端 UI(引擎开关 / 拖放 / 尺寸 / 孔参数 / 选面 / 切 / 下载)
+public/magnet/
+└── blender_bridge.py         # Blender 插件(桥接)—— 页面直接给下载链接
 ```
+
+- **`blender-local.ts` 里 `fetchImpl` 是注入的** —— 单测塞一个假 fetch 就能验
+  协议和错误映射,不用起浏览器、不用装 Blender、不用联网。
+- **插件那份脚本提交进仓库** —— 跟 `public/manifold.wasm` 一个道理(新克隆的
+  机器不用跑脚本就能用)。
 
 #### 切刀摆放的数学(照搬脚本,去掉 ratio)
 
@@ -1577,9 +1663,12 @@ components/
 | 视口 | `src/features/shared/components/model-viewport/` 的 `ModelViewport` —— **整个仓库只有这一份视口**,别再写第二个 |
 | 焊接 / 拓扑 | `src/features/tools/lib/mesh/weld.ts` 的 `weldAndAnalyzeTopology()` |
 | **导 ZIP** | `src/features/pricing/lib/obj-exporter.ts` 的 `downloadModelZip()` —— 别自己再写一套打包 |
+| **打包给本地 Blender** | `src/features/pricing/lib/obj-exporter.ts` 的 `buildModelZipBlob()` —— 同一个包,别再写一套 |
 
 - **尺寸只有一档** —— 「目标最大边(mm)」单值 + 均匀缩放。XYZ 三轴分别调对这个
   工具没必要(孔径是绝对尺寸,只要整体大小对就行)。
+- **那个数字输入框能直接改** —— 输入框存的是**字符串**,失焦时才归一化
+  (不然用户敲到一半就被格式化掉,数字根本改不了)。
 
 #### Manifold3D 的 API 表面(踩过的坑,别再踩)
 
@@ -1606,6 +1695,8 @@ components/
 | `src/test/magnet/pure/magnet-backface.test.ts` | 平面区域生长(立方体 6 块 × 1600mm²、面积下限过滤、退化面剔除、空网格不炸)/ **歪了也找得到**/ `pickBackFace` 的面积 + 平整度排序 |
 | `src/test/magnet/pure/write-obj.test.ts` | 三角汤 → OBJ 文本 / 顶点去重 / 1-based 索引 / `-0` 归一化 / **UV 写出(`vt` + `f v/vt`)** / **材质分组(`usemtl` + `mtllib`,面按材质连续)** |
 | `src/test/magnet/pure/magnet-page.test.ts` | 路由在 / 工具中心登记了 / **视口是复用的那一份** / **不进工单**(不碰报价、工单、R2)/ 拖放用 `useDropZone` / 焊接走 `weldAndAnalyzeTopology` / `Manifold.cylinder` 不加 `new` / **孔径是绝对毫米**(可调,但 `EXPECTED_WIDTH_MM` 不许进代码)/ **① 可调** / **② 智能识别背面** / **③ 导出保留材质** / `UNEXPECTED` 码在位 / wasm 提交进仓库 / **中英文 key 递归一致** |
+| `src/test/magnet/pure/magnet-cutter-client.test.ts` | **Worker 回过话**之后超时 ⇒ 报 `WORKER_TIMEOUT`、**不退回主线程** / 崩了 ⇒ `WORKER_CRASHED`、**不退回主线程** / **从没回过话** ⇒ 退回主线程照样切得出来 / Worker 压根没有 ⇒ 退回主线程 / 引擎报的模型错**原样带上来** / 切割超时是 **300 秒**、分析 **60 秒** |
+| `src/test/magnet/pure/magnet-blender-local.test.ts` | 端口归一化(非法 ⇒ 默认)/ **base URL 写死回环** / 探活带协议头 / 协议对不上 ⇒ `BLENDER_BAD_RESPONSE` / 连不上 ⇒ `BLENDER_NOT_RUNNING` / 没回话 ⇒ `BLENDER_TIMEOUT` / 切割的**包 + 头**都对 / 插件报错 ⇒ `BLENDER_FAILED` 且 detail 带着它自己的 code / 回的不是 zip ⇒ `BLENDER_BAD_RESPONSE` / **插件只绑 `127.0.0.1`** / 带 `Access-Control-Allow-Private-Network` / **EXACT → FAST** / **不调 `bpy.ops`** / 切刀摆放跟网页端同一套数学 / **页面有引擎开关** / **不碰工单链路** / **不往我们的服务器发模型** / **指引下便携版 Blender + 插件** / **Blender 模式不跑浏览器的分析** |
 
 ### 外国访客 → 海外独立站(2026-11-10)
 

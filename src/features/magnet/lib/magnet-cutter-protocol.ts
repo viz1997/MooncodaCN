@@ -152,13 +152,58 @@ export type MagnetErrorCode =
   /** 那个面太薄 / 净空不够 */
   | "FACE_NOT_CUTTABLE"
   /**
+   * 切割超时 —— **模型太重,浏览器算不完**
+   *
+   * 跟模型有关(不是「不是模型的问题」!)。真实模型(AI 生成的、几十万面的)
+   * 跑 manifold 的 EXACT 布尔运算可能要好几分钟,也可能根本算不完。
+   */
+  | "WORKER_TIMEOUT"
+  /**
+   * 切割引擎崩了 —— Worker 整个没了
+   *
+   * 常见于模型几何太复杂(自相交 / 面数太大),引擎算到一半炸了。
+   */
+  | "WORKER_CRASHED"
+  /**
+   * Worker 压根起不来 —— 已经退回主线程算了,还是没成
+   *
+   * 浏览器不支持 Worker、或者打包器没产出 worker chunk。
+   */
+  | "WORKER_UNAVAILABLE"
+  /**
+   * 引擎那一步抛了个预料之外的错(建网格 / 切刀摆放 / 取结果)
+   *
+   * **带原始信息** —— 工作室要能一眼看出是哪一步炸的。
+   */
+  | "ENGINE_FAILED"
+  /**
    * 出了个**预料之外**的错(不是上面那几种已知的)
    *
    * 以前所有非 `MagnetCutterError` 的抛出都一律报成 `BOOLEAN_FAILED` ——
    * 用户看到的是「布尔运算在这个模型上失败了」,但真因(Worker 崩了 /
    * 超时了 / 某个 TypeError)全被吞了。**分开放**,界面才能说对那句话。
    */
-  | "UNEXPECTED";
+  | "UNEXPECTED"
+  /**
+   * 本地 Blender 没跑起来 —— **连不上 127.0.0.1**
+   *
+   * 端口没开 / 插件没启动 / 防火墙拦了。**不是模型的问题**。
+   */
+  | "BLENDER_NOT_RUNNING"
+  /**
+   * 本地 Blender 那边切失败了 —— 它自己报回来的
+   *
+   * 响应体里带它自己的原因(面太薄 / 孔切到边上 / 布尔失败 …)。
+   */
+  | "BLENDER_FAILED"
+  /** 本地 Blender 那边超时了 —— 大模型切太久 */
+  | "BLENDER_TIMEOUT"
+  /**
+   * 本地 Blender 回的不是预期的东西(不是 zip / 头对不上)
+   *
+   * 一般是**插件版本对不上**网页端。
+   */
+  | "BLENDER_BAD_RESPONSE";
 
 export type MagnetWorkerIn =
   | {

@@ -35,12 +35,54 @@ export const MAGNET_ERROR_KEYS: Record<MagnetErrorCode, string> = {
   HOLE_SPILLED: "errors.codes.holeSpilled",
   FACE_NOT_CUTTABLE: "errors.codes.faceNotCuttable",
   /**
-   * 预料之外的错(Worker 崩了 / 超时了 / 某个 TypeError)
+   * 切割超时 —— **模型太重,浏览器算不完**
    *
-   * 以前这些一律报成 `BOOLEAN_FAILED` —— 用户看到的是「布尔运算在这个模型上
-   * 失败了」,但真因跟模型**没关系**。分开放,界面才能说对那句话。
+   * ⚠️ 这跟模型**有关**(不是「不是模型的问题」!)—— AI 生成的模型动辄
+   * 几十万面,EXACT 布尔运算要好几分钟,甚至根本算不完。
+   */
+  WORKER_TIMEOUT: "errors.codes.workerTimeout",
+  /**
+   * 切割引擎崩了 —— Worker 整个没了
+   *
+   * 常见于几何太复杂(自相交 / 面数太大),引擎算到一半炸了。
+   */
+  WORKER_CRASHED: "errors.codes.workerCrashed",
+  /**
+   * Worker 压根起不来(浏览器不支持 / 没产出 worker chunk)
+   *
+   * 已经退回主线程算了 —— 还是没成。
+   */
+  WORKER_UNAVAILABLE: "errors.codes.workerUnavailable",
+  /**
+   * 引擎那一步抛了个预料之外的错(建网格 / 切刀摆放 / 取结果)
+   *
+   * **带原始信息** —— 工作室要能一眼看出是哪一步炸的。
+   */
+  ENGINE_FAILED: "errors.codes.engineFailed",
+  /**
+   * 预料之外的错(不在上面那几种之列的)
+   *
+   * 以前所有非 `MagnetCutterError` 的抛出都一律报成 `BOOLEAN_FAILED` ——
+   * 用户看到的是「布尔运算在这个模型上失败了」,但真因(Worker 崩了 /
+   * 超时了 / 某个 TypeError)全被吞了。分开放,界面才能说对那句话。
    */
   UNEXPECTED: "errors.codes.unexpected",
+  /**
+   * 本地 Blender 连不上 —— 插件没起 / 端口不对
+   *
+   * **不是模型的问题** —— 是「本地那条路还没准备好」。
+   */
+  BLENDER_NOT_RUNNING: "errors.codes.blenderNotRunning",
+  /**
+   * 本地 Blender 那边切失败了(它自己报的)
+   *
+   * 原因(面太薄 / 孔切到边上 / 布尔失败)在详情里。
+   */
+  BLENDER_FAILED: "errors.codes.blenderFailed",
+  /** 本地 Blender 那边超时了 */
+  BLENDER_TIMEOUT: "errors.codes.blenderTimeout",
+  /** 本地 Blender 回的不是预期的东西 —— 插件版本对不上 */
+  BLENDER_BAD_RESPONSE: "errors.codes.blenderBadResponse",
 };
 
 /**
