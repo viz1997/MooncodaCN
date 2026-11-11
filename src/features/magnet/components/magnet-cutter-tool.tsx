@@ -32,13 +32,16 @@
  *
  * | 引擎 | 干什么 | 适合谁 |
  * |---|---|---|
- * | **浏览器**(默认) | Manifold3D(WASM)在 Worker 里跑 | 模型是干净的(流形、闭合) |
- * | **本地 Blender** | 装一个插件,切孔在**用户自己电脑上**跑 | AI 生成的模型(非流形是常态) |
+ * | **浏览器**(默认) | Manifold3D(WASM)在 Worker 里跑,模型破了自己修 | 大多数模型 |
+ * | **本地 Blender** | 装一个插件,切孔在**用户自己电脑上**跑 | 自相交 / 修不好的模型 |
  *
- * - **浏览器那条路会拒掉非流形模型**(`NOT_MANIFOLD`)—— 工作室的模型是
- *   Meshy 出来的,非流形是常态。所以有了第二条路。
- * - **本地 Blender 那条路不跑浏览器的分析** —— 浏览器那套分析会先拒掉
- *   非流形模型,而插件自己挑面(最大的平面)。
+ * - **浏览器那条路会先「修」再切**(2026-11-11)—— 工作室的原话:
+ *   「不用装任何东西 —— 但模型不是封闭实体(有开放边 / 非流形边)时会切不了 /
+ *   不要因为这个问题切不了」。所以现在**不因为「不是封闭实体」就拒收**:
+ *   缺的面补上、重复的面剔掉、非流形边上的多余面删掉、绕序翻乱的翻过来、
+ *   蝴蝶结顶点拆开(`magnet-repair.ts`)。**修完还是破的才报错。**
+ * - **本地 Blender 那条路不跑浏览器的分析** —— 浏览器那套分析在**修复之后**
+ *   仍然拿不出结果时,插件自己挑面(最大的平面)照样能切。
  * - **只跟 `127.0.0.1` 说话** —— 走回环地址,**不是**我们的服务器。没有
  *   上传、没有登录、没有 API 路由。模型不出用户自己的电脑。
  * - **插件在仓库里**(`public/magnet/blender_bridge.py`)—— 页面直接给下载
@@ -76,6 +79,7 @@ import {
   Plug,
   RotateCcw,
   Ruler,
+  Wrench,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -510,7 +514,8 @@ export function MagnetCutterTool() {
     setCutResult(null);
     setBlenderResult(null);
     // 本地 Blender 那条路**不跑浏览器的分析** ——
-    // ① 那套分析会拒掉非流形模型,而本地 Blender 正是为了切这种模型
+    // ① 浏览器那套分析(修完还是修不好的模型)会失败,而本地 Blender 正是
+    //   为了切这种模型
     // ② 插件自己挑面(最大的平面),浏览器的候选面表格用不着
     if (engine === "blender") return;
     const timer = setTimeout(() => {
@@ -1172,6 +1177,27 @@ export function MagnetCutterTool() {
                     {t("hole.hint")}
                   </p>
                 </section>
+
+                {/* ---- 自动修复的告知(模型不是封闭实体时)---- */}
+                {analysis?.repair?.changed && (
+                  <section className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+                    <h3 className="mb-1 flex items-center gap-1.5 text-xs font-bold text-amber-200">
+                      <Wrench className="size-3.5 text-amber-400" />
+                      {t("repair.title")}
+                    </h3>
+                    <p className="text-[11px] leading-relaxed text-amber-100/80">
+                      {t("repair.detail", {
+                        holes: analysis.repair.filledLoops,
+                        dropped:
+                          analysis.repair.droppedDegenerate +
+                          analysis.repair.droppedDuplicate +
+                          analysis.repair.droppedNonManifold,
+                        flipped: analysis.repair.flippedFaces,
+                        split: analysis.repair.splitVertices,
+                      })}
+                    </p>
+                  </section>
+                )}
 
                 {/* ---- 智能识别背面(本地 Blender 那条路不用)---- */}
                 {model && engine === "browser" && (

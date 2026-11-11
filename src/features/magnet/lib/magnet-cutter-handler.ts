@@ -100,6 +100,11 @@ import {
   normalizeHoleParams,
   parsePatchTarget,
 } from "./magnet-params";
+import {
+  type MagnetRepairReport,
+  repairMagnetGeometry,
+  splitMagnetVertices,
+} from "./magnet-repair";
 
 /**
  * wasm 在 `public/` 下的地址
@@ -229,44 +234,98 @@ async function createRuntime(): Promise<ManifoldToplevel> {
  * 直接读位模式就行,不用复制。
  */
 function fingerprint(positions: Float32Array): string {
-  const bits = new Uint32Array(
-    positions.buffer,
-    positions.byteOffset,
-    positions.length
-  );
-  let h = 0x811c9dc5;
-  for (let i = 0; i < bits.length; i++) {
-    h ^= bits[i]!;
-    h = Math.imul(h, 16777619);
-  }
-  return `${positions.length}:${(h >>> 0).toString(16)}`;
+  return hashBits(positions);
 }
 
-/** 焊接 + 校验之后的东西 —— 按位置指纹缓存 */
+/** FNV-1a —— 32 位哈希(按**字节**算,避开对齐问题) */
+function hashBits(values: Float32Array | Uint16Array): string {
+  const bytes = new Uint8Array(
+    values.buffer,
+    values.byteOffset,
+    values.byteLength
+  );
+  let h = 0x811c9dc5;
+  for (let i = 0; i < bytes.length; i++) {
+    h ^= bytes[i]!;
+    h = Math.imul(h, 16777619);
+  }
+  return `${values.length}:${(h >>> 0).toString(16)}`;
+}
+
+/**
+ * 贴图的指纹
+ *
+ * **贴图得算进缓存键** —— 分析那条路**没有**贴图,切割那条路**有**。
+ * 修复的时候补出来的盖面要**借**边界面的 UV(没有贴图就填 0)⇒
+ * 同一份几何,带不带贴图,修出来的网格**不是同一个**。
+ *
+ * 键算错的话:分析(无贴图)先跑 ⇒ 缓存里存的是没 UV 的那份 ⇒ 切割(有贴图)
+ * 直接拿那份去切 ⇒ **贴图整个丢光**(而且不报错)。
+ */
+function fingerprintTexture(texture?: MagnetTextureInput | null): string {
+  if (!texture) return "none";
+  const parts: string[] = [];
+  parts.push(texture.uvs ? hashBits(texture.uvs) : "nouv");
+  parts.push(texture.materialIndex ? hashBits(texture.materialIndex) : "nomat");
+  parts.push(`names:${texture.materialNames?.length ?? 0}`);
+  return parts.join("|");
+}
+
+/** 焊接 + 修复之后的东西 —— 按位置指纹缓存 */
 type Topology = {
-  /** 仓库焊接出来的拓扑 */
+  /** 再焊一次的拓扑(壳 / 整体朝向 / 退化标记都在这儿) */
   topo: ReturnType<typeof weldAndAnalyzeTopology>;
+  /** 修好 + 拆过顶点的 indexed 网格(绕序还是原样) */
+  repaired: MagnetIndexedMesh;
+  /** 逐面 UV(每面 6 个 float)—— 原模型没贴图时是 null */
+  uvs: Float32Array | null;
+  /** 逐面材质下标 —— 原模型没材质时是 null */
+  materialIndex: Uint16Array | null;
   /** 绕序修正后的 indexed 网格(法线朝外)—— 智能识别背面用它 */
   corrected: MagnetIndexedMesh;
-  /** 要翻绕序的那些面(焊接后的面号) */
+  /** 要翻绕序的那些面(面号) */
   flippedFaces: Set<number>;
+  /** 修了什么 —— 给界面 / 日志看 */
+  repair: MagnetRepairReport;
 };
 
 let topologyCache: { key: string; topology: Topology } | null = null;
 
 /**
- * 三角汤 → 焊接好的拓扑(带三道闸)
+ * 三角汤 → 焊接好的拓扑(**自动修复**,不再因为「不是封闭实体」就拒收)
  *
- * 四道闸(工作室的模型是 AI 生成的(Meshy),非流形是常态 —— 这四道**不是**
- * 可选项):
+ * ## 为什么不再拒收(2026-11-11)
  *
- * 1. 不是封闭流形(有开放边 / 非流形边)⇒ 拒绝
- * 2. 有局部翻转的面 ⇒ 拒绝(manifold 不看绕向,喂进去就是烂件)
- * 3. 法线朝内的壳 ⇒ **自己翻过来**(manifold 不抛错,只是算错)
- * 4. manifold 自己抛错 ⇒ 拒绝(在 `buildModel` 那一步)
+ * 工作室的原话:**「不用装任何东西 —— 但模型不是封闭实体(有开放边 /
+ * 非流形边)时会切不了 / 不要因为这个问题切不了」**。
+ *
+ * 早先这里是两道闸:不是封闭流形 ⇒ 拒;有翻着的面 ⇒ 拒。那等于把
+ * 「模型是 AI 生成的」这件事推给用户 —— 客户拿着 Meshy 导出的模型,
+ * 装不装 Blender 都切不了。
+ *
+ * 现在改成**先修再切**:
+ *
+ * ```
+ * 焊接 → 阶段 A(几何修复:退化面 / 重复面 / 非流形边 / 绕序 / 补洞)
+ *      → 再焊一次(拿干净的拓扑)
+ *      → 阶段 B(拆蝴蝶结顶点)
+ *      → 整体朝内的壳翻过来
+ * ```
+ *
+ * 修完还是不封闭 ⇒ 那才是真的切不了,这时候才报错(而且要说清楚
+ * 「自动修复之后还剩多少条破边」)。
+ *
+ * ## 三道闸还在,只是往后挪了
+ *
+ * 1. **修完还是不封闭** ⇒ 拒绝(报 `NOT_MANIFOLD`,附上剩余条数)
+ * 2. **法线整体朝内的壳** ⇒ **自己翻过来**(manifold 不抛错,只是算错)
+ * 3. **manifold 自己抛错** ⇒ 拒绝(在 `buildModel` 那一步)
  */
-function prepareTopology(positions: Float32Array): Topology {
-  const key = fingerprint(positions);
+function prepareTopology(
+  positions: Float32Array,
+  texture?: MagnetTextureInput | null
+): Topology {
+  const key = `${fingerprint(positions)}|${fingerprintTexture(texture)}`;
   if (topologyCache && topologyCache.key === key) return topologyCache.topology;
 
   let topo: ReturnType<typeof weldAndAnalyzeTopology>;
@@ -284,34 +343,119 @@ function prepareTopology(positions: Float32Array): Topology {
     );
   }
 
-  const openEdges = topo.components.reduce((s, c) => s + c.openEdges, 0);
-  const nonManifoldEdges = topo.components.reduce(
+  // --- 阶段 A:几何修复 ---
+  let phaseA: ReturnType<typeof repairMagnetGeometry>;
+  try {
+    phaseA = repairMagnetGeometry({
+      vertices: topo.mesh.vertices,
+      faceVertex: topo.mesh.faceVertex,
+      uvs: texture?.uvs ?? null,
+      materialIndex: texture?.materialIndex ?? null,
+    });
+  } catch (err) {
+    throw engineError("网格修复", err);
+  }
+
+  if (phaseA.positions.length === 0) {
+    throw new MagnetCutterError(
+      "EMPTY_MODEL",
+      "这个模型里没有能构成实体的面 —— 文件是空的,或者只有点没有面。"
+    );
+  }
+
+  // --- 再焊一次:拿干净的拓扑(壳 / 整体朝向 / 退化标记)---
+  let topo1: ReturnType<typeof weldAndAnalyzeTopology>;
+  try {
+    topo1 = weldAndAnalyzeTopology(phaseA.positions);
+  } catch (err) {
+    throw engineError("网格修复后重新焊接", err);
+  }
+
+  // --- 阶段 B:拆蝴蝶结顶点(拆完**不能**再焊)---
+  const phaseB = splitMagnetVertices({
+    vertices: topo1.mesh.vertices,
+    faceVertex: topo1.mesh.faceVertex,
+  });
+
+  const repair: MagnetRepairReport = {
+    ...phaseA.report,
+    splitVertices: phaseB.splitVertices,
+  };
+
+  // 修完还是不封闭 ⇒ 真的切不了
+  const openEdges = topo1.components.reduce((s, c) => s + c.openEdges, 0);
+  const nonManifoldEdges = topo1.components.reduce(
     (s, c) => s + c.nonManifoldEdges,
     0
   );
-  if (openEdges > 0 || nonManifoldEdges > 0) {
+  repair.openEdgesAfter = openEdges;
+  repair.nonManifoldEdgesAfter = nonManifoldEdges;
+  repair.closed = openEdges === 0 && nonManifoldEdges === 0;
+
+  if (!repair.closed) {
     throw new MagnetCutterError(
       "NOT_MANIFOLD",
-      `这个模型不是封闭流形(有 ${openEdges} 条开放边 / ${nonManifoldEdges} 条非流形边)—— 布尔运算切不了。` +
-        "先去「打印前工作台 → 检查」看看问题在哪儿。"
+      `自动修复之后这个模型还是不封闭(还剩 ${openEdges} 条开放边 / ${nonManifoldEdges} 条非流形边)` +
+        "—— 破得太厉害了,布尔运算切不了。" +
+        "换个模型,或者先用「打印前工作台 → 检查」把破的地方修好。"
     );
   }
 
-  // 局部翻转的面:manifold 不检查绕向一致性,喂进去就是烂件 —— 直接拒。
-  // (仓库统计「局部翻转面」时**已经排除了整体朝内的壳**,所以这两个数不重叠。)
-  if (topo.flippedFaceCount > 0) {
+  // 封闭 ≠ 有实体 —— 一张孤零零的三角形补上盖面之后「封闭」了,但它
+  // 没有厚度(体积是 0),布尔那一步照样会拒。自己先拦下来,说人话。
+  const volume = Math.abs(signedVolumeOfSoup(phaseA.positions));
+  if (volume < 1e-6) {
     throw new MagnetCutterError(
-      "INVERTED_WINDING",
-      `这个模型里有 ${topo.flippedFaceCount} 个面的法线是翻着的 —— 布尔算出来会烂。` +
-        "先去「打印前工作台 → 检查」把法线修好。"
+      "NOT_MANIFOLD",
+      "自动修复之后这个模型还是没有实体(没有厚度)—— 布尔运算切不了。" +
+        "换一个有点厚度的模型试试。"
     );
   }
 
-  const { corrected, flippedFaces } = buildCorrectedMesh(topo);
+  const repaired: MagnetIndexedMesh = {
+    vertices: phaseB.vertices,
+    faceVertex: phaseB.faceVertex,
+  };
+  const { corrected, flippedFaces } = buildCorrectedMesh(topo1, repaired);
 
-  const topology: Topology = { topo, corrected, flippedFaces };
+  const topology: Topology = {
+    topo: topo1,
+    repaired,
+    uvs: phaseA.uvs,
+    materialIndex: phaseA.materialIndex,
+    corrected,
+    flippedFaces,
+    repair,
+  };
   topologyCache = { key, topology };
   return topology;
+}
+
+/**
+ * 三角汤的有符号体积(正 = 法线朝外)
+ *
+ * 用来判「这个模型到底有没有实体」—— 封闭但**没有厚度**的壳(比如一张
+ * 孤零零的三角形补了个盖面)体积是 0,布尔那一步会拒。
+ */
+function signedVolumeOfSoup(positions: Float32Array): number {
+  let vol = 0;
+  for (let f = 0; f < positions.length / 9; f++) {
+    const ax = positions[f * 9]!,
+      ay = positions[f * 9 + 1]!,
+      az = positions[f * 9 + 2]!;
+    const bx = positions[f * 9 + 3]!,
+      by = positions[f * 9 + 4]!,
+      bz = positions[f * 9 + 5]!;
+    const cx = positions[f * 9 + 6]!,
+      cy = positions[f * 9 + 7]!,
+      cz = positions[f * 9 + 8]!;
+    vol +=
+      (ax * (by * cz - bz * cy) +
+        ay * (bz * cx - bx * cz) +
+        az * (bx * cy - by * cx)) /
+      6;
+  }
+  return vol;
 }
 
 /**
@@ -325,20 +469,28 @@ function prepareTopology(positions: Float32Array): Topology {
  * 「外壳正常 + 内腔空腔」这种组合,整体翻会把好的那个也翻坏。
  *
  * 翻绕序的时候**UV 也要跟着换角**(见 `buildTexturedMeshInput`)。
+ *
+ * ⚠️ **面号跟 `mesh` 对齐** —— `topo` 是「再焊一次」那份拓扑(它带着
+ * 壳 / 整体朝向的判定),`mesh` 是**修好 + 拆过顶点**那份网格。两者的
+ * 面数、面序一致(修复不重排面,拆顶点只改顶点号),所以 `topo.faceComponent[f]`
+ * 说的就是 `mesh` 的第 f 张面。
  */
-function buildCorrectedMesh(topo: ReturnType<typeof weldAndAnalyzeTopology>): {
+function buildCorrectedMesh(
+  topo: ReturnType<typeof weldAndAnalyzeTopology>,
+  mesh: MagnetIndexedMesh
+): {
   corrected: MagnetIndexedMesh;
   flippedFaces: Set<number>;
 } {
-  const mesh = topo.mesh;
   const inverted = new Set<number>();
   topo.components.forEach((c, i) => {
     if (c.globalInverted) inverted.add(i);
   });
 
+  const faceCount = mesh.faceVertex.length / 3;
   const faceVertex = new Uint32Array(mesh.faceVertex);
   const flippedFaces = new Set<number>();
-  for (let f = 0; f < mesh.faceCount; f++) {
+  for (let f = 0; f < faceCount; f++) {
     const comp = topo.faceComponent[f] ?? -1;
     if (comp < 0 || !inverted.has(comp)) continue;
     const b = faceVertex[f * 3 + 1]!;
@@ -423,7 +575,7 @@ async function buildModel(
   texture?: MagnetTextureInput | null
 ): Promise<BuiltModel> {
   const runtime = await loadManifoldRuntime();
-  const topology = prepareTopology(positions);
+  const topology = prepareTopology(positions, texture);
 
   let input: ManifoldMeshInput;
   let materialIds: number[];
@@ -449,8 +601,9 @@ async function buildModel(
   } catch (err) {
     throw new MagnetCutterError(
       "NOT_MANIFOLD",
-      `布尔引擎拒绝了这个模型(${describeManifoldError(err)})—— ` +
-        "先去「打印前工作台 → 检查」把网格修好。"
+      `布尔引擎还是拒绝了这个模型(${describeManifoldError(err)})—— ` +
+        "自动修复没能把它变成能参与布尔运算的实体。" +
+        "换一个模型,或者先用「打印前工作台 → 检查」看看问题在哪儿。"
     );
   }
 
@@ -496,25 +649,27 @@ async function buildModel(
 }
 
 /**
- * 不带贴图时的网格 —— 直接用焊接出来的顶点(`numProp = 3`)
+ * 不带贴图时的网格 —— 直接用**修好之后**的顶点(`numProp = 3`)
  *
- * 两件事:
+ * 三件事:
  *
- * 1. **剔掉退化面**(零面积 / 顶点重合)—— 仓库的焊接输出**带着**它们
- *    (只是打了 `FACE_FLAG.DEGENERATE` 标记),manifold 收不了。
- * 2. **逐个连通分量翻绕序**(见 `buildCorrectedMesh`)。
+ * 1. **用修复后的网格**(不是原始焊接的)—— 退化面已经在修复那一步删了,
+ *    洞也补上了,绕序也统一了。
+ * 2. **再剔一次退化面**(零面积 / 顶点重合)—— 修复之后**又焊了一次**,
+ *    那次焊接可能又标出新的退化面(几乎不会,但 manifold 收不了)。
+ * 3. **逐个连通分量翻绕序**(见 `buildCorrectedMesh`)。
  */
 function buildPlainMeshInput(topology: Topology): ManifoldMeshInput {
-  const { topo, flippedFaces } = topology;
-  const mesh = topo.mesh;
+  const { topo, repaired, flippedFaces } = topology;
 
-  const triVerts = new Uint32Array(mesh.faceCount * 3);
+  const faceCount = repaired.faceVertex.length / 3;
+  const triVerts = new Uint32Array(faceCount * 3);
   let w = 0;
-  for (let f = 0; f < mesh.faceCount; f++) {
+  for (let f = 0; f < faceCount; f++) {
     if ((topo.flags[f] ?? 0) & FACE_FLAG.DEGENERATE) continue;
-    const a = mesh.faceVertex[f * 3]!;
-    const b = mesh.faceVertex[f * 3 + 1]!;
-    const c = mesh.faceVertex[f * 3 + 2]!;
+    const a = repaired.faceVertex[f * 3]!;
+    const b = repaired.faceVertex[f * 3 + 1]!;
+    const c = repaired.faceVertex[f * 3 + 2]!;
     if (flippedFaces.has(f)) {
       triVerts[w++] = a;
       triVerts[w++] = c;
@@ -528,7 +683,7 @@ function buildPlainMeshInput(topology: Topology): ManifoldMeshInput {
 
   return {
     numProp: 3,
-    vertProperties: mesh.vertices,
+    vertProperties: repaired.vertices,
     triVerts: triVerts.subarray(0, w),
   };
 }
@@ -560,15 +715,18 @@ function buildTexturedMeshInput(
   topology: Topology,
   texture: MagnetTextureInput
 ): { input: ManifoldMeshInput; materialIds: number[] } {
-  const { topo, flippedFaces } = topology;
-  const mesh = topo.mesh;
-  const uvs = texture.uvs ?? null;
-  const materialIndex = texture.materialIndex ?? null;
+  const { topo, repaired, flippedFaces } = topology;
+  const mesh = repaired;
+  // ⚠️ **用修复后的 UV / 材质**,不是原始那份 ——
+  // 修复会删面、加面(补洞)、翻面 ⇒ 原始那份跟现在的面**对不上号**了。
+  // 用原始那份 ⇒ 贴图整个错位(补出来的盖面拿不到 UV,翻过的面 UV 反了)。
+  const uvs = topology.uvs;
+  const materialIndex = topology.materialIndex;
   const materialCount = Math.max(1, texture.materialNames?.length ?? 1);
 
   // --- ① 有效面(剔掉退化面)+ 每个面的材质 ---
   const facesByMaterial = new Map<number, number[]>();
-  for (let f = 0; f < mesh.faceCount; f++) {
+  for (let f = 0; f < mesh.faceVertex.length / 3; f++) {
     if ((topo.flags[f] ?? 0) & FACE_FLAG.DEGENERATE) continue;
     const raw = materialIndex?.[f];
     const mat =
@@ -605,7 +763,7 @@ function buildTexturedMeshInput(
   const triVerts = new Uint32Array(nCorners);
   const mergeFrom: number[] = [];
   const mergeTo: number[] = [];
-  /** 焊接顶点号 → 第一个用它的角(规范角) */
+  /** 顶点号 → 第一个用它的角(规范角) */
   const canonical = new Map<number, number>();
 
   orderedFaces.forEach((f, t) => {
@@ -952,6 +1110,8 @@ export async function analyzeModel(
     volume: prepared.volume,
     bboxMin: [prepared.bbox.min[0], prepared.bbox.min[1], prepared.bbox.min[2]],
     bboxMax: [prepared.bbox.max[0], prepared.bbox.max[1], prepared.bbox.max[2]],
+    // 修了什么 —— 界面得告诉用户(模型不是封闭实体时是我们补的洞)
+    repair: prepared.topology.repair,
   };
 }
 
@@ -1177,10 +1337,12 @@ export async function cutMagnetPocket(
     throw engineError("取切完的结果", err);
   }
   // 孔壁是新生成的三角形 —— 它们属于「被切的那个面」的材质
+  // ⚠️ **用修复后的材质数组** —— 修复会删面 / 加面 / 翻面,原始那份跟现在
+  // 的面号对不上号了(用原始那份 ⇒ 找到的面号是错的 ⇒ 材质取错)。
   const fallbackMaterial = findMaterialAtPoint(
     prepared.topology.corrected,
     site.point,
-    texture?.materialIndex ?? null,
+    prepared.topology.materialIndex,
     0
   );
 

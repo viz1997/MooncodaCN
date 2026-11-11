@@ -178,7 +178,7 @@ function seamedCylinder(
 }
 
 describe("带贴图的真实模型(带接缝的圆柱 + 三个材质)", () => {
-  it("模型本身是封闭流形 —— 能过那三道闸", async () => {
+  it("模型本身是封闭流形 —— 自动修复不动它,照样切得动", async () => {
     const model = seamedCylinder(64, 16, 25, 40);
     const analysis = await analyzeModel(model.positions, null);
     expect(analysis.volume).toBeGreaterThan(0);

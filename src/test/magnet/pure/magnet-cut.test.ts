@@ -9,7 +9,8 @@
  * 1. 切掉的体积**分毫不差** —— 跟「64 边形截面积 × 1.3mm」对上
  * 2. 切完的网格**还是封闭流形**(能再切一次不炸)
  * 3. **太薄**的面切不得(会捅穿)
- * 4. **非流形**的模型拒收(并指路到工作台的检查)
+ * 4. **不是封闭实体的模型**(有开放边 / 非流形边)⇒ **自动修好再切**,
+ *    不因为这个拒绝(工作室 2026-11-11)
  * 5. 六个面里挑出**平整度最高**的
  * 6. 整体法线朝内的模型 —— manifold 自己不报错,**得我们翻过来**
  */
@@ -226,14 +227,45 @@ describe("磁吸孔切割(真跑 manifold)", () => {
     await expect(cutMagnetPocket(plateSoup(1), "posZ")).rejects.toThrow(/捅穿/);
   });
 
-  it("非流形的模型拒收,并指路到工作台的检查", async () => {
-    await expect(cutMagnetPocket(openCubeSoup(40), "posZ")).rejects.toThrow(
-      /封闭流形/
-    );
-    await expect(cutMagnetPocket(openCubeSoup(40), "posZ")).rejects.toSatisfy(
+  it("**不是封闭实体的模型也能切** —— 自动补洞(工作室 2026-11-11)", async () => {
+    // 缺一个面的立方体:有开放边,不是封闭流形。
+    // 早先这一条是「拒收」—— 工作室的原话是「不要因为这个问题切不了」。
+    const broken = openCubeSoup(40);
+
+    // 修好之后照样切得动
+    const result = await cutMagnetPocket(broken, "posZ");
+    const expected = expectedRemovedVolumeMm3();
+    // 切掉的体积跟完好的立方体**分毫不差** ⇒ 补出来的那个面就在正确的位置
+    expect(result.removedVolume).toBeCloseTo(expected, 3);
+    // 切之前的体积是完整的 40³(补出来的盖面把体积补回来了)
+    expect(result.volumeBefore).toBeCloseTo(64000, 0);
+  });
+
+  it("自动修复之后还是破的 ⇒ 那才拒收(而且说清楚还剩几条)", async () => {
+    // 一张孤零零的三角形:补上盖面之后「封闭」了,但它**没有厚度**
+    // (体积是 0)⇒ 布尔那一步会拒。自己先拦下来,说人话。
+    const shards = new Float32Array([
+      0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0,
+    ]);
+    await expect(cutMagnetPocket(shards, "posZ")).rejects.toSatisfy(
       (err: unknown) =>
-        err instanceof MagnetCutterError && err.code === "NOT_MANIFOLD"
+        err instanceof MagnetCutterError &&
+        err.code === "NOT_MANIFOLD" &&
+        /自动修复之后/.test(err.message)
     );
+  });
+
+  it("**改了用户的模型就得告诉用户** —— 分析结果里带着修复的经过", async () => {
+    const analysis = await analyzeModel(openCubeSoup(40));
+    expect(analysis.repair).not.toBeNull();
+    expect(analysis.repair?.changed).toBe(true);
+    // 补了一个洞(缺的那一面)
+    expect(analysis.repair?.filledLoops).toBe(1);
+    expect(analysis.repair?.closed).toBe(true);
+
+    // 完好的模型 —— **一个字节都没动**
+    const clean = await analyzeModel(cubeSoup(40));
+    expect(clean.repair?.changed).toBe(false);
   });
 
   it("整体法线朝内的模型 —— 自己翻过来照样能切", async () => {

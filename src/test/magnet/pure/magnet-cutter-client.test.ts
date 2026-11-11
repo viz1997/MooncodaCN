@@ -98,6 +98,7 @@ class FakeWorker {
       volume: 64000,
       bboxMin: [-20, -20, -20],
       bboxMax: [20, 20, 20],
+      repair: null,
     };
     this.onmessage?.({
       data: { type: "analyze", seq, result },

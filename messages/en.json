@@ -1454,6 +1454,10 @@
       "reset": "Restore defaults",
       "hint": "Fill in the real magnet size — Ø20.7 mm × 1.3 mm deep by default. Both values are absolute millimetres; they do not scale with the model."
     },
+    "repair": {
+      "title": "This model had gaps — they are repaired",
+      "detail": "Filled {holes} gap(s) · dropped {dropped} bad face(s) · flipped {flipped} face(s) with reversed winding · split {split} pinched vertex/vertices. What you get back is the repaired model."
+    },
     "back": {
       "title": "Smart back-face detection",
       "hint": "Finds the largest flat region on the model by area, whatever way the model is oriented. Click a row to use a different one.",
@@ -1508,7 +1512,7 @@
     "engine": {
       "title": "Cutting engine",
       "browser": "Cut in the browser",
-      "browserHint": "Nothing to install — but models that are not closed solids (open or non-manifold edges) cannot be cut this way.",
+      "browserHint": "Nothing to install — models that are not closed solids (open or non-manifold edges) are repaired automatically and then cut.",
       "blender": "Cut with local Blender",
       "blenderHint": "Cuts on your own machine — non-manifold and self-intersecting models work too. The model only goes to 127.0.0.1; it never leaves this computer.",
       "portLabel": "Port",
@@ -1529,8 +1533,8 @@
       "generic": "Something went wrong — please try again.",
       "noGeometry": "No geometry could be read from this file.",
       "codes": {
-        "notManifold": "This model is not a closed solid (it has open or non-manifold edges), so a boolean cannot cut it. Check it in the Print Pre-flight Workbench first.",
-        "invertedWinding": "This model's faces were wound inside-out — that has been corrected automatically. Please try again.",
+        "notManifold": "Even after automatic repair this model still cannot take part in a boolean (it still has open or non-manifold edges, or it has no thickness at all). Try a different model, or check it in the Print Pre-flight Workbench first.",
+        "invertedWinding": "This model's faces are wound inside-out, so the boolean engine cannot compute a correct result. Fix the normals in the Print Pre-flight Workbench first.",
         "emptyModel": "This model is empty or degenerate — there is nothing to cut.",
         "booleanFailed": "The boolean operation failed on this model. Try exporting it again from your modelling tool and re-importing it.",
         "faceCountCollapsed": "The result came out broken (the face count collapsed), so it was rejected — the original model was kept.",

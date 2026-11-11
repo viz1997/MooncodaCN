@@ -15,6 +15,7 @@ import type {
   MagnetHoleParams,
   MagnetTargetId,
 } from "./magnet-params";
+import type { MagnetRepairReport } from "./magnet-repair";
 
 /**
  * 模型身上带过来的「贴图信息」
@@ -129,6 +130,14 @@ export type MagnetAnalyzeOutcome = {
   /** 包围盒 */
   bboxMin: [number, number, number];
   bboxMax: [number, number, number];
+  /**
+   * 修了什么 —— 模型**不是封闭实体**时,浏览器那条路**自己修**(2026-11-11)
+   *
+   * `changed === false` = 模型本来就是好的,一个字节都没动。
+   * 界面拿这个告诉用户「你的模型有破口,我们补上了」—— **不能悄悄改
+   * 用户的模型**。
+   */
+  repair: MagnetRepairReport | null;
 };
 
 /** Worker 回的错 —— 带稳定的 code,界面按 code 查文案 */

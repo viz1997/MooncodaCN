@@ -31,6 +31,11 @@ import { describe, expect, it } from "vitest";
  * - **③ 导出保留材质贴图** —— 导出走 `writeObjFromSoup` + `downloadModelZip`,
  *   OBJ 里有 `vt` / `usemtl` / `mtllib`
  *
+ * 2026-11-11 工作室追加的一条(「**不要因为这个问题切不了**」)也在这一层:
+ *
+ * - **④ 模型不是封闭实体 ⇒ 自动修好再切** —— `magnet-repair.ts` 那份纯函数
+ *   补洞 / 剔重复面 / 拆蝴蝶结顶点 / 翻绕序,接在布尔运算**之前**
+ *
  * 全部是文件扫描 + 常量 —— 不需要 DB / 网络 / 浏览器。
  */
 
@@ -88,6 +93,7 @@ const WRITE_OBJ = "src/features/magnet/lib/write-obj.ts";
 const PROTOCOL = "src/features/magnet/lib/magnet-cutter-protocol.ts";
 const ERROR_MAP = "src/features/magnet/lib/magnet-error.ts";
 const HUB = "src/features/tools/components/tools-hub.tsx";
+const REPAIR = "src/features/magnet/lib/magnet-repair.ts";
 
 describe("磁吸孔工具页面", () => {
   it("路由在(挂在 (marketing-atelier) 组 —— 跟打印工作台同组)", () => {
@@ -220,6 +226,53 @@ describe("磁吸孔工具页面", () => {
     expect(writer).toContain("vt ");
     expect(writer).toContain("usemtl ");
     expect(writer).toContain("mtllib ");
+  });
+
+  it("**不是封闭实体也照样切** —— 先自动修好再切(工作室 2026-11-11)", () => {
+    // 修模型的那份纯函数模块得在
+    expect(existsSync(join(ROOT, REPAIR))).toBe(true);
+    const repair = read(REPAIR);
+    expect(repair).toContain("repairMagnetGeometry");
+    expect(repair).toContain("splitMagnetVertices");
+
+    // handler 真的接上了 —— 不是写了个文件没人用
+    const handler = read(HANDLER);
+    expect(handler).toContain("repairMagnetGeometry");
+    expect(handler).toContain("splitMagnetVertices");
+    expect(handler).toMatch(/from "\.\/magnet-repair"/);
+
+    // **不许**因为「不是封闭实体」就提前拒收 —— 那道闸现在是「修完还破才拒」
+    // (拒绝发生在修复之后,不是在修复之前)
+    const repairAt = handler.indexOf("repairMagnetGeometry(");
+    const rejectAt = handler.indexOf('"NOT_MANIFOLD"');
+    expect(repairAt).toBeGreaterThan(-1);
+    expect(rejectAt).toBeGreaterThan(repairAt);
+
+    // 页面上摆的那句「不用装任何东西」也得说清楚会自己修
+    const zh = flattenKeys(messages("zh").Magnet);
+    const en = flattenKeys(messages("en").Magnet);
+    expect(zh["engine.browserHint"]).toContain("修");
+    expect(en["engine.browserHint"]).toContain("repair");
+    // 旧文案那句「会切不了」不许再出现
+    expect(zh["engine.browserHint"]).not.toContain("会切不了");
+  });
+
+  it("**改了用户的模型就得告诉用户** —— 修复的经过摆在页面上", () => {
+    // 分析结果里带着「修了什么」
+    expect(read(HANDLER)).toMatch(/repair:\s*prepared\.topology\.repair/);
+    expect(read(PROTOCOL)).toContain("repair");
+    // 页面上真的渲染了那一段
+    const tool = read(TOOL);
+    expect(tool).toContain("analysis?.repair?.changed");
+    expect(tool).toContain('t("repair.title")');
+    expect(tool).toContain('t("repair.detail"');
+    // 中英文都有
+    const zh = flattenKeys(messages("zh").Magnet);
+    const en = flattenKeys(messages("en").Magnet);
+    expect(zh["repair.title"]).toBeTruthy();
+    expect(en["repair.title"]).toBeTruthy();
+    expect(zh["repair.detail"]).toBeTruthy();
+    expect(en["repair.detail"]).toBeTruthy();
   });
 
   it("预料之外的错单独一个码 —— 不再一律报成 BOOLEAN_FAILED", () => {
