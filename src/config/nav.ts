@@ -371,6 +371,14 @@ export const adminNav: NavGroup[] = [
         href: "/admin/coupons",
         icon: Gift,
       },
+      // 2026-11-11：站点设置 —— 后台能改、不用重新部署的站点级设置。
+      // 第一项是海外独立站(Shopify)的顾客访问地址（工作室原话：「不需要
+      // 环境变量，在后台设置」）。真理源在 `site_setting` 表。
+      {
+        title: "站点设置",
+        href: "/admin/site-settings",
+        icon: Settings,
+      },
       {
         title: "商品管理",
         href: "/admin/product-effects",

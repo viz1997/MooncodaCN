@@ -3488,3 +3488,42 @@ export const couponRedemptionRelations = relations(
     }),
   })
 );
+
+/* -------------------------------------------------------------------------- */
+/*  站点设置                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 站点设置 —— **键值对**(2026-11-11)
+ *
+ * 「后台能改、不用重新部署」的站点级设置都住这儿。第一项是**海外独立站的
+ * 顾客访问地址**(`international_store_url`)—— 工作室 2026-11-11 的要求是
+ * **「不需要环境变量,在后台设置」**。
+ *
+ * ## 为什么不再只靠环境变量
+ *
+ * `NEXT_PUBLIC_*` 是**构建期内联**的 ⇒ 改完环境变量要**重新部署**才生效。
+ * 真理源搬到这张表,环境变量退成**兜底**。
+ *
+ * ## 回退链(逐键)
+ *
+ * ```
+ * DB 那一行 → NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL → 空(不显示入口)
+ * ```
+ *
+ * **逐键**取,不是「有一行就全走 DB」—— 以后加第二个键,前一个键的兜底
+ * 不该跟着一起没。
+ *
+ * ⚠️ **DB 里存了空串 = 明确关掉** —— 不是「没配」。所以后台能把入口关掉,
+ * 哪怕环境变量还配着(那正是「在后台设置」的意义)。
+ */
+export const siteSetting = pgTable("site_setting", {
+  /** 键 —— 见 `features/site-settings/lib/site-setting.ts` 的 SITE_SETTING_KEYS */
+  key: text("key").primaryKey(),
+  /** 值 —— 字符串(地址、开关都存字符串) */
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export type SiteSettingRow = typeof siteSetting.$inferSelect;
+export type NewSiteSettingRow = typeof siteSetting.$inferInsert;

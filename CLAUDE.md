@@ -17,7 +17,7 @@ Mooncoda is a production-ready Next.js SaaS template. It provides a complete fou
 | **Shopify**(外部服务)**已下线** | 曾经只做银行卡 / Shop Pay 的收银台(草稿订单,逐分相等)。2026-11-05 工作室决定只用微信 + 支付宝,**不再接新单** —— 代码留着给老单用,整目录待拆。⚠️ **这一行说的是「收款通道」** —— 工作室**境外那个独立站**(另一个 Shopify 店铺)跟它**不是一回事**,见「外国访客 → 海外独立站」 | Shopify Admin GraphQL API + 草稿订单 |
 | **Sellbase**(独立服务)**过渡期保留** | 旧收款路:Sellbase 建单 + Stripe 付款页。**不再接新单**(已建好的旧单还能重取支付入口)。两个新通道跑通后整个 `src/features/sellbase/` 拆掉 | Supabase Edge Functions(**跟本仓库同一个 Supabase 项目**)+ Stripe(MIT) |
 | **微信小程序 / 浏览器访客**(外部客户端) | 调 NextDevTpl AI 接口拿候选图 **+ 调 `/api/image-gen/products` 拿商品与 SKU**;调 NextDevTpl `/api/store/**` 加购 + 结算 | Taro 4 + React 18(小程序);Next.js(浏览器) |
-| **海外独立站**(外部服务,工作室自营) | **境外 Shopify 店铺** —— 境外的买家在那儿下单。本仓库**只提供一个入口**:`/en` 页面的顶部公告条 + 导航按钮,地址走 `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL`。**不接单、不算价、不碰钱** | Shopify 店铺前端(独立部署) |
+| **海外独立站**(外部服务,工作室自营) | **境外 Shopify 店铺** —— 境外的买家在那儿下单。本仓库**只提供一个入口**:顶部公告条 + 导航按钮(**所有语言站都出现**),地址走**后台设置**(`/admin/site-settings` → `site_setting` 表),环境变量 `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL` 只当**兜底**。**不接单、不算价、不碰钱** | Shopify 店铺前端(独立部署) |
 
 **接入形态 = 「本仓库算价,收银台只负责收钱」**(2026-11-05 取代 Sellbase 单通道):
 - 本仓库算的价 = `items[].unit_price_amount`;收银台那边只是**载体** + 一个能看懂的标题
@@ -259,6 +259,7 @@ All tables use `text` primary keys with `nanoid()` defaults.
 | `storefront_order` / `storefront_order_item` | 商城订单事实;`status`(订单状态)和 `payment_status`(支付状态)**分两列**;收款相关列:`payment_channel`(这单走哪个通道)、`provider_order_id`(平台侧单号,回调反查)、`payment_qr_code_url`(微信扫码的 `code_url`)、`payment_url`(支付宝 / Shopify 的跳转地址)、`sellbase_order_id`(旧路,唯一索引)、`paid_at` |
 | `address` | 收货地址簿 —— **必须留在本仓库**,Sellbase 的 `customer.addresses` 只读,没有创建地址的路由 |
 | `print_order` | 打印工单;收款相关列跟商城订单同一套:`payment_status` / `payment_channel` / `provider_order_id` / `payment_qr_code_url` / `payment_url` / `paid_at`(外加旧路的 `sellbase_order_id`);另有交期两列 `delivery_tier` / `delivery_fee_cents`(见「打印工单交期档位」);**独立工单**(`storefront_order_id` = null,工单自己收款,见「打印服务直接建工单」);旧单(2026-11-08 之前跟着商城订单结的账)才挂 `storefront_order_id` |
+| `site_setting` | **站点级设置**(2026-11-11 新增)—— `key` text PK / `value` text / `updated_at`;现在只有一项:`international_store_url`(海外独立站入口地址,后台 `/admin/site-settings` 改,环境变量退成兜底,见「外国访客 → 海外独立站」)。**没有配置行** —— 迁移脚本只建表,跑完线上行为不变 |
 
 `user.sellbase_customer_id`(原 `medusa_customer_id`)只是**加速指针** —— Sellbase 的 customer 按 **email** upsert,真正的 join key 永远是 email。
 
@@ -2141,7 +2142,7 @@ Script,桥接就起了。做出插件,或者 mcp 协议」**。
 | `src/test/magnet/pure/magnet-addon.test.ts` | 插件包在仓库里 / zip **只有一个顶层目录**、目录名 = 模块名 / 包里的 `bridge.py` 跟源码**一个字节都不差**(不会漂)/ 入口 re-export `bl_info` / `register` / `unregister` 且**不抄第二份 `bl_info`** / 源码里有 `AddonPreferences` / 面板 / 操作器 / 协议版本对得上 / **只绑 `127.0.0.1`**(不许 `0.0.0.0`)/ **proxy 的 matcher 放 `/magnet/*` 过**(页面路由照常走 locale)/ 构建脚本在仓库里 + `package.json` 登记了 `magnet:addon` |
 | `src/test/magnet/pure/magnet-mcp.test.ts` | 协议合规(版本协商 / **通知不回** / 工具不存在回 `-32602` / 不认识的方法回 `-32601` / 不是 2.0 回 `-32600` / 解不了 JSON 回 `-32700`)/ 工具炸了也给一份看得懂的内容(标 `isError`)/ 排版说人话(「可以切」/「太薄 —— 切下去会捅穿」/「一个字节都没改」/「临时封上了 … 不会多出几何」)/ **坐标不像毫米时要提醒**(不悄悄缩放)/ **引擎是同一份代码**/ **只跟 `127.0.0.1` 说话**/ **stdout 只写一次**(协议通道)/ **不进工单**(不碰报价 / 工单 / R2)/ 协议层与排版层住在 `src/features/magnet/lib/`(能进 unit project) |
 
-### 外国访客 → 海外独立站(2026-11-10,**2026-11-11 改了口径**)
+### 外国访客 → 海外独立站(2026-11-10,**2026-11-11 改了口径**,**2026-11-11 改成后台可配**)
 
 工作室的独立站是**另一个 Shopify 店铺**(境外的那个)。境外访客落到本仓库之后,
 看到的是人民币价格、境内物流、境内客服 —— 看着就不是给他准备的。要给他一个
@@ -2149,7 +2150,7 @@ Script,桥接就起了。做出插件,或者 mcp 协议」**。
 
 > ⚠️ **这跟 `src/features/payments/providers/shopify/` 那个支付通道不是一回事**
 > —— 那个 2026-11-05 就退出 `ENABLED_PAYMENT_CHANNELS` 了(`SHOPIFY_STORE_DOMAIN`
-> 那套是 Admin API,给收款用的)。这里是**顾客访问地址**。两个变量名也刻意不一样:
+> 那套是 Admin API,给收款用的)。这里是**顾客访问地址**。两个名字也刻意不一样:
 > `SHOPIFY_STORE_DOMAIN` vs `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL`。
 
 #### 「外国访客」**不等于**「会看英文」——**所有语言站都出现**
@@ -2178,6 +2179,7 @@ Script,桥接就起了。做出插件,或者 mcp 协议」**。
 | 出现的位置 | **所有语言站都出现** —— `/en` 和 `/zh` 都有(2026-11-11 改的,原来只在 `/en`) |
 | 公告条 | 顶部一条细条,**挂在头上面**(头是 sticky 的,条在头下面会被盖住) |
 | 导航按钮 | 商城那个头(`WjpStoreHeader`)里的一项,桌面端 + 移动端 Sheet **两处** |
+| **地址从哪儿来** | **后台设置**(`/admin/site-settings`)—— 真理源是 DB 的 `site_setting` 表;环境变量 `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL` 退成**兜底**(2026-11-11 工作室改的,见下面「地址从哪儿来」) |
 | 没配地址 | **不显示入口** —— 宁可没有,也不要一条指向空地址的死链 |
 
 - **可见性判定只有一份** —— `shouldShowInternationalStore(url)`
@@ -2189,6 +2191,12 @@ Script,桥接就起了。做出插件,或者 mcp 协议」**。
   `params: Promise<{ locale: string }>` —— **读 params 不会把页面变成动态渲染**
   (`[locale]/layout.tsx` 已经有 `generateStaticParams`,locale 在构建期就是确定的)。
   别顺手加 `await connection()`。
+- **地址由 layout 当 props 传下去** —— 两个 layout 各调一次
+  `getInternationalStoreUrl()`,把生效地址**当 props** 传给公告条和
+  `WjpStoreHeader`。**两个渲染处自己不读**(客户端组件读不了 DB,server
+  component 也不该自己查 —— 两处共用 layout 查好的那一份)。
+  ⇒ **没有 `typeof window` 分支**,SSR 和客户端渲染出来的 HTML 一模一样
+  (MEMORY 那条「不许用 `typeof window` 分支」)。
 - **导航项是站外链接** —— 直接 `<a href target="_blank" rel="noopener noreferrer">`,
   **不用 next-intl 的 `<Link>`**(那个是给站内路由加 locale 前缀的)。
 - **文案走 i18n** —— `InternationalStore.{bar,barCta,nav}`,en / zh 两份键完全一致。
@@ -2196,21 +2204,82 @@ Script,桥接就起了。做出插件,或者 mcp 协议」**。
   刻意**不带** `label` / `labelEn`,标题从 `InternationalStore.nav` 来,
   两份文案不会重复。
 
-#### 环境变量
+#### 地址从哪儿来(2026-11-11 改成后台可配)
 
-`NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL` —— 独立站的顾客访问地址。
+工作室 2026-11-11 的原话:**「不需要环境变量,在后台设置」**。
 
-- **没配就是空字符串**(`src/config/site.ts` 的 `siteConfig.internationalStoreUrl`),
-  空 ⇒ 两边都不显示入口。
-- **`NEXT_PUBLIC_*` 是构建期内联的** ⇒ 改完环境变量要**重新部署**才生效,
-  不是改完刷新页面就行。
-- `.env.example` 被 gitignore ⇒ 变量说明写在 `src/config/site.ts` 的**文件头注释**里。
+原先那条地址只走环境变量 `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL` —— 而
+`NEXT_PUBLIC_*` 是**构建期内联**的 ⇒ 改一次地址要**重新部署**,工作室改不动。
+现在真理源搬到 DB:
+
+```
+DB 的 site_setting 表那一行  →  NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL  →  空(不显示入口)
+```
+
+- **后台页面** —— `/admin/site-settings`(侧边栏「站点设置」)。**配置界面在
+  页面上直接处理,不开弹窗**(工作室的口味,跟 `/admin/print-pricing` 一个
+  路子)。两块:①「当前生效值」只读卡(生效地址 / 它从哪儿来 / 环境变量里
+  那个值)②地址表单(一个输入框 + 保存 + 「删掉后台这一行」)。
+- **「存空串」≠「删掉那一行」** —— 这是**两件事**,后台摆**两颗按钮**:
+  - **存空串** = **明确关掉入口**(哪怕环境变量还配着,页面也不出现入口)
+  - **删掉那一行** = 「我没配过这一项」⇒ **退回环境变量那一档**
+  只留一颗按钮的话,工作室想「改回用环境变量」就只能手动改库。
+- **真理源那一格有值就赢** —— DB 那一行**存了**(哪怕是空串)就赢过环境变量;
+  DB **没这一行**才看环境变量。这是 `resolveInternationalStoreUrl()` 的口径
+  (纯函数,零 import,能进 `unit` project)。
+- **地址要验** —— 只接受 `http` / `https` 开头的网址。**写的时候验一次,渲染
+  的时候再验一次**(fail closed):地址会渲染进 `<a href>` ⇒ 手改 DB 塞一个
+  `javascript:` 进来,页面不该照着渲染。
+- **模块布局**:
+
+  ```
+  src/features/site-settings/
+  ├── lib/
+  │   ├── site-setting.ts        # 纯函数:键名 / 归一化 / 校验 / 回退链(零 import)
+  │   └── site-setting-store.ts  # DB 读写 + 缓存 + 兜底(server-only)
+  ├── admin/
+  │   ├── types.ts               # 视图模型 + 错误码联合类型(**类型不放在 "use server" 文件里**)
+  │   ├── actions.ts             # "use server" + adminAction
+  │   └── components/site-settings-admin-view.tsx
+  └── (页面)src/app/[locale]/(admin)/admin/site-settings/page.tsx
+  ```
+
+- **读用 `unstable_cache`,不用 `await connection()`** —— 公告条挂在**每一个**
+  营销页的 layout 里;直接读库 ⇒ 整个营销站永远动态渲染(CLAUDE.md 明确不
+  想要:「动静太大」)。`unstable_cache` 的缓存键**含实参**(Next 把实参 JSON
+  化拼进 invocation key)⇒ 一个带 key 参数的函数就够用。
+  ⚠️ **报错的那一层在缓存外面** —— catch 住退回环境变量,**失败不会被缓存**
+  (抛异常的调用不会被 `unstable_cache` 写进缓存)⇒ 迁移脚本一跑,下一次
+  请求就自动切到 DB 那一档。
+- **保存后立刻生效** —— `revalidateTag(SITE_SETTINGS_TAG, { expire: 0 })`
+  (**不能用 `"max"`** —— 那是 stale-while-revalidate,工作室刷新第一眼看到的
+  还是旧地址)+ `revalidatePath("/[locale]", "layout")` +
+  `revalidatePath("/[locale]", "page")`。
+- **读失败不抛进渲染链路** —— 整站塌了比「地址跟后台配的不一样」严重得多。
+  兜底到环境变量,并**记一条 error 日志**(兜底不是静默的)。
+- **迁移脚本** —— `scripts/apply-site-setting-schema.ts`(幂等,手写,不走
+  `db:generate`):建 `site_setting` 表(`key` text PK / `value` text NOT NULL /
+  `updated_at`)。**不写任何一行配置** —— 脚本**不许**把环境变量抄进表里,
+  跑完迁移线上不会静默变掉。
+
+  ```bash
+  pnpm migrate:apply-site-setting   # = tsx scripts/apply-site-setting-schema.ts
+  ```
+
+  **不代跑** —— 工作室的库由工作室自己执行。
+- **环境变量那一档还得留着** —— `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL` 退成
+  **兜底**(`src/config/site.ts` 的 `siteConfig.internationalStoreUrl`),没配
+  就是空字符串 ⇒ 两边都不显示入口。**它是构建期内联的** ⇒ 改它要**重新
+  部署**,但改后台那一行不用。
+  `.env.example` 被 gitignore ⇒ 变量说明写在 `src/config/site.ts` 的**文件头
+  注释**里。
 
 #### 行为由单测守住
 
 | 测试 | 守住什么 |
 |---|---|
-| `src/test/marketing/pure/international-store.test.ts` | 可见性判定(**配了地址就出现 —— 所有语言站都出现**;空地址不出现)/ **判定里没有 locale 那一层**(函数只有一个入参;两个渲染处都不传 locale)/ 地址读 `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL` / **`SHOPIFY_STORE_DOMAIN` 不许进新代码**(别跟已下线的支付通道混)/ 公告条挂在两个 layout 上且在 header **上面** / 布局读了 `params` / `STORE_NAV` 有 `external` 这一支 / 渲染成 `<a target=_blank>` / 桌面端 + 移动端两处都处理了 / 中英文 key 一致 |
+| `src/test/marketing/pure/international-store.test.ts` | 可见性判定(**配了地址就出现 —— 所有语言站都出现**;空地址不出现)/ **判定里没有 locale 那一层**(函数只有一个入参;两个渲染处都不传 locale)/ **真理源在 DB,环境变量退成兜底**(两个 layout 调 `getInternationalStoreUrl`;两个渲染处**不自己读** —— 地址从 layout 当 props 传下去)/ **`SHOPIFY_STORE_DOMAIN` 不许进新代码**(别跟已下线的支付通道混)/ 公告条挂在两个 layout 上且在 header **上面** / 布局读了 `params` / `STORE_NAV` 有 `external` 这一支 / 渲染成 `<a target=_blank>` / 桌面端 + 移动端两处都处理了 / 中英文 key 一致 |
+| `src/test/site-settings/pure/site-settings.test.ts` | 回退链(**DB 那一行赢过环境变量**;DB 空串 = 明确关掉;DB 没这一行才看环境变量;都没有 = 未配置)/ 归一化(去空格 / 去尾斜杠)与校验(**只收 http / https**,`javascript:` / `mailto:` 拒掉)/ **不合法的地址 fail closed**(手改 DB 也渲染不出 `javascript:`)/ 读的那一层(`unstable_cache` + tag + 兜底 catch 在缓存外面)/ 后台那一页(不自己判 admin / 不开弹窗 / 有保存和删行两个动作 / 错误码在位 / `revalidateTag` + `revalidatePath`)/ **`"use server"` 文件不 re-export 类型** / 迁移脚本**不写任何配置行** / 中英文 key 一致 |
 
 ### 打印定价后台(2026-11-06)
 

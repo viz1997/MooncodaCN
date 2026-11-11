@@ -154,9 +154,12 @@ export const OCCASIONS: readonly Occasion[] = [
  * 2026-11-10 加了第 6 项「海外独立站」(`kind: "external"`):境外来访客
  * 引导到工作室的**另一个 Shopify 店铺**。它**所有语言站都显示**(2026-11-11
  * 工作室改的口径:「不是 en 才是,所有都要」),而且要配了地址才显示。
+ *
+ * 2026-11-11:地址的真理源搬到 DB(`site_setting` 表)—— 工作室要求「**不
+ * 需要环境变量,在后台设置**」。所以这一项的 `href` **恒为空**:真正的地址
+ * 在渲染时从 `internationalStoreUrl` 这个 prop 拿(见 `wjp-store-header.tsx`)。
  */
 
-import { siteConfig } from "@/config/site";
 export type StoreNavItem =
   | {
       id: string;
@@ -195,9 +198,13 @@ export type StoreNavItem =
       /**
        * 渲染成 `<a target="_blank">`,跳**站外**(另一个 Shopify 店铺)
        *
-       * 2026-11-10 新增:引导境外访客去工作室的独立站。地址来自
-       * `siteConfig.internationalStoreUrl`(环境变量
-       * `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL`)。
+       * 2026-11-10 新增:引导境外访客去工作室的独立站。
+       *
+       * 2026-11-11:地址的真理源搬到 DB(`site_setting` 表,工作室要求
+       * 「不需要环境变量,在后台设置」)⇒ **这一项的 `href` 恒为空**,
+       * 真正的地址在渲染时从 `internationalStoreUrl` prop 拿
+       * (见 `wjp-store-header.tsx`)。这里留着 `href` 字段只是为了类型
+       * 统一 —— 别的分支(`anchor` / `route`)要它。
        *
        * **只用 `<a>`,不用 next-intl 的 `<Link>`** —— `<Link>` 是给站内路由
        * 加 locale 前缀用的,外部绝对地址走它没有意义(多一事不如少一事)。
@@ -246,11 +253,13 @@ export const STORE_NAV: readonly StoreNavItem[] = [
   { id: "custom", label: "定制", labelEn: "Customize", kind: "customize" },
   {
     // 海外独立站(2026-11-10)—— **所有语言站都显示**(2026-11-11 改的口径),
-    // 而且要配了 `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL` 才显示
-    // (判断在 header 的渲染处)。
+    // 而且要配了地址才显示(判断在 header 的渲染处)。
+    //
+    // ⚠️ **`href` 恒为空** —— 真正的地址在渲染时从 `internationalStoreUrl`
+    // prop 拿(DB 里的那一行 → 环境变量兜底 → 空)。
     id: "international",
     kind: "external",
-    href: siteConfig.internationalStoreUrl,
+    href: "",
   },
 ];
 

@@ -1000,7 +1000,8 @@
       "printOrders": "打印订单",
       "printPricing": "打印定价",
       "files": "文件管理",
-      "coupons": "优惠码"
+      "coupons": "优惠码",
+      "siteSettings": "站点设置"
     }
   },
   "AdminOrders": {
@@ -2418,6 +2419,48 @@
       "COUPON_NOT_FOUND": "找不到这一张券 —— 刷新一下再试",
       "INVALID_RULE": "规则不自洽 —— 满减要有面额、百分比要有折扣率、失效时间不能早于生效时间",
       "MIGRATION_MISSING": "优惠码的表还不存在 —— 先跑 pnpm migrate:apply-coupon",
+      "SAVE_FAILED": "保存失败 —— 看服务端日志"
+    }
+  },
+  "AdminSiteSettings": {
+    "title": "站点设置",
+    "subtitle": "后台能改、改完不用重新部署的站点级设置。改完立刻生效。",
+    "loading": "正在读站点设置…",
+    "current": {
+      "title": "当前生效值",
+      "sourceDb": "后台配置",
+      "sourceEnv": "环境变量兜底",
+      "sourceNone": "未配置",
+      "effectiveUrl": "正在生效的地址",
+      "envUrl": "环境变量里的地址",
+      "empty": "（没配）",
+      "invalid": "这个地址不合法 —— 已经当作「没配」处理了,页面上不会出现入口。",
+      "readFailed": "读不到站点设置"
+    },
+    "banner": {
+      "envFallback": "现在还没在后台存过 —— 用的是环境变量 NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL 那一档。环境变量是构建期内联的,改它要重新部署;存到后台就不用。",
+      "notConfigured": "还没配地址 —— 页面上既没有顶部公告条,也没有导航入口。填上地址就都出现。"
+    },
+    "form": {
+      "title": "海外独立站地址",
+      "label": "独立站网址",
+      "placeholder": "https://your-store.myshopify.com",
+      "help": "境外买家下单的那个 Shopify 店铺的顾客访问地址。",
+      "extra": "只接受 http / https 开头的网址。留空保存 = 明确关掉入口(哪怕环境变量还配着)。"
+    },
+    "actions": {
+      "save": "保存",
+      "reset": "删掉后台这一行(退回环境变量)"
+    },
+    "messages": {
+      "loadFailed": "读站点设置失败 —— 看服务端日志",
+      "saveSuccess": "已保存,立刻生效",
+      "resetSuccess": "已删掉后台这一行,现在走环境变量那一档"
+    },
+    "errors": {
+      "INVALID_URL": "这个地址不合法 —— 只接受 http / https 开头的网址",
+      "NOT_HTTP": "这个地址不合法 —— 只接受 http / https 开头的网址",
+      "MIGRATION_MISSING": "site_setting 表还不存在 —— 先跑 pnpm migrate:apply-site-setting",
       "SAVE_FAILED": "保存失败 —— 看服务端日志"
     }
   }

@@ -25,8 +25,10 @@ import { shouldShowInternationalStore } from "@/features/marketing/components/st
  *
  * 1. **可见性判定** —— 配了地址就出现(**所有语言站**);没配就不出现
  * 2. **判定里没有 locale 那一层** —— 两个渲染处都不传 locale
- * 3. **地址来自环境变量** —— `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL`;
- *    没配就是空字符串(不许留一条指向空地址的死链)
+ * 3. **地址从 layout 当 props 传进来** —— 真理源在 DB(`site_setting` 表,
+ *    工作室 2026-11-11 的要求:「不需要环境变量,在后台设置」),环境变量
+ *    `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL` 退成**兜底**;两处都拿不到就
+ *    是空字符串(不许留一条指向空地址的死链)
  * 4. **别跟已下线的支付通道搞混** —— `SHOPIFY_STORE_DOMAIN`(收款用的
  *    Admin API 域名,2026-11-05 那个通道就下线了)跟
  *    `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL`(顾客访问地址)**是两个变量**
@@ -101,10 +103,43 @@ describe("海外独立站入口", () => {
   });
 
   describe("配置", () => {
-    it("地址读环境变量,没配就是空字符串", () => {
-      const src = read(SITE);
-      expect(src).toContain("NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL");
-      expect(src).toContain("internationalStoreUrl");
+    it("真理源在 DB,环境变量退成兜底", () => {
+      // 工作室 2026-11-11 的要求:「不需要环境变量,在后台设置」⇒
+      // 生效地址走 `getInternationalStoreUrl()`(DB 那一行 → 环境变量 → 空)。
+      for (const rel of [ATELIER_LAYOUT, MARKETING_LAYOUT]) {
+        const src = stripComments(read(rel));
+        expect(src).toContain("getInternationalStoreUrl");
+      }
+      // 环境变量那一档还在(兜底),说明得留在文件头里
+      const site = read(SITE);
+      expect(site).toContain("NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL");
+      expect(site).toContain("internationalStoreUrl");
+    });
+
+    it("两个渲染处**不自己读** —— 地址从 layout 当 props 传进来", () => {
+      // 客户端组件读不了 DB(server-only);公告条是 server component,
+      // 但也不该自己查 —— 两处共用 layout 查好的那一份。
+      for (const rel of [BAR, HEADER]) {
+        const src = stripComments(read(rel));
+        expect(src).not.toContain("siteConfig");
+        expect(src).not.toContain("getInternationalStoreUrl");
+        expect(src).not.toContain("@/db");
+      }
+    });
+
+    it("layout 把地址传给了公告条和导航按钮", () => {
+      const atelier = stripComments(read(ATELIER_LAYOUT));
+      expect(atelier).toMatch(
+        /<InternationalStoreBar[^>]*url=\{[^}]*internationalStore[^}]*\}/
+      );
+      expect(atelier).toMatch(
+        /<WjpStoreHeader[^>]*internationalStoreUrl=\{[^}]*internationalStore[^}]*\}/
+      );
+
+      const marketing = stripComments(read(MARKETING_LAYOUT));
+      expect(marketing).toMatch(
+        /<InternationalStoreBar[^>]*url=\{[^}]*internationalStore[^}]*\}/
+      );
     });
 
     it("文件头得写清楚「构建期内联 ⇒ 配完要重新部署」这个坑", () => {

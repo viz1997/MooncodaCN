@@ -115,7 +115,6 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { siteConfig } from "@/config/site";
 // 头像的 URL 要过一次 getAvatarUrl —— `user.image` 可能是**存储键名**
 // (自己在「账户信息」页上传的头像),不是 URL。直接拿它当 src 会是一张
 // 裂图。刻意从 utils 导入,不走 "@/features/storage" 桶文件(那会把
@@ -161,7 +160,21 @@ function getInitials(name?: string | null, email?: string | null): string {
   return mail ? (mail[0] ?? "").toUpperCase() : "·";
 }
 
-export function WjpStoreHeader() {
+export function WjpStoreHeader({
+  internationalStoreUrl,
+}: {
+  /**
+   * 海外独立站(Shopify)的顾客访问地址 —— **从 layout 当 props 传进来**
+   *
+   * 为什么不是这个组件自己读:真理源搬到 DB 了(工作室 2026-11-11 的要求:
+   * 「不需要环境变量,在后台设置」)⇒ 读 DB 只能在 server 侧做。layout 是
+   * server component,读好了传下来。
+   *
+   * ⚠️ **两端渲染出来的是同一个值** —— 不靠 `typeof window` 分支(见
+   * MEMORY 那条)。没传 / 传空 ⇒ 入口不出现。
+   */
+  internationalStoreUrl?: string;
+}) {
   const locale = useLocale();
   const isZh = locale === "zh";
   // 海外独立站那一项的标题走 i18n(别的几项标题写死在 STORE_NAV 里)
@@ -178,9 +191,8 @@ export function WjpStoreHeader() {
    * 这条判定**不看 locale** ⇒ 两端渲染出来的是同一个导航(不用
    * `typeof window` 分支,见 MEMORY 那条)。
    */
-  const showExternal = shouldShowInternationalStore(
-    siteConfig.internationalStoreUrl
-  );
+  const externalHref = internationalStoreUrl ?? "";
+  const showExternal = shouldShowInternationalStore(externalHref);
 
   const [scrolled, setScrolled] = React.useState(false);
   const [mobileOpen, setMobileOpen] = React.useState(false);
@@ -339,7 +351,7 @@ export function WjpStoreHeader() {
                       showExternal ? (
                         <a
                           key={link.id}
-                          href={link.href}
+                          href={externalHref}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="flex items-center gap-2 px-4 py-3 text-sm font-medium hover:bg-muted transition-colors rounded-md"
@@ -479,7 +491,7 @@ export function WjpStoreHeader() {
                   showExternal ? (
                     <a
                       key={link.id}
-                      href={link.href}
+                      href={externalHref}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center gap-1 text-sm font-medium text-foreground/70 hover:text-[var(--primary)] transition-colors"

@@ -1003,7 +1003,8 @@
       "printOrders": "Print Orders",
       "printPricing": "Print Pricing",
       "files": "Files",
-      "coupons": "Coupons"
+      "coupons": "Coupons",
+      "siteSettings": "Site Settings"
     }
   },
   "AdminOrders": {
@@ -2421,6 +2422,48 @@
       "COUPON_NOT_FOUND": "Coupon not found — refresh and try again",
       "INVALID_RULE": "The rule does not add up — a fixed amount needs an amount, a percentage needs a rate, and it cannot end before it starts",
       "MIGRATION_MISSING": "The coupon tables do not exist yet — run pnpm migrate:apply-coupon",
+      "SAVE_FAILED": "Save failed — check the server log"
+    }
+  },
+  "AdminSiteSettings": {
+    "title": "Site Settings",
+    "subtitle": "Site-wide settings you can change here, with no redeploy. Changes take effect immediately.",
+    "loading": "Loading site settings…",
+    "current": {
+      "title": "Currently in effect",
+      "sourceDb": "Configured here",
+      "sourceEnv": "Environment variable fallback",
+      "sourceNone": "Not configured",
+      "effectiveUrl": "Address in effect",
+      "envUrl": "Address in the environment variable",
+      "empty": "(not set)",
+      "invalid": "This address is not valid — it is treated as \"not set\", so the entry does not appear on the site.",
+      "readFailed": "Could not read the site settings"
+    },
+    "banner": {
+      "envFallback": "Nothing has been saved here yet — the NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL environment variable is being used. That one is inlined at build time, so changing it needs a redeploy; saving it here does not.",
+      "notConfigured": "No address yet — there is no announcement bar and no navigation entry on the site. Fill in the address and both appear."
+    },
+    "form": {
+      "title": "International store address",
+      "label": "Store URL",
+      "placeholder": "https://your-store.myshopify.com",
+      "help": "The customer-facing address of the Shopify store where overseas buyers place their orders.",
+      "extra": "Only http / https addresses are accepted. Saving it empty explicitly turns the entry off, even if the environment variable is still set."
+    },
+    "actions": {
+      "save": "Save",
+      "reset": "Delete the row saved here (fall back to the environment variable)"
+    },
+    "messages": {
+      "loadFailed": "Could not load the site settings — check the server log",
+      "saveSuccess": "Saved, effective immediately",
+      "resetSuccess": "Deleted the row saved here — the environment variable is back in charge"
+    },
+    "errors": {
+      "INVALID_URL": "That address is not valid — only http / https addresses are accepted",
+      "NOT_HTTP": "That address is not valid — only http / https addresses are accepted",
+      "MIGRATION_MISSING": "The site_setting table does not exist yet — run pnpm migrate:apply-site-setting",
       "SAVE_FAILED": "Save failed — check the server log"
     }
   }

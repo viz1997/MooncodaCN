@@ -42,6 +42,7 @@
 import { InternationalStoreBar } from "@/features/marketing/components/storefront/international-store-bar";
 import { StoreFooter } from "@/features/marketing/components/storefront/store-footer";
 import { WjpStoreHeader } from "@/features/marketing/components/storefront/wjp-store-header";
+import { getInternationalStoreUrl } from "@/features/site-settings/lib/site-setting-store";
 import { CartDrawer } from "@/features/storefront/components/cart-drawer";
 import { CustomWorkshop } from "@/features/storefront/components/custom-workshop";
 import { CustomizeEntry } from "@/features/storefront/components/customize-entry";
@@ -59,6 +60,15 @@ export default async function MarketingAtelierLayout({
   // locale 在构建期就是确定的。读 params **不会**把页面变成动态渲染
   // (`[locale]/layout.tsx` 已经有 generateStaticParams)。
   const { locale } = await params;
+
+  // 海外独立站的顾客访问地址(2026-11-11)—— 真理源在 DB(`site_setting`
+  // 表),工作室在后台就能改,不用重新部署。回退链:DB 那一行 → 环境变量
+  // `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL` → 空(入口不出现)。
+  //
+  // 读的是**带缓存**的那一份(`unstable_cache` + tag)⇒ 这一页不会因为
+  // 读一次库就永远动态渲染。后台保存时会把 tag 和 layout 一起刷掉。
+  const internationalStore = await getInternationalStoreUrl();
+
   return (
     <>
       {/* atelier 设计语言局部注入 —— 只罩本 route group 子树 */}
@@ -121,8 +131,8 @@ export default async function MarketingAtelierLayout({
 
       <div className="atelier-root min-h-screen flex flex-col bg-background text-foreground">
         {/* 海外独立站公告条 —— 所有语言站都出现,挂在头上面 */}
-        <InternationalStoreBar locale={locale} />
-        <WjpStoreHeader />
+        <InternationalStoreBar locale={locale} url={internationalStore.url} />
+        <WjpStoreHeader internationalStoreUrl={internationalStore.url} />
         <main className="flex-1">{children}</main>
         <StoreFooter />
 

@@ -31,7 +31,10 @@
 /**
  * 海外独立站入口要不要出现
  *
- * @param url 独立站地址(来自 `siteConfig.internationalStoreUrl`)
+ * @param url 独立站地址 —— **生效的那一份**(DB 那一行 → 环境变量 → 空)。
+ *   两个渲染处都是从 layout 当 props 拿到的(见
+ *   `src/features/site-settings/lib/site-setting-store.ts`),
+ *   **不是**这个模块自己读的。
  */
 export function shouldShowInternationalStore(url: string): boolean {
   return url.trim() !== "";
