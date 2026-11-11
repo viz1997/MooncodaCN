@@ -152,8 +152,8 @@ export const OCCASIONS: readonly Occasion[] = [
  * 每段有自己的标题和锚点 —— footer 的「作品集」栏直接链过去。
  *
  * 2026-11-10 加了第 6 项「海外独立站」(`kind: "external"`):境外来访客
- * 引导到工作室的**另一个 Shopify 店铺**。它**只在英文站显示** —— 中文站
- * 一点痕迹都不留。
+ * 引导到工作室的**另一个 Shopify 店铺**。它**所有语言站都显示**(2026-11-11
+ * 工作室改的口径:「不是 en 才是,所有都要」),而且要配了地址才显示。
  */
 
 import { siteConfig } from "@/config/site";
@@ -202,7 +202,8 @@ export type StoreNavItem =
        * **只用 `<a>`,不用 next-intl 的 `<Link>`** —— `<Link>` 是给站内路由
        * 加 locale 前缀用的,外部绝对地址走它没有意义(多一事不如少一事)。
        *
-       * 这一项**只在英文站出现**,而且要配了地址才出现 —— 判断在渲染处
+       * 这一项**所有语言站都出现**(2026-11-11 工作室改的口径:「不是 en
+       * 才是,所有都要」),而且要配了地址才出现 —— 判断在渲染处
        * (header),不在数据处。
        *
        * **它没有 `label` / `labelEn`** —— 别的几项标题写死在数据里(那是
@@ -244,8 +245,9 @@ export const STORE_NAV: readonly StoreNavItem[] = [
   },
   { id: "custom", label: "定制", labelEn: "Customize", kind: "customize" },
   {
-    // 海外独立站(2026-11-10)—— **只在英文站显示**,而且要配了
-    // `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL` 才显示(判断在 header 的渲染处)。
+    // 海外独立站(2026-11-10)—— **所有语言站都显示**(2026-11-11 改的口径),
+    // 而且要配了 `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL` 才显示
+    // (判断在 header 的渲染处)。
     id: "international",
     kind: "external",
     href: siteConfig.internationalStoreUrl,

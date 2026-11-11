@@ -2022,7 +2022,7 @@ public/magnet/
 | `src/test/magnet/pure/magnet-blender-local.test.ts` | 端口归一化(非法 ⇒ 默认)/ **base URL 写死回环** / 探活带协议头 / 协议对不上 ⇒ `BLENDER_BAD_RESPONSE` / 连不上 ⇒ `BLENDER_NOT_RUNNING` / 没回话 ⇒ `BLENDER_TIMEOUT` / 切割的**包 + 头**都对 / 插件报错 ⇒ `BLENDER_FAILED` 且 detail 带着它自己的 code / 回的不是 zip ⇒ `BLENDER_BAD_RESPONSE` / **插件只绑 `127.0.0.1`** / 带 `Access-Control-Allow-Private-Network` / **EXACT → FAST** / **不调 `bpy.ops`** / 切刀摆放跟网页端同一套数学 / **页面有引擎开关** / **不碰工单链路** / **不往我们的服务器发模型** / **指引下便携版 Blender + 插件** / **Blender 模式不跑浏览器的分析** / **插件那条路也不修用户的模型**(临时盖面 + 切完摘掉)/ 统计里带 `lidCapped` / `lidFaces` / `lidStripped` / **一键启动脚本在仓库里**(`.cmd` / `.sh`)/ **页面不许 `child_process` / `spawn` / `execFile`** / **启动脚本走 `--background`(命令执行,不打开 GUI)** / **后台模式自己阻塞跑活**(`_pump_forever`,定时器在后台模式永远不触发)/ 输出不被缓冲 |
 | `src/test/magnet/pure/magnet-engine-load.test.ts` | **wasm 地址必须是绝对地址**(普通页面 / blob Worker / 普通 Worker / opaque origin 不炸)/ `locateFile` 走 `resolveWasmUrl()` / **proxy 的 matcher 把 `wasm` / `py` / `/magnet/*` 排除掉**(静态文件别被 locale 前缀劫持)/ 页面路由与 API 路由照常走 / `ENGINE_LOAD_FAILED` 有中英文文案 |
 
-### 外国访客 → 海外独立站(2026-11-10)
+### 外国访客 → 海外独立站(2026-11-10,**2026-11-11 改了口径**)
 
 工作室的独立站是**另一个 Shopify 店铺**(境外的那个)。境外访客落到本仓库之后,
 看到的是人民币价格、境内物流、境内客服 —— 看着就不是给他准备的。要给他一个
@@ -2033,28 +2033,38 @@ public/magnet/
 > 那套是 Admin API,给收款用的)。这里是**顾客访问地址**。两个变量名也刻意不一样:
 > `SHOPIFY_STORE_DOMAIN` vs `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL`。
 
-#### 「外国访客」在本仓库里就是 `/en` 那一侧
+#### 「外国访客」**不等于**「会看英文」——**所有语言站都出现**
 
-本仓库有 `/en` 和 `/zh` 两个 locale,`localePrefix` 默认 `always` ⇒ URL 一定带
-前缀。**仓库里没有 geo / IP / `navigator.language` 判断**(现在一个都没有,也不该
-为了这个加)—— 「外国访客」就落在 `/en`。
+> 2026-11-11 工作室改的口径:**「不是 en 才是,所有都要」**。
 
-这也避开了 MEMORY 里那条「**不许用 `typeof window` 分支**,SSR 和客户端必须渲染
-一样的 href」:公告条是 **server component**,locale 从 layout 的 `params` 拿,
-两端渲染出来的是同一份 HTML。
+原来这条入口**只在英文站**出现 —— 当时的假设是「外国访客 = 会看英文」。工作室
+否掉了这个假设:**中文站上也有境外买家**(中文是他们的母语),境内价格 / 境内
+物流 / 境内客服对他们不合适 ⇒ 入口该给。
+
+- **境内买家看到会不会困惑?** 靠**文案**解决,不靠**藏起来** —— 公告条写的是
+  「中国大陆以外下单?请前往我们的海外独立站」,境内的人看完知道跟自己没关系,
+  不会误点。**藏起来(只给英文站)那份才是错的** —— 那些真正需要出口的人反而
+  看不到。
+- **本仓库仍然没有 geo / IP / `navigator.language` 判断** —— 现在一个都没有,
+  也不该为了这个加。**所有语言站一律显示**是最简单也最不会错的判定。
+- **判定不看 locale** ⇒ 两端渲染出来的是同一个导航(不靠 `typeof window`
+  分支,见 MEMORY 那条「不许用 `typeof window` 分支」)。公告条是
+  **server component**,locale 只用来**取文案**(bar / barCta / nav 三条),
+  两端渲染出来的是同一份 HTML。
 
 #### 四条口径
 
 | 什么 | 口径 |
 |---|---|
-| 出现的位置 | **只在 `/en`** —— 中文站的访客**一点痕迹都看不到**(返回 null,不是「藏起来」) |
+| 出现的位置 | **所有语言站都出现** —— `/en` 和 `/zh` 都有(2026-11-11 改的,原来只在 `/en`) |
 | 公告条 | 顶部一条细条,**挂在头上面**(头是 sticky 的,条在头下面会被盖住) |
 | 导航按钮 | 商城那个头(`WjpStoreHeader`)里的一项,桌面端 + 移动端 Sheet **两处** |
 | 没配地址 | **不显示入口** —— 宁可没有,也不要一条指向空地址的死链 |
 
-- **可见性判定只有一份** —— `shouldShowInternationalStore(locale, url)`
-  (`international-store.ts`,纯函数)。公告条(server)和导航按钮(client)共用它,
-  **两处不可能漂** —— 而且它能进 `unit` project 跑单测,不用起浏览器。
+- **可见性判定只有一份** —— `shouldShowInternationalStore(url)`
+  (`international-store.ts`,纯函数,**只有一个入参:地址**)。公告条(server)和
+  导航按钮(client)共用它,**两处不可能漂** —— 而且它能进 `unit` project 跑单测,
+  不用起浏览器。
 - **公告条挂在两个 layout 上** —— `(marketing-atelier)`(商城 + 工具页 + 账户页)
   和 `(marketing)`(博客 / 作品集 / 法律页)。两个 layout 现在都读
   `params: Promise<{ locale: string }>` —— **读 params 不会把页面变成动态渲染**
@@ -2081,7 +2091,7 @@ public/magnet/
 
 | 测试 | 守住什么 |
 |---|---|
-| `src/test/marketing/pure/international-store.test.ts` | 可见性判定(英文站 + 配了地址才出现;中文站不出现;空地址不出现)/ 地址读 `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL` / **`SHOPIFY_STORE_DOMAIN` 不许进新代码**(别跟已下线的支付通道混)/ 公告条挂在两个 layout 上且在 header **上面** / 布局读了 `params` / `STORE_NAV` 有 `external` 这一支 / 渲染成 `<a target=_blank>` / 桌面端 + 移动端两处都处理了 / 中英文 key 一致 |
+| `src/test/marketing/pure/international-store.test.ts` | 可见性判定(**配了地址就出现 —— 所有语言站都出现**;空地址不出现)/ **判定里没有 locale 那一层**(函数只有一个入参;两个渲染处都不传 locale)/ 地址读 `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL` / **`SHOPIFY_STORE_DOMAIN` 不许进新代码**(别跟已下线的支付通道混)/ 公告条挂在两个 layout 上且在 header **上面** / 布局读了 `params` / `STORE_NAV` 有 `external` 这一支 / 渲染成 `<a target=_blank>` / 桌面端 + 移动端两处都处理了 / 中英文 key 一致 |
 
 ### 打印定价后台(2026-11-06)
 

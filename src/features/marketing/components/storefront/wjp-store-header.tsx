@@ -168,17 +168,17 @@ export function WjpStoreHeader() {
   const tStore = useTranslations("InternationalStore");
 
   /**
-   * 海外独立站入口要不要出现(2026-11-10)
+   * 海外独立站入口要不要出现(2026-11-10 定的,2026-11-11 改了口径)
    *
-   * 两个条件都要满足:① **英文站**(中文站的境内外访客看到的是同一个站,
-   * 给中文站挂一条「请去境外店」是添乱)② **配了地址**(没配就别留一条
-   * 指向空地址的死链)。
+   * 只有一个条件:**配了地址**(没配就别留一条指向空地址的死链)。
    *
-   * locale 用 next-intl 的 `useLocale()`(SSR 可见)—— 不用
-   * `typeof window` 分支,两端渲染出来的是同一个导航。
+   * 原来还要求「**英文站**」—— 工作室的口径是「**不是 en 才是,所有都要**」:
+   * 「外国访客」不等于「会看英文」,中文站上也有境外买家(中文是他们的母语)。
+   *
+   * 这条判定**不看 locale** ⇒ 两端渲染出来的是同一个导航(不用
+   * `typeof window` 分支,见 MEMORY 那条)。
    */
   const showExternal = shouldShowInternationalStore(
-    locale,
     siteConfig.internationalStoreUrl
   );
 
@@ -335,7 +335,7 @@ export function WjpStoreHeader() {
                     ) : link.kind === "external" ? (
                       // 海外独立站 —— 跳**站外**的另一个 Shopify 店铺,
                       // 所以是 `<a target="_blank">` 而不是 `<Link>`。
-                      // 只在英文站 + 配了地址时出现(见 showExternal)。
+                      // 所有语言站都出现,只要配了地址(见 showExternal)。
                       showExternal ? (
                         <a
                           key={link.id}

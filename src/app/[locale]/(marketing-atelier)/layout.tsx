@@ -54,9 +54,10 @@ export default async function MarketingAtelierLayout({
   children: React.ReactNode;
   params: Promise<{ locale: string }>;
 }) {
-  // 海外独立站公告条只挂在英文站(2026-11-10)—— locale 在构建期就是确定的,
-  // 所以 `/en` 的页面在构建期就不带条、`/zh` 的带。读 params **不会**把页面
-  // 变成动态渲染(`[locale]/layout.tsx` 已经有 generateStaticParams)。
+  // 海外独立站公告条**所有语言站都挂**(2026-11-11 工作室改的口径:「不是 en
+  // 才是,所有都要」—— 中文站上也有境外买家)。locale 只用来**取文案**,
+  // locale 在构建期就是确定的。读 params **不会**把页面变成动态渲染
+  // (`[locale]/layout.tsx` 已经有 generateStaticParams)。
   const { locale } = await params;
   return (
     <>
@@ -119,7 +120,7 @@ export default async function MarketingAtelierLayout({
       `}</style>
 
       <div className="atelier-root min-h-screen flex flex-col bg-background text-foreground">
-        {/* 海外独立站公告条 —— 只在英文站出现,挂在头上面 */}
+        {/* 海外独立站公告条 —— 所有语言站都出现,挂在头上面 */}
         <InternationalStoreBar locale={locale} />
         <WjpStoreHeader />
         <main className="flex-1">{children}</main>

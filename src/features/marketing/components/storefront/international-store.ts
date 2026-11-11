@@ -5,32 +5,34 @@
  *
  * 公告条(`international-store-bar.tsx`,server component)和导航按钮
  * (`wjp-store-header.tsx`,client component)都要判断「这条入口要不要出现」。
- * 两处各写一遍 `locale === "en" && url !== ""` 迟早会漂 —— 有一处忘了判,
- * 中文站上就冒出一条「请去境外店买」的条子。
+ * 两处各写一遍 `url !== ""` 迟早会漂 —— 有一处忘了判,导航里就冒出一个
+ * 指向空地址的死链。
  *
  * 抽成纯函数之后:
  *
  * - 判定逻辑**能进 `unit` project 跑单测**(不用起浏览器、不用连库)
  * - 两处共用**同一份**判断,不可能漂
  *
- * ## 判定口径
+ * ## 判定口径(2026-11-11 工作室改的)
  *
- * 两个条件**都要**满足:
+ * **所有语言站都出现** —— 原来只在英文站(`locale === "en"`)出现,工作室的
+ * 口径是「**不是 en 才是,所有都要**」。
  *
- * 1. **英文站**(`locale === "en"`)—— 中文站的访客看到的境内价格、境内物流、
- *    境内客服就是给他准备的,挂一条「请去境外店」是添乱。
- * 2. **配了地址** —— 宁可没有入口,也不要一条指向空地址的死链。
+ * 理由:「外国访客」**不等于**「会看英文」。中文站上也有境外买家(中文是
+ * 他们的母语),境内站上的价格 / 物流 / 客服对他们不合适 —— 入口该给。
+ * 至于「境内买家看到会不会困惑」,靠**文案**解决,不靠**藏起来**:
+ * 公告条的文案本身就是「中国大陆以外下单?请前往我们的海外独立站」——
+ * 境内的人看完知道跟自己没关系,不会误点。
+ *
+ * 唯一还剩下的条件:**配了地址** —— 宁可没有入口,也不要一条指向空地址的
+ * 死链。
  */
 
 /**
  * 海外独立站入口要不要出现
  *
- * @param locale 当前 locale(只有 `"en"` 才出现)
- * @param url    独立站地址(来自 `siteConfig.internationalStoreUrl`)
+ * @param url 独立站地址(来自 `siteConfig.internationalStoreUrl`)
  */
-export function shouldShowInternationalStore(
-  locale: string,
-  url: string
-): boolean {
-  return locale === "en" && url.trim() !== "";
+export function shouldShowInternationalStore(url: string): boolean {
+  return url.trim() !== "";
 }

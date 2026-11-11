@@ -5,25 +5,36 @@ import { describe, expect, it } from "vitest";
 import { shouldShowInternationalStore } from "@/features/marketing/components/storefront/international-store";
 
 /**
- * 外国访客 → 海外独立站入口(2026-11-10)
+ * 外国访客 → 海外独立站入口(2026-11-10 定的,2026-11-11 改了口径)
  *
  * 工作室的独立站是**另一个 Shopify 店铺**(境外的那个)。本仓库有 `/en` 和
- * `/zh` 两个 locale,`localePrefix` 默认 `always` ⇒ URL 一定带前缀 ⇒
- * **「外国访客」在本仓库里就是 `/en` 那一侧**。
+ * `/zh` 两个 locale,`localePrefix` 默认 `always` ⇒ URL 一定带前缀。
+ *
+ * ## 2026-11-11 工作室改的口径:**不是 en 才是,所有都要**
+ *
+ * 原来这条入口**只在英文站**出现 —— 当时的假设是「外国访客 = 会看英文」。
+ * 工作室否掉了这个假设:**中文站上也有境外买家**(中文是他们的母语),
+ * 境内价格 / 境内物流 / 境内客服对他们不合适 ⇒ 入口该给。
+ *
+ * 境内买家看到会不会困惑?靠**文案**解决(公告条写的是「中国大陆以外下单?
+ * 请前往我们的海外独立站」),不靠**藏起来**。
+ *
+ * ⇒ 判定**不再看 locale**,只剩一个条件:**配了地址**。
  *
  * ## 这个文件守住什么
  *
- * 1. **可见性判定** —— 英文站 + 配了地址才出现;中文站**一点痕迹都不留**
- * 2. **地址来自环境变量** —— `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL`;
+ * 1. **可见性判定** —— 配了地址就出现(**所有语言站**);没配就不出现
+ * 2. **判定里没有 locale 那一层** —— 两个渲染处都不传 locale
+ * 3. **地址来自环境变量** —— `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL`;
  *    没配就是空字符串(不许留一条指向空地址的死链)
- * 3. **别跟已下线的支付通道搞混** —— `SHOPIFY_STORE_DOMAIN`(收款用的
+ * 4. **别跟已下线的支付通道搞混** —— `SHOPIFY_STORE_DOMAIN`(收款用的
  *    Admin API 域名,2026-11-05 那个通道就下线了)跟
  *    `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL`(顾客访问地址)**是两个变量**
- * 4. **公告条挂在两个 layout 上,且在 header 上面** —— 头是 sticky 的,
+ * 5. **公告条挂在两个 layout 上,且在 header 上面** —— 头是 sticky 的,
  *    条在头下面的话会被头盖住
- * 5. **导航按钮是站外链接** —— `<a target="_blank" rel="noopener noreferrer">`,
+ * 6. **导航按钮是站外链接** —— `<a target="_blank" rel="noopener noreferrer">`,
  *    不是 next-intl 的 `<Link>`(那个是给站内路由加 locale 前缀的)
- * 6. **中英文 key 一致**
+ * 7. **中英文 key 一致**
  *
  * 纯函数 + 文件扫描 —— 不需要 DB / 网络 / 浏览器。
  */
@@ -51,6 +62,8 @@ function stripComments(src: string): string {
 }
 
 const SITE = "src/config/site.ts";
+const PREDICATE =
+  "src/features/marketing/components/storefront/international-store.ts";
 const BAR =
   "src/features/marketing/components/storefront/international-store-bar.tsx";
 const HEADER =
@@ -62,21 +75,28 @@ const MARKETING_LAYOUT = "src/app/[locale]/(marketing)/layout.tsx";
 
 describe("海外独立站入口", () => {
   describe("可见性判定", () => {
-    it("英文站 + 配了地址 ⇒ 出现", () => {
+    it("配了地址 ⇒ 出现(**所有语言站都出现**)", () => {
       expect(
-        shouldShowInternationalStore("en", "https://example.myshopify.com")
+        shouldShowInternationalStore("https://example.myshopify.com")
       ).toBe(true);
     });
 
-    it("中文站 ⇒ 不出现(一点痕迹都不留)", () => {
-      expect(
-        shouldShowInternationalStore("zh", "https://example.myshopify.com")
-      ).toBe(false);
+    it("没配地址 ⇒ 不出现(不留死链)", () => {
+      expect(shouldShowInternationalStore("")).toBe(false);
+      expect(shouldShowInternationalStore("   ")).toBe(false);
     });
 
-    it("没配地址 ⇒ 不出现(不留死链)", () => {
-      expect(shouldShowInternationalStore("en", "")).toBe(false);
-      expect(shouldShowInternationalStore("en", "   ")).toBe(false);
+    it("**判定里没有 locale 那一层** —— 工作室的口径是「不是 en 才是,所有都要」", () => {
+      // 判定函数压根不接 locale(只有一个入参:地址)
+      expect(shouldShowInternationalStore.length).toBe(1);
+      // 注释里**提到**那个条件不算违规(那儿恰恰要解释改了什么)
+      expect(stripComments(read(PREDICATE))).not.toContain('locale === "en"');
+      // 两个渲染处也都不传 locale
+      for (const rel of [BAR, HEADER]) {
+        const code = stripComments(read(rel));
+        expect(code).not.toMatch(/shouldShowInternationalStore\(\s*locale/);
+        expect(code).not.toMatch(/shouldShowInternationalStore\(\s*"en"/);
+      }
     });
   });
 
@@ -127,7 +147,7 @@ describe("海外独立站入口", () => {
       }
     });
 
-    it("layout 读了 locale(不然判不出该不该出现)", () => {
+    it("layout 读了 locale —— 公告条要按 locale 取文案", () => {
       for (const rel of [ATELIER_LAYOUT, MARKETING_LAYOUT]) {
         const src = read(rel);
         expect(src).toContain("params: Promise<{ locale: string }>");
