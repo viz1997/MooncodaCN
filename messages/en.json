@@ -1456,7 +1456,8 @@
     },
     "repair": {
       "title": "This model had gaps — they are repaired",
-      "detail": "Filled {holes} gap(s) · dropped {dropped} bad face(s) · flipped {flipped} face(s) with reversed winding · split {split} pinched vertex/vertices. What you get back is the repaired model."
+      "detail": "Filled {holes} gap(s) · dropped {dropped} bad face(s) · flipped {flipped} face(s) with reversed winding · split {split} pinched vertex/vertices. What you get back is the repaired model.",
+      "welded": "{welded} vertex/vertices were actually the same point (less than {tol} mm apart) — they have been welded back together, and the shape of the model is unchanged."
     },
     "back": {
       "title": "Smart back-face detection",

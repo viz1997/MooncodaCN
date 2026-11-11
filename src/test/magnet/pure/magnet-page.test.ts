@@ -18,10 +18,12 @@ import { describe, expect, it } from "vitest";
  * 5. **拖放用仓库那个 hook** —— 自己写 `onDragOver` 那个写法就是会闪的那份
  * 6. **焊接走仓库唯一公开入口** —— `weldAndAnalyzeTopology()`;
  *    `weldVertices` 是模块私有的,拿不到
- * 7. **孔径是绝对毫米** —— Blender 脚本里那个「孔径跟着模型最大边缩放」的
+ * 7. **焊接在修复之前** —— 磁吸孔自己那一份**容差阶梯**先把「同一个点」
+ *    认出来(仓库那份太严:diag × 1e-7 vs Blender 的 0.1mm),再谈补洞
+ * 8. **孔径是绝对毫米** —— Blender 脚本里那个「孔径跟着模型最大边缩放」的
  *    临时假设**不许**被搬进来(2026-11-11 起孔径**可调**,但**仍然是绝对
  *    毫米** —— 孔是实物磁铁的尺寸,不是模型的比例)
- * 8. **wasm 提交进仓库** —— 新克隆的机器不用先跑脚本
+ * 9. **wasm 提交进仓库** —— 新克隆的机器不用先跑脚本
  *
  * 2026-11-11 工作室提的三条,也在这一层守着:
  *
@@ -94,6 +96,7 @@ const PROTOCOL = "src/features/magnet/lib/magnet-cutter-protocol.ts";
 const ERROR_MAP = "src/features/magnet/lib/magnet-error.ts";
 const HUB = "src/features/tools/components/tools-hub.tsx";
 const REPAIR = "src/features/magnet/lib/magnet-repair.ts";
+const WELD = "src/features/magnet/lib/magnet-weld.ts";
 
 describe("磁吸孔工具页面", () => {
   it("路由在(挂在 (marketing-atelier) 组 —— 跟打印工作台同组)", () => {
@@ -151,6 +154,41 @@ describe("磁吸孔工具页面", () => {
     const src = read(HANDLER);
     expect(src).toContain("weldAndAnalyzeTopology");
     expect(src).not.toMatch(/weldVertices/);
+  });
+
+  it("**先焊接、再修复** —— 「同一个点」先认出来(工作室 2026-11-11)", () => {
+    // 磁吸孔自己那一份焊接(容差阶梯)在
+    expect(existsSync(join(ROOT, WELD))).toBe(true);
+    const weld = read(WELD);
+    expect(weld).toContain("magnetWeldLadder");
+    expect(weld).toContain("weldMagnetUntilClosed");
+    // 阶梯的最松一档 = Blender `remove_doubles` 的 0.1mm
+    expect(weld).toContain("[0.001, 0.01, 0.05, 0.1]");
+    // 「近似重复」是那个**有信息量**的计数(三角汤天生的重复没有)
+    expect(weld).toContain("mergedApprox");
+
+    // handler 接上了
+    const handler = read(HANDLER);
+    expect(handler).toMatch(/from "\.\/magnet-weld"/);
+    expect(handler).toContain("weldMagnetUntilClosed");
+
+    // **焊接在修复之前** —— 先把同一个点认出来,再谈补洞
+    const weldAt = handler.indexOf("weldMagnetUntilClosed(");
+    const repairAt = handler.indexOf("repairMagnetGeometry(");
+    expect(weldAt).toBeGreaterThan(-1);
+    expect(repairAt).toBeGreaterThan(weldAt);
+
+    // 报告里带着焊接的三个数
+    expect(handler).toContain("weldedVertices");
+    expect(handler).toContain("weldedNearDuplicates");
+    expect(handler).toContain("weldToleranceMm");
+
+    // 页面把这件事告诉用户 —— 焊接**不改形状**,跟「改了模型」分开摆
+    expect(read(TOOL)).toContain("repair.welded");
+    const zh = flattenKeys(messages("zh").Magnet);
+    const en = flattenKeys(messages("en").Magnet);
+    expect(zh["repair.welded"]).toBeTruthy();
+    expect(en["repair.welded"]).toBeTruthy();
   });
 
   it("Manifold.cylinder 是静态方法 —— 不加 new", () => {

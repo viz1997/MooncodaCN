@@ -114,6 +114,29 @@ function openCubeSoup(size: number): Float32Array {
   return full.subarray(0, full.length - 9);
 }
 
+/**
+ * 每个面的三个顶点**各复制一份**并加一点点扰动
+ *
+ * 这就是 AI 生成模型的典型样子:同一个逻辑顶点,不同面各自算了一遍,
+ * 差了 1e-4mm。**模型本身没破** —— 破了的是我们的焊接容差。
+ */
+function jitteredCubeSoup(size: number, jitter: number): Float32Array {
+  const src = cubeSoup(size);
+  const out = new Float32Array(src.length);
+  for (let f = 0; f < src.length / 9; f++) {
+    for (let k = 0; k < 3; k++) {
+      out[f * 9 + k * 3] = src[f * 9 + k * 3]!;
+      out[f * 9 + k * 3 + 1] = src[f * 9 + k * 3 + 1]!;
+      out[f * 9 + k * 3 + 2] = src[f * 9 + k * 3 + 2]!;
+    }
+    // 三个顶点各错开一点(方向不同 ⇒ 不会互相抵消)
+    out[f * 9] = out[f * 9]! + jitter;
+    out[f * 9 + 4] = out[f * 9 + 4]! + jitter;
+    out[f * 9 + 8] = out[f * 9 + 8]! + jitter;
+  }
+  return out;
+}
+
 /** 整体法线朝内 —— manifold 自己不报错,体积是负的 */
 function invertedCubeSoup(size: number): Float32Array {
   const src = cubeSoup(size);
@@ -239,6 +262,31 @@ describe("磁吸孔切割(真跑 manifold)", () => {
     expect(result.removedVolume).toBeCloseTo(expected, 3);
     // 切之前的体积是完整的 40³(补出来的盖面把体积补回来了)
     expect(result.volumeBefore).toBeCloseTo(64000, 0);
+  });
+
+  it("**近重合顶点的模型照样切** —— 焊回去就好,**不用修复**(工作室 2026-11-11)", async () => {
+    // 工作室的真实模型:461 条开放边。根因**不是模型破**,是我们的焊接太严
+    // (diag × 1e-7 ≈ 0.000004mm,Blender 的 `remove_doubles` 是 0.1mm ——
+    //  粗了两万五千倍)。同一个逻辑顶点差 1e-4mm ⇒ 焊不上 ⇒ 一堆假开放边。
+    const jittered = jitteredCubeSoup(40, 1e-4);
+
+    // 切得动 —— 切掉的体积跟完好的立方体分毫不差
+    const result = await cutMagnetPocket(jittered, "posZ");
+    expect(result.removedVolume).toBeCloseTo(expectedRemovedVolumeMm3(), 3);
+    expect(result.volumeBefore).toBeCloseTo(64000, 0);
+
+    // **而且一丁点几何都没改** —— 没补洞、没删面、没翻绕序
+    const analysis = await analyzeModel(jittered);
+    expect(analysis.repair?.filledLoops).toBe(0);
+    expect(analysis.repair?.capFaces).toBe(0);
+    expect(analysis.repair?.droppedDegenerate).toBe(0);
+    expect(analysis.repair?.droppedDuplicate).toBe(0);
+    expect(analysis.repair?.droppedNonManifold).toBe(0);
+    expect(analysis.repair?.flippedFaces).toBe(0);
+    expect(analysis.repair?.changed).toBe(false);
+
+    // 焊上去了 —— 界面上的那句告知有东西可说
+    expect(analysis.repair?.weldedNearDuplicates).toBeGreaterThan(0);
   });
 
   it("自动修复之后还是破的 ⇒ 那才拒收(而且说清楚还剩几条)", async () => {

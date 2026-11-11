@@ -105,6 +105,7 @@ import {
   repairMagnetGeometry,
   splitMagnetVertices,
 } from "./magnet-repair";
+import { weldMagnetUntilClosed } from "./magnet-weld";
 
 /**
  * wasm 在 `public/` 下的地址
@@ -292,7 +293,7 @@ type Topology = {
 let topologyCache: { key: string; topology: Topology } | null = null;
 
 /**
- * 三角汤 → 焊接好的拓扑(**自动修复**,不再因为「不是封闭实体」就拒收)
+ * 三角汤 → 焊接好的拓扑(**先焊、再修**,不再因为「不是封闭实体」就拒收)
  *
  * ## 为什么不再拒收(2026-11-11)
  *
@@ -303,17 +304,27 @@ let topologyCache: { key: string; topology: Topology } | null = null;
  * 「模型是 AI 生成的」这件事推给用户 —— 客户拿着 Meshy 导出的模型,
  * 装不装 Blender 都切不了。
  *
- * 现在改成**先修再切**:
+ * ## 现在的顺序(2026-11-11 改:焊接放在最前面)
  *
  * ```
- * 焊接 → 阶段 A(几何修复:退化面 / 重复面 / 非流形边 / 绕序 / 补洞)
+ * ① 焊接(容差阶梯)—— 把「同一个点算出来差一点点」的顶点焊上
+ *      → 阶段 A(几何修复:退化面 / 重复面 / 非流形边 / 绕序 / 补洞)
  *      → 再焊一次(拿干净的拓扑)
  *      → 阶段 B(拆蝴蝶结顶点)
  *      → 整体朝内的壳翻过来
  * ```
  *
- * 修完还是不封闭 ⇒ 那才是真的切不了,这时候才报错(而且要说清楚
- * 「自动修复之后还剩多少条破边」)。
+ * **① 是关键**。工作室拿真实模型试的时候报了「还剩 461 条开放边」——
+ * 看着像模型太破,其实**不是模型的问题,是我们的焊接太严**:
+ * 仓库那份 `weldAndAnalyzeTopology()` 的容差是 `diag × 1e-7`
+ * (40mm 的模型 = 0.000004mm),而 **Blender 的 `remove_doubles` 默认
+ * 0.1mm** —— 粗了两万五千倍。AI 生成的模型里同一个逻辑顶点差
+ * 1e-4mm 是常事 ⇒ 我们焊不上 ⇒ 每个这样的点留一条假开放边 ⇒
+ * 一个本来完好的模型被看成「几百条破边」。
+ *
+ * 焊接那一层**不动几何**(只把坐标差 1e-4mm 的两个点算成一个)⇒
+ * 模型回到它本来的样子,布尔运算直接就能用。**阶段 A 那种补洞 / 删面
+ * 才轮到「真的破了」的模型**,是兜底,不是常态。
  *
  * ## 三道闸还在,只是往后挪了
  *
@@ -328,9 +339,12 @@ function prepareTopology(
   const key = `${fingerprint(positions)}|${fingerprintTexture(texture)}`;
   if (topologyCache && topologyCache.key === key) return topologyCache.topology;
 
+  // --- 第 0 步:焊接(容差阶梯)—— **不动几何**,只把「同一个点」认出来 ---
+  const weld = weldMagnetUntilClosed(positions);
+
   let topo: ReturnType<typeof weldAndAnalyzeTopology>;
   try {
-    topo = weldAndAnalyzeTopology(positions);
+    topo = weldAndAnalyzeTopology(weld.positions);
   } catch (err) {
     // 焊接在极端几何(退化面 / NaN 顶点)上会抛 —— 原始信息得留住
     throw engineError("网格焊接", err);
@@ -380,6 +394,9 @@ function prepareTopology(
   const repair: MagnetRepairReport = {
     ...phaseA.report,
     splitVertices: phaseB.splitVertices,
+    weldedVertices: weld.merged,
+    weldedNearDuplicates: weld.mergedApprox,
+    weldToleranceMm: weld.toleranceMm,
   };
 
   // 修完还是不封闭 ⇒ 真的切不了

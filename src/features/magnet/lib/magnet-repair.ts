@@ -112,6 +112,21 @@ export interface MagnetRepairReport {
   closed: boolean;
   /** 有没有真的动过手(没动过就不用重新焊接) */
   changed: boolean;
+  /**
+   * 焊接合并掉的顶点数(容差阶梯那一层 —— 见 `magnet-weld.ts`)
+   *
+   * **这是「不改动用户模型」的那一层** —— 焊掉的顶点本来就在那儿,
+   * 只是差了 1e-4mm 被算成了两个点。
+   */
+  weldedVertices: number;
+  /**
+   * 其中**坐标不完全相同**的那些 —— 「模型里有几个点其实是同一个点,
+   * 只是算出来差了一点」。**这才是界面上要摆的数**(三角汤天生就有
+   * 大量完全重复的顶点,那个总数没什么信息量)。
+   */
+  weldedNearDuplicates: number;
+  /** 焊接用的容差(mm)—— 0 = 一档都没用上 */
+  weldToleranceMm: number;
 }
 
 /** 修完的结果 */
@@ -944,6 +959,9 @@ export function repairMagnetGeometry(
     nonManifoldEdgesAfter: 0,
     closed: false,
     changed: false,
+    weldedVertices: 0,
+    weldedNearDuplicates: 0,
+    weldToleranceMm: 0,
   };
 
   const srcFaces = input.faceVertex;

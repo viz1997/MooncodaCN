@@ -1178,6 +1178,16 @@ export function MagnetCutterTool() {
                   </p>
                 </section>
 
+                {/* ---- 焊接的告知(把「同一个点」认出来 —— 形状没变)---- */}
+                {(analysis?.repair?.weldedNearDuplicates ?? 0) > 0 && (
+                  <p className="text-[11px] leading-relaxed text-zinc-500">
+                    {t("repair.welded", {
+                      welded: analysis?.repair?.weldedNearDuplicates ?? 0,
+                      tol: (analysis?.repair?.weldToleranceMm ?? 0).toFixed(4),
+                    })}
+                  </p>
+                )}
+
                 {/* ---- 自动修复的告知(模型不是封闭实体时)---- */}
                 {analysis?.repair?.changed && (
                   <section className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
