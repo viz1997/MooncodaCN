@@ -40,7 +40,7 @@ const footerLinks = [
     links: [
       { label: "工作流程", href: "/#how" },
       { label: "工具中心", href: "/tools" },
-      { label: "运费与售后", href: "/legal/shipping" },
+      { label: "运费与交期", href: "/legal/shipping" },
       { label: "联系客服", href: "/dashboard/support" },
     ],
   },
@@ -53,11 +53,22 @@ const footerLinks = [
     ],
   },
   {
+    // 条款 —— 2026-11-12 换掉了原来那三条。
+    //
+    // 原来摆的是模板(SaaS 模板)的文档:隐私政策 / 服务条款 / Cookie 设置。
+    // 前两份是模板自己的(隐私政策里写的是「生成闪卡」「Anki 包」),
+    // 第三条 `/legal/cookies` **压根不是合法 slug**(真 slug 是
+    // `cookie-policy`)⇒ 那是个 404。工作室的原话:
+    // 「不再展示这些页面，即原项目的页面」。
+    //
+    // 现在摆的是**工作室自己的**打印服务文档 —— 跟营销页 footer 的
+    // 「打印服务」那一栏是同一组。
     title: "条款",
     links: [
-      { label: "隐私政策", href: "/legal/privacy" },
-      { label: "服务条款", href: "/legal/terms" },
-      { label: "Cookie 设置", href: "/legal/cookies" },
+      { label: "打印须知", href: "/legal/print-notice" },
+      { label: "3D模型设计规范", href: "/legal/design-spec" },
+      { label: "售后说明", href: "/legal/after-sales" },
+      { label: "下单须知", href: "/legal/print-order-notice" },
     ],
   },
 ];

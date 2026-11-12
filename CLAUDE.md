@@ -3638,6 +3638,66 @@ Sellbase 的 `createCheckout()` 把 `payment_method_types: ["card"]` **写死**
 折后单价重建一张 Sellbase 订单(**不重算价** —— 用户下单时同意的是那个价),
 然后拿到 Stripe 链接。用户去「我的订单」点「重新获取支付链接」就行。
 
+### 不再展示原项目(SaaS 模板)的页面(2026-11-12)
+
+工作室把整个站点的头 + 页脚贴过来,原话是:
+
+> 「不再展示这些页面，即原项目的页面」
+
+**「原项目的页面」= 点开就是 404 / 死链 / 内容不对的那几页** —— 不是「所有跟模板
+有关的页面」。逐个查过:
+
+| 原来在哪 | 指向 | 为什么算「原项目的页面」 |
+|---|---|---|
+| 头部 `Docs` | `/docs` | `src/content/docs` 这个目录**压根不存在** ⇒ `/zh/docs` 直接 404 |
+| 头部 `Pricing` | `/#pricing` | 首页上**没有** `id="pricing"` 的元素 ⇒ 死锚点(点过去落在页顶)。模板的 `/pricing` 页 2026-11-07 起 308 跳到 `/tools/workbench` |
+| 头部 `Blog` | `/blog` | 模板的博客只有两篇「你好世界」「Mooncoda 开源了」—— 讲的是这个 Next.js SaaS 模板,跟打印业务无关 |
+| 页脚 `Pricing` / `Changelog` | `/#pricing` / `/blog` | 跟头部同一页 |
+| 页脚「条款」整组 | `/legal/terms`、`/legal/privacy`、`/legal/cookie-policy` | 三份都是模板的文档 —— 隐私政策里写的是「生成闪卡」「Anki 包」那一套 SaaS 业务 |
+| 登录页页脚 | 隐私政策 / 服务条款 | 同上 |
+| Cookie 横幅 | 隐私政策 | 同上 |
+
+⇒ **留着**的是工作室自己的:Gallery(`/products`)/ Image Gen(`/image-gen`)/
+Print(`/cart`)/ Tools(`/tools`)/ `/dashboard`/ Contact Us(mailto)/ 工作室自己的
+四份打印服务文档。
+
+- **头部导航**(`src/config/nav.ts` 的 `mainNav`)现在只剩四项。
+- **页脚** —— 营销页那个 footer 从三列变成**两列**(作品 / 打印服务);商城
+  footer 的「条款」那一栏换成了工作室自己的四份打印文档。
+- **三份模板 MDX 删了**(`src/content/legal/{zh,en}/{terms,privacy,cookie-policy}.mdx`)
+  —— 摆在页脚上比不摆更糟:那是**模板的隐私政策**,讲的是「生成闪卡」。
+  ⚠️ **微信支付 / 支付宝的「商户进件」可能要填隐私政策 URL** —— 那两份得按
+  打印业务的实际口径重写(收哪些信息、存在哪、留多久),文案得工作室自己拍板。
+  需要的话我写一版草稿。
+- **`/legal/cookies` 那条死链也删了** —— 那压根不是合法 slug(真 slug 是
+  `cookie-policy`)⇒ 商城页脚上摆的就是一个点开就 404 的链接。
+- **博客这一节本身留着**(`src/content/blog/` 目录留着,`.gitkeep` 占位)——
+  工作室随时能写自己的文章;只是**没有文章之前不占导航位、不进 sitemap**。
+  列表页零文章时摆空状态(「暂无博客文章」),不是白屏。
+- **messages 里那四个键删了**:`Footer.legal` / `Auth.footer.privacy` /
+  `Auth.footer.terms` / `Cookie.privacyPolicy`。**Cookie 设置弹窗留着** ——
+  它是功能,不是模板文案。
+
+### `/legal/shipping`:运费与交期(2026-11-12)
+
+工作室报的是**「legal/shipping,缺少路由页面」** —— 页脚有一个运费入口,但没
+有那篇文章。
+
+- **正文在 `src/content/legal/{zh,en}/shipping.mdx`** —— 跟其他法律文档一个
+  集合,`/legal/[slug]` 路由自动认(那个路由**完全由集合驱动**:「其他文档」
+  列表 = `getLegalDocs(locale)` 减去当前篇 ⇒ 加一篇 MDX 就自动多一个链接)。
+- **事实全部来自仓库自己的代码**,不是编的:
+  - 目录商品运费 `DEFAULT_SHIPPING_CENTS: 800`(¥8)/ 免运费门槛
+    `FREE_SHIPPING_THRESHOLD_CENTS: 9900`(¥99)—— `storefront/lib/pricing-constants.ts`
+  - 打印工单交期三档 96h / 72h / 48h,加价 0% / 10% / 37%(基数 = 小计)
+    —— `print-quote/lib/delivery-tier.ts`
+  - 收货规则(开箱视频 / 签收后 3 天内 / 顺丰)取自工作室自己的
+    `after-sales.mdx` 和 `print-notice.mdx`
+- **打印工单没有运费行** —— 它的加价项是**交期加价**,跟商城那 ¥8 运费是两
+  码事,页面里分开写清楚了。
+- **页脚入口**两处:营销页 footer(`footerNav.service`,标题走 i18n 的
+  `Footer.shipping`)+ 商城 footer(「帮助」栏里的「运费与交期」)。
+
 ### 工作台左栏加宽 + 三个尺寸格显示完整(2026-11-12)
 
 工作室报的是:**「tools/workbench 中三个尺寸的组件没有完全显示数值」**。

@@ -333,8 +333,6 @@
     },
     "footer": {
       "copyright": "© {year} {name}. All rights reserved.",
-      "privacy": "Privacy Policy",
-      "terms": "Terms of Service",
       "cookies": "Cookie Settings"
     },
     "brand": {
@@ -570,7 +568,6 @@
   "Cookie": {
     "title": "Cookie Settings",
     "description": "We use cookies to ensure you get the best experience on our website. By continuing to use this site, you agree to our",
-    "privacyPolicy": "Privacy Policy",
     "acceptAll": "Accept all",
     "rejectAll": "Essential only",
     "managePreferences": "Manage preferences",
@@ -1094,12 +1091,12 @@
   "Footer": {
     "description": "Mooncoda — WJP full-color 3D printing expert. Pet badges, keychains, fridge magnets, figures — single-piece customization & shipping.",
     "product": "Gallery",
-    "legal": "Legal",
     "service": "Print Service",
     "printNotice": "Print Notice",
     "designSpec": "3D Model Design Specification",
     "afterSales": "After-Sales Policy",
     "orderNotice": "Model Print Order Notice",
+    "shipping": "Shipping & Delivery",
     "copyright": "© {year} {name}. All rights reserved.",
     "twitter": "Weibo",
     "github": "Xiaohongshu"

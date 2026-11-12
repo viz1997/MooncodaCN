@@ -67,7 +67,16 @@ export async function generateMetadata({
  * 法律文档详情页面
  *
  * 路由: /legal/[slug]
- * 支持: /legal/terms, /legal/privacy, /legal/cookie-policy
+ *
+ * 2026-11-12:模板(SaaS 模板)那三份 —— `terms` / `privacy` /
+ * `cookie-policy` —— **MDX 已删**(讲的是「生成闪卡」「Anki 包」那一套,
+ * 跟打印业务无关)。现在这个集合里剩的都是**工作室自己的**文档:
+ * `print-notice` / `design-spec` / `after-sales` / `print-order-notice` /
+ * `shipping`。
+ *
+ * 页面内容**全部由集合驱动** —— 下面那个「其他文档」列表是
+ * `getLegalDocs(locale)` 减去当前这篇 ⇒ **加一篇 MDX 就自动多一个链接**,
+ * 不用改这里。
  */
 export default async function LegalPage({
   params,

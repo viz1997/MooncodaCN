@@ -30,7 +30,10 @@ export function Footer() {
           </div>
 
           {/* 链接区 */}
-          <div className="grid grid-cols-2 gap-8 sm:grid-cols-3">
+          {/* 两列(作品 / 打印服务)—— 2026-11-12 去掉了「条款」那一列:
+              那三份都是原项目(SaaS 模板)的文档,工作室的原话是
+              「不再展示这些页面，即原项目的页面」。 */}
+          <div className="grid grid-cols-2 gap-8">
             {/* 产品 */}
             <div>
               <h3 className="mb-4 text-sm font-semibold">{t("product")}</h3>
@@ -42,23 +45,6 @@ export function Footer() {
                       {...(link.external
                         ? { target: "_blank", rel: "noopener noreferrer" }
                         : {})}
-                      className="text-sm text-muted-foreground transition-colors hover:text-foreground"
-                    >
-                      {link.title}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            {/* 法律 */}
-            <div>
-              <h3 className="mb-4 text-sm font-semibold">{t("legal")}</h3>
-              <ul className="space-y-3">
-                {footerNav.legal.map((link) => (
-                  <li key={link.href}>
-                    <Link
-                      href={link.href}
                       className="text-sm text-muted-foreground transition-colors hover:text-foreground"
                     >
                       {link.title}

@@ -147,12 +147,27 @@ export const productsNav: ProductNavGroup[] = [
 
 /**
  * 主导航链接 (Header)
+ *
+ * 2026-11-12:去掉三项**原项目(SaaS 模板)的页面** —— 工作室的原话:
+ * 「不再展示这些页面，即原项目的页面」。
+ *
+ *  | 原来 | 去哪了 | 为什么 |
+ *  |---|---|---|
+ *  | `Docs` → `/docs` | 没了 | `src/content/docs` 这个目录**压根不存在** ⇒
+ *    `/zh/docs` 直接 404(一个点开就是 404 的导航位) |
+ *  | `Pricing` → `/#pricing` | 没了 | 首页上**没有** `id="pricing"` 的元素 ⇒
+ *    死锚点(点过去落在页顶)。模板的 `/pricing` 页 2026-11-07 起 308 跳到
+ *    `/tools/workbench`,工具在「工具」那一位里 |
+ *  | `Blog` → `/blog` | 没了 | 模板的博客只有两篇「你好世界」和「Mooncoda 开源了」
+ *    —— 讲的是这个 Next.js SaaS 模板,跟打印业务无关。**博客这一节本身留着**
+ *    (工作室随时可以写自己的文章),只是没有文章之前不占导航位 |
+ *
+ * ⇒ 留下的四项都是 Mooncoda 自己的:Gallery(作品集)/ Image Gen(生图)/
+ * Print(商城购物袋)/ Tools(工具中心)。
  */
 export const mainNav: NavItem[] = [
   { title: "Gallery", href: "/products" },
   { title: "Image Gen", href: "/image-gen" },
-  { title: "Docs", href: "/docs" },
-  { title: "Pricing", href: "/#pricing" },
   // 打印服务 —— 2026-11-01 新增。
   // 2026-11-06 改指打印单(`/print-order`),2026-11-08 又改回商城购物袋
   // (`/cart`):工作室的说法是「不要 print-order,进入商城那个」。打印服务
@@ -162,32 +177,39 @@ export const mainNav: NavItem[] = [
   // 工具中心 —— 公开工具页(克重计算器 / 模型检查),浏览器本地算,不需登录
   // 2026-11-01：导航只留一个「工具」位,工具清单在 /tools 里列
   { title: "Tools", href: "/tools" },
-  { title: "Blog", href: "/blog" },
 ];
 
 /**
  * Footer 导航配置
+ *
+ * 2026-11-12:去掉**原项目(SaaS 模板)的页面** —— 工作室的原话:
+ * 「不再展示这些页面，即原项目的页面」。
+ *
+ *  - `product` 里的 `Pricing`(死锚点 `/#pricing`)和 `Changelog`(`/blog`,
+ *    跟头部去掉的是同两页。
+ *  - **`legal` 那一组整个没了** —— 三份都是模板的文档:
+ *    `Terms of Service` / `Privacy Policy` / `Cookie Policy`。
+ *    模板的隐私政策里写的是「生成闪卡」「Anki 包」那一套 SaaS 业务,
+ *    跟打印业务八竿子打不着 —— 摆在页脚上比不摆更糟。
+ *    **对应的 MDX 也删了**(`src/content/legal/{zh,en}/{terms,privacy,cookie-policy}.mdx`),
+ *    所以那几个 URL 现在是 404,不是「点进去发现内容不对」。
+ *    > ⚠️ 工作室的微信支付 / 支付宝**商户进件**可能要填「隐私政策 URL」。
+ *    > 这两份文档得按打印业务的实际口径重写 —— 内容能从代码里查出来
+ *    > (收哪些信息、存在哪、留多久),文案得工作室自己拍板。
+ *    > 需要的话我写一版草稿。
+ *  - `service`(打印须知 / 设计规范 / 售后 / 下单须知)是工作室自己的,留着。
  */
 export const footerNav = {
   /** 产品 (Product) */
   product: [
-    { title: "Pricing", href: "/#pricing" },
     { title: "Tools", href: "/tools" },
     // 打印服务 —— 2026-11-01 新增,2026-11-08 改指商城购物袋
     // (打印单 `/print-order` 和报价台 `/quote` 都只是重定向)
     { title: "Print", href: "/cart" },
-    { title: "Changelog", href: "/blog" },
     {
       title: "Contact Us",
       href: `mailto:${process.env.NEXT_PUBLIC_SUPPORT_EMAIL || FALLBACK_SUPPORT_EMAIL}`,
     },
-  ] as NavItem[],
-
-  /** 法律 (Legal) */
-  legal: [
-    { title: "Terms of Service", href: "/legal/terms" },
-    { title: "Privacy Policy", href: "/legal/privacy" },
-    { title: "Cookie Policy", href: "/legal/cookie-policy" },
   ] as NavItem[],
 
   /**
@@ -216,6 +238,14 @@ export const footerNav = {
       title: "Model Print Order Notice",
       titleKey: "orderNotice",
       href: "/legal/print-order-notice",
+    },
+    // 运费与交期 —— 2026-11-12 新增。
+    // 商城目录商品的运费 / 免运费门槛 + 打印工单的交期档位与加价比例,
+    // 都写在这一页(工作室 2026-11-12 报「legal/shipping 缺少路由页面」)。
+    {
+      title: "Shipping & Delivery",
+      titleKey: "shipping",
+      href: "/legal/shipping",
     },
   ] as NavItem[],
 };

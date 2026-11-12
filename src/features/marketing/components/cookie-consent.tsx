@@ -5,7 +5,6 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Link } from "@/i18n/routing";
 import {
   COOKIE_CONSENT_CHANGE_EVENT,
   COOKIE_CONSENT_KEY,
@@ -146,12 +145,10 @@ export function CookieConsent() {
                 <h3 className="text-lg font-semibold">{t("title")}</h3>
                 <p className="mt-1 text-sm text-muted-foreground">
                   {t("description")}
-                  <Link
-                    href="/legal/privacy"
-                    className="ml-1 underline underline-offset-4 hover:text-foreground"
-                  >
-                    {t("privacyPolicy")}
-                  </Link>
+                  {/* 2026-11-12:隐私政策链接去掉了 —— 那份文档是**原项目
+                      (SaaS 模板)**的(内容讲的是「生成闪卡」「Anki 包」),
+                      MDX 已删。工作室的原话:「不再展示这些页面，即原项目的
+                      页面」。要挂回来的话,先把那份文档按打印业务重写。 */}
                   。
                 </p>
               </div>

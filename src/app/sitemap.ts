@@ -2,7 +2,7 @@ import type { MetadataRoute } from "next";
 
 import { siteConfig } from "@/config";
 import { getAllPseoParams } from "@/features/pseo/lib/pseo-data";
-import { getAllBlogSlugs, getAllLegalSlugs } from "@/lib/source";
+import { getAllLegalSlugs } from "@/lib/source";
 
 /** Supported locales */
 const locales = ["en", "zh"] as const;
@@ -12,6 +12,12 @@ const locales = ["en", "zh"] as const;
  *
  * 包含所有公开页面的 URL
  * 用于搜索引擎索引
+ *
+ * 2026-11-12:**博客不再进 sitemap** —— 工作室的原话:「不再展示这些页面,
+ * 即原项目的页面」。模板自带的两篇博客(「你好世界」「Mooncoda 开源了」)
+ * 讲的是这个 Next.js SaaS 模板,跟打印业务无关,MDX 已删。**博客这一节本身
+ * 留着**(工作室随时能写自己的文章),只是没有文章之前不占导航位、不进
+ * sitemap —— 留一个空列表页在 sitemap 里等于告诉搜索引擎「这是个正式页面」。
  */
 export default function sitemap(): MetadataRoute.Sitemap {
   const baseUrl = siteConfig.url;
@@ -20,7 +26,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
   // Static pages that exist for each locale
   const staticPaths = [
     "", // homepage
-    "/blog",
     "/pseo",
     // 工具中心(2026-11-01):打印前工作台(检查 / 克重 / 摆盘)
     // 三个老地址都不进 sitemap —— 它们各自 308 跳到 `/tools/workbench`,
@@ -44,17 +49,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
     }))
   );
 
-  // Blog posts (dynamic)
-  const blogSlugs = getAllBlogSlugs();
-  const blogRoutes = blogSlugs.map(
-    ({ locale, slug }: { locale: string; slug: string }) => ({
-      url: `${baseUrl}/${locale}/blog/${slug}`,
-      lastModified: now,
-      changeFrequency: "monthly" as const,
-      priority: 0.7,
-    })
-  );
-
   // Legal pages (dynamic)
   const legalSlugs = getAllLegalSlugs();
   const legalRoutes = legalSlugs.map(
@@ -74,5 +68,5 @@ export default function sitemap(): MetadataRoute.Sitemap {
     priority: 0.6,
   }));
 
-  return [...staticRoutes, ...blogRoutes, ...legalRoutes, ...pseoRoutes];
+  return [...staticRoutes, ...legalRoutes, ...pseoRoutes];
 }

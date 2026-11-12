@@ -329,8 +329,6 @@
     },
     "footer": {
       "copyright": "© {year} {name}。保留所有权利。",
-      "privacy": "隐私政策",
-      "terms": "服务条款",
       "cookies": "Cookie 设置"
     },
     "brand": {
@@ -527,7 +525,6 @@
   "Cookie": {
     "title": "Cookie 设置",
     "description": "我们使用 Cookie 来确保您在我们网站上获得最佳体验。继续使用本网站即表示您同意我们的",
-    "privacyPolicy": "隐私政策",
     "acceptAll": "接受全部",
     "rejectAll": "仅必要",
     "managePreferences": "管理偏好",
@@ -1091,12 +1088,12 @@
   "Footer": {
     "description": "Mooncoda 梦可达 — WJP 全彩 3D 打印专家，宠物徽章、钥匙扣、冰箱贴、手办等一件定制、一件发货。",
     "product": "作品",
-    "legal": "条款",
     "service": "打印服务",
     "printNotice": "打印须知",
     "designSpec": "3D模型设计规范",
     "afterSales": "售后说明",
     "orderNotice": "下单须知",
+    "shipping": "运费与交期",
     "copyright": "© {year} {name}。保留所有权利。",
     "twitter": "微博",
     "github": "小红书"
