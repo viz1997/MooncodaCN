@@ -1416,9 +1416,9 @@
     }
   },
   "InternationalStore": {
-    "bar": "Ordering outside mainland China? Shop on our international store",
-    "barCta": "Visit the store",
-    "nav": "International Store"
+    "bar": "Ordering outside mainland China? Visit our overseas store",
+    "barCta": "Shopify",
+    "nav": "Shopify"
   },
   "Magnet": {
     "title": "Magnet Pocket Cutter",
@@ -2445,8 +2445,8 @@
       "notConfigured": "No address yet — there is no announcement bar and no navigation entry on the site. Fill in the address and both appear."
     },
     "form": {
-      "title": "International store address",
-      "label": "Store URL",
+      "title": "Shopify store address",
+      "label": "Shopify store URL",
       "placeholder": "https://your-store.myshopify.com",
       "help": "The customer-facing address of the Shopify store where overseas buyers place their orders.",
       "extra": "Only http / https addresses are accepted. Saving it empty explicitly turns the entry off, even if the environment variable is still set."

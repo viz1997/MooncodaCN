@@ -12,7 +12,7 @@
  * 1. **所有语言站都出现** —— 原来只在英文站出现,工作室的口径是
  *    「**不是 en 才是,所有都要**」。「外国访客」不等于「会看英文」:
  *    中文站上也有境外买家(中文是他们的母语)。境内买家看到会不会困惑,
- *    靠**文案**解决(「中国大陆以外下单?请前往我们的海外独立站」),
+ *    靠**文案**解决(「中国大陆以外下单?请前往我们的海外店铺」),
  *    不靠**藏起来**。
  * 2. **没配地址就不出现** —— 宁可没有入口,也不要一条指向空地址的死链。
  * 3. **它是 server component** —— locale 从 layout 的 `params` 拿,两端
@@ -35,11 +35,25 @@
  * 就退出 `ENABLED_PAYMENT_CHANNELS` 了),这里是**顾客访问地址**。两个
  * 变量名也刻意不一样:`SHOPIFY_STORE_DOMAIN` vs
  * `NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL`(后者现在只是**兜底**)。
+ *
+ * ## 2026-11-12:CTA 写「Shopify」+ 摆品牌图标
+ *
+ * 工作室的要求:**「【海外独立站】改为【shopify】,用 shopify 的图标」**。
+ *
+ * 那个店**本来就是 Shopify 店铺** —— 以前只是文案上写「海外独立站」,没
+ * 说清楚那是个 Shopify 店。现在这条细条的 CTA 直接写 **Shopify** + 官方
+ * 那个购物袋标志(`shopify-icon.tsx`)⇒ 境外买家一眼认得出是同一家店的
+ * 另一个门面。
+ *
+ * **文案别再堆一遍「Shopify」** —— `bar` 说「中国大陆以外下单?请前往我们
+ * 的海外店铺」,CTA 说「Shopify」+ 图标。一句话里出现两次平台名,在一条
+ * 11px 的细条上很吵。
  */
 
 import { getTranslations } from "next-intl/server";
 
 import { shouldShowInternationalStore } from "./international-store";
+import { ShopifyIcon } from "./shopify-icon";
 
 export async function InternationalStoreBar({
   locale,
@@ -65,8 +79,11 @@ export async function InternationalStoreBar({
           href={url}
           target="_blank"
           rel="noopener noreferrer"
-          className="font-medium text-[var(--primary)] underline underline-offset-2 transition-opacity hover:opacity-75"
+          className="inline-flex items-center gap-1 font-medium text-[var(--primary)] underline underline-offset-2 transition-opacity hover:opacity-75"
         >
+          {/* 品牌图标(2026-11-12)—— 那个店本来就是 Shopify,摆上标志让
+              境外买家一眼认得出是同一家店的另一个门面 */}
+          <ShopifyIcon className="size-3.5" />
           {t("barCta")}
         </a>
       </div>

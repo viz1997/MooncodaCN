@@ -158,6 +158,11 @@ export const OCCASIONS: readonly Occasion[] = [
  * 2026-11-11:地址的真理源搬到 DB(`site_setting` 表)—— 工作室要求「**不
  * 需要环境变量,在后台设置**」。所以这一项的 `href` **恒为空**:真正的地址
  * 在渲染时从 `internationalStoreUrl` 这个 prop 拿(见 `wjp-store-header.tsx`)。
+ *
+ * 2026-11-12:这一项的标题从「海外独立站」改成 **「Shopify」** + 摆官方那个
+ * 购物袋标志 —— 工作室的要求:**「【海外独立站】改为【shopify】,用 shopify
+ * 的图标」**。那个店本来就是 Shopify 店铺,以前只是没说清楚。**标题仍然走
+ * i18n**(`InternationalStore.nav`),改文案改 `messages/*.json` 就行。
  */
 
 export type StoreNavItem =

@@ -1413,9 +1413,9 @@
     }
   },
   "InternationalStore": {
-    "bar": "中国大陆以外下单?请前往我们的海外独立站",
-    "barCta": "前往独立站",
-    "nav": "海外独立站"
+    "bar": "中国大陆以外下单?请前往我们的海外店铺",
+    "barCta": "Shopify",
+    "nav": "Shopify"
   },
   "Magnet": {
     "title": "磁吸孔切割",
@@ -2442,8 +2442,8 @@
       "notConfigured": "还没配地址 —— 页面上既没有顶部公告条,也没有导航入口。填上地址就都出现。"
     },
     "form": {
-      "title": "海外独立站地址",
-      "label": "独立站网址",
+      "title": "Shopify 店铺地址",
+      "label": "Shopify 店铺网址",
       "placeholder": "https://your-store.myshopify.com",
       "help": "境外买家下单的那个 Shopify 店铺的顾客访问地址。",
       "extra": "只接受 http / https 开头的网址。留空保存 = 明确关掉入口(哪怕环境变量还配着)。"

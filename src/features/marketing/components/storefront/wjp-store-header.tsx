@@ -129,6 +129,7 @@ import { signOut, useSession } from "@/lib/auth/client";
 import { formatCents } from "@/lib/money";
 import { shouldShowInternationalStore } from "./international-store";
 import { STORE_NAV } from "./occasion-data";
+import { ShopifyIcon } from "./shopify-icon";
 
 /**
  * 导航标签按 locale 取。
@@ -178,6 +179,7 @@ export function WjpStoreHeader({
   const locale = useLocale();
   const isZh = locale === "zh";
   // 海外独立站那一项的标题走 i18n(别的几项标题写死在 STORE_NAV 里)
+  // 2026-11-12:标题从「海外独立站」改成「Shopify」+ 品牌图标
   const tStore = useTranslations("InternationalStore");
 
   /**
@@ -356,6 +358,8 @@ export function WjpStoreHeader({
                           rel="noopener noreferrer"
                           className="flex items-center gap-2 px-4 py-3 text-sm font-medium hover:bg-muted transition-colors rounded-md"
                         >
+                          {/* 品牌图标(2026-11-12)—— 那本来就是 Shopify 店 */}
+                          <ShopifyIcon className="size-4" />
                           {tStore("nav")}
                           <ExternalLink className="size-3.5" />
                         </a>
@@ -494,8 +498,10 @@ export function WjpStoreHeader({
                       href={externalHref}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center gap-1 text-sm font-medium text-foreground/70 hover:text-[var(--primary)] transition-colors"
+                      className="flex items-center gap-1.5 text-sm font-medium text-foreground/70 hover:text-[var(--primary)] transition-colors"
                     >
+                      {/* 品牌图标(2026-11-12)—— 那本来就是 Shopify 店 */}
+                      <ShopifyIcon className="size-3.5" />
                       {tStore("nav")}
                       <ExternalLink className="size-3" />
                     </a>

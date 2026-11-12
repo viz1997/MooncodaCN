@@ -17,9 +17,16 @@ import { shouldShowInternationalStore } from "@/features/marketing/components/st
  * 境内价格 / 境内物流 / 境内客服对他们不合适 ⇒ 入口该给。
  *
  * 境内买家看到会不会困惑?靠**文案**解决(公告条写的是「中国大陆以外下单?
- * 请前往我们的海外独立站」),不靠**藏起来**。
+ * 请前往我们的海外店铺」),不靠**藏起来**。
  *
  * ⇒ 判定**不再看 locale**,只剩一个条件:**配了地址**。
+ *
+ * ## 2026-11-12 工作室的要求:**「【海外独立站】改为【shopify】,用 shopify
+ * 的图标」**
+ *
+ * 那个店**本来就是 Shopify 店铺**(境内站 → 境外站 `mooncoda.com`,后者跑
+ * Shopify)—— 以前只是文案上写「海外独立站」,没说清楚那是个 Shopify 店。
+ * 现在**标题写「Shopify」+ 摆上官方那个购物袋标志**。
  *
  * ## 这个文件守住什么
  *
@@ -37,6 +44,7 @@ import { shouldShowInternationalStore } from "@/features/marketing/components/st
  * 6. **导航按钮是站外链接** —— `<a target="_blank" rel="noopener noreferrer">`,
  *    不是 next-intl 的 `<Link>`(那个是给站内路由加 locale 前缀的)
  * 7. **中英文 key 一致**
+ * 8. **对外那一层写的是「Shopify」+ 品牌图标**(2026-11-12)
  *
  * 纯函数 + 文件扫描 —— 不需要 DB / 网络 / 浏览器。
  */
@@ -74,6 +82,7 @@ const NAV_DATA =
   "src/features/marketing/components/storefront/occasion-data.ts";
 const ATELIER_LAYOUT = "src/app/[locale]/(marketing-atelier)/layout.tsx";
 const MARKETING_LAYOUT = "src/app/[locale]/(marketing)/layout.tsx";
+const ICON = "src/features/marketing/components/storefront/shopify-icon.tsx";
 
 describe("海外独立站入口", () => {
   describe("可见性判定", () => {
@@ -240,6 +249,79 @@ describe("海外独立站入口", () => {
       for (const key of ["bar", "barCta", "nav"]) {
         expect(en).toHaveProperty(key);
         expect(zh).toHaveProperty(key);
+      }
+    });
+  });
+
+  /**
+   * 2026-11-12:工作室要求 —— 「【海外独立站】改为【shopify】,用 shopify 的图标」
+   *
+   * 那个店**本来就是 Shopify 店铺**(境内站 → 境外站 `mooncoda.com`,后者跑
+   * Shopify)—— 以前只是文案上写「海外独立站」,没说清楚那是个 Shopify 店。
+   *
+   * 这几条守的是**对外那一层**:标题写「Shopify」+ 摆上品牌图标。
+   */
+  describe("改名成 Shopify + 品牌图标(2026-11-12)", () => {
+    it("标题写的是「Shopify」,不再是「海外独立站 / International Store」", () => {
+      for (const locale of ["zh", "en"] as const) {
+        const store = messages(locale).InternationalStore as Record<
+          string,
+          unknown
+        >;
+        // 导航项 + 公告条 CTA —— 两处都直接写平台名
+        expect(store.nav).toBe("Shopify");
+        expect(store.barCta).toBe("Shopify");
+        // 旧的说法不许再出现在这一块里
+        for (const value of Object.values(store)) {
+          expect(String(value)).not.toMatch(/独立站/);
+          expect(String(value)).not.toMatch(/Independent store/i);
+          expect(String(value)).not.toMatch(/International store/i);
+        }
+      }
+    });
+
+    it("后台那一页的表单标题也改成 Shopify", () => {
+      for (const locale of ["zh", "en"] as const) {
+        const admin = messages(locale).AdminSiteSettings as {
+          form: { title: string; label: string };
+        };
+        expect(admin.form.title).toContain("Shopify");
+        expect(admin.form.label).toContain("Shopify");
+        expect(admin.form.title).not.toMatch(/独立站/);
+        expect(admin.form.label).not.toMatch(/独立站/);
+      }
+    });
+
+    it("Shopify 图标组件在 —— 官方那个购物袋标志", () => {
+      const src = read(ICON);
+      // 路径是 simple-icons 的 shopify(CC0)—— 手抄歪了就是另一个图形了
+      expect(src).toContain("M15.337 23.979l7.216-1.561");
+      expect(src).toContain('viewBox="0 0 24 24"');
+      // 跟着文字颜色走(不写死颜色)
+      expect(src).toContain('fill="currentColor"');
+      // 旁边永远有一行「Shopify」文字 —— 再给图标一个 aria-label 会念两遍
+      expect(src).toContain('aria-hidden="true"');
+      // 尺寸交给 className(跟仓库里 lucide 那些图标一个套路)
+      expect(src).toContain("className");
+    });
+
+    it("公告条带上了图标", () => {
+      const src = read(BAR);
+      expect(src).toContain("ShopifyIcon");
+      // 图标跟 CTA 文字在同一个链接里
+      expect(src).toMatch(/<ShopifyIcon[^>]*\/>[\s\S]{0,120}\{t\("barCta"\)\}/);
+    });
+
+    it("导航按钮带上了图标(桌面端 + 移动端 Sheet 两处)", () => {
+      const src = read(HEADER);
+      const matches = src.match(/<ShopifyIcon/g) ?? [];
+      expect(matches.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("两个渲染处都 import 了那一份图标(不许各画一个)", () => {
+      for (const rel of [BAR, HEADER]) {
+        const src = read(rel);
+        expect(src).toMatch(/import \{ ShopifyIcon \} from "\.\/shopify-icon"/);
       }
     });
   });

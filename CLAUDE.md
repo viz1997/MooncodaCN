@@ -2192,7 +2192,7 @@ Script,桥接就起了。做出插件,或者 mcp 协议」**。
 | `src/test/magnet/pure/magnet-addon.test.ts` | 插件包在仓库里 / zip **只有一个顶层目录**、目录名 = 模块名 / 包里的 `bridge.py` 跟源码**一个字节都不差**(不会漂)/ 入口 re-export `bl_info` / `register` / `unregister` 且**不抄第二份 `bl_info`** / 源码里有 `AddonPreferences` / 面板 / 操作器 / 协议版本对得上 / **只绑 `127.0.0.1`**(不许 `0.0.0.0`)/ **proxy 的 matcher 放 `/magnet/*` 过**(页面路由照常走 locale)/ 构建脚本在仓库里 + `package.json` 登记了 `magnet:addon` |
 | `src/test/magnet/pure/magnet-mcp.test.ts` | 协议合规(版本协商 / **通知不回** / 工具不存在回 `-32602` / 不认识的方法回 `-32601` / 不是 2.0 回 `-32600` / 解不了 JSON 回 `-32700`)/ 工具炸了也给一份看得懂的内容(标 `isError`)/ 排版说人话(「可以切」/「太薄 —— 切下去会捅穿」/「一个字节都没改」/「临时封上了 … 不会多出几何」)/ **坐标不像毫米时要提醒**(不悄悄缩放)/ **引擎是同一份代码**/ **只跟 `127.0.0.1` 说话**/ **stdout 只写一次**(协议通道)/ **不进工单**(不碰报价 / 工单 / R2)/ 协议层与排版层住在 `src/features/magnet/lib/`(能进 unit project) |
 
-### 外国访客 → 海外独立站(2026-11-10,**2026-11-11 改了口径**,**2026-11-11 改成后台可配**)
+### 外国访客 → 海外独立站(2026-11-10,**2026-11-11 改了口径**,**2026-11-11 改成后台可配**,**2026-11-12 改成「Shopify」+ 品牌图标**)
 
 工作室的独立站是**另一个 Shopify 店铺**(境外的那个)。境外访客落到本仓库之后,
 看到的是人民币价格、境内物流、境内客服 —— 看着就不是给他准备的。要给他一个
@@ -2212,7 +2212,7 @@ Script,桥接就起了。做出插件,或者 mcp 协议」**。
 物流 / 境内客服对他们不合适 ⇒ 入口该给。
 
 - **境内买家看到会不会困惑?** 靠**文案**解决,不靠**藏起来** —— 公告条写的是
-  「中国大陆以外下单?请前往我们的海外独立站」,境内的人看完知道跟自己没关系,
+  「中国大陆以外下单?请前往我们的海外店铺」,境内的人看完知道跟自己没关系,
   不会误点。**藏起来(只给英文站)那份才是错的** —— 那些真正需要出口的人反而
   看不到。
 - **本仓库仍然没有 geo / IP / `navigator.language` 判断** —— 现在一个都没有,
@@ -2253,6 +2253,38 @@ Script,桥接就起了。做出插件,或者 mcp 协议」**。
   导航项的标题**不在** `occasion-data.ts` 里写死 —— 那一支 `kind: "external"`
   刻意**不带** `label` / `labelEn`,标题从 `InternationalStore.nav` 来,
   两份文案不会重复。
+
+#### 2026-11-12:标题改成「Shopify」+ 官方品牌图标
+
+工作室的原话:**「【海外独立站】改为【shopify】,用 shopify 的图标」**。
+
+那个店**本来就是 Shopify 店铺**(境内站 → 境外站 `mooncoda.com`,后者跑
+Shopify)—— 以前只是文案上写「海外独立站」,没说清楚那是个 Shopify 店。
+现在**标题直接写「Shopify」+ 摆官方那个购物袋标志**。
+
+- **这是对外那一层的改名,不是收款通道** —— `src/features/payments/providers/shopify/`
+  那个 2026-11-05 就下线了,跟这条入口**没关系**(见本文开头那个警告框)。
+  DB 里的键名(`international_store_url`)、i18n 的命名空间
+  (`InternationalStore`)、环境变量名(`NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL`)
+  **一个都没改** —— 改那些要迁移,而且会把「顾客访问地址」和「收款通道」
+  搅在一起(那两个名字**刻意不一样**)。
+- **图标组件** —— `src/features/marketing/components/storefront/shopify-icon.tsx`
+  (新文件)。路径取自 **simple-icons** 的 `shopify`(**CC0-1.0**)。
+  ⚠️ **别手抄那个 path** —— 手抄歪了就是另一个图形了;要去那儿取。
+- **为什么不装 `simple-icons` 这个包** —— 仓库里只有 `lucide-react`,而
+  lucide **没有品牌图标**(品牌图标早就被它去掉了)。为一个图标加一个依赖不划算。
+- **图标约定** —— `fill="currentColor"`(跟着文字颜色走,不写死颜色)+
+  `aria-hidden="true"`(旁边永远有一行「Shopify」文字,再给图标一个
+  aria-label 会念两遍)+ 尺寸交给 `className`(跟仓库里 lucide 那些图标一个套路)。
+- **两个渲染处都摆** —— 公告条(server component)和导航按钮(client component)
+  **import 同一份** `ShopifyIcon`,不许各画一个。导航按钮**桌面端 + 移动端
+  Sheet 两处**都要摆。
+- **文案别再堆一遍「Shopify」** —— `bar` 说「中国大陆以外下单?请前往我们的海外
+  店铺」,CTA(`barCta`)/ 导航项(`nav`)才说「Shopify」+ 图标。一句话里出现两次
+  平台名,在一条 11px 的细条上很吵。
+- **后台那一页也跟着改** —— `/admin/site-settings` 的表单标题 / 标签从「海外独立站
+  店铺地址」改成「Shopify 店铺地址」(那一页是配置界面,改的是**给人看的说法**,
+  存的键名一个字没动)。
 
 #### 地址从哪儿来(2026-11-11 改成后台可配)
 
@@ -2328,7 +2360,7 @@ DB 的 site_setting 表那一行  →  NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL  →  
 
 | 测试 | 守住什么 |
 |---|---|
-| `src/test/marketing/pure/international-store.test.ts` | 可见性判定(**配了地址就出现 —— 所有语言站都出现**;空地址不出现)/ **判定里没有 locale 那一层**(函数只有一个入参;两个渲染处都不传 locale)/ **真理源在 DB,环境变量退成兜底**(两个 layout 调 `getInternationalStoreUrl`;两个渲染处**不自己读** —— 地址从 layout 当 props 传下去)/ **`SHOPIFY_STORE_DOMAIN` 不许进新代码**(别跟已下线的支付通道混)/ 公告条挂在两个 layout 上且在 header **上面** / 布局读了 `params` / `STORE_NAV` 有 `external` 这一支 / 渲染成 `<a target=_blank>` / 桌面端 + 移动端两处都处理了 / 中英文 key 一致 |
+| `src/test/marketing/pure/international-store.test.ts` | 可见性判定(**配了地址就出现 —— 所有语言站都出现**;空地址不出现)/ **判定里没有 locale 那一层**(函数只有一个入参;两个渲染处都不传 locale)/ **真理源在 DB,环境变量退成兜底**(两个 layout 调 `getInternationalStoreUrl`;两个渲染处**不自己读** —— 地址从 layout 当 props 传下去)/ **`SHOPIFY_STORE_DOMAIN` 不许进新代码**(别跟已下线的支付通道混)/ 公告条挂在两个 layout 上且在 header **上面** / 布局读了 `params` / `STORE_NAV` 有 `external` 这一支 / 渲染成 `<a target=_blank>` / 桌面端 + 移动端两处都处理了 / 中英文 key 一致 / **标题写的是「Shopify」**(2026-11-12;旧的说法「海外独立站 / International Store」不许再出现)/ 图标组件在(那个 path 一字不差 + `currentColor` + `aria-hidden`)/ **公告条和导航按钮都带上了图标** / **两个渲染处 import 的是同一份图标**(不许各画一个) |
 | `src/test/site-settings/pure/site-settings.test.ts` | 回退链(**DB 那一行赢过环境变量**;DB 空串 = 明确关掉;DB 没这一行才看环境变量;都没有 = 未配置)/ 归一化(去空格 / 去尾斜杠)与校验(**只收 http / https**,`javascript:` / `mailto:` 拒掉)/ **不合法的地址 fail closed**(手改 DB 也渲染不出 `javascript:`)/ 读的那一层(`unstable_cache` + tag + 兜底 catch 在缓存外面)/ 后台那一页(不自己判 admin / 不开弹窗 / 有保存和删行两个动作 / 错误码在位 / `revalidateTag` + `revalidatePath`)/ **`"use server"` 文件不 re-export 类型** / 迁移脚本**不写任何配置行** / 中英文 key 一致 |
 
 ### 打印定价后台(2026-11-06)
