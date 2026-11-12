@@ -3638,6 +3638,43 @@ Sellbase 的 `createCheckout()` 把 `payment_method_types: ["card"]` **写死**
 折后单价重建一张 Sellbase 订单(**不重算价** —— 用户下单时同意的是那个价),
 然后拿到 Stripe 链接。用户去「我的订单」点「重新获取支付链接」就行。
 
+### 工作台左栏加宽 + 三个尺寸格显示完整(2026-11-12)
+
+工作室报的是:**「tools/workbench 中三个尺寸的组件没有完全显示数值」**。
+
+- **根因是算出来的,不是猜出来的** —— 1440px 视口下侧栏 360px,三个格子各
+  94.33px,减去 `p-3` 的左右内边距只剩 **70.33px** 可用;「1,234.5」在 18px
+  等宽字体下要 **75.61px**,加 4px 间距加 "mm" 的 14.41px ⇒ 需要 **94.02px**
+  ⇒ **"mm" 探出卡片右缘 12.69px**,被卡片自己的 `overflow-hidden` 切掉 ——
+  画面上看着像 "mn"。Y / Z 装得下,只有 X 那个长数字被裁。
+- **三处一起改才装得下**:
+
+  | 什么 | 从 | 到 |
+  |---|---|---|
+  | 侧栏宽度 | `md:w-[360px]` | **`md:w-[400px] xl:w-[440px]`** |
+  | 格子内边距 | `p-3` | **`p-2`** |
+  | 数值字号 | `text-lg` | **`text-base`**("mm" `text-xs` → `text-[10px]`) |
+
+  改完实测:1440px(xl ⇒ 440px 侧栏)每格 121px / 可用 105px,X 值 67.2px +
+  "mm" 12px ⇒ 余量 28.8px;1024px(md ⇒ 400px 侧栏)余量 15.45px。**两个断点
+  都装得下。**
+- **两个侧栏必须一样宽** —— 不然切一次视角视口宽度就变,相机的取景会跑偏。
+- **`<input>` 必须写 `min-w-0`** —— 它的 `min-width` 默认是 `auto`(不小于内容
+  宽度),flex 容器再怎么挤它也不缩 ⇒ 数值一长就把 "mm" 顶出去。加 `min-w-0`
+  之后它才肯缩(剩下靠浏览器自己的横向滚动看得到,`title` 里挂完整值)。
+- **数字输入框的上下箭头去掉** —— Chrome 的 spinner 画在输入框里侧,在 121px
+  宽的格子里占掉 13px,还会压住最后一位数字(`[appearance:textfield]` +
+  `::-webkit-*-spin-button:appearance-none`,仓库里那套写法)。
+- **只读那一格给 `min-w-0 truncate` + `title`** —— 万一来了个五位数毫米,宁可
+  截断并把完整值挂在 tooltip 上,也不让它顶掉 "mm"。
+
+#### 行为由单测守住
+
+| 测试 | 守住什么 |
+|---|---|
+| `src/test/tools/pure/workbench-layout.test.ts` | **两个侧栏同宽**(`md:w-[400px] xl:w-[440px]`,旧宽度不许还在)/ 格子内边距 `p-2` / 数值 `text-base` + 「mm」`text-[10px]` / 数值那格 `min-w-0 truncate` + `title` / 输入框 `min-w-0` / **数字输入框的 spinner 去掉** |
+| `src/test/marketing/pure/template-pages.test.ts` | 模板那三份法律 MDX **真的删了**(两个语言)/ 模板那两篇博客删了 / 法律集合里**只剩工作室自己的五篇**(两个语言一样)/ **`/legal/shipping` 两个语言都有** + frontmatter 齐 + **运费与交期的事实跟代码里的一致**(¥8 / ¥99 / 96·72·48 小时 / 10% · 37%)/ **页脚与导航里每一个 `/legal/…` 链接都对应一篇真实存在的 MDX**(死链守卫)/ 不许再指向模板那三份 / 不许指向 `/legal/cookies`(那不是合法 slug)/ 头部导航里没有 `/docs` · `/#pricing` · `/blog` / 页脚没有「条款」那一组 / 营销页 footer 是两列 / 商城页脚摆的是工作室自己的四份 / 登录页页脚 + Cookie 横幅不再链隐私政策 / **sitemap 里没有 `/blog`** / 博客这一节留着(目录 + 空状态)/ messages 里那四个键删了 + 中英文 key 一致 |
+
 ## Coding Conventions
 
 - **Language:** Chinese comments throughout the codebase (code itself in English)

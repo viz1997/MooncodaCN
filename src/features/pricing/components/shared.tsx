@@ -202,7 +202,20 @@ export function StatBlock({
   );
 }
 
-/** 只读尺寸显示（原始尺寸模式） */
+/**
+ * 只读尺寸显示（原始尺寸模式）
+ *
+ * 2026-11-12:数值 + 单位之前会被裁掉 —— 「1,234.5 mm」在 360px 宽的侧栏里
+ * 需要 94px,而格子(94.33px)减去 `p-3` 的左右内边距只剩 70.33px ⇒ "mm" 探出
+ * 卡片右缘 12.69px,被卡片自己的 `overflow-hidden` 切掉(画面上看着像 "mn")。
+ *
+ * 三处一起改才装得下:① 侧栏加宽(`model-settings-panel.tsx` 的
+ * `md:w-[400px] xl:w-[440px]`)② 格子内边距 `p-3` → `p-2` ③ 数值 `text-lg`
+ * → `text-base`、"mm" `text-xs` → `text-[10px]`。
+ *
+ * 数值那一格给 `min-w-0 truncate` + `title` —— 万一来了个离谱的大数
+ * (五位数毫米),宁可截断并把完整值挂在 tooltip 上,也不让它顶掉 "mm"。
+ */
 export function DimDisplay({
   axis,
   axisColor,
@@ -215,7 +228,7 @@ export function DimDisplay({
   value: number;
 }) {
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-3 h-[78px] flex flex-col">
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-2 h-[78px] flex flex-col">
       <div className="flex items-center gap-1.5 mb-1.5">
         <span
           className="size-3 rounded-sm"
@@ -224,15 +237,32 @@ export function DimDisplay({
         <span className="text-xs font-medium text-zinc-400">{axis}</span>
         <span className="text-xs text-zinc-500 ml-auto">{label}</span>
       </div>
-      <div className="font-mono text-lg text-zinc-100 flex items-center gap-1 flex-1">
-        <span>{fmt(value, 1)}</span>
-        <span className="text-xs text-zinc-500">mm</span>
+      <div className="font-mono text-base text-zinc-100 flex items-center gap-1 flex-1">
+        <span className="min-w-0 truncate" title={`${fmt(value, 1)} mm`}>
+          {fmt(value, 1)}
+        </span>
+        <span className="text-[10px] text-zinc-500 shrink-0">mm</span>
       </div>
     </div>
   );
 }
 
-/** 可编辑尺寸（自选尺寸模式） */
+/**
+ * 可编辑尺寸（自选尺寸模式）
+ *
+ * 2026-11-12:跟 `DimDisplay` 一起收窄 —— 数值 `text-lg` → `text-base`、
+ * 输入框左右内边距 `px-2` → `px-1`、"mm" `text-xs` → `text-[10px]`。
+ *
+ * ⚠️ **输入框必须写 `min-w-0`** —— `<input>` 的 `min-width` 默认是 `auto`,
+ * 也就是「不小于内容宽度」:flex 容器再怎么挤,输入框也不会缩到内容宽度以下
+ * ⇒ 数值一长就把 "mm" 顶出去。加 `min-w-0` 之后它才肯缩,剩下的字靠浏览器
+ * 自己的横向滚动看得到(`title` 里挂完整值)。
+ *
+ * ⚠️ **数字输入框的上下箭头也去掉** —— Chrome 的 spinner 画在输入框里侧,
+ * 在 121px 宽的格子里占掉 13px,还会压住最后一位数字。仓库里那套写法
+ * (`[appearance:textfield]` + `::-webkit-*-spin-button:appearance-none`,
+ * canvas 模块那几个面板也是这么写的)一刀切掉。
+ */
 export function DimEditor({
   axis,
   axisColor,
@@ -247,7 +277,7 @@ export function DimEditor({
   onChange: (v: number) => void;
 }) {
   return (
-    <div className="rounded-lg border border-zinc-700 bg-zinc-900 p-3 h-[78px] flex flex-col focus-within:border-amber-400 focus-within:ring-1 focus-within:ring-amber-500/30 transition-colors">
+    <div className="rounded-lg border border-zinc-700 bg-zinc-900 p-2 h-[78px] flex flex-col focus-within:border-amber-400 focus-within:ring-1 focus-within:ring-amber-500/30 transition-colors">
       <div className="flex items-center gap-1.5 mb-1.5">
         <span
           className="size-3 rounded-sm"
@@ -263,10 +293,11 @@ export function DimEditor({
           step="0.1"
           value={Number.isFinite(value) ? Math.round(value * 100) / 100 : ""}
           onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
-          className="font-mono text-lg h-7 px-2 py-0 border-0 bg-transparent text-zinc-100 placeholder:text-zinc-600 focus-visible:ring-0"
+          title={`${fmt(value, 1)} mm`}
+          className="font-mono text-base h-7 px-1 py-0 border-0 bg-transparent text-zinc-100 placeholder:text-zinc-600 focus-visible:ring-0 min-w-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
           placeholder="0.0"
         />
-        <span className="text-xs text-zinc-500 shrink-0">mm</span>
+        <span className="text-[10px] text-zinc-500 shrink-0">mm</span>
       </div>
     </div>
   );

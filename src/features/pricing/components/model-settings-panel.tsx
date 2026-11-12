@@ -62,8 +62,10 @@ import type { ReactNode } from "react";
  *
  * - **并排断点跟旧检查工具一样(`md`)** —— 侧栏 `md:order-1`、视口
  *   `md:order-2`(手机上视口还在上面,所以 DOM 里它在前面)
- * - **两个侧栏同宽(`md:w-[360px]`)** —— 不然切一次视角视口宽度就变,
- *   相机的取景会跑偏
+ * - **两个侧栏同宽(`md:w-[400px] xl:w-[440px]`)** —— 不然切一次视角视口
+ *   宽度就变,相机的取景会跑偏
+ *   (2026-11-12:从 360px 加宽 —— 360px 时三个尺寸格子装不下
+ *   「1,234.5 mm」,数值后面的 "mm" 被卡片切掉了)
  * - **「提交打印订单」那张卡在深色应用外面** —— 它是页面里的一张浅色卡
  *   (工作室的下单按钮),不是 3D 应用的一部分
  *
@@ -932,7 +934,7 @@ export function ModelSettingsPanel({
               {tab === "check" ? (
                 <aside
                   className={cn(
-                    "order-2 md:order-1 md:w-[360px] md:shrink-0 flex flex-col border-t md:border-t-0 md:border-r border-zinc-800",
+                    "order-2 md:order-1 md:w-[400px] xl:w-[440px] md:shrink-0 flex flex-col border-t md:border-t-0 md:border-r border-zinc-800",
                     // 全屏:信息栏自己内部滚(窄屏时整行也滚)
                     fullscreen && "min-h-0 overflow-y-auto"
                   )}
@@ -978,7 +980,7 @@ export function ModelSettingsPanel({
               ) : (
                 <aside
                   className={cn(
-                    "order-2 md:order-1 md:w-[360px] md:shrink-0 flex flex-col border-t md:border-t-0 md:border-r border-zinc-800",
+                    "order-2 md:order-1 md:w-[400px] xl:w-[440px] md:shrink-0 flex flex-col border-t md:border-t-0 md:border-r border-zinc-800",
                     // 全屏:信息栏自己内部滚(窄屏时整行也滚)
                     fullscreen && "min-h-0 overflow-y-auto"
                   )}

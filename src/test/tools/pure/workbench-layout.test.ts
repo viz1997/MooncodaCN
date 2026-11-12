@@ -255,4 +255,113 @@ describe("工作台排版 —— 模型显示后不能错位", () => {
       expect(String(axis.heightFull)).not.toMatch(/Z/i);
     }
   });
+
+  // ------------------------------------------------- 三个尺寸格装得下
+
+  /**
+   * ⑫ 三个尺寸格要装得下完整数值(2026-11-12)
+   *
+   * 工作室报的是:**「tools/workbench 中三个尺寸的组件没有完全显示数值」**。
+   *
+   * **根因是算出来的,不是猜出来的** —— 1440px 视口下侧栏 360px,
+   * 三个格子各 94.33px,减去 `p-3` 的左右内边距只剩 **70.33px** 可用;
+   * 「1,234.5」在 18px 等宽字体下要 **75.61px**,加 4px 间距加 "mm" 的
+   * 14.41px ⇒ 需要 **94.02px** ⇒ "mm" 探出卡片右缘 **12.69px**,
+   * 被卡片自己的 `overflow-hidden` 切掉 —— 画面上看着像 "mn"。
+   *
+   * 三处一起改才装得下:
+   *
+   * | 什么 | 从 | 到 |
+   * |---|---|---|
+   * | 侧栏宽度 | `md:w-[360px]` | `md:w-[400px] xl:w-[440px]` |
+   * | 格子内边距 | `p-3` | `p-2` |
+   * | 数值字号 | `text-lg` | `text-base` |
+   *
+   * 改完实测:1440px(xl ⇒ 440px 侧栏)每格 121px / 可用 105px,
+   * X 值 67.2px + "mm" 12px ⇒ 余量 28.8px;1024px(md ⇒ 400px 侧栏)
+   * 余量 15.45px。**两个断点都装得下。**
+   *
+   * ⚠️ **输入框必须写 `min-w-0`** —— `<input>` 的 `min-width` 默认是 `auto`
+   * (不小于内容宽度),flex 容器再怎么挤它也不缩 ⇒ 数值一长就把 "mm" 顶出去。
+   */
+  describe("⑫ 三个尺寸格装得下完整数值", () => {
+    it("两个侧栏同宽 —— 加宽到 `md:w-[400px] xl:w-[440px]`", () => {
+      const asides = literals.filter((l) => l.includes("md:order-1"));
+      expect(asides.length).toBeGreaterThanOrEqual(2);
+      for (const aside of asides) {
+        expect(aside).toContain("md:w-[400px]");
+        expect(aside).toContain("xl:w-[440px]");
+        // 旧宽度不许还在(360px 装不下「1,234.5 mm」)
+        expect(aside).not.toContain("md:w-[360px]");
+      }
+      // 两个侧栏**必须一样宽** —— 不然切一次视角视口宽度就变,相机取景会跑偏
+      const widths = new Set(
+        asides.map((a) => a.match(/md:w-\[[^\]]+\]/)?.[0] ?? "")
+      );
+      expect(widths.size).toBe(1);
+    });
+
+    it("格子的内边距是 `p-2`(不是 `p-3`)", () => {
+      const shared = stripComments(read(SHARED));
+      for (const fn of [
+        "export function DimDisplay",
+        "export function DimEditor",
+      ]) {
+        const body = sliceComponent(shared, fn);
+        const card = body.match(/"[^"\n]*bg-zinc-900[^"\n]*"/g) ?? [];
+        expect(card.length).toBeGreaterThanOrEqual(1);
+        for (const c of card) {
+          expect(c).toContain("p-2");
+          expect(c).not.toContain("p-3");
+        }
+      }
+    });
+
+    it("数值是 `text-base`(不是 `text-lg`),「mm」是 `text-[10px]`", () => {
+      const shared = stripComments(read(SHARED));
+      for (const fn of [
+        "export function DimDisplay",
+        "export function DimEditor",
+      ]) {
+        const body = sliceComponent(shared, fn);
+        expect(body).toContain("text-base");
+        expect(body).not.toMatch(/\btext-lg\b/);
+        // 「mm」不许跟数值抢宽度 —— `shrink-0` + 小字号
+        expect(body).toContain("text-[10px]");
+        expect(body).toContain("shrink-0");
+      }
+    });
+
+    it("数值那格 `min-w-0 truncate` + `title`(离谱的大数宁可截断也不顶掉「mm」)", () => {
+      const display = sliceComponent(
+        stripComments(read(SHARED)),
+        "export function DimDisplay"
+      );
+      expect(display).toContain("min-w-0 truncate");
+      expect(display).toContain("title=");
+    });
+
+    it("输入框写 `min-w-0` —— `<input>` 的 min-width 默认是 auto", () => {
+      const editor = sliceComponent(
+        stripComments(read(SHARED)),
+        "export function DimEditor"
+      );
+      expect(editor).toContain("min-w-0");
+      expect(editor).toContain("title=");
+    });
+
+    it("数字输入框的上下箭头去掉(Chrome 的 spinner 在 121px 的格子里占 13px)", () => {
+      const editor = sliceComponent(
+        stripComments(read(SHARED)),
+        "export function DimEditor"
+      );
+      expect(editor).toContain("[appearance:textfield]");
+      expect(editor).toContain(
+        "[&::-webkit-inner-spin-button]:appearance-none"
+      );
+      expect(editor).toContain(
+        "[&::-webkit-outer-spin-button]:appearance-none"
+      );
+    });
+  });
 });
