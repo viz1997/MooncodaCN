@@ -252,9 +252,9 @@ export function ExternalApiKeysAdminView() {
     }
   };
 
-  const openPublicPage = () => {
+  const openWorkbench = () => {
     if (typeof window !== "undefined") {
-      window.open("/image-gen", "_blank");
+      window.open("/dashboard/generate", "_blank");
     }
   };
 
@@ -273,10 +273,10 @@ export function ExternalApiKeysAdminView() {
         </div>
         <div className="flex items-center gap-2">
           <Button
-            onClick={openPublicPage}
+            onClick={openWorkbench}
             icon={<ExternalLink className="h-4 w-4" />}
           >
-            打开外部生图页面
+            打开生图工作台
           </Button>
           <Button
             type="primary"
@@ -305,20 +305,22 @@ export function ExternalApiKeysAdminView() {
                 </Badge>
               </div>
               <p className="text-xs text-muted-foreground mb-2">
-                独立路由页面，无需登录平台，外部用户通过专属 API Key
-                即可使用生图服务
+                外部用户通过专属 API Key 即可使用生图服务 —— 2026-11-13
+                起**不再有公开的生图页面**
+                （工作室的原话：「不要生图在首页电商，也不想进入这些路由页面」），
+                外部用户走接口，工作室自己看效果用控制台的工作台
               </p>
               <div className="flex items-center gap-2 flex-wrap">
                 <code className="text-[11px] bg-muted px-2 py-0.5 rounded font-mono">
-                  /image-gen
+                  /api/image-gen/**
                 </code>
                 <Button
                   size="small"
                   type="text"
                   className="!h-6 !text-xs"
-                  onClick={openPublicPage}
+                  onClick={openWorkbench}
                 >
-                  访问页面 <ExternalLink className="h-3 w-3 ml-1" />
+                  打开工作台 <ExternalLink className="h-3 w-3 ml-1" />
                 </Button>
               </div>
             </div>

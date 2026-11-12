@@ -1,7 +1,5 @@
 import {
-  Award,
   BookOpen,
-  Box,
   Boxes,
   Cpu,
   FolderOpen,
@@ -9,13 +7,10 @@ import {
   Gift,
   Globe,
   Headset,
-  Image,
   Images,
-  KeyRound,
   LayoutDashboard,
   ListOrdered,
   type LucideIcon,
-  Magnet,
   Package,
   Scale,
   ScrollText,
@@ -28,8 +23,6 @@ import {
   Users,
   Wand2,
 } from "lucide-react";
-
-import { FALLBACK_SUPPORT_EMAIL } from "./site";
 
 /**
  * 导航链接类型
@@ -62,193 +55,31 @@ export interface NavGroup {
   items: NavItem[];
 }
 
-/**
- * Products 下拉菜单项类型
- */
-export interface ProductNavItem {
-  title: string;
-  href: string;
-  description: string;
-  icon: LucideIcon;
-}
-
-/**
- * Products 下拉菜单分组类型
- */
-export interface ProductNavGroup {
-  title: string;
-  items: ProductNavItem[];
-}
-
 // ============================================
-// Marketing 导航配置
+// Marketing 导航配置 —— 2026-11-13 **整个没了**
 // ============================================
-
-/**
- * Products 下拉菜单内容 —— WJP 全彩 3D 打印真实品类
- *
- * 3 列 × 2 项：周边配饰 / 桌面展示 / 收藏礼品，覆盖 src/features/products/lib/data.ts
- * 里所有 ProductCategory（badge/keychain/fridge-magnet/figure/standee/gift）。
- * 全部跳 /products 作品集页，由页内的 category chip 做进一步筛选。
- */
-export const productsNav: ProductNavGroup[] = [
-  {
-    title: "Wearables",
-    items: [
-      {
-        title: "Keychain",
-        href: "/products",
-        description: "30-80mm 全彩挂件",
-        icon: KeyRound,
-      },
-      {
-        title: "Badge",
-        href: "/products",
-        description: "30-50mm 胸针佩戴",
-        icon: Award,
-      },
-    ],
-  },
-  {
-    title: "Desk",
-    items: [
-      {
-        title: "Magnet",
-        href: "/products",
-        description: "40-60mm 磁吸贴",
-        icon: Magnet,
-      },
-      {
-        title: "Standee",
-        href: "/products",
-        description: "80-150mm 桌面立牌",
-        icon: Image,
-      },
-    ],
-  },
-  {
-    title: "Collectibles",
-    items: [
-      {
-        title: "Figure",
-        href: "/products",
-        description: "100-200mm 桌面摆件",
-        icon: Box,
-      },
-      {
-        title: "Gift Set",
-        href: "/products",
-        description: "礼盒包装 + 定制卡片",
-        icon: Package,
-      },
-    ],
-  },
-];
-
-/**
- * 主导航链接 (Header)
- *
- * 2026-11-12:去掉三项**原项目(SaaS 模板)的页面** —— 工作室的原话:
- * 「不再展示这些页面，即原项目的页面」。
- *
- *  | 原来 | 去哪了 | 为什么 |
- *  |---|---|---|
- *  | `Docs` → `/docs` | 没了 | `src/content/docs` 这个目录**压根不存在** ⇒
- *    `/zh/docs` 直接 404(一个点开就是 404 的导航位) |
- *  | `Pricing` → `/#pricing` | 没了 | 首页上**没有** `id="pricing"` 的元素 ⇒
- *    死锚点(点过去落在页顶)。模板的 `/pricing` 页 2026-11-07 起 308 跳到
- *    `/tools/workbench`,工具在「工具」那一位里 |
- *  | `Blog` → `/blog` | 没了 | 模板的博客只有两篇「你好世界」和「Mooncoda 开源了」
- *    —— 讲的是这个 Next.js SaaS 模板,跟打印业务无关。**博客这一节本身留着**
- *    (工作室随时可以写自己的文章),只是没有文章之前不占导航位 |
- *
- * ⇒ 留下的四项都是 Mooncoda 自己的:Gallery(作品集)/ Image Gen(生图)/
- * Print(商城购物袋)/ Tools(工具中心)。
- */
-export const mainNav: NavItem[] = [
-  { title: "Gallery", href: "/products" },
-  { title: "Image Gen", href: "/image-gen" },
-  // 打印服务 —— 2026-11-01 新增。
-  // 2026-11-06 改指打印单(`/print-order`),2026-11-08 又改回商城购物袋
-  // (`/cart`):工作室的说法是「不要 print-order,进入商城那个」。打印服务
-  // 现在跟目录商品装同一个购物袋,同一个结算流程,一次付款。
-  // `/print-order` 和 `/quote` 都留着重定向到 `/cart`。
-  { title: "Print", href: "/cart" },
-  // 工具中心 —— 公开工具页(克重计算器 / 模型检查),浏览器本地算,不需登录
-  // 2026-11-01：导航只留一个「工具」位,工具清单在 /tools 里列
-  { title: "Tools", href: "/tools" },
-];
-
-/**
- * Footer 导航配置
- *
- * 2026-11-12:去掉**原项目(SaaS 模板)的页面** —— 工作室的原话:
- * 「不再展示这些页面，即原项目的页面」。
- *
- *  - `product` 里的 `Pricing`(死锚点 `/#pricing`)和 `Changelog`(`/blog`,
- *    跟头部去掉的是同两页。
- *  - **`legal` 那一组整个没了** —— 三份都是模板的文档:
- *    `Terms of Service` / `Privacy Policy` / `Cookie Policy`。
- *    模板的隐私政策里写的是「生成闪卡」「Anki 包」那一套 SaaS 业务,
- *    跟打印业务八竿子打不着 —— 摆在页脚上比不摆更糟。
- *    **对应的 MDX 也删了**(`src/content/legal/{zh,en}/{terms,privacy,cookie-policy}.mdx`),
- *    所以那几个 URL 现在是 404,不是「点进去发现内容不对」。
- *    > ⚠️ 工作室的微信支付 / 支付宝**商户进件**可能要填「隐私政策 URL」。
- *    > 这两份文档得按打印业务的实际口径重写 —— 内容能从代码里查出来
- *    > (收哪些信息、存在哪、留多久),文案得工作室自己拍板。
- *    > 需要的话我写一版草稿。
- *  - `service`(打印须知 / 设计规范 / 售后 / 下单须知)是工作室自己的,留着。
- */
-export const footerNav = {
-  /** 产品 (Product) */
-  product: [
-    { title: "Tools", href: "/tools" },
-    // 打印服务 —— 2026-11-01 新增,2026-11-08 改指商城购物袋
-    // (打印单 `/print-order` 和报价台 `/quote` 都只是重定向)
-    { title: "Print", href: "/cart" },
-    {
-      title: "Contact Us",
-      href: `mailto:${process.env.NEXT_PUBLIC_SUPPORT_EMAIL || FALLBACK_SUPPORT_EMAIL}`,
-    },
-  ] as NavItem[],
-
-  /**
-   * 打印服务 (Print Service) —— 2026-11-05 新增
-   *
-   * 打印工单(`/print-order`)的须知 / 规范 / 售后。正文在 `src/content/legal/`
-   * 下的 MDX 里,标题走 titleKey 取 messages 的中文文案。
-   */
-  service: [
-    {
-      title: "Print Notice",
-      titleKey: "printNotice",
-      href: "/legal/print-notice",
-    },
-    {
-      title: "3D Model Design Specification",
-      titleKey: "designSpec",
-      href: "/legal/design-spec",
-    },
-    {
-      title: "After-Sales Policy",
-      titleKey: "afterSales",
-      href: "/legal/after-sales",
-    },
-    {
-      title: "Model Print Order Notice",
-      titleKey: "orderNotice",
-      href: "/legal/print-order-notice",
-    },
-    // 运费与交期 —— 2026-11-12 新增。
-    // 商城目录商品的运费 / 免运费门槛 + 打印工单的交期档位与加价比例,
-    // 都写在这一页(工作室 2026-11-12 报「legal/shipping 缺少路由页面」)。
-    {
-      title: "Shipping & Delivery",
-      titleKey: "shipping",
-      href: "/legal/shipping",
-    },
-  ] as NavItem[],
-};
+//
+// 工作室的原话:「全站一套头尾」+「不再展示这些页面，即原项目的页面」。
+//
+// 以前这里有四份配置,现在**一份都不留**:
+//
+//  | 删掉的 | 为什么 |
+//  |---|---|
+//  | `mainNav` | 模板那套 `Header` 的导航 —— 整站改用商城头(`WjpStoreHeader` +
+//    `STORE_NAV`),模板头删了,这份配置就没有消费者了 |
+//  | `productsNav` | 模板那套 `Header` 的 Products 下拉(3 列 × 2 项)—— 同样只被
+//    模板头用。9 个项全跳 `/products`,那个地址现在是**能下单的真目录** |
+//  | `footerNav` | 模板那套 `Footer` 的配置 —— 模板页脚删了,现在页脚是
+//    `StoreFooter`(商城那一套,链接写死在它自己的文件里) |
+//  | `marketingConfig` | 只是把 `mainNav` + `footerNav` 打包 —— 没人用 |
+//
+// **商城的导航不在这里** —— 商城头那 6 项在
+// `src/features/marketing/components/storefront/occasion-data.ts` 的
+// `STORE_NAV`(工作室自己精简过的),页脚的链接在
+// `src/features/marketing/components/storefront/store-footer.tsx`。
+//
+// `NavItem` / `NavGroup` 两个类型**留着** —— `dashboardNav` / `adminNav`
+// 还在用。
 
 // ============================================
 // Dashboard 导航配置
@@ -276,7 +107,8 @@ export const dashboardNav: NavGroup[] = [
         href: "/dashboard/generate-v2",
         icon: Sparkles,
       },
-      // 已隐藏：公开生图（与 /image-gen 公开页重复）
+      // 已隐藏：公开生图（2026-11-13 起那条公开路由整个删了 —— 工作室不要
+      // 公开的生图页面；生图能力在上面的「Generate」/「Generate V2」里）
       // { title: "Public Image Gen", href: "/image-gen", icon: Sparkles },
       // 已隐藏：照片库独立入口 —— 已合并到「我的资产」里的「我的照片」Tab
       // { title: "Photos", href: "/dashboard/photos", icon: Image },
@@ -465,14 +297,6 @@ export const adminNav: NavGroup[] = [
 // ============================================
 // 导出配置对象
 // ============================================
-
-/**
- * Marketing 页面配置
- */
-export const marketingConfig = {
-  mainNav,
-  footerNav,
-};
 
 /**
  * Dashboard 页面配置

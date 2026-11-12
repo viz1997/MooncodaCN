@@ -13,7 +13,7 @@
  * 发起方和执行方之间隔着几百像素和两段版式,没法靠 props 传。用组件内的
  * useState 的话,品类导航条改了值,网格根本不知道。
  *
- * 同一个 store 还顺带解决了跨页继承:作品集页(`/marketing/products`)的
+ * 同一个 store 还顺带解决了跨页继承:作品集页(`/products`)的
  * `FeaturedProducts` 读的是同一条 `series` —— 首页筛完品类跳过去,那边
  * 还是筛好的。
  *

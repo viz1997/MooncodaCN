@@ -43,7 +43,7 @@ import { WJP_SERIES } from "./wjp-store-data";
  *  - 主 CTA 从 `<Link href="/image-gen">` 改成按钮 → 开品类选择层(2026-10-22):
  *    `/image-gen` 是登录后的 SaaS 工作台,`proxy.ts` 会把未登录访客弹到
  *    `/sign-in?callbackUrl=/image-gen`。Hero 是访客的第一入口,不该一上来就要登录
- *    —— 匿名本来就能跑 `/api/store/*` 的定制链路。
+ *    —— 匿名本来就能跑 `/api/store/*` 的定制链路。（2026-11-13 起那条公开的生图路由也删了 —— 工作室不要公开的生图页面；生图能力还在控制台的 `/dashboard/generate`）
  *
  * ## 2026-11-02:生图要登录
  *

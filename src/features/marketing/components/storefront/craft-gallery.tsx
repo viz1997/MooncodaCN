@@ -27,7 +27,7 @@ import { WJP_COMMUNITY_POSTS } from "./wjp-store-data";
  * ## 关于 CraftStory 组件本身
  *
  * 它还留在 `craft-story.tsx` 里(带 01–03 三条工艺说明),给作品集页
- * `/marketing/products` 用 —— 那边需要完整的三条说明。首页只取它的标题和
+ * `/products` 用 —— 那边需要完整的三条说明。首页只取它的标题和
  * 一段话,所以这里不 import 整个组件,避免把三条说明也拖进来。
  */
 export function CraftGallery() {

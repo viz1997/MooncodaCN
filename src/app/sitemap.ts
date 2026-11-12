@@ -1,7 +1,6 @@
 import type { MetadataRoute } from "next";
 
 import { siteConfig } from "@/config";
-import { getAllPseoParams } from "@/features/pseo/lib/pseo-data";
 import { getAllLegalSlugs } from "@/lib/source";
 
 /** Supported locales */
@@ -26,7 +25,10 @@ export default function sitemap(): MetadataRoute.Sitemap {
   // Static pages that exist for each locale
   const staticPaths = [
     "", // homepage
-    "/pseo",
+    // 作品集(2026-11-13 归位):真目录从 `/marketing/products` 搬到 `/products`
+    // —— `/products` 这个地址原先被模板那套写死的演示数据占着(封面全是破图、
+    // 不能下单),现在它是**能下单的真目录**。作品集是主入口,该进 sitemap。
+    "/products",
     // 工具中心(2026-11-01):打印前工作台(检查 / 克重 / 摆盘)
     // 三个老地址都不进 sitemap —— 它们各自 308 跳到 `/tools/workbench`,
     // 留旧地址在 sitemap 里等于告诉搜索引擎「这个页面也是正式页面」。
@@ -37,6 +39,15 @@ export default function sitemap(): MetadataRoute.Sitemap {
     // 删掉(打印服务直接建工单,工单在 `/account/print-orders` 那个列表里),
     // 只留一个重定向;报价台(`/quote`)2026-11-06 也已整页删掉。打印服务对外的
     // 公开入口是打印前工作台(`/tools/workbench`,上面已经在列表里)。
+    //
+    // pSEO **整块不进 sitemap** —— 2026-11-13 工作室的原话:「不要博客/生图/
+    // pseo 在首页电商……也不想进入这些路由页面」。索引页(`/pseo`)和单页
+    // (`/pseo/<slug>`)**路由都删了**,内容 JSON 也清空了。
+    // ⇒ 接线(`getAllPseoParams()`)也跟着删 —— 留着的话,工作室哪天往
+    // `src/features/pseo/data/pseo-pages.json` 里填了内容,sitemap 会列出
+    // **一串 404 的 URL**。
+    // **引擎文件留着**(`src/features/pseo/`):工作室哪天想开这一块,填 JSON
+    // + 把路由接回去就行,不用重写。
   ];
 
   // Generate static routes for each locale
@@ -60,13 +71,5 @@ export default function sitemap(): MetadataRoute.Sitemap {
     })
   );
 
-  const pseoSlugs = getAllPseoParams();
-  const pseoRoutes = pseoSlugs.map(({ locale, slug }) => ({
-    url: `${baseUrl}/${locale}/pseo/${slug}`,
-    lastModified: now,
-    changeFrequency: "weekly" as const,
-    priority: 0.6,
-  }));
-
-  return [...staticRoutes, ...legalRoutes, ...pseoRoutes];
+  return [...staticRoutes, ...legalRoutes];
 }

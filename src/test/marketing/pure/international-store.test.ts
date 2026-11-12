@@ -81,7 +81,6 @@ const HEADER =
 const NAV_DATA =
   "src/features/marketing/components/storefront/occasion-data.ts";
 const ATELIER_LAYOUT = "src/app/[locale]/(marketing-atelier)/layout.tsx";
-const MARKETING_LAYOUT = "src/app/[locale]/(marketing)/layout.tsx";
 const ICON = "src/features/marketing/components/storefront/shopify-icon.tsx";
 
 describe("海外独立站入口", () => {
@@ -115,7 +114,10 @@ describe("海外独立站入口", () => {
     it("真理源在 DB,环境变量退成兜底", () => {
       // 工作室 2026-11-11 的要求:「不需要环境变量,在后台设置」⇒
       // 生效地址走 `getInternationalStoreUrl()`(DB 那一行 → 环境变量 → 空)。
-      for (const rel of [ATELIER_LAYOUT, MARKETING_LAYOUT]) {
+      //
+      // 2026-11-13:全站只剩**一个** layout 了(模板那套 `(marketing)` 组整个
+      // 删掉)⇒ 公告条和导航按钮都挂在这一个 layout 上。
+      for (const rel of [ATELIER_LAYOUT]) {
         const src = stripComments(read(rel));
         expect(src).toContain("getInternationalStoreUrl");
       }
@@ -143,11 +145,6 @@ describe("海外独立站入口", () => {
       );
       expect(atelier).toMatch(
         /<WjpStoreHeader[^>]*internationalStoreUrl=\{[^}]*internationalStore[^}]*\}/
-      );
-
-      const marketing = stripComments(read(MARKETING_LAYOUT));
-      expect(marketing).toMatch(
-        /<InternationalStoreBar[^>]*url=\{[^}]*internationalStore[^}]*\}/
       );
     });
 
@@ -187,8 +184,8 @@ describe("海外独立站入口", () => {
       expect(src).toContain('rel="noopener noreferrer"');
     });
 
-    it("挂在两个 layout 上,且在 header **上面**", () => {
-      for (const rel of [ATELIER_LAYOUT, MARKETING_LAYOUT]) {
+    it("挂在唯一的那个 layout 上,且在 header **上面**", () => {
+      for (const rel of [ATELIER_LAYOUT]) {
         // 注释里也提到过 `<WjpStoreHeader />` —— 排版要按**代码**算
         const src = stripComments(read(rel));
         expect(src).toContain("InternationalStoreBar");
@@ -204,7 +201,7 @@ describe("海外独立站入口", () => {
     });
 
     it("layout 读了 locale —— 公告条要按 locale 取文案", () => {
-      for (const rel of [ATELIER_LAYOUT, MARKETING_LAYOUT]) {
+      for (const rel of [ATELIER_LAYOUT]) {
         const src = read(rel);
         expect(src).toContain("params: Promise<{ locale: string }>");
         expect(src).toContain("await params");

@@ -658,46 +658,6 @@
       }
     }
   },
-  "Header": {
-    "dashboard": "控制台",
-    "login": "登录",
-    "getStarted": "上传定制",
-    "docs": "工艺介绍"
-  },
-  "Navigation": {
-    "products": "产品",
-    "imageGen": "生图",
-    "docs": "文档",
-    "pseo": "PSEO",
-    "pricing": "定价",
-    "tools": "工具",
-    "blog": "博客",
-    "about": "关于",
-    "productsMenu": {
-      "wearables": {
-        "title": "周边配饰",
-        "keychain": "钥匙扣",
-        "keychainDesc": "30-80mm 全彩挂件",
-        "badge": "徽章",
-        "badgeDesc": "30-50mm 胸针佩戴"
-      },
-      "desk": {
-        "title": "桌面展示",
-        "magnet": "冰箱贴",
-        "magnetDesc": "40-60mm 磁吸贴",
-        "standee": "立牌",
-        "standeeDesc": "80-150mm 桌面立牌"
-      },
-      "collectibles": {
-        "title": "收藏礼品",
-        "figure": "手办",
-        "figureDesc": "100-200mm 桌面摆件",
-        "gift": "礼品套装",
-        "giftDesc": "礼盒包装 + 定制卡片"
-      }
-    },
-    "quote": "报价"
-  },
   "Subscription": {
     "plans": {
       "free": "免费版",
@@ -1084,19 +1044,6 @@
       "CANCELLED": "已取消",
       "FAILED": "生成失败"
     }
-  },
-  "Footer": {
-    "description": "Mooncoda 梦可达 — WJP 全彩 3D 打印专家，宠物徽章、钥匙扣、冰箱贴、手办等一件定制、一件发货。",
-    "product": "作品",
-    "service": "打印服务",
-    "printNotice": "打印须知",
-    "designSpec": "3D模型设计规范",
-    "afterSales": "售后说明",
-    "orderNotice": "下单须知",
-    "shipping": "运费与交期",
-    "copyright": "© {year} {name}。保留所有权利。",
-    "twitter": "微博",
-    "github": "小红书"
   },
   "MaterialPricing": {
     "header": {

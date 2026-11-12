@@ -8,9 +8,14 @@
  * 不传 `open`：仍可作为 inline section 嵌入父级（保留向前兼容）。
  *
  * 调用方：
- *  - /image-gen（public-image-gen-view.tsx）—— demo 成功卡点「分享给客户」→ 弹窗
- *    模式，复用 submitted.token（promptOrder.token）。不再调 createPreviewShareAction
- *    写 preview_share 行（同一次下单多次点都用同一个 token）。
+ *  - 2026-11-13 之前是 /image-gen（public-image-gen-view.tsx）—— demo 成功卡点
+ *    「分享给客户」→ 弹窗模式，复用 submitted.token（promptOrder.token）。
+ *    那条 demo 流连同路由一起删掉了（工作室不要公开的生图页面），这个组件
+ *    暂时没有调用方 —— 留着是因为它是**通用**的分享弹窗（二维码 + 复制链接），
+ *    哪天要在别处复用来着，直接接上就行。
+ *
+ * 注意：分享页本身是 `/p/[token]`（免登录，R2 公开域），跟 /p/[token] 之外的
+ * 登录态页面无关。
  *
  * 设计要点：
  *  - QR code 用 qrcode 包 toDataURL 生成 240px PNG（深色 #1c1917 兼容深色背景）

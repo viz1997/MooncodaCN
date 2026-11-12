@@ -72,6 +72,9 @@ export const authRoutes = [
 /**
  * 公开路由的路径模式
  * 这些路由不需要认证
+ *
+ * 2026-11-13:删掉了 `/blog` `/docs` 两条 —— 那些路由整个删掉了(模板自己的
+ * 博客 + 文档集合),留着只是让「公开路由」清单里摆着不存在的地址。
  */
 export const publicRoutes = [
   "/",
@@ -80,8 +83,4 @@ export const publicRoutes = [
   // 工具中心(2026-11-01):克重计算器 + 模型检查,都在浏览器本地算
   "/tools",
   "/tools/:path*",
-  "/blog",
-  "/blog/:path*",
-  "/docs",
-  "/docs/:path*",
 ];

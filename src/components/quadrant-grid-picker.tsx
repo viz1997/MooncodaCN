@@ -8,15 +8,17 @@
  *
  * 起源：`src/features/gpt-image/user/components/quadrant-grid.tsx` 是 /p/[token]
  * 订单页用的 cell-picker，但 props 强耦合 token-based URL 生成（`candidateUrl(token,
- * imageIdx, 0, updatedAt)`）。/image-gen demo 流（src/features/image-gen/components/
- * public-image-gen-view.tsx）也用同一套 composite-over-hotzone 模式但 URL 已经是
- * R2 公开域，没有 token。把核心热区逻辑抽到本组件，让两个调用点共享。
+ * imageIdx, 0, updatedAt)`）。把核心热区逻辑抽到本组件，让两个调用点共享。
  *
  * 复用：
  * - /p/[token]：quadrant-grid.tsx 包成 wrapper，外部签名不变（保持向后兼容）
- * - /image-gen demo：直接调用本组件，compositeUrl = result.url
- * - /image-gen/orders 详情：disabled 模式渲染"已锁定"视觉
+ * - 后台订单详情：disabled 模式渲染"已锁定"视觉
  * - /dashboard/prompt-orders admin：仍走 CSS background-position 切 cell（更轻）
+ *
+ * 2026-11-13：/image-gen 那条 demo 流（public-image-gen-view.tsx +
+ * /image-gen/orders 的 orders-view.tsx）连同路由一起删掉了 —— 工作室的原话：
+ * 「不要生图在首页电商，也不想进入这些路由页面」。原先还列在这里的两个调用点
+ * 没有了；外部用户那条线现在只走 API（/api/image-gen/**）。
  *
  * a11y：
  * - radiogroup + radio 语义（与 quadrant-grid.tsx 保持一致）

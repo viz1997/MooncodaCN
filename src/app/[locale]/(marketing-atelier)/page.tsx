@@ -65,7 +65,8 @@ export const dynamic = "force-dynamic";
  *  - 不复用现有 marketing HeroSection / StatsSection / ... / CTASection —— atelier 视觉
  *    与原 11 段拼装不同,根路径只走 atelier 形态。
  *
- * 关联:`/marketing/products` 是独立页面,本次不动(见 wjp-storefront-atelier-port.md)。
+ * 关联:`/products` 是独立页面(作品集),2026-11-13 从 `/marketing/products`
+ * 归位过来(见 wjp-storefront-atelier-port.md)。
  */
 export async function generateMetadata({
   params,

@@ -20,14 +20,12 @@ export function generateWebSiteSchema(locale: LocaleType) {
         ? "Production-ready Next.js SaaS template with authentication, payments, credits, and i18n"
         : "生产就绪的 Next.js SaaS 模板，内置认证、支付、积分与国际化",
     inLanguage: locale === "en" ? "en-US" : "zh-CN",
-    potentialAction: {
-      "@type": "SearchAction",
-      target: {
-        "@type": "EntryPoint",
-        urlTemplate: `${getBaseUrl()}/{locale}/blog?q={search_term_string}`,
-      },
-      "query-input": "required name=search_term_string",
-    },
+    // 2026-11-13:原来的 `potentialAction` / `SearchAction` 指向
+    // `/{locale}/blog?q={search_term_string}` —— 工作室把博客整块删了(那是
+    // 模板自己的两篇文章,讲的是这个 SaaS 模板,跟打印业务无关),那条地址现在
+    // 是 404。留着它等于跟搜索引擎说「本站有个站内搜索入口」,点进去是死的。
+    // ⇒ 整段删掉。站内搜索本来也没有 —— `/api/search` 走的是 docs 集合,
+    // 而 docs 路由 2026-11-13 也删了。
   };
 }
 

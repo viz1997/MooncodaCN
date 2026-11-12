@@ -886,12 +886,15 @@ const productFormSchema = z.object({
  *
  * 路径跟 `src/app/[locale]/` 下的实际路由对应:
  *   `/[locale]`                        → (marketing-atelier)/page.tsx
- *   `/[locale]/marketing/products`     → (marketing)/marketing/products/page.tsx
+ *   `/[locale]/products`               → (marketing-atelier)/products/page.tsx
  *   `/[locale]/product/[handle]`       → (marketing-atelier)/product/[handle]/page.tsx
+ *
+ * 2026-11-13:作品集从 `/marketing/products` 归位到 `/products`(见那一节的
+ * CLAUDE.md 说明),这一行跟着改。旧地址留了 308 桩,重定向不用清缓存。
  */
 function revalidateStorefrontProductPaths(): void {
   revalidatePath("/[locale]", "page");
-  revalidatePath("/[locale]/marketing/products", "page");
+  revalidatePath("/[locale]/products", "page");
   revalidatePath("/[locale]/product/[handle]", "page");
 }
 

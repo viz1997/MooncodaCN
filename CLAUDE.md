@@ -184,10 +184,11 @@ Tests live in `src/test/` (not colocated), run sequentially to avoid DB race con
 
 All routes are under `[locale]` for i18n:
 
-- **`(marketing)/`** — Public pages (home, pricing, blog, legal). Layout: Header + Footer.
+- **`(marketing-atelier)/`** — **全站唯一的公开路由组**(2026-11-13 起)。首页 / 作品集(`/products`) / 商品详情(`/product/[handle]`) / 法律页(`/legal/**`) / 购物袋 / 结算 / 工具页(`/tools/**`) / 买家中心(`/account/**`)。Layout: 商城头(`WjpStoreHeader`)+ 商城页脚(`StoreFooter`)+ 四个 overlay + `.atelier-root` 配色 token。**模板那套 `(marketing)` 组已经整个删掉了** —— 见「全站一套头尾」那节。
 - **`(dashboard)/`** — Authenticated area (dashboard overview, credits, settings, support). Layout: Sidebar + Topbar. Requires session token in middleware.
 - **`(auth)/`** — Sign-in, sign-up, forgot/reset password. Redirects to dashboard if already logged in.
 - **`(admin)/`** — Admin panel (users, tickets, stats). Requires admin role.
+- **`(dev)/`** — 开发用页面(不对外)。
 
 ### API Routes (`src/app/api/`)
 
@@ -3734,6 +3735,100 @@ Print(`/cart`)/ Tools(`/tools`)/ `/dashboard`/ Contact Us(mailto)/ 工作室自�
 |---|---|
 | `src/test/tools/pure/workbench-layout.test.ts` | **两个侧栏同宽**(`md:w-[400px] xl:w-[440px]`,旧宽度不许还在)/ 格子内边距 `p-2` / 数值 `text-base` + 「mm」`text-[10px]` / 数值那格 `min-w-0 truncate` + `title` / 输入框 `min-w-0` / **数字输入框的 spinner 去掉** |
 | `src/test/marketing/pure/template-pages.test.ts` | 模板那三份法律 MDX **真的删了**(两个语言)/ 模板那两篇博客删了 / 法律集合里**只剩工作室自己的五篇**(两个语言一样)/ **`/legal/shipping` 两个语言都有** + frontmatter 齐 + **运费与交期的事实跟代码里的一致**(¥8 / ¥99 / 96·72·48 小时 / 10% · 37%)/ **页脚与导航里每一个 `/legal/…` 链接都对应一篇真实存在的 MDX**(死链守卫)/ 不许再指向模板那三份 / 不许指向 `/legal/cookies`(那不是合法 slug)/ 头部导航里没有 `/docs` · `/#pricing` · `/blog` / 页脚没有「条款」那一组 / 营销页 footer 是两列 / 商城页脚摆的是工作室自己的四份 / 登录页页脚 + Cookie 横幅不再链隐私政策 / **sitemap 里没有 `/blog`** / 博客这一节留着(目录 + 空状态)/ messages 里那四个键删了 + 中英文 key 一致 |
+
+### 全站一套头尾:模板那套 `(marketing)` 组整个删掉(2026-11-13)
+
+工作室连着问了两句「为什么」,又拍板了两件事:
+
+| 工作室的原话 | 真相 |
+|---|---|
+| 「**为什么还有 zh/products**」 | 那是**模板时代留下的静态作品集** —— `src/features/products/lib/data.ts` 里 **6 件写死的东西**(¥49 / ¥89 / ¥299 / ¥199 / ¥159),封面指向 `public/products/**` —— 那个目录**压根不存在** ⇒ **每张封面都是破图**;不能下单;后台改不了价。而**真目录**(`getStorefrontProducts()`,DB 驱动)躲在 `/marketing/products` 下。两个页面**标题一模一样** ⇒ 重复内容。 |
+| 「**为什么又进入非电商页面 legal/shipping**」 | 法律文档住在 `(marketing)` 组 ⇒ 套的是**模板那套 Header / Footer**;而入口在**商城页脚**(`StoreFooter`)⇒ **点一下就换了一套头尾**。同一个毛病还有:真作品集 `/marketing/products` 渲染的明明是商城组件(`StoreHero` / `SeriesShowcase` / …),却**不在 `(marketing-atelier)` 组里** ⇒ 拿不到 `.atelier-root` 的配色 / 圆角 / 字体 token ⇒ **不是一张脸**。 |
+| pSEO 怎么处置(工作室拍板) | 「**删掉落地页,留下引擎**」 |
+| 头尾怎么处置(工作室拍板) | 「**全站一套头尾**」⇒ `(marketing)` 组整个删掉,全站只留商城那一套 |
+
+**做完之后,公开页面只有 `(marketing-atelier)` 一个路由组** —— 头是
+`WjpStoreHeader`,尾是 `StoreFooter`,外加商城那四个 overlay(`CartDrawer` /
+`ProductQuickView` / `CustomizeEntry` / `CustomWorkshop`)。`/dashboard/**` /
+`/admin/**` 走各自组的 layout(那是**控制台 / 后台**,不是浏览面),
+`/p/[token]`(免登录分享页)同理。
+
+#### 删掉了什么
+
+| 删的 | 为什么 |
+|---|---|
+| `src/app/[locale]/(marketing)/` **整个组** | 模板那套头尾的唯一消费者。留着它 ⇒ 又有两套头尾 |
+| `src/features/marketing/components/header.tsx` / `footer.tsx` / `nav-menu.tsx` | 模板的头 / 尾 / 导航菜单 |
+| `src/features/products/`(`lib/data.ts` + `components/product-card.tsx`) | 6 件写死的演示数据 —— 封全是破图、不能下单。**商城那一份卡片是同名不同物**(`storefront/product-card.tsx`,链 `/product/[handle]`),别碰 |
+| `nav.ts` 里的 `mainNav` / `productsNav` / `footerNav` / `marketingConfig` | 只被模板头尾消费。`NavItem` / `NavGroup` **留着**(`dashboardNav` / `adminNav` 在用) |
+| `messages/{zh,en}.json` 的 `Header` / `Navigation` / `Footer` 三个命名空间 | 模板那三个文件的 i18n。**留着就是没人读的死文案**。⚠️ `Auth.footer.*` 是**另一套**(登录页在用),**留着** |
+| `src/app/[locale]/docs/`(layout + `[[...slug]]`) | `src/content/docs` 目录不存在 ⇒ `/zh/docs` **只能是 404**;它的 layout 还 import 着模板 Header。⚠️ `source.config.ts` 的 `docs` 集合和 `src/lib/source.ts` 的 `docsSource` **留着**(`/api/search` 在用) |
+| `src/app/[locale]/image-gen/`(公开生图页 + 订单页) | 工作室 2026-11-13:「不要博客/生图/pseo 在首页电商……**也不想进入这些路由页面**」⇒ 直接删路由(⇒ 404),不是搬家 |
+| `src/app/[locale]/(marketing-atelier)/blog/` | 同上 —— **博客路由整个删了**。`src/content/blog/` **目录留着**(集合配置指着它,工作室随时能写自己的文章),只是**没有列表页了** |
+| `src/app/[locale]/(marketing)/demo/plan-badges/` | 模板的徽章演示页 |
+| `src/features/image-gen/components/public-image-gen-view.tsx` / `orders-view.tsx` | 上面那个公开页的两个组件,**零 import** ⇒ 一起删 |
+| `src/features/blog/`(三个文件) | 模板博客的组件 |
+
+#### `/products` 归位 + 旧地址 308
+
+```
+/products                    ← 真目录(能下单、价来自 DB、商城头尾)
+/marketing/products          ← 308 → /products(permanentRedirect)
+```
+
+- **真目录搬到了 `(marketing-atelier)/products/page.tsx`** —— 保留
+  `export const dynamic = "force-dynamic"`(价必须来自 DB),canonical /
+  alternates(en+zh)/ OpenGraph url / `BreadcrumbJsonLd` **全部指向
+  `/products`**。
+- **旧地址留 308 桩** —— `permanentRedirect`(`next/navigation` 的,不是
+  `@/i18n/routing` 里那个 —— 后者是 client 入口,没有 `permanentRedirect`,
+  放进共享模块会在打包时炸)。**永久搬家要用 308**:307 会被当成临时跳转,
+  搜索引擎不转移权重。
+- **入口全部改指 `/products`**:商城页脚「全部作品」/ `product-quick-view.tsx`
+  的「查看完整详情」/ `image-gen/admin/actions.ts` 的 `revalidatePath` /
+  注释类引用(`craft-gallery.tsx` / `product-card.tsx` / `use-shop-filter.ts` /
+  `(marketing-atelier)/page.tsx` / `layout.tsx` 的文件头)。
+- **sitemap 加了 `"/products"`**(作品集是主入口)。
+
+#### pSEO:删落地页,留引擎
+
+- `src/features/pseo/data/pseo-pages.json` **清空成 `[]`** —— 文件**留着**
+  (`pseo-data.ts` 在模块顶层 import 它,删文件会编译不过)。
+- **索引页(`/pseo`)和单页(`/pseo/[slug]`)路由都删了** —— 工作室原话:
+  「不想进入这些路由页面」⇒ 404。
+- **sitemap 里没有 `"/pseo"`,连 `getAllPseoParams()` 那条接线也删了** ——
+  留着的话,工作室哪天往 JSON 里填了内容,sitemap 会列出一串 404 的 URL。
+- **引擎文件全留着**(`src/features/pseo/{lib,components}/`)+ `pseo-data.ts` ——
+  工作室哪天想开这一块,填 JSON + 把路由接回去就行,不用重写。
+- `pseo-data.ts` **容得下空数组**(所有消费者都是 `.map` / `.filter` /
+  `.find` over `pages`)⇒ JSON 清空是安全的。
+
+#### 入口补位:不许有页面变得进不去
+
+| 原来(模板头) | 现在 |
+|---|---|
+| Gallery → `/products` | 商城页脚「全部作品」→ `/products` + 首页「作品」色带 |
+| Print → `/cart` | 商城头的购物袋按钮 → 抽屉里「查看购物袋」→ `/cart`(`cart-drawer.tsx` 已有) |
+| Tools → `/tools` | `STORE_NAV` 的「工具」项(已有) |
+| Image Gen → `/image-gen` | **删了** —— 那条公开路由按工作室的要求整个没了,`/dashboard/generate` 那一支还在(控制台里) |
+
+#### 留着的东西(和理由)
+
+| 留着 | 为什么 |
+|---|---|
+| `src/features/pseo/` **引擎** | 工作室拍板「留下引擎」 |
+| `/p/[token]` | 免登录的订单 / 预览分享页,常在聊天里点开;不是浏览面,给它套商城头反而奇怪 |
+| `/dashboard/generate` / `/dashboard/generate-v2` / `/api/image-gen/**` | 生图能力本身在控制台和 API 上(小程序 / 外部 API key 都调它);删的只是**公开那一条路由** |
+| `src/features/image-gen/components/{spec-modal,order-detail-view,generate-workbench-view,effects-history-view,models-manager-view,photos-manager-view,safe-image,external-image-gen-card}.tsx` | 都还有真实消费者(后台 / 控制台) |
+| `src/features/marketing/components/` 里那 13 个模板区块(`hero-section` / `feature-grid` / …) | 早就是死代码(没有任何页面 import),但**跟这次改动无关** ⇒ 不在本次范围内,别顺手扩大 diff |
+
+#### 行为由单测守住
+
+| 测试 | 守住什么 |
+|---|---|
+| `src/test/marketing/pure/single-chrome.test.ts` | `(marketing)` 组目录**不存在** / `src/features/products/` **不存在** / 模板头尾三个文件**不存在** / `nav.ts` 里没有 `mainNav` · `productsNav` · `footerNav` · `marketingConfig` / barrel 里不再导出那三个 / messages 里 `Header` · `Navigation` · `Footer` **三个命名空间删了** + **中英文顶层键集一致** / 真作品集住在 `(marketing-atelier)/products` + canonical 是 `/products` / 旧地址是 **308 桩**(`permanentRedirect`,不许用 `redirect()`) / 商城页脚指着 `/products` / `legal/[slug]` 在 `(marketing-atelier)` 下 / **pSEO 的 JSON 是 `[]` + 路由没了 + 引擎文件都还在** / sitemap 有 `"/products"`、没有 `"/blog"` · `"/pseo"` / 博客 · 生图 · pSEO · 文档 · 模板徽章演示页的**路由都不存在** / **全站只有那一个 layout 挂商城头尾**(根 layout 不许挂) / **`src/` 下没有任何文件还 import 模板那三个组件** |
+| `src/test/marketing/pure/international-store.test.ts` | 公告条 + 导航按钮**挂在唯一的那个 layout 上**(以前是两个)、地址从 layout 当 props 传下来 |
+| `src/test/marketing/pure/template-pages.test.ts` | 模板那三份法律 MDX 删了 / 模板那三个 i18n 命名空间删了 / **博客路由没了**(目录留着)/ 每一个 `/legal/…` 链接都有真实 MDX(两个语言) |
 
 ## Coding Conventions
 

@@ -19,6 +19,25 @@ import { getStorefrontProducts } from "@/features/storefront/lib/price-source";
 export const dynamic = "force-dynamic";
 
 /**
+ * 作品集页 —— `/products`
+ *
+ * **2026-11-13 从 `/marketing/products` 搬过来**(工作室问「为什么还有
+ * zh/products」)。搬动的两个原因:
+ *
+ *  1. **URL**:模板那套静态作品集(6 件写死的演示数据、封面全是破图、不能
+ *     下单)占着 `/products`;真目录却躲在 `/marketing/products` 下。现在
+ *     `/products` 就是**能下单的真目录** —— 商城头尾那套导航里的「Gallery」
+ *     指的也是它。
+ *  2. **外壳**:这一页渲染的是商城组件(`StoreHero` / `SeriesShowcase` / …),
+ *     但它原先住在 `(marketing)` 组里 ⇒ **拿不到 `.atelier-root` 的配色 /
+ *     圆角 / 字体 token**。搬进 `(marketing-atelier)` 之后,整站只有一套
+ *     头尾、一张脸。
+ *
+ * 旧地址 `/marketing/products` 留了一个 308 桩(见同目录下的
+ * `../marketing/products/page.tsx`)—— 书签 / 外链 / 已被收录的 URL 不能断。
+ */
+
+/**
  * 生成作品集列表页 Metadata
  */
 export async function generateMetadata({
@@ -38,17 +57,17 @@ export async function generateMetadata({
     title,
     description,
     alternates: {
-      canonical: `${siteConfig.url}/${locale}/marketing/products`,
+      canonical: `${siteConfig.url}/${locale}/products`,
       languages: {
-        en: `${siteConfig.url}/en/marketing/products`,
-        zh: `${siteConfig.url}/zh/marketing/products`,
+        en: `${siteConfig.url}/en/products`,
+        zh: `${siteConfig.url}/zh/products`,
       },
     },
     openGraph: {
       title,
       description,
       type: "website",
-      url: `${siteConfig.url}/${locale}/marketing/products`,
+      url: `${siteConfig.url}/${locale}/products`,
       siteName: siteConfig.name,
     },
   };
@@ -74,7 +93,7 @@ export default async function MarketingProductsPage({
           { name: isZh ? "首页" : "Home", url: `/${locale}` },
           {
             name: isZh ? "作品集" : "Gallery",
-            url: `/${locale}/marketing/products`,
+            url: `/${locale}/products`,
           },
         ]}
       />

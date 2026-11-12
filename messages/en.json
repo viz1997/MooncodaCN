@@ -506,46 +506,6 @@
     "anonymous_migration": "Migrated {cardCount} items from anonymous session",
     "anonymous_migration_bonus": "New user bonus: Saved {cardCount} items for free"
   },
-  "Header": {
-    "dashboard": "My Orders",
-    "login": "Login",
-    "getStarted": "Upload to Customize",
-    "docs": "Process"
-  },
-  "Navigation": {
-    "products": "Products",
-    "imageGen": "Image Gen",
-    "docs": "Docs",
-    "pseo": "PSEO",
-    "pricing": "Pricing",
-    "tools": "Tools",
-    "blog": "Blog",
-    "about": "About",
-    "productsMenu": {
-      "wearables": {
-        "title": "Wearables",
-        "keychain": "Keychain",
-        "keychainDesc": "30-80mm full-color charm",
-        "badge": "Badge",
-        "badgeDesc": "30-50mm pin to wear"
-      },
-      "desk": {
-        "title": "Desk",
-        "magnet": "Fridge Magnet",
-        "magnetDesc": "40-60mm magnetic",
-        "standee": "Standee",
-        "standeeDesc": "80-150mm desk stand"
-      },
-      "collectibles": {
-        "title": "Collectibles",
-        "figure": "Figure",
-        "figureDesc": "100-200mm desk piece",
-        "gift": "Gift Set",
-        "giftDesc": "Gift box + custom card"
-      }
-    },
-    "quote": "Quote"
-  },
   "Common": {
     "getStarted": "Get Started",
     "login": "Log in",
@@ -1087,19 +1047,6 @@
       "CANCELLED": "Cancelled",
       "FAILED": "Failed"
     }
-  },
-  "Footer": {
-    "description": "Mooncoda — WJP full-color 3D printing expert. Pet badges, keychains, fridge magnets, figures — single-piece customization & shipping.",
-    "product": "Gallery",
-    "service": "Print Service",
-    "printNotice": "Print Notice",
-    "designSpec": "3D Model Design Specification",
-    "afterSales": "After-Sales Policy",
-    "orderNotice": "Model Print Order Notice",
-    "shipping": "Shipping & Delivery",
-    "copyright": "© {year} {name}. All rights reserved.",
-    "twitter": "Weibo",
-    "github": "Xiaohongshu"
   },
   "MaterialPricing": {
     "header": {

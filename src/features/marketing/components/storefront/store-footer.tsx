@@ -7,7 +7,7 @@ import { Link } from "@/i18n/routing";
  *
  * 适配差异:
  *  - 品牌名 "ATELIER" → "Mooncoda 梦可达"
- *  - 法律页链接到 (marketing)/legal 路由而不是占位 #
+ *  - 法律页链接到 /legal 路由而不是占位 #
  *
  * 锚点(2026-10-31 修正):
  *  - 原来「钥匙扣 / Q 版手办 / 冰箱贴」三项全指向 `/marketing/products#series`
@@ -23,12 +23,16 @@ import { Link } from "@/i18n/routing";
  *    都收在工具中心里)。放在 footer 而不是顶部导航 —— 顶部导航已经有一个
  *    「工具」位(wjp-store-header 的 STORE_NAV),footer 再列一份是死链接
  *    的复制品。
+ *
+ * 「全部作品」的地址(2026-11-13 改):`/marketing/products` → **`/products`**。
+ * 真作品集归位到 `/products`(那个地址原先被模板那套 6 件写死的演示数据
+ * 占着,封面全是破图、不能下单)。旧地址 `/marketing/products` 留了 308 桩。
  */
 const footerLinks = [
   {
     title: "作品集",
     links: [
-      { label: "全部作品", href: "/marketing/products" },
+      { label: "全部作品", href: "/products" },
       { label: "生日礼物", href: "/#birthday" },
       { label: "毕业季", href: "/#graduation" },
       { label: "纪念日", href: "/#anniversary" },

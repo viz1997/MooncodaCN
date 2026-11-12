@@ -6,8 +6,6 @@ export { CookieConsent } from "./cookie-consent";
 export { CTASection } from "./cta-section";
 export { FAQSection } from "./faq-section";
 export { FeatureGrid } from "./feature-grid";
-export { Footer } from "./footer";
-export { Header } from "./header";
 export { HeroSection } from "./hero-section";
 export { HowItWorks } from "./how-it-works";
 export { ImageToObjectSection } from "./image-to-object-section";

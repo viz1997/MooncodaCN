@@ -1,20 +1,23 @@
 /**
- * 根 `/` 专属 layout —— atelier 视觉 1:1 拼装 + commerce overlay 全部挂载
- * (本仓库的 mock commerce 阶段,见 architecture-sellbase-integration.md)。
+ * **全站唯一的那套头尾** —— atelier 视觉 1:1 拼装 + commerce overlay 全部挂载。
  *
- * 关键边界:
- *  - 此 layout 服务根 URL `/` + `/product/[handle]`(都隶属本 route group)
- *  - 其他 marketing 页(/blog /pricing /pseo /products /marketing/products)继续走
- *    `(marketing)/layout.tsx` + 现有 Header + Footer,**不受本 layout 影响**
- *  - 用 Next.js route group `(marketing-atelier)` 与 `(marketing)` 平行,达到隔离
- *    layout 目的
+ * 关键边界(2026-11-13 变):
+ *  - 以前还有第二个 route group `(marketing)`(模板那套 Header / Footer),
+ *    2026-11-13 **整个删掉了** —— 工作室的原话:「全站一套头尾」。
+ *    模板头尾承载的页面(作品集 / 法律文档 / 打印工单跳转 / 报价台)都搬到了
+ *    本组;博客 / 生图 / pSEO 的**路由**按工作室的要求直接删掉(⇒ 404)。
+ *  - 现在这个 layout 服务**所有公开页**:根 `/`、`/product/[handle]`、
+ *    `/products`(真作品集)、`/legal/**`、`/cart`、`/checkout`、`/tools/**`、
+ *    `/account/**`。
+ *  - `/dashboard/**` / `/admin/**` 走各自组的 layout —— 那是**控制台 / 后台**,
+ *    不是「浏览面」,不套商城头尾。`/p/[token]`(免登录分享页)同理。
  *
  * 设计语言局部注入(2026-10-21 重铺,参考 The Foggy Dog):
  *  - NextDevTpl 全站 = Mooncode Warm Craft(Spruce + Geist + 1.25rem 大圆角)
  *  - atelier = Soft Pastel Atelier(evergreen 墨绿 + dusty rose 玫瑰 + bone 暖纸底
  *    + Playfair Display / Noto Serif SC + 0.5rem 圆角 + 场合色带)
  *  - 此 layout 在 `.atelier-root` 子树内重写 CSS 变量,不影响 /dashboard、
- *    /admin、/docs、/blog、/image-gen 等其他页
+ *    /admin 等后台页
  *  - h1-h4 在 atelier 子树走 `Playfair Display → Noto Serif SC` 字体栈:
  *    拉丁字形走 Playfair,汉字逐字形回退到中文衬线(不需要按 locale 切 CSS)
  *  - 字体变量由 `app/layout.tsx` 注入:`--font-atelier-inter` /
@@ -35,9 +38,7 @@
  *    - `<CustomWorkshop />` —— 4 阶段定制工作台 Dialog(Upload/Transform/Configure/Review)
  *  - 四个 overlay 都把 portal 指回 `.atelier-root`(useAtelierContainer),否则
  *    Radix 的 portal 落在这个 token 子树之外,配色 / 圆角会退回全站默认主题
- *  - 内容:`children` —— page.tsx 拼装 4 段(StoreHero / OccasionShelf(四屏
- *    整屏色带,统一版式)/ HowItWorks / CraftGallery(工艺 + 真实订单合并))
- *    + `/product/[handle]/page.tsx` 渲染 `<ProductDetail />`
+ *  - 内容:`children` —— 各个页面自己拼装
  */
 import { InternationalStoreBar } from "@/features/marketing/components/storefront/international-store-bar";
 import { StoreFooter } from "@/features/marketing/components/storefront/store-footer";

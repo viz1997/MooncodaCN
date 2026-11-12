@@ -7,7 +7,7 @@
  * (`if (!product) return null`)。这两者之前链 `/image-gen` —— 那是登录后的
  * SaaS 工作台,`proxy.ts` 会把未登录访客弹到 `/sign-in?callbackUrl=/image-gen`,
  * 于是公开店铺的访客点「定制」直接撞登录墙,而 `/api/store/*` 定制链路
- * 被白白绕开。
+ * 被白白绕开。（2026-11-13 起那条公开的生图路由也删了 —— 工作室不要公开的生图页面；生图能力还在控制台的 `/dashboard/generate`）
  *
  * 现在:点「定制」→ 选一个品类 → 该品类的代表商品交给 `CustomWorkshop`。
  *

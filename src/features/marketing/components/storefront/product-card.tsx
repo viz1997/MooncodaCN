@@ -3,8 +3,10 @@
 /**
  * atelier 商品卡 —— 首页 / 场合色带 / 相关推荐共用。
  *
- * 2026-10-21 换数据源:从 `@/features/products/lib/data` 的 `Product[]`
- * 换成 `mock-catalog` 的 `StorefrontProduct[]`。
+ * 数据源:现役目录 `mock-catalog` 的 `StorefrontProduct[]`
+ * (DB 驱动的真目录走 `getStorefrontProducts()`,见 price-source.ts)。
+ * 2026-10-21 之前读的是 `@/features/products/lib/data` —— 那是模板那套
+ * 6 件写死的演示数据,2026-11-13 连同整个 `src/features/products/` 删掉了。
  *
  * 换的原因(不是重构洁癖,是有 bug):
  *  1. 旧版卡片链到 `/marketing/products/${slug}` —— **该路由不存在**,
@@ -12,9 +14,6 @@
  *  2. `/product/${handle}`(atelier 详情页)读的是 `StorefrontProduct`,
  *     旧卡片的 slug 与 handle 没有映射表,两边对不上。
  *  换成同一份数据后链接是 `/product/${handle}`,真实存在,且与详情页一致。
- *
- * ⚠️ 同名不同物:`@/features/products/components/product-card.tsx` 是
- * /products 画廊用的另一个卡片,本次没动。改的时候核对 import 路径。
  *
  * 版式(The Foggy Dog 手法):
  *  - 图在 --muted 的方格里,hover 轻微放大
