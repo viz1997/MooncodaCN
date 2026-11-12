@@ -5,6 +5,11 @@
  *
  * 渲染逻辑与源实现保持一致；移植时仅做类型严格化（noUncheckedIndexedAccess /
  * exactOptionalPropertyTypes）与 Biome 格式化调整，未改变任何渲染行为。
+ *
+ * **2026-11-12:改成深色** —— 这张缩略图只摆在工作台的**深色头部**里
+ * （`pricing-calculator.tsx` 的 `modelHeader`）。原来它是浅灰背景（`0xfafaf9`）
+ * + 浅色边框，在一片深色里就是一个刺眼的白方块 —— 整页「一张脸」的
+ * 原则在这里破了。现在跟侧栏的卡片一样是 `zinc-900`。
  */
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
@@ -36,7 +41,8 @@ export function ObjThumbnail({ objText, size = 80, className }: Props) {
 
     // Scene
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xfafaf9); // 浅灰背景
+    // 深色背景（zinc-900）—— 摆在深色头部里，不能是个白方块
+    scene.background = new THREE.Color(0x18181b);
 
     // Camera — 正前方视角（从 -Y 方向看向模型，Z 朝上）
     const camera = new THREE.PerspectiveCamera(30, w / h, 0.1, 10000);
@@ -169,7 +175,10 @@ export function ObjThumbnail({ objText, size = 80, className }: Props) {
         Math.max(
           scaledW / (2 * Math.tan((camera.fov * Math.PI) / 180 / 2)),
           scaledH / (2 * Math.tan((camera.fov * Math.PI) / 180 / 2))
-        ) * 2.5;
+        ) *
+        // 2.5 是源实现的留白 —— 模型只占画面的四成,缩略图里几乎看不清。
+        // 1.8 让它填满大部分画面(留一点边,免得贴边被切)。
+        1.8;
       camera.position.set(0, -camDist, scaledH * 0.45); // 正前方，略偏上看向模型中心
       camera.lookAt(0, 0, scaledH * 0.45);
 
@@ -190,7 +199,7 @@ export function ObjThumbnail({ objText, size = 80, className }: Props) {
   return (
     <div
       ref={containerRef}
-      className={`rounded-md border border-stone-200 overflow-hidden shrink-0 bg-stone-50 ${className ?? ""}`}
+      className={`rounded-md border border-zinc-800 overflow-hidden shrink-0 bg-zinc-900 ${className ?? ""}`}
       style={{ width: size, height: size }}
     />
   );

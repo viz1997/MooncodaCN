@@ -1782,6 +1782,11 @@ export function PricingCalculator({
         所以:标签一行、数一行(固定高度 + 底对齐)、注解一行(固定高度),
         三格结构完全一样 → 数字必然对齐。注解行留空也是占位,
         高度不变,三个数字不会因为谁多一行注解而错位。
+
+        **三个数还得是同一个字号**(2026-11-12)—— 底对齐只对齐了**盒子**的
+        底,不对齐**基线**:字号大一号,基线就低几像素(30px 的数比 24px 的
+        低下 6px)。以前耗材克重是 `text-3xl`、另外两个是 `text-2xl`,
+        三格结构一样也照样看着没对齐 —— 现在三个都是 `text-2xl`。
       */}
       <div className="rounded-lg border border-zinc-800 bg-zinc-900 overflow-hidden">
         <div className="grid grid-cols-3 divide-x divide-zinc-800">
@@ -1791,13 +1796,17 @@ export function PricingCalculator({
               <span className="truncate">{t("stats.materialWeight")}</span>
             </div>
             <div className="mt-1 flex h-9 items-end">
-              <span className="font-mono text-3xl font-semibold leading-none tracking-tight text-amber-400">
+              <span className="font-mono text-2xl font-semibold leading-none tracking-tight text-amber-400">
                 {materialWeightG} g
               </span>
             </div>
-            {/* 体积 × 材料密度 —— 把这个数是怎么来的摆出来 */}
+            {/* 体积 × 材料密度 —— 把这个数是怎么来的摆出来。
+
+                **紧凑写法** —— 这一格只有 88px 宽(360px 的侧栏 ÷ 3 − 内边距),
+                写成「8.00 cm³ × 1.20」会被 `truncate` 截成「8.00 cm³ × 1…」
+                (数字被切掉一半,用户读到的是半个密度)。去掉两处空格就放得下了。 */}
             <div className="mt-1 h-4 truncate font-mono text-[10px] text-zinc-500">
-              {fmt(calc.volumeCM3, 2)} cm³ × {fmt(materialDensity, 2)}
+              {fmt(calc.volumeCM3, 2)}cm³×{fmt(materialDensity, 2)}
             </div>
           </div>
 

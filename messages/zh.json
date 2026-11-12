@@ -1233,9 +1233,9 @@
       "exitFullscreenTitle": "退出全屏"
     },
     "axis": {
-      "length": "长 X",
-      "width": "宽 Y",
-      "height": "高 Z",
+      "length": "长",
+      "width": "宽",
+      "height": "高",
       "lengthFull": "长度 (mm)",
       "widthFull": "宽度 (mm)",
       "heightFull": "高度 (mm)"

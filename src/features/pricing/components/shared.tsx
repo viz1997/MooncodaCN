@@ -277,6 +277,17 @@ export function DimEditor({
  *
  * `tone="dark"` —— 放在**深色的视口条**上时用(工作台的「模型角度」条跟
  * 3D 视口是同一个深色区块)。默认 `light` 给浅色面板用。
+ *
+ * ## 为什么输入框是**定宽**的(2026-11-12)
+ *
+ * 以前输入框没写宽度 ⇒ shadcn 的 `w-full` 生效 ⇒ 它把整条剩下的空间
+ * 全部吃掉:1600px 的时候每个框 250px 宽(一个 0~360° 的数字孤零零地
+ * 待在一条 250px 的长框里,「°」被甩到最右边),820px 的时候被压成
+ * **14px**(根本没法用)。
+ *
+ * 现在:外层 `shrink-0`(不再 `flex-1` 抢空间),输入框 `w-14`(56px)——
+ * 「°」紧跟在数字后面,整组宽度是确定的,窄屏时由父级 `flex-wrap`
+ * 换行而不是压扁。
  */
 export function AngleInput({
   label,
@@ -293,7 +304,7 @@ export function AngleInput({
 }) {
   const dark = tone === "dark";
   return (
-    <div className="flex items-center gap-1.5 flex-1">
+    <div className="flex items-center gap-1.5 shrink-0">
       <span
         className="size-2.5 rounded-sm shrink-0"
         style={{ backgroundColor: color }}
@@ -312,8 +323,8 @@ export function AngleInput({
         onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
         className={
           dark
-            ? "font-mono text-xs h-6 px-1.5 py-0 bg-zinc-900 border-zinc-700 text-zinc-100 placeholder:text-zinc-600 focus-visible:ring-violet-500/40 focus-visible:border-violet-400"
-            : "font-mono text-xs h-6 px-1.5 py-0 border-stone-200 focus-visible:ring-violet-200 focus-visible:border-violet-400"
+            ? "w-14 font-mono text-xs h-6 px-1.5 py-0 bg-zinc-900 border-zinc-700 text-zinc-100 placeholder:text-zinc-600 focus-visible:ring-violet-500/40 focus-visible:border-violet-400"
+            : "w-14 font-mono text-xs h-6 px-1.5 py-0 border-stone-200 focus-visible:ring-violet-200 focus-visible:border-violet-400"
         }
         placeholder="0"
       />

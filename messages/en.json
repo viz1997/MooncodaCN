@@ -1236,9 +1236,9 @@
       "exitFullscreenTitle": "Exit fullscreen"
     },
     "axis": {
-      "length": "L X",
-      "width": "W Y",
-      "height": "H Z",
+      "length": "Length",
+      "width": "Width",
+      "height": "Height",
       "lengthFull": "Length (mm)",
       "widthFull": "Width (mm)",
       "heightFull": "Height (mm)"

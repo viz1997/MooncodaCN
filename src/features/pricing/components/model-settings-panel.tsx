@@ -534,17 +534,39 @@ export function ModelSettingsPanel({
         className={cn(
           "rounded-xl border border-zinc-800 bg-zinc-950 text-zinc-100 shadow-sm overflow-hidden",
           // 全屏 —— **状态驱动**,不用 `[:fullscreen]:` 变体(见文件头)
-          fullscreen &&
-            "h-screen w-screen rounded-none border-0 flex flex-col overflow-hidden"
+          fullscreen
+            ? "h-screen w-screen rounded-none border-0 flex flex-col overflow-hidden"
+            : // 整块工作台占满「视口 − 页面固定部分」的高度(2026-11-12)
+              //
+              // **给高度的是「整块」,不是「视口那一行」** —— 头部(文件身份 +
+              // 徽标 + 问题条)的高度是**变的**:同一个模型,徽标换行 / 问题条
+              // 出现,头部就多几十像素。写死「那一行」的高度(以前的
+              // `md:h-[560px]`),头部一变,整块就撑出视口,页面多滚一段,
+              // 视口那一块被挤扁 —— 头部一行、视口一行、侧栏一行,谁跟谁
+              // 对不齐。
+              //
+              // 现在:整块占满「视口 − 页面固定部分(站点头 + 页面内边距 +
+              // 一行说明 ≈ 180px)」,头部占多少由它自己定,下面那行
+              // (`flex-1 min-h-0`)把剩下的全吃掉 ⇒ **三行永远一样高**。
+              //
+              // 下限 600px:窗口太矮时整块保持 600px,页面自己滚(总比把
+              // 3D 视口裁掉一半强)。
+              //
+              // **只在「视口那一行」真的在的时候才给高度** —— 解析中 / 解析
+              // 失败的时候整块还是内容高度,不然一个 800px 高的空盒子摆着
+              // 「解析中」三个字,底下全是空的。
+              showViewer
+              ? "md:flex md:flex-col md:h-[clamp(600px,calc(100dvh_-_180px),1200px)]"
+              : ""
         )}
       >
         {/* ---------- 卡片头部（文件身份 + 操作）—— 由父组件渲染 ---------- */}
         {header !== undefined ? (
-          <div className="px-4 py-3 border-b border-zinc-800 bg-zinc-900/60">
+          <div className="shrink-0 px-4 py-3 border-b border-zinc-800 bg-zinc-900/60">
             {header}
           </div>
         ) : (
-          <div className="flex items-start justify-between gap-3 px-4 py-3 border-b border-zinc-800 bg-zinc-900/60">
+          <div className="shrink-0 flex items-start justify-between gap-3 px-4 py-3 border-b border-zinc-800 bg-zinc-900/60">
             <div className="min-w-0">
               <h3 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
                 <Boxes className="size-4 text-amber-400 shrink-0" />
@@ -616,7 +638,7 @@ export function ModelSettingsPanel({
             {/* ---------- 视角切换（检查 / 克重）----------
               两个视角看的是**同一个**模型 —— 模型只载入一次,切换不重新解析。
               下面那一个 3D 视口也是**共用的**:切视角只换喂进去的数据。 */}
-            <div className="flex items-center gap-1 border-b border-zinc-800 bg-zinc-900/60 px-3 py-2">
+            <div className="shrink-0 flex items-center gap-1 border-b border-zinc-800 bg-zinc-900/60 px-3 py-2">
               {WORKSPACE_TABS.map((item) => (
                 <button
                   key={item.id}
@@ -646,9 +668,10 @@ export function ModelSettingsPanel({
             <div
               className={cn(
                 "flex flex-col md:flex-row",
-                // 全屏:整块工作台占满屏幕 —— 这一行吃掉剩下的高度,
-                // 视口跟信息栏各占一半(信息栏自己内部滚)
-                fullscreen ? "flex-1 min-h-0 overflow-y-auto" : "md:h-[560px]"
+                // 这一行吃掉整块工作台剩下的高度(`flex-1 min-h-0`)——
+                // 视口跟信息栏**一样高**,谁也不多谁也不少。
+                // 全屏:整块工作台占满屏幕,这一行同样吃剩下的。
+                fullscreen ? "flex-1 min-h-0 overflow-y-auto" : "flex-1 min-h-0"
               )}
             >
               {/* ---------- 右：共用的展示区域 ----------
@@ -659,8 +682,7 @@ export function ModelSettingsPanel({
                 3D 应用本身,跟以前检查工具的深色视口区是同一块地。 */}
               <div
                 className={cn(
-                  "order-1 md:order-2 flex flex-col md:flex-1 min-w-0",
-                  fullscreen && "min-h-0"
+                  "order-1 md:order-2 flex flex-col md:flex-1 min-w-0 min-h-0"
                 )}
               >
                 <div className="flex items-center justify-between bg-zinc-950 px-3 py-2 border-b border-zinc-800">
@@ -713,14 +735,17 @@ export function ModelSettingsPanel({
                   右键平移。 */}
                 {loadStatus === "ready" && (
                   <div className="px-3 py-2 border-b border-zinc-800 bg-zinc-900">
-                    <div className="flex items-center gap-3">
+                    {/* `flex-wrap` —— 窄的时候整组换行,而不是把三个输入框
+                        压成一条缝(以前在 820px 上每个输入框只剩 14px 宽,
+                        「°」跟数字完全脱节)。 */}
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                       <span
                         className="text-[10px] font-medium text-violet-300 shrink-0"
                         title={t("angle.gizmoHint")}
                       >
                         {t("angle.modelAngle")}
                       </span>
-                      <div className="flex items-center gap-2 flex-1">
+                      <div className="flex items-center gap-2 shrink-0">
                         <AngleInput
                           label="X"
                           value={manualRotX}
@@ -748,14 +773,15 @@ export function ModelSettingsPanel({
                           type="button"
                           onClick={onResetAngle}
                           title={t("angle.resetAngle")}
-                          className="text-[10px] text-violet-300 hover:text-violet-200 flex items-center gap-1 px-2 py-0.5 rounded border border-violet-400/40 bg-white/10 hover:bg-white/20"
+                          className="text-[10px] text-violet-300 hover:text-violet-200 flex items-center gap-1 px-2 py-0.5 rounded border border-violet-400/40 bg-white/10 hover:bg-white/20 shrink-0"
                         >
                           <RotateCcw className="size-3" />
                           {t("angle.resetAngle")}
                         </button>
                       )}
-                      {/* 怎么转模型 —— 拖画面里的彩色圆环(旋转控制器) */}
-                      <span className="hidden sm:inline text-[10px] text-zinc-500 shrink-0">
+                      {/* 怎么转模型 —— 拖画面里的彩色圆环(旋转控制器)。
+                          `xl` 起才摆 —— 窄的时候它会把别的挤下去。 */}
+                      <span className="hidden xl:inline text-[10px] text-zinc-500 ml-auto shrink-0">
                         {t("angle.gizmoHint")}
                       </span>
                     </div>
@@ -957,8 +983,23 @@ export function ModelSettingsPanel({
                     fullscreen && "min-h-0 overflow-y-auto"
                   )}
                 >
-                  {/* 内容区自己滚 —— 底部固定条不跟着滚 */}
-                  <div className="flex-1 min-h-0 overflow-y-auto p-3 flex flex-col gap-3">
+                  {/* ---------- 内容区自己滚 —— 底部固定条不跟着滚 ----------
+
+                      **这里必须是块级布局,不能是 flex 列** —— 这是 2026-11-12
+                      修的那个「排版错位」的根因:
+
+                      内容区有**确定的高度**(整行 `md:h-[…]`,aside 是
+                      `flex flex-col`,内容区 `flex-1`)。在**有确定高度的**
+                      flex 列里,子元素默认 `flex-shrink: 1` ⇒ **子元素被压扁**,
+                      而不是容器滚动。压扁的那张「尺寸调整」卡自己还带
+                      `overflow-hidden` ⇒ 里面的 X/Y/Z 尺寸格**被裁掉一半**
+                      (实测 209px 的内容被压到 96px,裁掉 115px),「改为自选
+                      尺寸」那行跟缩放摘要**整个看不见**。
+
+                      「检查」那一栏的内容区本来就是块级(没这个问题),两边
+                      现在口径一致。**别再改回 `flex flex-col`** —— 要留间距
+                      用 `space-y-3`。 */}
+                  <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
                     <h2 className="flex items-center gap-2 text-sm font-bold tracking-tight text-zinc-100">
                       <Scale className="size-4 text-amber-400" />
                       {t("tabs.weight")}

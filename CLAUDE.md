@@ -1397,6 +1397,56 @@ shared/components/model-viewport/
 | `src/test/pricing/pure/support-cache-key.test.ts` | 同一组参数 ⇒ 同一个键 / 改尺寸 ⇒ 换键 / 转姿态 ⇒ 换键 / **0.0001° 抖动算同一个键、0.01° 算另一个** / 姿态和尺寸都参与 / 键里存的是取整后的值 / 缺省缩放当 1 |
 | `src/test/pricing/pure/obj-text.test.ts` | BOM 嗅探 / NUL 密度嗅探(**LE ⇒ 奇数位、BE ⇒ 偶数位**)/ UTF-16LE·BE 解码 / UTF-8 BOM 摘掉 / 空文件的两种说法 |
 | `src/test/tools/pure/workbench-merge.test.ts` | 一个视口 / 侧栏在左 / **主出口在左栏底部固定条**(`primaryAction`)/ **浮层药丸只管「看图」** |
+| `src/test/tools/pure/workbench-layout.test.ts` | **排版不错位**(2026-11-12,见下一节) |
+
+### 工作台排版:模型一显示,侧栏就被压扁(2026-11-12)
+
+工作室报的是:**「tools/workbench 的 ui 排版不行,导致模型展示后一些 ui 错位」**。
+
+**根因不是「模型挡住了什么」,是 flex 收缩**:
+
+```
+整行(有确定高度)
+  └─ aside(flex flex-col)
+       └─ 内容区(flex-1 min-h-0 overflow-y-auto flex flex-col)   ← 有确定高度
+            ├─ 「尺寸调整」卡(overflow-hidden)
+            └─ ……
+```
+
+- 内容区是一个**有确定高度的 flex 列** ⇒ 子元素默认 `flex-shrink: 1`
+  ⇒ **子元素被压扁,而不是容器滚动**。
+- **容器自己滚(`overflow-y-auto`)救不了** —— 滚动是「内容超出时」的兜底;
+  子元素先被压到容器高度以内就**根本不超**,压根不会滚。
+- 压扁的那张「尺寸调整」卡自己还带 `overflow-hidden` ⇒ 里面的 X/Y/Z 尺寸格
+  **被裁掉一半**(实测 209px 的内容被压到 96px,裁掉 115px)——
+  「改为自选尺寸」那行跟缩放摘要**整个看不见**。
+- **「检查」那一栏没这个问题**(它的内容区本来就是块级)⇒ 两个视角看起来
+  像两个软件。
+
+**修法**(都在 `model-settings-panel.tsx` / `shared.tsx` / `pricing-calculator.tsx`):
+
+- **内容区改成块级** —— `flex-1 min-h-0 overflow-y-auto p-3 space-y-3`,
+  **别再改回 `flex flex-col`**(要留间距用 `space-y-3`)。两个视角口径一致。
+- **整块工作台自己占高度** —— `md:h-[clamp(600px,calc(100dvh_-_180px),1200px)]`
+  给**整块**,不给「视口那一行」。头部(文件身份 + 徽标 + 问题条)高度是
+  **变的** ⇒ 写死「那一行」的高度,头部一变就撑出视口,三行对不齐。
+  下面那行用 `flex-1 min-h-0` 把剩下的全吃掉。
+- **头部 / 视角条 `shrink-0`**;**视口列的 `min-h-0` 不再只在全屏时才有**。
+- **角度输入框定宽**(`w-14` = 56px,外层 `shrink-0` 不再 `flex-1`)——
+  以前不写宽度 ⇒ shadcn 的 `w-full` 生效 ⇒ 1600px 上每个框 250px 宽
+  (「°」被甩到最右边),820px 上被压成 **14px**(没法用)。角度条改 `flex-wrap`,
+  窄屏换行而不是压扁。
+- **三个克重数同一个字号**(`text-2xl`)—— 底对齐只对齐**盒子**的底,不对齐
+  **基线**:字号大一号,基线就低几像素(30px 的数比 24px 的低 6px)。
+- **缩略图改深色** —— 原来 WebGL 背景是浅灰 `0xfafaf9`,在深色页面里是个
+  刺眼的白方块 ⇒ `0x18181b`(zinc-900)。
+- **耗材那一行的小字不截断** —— `8.00 cm³ × 1.20` 在 88px 的格子里被
+  `truncate` 截成「8.00 cm³ × 1…」⇒ 去掉 `×` 两边的空格。
+- **轴标签不重复那个字母** —— 「X 长 X」⇒ `MaterialPricing.axis.length`
+  改成「长」/「Length」。
+
+**行为由单测守住** —— `src/test/tools/pure/workbench-layout.test.ts`
+(11 条,结构扫描;改回 `flex flex-col` 会当场失败,已用变异测试验过)。
 
 ### 磁吸孔切割工具 `/tools/magnet`(2026-11-10,**2026-11-11 加了三条 + 两条引擎 + 四条**)
 
