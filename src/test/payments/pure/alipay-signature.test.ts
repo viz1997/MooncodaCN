@@ -56,6 +56,8 @@ const config: AlipayConfig = {
   notifyUrl: "https://example.com/api/webhooks/alipay",
   returnUrl: null,
   siteUrl: "https://example.com",
+  // 这个夹具走的是**正式**网关 —— 沙箱标志是给界面挂「沙箱」徽章用的
+  sandbox: false,
 };
 
 const request: PaymentRequest = {

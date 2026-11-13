@@ -958,7 +958,8 @@
       "printPricing": "打印定价",
       "files": "文件管理",
       "coupons": "优惠码",
-      "siteSettings": "站点设置"
+      "siteSettings": "站点设置",
+      "paymentSettings": "支付设置"
     }
   },
   "AdminOrders": {
@@ -2159,6 +2160,8 @@
   "Payment": {
     "title": "支付方式",
     "unavailable": "暂未开放",
+    "sandboxBadge": "沙箱",
+    "sandboxNotice": "沙箱模式 —— 这一笔不会真的扣款,钱不会进工作室的账户。",
     "noneAvailable": "暂时没有可用的支付方式,请联系工作室",
     "channels": {
       "wechat": {
@@ -2364,6 +2367,110 @@
       "INVALID_RULE": "规则不自洽 —— 满减要有面额、百分比要有折扣率、失效时间不能早于生效时间",
       "MIGRATION_MISSING": "优惠码的表还不存在 —— 先跑 pnpm migrate:apply-coupon",
       "SAVE_FAILED": "保存失败 —— 看服务端日志"
+    }
+  },
+  "AdminPaymentSettings": {
+    "title": "支付设置",
+    "subtitle": "微信支付 / 支付宝的沙箱开关、端点、凭据都在这一页配 —— 改完不用重新部署。正式模式的凭据仍然走环境变量,一个字都没动。",
+    "loading": "正在读支付设置…",
+    "channels": {
+      "wechat": "微信支付",
+      "alipay": "支付宝"
+    },
+    "banner": {
+      "missingTable": "支付设置的表还不存在",
+      "missingTableDetail": "先跑 pnpm migrate:apply-payment-setting 建表,再回来看。这一页的每个写操作都会撞同一个错。",
+      "sandboxTitle": "现在跑在沙箱模式",
+      "sandboxDetail": "沙箱里收不到真钱 —— 客户付了钱,钱进的是沙箱账户。验通了之后记得把开关关掉(下面「沙箱开关」拨成关)。",
+      "invalidTitle": "沙箱开关存的值认不出来",
+      "invalidDetail": "只认 true / false。认不出来的通道会被当成「没配好」,选不了 —— 把开关拨对再保存就行。"
+    },
+    "status": {
+      "title": "当前生效状态",
+      "modeSandbox": "沙箱模式",
+      "modeProduction": "正式模式",
+      "modeInvalid": "开关的值认不出来",
+      "configured": "配好了",
+      "notConfigured": "还没配好",
+      "endpoint": "确切端点",
+      "endpointFailed": "端点解析失败",
+      "source": "凭据从哪儿来",
+      "sourceDb": "后台配置(这一页)",
+      "sourceEnv": "环境变量",
+      "missing": "当前模式还缺",
+      "missingVerify": "还缺验签材料(不影响下单,但收不到通知)",
+      "allPresent": "都齐了",
+      "otherMode": "另一个模式",
+      "sameCredential": "这几项跟正式模式的值一模一样 —— 大概率贴错了"
+    },
+    "form": {
+      "title": "沙箱凭据",
+      "help": "两个通道分开配。密钥输入框留空 = 保持原值(不是清空)—— 要清空用那一栏的「删掉这一行」。",
+      "wechatTitle": "微信支付",
+      "wechatHelp": "沙箱商户号 / AppID / APIv3 密钥 / 商户证书序列号 / 商户私钥,加上验签用的微信支付公钥(或平台证书目录)。",
+      "alipayTitle": "支付宝",
+      "alipayHelp": "沙箱 APPID / 应用私钥 / 支付宝公钥,加上沙箱网关地址(留空 = 用新沙箱)。",
+      "switchLabel": "跑在沙箱模式",
+      "switchExtra": "拨到关 = 这个通道走正式模式(环境变量那套凭据)。拨到开 = 走沙箱。",
+      "optional": "可选",
+      "envVarHint": "正式模式对应的环境变量",
+      "secretHint": "已配的密钥不显示原文 —— 留空 = 保持原值",
+      "placeholder": "留空 = 用默认值",
+      "notSet": "还没配",
+      "saveNote": "两个通道的开关 + 凭据一起保存(一个事务)。"
+    },
+    "actions": {
+      "save": "保存",
+      "deleteRow": "删掉这一行",
+      "test": "跑一笔 ¥0.01 测试单",
+      "confirmProduction": "我确认要真扣 1 分钱",
+      "cancel": "算了"
+    },
+    "test": {
+      "title": "连通性自检",
+      "help": "走生产的同一条代码路径(结算页调的那个函数),验的是「凭据对不对 / 端点对不对 / 签名对不对」。这一笔只在平台上建单,本地不落订单。",
+      "confirmTitle": "这个通道跑在正式模式",
+      "confirmDetail": "正式模式下这一笔会真的扣 1 分钱。确认要跑就再点一次。",
+      "qrLabel": "微信返回的 code_url",
+      "qrHint": "用微信沙箱客户端扫(正式 App 扫不动)。",
+      "redirectLabel": "支付宝的完整跳转地址",
+      "openLabel": "在浏览器里打开"
+    },
+    "messages": {
+      "loadFailed": "读支付设置失败 —— 看服务端日志",
+      "saveSuccess": "已保存,立刻生效",
+      "deleteSuccess": "已删掉这一行",
+      "testSuccess": "测试单建成了 —— 看下面那个码 / 地址"
+    },
+    "errors": {
+      "INVALID_INPUT": "参数不合法",
+      "MIGRATION_MISSING": "支付设置的表还不存在 —— 先跑 pnpm migrate:apply-payment-setting",
+      "LOAD_FAILED": "读支付设置失败 —— 看服务端日志",
+      "SAVE_FAILED": "保存失败 —— 看服务端日志",
+      "DELETE_FAILED": "删掉这一行失败 —— 看服务端日志",
+      "TEST_CHANNEL_UNSUPPORTED": "这个通道没有实现",
+      "TEST_NOT_CONFIGURED": "这个通道还没配好 —— 先把凭据填齐(上面「当前生效状态」列了缺哪几个)",
+      "TEST_MODE_INVALID": "沙箱开关存的值认不出来 —— 只认 true / false",
+      "TEST_NEEDS_PRODUCTION_CONFIRM": "这个通道跑在正式模式 —— 这一笔会真的扣 1 分钱,再点一次确认",
+      "TEST_PROVIDER_FAILED": "通道调用失败 —— 看下面的详细信息"
+    },
+    "fields": {
+      "wechat_sandbox_api_base": "沙箱 API 根地址",
+      "wechat_sandbox_native_path": "沙箱 Native 下单路径",
+      "wechat_sandbox_mch_id": "沙箱商户号",
+      "wechat_sandbox_app_id": "沙箱 AppID",
+      "wechat_sandbox_api_v3_key": "沙箱 APIv3 密钥(32 字节)",
+      "wechat_sandbox_serial_no": "沙箱商户证书序列号",
+      "wechat_sandbox_private_key": "沙箱商户私钥(PEM)",
+      "wechat_sandbox_public_key": "沙箱微信支付公钥(PEM)",
+      "wechat_sandbox_public_key_id": "沙箱微信支付公钥 ID",
+      "wechat_sandbox_platform_cert_dir": "沙箱平台证书目录",
+      "wechat_sandbox_notify_url": "沙箱通知地址",
+      "alipay_sandbox_gateway": "沙箱网关地址",
+      "alipay_sandbox_app_id": "沙箱 APPID",
+      "alipay_sandbox_app_private_key": "沙箱应用私钥(PEM)",
+      "alipay_sandbox_public_key": "沙箱支付宝公钥(PEM)",
+      "alipay_sandbox_notify_url": "沙箱通知地址"
     }
   },
   "AdminSiteSettings": {

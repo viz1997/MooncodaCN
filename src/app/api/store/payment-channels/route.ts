@@ -40,7 +40,7 @@ async function handle(request: NextRequest) {
   }
 
   return NextResponse.json(
-    { channels: listPaymentChannels() },
+    { channels: await listPaymentChannels() },
     { headers: getRateLimitHeaders(rl) }
   );
 }

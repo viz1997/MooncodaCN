@@ -176,8 +176,12 @@ export interface PaymentProvider {
    *
    * 没配好的通道不能出现在「选择支付方式」里 —— 让用户点一个注定失败的
    * 按钮,比不给他这个选项更糟。
+   *
+   * **为什么是 `Promise`** —— 沙箱模式的凭据在数据库里(后台
+   * `/admin/payment-settings` 配的)⇒ 读配置天然是异步的。见
+   * `providers/<通道>/config.ts`。
    */
-  isConfigured(): boolean;
+  isConfigured(): Promise<boolean>;
   /**
    * 建一次支付会话
    *
@@ -236,4 +240,13 @@ export interface PaymentChannelMeta {
 export interface PaymentChannelInfo extends PaymentChannelMeta {
   /** 配好了没 —— 没配好的在界面上是灰的、选不了 */
   available: boolean;
+  /**
+   * 现在跑在**沙箱**还是**正式**
+   *
+   * 沙箱模式下界面上要挂一枚醒目的「沙箱」徽章 —— 真收钱的那条路上,
+   * **必须一眼看得出来**(上线忘了关沙箱开关 = 用户付的钱进沙箱)。
+   *
+   * 非沙箱通道(Shopify / 旧路)恒为 `false`。
+   */
+  sandbox: boolean;
 }

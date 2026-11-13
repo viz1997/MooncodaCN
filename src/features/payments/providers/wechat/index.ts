@@ -35,7 +35,7 @@ import {
   type PaymentSession,
 } from "@/features/payments/lib/types";
 
-import { getWechatPayConfig, isWechatPayConfigured } from "./env";
+import { getWechatPayConfig, isWechatPayConfigured } from "./config";
 import { buildDescription, createNativeOrderWithConfig } from "./native";
 
 /**
@@ -78,8 +78,8 @@ export const wechatPayProvider: PaymentProvider = {
   isConfigured: isWechatPayConfigured,
 
   async createSession(request: PaymentRequest): Promise<PaymentSession> {
-    // 没配好 → PaymentNotConfiguredError(重试没用,得先配环境变量)
-    const config = getWechatPayConfig();
+    // 没配好 → PaymentNotConfiguredError(重试没用,得先配环境变量 / 后台沙箱凭据)
+    const config = await getWechatPayConfig();
 
     try {
       const { codeUrl } = await createNativeOrderWithConfig(config, {
@@ -111,10 +111,13 @@ export const wechatPayProvider: PaymentProvider = {
 
 export default wechatPayProvider;
 
-export type { WechatPayConfig } from "./env";
 export {
   getWechatPayConfig,
+  getWechatPayConfigs,
   isWechatPayConfigured,
+} from "./config";
+export type { WechatPayConfig } from "./env";
+export {
   resolveVerifyPublicKey,
   WECHAT_PAY_API_BASE,
   WECHAT_PAY_NOTIFY_PATH,

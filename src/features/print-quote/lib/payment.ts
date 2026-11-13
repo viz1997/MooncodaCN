@@ -131,7 +131,7 @@ export async function createPrintOrderPayment(
   const resolved =
     channel && isPaymentChannelEnabled(channel)
       ? channel
-      : (listAvailablePaymentChannels()[0]?.channel ?? null);
+      : ((await listAvailablePaymentChannels())[0]?.channel ?? null);
 
   if (!resolved) {
     console.error(
@@ -154,7 +154,7 @@ async function createNewChannelPrintOrderPayment(
   channel: OnlinePaymentChannel
 ): Promise<PrintOrderPaymentSession | null> {
   const provider = getPaymentProvider(channel);
-  if (!provider || !provider.isConfigured()) {
+  if (!provider || !(await provider.isConfigured())) {
     console.error(
       `[print-quote] ${order.orderNo} 收款通道 ${channel} 没配置好 —— 走线下收款`
     );
@@ -405,7 +405,7 @@ export async function ensurePrintOrderPaymentLink(
   // `payment_channel` 是 null 的单 = 建单时压根没定通道(当时没有可用的线上
   // 通道)。这种单按**新路**处理 —— 走第一个「开放了而且配好了」的通道。
   if (order.paymentChannel === null) {
-    const fallback = listAvailablePaymentChannels()[0];
+    const fallback = (await listAvailablePaymentChannels())[0];
     if (!fallback) {
       return { ok: false, code: "PAYMENT_NOT_CONFIGURED" };
     }
@@ -469,7 +469,7 @@ async function ensureNewChannelPrintOrderPaymentLink(
   channel: OnlinePaymentChannel
 ): Promise<PaymentLinkResult> {
   const provider = getPaymentProvider(channel);
-  if (!provider || !provider.isConfigured()) {
+  if (!provider || !(await provider.isConfigured())) {
     return { ok: false, code: "PAYMENT_NOT_CONFIGURED" };
   }
 

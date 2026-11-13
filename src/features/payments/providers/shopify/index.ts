@@ -45,7 +45,9 @@ import { isShopifyConfigured } from "./env";
 export const shopifyPaymentProvider: PaymentProvider = {
   channel: "shopify",
 
-  isConfigured: isShopifyConfigured,
+  // Shopify 那条路没有沙箱 —— 凭据只从环境变量读,所以判断还是同步的。
+  // 契约已经改成异步(`isConfigured(): Promise<boolean>`)⇒ 这里包一层。
+  isConfigured: async () => isShopifyConfigured(),
 
   async createSession(request: PaymentRequest): Promise<PaymentSession> {
     try {

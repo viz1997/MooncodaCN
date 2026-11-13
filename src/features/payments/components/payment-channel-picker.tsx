@@ -27,10 +27,25 @@
  * 而不是把 `null` 发给服务端让服务端替用户挑。
  *
  * **绝不能把没配好的通道发出去** —— 服务端会 503。
+ *
+ * ## 沙箱徽章(2026-11-13)
+ *
+ * 沙箱模式下付的钱**不会真的扣**,订单也不会真的发货 —— 但**界面上必须一眼
+ * 看得出来**。反了就是:工作室在沙箱里测着测着忘了关开关,真客户付的钱进了
+ * 沙箱(钱收不到),而客户这边看着一切正常。
+ *
+ * 两处提示:
+ *
+ * - **每个沙箱通道一枚琥珀色徽章**(在按钮上,跟着通道走)
+ * - **列表上方一条提示条**(只要有**任何一个**通道在沙箱就摆)
+ *
+ * 提示条的颜色跟「暂未开放」那个灰的明显区分 —— 那个是「还没准备好」,
+ * 这个是「**在收真钱的那条路上**,现在跑的是假的」。
  */
 
 "use client";
 
+import { AlertTriangle } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 
@@ -40,6 +55,12 @@ export interface PaymentChannelOption {
   label: string;
   description: string;
   available: boolean;
+  /**
+   * 现在跑在**沙箱**还是**正式**
+   *
+   * 缺省当 `false` —— 服务端还没带这个字段的旧版本响应也能正常画。
+   */
+  sandbox?: boolean;
 }
 
 export function PaymentChannelPicker({
@@ -88,13 +109,16 @@ export function PaymentChannelPicker({
         const list: unknown = body?.channels;
         // **全部**都留着 —— 没配好的(`available: false`)也要显示出来,
         // 只是灰着、选不了。工作室要让人看见支持哪几种付款方式。
-        const all = (Array.isArray(list) ? list : []).filter(
-          (c): c is PaymentChannelOption =>
-            typeof c === "object" &&
-            c !== null &&
-            typeof (c as PaymentChannelOption).channel === "string" &&
-            typeof (c as PaymentChannelOption).available === "boolean"
-        );
+        const all = (Array.isArray(list) ? list : [])
+          .filter(
+            (c): c is PaymentChannelOption =>
+              typeof c === "object" &&
+              c !== null &&
+              typeof (c as PaymentChannelOption).channel === "string" &&
+              typeof (c as PaymentChannelOption).available === "boolean"
+          )
+          // `sandbox` 是后加的字段 —— 缺的老响应按「正式」处理
+          .map((c) => ({ ...c, sandbox: c.sandbox === true }));
 
         setChannels(all);
 
@@ -124,12 +148,24 @@ export function PaymentChannelPicker({
 
   // 一个都配不好 —— 明说,别让用户对着一个全灰的列表猜
   const noneAvailable = channels.every((channel) => !channel.available);
+  // **只要有一个**通道在沙箱就摆提示条 —— 两个通道是分开拨的,
+  // 工作室可能微信在沙箱、支付宝在正式(或者反过来)
+  const anySandbox = channels.some((channel) => channel.sandbox);
 
   return (
     <fieldset className="mt-6">
       <legend className="eyebrow text-muted-foreground mb-3">
         {tRoot("title")}
       </legend>
+      {anySandbox && (
+        <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-900 dark:text-amber-200">
+          <AlertTriangle
+            className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400"
+            aria-hidden="true"
+          />
+          <span>{tRoot("sandboxNotice")}</span>
+        </div>
+      )}
       <ul className="space-y-2">
         {channels.map((channel) => {
           const selected = channel.channel === value;
@@ -164,8 +200,14 @@ export function PaymentChannelPicker({
                   className="mt-1 accent-[var(--primary)]"
                 />
                 <span className="flex-1 min-w-0">
-                  <span className="flex items-center gap-2">
+                  <span className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-medium">{label}</span>
+                    {/* 沙箱徽章摆在「暂未开放」**前面** —— 沙箱是更该先看到的 */}
+                    {channel.sandbox && (
+                      <span className="rounded-sm border border-amber-500/50 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                        {tRoot("sandboxBadge")}
+                      </span>
+                    )}
                     {!usable && (
                       <span className="rounded-sm border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground">
                         {tRoot("unavailable")}

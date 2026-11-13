@@ -3527,3 +3527,51 @@ export const siteSetting = pgTable("site_setting", {
 
 export type SiteSettingRow = typeof siteSetting.$inferSelect;
 export type NewSiteSettingRow = typeof siteSetting.$inferInsert;
+
+/* -------------------------------------------------------------------------- */
+/*  支付设置                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 支付设置 —— **键值对**(2026-11-13)
+ *
+ * 工作室 2026-11-13 的要求:**「支付宝、微信支付先用沙盒测试验证」** + 补一句
+ * **「可以后台配置」**。
+ *
+ * ## 这张表装什么
+ *
+ * **沙箱**那一套东西:两个通道的开关、端点、凭据。
+ *
+ * | 键 | 装什么 |
+ * |---|---|
+ * | `wechat_sandbox_enabled` / `alipay_sandbox_enabled` | 模式开关(`true` = 沙箱) |
+ * | `wechat_sandbox_api_base` / `wechat_sandbox_native_path` | 微信沙箱端点 |
+ * | `alipay_sandbox_gateway` | 支付宝沙箱网关(新旧两个沙箱 APPID 不通用) |
+ * | `*_sandbox_mch_id` / `*_sandbox_app_id` / `*_sandbox_api_v3_key` … | 沙箱凭据 |
+ * | `*_sandbox_private_key` / `*_sandbox_public_key` | 沙箱私钥 / 公钥(PEM) |
+ *
+ * 键名表在 `features/payments/lib/sandbox.ts` 的 `PAYMENT_SETTING_KEYS`。
+ *
+ * ## 跟 `site_setting` 一样是**键值对**,但**独立一张表**
+ *
+ * 支付设置跟站点设置是两码事 —— 后台也是两个页面。而且这一张表里会存
+ * **私钥**,不该跟站点设置混在一张表里。
+ *
+ * ## 正式凭据**不在**这张表里
+ *
+ * 正式凭据继续走**环境变量**(`WECHAT_PAY_*` / `ALIPAY_*`),一个字都不改。
+ * 两套命名空间完全不相干 —— 半配置不会变成「一半沙箱一半正式」的混合签名。
+ *
+ * ⚠️ **迁移脚本不写任何一行** —— 跑完迁移线上行为**一个字都不变**(默认
+ * 走正式通道)。工作室在 `/admin/payment-settings` 里自己填、自己拨开关。
+ */
+export const paymentSetting = pgTable("payment_setting", {
+  /** 键 —— 见 `features/payments/lib/sandbox.ts` 的 PAYMENT_SETTING_KEYS */
+  key: text("key").primaryKey(),
+  /** 值 —— 字符串(开关、端点、凭据都存字符串) */
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export type PaymentSettingRow = typeof paymentSetting.$inferSelect;
+export type NewPaymentSettingRow = typeof paymentSetting.$inferInsert;

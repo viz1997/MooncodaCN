@@ -126,7 +126,7 @@ export async function ensureStorefrontOrderPaymentLink(
   // 没有可用的线上通道)。这种单按**新路**处理 —— 走第一个「开放了而且配好了」
   // 的通道,别掉回旧路(旧路已经不再接新单了)。
   if (order.paymentChannel === null) {
-    const fallback = listAvailablePaymentChannels()[0];
+    const fallback = (await listAvailablePaymentChannels())[0];
     if (!fallback) {
       return { ok: false, code: "PAYMENT_NOT_CONFIGURED" };
     }
@@ -263,7 +263,7 @@ async function ensureNewChannelPaymentLink(
   }
 
   const provider = getPaymentProvider(channel);
-  if (!provider || !provider.isConfigured()) {
+  if (!provider || !(await provider.isConfigured())) {
     return { ok: false, code: "PAYMENT_NOT_CONFIGURED" };
   }
 

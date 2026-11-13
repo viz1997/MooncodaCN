@@ -961,7 +961,8 @@
       "printPricing": "Print Pricing",
       "files": "Files",
       "coupons": "Coupons",
-      "siteSettings": "Site Settings"
+      "siteSettings": "Site Settings",
+      "paymentSettings": "Payment Settings"
     }
   },
   "AdminOrders": {
@@ -2162,6 +2163,8 @@
   "Payment": {
     "title": "Payment method",
     "unavailable": "Not available yet",
+    "sandboxBadge": "Sandbox",
+    "sandboxNotice": "Sandbox mode — this payment will not actually charge you; no money reaches the studio's account.",
     "noneAvailable": "No payment method is available right now — please contact us",
     "channels": {
       "wechat": {
@@ -2367,6 +2370,110 @@
       "INVALID_RULE": "The rule does not add up — a fixed amount needs an amount, a percentage needs a rate, and it cannot end before it starts",
       "MIGRATION_MISSING": "The coupon tables do not exist yet — run pnpm migrate:apply-coupon",
       "SAVE_FAILED": "Save failed — check the server log"
+    }
+  },
+  "AdminPaymentSettings": {
+    "title": "Payment Settings",
+    "subtitle": "Sandbox switches, endpoints and credentials for WeChat Pay and Alipay are configured here — no redeploy needed. Production credentials still come from environment variables, untouched.",
+    "loading": "Loading payment settings…",
+    "channels": {
+      "wechat": "WeChat Pay",
+      "alipay": "Alipay"
+    },
+    "banner": {
+      "missingTable": "The payment settings table does not exist yet",
+      "missingTableDetail": "Run pnpm migrate:apply-payment-setting to create it, then come back. Every write on this page hits the same error until then.",
+      "sandboxTitle": "Running in sandbox mode",
+      "sandboxDetail": "A sandbox never takes real money — a customer can pay and the money lands in the sandbox account. Remember to turn the switch off once you are done testing.",
+      "invalidTitle": "The sandbox switch holds a value we cannot read",
+      "invalidDetail": "Only true / false are recognised. A channel with an unreadable value counts as \"not configured\" and cannot be selected — set the switch and save."
+    },
+    "status": {
+      "title": "Currently in effect",
+      "modeSandbox": "Sandbox mode",
+      "modeProduction": "Production mode",
+      "modeInvalid": "Unreadable switch value",
+      "configured": "Configured",
+      "notConfigured": "Not configured yet",
+      "endpoint": "Exact endpoint",
+      "endpointFailed": "Endpoint could not be resolved",
+      "source": "Where the credentials come from",
+      "sourceDb": "Configured here (this page)",
+      "sourceEnv": "Environment variable",
+      "missing": "Missing in the current mode",
+      "missingVerify": "Verification material is missing (ordering works, but notifications cannot be verified)",
+      "allPresent": "Everything is there",
+      "otherMode": "The other mode",
+      "sameCredential": "These hold exactly the same values as production — most likely pasted in by mistake"
+    },
+    "form": {
+      "title": "Sandbox credentials",
+      "help": "The two channels are configured separately. Leaving a secret input empty keeps the stored value (it does not clear it) — use \"Delete this row\" on that field to clear one.",
+      "wechatTitle": "WeChat Pay",
+      "wechatHelp": "Sandbox merchant id, AppID, APIv3 key, merchant certificate serial number and merchant private key, plus the WeChat Pay public key (or the platform certificate directory) used to verify notifications.",
+      "alipayTitle": "Alipay",
+      "alipayHelp": "Sandbox APPID, application private key and Alipay public key, plus the sandbox gateway (empty = the current default sandbox).",
+      "switchLabel": "Run in sandbox mode",
+      "switchExtra": "Off = this channel uses production mode (the environment variable credentials). On = it uses the sandbox.",
+      "optional": "optional",
+      "envVarHint": "The matching production environment variable",
+      "secretHint": "Stored secrets are never shown — leaving the field empty keeps the current value",
+      "placeholder": "Empty = use the default",
+      "notSet": "Not set yet",
+      "saveNote": "Both channels' switches and credentials are saved together (one transaction)."
+    },
+    "actions": {
+      "save": "Save",
+      "deleteRow": "Delete this row",
+      "test": "Run a ¥0.01 test order",
+      "confirmProduction": "Yes, take the 1 cent",
+      "cancel": "Cancel"
+    },
+    "test": {
+      "title": "Connectivity check",
+      "help": "It goes through the exact production code path (the one checkout calls), so it verifies the credentials, the endpoint and the signature. It only creates an order on the platform — nothing is stored locally.",
+      "confirmTitle": "This channel runs in production mode",
+      "confirmDetail": "In production mode this order really takes 1 cent. Click again to confirm.",
+      "qrLabel": "The code_url returned by WeChat",
+      "qrHint": "Scan it with the WeChat sandbox app (the production app cannot).",
+      "redirectLabel": "The full Alipay redirect address",
+      "openLabel": "Open in the browser"
+    },
+    "messages": {
+      "loadFailed": "Could not read the payment settings — check the server log",
+      "saveSuccess": "Saved, effective immediately",
+      "deleteSuccess": "Row deleted",
+      "testSuccess": "Test order created — see the code / address below"
+    },
+    "errors": {
+      "INVALID_INPUT": "Invalid input",
+      "MIGRATION_MISSING": "The payment settings table does not exist yet — run pnpm migrate:apply-payment-setting",
+      "LOAD_FAILED": "Could not read the payment settings — check the server log",
+      "SAVE_FAILED": "Save failed — check the server log",
+      "DELETE_FAILED": "Could not delete that row — check the server log",
+      "TEST_CHANNEL_UNSUPPORTED": "This channel has no implementation",
+      "TEST_NOT_CONFIGURED": "This channel is not configured yet — fill in the credentials (\"Currently in effect\" above lists what is missing)",
+      "TEST_MODE_INVALID": "The sandbox switch holds a value we cannot read — only true / false are recognised",
+      "TEST_NEEDS_PRODUCTION_CONFIRM": "This channel runs in production mode — this order really takes 1 cent, click again to confirm",
+      "TEST_PROVIDER_FAILED": "The channel call failed — see the details below"
+    },
+    "fields": {
+      "wechat_sandbox_api_base": "Sandbox API base",
+      "wechat_sandbox_native_path": "Sandbox Native order path",
+      "wechat_sandbox_mch_id": "Sandbox merchant id",
+      "wechat_sandbox_app_id": "Sandbox AppID",
+      "wechat_sandbox_api_v3_key": "Sandbox APIv3 key (32 bytes)",
+      "wechat_sandbox_serial_no": "Sandbox merchant certificate serial number",
+      "wechat_sandbox_private_key": "Sandbox merchant private key (PEM)",
+      "wechat_sandbox_public_key": "Sandbox WeChat Pay public key (PEM)",
+      "wechat_sandbox_public_key_id": "Sandbox WeChat Pay public key id",
+      "wechat_sandbox_platform_cert_dir": "Sandbox platform certificate directory",
+      "wechat_sandbox_notify_url": "Sandbox notification URL",
+      "alipay_sandbox_gateway": "Sandbox gateway",
+      "alipay_sandbox_app_id": "Sandbox APPID",
+      "alipay_sandbox_app_private_key": "Sandbox application private key (PEM)",
+      "alipay_sandbox_public_key": "Sandbox Alipay public key (PEM)",
+      "alipay_sandbox_notify_url": "Sandbox notification URL"
     }
   },
   "AdminSiteSettings": {

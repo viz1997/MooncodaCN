@@ -41,7 +41,8 @@
 
 import { PaymentProviderError } from "@/features/payments/lib/types";
 
-import { type AlipayConfig, getAlipayConfig } from "./env";
+import { getAlipayConfig } from "./config";
+import type { AlipayConfig } from "./env";
 import { formatAlipayTimestamp } from "./page-pay";
 import { buildSignContent, signContent, verifySign } from "./sign";
 
@@ -136,7 +137,7 @@ export async function queryTradeByOrderNo(
   outTradeNo: string,
   config?: AlipayConfig
 ): Promise<AlipayTradeQueryResult> {
-  const effectiveConfig = config ?? getAlipayConfig();
+  const effectiveConfig = config ?? (await getAlipayConfig());
 
   const params: Record<string, string> = {
     app_id: effectiveConfig.appId,

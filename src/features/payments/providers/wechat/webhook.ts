@@ -49,7 +49,8 @@
 
 import { settleByOrderNo } from "@/features/payments/lib/settle";
 
-import { getWechatPayConfig, resolveVerifyPublicKey } from "./env";
+import { getWechatPayConfigs } from "./config";
+import { resolveVerifyPublicKey, type WechatPayConfig } from "./env";
 import {
   decryptResource,
   isTimestampWithinTolerance,
@@ -169,6 +170,14 @@ export function decryptTransaction(
  *
  * 抛错 = 「这次处理挂了」(比如 DB 写失败)—— 调用方应该回 5xx 让微信重投。
  * 不抛错但 `verified: false` = 「签名不对 / 解不开」—— 调用方回 401。
+ *
+ * ## 为什么**两个模式**的凭据都试一遍
+ *
+ * 拨沙箱开关的瞬间可能有**在途付款**:切到沙箱时,一笔**正式**订单的通知到了
+ * ⇒ 用沙箱公钥验不过 ⇒ **真钱收了但订单不标已付**(钱收了、货没开工)。
+ *
+ * ⇒ 先用当前模式的凭据验,验不过再试另一个模式的。**另一套验不过就照旧
+ * 拒绝** —— 只是多试一次,**不放松任何校验**。
  */
 export async function handleWechatNotify(params: {
   rawBody: string;
@@ -176,7 +185,8 @@ export async function handleWechatNotify(params: {
   /** 当前时间(秒)—— 传进来是为了可测 */
   nowSeconds: number;
 }): Promise<WechatNotifyOutcome> {
-  const config = getWechatPayConfig();
+  // 当前模式那一份排在前面;另一档没配好就自动跳过。
+  const configs = await getWechatPayConfigs();
   const headers = readNotifyHeaders(params.headers);
 
   const { timestamp, nonce, signature, serial } = headers;
@@ -205,39 +215,9 @@ export async function handleWechatNotify(params: {
     };
   }
 
-  // ---- 3. 找验签用的公钥 ----
-  const publicKeyPem = resolveVerifyPublicKey(config, serial);
-  if (!publicKeyPem) {
-    return {
-      verified: false,
-      orderNo: null,
-      transactionId: null,
-      tradeState: null,
-      settled: false,
-      reason: "找不到验签用的公钥(证书目录和公钥模式都没命中)",
-    };
-  }
-
-  // ---- 4. 验签 ----
-  const verified = verifyNotifySignature({
-    timestamp,
-    nonce,
-    rawBody: params.rawBody,
-    signature,
-    publicKeyPem,
-  });
-  if (!verified) {
-    return {
-      verified: false,
-      orderNo: null,
-      transactionId: null,
-      tradeState: null,
-      settled: false,
-      reason: "验签失败",
-    };
-  }
-
-  // ---- 5. 解析 + 解密 ----
+  // ---- 3. 解析回调体 ----
+  //
+  // 解析**不涉及信任** —— 真正拿来落库的字段要到验签过了才动。
   let payload: WechatNotifyPayload;
   try {
     payload = parseNotifyPayload(params.rawBody);
@@ -264,10 +244,52 @@ export async function handleWechatNotify(params: {
     };
   }
 
-  let transaction: WechatTransaction;
-  try {
-    transaction = decryptTransaction(resource, config.apiV3Key);
-  } catch {
+  // ---- 4. 验签:找出「哪几份配置的公钥能验过这张通知」 ----
+  //
+  // 两个模式都试 —— 当前模式那一份排在前面。
+  const verifying: WechatPayConfig[] = [];
+  for (const config of configs) {
+    const publicKeyPem = resolveVerifyPublicKey(config, serial);
+    if (!publicKeyPem) continue;
+    const verified = verifyNotifySignature({
+      timestamp,
+      nonce,
+      rawBody: params.rawBody,
+      signature,
+      publicKeyPem,
+    });
+    if (verified) verifying.push(config);
+  }
+
+  if (verifying.length === 0) {
+    return {
+      verified: false,
+      orderNo: null,
+      transactionId: null,
+      tradeState: null,
+      settled: false,
+      reason:
+        configs.length === 0 ? "两个模式都没配好,没有验签用的公钥" : "验签失败",
+    };
+  }
+
+  // ---- 5. 解密:用「验过了的那几份配置」的 APIv3 密钥 ----
+  //
+  // APIv3 密钥跟公钥是**配套**的(同一套商户凭据)⇒ 哪把公钥验过了,就用
+  // 那份配置的密钥解。解不开就换下一把。
+  let transaction: WechatTransaction | null = null;
+  let usedConfig: WechatPayConfig | null = null;
+  for (const config of verifying) {
+    try {
+      transaction = decryptTransaction(resource, config.apiV3Key);
+      usedConfig = config;
+      break;
+    } catch {
+      // 换下一把密钥再试
+    }
+  }
+
+  if (!transaction || !usedConfig) {
     return {
       verified: false,
       orderNo: null,
@@ -283,7 +305,10 @@ export async function handleWechatNotify(params: {
   const tradeState = (transaction.trade_state ?? "").trim();
 
   // ---- 6. 商户号 / appid 对不上 → 不是我们这一笔 ----
-  if (transaction.mchid && transaction.mchid !== config.mchId) {
+  //
+  // 跟**解密用的那份配置**比 —— 不是跟「当前模式」比:在途付款那一笔可能是
+  // 另一个模式的凭据签发的。
+  if (transaction.mchid && transaction.mchid !== usedConfig.mchId) {
     return {
       verified: true,
       orderNo: orderNo || null,
@@ -293,7 +318,7 @@ export async function handleWechatNotify(params: {
       reason: "mchid 与当前配置不一致,忽略",
     };
   }
-  if (transaction.appid && transaction.appid !== config.appId) {
+  if (transaction.appid && transaction.appid !== usedConfig.appId) {
     return {
       verified: true,
       orderNo: orderNo || null,

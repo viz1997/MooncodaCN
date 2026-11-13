@@ -57,6 +57,7 @@ import { shopifyPaymentProvider } from "@/features/payments/providers/shopify";
 import { wechatPayProvider } from "@/features/payments/providers/wechat";
 
 import { ALL_CHANNELS, isPaymentChannelEnabled } from "./channels";
+import { getPaymentChannelRuntime } from "./sandbox-store";
 import type {
   OnlinePaymentChannel,
   PaymentChannelInfo,
@@ -97,8 +98,36 @@ export function getPaymentProvider(
 }
 
 /** 通道的静态信息在 `channels.ts` —— 这里只补上「配好了没」 */
-function isChannelConfigured(channel: OnlinePaymentChannel): boolean {
-  return PROVIDERS[channel]?.isConfigured() ?? false;
+async function isChannelConfigured(
+  channel: OnlinePaymentChannel
+): Promise<boolean> {
+  const provider = PROVIDERS[channel];
+  if (!provider) return false;
+  try {
+    return await provider.isConfigured();
+  } catch {
+    // 「配好了没」本身不该抛 —— provider 那一层已经把异常吞成 false 了。
+    // 这里再兜一层:万一哪个 provider 忘了兜住,也不能让整个清单接口 500。
+    return false;
+  }
+}
+
+/**
+ * 这个通道现在跑在**沙箱**还是**正式**
+ *
+ * 只有微信 / 支付宝有沙箱(Shopify / 旧路没有)⇒ 别的通道恒为 `false`。
+ *
+ * **认不出来一律当「正式」** —— 模式不明的时候通道本身是禁用的
+ * (`modeInvalid`),`sandbox` 这个标志压根不会被界面用上;而「认不出来却
+ * 摆一个沙箱徽章」会误导人。
+ */
+async function isChannelInSandbox(
+  channel: OnlinePaymentChannel
+): Promise<boolean> {
+  if (channel !== "wechat" && channel !== "alipay") return false;
+  const runtime = await getPaymentChannelRuntime(channel);
+  if (runtime.modeInvalid) return false;
+  return runtime.mode === "sandbox";
 }
 
 /**
@@ -148,26 +177,66 @@ function warnUnconfiguredChannels(channels: PaymentChannelInfo[]): void {
 }
 
 /**
+ * 跑在**沙箱**模式的通道 → 记一条横幅
+ *
+ * ## 为什么要有这条
+ *
+ * 沙箱开关在后台 `/admin/payment-settings` 上,不在环境变量里 ⇒ **部署的
+ * 那一刻看不出来**。上线忘了关沙箱开关 = **真客户的钱付到沙箱里**。
+ *
+ * 这条横幅让服务端**说话** —— 一个进程只打一次,别把日志刷爆。
+ * 确切端点由 provider 自己打(`providers/<通道>/config.ts`),两边合起来能直接
+ * 看出「现在打到哪儿去了」。
+ */
+function warnSandboxChannels(channels: PaymentChannelInfo[]): void {
+  for (const channel of channels) {
+    if (!channel.sandbox) continue;
+    const key = `sandbox:${channel.channel}`;
+    if (warnedChannels.has(key)) continue;
+    warnedChannels.add(key);
+
+    console.warn(
+      `[payments] ⚠ 通道 ${channel.channel} 现在跑在**沙箱**模式 —— ` +
+        `沙箱单不会真的扣钱,但**真单也会进沙箱**(钱收不到)。` +
+        `上线前请到后台「支付设置」把沙箱开关关掉。`
+    );
+  }
+}
+
+/**
  * 列出**开放了**的通道,给界面选
  *
  * `available` 为 false 的通道**也返回** —— 前端把它显示成灰的、标「暂未
  * 开放」,而不是藏起来:工作室要让人看见支持哪几种付款方式,但没配好的
  * 那几个不能点(点了只会 503)。
+ *
+ * **为什么是 `Promise`** —— 沙箱模式的凭据在数据库里(后台
+ * `/admin/payment-settings` 配的)⇒ 「配好了没」和「跑在沙箱还是正式」
+ * 都得读库 ⇒ 天然是异步的。
  */
-export function listPaymentChannels(): PaymentChannelInfo[] {
-  const channels = ALL_CHANNELS.filter((channel) =>
+export async function listPaymentChannels(): Promise<PaymentChannelInfo[]> {
+  const enabled = ALL_CHANNELS.filter((channel) =>
     isPaymentChannelEnabled(channel.channel)
-  ).map((channel) => ({
-    ...channel,
-    available: isChannelConfigured(channel.channel),
-  }));
+  );
+
+  const channels = await Promise.all(
+    enabled.map(async (channel) => ({
+      ...channel,
+      available: await isChannelConfigured(channel.channel),
+      sandbox: await isChannelInSandbox(channel.channel),
+    }))
+  );
 
   warnUnconfiguredChannels(channels);
+  warnSandboxChannels(channels);
 
   return channels;
 }
 
 /** 配好了、能用的通道 */
-export function listAvailablePaymentChannels(): PaymentChannelInfo[] {
-  return listPaymentChannels().filter((channel) => channel.available);
+export async function listAvailablePaymentChannels(): Promise<
+  PaymentChannelInfo[]
+> {
+  const channels = await listPaymentChannels();
+  return channels.filter((channel) => channel.available);
 }

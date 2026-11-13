@@ -27,7 +27,7 @@ import {
   type PaymentSession,
 } from "@/features/payments/lib/types";
 
-import { getAlipayConfig, isAlipayConfigured } from "./env";
+import { getAlipayConfig, isAlipayConfigured } from "./config";
 import { buildPagePayRedirectUrl } from "./page-pay";
 
 /**
@@ -42,8 +42,8 @@ export const alipayPayProvider: PaymentProvider = {
   isConfigured: isAlipayConfigured,
 
   async createSession(request: PaymentRequest): Promise<PaymentSession> {
-    // 没配好 → PaymentNotConfiguredError(重试没用,得先配环境变量)
-    const config = getAlipayConfig();
+    // 没配好 → PaymentNotConfiguredError(重试没用,得先配环境变量 / 后台沙箱凭据)
+    const config = await getAlipayConfig();
 
     try {
       const redirectUrl = buildPagePayRedirectUrl(config, request);
@@ -66,8 +66,12 @@ export const alipayPayProvider: PaymentProvider = {
 
 export default alipayPayProvider;
 
+export {
+  getAlipayConfig,
+  getAlipayConfigs,
+  isAlipayConfigured,
+} from "./config";
 export type { AlipayConfig } from "./env";
-export { getAlipayConfig, isAlipayConfigured } from "./env";
 export { buildBizContent, buildPagePayRedirectUrl } from "./page-pay";
 export type { AlipayTradeQueryResult } from "./query";
 export { queryTradeByOrderNo } from "./query";

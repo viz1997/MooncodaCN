@@ -357,9 +357,9 @@ function repriceLine(item: CartLineItem, source: PriceSource): PricedLine {
  * 代码还留着(`src/features/sellbase/`,已建好的旧单还能重取支付入口),
  * 但**新单不走它** —— 所以这里直接拒掉。
  */
-export function resolveCheckoutChannel(
+export async function resolveCheckoutChannel(
   requested: PaymentChannel | null | undefined
-): OnlinePaymentChannel {
+): Promise<OnlinePaymentChannel> {
   const unavailable = new CheckoutError(
     "PAYMENT_CHANNEL_UNAVAILABLE",
     "这个支付方式暂时不可用,请换一个或联系工作室"
@@ -373,12 +373,12 @@ export function resolveCheckoutChannel(
   if (requested) {
     if (!isPaymentChannelEnabled(requested)) throw unavailable;
     const provider = getPaymentProvider(requested);
-    if (!provider?.isConfigured()) throw unavailable;
+    if (!provider || !(await provider.isConfigured())) throw unavailable;
     return requested;
   }
 
   // 没指定 → 第一个「开放了而且配好了」的通道
-  const fallback = listAvailablePaymentChannels()[0];
+  const fallback = (await listAvailablePaymentChannels())[0];
   if (!fallback) {
     throw new CheckoutError(
       "PAYMENT_CHANNEL_UNAVAILABLE",
@@ -618,7 +618,7 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
     discountedSubtotalCents - couponDiscountCents + shippingCents;
 
   // 3. 通道
-  const channel = resolveCheckoutChannel(input.channel);
+  const channel = await resolveCheckoutChannel(input.channel);
   const legacy = channel === "stripe";
 
   // 3b. 旧路(Sellbase + Stripe)**不支持优惠码**

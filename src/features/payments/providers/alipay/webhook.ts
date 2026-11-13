@@ -34,7 +34,8 @@
 
 import { settleByOrderNo } from "@/features/payments/lib/settle";
 
-import { getAlipayConfig } from "./env";
+import { getAlipayConfigs } from "./config";
+import type { AlipayConfig } from "./env";
 import { buildSignContent, verifySign } from "./sign";
 
 /** 一批通知参数 */
@@ -103,23 +104,48 @@ export interface AlipayNotifyOutcome {
  *
  * 抛错 = 「这次处理挂了」(比如 DB 写失败)—— 调用方应该回 5xx 让支付宝重投。
  * 不抛错但 `verified: false` = 「签名不对」—— 调用方回 401。
+ *
+ * ## 为什么**两个模式**的公钥都试一遍
+ *
+ * 拨沙箱开关的瞬间可能有**在途付款**:切到沙箱时,一笔**正式**订单的通知到了
+ * ⇒ 用沙箱支付宝公钥验不过 ⇒ **真钱收了但订单不标已付**(钱收了、货没开工)。
+ *
+ * ⇒ 先用当前模式的公钥验,验不过再试另一个模式的。**另一套验不过就照旧
+ * 拒绝** —— 只是多试一次,**不放松任何校验**。
  */
 export async function handleAlipayNotify(
   params: AlipayNotifyParams
 ): Promise<AlipayNotifyOutcome> {
-  const config = getAlipayConfig();
+  // 当前模式那一份排在前面;另一档没配好就自动跳过。
+  const configs = await getAlipayConfigs();
 
-  const verified = verifyNotifySignature(params, config.alipayPublicKey);
-  if (!verified) {
+  // ---- 1. 验签:找出「哪几份配置的支付宝公钥能验过这条通知」 ----
+  const verifying: AlipayConfig[] = [];
+  for (const config of configs) {
+    if (verifyNotifySignature(params, config.alipayPublicKey)) {
+      verifying.push(config);
+    }
+  }
+
+  if (verifying.length === 0) {
     return {
       verified: false,
       orderNo: params.out_trade_no ?? null,
       tradeNo: params.trade_no ?? null,
       tradeStatus: params.trade_status ?? null,
       settled: false,
-      reason: "验签失败",
+      reason:
+        configs.length === 0
+          ? "两个模式都没配好,没有验签用的支付宝公钥"
+          : "验签失败",
     };
   }
+
+  // ---- 2. 拿验过了的那份配置比 APPID ----
+  //
+  // 跟**验过的那份**比,不是跟「当前模式」比:在途付款那一笔可能是另一个
+  // 模式的凭据签发的。
+  const config = verifying[0] as AlipayConfig;
 
   const orderNo = (params.out_trade_no ?? "").trim();
   const tradeNo = (params.trade_no ?? "").trim();

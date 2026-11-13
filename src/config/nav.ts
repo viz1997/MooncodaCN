@@ -2,6 +2,7 @@ import {
   BookOpen,
   Boxes,
   Cpu,
+  CreditCard,
   FolderOpen,
   Frame,
   Gift,
@@ -240,6 +241,15 @@ export const adminNav: NavGroup[] = [
         title: "站点设置",
         href: "/admin/site-settings",
         icon: Settings,
+      },
+      // 2026-11-13：支付设置 —— 微信 / 支付宝的**沙箱**开关、端点、凭据都在
+      // 这一页配(工作室原话：「支付宝、微信支付先用沙盒测试验证」+「可以
+      // 后台配置」)。真理源在 `payment_setting` 表,改完不用重新部署。
+      // ⚠️ 正式模式的凭据**一个字都不动** —— 继续走环境变量。
+      {
+        title: "支付设置",
+        href: "/admin/payment-settings",
+        icon: CreditCard,
       },
       {
         title: "商品管理",
