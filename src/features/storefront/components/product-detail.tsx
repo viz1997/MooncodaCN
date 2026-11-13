@@ -108,7 +108,7 @@ export function ProductDetail({ handle }: { handle: string }) {
 
   if (query.isLoading) {
     return (
-      <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8 py-10">
+      <div className="atelier-container py-10">
         <div className="grid lg:grid-cols-2 gap-8 lg:gap-12">
           <div className="aspect-square bg-muted rounded-lg animate-pulse" />
           <div className="space-y-4">
@@ -124,7 +124,7 @@ export function ProductDetail({ handle }: { handle: string }) {
 
   if (query.isError || !product) {
     return (
-      <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8 py-20 text-center">
+      <div className="atelier-container py-20 text-center">
         <h1 className="font-serif text-3xl mb-3">找不到这件作品</h1>
         <p className="text-sm text-muted-foreground mb-6">
           产品 {handle} 不存在或已下架。
@@ -138,7 +138,7 @@ export function ProductDetail({ handle }: { handle: string }) {
 
   return (
     <div className="bg-background">
-      <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8 py-6 lg:py-10">
+      <div className="atelier-container py-6 lg:py-10">
         {/* Breadcrumb */}
         <nav className="flex items-center gap-2 text-xs text-muted-foreground mb-6">
           <Link href="/" className="hover:text-foreground transition-colors">

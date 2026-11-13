@@ -1,0 +1,274 @@
+/**
+ * atelier 路由组的版式(2026-11-13)
+ *
+ * 这个文件只服务 `(marketing-atelier)` —— **全站唯一的公开面**。
+ * atelier 的**色值**在 `(marketing-atelier)/layout.tsx` 的 `<style>` 块里
+ * (`.atelier-root` 重写 CSS 变量);这里放的是**版式**。
+ *
+ * ## ⚠️ 这里写的是**普通 CSS**,不是 `@utility`(踩过的坑)
+ *
+ * Tailwind v4 的 PostCSS 插件有个「快速跳过」检查:一个 CSS 文件里
+ * **只要没有** `@import` / `@theme` / `@reference` / `@apply` / `@tailwind`
+ * 这类指令,**整个文件直接原样输出**,插件压根不处理它。
+ *
+ * ⇒ `@utility` 写在这个文件里 = **浏览器拿到一个不认识的 at-rule**
+ * ⇒ 类名彻底不生效(宽度全丢)。
+ *
+ * (`globals.css` 里有 `@import "tailwindcss"` ⇒ 那个文件会被处理;
+ * 但**跨文件**的 `@utility` 不会自动生效 —— Tailwind 的 `@reference`
+ * 是给「在别的文件里用 `@apply`」用的,不是给「在别的文件里定义工具类」用的。)
+ *
+ * ⇒ 三个宽度类就是**普通类**。普通类在这个文件里**照常生效**
+ * (Tailwind 不处理这个文件 ⇒ 原样输出 ⇒ 浏览器认)。
+ *
+ * ⚠️ **普通 CSS 不在 cascade layer 里** ⇒ 它的优先级**高于** Tailwind 的
+ * 工具类。实测这 42 处用法**没有一处**同时带 `max-w-*` / `px-*` / `mx-*` /
+ * `w-*`(宽度只能有一个来源)。**以后给这些元素加宽度类之前先看一眼这里。**
+ *
+ * ## 1. `atelier-container` —— 全站统一的内容宽度
+ *
+ * 工作室 2026-11-13 报的是:「每个页面的宽度不一致」。
+ *
+ * 改之前公开页有**四档**宽度:
+ *
+ * | 页面 | 改之前 |
+ * |---|---|
+ * | 首页 / 作品集 / 商品详情 / 页头 / 页脚 | `max-w-[1280px]` |
+ * | 购物袋 / 结算 / 买家中心 | `max-w-[1100px]` |
+ * | 法律文档 | `container max-w-3xl`(768px) |
+ * | 结算成功页 | `max-w-[560px]` |
+ *
+ * 页头页脚是 1280 ⇒ 内容比头尾窄的那几页左右边缘对不齐,一眼就看出来。
+ *
+ * ⇒ 现在**所有公开页**都用这一个类。**别再各写各的 `max-w-*`。**
+ *
+ * ⚠️ **工具台(`/tools/workbench`)不在这一档里** —— 它是 1600px,那是
+ * 2026-11-09 工作室专门给 3D 视口留宽的决定(视口从 ~496px 涨到 ~730px)。
+ * **别拿这个类去改它。**
+ *
+ * ⚠️ **别用 `.container`** —— `globals.css` 里那个 `.container` 写在
+ * `@layer base`,而 Tailwind 自带的 `.container` 在 utilities 层,断点处的
+ * max-width(40/48/64/80rem)会**盖掉**它 ⇒ 「1280px 的容器」名不副实。
+ * 这个类是 utilities 层的新定义,行为稳定。
+ *
+ * **长文另有一个「阅读栏」** —— 法律文档在 1280 的框里居中摆一条 ~46rem
+ * 的栏(正文一行太长不好读)。框归框,栏归栏:左右边缘仍然跟头尾对齐。
+ */
+.atelier-container {
+  width: 100%;
+  margin-inline: auto;
+  max-width: 1280px;
+  padding-inline: 1rem;
+}
+
+@media (width >= 40rem) {
+  .atelier-container {
+    padding-inline: 1.5rem;
+  }
+}
+
+@media (width >= 64rem) {
+  .atelier-container {
+    padding-inline: 2rem;
+  }
+}
+
+/**
+ * **阅读栏** —— 长文在 1280 的框里居中摆一条 ~46rem 的栏
+ *
+ * 正文一行太长不好读(一行 120 个汉字眼睛会跳)。框归框、栏归栏:
+ * 左右边缘仍然跟页头页脚对齐,只有正文那一段窄一点。
+ * 法定给的是「一行 45~75 个字符」⇒ 46rem ≈ 736px 是这个尺寸下的甜点。
+ */
+.atelier-measure {
+  width: 100%;
+  margin-inline: auto;
+  max-width: 46rem;
+}
+
+/**
+ * **窄栏** —— 「一张卡」那种状态页(结算成功 / 失败 / 缺订单号)
+ *
+ * 同样是框 + 栏:外框 1280(跟头尾对齐),里面一张 560px 的窄卡。
+ */
+.atelier-narrow {
+  width: 100%;
+  margin-inline: auto;
+  max-width: 560px;
+}
+
+/**
+ * ## 2. `.legal-doc` —— 法律文档正文
+ *
+ * 工作室 2026-11-13 报的是:「legal/shipping 的文字和主题颜色相似导致看不清」。
+ *
+ * **根因不是配错了一个色,是整套排版压根没生效**:
+ *
+ * - 页面上写的是 `prose prose-a:text-primary prose-th:bg-muted …` ——
+ *   那是 **`@tailwindcss/typography`** 的类。这个包**本仓库没装**
+ *   (package.json / pnpm-lock.yaml 里零命中)⇒ **那些 `prose-*` 全是死的**。
+ * - 真正生效的是 Fumadocs 自带的 `.prose`(`globals.css` 第一行
+ *   `@import "fumadocs-ui/style.css"`),它建在**另一套冷灰**色板上:
+ *   `--color-fd-foreground: #0a0a0a`、`--color-fd-card: #f1f1f1`。
+ *   ⇒ **链接跟正文一个颜色**(只有下划线和 500 字重区分),
+ *   **表格是一块冷灰卡片**摆在暖纸底(bone)上 —— 这就是「看不清」。
+ *
+ * ⇒ 自己写一套,**只用 atelier 的色值**:
+ *
+ * | 元素 | 用什么 | 为什么 |
+ * |---|---|---|
+ * | 正文 | `--foreground`(暖墨) | ≈15:1,暖纸底上足够清楚 |
+ * | 链接 | `--primary`(墨绿) + 下划线 | ≈9.4:1,一眼认得出是链接 |
+ * | 链接 hover | `--foreground` | 跟正文区分靠**下划线**,不靠变色 |
+ * | 表头 | `--muted` 底 + `--border` 描边 | 暖色,不是冷灰 |
+ * | 列表符号 | `--primary` | 有点缀,不成一片 |
+ * | 引用块 | `--secondary` 底 + `--primary` 左边线 | |
+ *
+ * ⚠️ **`--accent`(玫瑰)不能拿来写正文** —— 它在暖纸底上只有 ≈2.9:1,
+ * 达不到 WCAG AA(4.5:1)。它是 CTA 的颜色,不是正文的颜色。
+ *
+ * ⚠️ **不要用 `--muted-foreground` 写正文** —— ≈4.6:1 勉强过 AA,
+ * 长段落读起来发飘。`--muted-foreground` 是**辅助信息**(日期、说明)的颜色。
+ */
+.legal-doc {
+  color: var(--foreground);
+  font-size: 1rem;
+  line-height: 1.85;
+  overflow-wrap: break-word;
+}
+
+.legal-doc > * + * {
+  margin-top: 1.1em;
+}
+
+.legal-doc h2 {
+  margin-top: 2em;
+  margin-bottom: 0.6em;
+  font-size: 1.375rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--foreground);
+}
+
+.legal-doc h3 {
+  margin-top: 1.6em;
+  margin-bottom: 0.5em;
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--foreground);
+}
+
+.legal-doc h4 {
+  margin-top: 1.4em;
+  margin-bottom: 0.4em;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.legal-doc p {
+  margin: 0;
+}
+
+.legal-doc a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+.legal-doc a:hover {
+  color: var(--foreground);
+  text-decoration-thickness: 2px;
+}
+
+.legal-doc strong {
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.legal-doc ul,
+.legal-doc ol {
+  padding-left: 1.4em;
+}
+
+.legal-doc ul {
+  list-style: disc;
+}
+
+.legal-doc ol {
+  list-style: decimal;
+}
+
+.legal-doc li {
+  margin-top: 0.35em;
+}
+
+.legal-doc li::marker {
+  color: var(--primary);
+}
+
+.legal-doc blockquote {
+  border-left: 3px solid var(--primary);
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  padding: 0.85rem 1.1rem;
+  border-radius: 0 0.25rem 0.25rem 0;
+}
+
+.legal-doc blockquote > * + * {
+  margin-top: 0.75em;
+}
+
+/* 窄屏上表格横向滚,别把整页撑宽 */
+.legal-doc table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+}
+
+.legal-doc th,
+.legal-doc td {
+  border: 1px solid var(--border);
+  padding: 0.55rem 0.8rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.legal-doc th {
+  background: var(--muted);
+  font-weight: 600;
+  color: var(--foreground);
+  white-space: nowrap;
+}
+
+.legal-doc hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 2em 0;
+}
+
+.legal-doc code {
+  background: var(--secondary);
+  color: var(--foreground);
+  padding: 0.15em 0.4em;
+  border-radius: 0.25rem;
+  font-size: 0.9em;
+}
+
+.legal-doc pre {
+  background: var(--secondary);
+  padding: 1rem 1.1rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  font-size: 0.875rem;
+}
+
+.legal-doc pre code {
+  background: none;
+  padding: 0;
+  font-size: inherit;
+}

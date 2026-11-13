@@ -73,6 +73,14 @@
  * 2026-11-01 这第 5 项改成「工具」(`/tools` 工具中心):克重计算器不再是
  * 导航直挂的品类,而是工具中心里的一个工具,工具多了也不会把导航撑长。
  *
+ * 2026-11-13 加了「打印」一项(`kind: "route"`,指向 `/tools/workbench`)——
+ * 工作室的要求:**「顶部增加打印入口,进入 workbench 工具」**。它是工作室的
+ * 主营入口(把模型打印出来),跟「工具」(工具中心索引页)并存:想逛工具清单
+ * 的走「工具」,已经知道要打印的直接走「打印」。
+ *
+ * 桌面端导航和移动端 Sheet **共用同一份 STORE_NAV** —— 这一项两处自动
+ * 都有,不用各写一遍。
+ *
  * 原来这里是六项(生日 / 毕业 / 纪念 / 节日 / 定制 / 全部),移动端 Sheet 里还
  * 挂着一个「按形态」三项的二级列表 —— 一共九个可点的去处,导航本身成了首页
  * 最复杂的东西。场合四段色带还在首页上(各有自己的锚点),只是不再各占一个
@@ -303,7 +311,7 @@ export function WjpStoreHeader({
           : "bg-background"
       }`}
     >
-      <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8">
+      <div className="atelier-container">
         <div className="flex h-16 items-center justify-between gap-4">
           {/* Left: mobile menu + desktop nav */}
           <div className="flex items-center gap-1 flex-1">

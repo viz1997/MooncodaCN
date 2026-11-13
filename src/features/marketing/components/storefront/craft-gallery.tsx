@@ -38,7 +38,7 @@ export function CraftGallery() {
 
   return (
     <section id="craft" className="bg-muted/30 py-16 lg:py-24 scroll-mt-16">
-      <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8">
+      <div className="atelier-container">
         {/* Header —— 一套标题栏,左右分栏。左边讲工艺,右边讲真实订单。 */}
         <div className="grid lg:grid-cols-12 lg:gap-16 mb-12 lg:mb-16">
           <div className="lg:col-span-5">

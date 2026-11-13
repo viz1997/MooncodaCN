@@ -36,7 +36,7 @@ export function ShopAnnouncement({ locale }: { locale: "zh" | "en" }) {
 
   return (
     <div className="border-b border-border/60 bg-[var(--secondary)]/70">
-      <div className="mx-auto flex max-w-[1280px] flex-wrap items-center justify-center gap-x-7 gap-y-1 px-4 py-2.5 text-[11px] tracking-wide text-muted-foreground sm:px-6 lg:px-8">
+      <div className="atelier-container flex flex-wrap items-center justify-center gap-x-7 gap-y-1 py-2.5 text-[11px] tracking-wide text-muted-foreground">
         {facts.map((fact) => (
           <span key={fact} className="flex items-center gap-2">
             <span className="size-1 shrink-0 rounded-full bg-[var(--accent)]" />

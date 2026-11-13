@@ -135,7 +135,7 @@ export function CommunityWall() {
 
   return (
     <section id="gallery" className="bg-muted/30 py-16 lg:py-24 scroll-mt-16">
-      <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8">
+      <div className="atelier-container">
         {/* Header —— 与 CraftStory 同一套「左标题 / 右说明」分栏 */}
         <div className="grid lg:grid-cols-12 lg:gap-16 mb-12 lg:mb-16">
           <div className="lg:col-span-5">

@@ -98,7 +98,7 @@ export function CartPageView({ initialCart }: { initialCart: Cart | null }) {
 
   if (items.length === 0) {
     return (
-      <div className="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8 py-20 text-center">
+      <div className="atelier-container py-20 text-center">
         <div className="size-16 rounded-full bg-secondary flex items-center justify-center mx-auto mb-5">
           <ShoppingBag className="size-7 text-muted-foreground" />
         </div>
@@ -118,7 +118,7 @@ export function CartPageView({ initialCart }: { initialCart: Cart | null }) {
   /* ---------------------------------------------------------------------- */
 
   return (
-    <div className="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8 py-10">
+    <div className="atelier-container py-10">
       <div className="flex items-end justify-between gap-4 mb-8">
         <div>
           <h1 className="font-serif text-3xl">购物袋</h1>

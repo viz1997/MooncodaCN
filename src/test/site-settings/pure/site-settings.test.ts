@@ -3,9 +3,12 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_SERVICE_WECHAT_QR_PATH,
   normalizeStorefrontUrl,
   resolveInternationalStoreUrl,
+  resolveServiceWechatQrUrl,
   SITE_SETTING_KEYS,
+  validateServiceQrUrl,
   validateStorefrontUrl,
 } from "@/features/site-settings/lib/site-setting";
 
@@ -308,6 +311,7 @@ describe("站点设置:i18n", () => {
     for (const code of [
       "INVALID_URL",
       "NOT_HTTP",
+      "INVALID_QR_URL",
       "MIGRATION_MISSING",
       "SAVE_FAILED",
     ]) {
@@ -325,5 +329,143 @@ describe("站点设置:i18n", () => {
     };
     expect(zh.nav.siteSettings).toBeTruthy();
     expect(en.nav.siteSettings).toBeTruthy();
+  });
+});
+
+/**
+ * 客服微信二维码(2026-11-13)
+ *
+ * 工作室的要求:**「底部增加客服联系方式,比如点击后展示客服的微信二维码」**。
+ *
+ * 这一项跟海外独立站地址**共用那套回退链**,只有两处不同:
+ *
+ * 1. **多一档「内置默认」** —— `/service/wechat-qr.png`。二维码图往往是放进
+ *    仓库里的一张静态文件,不是公网地址;后台那一栏不填时,页面照样去找它。
+ * 2. **多认一档站内路径** —— 二维码图不是链接,`<img src>` 认站内路径。
+ *
+ * ⚠️ **站内路径只认单个斜杠开头** —— `//evil.com/x.png` 是「协议相对地址」,
+ * 浏览器会当成 `https://evil.com/x.png` 去请求 ⇒ 等于让一个后台可配的字段
+ * 变成「从别的站加载图片」的入口。
+ */
+describe("站点设置:客服微信二维码", () => {
+  it("键名是写死在代码里的那一个", () => {
+    expect(SITE_SETTING_KEYS.serviceWechatQrUrl).toBe("service_wechat_qr_url");
+  });
+
+  it("DB 里有这一行 ⇒ 它说了算", () => {
+    const resolved = resolveServiceWechatQrUrl({
+      dbValue: "https://cdn.example.com/qr.png",
+      envValue: "/service/wechat-qr.png",
+    });
+    expect(resolved.url).toBe("https://cdn.example.com/qr.png");
+    expect(resolved.source).toBe("db");
+    expect(resolved.invalid).toBe(false);
+  });
+
+  it("DB 里存了**空串** ⇒ 明确关掉(页脚不摆二维码)", () => {
+    const resolved = resolveServiceWechatQrUrl({
+      dbValue: "",
+      envValue: "/service/wechat-qr.png",
+    });
+    expect(resolved.url).toBe("");
+    expect(resolved.source).toBe("db");
+    expect(resolved.invalid).toBe(false);
+  });
+
+  it("DB 里没这一行 ⇒ 看环境变量", () => {
+    const resolved = resolveServiceWechatQrUrl({
+      dbValue: null,
+      envValue: "https://cdn.example.com/qr.png",
+    });
+    expect(resolved.url).toBe("https://cdn.example.com/qr.png");
+    expect(resolved.source).toBe("env");
+  });
+
+  it("环境变量也没有 ⇒ 走内置默认那一张静态图", () => {
+    const resolved = resolveServiceWechatQrUrl({
+      dbValue: null,
+      envValue: "",
+    });
+    expect(resolved.url).toBe(DEFAULT_SERVICE_WECHAT_QR_PATH);
+    expect(resolved.url).toBe("/service/wechat-qr.png");
+    expect(resolved.source).toBe("default");
+    expect(resolved.invalid).toBe(false);
+  });
+
+  it("不合法 ⇒ **不显示**(fail closed)", () => {
+    const resolved = resolveServiceWechatQrUrl({
+      dbValue: "javascript:alert(1)",
+      envValue: "/service/wechat-qr.png",
+    });
+    expect(resolved.url).toBe("");
+    expect(resolved.invalid).toBe(true);
+    expect(resolved.source).toBe("db");
+  });
+
+  it("站内路径合法(单斜杠开头)", () => {
+    const ok = validateServiceQrUrl("/service/wechat-qr.png");
+    expect(ok.ok).toBe(true);
+    expect(ok.ok === true && ok.value).toBe("/service/wechat-qr.png");
+  });
+
+  it("**协议相对地址不认** —— `//evil.com/x.png` 不是站内路径", () => {
+    // 浏览器会把它当成 https://evil.com/x.png 去请求 ⇒ 后台可配的字段
+    // 变成了「从别的站加载图片」的入口。
+    const bad = validateServiceQrUrl("//evil.com/x.png");
+    expect(bad.ok).toBe(false);
+    expect(bad.ok === false && bad.code).toBe("INVALID_URL");
+  });
+
+  it("javascript: / mailto: 一律拒掉", () => {
+    expect(validateServiceQrUrl("javascript:alert(1)").ok).toBe(false);
+    expect(validateServiceQrUrl("mailto:a@b.com").ok).toBe(false);
+  });
+
+  it("读的那一层读的是**环境变量兜底 + DB**", () => {
+    const src = read(STORE);
+    expect(src).toContain("NEXT_PUBLIC_SERVICE_WECHAT_QR_URL");
+    expect(src).toContain("resolveServiceWechatQrUrl");
+    expect(src).toContain("getServiceWechatQrUrl");
+  });
+
+  it("读挂了 ⇒ 退回默认路径,**不抛**(页脚的客服入口不能整个没了)", () => {
+    const src = read(STORE);
+    expect(src).toMatch(/catch[\s\S]{0,400}resolveServiceWechatQrUrl/);
+  });
+
+  it("后台保存**两个键一个事务** —— 不会写一半", () => {
+    const src = read(ACTIONS);
+    expect(src).toContain("saveSiteSettings");
+    expect(src).toContain("SITE_SETTING_KEYS.internationalStoreUrl");
+    expect(src).toContain("SITE_SETTING_KEYS.serviceWechatQrUrl");
+  });
+
+  it("重置是**按键**的 —— 不能顺手把另一项也退回去", () => {
+    const src = read(ACTIONS);
+    expect(src).toContain("resetSchema");
+    expect(src).toContain("SITE_SETTING_KEYS.serviceWechatQrUrl");
+    expect(src).toContain("deleteSiteSetting(parsedInput.key)");
+  });
+
+  it("二维码不合法 ⇒ 报**它自己那个码**(工作室要知道改哪个输入框)", () => {
+    const src = read(ACTIONS);
+    expect(src).toContain("INVALID_QR_URL");
+    expect(src).toContain("validateServiceQrUrl");
+  });
+
+  it("后台那一页:两个字段 + 两颗重置按钮", () => {
+    const src = read(VIEW);
+    expect(src).toContain("serviceWechatQrUrl");
+    expect(src).toContain("adminResetSiteSettingsAction");
+    // 两颗重置 ⇒ 两个 hook
+    expect(src).toContain("resetStore");
+    expect(src).toContain("resetQr");
+  });
+
+  it("类型在纯类型模块里(「use server」文件不 re-export 类型)", () => {
+    const src = read(ACTIONS);
+    expect(src).not.toMatch(/^\s*export\s+type\s*\{/m);
+    expect(src).not.toMatch(/^\s*export\s*\*\s*from/m);
+    expect(read(TYPES)).toContain("serviceQrUrl");
   });
 });

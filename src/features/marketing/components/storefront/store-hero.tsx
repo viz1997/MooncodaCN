@@ -110,7 +110,7 @@ export function StoreHero({
         className="h-px w-full"
         style={{ backgroundColor: "var(--accent)" }}
       />
-      <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8">
+      <div className="atelier-container">
         <div className="grid items-center gap-0 py-12 lg:grid-cols-2 lg:gap-12 lg:py-20">
           {/* Left: copy —— eyebrow + 大衬线标题 */}
           <motion.div

@@ -110,51 +110,59 @@ export default async function LegalPage({
         });
 
   return (
-    <article className="container mx-auto max-w-3xl py-12">
-      {/* 返回链接 */}
-      <Link
-        href="/"
-        className="mb-8 inline-flex items-center text-sm text-muted-foreground hover:text-foreground"
-      >
-        ← {locale === "zh" ? "返回首页" : "Back to Home"}
-      </Link>
+    // 外框 = 全站统一的 `atelier-container`(1280),里面再居中摆一条阅读栏
+    // (正文一行太长不好读)。框归框、栏归栏 ⇒ 左右边缘仍跟页头页脚对齐。
+    <article className="atelier-container py-12">
+      <div className="atelier-measure">
+        {/* 返回链接 */}
+        <Link
+          href="/"
+          className="mb-8 inline-flex items-center text-sm text-muted-foreground hover:text-foreground"
+        >
+          ← {locale === "zh" ? "返回首页" : "Back to Home"}
+        </Link>
 
-      {/* 文档头部 */}
-      <header className="mb-8 border-b pb-8">
-        {/* 标题 */}
-        <h1 className="mb-4 text-3xl font-bold tracking-tight md:text-4xl">
-          {doc.title}
-        </h1>
+        {/* 文档头部 */}
+        <header className="mb-8 border-b pb-8">
+          {/* 标题 */}
+          <h1 className="mb-4 text-3xl font-bold tracking-tight md:text-4xl">
+            {doc.title}
+          </h1>
 
-        {/* 最后更新日期 */}
-        <p className="text-sm text-muted-foreground">
-          {locale === "zh" ? "最后更新：" : "Last Updated: "}
-          <time dateTime={formattedDate}>{formattedDate}</time>
-        </p>
-      </header>
+          {/* 最后更新日期 */}
+          <p className="text-sm text-muted-foreground">
+            {locale === "zh" ? "最后更新：" : "Last Updated: "}
+            <time dateTime={formattedDate}>{formattedDate}</time>
+          </p>
+        </header>
 
-      {/* 文档内容 - 使用 Tailwind Typography 样式 */}
-      <div className="prose prose-neutral dark:prose-invert max-w-none prose-headings:font-semibold prose-h2:text-xl prose-h2:mt-8 prose-h3:text-lg prose-a:text-primary prose-a:no-underline hover:prose-a:underline prose-table:text-sm prose-th:bg-muted prose-th:p-2 prose-td:p-2 prose-td:border">
-        <MDXContent components={{ a: MdxLink }} />
-      </div>
-
-      {/* 底部导航 —— 列出该语言下的全部文档 */}
-      <footer className="mt-12 border-t pt-8">
-        <div className="flex flex-wrap gap-x-4 gap-y-2 text-sm">
-          <span className="text-muted-foreground">
-            {locale === "zh" ? "其他文档：" : "Other documents:"}
-          </span>
-          {siblings.map((item) => (
-            <Link
-              key={item.info.path}
-              href={`/legal/${getLegalSlug(item)}`}
-              className="text-primary hover:underline"
-            >
-              {item.title}
-            </Link>
-          ))}
+        {/* 文档内容 —— `.legal-doc` 是本组自己写的排版(`atelier.css`)
+            ⚠️ **别再用 `prose-*` 那套** —— `@tailwindcss/typography` 这个包
+            本仓库没装,那些类全是死的;真正生效的是 Fumadocs 的 `.prose`
+            (冷灰色板),链接跟正文一个颜色、表格是灰卡片摆在暖纸底上
+            ⇒ 「文字和主题颜色相似导致看不清」。 */}
+        <div className="legal-doc">
+          <MDXContent components={{ a: MdxLink }} />
         </div>
-      </footer>
+
+        {/* 底部导航 —— 列出该语言下的全部文档 */}
+        <footer className="mt-12 border-t pt-8">
+          <div className="flex flex-wrap gap-x-4 gap-y-2 text-sm">
+            <span className="text-muted-foreground">
+              {locale === "zh" ? "其他文档：" : "Other documents:"}
+            </span>
+            {siblings.map((item) => (
+              <Link
+                key={item.info.path}
+                href={`/legal/${getLegalSlug(item)}`}
+                className="text-primary hover:underline"
+              >
+                {item.title}
+              </Link>
+            ))}
+          </div>
+        </footer>
+      </div>
     </article>
   );
 }

@@ -40,10 +40,16 @@
  *    Radix 的 portal 落在这个 token 子树之外,配色 / 圆角会退回全站默认主题
  *  - 内容:`children` —— 各个页面自己拼装
  */
+// 本组的版式(统一内容宽度 + 法律文档排版)—— 色值在下面的 <style> 块里
+import "./atelier.css";
+
 import { InternationalStoreBar } from "@/features/marketing/components/storefront/international-store-bar";
 import { StoreFooter } from "@/features/marketing/components/storefront/store-footer";
 import { WjpStoreHeader } from "@/features/marketing/components/storefront/wjp-store-header";
-import { getInternationalStoreUrl } from "@/features/site-settings/lib/site-setting-store";
+import {
+  getInternationalStoreUrl,
+  getServiceWechatQrUrl,
+} from "@/features/site-settings/lib/site-setting-store";
 import { CartDrawer } from "@/features/storefront/components/cart-drawer";
 import { CustomWorkshop } from "@/features/storefront/components/custom-workshop";
 import { CustomizeEntry } from "@/features/storefront/components/customize-entry";
@@ -69,6 +75,15 @@ export default async function MarketingAtelierLayout({
   // 读的是**带缓存**的那一份(`unstable_cache` + tag)⇒ 这一页不会因为
   // 读一次库就永远动态渲染。后台保存时会把 tag 和 layout 一起刷掉。
   const internationalStore = await getInternationalStoreUrl();
+
+  // 客服微信二维码的图片地址(2026-11-13)—— 页脚「客服」那一栏点开弹出来
+  // 的那张图。真理源同样在 DB(`site_setting` 表的 `service_wechat_qr_url`),
+  // 回退链:DB 那一行 → `NEXT_PUBLIC_SERVICE_WECHAT_QR_URL` →
+  // `/service/wechat-qr.png`(内置默认那一张)。
+  //
+  // **地址从 layout 当 props 传下去** —— 客户端组件读不了 DB,server
+  // component 也不该自己查(两处共用 layout 查好的那一份)。
+  const serviceQr = await getServiceWechatQrUrl();
 
   return (
     <>
@@ -135,7 +150,7 @@ export default async function MarketingAtelierLayout({
         <InternationalStoreBar locale={locale} url={internationalStore.url} />
         <WjpStoreHeader internationalStoreUrl={internationalStore.url} />
         <main className="flex-1">{children}</main>
-        <StoreFooter />
+        <StoreFooter serviceQrUrl={serviceQr.url} />
 
         {/* commerce overlays(全局挂载) */}
         <CartDrawer />

@@ -27,11 +27,13 @@ export default async function CheckoutSuccessPage({
 
   if (!orderNo) {
     return (
-      <div className="mx-auto max-w-[560px] px-4 sm:px-6 py-16 text-center">
-        <h1 className="font-serif text-3xl mb-2">缺少订单号</h1>
-        <p className="text-sm text-muted-foreground">
-          这个页面需要订单号才能查订单状态。
-        </p>
+      <div className="atelier-container py-16 text-center">
+        <div className="atelier-narrow">
+          <h1 className="font-serif text-3xl mb-2">缺少订单号</h1>
+          <p className="text-sm text-muted-foreground">
+            这个页面需要订单号才能查订单状态。
+          </p>
+        </div>
       </div>
     );
   }
@@ -42,11 +44,13 @@ export default async function CheckoutSuccessPage({
   // 未登录 —— 查不了(归属校验在数据层)。也让用户去登录,登录后回来。
   if (!userId) {
     return (
-      <div className="mx-auto max-w-[560px] px-4 sm:px-6 py-16 text-center">
-        <h1 className="font-serif text-3xl mb-2">需要登录</h1>
-        <p className="text-sm text-muted-foreground">
-          订单挂在你的账号名下 —— 登录后就能看到支付状态。
-        </p>
+      <div className="atelier-container py-16 text-center">
+        <div className="atelier-narrow">
+          <h1 className="font-serif text-3xl mb-2">需要登录</h1>
+          <p className="text-sm text-muted-foreground">
+            订单挂在你的账号名下 —— 登录后就能看到支付状态。
+          </p>
+        </div>
       </div>
     );
   }
@@ -55,11 +59,13 @@ export default async function CheckoutSuccessPage({
 
   if (!result) {
     return (
-      <div className="mx-auto max-w-[560px] px-4 sm:px-6 py-16 text-center">
-        <h1 className="font-serif text-3xl mb-2">订单不存在</h1>
-        <p className="text-sm text-muted-foreground">
-          订单号 {orderNo} —— 找不到这笔订单。
-        </p>
+      <div className="atelier-container py-16 text-center">
+        <div className="atelier-narrow">
+          <h1 className="font-serif text-3xl mb-2">订单不存在</h1>
+          <p className="text-sm text-muted-foreground">
+            订单号 {orderNo} —— 找不到这笔订单。
+          </p>
+        </div>
       </div>
     );
   }

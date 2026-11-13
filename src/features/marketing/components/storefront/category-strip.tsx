@@ -107,7 +107,7 @@ export function CategoryStrip({
 
   return (
     <section className="border-y border-border/60 bg-[var(--card)]">
-      <div className="mx-auto max-w-[1280px] px-4 py-10 sm:px-6 lg:px-8 lg:py-12">
+      <div className="atelier-container py-10 lg:py-12">
         <div className="mb-6 flex items-end justify-between gap-4">
           <div>
             <p className="eyebrow text-[var(--accent)] mb-2.5">

@@ -36,14 +36,7 @@ export function AtelierPageShell({
   className?: string;
 }) {
   return (
-    <div
-      className={cn(
-        "mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8 py-10",
-        className
-      )}
-    >
-      {children}
-    </div>
+    <div className={cn("atelier-container py-10", className)}>{children}</div>
   );
 }
 
@@ -97,7 +90,7 @@ export function AtelierEmptyState({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8 py-20 text-center">
+    <div className="atelier-container py-20 text-center">
       <div className="size-16 rounded-full bg-secondary flex items-center justify-center mx-auto mb-5">
         <Icon className="size-7 text-muted-foreground" />
       </div>

@@ -74,7 +74,7 @@ export function ShopGrid({
     // id="works" —— 顶部导航「作品」和 footer「全部作品」的落点。
     // scroll-mt-16 = sticky header 高度,锚点跳转不被遮。
     <section id="works" className="scroll-mt-16 bg-background py-16 lg:py-24">
-      <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8">
+      <div className="atelier-container">
         <div className="mb-8 flex flex-col gap-5 lg:mb-10 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-xl">
             <p className="eyebrow text-[var(--accent)] mb-3">

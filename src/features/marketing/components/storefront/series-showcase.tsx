@@ -43,7 +43,7 @@ export function SeriesShowcase({
       id="categories"
       className="bg-muted/40 py-12 lg:py-16 border-y scroll-mt-16"
     >
-      <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8">
+      <div className="atelier-container">
         <div className="mb-7 flex flex-col sm:flex-row sm:items-end justify-between gap-2">
           <p className="eyebrow text-muted-foreground">按形态 · 按品类逛</p>
           <p className="text-sm text-muted-foreground">

@@ -51,7 +51,7 @@ export function ToolsHub() {
   const t = useTranslations("ToolsCenter");
 
   return (
-    <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8 py-12 lg:py-16">
+    <div className="atelier-container py-12 lg:py-16">
       <header className="max-w-2xl">
         <p className="eyebrow text-[var(--accent)] mb-4">{t("eyebrow")}</p>
         <h1 className="text-4xl sm:text-5xl font-medium tracking-tight leading-[1.05] text-balance">

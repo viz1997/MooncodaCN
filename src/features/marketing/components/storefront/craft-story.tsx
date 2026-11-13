@@ -47,7 +47,7 @@ const craftNotes = [
 export function CraftStory() {
   return (
     <section id="craft" className="bg-background py-16 lg:py-24 scroll-mt-16">
-      <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8">
+      <div className="atelier-container">
         <div className="grid lg:grid-cols-12 lg:gap-16">
           {/* Left —— eyebrow + 衬线标题 + 说明 + 内联链接 */}
           <div className="lg:col-span-5">

@@ -63,7 +63,7 @@ export function OccasionShelf({ locale }: { locale: "zh" | "en" }) {
           style={{ backgroundColor: occasion.wash }}
           {...reveal(bandIndex * 0.02)}
         >
-          <div className="mx-auto grid w-full max-w-[1280px] items-center gap-8 px-4 sm:px-6 lg:grid-cols-12 lg:gap-10 lg:px-8">
+          <div className="atelier-container grid items-center gap-8 lg:grid-cols-12 lg:gap-10">
             {/* 海报 */}
             <div className="lg:col-span-5">
               <div className="overflow-hidden rounded-lg bg-muted/40">

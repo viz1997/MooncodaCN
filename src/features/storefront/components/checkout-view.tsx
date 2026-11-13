@@ -96,7 +96,7 @@ export function CheckoutView({
 
   if (items.length === 0) {
     return (
-      <div className="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8 py-16 text-center">
+      <div className="atelier-container py-16 text-center">
         <h1 className="font-serif text-3xl mb-3">购物袋是空的</h1>
         <p className="text-sm text-muted-foreground mb-8">
           还没有要结算的作品 —— 去挑一个吧。
@@ -114,7 +114,7 @@ export function CheckoutView({
 
   if (!isLoggedIn) {
     return (
-      <div className="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8 py-16 text-center">
+      <div className="atelier-container py-16 text-center">
         <h1 className="font-serif text-3xl mb-3">结算需要先登录</h1>
         <p className="text-sm text-muted-foreground mb-8 max-w-md mx-auto">
           订单要挂在你的账号名下,登录后购物袋里的东西还在,可以直接继续。
@@ -131,7 +131,7 @@ export function CheckoutView({
   /* ---------------------------------------------------------------------- */
 
   return (
-    <div className="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8 py-10">
+    <div className="atelier-container py-10">
       <div className="flex items-center justify-between gap-4 mb-8">
         <h1 className="font-serif text-3xl">结算</h1>
         {/* 改数量 / 删一行回购物袋去改 —— 结算页上不给改,免得跟付款入口混在一起 */}

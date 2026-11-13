@@ -48,6 +48,7 @@ import { describeDbError } from "@/features/shared/lib/db-error";
 import {
   type ResolvedSiteSetting,
   resolveInternationalStoreUrl,
+  resolveServiceWechatQrUrl,
   SITE_SETTING_KEYS,
   type SiteSettingKey,
 } from "./site-setting";
@@ -71,6 +72,18 @@ export const SITE_SETTINGS_TAG = "site-settings";
  */
 function readEnvInternationalStoreUrl(): string {
   return process.env.NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL?.trim() ?? "";
+}
+
+/**
+ * 环境变量兜底 —— 客服微信二维码的图片地址(2026-11-13)
+ *
+ * 跟上面那条一个道理:后台那一行是真理源,环境变量退成兜底。
+ *
+ * ⚠️ `.env.example` 被 gitignore ⇒ 这条变量的说明只写在这儿(文件头就是
+ * 活文档)。
+ */
+function readEnvServiceWechatQrUrl(): string {
+  return process.env.NEXT_PUBLIC_SERVICE_WECHAT_QR_URL?.trim() ?? "";
 }
 
 /**
@@ -126,6 +139,34 @@ export const getInternationalStoreUrl = cache(
   }
 );
 
+/**
+ * 客服微信二维码的**生效图片地址** —— 渲染链路上的唯一入口(2026-11-13)
+ *
+ * 回退链:DB 那一行 → `NEXT_PUBLIC_SERVICE_WECHAT_QR_URL` →
+ * `DEFAULT_SERVICE_WECHAT_QR_PATH`(`/service/wechat-qr.png`)。
+ *
+ * **不抛错** —— 跟上面那条一个口径:读挂了就退回环境变量 / 默认路径,并记
+ * 一条 error 日志。页脚的客服入口不能因为一次数据库抖动就整个没了。
+ */
+export const getServiceWechatQrUrl = cache(
+  async (): Promise<ResolvedSiteSetting> => {
+    const envValue = readEnvServiceWechatQrUrl();
+    try {
+      const dbValue = await cachedReadSiteSetting(
+        SITE_SETTING_KEYS.serviceWechatQrUrl
+      );
+      return resolveServiceWechatQrUrl({ dbValue, envValue });
+    } catch (error) {
+      const info = describeDbError(error);
+      console.error(
+        "[site-settings] 读客服二维码设置失败,退回默认路径:",
+        info.message || error
+      );
+      return resolveServiceWechatQrUrl({ dbValue: null, envValue });
+    }
+  }
+);
+
 /* -------------------------------------------------------------------------- */
 /*  后台要的那一份                                                             */
 /* -------------------------------------------------------------------------- */
@@ -142,6 +183,16 @@ export interface SiteSettingsOverview {
   readError: string | null;
   /** 表还没建(迁移脚本没跑) */
   missingRelation: boolean;
+  /**
+   * 客服微信二维码 —— 生效值(2026-11-13)
+   *
+   * 跟上面那套是**两个独立的设置**:一个挂了不影响另一个。
+   */
+  serviceQr: ResolvedSiteSetting;
+  /** 二维码那一行在 DB 里的原始值 —— `null` = 没存过 */
+  serviceQrDbValue: string | null;
+  /** 二维码的环境变量值(空 = 没配) */
+  serviceQrEnvValue: string;
 }
 
 /**
@@ -149,36 +200,69 @@ export interface SiteSettingsOverview {
  *
  * 后台要看到**真话**:刚保存完刷新一下,看到的必须是刚存的那个值,不是
  * 缓存里的旧值。
+ *
+ * ⚠️ **两项各自 try/catch** —— 读海外独立站那一行挂了,不该把客服二维码
+ * 那一项也拖下水(反之亦然)。后台少显示一项,比整页报错好。
  */
 export async function getSiteSettingsOverview(): Promise<SiteSettingsOverview> {
   const envValue = readEnvInternationalStoreUrl();
+  const serviceQrEnvValue = readEnvServiceWechatQrUrl();
+
+  let resolved: ResolvedSiteSetting;
+  let dbValue: string | null = null;
+  let readError: string | null = null;
+  let missingRelation = false;
+
   try {
-    const dbValue = await readSiteSettingRow(
-      SITE_SETTING_KEYS.internationalStoreUrl
-    );
-    return {
-      resolved: resolveInternationalStoreUrl({ dbValue, envValue }),
-      dbValue,
-      envValue,
-      readError: null,
-      missingRelation: false,
-    };
+    dbValue = await readSiteSettingRow(SITE_SETTING_KEYS.internationalStoreUrl);
+    resolved = resolveInternationalStoreUrl({ dbValue, envValue });
   } catch (error) {
     const info = describeDbError(error);
     console.error(
       "[site-settings] 读后台概览失败,退回环境变量兜底:",
       info.message || error
     );
-    return {
-      resolved: resolveInternationalStoreUrl({ dbValue: null, envValue }),
-      dbValue: null,
-      envValue,
-      readError: info.missingRelation
-        ? "站点设置的表还不存在(迁移脚本没跑)"
-        : `读站点设置失败:${info.message}`,
-      missingRelation: info.missingRelation,
-    };
+    resolved = resolveInternationalStoreUrl({ dbValue: null, envValue });
+    dbValue = null;
+    readError = info.missingRelation
+      ? "站点设置的表还不存在(迁移脚本没跑)"
+      : `读站点设置失败:${info.message}`;
+    missingRelation = info.missingRelation;
   }
+
+  let serviceQr: ResolvedSiteSetting;
+  let serviceQrDbValue: string | null = null;
+
+  try {
+    serviceQrDbValue = await readSiteSettingRow(
+      SITE_SETTING_KEYS.serviceWechatQrUrl
+    );
+    serviceQr = resolveServiceWechatQrUrl({
+      dbValue: serviceQrDbValue,
+      envValue: serviceQrEnvValue,
+    });
+  } catch (error) {
+    const info = describeDbError(error);
+    console.error(
+      "[site-settings] 读客服二维码设置失败,退回默认路径:",
+      info.message || error
+    );
+    serviceQr = resolveServiceWechatQrUrl({
+      dbValue: null,
+      envValue: serviceQrEnvValue,
+    });
+  }
+
+  return {
+    resolved,
+    dbValue,
+    envValue,
+    readError,
+    missingRelation,
+    serviceQr,
+    serviceQrDbValue,
+    serviceQrEnvValue,
+  };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -186,7 +270,7 @@ export async function getSiteSettingsOverview(): Promise<SiteSettingsOverview> {
 /* -------------------------------------------------------------------------- */
 
 /**
- * 写一行(upsert)
+ * 写**一行**(upsert)
  *
  * 存**归一化之后**的值 —— 后台的「当前生效值」跟页面上的链接要一模一样,
  * 否则工作室会看到「我存的是 https://x.com/,页面上是 https://x.com」而
@@ -204,6 +288,41 @@ export async function saveSiteSetting(
       target: siteSetting.key,
       set: { value: payload.value, updatedAt: payload.updatedAt },
     });
+}
+
+/**
+ * 写**多项**设置 —— **一个事务**里全写完(2026-11-13)
+ *
+ * 后台现在是**一张表单两个字段**(海外独立站地址 + 客服二维码地址),点一次
+ * 「保存」两个都写。
+ *
+ * ## 为什么要一个事务
+ *
+ * 分两次写 ⇒ 可能出现「独立站存进去了、二维码没存进去」的**半截状态** ——
+ * 工作室刷新一下看到的是两个不同版本的设置,会以为出了鬼(而且说不清是哪
+ * 一半生效了)。
+ *
+ * 一个事务 ⇒ 要么两个都在,要么两个都不在。
+ */
+export async function saveSiteSettings(
+  entries: Array<{ key: SiteSettingKey; value: string }>
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    for (const entry of entries) {
+      const payload = {
+        key: entry.key,
+        value: entry.value,
+        updatedAt: new Date(),
+      };
+      await tx
+        .insert(siteSetting)
+        .values(payload)
+        .onConflictDoUpdate({
+          target: siteSetting.key,
+          set: { value: payload.value, updatedAt: payload.updatedAt },
+        });
+    }
+  });
 }
 
 /**

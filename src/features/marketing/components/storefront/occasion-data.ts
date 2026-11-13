@@ -163,6 +163,10 @@ export const OCCASIONS: readonly Occasion[] = [
  * 购物袋标志 —— 工作室的要求:**「【海外独立站】改为【shopify】,用 shopify
  * 的图标」**。那个店本来就是 Shopify 店铺,以前只是没说清楚。**标题仍然走
  * i18n**(`InternationalStore.nav`),改文案改 `messages/*.json` 就行。
+ *
+ * 2026-11-13:加了「打印」一项(`kind: "route"`,指向 `/tools/workbench`)——
+ * 工作室的要求:**「顶部增加打印入口,进入 workbench 工具」**。它是工作室的
+ * 主营入口(把模型打印出来),跟「工具」(`/tools` 工具中心索引)并存。
  */
 
 export type StoreNavItem =
@@ -181,8 +185,10 @@ export type StoreNavItem =
       /**
        * 渲染成 `<Link>`,跳站内独立路由(不是首页锚点)
        *
-       * 目前只有一项:`/tools` 工具中心 —— 它是独立页面
-       * (route group `(marketing-atelier)`),浏览器本地算,不需要登录。
+       * 现在有两项:`/tools` 工具中心(索引页,列着工作台和磁吸孔切割)和
+       * `/tools/workbench` 打印前工作台(2026-11-13 加的「打印」入口,直接
+       * 进工作台)。两者都在 route group `(marketing-atelier)` 里,浏览器本地
+       * 算,不需要登录。
        * 2026-11-01:原来是 `/pricing` 克重计算器,现在工具多了(模型检查),
        * 导航位只留一个「工具」,具体清单在 `/tools` 里列。
        * 与「anchor」分开是因为两者语义不同:anchor 是首页内滚动,
@@ -247,6 +253,23 @@ export const STORE_NAV: readonly StoreNavItem[] = [
     labelEn: "Craft",
     kind: "anchor",
     href: "/#craft",
+  },
+  {
+    // 「打印」(2026-11-13)—— 工作室要求「顶部增加打印入口,进入 workbench
+    // 工具」。这是**工作室的主营入口**:导航里除了「作品」,用户最想点进去的
+    // 就是「把我的模型打印出来」。
+    //
+    // 它跟「工具」的区别 —— 「工具」是**工具中心**(一个索引页,列着工作台
+    // 和磁吸孔切割),「打印」是**直接进打印前工作台** `/tools/workbench`。
+    // 两个都留着:想逛工具清单的走「工具」,已经知道要打印的直接走「打印」。
+    //
+    // 老的三个地址(`/pricing` / `/tools/weight` / `/tools/model-check`)都 308
+    // 跳到 `/tools/workbench` —— 这一项指向的正是那个「活」的地址。
+    id: "print",
+    label: "打印",
+    labelEn: "Print",
+    kind: "route",
+    href: "/tools/workbench",
   },
   {
     id: "tools",

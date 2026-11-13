@@ -95,7 +95,7 @@ export function FeaturedProducts({
 
   return (
     <section id="all" className="bg-background py-16 lg:py-24 scroll-mt-16">
-      <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8">
+      <div className="atelier-container">
         {/* Header —— eyebrow + 衬线标题 + 两端的滚动按钮 */}
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6 mb-8 lg:mb-10">
           <div className="max-w-xl">

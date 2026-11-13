@@ -59,7 +59,7 @@ const steps = [
 export function HowItWorks() {
   return (
     <section id="how" className="bg-background py-16 lg:py-24 scroll-mt-16">
-      <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8">
+      <div className="atelier-container">
         {/* Header —— 与 occasion 色带同构:eyebrow + 衬线标题 + tagline,
             但字号留在 text-3xl/4xl(色带的 5xl/6xl 是整屏大标题的量级,
             收尾段不跟)。CraftGallery 同一档。 */}

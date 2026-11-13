@@ -199,50 +199,56 @@ export function CheckoutSuccessView({
 
   if (paymentStatus === "refunded") {
     return (
-      <div className="mx-auto max-w-[560px] px-4 sm:px-6 py-16 text-center">
-        <XCircle className="size-14 mx-auto text-muted-foreground" />
-        <h1 className="font-serif text-3xl mt-5 mb-2">已退款</h1>
-        <p className="text-sm text-muted-foreground mb-8">
-          订单号 {orderNo} —— 这笔订单已经退过款。
-        </p>
-        <Button asChild className="rounded-full px-7">
-          <Link href="/account/orders">我的订单</Link>
-        </Button>
+      <div className="atelier-container py-16 text-center">
+        <div className="atelier-narrow">
+          <XCircle className="size-14 mx-auto text-muted-foreground" />
+          <h1 className="font-serif text-3xl mt-5 mb-2">已退款</h1>
+          <p className="text-sm text-muted-foreground mb-8">
+            订单号 {orderNo} —— 这笔订单已经退过款。
+          </p>
+          <Button asChild className="rounded-full px-7">
+            <Link href="/account/orders">我的订单</Link>
+          </Button>
+        </div>
       </div>
     );
   }
 
   if (paymentStatus === "failed") {
     return (
-      <div className="mx-auto max-w-[560px] px-4 sm:px-6 py-16 text-center">
-        <XCircle className="size-14 mx-auto text-destructive" />
-        <h1 className="font-serif text-3xl mt-5 mb-2">支付失败</h1>
-        <p className="text-sm text-muted-foreground mb-8">
-          订单号 {orderNo} —— 这次没有扣款成功,可以在「我的订单」里重新支付。
-        </p>
-        <Button asChild className="rounded-full px-7">
-          <Link href="/account/orders">我的订单</Link>
-        </Button>
+      <div className="atelier-container py-16 text-center">
+        <div className="atelier-narrow">
+          <XCircle className="size-14 mx-auto text-destructive" />
+          <h1 className="font-serif text-3xl mt-5 mb-2">支付失败</h1>
+          <p className="text-sm text-muted-foreground mb-8">
+            订单号 {orderNo} —— 这次没有扣款成功,可以在「我的订单」里重新支付。
+          </p>
+          <Button asChild className="rounded-full px-7">
+            <Link href="/account/orders">我的订单</Link>
+          </Button>
+        </div>
       </div>
     );
   }
 
   if (paymentStatus === "paid" || status === "paid" || status === "fulfilled") {
     return (
-      <div className="mx-auto max-w-[560px] px-4 sm:px-6 py-16 text-center">
-        <CheckCircle2 className="size-14 mx-auto text-primary" />
-        <h1 className="font-serif text-3xl mt-5 mb-2">支付成功</h1>
-        <p className="text-sm text-muted-foreground mb-1">订单号 {orderNo}</p>
-        <p className="text-sm text-muted-foreground mb-8">
-          金额 {formatCents(totalCents)} —— 我们已经收到款,马上开始制作。
-        </p>
-        <div className="flex gap-3 justify-center">
-          <Button asChild className="rounded-full px-7">
-            <Link href="/products">继续逛</Link>
-          </Button>
-          <Button asChild variant="outline" className="rounded-full px-7">
-            <Link href="/account/orders">我的订单</Link>
-          </Button>
+      <div className="atelier-container py-16 text-center">
+        <div className="atelier-narrow">
+          <CheckCircle2 className="size-14 mx-auto text-primary" />
+          <h1 className="font-serif text-3xl mt-5 mb-2">支付成功</h1>
+          <p className="text-sm text-muted-foreground mb-1">订单号 {orderNo}</p>
+          <p className="text-sm text-muted-foreground mb-8">
+            金额 {formatCents(totalCents)} —— 我们已经收到款,马上开始制作。
+          </p>
+          <div className="flex gap-3 justify-center">
+            <Button asChild className="rounded-full px-7">
+              <Link href="/products">继续逛</Link>
+            </Button>
+            <Button asChild variant="outline" className="rounded-full px-7">
+              <Link href="/account/orders">我的订单</Link>
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -254,15 +260,17 @@ export function CheckoutSuccessView({
 
   if (status === "cancelled") {
     return (
-      <div className="mx-auto max-w-[560px] px-4 sm:px-6 py-16 text-center">
-        <XCircle className="size-14 mx-auto text-destructive" />
-        <h1 className="font-serif text-3xl mt-5 mb-2">订单已取消</h1>
-        <p className="text-sm text-muted-foreground mb-8">
-          订单号 {orderNo} —— 这次没有收到付款。
-        </p>
-        <Button asChild className="rounded-full px-7">
-          <Link href="/products">回到商店</Link>
-        </Button>
+      <div className="atelier-container py-16 text-center">
+        <div className="atelier-narrow">
+          <XCircle className="size-14 mx-auto text-destructive" />
+          <h1 className="font-serif text-3xl mt-5 mb-2">订单已取消</h1>
+          <p className="text-sm text-muted-foreground mb-8">
+            订单号 {orderNo} —— 这次没有收到付款。
+          </p>
+          <Button asChild className="rounded-full px-7">
+            <Link href="/products">回到商店</Link>
+          </Button>
+        </div>
       </div>
     );
   }
@@ -272,64 +280,66 @@ export function CheckoutSuccessView({
   /* ---------------------------------------------------------------------- */
 
   return (
-    <div className="mx-auto max-w-[560px] px-4 sm:px-6 py-16 text-center">
-      {gaveUp ? (
-        <>
-          <XCircle className="size-14 mx-auto text-muted-foreground" />
-          <h1 className="font-serif text-3xl mt-5 mb-2">还没收到付款</h1>
-          <p className="text-sm text-muted-foreground mb-8">
-            订单号 {orderNo} —— 支付可能没有完成,或者确认消息还没到。
-            {paymentUrl || paymentQrCodeUrl
-              ? "你可以重新支付这笔订单。"
-              : "请到「我的订单」里重新获取支付入口。"}
-          </p>
+    <div className="atelier-container py-16 text-center">
+      <div className="atelier-narrow">
+        {gaveUp ? (
+          <>
+            <XCircle className="size-14 mx-auto text-muted-foreground" />
+            <h1 className="font-serif text-3xl mt-5 mb-2">还没收到付款</h1>
+            <p className="text-sm text-muted-foreground mb-8">
+              订单号 {orderNo} —— 支付可能没有完成,或者确认消息还没到。
+              {paymentUrl || paymentQrCodeUrl
+                ? "你可以重新支付这笔订单。"
+                : "请到「我的订单」里重新获取支付入口。"}
+            </p>
 
-          {/* 微信那一支 —— 码还在,用户扫一下就行 */}
-          {paymentQrCodeUrl && (
-            <div className="mb-8 flex justify-center">
-              <PaymentQrCode
-                value={paymentQrCodeUrl}
-                size={200}
-                hint="用微信扫一扫,付款完成后这一页会自动更新"
-              />
-            </div>
-          )}
-
-          <div className="flex gap-3 justify-center">
-            {paymentUrl && (
-              <Button asChild className="rounded-full px-7">
-                <a href={paymentUrl}>重新支付</a>
-              </Button>
+            {/* 微信那一支 —— 码还在,用户扫一下就行 */}
+            {paymentQrCodeUrl && (
+              <div className="mb-8 flex justify-center">
+                <PaymentQrCode
+                  value={paymentQrCodeUrl}
+                  size={200}
+                  hint="用微信扫一扫,付款完成后这一页会自动更新"
+                />
+              </div>
             )}
-            <Button asChild variant="outline" className="rounded-full px-7">
-              <Link href="/account/orders">我的订单</Link>
-            </Button>
-          </div>
-        </>
-      ) : (
-        <>
-          <Loader2 className="size-14 mx-auto animate-spin text-muted-foreground" />
-          <h1 className="font-serif text-3xl mt-5 mb-2">正在确认支付…</h1>
-          <p className="text-sm text-muted-foreground mb-8">
-            订单号 {orderNo}
-            <br />
-            金额 {formatCents(totalCents)}
-            <br />
-            支付确认后会立刻显示,通常只要几秒。
-          </p>
 
-          {/* 微信那一支 —— 用户还没扫码,码得一直显示着 */}
-          {paymentQrCodeUrl && (
-            <div className="mb-8 flex justify-center">
-              <PaymentQrCode
-                value={paymentQrCodeUrl}
-                size={200}
-                hint="用微信扫一扫,付款完成后这一页会自动更新"
-              />
+            <div className="flex gap-3 justify-center">
+              {paymentUrl && (
+                <Button asChild className="rounded-full px-7">
+                  <a href={paymentUrl}>重新支付</a>
+                </Button>
+              )}
+              <Button asChild variant="outline" className="rounded-full px-7">
+                <Link href="/account/orders">我的订单</Link>
+              </Button>
             </div>
-          )}
-        </>
-      )}
+          </>
+        ) : (
+          <>
+            <Loader2 className="size-14 mx-auto animate-spin text-muted-foreground" />
+            <h1 className="font-serif text-3xl mt-5 mb-2">正在确认支付…</h1>
+            <p className="text-sm text-muted-foreground mb-8">
+              订单号 {orderNo}
+              <br />
+              金额 {formatCents(totalCents)}
+              <br />
+              支付确认后会立刻显示,通常只要几秒。
+            </p>
+
+            {/* 微信那一支 —— 用户还没扫码,码得一直显示着 */}
+            {paymentQrCodeUrl && (
+              <div className="mb-8 flex justify-center">
+                <PaymentQrCode
+                  value={paymentQrCodeUrl}
+                  size={200}
+                  hint="用微信扫一扫,付款完成后这一页会自动更新"
+                />
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

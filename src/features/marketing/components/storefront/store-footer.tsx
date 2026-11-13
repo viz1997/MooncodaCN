@@ -2,6 +2,8 @@
 
 import { Link } from "@/i18n/routing";
 
+import { ServiceContactDialog } from "./service-contact-dialog";
+
 /**
  * WJP 商店 Footer —— 1:1 移植自 atelier `store-footer.tsx`。
  *
@@ -27,6 +29,13 @@ import { Link } from "@/i18n/routing";
  * 「全部作品」的地址(2026-11-13 改):`/marketing/products` → **`/products`**。
  * 真作品集归位到 `/products`(那个地址原先被模板那套 6 件写死的演示数据
  * 占着,封面全是破图、不能下单)。旧地址 `/marketing/products` 留了 308 桩。
+ *
+ * 「客服」那一栏(2026-11-13 加的):工作室要求「底部增加客服联系方式,比如
+ * 点击后展示客服的微信二维码」⇒ 单独一栏,头一项是**客服微信**(点开弹
+ * 二维码,见 `service-contact-dialog.tsx`),另外两项是邮箱和在线工单。
+ *
+ * ⚠️ **二维码那一项不是 `footerLinks` 里的一行** —— 它是个**按钮**(弹窗的
+ * 触发器),不是链接。所以那一栏单独渲染,不混进 `footerLinks` 的结构里。
  */
 const footerLinks = [
   {
@@ -45,7 +54,6 @@ const footerLinks = [
       { label: "工作流程", href: "/#how" },
       { label: "工具中心", href: "/tools" },
       { label: "运费与交期", href: "/legal/shipping" },
-      { label: "联系客服", href: "/dashboard/support" },
     ],
   },
   {
@@ -77,10 +85,13 @@ const footerLinks = [
   },
 ];
 
-export function StoreFooter() {
+/** 客服邮箱 —— 跟 `src/config/site.ts` 的兜底地址一致 */
+const SERVICE_EMAIL = "support@mooncoda.com";
+
+export function StoreFooter({ serviceQrUrl }: { serviceQrUrl?: string }) {
   return (
     <footer className="mt-auto bg-background border-t">
-      <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8 py-12 lg:py-16">
+      <div className="atelier-container py-12 lg:py-16">
         <div className="grid gap-10 lg:grid-cols-12">
           {/* Brand */}
           <div className="lg:col-span-4">
@@ -94,7 +105,7 @@ export function StoreFooter() {
           </div>
 
           {/* Link columns */}
-          <div className="lg:col-span-8 grid grid-cols-2 sm:grid-cols-4 gap-8">
+          <div className="lg:col-span-8 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-8">
             {footerLinks.map((col) => (
               <div key={col.title}>
                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-foreground mb-4">
@@ -114,6 +125,34 @@ export function StoreFooter() {
                 </ul>
               </div>
             ))}
+
+            {/* 客服(2026-11-13)—— 头一项是弹二维码的按钮,不是链接 */}
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-foreground mb-4">
+                客服
+              </p>
+              <ul className="space-y-2.5">
+                <li>
+                  <ServiceContactDialog qrUrl={serviceQrUrl ?? ""} />
+                </li>
+                <li>
+                  <a
+                    href={`mailto:${SERVICE_EMAIL}`}
+                    className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    邮箱联系
+                  </a>
+                </li>
+                <li>
+                  <Link
+                    href="/dashboard/support"
+                    className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    在线工单
+                  </Link>
+                </li>
+              </ul>
+            </div>
           </div>
         </div>
 

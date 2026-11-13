@@ -22,6 +22,13 @@ export type AdminSiteSettingErrorCode =
   | "INVALID_URL"
   /** 是 URL,但不是 http(s) —— `javascript:` 那种 */
   | "NOT_HTTP"
+  /**
+   * **客服二维码那一项**的地址不合法(2026-11-13)
+   *
+   * 单独一个码 —— 后台那张表单有**两个长得一样的输入框**,只报一句
+   * 「地址不合法」的话,工作室不知道该改哪一个。
+   */
+  | "INVALID_QR_URL"
   /** 表还不存在 —— 迁移脚本没跑 */
   | "MIGRATION_MISSING"
   /** 其它失败 */
@@ -42,7 +49,7 @@ export interface AdminSiteSettingsView {
   /** 现在生效的地址 —— 空 = 入口不出现 */
   effectiveUrl: string;
   /** 生效值从哪儿来 */
-  source: "db" | "env" | "none";
+  source: "db" | "env" | "default" | "none";
   /** 存着的值不合法 —— 渲染时已经忽略了 */
   invalid: boolean;
   /** DB 里那一行的原始值 —— `null` = 没存过 */
@@ -53,4 +60,17 @@ export interface AdminSiteSettingsView {
   readError: string | null;
   /** 表还没建(迁移脚本没跑) */
   missingRelation: boolean;
+
+  /* ---- 客服微信二维码(2026-11-13)—— 跟上面那套是**两个独立的设置** ---- */
+
+  /** 现在生效的图片地址 —— 空 = 页脚不摆二维码 */
+  serviceQrUrl: string;
+  /** 生效值从哪儿来(`default` = 走 `/service/wechat-qr.png` 那条静态路径) */
+  serviceQrSource: "db" | "env" | "default" | "none";
+  /** 存着的值不合法 —— 渲染时已经忽略了 */
+  serviceQrInvalid: boolean;
+  /** DB 里那一行的原始值 —— `null` = 没存过 */
+  serviceQrDbValue: string | null;
+  /** 环境变量里的那个值(空 = 没配) */
+  serviceQrEnvValue: string;
 }

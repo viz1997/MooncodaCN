@@ -2377,36 +2377,50 @@
       "title": "Currently in effect",
       "sourceDb": "Configured here",
       "sourceEnv": "Environment variable fallback",
+      "sourceDefault": "Built-in default",
       "sourceNone": "Not configured",
       "effectiveUrl": "Address in effect",
       "envUrl": "Address in the environment variable",
       "empty": "(not set)",
       "invalid": "This address is not valid — it is treated as \"not set\", so the entry does not appear on the site.",
-      "readFailed": "Could not read the site settings"
+      "readFailed": "Could not read the site settings",
+      "storeTitle": "Overseas store (Shopify)",
+      "serviceTitle": "Customer service WeChat QR code"
     },
     "banner": {
       "envFallback": "Nothing has been saved here yet — the NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL environment variable is being used. That one is inlined at build time, so changing it needs a redeploy; saving it here does not.",
-      "notConfigured": "No address yet — there is no announcement bar and no navigation entry on the site. Fill in the address and both appear."
+      "notConfigured": "No address yet — there is no announcement bar and no navigation entry on the site. Fill in the address and both appear.",
+      "envFallbackQr": "Nothing has been saved here yet — the NEXT_PUBLIC_SERVICE_WECHAT_QR_URL environment variable is being used. That one is inlined at build time, so changing it needs a redeploy; saving it here does not.",
+      "defaultQr": "Nothing set yet — the built-in default image (/service/wechat-qr.png) is being used. Drop the QR image at public/service/wechat-qr.png and it works, or fill in a public R2 address below."
     },
     "form": {
       "title": "Shopify store address",
       "label": "Shopify store URL",
       "placeholder": "https://your-store.myshopify.com",
-      "help": "The customer-facing address of the Shopify store where overseas buyers place their orders.",
-      "extra": "Only http / https addresses are accepted. Saving it empty explicitly turns the entry off, even if the environment variable is still set."
+      "help": "The address of the overseas Shopify store — the announcement bar and the navigation entry both use it.",
+      "extra": "Only http / https addresses are accepted. Saving it empty explicitly turns the entry off, even if the environment variable is still set.",
+      "qrTitle": "Customer service WeChat QR code",
+      "serviceLabel": "Customer service WeChat QR code address",
+      "servicePlaceholder": "/service/wechat-qr.png",
+      "serviceHelp": "The QR code image shown when the customer service entry in the footer is opened.",
+      "serviceExtra": "A site-relative path (/service/wechat-qr.png) or an http / https address. Saving it empty explicitly turns it off (the footer shows no QR code).",
+      "saveNote": "Both are saved at once — if either one is invalid, neither is written."
     },
     "actions": {
       "save": "Save",
-      "reset": "Delete the row saved here (fall back to the environment variable)"
+      "reset": "Delete the row saved here (fall back to the environment variable)",
+      "resetQr": "Delete the row saved here (fall back to the default)"
     },
     "messages": {
       "loadFailed": "Could not load the site settings — check the server log",
       "saveSuccess": "Saved, effective immediately",
-      "resetSuccess": "Deleted the row saved here — the environment variable is back in charge"
+      "resetSuccess": "Deleted the row saved here — the environment variable is back in charge",
+      "resetQrSuccess": "Deleted the row saved here — the fallback is back in charge (environment variable / built-in default)"
     },
     "errors": {
       "INVALID_URL": "That address is not valid — only http / https addresses are accepted",
       "NOT_HTTP": "That address is not valid — only http / https addresses are accepted",
+      "INVALID_QR_URL": "That QR code address is not valid — only a site-relative path (/service/wechat-qr.png) or an http / https address is accepted",
       "MIGRATION_MISSING": "The site_setting table does not exist yet — run pnpm migrate:apply-site-setting",
       "SAVE_FAILED": "Save failed — check the server log"
     }
