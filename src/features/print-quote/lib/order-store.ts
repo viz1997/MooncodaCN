@@ -494,6 +494,8 @@ export function toUserPrintOrderDetail(
     contactName: row.contactName,
     contactEmail: row.contactEmail,
     contactPhone: row.contactPhone,
+    // 收货地址快照 —— 买家侧第一次渲染它(见 `quote-types.ts`)
+    shippingAddress: row.shippingAddress,
     note: row.note,
     locale: row.locale === "en" ? "en" : "zh",
   };

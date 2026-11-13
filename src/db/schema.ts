@@ -3575,3 +3575,175 @@ export const paymentSetting = pgTable("payment_setting", {
 
 export type PaymentSettingRow = typeof paymentSetting.$inferSelect;
 export type NewPaymentSettingRow = typeof paymentSetting.$inferInsert;
+
+/* -------------------------------------------------------------------------- */
+/*  物流                                                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 物流 —— 一个订单可以拆多个包裹(2026-11-13)
+ *
+ * 工作室的诉求就一句:**「东西寄出去了,买家知道」**。全库此前**零运单号列**
+ * —— 商城订单和打印工单都落了收货地址快照,但买家侧一处都没渲染过,后台也
+ * 没有任何地方能填「顺丰 SF1234」。
+ *
+ * ## 为什么物流**独立成表**,不塞进订单的 `status`
+ *
+ * 物流状态跟订单状态是**正交的两个维度**:
+ *
+ * - 退过款的单照样发货
+ * - 没付钱的单已经寄出
+ * - 打印件「生产完成但快递还没揽收」
+ *
+ * 这跟仓库已有的 `status` / `payment_status` 分列是同一个道理 ——
+ * `storefront_order.status` 说的是「这单走到哪一步」,`payment_status` 说的是
+ * 「钱到没到」,物流说的是「东西在哪」。三个维度各走各的。
+ *
+ * ## 状态用**小写**
+ *
+ * `payment_status`(`unpaid`/`paid`/`refunded`)、`delivery_tier`
+ * (`standard`/`express`/`urgent`)、`payment_channel`(`wechat`/`alipay`)全是
+ * 小写,新表跟着走。
+ *
+ * ⚠️ **跟 `print_order.status` 的 `SHIPPED`(大写)是两回事**:那个是「制作
+ * 进度」(打印件做到哪一步了),这个是「物流事实」(快递到哪了)。
+ *
+ * ## 为什么用 `text(..., { enum })` 而不是 `pgEnum`
+ *
+ * 物流状态是**外部概念**,将来大概率要加「已揽收」「派送中」。`text + enum`
+ * 加值只改 TS 一行,不用再写一次迁移脚本让工作室跑。仓库里 `payment_status` /
+ * `delivery_tier` / `order_kind` 都是这个路子。
+ *
+ * ## 迁移脚本
+ *
+ * `scripts/apply-shipment-schema.ts`(幂等,**不播种任何一行**)。
+ */
+export const shipment = pgTable(
+  "shipment",
+  {
+    id: text("id").primaryKey(),
+    /**
+     * 商城订单 / 打印工单
+     *
+     * 两张订单表的 id 不通用,所以物流行必须带这个维度才能定位到是哪一单。
+     */
+    orderKind: text("order_kind", {
+      enum: ["storefront", "print"],
+    }).notNull(),
+    /**
+     * 订单 id —— **不加外键**
+     *
+     * 它可能指 `storefront_order.id` 也可能指 `print_order.id`,加外键只能选
+     * 一张表,另一种就挂不上。归属校验靠**查询时带 `order_kind`**。
+     * (两张订单表都只有「取消」没有「删除」,孤儿行风险低。)
+     */
+    orderId: text("order_id").notNull(),
+    /**
+     * 第几个包裹 —— 一个订单可以拆多个包裹(补发 / 分开发)
+     *
+     * 第一个包裹 = 1。服务端在事务里算「现有最大 + 1」,客户端不传。
+     */
+    packageIndex: integer("package_index").notNull().default(1),
+    /** 物流状态 —— 小写,跟 `payment_status` 一个口径 */
+    status: text("status", {
+      enum: ["shipped", "delivered", "returned"],
+    }).notNull(),
+    /** 快递公司代码(清单在 `features/shipment/lib/carriers.ts`) */
+    shippingCompany: text("shipping_company").notNull(),
+    /** 选了「其它」时工作室自己填的名字(code = `other` 时才有值) */
+    shippingCompanyLabel: text("shipping_company_label"),
+    /** 运单号(入库前已归一化:全角→半角、去空白、转大写) */
+    trackingNumber: text("tracking_number").notNull(),
+    /** 备注 —— 异常原因 / 撤销原因 */
+    note: text("note"),
+    /**
+     * 发货时间 —— 建行那一刻定下,**回退不重置**
+     *
+     * 那是「实际寄出去」的时刻,跟状态回退无关。
+     */
+    shippedAt: timestamp("shipped_at").notNull().defaultNow(),
+    /** 签收时间(null = 还没签收) */
+    deliveredAt: timestamp("delivered_at"),
+    /** 异常 / 退回时间(null = 没发生过) */
+    returnedAt: timestamp("returned_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    // 查「这个订单的物流」—— 后台发货台 + 买家侧详情页都走它
+    index("shipment_order_idx").on(t.orderKind, t.orderId),
+    // 同一个订单里第 N 个包裹只能有一个 —— 并发点两次「发货」也不会裂成两条
+    uniqueIndex("shipment_order_package_uq").on(
+      t.orderKind,
+      t.orderId,
+      t.packageIndex
+    ),
+    // 发货台按状态筛
+    index("shipment_status_idx").on(t.status),
+  ]
+);
+
+export type ShipmentRow = typeof shipment.$inferSelect;
+export type NewShipmentRow = typeof shipment.$inferInsert;
+
+/**
+ * 物流时间线 —— 每次状态变更留一条(2026-11-13)
+ *
+ * ## 为什么是**行式**不是 jsonb 数组
+ *
+ * 跟 `print_order_event` 一个口径:时间线是**只追加**的,写的时候只 INSERT。
+ * jsonb 数组每次改状态都要「读出来 → 改 → 写回去」,两笔并发的状态变更会
+ * 互相覆盖。
+ *
+ * ## 系统句子不落库
+ *
+ * 库里只存**人工写的自由文本**(note)。「工作室把这单标成了已签收」由前端按
+ * (actor, from, to) 用 i18n 现场渲染 —— 库里不存需要翻译的字符串。
+ */
+export const shipmentEvent = pgTable(
+  "shipment_event",
+  {
+    id: text("id").primaryKey(),
+    shipmentId: text("shipment_id")
+      .notNull()
+      .references(() => shipment.id, { onDelete: "cascade" }),
+    /** 原状态;创建事件为 null */
+    fromStatus: text("from_status", {
+      enum: ["shipped", "delivered", "returned"],
+    }),
+    /** 新状态 */
+    toStatus: text("to_status", {
+      enum: ["shipped", "delivered", "returned"],
+    }).notNull(),
+    /** 谁改的 —— 一期只有后台和系统 */
+    actor: text("actor", { enum: ["admin", "system"] }).notNull(),
+    /** 人工备注;回退 / 异常时必填 */
+    note: text("note"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    // 时间线读取模式:WHERE shipment_id = ? ORDER BY created_at —— 一条索引全覆盖
+    index("shipment_event_shipment_created_idx").on(t.shipmentId, t.createdAt),
+  ]
+);
+
+export type ShipmentEventRow = typeof shipmentEvent.$inferSelect;
+export type NewShipmentEventRow = typeof shipmentEvent.$inferInsert;
+
+/**
+ * 物流的关系
+ *
+ * `shipment` **不跟订单建关系** —— 它可以挂在两种订单上,建关系就得选一张表,
+ * 另一种就挂不上(见上面 `orderId` 的注释)。查订单的物流靠
+ * `(order_kind, order_id)` 这对索引。
+ */
+export const shipmentRelations = relations(shipment, ({ many }) => ({
+  events: many(shipmentEvent),
+}));
+
+export const shipmentEventRelations = relations(shipmentEvent, ({ one }) => ({
+  shipment: one(shipment, {
+    fields: [shipmentEvent.shipmentId],
+    references: [shipment.id],
+  }),
+}));

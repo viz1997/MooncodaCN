@@ -37,6 +37,8 @@ import type {
   UserPrintOrderDetail,
 } from "@/features/print-quote/lib/quote-types";
 import { isLiveStatus } from "@/features/print-quote/lib/status-machine";
+import { shipmentFingerprint } from "@/features/shipment/lib/fingerprint";
+import type { ShipmentView } from "@/features/shipment/lib/types";
 
 /** 递减调度表(毫秒) */
 const POLL_SCHEDULE_MS: readonly number[] = [30_000, 20_000, 15_000, 10_000];
@@ -296,15 +298,26 @@ const DETAIL_INTERVAL_MS = 30_000;
 export type UsePrintOrderDetailPollingResult = {
   order: UserPrintOrderDetail;
   events: PrintOrderEventView[];
+  /** 物流 —— 一个工单可能有多个包裹 */
+  shipments: ShipmentView[];
   /** 立刻拉一次(取消工单成功后用) */
   refresh: () => Promise<void>;
 };
 
 /**
+ * 物流的指纹 —— **两个指纹都必须带它**(2026-11-13)
+ *
+ * 实现住在 `features/shipment/lib/fingerprint.ts` —— 商城订单详情页也用它,
+ * 两个 hook 各写一份迟早漂(一边带 `updatedAt` 一边不带 = 一边刷得出来
+ * 一边刷不出来)。这里再导出一次,是为了让「物流指纹」这件事只有一个入口。
+ */
+export { shipmentFingerprint };
+
+/**
  * 工单详情页的轮询
  *
- * 和列表页不同:这里要的不只是状态,还有**时间线**。所以轮询打的是
- * `GET /api/print-orders/[orderNo]`,一次把订单和时间线都拿回来 ——
+ * 和列表页不同:这里要的不只是状态,还有**时间线**和**物流**。所以轮询打的是
+ * `GET /api/print-orders/[orderNo]`,一次把订单、时间线、物流都拿回来 ——
  * 不用两个接口、也不用担心两者不同步。
  *
  * 节奏固定 30s:详情页是用户主动盯着看的页面,状态变化频率极低,
@@ -314,15 +327,20 @@ export type UsePrintOrderDetailPollingResult = {
  */
 export function usePrintOrderDetailPolling(
   orderNo: string,
-  initial: { order: UserPrintOrderDetail; events: PrintOrderEventView[] }
+  initial: {
+    order: UserPrintOrderDetail;
+    events: PrintOrderEventView[];
+    shipments: ShipmentView[];
+  }
 ): UsePrintOrderDetailPollingResult {
   const [order, setOrder] = useState<UserPrintOrderDetail>(initial.order);
   const [events, setEvents] = useState<PrintOrderEventView[]>(initial.events);
+  const [shipments, setShipments] = useState<ShipmentView[]>(initial.shipments);
 
   const aliveRef = useRef(true);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stoppedRef = useRef(false);
-  /** 指纹 —— 订单 + 时间线都没变就不 setState */
+  /** 指纹 —— 订单 + 时间线 + 物流都没变就不 setState */
   const fingerprintRef = useRef<string>("");
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -345,17 +363,20 @@ export function usePrintOrderDetailPolling(
       const body = (await res.json()) as {
         order?: UserPrintOrderDetail;
         events?: PrintOrderEventView[];
+        shipments?: ShipmentView[];
       };
       const nextOrder = body.order;
       const nextEvents = body.events ?? [];
+      const nextShipments = body.shipments ?? [];
       if (!nextOrder) return;
 
-      const fingerprint = `${nextOrder.orderNo}:${nextOrder.status}:${nextOrder.paymentStatus}:${nextOrder.updatedAt}:${nextEvents.length}:${nextEvents.map((e) => e.id).join(",")}`;
+      const fingerprint = `${nextOrder.orderNo}:${nextOrder.status}:${nextOrder.paymentStatus}:${nextOrder.updatedAt}:${nextEvents.length}:${nextEvents.map((e) => e.id).join(",")}:${shipmentFingerprint(nextShipments)}`;
       if (fingerprint === fingerprintRef.current) return;
       fingerprintRef.current = fingerprint;
 
       setOrder(nextOrder);
       setEvents(nextEvents);
+      setShipments(nextShipments);
     } catch (error) {
       console.error("[PrintOrder] 详情轮询失败:", error);
     }
@@ -404,12 +425,13 @@ export function usePrintOrderDetailPolling(
   // 都触发 —— 那会把轮询拉回来的新数据又覆盖回旧快照。
   const appliedInitialRef = useRef<string>("");
   useEffect(() => {
-    const fingerprint = `${initial.order.orderNo}:${initial.order.status}:${initial.order.paymentStatus}:${initial.order.updatedAt}:${initial.events.length}:${initial.events.map((e) => e.id).join(",")}`;
+    const fingerprint = `${initial.order.orderNo}:${initial.order.status}:${initial.order.paymentStatus}:${initial.order.updatedAt}:${initial.events.length}:${initial.events.map((e) => e.id).join(",")}:${shipmentFingerprint(initial.shipments)}`;
     if (fingerprint === appliedInitialRef.current) return;
     appliedInitialRef.current = fingerprint;
     setOrder(initial.order);
     setEvents(initial.events);
+    setShipments(initial.shipments);
   }, [initial]);
 
-  return { order, events, refresh };
+  return { order, events, shipments, refresh };
 }

@@ -3,12 +3,14 @@
 /**
  * 工单详情页 —— `/account/print-orders/[orderNo]`
  *
- * ## 这一页要回答四个问题
+ * ## 这一页要回答六个问题
  *
  *   1. 现在到哪一步了?   → 状态 chip + 时间线
  *   2. 当时按什么价收的? → 报价明细(服务端重算后落库的那个数)
  *   3. 模型是哪个?       → 模型文件信息
- *   4. 我留过什么话?     → 联系方式 + 下单留言
+ *   4. 寄到哪儿了?       → 收货地址快照
+ *   5. 怎么寄的?         → 物流(快递公司 + 运单号)
+ *   6. 我留过什么话?     → 联系方式 + 下单留言
  *
  * ## 状态是轮询来的,不是刷新来的
  *
@@ -52,21 +54,29 @@ import {
   AtelierPanel,
   AtelierSectionTitle,
 } from "@/features/shared/components/atelier-page";
+import {
+  ShipmentPanel,
+  ShippingAddressPanel,
+} from "@/features/shipment/components/shipment-panel";
+import type { ShipmentView } from "@/features/shipment/lib/types";
 import { Link } from "@/i18n/routing";
 
 export function PrintOrderDetailView({
   order: initialOrder,
   events: initialEvents,
+  shipments: initialShipments,
 }: {
   order: UserPrintOrderDetail;
   events: PrintOrderEventView[];
+  /** 物流 —— 一个工单可能有多个包裹(补发 / 分开发) */
+  shipments: ShipmentView[];
 }) {
   const t = useTranslations("PrintQuote");
   const format = useFormatter();
 
-  const { order, events, refresh } = usePrintOrderDetailPolling(
+  const { order, events, shipments, refresh } = usePrintOrderDetailPolling(
     initialOrder.orderNo,
-    { order: initialOrder, events: initialEvents }
+    { order: initialOrder, events: initialEvents, shipments: initialShipments }
   );
 
   const cancellable = isUserCancellable(order.status);
@@ -250,6 +260,12 @@ export function PrintOrderDetailView({
             />
           </dl>
         </AtelierPanel>
+
+        {/* 收货地址 —— 快照,落库了但以前买家侧一次都没渲染过 */}
+        <ShippingAddressPanel address={order.shippingAddress} />
+
+        {/* 物流 —— 工作室在后台填的快递公司 + 运单号 */}
+        <ShipmentPanel shipments={shipments} />
 
         {/* 联系方式 */}
         <AtelierPanel>

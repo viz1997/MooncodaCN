@@ -3972,6 +3972,222 @@ Print(`/cart`)/ Tools(`/tools`)/ `/dashboard`/ Contact Us(mailto)/ 工作室自�
 | `src/test/marketing/pure/international-store.test.ts` | 公告条 + 导航按钮**挂在唯一的那个 layout 上**(以前是两个)、地址从 layout 当 props 传下来 |
 | `src/test/marketing/pure/template-pages.test.ts` | 模板那三份法律 MDX 删了 / 模板那三个 i18n 命名空间删了 / **博客路由没了**(目录留着)/ 每一个 `/legal/…` 链接都有真实 MDX(两个语言) |
 
+### 物流一期:自建发货台 + 买家侧看得到运单号(2026-11-13)
+
+工作室问的是「**有没有成熟的物流管理方案设计**」。答案是有生态(聚水潭 / 旺店通 /
+店小秘这种 OMS,快递鸟 / 快递100 / 菜鸟这种开放平台),但**那些都不是这个仓库该接
+的东西** —— 本仓库是「自建或 Vercel + Neon」的 SaaS 底座,接一整套 OMS 会把部署
+形态和上游依赖都拖重,而工作室一天几十单,快递鸟那类按量计费的接口换不来对应的
+收益。
+
+工作室拍板:**「只需要完成一期就好」**。
+
+**一期的目标就一句话:工作室寄出去,买家看得见。**
+
+- 后台能填「快递公司 + 运单号」—— **新开一个集中的「发货台」页**,商城订单和
+  打印工单**摆在一张表里**
+- 物流状态覆盖**发货 + 签收 + 异常/退回**
+- 买家在**两处**看得见:打印工单详情页 + 商城订单详情页(新建),两处都顺带把
+  **收货地址**显示出来(数据今天就在库里,只是买家侧一次都没渲染过)
+- 物流状态是**独立的表**,不塞进订单的 `status`
+
+**明确不做**(二期再说):第三方物流对接(快递鸟 / 快递100 / 菜鸟 / 顺丰开放
+平台)、运费价表与运费计算引擎、快递轨迹查询、退货入库 / 售后流程、WMS / 库存
+扣减、多平台 OMS 对接、商城订单的完整后台管理页、商城订单的邮件通知。
+
+#### 为什么物流**独立成表**
+
+一个订单可能拆多个包裹(补发 / 分开发),订单表上堆 `shipping_company` /
+`tracking_number` 表达不了;而且**物流状态跟订单状态是正交的两个维度**(退过款的
+单照样发货、没付钱的单已经寄出、打印件「生产完成但没揽收」)—— 跟仓库已有的
+`status` / `payment_status` 分列是同一个道理。
+
+| 表 | 干什么 |
+|---|---|
+| `shipment` | 物流主记录。`order_kind`(`storefront` / `print`)+ `order_id` + `package_index` + 状态 + 快递公司 + 运单号 + 三个时间戳 |
+| `shipment_event` | 时间线 —— 每次状态变更留一条(`from_status` / `to_status` / `actor` / `note`) |
+
+- **不加外键** —— `order_id` 可能指 `storefront_order.id` 也可能指 `print_order.id`,
+  加外键只能选一张表,另一种就挂不上。归属校验靠**查询时带 `order_kind`**。
+  (跟 `coupon_redemption` 的 `order_kind` + `order_id` 一个路子。)
+- **状态用小写**(`shipped` / `delivered` / `returned`)—— 跟 `payment_status` /
+  `delivery_tier` / `payment_channel` 一样。**跟 `print_order.status` 的 `SHIPPED`
+  (大写)是两回事**:那个是「制作进度」,这个是「物流事实」。
+- **`text(..., { enum })` 不是 `pgEnum`** —— 物流状态是**外部概念**,将来大概率
+  要加「已揽收」「派送中」;`text + enum` 加值只改 TS 一行,不用再写一次迁移脚本
+  让工作室跑。
+- **唯一索引 `(order_kind, order_id, package_index)`** —— 并发点两次「发货」也
+  不会裂成两条。第一个包裹 = 1,服务端在事务里算「现有最大 + 1」,**客户端不传**。
+- **三个时间戳** —— `shipped_at` 建行时定下(**回退不重置**:那是「实际寄出去」的
+  时刻);`delivered_at` / `returned_at` 进入对应状态时写、离开时清空。
+
+#### 状态机:纯函数(`src/features/shipment/lib/transitions.ts`)
+
+**零 import**(只 import 类型)⇒ 能进 vitest `unit` project。形状照
+`src/features/print-quote/lib/status-machine.ts`(那三处都要用:后台 `<Select>`
+的选项、服务端的校验、买家侧的状态文案)。
+
+| 从 | 到 | 分类 | 备注 |
+|---|---|---|---|
+| —(创建) | `shipped` | — | 发货那一刻建行 |
+| `shipped` | `delivered` | forward | 不要求备注 |
+| `shipped` | `returned` | cancel | **要求备注**(退回 / 丢件得说清楚) |
+| `delivered` | `returned` | cancel | **要求备注**(买家说没收到) |
+| `returned` | `shipped` | backward | **要求备注**(撤销误标) |
+
+- **`delivered → shipped` 不允许** —— 签收之后不能「退回没签收」。
+- **同状态 = 不动**(`classifyShipmentTransition(from, from)` → null)—— 重复点
+  「保存」不刷时间线,也不报错(返 `{ok:true, changed:false}`)。
+- **`shipmentTransitionRequiresNote` = 分类是 `cancel` 或 `backward`**。
+- **物流没有终态** —— 每个状态都能纠正(签收后还能标异常、异常还能撤销)。跟
+  `print_order.status` 不同(那边 COMPLETED / CANCELLED 是死路),**别照抄
+  `isTerminalStatus`**。
+
+#### 快递公司:存 code,显示名走 i18n
+
+`src/features/shipment/lib/carriers.ts` —— 11 家固定清单(顺丰 / 京东 / 中通 /
+圆通 / 申通 / 韵达 / EMS / 邮政 / 极兔 / 德邦 + 「其它」)。
+
+- **存 code 不存显示名** —— 两个语言站显示同一个品牌名才好(「顺丰速运」/
+  「SF Express」走 i18n),而且同一家快递不会在库里裂成「顺丰」「顺丰速运」两种写法。
+- **留「其它」兜底** —— 工作室用清单外的快递时不能被卡住。选了 `other` **必须**填
+  `shippingCompanyLabel`(zod `superRefine` 校验)。
+- **运单号归一化**(`normalizeTrackingNumber`)三步:**全角 → 半角**(手机输入法打出来
+  的单号常是全角)→ **去所有空白**(快递员报号时中间常有空格)→ **转大写**(运单号
+  字母数字不区分大小写,统一大写少一类对不上的扯皮)。
+
+#### 后台「发货台」`/admin/shipments`
+
+**新开一页**,不改 `/admin/print-orders`,也不新建商城订单后台页 —— 一期只解决
+「寄出去了要能填单号」,不顺手造一整套商城订单管理。
+
+- **一行 = 一个订单**(不是一行一个包裹)—— 商城订单和打印工单**摆在一张表里**
+- **筛选**:顶部一个状态下拉(全部 / 待发货 / 已发货 / 已签收 / 异常退回)——
+  **就地筛选,不开弹窗**
+- **操作一律就地展开**(工作室口味),用 antd 的 `expandedRowRender`:
+  快递公司下拉 + 运单号 + 备注 → 提交;已有包裹的订单下面列出每个包裹,每个包裹
+  后面跟一个「改状态」下拉;底部一个「再加一个包裹」按钮
+- **视图**(`shipments-admin-view.tsx`)/ **展开面板**(`shipment-expand-panel.tsx`)
+  —— **没有 `<Modal>` / `<Dialog>` / `<Drawer>`**,单测守着这一条
+
+**action**(`src/features/shipment/admin/actions.ts`,`"use server"` + `adminAction`):
+
+- 返 **`{ ok: true, ... }` / `{ ok: false, code }`,不 throw**(照
+  `print-quote/admin/actions.ts` / `coupon/admin/actions.ts` 的方言 B)——
+  throw 会被 next-safe-action 糊成「服务器错误」,工作室根本不知道是哪儿错了
+- **七个错误码**:`ORDER_NOT_FOUND` / `SHIPMENT_NOT_FOUND` / `INVALID_TRANSITION` /
+  `NOTE_REQUIRED` / `INVALID_INPUT` / `MIGRATION_MISSING` / `SAVE_FAILED`。
+  `MIGRATION_MISSING` 来自 `describeDbError(error)` 认出 PG 的 `42P01`/`42703`
+  ⇒ **迁移脚本没跑的时候界面说人话,不是 500**
+- **视图模型和错误码联合类型住在 `src/features/shipment/admin/types.ts`** ——
+  **`"use server"` 文件不 re-export 类型**(Turbopack 会把类型 re-export 注册成
+  server action ⇒ 运行时 `ReferenceError` ⇒ 整页 500)
+- **下拉选项跟服务端校验是同一份状态机** —— 面板用
+  `allowedNextShipmentStatuses`,服务端用 `SHIPMENT_STATUSES`,**不许各写一份**
+- 保存完 `revalidatePath("/[locale]/admin/shipments", "page")` + **买家侧那一页**
+  (商城 `/[locale]/account/orders` / 工单 `/[locale]/account/print-orders`)
+
+#### 订单状态联动:只往前推一格,门槛很严
+
+| 订单 | 条件 | 改法 |
+|---|---|---|
+| 商城 `storefront_order` | `payment_status = "paid"` **且** `status = "paid"` | `status → "fulfilled"` |
+| 打印 `print_order` | 当前**不是**终态、**也不是** `SHIPPED` / `COMPLETED` | `status → "SHIPPED"` |
+| 打印 `print_order`(签收时) | `status = "SHIPPED"` | `status → "COMPLETED"` |
+
+**其它情况一律不动订单 status**(未收款、已取消、已经推进过了)。
+
+- **为什么商城那两列都要卡** —— 迟到的 `mark_paid` webhook
+  (`payments/lib/transitions.ts`)只跳过 `paymentStatus === "paid" / "refunded"` 和
+  `status === "cancelled"`,**不跳过 `fulfilled`** ⇒ 不卡 `payment_status` 的话,
+  一个「已发货但还没标收款」的单会被 webhook 写成 `paid`,**把 `fulfilled` 倒退回去**。
+  卡上之后,已付款的单 webhook 直接 skip,倒退不可能发生。
+- **`fulfilled` 是全仓第一个写它的人** —— 买家侧文案里它本来就是「已发货」,
+  但以前**没有任何一处写它**(死枚举值)。`order-payment.ts` 已经预留了
+  「`fulfilled` ⇒ 不再发付款入口」的守卫。
+- **打印工单复用 `transitionPrintOrderStatus()`** —— 它是**唯一的状态写入口**
+  (锁行 → 状态机 → 改状态 → **写时间线**,一个事务里)。自己写一条 UPDATE
+  就是当年被删掉的那条「后门」。复用它 ⇒ 时间线照旧有记录、邮件照旧发。
+- **联动是「尽力而为」,不是硬不变式** —— `transitionPrintOrderStatus()` 会抛
+  `PrintOrderTransitionError`,发货台**catch 掉它、记一条日志、继续**(物流记录
+  已经落库了,那是主记录;订单状态是派生信息)。**联动不必跟建发货单同事务**。
+- **签收 / 异常不联动商城订单 status** —— `fulfilled` 已是终点;签收了订单不一定
+  「完成」(可能还有售后)。
+- **通知**:打印工单侧复用现有 `notifyPrintOrderStatusChanged()`(邮件按**订单的
+  语言**发);**商城侧一期不主动发邮件**(仓库里没有商城订单的邮件基建)——
+  买家刷新页面就看得见。
+
+#### 买家侧:两处都显示
+
+| 页面 | 改什么 |
+|---|---|
+| `/account/print-orders/[orderNo]` | 加**「收货地址」**+**「物流」**两个面板(页面已存在,只加分区) |
+| `/account/orders/[orderNo]` | **新建**(以前商城订单买家侧**只有列表**,没有详情页) |
+
+- **两处共用同一份面板** —— `ShipmentPanel` / `ShippingAddressPanel` 在
+  `src/features/shipment/components/shipment-panel.tsx`,**组件自带 `AtelierPanel`
+  外壳**,调用方只管摆。两处显示的东西一模一样,写两份迟早漂。
+- **地址用 `formatAddressLine()`**(`src/features/address/types.ts`)—— **订单侧
+  一次都没调用过它**,买家侧第一次渲染地址快照,直接复用这个函数,别新写一份。
+- **用快照不用地址簿** —— 用户后来改了地址簿,历史订单的收货地址不该跟着变
+  (包裹已经按老地址寄出去了)。没有快照的老单摆「—」,不编一个地址出来。
+- **归属校验在数据层** —— `getUserStorefrontOrderByOrderNo` 的 WHERE 里带了
+  `user_id`,别人的单查出来是 null ⇒ **404,不是 403**(订单号可以枚举)。
+- **金额一个加法都不做** —— 每行都是服务端算好的数(`total_cents = subtotal −
+  discount − coupon_discount + shipping`),前端只做呈现。
+
+#### 轮询的指纹里**必须**含物流(最容易漏的一条)
+
+工作室在后台填单号是**外部写入** —— 买家这边订单状态一个字都没变。轮询回来的
+数据跟上一轮**完全一样** ⇒ 不 setState ⇒ 页面停在「还没发货」。**漏了物流这一段,
+功能看着「做完了」,实际上要用户手动刷新才看得见。**
+
+- **打印工单**:`use-print-order-polling.ts` 的**两个**指纹都要加物流 —— 详情轮询
+  的和 RSC 初始同步的
+- **商城订单**:`use-store-order-polling.ts`(新建,30s 一轮、`document.hidden` 时
+  不轮、401 停轮)轮询**现成的** `GET /api/store/orders/[orderNo]` —— 那个接口
+  **加一个 `shipments` 字段**(响应形状**只涨不破**,现有 4 处消费者忽略未知字段),
+  **不新开接口**
+- **指纹只有一份实现** —— `src/features/shipment/lib/fingerprint.ts` 的
+  `shipmentFingerprint()`,两个 hook 都 import 它 ⇒ **两处不可能漂**
+
+#### 模块布局(`src/features/shipment/`)
+
+```
+lib/
+├── types.ts            # 纯类型:ShipmentStatus / ShipmentView / ShipmentErrorCode / AdminShipmentRow
+├── transitions.ts      # 纯函数状态机(零 import)
+├── carriers.ts         # 快递公司清单 + 归一化(零 import)
+├── fingerprint.ts      # 轮询指纹(零 import)—— 两个 hook 共用
+├── shipment-store.ts   # 服务端:建单 / 改状态 / 查物流 / 查时间线 / 后台列表
+└── order-linkage.ts    # 发货 ⇒ 订单状态联动
+admin/
+├── types.ts            # 后台视图模型 + 错误码联合类型(**不在 "use server" 文件里**)
+├── actions.ts          # "use server" + adminAction,返 {ok:true} / {ok:false,code}
+└── components/
+    ├── shipments-admin-view.tsx   # 发货台(就地展开,不开弹窗)
+    └── shipment-expand-panel.tsx  # 展开区:发货表单 + 改状态
+components/
+└── shipment-panel.tsx  # 买家侧的物流面板 + 收货地址面板(两处共用)
+```
+
+#### 迁移脚本(**只写,不跑**)
+
+`scripts/apply-shipment-schema.ts`(幂等 / `--dry-run` / **不播种任何一行** ——
+跑完线上行为一个字节都不变)。**不代跑** —— 工作室的库由工作室自己执行。
+
+```bash
+pnpm migrate:apply-shipment   # = tsx scripts/apply-shipment-schema.ts
+```
+
+#### 行为由单测守住
+
+| 测试 | 守住什么 |
+|---|---|
+| `src/test/shipment/pure/shipment-transitions.test.ts` | 状态机(允许的迁移逐条对 / 不允许的返 null / 同状态不动 / `cancel` 与 `backward` 必写备注 / `shipped → delivered` 不要求备注 / **物流没有终态**)/ 清单(`other` 之外都是已知 code / 运单号归一化 **全角→半角 + 去空白 + 转大写**) |
+| `src/test/shipment/pure/shipment-admin.test.ts` | 路由在 `/admin/shipments` + 侧边栏登记了 / **不开弹窗**(视图和面板里没有 `<Modal>` / `<Dialog>` / `Drawer.`)/ action **不 throw** + 失败走 `{ok:false,code}` / `"use server"` 文件**没** re-export 类型 / **下拉选项跟服务端校验是同一份状态机** / 写完刷买家侧那一页 / 迁移脚本**不播种**、**不改订单表**、`--dry-run` 在、**同一订单同一包裹下标只有一个** / schema 两张表跟索引 / **中英文键集完全一致**(每个错误码、每家快递、三个状态都摆得上话) |
+| `src/test/shipment/pure/shipment-buyer.test.ts` | 工单详情页有「收货地址」+「物流」两个分区 / 商城订单详情页路由存在(404 不是 403)/ 列表能点进详情 / **地址快照这次渲染了** / **两处轮询指纹都含物流** + 指纹只有一份实现 / 两个接口的 `shipments` 字段在 / **金额一个加法都不做** |
+
 ## Coding Conventions
 
 - **Language:** Chinese comments throughout the codebase (code itself in English)

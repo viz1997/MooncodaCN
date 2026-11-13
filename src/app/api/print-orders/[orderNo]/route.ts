@@ -24,6 +24,10 @@ import {
   getUserPrintOrderByOrderNo,
   toUserPrintOrderDetail,
 } from "@/features/print-quote/lib/order-store";
+import {
+  listShipmentsForOrder,
+  toShipmentView,
+} from "@/features/shipment/lib/shipment-store";
 import { withApiLogging } from "@/lib/api-logger";
 import {
   checkRateLimit,
@@ -33,7 +37,7 @@ import {
 } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
-/** 两次读(订单 + 时间线),30s 够 */
+/** 三次读(订单 + 时间线 + 物流),30s 够 */
 export const maxDuration = 30;
 
 async function handle(
@@ -68,11 +72,15 @@ async function handle(
   }
 
   const events = await listPrintOrderEvents(row.id);
+  // 物流(2026-11-13)—— 一个工单可能有多个包裹(补发 / 分开发)
+  const shipments = await listShipmentsForOrder("print", row.id);
 
   return NextResponse.json(
     {
       order: toUserPrintOrderDetail(row),
       events: events.map(toPrintOrderEventView),
+      // 响应形状**只涨不破** —— 老消费者忽略这个字段,不影响它们
+      shipments: shipments.map(toShipmentView),
     },
     { headers: getRateLimitHeaders(rl) }
   );

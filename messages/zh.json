@@ -959,7 +959,8 @@
       "files": "文件管理",
       "coupons": "优惠码",
       "siteSettings": "站点设置",
-      "paymentSettings": "支付设置"
+      "paymentSettings": "支付设置",
+      "shipments": "发货管理"
     }
   },
   "AdminOrders": {
@@ -2527,6 +2528,194 @@
       "INVALID_QR_URL": "二维码地址不合法 —— 只接受站内路径(/service/wechat-qr.png)或 http / https 网址",
       "MIGRATION_MISSING": "site_setting 表还不存在 —— 先跑 pnpm migrate:apply-site-setting",
       "SAVE_FAILED": "保存失败 —— 看服务端日志"
+    }
+  },
+  "Shipment": {
+    "title": "物流",
+    "empty": "还没发货 —— 寄出后这里会显示快递公司和运单号",
+    "carrier": "快递公司",
+    "trackingNumber": "运单号",
+    "shippedAt": "发货",
+    "deliveredAt": "签收",
+    "returnedAt": "退回",
+    "note": "备注",
+    "packageIndex": "包裹 {index}",
+    "address": "收货地址",
+    "recipient": "收件人",
+    "phone": "电话",
+    "addressLine": "地址",
+    "carriers": {
+      "sf": "顺丰速运",
+      "jd": "京东物流",
+      "zto": "中通快递",
+      "yto": "圆通速递",
+      "sto": "申通快递",
+      "yunda": "韵达速递",
+      "ems": "中国邮政 EMS",
+      "post": "中国邮政",
+      "jtsd": "极兔速递",
+      "deppon": "德邦快递",
+      "other": "其它快递"
+    },
+    "status": {
+      "shipped": "已发货",
+      "delivered": "已签收",
+      "returned": "异常 / 退回"
+    }
+  },
+  "StorefrontOrder": {
+    "list": {
+      "title": "我的订单",
+      "description": "成品商城的订单。付款完成才开始制作,进度会在这里更新。",
+      "browse": "继续浏览",
+      "emptyTitle": "还没有订单",
+      "emptyDescription": "在商城里挑一个作品,付完款就能在这里看到进度。",
+      "emptyAction": "浏览作品",
+      "itemsCount": "共 {count} 件",
+      "more": " 等",
+      "viewDetail": "查看详情"
+    },
+    "detail": {
+      "back": "返回订单列表",
+      "title": "订单详情",
+      "placedAt": "下单时间",
+      "paidAt": "支付时间",
+      "items": "商品明细",
+      "amount": "金额",
+      "subtotal": "商品小计",
+      "discount": "数量折扣",
+      "coupon": "优惠码",
+      "shipping": "运费",
+      "total": "合计",
+      "note": "买家留言",
+      "refresh": "刷新"
+    },
+    "status": {
+      "unpaid": "待支付",
+      "paid": "已支付",
+      "fulfilled": "已发货",
+      "cancelled": "已取消"
+    },
+    "paymentStatus": {
+      "unpaid": "待支付",
+      "paid": "已支付",
+      "refunded": "已退款",
+      "failed": "支付失败"
+    },
+    "pay": {
+      "action": "去支付",
+      "failed": "生成支付入口失败,请稍后重试",
+      "noLink": "没有拿到支付入口",
+      "alreadyPaid": "这笔订单已经付过了",
+      "refunded": "这笔订单已退款",
+      "carrierMissing": "收款通道还没配好",
+      "notConfigured": "收款通道还没配好 —— 请联系工作室",
+      "orderNotFound": "订单不存在",
+      "authRequired": "请先登录",
+      "qrTitle": "微信扫码支付",
+      "qrHint": "用微信扫一扫,付款完成后这一行会自动变成「已支付」",
+      "openLink": "打开支付链接"
+    }
+  },
+  "AdminShipment": {
+    "title": "发货管理",
+    "subtitle": "商城订单和打印工单都在这一页 —— 填上快递公司和运单号,买家在订单详情页就看得见。",
+    "filter": {
+      "label": "筛选",
+      "all": "全部",
+      "pending": "待发货",
+      "shipped": "已发货",
+      "delivered": "已签收",
+      "returned": "异常 / 退回"
+    },
+    "table": {
+      "kindLabel": "类型",
+      "kind": {
+        "storefront": "商城",
+        "print": "打印"
+      },
+      "orderNo": "订单号",
+      "recipient": "收件人",
+      "address": "收货地址",
+      "summary": "摘要",
+      "amount": "金额",
+      "payment": "收款 / 订单状态",
+      "shipment": "物流",
+      "actions": "操作"
+    },
+    "payment": {
+      "unpaid": "未收款",
+      "paid": "已收款",
+      "refunded": "已退款",
+      "failed": "收款失败"
+    },
+    "orderStatus": {
+      "label": "订单状态",
+      "storefront": {
+        "unpaid": "待付款",
+        "paid": "已付款",
+        "fulfilled": "已发货",
+        "cancelled": "已取消"
+      },
+      "print": {
+        "PENDING": "待确认",
+        "CONFIRMED": "已确认",
+        "IN_PRODUCTION": "制作中",
+        "SHIPPED": "已发货",
+        "COMPLETED": "已完成",
+        "CANCELLED": "已取消"
+      }
+    },
+    "shipment": {
+      "none": "待发货"
+    },
+    "actions": {
+      "ship": "发货",
+      "manage": "物流",
+      "close": "收起",
+      "addPackage": "再加一个包裹",
+      "changeStatus": "改状态",
+      "submit": "提交",
+      "cancel": "取消"
+    },
+    "existing": {
+      "title": "已发出去的包裹"
+    },
+    "form": {
+      "firstPackageTitle": "填运单号 —— 提交即发货",
+      "newPackageTitle": "再加一个包裹",
+      "carrier": "快递公司",
+      "carrierOther": "快递公司名称",
+      "carrierOtherPlaceholder": "选了「其它」就得自己填名字",
+      "trackingNumber": "运单号",
+      "trackingPlaceholder": "例如 SF1234567890",
+      "note": "备注",
+      "notePlaceholder": "选填。改成「异常 / 退回」或撤销误标时必填。",
+      "submitShip": "提交发货",
+      "cancel": "取消",
+      "required": "这一项要填",
+      "noteRequiredHint": "这一条要写清楚原因"
+    },
+    "package": {
+      "index": "包裹 {index}"
+    },
+    "errors": {
+      "ORDER_NOT_FOUND": "订单不存在 —— 刷新一下页面再试",
+      "SHIPMENT_NOT_FOUND": "这个包裹不存在了 —— 刷新一下页面再试",
+      "INVALID_TRANSITION": "这个状态不能这么改",
+      "NOTE_REQUIRED": "这一条要写清楚原因",
+      "INVALID_INPUT": "填的内容不对",
+      "MIGRATION_MISSING": "shipment 表还不存在 —— 先跑 pnpm migrate:apply-shipment",
+      "SAVE_FAILED": "保存失败 —— 看服务端日志"
+    },
+    "messages": {
+      "loading": "正在读发货台…",
+      "loadFailed": "读发货台失败 —— 看服务端日志",
+      "empty": "还没有单子",
+      "count": "共 {count} 单",
+      "shipped": "已发货",
+      "statusUpdated": "状态已更新",
+      "validationFailed": "提交的内容有问题"
     }
   }
 }

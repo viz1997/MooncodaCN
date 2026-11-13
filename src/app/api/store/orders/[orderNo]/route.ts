@@ -13,12 +13,16 @@
 
 import { NextResponse } from "next/server";
 
+import {
+  listShipmentsForOrder,
+  toShipmentView,
+} from "@/features/shipment/lib/shipment-store";
 import { getUserStorefrontOrderByOrderNo } from "@/features/storefront/lib/orders";
 import { withApiLogging } from "@/lib/api-logger";
 import { getSessionFromRequest } from "@/lib/auth/request-session";
 
 export const runtime = "nodejs";
-/** 一次主键查询 */
+/** 两次读(订单 + 物流) */
 export const maxDuration = 15;
 
 async function handle(
@@ -46,6 +50,9 @@ async function handle(
 
   const order = result.order;
 
+  // 物流(2026-11-13)—— 一个订单可能有多个包裹(补发 / 分开发)
+  const shipments = await listShipmentsForOrder("storefront", order.id);
+
   return NextResponse.json({
     orderNo: order.orderNo,
     status: order.status,
@@ -63,6 +70,12 @@ async function handle(
     paymentChannel: order.paymentChannel,
     paidAt: order.paidAt ? order.paidAt.toISOString() : null,
     createdAt: order.createdAt.toISOString(),
+    /**
+     * 物流(2026-11-13)
+     *
+     * **响应形状只涨不破** —— 现有那几处消费者忽略这个字段,不受影响。
+     */
+    shipments: shipments.map(toShipmentView),
   });
 }
 

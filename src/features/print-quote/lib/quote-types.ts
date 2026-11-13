@@ -17,6 +17,7 @@
  *  - 克重 g
  */
 
+import type { ShippingAddressSnapshot } from "@/db/schema";
 import type { DeliveryRates, DeliveryTierId } from "./delivery-tier";
 
 /** 订单状态 —— 与 `print_order_status` enum 一一对应 */
@@ -357,6 +358,15 @@ export type UserPrintOrderDetail = UserPrintOrder & {
   contactName: string;
   contactEmail: string;
   contactPhone: string | null;
+  /**
+   * 收货地址快照 —— 落库了但买家侧一直没渲染过
+   *
+   * 地址是**下单那一刻的事实**:用户后来改地址簿,历史工单的收货地址不该
+   * 跟着变(活已经按老地址开工了)。所以订单存快照,不走地址簿。
+   *
+   * 老单可能没有这一列(下单时没填地址)—— 那时是 `null`,界面摆「—」。
+   */
+  shippingAddress: ShippingAddressSnapshot | null;
   /** 用户留言 */
   note: string | null;
   /** 这单的邮件通知语言 */

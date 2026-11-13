@@ -962,7 +962,8 @@
       "files": "Files",
       "coupons": "Coupons",
       "siteSettings": "Site Settings",
-      "paymentSettings": "Payment Settings"
+      "paymentSettings": "Payment Settings",
+      "shipments": "Shipping Desk"
     }
   },
   "AdminOrders": {
@@ -2530,6 +2531,194 @@
       "INVALID_QR_URL": "That QR code address is not valid — only a site-relative path (/service/wechat-qr.png) or an http / https address is accepted",
       "MIGRATION_MISSING": "The site_setting table does not exist yet — run pnpm migrate:apply-site-setting",
       "SAVE_FAILED": "Save failed — check the server log"
+    }
+  },
+  "Shipment": {
+    "title": "Shipping",
+    "empty": "Not shipped yet — the carrier and tracking number will show up here once it is on its way",
+    "carrier": "Carrier",
+    "trackingNumber": "Tracking number",
+    "shippedAt": "Shipped",
+    "deliveredAt": "Delivered",
+    "returnedAt": "Returned",
+    "note": "Note",
+    "packageIndex": "Package {index}",
+    "address": "Shipping address",
+    "recipient": "Recipient",
+    "phone": "Phone",
+    "addressLine": "Address",
+    "carriers": {
+      "sf": "SF Express",
+      "jd": "JD Logistics",
+      "zto": "ZTO Express",
+      "yto": "YTO Express",
+      "sto": "STO Express",
+      "yunda": "Yunda Express",
+      "ems": "China Post EMS",
+      "post": "China Post",
+      "jtsd": "J&T Express",
+      "deppon": "Deppon",
+      "other": "Other carrier"
+    },
+    "status": {
+      "shipped": "Shipped",
+      "delivered": "Delivered",
+      "returned": "Exception / returned"
+    }
+  },
+  "StorefrontOrder": {
+    "list": {
+      "title": "My orders",
+      "description": "Orders from the shop. Work starts once the payment lands, and progress shows up here.",
+      "browse": "Keep browsing",
+      "emptyTitle": "No orders yet",
+      "emptyDescription": "Pick something in the shop — once you pay, its progress shows up here.",
+      "emptyAction": "Browse the shop",
+      "itemsCount": "{count} item(s)",
+      "more": " and more",
+      "viewDetail": "View details"
+    },
+    "detail": {
+      "back": "Back to orders",
+      "title": "Order details",
+      "placedAt": "Placed",
+      "paidAt": "Paid",
+      "items": "Items",
+      "amount": "Amount",
+      "subtotal": "Subtotal",
+      "discount": "Quantity discount",
+      "coupon": "Coupon",
+      "shipping": "Shipping",
+      "total": "Total",
+      "note": "Buyer note",
+      "refresh": "Refresh"
+    },
+    "status": {
+      "unpaid": "Unpaid",
+      "paid": "Paid",
+      "fulfilled": "Shipped",
+      "cancelled": "Cancelled"
+    },
+    "paymentStatus": {
+      "unpaid": "Unpaid",
+      "paid": "Paid",
+      "refunded": "Refunded",
+      "failed": "Payment failed"
+    },
+    "pay": {
+      "action": "Pay now",
+      "failed": "Could not create a payment link — please try again",
+      "noLink": "No payment link came back",
+      "alreadyPaid": "This order is already paid",
+      "refunded": "This order was refunded",
+      "carrierMissing": "The payment channel is not set up yet",
+      "notConfigured": "The payment channel is not set up yet — please contact the studio",
+      "orderNotFound": "Order not found",
+      "authRequired": "Please sign in first",
+      "qrTitle": "Scan to pay with WeChat",
+      "qrHint": "Scan with WeChat — this row turns into \"Paid\" once the payment lands",
+      "openLink": "Open payment link"
+    }
+  },
+  "AdminShipment": {
+    "title": "Shipping Desk",
+    "subtitle": "Mall orders and print orders live on this one page — fill in the carrier and tracking number and the buyer sees them on the order detail page.",
+    "filter": {
+      "label": "Filter",
+      "all": "All",
+      "pending": "Not shipped",
+      "shipped": "Shipped",
+      "delivered": "Delivered",
+      "returned": "Exception / returned"
+    },
+    "table": {
+      "kindLabel": "Type",
+      "kind": {
+        "storefront": "Mall",
+        "print": "Print"
+      },
+      "orderNo": "Order no.",
+      "recipient": "Recipient",
+      "address": "Shipping address",
+      "summary": "Summary",
+      "amount": "Amount",
+      "payment": "Payment / order status",
+      "shipment": "Shipping",
+      "actions": "Actions"
+    },
+    "payment": {
+      "unpaid": "Not paid",
+      "paid": "Paid",
+      "refunded": "Refunded",
+      "failed": "Payment failed"
+    },
+    "orderStatus": {
+      "label": "Order status",
+      "storefront": {
+        "unpaid": "Awaiting payment",
+        "paid": "Paid",
+        "fulfilled": "Shipped",
+        "cancelled": "Cancelled"
+      },
+      "print": {
+        "PENDING": "Pending",
+        "CONFIRMED": "Confirmed",
+        "IN_PRODUCTION": "In production",
+        "SHIPPED": "Shipped",
+        "COMPLETED": "Completed",
+        "CANCELLED": "Cancelled"
+      }
+    },
+    "shipment": {
+      "none": "Not shipped"
+    },
+    "actions": {
+      "ship": "Ship",
+      "manage": "Shipping",
+      "close": "Close",
+      "addPackage": "Add another package",
+      "changeStatus": "Change status",
+      "submit": "Submit",
+      "cancel": "Cancel"
+    },
+    "existing": {
+      "title": "Packages already sent"
+    },
+    "form": {
+      "firstPackageTitle": "Fill in the tracking number — submitting ships it",
+      "newPackageTitle": "Add another package",
+      "carrier": "Carrier",
+      "carrierOther": "Carrier name",
+      "carrierOtherPlaceholder": "Pick \"Other carrier\" and type the name here",
+      "trackingNumber": "Tracking number",
+      "trackingPlaceholder": "For example SF1234567890",
+      "note": "Note",
+      "notePlaceholder": "Optional. Required when marking an exception / return or undoing a mistake.",
+      "submitShip": "Ship it",
+      "cancel": "Cancel",
+      "required": "This field is required",
+      "noteRequiredHint": "Say why on this one"
+    },
+    "package": {
+      "index": "Package {index}"
+    },
+    "errors": {
+      "ORDER_NOT_FOUND": "That order does not exist — refresh the page and try again",
+      "SHIPMENT_NOT_FOUND": "That package no longer exists — refresh the page and try again",
+      "INVALID_TRANSITION": "That status change is not allowed",
+      "NOTE_REQUIRED": "Say why on this one",
+      "INVALID_INPUT": "What you filled in does not add up",
+      "MIGRATION_MISSING": "The shipment table does not exist yet — run pnpm migrate:apply-shipment",
+      "SAVE_FAILED": "Save failed — check the server log"
+    },
+    "messages": {
+      "loading": "Reading the shipping desk…",
+      "loadFailed": "Could not read the shipping desk — check the server log",
+      "empty": "No orders yet",
+      "count": "{count} orders",
+      "shipped": "Shipped",
+      "statusUpdated": "Status updated",
+      "validationFailed": "What you submitted does not add up"
     }
   }
 }

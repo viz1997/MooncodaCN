@@ -9,6 +9,10 @@ import {
   getUserPrintOrderByOrderNo,
   toUserPrintOrderDetail,
 } from "@/features/print-quote/lib/order-store";
+import {
+  listShipmentsForOrder,
+  toShipmentView,
+} from "@/features/shipment/lib/shipment-store";
 import { getServerSession } from "@/lib/auth/server";
 
 export const dynamic = "force-dynamic";
@@ -57,11 +61,14 @@ export default async function AccountPrintOrderDetailPage({
   }
 
   const events = await listPrintOrderEvents(row.id);
+  // 物流(2026-11-13)—— 一个工单可能有多个包裹(补发 / 分开发)
+  const shipments = await listShipmentsForOrder("print", row.id);
 
   return (
     <PrintOrderDetailView
       order={toUserPrintOrderDetail(row)}
       events={events.map(toPrintOrderEventView)}
+      shipments={shipments.map(toShipmentView)}
     />
   );
 }

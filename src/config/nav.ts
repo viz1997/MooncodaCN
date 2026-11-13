@@ -21,6 +21,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Ticket,
+  Truck,
   Users,
   Wand2,
 } from "lucide-react";
@@ -250,6 +251,13 @@ export const adminNav: NavGroup[] = [
         title: "支付设置",
         href: "/admin/payment-settings",
         icon: CreditCard,
+      },
+      // 2026-11-13：后台发货台 —— 商城订单和打印工单**摆一张表**,填「快递
+      // 公司 + 运单号」,买家在订单详情页看得见物流。一期不接第三方物流平台。
+      {
+        title: "发货管理",
+        href: "/admin/shipments",
+        icon: Truck,
       },
       {
         title: "商品管理",

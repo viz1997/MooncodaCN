@@ -20,16 +20,20 @@
  * 未支付的订单给一个「去支付」按钮 —— 入口过期了(支付平台那边会换新的)
  * 或者结算时压根没生成入口(建单失败),都能在这里重新拿到。
  *
- * ## 微信是**扫码**,不是跳转
+ * 付款逻辑在 `useStoreOrderPayment` 里 —— **详情页共用同一份**(2026-11-13)。
+ * 逻辑在 hook、版式在各自组件:这一页的二维码是**整行下方展开**(满宽),
+ * 详情页的是**居中一块**。
  *
- * 别的通道点了按钮整页跳走;微信点了之后**留在原地**画一个二维码 ——
- * 用户扫完码,页面轮询订单状态,收到款就显示「已支付」。
+ * ## 「查看详情」的入口
+ *
+ * 整行不做 `Link` —— 行里本来就有「去支付」按钮,整行变链接会让按钮的点击
+ * 语义变糊(而且嵌套交互元素在 a11y 上是错的)。给一个明确的「查看详情」链接。
  */
 
 "use client";
 
 import { Loader2, ShoppingBag } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { PaymentQrCode } from "@/features/payments/components/payment-qr";
@@ -38,6 +42,11 @@ import {
   AtelierPageHeader,
   AtelierPageShell,
 } from "@/features/shared/components/atelier-page";
+import { useStoreOrderPayment } from "@/features/storefront/hooks/use-store-order-payment";
+import {
+  STORE_ORDER_PAYMENT_CHIP,
+  STORE_ORDER_STATUS_CHIP,
+} from "@/features/storefront/lib/order-status-ui";
 import { Link } from "@/i18n/routing";
 import { formatCents } from "@/lib/money";
 
@@ -58,56 +67,46 @@ export interface StoreOrderListItem {
   paymentChannel?: string | null;
 }
 
-/** 状态的显示文案 + 颜色 */
-const STATUS_META: Record<
-  StoreOrderListItem["status"],
-  { label: string; className: string }
-> = {
-  unpaid: { label: "待支付", className: "text-accent" },
-  paid: { label: "已支付", className: "text-primary" },
-  fulfilled: { label: "已发货", className: "text-primary" },
-  cancelled: { label: "已取消", className: "text-muted-foreground" },
-};
-
-/** 支付状态里那些「订单状态表达不了」的情况 */
-const PAYMENT_META: Record<
-  Extract<
-    StoreOrderListItem["paymentStatus"],
-    "refunded" | "failed" | "unpaid"
-  >,
-  { label: string; className: string }
-> = {
-  refunded: { label: "已退款", className: "text-muted-foreground" },
-  failed: { label: "支付失败", className: "text-destructive" },
-  unpaid: { label: "待支付", className: "text-accent" },
-};
-
 /**
  * 显示哪个标签 —— **支付状态优先**
  *
  * 一单退了款,订单状态还是「已支付」(单子还在),但用户要看到的是「已退款」。
  * 反过来一单支付失败了,订单状态是「未支付」,但文案该说「支付失败」。
+ *
+ * 返回的是**完整的 i18n 键**(`status.paid` / `paymentStatus.refunded`)——
+ * 两套状态是两套文案,只回一个裸值的话,调用方分不清该去哪个命名空间里找。
+ *
+ * 徽章的配色跟详情页共用一份(`order-status-ui.ts`) —— 两处各写一套颜色,
+ * 改一次颜色只改一处,两个页面就长得不一样了。
  */
-function resolveOrderMeta(order: StoreOrderListItem): {
-  label: string;
+function resolveOrderChip(order: StoreOrderListItem): {
+  key: string;
   className: string;
 } {
   if (order.paymentStatus !== "paid") {
-    return PAYMENT_META[order.paymentStatus];
+    return {
+      key: `paymentStatus.${order.paymentStatus}`,
+      className: STORE_ORDER_PAYMENT_CHIP[order.paymentStatus],
+    };
   }
-  return STATUS_META[order.status];
+  return {
+    key: `status.${order.status}`,
+    className: STORE_ORDER_STATUS_CHIP[order.status],
+  };
 }
 
 export function StoreOrderList({ orders }: { orders: StoreOrderListItem[] }) {
+  const t = useTranslations("StorefrontOrder");
+
   if (orders.length === 0) {
     return (
       <AtelierEmptyState
         icon={ShoppingBag}
-        title="还没有订单"
-        description="在商城里挑一个作品,付完款就能在这里看到进度。"
+        title={t("list.emptyTitle")}
+        description={t("list.emptyDescription")}
         action={
           <Button asChild className="rounded-full px-7">
-            <Link href="/">浏览作品</Link>
+            <Link href="/">{t("list.emptyAction")}</Link>
           </Button>
         }
       />
@@ -117,11 +116,11 @@ export function StoreOrderList({ orders }: { orders: StoreOrderListItem[] }) {
   return (
     <AtelierPageShell>
       <AtelierPageHeader
-        title="我的订单"
-        description="成品商城的订单。付款完成才开始制作,进度会在这里更新。"
+        title={t("list.title")}
+        description={t("list.description")}
         action={
           <Button asChild variant="ghost" size="sm" className="rounded-full">
-            <Link href="/">继续浏览</Link>
+            <Link href="/">{t("list.browse")}</Link>
           </Button>
         }
       />
@@ -136,86 +135,11 @@ export function StoreOrderList({ orders }: { orders: StoreOrderListItem[] }) {
 }
 
 function OrderRow({ order }: { order: StoreOrderListItem }) {
-  const meta = resolveOrderMeta(order);
-  const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
-  /** 微信扫码的二维码内容 —— 非 null 时页面留在原地画码 */
-  const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const t = useTranslations("StorefrontOrder");
+  const chip = resolveOrderChip(order);
+  const payment = useStoreOrderPayment(order.orderNo);
 
-  const handlePay = async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(
-        `/api/store/orders/${encodeURIComponent(order.orderNo)}/payment-link`,
-        { method: "POST", credentials: "include" }
-      );
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(body?.message ?? "生成支付入口失败");
-        setIsLoading(false);
-        return;
-      }
-      // 微信 Native —— 扫码,页面留在原地
-      if (body.paymentQrCodeUrl) {
-        setQrCodeUrl(body.paymentQrCodeUrl);
-        setIsLoading(false);
-        return;
-      }
-      setPaymentUrl(body.paymentUrl ?? null);
-      if (body.paymentUrl) {
-        window.location.href = body.paymentUrl;
-        return;
-      }
-      setError("没有拿到支付入口");
-      setIsLoading(false);
-    } catch {
-      setError("生成支付入口失败");
-      setIsLoading(false);
-    }
-  };
-
-  /**
-   * 扫完码之后轮询收款状态
-   *
-   * 微信的回调到本仓库有几秒延迟。列表页不轮询的话用户得手动刷新 ——
-   * 扫完码盯着「待支付」不动,体验很差。
-   */
-  useEffect(() => {
-    if (!qrCodeUrl) return;
-
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const res = await fetch(
-          `/api/store/orders/${encodeURIComponent(order.orderNo)}`,
-          { cache: "no-store", headers: { Accept: "application/json" } }
-        );
-        if (!res.ok) return;
-        const body = await res.json();
-        if (
-          body?.paymentStatus === "paid" ||
-          body?.status === "paid" ||
-          body?.status === "fulfilled"
-        ) {
-          if (!cancelled) window.location.reload();
-        }
-      } catch {
-        // 网络抖一下 —— 下一轮再试
-      }
-    };
-
-    void tick();
-    const timer = setInterval(() => {
-      void tick();
-    }, 3000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [qrCodeUrl, order.orderNo]);
+  const payable = order.paymentStatus === "unpaid" && order.status === "unpaid";
 
   return (
     <li className="flex flex-wrap gap-4 py-6">
@@ -235,11 +159,12 @@ function OrderRow({ order }: { order: StoreOrderListItem }) {
           <div className="min-w-0">
             <p className="font-serif text-base leading-tight">
               {order.titles.join(" · ") || order.orderNo}
-              {order.itemCount > order.titles.length ? " 等" : ""}
+              {order.itemCount > order.titles.length ? t("list.more") : ""}
             </p>
             <div className="mt-1 space-y-0.5">
               <p className="text-[11px] text-muted-foreground">
-                {order.orderNo} · 共 {order.itemCount} 件
+                {order.orderNo} ·{" "}
+                {t("list.itemsCount", { count: order.itemCount })}
               </p>
               <p className="text-[11px] text-muted-foreground">
                 {new Date(order.createdAt).toLocaleString("zh-CN")}
@@ -248,52 +173,65 @@ function OrderRow({ order }: { order: StoreOrderListItem }) {
           </div>
 
           <span
-            className={`shrink-0 rounded-full border border-border px-2.5 py-0.5 text-[11px] ${meta.className}`}
+            className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] ring-1 ring-inset ${chip.className}`}
           >
-            {meta.label}
+            {t(chip.key)}
           </span>
         </div>
 
-        {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+        {payment.error ? (
+          <p className="mt-2 text-xs text-destructive">{payment.error}</p>
+        ) : null}
 
-        <div className="mt-4 flex items-end justify-between gap-4">
+        <div className="mt-4 flex flex-wrap items-end justify-between gap-4">
           <p className="font-serif text-xl">{formatCents(order.totalCents)}</p>
 
-          {order.paymentStatus === "unpaid" && order.status === "unpaid" && (
-            <Button
-              size="sm"
-              className="rounded-full"
-              onClick={handlePay}
-              disabled={isLoading}
-              type="button"
-            >
-              {isLoading && <Loader2 className="size-3.5 animate-spin" />}
-              去支付
+          <div className="flex items-center gap-2">
+            {/* 详情入口 —— 物流 / 收货地址 / 金额明细都在那一页 */}
+            <Button asChild size="sm" variant="ghost" className="rounded-full">
+              <Link href={`/account/orders/${order.orderNo}`}>
+                {t("list.viewDetail")}
+              </Link>
             </Button>
-          )}
+
+            {payable ? (
+              <Button
+                size="sm"
+                className="rounded-full"
+                onClick={() => void payment.startPayment()}
+                disabled={payment.isLoading}
+                type="button"
+              >
+                {payment.isLoading ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : null}
+                {t("pay.action")}
+              </Button>
+            ) : null}
+          </div>
         </div>
 
-        {paymentUrl && (
+        {payment.paymentUrl ? (
           <a
-            href={paymentUrl}
+            href={payment.paymentUrl}
             className="mt-2 block text-xs underline text-muted-foreground"
           >
-            打开支付链接
+            {t("pay.openLink")}
           </a>
-        )}
+        ) : null}
       </div>
 
       {/* 微信扫码 —— 整行下方展开,画完码用户扫就行 */}
-      {qrCodeUrl && (
+      {payment.qrCodeUrl ? (
         <div className="w-full shrink-0 border-t border-border pt-4 flex flex-col items-center">
-          <p className="font-serif text-base mb-3">微信扫码支付</p>
+          <p className="font-serif text-base mb-3">{t("pay.qrTitle")}</p>
           <PaymentQrCode
-            value={qrCodeUrl}
+            value={payment.qrCodeUrl}
             size={200}
-            hint="用微信扫一扫,付款完成后这一行会自动变成「已支付」"
+            hint={t("pay.qrHint")}
           />
         </div>
-      )}
+      ) : null}
     </li>
   );
 }
