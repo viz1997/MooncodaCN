@@ -31,6 +31,13 @@ import { useCallback, useEffect, useState } from "react";
  */
 const ERROR_CODE_KEYS: Record<string, string> = {
   ALREADY_PAID: "pay.alreadyPaid",
+  /**
+   * 「支付宝那边说付了、我们核不上」(2026-11-14)
+   *
+   * 这一档**不能**落回 `pay.failed` —— 那句「生成支付入口失败,请稍后重试」
+   * 会引导用户**再付一次**(钱可能已经到了)。
+   */
+  PAYMENT_UNVERIFIED: "pay.unverified",
   ORDER_REFUNDED: "pay.refunded",
   CARRIER_MISSING: "pay.carrierMissing",
   PAYMENT_NOT_CONFIGURED: "pay.notConfigured",

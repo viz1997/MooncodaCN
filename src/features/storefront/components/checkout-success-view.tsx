@@ -27,7 +27,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Loader2, XCircle } from "lucide-react";
+import { CheckCircle2, Loader2, TriangleAlert, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -46,6 +46,20 @@ const HIDDEN_INTERVAL_MS = 15_000;
 
 type OrderStatus = "unpaid" | "paid" | "fulfilled" | "cancelled";
 type OrderPaymentStatus = "unpaid" | "paid" | "refunded" | "failed";
+
+/**
+ * 主动查单的结论(2026-11-14)
+ *
+ * `reportedPaid` = 「支付宝那边**说**这笔已经付款成功,但我们核对不上」
+ * (公钥不对 / 金额对不上)⇒ **买家不许再付一次**。
+ */
+interface ReconcileConclusion {
+  paid: boolean;
+  reportedPaid: boolean;
+  settled: boolean;
+  code: string;
+  message: string;
+}
 
 export function CheckoutSuccessView({
   orderNo,
@@ -74,6 +88,18 @@ export function CheckoutSuccessView({
   );
   const [totalCents, setTotalCents] = useState(initialTotalCents);
   const [gaveUp, setGaveUp] = useState(false);
+  /**
+   * 「支付宝那边说付了、我们核不上」(2026-11-14)
+   *
+   * 为真 ⇒ 这一页**不许**给「重新支付」按钮 —— 那条链接的 `out_trade_no`
+   * 已经付过了,点它只会拿到支付宝的「该订单已付款(TRADE_HAS_SUCCESS)」,
+   * **死循环**(线上真踩过:`SO-20261114-137332`)。
+   *
+   * 同时**继续轮询** —— 工作室把公钥修好之后,下一轮就会变成「支付成功」。
+   */
+  const [reportedPaid, setReportedPaid] = useState(false);
+  /** 查单给的人话 —— 摆在 ⚠ 面板里 */
+  const [reconcileMessage, setReconcileMessage] = useState<string | null>(null);
 
   const aliveRef = useRef(true);
   const attemptRef = useRef(0);
@@ -131,6 +157,7 @@ export function CheckoutSuccessView({
         const body = (await res.json()) as {
           status?: OrderStatus;
           paymentStatus?: OrderPaymentStatus;
+          reconcile?: ReconcileConclusion | null;
         };
         if (cancelled) return;
         if (typeof body.status === "string") {
@@ -138,6 +165,11 @@ export function CheckoutSuccessView({
         }
         if (typeof body.paymentStatus === "string") {
           setPaymentStatus(body.paymentStatus);
+        }
+        // 「支付宝说付了、我们核不上」⇒ 撤掉「重新支付」按钮
+        if (body.reconcile?.reportedPaid) {
+          setReportedPaid(true);
+          setReconcileMessage(body.reconcile.message ?? null);
         }
       } catch {
         // 查单挂了 —— 下面的轮询还在,不影响
@@ -199,6 +231,7 @@ export function CheckoutSuccessView({
             totalCents?: number;
             paymentUrl?: string | null;
             paymentQrCodeUrl?: string | null;
+            reconcile?: ReconcileConclusion | null;
           };
           if (typeof body.status === "string") {
             setStatus(body.status);
@@ -214,6 +247,11 @@ export function CheckoutSuccessView({
           }
           if (body.paymentQrCodeUrl !== undefined) {
             setPaymentQrCodeUrl(body.paymentQrCodeUrl);
+          }
+          // 「支付宝说付了、我们核不上」⇒ 撤掉「重新支付」按钮(2026-11-14)
+          if (body.reconcile?.reportedPaid) {
+            setReportedPaid(true);
+            setReconcileMessage(body.reconcile.message ?? null);
           }
           if (
             (body.status && body.status !== "unpaid") ||
@@ -339,7 +377,42 @@ export function CheckoutSuccessView({
   return (
     <div className="atelier-container py-16 text-center">
       <div className="atelier-narrow">
-        {gaveUp ? (
+        {reportedPaid ? (
+          /* ------------------------------------------------------------------ */
+          /*  支付宝说付了,我们核不上(2026-11-14)                             */
+          /* ------------------------------------------------------------------ */
+          <>
+            <TriangleAlert className="size-14 mx-auto text-amber-600" />
+            <h1 className="font-serif text-3xl mt-5 mb-2">
+              支付宝那边显示已经付款成功
+            </h1>
+            <p className="text-sm text-muted-foreground mb-2">
+              订单号 {orderNo}
+              <br />
+              金额 {formatCents(totalCents)}
+            </p>
+            <p className="text-sm text-muted-foreground mb-8">
+              我们这边还在核对这笔付款(不影响你 —— 请不要重复付款,
+              工作室会人工确认)。
+            </p>
+
+            {/* 查单给的人话 —— 工作室那边看日志时能对上 */}
+            {reconcileMessage && (
+              <p className="mb-8 rounded-lg bg-amber-50 px-4 py-3 text-left text-xs text-amber-900">
+                {reconcileMessage}
+              </p>
+            )}
+
+            {/* ⚠️ **不给「重新支付」** —— 那条链接的 out_trade_no 已经付过了,
+                点它只会拿到支付宝的「该订单已付款(TRADE_HAS_SUCCESS)」,
+                死循环(线上真踩过:SO-20261114-137332)。 */}
+            <div className="flex gap-3 justify-center">
+              <Button asChild variant="outline" className="rounded-full px-7">
+                <Link href="/account/orders">我的订单</Link>
+              </Button>
+            </div>
+          </>
+        ) : gaveUp ? (
           <>
             <XCircle className="size-14 mx-auto text-muted-foreground" />
             <h1 className="font-serif text-3xl mt-5 mb-2">还没收到付款</h1>

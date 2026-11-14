@@ -111,6 +111,33 @@ export function CheckoutPaymentPanel({
       }
 
       // 订单建好了但没有付款入口 —— 给出订单号,让用户去订单页重取
+      //
+      // ⚠️ **「这一单被挡住了」要单独说**(2026-11-14)
+      //
+      // `ALREADY_PAID` / `PAYMENT_UNVERIFIED` / `ORDER_REFUNDED` 意思是
+      // **钱已经发生了**(付过了 / 支付宝说付了但我们核不上 / 退过了)。
+      // 说成「支付入口生成失败,请重新获取」⇒ 用户点进去再付一次 ⇒
+      // **收两次钱**(线上真踩过:`SO-20261114-137332`)。
+      if (body?.paymentBlocked === "ALREADY_PAID") {
+        setPayError(
+          "这笔订单已经付款成功,不用重复支付。请到「我的订单」里查看。"
+        );
+        setIsPaying(false);
+        return;
+      }
+      if (body?.paymentBlocked === "PAYMENT_UNVERIFIED") {
+        setPayError(
+          "支付宝那边显示这笔已经付款成功,我们还在核对 —— 请不要重复付款,工作室会人工确认。"
+        );
+        setIsPaying(false);
+        return;
+      }
+      if (body?.paymentBlocked === "ORDER_REFUNDED") {
+        setPayError("这笔订单已经退过款了。详情请到「我的订单」里查看。");
+        setIsPaying(false);
+        return;
+      }
+
       // 两种失败,两种说法(见 checkout.ts 的 classifyPaymentIssue):
       // 「收款通道没配好」重试没用,让他去找工作室;「这次调用挂了」重试就能好
       setPayError(

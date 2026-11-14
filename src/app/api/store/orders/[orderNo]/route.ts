@@ -52,6 +52,22 @@ async function handle(
 
   let order = result.order;
 
+  /**
+   * 主动查单的结论(2026-11-14)
+   *
+   * null = 这一轮**没查**(节流挡掉了 / 不是支付宝那一支 / 已经终态)。
+   *
+   * `reportedPaid` = 「支付宝那边**说**这笔已经付款成功,但我们核对不上」
+   * (公钥不对 / 金额对不上)⇒ 界面**必须**撤掉「重新支付」按钮。
+   */
+  let reconcile: {
+    paid: boolean;
+    reportedPaid: boolean;
+    settled: boolean;
+    code: string;
+    message: string;
+  } | null = null;
+
   // ---- 主动查单兜底(2026-11-14)----
   //
   // 异步通知丢了的话,订单会永远停在 `unpaid` —— 用户盯着「正在确认支付…」
@@ -65,10 +81,17 @@ async function handle(
     claimReconcileSlot(order.orderNo, Date.now())
   ) {
     try {
-      await reconcileStorefrontOrderPayment({
+      const outcome = await reconcileStorefrontOrderPayment({
         order,
         items: result.items,
       });
+      reconcile = {
+        paid: outcome.paid,
+        reportedPaid: outcome.reportedPaid,
+        settled: outcome.settled,
+        code: outcome.code,
+        message: outcome.message,
+      };
       // 重读 —— 落库之后状态变了,响应里要给**新**的那个
       const fresh = await getUserStorefrontOrderByOrderNo(user.id, orderNo);
       if (fresh) order = fresh.order;
@@ -90,7 +113,18 @@ async function handle(
     paymentStatus: order.paymentStatus,
     totalCents: order.totalCents,
     currency: order.currency,
-    paymentUrl: order.paymentUrl,
+    /**
+     * 付款跳转地址
+     *
+     * ⚠️ **「支付宝说付了、我们核不上」的时候这一项一律给 null**(2026-11-14)
+     * —— `order.paymentUrl` 里存的是**建单时**那条链接,它的 `out_trade_no`
+     * 已经付过了。买家点它 ⇒ 支付宝回「该订单已付款(TRADE_HAS_SUCCESS)」⇒
+     * **死循环**(线上真踩过:`SO-20261114-137332`)。
+     *
+     * ⇒ 宁可**不给**链接(界面换成「请不要重复付款」那句话),也不给一条
+     * 一定会把买家带回原点的路。
+     */
+    paymentUrl: reconcile?.reportedPaid ? null : order.paymentUrl,
     /**
      * 微信扫码的二维码内容(2026-11-05)
      *
@@ -107,6 +141,17 @@ async function handle(
      * **响应形状只涨不破** —— 现有那几处消费者忽略这个字段,不受影响。
      */
     shipments: shipments.map(toShipmentView),
+    /**
+     * 主动查单的结论(2026-11-14)
+     *
+     * null = 这一轮没查(节流挡掉了 / 不是支付宝 / 已经终态)。
+     *
+     * `reportedPaid` = 「支付宝那边**说**这笔已经付款成功,但我们核对不上」
+     * ⇒ 界面**必须**撤掉「重新支付」按钮,换成一句「请不要重复付款」。
+     *
+     * **响应形状只涨不破** —— 现有那几处消费者忽略这个字段,不受影响。
+     */
+    reconcile,
   });
 }
 

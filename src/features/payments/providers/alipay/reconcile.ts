@@ -8,15 +8,15 @@
  * - `notify_url` 配错 / 指向本地地址 / 域名换过 → 支付宝推不到
  * - 通知验签失败(支付宝公钥贴错 / 不是同一个沙箱应用)→ 回 401,支付宝
  *   重投 8 次之后放弃
- * - `app_id` 对不上 → 代码回 `success`(认不出来的单号不算错误)⇒ 支付宝
+ * - `app_id` 对不上 → 代码回 `success`(认不出来的单号不是错误)⇒ 支付宝
  *   **不再重投**
  *
  * ⇒ 结果都是**钱到了、订单永远是 `unpaid`**。用户盯着「正在确认支付…」转圈
  * 到超时,工作室那边看到的是一张没付的单。
  *
  * ⇒ 这一条路是**我们自己拿订单号去问支付宝**:查单请求用**应用私钥**签
- * (支付宝认),响应���**支付宝公钥**验(这才可信)—— 跟同步回跳带回来的参数
- * 不能信是同一个道理。
+ * (支付宝认),响应**支付宝公钥**验(这才可信)—— 跟同步回跳带回来的参数
+ * 不能信是一个道理。
  *
  * ## 幂等
  *
@@ -28,7 +28,16 @@
  *
  * `getAlipayConfigs()` 给**两个模式**的配置(当前模式那一份排在前面)——
  * 拨开关的瞬间可能有**在途付款**:切到沙箱时,一笔**正式**订单的通知到了。
- * 另一套验不过就跳过,���只是多试一次,**不放松任何校验**。
+ * 另一套验不过就跳过,只是多试一次,**不放松任何校验**。
+ *
+ * ## 失败原因要挑「最该说给人听」的那条(2026-11-14)
+ *
+ * 原来全部试完都失败时,一律返回 `query_failed` + 最后一次的消息 ——
+ * 工作室看到的永远是笼统的一句「支付宝查单没查成」,而真相可能是
+ * 「支付宝公钥贴错了」(线上真踩过:`SO-20261114-137332` 查单永远
+ * `signature_invalid` ⇒ 订单永远 `unpaid` ⇒ 买家以为没付、再付一次)。
+ *
+ * ⇒ 每一套凭据的失败都**按严重度打分**,最后挑分最高的那条报出去。
  */
 
 import { amountStringToCents } from "@/features/payments/lib/money";
@@ -39,12 +48,61 @@ import { queryTradeByOrderNo } from "./query";
 import {
   type AlipayReconcileCode,
   decideAlipayReconcile,
+  rankAlipayReconcileFailure,
 } from "./reconcile-rules";
+
+/**
+ * 一次查单尝试 —— **每一套凭据一条**
+ *
+ * ## 为什么要有它
+ *
+ * 判定层给的是**结论**(`code` / `message`),但工作室要修的时候需要的是
+ * **原始事实**:支付宝到底回了什么?签名验过没有?我打的是哪个网关?
+ *
+ * 没有这些,工作室只能看到一句「支付宝查单没查成」—— 而真相往往是
+ * 「公钥贴错了」或者「APPID 跟私钥不是一套」(线上真踩过:
+ * `SO-20261114-137332` 查单永远 `signature_invalid`)。
+ *
+ * ⇒ 每一套凭据(沙箱 + 正式)都留一条,**原样**给工作室看。
+ *
+ * ⚠️ **不含任何密钥** —— 只有网关地址和支付宝回的那些字段。
+ */
+export interface AlipayQueryAttempt {
+  /** 这一套凭据是**沙箱**还是**正式** */
+  sandbox: boolean;
+  /** 打的哪个网关(工作室对着它去支付宝后台对) */
+  gateway: string;
+  /** 查到了吗(`code === "10000"`) */
+  ok: boolean;
+  /** 响应的签名验过了吗 —— **`false` = 公钥不对** */
+  verified: boolean;
+  /** 支付宝回的 `code`(`10000` = 成功) */
+  code: string | null;
+  /** 支付宝回的 `sub_code`(`ACQ.TRADE_NOT_EXIST` = 还没付) */
+  subCode: string | null;
+  /** 交易状态(`TRADE_SUCCESS` / `WAIT_BUYER_PAY` / …) */
+  tradeStatus: string | null;
+  /** 支付宝记的实付金额(**元**字符串) */
+  totalAmount: string | null;
+  /** 支付宝的订单号 */
+  tradeNo: string | null;
+  /** 支付宝自己给的话(`sub_msg` / `msg`) */
+  message: string | null;
+  /** 这一套凭据**整个挂了**(网络 / 上游)—— 有值就说明压根没拿到支付宝的回应 */
+  error: string | null;
+}
 
 /** 一次对账的结果 */
 export interface AlipayReconcileOutcome {
-  /** 支付宝说这笔已经付成功了(验签 + 金额都对得上) */
+  /** 「我们核对过这笔已经付成功了」(验签过了 + 金额对得上) */
   paid: boolean;
+  /**
+   * 「支付宝那边**说**这笔已经付款成功了」
+   *
+   * 跟 `paid` **正交** —— 为真但 `paid` 为假,意思是「支付宝说付了,但我们
+   * 核对不上(公钥不对 / 金额对不上)」。⇒ **用户不许再付一次**。
+   */
+  reportedPaid: boolean;
   /** 有没有真的落库 */
   settled: boolean;
   /** 原因码 */
@@ -53,6 +111,12 @@ export interface AlipayReconcileOutcome {
   message: string;
   /** 支付宝的订单号(查到了才有) */
   tradeNo: string | null;
+  /**
+   * 每一套凭据的**原始事实** —— 给工作室看的
+   *
+   * 空数组 = 一套凭据都没试成(通道压根没配好)。
+   */
+  attempts: AlipayQueryAttempt[];
 }
 
 /**
@@ -84,10 +148,12 @@ export async function reconcileAlipayPayment(params: {
     });
     return {
       paid: true,
+      reportedPaid: true,
       settled: false,
       code: decision.code,
       message: decision.message,
       tradeNo: null,
+      attempts: [],
     };
   }
 
@@ -96,24 +162,78 @@ export async function reconcileAlipayPayment(params: {
   if (configs.length === 0) {
     return {
       paid: false,
+      reportedPaid: false,
       settled: false,
       code: "not_configured",
       message: "支付宝通道没配好 —— 查不了单",
       tradeNo: null,
+      attempts: [],
     };
   }
 
   // ---- 逐套凭据试 ----
   let lastFailure = "";
+  let lastFailureCode: AlipayReconcileCode = "query_failed";
+  /** 目前记下的那条失败的严重度 */
+  let bestRank = -1;
+  /** 有没有哪一套凭据说「这笔已经付过了」 */
+  let reportedPaid = false;
+  /** 「已付但核不上」那一档的人话 */
+  let reportedPaidMessage: string | null = null;
+  /** 每一套凭据的原始事实 —— 给工作室看的 */
+  const attempts: AlipayQueryAttempt[] = [];
+
+  /** 记一条失败 —— **只留更严重的**那条 */
+  const rememberFailure = (
+    code: AlipayReconcileCode,
+    message: string
+  ): void => {
+    const rank = rankAlipayReconcileFailure(code);
+    if (rank <= bestRank) return;
+    bestRank = rank;
+    lastFailureCode = code;
+    lastFailure = message;
+  };
+
   for (const config of configs) {
     let result: Awaited<ReturnType<typeof queryTradeByOrderNo>>;
     try {
       result = await queryTradeByOrderNo(orderNo, config);
     } catch (error) {
       // 这一次调用挂了(网络 / 上游)—— 换下一套凭据再试
-      lastFailure = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      attempts.push({
+        sandbox: config.sandbox,
+        gateway: config.gateway,
+        ok: false,
+        verified: false,
+        code: null,
+        subCode: null,
+        tradeStatus: null,
+        totalAmount: null,
+        tradeNo: null,
+        message: null,
+        error: errorMessage,
+      });
+      rememberFailure("query_failed", errorMessage);
       continue;
     }
+
+    // 这一套凭据的原始事实 —— 原样记下来
+    attempts.push({
+      sandbox: config.sandbox,
+      gateway: config.gateway,
+      ok: result.ok,
+      verified: result.verified,
+      code: result.code,
+      subCode: result.subCode,
+      tradeStatus: result.tradeStatus,
+      totalAmount: result.totalAmount,
+      tradeNo: result.tradeNo,
+      message: result.message,
+      error: null,
+    });
 
     // 支付宝给的实付金额是**元字符串** —— 转成分,跟订单应付同一口径
     let paidAmountCents: number | null = null;
@@ -133,13 +253,17 @@ export async function reconcileAlipayPayment(params: {
       paidAmountCents,
       expectedAmountCents,
       alreadyPaid: false,
+      // 支付宝自己的话**原样带下去** —— 判定层要靠 `sub_code` 分
+      // 「查不到」和「请求被拒」
+      queryCode: result.code,
+      querySubCode: result.subCode,
+      queryMessage: result.message,
     });
 
-    // 查得到但不是付款成功 / 验签不过 —— 换下一套凭据再试
-    // (可能是另一套沙箱应用收的钱)
-    if (!decision.shouldSettle && result.ok && decision.code !== "not_paid") {
-      lastFailure = decision.message;
-      continue;
+    // 「支付宝说付过了」—— 记下来,哪怕这套凭据没验过
+    if (decision.reportedPaid) {
+      reportedPaid = true;
+      reportedPaidMessage = decision.message;
     }
 
     // ---- 该落库了 ----
@@ -152,12 +276,14 @@ export async function reconcileAlipayPayment(params: {
       });
       return {
         paid: true,
+        reportedPaid: true,
         settled: settled.changed,
         code: decision.code,
         message: settled.changed
           ? "主动查单确认已付款,订单已标为已支付"
           : "主动查单确认已付款(订单已经是已支付状态)",
         tradeNo: result.tradeNo,
+        attempts,
       };
     }
 
@@ -168,22 +294,37 @@ export async function reconcileAlipayPayment(params: {
     if (result.ok && result.verified) {
       return {
         paid: false,
+        reportedPaid: decision.reportedPaid,
         settled: false,
         code: decision.code,
         message: decision.message,
         tradeNo: result.tradeNo,
+        attempts,
       };
     }
 
-    lastFailure = decision.message;
+    // ---- 这一套没成 ----
+    //
+    // 记下来 —— 但**只留最严重的那条**(见 `rankAlipayReconcileFailure`)。
+    // 换下一套凭据再试。
+    rememberFailure(decision.code, decision.message);
   }
 
   // ---- 全部都没查成 ----
+  //
+  // 报**最严重的那条**,不是笼统的「查单没查成」——
+  // 工作室要能一眼看出「是公钥不对」还是「是用户还没付」。
   return {
     paid: false,
+    reportedPaid,
     settled: false,
-    code: "query_failed",
-    message: lastFailure || "支付宝查单没查成",
+    code: lastFailureCode,
+    message: reportedPaid
+      ? (reportedPaidMessage ??
+        lastFailure ??
+        "支付宝那边说付过了,但我们核对不上")
+      : lastFailure || "支付宝查单没查成",
     tradeNo: null,
+    attempts,
   };
 }

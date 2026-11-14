@@ -113,6 +113,8 @@ import { findProductById } from "./mock-catalog";
 import { ensureStorefrontOrderPaymentLink } from "./order-payment";
 import {
   classifyPaymentIssue,
+  paymentBlockedFromLinkCode,
+  type StorefrontPaymentBlocked,
   type StorefrontPaymentIssue,
 } from "./payment-issue";
 import {
@@ -204,9 +206,26 @@ export interface CheckoutSuccess {
    *   这种重试是有意义的。
    */
   paymentIssue: StorefrontPaymentIssue | null;
+  /**
+   * 这一单**被挡住**了(2026-11-14)
+   *
+   * null = 没被挡(入口拿到了,或者只是入口没生成出来 —— 那是 `paymentIssue`)。
+   *
+   * 非 null 时 `paymentUrl` / `paymentQrCodeUrl` 一定是 null,**而且界面不许
+   * 给「重新支付」**:
+   *
+   * - `ALREADY_PAID` —— 钱到了,别再付
+   * - `PAYMENT_UNVERIFIED` —— 支付宝**说**付了、我们核不上 ⇒ **别再付**,
+   *   工作室人工确认
+   * - `ORDER_REFUNDED` —— 已经退过款
+   *
+   * ⚠️ **跟 `paymentIssue` 正交,别合并** —— 「支付失败」这句话在这里是错的,
+   * 而且危险:它引导用户去重试一件已经付过的事。
+   */
+  paymentBlocked: StorefrontPaymentBlocked | null;
 }
 
-export type { StorefrontPaymentIssue };
+export type { StorefrontPaymentBlocked, StorefrontPaymentIssue };
 export { classifyPaymentIssue };
 
 export type CheckoutErrorCode =
@@ -974,6 +993,8 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
     totalCents,
     currency: PRICE_CURRENCY,
     paymentIssue,
+    // 新建的这一单刚建好 —— 钱还没到,没有被挡住
+    paymentBlocked: null,
   };
 }
 
@@ -1008,6 +1029,15 @@ async function reusePendingOrder(
     reusable.items
   );
 
+  /**
+   * 「这一单被挡住了」—— 钱已经发生了(2026-11-14)
+   *
+   * `ALREADY_PAID` / `PAYMENT_UNVERIFIED` / `ORDER_REFUNDED` 三个码**不是**
+   * 「付款入口没生成出来」⇒ **不能**归成 `PAYMENT_FAILED` ——
+   * 「支付失败」这句话会引导用户去**再付一次**,而这一单的钱可能已经到了。
+   */
+  const blocked = link.ok ? null : paymentBlockedFromLinkCode(link.code);
+
   return {
     orderNo: reusable.order.orderNo,
     paymentUrl: link.ok ? link.paymentUrl : null,
@@ -1026,5 +1056,7 @@ async function reusePendingOrder(
       : link.code === "PAYMENT_NOT_CONFIGURED"
         ? "PAYMENT_NOT_CONFIGURED"
         : "PAYMENT_FAILED",
+    // 「这一单不许再付了」—— 跟 `paymentIssue` **正交**(见 `payment-issue.ts`)
+    paymentBlocked: blocked,
   };
 }

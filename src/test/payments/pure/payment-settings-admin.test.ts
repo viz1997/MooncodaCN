@@ -400,6 +400,128 @@ describe("支付设置:测试单", () => {
   });
 });
 
+describe("支付设置:查单自检(2026-11-14)", () => {
+  it("action 在,走 adminAction", () => {
+    const src = read(ACTIONS);
+    expect(src).toContain("adminReconcileStorefrontOrderAction");
+    expect(src).toMatch(/withPaymentAction\(\s*"reconcile"\s*\)/);
+  });
+
+  it("查不到订单 / 调用整个挂了 ⇒ `{ok:false, code}`,**不 throw**", () => {
+    // throw 会被 next-safe-action 糊成「服务器错误」—— 工作室根本不知道是
+    // 「单号打错了」还是「支付宝挂了」。
+    const src = read(ACTIONS);
+    expect(src).toContain('code: "RECONCILE_ORDER_NOT_FOUND"');
+    expect(src).toContain('code: "RECONCILE_FAILED"');
+  });
+
+  it("**「查出来不是这一档」也算成功** —— 结论 ≠ 这次调用挂了", () => {
+    // 「签名验不过」「还没付」是**结论**(重试没用),不是「这次调用挂了」。
+    // 走 `ok:false` ⇒ 界面会说「请稍后重试」⇒ 工作室会一直点。
+    const src = read(ACTIONS);
+    // 判定层的结果原样带出来(code / paid / reportedPaid / settled)
+    expect(src).toContain("code: outcome.code");
+    expect(src).toContain("paid: outcome.paid");
+    expect(src).toContain("reportedPaid: outcome.reportedPaid");
+    expect(src).toContain("settled: outcome.settled");
+    // 原始事实也带出来(支付宝到底回了什么)
+    expect(src).toContain("attempts: outcome.attempts");
+    expect(src).toContain("tradeNo: outcome.tradeNo");
+  });
+
+  it("查完真的把订单标成已支付 ⇒ 刷买家侧那一页", () => {
+    const src = read(ACTIONS);
+    expect(src).toContain("reconcileStorefrontOrderPayment");
+    expect(src).toMatch(
+      /if\s*\(outcome\.settled\)[\s\S]{0,200}?revalidatePath\(/
+    );
+  });
+
+  it("后台**不带** user_id 过滤 —— 查的是自己家的单", () => {
+    // 用户侧那个 `getUserStorefrontOrderByOrderNo` 带 `user_id` ⇒ 后台用它
+    // 永远查不到工作室自己的单。
+    const src = read(ACTIONS);
+    expect(src).toContain("getStorefrontOrderByOrderNoForAdmin");
+  });
+
+  it("**就地展开,不开弹窗**(工作室的口味)", () => {
+    const src = stripComments(read(VIEW));
+    expect(src).not.toContain("<Modal");
+    expect(src).not.toContain("<Dialog");
+    expect(src).not.toContain("Drawer.");
+    // 查单那一块是页面上的一段,不是一个弹窗
+    expect(src).toContain('t("reconcile.title")');
+  });
+
+  it("界面把**原始事实**摆出来(工作室排查要的就是这些)", () => {
+    // 支付宝回了什么 + 验签过没过 + 打的哪个网关
+    const src = read(VIEW);
+    expect(src).toContain("reconcile.codeLabel");
+    expect(src).toContain("reconcile.subCodeLabel");
+    expect(src).toContain("reconcile.tradeStatusLabel");
+    expect(src).toContain("reconcile.totalAmountLabel");
+    expect(src).toContain("reconcile.gatewayLabel");
+    expect(src).toContain("reconcile.verifiedOk");
+    expect(src).toContain("reconcile.verifiedBad");
+  });
+
+  it("「支付宝说付了」跟「我们核上了」是**两个徽标**", () => {
+    // 合在一起的话,工作室会以为「支付宝说付了」= 「钱到账了」⇒ 可能直接发货。
+    const src = read(VIEW);
+    expect(src).toContain("reconcile.paidTag");
+    expect(src).toContain("reconcile.reportedPaidTag");
+    expect(src).toContain("reconcile.settledTag");
+  });
+
+  it("中英文键集完全一致(reconcile 命名空间)", () => {
+    const zh = messages("zh").AdminPaymentSettings as {
+      reconcile: Record<string, unknown>;
+    };
+    const en = messages("en").AdminPaymentSettings as {
+      reconcile: Record<string, unknown>;
+    };
+    const leaves = (obj: Record<string, unknown>, prefix = ""): string[] =>
+      Object.keys(obj).flatMap((key) => {
+        const value = obj[key];
+        const path = prefix ? `${prefix}.${key}` : key;
+        if (value && typeof value === "object" && !Array.isArray(value)) {
+          return leaves(value as Record<string, unknown>, path);
+        }
+        return [path];
+      });
+    expect(leaves(zh.reconcile).sort()).toEqual(leaves(en.reconcile).sort());
+  });
+
+  it("**十个判定码**两种语言都摆得上话", () => {
+    // `AlipayReconcileCode` 那一组 —— 每一个都要有人话,不然工作室看到
+    // 一个 `signature_invalid` 不知道该干嘛。
+    const zh = messages("zh").AdminPaymentSettings as {
+      reconcile: { code: Record<string, unknown> };
+    };
+    const en = messages("en").AdminPaymentSettings as {
+      reconcile: { code: Record<string, unknown> };
+    };
+    for (const code of [
+      "already_paid",
+      "not_found",
+      "query_rejected",
+      "signature_invalid",
+      "not_paid",
+      "amount_mismatch",
+      "settled",
+      "not_configured",
+      "query_failed",
+      "skipped",
+    ]) {
+      expect(zh.reconcile.code[code], `zh 缺 ${code}`).toBeTruthy();
+      expect(en.reconcile.code[code], `en 缺 ${code}`).toBeTruthy();
+    }
+    expect(Object.keys(en.reconcile.code).sort()).toEqual(
+      Object.keys(zh.reconcile.code).sort()
+    );
+  });
+});
+
 describe("支付设置:字段清单只有一份", () => {
   it("表单 / 缺字段诊断 / 写入全靠 `FieldGroup` 那一份", () => {
     const src = read(ACTIONS);
@@ -538,7 +660,7 @@ describe("支付设置:i18n", () => {
     );
   });
 
-  it("十个错误码两种语言都摆得上话", () => {
+  it("十二个错误码两种语言都摆得上话", () => {
     const zh = messages("zh").AdminPaymentSettings as {
       errors: Record<string, unknown>;
     };
@@ -556,10 +678,17 @@ describe("支付设置:i18n", () => {
       "TEST_MODE_INVALID",
       "TEST_NEEDS_PRODUCTION_CONFIRM",
       "TEST_PROVIDER_FAILED",
+      // 查单自检那一条路(2026-11-14 加的)
+      "RECONCILE_ORDER_NOT_FOUND",
+      "RECONCILE_FAILED",
     ]) {
       expect(zh.errors[code], `zh 缺 ${code}`).toBeTruthy();
       expect(en.errors[code], `en 缺 ${code}`).toBeTruthy();
     }
+    // 键集不许多也不许少
+    expect(Object.keys(en.errors).sort()).toEqual(
+      Object.keys(zh.errors).sort()
+    );
   });
 
   it("侧边栏标题两种语言都有", () => {

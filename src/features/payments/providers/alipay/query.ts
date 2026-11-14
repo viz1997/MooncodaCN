@@ -53,6 +53,9 @@ export const ALIPAY_QUERY_METHOD = "alipay.trade.query";
 interface AlipayQueryResponseBody {
   alipay_trade_query_response?: {
     code?: string;
+    /** 支付宝的子错误码 —— 「查不到这笔交易」就是 `ACQ.TRADE_NOT_EXIST` */
+    sub_code?: string;
+    sub_msg?: string;
     msg?: string;
     out_trade_no?: string;
     trade_no?: string;
@@ -76,6 +79,10 @@ export interface AlipayTradeQueryResult {
   totalAmount: string | null;
   /** 响应签名验过了吗 */
   verified: boolean;
+  /** 支付宝回的 `code`(`10000` = 成功)—— 失败时工作室照着它去查支付宝文档 */
+  code: string | null;
+  /** 支付宝回的 `sub_code` —— `ACQ.TRADE_NOT_EXIST` = 「还没付」 */
+  subCode: string | null;
   /** 失败原因 / 提示 */
   message: string | null;
 }
@@ -202,6 +209,17 @@ export async function queryTradeByOrderNo(
 
   const ok = inner.code === "10000";
 
+  // 失败时**把支付宝自己给的话原样带上**(2026-11-14)
+  //
+  // 原来只留 `inner.msg` —— 支付宝的 `msg` 大多是一句
+  // 「Business Failed」,真正有用的是 `sub_msg`
+  // (比如 `Invalid App ID`)。
+  // 丢了它 ⇒ 工作室永远只知道「查不成」,不知道去改哪一项。
+  //
+  // `code` / `sub_code` **单独两个字段** —— 判定层要靠 `sub_code` 分
+  // 「查不到」和「请求被拒」,拼进一句话就没法判了。
+  const failureMessage = ok ? null : (inner.sub_msg ?? inner.msg ?? null);
+
   return {
     ok,
     outTradeNo: inner.out_trade_no ?? null,
@@ -209,6 +227,8 @@ export async function queryTradeByOrderNo(
     tradeStatus: inner.trade_status ?? null,
     totalAmount: inner.total_amount ?? null,
     verified,
-    message: ok ? null : (inner.msg ?? `支付宝返回 code=${inner.code ?? "?"}`),
+    code: inner.code ?? null,
+    subCode: inner.sub_code ?? null,
+    message: failureMessage,
   };
 }

@@ -78,6 +78,16 @@ export type StorefrontPaymentLinkResult =
       ok: false;
       code:
         | "ALREADY_PAID"
+        /**
+         * 「支付宝那边说付了,我们核不上」(2026-11-14)
+         *
+         * 签名验不过 / 金额对不上 ⇒ 落不了库,但**支付宝那边确实收了钱**。
+         *
+         * ⇒ 这一档**不给付款入口** —— 给的就是那条死路:链接的
+         * `out_trade_no` 已经付过了,点它只会拿到支付宝的
+         * 「该订单已付款(TRADE_HAS_SUCCESS)」⇒ 死循环。
+         */
+        | "PAYMENT_UNVERIFIED"
         | "ORDER_REFUNDED"
         | "LINK_FAILED"
         | "PAYMENT_NOT_CONFIGURED"
@@ -282,6 +292,23 @@ async function ensureNewChannelPaymentLink(
       const outcome = await reconcileStorefrontOrderPayment({ order, items });
       if (outcome.paid) {
         return { ok: false, code: "ALREADY_PAID" };
+      }
+      // ---- 「支付宝说付了、我们核不上」(2026-11-14)----
+      //
+      // 签名验不过 / 金额对不上 ⇒ 落不了库,但**支付宝那边确实收了钱**。
+      //
+      // ⇒ **不给付款入口** —— 下面那段会把 `order.paymentUrl` 原样递回去,
+      // 而那条链接的 `out_trade_no` 已经付过了 ⇒ 买家点它 ⇒ 支付宝回
+      // 「该订单已付款(TRADE_HAS_SUCCESS)」⇒ **死循环**(线上真踩过:
+      // `SO-20261114-137332`)。
+      //
+      // 这一档的界面话术是「请不要重复付款,工作室会人工确认」。
+      if (outcome.reportedPaid) {
+        console.error(
+          `[storefront] ${order.orderNo} 支付宝那边说已付款但核对不上:` +
+            `${outcome.code} —— ${outcome.message}(不发放付款入口,避免重复付款)`
+        );
+        return { ok: false, code: "PAYMENT_UNVERIFIED" };
       }
     } catch (error) {
       // 查单挂了**不拦着**发入口 —— 用户还得能付

@@ -58,6 +58,39 @@ export async function getUserStorefrontOrderByOrderNo(
 }
 
 /**
+ * 按订单号取一单 —— **后台**用(不带 `user_id` 过滤)
+ *
+ * ## 为什么后台要单独一个函数
+ *
+ * 后台的「查单自检」是工作室拿**订单号**去查 —— 买家是谁他清楚,但这里的
+ * 归属校验对工作室没有意义(他自己家的单)。
+ *
+ * ⇒ 单独一个函数,名字里写明 `ForAdmin` —— **别拿它去写面向用户的路由**。
+ * 用户侧的订单详情**必须**走 `getUserStorefrontOrderByOrderNo`(那条把
+ * `user_id` 写进 WHERE,别人的单查出来是 null)。
+ */
+export async function getStorefrontOrderByOrderNoForAdmin(
+  orderNo: string
+): Promise<StorefrontOrderWithItems | null> {
+  const rows = await db
+    .select()
+    .from(storefrontOrder)
+    .where(eq(storefrontOrder.orderNo, orderNo))
+    .limit(1);
+
+  const order = rows[0];
+  if (!order) return null;
+
+  const items = await db
+    .select()
+    .from(storefrontOrderItem)
+    .where(eq(storefrontOrderItem.orderId, order.id))
+    .orderBy(storefrontOrderItem.createdAt);
+
+  return { order, items };
+}
+
+/**
  * 某个用户的订单列表 —— 「我的订单」页用
  *
  * 按下单时间倒序。订单行一次批量取回(不是每单查一次)。

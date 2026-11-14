@@ -70,8 +70,18 @@ async function handle(
   );
 
   if (!link.ok) {
+    /**
+     * 「这一单不许再付了」那一族 → **409**(不是 502)
+     *
+     * 409 = 「这个状态跟现在的请求冲突」—— 钱已经发生了(付过了 / 支付宝说
+     * 付了但我们核不上 / 退过了),再要一个付款入口就是让用户**付两次**。
+     *
+     * 502 是「这次调用挂了,重试就好」—— 那句话在这一档上是**错的**。
+     */
     const status =
-      link.code === "ALREADY_PAID" || link.code === "ORDER_REFUNDED"
+      link.code === "ALREADY_PAID" ||
+      link.code === "ORDER_REFUNDED" ||
+      link.code === "PAYMENT_UNVERIFIED"
         ? 409
         : 502;
     return NextResponse.json(
@@ -94,6 +104,10 @@ function messageForCode(code: string): string {
   switch (code) {
     case "ALREADY_PAID":
       return "这笔订单已经付过了";
+    case "PAYMENT_UNVERIFIED":
+      // ⚠️ 这一档**不能**说成「生成失败,请重试」—— 钱可能已经到了,
+      // 让用户重试就是让他**付两次**(线上真踩过:SO-20261114-137332)。
+      return "支付宝那边显示这笔已经付款成功,我们还在核对 —— 请不要重复付款,工作室会人工确认";
     case "ORDER_REFUNDED":
       return "这笔订单已经退过款了";
     case "CARRIER_MISSING":

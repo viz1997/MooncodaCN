@@ -6,12 +6,27 @@
  * 工作室 2026-11-13 的要求:**「支付宝、微信支付先用沙盒测试验证」**,外加
  * **「可以后台配置」**。
  *
- * 这一页三块(工作室的口味:**配置界面在页面上直接处理,不开弹窗**):
+ * 这一页四块(工作室的口味:**配置界面在页面上直接处理,不开弹窗**):
  *
  * 1. **当前生效状态**(只读卡)—— 每个通道:当前模式 / **确切端点** / 凭据从
  *    哪儿来 / 配好了没 / **缺哪几个**(精确列名字)。两个模式都摆出来。
  * 2. **凭据表单** —— 微信 + 支付宝各一块:沙箱开关 + 端点 + 凭据。
  * 3. **测试** —— 「跑一笔 ¥0.01 测试单」按钮。
+ * 4. **查单自检** —— 贴一个订单号,当场问支付宝「这单到底付了没」。
+ *
+ * ## ④ 查单自检为什么必须有(2026-11-14)
+ *
+ * 线上真踩过(`SO-20261114-137332`):支付宝那边**已经付款成功**,我们这边因为
+ * **支付宝公钥贴错了**验不过 ⇒ 订单永远是 `unpaid` ⇒ 买家以为没付、**再付
+ * 一次**;工作室看到的是一张没付的单。
+ *
+ * 那条链路上**什么日志都没有** —— 通知验签失败回 401,支付宝重投 8 次之后
+ * 放弃;查单那一腿同样验不过 ⇒ 结论永远是笼统的「查单没查成」。
+ *
+ * ⇒ 这一块把**原始事实**摆出来:每套凭据打了哪个网关、支付宝回了什么
+ * (`code` / `sub_code` / `trade_status` / `total_amount`)、**签名验过没有**
+ * (`verified === false` ⇒ 就是公钥贴错了)。工作室照着这张表一眼就能看出
+ * 是「公钥不对」/「APPID 跟私钥不是一套」/「用户还没付」。
  *
  * ## 沙箱字段**只在开关拨到「开」的时候才出现**
  *
@@ -62,6 +77,7 @@ import {
   CreditCard,
   FlaskConical,
   Save,
+  Search,
   ShieldCheck,
   Trash2,
 } from "lucide-react";
@@ -72,12 +88,14 @@ import { useCallback, useEffect, useState } from "react";
 import {
   adminDeletePaymentSettingAction,
   adminGetPaymentSettingsAction,
+  adminReconcileStorefrontOrderAction,
   adminSavePaymentSettingsAction,
   adminTestPaymentChannelAction,
 } from "@/features/payments/admin/actions";
 import type {
   AdminPaymentChannelView,
   AdminPaymentFieldView,
+  AdminPaymentReconcileResult,
   AdminPaymentSettingsView,
   AdminPaymentTestResult,
 } from "@/features/payments/admin/types";
@@ -87,6 +105,7 @@ import type {
   SandboxChannel,
 } from "@/features/payments/lib/sandbox";
 import { shouldShowSandboxFields } from "@/features/payments/lib/sandbox";
+import { formatCents } from "@/lib/money";
 
 /* -------------------------------------------------------------------------- */
 /*  表单形状                                                                    */
@@ -132,6 +151,12 @@ export function PaymentSettingsAdminView() {
   );
   /** 等工作室再点一次确认的通道(正式模式 ⇒ 这一笔真扣钱) */
   const [confirming, setConfirming] = useState<SandboxChannel | null>(null);
+  /** 查单自检:贴进来的订单号 */
+  const [reconcileOrderNo, setReconcileOrderNo] = useState("");
+  /** 查单自检:最近一次的结果 */
+  const [reconcile, setReconcile] = useState<
+    AdminPaymentReconcileResult | undefined
+  >(undefined);
 
   /* ---------------------------------------------------------------- 读 ---- */
 
@@ -224,6 +249,32 @@ export function PaymentSettingsAdminView() {
     },
   });
 
+  /**
+   * 查单自检
+   *
+   * **诊断**,不是「跑通 / 没跑通」——
+   *
+   * - 查出来「不是付款成功」= **一个结论**(用户还没付完)⇒ `ok: true`
+   * - 查出来「签名验不过」= **一个结论**(支付宝公钥贴错了)⇒ `ok: true`
+   * - 订单号不存在 / 调用整个挂了 = **这次调用没成** ⇒ `ok: false`
+   */
+  const { execute: runReconcile, isPending: isReconciling } = useAction(
+    adminReconcileStorefrontOrderAction,
+    {
+      onSuccess: ({ data }) => {
+        if (!data) return;
+        if (data.ok === false) {
+          message.error(t(`errors.${data.code}`));
+          return;
+        }
+        setReconcile(data);
+      },
+      onError: ({ error }) => {
+        message.error(error.serverError ?? t("errors.RECONCILE_FAILED"));
+      },
+    }
+  );
+
   /* ------------------------------------------------------------ 表单动作 -- */
 
   const onSave = async (values: PaymentSettingsFormValues) => {
@@ -242,6 +293,20 @@ export function PaymentSettingsAdminView() {
     } finally {
       setTestingChannel(null);
     }
+  };
+
+  /**
+   * 查一次单 —— **只查,不写任何配置**
+   *
+   * 这一步**不动任何开关、不动任何凭据** —— 它只是拿订单号去问支付宝
+   * 「这单到底付了没」。查出来已付的会**顺带把订单标成已付**(那是查单那条
+   * 腿本来就要做的事)。
+   */
+  const onReconcile = async () => {
+    const orderNo = reconcileOrderNo.trim();
+    if (!orderNo) return;
+    setReconcile(undefined);
+    await runReconcile({ orderNo });
   };
 
   /* -------------------------------------------------------- 渲染 --------- */
@@ -484,6 +549,23 @@ export function PaymentSettingsAdminView() {
             modeProduction={t("status.modeProduction")}
           />
         ))}
+      </section>
+
+      {/* ④ 查单自检 —— 贴一个订单号,当场问支付宝「这单到底付了没」 */}
+      <section className="space-y-4">
+        <h3 className="flex items-center gap-2 text-sm font-semibold">
+          <Search className="h-4 w-4 text-sky-600" />
+          {t("reconcile.title")}
+        </h3>
+        <p className="text-xs text-muted-foreground">{t("reconcile.help")}</p>
+
+        <ReconcilePanel
+          orderNo={reconcileOrderNo}
+          onOrderNoChange={setReconcileOrderNo}
+          onCheck={() => void onReconcile()}
+          isChecking={isReconciling}
+          result={reconcile}
+        />
       </section>
     </div>
   );
@@ -982,6 +1064,226 @@ function TestPanel({
           ) : null}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  查单自检面板                                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 「贴一个订单号,当场问支付宝这单到底付了没」
+ *
+ * ## 为什么要把**原始事实**摆出来
+ *
+ * 线上真踩过(`SO-20261114-137332`):支付宝那边**已经付款成功**,我们这边因为
+ * **支付宝公钥贴错了**验不过 ⇒ 订单永远是 `unpaid` ⇒ 买家以为没付、**再付
+ * 一次**(点「重新支付」跳到支付宝,支付宝回一句 `TRADE_HAS_SUCCESS` —— 一个
+ * 死循环:点一次跳一次,每一跳都是那句「该订单已付款」)。
+ *
+ * 那条链路上**什么日志都没有** ⇒ 工作室只能靠猜。
+ *
+ * ⇒ 这一块摆三样东西:
+ *
+ * 1. **本地状态** —— 我们这边记的是什么
+ * 2. **结论** —— 查单判定层给的码(`paid` / `reportedPaid` / `settled`)
+ * 3. **每一套凭据的原始事实** —— 打了哪个网关、支付宝回了什么、**签名验过没有**
+ *
+ * 第 3 条是关键:`verified === false` ⇒ **就是支付宝公钥贴错了**。
+ *
+ * ## 为什么**不弹窗**
+ *
+ * 工作室的口味 —— 配置界面在页面上直接处理(跟打印定价 / 优惠码 / 站点设置
+ * 后台一个路子)。
+ */
+function ReconcilePanel({
+  orderNo,
+  onOrderNoChange,
+  onCheck,
+  isChecking,
+  result,
+}: {
+  orderNo: string;
+  onOrderNoChange: (value: string) => void;
+  onCheck: () => void;
+  isChecking: boolean;
+  result: AdminPaymentReconcileResult | undefined;
+}) {
+  const t = useTranslations("AdminPaymentSettings");
+
+  const paid = result?.ok === true ? result.paid : false;
+  const reportedPaid = result?.ok === true ? result.reportedPaid : false;
+  const settled = result?.ok === true ? result.settled : false;
+
+  return (
+    <div className="rounded-lg border bg-card p-4 shadow-sm">
+      <div className="flex flex-wrap items-center gap-3">
+        <Input
+          className="min-w-[240px] flex-1"
+          size="small"
+          placeholder={t("reconcile.orderNoPlaceholder")}
+          value={orderNo}
+          onChange={(e) => onOrderNoChange(e.target.value)}
+          onPressEnter={onCheck}
+        />
+        <Button
+          size="small"
+          type="primary"
+          icon={<Search className="h-3.5 w-3.5" />}
+          loading={isChecking}
+          onClick={onCheck}
+        >
+          {isChecking ? t("reconcile.checking") : t("reconcile.check")}
+        </Button>
+      </div>
+
+      {result?.ok ? (
+        <div className="mt-4 space-y-3 text-xs">
+          {/* ① 本地状态 —— 我们这边记的是什么 */}
+          <div className="rounded-md border bg-muted/30 p-3">
+            <p className="mb-2 text-[11px] font-medium text-muted-foreground">
+              {t("reconcile.localTitle")}
+            </p>
+            <div className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
+              <ReconcileFact
+                label={t("reconcile.localStatus")}
+                value={result.localStatus}
+              />
+              <ReconcileFact
+                label={t("reconcile.localPaymentStatus")}
+                value={result.localPaymentStatus}
+              />
+              <ReconcileFact
+                label={t("reconcile.localChannel")}
+                value={result.localPaymentChannel}
+              />
+              <ReconcileFact
+                label={t("reconcile.localTotal")}
+                value={formatCents(result.totalCents)}
+              />
+            </div>
+          </div>
+
+          {/* ② 结论 */}
+          <div
+            className={
+              reportedPaid && !paid
+                ? "rounded-md border border-destructive/40 bg-destructive/5 p-3"
+                : "rounded-md border bg-muted/30 p-3"
+            }
+          >
+            <p className="mb-2 text-[11px] font-medium text-muted-foreground">
+              {t("reconcile.verdictTitle")}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Tag color="default">{result.code}</Tag>
+              {paid ? <Tag color="green">{t("reconcile.paidTag")}</Tag> : null}
+              {reportedPaid && !paid ? (
+                <Tag color="red">{t("reconcile.reportedPaidTag")}</Tag>
+              ) : null}
+              {settled ? (
+                <Tag color="green">{t("reconcile.settledTag")}</Tag>
+              ) : null}
+              <ReconcileFact
+                label={t("reconcile.tradeNoLabel")}
+                value={result.tradeNo}
+              />
+            </div>
+            <p className="mt-2 leading-relaxed">{result.message}</p>
+            <p className="mt-1 text-muted-foreground">
+              {t(`reconcile.code.${result.code}`)}
+            </p>
+          </div>
+
+          {/* ③ 每一套凭据的原始事实 —— 诊断的关键就在这儿 */}
+          {result.attempts.length > 0 ? (
+            <div className="rounded-md border bg-muted/30 p-3">
+              <p className="mb-2 text-[11px] font-medium text-muted-foreground">
+                {t("reconcile.attemptsTitle")}
+              </p>
+              <div className="space-y-2">
+                {result.attempts.map((attempt, index) => (
+                  <div
+                    key={`${attempt.gateway}-${index}`}
+                    className="rounded-md border bg-background p-2.5"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Tag color={attempt.sandbox ? "orange" : "red"}>
+                        {attempt.sandbox
+                          ? t("reconcile.attemptSandbox")
+                          : t("reconcile.attemptProduction")}
+                      </Tag>
+                      {/* 验签没通过 = 支付宝公钥贴错了 —— 这条最要紧 */}
+                      <Tag color={attempt.verified ? "green" : "red"}>
+                        {attempt.verified
+                          ? t("reconcile.verifiedOk")
+                          : t("reconcile.verifiedBad")}
+                      </Tag>
+                      <Tag color={attempt.ok ? "green" : "default"}>
+                        {attempt.ok
+                          ? t("reconcile.okYes")
+                          : t("reconcile.okNo")}
+                      </Tag>
+                    </div>
+                    <div className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-2">
+                      <ReconcileFact
+                        label={t("reconcile.gatewayLabel")}
+                        value={attempt.gateway}
+                      />
+                      <ReconcileFact
+                        label={t("reconcile.codeLabel")}
+                        value={attempt.code}
+                      />
+                      <ReconcileFact
+                        label={t("reconcile.subCodeLabel")}
+                        value={attempt.subCode}
+                      />
+                      <ReconcileFact
+                        label={t("reconcile.tradeStatusLabel")}
+                        value={attempt.tradeStatus}
+                      />
+                      <ReconcileFact
+                        label={t("reconcile.totalAmountLabel")}
+                        value={attempt.totalAmount}
+                      />
+                      <ReconcileFact
+                        label={t("reconcile.tradeNoLabel")}
+                        value={attempt.tradeNo}
+                      />
+                      <ReconcileFact
+                        label={t("reconcile.messageLabel")}
+                        value={attempt.message}
+                      />
+                      <ReconcileFact
+                        label={t("reconcile.errorLabel")}
+                        value={attempt.error}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** 一行「标签 + 值」—— 值是空的就**整行不摆**(别摆一个空标签) */
+function ReconcileFact({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | null | undefined;
+}) {
+  if (value === null || value === undefined || value === "") return null;
+  return (
+    <div className="flex min-w-0 gap-2">
+      <span className="shrink-0 text-muted-foreground">{label}</span>
+      <span className="min-w-0 break-all font-mono text-[11px]">{value}</span>
     </div>
   );
 }

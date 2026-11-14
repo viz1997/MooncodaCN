@@ -32,6 +32,7 @@
 
 import type { StorefrontOrderItemRow, StorefrontOrderRow } from "@/db/schema";
 import { computeTotalCents } from "@/features/payments/lib/total";
+import type { AlipayQueryAttempt } from "@/features/payments/providers/alipay/reconcile";
 import { reconcileAlipayPayment } from "@/features/payments/providers/alipay/reconcile";
 import type { AlipayReconcileCode } from "@/features/payments/providers/alipay/reconcile-rules";
 
@@ -39,14 +40,29 @@ import { buildStorefrontPaymentRequest } from "./payment-request";
 
 /** 一次对账的结果 */
 export interface StorefrontReconcileOutcome {
-  /** 支付宝说这笔已经付成功了(验签 + 金额都对得上) */
+  /** 「我们核对过这笔已经付成功了」(验签过了 + 金额对得上) */
   paid: boolean;
+  /**
+   * 「支付宝那边**说**这笔已经付款成功了」
+   *
+   * 跟 `paid` **正交**。为真但 `paid` 为假 = 「支付宝说付了,我们核对不上」
+   * (公钥不对 / 金额对不上)⇒ **用户不许再付一次**,界面要写明。
+   */
+  reportedPaid: boolean;
   /** 有没有真的落库 */
   settled: boolean;
   /** 原因码 */
   code: AlipayReconcileCode | "skipped";
   /** 人话 */
   message: string;
+  /** 支付宝的订单号(查到了才有)—— 工作室拿去支付宝后台对 */
+  tradeNo: string | null;
+  /**
+   * 每一套凭据的**原始事实** —— 给工作室看的
+   *
+   * 空数组 = 一套凭据都没试成(通道压根没配好 / 单号不对那一档)。
+   */
+  attempts: AlipayQueryAttempt[];
 }
 
 /**
@@ -65,17 +81,23 @@ export async function reconcileStorefrontOrderPayment(params: {
   if (order.paymentStatus === "paid" || order.status === "fulfilled") {
     return {
       paid: true,
+      reportedPaid: true,
       settled: false,
       code: "already_paid",
       message: "这笔订单已经是已付款",
+      tradeNo: null,
+      attempts: [],
     };
   }
   if (order.paymentStatus === "refunded") {
     return {
       paid: false,
+      reportedPaid: false,
       settled: false,
       code: "skipped",
       message: "这笔订单已经退过款 —— 不再查单",
+      tradeNo: null,
+      attempts: [],
     };
   }
 
@@ -83,9 +105,12 @@ export async function reconcileStorefrontOrderPayment(params: {
   if (order.paymentChannel !== "alipay") {
     return {
       paid: false,
+      reportedPaid: false,
       settled: false,
       code: "skipped",
       message: "这个通道暂时不支持主动查单",
+      tradeNo: null,
+      attempts: [],
     };
   }
 
@@ -120,8 +145,11 @@ export async function reconcileStorefrontOrderPayment(params: {
 
   return {
     paid: outcome.paid,
+    reportedPaid: outcome.reportedPaid,
     settled: outcome.settled,
     code: outcome.code,
     message: outcome.message,
+    tradeNo: outcome.tradeNo,
+    attempts: outcome.attempts,
   };
 }

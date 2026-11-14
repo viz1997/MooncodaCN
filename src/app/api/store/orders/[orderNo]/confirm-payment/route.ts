@@ -78,6 +78,16 @@ async function handle(
     /** 这一次查单的结论 —— 给界面 / 日志看 */
     reconcile: {
       paid: outcome.paid,
+      /**
+       * 「支付宝那边**说**这笔已经付款成功」
+       *
+       * 跟 `paid` **正交**(2026-11-14)—— 为真但 `paid` 为假 = 「支付宝说付了,
+       * 我们核对不上」(公钥不对 / 金额对不上)⇒ **买家不许再付一次**。
+       *
+       * 界面的任务是:**看到这个信号就把「重新支付」按钮撤掉**,换成一句
+       * 「支付宝那边显示已经付款成功,我们还在核对 —— 请不要重复付款」。
+       */
+      reportedPaid: outcome.reportedPaid,
       settled: outcome.settled,
       code: outcome.code,
       message: outcome.message,

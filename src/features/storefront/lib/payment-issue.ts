@@ -45,6 +45,56 @@ export type StorefrontPaymentIssue =
   | "PAYMENT_FAILED";
 
 /**
+ * 这一单**被挡住**了 —— 钱的事已经发生了,不是「没生成入口」(2026-11-14)
+ *
+ * ## 为什么**另起一栏**,不并进 `StorefrontPaymentIssue`
+ *
+ * `StorefrontPaymentIssue` 回答的是「**为什么没生成付款入口**」——
+ * 通道没配好 / 这次调用挂了。这两类的重试建议是**相反**的。
+ *
+ * 而这一栏回答的是**另一个问题**:「**这一单不许再付了**」。
+ *
+ * 线上真踩过(`SO-20261114-137332`):支付宝那边**已经付款成功**,我们这边
+ * 因为公钥不对**核不上** ⇒ 订单停在 `unpaid` ⇒ 复用待付款单的时候
+ * `checkout()` 把 `ALREADY_PAID` 归成「支付失败」⇒ 用户以为没付 ⇒ **再付
+ * 一次**;而那条链接的 `out_trade_no` 已经付过了 ⇒ 支付宝回
+ * 「该订单已付款(TRADE_HAS_SUCCESS)」⇒ **死循环**。
+ *
+ * ⇒ 「支付失败」这句话在这里是**错的**,而且危险 —— 它引导用户去重试一件
+ * 已经付过的事。
+ *
+ * | 码 | 意思 | 用户该做什么 |
+ * |---|---|---|
+ * | `ALREADY_PAID` | 我们核对过,确实付过了 | 什么都别做 |
+ * | `PAYMENT_UNVERIFIED` | 支付宝**说**付了,我们核不上 | **不要重复付款**,工作室人工确认 |
+ * | `ORDER_REFUNDED` | 已经退过款 | 什么都别做 |
+ */
+export type StorefrontPaymentBlocked =
+  | "ALREADY_PAID"
+  | "PAYMENT_UNVERIFIED"
+  | "ORDER_REFUNDED";
+
+/**
+ * 收款入口的结果码 ⇒ 对应的「被挡住」码
+ *
+ * **只有这几个码**是「钱已经发生了」——
+ * `LINK_FAILED` / `PAYMENT_NOT_CONFIGURED` / `CARRIER_MISSING` 都是
+ * 「入口没生成出来」,跟「钱付过了」是两回事。
+ */
+export function paymentBlockedFromLinkCode(
+  code: string | null | undefined
+): StorefrontPaymentBlocked | null {
+  if (
+    code === "ALREADY_PAID" ||
+    code === "PAYMENT_UNVERIFIED" ||
+    code === "ORDER_REFUNDED"
+  ) {
+    return code;
+  }
+  return null;
+}
+
+/**
  * 判断一次建单失败属于哪一类
  *
  * **幂等**:同样的错误永远得到同样的分类。

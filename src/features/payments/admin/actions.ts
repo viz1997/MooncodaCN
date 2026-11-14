@@ -12,6 +12,7 @@
  * - `adminSavePaymentSettingsAction` —— 保存(**一个事务**)
  * - `adminDeletePaymentSettingAction` —— 删掉后台**某一行**
  * - `adminTestPaymentChannelAction` —— 跑一笔 **¥0.01** 的测试单
+ * - `adminReconcileStorefrontOrderAction` —— 拿订单号**查单**(诊断「钱到了、订单不动」)
  *
  * ## 为什么沙箱凭据在 DB 而不是环境变量
  *
@@ -48,6 +49,8 @@ import { revalidatePath, revalidateTag } from "next/cache";
 import { z } from "zod";
 
 import { describeDbError } from "@/features/shared/lib/db-error";
+import { getStorefrontOrderByOrderNoForAdmin } from "@/features/storefront/lib/orders";
+import { reconcileStorefrontOrderPayment } from "@/features/storefront/lib/payment-reconcile";
 import { adminAction } from "@/lib/safe-action";
 import { resolveNotifyUrl } from "../lib/notify-url";
 import { getPaymentProvider } from "../lib/registry";
@@ -83,6 +86,7 @@ import type {
   AdminPaymentChannelView,
   AdminPaymentFieldView,
   AdminPaymentModeView,
+  AdminPaymentReconcileResult,
   AdminPaymentSettingsView,
   AdminPaymentSettingWriteResult,
   AdminPaymentTestResult,
@@ -584,9 +588,100 @@ export const adminTestPaymentChannelAction = withPaymentAction("test")
     }
   });
 
+/* -------------------------------------------------------------------------- */
+/*  查单自检                                                                    */
+/* -------------------------------------------------------------------------- */
+
+const reconcileSchema = z.object({
+  /** 商城的订单号(比如 `SO-20261114-137332`) */
+  orderNo: z.string().trim().min(1).max(64),
+});
+
+/**
+ * 拿订单号去问支付宝「这单到底付了没」 —— **查单自检**
+ *
+ * ## 为什么后台要有一颗这个
+ *
+ * 线上真踩过的两单(`SO-20261114-657E4A` / `SO-20261114-137332`):
+ * **钱到了、订单永远是 `unpaid`**,买家盯着「正在确认支付…」转圈到超时。
+ *
+ * 排查这件事需要三样东西,而**界面上一样都没有**:
+ *
+ * 1. 支付宝到底回了什么(`code` / `sub_code` / `trade_status` / `total_amount`)
+ * 2. 响应的签名验过没有 —— **`false` 就是支付宝公钥贴错了**
+ * 3. 我打的是哪个网关、沙箱还是正式
+ *
+ * ⇒ 这个 action 把**原始事实**原样带给工作室(`attempts`),外加判定层的
+ * **结论**(`code` / `paid` / `reportedPaid` / `settled`)。
+ *
+ * ## 它**会**把订单标成已支付
+ *
+ * 走的就是买家侧那条兜底路(`reconcileStorefrontOrderPayment`)—— 验签过了 +
+ * 金额对得上 ⇒ 落库标成已支付。**这是这条兜底路本来该做的事**,后台只是
+ * 手动触发它。
+ *
+ * ## 「查出来不是这一档」**也算成功**
+ *
+ * 「签名验不过」「还没付」是**结论**(重试没用),不是「这次调用挂了」。
+ * ⇒ 那些走 `ok: true`,只有「订单号查不到」「调用整个挂了」才走 `ok: false`。
+ *
+ * ## 归属校验
+ *
+ * 后台**不带** `user_id` 过滤(工作室查的是自己家的单)——
+ * 用的是 `getStorefrontOrderByOrderNoForAdmin`,**不是**用户侧那个。
+ */
+export const adminReconcileStorefrontOrderAction = withPaymentAction(
+  "reconcile"
+)
+  .schema(reconcileSchema)
+  .action(async ({ parsedInput }): Promise<AdminPaymentReconcileResult> => {
+    const found = await getStorefrontOrderByOrderNoForAdmin(
+      parsedInput.orderNo
+    );
+    if (!found) {
+      return { ok: false, code: "RECONCILE_ORDER_NOT_FOUND" };
+    }
+
+    try {
+      const outcome = await reconcileStorefrontOrderPayment({
+        order: found.order,
+        items: found.items,
+      });
+
+      // 查单有可能**把订单标成已支付** ⇒ 买家侧那一页要重新算
+      if (outcome.settled) {
+        revalidatePath("/[locale]/account/orders", "page");
+      }
+
+      return {
+        ok: true,
+        orderNo: found.order.orderNo,
+        localStatus: found.order.status,
+        localPaymentStatus: found.order.paymentStatus,
+        localPaymentChannel: found.order.paymentChannel,
+        totalCents: found.order.totalCents,
+        code: outcome.code,
+        message: outcome.message,
+        paid: outcome.paid,
+        reportedPaid: outcome.reportedPaid,
+        settled: outcome.settled,
+        tradeNo: outcome.tradeNo,
+        attempts: outcome.attempts,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(
+        `[payment-settings] 查单 ${parsedInput.orderNo} 失败:`,
+        message
+      );
+      return { ok: false, code: "RECONCILE_FAILED" };
+    }
+  });
+
 /*
  * `AdminPaymentSettingsView` / `AdminPaymentSettingWriteResult` /
- * `AdminPaymentSettingErrorCode` / `AdminPaymentTestResult`
+ * `AdminPaymentSettingErrorCode` / `AdminPaymentTestResult` /
+ * `AdminPaymentReconcileResult`
  * **不在这里 re-export** —— 「use server」文件只能导出 async 函数,类型
  * re-export 会被 Turbopack 注册成 server action,运行时引用一个不存在的类型
  * 绑定 → ReferenceError,整个页面 500

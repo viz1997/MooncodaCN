@@ -39,7 +39,10 @@ import {
 import {
   ALIPAY_PAID_TRADE_STATUSES,
   decideAlipayReconcile,
+  describeAlipayQueryError,
   isAlipayPaidTradeStatus,
+  isAlipayTradeNotExist,
+  rankAlipayReconcileFailure,
 } from "@/features/payments/providers/alipay/reconcile-rules";
 
 /* -------------------------------------------------------------------------- */
@@ -230,6 +233,246 @@ describe("decideAlipayReconcile", () => {
         paidAmountCents: null,
       }).code
     ).toBe("not_paid");
+  });
+
+  /* ------------------------------------------------------------------ */
+  /*  「查不到」与「请求被拒」要分开(2026-11-14)                          */
+  /* ------------------------------------------------------------------ */
+
+  it("支付宝说这笔交易不存在 ⇒ not_found(用户还没付,不是错误)", () => {
+    const decision = decideAlipayReconcile({
+      ...base,
+      queryOk: false,
+      queryCode: "40004",
+      querySubCode: "ACQ.TRADE_NOT_EXIST",
+      queryMessage: "交易不存在",
+    });
+    expect(decision.code).toBe("not_found");
+    expect(decision.reportedPaid).toBe(false);
+    expect(decision.shouldSettle).toBe(false);
+  });
+
+  it("新沙箱的 RECORD_NOT_EXIST 也算「查不到」", () => {
+    const decision = decideAlipayReconcile({
+      ...base,
+      queryOk: false,
+      queryCode: "40004",
+      querySubCode: "ACQ.RECORD_NOT_EXIST",
+    });
+    expect(decision.code).toBe("not_found");
+  });
+
+  it("支付宝把查单请求拒了 ⇒ query_rejected(**不是**「用户没付」)", () => {
+    const decision = decideAlipayReconcile({
+      ...base,
+      queryOk: false,
+      queryCode: "40002",
+      querySubCode: "ACQ.INVALID_PARAMETER",
+      queryMessage: "无效的AppID参数",
+    });
+    expect(decision.code).toBe("query_rejected");
+    expect(decision.reportedPaid).toBe(false);
+    expect(decision.shouldSettle).toBe(false);
+    // 人话里必须点出「配置不对」,不然工作室以为用户没付
+    expect(decision.message).toContain("配置");
+    // 支付宝自己给的码要带出来 —— 工作室照着它去支付宝后台搜
+    expect(decision.message).toContain("40002");
+    expect(decision.message).toContain("ACQ.INVALID_PARAMETER");
+  });
+
+  it("query_rejected 与 not_found 都不错报成「用户还没付」", () => {
+    const rejected = decideAlipayReconcile({
+      ...base,
+      queryOk: false,
+      queryCode: "40006",
+    });
+    const notFound = decideAlipayReconcile({
+      ...base,
+      queryOk: false,
+      querySubCode: "ACQ.TRADE_NOT_EXIST",
+    });
+    expect(rejected.code).not.toBe(notFound.code);
+    expect(rejected.message).not.toBe(notFound.message);
+  });
+
+  it("没带 code ⇒ 当成「查不到」(多数情况,也不吓人)", () => {
+    const decision = decideAlipayReconcile({
+      ...base,
+      queryOk: false,
+    });
+    expect(decision.code).toBe("not_found");
+  });
+
+  /* ------------------------------------------------------------------ */
+  /*  `paid` 与 `reportedPaid` 是两件事(2026-11-14)                       */
+  /* ------------------------------------------------------------------ */
+
+  it("验签不过但支付宝说付了 ⇒ reportedPaid 为真(拦住第二次付款)", () => {
+    const decision = decideAlipayReconcile({
+      ...base,
+      verified: false,
+    });
+    expect(decision.code).toBe("signature_invalid");
+    expect(decision.reportedPaid).toBe(true);
+    // ⚠️ 但**不许**落库 —— 没验过签
+    expect(decision.paid).toBe(false);
+    expect(decision.shouldSettle).toBe(false);
+    expect(decision.message).toContain("请不要重复付款");
+  });
+
+  it("验签不过且交易状态不是付款成功 ⇒ reportedPaid 为假", () => {
+    const decision = decideAlipayReconcile({
+      ...base,
+      verified: false,
+      tradeStatus: "WAIT_BUYER_PAY",
+    });
+    expect(decision.code).toBe("signature_invalid");
+    expect(decision.reportedPaid).toBe(false);
+    expect(decision.message).not.toContain("请不要重复付款");
+  });
+
+  it("支付宝没给实付金额 ⇒ reportedPaid 为真(不许落库,但要拦住重复付款)", () => {
+    const decision = decideAlipayReconcile({
+      ...base,
+      paidAmountCents: null,
+    });
+    expect(decision.code).toBe("amount_mismatch");
+    expect(decision.reportedPaid).toBe(true);
+    expect(decision.shouldSettle).toBe(false);
+    expect(decision.message).toContain("请不要重复付款");
+  });
+
+  it("金额对不上 ⇒ reportedPaid 为真 + 人话里带两个数", () => {
+    const decision = decideAlipayReconcile({
+      ...base,
+      paidAmountCents: 100,
+    });
+    expect(decision.code).toBe("amount_mismatch");
+    expect(decision.reportedPaid).toBe(true);
+    expect(decision.shouldSettle).toBe(false);
+    expect(decision.message).toContain("请不要重复付款");
+    expect(decision.message).toContain("100");
+    expect(decision.message).toContain("24700");
+  });
+
+  it("查不到 / 请求被拒 / 还没付 ⇒ reportedPaid 一律为假", () => {
+    expect(
+      decideAlipayReconcile({ ...base, queryOk: false }).reportedPaid
+    ).toBe(false);
+    expect(
+      decideAlipayReconcile({
+        ...base,
+        queryOk: false,
+        queryCode: "40002",
+      }).reportedPaid
+    ).toBe(false);
+    expect(
+      decideAlipayReconcile({
+        ...base,
+        tradeStatus: "WAIT_BUYER_PAY",
+      }).reportedPaid
+    ).toBe(false);
+  });
+
+  it("落库那一档两个信号都为真", () => {
+    const decision = decideAlipayReconcile(base);
+    expect(decision.paid).toBe(true);
+    expect(decision.reportedPaid).toBe(true);
+    expect(decision.shouldSettle).toBe(true);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/*  「支付宝说交易不存在」                                                     */
+/* -------------------------------------------------------------------------- */
+
+describe("isAlipayTradeNotExist", () => {
+  it("ACQ.TRADE_NOT_EXIST 算", () => {
+    expect(isAlipayTradeNotExist("ACQ.TRADE_NOT_EXIST")).toBe(true);
+  });
+
+  it("ACQ.RECORD_NOT_EXIST 也算(新沙箱)", () => {
+    expect(isAlipayTradeNotExist("ACQ.RECORD_NOT_EXIST")).toBe(true);
+  });
+
+  it("别的子码不算", () => {
+    expect(isAlipayTradeNotExist("ACQ.INVALID_PARAMETER")).toBe(false);
+    expect(isAlipayTradeNotExist("ACQ.SYSTEM_ERROR")).toBe(false);
+  });
+
+  it("空值不算", () => {
+    expect(isAlipayTradeNotExist(null)).toBe(false);
+    expect(isAlipayTradeNotExist(undefined)).toBe(false);
+    expect(isAlipayTradeNotExist("")).toBe(false);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/*  把支付宝自己的错误拼成人话                                                  */
+/* -------------------------------------------------------------------------- */
+
+describe("describeAlipayQueryError", () => {
+  it("code / sub_code / message 都带出来", () => {
+    const text = describeAlipayQueryError({
+      code: "40002",
+      subCode: "ACQ.INVALID_PARAMETER",
+      message: "无效的AppID参数",
+    });
+    expect(text).toContain("code=40002");
+    expect(text).toContain("sub_code=ACQ.INVALID_PARAMETER");
+    expect(text).toContain("无效的AppID参数");
+  });
+
+  it("空的那几项不摆出来", () => {
+    const text = describeAlipayQueryError({
+      code: "40004",
+      subCode: null,
+      message: undefined,
+    });
+    expect(text).toBe("code=40004");
+  });
+
+  it("什么都没给 ⇒ 空串(人话里就不加「支付宝说:」那一截)", () => {
+    expect(describeAlipayQueryError({})).toBe("");
+    expect(
+      describeAlipayQueryError({ code: null, subCode: null, message: null })
+    ).toBe("");
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/*  失败原因的严重度 —— 挑一个「最该说给人听」的                                */
+/* -------------------------------------------------------------------------- */
+
+describe("rankAlipayReconcileFailure", () => {
+  it("「配置错了」那一档最严重(重试没用)", () => {
+    expect(rankAlipayReconcileFailure("query_rejected")).toBeGreaterThan(
+      rankAlipayReconcileFailure("signature_invalid")
+    );
+    expect(rankAlipayReconcileFailure("signature_invalid")).toBeGreaterThan(
+      rankAlipayReconcileFailure("amount_mismatch")
+    );
+    expect(rankAlipayReconcileFailure("amount_mismatch")).toBeGreaterThan(
+      rankAlipayReconcileFailure("query_failed")
+    );
+    expect(rankAlipayReconcileFailure("query_failed")).toBeGreaterThan(
+      rankAlipayReconcileFailure("not_found")
+    );
+    expect(rankAlipayReconcileFailure("not_found")).toBeGreaterThan(
+      rankAlipayReconcileFailure("not_paid")
+    );
+  });
+
+  it("「还没付」那一档比「配置错了」低 —— 别把正常情况说成故障", () => {
+    expect(rankAlipayReconcileFailure("not_found")).toBeLessThan(
+      rankAlipayReconcileFailure("query_rejected")
+    );
+  });
+
+  it("不是「失败」的那几档 = 0", () => {
+    expect(rankAlipayReconcileFailure("settled")).toBe(0);
+    expect(rankAlipayReconcileFailure("already_paid")).toBe(0);
+    expect(rankAlipayReconcileFailure("not_configured")).toBe(0);
   });
 });
 

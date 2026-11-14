@@ -29,6 +29,8 @@ import type {
   PaymentSettingKey,
   SandboxChannel,
 } from "../lib/sandbox";
+import type { AlipayQueryAttempt } from "../providers/alipay/reconcile";
+import type { AlipayReconcileCode } from "../providers/alipay/reconcile-rules";
 
 /**
  * 一个凭据字段的展示信息
@@ -225,7 +227,20 @@ export type AdminPaymentSettingErrorCode =
    */
   | "TEST_NEEDS_PRODUCTION_CONFIRM"
   /** 通道调用失败(网络 / 上游 / 证书) */
-  | "TEST_PROVIDER_FAILED";
+  | "TEST_PROVIDER_FAILED"
+  /**
+   * 查单自检:这个订单号在库里**查不到**
+   *
+   * —— 工作室贴错了单号,或者那不是一张商城订单。
+   */
+  | "RECONCILE_ORDER_NOT_FOUND"
+  /**
+   * 查单自检:整个调用挂了(网络 / 上游)
+   *
+   * 「查不成」跟「查出来不是这一档」是两件事 —— 前者是**这次调用挂了**
+   * (重试有用),后者是**结论**(重试没用)。
+   */
+  | "RECONCILE_FAILED";
 
 /** 写操作的结果 —— **不 throw**,throw 会被 next-safe-action 糊成「服务器错误」 */
 export type AdminPaymentSettingWriteResult =
@@ -249,3 +264,61 @@ export interface AdminPaymentTestResult {
   /** 失败时的人话 */
   message: string | null;
 }
+
+/* -------------------------------------------------------------------------- */
+/*  查单自检                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 一次查单尝试的**原始事实** —— 给工作室看的
+ *
+ * 直接用 provider 那一份(`AlipayQueryAttempt`)**类型别名**,不另写一份 ——
+ * 两份形状迟早漂(线上真踩过:通知那一腿和查单那一腿**用同一个支付宝公钥**,
+ * 贴错了两条腿一起断)。
+ *
+ * ⚠️ **不含任何密钥** —— 只有网关地址和支付宝回的那些字段。
+ */
+export type AdminPaymentReconcileAttempt = AlipayQueryAttempt;
+
+/**
+ * 查单自检的结果
+ *
+ * ## 为什么「查出来不是这一档」也算 `ok: true`
+ *
+ * 这一页要做的是**诊断**,不是「跑通 / 没跑通」——
+ *
+ * - 查出来「不是付款成功」= **一个结论**(用户还没付完)⇒ `ok: true`
+ * - 查出来「签名验不过」= **一个结论**(公钥贴错了)⇒ `ok: true`
+ * - 订单号不存在 / 调用整个挂了 = **这次调用没成** ⇒ `ok: false`
+ *
+ * ⇒ 界面照着 `code` 摆不同的话,别把「没查成」和「查了,结论是不行」混成一句。
+ */
+export type AdminPaymentReconcileResult =
+  | {
+      ok: true;
+      /** 订单号(回显,免得工作室看错是哪一张) */
+      orderNo: string;
+      /** 本地订单状态(`unpaid` / `paid` / `fulfilled` / …) */
+      localStatus: string;
+      /** 本地支付状态(`unpaid` / `paid` / `refunded`) */
+      localPaymentStatus: string;
+      /** 本地记的支付通道 */
+      localPaymentChannel: string | null;
+      /** 订单应付(分)—— 拿来跟支付宝记的实付对 */
+      totalCents: number;
+      /** 查单结论码 */
+      code: AlipayReconcileCode | "skipped";
+      /** 查单结论的人话 */
+      message: string;
+      /** 「我们核对过这笔已经付成功了」(验签过了 + 金额对得上) */
+      paid: boolean;
+      /** 「支付宝那边**说**这笔已经付款成功了」(可能我们核对不上) */
+      reportedPaid: boolean;
+      /** 有没有真的落库(把订单标成已支付) */
+      settled: boolean;
+      /** 支付宝的订单号 —— 工作室拿去支付宝后台对 */
+      tradeNo: string | null;
+      /** 每一套凭据的原始事实 */
+      attempts: AdminPaymentReconcileAttempt[];
+    }
+  | { ok: false; code: AdminPaymentSettingErrorCode };
