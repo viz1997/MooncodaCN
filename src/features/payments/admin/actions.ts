@@ -172,6 +172,7 @@ function toModeView(
     configured: status.configured,
     masked: status.masked,
     values,
+    keyIssues: status.keyIssues,
   };
 }
 
@@ -211,6 +212,7 @@ function toChannelView(
     missingVerify: current.missingVerify.map((field) =>
       toFieldView(field, current.masked, currentValues)
     ),
+    keyIssues: current.keyIssues,
     sandbox: toModeView(runtime.sandbox, true),
     production: toModeView(runtime.production, false),
     sameCredential: runtime.sameCredential.map((field) =>

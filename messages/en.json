@@ -2405,7 +2405,21 @@
       "missingVerify": "Verification material is missing (ordering works, but notifications cannot be verified)",
       "allPresent": "Everything is there",
       "otherMode": "The other mode",
-      "sameCredential": "These hold exactly the same values as production — most likely pasted in by mistake"
+      "sameCredential": "These hold exactly the same values as production — most likely pasted in by mistake",
+      "keyHealth": "Key health check",
+      "keyHealthDetail": "The keys below are wrong — payments will fail outright (retrying will not help).",
+      "keyProblem": {
+        "public-key": "holds a public key — this field needs the private key",
+        "private-key": "holds a private key — this field needs the public key",
+        "no-header": "is missing the PEM BEGIN / END lines",
+        "mislabeled": "has a PEM label that does not match its contents",
+        "unparseable": "cannot be parsed — not a usable PEM"
+      },
+      "keyFix": {
+        "wrapped": "the BEGIN / END lines were added automatically, usable",
+        "relabeled": "the label was corrected automatically, usable"
+      },
+      "keyUnusable": "unusable, payments will fail"
     },
     "form": {
       "title": "Sandbox credentials",
@@ -2416,6 +2430,7 @@
       "alipayHelp": "Sandbox APPID, application private key and Alipay public key, plus the sandbox gateway (empty = the current default sandbox).",
       "switchLabel": "Run in sandbox mode",
       "switchExtra": "Off = this channel uses production mode (the environment variable credentials). On = it uses the sandbox.",
+      "productionOnly": "This channel is in production mode — the sandbox endpoints and credentials are hidden. Turn on \"Run in sandbox mode\" to show them.",
       "optional": "optional",
       "envVarHint": "The matching production environment variable",
       "secretHint": "Stored secrets are never shown — leaving the field empty keeps the current value",

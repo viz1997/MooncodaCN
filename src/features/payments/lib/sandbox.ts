@@ -12,8 +12,12 @@
  * → 购物袋摘掉买掉的那几行」整条链路跑通。
  *
  * 这一层是**纯函数**:键名表、模式解析、端点解析、缺字段诊断、凭据同值检测。
- * **零 import** —— 不引 `@/db`、不引 `server-only` ⇒ 后台页面、provider、
+ * **零运行时 import** —— 不引 `@/db`、不引 `server-only` ⇒ 后台页面、provider、
  * 命令行自检脚本都能安全 import 它。
+ *
+ * (有一处 `import type` —— `lib/pem.ts` 的类型。**类型**会在编译期被抹掉,
+ * 所以客户端 bundle 里**不会**出现 `node:crypto`;但 `pem.ts` 本身**不许**
+ * 从这里 import 任何运行时的值 —— 那会把 `node:crypto` 拖进浏览器 bundle。)
  *
  * ## 三条硬规矩(方向不对称 —— 「误收真钱」的代价远大于「白测一次」)
  *
@@ -37,6 +41,9 @@
  * ⚠️ **沙箱凭据不回退到环境变量** —— 少一个来源 = 少一处能传错的地方。
  * 后台那一页就是沙箱凭据的**唯一**配置处。
  */
+
+// **类型** import —— 编译期会被抹掉,客户端 bundle 里不会带上 `node:crypto`
+import type { PemFix, PemProblem } from "./pem";
 
 /* -------------------------------------------------------------------------- */
 /*  常量                                                                        */
@@ -236,6 +243,34 @@ export function resolveSandboxMode(
 
   // 认不出来 ⇒ 不猜
   return { mode: "production", invalid: true, raw: trimmed };
+}
+
+/* -------------------------------------------------------------------------- */
+/*  沙箱字段的显示                                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 沙箱的端点 / 凭据**要不要显示** —— **开关拨到「开」才显示**
+ *
+ * 工作室 2026-11-14 的原话:**「开启后才展示沙箱字段内容,而不是全部直接
+ * 展示」**;「关闭后不展示」。
+ *
+ * 开关关着 = 这个通道走**正式模式**(环境变量那套凭据)⇒ 那一档一个沙箱字段
+ * 都用不上,摆一屏输入框在那儿只会让人以为「这些要填」。
+ *
+ * ⚠️ **`undefined` 按「关」处理** —— 表单刚挂载、开关字段还没注册的时候
+ * `useWatch` 返回 `undefined`。按「开」处理会让正式模式的通道一进来就是一屏
+ * 沙箱输入框(看着像默认就在沙箱里);按「关」处理只是**晚半拍**显示,数据
+ * 一个字都不受影响。
+ *
+ * **关掉不删数据** —— 表单里没有的键,服务端拿到 `undefined`,
+ * `adminSavePaymentSettingsAction` 那句 `if (raw === undefined) continue;`
+ * 直接跳过 ⇒ **DB 里那行沙箱配置一个字都不动**(下次拨到「开」还在)。
+ */
+export function shouldShowSandboxFields(
+  sandboxEnabled: boolean | undefined
+): boolean {
+  return sandboxEnabled === true;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -500,6 +535,16 @@ export interface FieldGroup {
    */
   pem?: boolean;
   /**
+   * 这一项是**私钥**还是**公钥**
+   *
+   * ⇒ 后台那一页要对密钥做**体检**(贴错栏、缺头尾行、标签不对),
+   * 而体检得知道「这一栏本来该是什么」—— 私钥贴进公钥栏、公钥贴进私钥栏,
+   * 是最常见的两种贴反。
+   *
+   * **只有 `pem: true` 的字段才有这个值** —— 非 PEM 字段不用管。
+   */
+  keyKind?: "private" | "public";
+  /**
    * 这一项是不是**密钥**(不该明文回到浏览器)
    *
    * 后台那一页是**客户端组件** ⇒ 密钥的原文**不能进 props**。
@@ -527,6 +572,27 @@ export interface ChannelRequirements {
   verifyAlternatives: FieldGroup[][];
   /** 端点 / 通知地址 —— 全都可选 */
   settings: FieldGroup[];
+}
+
+/**
+ * 一个密钥字段的**体检结果** —— 后台那一页显示用
+ *
+ * ⚠️ **只带诊断信息,不带密钥本身** —— 后台是客户端组件,密钥的原文永远
+ * 不进 props(这条规矩跟 `FieldGroup.secret` 是同一条)。
+ */
+export interface PaymentKeyIssue {
+  /** 哪个字段 */
+  key: PaymentSettingKey;
+  /** 字段的中文标签 */
+  label: string;
+  /** 问题出在哪儿(见 `lib/pem.ts` 的 `PemProblem`) */
+  problem: PemProblem;
+  /** 做了什么修复(`none` = 没修) */
+  fix: PemFix;
+  /** 人话诊断 */
+  detail: string;
+  /** 这把密钥**能不能用** */
+  usable: boolean;
 }
 
 /** 微信支付需要的字段 */
@@ -559,6 +625,7 @@ export const WECHAT_REQUIREMENTS: ChannelRequirements = {
       label: "商户私钥(PEM)",
       multiline: true,
       pem: true,
+      keyKind: "private",
       secret: true,
     },
   ],
@@ -570,6 +637,7 @@ export const WECHAT_REQUIREMENTS: ChannelRequirements = {
         label: "微信支付公钥(PEM)",
         multiline: true,
         pem: true,
+        keyKind: "public",
         secret: true,
       },
       {
@@ -622,6 +690,7 @@ export const ALIPAY_REQUIREMENTS: ChannelRequirements = {
       label: "应用私钥(PEM)",
       multiline: true,
       pem: true,
+      keyKind: "private",
       secret: true,
     },
     {
@@ -630,6 +699,7 @@ export const ALIPAY_REQUIREMENTS: ChannelRequirements = {
       label: "支付宝公钥(PEM)",
       multiline: true,
       pem: true,
+      keyKind: "public",
       secret: true,
     },
   ],

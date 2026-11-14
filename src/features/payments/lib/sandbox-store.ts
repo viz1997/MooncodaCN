@@ -65,6 +65,7 @@ import { describeDbError } from "@/features/shared/lib/db-error";
 import { readAlipayProductionValues } from "../providers/alipay/env";
 import { readWechatProductionValues } from "../providers/wechat/env";
 
+import { inspectPrivateKeyPem, inspectPublicKeyPem } from "./pem";
 import {
   ALIPAY_REQUIREMENTS,
   allChannelFields,
@@ -74,6 +75,7 @@ import {
   type FieldGroup,
   maskSecret,
   PAYMENT_SETTING_KEYS,
+  type PaymentKeyIssue,
   type PaymentRuntimeMode,
   type PaymentSettingKey,
   pickChannelValues,
@@ -183,6 +185,14 @@ export interface PaymentModeStatus {
    * 直接发给客户端组件。
    */
   values: Record<string, string>;
+  /**
+   * 密钥字段的**体检结果** —— 哪一栏贴错了 / 缺头尾行 / 标签不对
+   *
+   * **只带诊断,不带密钥本身** ⇒ 这一份也可以直接发给客户端组件。
+   *
+   * 空的字段**不在这里** —— 「没配」是**缺字段**那栏的事(见 `missing`)。
+   */
+  keyIssues: PaymentKeyIssue[];
 }
 
 /** 一个通道的完整运行时 */
@@ -210,6 +220,12 @@ export interface PaymentChannelRuntime {
   missing: FieldGroup[];
   /** 当前模式缺的验签字段 */
   missingVerify: FieldGroup[];
+  /**
+   * 当前模式的**密钥体检结果** —— 哪一栏贴错了 / 缺头尾行 / 标签不对
+   *
+   * 只带诊断,不带密钥本身。
+   */
+  keyIssues: PaymentKeyIssue[];
   /** 沙箱那一档的状态 */
   sandbox: PaymentModeStatus;
   /** 正式那一档的状态 */
@@ -233,6 +249,53 @@ function pickValues(
   requirements: ChannelRequirements
 ): Record<string, string> {
   return pickChannelValues(requirements, rows);
+}
+
+/**
+ * 体检这个模式下**所有密钥字段** —— 只回诊断,不回密钥本身
+ *
+ * ## 为什么后台要摆这个
+ *
+ * 线上真踩过(`SO-20261114-657E4A`):私钥贴错(缺头尾行 / 标签贴错 / 公钥贴进
+ * 私钥栏),OpenSSL 那边报的是一句
+ * `error:1E08010C:DECODER routines::unsupported` —— **一个字都看不出「你贴错了」**,
+ * 界面还把它归成「这次调用挂了,重试一下」。
+ *
+ * ⇒ 后台在**保存之后、下单之前**就把话说清楚:哪一栏、什么问题、能不能用。
+ *
+ * ## 「没配」不算「有问题」
+ *
+ * 空的那一栏是**缺字段**(那一栏有别的诊断),不是**贴错了** ⇒ 空的一律跳过。
+ *
+ * ## 密钥的原文**不进结果**
+ *
+ * 结果里只有 `label` / `problem` / `fix` / `detail` / `usable` ——
+ * 后台是客户端组件,密钥的原文永远不进 props。
+ */
+function collectKeyIssues(
+  requirements: ChannelRequirements,
+  values: Record<string, string>
+): PaymentKeyIssue[] {
+  const issues: PaymentKeyIssue[] = [];
+  for (const field of allFields(requirements)) {
+    if (!field.pem || !field.keyKind) continue;
+    const raw = values[field.key] ?? "";
+    if (!raw.trim()) continue;
+    const inspection =
+      field.keyKind === "private"
+        ? inspectPrivateKeyPem(raw)
+        : inspectPublicKeyPem(raw);
+    if (inspection.problem === "none") continue;
+    issues.push({
+      key: field.key,
+      label: field.label,
+      problem: inspection.problem,
+      fix: inspection.fix,
+      detail: inspection.detail,
+      usable: inspection.usable,
+    });
+  }
+  return issues;
 }
 
 /** 算一个模式的状态 */
@@ -268,6 +331,8 @@ function buildModeStatus(input: {
     configured,
     masked,
     values: plain,
+    // 密钥体检 —— 在**过滤掉密钥原文之前**算(算完只留诊断)
+    keyIssues: collectKeyIssues(input.requirements, input.values),
   };
 }
 
@@ -317,6 +382,7 @@ function buildWechatRuntime(
     configured: !invalid && current.configured,
     missing: current.missing,
     missingVerify: current.missingVerify,
+    keyIssues: current.keyIssues,
     sandbox,
     production,
     sameCredential: detectSameCredential({
@@ -374,6 +440,7 @@ function buildAlipayRuntime(
     configured: !invalid && current.configured,
     missing: current.missing,
     missingVerify: current.missingVerify,
+    keyIssues: current.keyIssues,
     sandbox,
     production,
     sameCredential: detectSameCredential({

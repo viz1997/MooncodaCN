@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   ALIPAY_REQUIREMENTS,
   allChannelFields,
+  shouldShowSandboxFields,
   WECHAT_REQUIREMENTS,
 } from "@/features/payments/lib/sandbox";
 
@@ -334,6 +335,75 @@ describe("支付设置:字段清单只有一份", () => {
   });
 });
 
+describe("支付设置:沙箱字段**只在开关拨到「开」的时候才出现**", () => {
+  it("判定是纯函数 —— `undefined` 按「关」处理", () => {
+    // 工作室 2026-11-14 的原话:「开启后才展示沙箱字段内容,而不是全部直接
+    // 展示」/「关闭后不展示」。
+    expect(shouldShowSandboxFields(true)).toBe(true);
+    expect(shouldShowSandboxFields(false)).toBe(false);
+    // 首帧 `useWatch` 返回 undefined(字段还没注册)⇒ 按「关」
+    expect(shouldShowSandboxFields(undefined)).toBe(false);
+  });
+
+  it("视图**盯着那口开关** —— 用 `useWatch`,不是自己存一份状态", () => {
+    const src = read(VIEW);
+    expect(src).toContain("Form.useWatch(channelKey, form)");
+    expect(src).toContain("shouldShowSandboxFields(");
+  });
+
+  it("字段块**整个**挂在开关上 —— 关着的时候那些输入框压根不在页面上", () => {
+    const src = stripComments(read(VIEW));
+    // 三元:`{sandboxOn ? ( 字段块 ) : ( 一句说明 )}`
+    expect(src).toContain("{sandboxOn ? (");
+    expect(src).toContain('t("form.productionOnly")');
+    // 「删掉这一行」按钮也在字段块里 ⇒ 关着的时候那个按钮同样不出现
+    const fieldsBlock = src.slice(src.indexOf("{sandboxOn ? ("));
+    expect(fieldsBlock).toContain("fields.map((field) => (");
+    expect(fieldsBlock).toContain("actions.deleteRow");
+  });
+
+  it("两个通道都把 form 实例传下去(不然 watch 不到)", () => {
+    const src = stripComments(read(VIEW));
+    // `<Form form={form} …>` 是外层那一个(本来就有的)⇒ 这里只数
+    // **传给 `<ChannelForm>` 的**那两个 —— 少了任何一个,那个通道就 watch 不到开关。
+    const passed = src.match(/<ChannelForm[\s\S]{0,400}?form=\{form\}/g) ?? [];
+    expect(passed.length).toBe(2);
+    // 两个通道都在里面
+    expect(src).toMatch(
+      /channelKey="wechatSandboxEnabled"[\s\S]{0,400}?form=\{form\}/
+    );
+    expect(src).toMatch(
+      /channelKey="alipaySandboxEnabled"[\s\S]{0,400}?form=\{form\}/
+    );
+  });
+
+  it("**关掉不删数据** —— 表单里没有的键,服务端直接跳过", () => {
+    // 藏起来的字段不进提交体 ⇒ 服务端拿到 `undefined` ⇒ 那行沙箱配置不动
+    const actions = read(ACTIONS);
+    expect(actions).toMatch(/if\s*\(raw\s*===\s*undefined\)\s*continue;/);
+    // 开关本身**永远写** ⇒ 「关」这个状态是存下来的,不是靠界面推断
+    expect(actions).toContain(
+      'value: parsedInput.wechatSandboxEnabled ? "true" : "false"'
+    );
+    expect(actions).toContain(
+      'value: parsedInput.alipaySandboxEnabled ? "true" : "false"'
+    );
+  });
+
+  it("「关着」那句话两种语言都有", () => {
+    const zh = messages("zh").AdminPaymentSettings as {
+      form: Record<string, unknown>;
+    };
+    const en = messages("en").AdminPaymentSettings as {
+      form: Record<string, unknown>;
+    };
+    expect(zh.form.productionOnly).toBeTruthy();
+    expect(en.form.productionOnly).toBeTruthy();
+    // form 命名空间的 key 集也一致
+    expect(Object.keys(en.form).sort()).toEqual(Object.keys(zh.form).sort());
+  });
+});
+
 describe("支付设置:迁移脚本", () => {
   it("脚本在仓库里,幂等,不播种任何一行", () => {
     const src = read(MIGRATION);
@@ -342,7 +412,6 @@ describe("支付设置:迁移脚本", () => {
     // **不写配置行** —— 跑完脚本线上行为一个字节都不变
     expect(stripComments(src)).not.toMatch(/INSERT\s+INTO/i);
   });
-
   it("支持 --dry-run", () => {
     expect(read(MIGRATION)).toContain("--dry-run");
   });

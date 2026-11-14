@@ -3594,6 +3594,33 @@ webhook 的 HMAC 密钥**。app 要装在店铺上、且跟店铺同一个组织
   **输入框留空 = 保持原值**(不是清空)—— 否则工作室点一次「保存」就把私钥擦了,
   下一次支付以「签名错误」的形式炸出来。
 
+#### 沙箱字段**只在开关拨到「开」的时候才出现**(2026-11-14)
+
+工作室 2026-11-14 的原话:**「拨到关 = 这个通道走正式模式(环境变量那套凭据)。
+拨到开 = 走沙箱。开启后才展示沙箱字段内容,而不是全部直接展示」** +「关闭后
+不展示」。
+
+⇒ 后台那一页**不是**把两套凭据并排摆出来让人自己看哪套生效:
+
+| 开关 | 页面显示 |
+|---|---|
+| **关**(正式模式) | **沙箱的端点 / 凭据一格都不显示**,只摆一句「当前是正式模式 —— 凭据来自环境变量」 |
+| **开**(沙箱模式) | 沙箱的端点 / 凭据**全部出现** |
+
+- **判定是纯函数** —— `payments/lib/sandbox.ts` 的
+  `shouldShowSandboxFields(sandboxEnabled)`,**只有一个入参**(是 `true` /
+  `false` / `undefined`)。`undefined` 按**关**处理(`Form.useWatch` 首帧返回
+  `undefined` —— 字段还没注册)。
+- **视图盯着那口开关** —— `Form.useWatch(channelKey, form)` ⇒ 开关拨动 → 字段
+  块**当场出现 / 当场消失**。两个 `<ChannelForm>` 都得把 `form` 实例传下去,
+  不然那个通道 watch 不到。
+- **关掉不删数据** —— 字段块整个卸载 ⇒ 那些键**不在提交体里** ⇒ 服务端拿到
+  `undefined` ⇒ `adminSavePaymentSettingsAction` 的
+  `if (raw === undefined) continue;` 直接跳过 ⇒ **DB 里那行沙箱配置一个字都不动**
+  (下次拨到「开」还在)。⚠️ **别改成「隐藏但保留」**(把字段留着、只是加
+  `hidden`)—— 那会让空串的语义从「保持原值」变成「清空」,工作室点一次保存
+  就把私钥擦了。
+
 #### 模式解析**严格**:只认 true / false
 
 `true/1/yes/on`(大小写不敏感)= 沙箱,`false/0/no/off/""` = 正式,**其它值
@@ -3697,8 +3724,98 @@ webhook 的 HMAC 密钥**。app 要装在店铺上、且跟店铺同一个组织
 | `src/test/payments/pure/payment-sandbox.test.ts` | 纯 resolver 的不变量(两端各测一遍:沙箱**不产生**正式端点 / 正式**不产生**沙箱端点) |
 | `src/test/payments/pure/payment-sandbox-config.test.ts` | provider 配置解析(沙箱只读 `*_sandbox_*` / 缺字段精确列名 / 未知模式值不猜) |
 | `src/test/payments/pure/payment-sandbox-ui.test.ts` | 徽章 + 提示条 + i18n(`Payment.sandboxBadge` / `Payment.sandboxNotice`) |
-| `src/test/payments/pure/payment-settings-admin.test.ts` | 后台页(路由 / 侧边栏 / 不开弹窗 / 密钥不回显 / 空串口径 / 测试单走生产路径) |
+| `src/test/payments/pure/payment-settings-admin.test.ts` | 后台页(路由 / 侧边栏 / 不开弹窗 / 密钥不回显 / 空串口径 / 测试单走生产路径)/ **沙箱字段只在开关拨到「开」的时候才出现**(判定是纯函数 / `useWatch` / 字段块整个挂在开关上 / **关掉不删数据**) |
 | `src/test/payments/pure/payment-sandbox-check.test.ts` | 自检脚本(**不重新实现签名** / dotenv 排第一 / 两个候选 path 都探 / 正式模式不碰钱 / 退出码) |
+
+### 支付密钥体检:贴错了当场认出来(2026-11-14)
+
+**线上真踩过** —— 订单 `SO-20261114-657E4A` 重建支付宝支付会话失败:
+
+```
+[storefront] SO-20261114-657E4A 重建 alipay 支付会话失败
+Error [PaymentProviderError]: 拼支付宝跳转地址失败 …
+  [cause]: Error: error:1E08010C:DECODER routines::unsupported
+           code: 'ERR_OSSL_UNSUPPORTED'
+```
+
+那句 `error:1E08010C:DECODER routines::unsupported` 一个字都看不出「你贴错了」
+—— 三种错法在 OpenSSL 那边**报的是同一句话**:
+
+| 错法 | 现象 |
+|---|---|
+| 只复制了 base64 正文(没有 `BEGIN` / `END` 两行) | 同一句 `ERR_OSSL_UNSUPPORTED` |
+| PKCS#1 的正文却标成了 `BEGIN PRIVATE KEY` | 同上 |
+| 把**公钥**贴进了私钥那一栏 | 同上 |
+
+而且它原先被包成 `PaymentProviderError` ⇒ 界面说的是「这次调用挂了,重试一下」
+⇒ 工作室点一百次也是同一个错。
+
+#### 三件事
+
+**① 认出来** —— `src/features/payments/lib/pem.ts`(**纯函数,只 import
+`node:crypto`**,零 DB 依赖 ⇒ 能进 `unit` project):
+
+| `PemProblem` | 什么意思 |
+|---|---|
+| `public-key` | **私钥**那一栏里贴的是公钥 |
+| `private-key` | **公钥**那一栏里贴的是私钥 |
+| `no-header` | 没有 PEM 头尾两行(只有 base64 正文) |
+| `mislabeled` | 头尾行的标签跟内容对不上 |
+| `unparseable` | 看不出来(多半是复制不全) |
+| `none` | 没问题 |
+
+**② 能修的当场修** —— `PemFix` = `wrapped`(补头尾行)/ `relabeled`(换标签)/
+`none`。⚠️ **「修」不是「猜」** —— 每一个候选 PEM 都**真的
+`createPrivateKey()` 成功**才算数 ⇒ 修不出来就**原样报错**,绝不拿一个
+「看起来像」的密钥去签名。
+
+**③ 分清「配错了」和「这次挂了」** —— 密钥不对是**配置问题**,重试没用:
+
+```
+修不了 ⇒ PaymentNotConfiguredError ⇒ PAYMENT_NOT_CONFIGURED(去改配置)
+```
+
+`providers/alipay/sign.ts` 的 `signContent()` 与
+`providers/wechat/signature.ts` 的 `signWithPrivateKey()` **都**先体检再签名,
+抛的是 `PaymentNotConfiguredError`(不是 `PaymentProviderError`)⇒
+`storefront/lib/payment-issue.ts` 的 `classifyPaymentIssue()` 把它归到
+「重试没用」那一档。
+
+#### ⚠️ 一个必须先判的坑:`createPublicKey()` 接受私钥
+
+Node 的 `createPublicKey()` 拿到一把**私钥**会**推出**它的公钥,而且**不报错**
+⇒ 不先判的话,一把私钥贴进「平台公钥」那一栏会被当成「能用的公钥」,
+验签拿着**自己的**公钥去对支付宝/微信的签名 —— **永远对不上,而界面一个字
+都不说**(验不过就是 `false`,没有别的线索)。
+
+⇒ `inspectPublicKeyPem()` 的判定顺序是:**① 贴的是私钥? → ② 原样就是公钥? →
+③ 标签不对 → ④ 没头尾 → ⑤ 还是像私钥? → ⑥ 看不出来**。**私钥那个判断必须
+排在最前面。**
+
+#### 修好之后,原始那一栏还存着没修的版本
+
+修复只发生在**这一次调用的内存里**。DB 里存的还是工作室贴进来的原文(后台那一栏
+显示的是原文,不是修好的版本)—— 免得「界面上看着好好的,存进去的东西却被我们
+偷偷改过」。
+
+#### 体检结果摆在两个地方(**都在出错之前**)
+
+- **后台 `/admin/payment-settings`** —— 「当前生效状态」里一条**琥珀色**的
+  密钥体检框:哪一栏、什么问题、能不能用(`AdminPaymentSettings.status.keyHealth*`)。
+- **`pnpm payment:check-sandbox`** —— 自检脚本在**发请求之前**打一段「密钥体检:」,
+  逐条列问题 + 能不能用。⚠️ 体检结果是**生产模块**算好的
+  (`sandbox-store.ts` 的 `collectKeyIssues`)—— 脚本**不重新实现**一遍
+  (另写一份 = 两边迟早漂)。
+
+**密钥原文一个字都不出去** —— 体检结果**只带诊断**(`label` / `problem` /
+`fix` / `detail` / `usable`),不带密钥本身 ⇒ 那一份可以直接发给客户端组件。
+
+#### 行为由单测守住
+
+| 测试 | 守住什么 |
+|---|---|
+| `src/test/payments/pure/pem-inspection.test.ts` | 体检(三种贴错 + 自动修好)/ **修好的私钥真的签得出来**(修完验得过)/ 修不了 ⇒ `PaymentNotConfiguredError`(**不是** `PaymentProviderError`)/ **公钥栏贴私钥 ⇒ 认出来**(`createPublicKey` 接受私钥 ⇒ 必须先判)/ 微信支付宝**同一个口径** / `verifySign` 验不过时**返 false 而不是抛错** |
+| `src/test/payments/pure/payment-sandbox-check.test.ts` | 自检脚本的密钥体检那一段(**不重新实现**体检逻辑) |
 
 ### Stripe 微信支付 / 支付宝(2026-11-05,**旧路,过渡期保留**)
 

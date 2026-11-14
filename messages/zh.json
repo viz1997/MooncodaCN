@@ -2402,7 +2402,21 @@
       "missingVerify": "还缺验签材料(不影响下单,但收不到通知)",
       "allPresent": "都齐了",
       "otherMode": "另一个模式",
-      "sameCredential": "这几项跟正式模式的值一模一样 —— 大概率贴错了"
+      "sameCredential": "这几项跟正式模式的值一模一样 —— 大概率贴错了",
+      "keyHealth": "密钥体检",
+      "keyHealthDetail": "下面这几栏的密钥有问题 —— 支付会直接失败(重试没用)。",
+      "keyProblem": {
+        "public-key": "贴的是公钥 —— 这一栏要私钥",
+        "private-key": "贴的是私钥 —— 这一栏要公钥",
+        "no-header": "缺 PEM 头尾两行(BEGIN / END)",
+        "mislabeled": "PEM 标签跟内容对不上",
+        "unparseable": "解析不了 —— 不是一把能用的 PEM"
+      },
+      "keyFix": {
+        "wrapped": "已自动补上头尾行,能用",
+        "relabeled": "已自动改正标签,能用"
+      },
+      "keyUnusable": "用不了,支付会失败"
     },
     "form": {
       "title": "沙箱凭据",
@@ -2413,6 +2427,7 @@
       "alipayHelp": "沙箱 APPID / 应用私钥 / 支付宝公钥,加上沙箱网关地址(留空 = 用新沙箱)。",
       "switchLabel": "跑在沙箱模式",
       "switchExtra": "拨到关 = 这个通道走正式模式(环境变量那套凭据)。拨到开 = 走沙箱。",
+      "productionOnly": "当前是正式模式 —— 沙箱的端点与凭据不显示。拨到「跑在沙箱模式」才出现。",
       "optional": "可选",
       "envVarHint": "正式模式对应的环境变量",
       "secretHint": "已配的密钥不显示原文 —— 留空 = 保持原值",

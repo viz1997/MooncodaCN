@@ -169,6 +169,35 @@ describe("支付自检:正式模式不许顺手扣钱", () => {
   });
 });
 
+describe("支付自检:密钥体检", () => {
+  it("在**发请求之前**就把密钥的问题说出来", () => {
+    // 线上真踩过(`SO-20261114-657E4A`):私钥贴错 ⇒ OpenSSL 报的是一句
+    // `error:1E08010C:DECODER routines::unsupported` —— 一个字都看不出「你贴错了」。
+    const src = code();
+    expect(src).toContain("密钥体检:");
+    expect(src).toContain("runtime.keyIssues");
+    // 体检那一段在**路径探针 / 测试单**之前 —— 先说清楚,再发请求
+    expect(src.indexOf("密钥体检:")).toBeLessThan(
+      src.indexOf("probeWechatPaths")
+    );
+  });
+
+  it("体检结果是**生产模块**算好的 —— 脚本不重新实现一遍", () => {
+    // 另写一份 = 后台看到一句、自检脚本看到另一句,又得猜
+    const src = code();
+    expect(src).toContain("runtime.keyIssues");
+    expect(src).not.toContain("createPrivateKey");
+    expect(src).not.toContain("createPublicKey");
+    expect(src).not.toContain("BEGIN PRIVATE KEY");
+  });
+
+  it("用不了 ⇒ 算一条**问题**(退出码 1);能修 ⇒ 算一条**警告**", () => {
+    const src = code();
+    expect(src).toContain("密钥用不了:");
+    expect(src).toContain("密钥贴错了(已自动修好):");
+  });
+});
+
 describe("支付自检:输出与退出码", () => {
   it("打印**确切端点** —— 微信连 path 一起打(path 是签名的一部分)", () => {
     const src = code();

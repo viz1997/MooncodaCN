@@ -23,6 +23,7 @@
  */
 
 import type {
+  PaymentKeyIssue,
   PaymentRuntimeMode,
   PaymentSettingKey,
   SandboxChannel,
@@ -89,6 +90,12 @@ export interface AdminPaymentModeView {
    * 正式那一档只需要「配好了没 / 缺哪几个 / 掩码」这些信息。
    */
   values: Record<string, string>;
+  /**
+   * 密钥字段的**体检结果** —— 哪一栏贴错了 / 缺头尾行 / 标签不对
+   *
+   * **只带诊断,不带密钥本身** —— 密钥的原文永远不进 props。
+   */
+  keyIssues: PaymentKeyIssue[];
 }
 
 /**
@@ -121,6 +128,12 @@ export interface AdminPaymentChannelView {
   missing: AdminPaymentFieldView[];
   /** 当前模式缺的验签字段 */
   missingVerify: AdminPaymentFieldView[];
+  /**
+   * 当前模式的**密钥体检结果** —— 哪一栏贴错了 / 缺头尾行 / 标签不对
+   *
+   * **只带诊断,不带密钥本身** —— 密钥的原文永远不进 props。
+   */
+  keyIssues: PaymentKeyIssue[];
   /** 沙箱那一档的状态 */
   sandbox: AdminPaymentModeView;
   /** 正式那一档的状态 */

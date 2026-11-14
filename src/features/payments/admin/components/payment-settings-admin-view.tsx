@@ -13,6 +13,18 @@
  * 2. **凭据表单** —— 微信 + 支付宝各一块:沙箱开关 + 端点 + 凭据。
  * 3. **测试** —— 「跑一笔 ¥0.01 测试单」按钮。
  *
+ * ## 沙箱字段**只在开关拨到「开」的时候才出现**
+ *
+ * 工作室 2026-11-14 的原话:**「开启后才展示沙箱字段内容,而不是全部直接
+ * 展示」**;「关闭后不展示」。
+ *
+ * 开关关着 = 这个通道走**正式模式**(环境变量那套凭据)⇒ 沙箱的端点 / 凭据
+ * 一格都不显示,只摆一句「当前是正式模式」。
+ *
+ * **关掉不删数据** —— 表单里没有的键,服务端拿到 `undefined` ⇒
+ * `adminSavePaymentSettingsAction` 的 `if (raw === undefined) continue;`
+ * 直接跳过 ⇒ **DB 里那行沙箱配置一个字都不动**(下次拨到「开」还在)。
+ *
  * ## 密钥不回显
  *
  * 已配的私钥只显示 `已配置(…abcd)`(PEM 显示 `已配置(RSA PRIVATE KEY)`)——
@@ -42,6 +54,7 @@
  * 就地展开一块确认条)。
  */
 
+import type { FormInstance } from "antd";
 import { App, Button, Form, Input, Switch, Tag } from "antd";
 import {
   AlertTriangle,
@@ -73,6 +86,7 @@ import type {
   PaymentSettingKey,
   SandboxChannel,
 } from "@/features/payments/lib/sandbox";
+import { shouldShowSandboxFields } from "@/features/payments/lib/sandbox";
 
 /* -------------------------------------------------------------------------- */
 /*  表单形状                                                                    */
@@ -366,6 +380,7 @@ export function PaymentSettingsAdminView() {
             disabled={busy}
             onDelete={(key) => void removeRow({ key })}
             isRemoving={isRemoving}
+            form={form}
           />
 
           <div className="mt-6 border-t pt-5">
@@ -377,6 +392,7 @@ export function PaymentSettingsAdminView() {
               disabled={busy}
               onDelete={(key) => void removeRow({ key })}
               isRemoving={isRemoving}
+              form={form}
             />
           </div>
 
@@ -563,6 +579,31 @@ function ChannelStatus({
         ) : null}
       </div>
 
+      {/* 密钥体检 —— 贴错了密钥 = 支付**直接失败**(不是「重试一下」能解决的) */}
+      {channel.keyIssues.length > 0 ? (
+        <div className="mb-3 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-xs">
+          <p className="font-medium text-amber-800">{t("status.keyHealth")}</p>
+          <p className="mt-0.5 text-muted-foreground">
+            {t("status.keyHealthDetail")}
+          </p>
+          <ul className="mt-1.5 list-inside list-disc space-y-0.5">
+            {channel.keyIssues.map((issue) => (
+              <li key={issue.key}>
+                <span className="font-medium">{t(`fields.${issue.key}`)}</span>
+                <span className="ml-1">
+                  {t(`status.keyProblem.${issue.problem}`)}
+                </span>
+                <span className="ml-1 text-muted-foreground">
+                  {issue.usable
+                    ? t(`status.keyFix.${issue.fix}`)
+                    : t("status.keyUnusable")}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       {/* 另一个模式的状态 —— 工作室要能一眼看到「正式那边还缺什么」 */}
       <div className="border-t pt-3 text-xs">
         <p className="text-[11px] text-muted-foreground">{otherModeLabel}</p>
@@ -601,6 +642,7 @@ function ChannelForm({
   disabled,
   onDelete,
   isRemoving,
+  form,
 }: {
   channelKey: "wechatSandboxEnabled" | "alipaySandboxEnabled";
   title: string;
@@ -609,8 +651,27 @@ function ChannelForm({
   disabled: boolean;
   onDelete: (key: PaymentSettingKey) => void;
   isRemoving: boolean;
+  form: FormInstance<PaymentSettingsFormValues>;
 }) {
   const t = useTranslations("AdminPaymentSettings");
+
+  /**
+   * 沙箱字段**只在开关拨到「开」的时候才出现**
+   *
+   * 工作室 2026-11-14 的原话:**「开启后才展示沙箱字段内容,而不是全部直接
+   * 展示」**;「关闭后不展示」。
+   *
+   * 为什么要藏 —— 开关关着 = 这个通道走**正式模式**(环境变量那套凭据)。
+   * 那一档一个沙箱字段都用不上,摆一屏输入框在那儿只会让人以为「这些要填」,
+   * 或者把沙箱的私钥填进正式那套配置里。**关着 = 那些字段压根不存在。**
+   *
+   * **藏起来不会丢数据** —— 表单里没有的键,服务端拿到的是 `undefined`,
+   * `adminSavePaymentSettingsAction` 那句 `if (raw === undefined) continue;`
+   * 直接跳过 ⇒ **DB 里那行沙箱配置一个字都不动**(下次拨到「开」还在)。
+   *
+   * 判定本身是纯函数(`shouldShowSandboxFields`)—— 视图只负责接线。
+   */
+  const sandboxOn = shouldShowSandboxFields(Form.useWatch(channelKey, form));
 
   return (
     <div>
@@ -630,71 +691,79 @@ function ChannelForm({
         <Switch disabled={disabled} />
       </Form.Item>
 
-      <div className="space-y-3">
-        {fields.map((field) => (
-          <Form.Item
-            key={field.key}
-            name={["values", field.key]}
-            label={
-              <span className="text-xs">
-                {t(`fields.${field.key}`)}
-                {field.optional ? (
-                  <span className="ml-1 text-[11px] text-muted-foreground">
-                    ({t("form.optional")})
-                  </span>
-                ) : null}
-              </span>
-            }
-            extra={
-              <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
-                <span>
-                  {t("form.envVarHint")}:{" "}
-                  <code className="rounded bg-muted px-1 font-mono">
-                    {field.envVar}
-                  </code>
+      {sandboxOn ? (
+        <div className="space-y-3">
+          {fields.map((field) => (
+            <Form.Item
+              key={field.key}
+              name={["values", field.key]}
+              label={
+                <span className="text-xs">
+                  {t(`fields.${field.key}`)}
+                  {field.optional ? (
+                    <span className="ml-1 text-[11px] text-muted-foreground">
+                      ({t("form.optional")})
+                    </span>
+                  ) : null}
                 </span>
-                {field.secret ? (
-                  <span className="text-amber-700">{t("form.secretHint")}</span>
-                ) : null}
-                {/* 「删掉这一行」—— 清空一个密钥的唯一办法(输入框留空是「保持原值」) */}
-                <Button
-                  type="link"
-                  size="small"
-                  className="h-auto p-0 text-[11px]"
-                  icon={<Trash2 className="h-3 w-3" />}
-                  loading={isRemoving}
+              }
+              extra={
+                <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+                  <span>
+                    {t("form.envVarHint")}:{" "}
+                    <code className="rounded bg-muted px-1 font-mono">
+                      {field.envVar}
+                    </code>
+                  </span>
+                  {field.secret ? (
+                    <span className="text-amber-700">
+                      {t("form.secretHint")}
+                    </span>
+                  ) : null}
+                  {/* 「删掉这一行」—— 清空一个密钥的唯一办法(输入框留空是「保持原值」) */}
+                  <Button
+                    type="link"
+                    size="small"
+                    className="h-auto p-0 text-[11px]"
+                    icon={<Trash2 className="h-3 w-3" />}
+                    loading={isRemoving}
+                    disabled={disabled}
+                    onClick={() => onDelete(field.key)}
+                  >
+                    {t("actions.deleteRow")}
+                  </Button>
+                </span>
+              }
+            >
+              {field.multiline ? (
+                <Input.TextArea
+                  rows={6}
                   disabled={disabled}
-                  onClick={() => onDelete(field.key)}
-                >
-                  {t("actions.deleteRow")}
-                </Button>
-              </span>
-            }
-          >
-            {field.multiline ? (
-              <Input.TextArea
-                rows={6}
-                disabled={disabled}
-                placeholder={
-                  field.secret
-                    ? (field.masked ?? t("form.notSet"))
-                    : t("form.placeholder")
-                }
-                className="font-mono text-xs"
-              />
-            ) : (
-              <Input
-                disabled={disabled}
-                placeholder={
-                  field.secret
-                    ? (field.masked ?? t("form.notSet"))
-                    : t("form.placeholder")
-                }
-              />
-            )}
-          </Form.Item>
-        ))}
-      </div>
+                  placeholder={
+                    field.secret
+                      ? (field.masked ?? t("form.notSet"))
+                      : t("form.placeholder")
+                  }
+                  className="font-mono text-xs"
+                />
+              ) : (
+                <Input
+                  disabled={disabled}
+                  placeholder={
+                    field.secret
+                      ? (field.masked ?? t("form.notSet"))
+                      : t("form.placeholder")
+                  }
+                />
+              )}
+            </Form.Item>
+          ))}
+        </div>
+      ) : (
+        <p className="rounded-md border border-dashed bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+          {t("form.productionOnly")}
+        </p>
+      )}
     </div>
   );
 }

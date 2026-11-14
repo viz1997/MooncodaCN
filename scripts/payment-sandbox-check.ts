@@ -46,6 +46,7 @@
 import "./lib/load-env";
 import "./lib/require-database-url";
 
+import type { PemFix, PemProblem } from "@/features/payments/lib/pem";
 import { getPaymentProvider } from "@/features/payments/lib/registry";
 import {
   ALIPAY_REQUIREMENTS,
@@ -207,6 +208,45 @@ function printFields(
 /** 一组字段的标签 */
 function labels(fields: FieldGroup[]): string {
   return fields.map((field) => field.label).join("、");
+}
+
+/* -------------------------------------------------------------------------- */
+/*  密钥体检                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 密钥的问题 —— 中文说法
+ *
+ * 跟后台那一页(`AdminPaymentSettings.status.keyProblem.*`)是同一套口径 ——
+ * 两边各写一份的话,工作室在后台看到一句、自检脚本看到另一句,又得猜。
+ */
+function keyProblemLabel(problem: PemProblem): string {
+  switch (problem) {
+    case "public-key":
+      return "贴的是公钥 —— 这一栏要私钥";
+    case "private-key":
+      return "贴的是私钥 —— 这一栏要公钥";
+    case "no-header":
+      return "缺 PEM 头尾两行(BEGIN / END)";
+    case "mislabeled":
+      return "PEM 标签跟内容对不上";
+    case "unparseable":
+      return "解析不了 —— 不是一把能用的 PEM";
+    default:
+      return "没问题";
+  }
+}
+
+/** 做了什么修复 —— 中文说法 */
+function keyFixLabel(fix: PemFix): string {
+  switch (fix) {
+    case "wrapped":
+      return "已自动补上头尾行";
+    case "relabeled":
+      return "已自动改正标签";
+    default:
+      return "没修";
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -431,6 +471,37 @@ async function checkChannel(input: {
       `${yellow("⚠")} 缺验签材料:${labels(runtime.missingVerify)}  ${gray("(不影响下单,但收不到通知)")}`
     );
     warnings.push(`缺验签材料:${labels(runtime.missingVerify)}`);
+  }
+
+  /* ---- 密钥体检 ---- */
+  //
+  // 线上真踩过(`SO-20261114-657E4A`):私钥贴错 ⇒ OpenSSL 报的是一句
+  // `error:1E08010C:DECODER routines::unsupported` —— **一个字都看不出「你贴错了」**。
+  //
+  // ⇒ 这里在**发请求之前**就把话说清楚:哪一栏、什么问题、能不能用。
+  // 体检结果是**生产模块**算好的(`sandbox-store.ts` 的 `collectKeyIssues`)——
+  // 脚本**不重新实现**一遍(另写一份 = 两边迟早漂)。
+  if (runtime.keyIssues.length > 0) {
+    say("");
+    say(gray("密钥体检:"));
+    for (const issue of runtime.keyIssues) {
+      const verdict = issue.usable
+        ? yellow("已自动修好,能用") + gray(`(${keyFixLabel(issue.fix)})`)
+        : red("用不了,支付会直接失败");
+      say(
+        `   ${pad(issue.label, 26)} ${keyProblemLabel(issue.problem)}  ${verdict}`
+      );
+    }
+    const unusable = runtime.keyIssues.filter((issue) => !issue.usable);
+    if (unusable.length > 0) {
+      problems.push(`密钥用不了:${unusable.map((i) => i.label).join("、")}`);
+    } else {
+      warnings.push(
+        `密钥贴错了(已自动修好):${runtime.keyIssues
+          .map((i) => i.label)
+          .join("、")}`
+      );
+    }
   }
 
   // 另一模式缺什么 —— 工作室「拨开关之前」最想看的就是这个

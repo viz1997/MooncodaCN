@@ -30,6 +30,13 @@
 
 import { createPrivateKey, createPublicKey, sign, verify } from "node:crypto";
 
+import {
+  inspectPrivateKeyPem,
+  inspectPublicKeyPem,
+  normalizePemText,
+} from "../../lib/pem";
+import { PaymentNotConfiguredError } from "../../lib/types";
+
 /**
  * 待签字符串的两种口径
  *
@@ -97,22 +104,42 @@ export function buildSignContent(
  * 环境变量里一行写不下完整私钥,惯例是把换行写成 `\n`。这里把它还原成真换行。
  *
  * 顺带补上结尾换行 —— PEM 规范要求最后一行带换行,缺了有些解析器会挑食。
+ *
+ * **实现搬到 `lib/pem.ts`** —— 微信那一套以前也有一份一模一样的,
+ * 两份各改各的迟早漂。现在两个通道都调同一份。
  */
 export function normalizePemKey(raw: string): string {
-  const restored = raw
-    .replace(/\\r\\n/g, "\n")
-    .replace(/\\n/g, "\n")
-    .trim();
-  return restored.endsWith("\n") ? restored : `${restored}\n`;
+  return normalizePemText(raw);
 }
 
 /**
  * 用**应用私钥**签名(RSA2 / RSA-SHA256),返回 base64
  *
- * 私钥不对 / 不是合法 PEM 时抛错 —— 那属于「配错了」,由调用方分类。
+ * ## 私钥不对 ⇒ 抛 `PaymentNotConfiguredError`(不是 `PaymentProviderError`)
+ *
+ * 线上真踩过(`SO-20261114-657E4A`):私钥贴错(少头尾行 / 标签贴错 / 公钥贴进
+ * 私钥栏),`createPrivateKey()` 抛的是一句
+ * `error:1E08010C:DECODER routines::unsupported` —— **一个字都看不出「你贴错了」**。
+ *
+ * 而那条错原先被包成 `PaymentProviderError` ⇒ 界面说的是「这次调用挂了,
+ * 重试一下」⇒ 工作室点一百次也是同一个错。
+ *
+ * ⇒ 现在分三步:
+ *
+ * 1. **先体检**(`lib/pem.ts`)—— 认出「贴的是公钥」「缺头尾行」「标签不对」
+ * 2. **能修的当场修** —— 补头尾行 / 换标签,修完**真的能解析**才用
+ * 3. **修不了 ⇒ `PaymentNotConfiguredError`** —— 归类成「配错了」,
+ *    界面回 `PAYMENT_NOT_CONFIGURED`(重试没用,去改配置)
  */
 export function signContent(content: string, appPrivateKeyPem: string): string {
-  const key = createPrivateKey(normalizePemKey(appPrivateKeyPem));
+  const inspection = inspectPrivateKeyPem(appPrivateKeyPem);
+  if (!inspection.usable || !inspection.pem) {
+    throw new PaymentNotConfiguredError(
+      "alipay",
+      `支付宝应用私钥不可用:${inspection.detail}`
+    );
+  }
+  const key = createPrivateKey(inspection.pem);
   return sign("RSA-SHA256", Buffer.from(content, "utf8"), key).toString(
     "base64"
   );
@@ -133,7 +160,9 @@ export function verifySign(
   alipayPublicKeyPem: string
 ): boolean {
   try {
-    const key = createPublicKey(normalizePemKey(alipayPublicKeyPem));
+    const inspection = inspectPublicKeyPem(alipayPublicKeyPem);
+    if (!inspection.usable || !inspection.pem) return false;
+    const key = createPublicKey(inspection.pem);
     return verify(
       "RSA-SHA256",
       Buffer.from(content, "utf8"),

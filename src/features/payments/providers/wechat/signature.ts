@@ -66,6 +66,13 @@ import {
   verify,
 } from "node:crypto";
 
+import {
+  inspectPrivateKeyPem,
+  inspectPublicKeyPem,
+  normalizePemText,
+} from "../../lib/pem";
+import { PaymentNotConfiguredError } from "../../lib/types";
+
 /** 微信 V3 只有这一种签名算法 */
 export const WECHAT_SIGN_TYPE = "WECHATPAY2-SHA256-RSA2048";
 
@@ -88,13 +95,11 @@ export const WECHAT_NOTIFY_TIMESTAMP_TOLERANCE_SECONDS = 300;
  * 环境变量里一行写不下完整私钥,惯例是把换行写成 `\n`。这里还原成真换行。
  *
  * 顺带补上结尾换行 —— PEM 规范要求最后一行带换行,缺了有些解析器会挑食。
+ *
+ * **实现搬到 `lib/pem.ts`** —— 支付宝那一套以前也有一份一模一样的。
  */
 export function normalizePemKey(raw: string): string {
-  const restored = raw
-    .replace(/\\r\\n/g, "\n")
-    .replace(/\\n/g, "\n")
-    .trim();
-  return restored.endsWith("\n") ? restored : `${restored}\n`;
+  return normalizePemText(raw);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -134,13 +139,24 @@ export function buildSignMessage(params: WechatSignMessageParams): string {
 /**
  * 用**商户私钥**签名(RSA-SHA256),返回 base64
  *
- * 私钥不合法时抛错 —— 那属于「配错了」,由调用方分类。
+ * ## 私钥不对 ⇒ 抛 `PaymentNotConfiguredError`(不是 `PaymentProviderError`)
+ *
+ * 跟支付宝那一套**同一个口径**(见 `providers/alipay/sign.ts` 的说明):
+ * 先体检(`lib/pem.ts`)→ 能修的当场修 → 修不了 ⇒ 「配错了」
+ * (`PAYMENT_NOT_CONFIGURED`,重试没用)。
  */
 export function signWithPrivateKey(
   message: string,
   privateKeyPem: string
 ): string {
-  const key = createPrivateKey(normalizePemKey(privateKeyPem));
+  const inspection = inspectPrivateKeyPem(privateKeyPem);
+  if (!inspection.usable || !inspection.pem) {
+    throw new PaymentNotConfiguredError(
+      "wechat",
+      `微信商户私钥不可用:${inspection.detail}`
+    );
+  }
+  const key = createPrivateKey(inspection.pem);
   return sign("RSA-SHA256", Buffer.from(message, "utf8"), key).toString(
     "base64"
   );
@@ -163,7 +179,9 @@ export function verifyWithPublicKey(
   publicKeyPem: string
 ): boolean {
   try {
-    const key = createPublicKey(normalizePemKey(publicKeyPem));
+    const inspection = inspectPublicKeyPem(publicKeyPem);
+    if (!inspection.usable || !inspection.pem) return false;
+    const key = createPublicKey(inspection.pem);
     return verify(
       "RSA-SHA256",
       Buffer.from(message, "utf8"),
