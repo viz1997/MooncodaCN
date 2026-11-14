@@ -4105,6 +4105,83 @@ Node 的 `createPublicKey()` 拿到一把**私钥**会**推出**它的公钥,而
 | `src/test/payments/pure/alipay-reconcile.test.ts` | 交易状态(`TRADE_SUCCESS` / `TRADE_FINISHED` 算付成功)/ **验签不过 ⇒ 绝不落库** / **金额对不上 ⇒ 绝不落库** / **支付宝没给金额 ⇒ 核不了 ⇒ 不落库** / 判定顺序短路(`already_paid` → `not_found` → `signature_invalid` → `not_paid` → `amount_mismatch` → `settled`)/ **除 `settled` 那一档以外一条都不许落库** / 节流(第一次放行、冷却期内跳过、过了间隔放行、不同订单互不影响)/ 通知地址(显式优先 / 站点拼接 / 尾部斜杠 / 空白当没配 / `MISSING` / `INVALID_URL` / `NOT_HTTPS` / `LOCAL_ADDRESS` / 四个码都有人话) |
 | `src/test/payments/pure/payment-settings-admin.test.ts` | 后台把通知地址摆出来(横幅 + 每个通道的状态卡)/ 走 `resolveNotifyUrl` 那一层 / 两个通道各用各的通知路径 / **通知地址不从环境变量里漏出去** / 四个问题码中英文都摆得上话 |
 
+### 支付宝查单响应的验签口径(2026-11-14 第二个根因)
+
+工作室又报了一单:支付宝那边显示已经付款成功,订单却还是 `unpaid`:
+
+```
+⚠️ 支付宝那边显示这笔已经付款成功,但我们核对不上(签名验不过)——
+请不要重复付款,工作室会人工确认 —— 支付宝说:code=10000
+```
+
+三单全是同一个症状:
+
+| 订单号 | 金额 |
+|---|---|
+| `SO-20261114-657E4A` | ¥247 |
+| `SO-20261114-137332` | ¥249 |
+| `SO-20261114-E58728` | ¥228 |
+
+**根因不是公钥不对,是待签字符串拼错了。**
+
+原来的实现把待签字符串拼成:
+
+```
+alipay_trade_query_response={"code":"10000",…}
+```
+
+—— **多了一个键名前缀**。支付宝签的其实**只是内层那个对象的 JSON 原文**
+(含大括号 / **不含**键名 / **不含**外层的 `sign` 那一项)。官方《同步接口
+验签》(`open.alipay.com/200/106120`)就是这么写的:「开发者只对支付宝返回的
+json 中 response 的值做验签」;各家 SDK 也是这么实现的(Python 版 `alipay`
+的 `_get_string_to_be_signed()`:从 `{` 起按大括号配平抠原文)。
+
+⇒ **每一笔查单响应都验不过** ⇒ 判定层永远落在 `signature_invalid` ⇒
+订单永远停在 `unpaid`。**跟公钥没关系**(公钥是对的 —— 异步通知那条腿验得过)。
+
+#### 三条口径(新的 `providers/alipay/response-sign.ts`,纯函数)
+
+1. **待签字符串 = 内层那段原文**,**不带 `key=` 前缀**
+2. **必须抠原文,不能重新序列化** —— `JSON.stringify` 一次的话键序可能变、
+   `\/` 会被还原成 `/`(支付宝吐的 `qr_code` 里就有 `https:\/\/…`)、数字格式
+   可能变 ⇒ 抠原文是**唯一**能验过的办法
+3. **抠的时候要认字符串里的括号**(字符串里可能有 `{` / `}`)也要认转义
+
+⇒ 那个前缀是**硬编码的错** ⇒ 有单测钉住
+(`src/test/payments/pure/alipay-response-signature.test.ts` —— 还扫
+`query.ts` 的源码,防止有人把前缀写回去)。
+
+> **`query.ts` 搬不动的原因** —— 它 import `@/db`(`config.ts` →
+> `sandbox-store.ts`)⇒ 进不了 vitest 的 `unit` project ⇒ 抠原文那份逻辑
+> **抽成一个独立纯模块**(零 DB 依赖),`query.ts` 只调它。
+
+#### 顺带修的:请求被拒 ≠ 查不到
+
+支付宝**拒绝请求**时(APPID 不对 / 签名不对 / 参数不合法)回的是
+`{"error_response":{…}}`,**没有** `alipay_trade_query_response` 那个节点。
+
+以前代码只认后者 ⇒ 拒请求的时候 `code` 是空的 ⇒ 判定层把它归成「查不到这笔
+交易(用户没付)」—— **指错了方向**(工作室会去查用户有没有付,而真相是「我们
+这边的 APPID / 私钥不是一套」)。
+
+现在 `query.ts` **两个节点都认**:
+
+- 「查到了」**只看** `alipay_trade_query_response.code === "10000"`(错误节点的
+  `code` 是 4 位错误码 `40002` 之类,拿它当「查到了」就是误判)
+- 错误信息(`code` / `sub_code` / `sub_msg` / `msg`)从**哪个节点来都行**
+  (两个节点的错误字段同名)⇒ 统一取 `inner`
+- 交易那几个字段(`out_trade_no` / `trade_no` / `trade_status` / `total_amount`)
+  **只从查单节点取** —— `error_response` 里没有它们
+
+⇒ 被拒的请求现在落在判定层的 `query_rejected` 那一档,带着支付宝自己的
+`code` / `sub_code` / `msg` 报出来。
+
+#### 行为由单测守住
+
+| 测试 | 守住什么 |
+|---|---|
+| `src/test/payments/pure/alipay-response-signature.test.ts` | 待签字符串 = 内层原文(**不带 `alipay_trade_query_response=` 前缀**)/ 带前缀的那一版**验不过**(钉住原来的错法)/ **重新序列化会改掉 `\/` ⇒ 验不过**(必须抠原文)/ 字符串里的括号不会带偏抠取/ 验签失败**返 false 不抛错**/ 查单 + 判定层串起来 ⇒ 落库(`settled`)/ **验不过 ⇒ 绝不落库但拦住「再付一次」**/ 扫 `query.ts` 源码:**不许**拼那个前缀 / 验签走 `response-sign.ts` / `error_response` 也要认 |
+
 ### Stripe 微信支付 / 支付宝(2026-11-05,**旧路,过渡期保留**)
 
 Sellbase 的 `createCheckout()` 把 `payment_method_types: ["card"]` **写死**

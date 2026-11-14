@@ -608,7 +608,8 @@ const reconcileSchema = z.object({
  * 排查这件事需要三样东西,而**界面上一样都没有**:
  *
  * 1. 支付宝到底回了什么(`code` / `sub_code` / `trade_status` / `total_amount`)
- * 2. 响应的签名验过没有 —— **`false` 就是支付宝公钥贴错了**
+ * 2. 响应的签名验过没有 —— **`false` 就是签名没验过**(公钥不对 / 我们拼错了
+ *    待签字符串,见 `alipay/response-sign.ts`)
  * 3. 我打的是哪个网关、沙箱还是正式
  *
  * ⇒ 这个 action 把**原始事实**原样带给工作室(`attempts`),外加判定层的

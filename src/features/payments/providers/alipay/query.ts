@@ -44,10 +44,22 @@ import { PaymentProviderError } from "@/features/payments/lib/types";
 import { getAlipayConfig } from "./config";
 import type { AlipayConfig } from "./env";
 import { formatAlipayTimestamp } from "./page-pay";
-import { buildSignContent, signContent, verifySign } from "./sign";
+import {
+  ALIPAY_TRADE_QUERY_RESPONSE_KEY,
+  verifyAlipayResponseSignature,
+} from "./response-sign";
+import { buildSignContent, signContent } from "./sign";
 
 /** 查单接口名 */
 export const ALIPAY_QUERY_METHOD = "alipay.trade.query";
+
+/** 支付宝把**请求**拒了时的响应节点 —— 跟查单结果那个不是一个形状 */
+interface AlipayErrorResponseBody {
+  code?: string;
+  sub_code?: string;
+  sub_msg?: string;
+  msg?: string;
+}
 
 /** 查单响应的内层对象 */
 interface AlipayQueryResponseBody {
@@ -62,6 +74,15 @@ interface AlipayQueryResponseBody {
     trade_status?: string;
     total_amount?: string;
   };
+  /**
+   * **请求被拒**时的响应节点(APPID 不对 / 签名不对 / 参数不合法 …)
+   *
+   * 支付宝拒请求时**不回** `alipay_trade_query_response`,而是回这个。
+   * 以前代码只认前一个 ⇒ 拒请求的时候 `code` 是空的 ⇒ 判定层把它归成
+   * 「查不到这笔交易(用户没付)」—— **指错了方向**(工作室会去查用户有没有付,
+   * 而真相是「我们这边的 APPID / 私钥不是一套」)。
+   */
+  error_response?: AlipayErrorResponseBody;
   sign?: string;
 }
 
@@ -85,52 +106,6 @@ export interface AlipayTradeQueryResult {
   subCode: string | null;
   /** 失败原因 / 提示 */
   message: string | null;
-}
-
-/**
- * 抠出原始响应体里某个顶层字段的**原文片段**
- *
- * 验响应签名要用**原文** —— 重新 `JSON.stringify` 一次的话,数字格式
- * (`1.0` vs `1`)、键顺序都可能跟支付宝签名时用的原文不一样,签名就废了。
- *
- * 只处理顶层对象值(`{…}`)—— 支付宝的响应里需要验签的就是那一个内层对象。
- */
-function extractRawObject(raw: string, key: string): string | null {
-  const marker = `"${key}"`;
-  const markerIndex = raw.indexOf(marker);
-  if (markerIndex === -1) return null;
-
-  let cursor = markerIndex + marker.length;
-  while (cursor < raw.length && raw[cursor] !== ":") cursor++;
-  cursor++; // 跳过冒号
-  while (cursor < raw.length && /\s/.test(raw[cursor] ?? "")) cursor++;
-
-  if (raw[cursor] !== "{") return null;
-
-  let depth = 0;
-  let inString = false;
-  for (let i = cursor; i < raw.length; i++) {
-    const ch = raw[i];
-    if (inString) {
-      if (ch === "\\") {
-        i++; // 跳过被转义的字符
-        continue;
-      }
-      if (ch === '"') inString = false;
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-      continue;
-    }
-    if (ch === "{") {
-      depth++;
-    } else if (ch === "}") {
-      depth--;
-      if (depth === 0) return raw.slice(cursor, i + 1);
-    }
-  }
-  return null;
 }
 
 /**
@@ -193,21 +168,34 @@ export async function queryTradeByOrderNo(
     });
   }
 
-  const inner = parsed.alipay_trade_query_response ?? {};
+  const queryNode = parsed.alipay_trade_query_response;
+  const errorNode = parsed.error_response;
+  // 请求被拒的时候支付宝回的是 `error_response` —— 跟查单结果不是一个形状。
+  // 两个节点的**错误字段**(`code` / `sub_code` / `sub_msg` / `msg`)是同名的,
+  // 所以错误信息从哪个节点来都行 ⇒ 统一取 `inner`。
+  const inner = queryNode ?? errorNode;
 
-  // 验响应签名 —— 用原始片段重拼待签字符串
-  const rawInner = extractRawObject(raw, "alipay_trade_query_response");
-  const responseSign = parsed.sign;
-  const verified =
-    rawInner !== null &&
-    typeof responseSign === "string" &&
-    verifySign(
-      `alipay_trade_query_response=${rawInner}`,
-      responseSign,
-      effectiveConfig.alipayPublicKey
-    );
+  // 验响应签名 —— **待签字符串就是内层那段 JSON 原文**
+  //
+  // ⚠️ **不许**在前面拼 `alipay_trade_query_response=` —— 支付宝签的是
+  // 内层对象本身(官方《同步接口验签》:`open.alipay.com/200/106120`;
+  // 口径见 `response-sign.ts` 的文件头)。
+  //
+  // 拼了那个前缀 ⇒ 每一笔查单响应都验不过 ⇒ 判定层永远落在
+  // `signature_invalid` ⇒ 订单永远 `unpaid` —— 2026-11-14 线上踩过
+  // (`SO-20261114-657E4A` / `SO-20261114-137332` / `SO-20261114-E58728`)。
+  const verified = verifyAlipayResponseSignature({
+    raw,
+    key: ALIPAY_TRADE_QUERY_RESPONSE_KEY,
+    signature: parsed.sign,
+    alipayPublicKeyPem: effectiveConfig.alipayPublicKey,
+  });
 
-  const ok = inner.code === "10000";
+  // 查到了吗 —— **只有查单节点里 `code === "10000"` 才算查到了**
+  //
+  // `error_response` 节点里的 `code` 是 4 位错误码(`40002` 之类),
+  // 拿它当「查到了」就是误判。
+  const ok = queryNode?.code === "10000";
 
   // 失败时**把支付宝自己给的话原样带上**(2026-11-14)
   //
@@ -218,17 +206,18 @@ export async function queryTradeByOrderNo(
   //
   // `code` / `sub_code` **单独两个字段** —— 判定层要靠 `sub_code` 分
   // 「查不到」和「请求被拒」,拼进一句话就没法判了。
-  const failureMessage = ok ? null : (inner.sub_msg ?? inner.msg ?? null);
+  const failureMessage = ok ? null : (inner?.sub_msg ?? inner?.msg ?? null);
 
   return {
     ok,
-    outTradeNo: inner.out_trade_no ?? null,
-    tradeNo: inner.trade_no ?? null,
-    tradeStatus: inner.trade_status ?? null,
-    totalAmount: inner.total_amount ?? null,
+    // 交易那几个字段**只从查单节点取** —— `error_response` 节点里没有它们
+    outTradeNo: queryNode?.out_trade_no ?? null,
+    tradeNo: queryNode?.trade_no ?? null,
+    tradeStatus: queryNode?.trade_status ?? null,
+    totalAmount: queryNode?.total_amount ?? null,
     verified,
-    code: inner.code ?? null,
-    subCode: inner.sub_code ?? null,
+    code: inner?.code ?? null,
+    subCode: inner?.sub_code ?? null,
     message: failureMessage,
   };
 }
