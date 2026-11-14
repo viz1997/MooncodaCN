@@ -24,6 +24,7 @@ import {
   PAYMENT_SETTING_KEYS,
   type PaymentRuntimeMode,
   resolveWechatEndpointParts,
+  resolveWechatRefundPath,
 } from "@/features/payments/lib/sandbox";
 import {
   getPaymentChannelRawValues,
@@ -90,11 +91,30 @@ async function buildConfigForMode(
 
   logEndpointOnce(mode, endpoint.endpoint);
 
+  // 退款路径 —— **同样要进签名串**,所以也得按模式解析
+  //
+  // 正式那条写死(`/v3/refund/domestic/refunds`);沙箱那条要么后台配了、
+  // 要么从下单路径推出来(见 `sandbox.ts` 的 `resolveWechatRefundPath`)。
+  //
+  // ⚠️ **沙箱的退款路径不许跟正式那条一样** —— 那就等于在沙箱里退真钱。
+  // 那一道校验在 `resolveWechatRefundPath` 里。
+  const refundPath = resolveWechatRefundPath({
+    mode,
+    sandboxRefundPath:
+      raw.sandbox[PAYMENT_SETTING_KEYS.wechatSandboxRefundPath] || null,
+    sandboxNativePath:
+      raw.sandbox[PAYMENT_SETTING_KEYS.wechatSandboxNativePath] || null,
+  });
+  if (!refundPath.ok) {
+    throw new PaymentNotConfiguredError("wechat", refundPath.message);
+  }
+
   return buildWechatPayConfig({
     mode,
     values,
     apiBase: endpoint.apiBase,
     nativePath: endpoint.nativePath,
+    refundPath: refundPath.refundPath,
     siteUrl: readWechatSiteUrl(),
   });
 }

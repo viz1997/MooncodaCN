@@ -18,11 +18,14 @@
  *
  * session 没了就别打了,继续打只是浪费限流额度。
  *
- * ## 指纹里**必须**带物流
+ * ## 指纹里**必须**带物流 + 退款
  *
  * 工作室填了单号 ⇒ 订单状态没变 ⇒ 轮询回来的数据跟上一轮**完全一样**
  * ⇒ 不 setState ⇒ 页面停在「还没发货」。这就是 `shipmentFingerprint()`
  * 存在的理由。
+ *
+ * 退款同理 —— 工作室在后台处理退款申请也是**外部写入**,`refundFingerprint()`
+ * 少一段,买家页面就停在「等工作室处理」直到手动刷新。
  *
  * ## 轮询打的是现成的扁平接口
  *
@@ -33,6 +36,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { refundFingerprint } from "@/features/refund/lib/fingerprint";
+import type { RefundView } from "@/features/refund/lib/types";
 import { shipmentFingerprint } from "@/features/shipment/lib/fingerprint";
 import type { ShipmentView } from "@/features/shipment/lib/types";
 import type {
@@ -47,6 +52,8 @@ const DETAIL_INTERVAL_MS = 30_000;
 export type UseStoreOrderPollingResult = {
   /** 物流 —— 一个订单可能有多个包裹 */
   shipments: ShipmentView[];
+  /** 退款申请 —— 没有就是 null */
+  refund: RefundView | null;
   /** 轮询回来的状态快照(商品行和金额不会变,不在里面) */
   snapshot: StoreOrderPaymentSnapshot;
   /** 立刻拉一次 */
@@ -60,16 +67,19 @@ type StoreOrderApiResponse = {
   paymentUrl?: string | null;
   paymentQrCodeUrl?: string | null;
   shipments?: ShipmentView[];
+  refund?: RefundView | null;
 };
 
 /**
- * 状态快照的指纹 —— **两个指纹都必须带物流**
+ * 状态快照的指纹 —— **指纹必须带物流 + 退款**
  *
  * 少了物流这一段,工作室填了单号之后买家页面就不会自己更新。
+ * 少了退款这一段,工作室处理完退款之后买家页面也不会自己更新。
  */
 function snapshotFingerprint(
   snapshot: StoreOrderPaymentSnapshot,
-  shipments: ShipmentView[]
+  shipments: ShipmentView[],
+  refund: RefundView | null
 ): string {
   return [
     snapshot.status,
@@ -77,6 +87,7 @@ function snapshotFingerprint(
     snapshot.paymentUrl ?? "",
     snapshot.paymentQrCodeUrl ?? "",
     shipmentFingerprint(shipments),
+    refundFingerprint(refund),
   ].join("|");
 }
 
@@ -89,10 +100,12 @@ export function useStoreOrderPolling(
   orderNo: string,
   initial: {
     shipments: ShipmentView[];
+    refund?: RefundView | null;
     snapshot: StoreOrderPaymentSnapshot;
   }
 ): UseStoreOrderPollingResult {
   const [shipments, setShipments] = useState<ShipmentView[]>(initial.shipments);
+  const [refund, setRefund] = useState<RefundView | null>(initial.refund ?? null);
   const [snapshot, setSnapshot] = useState<StoreOrderPaymentSnapshot>(
     initial.snapshot
   );
@@ -130,6 +143,7 @@ export function useStoreOrderPolling(
 
       const body = (await res.json()) as StoreOrderApiResponse;
       const nextShipments = body.shipments ?? [];
+      const nextRefund = body.refund ?? null;
       const nextSnapshot: StoreOrderPaymentSnapshot = {
         status: body.status ?? snapshotRef.current.status,
         paymentStatus: body.paymentStatus ?? snapshotRef.current.paymentStatus,
@@ -137,13 +151,18 @@ export function useStoreOrderPolling(
         paymentQrCodeUrl: body.paymentQrCodeUrl ?? null,
       };
 
-      const fingerprint = snapshotFingerprint(nextSnapshot, nextShipments);
+      const fingerprint = snapshotFingerprint(
+        nextSnapshot,
+        nextShipments,
+        nextRefund
+      );
       if (fingerprint === fingerprintRef.current) return;
       fingerprintRef.current = fingerprint;
 
       snapshotRef.current = nextSnapshot;
       setSnapshot(nextSnapshot);
       setShipments(nextShipments);
+      setRefund(nextRefund);
     } catch (error) {
       console.error("[StoreOrder] 详情轮询失败:", error);
     }
@@ -197,14 +216,16 @@ export function useStoreOrderPolling(
   useEffect(() => {
     const fingerprint = snapshotFingerprint(
       initial.snapshot,
-      initial.shipments
+      initial.shipments,
+      initial.refund ?? null
     );
     if (fingerprint === appliedInitialRef.current) return;
     appliedInitialRef.current = fingerprint;
     snapshotRef.current = initial.snapshot;
     setSnapshot(initial.snapshot);
     setShipments(initial.shipments);
+    setRefund(initial.refund ?? null);
   }, [initial]);
 
-  return { shipments, snapshot, refresh };
+  return { shipments, refund, snapshot, refresh };
 }

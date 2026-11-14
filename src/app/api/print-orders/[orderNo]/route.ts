@@ -25,6 +25,10 @@ import {
   toUserPrintOrderDetail,
 } from "@/features/print-quote/lib/order-store";
 import {
+  getLatestRefundRequestForOrder,
+  toRefundView,
+} from "@/features/refund/lib/refund-store";
+import {
   listShipmentsForOrder,
   toShipmentView,
 } from "@/features/shipment/lib/shipment-store";
@@ -74,6 +78,8 @@ async function handle(
   const events = await listPrintOrderEvents(row.id);
   // 物流(2026-11-13)—— 一个工单可能有多个包裹(补发 / 分开发)
   const shipments = await listShipmentsForOrder("print", row.id);
+  // 退款申请(2026-11-14)—— **最新那一条**;没有就是 null
+  const refundRow = await getLatestRefundRequestForOrder("print", row.id);
 
   return NextResponse.json(
     {
@@ -81,6 +87,8 @@ async function handle(
       events: events.map(toPrintOrderEventView),
       // 响应形状**只涨不破** —— 老消费者忽略这个字段,不影响它们
       shipments: shipments.map(toShipmentView),
+      // 退款申请(2026-11-14)—— 响应形状同样**只涨不破**
+      refund: refundRow ? toRefundView(refundRow) : null,
     },
     { headers: getRateLimitHeaders(rl) }
   );

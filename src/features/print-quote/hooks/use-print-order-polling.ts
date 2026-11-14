@@ -37,6 +37,8 @@ import type {
   UserPrintOrderDetail,
 } from "@/features/print-quote/lib/quote-types";
 import { isLiveStatus } from "@/features/print-quote/lib/status-machine";
+import { refundFingerprint } from "@/features/refund/lib/fingerprint";
+import type { RefundView } from "@/features/refund/lib/types";
 import { shipmentFingerprint } from "@/features/shipment/lib/fingerprint";
 import type { ShipmentView } from "@/features/shipment/lib/types";
 
@@ -300,6 +302,8 @@ export type UsePrintOrderDetailPollingResult = {
   events: PrintOrderEventView[];
   /** 物流 —— 一个工单可能有多个包裹 */
   shipments: ShipmentView[];
+  /** 退款申请 —— 没有就是 null */
+  refund: RefundView | null;
   /** 立刻拉一次(取消工单成功后用) */
   refresh: () => Promise<void>;
 };
@@ -331,11 +335,13 @@ export function usePrintOrderDetailPolling(
     order: UserPrintOrderDetail;
     events: PrintOrderEventView[];
     shipments: ShipmentView[];
+    refund?: RefundView | null;
   }
 ): UsePrintOrderDetailPollingResult {
   const [order, setOrder] = useState<UserPrintOrderDetail>(initial.order);
   const [events, setEvents] = useState<PrintOrderEventView[]>(initial.events);
   const [shipments, setShipments] = useState<ShipmentView[]>(initial.shipments);
+  const [refund, setRefund] = useState<RefundView | null>(initial.refund ?? null);
 
   const aliveRef = useRef(true);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -364,19 +370,25 @@ export function usePrintOrderDetailPolling(
         order?: UserPrintOrderDetail;
         events?: PrintOrderEventView[];
         shipments?: ShipmentView[];
+        refund?: RefundView | null;
       };
       const nextOrder = body.order;
       const nextEvents = body.events ?? [];
       const nextShipments = body.shipments ?? [];
+      const nextRefund = body.refund ?? null;
       if (!nextOrder) return;
 
-      const fingerprint = `${nextOrder.orderNo}:${nextOrder.status}:${nextOrder.paymentStatus}:${nextOrder.updatedAt}:${nextEvents.length}:${nextEvents.map((e) => e.id).join(",")}:${shipmentFingerprint(nextShipments)}`;
+      // 指纹里**必须**带退款 —— 工作室在后台处理退款是**外部写入**,
+      // 工单的 `status` / `paymentStatus` 那一瞬间不一定变 ⇒ 少了这一段
+      // 买家页面就停在「等工作室处理」直到手动刷新。
+      const fingerprint = `${nextOrder.orderNo}:${nextOrder.status}:${nextOrder.paymentStatus}:${nextOrder.updatedAt}:${nextEvents.length}:${nextEvents.map((e) => e.id).join(",")}:${shipmentFingerprint(nextShipments)}:${refundFingerprint(nextRefund)}`;
       if (fingerprint === fingerprintRef.current) return;
       fingerprintRef.current = fingerprint;
 
       setOrder(nextOrder);
       setEvents(nextEvents);
       setShipments(nextShipments);
+      setRefund(nextRefund);
     } catch (error) {
       console.error("[PrintOrder] 详情轮询失败:", error);
     }
@@ -425,13 +437,14 @@ export function usePrintOrderDetailPolling(
   // 都触发 —— 那会把轮询拉回来的新数据又覆盖回旧快照。
   const appliedInitialRef = useRef<string>("");
   useEffect(() => {
-    const fingerprint = `${initial.order.orderNo}:${initial.order.status}:${initial.order.paymentStatus}:${initial.order.updatedAt}:${initial.events.length}:${initial.events.map((e) => e.id).join(",")}:${shipmentFingerprint(initial.shipments)}`;
+    const fingerprint = `${initial.order.orderNo}:${initial.order.status}:${initial.order.paymentStatus}:${initial.order.updatedAt}:${initial.events.length}:${initial.events.map((e) => e.id).join(",")}:${shipmentFingerprint(initial.shipments)}:${refundFingerprint(initial.refund ?? null)}`;
     if (fingerprint === appliedInitialRef.current) return;
     appliedInitialRef.current = fingerprint;
     setOrder(initial.order);
     setEvents(initial.events);
     setShipments(initial.shipments);
+    setRefund(initial.refund ?? null);
   }, [initial]);
 
-  return { order, events, shipments, refresh };
+  return { order, events, shipments, refund, refresh };
 }

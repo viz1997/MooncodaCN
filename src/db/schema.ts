@@ -1,4 +1,4 @@
-import { desc, relations } from "drizzle-orm";
+import { desc, relations, sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
   boolean,
@@ -3747,3 +3747,190 @@ export const shipmentEventRelations = relations(shipmentEvent, ({ one }) => ({
     references: [shipment.id],
   }),
 }));
+
+/**
+ * 退款申请(2026-11-14)
+ *
+ * ## 为什么是**独立的表**
+ *
+ * 用户反馈的是「订单支付后无法申请退款」—— 而这个功能**从来没存在过**:
+ * 买家侧没有入口、后端没有退款能力、`payment_status = "refunded"` 只有
+ * Shopify 和 Sellbase 两个 webhook 会写,而那两条路 2026-11-05 就下线了。
+ *
+ * 退款**不是订单状态** —— 它是「订单旁边的一条申请」,跟物流一个口径:
+ *
+ * - `storefront_order.payment_status` 说「钱到没到、退没退」(退过款 ⇒ `refunded`)
+ * - `refund_request` 说「买家申请了没有、工作室处理到哪一步」
+ *
+ * 两个维度各走各的:工作室点「标记已退款」只改 `payment_status`(**绝不动
+ * `status`** —— 退过款的单仍然是「已付款」那一列,不是「已取消」)。
+ *
+ * ## 状态用小写
+ *
+ * `pending` / `approved` / `refunded` / `rejected` —— 跟 `shipment.status` /
+ * `payment_status` 一个口径(`print_order.status` 的大写是「制作进度」,
+ * 那是另一回事)。
+ *
+ * ## 为什么用 `text(..., { enum })` 而不是 `pgEnum`
+ *
+ * 加一个状态只改 TS 一行,不用再写一次迁移脚本让工作室跑。
+ *
+ * ## 迁移脚本
+ *
+ * `scripts/apply-refund-schema.ts`(幂等,**不播种任何一行**)。
+ */
+export const refundRequest = pgTable(
+  "refund_request",
+  {
+    id: text("id").primaryKey(),
+    /**
+     * 商城订单 / 打印工单
+     *
+     * 两张订单表的 id 不通用,所以申请行必须带这个维度才能定位到是哪一单。
+     */
+    orderKind: text("order_kind", {
+      enum: ["storefront", "print"],
+    }).notNull(),
+    /**
+     * 订单 id —— **不加外键**
+     *
+     * 它可能指 `storefront_order.id` 也可能指 `print_order.id`,加外键只能选
+     * 一张表,另一种就挂不上。归属校验靠**查询时带 `order_kind`**。
+     */
+    orderId: text("order_id").notNull(),
+    /** 订单号 —— 冗余一份,后台列表和邮件不用 join */
+    orderNo: text("order_no").notNull(),
+    /** 申请人(买家) */
+    userId: text("user_id").notNull(),
+    /**
+     * **申请**金额 = 整单总额(分)
+     *
+     * 退款粒度是**整单退** —— 不做部分退款。工作室实际退多少由工作室在
+     * 支付平台那边决定,系统只记「已退款」,实际金额记在 `refundedCents`。
+     */
+    amountCents: integer("amount_cents").notNull(),
+    /** 买家填的原因(≤500 字) */
+    reason: text("reason").notNull(),
+    /** 申请状态 */
+    status: text("status", {
+      enum: ["pending", "approved", "refunded", "rejected"],
+    })
+      .notNull()
+      .default("pending"),
+    /** 工作室实际退的金额(可能 < `amountCents`) */
+    refundedCents: integer("refunded_cents"),
+    /** 这单走的收款通道(`wechat` / `alipay`)—— 工作室去哪个平台退钱靠它 */
+    paymentChannel: text("payment_channel"),
+    /**
+     * 平台侧的退款单号
+     *
+     * 微信 = `refund_id`,支付宝 = `trade_no` + `out_request_no`。
+     * **有值就别再发起第二次退款** —— 平台的退款接口是**幂等**的
+     * (`out_refund_no` / `out_request_no` 重复提交返回同一笔),但重复调一次
+     * 仍是白跑一趟网络,还可能因为余额/限额被拒,让工作室以为退失败了。
+     */
+    providerRefundId: text("provider_refund_id"),
+    /**
+     * 平台给的退款状态 —— **平台的原文,原样存**
+     *
+     * 微信:`SUCCESS` / `CLOSED` / `PROCESSING` / `ABNORMAL`;
+     * 支付宝:`fund_change=Y` / `fund_change=N`(它那边根本没有「状态」这个字段,
+     * 只有「这次有没有发生资金变动」)。
+     *
+     * ⚠️ **列是普通 `text`,不是枚举** —— 两个平台的词表根本不一样
+     * (支付宝压根没有「状态」),写成枚举就有一边塞不进去。
+     *
+     * `PROCESSING` = **钱还在路上** —— 这时候本地状态**不能**写 `refunded`,
+     * 得等平台的异步通知(或后台再点一次「查询/确认」)。
+     */
+    providerRefundStatus: text("provider_refund_status"),
+    /** 退款失败的原因 —— 平台回的原文(工作室要照着它去平台后台看) */
+    refundError: text("refund_error"),
+    /** 工作室处理备注 */
+    note: text("note"),
+    /** 处理人(admin 用户 id) */
+    reviewedBy: text("reviewed_by"),
+    /** 处理时间 */
+    reviewedAt: timestamp("reviewed_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    // 查「这个订单的退款申请」—— 后台列表 + 买家侧详情页都走它
+    index("refund_request_order_idx").on(t.orderKind, t.orderId),
+    /**
+     * **一个订单同时只能有一条进行中的申请**
+     *
+     * 部分唯一索引 —— 只有 `pending` 的行受约束,所以被拒之后可以再申请一条,
+     * 但「点两下提交」不会裂成两条。
+     */
+    uniqueIndex("refund_request_pending_uq")
+      .on(t.orderKind, t.orderId)
+      .where(sql`${t.status} = 'pending'`),
+    // 后台按状态筛
+    index("refund_request_status_idx").on(t.status),
+  ]
+);
+
+export type RefundRequestRow = typeof refundRequest.$inferSelect;
+export type NewRefundRequestRow = typeof refundRequest.$inferInsert;
+
+/**
+ * 退款申请时间线 —— 每次状态变更留一条
+ *
+ * 跟 `shipment_event` 一个口径:**行式、只追加**。系统句子不落库 —— 「工作室
+ * 同意了这笔退款」由前端按 (actor, from, to) 用 i18n 现场渲染,库里只存
+ * 人工写的 note。
+ */
+export const refundRequestEvent = pgTable(
+  "refund_request_event",
+  {
+    id: text("id").primaryKey(),
+    refundRequestId: text("refund_request_id")
+      .notNull()
+      .references(() => refundRequest.id, { onDelete: "cascade" }),
+    /** 原状态;创建事件为 null */
+    fromStatus: text("from_status", {
+      enum: ["pending", "approved", "refunded", "rejected"],
+    }),
+    /** 新状态 */
+    toStatus: text("to_status", {
+      enum: ["pending", "approved", "refunded", "rejected"],
+    }).notNull(),
+    /** 谁改的 —— 买家申请 / 工作室处理 */
+    actor: text("actor", { enum: ["user", "admin"] }).notNull(),
+    /** 人工备注;拒绝时必填 */
+    note: text("note"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    // 时间线读取模式:WHERE refund_request_id = ? ORDER BY created_at
+    index("refund_request_event_request_created_idx").on(
+      t.refundRequestId,
+      t.createdAt
+    ),
+  ]
+);
+
+export type RefundRequestEventRow = typeof refundRequestEvent.$inferSelect;
+export type NewRefundRequestEventRow = typeof refundRequestEvent.$inferInsert;
+
+/**
+ * 退款申请的关系
+ *
+ * `refund_request` **不跟订单建关系** —— 它可以挂在两种订单上,建关系就得选
+ * 一张表,另一种就挂不上(跟 `shipment` 一个道理)。
+ */
+export const refundRequestRelations = relations(refundRequest, ({ many }) => ({
+  events: many(refundRequestEvent),
+}));
+
+export const refundRequestEventRelations = relations(
+  refundRequestEvent,
+  ({ one }) => ({
+    refundRequest: one(refundRequest, {
+      fields: [refundRequestEvent.refundRequestId],
+      references: [refundRequest.id],
+    }),
+  })
+);

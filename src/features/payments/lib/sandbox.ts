@@ -116,6 +116,22 @@ export const WECHAT_SANDBOX_NATIVE_PATH_ALT =
  */
 export const WECHAT_NATIVE_PATH_SUFFIX = "/pay/transactions/native";
 
+/**
+ * 微信支付**正式**退款路径
+ *
+ * 跟下单路径一样**写死** —— 正式端点不提供任何覆盖口子(少一个能被人改错的
+ * 地方)。
+ */
+export const WECHAT_PRODUCTION_REFUND_PATH = "/v3/refund/domestic/refunds";
+
+/**
+ * 微信沙箱路径必须以这个结尾(退款那条)
+ *
+ * 跟 `WECHAT_NATIVE_PATH_SUFFIX` 一个套路 —— 防止工作室把退款路径填成别的
+ * 接口(填错了报错是「签名错误」,完全看不出是路径填错了)。
+ */
+export const WECHAT_REFUND_PATH_SUFFIX = "/refund/domestic/refunds";
+
 /* -------------------------------------------------------------------------- */
 /*  键名表                                                                      */
 /* -------------------------------------------------------------------------- */
@@ -136,6 +152,16 @@ export const PAYMENT_SETTING_KEYS = {
   wechatSandboxApiBase: "wechat_sandbox_api_base",
   /** 微信沙箱 Native 下单路径(默认 `/sandboxnew/v3/pay/transactions/native`) */
   wechatSandboxNativePath: "wechat_sandbox_native_path",
+  /**
+   * 微信沙箱退款路径(留空 = 从下单路径推出来)
+   *
+   * 退款路径**可配**,理由跟下单路径一样:微信沙箱的路径**没有权威文档**。
+   * 留空时按「把下单路径尾部 `/pay/transactions/native` 换成
+   * `/refund/domestic/refunds`」推 —— 两档候选沙箱路径推出来分别是
+   * `/sandboxnew/v3/refund/domestic/refunds` 和
+   * `/v3/sandbox/refund/domestic/refunds`。
+   */
+  wechatSandboxRefundPath: "wechat_sandbox_refund_path",
   /** 沙箱商户号 */
   wechatSandboxMchId: "wechat_sandbox_mch_id",
   /** 沙箱 AppID */
@@ -292,7 +318,13 @@ export type SandboxEndpointErrorCode =
   /** 微信沙箱的下单路径**不是** Native 下单接口 */
   | "NATIVE_PATH_NOT_NATIVE"
   /** 微信沙箱的下单路径跟正式那条一模一样 */
-  | "NATIVE_PATH_IS_PRODUCTION";
+  | "NATIVE_PATH_IS_PRODUCTION"
+  /** 微信沙箱的退款路径不合法(不以 `/` 开头) */
+  | "INVALID_REFUND_PATH"
+  /** 微信沙箱的退款路径**不是**退款接口 */
+  | "REFUND_PATH_NOT_REFUND"
+  /** 微信沙箱的退款路径跟正式那条一模一样 */
+  | "REFUND_PATH_IS_PRODUCTION";
 
 /** 端点解析的结果 */
 export type ResolvedEndpoint =
@@ -504,6 +536,96 @@ export function resolveWechatEndpoint(input: {
 }
 
 /* -------------------------------------------------------------------------- */
+/*  退款路径                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 解析微信**退款路径**的结果
+ *
+ * 跟 `ResolvedWechatEndpoint` 一样把 path **单独给** —— 微信的签名串里带的是
+ * path,退款请求**签的和打的必须是同一个 path**。
+ */
+export type ResolvedWechatRefundPath =
+  | { ok: true; refundPath: string }
+  | { ok: false; code: SandboxEndpointErrorCode; message: string };
+
+/**
+ * 从**下单路径**推出退款路径
+ *
+ * 规则:**把尾部 `/pay/transactions/native` 换成 `/refund/domestic/refunds`**。
+ *
+ * | 下单路径 | 推出的退款路径 |
+ * |---|---|
+ * | `/sandboxnew/v3/pay/transactions/native` | `/sandboxnew/v3/refund/domestic/refunds` |
+ * | `/v3/sandbox/pay/transactions/native` | `/v3/sandbox/refund/domestic/refunds` |
+ *
+ * 为什么按这条规则推 —— 沙箱的区别**只在 path 前缀**(`/sandboxnew` 或
+ * `/v3/sandbox`),前缀后面的接口路径跟正式是一样的。所以前缀照抄、接口段换掉。
+ *
+ * ⚠️ **推出来的路径只是「大概率对」** —— 微信沙箱的退款接口**没有权威文档**
+ * ⇒ 路径**可配**(DB 那个键),自检脚本会探。
+ */
+export function deriveWechatSandboxRefundPath(
+  nativePath?: string | null
+): string {
+  const candidate = nativePath?.trim() || WECHAT_SANDBOX_NATIVE_PATH;
+  // 下单路径压根不是 Native 接口(填错了)⇒ 推不出来,退回默认那一档
+  const base = candidate.endsWith(WECHAT_NATIVE_PATH_SUFFIX)
+    ? candidate
+    : WECHAT_SANDBOX_NATIVE_PATH;
+  const head = base.slice(0, base.length - WECHAT_NATIVE_PATH_SUFFIX.length);
+  return `${head}${WECHAT_REFUND_PATH_SUFFIX}`;
+}
+
+/**
+ * 解析微信**退款路径**
+ *
+ * ## 正式模式是**写死**的
+ *
+ * 跟下单路径一个口径 —— 正式端点不提供覆盖口子。
+ *
+ * ## 沙箱模式:配了用配的,没配就推
+ *
+ * 「推」是**零配置默认值**(工作室什么都不填也能退款);「配」是给
+ * 「推错了」留的逃生口(路径填错 ⇒ 自检脚本按返回码区分)。
+ */
+export function resolveWechatRefundPath(input: {
+  mode: PaymentRuntimeMode;
+  /** 沙箱退款路径(DB 里那个)—— 留空 = 从下单路径推 */
+  sandboxRefundPath?: string | null;
+  /** 沙箱 Native 下单路径 —— 退款路径留空时从它推 */
+  sandboxNativePath?: string | null;
+}): ResolvedWechatRefundPath {
+  if (input.mode === "production") {
+    return { ok: true, refundPath: WECHAT_PRODUCTION_REFUND_PATH };
+  }
+
+  const explicit = input.sandboxRefundPath?.trim();
+  const path = explicit || deriveWechatSandboxRefundPath(input.sandboxNativePath);
+
+  if (!path.startsWith("/")) {
+    return endpointError(
+      "INVALID_REFUND_PATH",
+      `微信沙箱的退款路径必须以 "/" 开头:${path}`
+    );
+  }
+  if (!path.endsWith(WECHAT_REFUND_PATH_SUFFIX)) {
+    return endpointError(
+      "REFUND_PATH_NOT_REFUND",
+      `微信沙箱的退款路径必须以 ${WECHAT_REFUND_PATH_SUFFIX} 结尾(那是退款接口):${path}`
+    );
+  }
+  if (path === WECHAT_PRODUCTION_REFUND_PATH) {
+    return endpointError(
+      "REFUND_PATH_IS_PRODUCTION",
+      `微信沙箱的退款路径跟正式那条一模一样(${path})—— 那就是正式端点,退的是真钱`
+    );
+  }
+
+  return { ok: true, refundPath: path };
+}
+
+/* -------------------------------------------------------------------------- */
 /*  凭据字段                                                                    */
 /* -------------------------------------------------------------------------- */
 
@@ -665,6 +787,12 @@ export const WECHAT_REQUIREMENTS: ChannelRequirements = {
       key: PAYMENT_SETTING_KEYS.wechatSandboxNativePath,
       envVar: "(正式端点写死)",
       label: "沙箱 Native 下单路径",
+      optional: true,
+    },
+    {
+      key: PAYMENT_SETTING_KEYS.wechatSandboxRefundPath,
+      envVar: "(正式端点写死)",
+      label: "沙箱退款路径(留空 = 从下单路径推)",
       optional: true,
     },
     {

@@ -271,7 +271,16 @@ export type PrintOrderTransitionErrorCode =
   /** 目标状态 = 当前状态(空转) */
   | "SAME_STATUS"
   /** 还没收款,不能开工(2026-11-04) */
-  | "PAYMENT_REQUIRED";
+  | "PAYMENT_REQUIRED"
+  /**
+   * 已经收了款,不能直接取消 —— 要退钱得走**退款申请**(2026-11-14)
+   *
+   * 这不是「多一道限制」,是**堵一个漏钱的洞**:取消只改 `status`,从不碰
+   * `payment_status` ⇒ 一个已付款的工单被买家自己取消掉,订单变成
+   * 「已取消」而 `payment_status` 还是 `paid` ⇒ **买家看着像退过款了,
+   * 钱其实没退**。
+   */
+  | "REFUND_REQUIRED";
 
 export class PrintOrderTransitionError extends Error {
   readonly code: PrintOrderTransitionErrorCode;
@@ -395,6 +404,21 @@ export async function transitionPrintOrderStatus(
         throw new PrintOrderTransitionError(
           "INVALID_TRANSITION",
           "只有待确认的工单可以自己取消"
+        );
+      }
+
+      // 2026-11-14:已付款的工单**不许直接取消**
+      //
+      // 「取消」只改 `status`,**从不碰 `payment_status`** ⇒ 一个已付款的工单
+      // 被买家自己取消掉,订单变成「已取消」,`payment_status` 还留在 `paid`
+      // ⇒ **买家看着像退过款了,钱其实没退**。工作室那边也会以为这一单退过了。
+      //
+      // ⇒ 要退钱得走**退款申请**那条路(后台会调平台退款 API,退完
+      // `payment_status` 才变成 `refunded`)。
+      if (current.paymentStatus === "paid") {
+        throw new PrintOrderTransitionError(
+          "REFUND_REQUIRED",
+          `工单 ${input.orderNo} 已经收款,要退钱请走退款申请`
         );
       }
     }

@@ -52,6 +52,7 @@ import {
   detectSameCredential,
   PAYMENT_SETTING_KEYS,
   WECHAT_PRODUCTION_NATIVE_PATH,
+  WECHAT_PRODUCTION_REFUND_PATH,
   WECHAT_SANDBOX_API_BASE,
   WECHAT_SANDBOX_NATIVE_PATH,
 } from "@/features/payments/lib/sandbox";
@@ -155,6 +156,7 @@ describe("buildWechatPayConfig —— 沙箱 / 正式两套配置", () => {
       values: wechatSandboxValues(),
       apiBase: WECHAT_SANDBOX_API_BASE,
       nativePath: WECHAT_SANDBOX_NATIVE_PATH,
+      refundPath: WECHAT_PRODUCTION_REFUND_PATH,
       siteUrl: "https://example.com",
     });
     const production = buildWechatPayConfig({
@@ -162,6 +164,7 @@ describe("buildWechatPayConfig —— 沙箱 / 正式两套配置", () => {
       values: wechatSandboxValues(),
       apiBase: WECHAT_SANDBOX_API_BASE,
       nativePath: WECHAT_SANDBOX_NATIVE_PATH,
+      refundPath: WECHAT_PRODUCTION_REFUND_PATH,
       siteUrl: "https://example.com",
     });
 
@@ -175,6 +178,7 @@ describe("buildWechatPayConfig —— 沙箱 / 正式两套配置", () => {
       values: wechatSandboxValues(),
       apiBase: WECHAT_SANDBOX_API_BASE,
       nativePath: WECHAT_SANDBOX_NATIVE_PATH,
+      refundPath: WECHAT_PRODUCTION_REFUND_PATH,
       siteUrl: "https://example.com",
     });
 
@@ -190,6 +194,7 @@ describe("buildWechatPayConfig —— 沙箱 / 正式两套配置", () => {
       values: wechatSandboxValues(),
       apiBase: WECHAT_SANDBOX_API_BASE,
       nativePath: WECHAT_SANDBOX_NATIVE_PATH,
+      refundPath: WECHAT_PRODUCTION_REFUND_PATH,
       siteUrl: "https://example.com",
     });
 
@@ -209,6 +214,7 @@ describe("buildWechatPayConfig —— 沙箱 / 正式两套配置", () => {
         values,
         apiBase: WECHAT_SANDBOX_API_BASE,
         nativePath: WECHAT_SANDBOX_NATIVE_PATH,
+        refundPath: WECHAT_PRODUCTION_REFUND_PATH,
         siteUrl: "https://example.com",
       });
     } catch (error) {
@@ -237,6 +243,7 @@ describe("buildWechatPayConfig —— 沙箱 / 正式两套配置", () => {
           values,
           apiBase: WECHAT_SANDBOX_API_BASE,
           nativePath: WECHAT_SANDBOX_NATIVE_PATH,
+          refundPath: WECHAT_PRODUCTION_REFUND_PATH,
           siteUrl: "https://example.com",
         });
         return null;
@@ -252,6 +259,7 @@ describe("buildWechatPayConfig —— 沙箱 / 正式两套配置", () => {
           values,
           apiBase: WECHAT_SANDBOX_API_BASE,
           nativePath: WECHAT_SANDBOX_NATIVE_PATH,
+          refundPath: WECHAT_PRODUCTION_REFUND_PATH,
           siteUrl: "https://example.com",
         });
         return null;
@@ -277,6 +285,7 @@ describe("buildWechatPayConfig —— 沙箱 / 正式两套配置", () => {
           }),
           apiBase: WECHAT_SANDBOX_API_BASE,
           nativePath: WECHAT_SANDBOX_NATIVE_PATH,
+          refundPath: WECHAT_PRODUCTION_REFUND_PATH,
           siteUrl: "https://example.com",
         });
         return null;
@@ -301,6 +310,7 @@ describe("buildWechatPayConfig —— 沙箱 / 正式两套配置", () => {
         }),
         apiBase: WECHAT_SANDBOX_API_BASE,
         nativePath: WECHAT_SANDBOX_NATIVE_PATH,
+        refundPath: WECHAT_PRODUCTION_REFUND_PATH,
         siteUrl: "https://example.com",
       });
     } catch (error) {
@@ -323,6 +333,7 @@ describe("buildWechatPayConfig —— 沙箱 / 正式两套配置", () => {
         }),
         apiBase: WECHAT_SANDBOX_API_BASE,
         nativePath: WECHAT_SANDBOX_NATIVE_PATH,
+        refundPath: WECHAT_PRODUCTION_REFUND_PATH,
         siteUrl: "https://example.com",
       });
     } catch (error) {
@@ -344,6 +355,7 @@ describe("buildWechatPayConfig —— 沙箱 / 正式两套配置", () => {
       }),
       apiBase: WECHAT_SANDBOX_API_BASE,
       nativePath: WECHAT_SANDBOX_NATIVE_PATH,
+      refundPath: WECHAT_PRODUCTION_REFUND_PATH,
       siteUrl: "https://example.com",
     });
 
@@ -361,6 +373,7 @@ describe("buildWechatPayConfig —— 沙箱 / 正式两套配置", () => {
       }),
       apiBase: WECHAT_SANDBOX_API_BASE,
       nativePath: WECHAT_SANDBOX_NATIVE_PATH,
+      refundPath: WECHAT_PRODUCTION_REFUND_PATH,
       siteUrl: "https://example.com",
     });
     expect(explicit.notifyUrl).toBe(
@@ -372,6 +385,7 @@ describe("buildWechatPayConfig —— 沙箱 / 正式两套配置", () => {
       values: wechatSandboxValues(),
       apiBase: WECHAT_SANDBOX_API_BASE,
       nativePath: WECHAT_SANDBOX_NATIVE_PATH,
+      refundPath: WECHAT_PRODUCTION_REFUND_PATH,
       siteUrl: "https://example.com",
     });
     expect(derived.notifyUrl).toBe("https://example.com/api/webhooks/wechat");
@@ -385,6 +399,7 @@ describe("buildWechatPayConfig —— 沙箱 / 正式两套配置", () => {
         values: wechatSandboxValues(),
         apiBase: WECHAT_SANDBOX_API_BASE,
         nativePath: WECHAT_SANDBOX_NATIVE_PATH,
+        refundPath: WECHAT_PRODUCTION_REFUND_PATH,
         siteUrl: null,
       });
     } catch (error) {
@@ -404,6 +419,7 @@ describe("buildWechatPayConfig —— 沙箱 / 正式两套配置", () => {
       }),
       apiBase: WECHAT_SANDBOX_API_BASE,
       nativePath: WECHAT_SANDBOX_NATIVE_PATH,
+      refundPath: WECHAT_PRODUCTION_REFUND_PATH,
       siteUrl: "https://example.com",
     });
 

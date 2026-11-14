@@ -56,8 +56,12 @@ export type PrintOrderMailInfo = {
  * 这里以前是「没配就返回 null,静默不发工作室那几封」。但工作室要的是
  * 「每张工单都有人收到通知」—— 环境变量漏配的时候静默不发,等于工单躺在
  * 后台没人知道。兜底地址在 `src/config/site.ts` 里。
+ *
+ * ⚠️ **导出** —— 退款那条线(`features/refund/lib/notifications.tsx`)也要给
+ * 工作室发信,收件人得是**同一个地址**。写第二份的话,两边可能读到不同的
+ * 环境变量 ⇒ 退款通知寄到别处去了。
  */
-function getStudioEmail(): string {
+export function getStudioEmail(): string {
   const email = process.env.NEXT_PUBLIC_SUPPORT_EMAIL?.trim();
   return email?.includes("@") ? email : FALLBACK_SUPPORT_EMAIL;
 }

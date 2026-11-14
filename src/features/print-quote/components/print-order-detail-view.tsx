@@ -49,6 +49,9 @@ import {
   PRINT_ORDER_PAYMENT_CHIP,
   PRINT_ORDER_STATUS_CHIP,
 } from "@/features/print-quote/lib/status-ui";
+import { RefundRequestButton } from "@/features/refund/components/refund-request-button";
+import { RefundStatusPanel } from "@/features/refund/components/refund-status-panel";
+import type { RefundView } from "@/features/refund/lib/types";
 import {
   AtelierPageShell,
   AtelierPanel,
@@ -65,21 +68,37 @@ export function PrintOrderDetailView({
   order: initialOrder,
   events: initialEvents,
   shipments: initialShipments,
+  refund: initialRefund = null,
 }: {
   order: UserPrintOrderDetail;
   events: PrintOrderEventView[];
   /** 物流 —— 一个工单可能有多个包裹(补发 / 分开发) */
   shipments: ShipmentView[];
+  /** 退款申请(2026-11-14)—— 没有就是 null */
+  refund?: RefundView | null;
 }) {
   const t = useTranslations("PrintQuote");
   const format = useFormatter();
 
-  const { order, events, shipments, refresh } = usePrintOrderDetailPolling(
-    initialOrder.orderNo,
-    { order: initialOrder, events: initialEvents, shipments: initialShipments }
-  );
+  const { order, events, shipments, refund, refresh } =
+    usePrintOrderDetailPolling(initialOrder.orderNo, {
+      order: initialOrder,
+      events: initialEvents,
+      shipments: initialShipments,
+      refund: initialRefund,
+    });
 
-  const cancellable = isUserCancellable(order.status);
+  /**
+   * 取消按钮
+   *
+   * ⚠️ **已经付款的单不给「取消工单」**(2026-11-14)
+   *
+   * `transitionPrintOrderStatus()` 在数据层挡住了这一条(`REFUND_REQUIRED`)——
+   * 买家点了会看到「这笔已经付款了,请走退款申请」。但界面上**不该摆一个
+   * 点了必失败的按钮** ⇒ 这一档改显「申请退款」。
+   */
+  const cancellable =
+    isUserCancellable(order.status) && order.paymentStatus !== "paid";
 
   /**
    * 从支付回跳(`?paid=1`)→ 立刻拉一次
@@ -194,6 +213,30 @@ export function PrintOrderDetailView({
         </div>
       </div>
 
+      {/*
+        退款入口(2026-11-14)
+        *
+        * **跟商城订单详情页共用同一个组件** —— 两边的入口长得一模一样、
+        * 行为也一模一样 ⇒ 只写一份实现,不会漂。
+        *
+        * 「能不能退」由**纯函数**判定(`evaluateRefundEligibility`):
+        * 工单一旦进 `IN_PRODUCTION`(工作室开始打印了)就不给退 —— 工作室的原话
+        * 「开始打印或者生产开始后无法退款,因为已经进行中」。
+        *
+        * **单独占一行**,不塞进头部那一列 —— 展开后的表单要写字,挤在
+        * 窄列里手机上没法写。
+      */}
+      <div className="mb-6 flex justify-end">
+        <RefundRequestButton
+          orderKind="print"
+          orderNo={order.orderNo}
+          paymentStatus={order.paymentStatus}
+          status={order.status}
+          refund={refund}
+          onSubmitted={() => void refresh()}
+        />
+      </div>
+
       <div className="space-y-6">
         {/* 时间线 */}
         <AtelierPanel>
@@ -266,6 +309,9 @@ export function PrintOrderDetailView({
 
         {/* 物流 —— 工作室在后台填的快递公司 + 运单号 */}
         <ShipmentPanel shipments={shipments} />
+
+        {/* 退款(2026-11-14)—— 没有申请就不渲染 */}
+        <RefundStatusPanel refund={refund} />
 
         {/* 联系方式 */}
         <AtelierPanel>

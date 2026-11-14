@@ -67,6 +67,7 @@ import {
   type PaymentSettingKey,
   WECHAT_PRODUCTION_API_BASE,
   WECHAT_PRODUCTION_NATIVE_PATH,
+  WECHAT_PRODUCTION_REFUND_PATH,
 } from "@/features/payments/lib/sandbox";
 import { PaymentNotConfiguredError } from "@/features/payments/lib/types";
 
@@ -127,6 +128,16 @@ export interface WechatPayConfig {
    * (见 `native.ts`:签名和 fetch 用的是同一个变量)。
    */
   nativePath: string;
+  /**
+   * **退款**路径
+   *
+   * ⚠️ **同样要进签名串** —— 跟 `nativePath` 一个道理(见 `refund.ts`:
+   * 签名和 fetch 用的是同一个变量)。
+   *
+   * 正式 = 写死(`/v3/refund/domestic/refunds`);沙箱 = DB 里那个,留空就从
+   * 下单路径推(见 `sandbox.ts` 的 `resolveWechatRefundPath`)。
+   */
+  refundPath: string;
 }
 
 /** 去掉尾部斜杠 —— 拼路径时 `//api/...` 会 404 */
@@ -248,6 +259,13 @@ export function buildWechatPayConfig(input: {
   apiBase: string;
   /** Native 下单路径(沙箱 = DB 里那个 / 正式 = 写死的) */
   nativePath: string;
+  /**
+   * 退款路径(沙箱 = DB 里那个 / 留空从下单路径推 / 正式 = 写死的)
+   *
+   * ⚠️ **留空是可以的** —— 调用方(`config.ts`)会用
+   * `resolveWechatRefundPath()` 把空值补成推导出来的那个。
+   */
+  refundPath: string;
   /** 站点地址 —— 用来拼默认的通知地址 */
   siteUrl: string | null;
 }): WechatPayConfig {
@@ -344,6 +362,7 @@ export function buildWechatPayConfig(input: {
     sandbox: mode === "sandbox",
     apiBase: input.apiBase,
     nativePath: input.nativePath,
+    refundPath: input.refundPath,
   };
 }
 
@@ -540,6 +559,8 @@ export function readWechatProductionValues(): Record<string, string> {
     [PAYMENT_SETTING_KEYS.wechatSandboxApiBase]: WECHAT_PRODUCTION_API_BASE,
     [PAYMENT_SETTING_KEYS.wechatSandboxNativePath]:
       WECHAT_PRODUCTION_NATIVE_PATH,
+    [PAYMENT_SETTING_KEYS.wechatSandboxRefundPath]:
+      WECHAT_PRODUCTION_REFUND_PATH,
     [PAYMENT_SETTING_KEYS.wechatSandboxNotifyUrl]:
       process.env.WECHAT_PAY_NOTIFY_URL?.trim() ?? "",
     [PAYMENT_SETTING_KEYS.wechatSandboxMchId]:

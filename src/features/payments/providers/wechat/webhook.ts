@@ -32,6 +32,15 @@
  * `resource` 里是**密文**,解出来才是交易详情:
  * `{ mchid, appid, out_trade_no, transaction_id, trade_state, … }`。
  *
+ * ## 退款通知走**同一个端点**
+ *
+ * 微信的退款结果通知(`REFUND.SUCCESS` / `REFUND.ABNORMAL` / `REFUND.CLOSED`)
+ * 跟付款通知**用同一个 `notify_url`** —— 退款那一份的 `associated_data` 是
+ * `"refund"`(付款那一份是 `"transaction"`),`event_type` 也是 `REFUND.` 开头。
+ *
+ * ⇒ 这个端点**按 `event_type` 分流**:付款走 `mark_paid`,退款走
+ * `landRefundOutcome`。两条腿共用一个 endpoint,不用再配第二个通知地址。
+ *
  * ## 三条规矩
  *
  * 1. **验签失败 → 401,不处理**。伪造的「已付款」通知是最坏的情况。
@@ -47,7 +56,14 @@
  * 不另建去重表。
  */
 
+import { landRefundOutcome } from "@/features/refund/lib/land-refund";
+import {
+  getRefundRequestById,
+  recordRefundProviderOutcome,
+  transitionRefundStatus,
+} from "@/features/refund/lib/refund-store";
 import { settleByOrderNo } from "@/features/payments/lib/settle";
+import { logger } from "@/lib/logger";
 
 import { getWechatPayConfigs } from "./config";
 import { resolveVerifyPublicKey, type WechatPayConfig } from "./env";
@@ -129,6 +145,62 @@ export interface WechatNotifyOutcome {
 }
 
 /**
+ * 解密出来的**退款单**详情 —— 只取我们要用的字段
+ *
+ * 付款通知解出来是交易详情(`trade_state` / `transaction_id`),
+ * 退款通知解出来是退款单详情(`refund_status` / `refund_id` / `out_refund_no`)。
+ * 密文结构一样(AES-256-GCM),只是明文里的字段不同。
+ */
+export interface WechatRefund {
+  mchid?: string;
+  /** 我们的订单号 */
+  out_trade_no?: string;
+  /** 微信的支付单号 */
+  transaction_id?: string;
+  /** **退款申请行的 id** —— 也就是我们发给微信的幂等键 `out_refund_no` */
+  out_refund_no?: string;
+  /** 微信的退款单号 */
+  refund_id?: string;
+  /** `SUCCESS` / `ABNORMAL` / `CLOSED` */
+  refund_status?: string;
+  success_time?: string;
+  user_received_account?: string;
+  amount?: {
+    total?: number;
+    /** **实际退款金额(分)** */
+    refund?: number;
+    payer_total?: number;
+    payer_refund?: number;
+  };
+}
+
+/** 微信的退款事件类型 —— 都以 `REFUND.` 开头 */
+export const WECHAT_REFUND_EVENT_PREFIX = "REFUND.";
+
+/**
+ * 这条通知是不是一条**退款**通知
+ *
+ * 两个判据(任一命中即是):
+ *
+ * 1. **`event_type` 以 `REFUND.` 开头**(主判据)—— 微信文档里明确的三种:
+ *    `REFUND.SUCCESS` / `REFUND.ABNORMAL` / `REFUND.CLOSED`。
+ * 2. **`resource.associated_data === "refund"`**(兜底)—— 退款那一份密文的
+ *    附加数据是 `"refund"`,付款那一份是 `"transaction"`。
+ *
+ * ## 为什么两个判据都要
+ *
+ * 微信偶尔会**不带 `event_type`**(或者带了别的事件名)。只认 `event_type`
+ * 的话,那种退款通知会被当成付款通知处理 ⇒ 走进 `trade_state` 那道关 ⇒
+ * 「交易状态(空)还不是付款成功」⇒ **钱退了但我们不知道**。
+ */
+export function isWechatRefundNotify(payload: WechatNotifyPayload): boolean {
+  const eventType = (payload.event_type ?? "").trim();
+  if (eventType.startsWith(WECHAT_REFUND_EVENT_PREFIX)) return true;
+  const associatedData = (payload.resource?.associated_data ?? "").trim();
+  return associatedData === "refund";
+}
+
+/**
  * 解析回调体
  *
  * 不是合法 JSON → 抛错(调用方回 400 / 401,反正不能落库)。
@@ -142,14 +214,17 @@ export function parseNotifyPayload(rawBody: string): WechatNotifyPayload {
 }
 
 /**
- * 解密 `resource`
+ * 解密 `resource` —— **通用**
  *
  * 解出来是明文 JSON 字符串。解密失败(密钥不对 / 报文被改过)→ 抛错。
+ *
+ * 付款通知和退款通知的密文结构**完全一样**(AES-256-GCM),只是明文里的字段
+ * 不同 ⇒ 解密这一步**只写一份**,字段的解读交给上面两个类型。
  */
-export function decryptTransaction(
+function decryptPayload(
   resource: WechatEncryptedResource,
   apiV3Key: string
-): WechatTransaction {
+): Record<string, unknown> {
   const plaintext = decryptResource({
     ciphertext: resource.ciphertext,
     nonce: resource.nonce,
@@ -158,9 +233,29 @@ export function decryptTransaction(
   });
   const parsed = JSON.parse(plaintext) as unknown;
   if (typeof parsed !== "object" || parsed === null) {
-    throw new Error("解密出来的交易详情不是 JSON 对象");
+    throw new Error("解密出来的内容不是 JSON 对象");
   }
-  return parsed as WechatTransaction;
+  return parsed as Record<string, unknown>;
+}
+
+/**
+ * 解密 `resource` —— 付款通知(交易详情)
+ */
+export function decryptTransaction(
+  resource: WechatEncryptedResource,
+  apiV3Key: string
+): WechatTransaction {
+  return decryptPayload(resource, apiV3Key) as WechatTransaction;
+}
+
+/**
+ * 解密 `resource` —— 退款通知(退款单详情)
+ */
+export function decryptRefund(
+  resource: WechatEncryptedResource,
+  apiV3Key: string
+): WechatRefund {
+  return decryptPayload(resource, apiV3Key) as WechatRefund;
 }
 
 /**
@@ -277,11 +372,13 @@ export async function handleWechatNotify(params: {
   //
   // APIv3 密钥跟公钥是**配套**的(同一套商户凭据)⇒ 哪把公钥验过了,就用
   // 那份配置的密钥解。解不开就换下一把。
-  let transaction: WechatTransaction | null = null;
+  //
+  // 解密这一步**不分付款 / 退款** —— 密文结构一样,分流放在解密之后。
+  let plaintext: Record<string, unknown> | null = null;
   let usedConfig: WechatPayConfig | null = null;
   for (const config of verifying) {
     try {
-      transaction = decryptTransaction(resource, config.apiV3Key);
+      plaintext = decryptPayload(resource, config.apiV3Key);
       usedConfig = config;
       break;
     } catch {
@@ -289,7 +386,7 @@ export async function handleWechatNotify(params: {
     }
   }
 
-  if (!transaction || !usedConfig) {
+  if (!plaintext || !usedConfig) {
     return {
       verified: false,
       orderNo: null,
@@ -300,6 +397,18 @@ export async function handleWechatNotify(params: {
     };
   }
 
+  // ---- 5.5 退款通知走**另一个分支** ----
+  //
+  // 微信的退款结果通知跟付款通知**用同一个 `notify_url`** ⇒ 同一个端点,
+  // 按 `event_type` 分流。
+  if (isWechatRefundNotify(payload)) {
+    return handleWechatRefundNotify({
+      refund: plaintext as WechatRefund,
+      config: usedConfig,
+    });
+  }
+
+  const transaction = plaintext as WechatTransaction;
   const orderNo = (transaction.out_trade_no ?? "").trim();
   const transactionId = (transaction.transaction_id ?? "").trim();
   const tradeState = (transaction.trade_state ?? "").trim();
@@ -368,5 +477,178 @@ export async function handleWechatNotify(params: {
     tradeState,
     settled: result.changed,
     reason: result.reason ?? null,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/*  退款通知                                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 处理一条**退款结果**通知
+ *
+ * ## 微信的三个退款事件
+ *
+ * | `event_type` | 意思 | 我们怎么办 |
+ * |---|---|---|
+ * | `REFUND.SUCCESS` | 钱退到了 | **落库**(申请单 → `refunded`,订单 → `payment_status = refunded`) |
+ * | `REFUND.ABNORMAL` | 退不了,需要人工处理 | 只记平台状态,申请单**留在 `approved`** 等工作室处理 |
+ * | `REFUND.CLOSED` | 退款单关掉了,钱**没退** | 申请单 → `rejected`(带备注),买家能重新申请 |
+ *
+ * ## 怎么找到对应的退款申请
+ *
+ * **`out_refund_no` 就是退款申请行的 `id`** —— 后台点「执行退款」时我们把它
+ * 当**幂等键**发给微信(支付宝那边叫 `out_request_no`)。⇒ 拿它直接查
+ * `refund_request`。
+ *
+ * ## 找不到申请单 ⇒ **什么都不改**
+ *
+ * 工作室在微信商户后台**手工**退款时,`out_refund_no` 是他自己填的 ⇒ 我们
+ * 没有对应的申请行。
+ *
+ * ⇒ 这种通知**只记一条日志**,不动本地状态。那条钱走工作室自己在后台点
+ * 「标记已退款」的路子 —— **不在这里自动改订单的收款状态**:
+ * 一条认不出出处的通知就改「已退款」,那是资损。
+ */
+async function handleWechatRefundNotify(params: {
+  refund: WechatRefund;
+  config: WechatPayConfig;
+}): Promise<WechatNotifyOutcome> {
+  const { refund, config } = params;
+
+  const orderNo = (refund.out_trade_no ?? "").trim();
+  const outRefundNo = (refund.out_refund_no ?? "").trim();
+  const refundId = (refund.refund_id ?? "").trim();
+  const refundStatus = (refund.refund_status ?? "").trim();
+
+  // ---- 1. 商户号对不上 → 不是我们这一笔 ----
+  if (refund.mchid && refund.mchid !== config.mchId) {
+    return {
+      verified: true,
+      orderNo: orderNo || null,
+      transactionId: (refund.transaction_id ?? "").trim() || null,
+      tradeState: refundStatus || null,
+      settled: false,
+      reason: "mchid 与当前配置不一致,忽略",
+    };
+  }
+
+  // ---- 2. 没有订单号 → 认不出来 ----
+  if (!orderNo) {
+    return {
+      verified: true,
+      orderNo: null,
+      transactionId: (refund.transaction_id ?? "").trim() || null,
+      tradeState: refundStatus || null,
+      settled: false,
+      reason: "退款通知里没有 out_trade_no",
+    };
+  }
+
+  // ---- 3. 没有幂等键 → 认不出是哪一笔退款 ----
+  if (!outRefundNo) {
+    return {
+      verified: true,
+      orderNo,
+      transactionId: (refund.transaction_id ?? "").trim() || null,
+      tradeState: refundStatus || null,
+      settled: false,
+      reason: "退款通知里没有 out_refund_no",
+    };
+  }
+
+  // ---- 4. 找申请单 ----
+  const request = await getRefundRequestById(outRefundNo);
+  if (!request) {
+    logger.warn(
+      { orderNo, outRefundNo, refundId, refundStatus },
+      "[wechat] 收到一条认不出出处的退款通知 —— 本地不动,让工作室自己在后台处理"
+    );
+    return {
+      verified: true,
+      orderNo,
+      transactionId: (refund.transaction_id ?? "").trim() || null,
+      tradeState: refundStatus || null,
+      settled: false,
+      reason: "找不到对应的退款申请单(可能是工作室在商户后台手工退的款)",
+    };
+  }
+
+  // 实际退款金额(分)—— 微信给的是分
+  const refundedCents =
+    typeof refund.amount?.refund === "number"
+      ? refund.amount.refund
+      : request.amountCents;
+
+  // ---- 5. 钱退到了 → 落库 ----
+  if (refundStatus === "SUCCESS") {
+    const landed = await landRefundOutcome({
+      refundRequestId: request.id,
+      orderNo: request.orderNo,
+      orderKind: request.orderKind,
+      channel: "wechat",
+      refundedCents,
+      providerRefundId: refundId || null,
+      providerStatus: refundStatus,
+      note: "微信退款结果通知",
+      actor: "admin",
+    });
+
+    return {
+      verified: true,
+      orderNo: request.orderNo,
+      transactionId: (refund.transaction_id ?? "").trim() || null,
+      tradeState: refundStatus,
+      settled: landed.ok,
+      reason: landed.ok
+        ? landed.changed
+          ? "退款已落库"
+          : "退款已经是这个状态了(重复通知)"
+        : `退款落库失败:${landed.code}`,
+    };
+  }
+
+  // ---- 6. 钱没退 —— 只记平台状态,申请单**留在原地** ----
+  //
+  // `ABNORMAL` 是「退不了、需要人工处理」⇒ 不能当成「退掉了」,也不能当成
+  // 「明确退不了」—— 工作室可能重试。申请单留在 `approved`,后台能看到平台
+  // 的原文。
+  //
+  // `CLOSED` 是「退款单关掉了」⇒ 钱**确定**没退 ⇒ 申请单写掉成 `rejected`
+  // (带备注),买家才能重新申请一条。
+  await recordRefundProviderOutcome({
+    refundRequestId: request.id,
+    providerRefundId: refundId || null,
+    providerRefundStatus: refundStatus,
+    refundError:
+      refundStatus === "CLOSED"
+        ? "微信退款单已关闭,款项没有退回"
+        : `微信退款状态:${refundStatus || "(空)"}`,
+  });
+
+  if (refundStatus === "CLOSED") {
+    const transition = await transitionRefundStatus({
+      refundRequestId: request.id,
+      toStatus: "rejected",
+      note: "微信退款单已关闭(CLOSED),款项没有退回 —— 工作室可以重新发起退款",
+      actor: "admin",
+      providerRefundId: refundId || null,
+      providerRefundStatus: refundStatus,
+    });
+    if (!transition.ok) {
+      logger.warn(
+        { err: transition.code, refundRequestId: request.id },
+        "[wechat] 退款单关了,但申请单写不掉"
+      );
+    }
+  }
+
+  return {
+    verified: true,
+    orderNo: request.orderNo,
+    transactionId: (refund.transaction_id ?? "").trim() || null,
+    tradeState: refundStatus,
+    settled: false,
+    reason: `退款状态 ${refundStatus || "(空)"} —— 钱还没退到`,
   };
 }

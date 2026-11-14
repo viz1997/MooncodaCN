@@ -963,7 +963,8 @@
       "settings": "设置",
       "siteSettings": "站点设置",
       "paymentSettings": "支付设置",
-      "shipments": "发货管理"
+      "shipments": "发货管理",
+      "refunds": "退款管理"
     }
   },
   "AdminOrders": {
@@ -2106,6 +2107,7 @@
           "INVALID_TRANSITION": "当前状态不能取消",
           "NOTE_REQUIRED": "请填写取消原因",
           "SAME_STATUS": "这张工单已经取消了",
+          "REFUND_REQUIRED": "这笔已经付款了,请走退款申请",
           "FAILED": "取消失败,请稍后重试"
         }
       }
@@ -2537,6 +2539,7 @@
     "fields": {
       "wechat_sandbox_api_base": "沙箱 API 根地址",
       "wechat_sandbox_native_path": "沙箱 Native 下单路径",
+      "wechat_sandbox_refund_path": "沙箱退款路径(留空 = 从下单路径推)",
       "wechat_sandbox_mch_id": "沙箱商户号",
       "wechat_sandbox_app_id": "沙箱 AppID",
       "wechat_sandbox_api_v3_key": "沙箱 APIv3 密钥(32 字节)",
@@ -2795,6 +2798,156 @@
       "count": "共 {count} 单",
       "shipped": "已发货",
       "statusUpdated": "状态已更新",
+      "validationFailed": "提交的内容有问题"
+    }
+  },
+  "Refund": {
+    "button": "申请退款",
+    "confirmTitle": "申请退款",
+    "confirmBody": "填一句原因,工作室会尽快处理。已经开始生产或已发货的单子不能退款。",
+    "reasonLabel": "退款原因",
+    "reasonPlaceholder": "比如:尺寸不合适 / 下错单了 / 买错了……",
+    "submit": "提交申请",
+    "submitting": "提交中…",
+    "cancel": "先不退了",
+    "statusTitle": "退款",
+    "status": {
+      "pending": "待工作室处理",
+      "approved": "工作室已同意,款项退回中",
+      "refunded": "已退款",
+      "rejected": "退款被拒绝"
+    },
+    "appliedAt": "申请时间",
+    "amountLabel": "申请退款金额",
+    "refundedAmountLabel": "实际退款金额",
+    "channelLabel": "收款通道",
+    "noteLabel": "工作室备注",
+    "errorLabel": "退款过程中的错误",
+    "errors": {
+      "ORDER_NOT_FOUND": "找不到这张订单",
+      "REFUND_NOT_FOUND": "找不到这笔退款申请",
+      "INVALID_TRANSITION": "当前状态不能这么改",
+      "NOTE_REQUIRED": "请填写处理备注",
+      "INVALID_INPUT": "提交的内容有问题",
+      "NOT_REFUNDABLE": "这张单不能退款",
+      "REQUEST_EXISTS": "你已经申请过了,等工作室处理",
+      "REFUND_NOT_SUPPORTED": "这个收款通道不支持自动退款 —— 请在商家后台手工退款后,回这里点「标记已退款」",
+      "PROVIDER_REJECTED": "支付平台拒绝了这次退款 —— 请在商家后台看一下原因",
+      "REFUND_PROCESSING": "退款请求已提交,平台还在处理 —— 等平台通知即可",
+      "MIGRATION_MISSING": "退款表还没建 —— 先跑 pnpm migrate:apply-refund",
+      "SAVE_FAILED": "保存失败 —— 看服务端日志",
+      "NOT_PAID": "这笔还没有付款,没什么可退的",
+      "ORDER_CANCELLED": "这张单已经取消了",
+      "PRODUCTION_STARTED": "已经开始生产了,不能退款",
+      "ALREADY_SHIPPED": "货已经发出去了,不能退款",
+      "NOT_FOUND": "找不到这张订单",
+      "FAILED": "操作失败 —— 请稍后重试"
+    }
+  },
+  "AdminRefund": {
+    "title": "退款管理",
+    "subtitle": "买家申请了退款,在这一页处理。点「执行退款」系统会自动调支付平台的退款 API;在商家后台手工退完钱的,回来点「标记已退款」。",
+    "filter": {
+      "label": "筛选",
+      "all": "全部",
+      "pending": "待处理",
+      "approved": "已同意",
+      "refunded": "已退款",
+      "rejected": "已拒绝"
+    },
+    "table": {
+      "kindLabel": "类型",
+      "kind": {
+        "storefront": "商城",
+        "print": "打印"
+      },
+      "orderNo": "订单号",
+      "buyer": "买家",
+      "amount": "金额",
+      "channel": "收款通道",
+      "reason": "申请原因",
+      "status": "状态",
+      "appliedAt": "申请时间",
+      "actions": "操作"
+    },
+    "summary": {
+      "title": "订单摘要",
+      "kind": "类型",
+      "orderNo": "订单号",
+      "buyer": "买家",
+      "item": "商品 / 模型",
+      "channel": "收款通道",
+      "amount": "申请金额",
+      "refundedAmount": "实际退款金额",
+      "orderStatus": "订单状态",
+      "paymentStatus": "收款状态",
+      "appliedAt": "申请时间",
+      "providerRefundId": "平台退款单号",
+      "providerRefundStatus": "平台退款状态",
+      "reason": "申请原因",
+      "refundError": "退款过程中的错误",
+      "note": "处理备注"
+    },
+    "channel": {
+      "wechat": "微信支付",
+      "alipay": "支付宝",
+      "offline": "线下转账",
+      "shopify": "Shopify",
+      "stripe": "Stripe",
+      "unknown": "未知通道"
+    },
+    "payment": {
+      "unpaid": "未收款",
+      "paid": "已收款",
+      "refunded": "已退款",
+      "failed": "收款失败"
+    },
+    "orderStatus": {
+      "label": "订单状态",
+      "storefront": {
+        "unpaid": "待付款",
+        "paid": "已付款",
+        "fulfilled": "已发货",
+        "cancelled": "已取消"
+      },
+      "print": {
+        "PENDING": "待确认",
+        "CONFIRMED": "已确认",
+        "IN_PRODUCTION": "制作中",
+        "SHIPPED": "已发货",
+        "COMPLETED": "已完成",
+        "CANCELLED": "已取消"
+      }
+    },
+    "form": {
+      "refundAmount": "实际退款金额",
+      "refundAmountHint": "默认等于申请金额(整单退)。工作室想少退一点的话改这里 —— 不能超过订单总额。",
+      "note": "处理备注",
+      "notePlaceholder": "拒绝申请时必填。其它情况选填 —— 填了会作为退款原因给到支付平台。",
+      "required": "这一项要填",
+      "noteRequiredHint": "拒绝申请要写清楚原因"
+    },
+    "actions": {
+      "approve": "同意退款",
+      "execute": "执行退款",
+      "executeWithAmount": "执行退款 {amount}",
+      "markRefunded": "标记已退款",
+      "markRefundedWithAmount": "标记已退款 {amount}",
+      "reject": "拒绝申请",
+      "manage": "处理",
+      "close": "收起",
+      "terminal": "这一条已经处理完了"
+    },
+    "messages": {
+      "loading": "正在读退款申请…",
+      "loadFailed": "读退款申请失败 —— 看服务端日志",
+      "empty": "还没有退款申请",
+      "count": "共 {count} 条",
+      "approved": "已同意退款",
+      "executed": "退款已提交,钱退了",
+      "markedRefunded": "已标记为退款",
+      "rejected": "已拒绝该申请",
+      "processing": "退款请求已提交,平台还在处理 —— 等平台通知即可",
       "validationFailed": "提交的内容有问题"
     }
   }

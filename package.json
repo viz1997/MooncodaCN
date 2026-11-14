@@ -30,6 +30,7 @@
     "migrate:apply-print-order-storefront-link": "tsx scripts/apply-print-order-storefront-link-schema.ts",
     "migrate:apply-print-pricing": "tsx scripts/apply-print-pricing-schema.ts",
     "migrate:apply-product-catalog": "tsx scripts/apply-product-catalog-schema.ts",
+    "migrate:apply-refund": "tsx scripts/apply-refund-schema.ts",
     "migrate:apply-sellbase-payment": "tsx scripts/apply-sellbase-payment-schema.ts",
     "migrate:apply-shipment": "tsx scripts/apply-shipment-schema.ts",
     "migrate:apply-site-setting": "tsx scripts/apply-site-setting-schema.ts",

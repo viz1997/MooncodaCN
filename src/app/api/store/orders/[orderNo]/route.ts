@@ -15,6 +15,10 @@ import { NextResponse } from "next/server";
 
 import { claimReconcileSlot } from "@/features/payments/lib/reconcile-throttle";
 import {
+  getLatestRefundRequestForOrder,
+  toRefundView,
+} from "@/features/refund/lib/refund-store";
+import {
   listShipmentsForOrder,
   toShipmentView,
 } from "@/features/shipment/lib/shipment-store";
@@ -107,6 +111,12 @@ async function handle(
   // 物流(2026-11-13)—— 一个订单可能有多个包裹(补发 / 分开发)
   const shipments = await listShipmentsForOrder("storefront", order.id);
 
+  // 退款申请(2026-11-14)—— **最新那一条**;没有就是 null
+  //
+  // 「最新」而不是「唯一」:被拒之后买家可以再申请一条 ⇒ 一个订单可能有多条。
+  // 买家侧只该看见**当前那一条**。
+  const refundRow = await getLatestRefundRequestForOrder("storefront", order.id);
+
   return NextResponse.json({
     orderNo: order.orderNo,
     status: order.status,
@@ -141,6 +151,15 @@ async function handle(
      * **响应形状只涨不破** —— 现有那几处消费者忽略这个字段,不受影响。
      */
     shipments: shipments.map(toShipmentView),
+    /**
+     * 退款申请(2026-11-14)
+     *
+     * **响应形状只涨不破** —— 现有那几处消费者忽略这个字段,不受影响。
+     *
+     * 工作室在后台改退款状态是**外部写入** ⇒ 买家页面的轮询指纹里**必须**
+     * 带这一段,否则页面停在「等工作室处理」直到手动刷新。
+     */
+    refund: refundRow ? toRefundView(refundRow) : null,
     /**
      * 主动查单的结论(2026-11-14)
      *

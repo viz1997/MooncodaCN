@@ -31,12 +31,15 @@ import {
   PaymentNotConfiguredError,
   type PaymentProvider,
   PaymentProviderError,
+  type PaymentRefundOutcome,
+  type PaymentRefundRequest,
   type PaymentRequest,
   type PaymentSession,
 } from "@/features/payments/lib/types";
 
 import { getWechatPayConfig, isWechatPayConfigured } from "./config";
 import { buildDescription, createNativeOrderWithConfig } from "./native";
+import { refundWithWechatConfig } from "./refund";
 
 /**
  * 算应付总额(分)
@@ -107,6 +110,46 @@ export const wechatPayProvider: PaymentProvider = {
       );
     }
   },
+
+  /**
+   * 退一次款 —— 调**微信官方的退款接口**
+   *
+   * ## 为什么不是「工作室手工退 + 我们记账」
+   *
+   * 微信这边**已经有**一整套退款机制:幂等键(`out_refund_no`)、退款状态机
+   * (`SUCCESS` / `PROCESSING` / `CLOSED` / `ABNORMAL`)、退款结果异步通知。
+   * 自己造一套「记账 + 手工对账」就是重复实现别人已经做好的东西,而且**退两次
+   * 钱**的风险全在自己身上。
+   *
+   * ⇒ 这一层很薄:递过去「订单号 + 金额 + 原因」,拿回一个状态。
+   *
+   * ## 幂等
+   *
+   * `out_refund_no` = 退款申请行的 id ⇒ **重试安全**:同一个号,平台那边只会
+   * 退一次钱。
+   */
+  async refund(request: PaymentRefundRequest): Promise<PaymentRefundOutcome> {
+    // 没配好 → PaymentNotConfiguredError(重试没用,得先配)
+    const config = await getWechatPayConfig();
+
+    try {
+      return await refundWithWechatConfig(config, {
+        orderNo: request.orderNo,
+        outRefundNo: request.outRefundNo,
+        totalCents: request.totalCents,
+        refundCents: request.refundCents,
+        reason: request.reason,
+      });
+    } catch (error) {
+      // 配置错误原样抛 —— 它跟「这次调用挂了」是两件事
+      if (error instanceof PaymentNotConfiguredError) throw error;
+      throw new PaymentProviderError(
+        "wechat",
+        error instanceof Error ? error.message : "微信退款失败",
+        { cause: error }
+      );
+    }
+  },
 };
 
 export default wechatPayProvider;
@@ -157,3 +200,10 @@ export {
   type WechatTransaction,
   wechatNotifyFailure,
 } from "./webhook";
+export {
+  buildWechatRefundBody,
+  mapWechatRefundStatus,
+  refundWithWechatConfig,
+  requestWechatRefund,
+  type WechatRefundParams,
+} from "./refund";

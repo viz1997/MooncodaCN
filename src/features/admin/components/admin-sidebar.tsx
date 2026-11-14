@@ -69,6 +69,7 @@ export function AdminSidebar() {
       站点设置: t("nav.siteSettings"),
       支付设置: t("nav.paymentSettings"),
       发货管理: t("nav.shipments"),
+      退款管理: t("nav.refunds"),
     };
     return titleMap[title] || title;
   };

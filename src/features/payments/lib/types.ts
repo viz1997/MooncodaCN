@@ -189,7 +189,105 @@ export interface PaymentProvider {
    * 压根没配好,重试没用」(跟「这次调用挂了」要分开,见 `payment-issue.ts`)。
    */
   createSession(request: PaymentRequest): Promise<PaymentSession>;
+  /**
+   * 退一次款
+   *
+   * **可选** —— 只有微信 / 支付宝实现了(它们各自有退款 API)。`shopify` /
+   * `stripe` 那两条旧路 2026-11-05 就下线了,不实现也不影响。
+   *
+   * ⚠️ **没有这个方法 ≠ 这个通道不能退** —— 工作室可以在平台后台手工退,
+   * 再回后台点「标记已退款」。这条路一直都在。
+   *
+   * 抛错 = **这次没退成**(钱没动);返回 `rejected` = **平台明确拒绝了**
+   * (钱也没动,但平台给了原因)。两者都不许把本地状态改成「已退款」。
+   */
+  refund?(request: PaymentRefundRequest): Promise<PaymentRefundOutcome>;
 }
+
+/* -------------------------------------------------------------------------- */
+/*  退款                                                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 一次退款请求
+ *
+ * ## 为什么平台已经做好了,我们要「接」而不是「自己造」
+ *
+ * 微信 / 支付宝的退款 API 自带**幂等键**(`out_refund_no` / `out_request_no`)
+ * + **退款状态机** + **异步通知**。自己造一套「记账 + 手工对账」就是重复实现
+ * 别人已经做好的东西 —— 而且**退两次钱**的风险全在自己身上。
+ *
+ * ⇒ 这一层**很薄**:把订单号、金额、原因递给平台,拿回一个状态。
+ */
+export interface PaymentRefundRequest {
+  /**
+   * 商户侧订单号(`out_trade_no`)—— **我们自己的订单号**
+   *
+   * 不是平台侧的 `trade_no` —— 两个通道都是用商户单号反查的。
+   */
+  orderNo: string;
+  /**
+   * 退款单号(`out_refund_no` / `out_request_no`)
+   *
+   * ⚠️ **必须是稳定的** —— 它就是**幂等键**:平台那边同一个号只会退一次。
+   * ⇒ 重试**必须**用同一个号(用退款申请行的 id),换个号就是退两次钱。
+   */
+  outRefundNo: string;
+  /**
+   * 订单**总额**(分)—— 平台拿它校验「退的不能超过原单」
+   *
+   * 微信的退款接口**两个金额都要**:原单总额 + 要退多少。
+   */
+  totalCents: number;
+  /** 要退多少(分)—— 整单退时 == `totalCents` */
+  refundCents: number;
+  /** 退款原因 —— 平台会把它展示给买家 */
+  reason: string;
+  /** 币种(iso 大写)—— 人民币就是 `"CNY"` */
+  currency: string;
+}
+
+/**
+ * 退款的结果
+ *
+ * 三档 —— 关键是**「钱退没退」和「平台受理了没」是两件事**:
+ *
+ * - `succeeded` —— 钱已经退到买家账上了(可以写 `payment_status = "refunded"`)
+ * - `processing` —— 平台受理了,钱**还在路上**(**不能**写 `refunded`)
+ * - `rejected` —— 平台拒绝了,**钱没动**(要带平台给的原文)
+ */
+export type PaymentRefundOutcome =
+  | {
+      status: "succeeded";
+      /** 平台侧的退款单号(`refund_id` / `out_biz_no`) */
+      providerRefundId: string | null;
+      /** 平台给的原始状态(`SUCCESS`) */
+      providerStatus: string;
+      /** 平台回的原文 —— 界面**原样**摆给工作室,别翻译成「出错了」 */
+      detail?: string;
+    }
+  | {
+      status: "processing";
+      providerRefundId: string | null;
+      /** 平台给的原始状态(`PROCESSING` / `CHANGE`) */
+      providerStatus: string;
+      /**
+       * 平台回的原文
+       *
+       * ⚠️ **「处理中」也得带原文** —— 比如微信回
+       * `RESOURCE_ALREADY_EXISTS`(这个退款单号用过了)⇒ 工作室得看见这句
+       * 才知道「别换个号重试,那就是退两次钱」。
+       */
+      detail?: string;
+    }
+  | {
+      status: "rejected";
+      providerRefundId: string | null;
+      /** 平台给的原始状态(可能没有) */
+      providerStatus: string | null;
+      /** 平台回的原文 —— 界面**原样**摆给工作室,别翻译成「出错了」 */
+      detail: string;
+    };
 
 /* -------------------------------------------------------------------------- */
 /*  错误                                                                       */

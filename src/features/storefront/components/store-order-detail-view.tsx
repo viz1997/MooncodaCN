@@ -32,6 +32,9 @@ import { useFormatter, useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { PaymentQrCode } from "@/features/payments/components/payment-qr";
+import { RefundRequestButton } from "@/features/refund/components/refund-request-button";
+import { RefundStatusPanel } from "@/features/refund/components/refund-status-panel";
+import type { RefundView } from "@/features/refund/lib/types";
 import {
   AtelierPageShell,
   AtelierPanel,
@@ -59,19 +62,23 @@ export function StoreOrderDetailView({
   order: initialOrder,
   items,
   shipments: initialShipments,
+  refund: initialRefund = null,
 }: {
   order: StoreOrderDetailOrder;
   items: StoreOrderDetailItem[];
   /** 物流 —— 一个订单可能有多个包裹(补发 / 分开发) */
   shipments: ShipmentView[];
+  /** 退款申请(2026-11-14)—— 没有就是 null */
+  refund?: RefundView | null;
 }) {
   const t = useTranslations("StorefrontOrder");
   const format = useFormatter();
 
-  const { shipments, snapshot, refresh } = useStoreOrderPolling(
+  const { shipments, refund, snapshot, refresh } = useStoreOrderPolling(
     initialOrder.orderNo,
     {
       shipments: initialShipments,
+      refund: initialRefund,
       snapshot: {
         status: initialOrder.status,
         paymentStatus: initialOrder.paymentStatus,
@@ -144,24 +151,50 @@ export function StoreOrderDetailView({
           </div>
         </div>
 
-        {payable ? (
-          <div className="flex flex-col items-end gap-1.5">
-            <Button
-              size="sm"
-              className="rounded-full"
-              onClick={() => void payment.startPayment()}
-              disabled={payment.isLoading}
-              type="button"
-            >
-              {t("pay.action")}
-            </Button>
-            {payment.error ? (
-              <p className="max-w-[16rem] text-right text-[11px] text-destructive">
-                {payment.error}
-              </p>
-            ) : null}
-          </div>
-        ) : null}
+        <div className="flex flex-col items-end gap-2">
+          {payable ? (
+            <div className="flex flex-col items-end gap-1.5">
+              <Button
+                size="sm"
+                className="rounded-full"
+                onClick={() => void payment.startPayment()}
+                disabled={payment.isLoading}
+                type="button"
+              >
+                {t("pay.action")}
+              </Button>
+              {payment.error ? (
+                <p className="max-w-[16rem] text-right text-[11px] text-destructive">
+                  {payment.error}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      {/*
+        退款入口(2026-11-14)
+        *
+        * 「能不能退」由**纯函数**判定(`evaluateRefundEligibility`)——
+        * 界面和服务端跑的是同一个函数,不会摆出一个「点了必失败」的按钮。
+        *
+        * ⚠️ **服务端那一层才是真正的授权边界** —— 用户照样能直接调 action。
+        * 界面上藏按钮只是 UI 便利。
+        *
+        * **单独占一行**,不塞进头部那一列 —— 展开后的表单要写字,挤在
+        * 内容宽的窄列里手机上没法写。
+      */}
+      <div className="mb-6 flex justify-end">
+        <RefundRequestButton
+          orderKind="storefront"
+          orderNo={initialOrder.orderNo}
+          paymentStatus={snapshot.paymentStatus}
+          status={snapshot.status}
+          hasShipment={shipments.length > 0}
+          refund={refund}
+          onSubmitted={() => void refresh()}
+        />
       </div>
 
       <div className="space-y-6">
@@ -213,6 +246,9 @@ export function StoreOrderDetailView({
 
         {/* 物流 —— 工作室在后台填的快递公司 + 运单号 */}
         <ShipmentPanel shipments={shipments} />
+
+        {/* 退款(2026-11-14)—— 没有申请就不渲染 */}
+        <RefundStatusPanel refund={refund} />
 
         {/* 金额 */}
         <AtelierPanel>

@@ -966,7 +966,8 @@
       "settings": "Settings",
       "siteSettings": "Site Settings",
       "paymentSettings": "Payment Settings",
-      "shipments": "Shipping Desk"
+      "shipments": "Shipping Desk",
+      "refunds": "Refunds"
     }
   },
   "AdminOrders": {
@@ -2109,6 +2110,7 @@
           "INVALID_TRANSITION": "This order cannot be cancelled in its current state",
           "NOTE_REQUIRED": "Please give a reason",
           "SAME_STATUS": "This order is already cancelled",
+          "REFUND_REQUIRED": "This one has already been paid — please request a refund instead",
           "FAILED": "Cancel failed, please try again"
         }
       }
@@ -2540,6 +2542,7 @@
     "fields": {
       "wechat_sandbox_api_base": "Sandbox API base",
       "wechat_sandbox_native_path": "Sandbox Native order path",
+      "wechat_sandbox_refund_path": "Sandbox refund path (empty = derive it from the order path)",
       "wechat_sandbox_mch_id": "Sandbox merchant id",
       "wechat_sandbox_app_id": "Sandbox AppID",
       "wechat_sandbox_api_v3_key": "Sandbox APIv3 key (32 bytes)",
@@ -2798,6 +2801,156 @@
       "count": "{count} orders",
       "shipped": "Shipped",
       "statusUpdated": "Status updated",
+      "validationFailed": "What you submitted does not add up"
+    }
+  },
+  "Refund": {
+    "button": "Request a refund",
+    "confirmTitle": "Request a refund",
+    "confirmBody": "Tell us why — the studio will get to it. Orders already in production or already shipped cannot be refunded.",
+    "reasonLabel": "Reason",
+    "reasonPlaceholder": "e.g. wrong size / ordered by mistake / bought the wrong thing…",
+    "submit": "Submit request",
+    "submitting": "Submitting…",
+    "cancel": "Never mind",
+    "statusTitle": "Refund",
+    "status": {
+      "pending": "Waiting for the studio",
+      "approved": "Approved — the money is on its way back",
+      "refunded": "Refunded",
+      "rejected": "Refund rejected"
+    },
+    "appliedAt": "Requested at",
+    "amountLabel": "Requested amount",
+    "refundedAmountLabel": "Amount refunded",
+    "channelLabel": "Payment channel",
+    "noteLabel": "Note from the studio",
+    "errorLabel": "Error during the refund",
+    "errors": {
+      "ORDER_NOT_FOUND": "We can't find that order",
+      "REFUND_NOT_FOUND": "We can't find that refund request",
+      "INVALID_TRANSITION": "That change isn't allowed from the current state",
+      "NOTE_REQUIRED": "Please write a note",
+      "INVALID_INPUT": "What you submitted does not add up",
+      "NOT_REFUNDABLE": "This order can't be refunded",
+      "REQUEST_EXISTS": "You've already asked — the studio will get to it",
+      "REFUND_NOT_SUPPORTED": "This payment channel can't refund automatically — refund it in the merchant dashboard, then come back and mark it refunded",
+      "PROVIDER_REJECTED": "The payment platform rejected this refund — check the merchant dashboard for the reason",
+      "REFUND_PROCESSING": "The refund request was sent and the platform is still working on it — we'll update it when the platform tells us",
+      "MIGRATION_MISSING": "The refund tables do not exist yet — run pnpm migrate:apply-refund",
+      "SAVE_FAILED": "Saving failed — check the server log",
+      "NOT_PAID": "This one has not been paid — there is nothing to refund",
+      "ORDER_CANCELLED": "This order was cancelled",
+      "PRODUCTION_STARTED": "Production has already started, so it can't be refunded",
+      "ALREADY_SHIPPED": "The order has already shipped, so it can't be refunded",
+      "NOT_FOUND": "We can't find that order",
+      "FAILED": "That didn't work — please try again"
+    }
+  },
+  "AdminRefund": {
+    "title": "Refunds",
+    "subtitle": "Handle refund requests here. \"Execute refund\" calls the payment platform's refund API for you; if you refunded by hand in the merchant dashboard, come back and mark it refunded.",
+    "filter": {
+      "label": "Filter",
+      "all": "All",
+      "pending": "Pending",
+      "approved": "Approved",
+      "refunded": "Refunded",
+      "rejected": "Rejected"
+    },
+    "table": {
+      "kindLabel": "Type",
+      "kind": {
+        "storefront": "Store",
+        "print": "Print"
+      },
+      "orderNo": "Order no.",
+      "buyer": "Buyer",
+      "amount": "Amount",
+      "channel": "Channel",
+      "reason": "Reason",
+      "status": "Status",
+      "appliedAt": "Requested at",
+      "actions": "Actions"
+    },
+    "summary": {
+      "title": "Order summary",
+      "kind": "Type",
+      "orderNo": "Order no.",
+      "buyer": "Buyer",
+      "item": "Item / model",
+      "channel": "Payment channel",
+      "amount": "Requested amount",
+      "refundedAmount": "Amount refunded",
+      "orderStatus": "Order status",
+      "paymentStatus": "Payment status",
+      "appliedAt": "Requested at",
+      "providerRefundId": "Platform refund no.",
+      "providerRefundStatus": "Platform refund status",
+      "reason": "Reason",
+      "refundError": "Error during the refund",
+      "note": "Note"
+    },
+    "channel": {
+      "wechat": "WeChat Pay",
+      "alipay": "Alipay",
+      "offline": "Offline transfer",
+      "shopify": "Shopify",
+      "stripe": "Stripe",
+      "unknown": "Unknown channel"
+    },
+    "payment": {
+      "unpaid": "Not paid",
+      "paid": "Paid",
+      "refunded": "Refunded",
+      "failed": "Payment failed"
+    },
+    "orderStatus": {
+      "label": "Order status",
+      "storefront": {
+        "unpaid": "Awaiting payment",
+        "paid": "Paid",
+        "fulfilled": "Shipped",
+        "cancelled": "Cancelled"
+      },
+      "print": {
+        "PENDING": "Awaiting confirmation",
+        "CONFIRMED": "Confirmed",
+        "IN_PRODUCTION": "In production",
+        "SHIPPED": "Shipped",
+        "COMPLETED": "Completed",
+        "CANCELLED": "Cancelled"
+      }
+    },
+    "form": {
+      "refundAmount": "Amount to refund",
+      "refundAmountHint": "Defaults to the requested amount (a full-order refund). Lower it here if the studio refunds less — it can never exceed the order total.",
+      "note": "Note",
+      "notePlaceholder": "Required when rejecting. Optional otherwise — whatever you type here is sent to the payment platform as the refund reason.",
+      "required": "This field is required",
+      "noteRequiredHint": "Rejecting a request needs a reason"
+    },
+    "actions": {
+      "approve": "Approve refund",
+      "execute": "Execute refund",
+      "executeWithAmount": "Execute refund {amount}",
+      "markRefunded": "Mark refunded",
+      "markRefundedWithAmount": "Mark refunded {amount}",
+      "reject": "Reject request",
+      "manage": "Handle",
+      "close": "Collapse",
+      "terminal": "This request is already handled"
+    },
+    "messages": {
+      "loading": "Loading refund requests…",
+      "loadFailed": "Could not load refund requests — check the server log",
+      "empty": "No refund requests yet",
+      "count": "{count} in total",
+      "approved": "Refund approved",
+      "executed": "Refund submitted — the money is back",
+      "markedRefunded": "Marked as refunded",
+      "rejected": "Request rejected",
+      "processing": "Refund request sent, the platform is still working on it — we'll update it when the platform tells us",
       "validationFailed": "What you submitted does not add up"
     }
   }

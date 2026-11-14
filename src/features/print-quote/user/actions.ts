@@ -46,6 +46,13 @@ export type CancelPrintOrderErrorCode =
   | "INVALID_TRANSITION"
   | "NOTE_REQUIRED"
   | "SAME_STATUS"
+  /**
+   * 已经收了款 —— 要退钱得走**退款申请**(2026-11-14)
+   *
+   * 「取消」只改 `status`,不碰 `payment_status` ⇒ 已付款的工单被取消掉,
+   * 钱还在买家账上,订单却写着「已取消」⇒ **看着像退过款,其实没退**。
+   */
+  | "REFUND_REQUIRED"
   | "FAILED";
 
 export type CancelPrintOrderResult =
@@ -111,7 +118,9 @@ export const cancelPrintOrderAction = withPrintOrderAction("cancel")
               ? "SAME_STATUS"
               : error.code === "NOTE_REQUIRED"
                 ? "NOTE_REQUIRED"
-                : "INVALID_TRANSITION";
+                : error.code === "REFUND_REQUIRED"
+                  ? "REFUND_REQUIRED"
+                  : "INVALID_TRANSITION";
         return { ok: false, code };
       }
       // 真的炸了(数据库挂了之类)—— 让 next-safe-action 统一处理
