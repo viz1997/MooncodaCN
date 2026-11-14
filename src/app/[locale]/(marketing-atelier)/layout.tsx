@@ -22,6 +22,8 @@
  *    拉丁字形走 Playfair,汉字逐字形回退到中文衬线(不需要按 locale 切 CSS)
  *  - 字体变量由 `app/layout.tsx` 注入:`--font-atelier-inter` /
  *    `--font-atelier-serif` / `--font-atelier-serif-sc`(前缀避免与 Geist 冲突)
+ *    —— 2026-11-14 起三套字体**自托管**(文件在 `src/fonts/`,构建期不再去
+ *    Google 拉),变量的名字和用法一个字没变
  *
  * 调色板说明:The Foggy Dog 的具体色值是二手的(官网无法在本环境抓取),
  * 所以**所有色值集中在这一个 <style> 块 + occasion-data.ts 的 wash 字段**,
@@ -111,7 +113,8 @@ export default async function MarketingAtelierLayout({
           --radius: 0.5rem;
         }
         .atelier-root { font-family: var(--font-atelier-inter), system-ui, sans-serif; font-feature-settings: "ss01", "cv11"; }
-        /* Playfair 没有汉字 —— 拉丁字形走 Playfair,汉字逐字形回退到 Noto Serif SC */
+        /* Playfair 没有汉字 —— 拉丁字形走 Playfair,汉字逐字形回退到 Noto Serif SC
+           (两套都是自托管的,文件在 src/fonts/) */
         .atelier-root h1,
         .atelier-root h2,
         .atelier-root h3,

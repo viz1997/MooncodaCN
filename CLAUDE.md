@@ -4593,6 +4593,84 @@ pnpm migrate:apply-shipment   # = tsx scripts/apply-shipment-schema.ts
 | `src/test/shipment/pure/shipment-admin.test.ts` | 路由在 `/admin/shipments` + 侧边栏登记了 / **不开弹窗**(视图和面板里没有 `<Modal>` / `<Dialog>` / `Drawer.`)/ action **不 throw** + 失败走 `{ok:false,code}` / `"use server"` 文件**没** re-export 类型 / **下拉选项跟服务端校验是同一份状态机** / 写完刷买家侧那一页 / 迁移脚本**不播种**、**不改订单表**、`--dry-run` 在、**同一订单同一包裹下标只有一个** / schema 两张表跟索引 / **中英文键集完全一致**(每个错误码、每家快递、三个状态都摆得上话) |
 | `src/test/shipment/pure/shipment-buyer.test.ts` | 工单详情页有「收货地址」+「物流」两个分区 / 商城订单详情页路由存在(404 不是 403)/ 列表能点进详情 / **地址快照这次渲染了** / **两处轮询指纹都含物流** + 指纹只有一份实现 / 两个接口的 `shipments` 字段在 / **金额一个加法都不做** |
 
+### 字体自托管:构建期不再碰 Google(2026-11-14)
+
+那天 Vercel 上的生产构建直接炸了(32 个 Turbopack 报错):
+
+```
+Module not found: Can't resolve '@vercel/turbopack-next/internal/font/google/font'
+next/font/google queries have exactly one entry
+  Server Component:
+    [next]/internal/font/google/playfair_display_82b161e1.module.css
+    ./src/app/layout.tsx
+```
+
+**根因不在本仓库的代码** —— Google 偶尔返回**没有扩展名**的字体地址
+(`/l/font?kit=…`),Next 16.1.4 的 Turbopack 解析不了那个形状
+(上游 vercel/next.js#99114,至今没有修复版)⇒ **构建结果取决于当天 Google
+返回什么**。重试能蒙混过去,但下一次还会炸。
+
+⇒ **字体文件进仓库,构建期不再碰 Google。** 顺带:境内访问
+`fonts.gstatic.com` 不稳,自托管之后字体跟站点同源。
+
+#### 三套字体,两种接法
+
+| 字体 | 用途 | 接法 |
+|---|---|---|
+| **Inter** | 正文(latin) | `next/font/local` —— 一个可变字体文件,`weight: "100 900"` |
+| **Playfair Display** | 标题(latin,normal + italic) | `next/font/local` —— 两个文件,各 `weight: "400 700"` |
+| **Noto Serif SC** | 标题里的**汉字**(字形级回退) | **手写 `@font-face`** —— 见下 |
+
+- **文件在 `src/fonts/`(不是 `public/`)** —— Turbopack 给它们打哈希名放进
+  `/_next/static/media/`,带 immutable 缓存头。`/_next/static/**` 本来就被
+  `src/proxy.ts` 的 matcher 排除 ⇒ **不用改 proxy**(2026-11-11 `/manifold.wasm`
+  那个坑是 `public/` 才会踩到的)。
+- **`src/fonts/README.md`** 记着为什么这么做、每个目录是什么、怎么重新拉。
+
+#### 为什么 Noto Serif SC 不用 `next/font/local`
+
+汉字字体是**按码位切片**的,靠 `unicode-range` 告诉浏览器「这段字形归哪个
+文件」⇒ 页面只用到哪几个字就只下哪几个切片(101 个切片,5.75MB)。
+
+`next/font/local` **没有 unicode-range 这个口子** ⇒ 用它的话 101 个切片会被
+浏览器**全量**下下来(6MB/页)。
+
+⇒ 那份切片表是**手写 `@font-face`** —— `src/fonts/noto-serif-sc/font.css`
+(**生成文件,别手改**),逐条照抄 Google 的块,只把 `url()` 换成本地路径,
+外加 `:root { --font-atelier-serif-sc: "Noto Serif SC", Georgia, serif; }`。
+
+⚠️ **它不占 `<body>` 的 className 槽** —— 那个变量定义在 `:root` 上(`<html>`),
+往下继承得到。
+
+#### 三个 CSS 变量名一个字都不许改
+
+`--font-atelier-inter` / `--font-atelier-serif` / `--font-atelier-serif-sc`
+—— `.atelier-root` 的字体栈靠它们。改了就静默掉回系统字体(页面上看不出异常)。
+
+⚠️ **`localFont` 的绑定标识符 = 全局的 `font-family` 名** —— SWC 注入的
+`variableName` 是按调用处的绑定名生成的(构建产物里是 `font-family:inter` /
+`font-family:playfair`,正是 `layout.tsx` 里那两个 `const` 的名字)。
+⇒ **两个文件里的两个 `localFont` 绑到同一个名字 = 两套 `@font-face` 共用一个
+family = 字形悄悄变成另一个字体**。单测守着「全仓绑定名唯一」。
+
+#### 重新拉字体
+
+```bash
+pnpm fonts:sync   # = tsx scripts/fetch-self-hosted-fonts.ts
+```
+
+- **必须用 Next 当初那个 User-Agent** —— Google 对 UA 敏感,换了一个就返回
+  另一套切片。
+- **下载到的必须是 `.woff2`** —— 脚本会校验(那天失败就是形状不对)。
+- **产物提交进仓库**(跟 `public/manifold.wasm` 一个道理)—— 新克隆的机器不用
+  跑脚本就能构建。
+
+#### 行为由单测守住
+
+| 测试 | 守住什么 |
+|---|---|
+| `src/test/repo/pure/self-hosted-fonts.test.ts` | **全仓不许再 import `next/font/google`**(产品代码,测试自己除外)/ 每个 `localFont` 的 `path:` 在磁盘上存在 + 都是 `.woff2` + 没有空的 `src` 数组 / **三个 CSS 变量名一个字都不许改** + 全仓没有多余的 `--font-atelier-*` / **`localFont` 的绑定名全仓唯一**(防 family 名撞车)/ 生成的 CSS 里**0** 个 `fonts.gstatic.com` / 每条 `@font-face` 都带 `unicode-range` + `font-display` / 每个 `url("./…woff2")` 都能找到文件 / `fonts:sync` 登记在 `package.json` + 脚本用对的 UA + 校验 woff2 |
+
 ## Coding Conventions
 
 - **Language:** Chinese comments throughout the codebase (code itself in English)
