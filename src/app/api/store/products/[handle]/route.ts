@@ -16,7 +16,7 @@ import { NextResponse } from "next/server";
 import {
   getRelatedStorefrontProducts,
   getStorefrontProduct,
-} from "@/features/storefront/lib/price-source";
+} from "@/features/storefront/lib/storefront-catalog";
 import { withApiLogging } from "@/lib/api-logger";
 
 export const runtime = "nodejs";

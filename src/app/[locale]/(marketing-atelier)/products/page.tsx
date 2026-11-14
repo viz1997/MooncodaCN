@@ -7,7 +7,7 @@ import { FeaturedProducts } from "@/features/marketing/components/storefront/fea
 import { HowItWorks } from "@/features/marketing/components/storefront/how-it-works";
 import { SeriesShowcase } from "@/features/marketing/components/storefront/series-showcase";
 import { StoreHero } from "@/features/marketing/components/storefront/store-hero";
-import { getStorefrontProducts } from "@/features/storefront/lib/price-source";
+import { getStorefrontProducts } from "@/features/storefront/lib/storefront-catalog";
 
 /**
  * 这一页**不能静态预渲染** —— 价必须是当下的。

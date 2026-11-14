@@ -103,6 +103,8 @@ import { createSellbaseOrder } from "@/features/sellbase/lib/orders";
 import type { CartLineItem, PricingResult } from "../types";
 import { buildLineSnapshot } from "./cart-snapshot";
 import { getCart, stampCartOwner } from "./cart-store";
+import { isCatalogTypeActive } from "./catalog-apply";
+import type { CatalogSource } from "./catalog-source-types";
 import {
   buildStorefrontSellbaseNote,
   buildStorefrontSuccessUrl,
@@ -117,10 +119,11 @@ import {
   findReusablePendingOrder,
   type ReusablePendingOrder,
 } from "./pending-order";
-import { getPriceSource } from "./price-source";
+import { getCatalogSource, getPriceSource } from "./price-source";
 import type { PriceSource } from "./price-source-types";
 import { calculatePricing } from "./pricing";
 import { calculateShippingCents } from "./pricing-constants";
+import { productUnavailableMessage } from "./product-unavailable";
 
 /* -------------------------------------------------------------------------- */
 /*  入参 / 出参                                                               */
@@ -214,6 +217,17 @@ export type CheckoutErrorCode =
   | "PAYMENT_CHANNEL_UNAVAILABLE"
   /** 优惠码不可用 —— 精确原因看 `CheckoutError.couponErrorCode` */
   | "COUPON_INVALID"
+  /**
+   * 车里有**已下架**的商品(2026-11-14)
+   *
+   * 后台 `/admin/products` 把某个型号下架,商城那一组设计就下架了。
+   * 用户之前加进车里的那几件还在车里 ⇒ 这一单**结不掉**,让用户自己把
+   * 那一行删掉。
+   *
+   * ⚠️ **不静默跳过那一行** —— 跳过的话用户看到的合计跟最后付的金额
+   * 对不上(「逐分相等」当场破)。
+   */
+  | "PRODUCT_UNAVAILABLE"
   | "FAILED";
 
 /** 结算失败 —— 带机器可读的 code,Route Handler 翻译成响应 */
@@ -287,8 +301,16 @@ export interface PricedLine {
  *
  * 基础价 / 配件加价取自 DB(后台 `/admin/products` 改的就是它),
  * 查不到才退回代码常量。
+ *
+ * ## `catalog` —— DB 里的**上架状态**(2026-11-14)
+ *
+ * 后台把某个型号下架 ⇒ 车里那一行**结不掉**(见 `PRODUCT_UNAVAILABLE`)。
  */
-function repriceLine(item: CartLineItem, source: PriceSource): PricedLine {
+function repriceLine(
+  item: CartLineItem,
+  source: PriceSource,
+  catalog: CatalogSource
+): PricedLine {
   const metadata = item.metadata;
 
   const product = findProductById(item.productId);
@@ -296,6 +318,18 @@ function repriceLine(item: CartLineItem, source: PriceSource): PricedLine {
     throw new CheckoutError(
       "PRICING_FAILED",
       `商品 ${item.productId} 已经不在目录里了`
+    );
+  }
+
+  // **下架的型号结不掉**(2026-11-14)
+  //
+  // 用户加购之后工作室在后台把它下架了 ⇒ 这一行不能再卖。
+  //
+  // 「没有 DB 行 ⇒ 上架」—— 后台没管过的型号照卖(读失败也是上架)。
+  if (!isCatalogTypeActive(product.productTypeCode, catalog)) {
+    throw new CheckoutError(
+      "PRODUCT_UNAVAILABLE",
+      productUnavailableMessage(product.title)
     );
   }
 
@@ -551,7 +585,16 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
     throw new CheckoutError("PRICING_FAILED", "价格暂时无法确认,请稍后重试");
   }
 
-  const lines = cart.items.map((item) => repriceLine(item, source));
+  // 1b. 上架状态(2026-11-14)
+  //
+  //     跟 `source` **同一次读** —— `getPriceSource()` / `getCatalogSource()`
+  //     底层是同一个 `cache()` 包着的 DB 读 ⇒ 这里不会多查一次库。
+  //
+  //     下架的型号结不掉(见 `repriceLine()`)。**不静默跳过那一行** ——
+  //     跳过会让用户看到的合计跟最后付的金额对不上(「逐分相等」当场破)。
+  const catalog = await getCatalogSource();
+
+  const lines = cart.items.map((item) => repriceLine(item, source, catalog));
 
   // 2. 金额
   const subtotalCents = lines.reduce(

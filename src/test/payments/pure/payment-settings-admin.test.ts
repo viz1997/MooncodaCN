@@ -206,8 +206,9 @@ describe("支付设置:密钥不进浏览器", () => {
     // 生产环境变量的原文**不发到浏览器** —— 那一档只需要「配好了没 /
     // 缺哪几个 / 掩码」这些信息。
     const src = read(ACTIONS);
-    expect(src).toContain("toModeView(runtime.production, false)");
-    expect(src).toContain("toModeView(runtime.sandbox, true)");
+    // 第三个参数是通知地址那一档(2026-11-14 加的)⇒ 这两条断言只锁前两个
+    expect(src).toMatch(/toModeView\(runtime\.production,\s*false/);
+    expect(src).toMatch(/toModeView\(runtime\.sandbox,\s*true/);
     expect(src).toMatch(
       /const values = exposeValues \? status\.values : \{\};/
     );
@@ -232,6 +233,93 @@ describe("支付设置:密钥不进浏览器", () => {
     const src = read("src/features/payments/lib/sandbox.ts");
     expect(src).toContain("maskSecret");
     expect(src).toContain("RSA PRIVATE KEY");
+  });
+});
+
+describe("支付设置:通知地址一眼看得出对不对", () => {
+  it("生效通知地址走**纯函数**那一层解析", () => {
+    // 诊断逻辑在 `lib/notify-url.ts`(零 import)⇒ 能进 unit project 跑单测
+    const src = read(ACTIONS);
+    expect(src).toContain('from "../lib/notify-url"');
+    expect(src).toContain("resolveNotifyUrl({");
+  });
+
+  it("两个通道各用各的通知路径", () => {
+    const src = read(ACTIONS);
+    expect(src).toContain("ALIPAY_NOTIFY_PATH");
+    expect(src).toContain("WECHAT_PAY_NOTIFY_PATH");
+  });
+
+  it("通知地址**不从环境变量里漏出去** —— 只给解析结果", () => {
+    // 通知地址不是密钥,但它会暴露站点地址 ⇒ 照样只在解析结果里给
+    const src = read(ACTIONS);
+    expect(src).toContain("notifyUrl: diagnosis.notifyUrl");
+    expect(src).toContain("notifyUrlSource: diagnosis.source");
+    expect(src).toContain("notifyUrlProblems: diagnosis.problems");
+  });
+
+  it("界面把通知地址摆出来 —— 有问题就报,没问题也说一声", () => {
+    const src = read(VIEW);
+    expect(src).toContain("channel.notifyUrl");
+    expect(src).toContain("channel.notifyUrlProblems");
+    expect(src).toContain("notifyUrlProblem");
+  });
+
+  it("有问题 ⇒ 页面顶部挂一条红色横幅(两个通道都算)", () => {
+    const src = stripComments(read(VIEW));
+    expect(src).toContain("notifyProblems");
+    expect(src).toContain("banner.notifyUrlTitle");
+  });
+
+  it("中英文文案都在", () => {
+    const zh = messages("zh").AdminPaymentSettings as {
+      banner: Record<string, unknown>;
+      status: Record<string, unknown>;
+    };
+    const en = messages("en").AdminPaymentSettings as {
+      banner: Record<string, unknown>;
+      status: Record<string, unknown>;
+    };
+    for (const key of ["notifyUrlTitle", "notifyUrlDetail"]) {
+      expect(zh.banner[key], `zh 缺 banner.${key}`).toBeTruthy();
+      expect(en.banner[key], `en 缺 banner.${key}`).toBeTruthy();
+    }
+    for (const key of [
+      "notifyUrl",
+      "notifyUrlMissing",
+      "notifyUrlSource",
+      "notifyUrlSourceExplicit",
+      "notifyUrlSourceSite",
+      "notifyUrlSourceNone",
+      "siteUrl",
+      "notifyUrlOk",
+    ]) {
+      expect(zh.status[key], `zh 缺 status.${key}`).toBeTruthy();
+      expect(en.status[key], `en 缺 status.${key}`).toBeTruthy();
+    }
+  });
+
+  it("四个问题码两种语言都摆得上话", () => {
+    // 问题码是**大写**的(`NotifyUrlProblem` 联合类型)—— 跟 `keyProblem.*`
+    // 那套小写的不一样。
+    const zh = messages("zh").AdminPaymentSettings as {
+      status: { notifyUrlProblem: Record<string, unknown> };
+    };
+    const en = messages("en").AdminPaymentSettings as {
+      status: { notifyUrlProblem: Record<string, unknown> };
+    };
+    for (const code of [
+      "MISSING",
+      "INVALID_URL",
+      "NOT_HTTPS",
+      "LOCAL_ADDRESS",
+    ]) {
+      expect(zh.status.notifyUrlProblem[code], `zh 缺 ${code}`).toBeTruthy();
+      expect(en.status.notifyUrlProblem[code], `en 缺 ${code}`).toBeTruthy();
+    }
+    expect(Object.keys(en.status.notifyUrlProblem).sort()).toEqual(
+      Object.keys(zh.status.notifyUrlProblem).sort()
+    );
   });
 });
 

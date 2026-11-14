@@ -113,7 +113,8 @@ export const MAGNET_BLENDER_PORTABLE_URL = "https://www.blender.org/download/";
  * `public/magnet/blender_bridge.py` 那份实现(原样拷进去)⇒ 插件跟网页那份
  * 永远是一个东西,不会漂。
  */
-export const MAGNET_BLENDER_ADDON_ZIP_URL = "/magnet/mooncoda_magnet_bridge.zip";
+export const MAGNET_BLENDER_ADDON_ZIP_URL =
+  "/magnet/mooncoda_magnet_bridge.zip";
 
 /**
  * 桥接脚本(`.py`)的下载地址

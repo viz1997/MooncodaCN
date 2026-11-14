@@ -1,5 +1,5 @@
 /**
- * 商品价钱的**数据库读取** —— 服务端专用
+ * 商品目录 + 价钱的**数据库读取** —— 服务端专用
  *
  * ## 为什么要有这个文件
  *
@@ -11,12 +11,30 @@
  * 这个文件把 DB 的价读出来,**盖到**静态目录上。纯函数那一半在
  * `pricing.ts`(加一个可选第二参),这里只管「读」和「盖」。
  *
- * ## 静态目录还在,只是价换了
+ * ## 2026-11-14:目录**本身**也接后台了
  *
- * 商品的**资料**(名字 / 图 / 系列 / 配件清单)仍然是代码常量 —— 那些不是
- * 后台能改的。这次只把**价**换成 DB 的。所以 `mock-catalog.ts` 保持
- * 客户端安全(它被 4 个 client 组件 import),**不许**在这里 import
- * `@/db` 之外的东西把它拖进浏览器。
+ * 工作室的要求:「电商产品获取后台配置管理好的产品」。⇒ 除了价,这一层
+ * 现在还管三件事:
+ *
+ * | DB 的列 | 管什么 |
+ * |---|---|
+ * | `status` | **上架 / 下架** —— 某个型号下架,商城那几件设计一起消失 |
+ * | `name` / `name_en` | **型号名** —— 商品页上的「钥匙扣 / 手办 / 冰箱贴」那个标签 |
+ * | `sort_order` | **系列之内**的先后(系列之间的顺序是 `WJP_SERIES` 代码常量) |
+ * | `accent` | 强调色(空 ⇒ 用代码常量) |
+ *
+ * **一次 DB 读**同时拿价和目录(`product` 表的两组列)⇒ 一个请求只查一次库。
+ * 纯函数那一半在 `catalog-apply.ts`(上架判定 / 盖名字 / 排序)。
+ *
+ * ## 哪些**不**接后台(刻意的)
+ *
+ * 设计级的资料 —— **标题 / 图 / 配件清单 / 工期** —— 仍然是代码常量。
+ * 后台管的是**型号**,商城卖的是**设计**:把型号级的 `description` /
+ * `coverUrl` / `leadTimeDays` 盖到设计级上,会让 4 件设计变成同一张图 /
+ * 同一段文案 / 同一个工期。理由见 CLAUDE.md「电商产品读后台配置」那一节。
+ *
+ * ⇒ `mock-catalog.ts` 保持客户端安全(它被 4 个 client 组件 import),
+ * **不许**在这里 import `@/db` 之外的东西把它拖进浏览器。
  *
  * ## ⚠️ 这个模块会让页面变成动态渲染
  *
@@ -49,9 +67,15 @@ import { product, productAccessoryVariant } from "@/db/schema";
 import { describeDbError } from "@/features/shared/lib/db-error";
 
 import type { AccessoryGroup, StorefrontProduct } from "../types";
-import { findRelatedProducts, MOCK_PRODUCTS } from "./mock-catalog";
+import { buildCatalogSource, emptyCatalogSource } from "./catalog-apply";
+import type { CatalogSource } from "./catalog-source-types";
 import type { PriceSource } from "./price-source-types";
 
+export type {
+  CatalogSource,
+  CatalogTypeConfig,
+  CatalogTypeRow,
+} from "./catalog-source-types";
 export type { PriceSource } from "./price-source-types";
 
 /* -------------------------------------------------------------------------- */
@@ -69,24 +93,40 @@ function emptyPriceSource(readError: string | null): PriceSource {
 }
 
 /**
- * 从 DB 读价 —— **请求内只查一次**
+ * 一次 DB 读的结果 —— **价 + 目录配置**
+ *
+ * 两份来源是同一个 `product` 表的两组列 ⇒ **一个请求只查一次库**。
+ */
+interface StorefrontSource {
+  readonly price: PriceSource;
+  readonly catalog: CatalogSource;
+}
+
+/**
+ * 从 DB 读价 + 读目录配置 —— **请求内只查一次**
  *
  * `cache()` 用 React 的(跟 `print-quote/lib/pricing-store.ts` 一个套路)。
- * 跨请求不缓存 —— 后台改完价要**立刻**生效。
+ * 跨请求不缓存 —— 后台改完价 / 改完上架状态要**立刻**生效。
  *
- * ## 关于 `is_active`
+ * ## 关于配件变体的 `is_active`
  *
- * **不按 `is_active` 过滤** —— 这次只改「价」,不改「卖不卖」。
- * 配件变体在商城里出不出现,那是「下架」的事(另一件事),跟价格无关。
- * 一个仍然在卖的变体,它的价就该用 DB 里那一行。
+ * **配件变体不按 `is_active` 过滤** —— 一个仍然在卖的变体,它的价就该用
+ * DB 里那一行。**下架**是**型号级**的事(`product.status`),管的是
+ * 「这一整组设计还在不在架上」,跟配件变体的价无关。
  */
-const readPriceSource = cache(async (): Promise<PriceSource> => {
+const readStorefrontSource = cache(async (): Promise<StorefrontSource> => {
   try {
     const [productRows, variantRows] = await Promise.all([
       db
         .select({
           code: product.code,
           basePriceCents: product.basePriceCents,
+          // 目录配置(2026-11-14)—— 上架状态 / 型号名 / 排序 / 强调色
+          name: product.name,
+          nameEn: product.nameEn,
+          status: product.status,
+          sortOrder: product.sortOrder,
+          accent: product.accent,
         })
         .from(product),
       db
@@ -130,18 +170,31 @@ const readPriceSource = cache(async (): Promise<PriceSource> => {
     }
 
     return {
-      basePriceCentsByTypeCode,
-      accessoryDeltaCentsByVariantId,
-      degraded: false,
-      readError: null,
+      price: {
+        basePriceCentsByTypeCode,
+        accessoryDeltaCentsByVariantId,
+        degraded: false,
+        readError: null,
+      },
+      // 目录配置 —— **稀疏的**:DB 里有的型号才有键
+      catalog: buildCatalogSource(productRows),
     };
   } catch (error) {
     const info = describeDbError(error);
     console.error(
-      "[storefront] 读商品价格失败,退回代码常量兜底:",
+      "[storefront] 读商品目录失败,退回代码常量兜底:",
       info.message || error
     );
-    return emptyPriceSource(info.message || String(error));
+    const reason = info.message || String(error);
+    return {
+      price: emptyPriceSource(reason),
+      // 目录也退回代码默认 —— **全部上架 + 原序**
+      //
+      // ⚠️ 这是**刻意**的:读失败时宁可把东西都摆出来(后台一改就好),
+      // 也不要给用户一个**空店**。收钱那一侧另有硬闸(`PriceSource.degraded`
+      // ⇒ 结算直接失败),不会「按旧价收钱」。
+      catalog: emptyCatalogSource(reason),
+    };
   }
 });
 
@@ -188,7 +241,21 @@ async function optOutOfStaticRendering(): Promise<void> {
  */
 export async function getPriceSource(): Promise<PriceSource> {
   await optOutOfStaticRendering();
-  return readPriceSource();
+  return (await readStorefrontSource()).price;
+}
+
+/**
+ * 目录源(上架状态 / 型号名 / 排序)—— **调用它就意味着这一页不能静态渲染**
+ *
+ * 跟 `getPriceSource()` **共用同一次 DB 读**(`readStorefrontSource()` 是
+ * `cache()` 包的)⇒ 一个请求只查一次库。
+ *
+ * 纯函数那一半在 `catalog-apply.ts`;把目录拼成「商城能直接用」的形状
+ * 是 `storefront-catalog.ts` 的事。
+ */
+export async function getCatalogSource(): Promise<CatalogSource> {
+  await optOutOfStaticRendering();
+  return (await readStorefrontSource()).catalog;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -241,41 +308,13 @@ export function applyPriceSource(
 }
 
 /* -------------------------------------------------------------------------- */
-/*  对外                                                                       */
+/*  目录 —— 在 `storefront-catalog.ts`                                             */
 /* -------------------------------------------------------------------------- */
 
 /**
- * 商城目录(带 DB 价)—— **服务端专用**
+ * 「商城目录」那三个 getter(带 DB 价 + 后台的上架 / 名字 / 排序)现在住在
+ * `storefront-catalog.ts` —— 那边把**价**和**目录**两件事拼在一起。
  *
- * 客户端组件**不许**直接调它 —— 价从服务端父组件当 props 传下去。
+ * 这里只留**两份来源**(`getPriceSource()` / `getCatalogSource()`)和
+ * 「盖价」那一半(`applyPriceSource()`)。
  */
-export async function getStorefrontProducts(): Promise<StorefrontProduct[]> {
-  const source = await getPriceSource();
-  return MOCK_PRODUCTS.map((item) => applyPriceSource(item, source));
-}
-
-/** 单件商品(带 DB 价)—— **服务端专用** */
-export async function getStorefrontProduct(
-  handle: string
-): Promise<StorefrontProduct | null> {
-  const item = MOCK_PRODUCTS.find((p) => p.handle === handle);
-  if (!item) return null;
-  const source = await getPriceSource();
-  return applyPriceSource(item, source);
-}
-
-/**
- * 相关商品(带 DB 价)—— **服务端专用**
- *
- * 「相关」的判断逻辑留在 `mock-catalog.ts`(同系列 / 同场合),这里只负责
- * **把 DB 的价盖上去** —— 两边各管一件事。
- */
-export async function getRelatedStorefrontProducts(
-  handle: string,
-  count: number
-): Promise<StorefrontProduct[]> {
-  const source = await getPriceSource();
-  return findRelatedProducts(handle, count).map((item) =>
-    applyPriceSource(item, source)
-  );
-}

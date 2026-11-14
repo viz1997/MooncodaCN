@@ -49,7 +49,7 @@ import { z } from "zod";
 
 import { describeDbError } from "@/features/shared/lib/db-error";
 import { adminAction } from "@/lib/safe-action";
-
+import { resolveNotifyUrl } from "../lib/notify-url";
 import { getPaymentProvider } from "../lib/registry";
 import {
   ALIPAY_REQUIREMENTS,
@@ -58,6 +58,7 @@ import {
   type FieldGroup,
   PAYMENT_SETTING_KEYS,
   type PaymentSettingKey,
+  type SandboxChannel,
   WECHAT_REQUIREMENTS,
 } from "../lib/sandbox";
 import {
@@ -70,9 +71,12 @@ import {
 } from "../lib/sandbox-store";
 import { buildTestPaymentRequest } from "../lib/test-order";
 import { PaymentNotConfiguredError } from "../lib/types";
-import { readAlipaySiteUrl } from "../providers/alipay/env";
+import { ALIPAY_NOTIFY_PATH, readAlipaySiteUrl } from "../providers/alipay/env";
 import { normalizePemKey as normalizeAlipayPem } from "../providers/alipay/sign";
-import { readWechatSiteUrl } from "../providers/wechat/env";
+import {
+  readWechatSiteUrl,
+  WECHAT_PAY_NOTIFY_PATH,
+} from "../providers/wechat/env";
 import { normalizePemKey as normalizeWechatPem } from "../providers/wechat/signature";
 
 import type {
@@ -144,6 +148,37 @@ function toFieldView(
 }
 
 /**
+ * 两个通道的**通知地址**怎么算 —— 一份清单
+ *
+ * 通知路径住在各通道自己的 `env.ts` 里(真理源),这里只把三样拼起来:
+ * **显式配的值** / **站点地址** / **通知路径**。
+ *
+ * 沙箱和正式**共用同一个键**(`*_sandbox_notify_url`)—— 跟凭据那套键空间
+ * 一个路子(见 `env.ts` 的「值用沙箱那一套的键名索引」)。
+ */
+interface ChannelNotifySpec {
+  /** 通知路径 —— 各通道 `env.ts` 里的那一份 */
+  path: string;
+  /** 显式配的通知地址在 `values` 里的键(沙箱 / 正式同一个键) */
+  key: PaymentSettingKey;
+  /** 站点地址怎么读 */
+  siteUrl: () => string | null;
+}
+
+const CHANNEL_NOTIFY: Record<SandboxChannel, ChannelNotifySpec> = {
+  wechat: {
+    path: WECHAT_PAY_NOTIFY_PATH,
+    key: PAYMENT_SETTING_KEYS.wechatSandboxNotifyUrl,
+    siteUrl: readWechatSiteUrl,
+  },
+  alipay: {
+    path: ALIPAY_NOTIFY_PATH,
+    key: PAYMENT_SETTING_KEYS.alipaySandboxNotifyUrl,
+    siteUrl: readAlipaySiteUrl,
+  },
+};
+
+/**
  * 一个通道在某个模式下的状态
  *
  * @param exposeValues **要不要把字段的原文带出去**
@@ -151,12 +186,24 @@ function toFieldView(
  * 沙箱那一档 = `true`(后台要拿它**预填表单**);正式那一档 = `false` ——
  * 生产环境变量的原文**不发到浏览器**,那一档只需要「配好了没 / 缺哪几个 /
  * 掩码」这些信息。
+ *
+ * @param notify 这个通道的通知地址怎么算
+ *
+ * ⚠️ **通知地址的诊断是服务端算完再带出去的** —— 正式那一档的
+ * `values` 是空的(生产环境变量原文不发到浏览器),但**通知地址本身不是
+ * 密钥**(平台公开回调的地址),工作室要能看见它对不对。
  */
 function toModeView(
   status: PaymentModeStatus,
-  exposeValues: boolean
+  exposeValues: boolean,
+  notify: ChannelNotifySpec
 ): AdminPaymentModeView {
   const values = exposeValues ? status.values : {};
+  const diagnosis = resolveNotifyUrl({
+    explicitNotifyUrl: status.values[notify.key] ?? "",
+    siteUrl: notify.siteUrl(),
+    notifyPath: notify.path,
+  });
   return {
     mode: status.mode,
     endpoint: status.endpoint.ok ? status.endpoint.endpoint : null,
@@ -173,6 +220,9 @@ function toModeView(
     masked: status.masked,
     values,
     keyIssues: status.keyIssues,
+    notifyUrl: diagnosis.notifyUrl,
+    notifyUrlSource: diagnosis.source,
+    notifyUrlProblems: diagnosis.problems,
   };
 }
 
@@ -182,6 +232,7 @@ function toChannelView(
 ): AdminPaymentChannelView {
   const requirements =
     runtime.channel === "wechat" ? WECHAT_REQUIREMENTS : ALIPAY_REQUIREMENTS;
+  const notify = CHANNEL_NOTIFY[runtime.channel];
 
   // 当前生效的那一档 —— `missing` / `missingVerify` 说的是**当前模式**缺什么
   const current =
@@ -195,6 +246,15 @@ function toChannelView(
   const fields = allChannelFields(requirements).map((field) =>
     toFieldView(field, runtime.sandbox.masked, runtime.sandbox.values)
   );
+
+  const sandbox = toModeView(runtime.sandbox, true, notify);
+  const production = toModeView(runtime.production, false, notify);
+
+  // 通知地址 —— 跟着**当前模式**走(工作室要一眼看出平台推不推得到)
+  //
+  // ⚠️ 通知地址的诊断是**视图**那一层算的(`toModeView()` 里)——
+  // `PaymentModeStatus` 那份原始状态里**没有**这三个字段。
+  const currentView = runtime.mode === "sandbox" ? sandbox : production;
 
   return {
     channel: runtime.channel,
@@ -213,8 +273,13 @@ function toChannelView(
       toFieldView(field, current.masked, currentValues)
     ),
     keyIssues: current.keyIssues,
-    sandbox: toModeView(runtime.sandbox, true),
-    production: toModeView(runtime.production, false),
+    // 通知地址 —— 跟着**当前模式**走(工作室要一眼看出平台推不推得到)
+    notifyUrl: currentView.notifyUrl,
+    notifyUrlSource: currentView.notifyUrlSource,
+    notifyUrlProblems: currentView.notifyUrlProblems,
+    siteUrl: notify.siteUrl(),
+    sandbox,
+    production,
     sameCredential: runtime.sameCredential.map((field) =>
       toFieldView(field, runtime.sandbox.masked, runtime.sandbox.values)
     ),

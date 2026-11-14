@@ -49,6 +49,7 @@ const WECHAT = "src/features/payments/providers/wechat/index.ts";
 const ALIPAY = "src/features/payments/providers/alipay/page-pay.ts";
 const SHOPIFY_DRAFT = "src/features/payments/providers/shopify/draft-order.ts";
 const ORDER_PAYMENT = "src/features/storefront/lib/order-payment.ts";
+const PAYMENT_REQUEST = "src/features/storefront/lib/payment-request.ts";
 const CHECKOUT = "src/features/storefront/lib/checkout.ts";
 const CART_TOTALS = "src/features/storefront/lib/cart-totals.ts";
 const CART_STORE = "src/features/storefront/lib/cart-store.ts";
@@ -96,12 +97,18 @@ describe("优惠码的接线 —— 扫描式守卫", () => {
     expect(code).toContain("discountCents?: number;");
   });
 
-  it("③ `order-payment.ts` 传了 `order.couponDiscountCents`", () => {
-    const code = stripComments(read(ORDER_PAYMENT));
+  it("③ 重建付款入口时带上了 `order.couponDiscountCents`", () => {
+    // 2026-11-14:构造 `PaymentRequest` 的那段抽到了 `payment-request.ts`
+    // (查单那边也要用同一份转换,不然会循环依赖)—— 断言跟着搬过来。
+    const request = stripComments(read(PAYMENT_REQUEST));
 
     // 少了它,「重新获取付款入口」重建出来的总额**比订单应付多出优惠那一份**
     // ⇒ 用户被多收钱
-    expect(code).toContain("discountCents: order.couponDiscountCents ?? 0,");
+    expect(request).toContain("discountCents: order.couponDiscountCents ?? 0,");
+
+    // 而 `order-payment.ts` 必须**走这一份**转换 —— 自己另拼一份就绕开了优惠
+    const code = stripComments(read(ORDER_PAYMENT));
+    expect(code).toContain("buildStorefrontPaymentRequest(");
   });
 
   it("④ `checkout.ts` 读 `cart.coupon_code`", () => {

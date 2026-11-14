@@ -727,16 +727,23 @@ export function filterByTypeCode(
 
 /**
  * 找相关产品(同系列,排除自己,取前 4 个)
+ *
+ * ⚠️ **`candidates` 是可选的**(2026-11-14)—— 调用方可以传一份**已经过滤掉
+ * 下架商品**的候选集。默认还是整份静态目录。
+ *
+ * 为什么需要它 —— 「相关推荐」是从候选集里切前 N 个的。候选集不先过滤下架,
+ * 切片就会把下架的商品塞进推荐位(点进去是个 404 页)。
  */
 export function findRelatedProducts(
   handle: string,
-  limit = 4
+  limit = 4,
+  candidates: readonly StorefrontProduct[] = MOCK_PRODUCTS
 ): StorefrontProduct[] {
   const product = findProductByHandle(handle);
   if (!product) return [];
-  return MOCK_PRODUCTS.filter(
-    (p) => p.seriesId === product.seriesId && p.handle !== handle
-  ).slice(0, limit);
+  return candidates
+    .filter((p) => p.seriesId === product.seriesId && p.handle !== handle)
+    .slice(0, limit);
 }
 
 /* -------------------------------------------------------------------------- */

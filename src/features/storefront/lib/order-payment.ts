@@ -41,7 +41,6 @@ import {
 import type {
   OnlinePaymentChannel,
   PaymentRequest,
-  PaymentRequestItem,
 } from "@/features/payments/lib/types";
 import { backfillSellbaseCustomerId } from "@/features/sellbase/lib/customer";
 import {
@@ -63,6 +62,8 @@ import {
   buildStorefrontSuccessUrl,
 } from "./checkout-url";
 import { classifyPaymentIssue } from "./payment-issue";
+import { reconcileStorefrontOrderPayment } from "./payment-reconcile";
+import { buildStorefrontPaymentRequest } from "./payment-request";
 
 /** 一次「重新获取付款入口」的结果 */
 export type StorefrontPaymentLinkResult =
@@ -267,6 +268,30 @@ async function ensureNewChannelPaymentLink(
     return { ok: false, code: "PAYMENT_NOT_CONFIGURED" };
   }
 
+  // ---- 先查一次支付宝(2026-11-14)----
+  //
+  // 用户点「重新获取付款入口」的时候,这笔单**可能已经付了**,只是异步通知
+  // 丢了(通知地址配错 / 验签不过 / app_id 对不上)⇒ 本地还停在 `unpaid`。
+  //
+  // ⇒ 主动查一次:查出来已付 ⇒ 返 `ALREADY_PAID`,**不再开一个入口**
+  // (再开一个就是让用户付两次)。
+  //
+  // 只查支付宝 —— 微信那边还没实现查单(微信 Native 的查单是另一个接口)。
+  if (channel === "alipay" && order.paymentStatus !== "paid") {
+    try {
+      const outcome = await reconcileStorefrontOrderPayment({ order, items });
+      if (outcome.paid) {
+        return { ok: false, code: "ALREADY_PAID" };
+      }
+    } catch (error) {
+      // 查单挂了**不拦着**发入口 —— 用户还得能付
+      console.error(
+        `[storefront] ${order.orderNo} 主动查单失败(继续发付款入口)`,
+        error
+      );
+    }
+  }
+
   // 已经有入口了 —— 直接用
   //
   // 微信这一支**只能复用**:`out_trade_no` 在微信侧唯一,同一张单再建第二个
@@ -280,42 +305,9 @@ async function ensureNewChannelPaymentLink(
     };
   }
 
-  const requestItems: PaymentRequestItem[] = items.map((item) => ({
-    title: item.productTitle,
-    quantity: item.quantity,
-    unitPriceCents: item.discountedUnitPriceCents,
-    sku: item.sku ?? item.productHandle,
-    attributes: {},
-  }));
-
-  const address = order.shippingAddress;
-  const request: PaymentRequest = {
-    orderNo: order.orderNo,
-    email: order.email,
-    items: requestItems,
-    shippingCents: order.shippingCents,
-    // **订单级优惠必须带上**(2026-11-08)
-    //
-    // 少了它,重建出来的总额 = Σ(折后单价 × 数量) + 运费 —— **比订单应付多出
-    // 优惠码减免的那一份** ⇒ 用户点一下「重新获取付款入口」就被多收钱。
-    //
-    // 优惠额是订单上**存下来的**那个数,不是现算的 —— 用户下单时同意的就是
-    // 那个价。
-    discountCents: order.couponDiscountCents ?? 0,
-    shippingAddress: address
-      ? {
-          recipientName: address.recipientName,
-          phone: address.phone,
-          province: address.province,
-          city: address.city,
-          district: address.district,
-          detail: address.detail,
-        }
-      : null,
-    note: order.note ?? "",
-    successUrl: buildStorefrontSuccessUrl(order.orderNo),
-    currency: order.currency,
-  };
+  // 转换口只有一份(`payment-request.ts`)—— 查单那边核对金额用的也是它,
+  // 两处算出同一个数才谈得上「逐分相等」。
+  const request: PaymentRequest = buildStorefrontPaymentRequest(order, items);
 
   try {
     const session = await provider.createSession(request);

@@ -2384,7 +2384,9 @@
       "sandboxTitle": "现在跑在沙箱模式",
       "sandboxDetail": "沙箱里收不到真钱 —— 客户付了钱,钱进的是沙箱账户。验通了之后记得把开关关掉(下面「沙箱开关」拨成关)。",
       "invalidTitle": "沙箱开关存的值认不出来",
-      "invalidDetail": "只认 true / false。认不出来的通道会被当成「没配好」,选不了 —— 把开关拨对再保存就行。"
+      "invalidDetail": "只认 true / false。认不出来的通道会被当成「没配好」,选不了 —— 把开关拨对再保存就行。",
+      "notifyUrlTitle": "通知地址有问题 —— 钱付了订单也不会变成已付",
+      "notifyUrlDetail": "平台把「付款成功」的推送送到这个地址;推不到就永远收不到那个通知。改完记得保存。"
     },
     "status": {
       "title": "当前生效状态",
@@ -2416,7 +2418,21 @@
         "wrapped": "已自动补上头尾行,能用",
         "relabeled": "已自动改正标签,能用"
       },
-      "keyUnusable": "用不了,支付会失败"
+      "keyUnusable": "用不了,支付会失败",
+      "notifyUrl": "通知地址(平台推过来的地址)",
+      "notifyUrlMissing": "(拼不出来 —— 这个通道收不到任何通知)",
+      "notifyUrlSource": "通知地址从哪儿来",
+      "notifyUrlSourceExplicit": "后台配的",
+      "notifyUrlSourceSite": "用站点地址拼的",
+      "notifyUrlSourceNone": "拼不出来",
+      "siteUrl": "站点地址",
+      "notifyUrlOk": "没问题 —— 平台推得到这里",
+      "notifyUrlProblem": {
+        "MISSING": "拼不出通知地址 —— 请填通知地址,或者配 NEXT_PUBLIC_APP_URL / BETTER_AUTH_URL",
+        "INVALID_URL": "通知地址不是一个合法的网址",
+        "NOT_HTTPS": "通知地址必须是 https —— 平台只接受 https 的回调地址",
+        "LOCAL_ADDRESS": "通知地址指向的是本机 —— 支付宝/微信的服务器推不到,钱付了订单也不会变已付"
+      }
     },
     "form": {
       "title": "沙箱凭据",

@@ -166,7 +166,10 @@ describe("价从 DB 来 —— 扫描式守卫", () => {
     const code = stripComments(read(CART_STORE));
 
     // 购物袋是给人看的,DB 读失败时降级到代码常量(不抛)
-    expect(code).toContain('import { getPriceSource } from "./price-source"');
+    // (import 那一句里还有 `getCatalogSource` —— 别把断言写死成整行)
+    expect(code).toMatch(
+      /import \{[^}]*getPriceSource[^}]*\} from "\.\/price-source"/
+    );
     expect(code).toContain("const source = await getPriceSource()");
     expect(code).toContain("calculatePricing(");
   });

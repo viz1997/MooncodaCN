@@ -22,6 +22,7 @@
  * —— 这一层只是**再筛一遍**,别把生产环境变量的原文发到浏览器。
  */
 
+import type { NotifyUrlProblem, NotifyUrlSource } from "../lib/notify-url";
 import type {
   PaymentKeyIssue,
   PaymentRuntimeMode,
@@ -96,6 +97,17 @@ export interface AdminPaymentModeView {
    * **只带诊断,不带密钥本身** —— 密钥的原文永远不进 props。
    */
   keyIssues: PaymentKeyIssue[];
+  /**
+   * 这个模式下的**生效通知地址** —— `null` = 拼不出来
+   *
+   * 通知地址配错 = **钱付了、订单永远是 `unpaid`**,而且**没有任何报错**
+   * (线上真踩过:`SO-20261114-657E4A`)。⇒ 后台要一眼看出它对不对。
+   */
+  notifyUrl: string | null;
+  /** 通知地址是从哪儿来的(显式配的 / 用站点地址拼的 / 拼不出来) */
+  notifyUrlSource: NotifyUrlSource;
+  /** 通知地址的问题 —— **空数组 = 没问题** */
+  notifyUrlProblems: NotifyUrlProblem[];
 }
 
 /**
@@ -134,6 +146,24 @@ export interface AdminPaymentChannelView {
    * **只带诊断,不带密钥本身** —— 密钥的原文永远不进 props。
    */
   keyIssues: PaymentKeyIssue[];
+  /**
+   * **当前模式**的生效通知地址 —— `null` = 拼不出来
+   *
+   * 后台那一页最要紧的一行字:**通知地址配错 = 钱付了、订单永远不标已付**,
+   * 而且没有任何报错。工作室要能一眼看出「这个地址平台推不到」。
+   */
+  notifyUrl: string | null;
+  /** 当前模式的通知地址是从哪儿来的 */
+  notifyUrlSource: NotifyUrlSource;
+  /** 当前模式的通知地址有哪些问题 —— **空数组 = 没问题** */
+  notifyUrlProblems: NotifyUrlProblem[];
+  /**
+   * 站点地址 —— 拼通知地址用的那个
+   *
+   * ⚠️ **生产环境如果还是 `http://localhost:3000`,通知地址就是推不到的** ——
+   * 这正是「钱付了、订单不动」最常见的一个原因。
+   */
+  siteUrl: string | null;
   /** 沙箱那一档的状态 */
   sandbox: AdminPaymentModeView;
   /** 正式那一档的状态 */

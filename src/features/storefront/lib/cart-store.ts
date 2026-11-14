@@ -68,10 +68,11 @@ import { evaluateCoupon } from "@/features/coupon/lib/coupon-service";
 import type { Cart, CartLineItem, CartLineItemMetadata } from "../types";
 import { computeSpecHash } from "./cart-spec";
 import { findProductById } from "./mock-catalog";
-import { getPriceSource } from "./price-source";
+import { getCatalogSource, getPriceSource } from "./price-source";
 import type { PriceSource } from "./price-source-types";
 import { calculatePricing, computeQuantityDiscount } from "./pricing";
 import { calculateShippingCents } from "./pricing-constants";
+import { assertCatalogTypeAvailable } from "./product-unavailable";
 
 /* -------------------------------------------------------------------------- */
 /*  Cookie helper                                                            */
@@ -674,6 +675,22 @@ export async function addLineItem(
   // 价从 **DB** 来(后台 `/admin/products` 改的就是它)——
   // 查不到就退回代码常量,购物袋可以降级(见 `price-source.ts`)。
   const source = await getPriceSource();
+
+  // **下架的型号不许加购**(2026-11-14)
+  //
+  // 后台 `/admin/products` 把某个型号下架 ⇒ 商城那一组设计不该再进购物袋。
+  // 「没有 DB 行 ⇒ 上架」—— 后台没管过的型号照卖(读失败也是上架,
+  // 见 `isCatalogTypeActive()`),不会因为后台空着就变成空店。
+  //
+  // 目录 / 详情 / 相关推荐那一侧也挡了(见 `storefront-catalog.ts`)——
+  // 三处都挡才不漏:网格里看不见 ≠ 加购接口拒绝。
+  const catalog = await getCatalogSource();
+  assertCatalogTypeAvailable({
+    typeCode: product.productTypeCode,
+    productTitle: product.title,
+    catalog,
+  });
+
   const pricing = calculatePricing(
     {
       productId: input.productId,

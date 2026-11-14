@@ -94,6 +94,12 @@ function statusForCode(code: CheckoutError["code"]): number {
     // 400,不是 500。客户端按 `couponErrorCode` 说人话。
     case "COUPON_INVALID":
       return 400;
+    // 车里有**已下架**的商品(2026-11-14)—— 409,不是 500
+    //
+    // 409 = 「这个状态跟现在的请求冲突」—— 商品下架了,没法买。
+    // 用户把那一行删掉就能结(界面会指出来是哪一件)。
+    case "PRODUCT_UNAVAILABLE":
+      return 409;
     default:
       return 500;
   }

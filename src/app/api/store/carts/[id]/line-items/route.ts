@@ -19,6 +19,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { addLineItem, getCart } from "@/features/storefront/lib/cart-store";
+import {
+  PRODUCT_UNAVAILABLE_CODE,
+  ProductUnavailableError,
+} from "@/features/storefront/lib/product-unavailable";
 import type { CartLineItemMetadata } from "@/features/storefront/types";
 import { withApiLogging } from "@/lib/api-logger";
 
@@ -100,6 +104,16 @@ async function handle(
       { status: 201 }
     );
   } catch (error) {
+    // **下架的型号加不进**(2026-11-14)—— 回 409,不是 500
+    //
+    // 409 = 「这个状态跟现在的请求冲突」—— 商品下架了,没法买。
+    // 500 会让工作室以为是服务器坏了。
+    if (error instanceof ProductUnavailableError) {
+      return NextResponse.json(
+        { error: PRODUCT_UNAVAILABLE_CODE, message: error.message },
+        { status: 409 }
+      );
+    }
     return NextResponse.json(
       {
         error: "ADD_LINE_ITEM_FAILED",

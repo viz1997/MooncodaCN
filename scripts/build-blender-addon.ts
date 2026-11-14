@@ -66,12 +66,7 @@ const ADDON_DIR = "mooncoda_magnet_bridge";
 const sourcePath = join(repoRoot, "public", "magnet", "blender_bridge.py");
 
 /** 产物 */
-const targetPath = join(
-  repoRoot,
-  "public",
-  "magnet",
-  `${ADDON_DIR}.zip`
-);
+const targetPath = join(repoRoot, "public", "magnet", `${ADDON_DIR}.zip`);
 
 /**
  * 插件入口 —— 内容是**生成**的

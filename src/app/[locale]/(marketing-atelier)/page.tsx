@@ -7,7 +7,7 @@ import { OccasionShelf } from "@/features/marketing/components/storefront/occasi
 import { ShopAnnouncement } from "@/features/marketing/components/storefront/shop-announcement";
 import { ShopGrid } from "@/features/marketing/components/storefront/shop-grid";
 import { StoreHero } from "@/features/marketing/components/storefront/store-hero";
-import { getStorefrontProducts } from "@/features/storefront/lib/price-source";
+import { getStorefrontProducts } from "@/features/storefront/lib/storefront-catalog";
 
 /**
  * 这一页**不能静态预渲染** —— 价必须是当下的。

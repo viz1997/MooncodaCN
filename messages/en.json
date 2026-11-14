@@ -2387,7 +2387,9 @@
       "sandboxTitle": "Running in sandbox mode",
       "sandboxDetail": "A sandbox never takes real money — a customer can pay and the money lands in the sandbox account. Remember to turn the switch off once you are done testing.",
       "invalidTitle": "The sandbox switch holds a value we cannot read",
-      "invalidDetail": "Only true / false are recognised. A channel with an unreadable value counts as \"not configured\" and cannot be selected — set the switch and save."
+      "invalidDetail": "Only true / false are recognised. A channel with an unreadable value counts as \"not configured\" and cannot be selected — set the switch and save.",
+      "notifyUrlTitle": "The notification URL is broken — a paid order will never be marked as paid",
+      "notifyUrlDetail": "The platform posts the \"payment succeeded\" notice to this URL. If it cannot reach it, the notice never arrives. Remember to save after fixing it."
     },
     "status": {
       "title": "Currently in effect",
@@ -2419,7 +2421,21 @@
         "wrapped": "the BEGIN / END lines were added automatically, usable",
         "relabeled": "the label was corrected automatically, usable"
       },
-      "keyUnusable": "unusable, payments will fail"
+      "keyUnusable": "unusable, payments will fail",
+      "notifyUrl": "Notification URL (where the platform posts back)",
+      "notifyUrlMissing": "(cannot be resolved — this channel will never receive a notification)",
+      "notifyUrlSource": "Notification URL comes from",
+      "notifyUrlSourceExplicit": "configured on this page",
+      "notifyUrlSourceSite": "derived from the site URL",
+      "notifyUrlSourceNone": "cannot be resolved",
+      "siteUrl": "Site URL",
+      "notifyUrlOk": "Looks good — the platform can reach it",
+      "notifyUrlProblem": {
+        "MISSING": "Cannot resolve a notification URL — fill one in, or set NEXT_PUBLIC_APP_URL / BETTER_AUTH_URL",
+        "INVALID_URL": "The notification URL is not a valid URL",
+        "NOT_HTTPS": "The notification URL must be https — platforms only accept https callbacks",
+        "LOCAL_ADDRESS": "The notification URL points at this machine — Alipay/WeChat cannot reach it, so a paid order will never be marked as paid"
+      }
     },
     "form": {
       "title": "Sandbox credentials",

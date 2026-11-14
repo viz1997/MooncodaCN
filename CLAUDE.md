@@ -2729,6 +2729,120 @@ pnpm tsx scripts/apply-currency-schema.ts --force-reprice # 真要按代码字�
 | `src/test/storefront/pure/db-price.test.ts` | `pricing.ts` 接受 `priceSource` 第二参 / `price-source.ts` 存在且含 `connection()` / 基础价取自 `priceSource` / `mock-catalog.ts` **不** import `@/db` / `price-source.ts` **不**被 client 组件 import / `checkout.ts` 在 `degraded` 时抛 `PRICING_FAILED` / `apply-currency-schema.ts` 含 `--force-reprice` / `bulkUpdateProductVariantsAction` 的 schema **不含** `priceCents` / `generateVariantsForProductInDb` 传了 DB 基础价 |
 | `src/test/storefront/pure/accessory-variant-unique.test.ts` | `variantCode` 全局唯一(配件加价能按它查到唯一一行) |
 
+### 电商产品读后台配置(2026-11-14)
+
+工作室的要求:**「电商产品获取后台配置管理好的产品」** ⇒ 商城目录要**跟着后台走**。
+
+2026-11-08 那次接的是**价**(`basePriceCents` / 配件加价)。这次接的是**目录
+配置** —— 上架状态 / 型号名 / 排序 / 强调色。
+
+#### ⚠️ 粒度:后台管的是**型号**,商城卖的是**设计**
+
+| 粒度 | 数量 | 例子 |
+|---|---|---|
+| **型号**(后台 `/admin/products` 管的) | 6 | R / A / P / RM / LB / M |
+| **设计**(商城卖的) | 12 | 4 钥匙扣 + 4 手办 + 4 冰箱贴 |
+
+⇒ **一个型号下架 ⇒ 那一组设计全部下架**(不是只下一件)。
+⇒ 型号级的字段**盖到**设计级上 = 把 4 件设计变成同一张图 / 同一段文案。
+
+#### 三层分工
+
+| 层 | 文件 | 干什么 |
+|---|---|---|
+| **读** | `price-source.ts` | 一次 DB 读 ⇒ `PriceSource`(价)+ `CatalogSource`(目录配置)。**两份共用同一个 `cache()`** ⇒ 一个请求只查一次库 |
+| **算** | `catalog-apply.ts` | **纯函数**(零 DB 依赖):上架判定 / 盖名字 / 排序 |
+| **拼** | `storefront-catalog.ts` | **服务端专用**:把上面两样拼成「商城能直接用」的商品列表 |
+
+- `catalog-apply.ts` / `catalog-source-types.ts` **零 import**(除了 `import type`)
+  ⇒ 能进 vitest `unit` project,单测直接喂手写的数据。
+- `storefront-catalog.ts` import 了 `price-source.ts`(那个 import `@/db`)
+  ⇒ **客户端组件不许 import 它**。价和目录配置**从服务端父组件当 props 传下去**
+  (跟 2026-11-08 那条一样)。单测全仓扫 `"use client"` 文件。
+
+#### 映射表 —— 哪些接,哪些**刻意不接**
+
+| DB `product` 列 | 落点 | 规则 |
+|---|---|---|
+| `code` | join key(`productTypeCode`) | — |
+| `status` | **上架 / 下架过滤** | 有行 ⇒ 用它(`inactive` ⇒ 该型号全部设计下架);**没有行 ⇒ 上架**(代码默认) |
+| `sortOrder` | **系列内排序** | 有行 ⇒ 用它;没有行 ⇒ 排最后(同型号内保持代码原序) |
+| `basePriceCents` | `basePriceCents` | 2026-11-08 就接了 |
+| 配件 `priceDeltaCents` | 配件加价 | 2026-11-08 就接了 |
+| `name` / `nameEn` | `typeLabel` / `typeLabelEn` | 非空 ⇒ 覆盖(**型号名,不是设计标题**) |
+| `accent` | `accent` | 非空 ⇒ 覆盖 |
+| `leadTimeDays` | **不接** | DB 是**型号级**且是占位值 7;商城每件设计的工期是 5/10/4/6/7 ⇒ 覆盖会把 8 件设计的工期改错 |
+| `category` | **不落点** | 型号级 6 值词表(`keychain` / `figure` / …),**不是系列** ⇒ 拿它驱动 `seriesId` 会把设计挪错系列 |
+| `description` / `coverUrl` | **不落点** | 型号级字段盖到设计级字段上 ⇒ 4 件设计变成同一张图 / 同一段文案 |
+| `title` / `subtitle` / `thumbnail` | **不落点** | 设计级资料归代码常量(`mock-catalog.ts`) |
+
+- **「没有行 ⇒ 上架」是刻意的** —— 后台还没播种过这一项 / DB 读失败时,商城要照常
+  显示 12 件设计(而不是空店)。真要下架,后台存一行 `status = inactive` 就行。
+- **只有 `status === "active"` 才上架** —— 认不出来的一律当下架。跟小程序那条链路
+  (`image-gen/lib/product-capability.ts`)**一个口径** —— 不然同一件商品在小程序上
+  买得到、在商城上买不到。
+- `product.status` 在 schema 里是 `text(..., { enum: ["active","inactive"] })`
+  ⇒ **只有 TS 层收窄,DB 没有 CHECK 约束** ⇒ 手改 DB 塞一个别的值 = 下架。
+
+#### 排序口径:系列之间是**代码常量**,系列之内才听后台的
+
+```
+sortCatalogItems(items, source):
+  1. seriesRank  —— `WJP_SERIES` 的顺序(钥匙扣 → 手办 → 冰箱贴)
+  2. sortOrder   —— 后台配的(没有 DB 行 ⇒ Number.MAX_SAFE_INTEGER ⇒ 排最后)
+  3. 原下标      —— 同值时保持代码里的原序(稳定)
+```
+
+- **系列顺序 = `WJP_SERIES` 代码常量**(后台管不了)—— 系列是**营销资产**
+  (首页色带 / 系列 chip / 作品集 showcase 都摆 `WJP_SERIES.map(...)`)。
+- ⚠️ **不能用 `Infinity`** —— 两个都没有 DB 行的设计一比就是
+  `Infinity - Infinity = NaN` ⇒ 比较函数返 `NaN` ⇒ 排序行为未定义。
+  用 `Number.MAX_SAFE_INTEGER`(相减是 `0`,稳)。
+- **接上后台之后顺序一个字节都不变** —— 种子脚本按 `PRODUCT_TYPES` 的顺序写
+  `sortOrder`(`(idx + 1) * 10`:R=10 / A=20 / P=30 / RM=40 / LB=50 / M=60),
+  而商城代码里的顺序恰好是同一个 ⇒ 网格顺序不变(工作室改 `sortOrder` 才变)。
+
+#### 下架的三道闸
+
+下架是**型号级**的 ⇒ 某个型号下架,那一组设计全部下架。
+
+| 闸 | 在哪儿 | 干什么 |
+|---|---|---|
+| **目录 / 详情 / 相关推荐** | `storefront-catalog.ts` | 目录里不出现;详情返 `null`(「不存在」和「已下架」给用户**同一个答案**);相关推荐的**候选集先过滤**(不然推荐位里会出现一件点进去是 404 的商品) |
+| **加购** | `cart-store.ts` → `product-unavailable.ts` | **直接拒**(`ProductUnavailableError`)—— 不能往购物袋里塞一件已经下架的商品 |
+| **结算** | `checkout.ts` → `repriceLine()` | **直接拒**(`CheckoutError("PRODUCT_UNAVAILABLE")`)—— 车里有下架的商品 ⇒ 这一单结不了 |
+
+- **状态码是 409,不是 500** —— 409 = 「这个状态跟现在的请求冲突」。
+  500 会让工作室以为是服务器坏了。
+- ⚠️ **不静默跳过那一行** —— 跳过会让用户看到的合计跟最后付的金额对不上
+  (**「逐分相等」当场破**)。要拒就拒,界面指出来是哪一件。
+- **`product-unavailable.ts` 是纯文件**(零 DB / 零网络)—— 能进 `unit` project。
+
+#### 降级契约(跟 2026-11-08 那条一致,**没有变**)
+
+```
+DB 读失败 ⇒ 显示侧降级到代码常量 + 一条日志
+          ⇒ 结算侧**直接抛 `PRICING_FAILED`**(绝不按旧价收款)
+```
+
+- 目录这边也一样:读失败 ⇒ **全部上架 + 原序**(12 件设计照常显示),不是空店。
+  收钱那一侧另有硬闸(`PriceSource.degraded` ⇒ 结算失败)。
+- **`await connection()` 还在** —— 少了它,价和上架状态会在构建期被烤进 HTML,
+  「后台改了不生效」原地复发。
+
+#### 可见的两处变化(工作室会看到)
+
+- **zh 的型号标签少了「CM 」前缀** —— 「CM 钥匙扣」→「钥匙扣」
+  (`buildTypeLabel(code,"zh")` 取的是 `PRODUCT_TYPES[].name`)。
+- **en 的型号标签从**型号代号**变成真名** —— "R" → "Keychain"
+  (`buildTypeLabel(code,"en")` 以前给的是裸代号)。
+
+#### 行为由单测守住
+
+| 测试 | 守住什么 |
+|---|---|
+| `src/test/storefront/pure/db-catalog.test.ts` | 上架判定(**没有 DB 行 ⇒ 上架** / 只有 `active` 才上架 / 读失败 ⇒ 全部上架)/ 盖名字(非空才盖 / **`description` · `thumbnail` · `leadTimeDays` · `title` 一个字节都不动**)/ 排序(**系列之间按 `WJP_SERIES`** / 系列之内按 `sortOrder` / **没有 DB 行 ⇒ 排最后** / 同值保持原序 / **种子顺序 ⇒ 一个字节都不变**)/ 下架闸门(加购被拒 / 结算被拒 / **不静默跳过那一行**)/ 接口回 **409**(不是 500)/ **没有客户端组件 import 服务端目录模块**(全仓扫)/ `catalog-apply.ts` 不 import `@/db` |
+
 ### 优惠码(订单级)(2026-11-08)
 
 仓库里以前**一个优惠码都没有** —— 现有的「折扣」只有**数量阶梯折扣**,而且是
@@ -3816,6 +3930,119 @@ Node 的 `createPublicKey()` 拿到一把**私钥**会**推出**它的公钥,而
 |---|---|
 | `src/test/payments/pure/pem-inspection.test.ts` | 体检(三种贴错 + 自动修好)/ **修好的私钥真的签得出来**(修完验得过)/ 修不了 ⇒ `PaymentNotConfiguredError`(**不是** `PaymentProviderError`)/ **公钥栏贴私钥 ⇒ 认出来**(`createPublicKey` 接受私钥 ⇒ 必须先判)/ 微信支付宝**同一个口径** / `verifySign` 验不过时**返 false 而不是抛错** |
 | `src/test/payments/pure/payment-sandbox-check.test.ts` | 自检脚本的密钥体检那一段(**不重新实现**体检逻辑) |
+
+### 支付宝主动查单兜底(2026-11-14)
+
+工作室报的是:支付宝沙箱那一单**付款成功了**,订单却永远停在 `unpaid`,
+用户盯着「正在确认支付…」转圈到超时(单号 `SO-20261114-657E4A`,金额 ¥247)。
+
+**根因:异步通知没落库,而仓库里**没有任何主动查单兜底**。**
+
+`providers/alipay/trade/query.ts` 的 `queryTradeByOrderNo` **写得出来但从来没被
+调用过** —— 收钱完全靠支付宝主动推过来的异步通知。而通知会丢:
+
+| 通知怎么丢的 | 现象 |
+|---|---|
+| `notify_url` 配错 / 指向本机 / 域名换过 | 支付宝**根本推不到** ⇒ 日志里一个字都没有 |
+| 通知验签失败(支付宝公钥贴错 / 不是同一个沙箱应用) | 回 401 ⇒ 支付宝重投 8 次之后放弃 |
+| 通知里的 `app_id` 对不上 | 代码回 `success`(认不出来的单号不是错误)⇒ 支付宝**不再重投** |
+
+⇒ 任何一种,结果都是**钱到了、订单永远是 `unpaid`**。浏览器那边也救不了 ——
+成功页和轮询接口**只读我们自己的 DB**,通知没落库就永远读不到「已付」。
+
+#### 三件事
+
+**(1) 回跳后立刻主动查单** —— `POST /api/store/orders/{orderNo}/confirm-payment`
+(`runtime = "nodejs"` / `maxDuration = 30`)。付款成功页挂载时打一次,拿到结果就
+把 `status` / `paymentStatus` 更新到界面上。失败**不报错**(轮询还在跑)。
+
+**(2) 轮询 / 「重新获取付款入口」也走查单兜底** ——
+
+- `GET /api/store/orders/{orderNo}`:查不到已付 ⇒ 顺手查一次支付宝(**节流**,
+  见下)。
+- `order-payment.ts` 的 `ensureNewChannelPaymentLink()`:**先查单**,查出来已付
+  就直接返 `ALREADY_PAID` —— 不是再发一张付款码(用户会付两次)。
+
+**(3) 后台「支付设置」摆出生效的 notify_url** —— 让工作室**一眼**看出通知地址
+有没有配错(配错了之后**没有任何报错**,只能靠人看出来)。
+
+#### 判定层是**纯函数**(`providers/alipay/reconcile-rules.ts`,零 import)
+
+查单结果只有三条**同时**成立才落库:
+
+1. **验签过了**(响应确实是支付宝发的 —— 查单请求用**应用私钥**签,
+   响应用**支付宝公钥**验)
+2. **交易状态是付款成功**(`TRADE_SUCCESS` / `TRADE_FINISHED`)
+3. **金额对得上**(实付 == 订单应付)
+
+少任何一条都**不落库** —— 落错了就是「没收到钱却标成已付」,那是资损。
+
+**判定顺序短路(顺序不能改)**:
+
+```
+已经付过 → 查不到 → 验签不过 → 不是付款成功 → 金额对不上 → 落库
+```
+
+「已经付过」排第一 —— 已经落库的单**不该**再去查支付宝(浪费一次调用),
+也不该被后面任何一条改回去(退款之后更不能)。
+
+- **支付宝没给实付金额**(`paidAmountCents === null`)⇒ `amount_mismatch` ——
+  「付款成功但没有金额」是查不到的事实,不是可以放过的细节。
+- **不知道应付多少**(`expectedAmountCents === null`)⇒ **不核对金额**
+  (正常不会发生 —— 应付金额是订单上的数)。
+
+#### 节流:同一个订单 20 秒只查一次
+
+`payments/lib/reconcile-throttle.ts` —— `RECONCILE_THROTTLE_MS = 20_000`。
+
+付款成功页在轮询订单状态(3 秒一轮)。每一轮都查 = 一笔订单在用户停留的那两分钟里
+打 40 次查单 ⇒ **支付宝限流,而限流正好发生在我们最需要查单的时候**。
+
+- **进程内**的 `Map`,不是严格限流 —— 即便多实例各查一次也只是多几次调用,
+  落库那层是幂等的(`transitions.ts` 里「已经是 `paid` 就 skip」),**不会重复记账**。
+- 真要严格限流得写进 DB(多一个 `last_reconciled_at` 列 + 一次 UPDATE)——
+  那要改表结构、要跑迁移,为「少打几次查单」不值当。
+- 条目多了就把**过期的**那些扔掉(别让 `Map` 一直涨)。
+
+#### 通知地址的诊断(`payments/lib/notify-url.ts`,纯函数)
+
+```
+显式配的通知地址  →  用它
+站点地址 + 通知路径 →  拼一个
+都没有            →  拼不出来(通道判「没配好」)
+```
+
+站点地址 = `NEXT_PUBLIC_APP_URL` 或 `BETTER_AUTH_URL`
+(`providers/alipay/env.ts` 的 `readAlipaySiteUrl()`)。
+
+**四个问题码**(`NotifyUrlProblem`):
+
+| 码 | 什么时候 | 界面能说什么 |
+|---|---|---|
+| `MISSING` | 拼不出通知地址 | 请填通知地址,或者配 `NEXT_PUBLIC_APP_URL` / `BETTER_AUTH_URL` |
+| `INVALID_URL` | 不是个合法网址 | 通知地址不是一个合法的网址 |
+| `NOT_HTTPS` | 不是 https | 平台只接受 https 的回调地址 |
+| `LOCAL_ADDRESS` | 指向本机(`localhost` / `127.0.0.1` / `0.0.0.0` / `::1` / `*.local`) | **平台推不到,钱付了订单也不会变已付** |
+
+⚠️ **问题码是**大写**的** —— 跟 `AdminPaymentSettings.status.keyProblem.*` 那套
+小写的**不是一回事**,别混。
+
+**后台那一页摆两处**:
+
+- **页面顶部红色横幅** —— 两个通道**都**有问题时挂一条,逐条列出是哪个通道、
+  什么问题。
+- **每个通道的状态卡里** —— 生效的 `notify_url` + 它是从哪儿来的(`explicit` /
+  `site` / `none`)+ 拼它用的**站点地址** + 没问题时的一句绿字。
+
+**通知地址**不是密钥,但它会暴露站点地址 ⇒ 照样只在**解析结果**里给,原始环境
+变量那一档不发到浏览器。
+
+#### 行为由单测守住
+
+| 测试 | 守住什么 |
+|---|---|
+| `src/test/payments/pure/alipay-reconcile.test.ts` | 交易状态(`TRADE_SUCCESS` / `TRADE_FINISHED` 算付成功)/ **验签不过 ⇒ 绝不落库** / **金额对不上 ⇒ 绝不落库** / **支付宝没给金额 ⇒ 核不了 ⇒ 不落库** / 判定顺序短路(`already_paid` → `not_found` → `signature_invalid` → `not_paid` → `amount_mismatch` → `settled`)/ **除 `settled` 那一档以外一条都不许落库** / 节流(第一次放行、冷却期内跳过、过了间隔放行、不同订单互不影响)/ 通知地址(显式优先 / 站点拼接 / 尾部斜杠 / 空白当没配 / `MISSING` / `INVALID_URL` / `NOT_HTTPS` / `LOCAL_ADDRESS` / 四个码都有人话) |
+| `src/test/payments/pure/payment-settings-admin.test.ts` | 后台把通知地址摆出来(横幅 + 每个通道的状态卡)/ 走 `resolveNotifyUrl` 那一层 / 两个通道各用各的通知路径 / **通知地址不从环境变量里漏出去** / 四个问题码中英文都摆得上话 |
 
 ### Stripe 微信支付 / 支付宝(2026-11-05,**旧路,过渡期保留**)
 

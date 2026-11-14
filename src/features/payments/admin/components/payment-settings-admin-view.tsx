@@ -269,6 +269,23 @@ export function PaymentSettingsAdminView() {
   const anyInvalid = wechat.modeInvalid || alipay.modeInvalid;
   const busy = isSaving || isRemoving;
 
+  /**
+   * 通知地址的问题 —— 两个通道**当前模式**上的
+   *
+   * 通知地址配错 = **钱付了、订单永远是 `unpaid`**,而且**没有任何报错**
+   * (线上真踩过:`SO-20261114-657E4A`)。⇒ 摆成页面顶部的横幅,别埋在卡片里。
+   */
+  const notifyProblems = [
+    { channel: wechat, label: t("channels.wechat") },
+    { channel: alipay, label: t("channels.alipay") },
+  ].flatMap(({ channel, label }) =>
+    channel.notifyUrlProblems.map((problem) => ({
+      key: `${channel.channel}-${problem}`,
+      channelLabel: label,
+      problem,
+    }))
+  );
+
   return (
     <div className="space-y-6">
       {/* 页头 */}
@@ -312,6 +329,30 @@ export function PaymentSettingsAdminView() {
             {t("banner.invalidTitle")}
           </p>
           <p className="text-muted-foreground">{t("banner.invalidDetail")}</p>
+        </div>
+      ) : null}
+
+      {/* 通知地址配错 = 钱付了、订单永远不标已付 —— 摆到最上面 */}
+      {notifyProblems.length > 0 ? (
+        <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs leading-relaxed">
+          <p className="mb-1 flex items-center gap-1 font-medium">
+            <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
+            {t("banner.notifyUrlTitle")}
+          </p>
+          <ul className="list-inside list-disc space-y-0.5 text-muted-foreground">
+            {notifyProblems.map((item) => (
+              <li key={item.key}>
+                <span className="font-medium text-foreground">
+                  {item.channelLabel}
+                </span>
+                {": "}
+                {t(`status.notifyUrlProblem.${item.problem}`)}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1 text-muted-foreground">
+            {t("banner.notifyUrlDetail")}
+          </p>
         </div>
       ) : null}
 
@@ -538,6 +579,45 @@ function ChannelStatus({
             {channel.mode === "sandbox" ? sourceDbText : sourceEnvText}
           </p>
         </div>
+      </div>
+
+      {/* 通知地址 —— 平台推过来的那个地址 */}
+      {/* */}
+      {/* 配错了 = 钱付了、订单永远不标已付,而且**没有任何报错** */}
+      {/* */}
+      {/* ⇒ 这一块要能一眼看出「平台推不推得到」 */}
+      <div className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs">
+        <p className="text-[11px] text-muted-foreground">
+          {t("status.notifyUrl")}
+        </p>
+        <p className="mt-0.5 break-all font-medium">
+          {channel.notifyUrl ?? (
+            <span className="text-destructive">
+              {t("status.notifyUrlMissing")}
+            </span>
+          )}
+        </p>
+
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          {t("status.notifyUrlSource")}:{" "}
+          {channel.notifyUrlSource === "explicit"
+            ? t("status.notifyUrlSourceExplicit")
+            : channel.notifyUrlSource === "site"
+              ? t("status.notifyUrlSourceSite")
+              : t("status.notifyUrlSourceNone")}
+          {" · "}
+          {t("status.siteUrl")}: {channel.siteUrl ?? "—"}
+        </p>
+
+        {channel.notifyUrlProblems.length > 0 ? (
+          <ul className="mt-1 list-inside list-disc space-y-0.5 text-destructive">
+            {channel.notifyUrlProblems.map((problem) => (
+              <li key={problem}>{t(`status.notifyUrlProblem.${problem}`)}</li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-1 text-emerald-700">{t("status.notifyUrlOk")}</p>
+        )}
       </div>
 
       {/* 当前模式缺什么 */}

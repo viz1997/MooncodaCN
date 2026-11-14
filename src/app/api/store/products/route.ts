@@ -27,7 +27,7 @@ import {
   filterBySeries,
   filterByTypeCode,
 } from "@/features/storefront/lib/mock-catalog";
-import { getStorefrontProducts } from "@/features/storefront/lib/price-source";
+import { getStorefrontProducts } from "@/features/storefront/lib/storefront-catalog";
 import { withApiLogging } from "@/lib/api-logger";
 
 export const runtime = "nodejs";

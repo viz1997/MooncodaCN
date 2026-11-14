@@ -94,6 +94,63 @@ export function CheckoutSuccessView({
     }
   }, [paymentStatus, queryClient]);
 
+  /**
+   * 回跳后**立刻主动查一次支付宝**(2026-11-14)
+   *
+   * 收钱以「支付宝推过来的异步通知」为准,但通知会丢(地址配错 / 验签不过 /
+   * app_id 对不上)⇒ 钱到了、订单永远是 `unpaid`,用户盯着「正在确认支付…」
+   * 转圈到超时(线上真踩过:`SO-20261114-657E4A`)。
+   *
+   * ⇒ 用户从支付宝回跳到这一页时,**主动问一次支付宝**「这单到底付了没」。
+   * 查完直接更新状态,不用等第一轮轮询(那要 3 秒)。
+   *
+   * 只在**进来那一刻**查一次 —— 后面由轮询接管(那个接口自带节流,同一个
+   * 订单 20 秒内最多打一次支付宝)。
+   *
+   * 查失败**不报错** —— 这只是兜底,主路还是轮询读库。
+   */
+  useEffect(() => {
+    if (initialStatus !== "unpaid" || initialPaymentStatus !== "unpaid") {
+      return;
+    }
+
+    let cancelled = false;
+
+    const confirm = async () => {
+      try {
+        const res = await fetch(
+          `/api/store/orders/${encodeURIComponent(orderNo)}/confirm-payment`,
+          {
+            method: "POST",
+            headers: { Accept: "application/json" },
+            cache: "no-store",
+          }
+        );
+        if (!res.ok) return;
+
+        const body = (await res.json()) as {
+          status?: OrderStatus;
+          paymentStatus?: OrderPaymentStatus;
+        };
+        if (cancelled) return;
+        if (typeof body.status === "string") {
+          setStatus(body.status);
+        }
+        if (typeof body.paymentStatus === "string") {
+          setPaymentStatus(body.paymentStatus);
+        }
+      } catch {
+        // 查单挂了 —— 下面的轮询还在,不影响
+      }
+    };
+
+    void confirm();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [orderNo, initialStatus, initialPaymentStatus]);
+
   useEffect(() => {
     aliveRef.current = true;
     attemptRef.current = 0;

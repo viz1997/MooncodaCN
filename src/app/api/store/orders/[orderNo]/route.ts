@@ -13,11 +13,13 @@
 
 import { NextResponse } from "next/server";
 
+import { claimReconcileSlot } from "@/features/payments/lib/reconcile-throttle";
 import {
   listShipmentsForOrder,
   toShipmentView,
 } from "@/features/shipment/lib/shipment-store";
 import { getUserStorefrontOrderByOrderNo } from "@/features/storefront/lib/orders";
+import { reconcileStorefrontOrderPayment } from "@/features/storefront/lib/payment-reconcile";
 import { withApiLogging } from "@/lib/api-logger";
 import { getSessionFromRequest } from "@/lib/auth/request-session";
 
@@ -48,7 +50,36 @@ async function handle(
     );
   }
 
-  const order = result.order;
+  let order = result.order;
+
+  // ---- 主动查单兜底(2026-11-14)----
+  //
+  // 异步通知丢了的话,订单会永远停在 `unpaid` —— 用户盯着「正在确认支付…」
+  // 转圈到超时(线上真踩过:`SO-20261114-657E4A`)。
+  //
+  // 轮询这条路**顺手查一次**:节流后同一个订单 20 秒内最多打一次支付宝,
+  // 不会把接口打爆。查完再重读一次,响应里给的是**新**的状态。
+  if (
+    order.paymentStatus === "unpaid" &&
+    order.paymentChannel === "alipay" &&
+    claimReconcileSlot(order.orderNo, Date.now())
+  ) {
+    try {
+      await reconcileStorefrontOrderPayment({
+        order,
+        items: result.items,
+      });
+      // 重读 —— 落库之后状态变了,响应里要给**新**的那个
+      const fresh = await getUserStorefrontOrderByOrderNo(user.id, orderNo);
+      if (fresh) order = fresh.order;
+    } catch (error) {
+      // 查单挂了**不影响**这个接口 —— 它只是「兜底」,主路还是读库
+      console.error(
+        `[storefront] ${order.orderNo} 主动查单失败(不影响订单状态查询)`,
+        error
+      );
+    }
+  }
 
   // 物流(2026-11-13)—— 一个订单可能有多个包裹(补发 / 分开发)
   const shipments = await listShipmentsForOrder("storefront", order.id);
