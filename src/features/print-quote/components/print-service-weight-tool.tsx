@@ -246,17 +246,23 @@ export function PrintServiceWeightTool({
   return (
     <>
       {/*
-        **只开「上传」这一个模式**(2026-11-10)
+        **三个模式都开**(2026-11-14)
 
-        「手动尺寸」对打印服务是**死路** —— 手动模式没有模型文件,而打印工单
-        必须把模型上传到 R2,它永远走不到下单。
-        「批量克重」是**另一个工具**(批量量重),没有下单出口。
+        2026-11-10 只留了「上传」这一个 —— 那时候的理由是「手动尺寸对打印服务
+        是死路」(手动模式没有模型文件,而打印工单必须把模型上传到 R2),
+        「批量克重」是另一个工具。工作室 2026-11-14 把三个标签要回去了:
+        「tools/workbench 工具页面先显示之前的 tab,上传模型计算 / 手动估算 /
+        批量报价和之前的 ui」。
 
-        代码不删(在 `features/pricing/` 里原样留着),想恢复只要把模式放回去。
+        ⇒ **不传 `modes`** —— 默认就是三个全开(`Mode = "upload" | "manual" |
+        "batch"`)。
+
+        ⚠️ **手动 / 批量两栏没有下单出口** —— `quoteActionSlot` 只挂在上传模式
+        那一块(`ModelSettingsPanel` 的 `primaryAction` 插槽)。那两栏是
+        「量重量的工具」,不是「下单的入口」—— 工单还是得先上传一个模型。
       */}
       <PricingCalculator
         showChrome={false}
-        modes={["upload"]}
         clientConfig={clientConfig}
         onModelChange={handleModelChange}
         onQuoteInput={handleQuoteInput}

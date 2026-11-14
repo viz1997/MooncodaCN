@@ -21,6 +21,11 @@ import { useTranslations } from "next-intl";
  * 并行解析 → 智能摆盘 → 克重计算。所有处理在浏览器本地完成，不上传服务器。
  *
  * 区块只呈现克重 / 体积 / 摆盘结果，不呈现任何价格。
+ *
+ * ⚠️ **配色是深色的(2026-11-14)** —— 这一栏 2026-11-10 之前一直藏着一个标签,
+ * 所以从来没跟着工作台改深色。现在标签放回来了,而整个页面的外壳是
+ * `bg-zinc-950`(工作室 2026-11-10 的「页面两张脸」那一条)——
+ * 浅色卡片落在深色底上就是**第二张脸**。**内容一个字没动,只换配色。**
  */
 import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -52,15 +57,16 @@ const BATCH_STATUS_LABEL_KEY: Record<BatchItem["status"], string> = {
   skipped: "skipped",
 };
 
+/** 状态徽章的配色 —— **深色那一套**(2026-11-14) */
 const BATCH_STATUS_COLOR: Record<BatchItem["status"], string> = {
-  pending: "bg-stone-100 text-stone-600 border-stone-200",
-  extracting: "bg-blue-50 text-blue-700 border-blue-200",
-  parsing: "bg-blue-50 text-blue-700 border-blue-200",
-  optimizing: "bg-violet-50 text-violet-700 border-violet-200",
-  pricing: "bg-amber-50 text-amber-700 border-amber-200",
-  done: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  error: "bg-red-50 text-red-700 border-red-200",
-  skipped: "bg-stone-100 text-stone-500 border-stone-200",
+  pending: "bg-zinc-800 text-zinc-300 border-zinc-700",
+  extracting: "bg-blue-500/15 text-blue-300 border-blue-500/30",
+  parsing: "bg-blue-500/15 text-blue-300 border-blue-500/30",
+  optimizing: "bg-violet-500/15 text-violet-300 border-violet-500/30",
+  pricing: "bg-amber-500/15 text-amber-300 border-amber-500/30",
+  done: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+  error: "bg-red-500/15 text-red-300 border-red-500/30",
+  skipped: "bg-zinc-800 text-zinc-400 border-zinc-700",
 };
 
 export type BatchModeSectionProps = {
@@ -119,15 +125,15 @@ export function BatchModeSection(props: BatchModeSectionProps) {
   return (
     <section className="mb-6 space-y-4">
       {/* 头部说明 */}
-      <Card className="border-stone-200 shadow-sm">
+      <Card className="border-zinc-800 bg-zinc-900">
         <CardContent className="p-5 space-y-4">
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div>
-              <h3 className="text-base font-semibold text-stone-800 flex items-center gap-2">
-                <ListChecks className="size-5 text-amber-600" />
+              <h3 className="text-base font-semibold text-zinc-100 flex items-center gap-2">
+                <ListChecks className="size-5 text-amber-500" />
                 {t("title")}
               </h3>
-              <p className="mt-1 text-xs text-stone-500 max-w-2xl leading-relaxed">
+              <p className="mt-1 text-xs text-zinc-400 max-w-2xl leading-relaxed">
                 {t("intro")}
               </p>
             </div>
@@ -152,9 +158,9 @@ export function BatchModeSection(props: BatchModeSectionProps) {
           </div>
 
           {/* 参数 */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2 border-t border-stone-100">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2 border-t border-zinc-800">
             <div className="space-y-1.5">
-              <Label className="text-xs text-stone-500">
+              <Label className="text-xs text-zinc-400">
                 {t("concurrency")}
               </Label>
               <div className="flex items-center gap-2">
@@ -167,68 +173,66 @@ export function BatchModeSection(props: BatchModeSectionProps) {
                   disabled={batchRunning}
                   className="flex-1 [&_[data-slot=slider-range]]:bg-amber-500 [&_[data-slot=slider-thumb]]:border-amber-500"
                 />
-                <span className="text-xs font-mono text-stone-700 w-6 text-right">
+                <span className="text-xs font-mono text-zinc-100 w-6 text-right">
                   {batchConcurrency}
                 </span>
               </div>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs text-stone-500">
-                {t("smartAngle")}
-              </Label>
+              <Label className="text-xs text-zinc-400">{t("smartAngle")}</Label>
               <div className="flex items-center gap-2 h-7">
                 <Switch
                   checked={batchApplyAngle}
                   onCheckedChange={onApplyAngleChange}
                   disabled={batchRunning}
                 />
-                <span className="text-xs text-stone-600">
+                <span className="text-xs text-zinc-400">
                   {batchApplyAngle ? t("enabled") : t("disabled")}
                 </span>
               </div>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs text-stone-500">
+              <Label className="text-xs text-zinc-400">
                 {t("materialDensity")}
               </Label>
               <div className="flex items-center gap-1 h-7">
-                <span className="font-mono text-sm text-stone-700">
+                <span className="font-mono text-sm text-zinc-100">
                   {fmt(materialDensity, 2)}
                 </span>
-                <span className="text-xs text-stone-400">g/cm³</span>
+                <span className="text-xs text-zinc-500">g/cm³</span>
               </div>
             </div>
             {/* 支撑是另一种材料 —— 支撑克重按这个密度算,得让人看见 */}
             <div className="space-y-1.5">
-              <Label className="text-xs text-stone-500">
+              <Label className="text-xs text-zinc-400">
                 {t("supportDensity")}
               </Label>
               <div className="flex items-center gap-1 h-7">
-                <span className="font-mono text-sm text-stone-700">
+                <span className="font-mono text-sm text-zinc-100">
                   {fmt(supportDensity, 2)}
                 </span>
-                <span className="text-xs text-stone-400">g/cm³</span>
+                <span className="text-xs text-zinc-500">g/cm³</span>
               </div>
             </div>
           </div>
 
           {/* 操作栏 */}
           {hasItems && (
-            <div className="flex items-center justify-between gap-3 pt-3 border-t border-stone-100 flex-wrap">
-              <div className="text-xs text-stone-500">
+            <div className="flex items-center justify-between gap-3 pt-3 border-t border-zinc-800 flex-wrap">
+              <div className="text-xs text-zinc-400">
                 {t.rich("summaryLine", {
                   total: summary.total,
                   done: summary.done,
                   errors: summary.errors,
                   pending: summary.pending,
                   b: (chunks) => (
-                    <strong className="text-stone-700">{chunks}</strong>
+                    <strong className="text-zinc-100">{chunks}</strong>
                   ),
                   bOk: (chunks) => (
-                    <strong className="text-emerald-700">{chunks}</strong>
+                    <strong className="text-emerald-300">{chunks}</strong>
                   ),
                   bErr: (chunks) => (
-                    <strong className="text-red-700">{chunks}</strong>
+                    <strong className="text-red-300">{chunks}</strong>
                   ),
                 })}
               </div>
@@ -238,7 +242,7 @@ export function BatchModeSection(props: BatchModeSectionProps) {
                   size="sm"
                   onClick={onClear}
                   disabled={batchRunning}
-                  className="text-stone-500 hover:text-red-600 hover:bg-red-50"
+                  className="text-zinc-400 hover:text-red-400 hover:bg-red-500/15"
                 >
                   <Trash2 className="size-3.5" />
                   {t("clear")}
@@ -248,7 +252,7 @@ export function BatchModeSection(props: BatchModeSectionProps) {
                     variant="outline"
                     size="sm"
                     onClick={onCancel}
-                    className="border-red-300 text-red-700 hover:bg-red-50"
+                    className="border-red-500/40 text-red-300 hover:bg-red-500/15"
                   >
                     <X className="size-4" />
                     {t("cancel")}
@@ -258,7 +262,7 @@ export function BatchModeSection(props: BatchModeSectionProps) {
                     size="sm"
                     onClick={onRun}
                     disabled={!hasPending}
-                    className="bg-amber-500 hover:bg-amber-600 text-white disabled:bg-stone-200 disabled:text-stone-400"
+                    className="bg-amber-500 hover:bg-amber-600 text-white disabled:bg-zinc-800 disabled:text-zinc-600"
                   >
                     <Activity className="size-4" />
                     {summary.errors > 0
@@ -275,22 +279,22 @@ export function BatchModeSection(props: BatchModeSectionProps) {
       {/* 空状态 */}
       {!hasItems && (
         <Card
-          className={`border-2 border-dashed transition-colors cursor-pointer bg-stone-50/40 ${isBatchDragging ? "border-amber-500 bg-amber-50/60 ring-2 ring-amber-200" : "border-stone-300 hover:border-amber-400"}`}
+          className={`border-2 border-dashed transition-colors cursor-pointer bg-zinc-900 ${isBatchDragging ? "border-amber-500 bg-amber-500/10 ring-2 ring-amber-500/30" : "border-zinc-700 hover:border-amber-500/60"}`}
           onClick={onPickFiles}
           {...dropHandlers}
         >
           <CardContent className="p-10 flex flex-col items-center text-center">
             <div
-              className={`size-16 rounded-full flex items-center justify-center mb-4 transition-colors ${isBatchDragging ? "bg-amber-200" : "bg-amber-100"}`}
+              className={`size-16 rounded-full flex items-center justify-center mb-4 transition-colors ${isBatchDragging ? "bg-amber-500/25" : "bg-amber-500/15"}`}
             >
               <ListChecks
-                className={`size-8 ${isBatchDragging ? "text-amber-700" : "text-amber-600"}`}
+                className={`size-8 ${isBatchDragging ? "text-amber-300" : "text-amber-400"}`}
               />
             </div>
-            <h3 className="text-base font-semibold text-stone-800 mb-1">
+            <h3 className="text-base font-semibold text-zinc-100 mb-1">
               {isBatchDragging ? t("dropHint") : t("emptyTitle")}
             </h3>
-            <p className="text-sm text-stone-500 max-w-md">
+            <p className="text-sm text-zinc-400 max-w-md">
               {isBatchDragging ? t("dropPending") : t("emptyHint")}
             </p>
           </CardContent>
@@ -322,9 +326,9 @@ export function BatchModeSection(props: BatchModeSectionProps) {
 
       {/* 明细列表 */}
       {hasItems && (
-        <Card className="border-stone-200 shadow-sm">
+        <Card className="border-zinc-800">
           <CardContent className="p-0 overflow-hidden">
-            <div className="divide-y divide-stone-100">
+            <div className="divide-y divide-zinc-800">
               {batchItems.map((item) => (
                 <BatchItemRow
                   key={item.id}
@@ -340,8 +344,8 @@ export function BatchModeSection(props: BatchModeSectionProps) {
 
       {/* 参数提示 */}
       {hasItems && (
-        <div className="flex items-center gap-2 text-xs text-stone-500 bg-stone-50 border border-stone-200 rounded-md p-3">
-          <AlertCircle className="size-3.5 text-stone-400 shrink-0" />
+        <div className="flex items-center gap-2 text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 rounded-md p-3">
+          <AlertCircle className="size-3.5 text-zinc-500 shrink-0" />
           <span>
             {t.rich("settingsReminder", {
               solidRatio,
@@ -349,7 +353,7 @@ export function BatchModeSection(props: BatchModeSectionProps) {
               supportDensity: fmt(supportDensity, 2),
               angle: batchApplyAngle ? t("enabled") : t("disabled"),
               b: (chunks) => (
-                <strong className="text-stone-700">{chunks}</strong>
+                <strong className="text-zinc-100">{chunks}</strong>
               ),
             })}
           </span>
@@ -382,11 +386,11 @@ function BatchItemRow({
     item.status !== "skipped";
 
   return (
-    <div className="p-3 sm:p-4 flex items-start gap-3 hover:bg-stone-50/40 transition-colors">
+    <div className="p-3 sm:p-4 flex items-start gap-3 hover:bg-zinc-900/60 transition-colors">
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <FileBox className="size-4 text-stone-500 shrink-0" />
-          <span className="text-sm font-medium text-stone-800 truncate">
+          <FileBox className="size-4 text-zinc-500 shrink-0" />
+          <span className="text-sm font-medium text-zinc-100 truncate">
             {item.name}
           </span>
           <Badge
@@ -398,7 +402,7 @@ function BatchItemRow({
           {duration !== null && item.status === "done" && (
             <Badge
               variant="outline"
-              className="text-[10px] font-mono border-stone-200 text-stone-500"
+              className="text-[10px] font-mono border-zinc-700 text-zinc-400"
             >
               {duration.toFixed(1)}s
             </Badge>
@@ -411,13 +415,13 @@ function BatchItemRow({
           item.status !== "pending" &&
           item.status !== "skipped" && (
             <div className="mt-2 flex items-center gap-2">
-              <div className="flex-1 h-1 bg-stone-200 rounded-full overflow-hidden">
+              <div className="flex-1 h-1 bg-zinc-800 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-amber-500 rounded-full transition-all duration-300"
                   style={{ width: `${Math.max(3, item.progress)}%` }}
                 />
               </div>
-              <span className="text-[10px] text-stone-500 font-mono w-9 text-right">
+              <span className="text-[10px] text-zinc-500 font-mono w-9 text-right">
                 {item.progress}%
               </span>
             </div>
@@ -425,7 +429,7 @@ function BatchItemRow({
 
         {/* 错误 */}
         {item.status === "error" && item.error && (
-          <div className="mt-1 text-xs text-red-600 flex items-center gap-1">
+          <div className="mt-1 text-xs text-red-400 flex items-center gap-1">
             <AlertCircle className="size-3 shrink-0" />
             {item.error}
           </div>
@@ -436,19 +440,19 @@ function BatchItemRow({
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
             <Badge
               variant="outline"
-              className="font-mono border-stone-200 text-stone-600"
+              className="font-mono border-zinc-700 text-zinc-400"
             >
               {fmt(r.pricing.volumeCM3, 2)} cm³
             </Badge>
             <Badge
               variant="outline"
-              className="font-mono border-stone-200 text-stone-600"
+              className="font-mono border-zinc-700 text-zinc-400"
             >
               {Math.ceil(r.pricing.materialWeight)} g
             </Badge>
             <Badge
               variant="outline"
-              className="font-mono border-stone-200 text-stone-600"
+              className="font-mono border-zinc-700 text-zinc-400"
             >
               {fmt(r.pricing.dims[0], 0)}×{fmt(r.pricing.dims[1], 0)}×
               {fmt(r.pricing.dims[2], 0)} mm
@@ -456,7 +460,7 @@ function BatchItemRow({
             {angle && (
               <Badge
                 variant="outline"
-                className="font-mono border-violet-200 text-violet-700 bg-violet-50"
+                className="font-mono border-violet-500/30 text-violet-300 bg-violet-500/15"
               >
                 <Compass className="size-3" />
                 X:{angle.rotX}° Y:{angle.rotY}°
@@ -469,7 +473,7 @@ function BatchItemRow({
             {r.supportWeightG > 0 && (
               <Badge
                 variant="outline"
-                className="font-mono border-violet-200 text-violet-700 bg-violet-50"
+                className="font-mono border-violet-500/30 text-violet-300 bg-violet-500/15"
               >
                 {t("selfSupport", {
                   ratio: fmt(r.supportRatio * 100, 0),
@@ -478,7 +482,7 @@ function BatchItemRow({
               </Badge>
             )}
             {angle?.laidFlat && (
-              <Badge className="text-[10px] bg-amber-100 text-amber-700 hover:bg-amber-100">
+              <Badge className="text-[10px] bg-amber-500/15 text-amber-300 hover:bg-amber-500/15">
                 {t("laidFlat")}
               </Badge>
             )}
@@ -494,7 +498,7 @@ function BatchItemRow({
               <Button
                 variant="ghost"
                 size="icon"
-                className="size-8 text-emerald-600 hover:bg-emerald-50"
+                className="size-8 text-emerald-400 hover:bg-emerald-500/15"
                 onClick={() => onExport(item)}
                 title={t("exportRotated")}
               >
@@ -508,7 +512,7 @@ function BatchItemRow({
           <Button
             variant="ghost"
             size="icon"
-            className="size-8 text-stone-400 hover:text-red-600 hover:bg-red-50"
+            className="size-8 text-zinc-500 hover:text-red-400 hover:bg-red-500/15"
             onClick={() => onRemove(item.id)}
             title={t("remove")}
           >

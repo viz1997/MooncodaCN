@@ -82,6 +82,11 @@ const CHECK_VIEW =
 const SETTINGS_PANEL =
   "src/features/pricing/components/model-settings-panel.tsx";
 const CALCULATOR = "src/features/pricing/components/pricing-calculator.tsx";
+const BATCH_SECTION = "src/features/pricing/components/batch-mode-section.tsx";
+const SHARED = "src/features/pricing/components/shared.tsx";
+/** 打印工作台那一层 —— `PricingCalculator` 的唯一消费者 */
+const WEIGHT_TOOL =
+  "src/features/print-quote/components/print-service-weight-tool.tsx";
 const TOOLS_HUB = "src/features/tools/components/tools-hub.tsx";
 const WORKBENCH_PAGE =
   "src/app/[locale]/(marketing-atelier)/tools/workbench/page.tsx";
@@ -440,6 +445,93 @@ describe("工作台 —— 浮层药丸只管「看图」(2026-11-10)", () => {
 
     // 药丸里不许再有图层开关
     expect(pill(frame)).not.toContain("activeLegend");
+  });
+});
+
+describe("工作台 —— 三个模式标签(2026-11-14)", () => {
+  it("**三个标签都在** —— 上传模型计算 / 手动估算 / 批量报价", () => {
+    // 工作室 2026-11-14 的原话:「tools/workbench工具页面先显示之前的tab,
+    // 上传模型计算 / 手动估算 / 批量报价和之前的ui」。
+    //
+    // 2026-11-10 那一版只留了「上传」(打印工作台传 `modes={["upload"]}`),
+    // 另外两个标签被藏起来了 —— 现在要回来。
+    const src = read(CALCULATOR);
+    expect(src).toContain('export type Mode = "upload" | "manual" | "batch"');
+    expect(src).toContain('modes ?? (["upload", "manual", "batch"] as Mode[])');
+  });
+
+  it("打印工作台**不传** `modes` ⇒ 默认三个全开", () => {
+    // 传了 `modes={["upload"]}` 的话标签就只剩一个 —— 那正是要撤掉的那一版。
+    const src = stripComments(read(WEIGHT_TOOL));
+    expect(src).not.toContain("modes={");
+    expect(src).not.toContain("modes=");
+  });
+
+  it("切换器**三个都在**(只有 `availableModes.length > 1` 才渲染)", () => {
+    const src = stripComments(read(CALCULATOR));
+    expect(src).toContain("availableModes.length > 1");
+    expect(src).toContain('availableModes.includes("upload")');
+    expect(src).toContain('availableModes.includes("manual")');
+    expect(src).toContain('availableModes.includes("batch")');
+  });
+
+  it("三栏的**内容**都还在(不是只有标签)", () => {
+    const src = stripComments(read(CALCULATOR));
+    expect(src).toContain('{mode === "upload" && (');
+    expect(src).toContain('{mode === "manual" && (');
+    expect(src).toContain('{mode === "batch" && (');
+  });
+
+  it("**手动 / 批量两栏没有下单出口** —— 不许挂报价按钮", () => {
+    // 「报价」按钮(`quoteActionSlot`)**只**在上传模式那一块 ⇒ 手动 / 批量
+    // 那两栏**没有下单这条路** ⇒ 恢复标签不会造出「能下单但没订单」的洞。
+    const src = read(CALCULATOR);
+    const uploadAt = src.indexOf('{mode === "upload" && (');
+    const manualAt = src.indexOf('{mode === "manual" && (');
+    const batchAt = src.indexOf('{mode === "batch" && (');
+    expect(uploadAt).toBeGreaterThan(-1);
+    expect(manualAt).toBeGreaterThan(uploadAt);
+    expect(batchAt).toBeGreaterThan(manualAt);
+
+    // 只挂**一次**(上传模式那一块)
+    const mounts = src.match(/primaryAction=\{quoteActionSlot\}/g) ?? [];
+    expect(mounts.length).toBe(1);
+    // 而那一处落在上传模式这一段里
+    const mountAt = src.indexOf("primaryAction={quoteActionSlot}");
+    expect(mountAt).toBeGreaterThan(uploadAt);
+    expect(mountAt).toBeLessThan(manualAt);
+  });
+
+  it("手动 / 批量两栏是**深色**的 —— 别造出「页面两张脸」", () => {
+    // 2026-11-10 工作室说过「页面两张脸」:整页 `bg-zinc-950`,浅色卡片落在
+    // 深色底上就是第二张脸。这两栏藏了四天,所以从来没跟着改过配色。
+    const calc = stripComments(read(CALCULATOR));
+
+    // 手动那一栏(从 `{mode === "manual"` 到 `{mode === "batch"` 之前)
+    const manualAt = calc.indexOf('{mode === "manual" && (');
+    const batchAt = calc.indexOf('{mode === "batch" && (');
+    expect(manualAt).toBeGreaterThan(-1);
+    expect(batchAt).toBeGreaterThan(manualAt);
+    const manual = calc.slice(manualAt, batchAt);
+    expect(manual).toContain("bg-zinc-900");
+    expect(manual).toContain("text-zinc-100");
+    // 浅色残留 —— 卡片 / 文字 / 边框
+    expect(manual).not.toContain("bg-stone-");
+    expect(manual).not.toContain("text-stone-");
+    expect(manual).not.toContain("border-stone-");
+
+    // 批量那一栏
+    const batch = stripComments(read(BATCH_SECTION));
+    expect(batch).toContain("bg-zinc-900");
+    expect(batch).toContain("text-zinc-100");
+    expect(batch).not.toContain("bg-stone-");
+    expect(batch).not.toContain("text-stone-");
+    expect(batch).not.toContain("border-stone-");
+
+    // 手动那一栏用的那个输入框 + 批量用的那个统计块
+    const shared = read(SHARED);
+    expect(shared).toContain("bg-zinc-950");
+    expect(shared).not.toContain("bg-stone-");
   });
 });
 

@@ -2315,12 +2315,21 @@ export function PricingCalculator({
             </section>
           )}
 
-          {/* ---------- 手动模式 ---------- */}
+          {/* ---------- 手动模式 ----------
+              **深色**(2026-11-14)
+
+              2026-11-10 之前这三个标签是藏着的,所以这一栏**从来没跟着改深色**
+              —— 它一直是浅色的 stone 卡片。现在标签放回来了,而整个页面的外壳
+              是 `bg-zinc-950`(工作室 2026-11-10 的「页面两张脸」那一条),
+              浅色卡片落在深色底上就是**第二张脸**。
+
+              ⇒ **内容一个字没动**(三个尺寸格 / 实心比例滑块 / 五个预设 /
+              支撑提示 / 预估克重),只把配色换成深色那一套。 */}
           {mode === "manual" && (
-            <Card className="border-stone-200 shadow-sm">
+            <Card className="border-zinc-800 bg-zinc-900">
               <CardContent className="pt-5 space-y-4">
                 <div className="space-y-2">
-                  <Label className="text-xs font-medium text-stone-600">
+                  <Label className="text-xs font-medium text-zinc-400">
                     {t("manual.dimsLabel")}
                   </Label>
                   <div className="grid grid-cols-3 gap-2">
@@ -2344,10 +2353,10 @@ export function PricingCalculator({
 
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <Label className="text-xs font-medium text-stone-600">
+                    <Label className="text-xs font-medium text-zinc-400">
                       {t("manual.solidRatio")}
                     </Label>
-                    <span className="text-xs font-mono font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                    <span className="text-xs font-mono font-semibold text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded border border-amber-500/30">
                       {solidRatio}%
                     </span>
                   </div>
@@ -2365,7 +2374,7 @@ export function PricingCalculator({
                         key={p.labelKey}
                         type="button"
                         onClick={() => setSolidRatio(p.ratio)}
-                        className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${solidRatio === p.ratio ? "bg-amber-500 text-white border-amber-500" : "bg-white text-stone-500 border-stone-200 hover:border-amber-400"}`}
+                        className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${solidRatio === p.ratio ? "bg-amber-500 text-white border-amber-500" : "bg-zinc-900 text-zinc-400 border-zinc-800 hover:border-amber-500/60"}`}
                       >
                         {t(p.labelKey)} {p.ratio}%
                       </button>
@@ -2374,13 +2383,13 @@ export function PricingCalculator({
                 </div>
 
                 {/* 支撑克重 —— 手动模式没有模型，支撑要上传模型后由智能摆盘算出 */}
-                <div className="flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 p-2.5">
+                <div className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/60 p-2.5">
                   <div className="flex items-center gap-2">
-                    <Compass className="size-3.5 text-stone-400" />
-                    <span className="text-sm text-stone-800">
+                    <Compass className="size-3.5 text-zinc-500" />
+                    <span className="text-sm text-zinc-100">
                       {t("stats.supportWeight")}
                     </span>
-                    <span className="text-xs text-stone-400">
+                    <span className="text-xs text-zinc-500">
                       {t("stats.supportNeedsModel")}
                     </span>
                   </div>
@@ -2388,17 +2397,17 @@ export function PricingCalculator({
 
                 {/* 预估克重 —— 手动模式原本只显示总价，去掉价格后改为只给克重 */}
                 {calc && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3 space-y-2">
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-stone-700">
+                      <span className="text-sm font-medium text-zinc-100">
                         {t("manual.weightTitle")}
                       </span>
-                      <span className="text-3xl font-bold tracking-tight text-amber-700 font-mono">
+                      <span className="text-3xl font-bold tracking-tight text-amber-300 font-mono">
                         {Math.ceil(calc.materialWeight)} g
                       </span>
                     </div>
                     {/* 次要数据 —— 体积 / 表面积 收成一行小字 */}
-                    <p className="text-[11px] text-stone-400">
+                    <p className="text-[11px] text-zinc-500">
                       {t("stats.realVolume")} {fmt(calc.volumeCM3, 2)} cm³ ·{" "}
                       {t("stats.surfaceArea")} {fmt(calc.surfaceAreaCM2, 2)} cm²
                     </p>

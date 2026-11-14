@@ -143,7 +143,12 @@ export function scaleGeometryXYZ(
 // 小组件
 // ---------------------------------------------------------------------------
 
-/** 数字输入框（手动模式外形尺寸） */
+/**
+ * 数字输入框（手动模式外形尺寸）
+ *
+ * **深色**(2026-11-14)—— 只在「手动估算」那一栏用,而那一栏现在摆在深色的
+ * 工作台上 ⇒ 输入框也得是深色的,否则浅色输入框落在深色卡片上很扎眼。
+ */
 export function DimInput({
   label,
   value,
@@ -155,21 +160,25 @@ export function DimInput({
 }) {
   return (
     <div className="space-y-1.5">
-      <Label className="text-xs text-stone-500">{label}</Label>
+      <Label className="text-xs text-zinc-400">{label}</Label>
       <Input
         type="number"
         min="0"
         step="0.1"
         value={Number.isFinite(value) ? value : ""}
         onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
-        className="font-mono"
+        className="font-mono bg-zinc-950 border-zinc-700 text-zinc-100 placeholder:text-zinc-600 focus-visible:ring-amber-500/40 focus-visible:border-amber-400"
         placeholder="0.0"
       />
     </div>
   );
 }
 
-/** 统计块（克重 / 体积 / 费用等） */
+/**
+ * 统计块（克重 / 体积 / 费用等）
+ *
+ * **深色**(2026-11-14)—— 只在「批量报价」那一栏用,跟上面那个输入框一个道理。
+ */
 export function StatBlock({
   label,
   value,
@@ -185,16 +194,16 @@ export function StatBlock({
 }) {
   return (
     <div
-      className={`rounded-lg border p-3 ${highlight ? "border-amber-300 bg-amber-50/60" : muted ? "border-stone-200 bg-stone-50/40" : "border-stone-200 bg-white"}`}
+      className={`rounded-lg border p-3 ${highlight ? "border-amber-500/30 bg-amber-500/10" : muted ? "border-zinc-800 bg-zinc-900/60" : "border-zinc-800 bg-zinc-900"}`}
     >
       <div
-        className={`flex items-center gap-1.5 text-xs ${muted ? "text-stone-400" : "text-stone-500"}`}
+        className={`flex items-center gap-1.5 text-xs ${muted ? "text-zinc-500" : "text-zinc-400"}`}
       >
         {icon}
         <span>{label}</span>
       </div>
       <div
-        className={`mt-1 font-mono ${highlight ? "text-amber-700 font-semibold text-base" : "text-stone-800 text-sm"}`}
+        className={`mt-1 font-mono ${highlight ? "text-amber-300 font-semibold text-base" : "text-zinc-100 text-sm"}`}
       >
         {value}
       </div>
