@@ -5,10 +5,14 @@
  * 供 /admin/products 后台使用。风格照 db-lines.ts —— mapper 把 DB 行转成
  * 运行时对象（时间戳转 ISO 字符串，方便过 next-safe-action 的 JSON 序列化）。
  *
- * 注意：本模块只管「商品资料 + SKU 价」。尺寸清单 / 配件清单仍是
- * product-catalog.ts 的 PRODUCT_TYPES 常量（见 CLAUDE.md 范围说明），
- * 所以 createProduct 的 code 必须落在字典里，否则对外接口不会返回它 ——
- * 写入前用 getProductType 校验。
+ * 注意：本模块只管「商品资料 + SKU 价」。尺寸清单 / 配件清单现在住在
+ * **DB 字典**（`product_size` / `product_accessory` / `product_accessory_option`，
+ * 见 `catalog-dictionary.ts`），代码常量 `PRODUCT_TYPES` 只是**兜底**。
+ *
+ * ⇒ 新建型号**不再**被 `PRODUCT_TYPES` 硬闸挡住（2026-11-14）——
+ * 尺寸 / 配件既然已经是 DB 字典，新型号就该能自由创建。
+ * 「生成 SKU」那一步仍然要求这个型号在字典里**至少有一档尺寸**：
+ * 没有尺寸 ⇒ 组合是空的 ⇒ 一个 SKU 都生成不出来。
  */
 
 import { asc, eq, inArray } from "drizzle-orm";
@@ -23,6 +27,12 @@ import type {
 import { product, productAccessoryVariant, productVariant } from "@/db/schema";
 import { getProductType } from "@/features/gpt-image/lib/product-catalog";
 
+import { getCatalogDictionary } from "./catalog-dictionary-store";
+import {
+  CatalogDictionaryUserError,
+  type CatalogDictionary,
+  sizeCodesForType,
+} from "./catalog-dictionary";
 import {
   buildAllVariantSeeds,
   recomputeVariantPrices,
@@ -268,15 +278,20 @@ export interface ProductInput {
   sortOrder?: number | undefined;
 }
 
-/** 新建商品；code 已存在则返回 undefined（调用方决定是否 upsert） */
+/**
+ * 新建商品；code 已存在则返回 undefined（调用方决定是否 upsert）
+ *
+ * ## code **不再**必须在 `PRODUCT_TYPES` 里（2026-11-14）
+ *
+ * 尺寸 / 配件清单搬进 DB 字典之后，新型号就该能自由创建 ——
+ * 以前那道闸逼着工作室改代码常量才能加一个型号。
+ *
+ * ⚠️ 但**没有尺寸就生成不出 SKU** —— 那一道闸挪到
+ * `generateVariantsForProductInDb`（那儿会说出人话）。
+ */
 export async function createProductInDb(
   input: ProductInput
 ): Promise<AdminProduct | undefined> {
-  if (!getProductType(input.code)) {
-    throw new Error(
-      `未知的产品码 ${input.code}：product-catalog.ts 的 PRODUCT_TYPES 里没有它，新增新型号需要改代码`
-    );
-  }
   const now = new Date();
   const row: NewProductRow = {
     code: input.code,
@@ -410,10 +425,24 @@ export async function bulkUpdateVariantsInDb(
  */
 export async function recomputeProductVariantPricesInDb(
   code: string,
-  basePriceCents: number
+  basePriceCents: number,
+  /**
+   * 字典 —— **可选**
+   *
+   * ⚠️ **后台改完字典那条路必须把「新鲜的」那份传进来** ——
+   * `getCatalogDictionary()` 是 React `cache()` 包着的,**请求级**:
+   * 同一个请求里刚写完字典再读,拿到的还是**改之前**那份。
+   * 不传 ⇒ 用缓存那份 ⇒ **拿旧加价去重算** ⇒ 改了加价,SKU 的价还是老的。
+   *
+   * 不传 = 常规读路径(不是「刚写完」的那种场景)。
+   */
+  dictionary?: CatalogDictionary
 ): Promise<number> {
-  const productType = getProductType(code);
-  if (!productType) throw new Error(`未知的产品码 ${code}`);
+  // 尺寸加价从**字典**来(DB 优先,代码常量兜底)—— 不再按下标算
+  const dict = dictionary ?? (await getCatalogDictionary());
+  if (!dict.typeOrder.includes(code)) {
+    throw new Error(`未知的产品码 ${code}`);
+  }
 
   const [existingRows, accessoryRows] = await Promise.all([
     db
@@ -435,7 +464,8 @@ export async function recomputeProductVariantPricesInDb(
 
   const recomputed = recomputeVariantPrices({
     basePriceCents,
-    productType,
+    productCode: code,
+    dictionary: dict,
     accessoryVariants: accessoryRows.map((r) => ({
       accessoryCode: r.accessoryCode,
       variantCode: r.variantCode,
@@ -486,10 +516,28 @@ export async function recomputeProductVariantPricesInDb(
  * @returns 新增行数
  */
 export async function generateVariantsForProductInDb(
-  code: string
+  code: string,
+  /**
+   * 字典 —— **可选**
+   *
+   * ⚠️ 同 `recomputeProductVariantPricesInDb`:后台「刚改完字典就补齐 SKU」
+   * 那条路必须传**新鲜的**那份,否则生成出来的 SKU 用的是**旧**加价。
+   */
+  dictionary?: CatalogDictionary
 ): Promise<number> {
-  const productType = getProductType(code);
-  if (!productType) throw new Error(`未知的产品码 ${code}`);
+  // 尺寸 / 配件清单从**字典**来(DB 优先,代码常量兜底)
+  const dict = dictionary ?? (await getCatalogDictionary());
+
+  // ⚠️ 新型号不再被 `PRODUCT_TYPES` 硬闸挡住（2026-11-14）——
+  // 但**至少要有一档尺寸**：没有尺寸 ⇒ 组合是空的 ⇒ 一个 SKU 都生成不出来。
+  //
+  // `sizeCodesForType` 只给**启用中**的尺寸（停用的被 merge 过滤掉了）⇒
+  // 「全停用了」跟「从来没有」是同一个结论：生成不出 SKU。
+  if (sizeCodesForType(dict, code).length === 0) {
+    throw new CatalogDictionaryUserError(
+      `型号 ${code} 在目录字典里没有尺寸 —— 先在「目录字典 → 尺寸字典」里加至少一档尺寸，再生成 SKU`
+    );
+  }
 
   const [productRow, accessoryRows] = await Promise.all([
     db.query.product.findFirst({ where: eq(product.code, code) }),
@@ -509,8 +557,9 @@ export async function generateVariantsForProductInDb(
       priceDeltaCents: r.priceDeltaCents,
       sortOrder: r.sortOrder,
     })),
+    dictionary: dict,
     // 只生成这一个产品
-    productTypes: [productType],
+    productCodes: [code],
   });
 
   const rows: NewProductVariantRow[] = seeds.map((s) => ({

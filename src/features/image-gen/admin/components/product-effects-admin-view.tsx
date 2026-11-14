@@ -41,6 +41,7 @@ import {
 } from "@/features/image-gen/admin/actions";
 import { EditEffectDialog } from "@/features/image-gen/admin/components/edit-effect-dialog";
 import { PreviewEffectDialog } from "@/features/image-gen/admin/components/preview-effect-dialog";
+import type { CatalogDictionaryView } from "@/features/image-gen/lib/catalog-dictionary-view";
 import {
   PROMPT_SCENE_COLORS,
   PROMPT_SCENE_LABELS,
@@ -52,10 +53,17 @@ import { cn } from "@/lib/utils";
 
 interface ProductEffectsAdminViewProps {
   effects: ProductEffect[];
+  /**
+   * 商品目录字典（型号 / 尺寸 / 配件）—— 服务端读好传下来
+   *
+   * 「编辑」弹窗里的表单是客户端组件读不了 DB ⇒ 逐层往下传。
+   */
+  catalog: CatalogDictionaryView;
 }
 
 export function ProductEffectsAdminView({
   effects: initialEffects,
+  catalog,
 }: ProductEffectsAdminViewProps) {
   const { message } = App.useApp();
   const [effects, setEffects] = useState<ProductEffect[]>(initialEffects);
@@ -553,10 +561,15 @@ export function ProductEffectsAdminView({
         open={!!editingEffect}
         onOpenChange={(open) => !open && setEditingEffect(null)}
         effect={editingEffect}
+        catalog={catalog}
       />
 
       {/* 新建对话框 */}
-      <EditEffectDialog open={createOpen} onOpenChange={setCreateOpen} />
+      <EditEffectDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        catalog={catalog}
+      />
     </div>
   );
 }

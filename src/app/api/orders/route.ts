@@ -16,6 +16,7 @@ import {
   listOrders as listOrdersSvc,
 } from "@/features/gpt-image/lib/admin-services";
 import { promptOrderCreateSchema } from "@/features/gpt-image/lib/validation";
+import { CatalogSpecValidationError } from "@/features/image-gen/lib/catalog-dictionary-validate";
 import { withApiLogging } from "@/lib/api-logger";
 import { auth } from "@/lib/auth";
 
@@ -113,6 +114,15 @@ async function postHandler(req: NextRequest) {
     revalidateTag(ORDERS_TAG, "max");
     return NextResponse.json({ success: true, data: order });
   } catch (err) {
+    // ⚠️ 规格不合法是**参数错**(400),不是服务端炸了(500)——
+    // 老口径(zod 层校验)是 400,校验搬到服务层(要读目录字典)之后
+    // 状态码得保持一致,不然客户端会把「用户填错了」当成「服务器坏了」。
+    if (err instanceof CatalogSpecValidationError) {
+      return NextResponse.json(
+        { success: false, error: err.message },
+        { status: 400 }
+      );
+    }
     return NextResponse.json(
       {
         success: false,

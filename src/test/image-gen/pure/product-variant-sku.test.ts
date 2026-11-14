@@ -9,26 +9,33 @@
  * 覆盖：
  *  1) buildSku —— 段规范化（_ → -，大写）+ 尾部 N-A 截断
  *  2) buildVariantSeeds —— 笛卡尔积展开 + 价格公式
- *     a) 尺寸阶梯 idx × ¥5
+ *     a) 尺寸加价来自**字典**（兜底那份 = idx × ¥5）
  *     b) 配件变体加价叠加
  *     c) 无变体的配件（metal/magnet/bracket）出 N-A 行
  *     d) 无配件的产品（RM）每尺寸出 1 行
  *  3) buildAllVariantSeeds —— 按 productTypeCode 正确分区配件变体
  *  4) id 由 SKU 派生 → 重跑幂等
  *
- * 不走 DB：product-variant-sku.ts 只 import product-catalog 的常量，
+ * 2026-11-14：尺寸 / 配件清单从**代码常量**搬进**字典**
+ * （`catalog-dictionary.ts`）⇒ 入参从 `productType` 换成 `dictionary`。
+ * 本文件用的字典是**代码常量兜底那一份** —— 它的尺寸加价就是
+ * `idx × ¥5`，所以下面的断言跟改造前**逐字相同**。
+ *
+ * 不走 DB：product-variant-sku.ts 只 import 字典 / product-catalog 的常量，
  * 没有 @/db 依赖。
  */
 
 import { describe, expect, it } from "vitest";
 
-import { PRODUCT_TYPES } from "@/features/gpt-image/lib/product-catalog";
+import {
+  buildCatalogDictionaryFromCodeConstants,
+  SIZE_STEP_CENTS,
+} from "@/features/image-gen/lib/catalog-dictionary";
 import {
   buildAllVariantSeeds,
   buildSku,
   buildVariantSeeds,
   NO_SEGMENT,
-  SIZE_STEP_CENTS,
   variantIdFromSku,
 } from "@/features/image-gen/lib/product-variant-sku";
 
@@ -36,11 +43,14 @@ import {
 // Fixture
 // ----------------------------------------------------------------------
 
-function productTypeOf(code: string) {
-  const pt = PRODUCT_TYPES.find((p) => p.code === code);
-  if (!pt) throw new Error(`fixture 缺失: PRODUCT_TYPES 里没有 ${code}`);
-  return pt;
-}
+/**
+ * 字典 = **代码常量兜底**那一份。
+ *
+ * ⚠️ 这一份的尺寸加价就是 `idx × ¥5` ⇒ 下面的价断言跟改造前逐字相同。
+ * 「字典优先、代码常量兜底」这件事由 `catalog-dictionary.test.ts` 守着，
+ * 本文件只管 SKU 生成这一层。
+ */
+const DICTIONARY = buildCatalogDictionaryFromCodeConstants();
 
 /** R 钥匙扣：2 尺寸 ×（皮革 2 色 + 金属 1 + 编织绳 1） */
 const R_VARIANTS = [
@@ -174,13 +184,11 @@ describe("variantIdFromSku", () => {
 // ----------------------------------------------------------------------
 
 describe("buildVariantSeeds", () => {
-  const ptR = productTypeOf("R");
-
-  it("尺寸阶梯加价 = idx × ¥5", () => {
+  it("尺寸阶梯加价 = idx × ¥5（兜底字典的显式值）", () => {
     const seeds = buildVariantSeeds({
       productCode: "R",
       basePriceCents: 1900,
-      productType: ptR,
+      dictionary: DICTIONARY,
       accessoryVariants: R_VARIANTS,
     });
     // 第一个尺寸 4cm(idx 0)金属行：1900 + 0 + 0
@@ -195,7 +203,7 @@ describe("buildVariantSeeds", () => {
     const seeds = buildVariantSeeds({
       productCode: "R",
       basePriceCents: 1900,
-      productType: ptR,
+      dictionary: DICTIONARY,
       accessoryVariants: R_VARIANTS,
     });
     // 6cm(idx1) + 黑色皮革(+100)
@@ -209,7 +217,7 @@ describe("buildVariantSeeds", () => {
     const seeds = buildVariantSeeds({
       productCode: "R",
       basePriceCents: 1900,
-      productType: ptR,
+      dictionary: DICTIONARY,
       accessoryVariants: R_VARIANTS,
     });
     const metal = seeds.filter((s) => s.accessoryCode === "metal");
@@ -223,7 +231,7 @@ describe("buildVariantSeeds", () => {
     const seeds = buildVariantSeeds({
       productCode: "RM",
       basePriceCents: 4900,
-      productType: productTypeOf("RM"),
+      dictionary: DICTIONARY,
       accessoryVariants: [],
     });
     // 相框 3 个尺寸 × 无配件
@@ -240,7 +248,7 @@ describe("buildVariantSeeds", () => {
   it("basePriceCents 不传时回退 BASE_PRICE_CENTS 字典", () => {
     const seeds = buildVariantSeeds({
       productCode: "P",
-      productType: productTypeOf("P"),
+      dictionary: DICTIONARY,
       accessoryVariants: [],
     });
     // P = ¥39
@@ -251,7 +259,7 @@ describe("buildVariantSeeds", () => {
     const seeds = buildVariantSeeds({
       productCode: "M",
       basePriceCents: 19900,
-      productType: productTypeOf("M"),
+      dictionary: DICTIONARY,
       accessoryVariants: M_GLASS_VARIANTS,
     });
     const glass4 = seeds.find((s) => s.sku.endsWith("-GLASS-COVER-GLASS-4"));
@@ -264,7 +272,7 @@ describe("buildVariantSeeds", () => {
     const seeds = buildVariantSeeds({
       productCode: "R",
       basePriceCents: 1900,
-      productType: ptR,
+      dictionary: DICTIONARY,
       accessoryVariants: R_ROPE_VARIANTS,
     });
     const rope = seeds.find((s) => s.sku === "R-4-BRAIDED-ROPE-RED");
@@ -277,7 +285,7 @@ describe("buildVariantSeeds", () => {
     const seeds = buildVariantSeeds({
       productCode: "R",
       basePriceCents: 1900,
-      productType: ptR,
+      dictionary: DICTIONARY,
       accessoryVariants: R_VARIANTS,
       startSortOrder: 100,
     });
@@ -290,7 +298,7 @@ describe("buildVariantSeeds", () => {
     const seeds = buildVariantSeeds({
       productCode: "R",
       basePriceCents: 1900,
-      productType: ptR,
+      dictionary: DICTIONARY,
       accessoryVariants: R_VARIANTS,
     });
     expect(new Set(seeds.map((s) => s.sku)).size).toBe(seeds.length);
@@ -307,6 +315,7 @@ describe("buildAllVariantSeeds", () => {
     const all = buildAllVariantSeeds({
       basePrices: { R: 1900, M: 19900 },
       accessoryVariants: R_VARIANTS,
+      dictionary: DICTIONARY,
     });
     // R 不能拿到 M 的 stand 变体
     const rSkus = all.filter((s) => s.productCode === "R").map((s) => s.sku);
@@ -320,6 +329,7 @@ describe("buildAllVariantSeeds", () => {
   it("全 6 个产品生成，SKU 全局不重复", () => {
     const all = buildAllVariantSeeds({
       accessoryVariants: R_VARIANTS,
+      dictionary: DICTIONARY,
     });
     const codes = new Set(all.map((s) => s.productCode));
     // PRODUCT_TYPES 的 6 个型号都要有 SKU —— 连无配件的 RM 也会按尺寸出行
@@ -333,6 +343,7 @@ describe("buildAllVariantSeeds", () => {
     const all = buildAllVariantSeeds({
       basePrices: { RM: 9999 },
       accessoryVariants: [],
+      dictionary: DICTIONARY,
     });
     const rm = all.find((s) => s.sku === "RM-6");
     expect(rm?.priceCents).toBe(9999);

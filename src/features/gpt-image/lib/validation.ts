@@ -3,7 +3,7 @@
  */
 
 import { z } from "zod";
-import { PLATFORMS, validateProductSpec } from "./product-catalog";
+import { PLATFORMS } from "./product-catalog";
 
 /** 单个提示词变量结构（Phase A 起 image-gen 工作台复用） */
 export const promptVariableSchema = z.object({
@@ -137,24 +137,22 @@ export const promptOrderCreateSchema = z
     /** 配件（leather/pvc/bracket），部分型号无配件选项，可选 */
     accessoryCode: z.string().min(1).max(16).optional(),
   })
-  // 三件套字典组合校验：ToC 订单允许三件套全 null；只要任一字段非空就跑校验。
+  // 三件套**自洽性**校验：ToC 订单允许三件套全 null；
+  // 只要给了尺寸 / 配件，就必须同时给型号。
+  //
+  // ⚠️ 这里**不再判「型号 / 尺寸 / 配件是不是字典里的那一档」**（2026-11-14）——
+  //   zod 的 `superRefine` 是**同步**的，读不了 DB ⇒ 尺寸 / 配件清单改从
+  //   **目录字典**（`catalog-dictionary.ts`）来，后台新加的尺寸才会被认。
+  //   权威的那一次校验在**服务层**
+  //   （`admin-services.ts::createOrder` / `updateOrder`）—— 那里能
+  //   `await getCatalogDictionary()`。
+  //   消息跟老的那份逐字相同 ⇒ 用户看到的报错还是那句话。
   .superRefine((data, ctx) => {
-    if (!data.productTypeCode && !data.productSize && !data.accessoryCode) {
-      return;
-    }
-    try {
-      validateProductSpec(
-        data.productTypeCode ?? null,
-        data.productSize ?? null,
-        data.accessoryCode ?? null
-      );
-    } catch (e) {
-      // 把校验失败的 message 挂到 productTypeCode 字段上（前端级联出错点）
-      const msg = e instanceof Error ? e.message : "产品规格组合不合法";
+    if (!data.productTypeCode && (data.productSize || data.accessoryCode)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["productTypeCode"],
-        message: msg,
+        message: "未选择产品型号时，不能指定尺寸或配件",
       });
     }
   });

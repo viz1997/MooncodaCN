@@ -47,6 +47,7 @@ import {
   getLeatherColor,
 } from "@/features/gpt-image/lib/product-catalog";
 import { findEffect } from "@/features/image-gen/lib/effects-store";
+import { getCatalogDictionary } from "@/features/image-gen/lib/catalog-dictionary-store";
 import { fillDefaultsByTemplate } from "@/features/image-gen/lib/preview-helpers";
 import { computePromptOrderCredits } from "@/features/image-gen/lib/price-calculator";
 import { protectedAction } from "@/lib/safe-action";
@@ -184,7 +185,9 @@ export const submitImageGenDemoAction = withDemoAction("submit")
         remarks: parsedInput.remarks ?? null,
         platform: parsedInput.platform ?? null,
         platformOrderNo: parsedInput.platformOrderNo ?? null,
-      }
+      },
+      // 尺寸 / 配件清单走**目录字典**(2026-11-14)—— 后台新加的必须被认
+      await getCatalogDictionary()
     );
 
     // 4c. 2026-09-11：selectedCell 校验（demo 流宫格选 cell 提交）

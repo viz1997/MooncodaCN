@@ -64,10 +64,12 @@ import { cache } from "react";
 
 import { db } from "@/db";
 import { product, productAccessoryVariant } from "@/db/schema";
+import { getCatalogDictionary } from "@/features/image-gen/lib/catalog-dictionary-store";
 import { describeDbError } from "@/features/shared/lib/db-error";
 
 import type { AccessoryGroup, StorefrontProduct } from "../types";
 import { buildCatalogSource, emptyCatalogSource } from "./catalog-apply";
+import { buildPriceCatalog } from "./catalog-dictionary-apply";
 import type { CatalogSource } from "./catalog-source-types";
 import type { PriceSource } from "./price-source-types";
 
@@ -238,10 +240,29 @@ async function optOutOfStaticRendering(): Promise<void> {
  *
  * 拿不到就**不抛** —— 把「查没查到」放进 `degraded` 标志,
  * **抛不抛由调用点决定**(见文件头那张表)。
+ *
+ * ## 这里还带一份「目录字典」(2026-11-14)
+ *
+ * `catalog` = **DB 里的尺寸 / 配件 / 加价**(`product_size` /
+ * `product_accessory*` 那几张表)翻译成商城形状。
+ *
+ * - **显示那条路**(`storefront-catalog.ts`)把它盖到商品上;
+ * - **算钱那条路**(`pricing.ts`)从**同一份**里取尺寸和配件加价。
+ *
+ * ⇒ 「页面显示 +¥5」和「结算收 +¥5」**结构上不可能对不上**。
+ *
+ * ⚠️ **字典读失败不会让 `degraded` 变 true** ——
+ * `getCatalogDictionary()` 自己会**整份退回代码常量兜底**,那份兜底跟
+ * 改造前逐字节相同 ⇒ 收钱那条路的降级闸(`degraded`)仍然是关于**价**的,
+ * 语义没被稀释。
  */
 export async function getPriceSource(): Promise<PriceSource> {
   await optOutOfStaticRendering();
-  return (await readStorefrontSource()).price;
+  const [source, dictionary] = await Promise.all([
+    readStorefrontSource(),
+    getCatalogDictionary(),
+  ]);
+  return { ...source.price, catalog: buildPriceCatalog(dictionary) };
 }
 
 /**

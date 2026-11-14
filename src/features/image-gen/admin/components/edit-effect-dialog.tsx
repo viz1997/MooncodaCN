@@ -14,18 +14,26 @@ import { Modal } from "antd";
 import { useRouter } from "next/navigation";
 
 import { ProductEffectForm } from "@/features/image-gen/admin/components/product-effect-form";
+import type { CatalogDictionaryView } from "@/features/image-gen/lib/catalog-dictionary-view";
 import type { ProductEffect } from "@/features/image-gen/lib/product-effect-types";
 
 interface EditEffectDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   effect?: ProductEffect | null;
+  /**
+   * 商品目录字典（型号 / 尺寸 / 配件）—— 服务端读好传下来
+   *
+   * 表单是客户端组件读不了 DB ⇒ 这个弹窗只负责**往下传**。
+   */
+  catalog: CatalogDictionaryView;
 }
 
 export function EditEffectDialog({
   open,
   onOpenChange,
   effect,
+  catalog,
 }: EditEffectDialogProps) {
   const router = useRouter();
   const isEdit = !!effect;
@@ -50,6 +58,7 @@ export function EditEffectDialog({
 
       <ProductEffectForm
         {...(effect ? { initialData: effect } : {})}
+        catalog={catalog}
         onSaved={() => {
           onOpenChange(false);
           router.refresh();

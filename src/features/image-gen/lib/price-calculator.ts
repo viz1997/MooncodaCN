@@ -30,8 +30,9 @@ import { promptTemplatePrice } from "@/db/schema";
 import {
   getAccessory,
   getLeatherColor,
-  getProductType,
 } from "@/features/gpt-image/lib/product-catalog";
+import { getCatalogDictionary } from "@/features/image-gen/lib/catalog-dictionary-store";
+import { validateProductSpecWithDictionary } from "@/features/image-gen/lib/catalog-dictionary-validate";
 
 /**
  * 价格计算入参：当前订单用户选的规格（与 promptOrder 列 1:1）。
@@ -80,7 +81,7 @@ export interface PriceCalcResult {
  *   4. 按 specKey 字母序组装 breakdown，total = basePrice + Σ(delta)
  *
  * 为什么校验在 helper 里再做一次：
- *   server action 已经做过 validateProductSpec / validateLeatherColor 等，
+ *   server action 已经做过 validateProductSpecWithDictionary / validateLeatherColor 等，
  *   helper 这里加一次兜底防御：万一调用方传脏值，至少不会返负积分或 NaN。
  *   校验失败抛 Error，server action 接住 → 抛给前端可读消息。
  */
@@ -90,26 +91,18 @@ export async function computePromptOrderCredits(
   input: PriceCalcInput
 ): Promise<PriceCalcResult> {
   // 1. 兜底校验（仅在 productTypeCode 非空时校验具体值，避免无型号老订单误伤）
+  //
+  // ⚠️ 尺寸 / 配件的合法性读**目录字典**(2026-11-14),不是代码常量 ——
+  // 后台 `/admin/products/[code]` 新加的尺寸必须能被算价这条链路认,
+  // 否则「校验通过、算价报错」= 白加一次(见 `catalog-dictionary-validate.ts`)。
   if (input.productTypeCode) {
-    const type = getProductType(input.productTypeCode);
-    if (!type) {
-      throw new Error(`未知的产品型号：${input.productTypeCode}`);
-    }
-    if (input.productSize && !type.sizes.includes(input.productSize)) {
-      throw new Error(
-        `产品型号 ${type.code} 不支持尺寸 ${input.productSize}cm`
-      );
-    }
-    if (
-      input.accessoryCode &&
-      !type.accessories.includes(
-        input.accessoryCode as (typeof type.accessories)[number]
-      )
-    ) {
-      throw new Error(
-        `产品型号 ${type.code} 不支持配件 ${input.accessoryCode}`
-      );
-    }
+    const dictionary = await getCatalogDictionary();
+    validateProductSpecWithDictionary(
+      dictionary,
+      input.productTypeCode,
+      input.productSize,
+      input.accessoryCode
+    );
     if (input.leatherColor) {
       const color = getLeatherColor(input.leatherColor);
       if (!color) {

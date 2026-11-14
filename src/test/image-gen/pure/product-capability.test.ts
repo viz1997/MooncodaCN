@@ -46,6 +46,13 @@ import {
   PRODUCT_META,
 } from "@/features/gpt-image/lib/product-catalog";
 import {
+  buildCatalogDictionaryFromCodeConstants,
+  type CatalogAccessoryDef,
+  type CatalogAccessoryOptionDef,
+  type CatalogDictionary,
+  type CatalogSizeDef,
+} from "@/features/image-gen/lib/catalog-dictionary";
+import {
   _internals,
   assembleProductCapabilities,
   parseProductTypeCodes,
@@ -127,6 +134,8 @@ function makeVariant(overrides: Partial<VariantRow> = {}): VariantRow {
     swatch: "#C0392B",
     priceDeltaCents: 200,
     sortOrder: 0,
+    // 2026-11-14:适用尺寸(DB 里存 JSON 数组字符串);空数组 = 通用
+    appliesToSizesCm: "[]",
     isActive: true,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -905,5 +914,246 @@ describe("assembleProductCapabilities —— 商品目录 DB 化(2026-10-21)", (
       new Map([["M", [makeSku({ sku: "M-8-STAND" })]]])
     );
     expect(out[0]?.variants).toEqual([]);
+  });
+});
+
+/* ========================================================================== */
+/*  尺寸 / 配件字典(2026-11-14)                                                 */
+/* ========================================================================== */
+
+/**
+ * 尺寸 / 配件清单搬进 DB 之后,`assembleProductCapabilities` 多了一个
+ * **末尾可选**的 `dictionary` 入参。
+ *
+ * 三条口径:
+ *
+ * 1. **不传字典 → 老口径一个字节都不变**(单测直接调本函数时不传)
+ * 2. **传了字典 → 尺寸清单 + 加价、配件清单 + 名字 / 分类都从字典来**
+ * 3. **发出去的字段一个都不多、一个都没少** —— 小程序读的就是这个接口的
+ *    响应形状,**一个字段都不能动**(工作室说了「不要管小程序」)
+ */
+describe("assembleProductCapabilities —— 尺寸 / 配件字典(2026-11-14)", () => {
+  const tplR = makeTemplate({ id: "tpl_R", productTypeCode: "R" });
+  const effR = makeEffect({
+    id: "eff_R_1",
+    productTypeCode: "R",
+    promptTemplateId: "tpl_R",
+  });
+  const effects = [{ effect: effR, template: tplR }];
+  const variantsByProduct = makeVariantMap([
+    ...makeRopeVariants(),
+    ...makeLeatherVariants(),
+  ]);
+
+  /** 兜底字典 + 局部改动 —— 模拟「后台改了字典」 */
+  function dictionaryWith(patch: {
+    sizesByType?: Record<string, readonly CatalogSizeDef[]>;
+    accessories?: Record<string, CatalogAccessoryDef>;
+    accessoryOptionsByType?: Record<
+      string,
+      readonly CatalogAccessoryOptionDef[]
+    >;
+  }): CatalogDictionary {
+    const base = buildCatalogDictionaryFromCodeConstants();
+    return {
+      ...base,
+      sizesByType: new Map([
+        ...base.sizesByType,
+        ...Object.entries(patch.sizesByType ?? {}),
+      ]),
+      accessories: new Map([
+        ...base.accessories,
+        ...Object.entries(patch.accessories ?? {}),
+      ]),
+      accessoryOptionsByType: new Map([
+        ...base.accessoryOptionsByType,
+        ...Object.entries(patch.accessoryOptionsByType ?? {}),
+      ]),
+    };
+  }
+
+  function rProduct(out: ReturnType<typeof assembleProductCapabilities>) {
+    const r = out.find((p) => p.productTypeCode === "R");
+    expect(r, "R 应该在响应里").toBeTruthy();
+    return r!;
+  }
+
+  it("① 传字典 → 尺寸加价来自字典(**不是** `idx × 500`)", () => {
+    const dict = dictionaryWith({
+      sizesByType: {
+        R: [
+          { code: "4", priceDeltaCents: 0, sortOrder: 10 },
+          { code: "6", priceDeltaCents: 1234, sortOrder: 20 },
+        ],
+      },
+    });
+
+    const out = assembleProductCapabilities(
+      effects,
+      variantsByProduct,
+      null,
+      null,
+      null,
+      null,
+      dict
+    );
+    const r = rProduct(out);
+
+    expect(r.sizes.map((s) => s.code)).toEqual(["4", "6"]);
+    expect(r.sizes[0]?.priceDeltaCents).toBe(0);
+    // 字典里写的是 1234 —— 老口径这里会是 500
+    expect(r.sizes[1]?.priceDeltaCents).toBe(1234);
+  });
+
+  it("② 不传字典 → 退回 `idx × 500`(老口径一个字节都不变)", () => {
+    const out = assembleProductCapabilities(effects, variantsByProduct, null, null);
+    const r = rProduct(out);
+
+    expect(r.sizes.map((s) => s.code)).toEqual(["4", "6"]);
+    expect(r.sizes.map((s) => s.priceDeltaCents)).toEqual([0, 500]);
+  });
+
+  it("③ 字典里新加的尺寸 → 清单多一档(后台新加的尺寸照常生效)", () => {
+    const dict = dictionaryWith({
+      sizesByType: {
+        R: [
+          { code: "4", priceDeltaCents: 0, sortOrder: 10 },
+          { code: "6", priceDeltaCents: 500, sortOrder: 20 },
+          { code: "8", priceDeltaCents: 999, sortOrder: 30 },
+        ],
+      },
+    });
+
+    const out = assembleProductCapabilities(
+      effects,
+      variantsByProduct,
+      null,
+      null,
+      null,
+      null,
+      dict
+    );
+    const r = rProduct(out);
+
+    expect(r.sizes.map((s) => s.code)).toEqual(["4", "6", "8"]);
+    expect(r.sizes[2]?.priceDeltaCents).toBe(999);
+  });
+
+  it("④ 配件的名字 / 分类来自字典(DB 优先于代码常量)", () => {
+    const dict = dictionaryWith({
+      accessories: {
+        leather: {
+          code: "leather",
+          name: "真皮(后台改的)",
+          nameEn: "Real Leather",
+          category: "material",
+          sortOrder: 10,
+        },
+      },
+    });
+
+    const out = assembleProductCapabilities(
+      effects,
+      variantsByProduct,
+      null,
+      null,
+      null,
+      null,
+      dict
+    );
+    const r = rProduct(out);
+    const leather = r.accessories.find((a) => a.code === "leather");
+
+    expect(leather?.name.zh).toBe("真皮(后台改的)");
+    expect(leather?.name.en).toBe("Real Leather");
+    expect(leather?.category).toBe("material");
+  });
+
+  it("⑤ 字典里新加的配件 → 出现在 accessories 里(没有变体就是空数组)", () => {
+    const dict = dictionaryWith({
+      accessories: {
+        new_thing: {
+          code: "new_thing",
+          name: "新配件",
+          nameEn: "New Thing",
+          category: "decor",
+          sortOrder: 99,
+        },
+      },
+      accessoryOptionsByType: {
+        R: [
+          { accessoryCode: "leather", sortOrder: 10 },
+          { accessoryCode: "metal", sortOrder: 20 },
+          { accessoryCode: "braided_rope", sortOrder: 30 },
+          { accessoryCode: "new_thing", sortOrder: 40 },
+        ],
+      },
+    });
+
+    const out = assembleProductCapabilities(
+      effects,
+      variantsByProduct,
+      null,
+      null,
+      null,
+      null,
+      dict
+    );
+    const r = rProduct(out);
+    const added = r.accessories.find((a) => a.code === "new_thing");
+
+    expect(added).toBeTruthy();
+    expect(added?.name.zh).toBe("新配件");
+    expect(added?.variants).toEqual([]);
+  });
+
+  it("⑥ 发出去的字段一个都没多、一个都没少(小程序契约)", () => {
+    const withoutDict = assembleProductCapabilities(
+      effects,
+      variantsByProduct,
+      null,
+      null
+    );
+    const withDict = assembleProductCapabilities(
+      effects,
+      variantsByProduct,
+      null,
+      null,
+      null,
+      null,
+      buildCatalogDictionaryFromCodeConstants()
+    );
+
+    const a = withoutDict[0]!;
+    const b = withDict[0]!;
+
+    expect(Object.keys(b).sort()).toEqual(Object.keys(a).sort());
+    expect(Object.keys(b.sizes[0]!).sort()).toEqual(Object.keys(a.sizes[0]!).sort());
+    expect(Object.keys(b.accessories[0]!).sort()).toEqual(
+      Object.keys(a.accessories[0]!).sort()
+    );
+    // 外层多一个字段都不行(那是接口形状变了)
+    expect(Object.keys(b).length).toBe(Object.keys(a).length);
+  });
+
+  it("⑦ 兜底字典走字典那条路 → 输出跟老口径**逐字节相同**", () => {
+    const withoutDict = assembleProductCapabilities(
+      effects,
+      variantsByProduct,
+      null,
+      null
+    );
+    const withFallback = assembleProductCapabilities(
+      effects,
+      variantsByProduct,
+      null,
+      null,
+      null,
+      null,
+      buildCatalogDictionaryFromCodeConstants()
+    );
+
+    // 「DB 还没播种」的那一刻,线上看到的必须跟今天一模一样
+    expect(withFallback).toEqual(withoutDict);
   });
 });

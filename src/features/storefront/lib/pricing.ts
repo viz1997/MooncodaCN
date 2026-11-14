@@ -146,8 +146,30 @@ export function calculatePricing(
   // 材质 id 在多个型号下重名("mat_resin" 挂在 R/A/P/RM 上),
   // 必须按型号限定查找范围,否则 A/P/RM 商品会拿到 R 的材质而被判不适用
   const material = findMaterial(spec.materialId, spec.productTypeCode);
-  const size = findSize(spec.sizeId);
   const aiStyle = findAiStyle(spec.aiStyleId);
+
+  /* -- 目录字典(DB 里的尺寸 / 配件)—— 2026-11-14 -------------------------- *
+   *
+   * 「后台能配」必须等于「服务端认」⇒ **算钱的那条路也读字典**。
+   *
+   * - 有字典 ⇒ 这个型号的尺寸 / 配件**以字典为准**
+   *   (字典里停用的尺寸 / 配件**不再卖** —— 抛错,不是偷偷按旧价收)。
+   * - 没有字典 ⇒ 退回代码常量(`mock-catalog.ts` 那套静态目录)。
+   *
+   * ⚠️ 显示那条路(`storefront-catalog.ts`)读的是**同一个字典** ⇒
+   * 「页面显示的」和「收的」结构上不可能对不上。
+   */
+  const catalog = priceSource?.catalog ?? null;
+  const catalogType = catalog?.byType.get(spec.productTypeCode) ?? null;
+
+  // 尺寸 —— 字典优先。
+  //
+  // ⚠️ 查的是**跨型号**的 `sizesById`(尺寸 id 本身带型号前缀 `size_R_4`),
+  // 找到之后**照样**判 `appliesTo` —— 「尺寸 4cm 不适用于产品型号 A」那条
+  // 报错不能因为换了数据源就消失。
+  const size = catalogType
+    ? (catalog?.sizesById.get(spec.sizeId) ?? null)
+    : findSize(spec.sizeId);
 
   if (!material) throw new Error(`未知材质: ${spec.materialId}`);
   if (!size) throw new Error(`未知尺寸: ${spec.sizeId}`);
@@ -197,11 +219,31 @@ export function calculatePricing(
   let accessoryCents = 0;
   const pickedGroups = new Set<string>();
   for (const variantId of accessoryIds) {
-    const variant = findAccessoryVariant(variantId);
+    // 配件分组 / 变体 —— 字典优先。
+    //
+    // ⚠️ **按型号查**(`catalogType.accessoryGroups`),不是跨型号的
+    // `variantsById` —— `variantCode` 只保证「型号内」唯一
+    // (DB 的唯一索引是 `(product_type_code, accessory_code, variant_code)`),
+    // 跨型号查会「取到另一个型号的那一条」。
+    const catalogGroup = catalogType
+      ? (catalogType.accessoryGroups.find((g) =>
+          g.variants.some((v) => v.id === variantId)
+        ) ?? null)
+      : null;
+    const catalogVariant =
+      catalogGroup?.variants.find((v) => v.id === variantId) ?? null;
+
+    const variant =
+      catalogVariant ??
+      catalog?.variantsById.get(variantId) ??
+      findAccessoryVariant(variantId);
     if (!variant) throw new Error(`未知配件: ${variantId}`);
-    const group = product.accessoryGroups.find((g) =>
-      g.variants.some((v) => v.id === variantId)
-    );
+
+    const group = catalogType
+      ? catalogGroup
+      : (product.accessoryGroups.find((g) =>
+          g.variants.some((v) => v.id === variantId)
+        ) ?? null);
     if (!group) {
       throw new Error(
         `配件 ${variant.name} 不适用于产品型号 ${spec.productTypeCode}`
@@ -217,8 +259,12 @@ export function calculatePricing(
     ) {
       throw new Error(`配件 ${variant.name} 不适用于 ${size.cm}cm 尺寸`);
     }
-    // 配件加价 —— DB 优先,查不到就退回代码常量
+    // 配件加价 —— 字典优先,再退平铺的价表,最后退代码常量
+    //
+    // ⚠️ `??` 不是 `||` —— 加价 **0 是合法值**(「不加价」),
+    // 用 `||` 会把 0 当成「没有」⇒ 悄悄按别的价收。
     accessoryCents +=
+      catalogVariant?.surchargeCents ??
       priceSource?.accessoryDeltaCentsByVariantId.get(variantId) ??
       variant.surchargeCents;
   }

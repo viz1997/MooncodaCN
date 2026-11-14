@@ -25,6 +25,7 @@ import { eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import type {
+  AccessoryCategory,
   AccessoryDef,
   AccessoryVariantDef,
   ProductCapability,
@@ -51,6 +52,15 @@ import {
   getProductType,
   PRODUCT_META,
 } from "@/features/gpt-image/lib/product-catalog";
+import {
+  type CatalogDictionary,
+  accessoryCodesForType,
+  accessoryDef,
+  SIZE_STEP_CENTS,
+  sizeCodesForType,
+  sizeDeltaCentsFor,
+} from "@/features/image-gen/lib/catalog-dictionary";
+import { getCatalogDictionary } from "@/features/image-gen/lib/catalog-dictionary-store";
 
 /* -------------------------------------------------------------------------- */
 /*  字典读取                                                                  */
@@ -298,6 +308,8 @@ function sanitizeStyles(raw: unknown): TemplateStyle[] {
  * @param productRows      product 表行按 code 索引(2026-10-21);null = 全部走字典回退
  * @param skuRowsByProduct product_variant active 行按 productCode 索引(2026-10-21);
  *                          null = variants[] 一律空数组
+ * @param dictionary       尺寸 / 配件字典(DB 优先,代码常量兜底);
+ *                          null = 走老口径(尺寸加价 = 下标 × ¥5)
  * @returns                按 productTypeCode 升序的产品数组
  */
 export function assembleProductCapabilities(
@@ -306,7 +318,8 @@ export function assembleProductCapabilities(
   filterCodes: string[] | null,
   keyScope: string[] | null,
   productRows: Map<string, ProductRow> | null = null,
-  skuRowsByProduct: Map<string, ProductVariantSummary[]> | null = null
+  skuRowsByProduct: Map<string, ProductVariantSummary[]> | null = null,
+  dictionary: CatalogDictionary | null = null
 ): ProductCapability[] {
   // 按 productTypeCode 分组 effects
   const grouped = new Map<
@@ -346,12 +359,30 @@ export function assembleProductCapabilities(
 
     const productType = getProductType(code);
     const productMeta = getProductMeta(code);
+    // ⚠️ 已知缺口:**只在 DB 字典里新建的型号**(`product` 表有行、
+    // 代码常量 `PRODUCT_TYPES` 里没有)在这里被跳过 —— 因为
+    // `displayName` / `description` / `capabilities` 三个字段只存在于
+    // 代码常量里,没有它们拼不出一个 `ProductCapability`。
+    // 尺寸 / 配件清单本身已经走字典(后台新加的尺寸、配件照常生效),
+    // 这道闸只挡「凭空冒出来的新型号」。
     if (!productType || !productMeta) continue; // 字典过期,跳过
 
     const entries = grouped.get(code) ?? [];
 
     // ----- sizes -----
-    const sizes: ProductSizeDef[] = productType.sizes.map((sizeCode, idx) => ({
+    //
+    // 尺寸清单 + 加价从**字典**来(DB 优先,代码常量兜底)—— 不再按下标算。
+    //
+    // ⚠️ 位置陷阱:`idx * 500` 意味着「在尺寸数组中间插一档,后面每一档的价
+    // 都会静默全变」。字典里存的是**显式**加价,四个应用点共用
+    // `sizeDeltaCentsFor()` 这一份查法。
+    //
+    // ⚠️ 没传字典时(单测直接调本函数)走老口径 —— 两条路径的输出必须
+    // 一模一样(兜底字典本身就是 `idx × ¥5`)。
+    const sizeCodes = dictionary
+      ? sizeCodesForType(dictionary, code)
+      : productType.sizes;
+    const sizes: ProductSizeDef[] = sizeCodes.map((sizeCode, idx) => ({
       code: sizeCode,
       label: {
         zh: `${sizeCode}${productType.unit}`,
@@ -362,30 +393,43 @@ export function assembleProductCapabilities(
       //
       // @deprecated 2026-10-21 起这只是给老客户端的兼容字段,真 SKU 价看
       // ProductCapability.variants[].priceCents。改这里不影响新逻辑。
-      priceDeltaCents: idx * 500,
+      //
+      // `?? 0` 只在字典自身不一致时才走到(尺寸清单和加价来自同一张表,
+      // 查得到清单就一定查得到加价)⇒ 取中性的「不加价」,不猜一个价。
+      priceDeltaCents: dictionary
+        ? (sizeDeltaCentsFor(dictionary, code, sizeCode) ?? 0)
+        : idx * SIZE_STEP_CENTS,
     }));
 
     // ----- accessories + variants -----
+    //
+    // 配件清单从**字典**来(DB 优先)—— 后台新加的配件立刻出现在对外接口。
+    // 名字 / 分类也走字典(DB 是真理源);字典里没这一条才退回代码常量。
     const variantsInner = variantsByProduct.get(code) ?? new Map();
-    const accessories: AccessoryDef[] = productType.accessories.map(
-      (accCode) => {
-        const meta = getAccessoryMeta(accCode) ?? {
-          category: "decor" as const,
-          name: { zh: accCode, en: accCode },
-        };
-        const variants = (variantsInner.get(accCode) ?? []).slice();
-        // 默认价差:有变体时价差由变体决定,无变体时给 0(允许后续从 catalog 扩展)
-        const defaultPrice = variants.length > 0 ? 0 : 0;
-        return {
-          code: accCode,
-          name: meta.name,
-          category: meta.category,
-          priceDeltaCents: defaultPrice,
-          variants,
-          requiresCapability: null,
-        } satisfies AccessoryDef;
-      }
-    );
+    const accessoryCodes = dictionary
+      ? accessoryCodesForType(dictionary, code)
+      : productType.accessories;
+    const accessories: AccessoryDef[] = accessoryCodes.map((accCode) => {
+      const dictDef = dictionary ? accessoryDef(dictionary, accCode) : null;
+      const fallbackMeta = getAccessoryMeta(accCode) ?? null;
+      // DB 里名字留空 ⇒ 退回代码常量,再退回配件码 —— 不让空串把标题洗白
+      const zhName = dictDef?.name.trim() || fallbackMeta?.name.zh || accCode;
+      const enName =
+        dictDef?.nameEn.trim() || fallbackMeta?.name.en || zhName || accCode;
+      const category: AccessoryCategory =
+        dictDef?.category ?? fallbackMeta?.category ?? "decor";
+      const variants = (variantsInner.get(accCode) ?? []).slice();
+      // 默认价差:有变体时价差由变体决定,无变体时给 0(允许后续从 catalog 扩展)
+      const defaultPrice = variants.length > 0 ? 0 : 0;
+      return {
+        code: accCode,
+        name: { zh: zhName, en: enName },
+        category,
+        priceDeltaCents: defaultPrice,
+        variants,
+        requiresCapability: null,
+      } satisfies AccessoryDef;
+    });
 
     // ----- templates -----
     const visualStylesSet = new Map<string, TemplateStyle>();
@@ -472,17 +516,22 @@ export function assembleProductCapabilities(
  *
  * 2026-10-21:新增 product / product_variant 两张表的查询。四个查询全部
  * 并行 —— 都是简单主键扫描,实测都在 10ms 以内,串起来没必要。
+ *
+ * 2026-11-14:第五个查询 = **商品目录字典**(尺寸加价 / 配件清单)。
+ * 字典读失败会**整份退回代码常量兜底**(`getCatalogDictionary()` 自己
+ * catch),不会让这个接口 500。
  */
 export async function loadProductCapabilities(opts: {
   filterCodes: string[] | null;
   keyScope: string[] | null;
 }): Promise<ProductCapability[]> {
-  const [effects, variantsByProduct, productRows, skuRowsByProduct] =
+  const [effects, variantsByProduct, productRows, skuRowsByProduct, dictionary] =
     await Promise.all([
       getActiveProductEffectsWithTemplates(),
       getActiveVariantsByProduct(),
       getProductRowsByCode(),
       getActiveSkuRowsByProduct(),
+      getCatalogDictionary(),
     ]);
   return assembleProductCapabilities(
     effects,
@@ -490,7 +539,8 @@ export async function loadProductCapabilities(opts: {
     opts.filterCodes,
     opts.keyScope,
     productRows,
-    skuRowsByProduct
+    skuRowsByProduct,
+    dictionary
   );
 }
 

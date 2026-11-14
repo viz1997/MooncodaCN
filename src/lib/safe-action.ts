@@ -14,6 +14,27 @@ const actionMetadataSchema = z
   .optional();
 
 /**
+ * 「这条错是给用户看的」—— 由**抛出方**自己标（`userFacing: true`）。
+ *
+ * ⚠️ 刻意**不**用 `instanceof`：核心层（`safe-action.ts`）不该 import 某个
+ * feature 的错误类 ⇒ 靠一个约定俗成的标记属性认。
+ *
+ * 现在只有一处用它：目录字典的规格校验错
+ * （`features/image-gen/lib/catalog-dictionary-validate.ts`）——
+ * 「选了一个不存在的尺寸」是**用户填错了**，不是服务端炸了。
+ *
+ * ⚠️ **刻意不写成类型谓词**（`error is Error`）—— `handleServerError` 的
+ * 入参类型本来就是 `Error`，谓词会把后面那段代码的 `error` 收窄成 `never`
+ * ⇒ `error.message` 直接编译不过。返回「消息或 null」就够用了。
+ */
+function userFacingMessage(error: unknown): string | null {
+  if (typeof error !== "object" || error === null) return null;
+  const candidate = error as { userFacing?: unknown; message?: unknown };
+  if (candidate.userFacing !== true) return null;
+  return typeof candidate.message === "string" ? candidate.message : null;
+}
+
+/**
  * 基础 Action 客户端
  *
  * 用于创建不需要认证的 Server Actions
@@ -28,6 +49,18 @@ const baseActionClient = createSafeActionClient({
    * - 生产环境下隐藏具体错误信息
    */
   handleServerError(error) {
+    // ⚠️ 标了「这条错是给用户看的」⇒ **生产环境也把原话带回去**，
+    // 而且**不上报 Sentry**（那是用户的输入问题，不是故障）。
+    // 没标的一律照旧糊掉 —— 免得把内部报错（表结构 / SQL）漏给用户。
+    const userMessage = userFacingMessage(error);
+    if (userMessage !== null) {
+      logger.warn(
+        { source: "server-action", message: userMessage },
+        "User-facing server error"
+      );
+      return userMessage;
+    }
+
     // 结构化日志记录
     logError(error, { source: "server-action" });
 

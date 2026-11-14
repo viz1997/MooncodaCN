@@ -48,6 +48,7 @@ import { consumeCredits } from "@/features/credits/core";
 import { InsufficientCreditsError } from "@/features/credits/errors";
 import { generateOrderToken } from "@/features/gpt-image/lib/generation-service";
 import { findEffect } from "@/features/image-gen/lib/effects-store";
+import { getCatalogDictionary } from "@/features/image-gen/lib/catalog-dictionary-store";
 import {
   fillDefaultsByTemplate,
   generatePreviewOrderNo,
@@ -156,7 +157,9 @@ export const createPreviewShareAction = withPreviewAction("create")
           remarks: parsedInput.remarks ?? null,
           platform: parsedInput.platform ?? null,
           platformOrderNo: parsedInput.platformOrderNo ?? null,
-        }
+        },
+        // 尺寸 / 配件清单走**目录字典**(2026-11-14)—— 后台新加的必须被认
+        await getCatalogDictionary()
       );
     } catch (err) {
       // eslint-disable-next-line no-console

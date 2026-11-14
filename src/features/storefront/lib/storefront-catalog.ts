@@ -44,6 +44,7 @@ import {
   isCatalogTypeActive,
   sortCatalogItems,
 } from "./catalog-apply";
+import { applyCatalogDictionaryToProduct } from "./catalog-dictionary-apply";
 import type { CatalogSource } from "./catalog-source-types";
 import {
   findProductByHandle,
@@ -79,13 +80,36 @@ async function resolveCatalog(): Promise<ResolvedCatalog> {
   return { price, catalog };
 }
 
-/** 把价和配置**都**盖到一件设计上 */
+/**
+ * 把价和配置**都**盖到一件设计上
+ *
+ * ## 顺序有讲究(2026-11-14)
+ *
+ * 1. `applyPriceSource` —— 基础价 + **平铺的**配件加价
+ * 2. `applyCatalogDictionaryToProduct` —— **目录字典**(尺寸 / 配件结构 / 配件加价)
+ * 3. `applyCatalogConfig` —— 后台的目录配置(上架 / 名字 / 排序 / 强调色)
+ *
+ * ### 为什么字典在第 2 步、而且**它赢**
+ *
+ * **算钱那条路(`pricing.ts`)也是字典优先** ——
+ * `catalogVariant?.surchargeCents ?? 平铺的价表 ?? 代码常量`。
+ *
+ * ⇒ 显示和收钱必须**赢的是同一个**。字典赢一边、价表赢另一边 ⇒
+ * 「页面显示 +¥5、结算按 +¥10 收」—— 「逐分相等」当场破。
+ *
+ * 平铺的价表(`accessoryDeltaCentsByVariantId`)只在字典里没有这个变体时
+ * 才顶上来 —— 那种情况下字典已经退回**代码常量**了,价表那一行是
+ * `product_accessory_variant` 里的真值,让它顶上更准。
+ */
 function decorate(
   item: StorefrontProduct,
   resolved: ResolvedCatalog
 ): StorefrontProduct {
   return applyCatalogConfig(
-    applyPriceSource(item, resolved.price),
+    applyCatalogDictionaryToProduct(
+      applyPriceSource(item, resolved.price),
+      resolved.price.catalog
+    ),
     resolved.catalog
   );
 }

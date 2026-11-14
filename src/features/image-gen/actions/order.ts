@@ -40,8 +40,13 @@ import {
   getProductType,
   validateLeatherColor,
   validatePlatform,
-  validateProductSpec,
 } from "@/features/gpt-image/lib/product-catalog";
+import {
+  accessoryCodesForType,
+  sizeCodesForType,
+} from "@/features/image-gen/lib/catalog-dictionary";
+import { getCatalogDictionary } from "@/features/image-gen/lib/catalog-dictionary-store";
+import { validateProductSpecWithDictionary } from "@/features/image-gen/lib/catalog-dictionary-validate";
 import { computePromptOrderCredits } from "@/features/image-gen/lib/price-calculator";
 import { protectedAction } from "@/lib/safe-action";
 
@@ -138,8 +143,14 @@ export const createOrderFromImageGenAction = withOrderAction("create")
     });
     if (!template) throw new Error("模板不存在或已停用");
 
-    // 3. 三件套校验
-    validateProductSpec(
+    // 3. 三件套校验 —— **按目录字典**(2026-11-14)
+    //
+    // ⚠️ 以前这里读的是**代码常量**(`product-catalog.ts` 的 `validateProductSpec`)
+    // ⇒ 后台 `/admin/products/[code]` 新加的尺寸 / 配件会被服务端判成非法。
+    // **后台能配 ≠ 服务端认** —— 这一处必须读字典。
+    const dictionary = await getCatalogDictionary();
+    validateProductSpecWithDictionary(
+      dictionary,
       parsedInput.productTypeCode ?? null,
       parsedInput.productSize ?? null,
       parsedInput.accessoryCode ?? null
@@ -155,20 +166,22 @@ export const createOrderFromImageGenAction = withOrderAction("create")
     let finalProductSize = parsedInput.productSize ?? null;
     let finalAccessoryCode = parsedInput.accessoryCode ?? null;
     if (parsedInput.productTypeCode) {
-      const type = getProductType(parsedInput.productTypeCode);
-      if (type) {
-        const sizesAvailable = type.sizes.filter((s) =>
-          allowedSizes ? allowedSizes.includes(s) : true
-        );
-        const accessoriesAvailable = type.accessories.filter((a) =>
-          allowedAccessories ? allowedAccessories.includes(a) : true
-        );
-        if (!finalProductSize && sizesAvailable.length > 0) {
-          finalProductSize = sizesAvailable[0] ?? null;
-        }
-        if (!finalAccessoryCode && accessoriesAvailable.length > 0) {
-          finalAccessoryCode = accessoriesAvailable[0] ?? null;
-        }
+      // 尺寸 / 配件清单走**字典**(跟上面那次校验同一个对象 ⇒ 两处不可能对不上)
+      const sizesAvailable = sizeCodesForType(
+        dictionary,
+        parsedInput.productTypeCode
+      ).filter((s) => (allowedSizes ? allowedSizes.includes(s) : true));
+      const accessoriesAvailable = accessoryCodesForType(
+        dictionary,
+        parsedInput.productTypeCode
+      ).filter((a) =>
+        allowedAccessories ? allowedAccessories.includes(a) : true
+      );
+      if (!finalProductSize && sizesAvailable.length > 0) {
+        finalProductSize = sizesAvailable[0] ?? null;
+      }
+      if (!finalAccessoryCode && accessoriesAvailable.length > 0) {
+        finalAccessoryCode = accessoriesAvailable[0] ?? null;
       }
     }
 

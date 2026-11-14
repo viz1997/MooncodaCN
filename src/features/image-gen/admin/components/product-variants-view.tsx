@@ -39,6 +39,9 @@ import {
   type ProductFormValues,
   productToFormValues,
 } from "@/features/image-gen/admin/components/product-form-dialog";
+import { useCatalogRows } from "@/features/image-gen/admin/components/catalog-admin-rows";
+import { ProductAccessoryVariantsView } from "@/features/image-gen/admin/components/product-accessory-variants-view";
+import { ProductDictionaryView } from "@/features/image-gen/admin/components/product-dictionary-view";
 import type {
   AdminProduct,
   AdminProductVariant,
@@ -72,6 +75,19 @@ export function ProductVariantsView({ productCode }: VariantViewProps) {
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const [form] = Form.useForm<ProductFormValues>();
+
+  /**
+   * 目录字典(尺寸 / 配件 / 配件变体)—— **一次读,两个区块共用**
+   *
+   * ⚠️ 不在下面两块里各读一次 —— 两份各读一次 ⇒ 两处的清单可能不一样
+   * (一个刷新了、另一个没刷新)⇒ 工作室看着像「刚加的配件变体不在下拉里」。
+   */
+  const {
+    rows: catalogRows,
+    loading: catalogLoading,
+    errorCode: catalogErrorCode,
+    reload: reloadCatalog,
+  } = useCatalogRows(productCode);
 
   const reload = async () => {
     setLoading(true);
@@ -217,13 +233,24 @@ export function ProductVariantsView({ productCode }: VariantViewProps) {
     modal.confirm({
       title: "按当前字典重新生成 SKU？",
       content:
-        "会按 PRODUCT_TYPES 的尺寸 × 配件 × 配件变体补齐缺失的 SKU 行。" +
+        "会按下面「目录字典」里配的尺寸 × 配件 × 配件变体补齐缺失的 SKU 行。" +
         "已存在的 SKU 不会被覆盖 —— 你在这里改过的价和上下架状态都保留。" +
-        "新增的 SKU 价格 = 基础价 + 尺寸阶梯 + 配件加价。",
+        "新增的 SKU 价格 = 基础价 + 尺寸加价 + 配件变体加价。",
       okText: "生成",
       cancelText: "取消",
       onOk: () => regenerate({ productCode }),
     });
+  };
+
+  /**
+   * 字典改完之后 —— **SKU 表和字典一起刷**
+   *
+   * 改尺寸加价 / 配件加价 ⇒ 服务端已经顺带重算了 SKU 的绝对价
+   * ⇒ 这一边只要把最新的 SKU 行读回来显示。
+   */
+  const handleDictionaryChanged = () => {
+    void reloadCatalog();
+    void reload();
   };
 
   /* ---------------------------------------------------------------------- */
@@ -255,7 +282,7 @@ export function ProductVariantsView({ productCode }: VariantViewProps) {
     <div className="space-y-6">
       <ModuleHeader
         title={`商品 · ${product?.name ?? productCode}`}
-        description="改商品资料 / 基础价，或逐行维护 SKU 变体的绝对价与上下架"
+        description="改商品资料 / 基础价，维护 SKU 变体的上下架；下面的目录字典决定有哪些尺寸、配件和加价"
       />
 
       <Button
@@ -349,7 +376,7 @@ export function ProductVariantsView({ productCode }: VariantViewProps) {
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <Tooltip title="按 PRODUCT_TYPES 的尺寸 × 配件 × 配件变体补齐缺失的 SKU，不覆盖已有行">
+                <Tooltip title="按下面「目录字典」里配的尺寸 × 配件 × 配件变体补齐缺失的 SKU，不覆盖已有行">
                   <Button
                     onClick={handleRegenerate}
                     loading={isRegenerating}
@@ -440,6 +467,28 @@ export function ProductVariantsView({ productCode }: VariantViewProps) {
                 </table>
               </div>
             )}
+          </div>
+
+          {/* ------------- 配件变体（加价 / 适用尺寸）------------- */}
+          <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-4">
+            <ProductAccessoryVariantsView
+              productTypeCode={productCode}
+              rows={catalogRows}
+              loading={catalogLoading}
+              errorCode={catalogErrorCode}
+              onChanged={handleDictionaryChanged}
+            />
+          </div>
+
+          {/* ------------- 目录字典（尺寸 / 配件 / 本型号可配哪些）------------- */}
+          <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-4">
+            <ProductDictionaryView
+              productTypeCode={productCode}
+              rows={catalogRows}
+              loading={catalogLoading}
+              errorCode={catalogErrorCode}
+              onChanged={handleDictionaryChanged}
+            />
           </div>
         </div>
       </div>

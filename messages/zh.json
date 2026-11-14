@@ -2950,5 +2950,105 @@
       "processing": "退款请求已提交,平台还在处理 —— 等平台通知即可",
       "validationFailed": "提交的内容有问题"
     }
+  },
+  "AdminCatalog": {
+    "sections": {
+      "sizes": {
+        "title": "尺寸字典",
+        "description": "这个型号有哪几档尺寸,每档加多少钱。加价是显式的 —— 在中间插一档不会把后面几档的价顶掉。"
+      },
+      "accessories": {
+        "title": "配件字典",
+        "description": "所有型号共用的配件清单(名称 / 分类)。停用一个配件,所有型号都不再提供它。"
+      },
+      "options": {
+        "title": "本型号可配哪些配件",
+        "description": "型号 {code} 可以配哪些配件。取消勾选 = 这个型号不再提供该配件。"
+      },
+      "variants": {
+        "title": "配件变体",
+        "description": "配件下面的每一个选项(颜色 / 规格),各自有加价和适用尺寸。"
+      }
+    },
+    "columns": {
+      "sizeCode": "尺寸",
+      "priceDelta": "加价",
+      "sortOrder": "排序",
+      "isActive": "启用",
+      "actions": "操作",
+      "accessoryCode": "配件编码",
+      "name": "名称",
+      "nameEn": "英文名",
+      "category": "分类",
+      "accessory": "配件",
+      "optionEnabled": "本型号可配",
+      "variantCode": "变体编码",
+      "swatch": "色板",
+      "appliesToSizes": "适用尺寸"
+    },
+    "categories": {
+      "material": "材质",
+      "protection": "防护",
+      "mount": "挂装",
+      "decor": "装饰"
+    },
+    "form": {
+      "sizeCode": "尺寸码",
+      "sizeCodeHint": "厘米,比如 4 / 6 / 11",
+      "priceDeltaCents": "加价",
+      "cents": "分",
+      "sortOrder": "排序",
+      "accessoryCode": "配件编码",
+      "accessoryCodeHint": "小写字母 + 下划线,比如 glass_cover",
+      "name": "名称",
+      "nameEn": "英文名",
+      "category": "分类",
+      "namePlaceholder": "比如 玻璃罩",
+      "nameEnPlaceholder": "e.g. Glass cover",
+      "required": "这一项必须填",
+      "accessory": "配件",
+      "accessoryLockedHint": "型号建好之后不能改 —— 换一个配件等于换一行",
+      "variantCode": "变体编码",
+      "variantCodeHint": "小写字母 + 下划线,比如 glass_4",
+      "swatch": "色板",
+      "appliesToSizes": "适用尺寸",
+      "appliesToSizesHint": "留空 = 所有尺寸都适用",
+      "appliesToSizesPlaceholder": "不选 = 全部尺寸"
+    },
+    "actions": {
+      "edit": "编辑",
+      "addSize": "新增尺寸",
+      "addAccessory": "新增配件",
+      "addVariant": "新增变体",
+      "save": "保存",
+      "cancel": "取消"
+    },
+    "messages": {
+      "sizeSaved": "尺寸已保存,{count} 个 SKU 的价格已重算",
+      "sizeDisabled": "尺寸已停用,{count} 个 SKU 的价格已重算",
+      "accessorySaved": "配件已保存",
+      "accessoryDisabled": "配件已停用",
+      "optionSaved": "配件归属已保存",
+      "variantSaved": "配件变体已保存,{count} 个 SKU 的价格已重算",
+      "variantDisabled": "配件变体已停用,{count} 个 SKU 的价格已重算",
+      "validationFailed": "提交的内容有问题",
+      "emptySizes": "这个型号还没有任何尺寸",
+      "emptyAccessories": "还没有任何配件",
+      "emptyOptions": "还没有任何配件归属",
+      "emptyVariants": "还没有任何配件变体"
+    },
+    "allSizes": "全部尺寸",
+    "errors": {
+      "INVALID_INPUT": "填的内容不合法",
+      "PRODUCT_NOT_FOUND": "这个型号在商品表里找不到了",
+      "SIZE_NOT_FOUND": "这一档尺寸找不到了",
+      "ACCESSORY_NOT_FOUND": "这个配件找不到了",
+      "VARIANT_NOT_FOUND": "这个配件变体找不到了",
+      "SIZE_CODE_DUPLICATED": "这个型号下已经有同名尺寸了",
+      "VARIANT_CODE_DUPLICATED": "这个变体编码已经被别的型号用过了 —— 变体编码必须全局唯一",
+      "MIGRATION_MISSING": "数据库还没建好这几张表 —— 跑一下迁移脚本",
+      "READ_FAILED": "读不到目录字典 —— 看服务端日志",
+      "SAVE_FAILED": "保存失败 —— 看服务端日志"
+    }
   }
 }

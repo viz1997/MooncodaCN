@@ -2953,5 +2953,105 @@
       "processing": "Refund request sent, the platform is still working on it — we'll update it when the platform tells us",
       "validationFailed": "What you submitted does not add up"
     }
+  },
+  "AdminCatalog": {
+    "sections": {
+      "sizes": {
+        "title": "Size dictionary",
+        "description": "Which sizes this model comes in, and what each one costs extra. The surcharge is explicit — inserting a size in the middle never shifts the ones after it."
+      },
+      "accessories": {
+        "title": "Accessory dictionary",
+        "description": "The accessory list shared by every model (name / category). Disabling one removes it from every model."
+      },
+      "options": {
+        "title": "Accessories available for this model",
+        "description": "Which accessories model {code} can be paired with. Unticking one means this model no longer offers it."
+      },
+      "variants": {
+        "title": "Accessory variants",
+        "description": "Each option under an accessory (colour / size), with its own surcharge and the sizes it applies to."
+      }
+    },
+    "columns": {
+      "sizeCode": "Size",
+      "priceDelta": "Surcharge",
+      "sortOrder": "Order",
+      "isActive": "Active",
+      "actions": "Actions",
+      "accessoryCode": "Accessory code",
+      "name": "Name",
+      "nameEn": "English name",
+      "category": "Category",
+      "accessory": "Accessory",
+      "optionEnabled": "Available here",
+      "variantCode": "Variant code",
+      "swatch": "Swatch",
+      "appliesToSizes": "Applies to"
+    },
+    "categories": {
+      "material": "Material",
+      "protection": "Protection",
+      "mount": "Mounting",
+      "decor": "Decoration"
+    },
+    "form": {
+      "sizeCode": "Size code",
+      "sizeCodeHint": "Centimetres, e.g. 4 / 6 / 11",
+      "priceDeltaCents": "Surcharge",
+      "cents": "cents",
+      "sortOrder": "Order",
+      "accessoryCode": "Accessory code",
+      "accessoryCodeHint": "Lower case with underscores, e.g. glass_cover",
+      "name": "Name",
+      "nameEn": "English name",
+      "category": "Category",
+      "namePlaceholder": "e.g. Glass cover",
+      "nameEnPlaceholder": "e.g. Glass cover",
+      "required": "This field is required",
+      "accessory": "Accessory",
+      "accessoryLockedHint": "The model cannot change after it is created — switching accessory means a different row",
+      "variantCode": "Variant code",
+      "variantCodeHint": "Lower case with underscores, e.g. glass_4",
+      "swatch": "Swatch",
+      "appliesToSizes": "Applies to sizes",
+      "appliesToSizesHint": "Leave empty = applies to every size",
+      "appliesToSizesPlaceholder": "Nothing selected = every size"
+    },
+    "actions": {
+      "edit": "Edit",
+      "addSize": "Add size",
+      "addAccessory": "Add accessory",
+      "addVariant": "Add variant",
+      "save": "Save",
+      "cancel": "Cancel"
+    },
+    "messages": {
+      "sizeSaved": "Size saved — {count} SKU prices recalculated",
+      "sizeDisabled": "Size disabled — {count} SKU prices recalculated",
+      "accessorySaved": "Accessory saved",
+      "accessoryDisabled": "Accessory disabled",
+      "optionSaved": "Accessory assignment saved",
+      "variantSaved": "Accessory variant saved — {count} SKU prices recalculated",
+      "variantDisabled": "Accessory variant disabled — {count} SKU prices recalculated",
+      "validationFailed": "What you submitted does not add up",
+      "emptySizes": "This model has no sizes yet",
+      "emptyAccessories": "There are no accessories yet",
+      "emptyOptions": "There are no accessory assignments yet",
+      "emptyVariants": "There are no accessory variants yet"
+    },
+    "allSizes": "All sizes",
+    "errors": {
+      "INVALID_INPUT": "What you entered is not valid",
+      "PRODUCT_NOT_FOUND": "This model is no longer in the product table",
+      "SIZE_NOT_FOUND": "That size no longer exists",
+      "ACCESSORY_NOT_FOUND": "That accessory no longer exists",
+      "VARIANT_NOT_FOUND": "That accessory variant no longer exists",
+      "SIZE_CODE_DUPLICATED": "This model already has a size with that code",
+      "VARIANT_CODE_DUPLICATED": "Another model already uses that variant code — variant codes must be globally unique",
+      "MIGRATION_MISSING": "These tables have not been created yet — run the migration script",
+      "READ_FAILED": "Could not read the catalog dictionary — check the server log",
+      "SAVE_FAILED": "Save failed — check the server log"
+    }
   }
 }

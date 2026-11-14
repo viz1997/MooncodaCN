@@ -25,11 +25,8 @@ import { useAction } from "next-safe-action/hooks";
 import { useEffect, useState } from "react";
 import { listTemplatesAction } from "@/features/gpt-image/actions/orders";
 import {
-  ACCESSORIES,
   LEATHER_COLORS,
-  PRODUCT_TYPES,
   type ProductCapabilities,
-  type ProductType,
 } from "@/features/gpt-image/lib/product-catalog";
 import {
   createProductEffectAdminAction,
@@ -38,6 +35,7 @@ import {
   updateProductEffectAdminAction,
   updatePromptTemplatePricesAction,
 } from "@/features/image-gen/admin/actions";
+import type { CatalogDictionaryView } from "@/features/image-gen/lib/catalog-dictionary-view";
 import { IMAGE_MODEL_LIST } from "@/features/image-gen/lib/image-models/types";
 import type {
   ProductEffect,
@@ -54,6 +52,16 @@ import { cn } from "@/lib/utils";
 interface ProductEffectFormProps {
   initialData?: ProductEffect;
   /**
+   * 商品目录字典(**服务端读好后当 props 传下来**)
+   *
+   * ⚠️ 这个表单是**客户端组件** —— 它自己读不了 DB。而「尺寸 / 配件」清单
+   * 现在住在 DB 里(后台可改)⇒ 只能从服务端传下来。
+   *
+   * ⚠️ 传的是**视图模型**(纯数组)不是 `CatalogDictionary` —— 后者装的是
+   * `ReadonlyMap`,过不了 RSC → client 的 props 边界。
+   */
+  catalog: CatalogDictionaryView;
+  /**
    * 保存成功回调；不传则默认跳回列表页
    */
   onSaved?: () => void;
@@ -65,6 +73,7 @@ function generateMaskId(): string {
 
 export function ProductEffectForm({
   initialData,
+  catalog,
   onSaved,
 }: ProductEffectFormProps) {
   const router = useRouter();
@@ -89,13 +98,14 @@ export function ProductEffectForm({
   const [status, setStatus] = useState<"active" | "inactive">(
     initialData?.status ?? "active"
   );
-  // 2026-09-10：产品型号（关联 PRODUCT_TYPES 字典）。选了之后会在表单底部展示
+  // 2026-09-10：产品型号（关联商品目录字典）。选了之后会在表单底部展示
   // 该型号的尺寸 + 配件预览，让 admin 配置时看到「/image-gen 弹出的可选规格」。
+  // 2026-11-14：型号 / 尺寸 / 配件清单改从**目录字典**来（DB 可改）⇒ 走 props。
   const [productTypeCode, setProductTypeCode] = useState<string | null>(
     initialData?.productTypeCode ?? null
   );
-  const productType: ProductType | null = productTypeCode
-    ? (PRODUCT_TYPES.find((t) => t.code === productTypeCode) ?? null)
+  const productType = productTypeCode
+    ? (catalog.types.find((t) => t.code === productTypeCode) ?? null)
     : null;
   // 2026-09-10：可配置尺寸 + 配件子集（null = 字典全量；非空数组 = 仅这些）
   const [allowedSizes, setAllowedSizes] = useState<string[]>(
@@ -468,7 +478,7 @@ export function ProductEffectForm({
       </Form.Item>
 
       {/* 2026-09-10：产品型号绑定。/image-gen demo 流选了模板后弹 SpecModal，
-          按 PRODUCT_TYPES 字典渲染该型号的尺寸 + 配件 + 刻字能力。null 表示老
+          按商品目录字典渲染该型号的尺寸 + 配件 + 刻字能力。null 表示老
           ToC 模板（无规格，spec 全 null）。 */}
       <Form.Item
         label={
@@ -485,7 +495,7 @@ export function ProductEffectForm({
           onChange={(v) => setProductTypeCode(v === "__none__" ? null : v)}
           options={[
             { value: "__none__", label: "不指定（老 ToC 模板）" },
-            ...PRODUCT_TYPES.map((t) => ({
+            ...catalog.types.map((t) => ({
               value: t.code,
               label: `${t.code} · ${t.name}`,
             })),
@@ -517,14 +527,11 @@ export function ProductEffectForm({
             <div>
               可选配件：
               {productType.accessories.length > 0 ? (
-                productType.accessories.map((a) => {
-                  const acc = ACCESSORIES.find((x) => x.code === a);
-                  return (
-                    <Badge key={a} className="ml-1">
-                      {acc?.name ?? a}
-                    </Badge>
-                  );
-                })
+                productType.accessories.map((a) => (
+                  <Badge key={a.code} className="ml-1">
+                    {a.name}
+                  </Badge>
+                ))
               ) : (
                 <span className="ml-1 text-muted-foreground">无</span>
               )}
@@ -604,11 +611,10 @@ export function ProductEffectForm({
               <div className="text-xs font-medium mb-1.5">配件</div>
               <div className="flex flex-wrap gap-2">
                 {productType.accessories.map((a) => {
-                  const acc = ACCESSORIES.find((x) => x.code === a);
-                  const checked = allowedAccessories.includes(a);
+                  const checked = allowedAccessories.includes(a.code);
                   return (
                     <label
-                      key={a}
+                      key={a.code}
                       className={cn(
                         "flex items-center gap-1.5 rounded-md border px-2.5 py-1 cursor-pointer text-xs transition-colors",
                         checked
@@ -620,13 +626,13 @@ export function ProductEffectForm({
                         checked={checked}
                         onChange={() =>
                           setAllowedAccessories((prev) =>
-                            prev.includes(a)
-                              ? prev.filter((x) => x !== a)
-                              : [...prev, a]
+                            prev.includes(a.code)
+                              ? prev.filter((x) => x !== a.code)
+                              : [...prev, a.code]
                           )
                         }
                       />
-                      {acc?.name ?? a}
+                      {a.name}
                     </label>
                   );
                 })}
@@ -831,9 +837,9 @@ export function ProductEffectForm({
          - 挂在 promptTemplate 上（prompt_template_price 表），与 productEffect 表独立
          - 本单总扣 = basePrice（promptTemplate.price） + Σ(matching rule.delta)
          - 4 个子区域（按 specKey 维度）：尺寸 / 配件 / 皮革色 / 保护套
-         - 始终展示字典全量（4cm/6cm/8cm/11cm + leather/pvc/bracket + 5 色 +
-           exposed/pvc），与 allowed 子集解耦：admin 即使在「规格」段没勾某个
-           尺寸，也能在这里预填 delta（运行时用户选不到就不命中 = 不影响）
+         - 始终展示字典全量（尺寸 = 各型号尺寸的并集 / 配件 = 全局配件清单 +
+           5 色皮革 + exposed/pvc），与 allowed 子集解耦：admin 即使在「规格」段
+           没勾某个尺寸，也能在这里预填 delta（运行时用户选不到就不命中 = 不影响）
          - 仅在选了 promptTemplateId 时显示（无模板的 productEffect 无意义）*/}
       {promptTemplateId && (
         <div className="rounded-lg border bg-rose-500/5 px-4 py-3 space-y-3">
@@ -871,7 +877,7 @@ export function ProductEffectForm({
               <div>
                 <div className="text-xs font-medium mb-1.5">尺寸</div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {["4", "6", "8", "11"].map((s) => {
+                  {catalog.allSizes.map((s) => {
                     const specKey = `size:${s}`;
                     const delta = getDelta(specKey);
                     return (
@@ -903,7 +909,7 @@ export function ProductEffectForm({
               <div>
                 <div className="text-xs font-medium mb-1.5">配件</div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {ACCESSORIES.map((a) => {
+                  {catalog.allAccessories.map((a) => {
                     const specKey = `accessory:${a.code}`;
                     const delta = getDelta(specKey);
                     return (

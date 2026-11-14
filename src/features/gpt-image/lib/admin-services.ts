@@ -10,6 +10,12 @@ import { nanoid } from "nanoid";
 import { db } from "@/db";
 import type { PromptOrderStatus } from "@/db/schema";
 import { promptOrder, promptTemplate } from "@/db/schema";
+import { getCatalogDictionary } from "@/features/image-gen/lib/catalog-dictionary-store";
+import {
+  defaultAccessoryForType,
+  defaultSizeForType,
+  validateProductSpecWithDictionary,
+} from "@/features/image-gen/lib/catalog-dictionary-validate";
 import { generateOrderToken } from "./generation-service";
 import {
   countCandidateGroups,
@@ -19,12 +25,7 @@ import {
   parseSelections,
   parseUploadedImages,
 } from "./order-helpers";
-import {
-  getProductType,
-  type PlatformCode,
-  validatePlatform,
-  validateProductSpec,
-} from "./product-catalog";
+import { type PlatformCode, validatePlatform } from "./product-catalog";
 
 // ============================================
 // 模板服务
@@ -363,16 +364,34 @@ export async function createOrder(input: {
   const finalProductTypeCode = input.productTypeCode ?? null;
   let finalProductSize = input.productSize ?? null;
   let finalAccessoryCode = input.accessoryCode ?? null;
+
+  // ⚠️ 尺寸 / 配件的合法性读**目录字典**(2026-11-14),不是代码常量 ——
+  // 后台 `/admin/products/[code]` 新加的尺寸必须能被这条链路认,
+  // 否则「后台能配 ≠ 服务端认」。
+  //
+  // 这一层是 `promptOrderCreateSchema` 的**唯一权威校验点**:
+  // zod 那层(`validation.ts`)是**同步纯函数**,读不了 DB ⇒ 它只保留
+  // 「没选型号却指定了尺寸 / 配件」这一条自洽性规则,型号 / 尺寸 / 配件
+  // 的**字典归属**在这里判。
+  const dictionary = await getCatalogDictionary();
+  validateProductSpecWithDictionary(
+    dictionary,
+    finalProductTypeCode,
+    finalProductSize,
+    finalAccessoryCode
+  );
+
+  // 默认值也从字典取(第一个可用尺寸 / 第一个可用配件)—— 跟代码常量那边
+  // `type.sizes[0]` / `type.accessories[0]` 一个口径,只是数据源换了。
   if (finalProductTypeCode) {
-    const type = getProductType(finalProductTypeCode);
-    // type 找不到时让 schema 校验阶段已拦下；这里兜底取 null 不写脏值
-    if (type) {
-      if (!finalProductSize && type.sizes.length > 0) {
-        finalProductSize = type.sizes[0] ?? null;
-      }
-      if (!finalAccessoryCode && type.accessories.length > 0) {
-        finalAccessoryCode = type.accessories[0] ?? null;
-      }
+    if (!finalProductSize) {
+      finalProductSize = defaultSizeForType(dictionary, finalProductTypeCode);
+    }
+    if (!finalAccessoryCode) {
+      finalAccessoryCode = defaultAccessoryForType(
+        dictionary,
+        finalProductTypeCode
+      );
     }
   }
 
@@ -664,7 +683,10 @@ export async function updateOrder(input: {
     input.productSize !== undefined ||
     input.accessoryCode !== undefined
   ) {
-    validateProductSpec(
+    // ⚠️ 走**目录字典**(2026-11-14)—— 后台 `/admin/products/[code]` 新加的
+    // 尺寸 / 配件必须被服务端认,否则「后台能配 ≠ 服务端认」。
+    validateProductSpecWithDictionary(
+      await getCatalogDictionary(),
       input.productTypeCode ?? null,
       input.productSize ?? null,
       input.accessoryCode ?? null

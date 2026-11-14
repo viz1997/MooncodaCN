@@ -52,13 +52,18 @@
  * ```
  * product_variant.price_cents =
  *     product.base_price_cents
- *   + 尺寸档位 × SIZE_STEP_CENTS
- *   + 配件变体加价
+ *   + 尺寸加价(product_size 表的**显式值**)
+ *   + 配件变体加价(product_accessory_variant 行)
  * ```
  *
- * 尺寸档位和配件加价都从**代码里的字典**取(`product-catalog.ts` /
- * `product-accessory-variants.ts`),不是从 DB 取 —— DB 里那些数就是旧的
- * 那一套。
+ * ⚠️ **尺寸加价和配件加价都从 DB 取**(2026-11-14 起)——
+ * 这两列搬进后台了(`/admin/products/[code]`),**后台配的值才是真理源**。
+ * 代码常量(`product-catalog.ts` / `product-accessory-variants.ts`)只是
+ * **兜底**:字典表还没播种 / 某个型号 DB 里没行时用它。
+ *
+ * ⇒ 这个脚本**只重刷 SKU 价**和(在 `--force-reprice` 下)基础价;
+ * **不碰配件加价** —— 以前它按代码字典重刷那一列,`--force-reprice` 会把
+ * 工作室调过的加价悄悄改回去,又是一轮「改了不生效」。
  *
  * ## ⚠️ 重定价要**显式**加 `--force-reprice`(2026-11-08)
  *
@@ -71,13 +76,13 @@
  * 没跑 / 某个型号还没播种时用它),不是**真理源**。工作室在后台调过的价
  * 才是真理源,脚本把它悄悄改回去,就是又一轮「改了不生效」。
  *
- * 真要按代码字典重刷(比如刚改完币种,整目录要换一套价),显式加:
+ * 真要重刷(比如刚改完币种,整目录要换一套价),显式加:
  *
  * ```
  * pnpm tsx scripts/apply-currency-schema.ts --force-reprice
  * ```
  *
- * **会覆盖 admin 改过的价** —— 这是显式选择,不是默认行为。
+ * **会覆盖 admin 改过的基础价** —— 这是显式选择,不是默认行为。
  *
  * ## 幂等
  *
@@ -96,13 +101,14 @@
 import "./lib/load-env";
 
 import { PRICE_CURRENCY, PRICE_REGION_ID } from "@/config/currency";
-import { PRODUCT_ACCESSORY_VARIANTS } from "@/features/gpt-image/lib/product-accessory-variants";
 // 字典是纯模块(没有 DB 依赖),静态 import 安全
 import {
   BASE_PRICE_CENTS,
   PRODUCT_TYPES,
 } from "@/features/gpt-image/lib/product-catalog";
-import { SIZE_STEP_CENTS } from "@/features/image-gen/lib/product-variant-sku";
+// ⚠️ `SIZE_STEP_CENTS` 的**单一出处**在 catalog-dictionary.ts(2026-11-14 起)
+// —— 别在别处再写一份 500。
+import { SIZE_STEP_CENTS } from "@/features/image-gen/lib/catalog-dictionary";
 
 /** 配件变体的查表键 —— 三元组 */
 function accKey(
@@ -252,14 +258,15 @@ async function main(): Promise<void> {
 
   // 3.2 product_accessory_variant.price_delta_cents
   //     键 = 产品码 | 配件码 | 变体码
-  const codeAccMap = new Map<string, number>();
-  for (const v of PRODUCT_ACCESSORY_VARIANTS) {
-    codeAccMap.set(
-      accKey(v.productTypeCode, v.accessoryCode, v.variantCode),
-      v.priceDeltaCents
-    );
-  }
-
+  //
+  // ⚠️ 2026-11-14:这一列**不再按代码字典重刷**。
+  //
+  // 配件加价搬进后台了(`/admin/products/[code]` → 配件变体)⇒ **后台配的
+  // 值才是真理源**。以前这里拿 `PRODUCT_ACCESSORY_VARIANTS`(代码常量)
+  // 当真理源,`--force-reprice` 会把工作室调过的加价悄悄改回去 —— 又一轮
+  // 「改了不生效」。代码字典现在只是**兜底**(字典表没播种时的初始值)。
+  //
+  // 所以这一节**只读出加价**,给 3.3 算 SKU 价用;一个字都不写。
   const accRows = await client.query<{
     product_type_code: string;
     accessory_code: string;
@@ -270,68 +277,21 @@ async function main(): Promise<void> {
        FROM "product_accessory_variant"`
   );
 
-  const accDiffs: Array<{
-    key: [string, string, string];
-    from: number;
-    to: number;
-  }> = [];
-  let accUnmatched = 0;
-  for (const row of accRows.rows) {
-    const key = accKey(
-      row.product_type_code,
-      row.accessory_code,
-      row.variant_code
-    );
-    const next = codeAccMap.get(key);
-    if (next === undefined) {
-      // 代码字典里没有这一行(可能是 admin 自己加的)—— 保持原样
-      accUnmatched += 1;
-      continue;
-    }
-    if (next === row.price_delta_cents) continue;
-    accDiffs.push({
-      key: [row.product_type_code, row.accessory_code, row.variant_code],
-      from: row.price_delta_cents,
-      to: next,
-    });
-  }
-
-  if (FORCE_REPRICE) {
-    for (const d of accDiffs) {
-      await client.query(
-        `UPDATE "product_accessory_variant"
-            SET "price_delta_cents" = $1, "updated_at" = now()
-          WHERE "product_type_code" = $2
-            AND "accessory_code" = $3
-            AND "variant_code" = $4;`,
-        [d.to, d.key[0], d.key[1], d.key[2]]
-      );
-    }
-    console.log(
-      `✓ product_accessory_variant.price_delta_cents:改写 ${accDiffs.length} 行` +
-        (accUnmatched > 0 ? `(${accUnmatched} 行不在代码字典里,原样保留)` : "")
-    );
-  } else if (accDiffs.length === 0) {
-    console.log("✓ product_accessory_variant.price_delta_cents:跟代码字典一致");
-  } else {
-    console.log(
-      `⚠ product_accessory_variant.price_delta_cents:有 ${accDiffs.length} 行跟代码字典不一致(未改动)`
-    );
-    for (const d of accDiffs) {
-      console.log(
-        `  · ${d.key.join("|")}: ${d.from} → ${d.to} 分` +
-          `(${money(d.from, currency)} → ${money(d.to, currency)})`
-      );
-    }
-  }
+  console.log(
+    `✓ product_accessory_variant.price_delta_cents:只读 ${accRows.rows.length} 行` +
+      "(不重刷 —— 配件加价由后台管)"
+  );
 
   // 3.3 product_variant.price_cents
-  //     = 基础价 + 尺寸档位 × SIZE_STEP_CENTS + 配件变体加价
+  //     = 基础价 + 尺寸加价 + 配件变体加价
   //     公式跟 buildAllVariantSeeds() / recomputeVariantPrices() 一致
   //
   //     **只读模式下查的是「不变式」**(用 DB 里自己的基础价和配件加价);
-  //     **--force-reprice 模式下用的是代码字典的值**(先刷基础价、再刷配件
-  //     加价,SKU 价跟着刷)。
+  //     **--force-reprice 模式下用新刷的基础价 + DB 里的配件加价**。
+  //
+  //     ⚠️ 尺寸加价和配件加价**两边模式都从 DB 取** —— 这两列 2026-11-14
+  //     起是**后台配的**(真理源在 DB),代码常量只是「字典表还没播种」时的
+  //     兜底。按代码字典重刷 = 又一轮「后台改了不生效」。
   const newBase = new Map<string, number>();
   for (const row of productRows.rows) {
     const next = BASE_PRICE_CENTS[row.code];
@@ -341,20 +301,72 @@ async function main(): Promise<void> {
     );
   }
 
-  // 配件加价:重定价模式用代码字典,只读模式用 DB 里自己的
+  // 配件加价 —— **DB 的行**(两边模式都一样)
   const accDelta = new Map<string, number>();
   for (const row of accRows.rows) {
-    const key = accKey(
-      row.product_type_code,
-      row.accessory_code,
-      row.variant_code
-    );
     accDelta.set(
-      key,
-      FORCE_REPRICE
-        ? (codeAccMap.get(key) ?? row.price_delta_cents)
-        : row.price_delta_cents
+      accKey(row.product_type_code, row.accessory_code, row.variant_code),
+      row.price_delta_cents
     );
+  }
+
+  // 尺寸加价 —— **DB 的 `product_size` 表**(后台能配 ⇒ 真理源在 DB)
+  //
+  // 这个脚本用裸 `pg`(不 import `@/db`)⇒ 自己查。
+  // 表还不存在(迁移没跑)⇒ **整份退回代码常量兜底**(idx × ¥5)
+  // —— 跟改造前的行为一个字节都不变。
+  //
+  // 合并口径跟 `catalog-dictionary.ts` 的 `mergeCatalogDictionary()` 一致:
+  // **逐型号** —— 某个型号在 DB 里有行 ⇒ 那个型号的尺寸全听 DB 的;
+  // 一个都没有 ⇒ 用代码常量。
+  const sizeRowsByType = new Map<string, Map<string, number>>();
+  try {
+    const sizeRows = await client.query<{
+      product_type_code: string;
+      size_code: string;
+      price_delta_cents: number;
+      is_active: boolean;
+    }>(
+      `SELECT "product_type_code", "size_code", "price_delta_cents", "is_active"
+         FROM "product_size"`
+    );
+    for (const row of sizeRows.rows) {
+      const m =
+        sizeRowsByType.get(row.product_type_code) ?? new Map<string, number>();
+      // 停用的那一档 = 那一档没了 ⇒ 不进 map(查的时候当成「查不到」)
+      if (row.is_active) m.set(row.size_code, row.price_delta_cents);
+      sizeRowsByType.set(row.product_type_code, m);
+    }
+  } catch {
+    // 表还不存在 ⇒ 整份退回代码常量兜底
+    sizeRowsByType.clear();
+    console.log(
+      "  (product_size 表还不存在 —— 尺寸加价退回代码常量兜底:idx × ¥5)"
+    );
+  }
+
+  /**
+   * 某一档尺寸的加价 —— `null` = **查不到**(这一行不参与重算)
+   *
+   * 跟 `catalog-dictionary.ts` 的 `sizeDeltaCentsFor()` **一个口径**:
+   * 查不到就返回 null,**不许当成 0** —— 当成 0 = 静默把某一档的尺寸加价
+   * 抹掉,价算错了还不报错。
+   */
+  function resolveSizeDelta(
+    typeCode: string,
+    sizeCode: string
+  ): number | null {
+    const typeRows = sizeRowsByType.get(typeCode);
+    if (typeRows) {
+      // 这个型号在 DB 里有行 ⇒ 全听 DB 的(含「这一档被停用了」的情况)
+      return typeRows.get(sizeCode) ?? null;
+    }
+    // 这个型号 DB 里没有 ⇒ 代码常量兜底
+    const productType = PRODUCT_TYPES.find((pt) => pt.code === typeCode);
+    if (!productType) return null;
+    const idx = productType.sizes.indexOf(sizeCode);
+    if (idx < 0) return null;
+    return idx * SIZE_STEP_CENTS;
   }
 
   const variantRows = await client.query<{
@@ -376,22 +388,30 @@ async function main(): Promise<void> {
   }> = [];
   let variantUnmatched = 0;
   for (const row of variantRows.rows) {
-    const productType = PRODUCT_TYPES.find(
-      (pt) => pt.code === row.product_code
-    );
-    if (!productType) {
+    // 尺寸档查不到(型号不在字典里 / 这一档被停用)⇒ **这一行不参与重算**
+    // —— 当成 0 会把尺寸加价悄悄抹掉(价算错还不报错)。
+    const sizeDelta = resolveSizeDelta(row.product_code, row.size_code);
+    if (sizeDelta === null) {
       variantUnmatched += 1;
       continue;
     }
-    const sizeIdx = productType.sizes.indexOf(row.size_code);
-    // 尺寸码不在字典里 → 当成 0 阶梯(跟 buildAllVariantSeeds 一样),
-    // 但这种行**不参与重算**(找不到尺寸阶梯,算出来的价是猜的)
-    const sizeDelta = (sizeIdx < 0 ? 0 : sizeIdx) * SIZE_STEP_CENTS;
-    const delta = accDelta.get(
-      accKey(row.product_code, row.accessory_code, row.variant_code)
-    );
+
+    // 配件变体加价 —— 跟 `recomputeVariantPrices()` 一个口径:
+    // 有变体码却查不到加价 ⇒ **跳过这一行**(不当成 0)
+    let accessoryDelta = 0;
+    if (row.variant_code !== "N-A" && row.variant_code !== "") {
+      const found = accDelta.get(
+        accKey(row.product_code, row.accessory_code, row.variant_code)
+      );
+      if (found === undefined) {
+        variantUnmatched += 1;
+        continue;
+      }
+      accessoryDelta = found;
+    }
+
     const next =
-      (newBase.get(row.product_code) ?? 0) + sizeDelta + (delta ?? 0);
+      (newBase.get(row.product_code) ?? 0) + sizeDelta + accessoryDelta;
     if (next === row.price_cents) continue;
     variantDiffs.push({ sku: row.sku, from: row.price_cents, to: next });
   }
@@ -413,12 +433,12 @@ async function main(): Promise<void> {
     );
   } else if (variantDiffs.length === 0) {
     console.log(
-      "✓ product_variant.price_cents:跟「基础价 + 尺寸阶梯 + 配件加价」一致"
+      "✓ product_variant.price_cents:跟「基础价 + 尺寸加价 + 配件加价」一致"
     );
   } else {
     console.log(
       `⚠ product_variant.price_cents:有 ${variantDiffs.length} 行跟` +
-        "「基础价 + 尺寸阶梯 + 配件加价」对不上(未改动)"
+        "「基础价 + 尺寸加价 + 配件加价」对不上(未改动)"
     );
     for (const d of variantDiffs.slice(0, 20)) {
       console.log(

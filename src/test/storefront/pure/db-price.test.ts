@@ -2,11 +2,11 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { getProductType } from "@/features/gpt-image/lib/product-catalog";
 import {
-  recomputeVariantPrices,
+  buildCatalogDictionaryFromCodeConstants,
   SIZE_STEP_CENTS,
-} from "@/features/image-gen/lib/product-variant-sku";
+} from "@/features/image-gen/lib/catalog-dictionary";
+import { recomputeVariantPrices } from "@/features/image-gen/lib/product-variant-sku";
 import type { PriceSource } from "@/features/storefront/lib/price-source-types";
 import { calculatePricing } from "@/features/storefront/lib/pricing";
 import type { CustomizationSpec } from "@/features/storefront/types";
@@ -55,6 +55,40 @@ function stripComments(src: string): string {
 }
 
 /**
+ * 去掉**纯类型**的 import 语句
+ *
+ * `import type { X } from "@/db/..."` 在编译期就被擦掉了 ⇒ **不会**把 DB
+ * 拖进浏览器 bundle ⇒ 它是允许存在的。
+ *
+ * 但 `import { X } from "@/db/..."`(值导入)就会 ⇒ 那才是要拦的。
+ *
+ * ⚠️ `tsconfig.json` **没有** `verbatimModuleSyntax` ⇒ 默认会把纯类型的
+ * import 整条擦掉(连带 `import { type A, type B } from "..."` 这种
+ * 全部 specifier 都是 type 的写法)。
+ */
+function stripTypeOnlyImports(src: string): string {
+  return src.replace(
+    /^[ \t]*import\s+(type\s+)?([\s\S]*?)\s*from\s+["'][^"']+["'];?[ \t]*$/gm,
+    (whole, typeKeyword: string | undefined, specifiers: string) => {
+      // `import type { … }` —— 整条擦掉
+      if (typeKeyword) return "";
+      // `import { type A, type B } from "…"` —— specifier 全是 type ⇒ 也擦掉
+      const named = specifiers.trim().match(/^\{([\s\S]*)\}$/);
+      if (named) {
+        const parts = (named[1] ?? "")
+          .split(",")
+          .map((part) => part.trim())
+          .filter(Boolean);
+        if (parts.length > 0 && parts.every((part) => /^type\s/.test(part))) {
+          return "";
+        }
+      }
+      return whole;
+    }
+  );
+}
+
+/**
  * 找出仓库里所有带 `"use client"` 的 tsx 文件(相对仓库根)
  *
  * 服务端模块(`price-source.ts` import 了 `@/db`)被客户端组件 import 时
@@ -90,6 +124,12 @@ const CART_STORE = "src/features/storefront/lib/cart-store.ts";
 const CURRENCY_MIGRATION = "scripts/apply-currency-schema.ts";
 const ADMIN_ACTIONS = "src/features/image-gen/admin/actions.ts";
 const DB_PRODUCTS = "src/features/image-gen/lib/db-products.ts";
+/** 纯的那一半:类型 + 兜底 + 合并(零 import) */
+const DICT_PURE = "src/features/image-gen/lib/catalog-dictionary.ts";
+/** overlay:把字典翻译成商城的形状(零 import) */
+const DICT_APPLY = "src/features/storefront/lib/catalog-dictionary-apply.ts";
+/** 连库的那一半(import `@/db`)—— 客户端组件不许碰 */
+const DICT_STORE = "src/features/image-gen/lib/catalog-dictionary-store.ts";
 
 /* -------------------------------------------------------------------------- */
 /*  扫描式守卫                                                                 */
@@ -119,9 +159,13 @@ describe("价从 DB 来 —— 扫描式守卫", () => {
     expect(code).toContain(
       "priceSource?.basePriceCentsByTypeCode.get(spec.productTypeCode) ??\n    product.basePriceCents"
     );
-    // 配件加价同理
+    // 配件加价同理 —— 但**目录字典优先**(2026-11-14)
+    //
+    // 顺序:字典 → 平铺的价表 → 代码常量。字典赢是因为**显示那条路**
+    // (`storefront-catalog.ts`)也是字典赢 ⇒ 一边赢字典、一边赢价表
+    // =「页面显示 +¥5、结算按 +¥10 收」。
     expect(code).toContain(
-      "priceSource?.accessoryDeltaCentsByVariantId.get(variantId) ??\n      variant.surchargeCents"
+      "catalogVariant?.surchargeCents ??\n      priceSource?.accessoryDeltaCentsByVariantId.get(variantId) ??\n      variant.surchargeCents"
     );
   });
 
@@ -293,8 +337,14 @@ describe("`calculatePricing` —— 第二参真的生效", () => {
 });
 
 describe("`recomputeVariantPrices` —— SKU 价 = 基础价 + 尺寸阶梯 + 配件加价", () => {
-  const productType = getProductType("R");
-  if (!productType) throw new Error("R 不在 PRODUCT_TYPES 里 —— 测试夹具坏了");
+  /**
+   * 字典 = **代码常量兜底**那一份(尺寸加价 = `idx × ¥5`)。
+   *
+   * 2026-11-14 起尺寸 / 配件清单住在**字典**里(`catalog-dictionary.ts`),
+   * `recomputeVariantPrices` 的入参从 `productType` 换成了 `dictionary`。
+   * 兜底那一份的加价跟改造前逐字相同 ⇒ 下面的断言一字未动。
+   */
+  const dictionary = buildCatalogDictionaryFromCodeConstants();
 
   const accessoryVariants = [
     {
@@ -329,7 +379,8 @@ describe("`recomputeVariantPrices` —— SKU 价 = 基础价 + 尺寸阶梯 + �
 
     const out = recomputeVariantPrices({
       basePriceCents: 1900,
-      productType,
+      productCode: "R",
+      dictionary,
       accessoryVariants,
       existingRows: rows,
     });
@@ -344,7 +395,8 @@ describe("`recomputeVariantPrices` —— SKU 价 = 基础价 + 尺寸阶梯 + �
   it("尺寸码不在字典里 → **跳过那一行**,不当成 0", () => {
     const out = recomputeVariantPrices({
       basePriceCents: 1900,
-      productType,
+      productCode: "R",
+      dictionary,
       accessoryVariants,
       existingRows: [
         { id: "v1", sizeCode: "4", accessoryCode: "N-A", variantCode: "N-A" },
@@ -360,7 +412,8 @@ describe("`recomputeVariantPrices` —— SKU 价 = 基础价 + 尺寸阶梯 + �
   it("配件变体查不到加价 → **跳过那一行**,不当成 0", () => {
     const out = recomputeVariantPrices({
       basePriceCents: 1900,
-      productType,
+      productCode: "R",
+      dictionary,
       accessoryVariants,
       existingRows: [
         { id: "v1", sizeCode: "4", accessoryCode: "N-A", variantCode: "N-A" },
@@ -380,7 +433,8 @@ describe("`recomputeVariantPrices` —— SKU 价 = 基础价 + 尺寸阶梯 + �
   it("「配件有码但没有变体行」(`N-A`)不加配件价 —— 跟播种口径一致", () => {
     const out = recomputeVariantPrices({
       basePriceCents: 1900,
-      productType,
+      productCode: "R",
+      dictionary,
       accessoryVariants,
       existingRows: [
         {
@@ -393,5 +447,72 @@ describe("`recomputeVariantPrices` —— SKU 价 = 基础价 + 尺寸阶梯 + �
     });
 
     expect(out).toEqual([{ id: "v1", priceCents: 1900 }]);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/*  尺寸 / 配件字典 —— 客户端不许碰服务端那一半                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 尺寸 / 配件清单搬进 DB 之后,「客户端不许碰服务端那一半」这条规矩
+ * **多了一份** —— 字典也分两半。
+ *
+ * | 哪一半 | 在哪儿 | 能给客户端用吗 |
+ * |---|---|---|
+ * | **纯的** | `catalog-dictionary.ts`(类型 + 兜底 + 合并) | ✅ 零 import |
+ * | **纯的** | `catalog-dictionary-apply.ts`(翻译成商城的形状) | ✅ 零 import |
+ * | **连库的** | `catalog-dictionary-store.ts` | ❌ 它 import `@/db` |
+ *
+ * 跟 `price-source.ts` 一个套路:**显示侧降级、结算侧硬闸**。
+ *
+ * ⚠️ 「兜底字典」那一层是这个设计的关键 —— DB 没播种 / 读失败时,商城
+ * 看到的加价跟今天**一个字节都不变**(测试 ⑦ 用 `toEqual` 逐字节比过)。
+ */
+describe("尺寸 / 配件字典 —— 客户端不许碰服务端那一半", () => {
+  it("① overlay 模块零 import —— 它是纯函数,服务端 / 客户端都能用", () => {
+    const code = stripTypeOnlyImports(stripComments(read(DICT_APPLY)));
+    const imports = code.match(/^[ \t]*import[ \t][^\n]*$/gm) ?? [];
+
+    // 它只许 import 纯类型 / 纯常量模块
+    for (const line of imports) {
+      expect(line, line).not.toMatch(/from\s+"@\/db"/);
+      expect(line, line).not.toMatch(/from\s+"[^"]*catalog-dictionary-store"/);
+      expect(line, line).not.toMatch(/from\s+"server-only"/);
+    }
+  });
+
+  it("② 纯的那一半也不许 import `@/db` —— 兜底必须能进浏览器", () => {
+    // ⚠️ 纯**类型**的 import(`import type { X } from "@/db/image-gen-types"`)
+    // 编译期就擦掉了 ⇒ 不算违规 ⇒ 先把它们摘掉再查
+    const code = stripTypeOnlyImports(stripComments(read(DICT_PURE)));
+
+    expect(code).not.toContain("@/db");
+    expect(code).not.toContain("server-only");
+  });
+
+  it("③ 服务端字典模块连库,而且调了 `connection()`(别把字典烤进 HTML)", () => {
+    const code = stripComments(read(DICT_STORE));
+
+    expect(code).toContain("await connection()");
+    expect(code).toContain("@/db");
+  });
+
+  it("④ 全仓扫一遍:没有任何 `\"use client\"` 文件 import 服务端字典模块", () => {
+    const offenders: string[] = [];
+    for (const rel of walkClientComponents()) {
+      const src = stripComments(read(rel));
+      if (/from\s+"[^"]*\/catalog-dictionary-store"/.test(src)) {
+        offenders.push(rel);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("⑤ `mock-catalog.ts` 仍然一个字都不改 —— 它不 import 任何字典模块", () => {
+    const code = stripComments(read(MOCK_CATALOG));
+
+    expect(code).not.toContain("@/db");
+    expect(code).not.toMatch(/from\s+"[^"]*catalog-dictionary/);
   });
 });

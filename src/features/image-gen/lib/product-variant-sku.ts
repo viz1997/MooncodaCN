@@ -9,27 +9,38 @@
  *  - 那张表回答「某产品的某配件有哪些颜色/尺寸」（AI 规格枚举）
  *  - 本模块回答「这个 (尺寸 × 配件 × 配件变体) 组合能卖多少钱」（真 SKU）
  *
- * 尺寸清单 / 配件清单目前仍是 product-catalog.ts 的 PRODUCT_TYPES 常量
- * （见 CLAUDE.md 范围说明）。将来这两张字典也 DB 化时，只需替换本模块的
- * 入参来源，SKU 编码规则不用动。
+ * ## 尺寸 / 配件清单从哪来（2026-11-14 起是 DB）
+ *
+ * 尺寸清单 / 配件清单原先是 product-catalog.ts 的 PRODUCT_TYPES 常量。
+ * 现在它们是**字典**（`catalog-dictionary.ts` —— 从 DB 读、代码常量兜底），
+ * 后台能改尺寸加价、能加新尺寸 / 新配件。
+ *
+ * **SKU 编码规则一个字都没动** —— 变的只是「尺寸加价从哪儿来」：
+ *
+ * | | 以前 | 现在 |
+ * |---|---|---|
+ * | 尺寸加价 | `idx * 500`（按**下标**算） | 字典里的**显式** `priceDeltaCents` |
+ * | 尺寸清单 | `PRODUCT_TYPES[].sizes` | `dictionary.sizesByType` |
+ * | 配件清单 | `PRODUCT_TYPES[].accessories` | `dictionary.accessoryOptionsByType` |
+ * | 配件变体加价 | `product_accessory_variant` 行 | 同左（**没变**） |
+ *
+ * ⚠️ **为什么尺寸加价必须改成显式的** —— 下标算出来的价，在尺寸数组中间插
+ * 一档，后面每一档的价会**静默全变**（而且商城显示的加价跟 SKU 表里真实的
+ * 绝对价会对不上）。显式的加价由后台决定，改哪一档只动哪一档。
+ *
+ * ⚠️ `SIZE_STEP_CENTS` 现在住在 `catalog-dictionary.ts`（那边要拿它生成
+ * 兜底字典）—— **单一出处**，别在别处再写一份 500。
  */
 
+import { BASE_PRICE_CENTS } from "@/features/gpt-image/lib/product-catalog";
 import {
-  BASE_PRICE_CENTS,
-  PRODUCT_TYPES,
-  type ProductType,
-} from "@/features/gpt-image/lib/product-catalog";
+  type CatalogDictionary,
+  accessoryCodesForType,
+  sizeDeltaCentsFor,
+} from "@/features/image-gen/lib/catalog-dictionary";
 
 /** 该维度不存在时在 SKU 里占位的段 */
 export const NO_SEGMENT = "N-A";
-
-/**
- * 尺寸加价规则（分）—— 与 product-capability.ts 里
- * `sizes[].priceDeltaCents = idx * 500` 保持一致。
- *
- * 抽成常量是为了让 seed 与运行时拼价逻辑不会各写一份然后漂移。
- */
-export const SIZE_STEP_CENTS = 500;
 
 /** product_accessory_variant 行的最小结构（本模块只需要这几个字段） */
 export interface AccessoryVariantLike {
@@ -140,12 +151,12 @@ export function variantIdFromSku(sku: string): string {
  * 某配件没有变体定义（如 metal / magnet / bracket）时产出 1 行，
  * variantCode 记 N-A；产品完全没有配件（RM）时每个尺寸产出 1 行 N-A 行。
  *
- * 初始价 = 商品 basePriceCents + 尺寸阶梯加价 + 配件变体加价，
+ * 初始价 = 商品 basePriceCents + **尺寸的显式加价** + 配件变体加价，
  * 与旧的前端拼价公式保持一致，所以 seed 当天线上价格零漂移。
  *
  * @param productCode       产品码
  * @param basePriceCents    该商品的 basePriceCents（DB 行优先，否则取字典）
- * @param productType       PRODUCT_TYPES 里对应的条目（提供 sizes / accessories）
+ * @param dictionary        尺寸 / 配件字典（DB 优先，代码常量兜底）
  * @param accessoryVariants product_accessory_variant 全量行（本产品相关的会被过滤）
  * @param startSortOrder    sortOrder 起始值，便于追加
  */
@@ -153,14 +164,15 @@ export function buildVariantSeeds(opts: {
   productCode: string;
   /** 显式带 `| undefined`：exactOptionalPropertyTypes 下字典查不到的值要能直接传下去 */
   basePriceCents?: number | undefined;
-  productType: ProductType;
+  /** 尺寸 / 配件字典 —— 尺寸加价是**显式**的，不靠下标算 */
+  dictionary: CatalogDictionary;
   accessoryVariants: readonly AccessoryVariantLike[];
   startSortOrder?: number | undefined;
 }): VariantSeed[] {
   const {
     productCode,
     basePriceCents,
-    productType,
+    dictionary,
     accessoryVariants,
     startSortOrder = 0,
   } = opts;
@@ -170,11 +182,16 @@ export function buildVariantSeeds(opts: {
   let sort = startSortOrder;
 
   // 无配件的产品（RM）也要出 1 行，用 NO_SEGMENT 占位代表「不带配件」
+  const accessoryCodes = accessoryCodesForType(dictionary, productCode);
   const accessories: readonly string[] =
-    productType.accessories.length > 0 ? productType.accessories : [NO_SEGMENT];
+    accessoryCodes.length > 0 ? accessoryCodes : [NO_SEGMENT];
 
-  for (const [sizeIdx, sizeCode] of productType.sizes.entries()) {
-    const sizeDelta = sizeIdx * SIZE_STEP_CENTS;
+  // 尺寸清单 —— 加价是**显式**的（字典里那一档写多少就是多少）
+  const sizes = dictionary.sizesByType.get(productCode) ?? [];
+
+  for (const size of sizes) {
+    const sizeCode = size.code;
+    const sizeDelta = size.priceDeltaCents;
 
     for (const accessory of accessories) {
       const isNoAccessory = accessory === NO_SEGMENT;
@@ -222,33 +239,41 @@ export function buildVariantSeeds(opts: {
 }
 
 /**
- * 生成全部 6 个产品的 SKU 行。
+ * 生成**全部**型号的 SKU 行。
  *
  * @param basePrices        productCode → basePriceCents（DB 行的价，优先于字典）
  * @param accessoryVariants product_accessory_variant 全量行
- * @param productTypes      PRODUCT_TYPES 条目（默认全量字典）
+ * @param dictionary        尺寸 / 配件字典
+ * @param productCodes      只生成这几个型号（默认 = 字典里的全部型号，按字典顺序）
  */
 export function buildAllVariantSeeds(opts: {
   basePrices?: Record<string, number>;
   accessoryVariants: ReadonlyArray<
     AccessoryVariantLike & { productTypeCode: string }
   >;
-  productTypes?: readonly ProductType[];
+  dictionary: CatalogDictionary;
+  productCodes?: readonly string[];
 }): VariantSeed[] {
   const {
     basePrices = {},
     accessoryVariants,
-    productTypes = PRODUCT_TYPES,
+    dictionary,
+    productCodes,
   } = opts;
 
+  // ⚠️ 顺序 = 字典的 `typeOrder`（R / A / P / RM / LB / M）—— 跟今天的
+  // `PRODUCT_TYPES` 顺序**逐字一致**。`buildAllVariantSeeds` 产出的行靠
+  // `sortOrder` 排序,顺序变了 ⇒ 商城里 SKU 的摆法变了。
+  const typeOrder = productCodes ?? dictionary.typeOrder;
+
   const out: VariantSeed[] = [];
-  for (const pt of productTypes) {
-    const mine = accessoryVariants.filter((v) => v.productTypeCode === pt.code);
+  for (const code of typeOrder) {
+    const mine = accessoryVariants.filter((v) => v.productTypeCode === code);
     out.push(
       ...buildVariantSeeds({
-        productCode: pt.code,
-        basePriceCents: basePrices[pt.code],
-        productType: pt,
+        productCode: code,
+        basePriceCents: basePrices[code],
+        dictionary,
         accessoryVariants: mine,
       })
     );
@@ -292,7 +317,7 @@ export interface RecomputedVariantPrice {
  * ## 算式跟播种完全一致
  *
  * ```
- * price = 基础价 + 尺寸阶梯(idx × 500) + 配件变体加价
+ * price = 基础价 + 尺寸加价(字典里的**显式**值) + 配件变体加价
  * ```
  *
  * 跟 `buildVariantSeeds()` 里的公式逐字一致 —— 两处算出来的价必须相同。
@@ -304,21 +329,22 @@ export interface RecomputedVariantPrice {
  * - **配件变体查不到加价** —— 同理,跳过。
  *
  * 「配件有码但没有变体行」(`variantCode = N-A`)**不是**查不到 ——
- * 播种时它就是 `base + 尺寸阶梯`,不加配件价。这条要跟播种口径一致。
+ * 播种时它就是 `base + 尺寸加价`,不加配件价。这条要跟播种口径一致。
  */
 export function recomputeVariantPrices(opts: {
   basePriceCents: number;
-  productType: ProductType;
+  productCode: string;
+  dictionary: CatalogDictionary;
   accessoryVariants: readonly AccessoryVariantLike[];
   existingRows: readonly ExistingVariantRow[];
 }): RecomputedVariantPrice[] {
-  const { basePriceCents, productType, accessoryVariants, existingRows } = opts;
-
-  // 尺寸码 → 阶梯加价(下标 × 500)
-  const sizeDeltaByCode = new Map<string, number>();
-  productType.sizes.forEach((sizeCode, idx) => {
-    sizeDeltaByCode.set(sizeCode, idx * SIZE_STEP_CENTS);
-  });
+  const {
+    basePriceCents,
+    productCode,
+    dictionary,
+    accessoryVariants,
+    existingRows,
+  } = opts;
 
   // (配件码, 变体码) → 加价
   const deltaByKey = new Map<string, number>();
@@ -328,8 +354,9 @@ export function recomputeVariantPrices(opts: {
 
   const out: RecomputedVariantPrice[] = [];
   for (const row of existingRows) {
-    const sizeDelta = sizeDeltaByCode.get(row.sizeCode);
-    if (sizeDelta === undefined) continue; // 尺寸不在字典里 → 跳过,别当成 0
+    // 尺寸加价 —— 字典里的**显式**值(不是下标算出来的)
+    const sizeDelta = sizeDeltaCentsFor(dictionary, productCode, row.sizeCode);
+    if (sizeDelta === null) continue; // 尺寸不在字典里 → 跳过,别当成 0
 
     let accessoryDelta = 0;
     const hasVariant = row.variantCode !== NO_SEGMENT && row.variantCode !== "";

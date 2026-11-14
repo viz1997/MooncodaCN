@@ -29,8 +29,13 @@ import {
   getProductType,
   validateLeatherColor,
   validatePlatform,
-  validateProductSpec,
 } from "@/features/gpt-image/lib/product-catalog";
+import type { CatalogDictionary } from "@/features/image-gen/lib/catalog-dictionary";
+import {
+  accessoryCodesForType,
+  sizeCodesForType,
+} from "@/features/image-gen/lib/catalog-dictionary";
+import { validateProductSpecWithDictionary } from "@/features/image-gen/lib/catalog-dictionary-validate";
 
 /**
  * helper 接受的 promptTemplate 最小子集（不耦合 Drizzle row 类型，
@@ -100,7 +105,8 @@ function parseJsonStringArray(raw: string | null | undefined): string[] | null {
  * 按模板默认填全部 spec 字段 + capability-gated 联动校验。
  *
  * 校验（与 submitImageGenDemoAction 内联逻辑等价）：
- *   1. validateProductSpec —— 型号 + 尺寸 + 配件字典合法性（client 传脏值直接拒）
+ *   1. validateProductSpecWithDictionary —— 型号 + 尺寸 + 配件字典合法性
+ *      （client 传脏值直接拒）—— **走目录字典**,不是代码常量(2026-11-14)
  *   2. 模板级 allowedSizes / allowedAccessories 子集越界 → 抛错
  *   3. engraving：canEngrave=false 时强制 null；空字符串视为未填
  *   4. leatherColor：canLeatherColor=false 时强制 null；非空则 validateLeatherColor
@@ -111,10 +117,16 @@ function parseJsonStringArray(raw: string | null | undefined): string[] | null {
  */
 export function fillDefaultsByTemplate(
   template: TemplateLike,
-  parsedInput: ParsedSpecInput
+  parsedInput: ParsedSpecInput,
+  dictionary: CatalogDictionary
 ): FilledSpec {
   // 1. 字典合法性（三件套）—— client 传脏值直接拒
-  validateProductSpec(
+  //
+  // ⚠️ 走**目录字典**(`catalog-dictionary-validate.ts`),不是代码常量 ——
+  // 后台 `/admin/products/[code]` 新加的尺寸 / 配件必须被服务端认。
+  // 消息跟老的那份逐字相同 ⇒ 用户看到的报错还是那句话。
+  validateProductSpecWithDictionary(
+    dictionary,
     parsedInput.productTypeCode ?? null,
     parsedInput.productSize ?? null,
     parsedInput.accessoryCode ?? null
@@ -128,21 +140,22 @@ export function fillDefaultsByTemplate(
   let finalProductSize = parsedInput.productSize ?? null;
   let finalAccessoryCode = parsedInput.accessoryCode ?? null;
   if (parsedInput.productTypeCode) {
-    const type = getProductType(parsedInput.productTypeCode);
-    if (type) {
-      // 字典 ∩ 模板子集
-      const sizesAvailable = type.sizes.filter((s) =>
-        allowedSizes ? allowedSizes.includes(s) : true
-      );
-      const accessoriesAvailable = type.accessories.filter((a) =>
-        allowedAccessories ? allowedAccessories.includes(a) : true
-      );
-      if (!finalProductSize && sizesAvailable.length > 0) {
-        finalProductSize = sizesAvailable[0] ?? null;
-      }
-      if (!finalAccessoryCode && accessoriesAvailable.length > 0) {
-        finalAccessoryCode = accessoriesAvailable[0] ?? null;
-      }
+    // 字典 ∩ 模板子集 —— 尺寸 / 配件清单走**同一个字典**
+    const sizesAvailable = sizeCodesForType(
+      dictionary,
+      parsedInput.productTypeCode
+    ).filter((s) => (allowedSizes ? allowedSizes.includes(s) : true));
+    const accessoriesAvailable = accessoryCodesForType(
+      dictionary,
+      parsedInput.productTypeCode
+    ).filter((a) =>
+      allowedAccessories ? allowedAccessories.includes(a) : true
+    );
+    if (!finalProductSize && sizesAvailable.length > 0) {
+      finalProductSize = sizesAvailable[0] ?? null;
+    }
+    if (!finalAccessoryCode && accessoriesAvailable.length > 0) {
+      finalAccessoryCode = accessoriesAvailable[0] ?? null;
     }
   }
 

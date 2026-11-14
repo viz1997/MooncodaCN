@@ -81,3 +81,119 @@ describe("DB 里出现重复时 —— 商城不猜", () => {
     expect(code).toContain("console.error");
   });
 });
+
+/* ========================================================================== */
+/*  后台不许加出重复的 variantCode(2026-11-14)                                  */
+/* ========================================================================== */
+
+/**
+ * 2026-11-14:后台能自由加配件变体了 ⇒ 「加的时候记得看一眼」守不住了
+ *
+ * 之前那是**约定**(代码字典里零重复);现在后台能加行 ⇒ 必须有**闸**。
+ *
+ * 三道:
+ *
+ * 1. **action 里查一次全局重复** —— `findConflictingVariantCode()` 按
+ *    `variantCode` **全局**查(不带型号),撞了就返 `VARIANT_CODE_DUPLICATED`。
+ * 2. **DB 兜底** —— 迁移给 `variant_code` 加了**全局唯一索引**
+ *    (`pav_variant_code_uniq_idx`);action 里那条漏了的话,PG 报 `23505`,
+ *    `isUniqueViolation()` 认出来,一样返那个码。
+ * 3. **迁移脚本先查重复** —— 有重复就**打印 + 中止**,不硬加索引
+ *    (硬加会失败,而「失败」比「中止 + 说清楚哪几行重复」难查得多)。
+ */
+describe("后台加配件变体 —— 重复的 `variantCode` 当场拒", () => {
+  const ADMIN = "src/features/image-gen/lib/catalog-dictionary-admin.ts";
+  const ACTIONS = "src/features/image-gen/admin/actions.ts";
+  const MIGRATION = "scripts/apply-catalog-dictionary-schema.ts";
+
+  it("① 查重复时**不带型号** —— 全局查", () => {
+    const code = read(ADMIN);
+
+    // 函数在
+    expect(code).toContain("export async function findConflictingVariantCode(");
+
+    // where 只按 variantCode —— 没有型号、没有配件
+    expect(code).toContain(
+      ".where(eq(productAccessoryVariant.variantCode, variantCode));"
+    );
+  });
+
+  it("② 同一个(型号, 配件)下不算撞车 —— 那是 DB 唯一索引管的事", () => {
+    const code = read(ADMIN);
+
+    // 同一个 (型号, 配件) ⇒ continue(不报冲突)
+    expect(code).toContain("row.productTypeCode === productTypeCode &&");
+    expect(code).toContain("row.accessoryCode === accessoryCode");
+    expect(code).toContain("continue;");
+  });
+
+  it("③ 改行时**排除自己** —— 不然改一次就撞自己", () => {
+    const code = read(ADMIN);
+    expect(code).toContain("if (excludeRowId && row.id === excludeRowId) continue;");
+  });
+
+  it("④ action 撞上了就返精确的码 —— 不是笼统的「保存失败」", () => {
+    const code = read(ACTIONS);
+
+    expect(code).toContain("const conflict = await findConflictingVariantCode(");
+    expect(code).toContain('if (conflict.conflict) {');
+    expect(code).toContain('return catalogFailure("VARIANT_CODE_DUPLICATED");');
+  });
+
+  it("⑤ DB 唯一索引撞了也一样是那个码(PG 23505 兜底)", () => {
+    const code = read(ACTIONS);
+
+    // 认得出 PG 的唯一冲突
+    expect(code).toContain("function isUniqueViolation(error: unknown): boolean");
+    expect(code).toContain('if (code === "23505") return true;');
+    // 认出来了就返同一个码
+    expect(code).toContain(
+      'if (isUniqueViolation(error)) {\n          return catalogFailure("VARIANT_CODE_DUPLICATED");'
+    );
+  });
+
+  it("⑥ 迁移给 `variant_code` 加了**全局唯一索引**", () => {
+    const code = read(MIGRATION);
+    expect(code).toContain(
+      'CREATE UNIQUE INDEX IF NOT EXISTS "pav_variant_code_uniq_idx"'
+    );
+    expect(code).toContain('ON "product_accessory_variant" ("variant_code");');
+  });
+
+  it("⑦ 迁移先查重复 —— 有重复就中止,不硬加索引", () => {
+    const code = read(MIGRATION);
+
+    // 查重复的 SQL
+    expect(code).toContain("HAVING count(*) > 1");
+
+    // **顺序**:查重复在建表建索引**之前**
+    // (dry-run 那段也有一处 `for (const statement of STATEMENTS)` ⇒ 从查重复
+    //  之后开始找,别把 dry-run 那处当成了建表那一处)
+    const dupCheckAt = code.indexOf("HAVING count(*) > 1");
+    const loopAt = code.indexOf(
+      "for (const statement of STATEMENTS)",
+      dupCheckAt
+    );
+    expect(dupCheckAt).toBeGreaterThan(-1);
+    expect(loopAt).toBeGreaterThan(-1);
+    expect(dupCheckAt).toBeLessThan(loopAt);
+
+    // 查到重复 ⇒ 中止
+    expect(code).toContain("if (dupCheck.rows.length > 0) {");
+    expect(code).toContain("process.exit(1);");
+
+    // 中止时说清楚「索引没建」—— 重跑是安全的
+    expect(code).toContain("全局唯一索引**没有建**");
+  });
+
+  it("⑧ `VARIANT_CODE_DUPLICATED` 两种语言都摆得上话", () => {
+    for (const locale of ["zh", "en"] as const) {
+      const messages = JSON.parse(
+        read(`messages/${locale}.json`)
+      ) as Record<string, unknown>;
+      const ns = messages.AdminCatalog as Record<string, unknown>;
+      const errors = ns.errors as Record<string, unknown>;
+      expect(errors.VARIANT_CODE_DUPLICATED, locale).toBeTruthy();
+    }
+  });
+});

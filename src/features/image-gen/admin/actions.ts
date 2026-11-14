@@ -13,7 +13,23 @@ import { z } from "zod";
 import { db } from "@/db";
 import { promptTemplate, promptTemplatePrice } from "@/db/schema";
 import type { ProductCapabilities } from "@/features/gpt-image/lib/product-catalog";
-import { getProductType } from "@/features/gpt-image/lib/product-catalog";
+import type { AdminCatalogErrorCode } from "@/features/image-gen/admin/types";
+import {
+  accessoryExists,
+  deactivateProductAccessoryRow,
+  deactivateProductAccessoryVariantRow,
+  deactivateProductSizeRow,
+  findConflictingVariantCode,
+  productExists,
+  readAccessoryVariantRow,
+  readAdminCatalogRows,
+  readProductBasePriceCents,
+  setProductAccessoryOptionRow,
+  upsertProductAccessoryRow,
+  upsertProductAccessoryVariantRow,
+  upsertProductSizeRow,
+} from "@/features/image-gen/lib/catalog-dictionary-admin";
+import { getCatalogDictionaryFresh } from "@/features/image-gen/lib/catalog-dictionary-store";
 import {
   createEffectInDb,
   deleteEffectInDb,
@@ -58,6 +74,7 @@ import type {
   PromptScene,
 } from "@/features/image-gen/lib/product-effect-types";
 import { PROMPT_SCENE_LABELS } from "@/features/image-gen/lib/product-effect-types";
+import { describeDbError } from "@/features/shared/lib/db-error";
 import { adminAction } from "@/lib/safe-action";
 
 const withImageGenAdminAction = (name: string) =>
@@ -921,18 +938,17 @@ export const getProductAdminAction = withImageGenAdminAction("getProduct")
 /**
  * 新建商品。
  *
- * code 必须在 PRODUCT_TYPES 字典里 —— 尺寸 / 配件清单目前还是代码常量，
- * 不在字典里的 code 对外接口不会返回它。db 层已做校验，这里再拦一道给
- * 明确的 toast 文案。
+ * ## code **不再**必须在 `PRODUCT_TYPES` 里（2026-11-14）
+ *
+ * 尺寸 / 配件清单搬进 DB 字典之后，新型号就该能自由创建 ——
+ * 以前那道闸逼着工作室改代码常量才能加一个型号。
+ *
+ * ⚠️ 但**没有尺寸就生成不出 SKU** —— 那一道闸挪到「补齐缺失 SKU」那一步
+ * （`generateVariantsForProductInDb`），那儿会说出人话。
  */
 export const createProductAdminAction = withImageGenAdminAction("createProduct")
   .schema(productFormSchema)
   .action(async ({ parsedInput }) => {
-    if (!getProductType(parsedInput.code)) {
-      throw new Error(
-        `产品码 ${parsedInput.code} 不在 PRODUCT_TYPES 字典里，新增型号需要改 product-catalog.ts`
-      );
-    }
     const existing = await findProductInDb(parsedInput.code);
     if (existing) throw new Error(`商品 ${parsedInput.code} 已存在`);
 
@@ -1048,15 +1064,502 @@ export const bulkUpdateProductVariantsAction = withImageGenAdminAction(
  * 按当前字典重新生成该商品的 SKU 行。
  *
  * 只 INSERT 不 UPDATE —— 运营改过的价不会被冲掉，已有行会被唯一索引挡下。
+ *
+ * ⚠️ **必须传「新鲜的」那份字典**（`getCatalogDictionaryFresh()`，不缓存）——
+ * React 的 `cache()` 是**请求级**的：同一个请求里刚写完字典再读，拿到的还是
+ * **改之前**那份 ⇒ 生成出来的 SKU 用的是**旧加价** ⇒ 工作室看着像没生效。
  */
 export const generateProductVariantsAction = withImageGenAdminAction(
   "generateProductVariants"
 )
   .schema(z.object({ productCode: z.string().min(1) }))
   .action(async ({ parsedInput }) => {
+    const dictionary = await getCatalogDictionaryFresh();
     const created = await generateVariantsForProductInDb(
-      parsedInput.productCode
+      parsedInput.productCode,
+      dictionary
     );
     revalidatePath(`/admin/products/${parsedInput.productCode}`);
     return { created };
+  });
+
+/* -------------------------------------------------------------------------- */
+/*  商品目录字典（2026-11-14）                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 尺寸 / 配件 / 配件变体原先是**代码常量** ⇒ 后台改不了 ⇒
+ * 工作室问「为什么商品 sku 无法设置以及价格」。
+ *
+ * 现在这三样是 **DB 字典**（`product_size` / `product_accessory` /
+ * `product_accessory_option` / `product_accessory_variant`），后台能自由增删。
+ *
+ * ## 三条规矩
+ *
+ * 1. **「删除」= 停用（`isActive=false`），不是硬删** —— 硬删之后那一行
+ *    「DB 没行」⇒ 字典的兜底规则把它**原样复活** ⇒ 工作室点了「删除」，
+ *    刷新一下它又回来了。
+ * 2. **`variantCode` 必须全局唯一** —— 商城拿 `acc_${variantCode}` 当键
+ *    ⇒ 撞车了加价就变成「取到哪个算哪个」。
+ * 3. **改加价 ⇒ 顺带重算 SKU 的绝对价** —— 尺寸加价 / 配件变体加价变了，
+ *    对应型号的 SKU 绝对价要跟着变。
+ *
+ * ## 为什么不 throw
+ *
+ * throw 会被 next-safe-action 糊成一句「服务器错误，请稍后重试」——
+ * 工作室根本不知道是**表还没建**、**变体码撞了**、还是**写库失败**。
+ * ⇒ 每个失败都带一个稳定的 code，界面按 code 查文案
+ * （文案表在 `admin/types.ts` 的 `CATALOG_ERROR_TEXT_KEYS`）。
+ */
+
+/** 尺寸码 —— 只能是数字（单位 cm）；`4.0` 归一化成 `4` */
+const catalogSizeCodeSchema = z
+  .string()
+  .trim()
+  .min(1, "请填写尺寸码")
+  .max(16, "尺寸码太长了")
+  .regex(/^\d+(\.\d+)?$/, "尺寸码只能是数字（单位 cm）");
+
+/** 配件码 / 配件变体码 —— 小写字母、数字、下划线 */
+const catalogCodeSchema = z
+  .string()
+  .trim()
+  .min(1, "请填写编码")
+  .max(64, "编码太长了")
+  .regex(
+    /^[a-z0-9_]+$/,
+    "编码只能用小写字母、数字和下划线（如 leather_brown）"
+  );
+
+/** `4.0` → `4` —— 免得「4」和「4.0」变成两档尺寸 */
+function normalizeSizeCode(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed.includes(".")) return trimmed;
+  const parsed = Number.parseFloat(trimmed);
+  if (!Number.isFinite(parsed)) return trimmed;
+  return String(parsed);
+}
+
+/**
+ * 失败的返回 —— **统一走这一个工厂**
+ *
+ * ⚠️ 别直接写 `return { ok: false as const, code: "SIZE_NOT_FOUND" }`:
+ * `ok` 加了 `as const`,但 `code` **没有** ⇒ 它的字面量类型**拓宽成 `string`**
+ * ⇒ 前端 `CATALOG_ERROR_TEXT_KEYS[data.code]` 索引不上去(TS7053)
+ * ⇒ **错误文案那一层整个塌掉**(界面只显示一个原始码)。
+ *
+ * ⇒ 走这一个工厂,`code` 的类型永远是 `AdminCatalogErrorCode`。
+ */
+function catalogFailure(code: AdminCatalogErrorCode): {
+  ok: false;
+  code: AdminCatalogErrorCode;
+} {
+  return { ok: false, code };
+}
+
+/** DB 报错 → 稳定的错误码 */
+function catalogErrorCode(error: unknown): AdminCatalogErrorCode {
+  const info = describeDbError(error);
+  if (info.missingRelation) return "MIGRATION_MISSING";
+  return "SAVE_FAILED";
+}
+
+/**
+ * **读**失败 → 稳定的错误码
+ *
+ * ⚠️ 读失败跟写失败**不是一件事** —— 写失败是「保存没成」,读失败是
+ * 「这一页摆不出来」。工作室看到的话要做的事不一样。
+ *
+ * 表还没建(`missingRelation`)⇒ `MIGRATION_MISSING`(界面直接告诉工作室
+ * 先跑 `pnpm migrate:apply-catalog-dictionary`);其它 ⇒ `READ_FAILED`。
+ */
+function catalogReadErrorCode(error: unknown): AdminCatalogErrorCode {
+  const info = describeDbError(error);
+  if (info.missingRelation) return "MIGRATION_MISSING";
+  return "READ_FAILED";
+}
+
+/**
+ * PG 的唯一约束冲突（`23505`）
+ *
+ * ⚠️ 同一个 `(型号, 配件, 变体码)` 撞了 —— DB 的唯一索引会挡下来 ⇒
+ * 把它翻译成 `VARIANT_CODE_DUPLICATED`，别让工作室看着一句「保存失败」。
+ */
+function isUniqueViolation(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 6; depth += 1) {
+    const code = (current as { code?: unknown } | null | undefined)?.code;
+    if (code === "23505") return true;
+    const cause = (current as { cause?: unknown } | null | undefined)?.cause;
+    if (!cause || cause === current) break;
+    current = cause;
+  }
+  return false;
+}
+
+/**
+ * 改完字典 ⇒ 顺带重算受影响型号的 SKU 绝对价
+ *
+ * ⚠️ **必须用「新鲜的」那份字典**（`getCatalogDictionaryFresh()`，不缓存）——
+ * React 的 `cache()` 是**请求级**的：同一个请求里刚写完字典再读，拿到的还是
+ * **改之前**那份 ⇒ 拿旧加价去重算 ⇒ **改了加价，SKU 的价还是老的**。
+ *
+ * 重算失败**只记日志、不抛** —— 字典已经写进库了（那才是工作室要的），
+ * SKU 价没跟上可以再点一次「补齐缺失 SKU」。
+ */
+async function recomputeSkusAfterDictionaryChange(
+  productTypeCode: string
+): Promise<number> {
+  try {
+    const basePriceCents = await readProductBasePriceCents(productTypeCode);
+    if (basePriceCents === null) return 0;
+    const dictionary = await getCatalogDictionaryFresh();
+    return await recomputeProductVariantPricesInDb(
+      productTypeCode,
+      basePriceCents,
+      dictionary
+    );
+  } catch (error) {
+    console.error(
+      `[catalog] 重算型号 ${productTypeCode} 的 SKU 价失败:`,
+      error
+    );
+    return 0;
+  }
+}
+
+/**
+ * 写完字典要刷的页面
+ *
+ * - 后台商品页 / SKU 页
+ * - **商城页** —— 尺寸加价变了，商城显示的价要跟着变
+ * - **效果模板页** —— 那个表单读的是同一份字典（型号 / 尺寸 / 配件清单）
+ */
+function revalidateCatalogPaths(productTypeCode?: string): void {
+  revalidatePath("/admin/products");
+  if (productTypeCode) {
+    revalidatePath(`/admin/products/${productTypeCode}`);
+  }
+  revalidatePath("/admin/product-effects");
+  revalidatePath("/admin/product-effects/new");
+  revalidatePath("/admin/product-effects/[id]", "page");
+  revalidateStorefrontProductPaths();
+}
+
+/**
+ * 读某个型号的后台字典（四块一起）
+ *
+ * **表还没建也是一个结果**，不是异常 —— 迁移脚本没跑的时候界面要说
+ * 「先跑 `pnpm migrate:apply-catalog-dictionary`」，而不是甩一个 500。
+ */
+export const listCatalogDictionaryAdminAction = withImageGenAdminAction(
+  "listCatalogDictionary"
+)
+  .schema(z.object({ productTypeCode: z.string().min(1).max(32) }))
+  .action(async ({ parsedInput }) => {
+    try {
+      const rows = await readAdminCatalogRows(parsedInput.productTypeCode);
+      return {
+        ok: true as const,
+        sizes: rows.sizes.map((row) => ({
+          id: row.id,
+          productTypeCode: row.productTypeCode,
+          sizeCode: row.sizeCode,
+          priceDeltaCents: row.priceDeltaCents,
+          sortOrder: row.sortOrder,
+          isActive: row.isActive,
+        })),
+        accessories: rows.accessories.map((row) => ({
+          code: row.code,
+          name: row.name,
+          nameEn: row.nameEn,
+          category: row.category,
+          sortOrder: row.sortOrder,
+          isActive: row.isActive,
+        })),
+        accessoryOptions: rows.accessoryOptions.map((row) => ({
+          id: row.id,
+          productTypeCode: row.productTypeCode,
+          accessoryCode: row.accessoryCode,
+          sortOrder: row.sortOrder,
+          isActive: row.isActive,
+        })),
+        variants: rows.variants.map((row) => ({
+          id: row.id,
+          productTypeCode: row.productTypeCode,
+          accessoryCode: row.accessoryCode,
+          variantCode: row.variantCode,
+          name: row.name,
+          nameEn: row.nameEn,
+          swatch: row.swatch,
+          priceDeltaCents: row.priceDeltaCents,
+          appliesToSizesCm: row.appliesToSizesCm,
+          sortOrder: row.sortOrder,
+          isActive: row.isActive,
+        })),
+      };
+    } catch (error) {
+      return catalogFailure(catalogReadErrorCode(error));
+    }
+  });
+
+/**
+ * 写一档尺寸 —— 按 `(型号, 尺寸码)` upsert
+ *
+ * 「新增」和「改」用**同一个字段**区分：这个型号下还没有这个尺寸码 ⇒ 新增；
+ * 已经有了 ⇒ 改那一行。
+ */
+export const upsertProductSizeAction = withImageGenAdminAction(
+  "upsertProductSize"
+)
+  .schema(
+    z.object({
+      productTypeCode: z.string().min(1).max(32),
+      sizeCode: catalogSizeCodeSchema,
+      /** 显式加价（分）—— 不靠下标算 */
+      priceDeltaCents: z.number().int().min(-1_000_000).max(1_000_000),
+      sortOrder: z.number().int().min(0).max(10_000).default(0),
+      isActive: z.boolean().default(true),
+    })
+  )
+  .action(async ({ parsedInput }) => {
+    try {
+      if (!(await productExists(parsedInput.productTypeCode))) {
+        return catalogFailure("PRODUCT_NOT_FOUND");
+      }
+      const sizeCode = normalizeSizeCode(parsedInput.sizeCode);
+      await upsertProductSizeRow({ ...parsedInput, sizeCode });
+      // 尺寸加价变了 ⇒ 这个型号的 SKU 绝对价要跟着重算
+      const recomputedSkus = await recomputeSkusAfterDictionaryChange(
+        parsedInput.productTypeCode
+      );
+      revalidateCatalogPaths(parsedInput.productTypeCode);
+      return { ok: true as const, changed: true, recomputedSkus };
+    } catch (error) {
+      return catalogFailure(catalogErrorCode(error));
+    }
+  });
+
+/**
+ * 停用一档尺寸 —— **不是硬删**
+ *
+ * 停用之后这一档从字典里消失 ⇒ 商城不再显示它、也不再生成新的 SKU。
+ * **已经生成的那些 SKU 的价不动**（重算时「查不到就跳过，不当成 0」）。
+ */
+export const deleteProductSizeAction = withImageGenAdminAction(
+  "deleteProductSize"
+)
+  .schema(
+    z.object({
+      productTypeCode: z.string().min(1).max(32),
+      sizeCode: catalogSizeCodeSchema,
+    })
+  )
+  .action(async ({ parsedInput }) => {
+    try {
+      const sizeCode = normalizeSizeCode(parsedInput.sizeCode);
+      const ok = await deactivateProductSizeRow(
+        parsedInput.productTypeCode,
+        sizeCode
+      );
+      if (!ok) return catalogFailure("SIZE_NOT_FOUND");
+      const recomputedSkus = await recomputeSkusAfterDictionaryChange(
+        parsedInput.productTypeCode
+      );
+      revalidateCatalogPaths(parsedInput.productTypeCode);
+      return { ok: true as const, changed: true, recomputedSkus };
+    } catch (error) {
+      return catalogFailure(catalogErrorCode(error));
+    }
+  });
+
+/**
+ * 写一个配件 —— 按 `code` upsert
+ *
+ * ⚠️ **配件是全局的** —— 改一个配件的名字/分类，所有型号都跟着变。
+ *
+ * 配件这一层**没有加价**（加价在配件变体上）⇒ 这里改任何字段都**不需要**
+ * 重算 SKU 价。
+ */
+export const upsertProductAccessoryAction = withImageGenAdminAction(
+  "upsertProductAccessory"
+)
+  .schema(
+    z.object({
+      code: catalogCodeSchema,
+      name: z.string().trim().min(1, "请填写配件名称").max(64),
+      nameEn: z.string().trim().max(64).default(""),
+      category: z.enum(["material", "protection", "mount", "decor"]),
+      sortOrder: z.number().int().min(0).max(10_000).default(0),
+      isActive: z.boolean().default(true),
+    })
+  )
+  .action(async ({ parsedInput }) => {
+    try {
+      await upsertProductAccessoryRow(parsedInput);
+      revalidateCatalogPaths();
+      return { ok: true as const, changed: true };
+    } catch (error) {
+      return catalogFailure(catalogErrorCode(error));
+    }
+  });
+
+/**
+ * 停用一个配件 —— **不是硬删**
+ *
+ * ⚠️ 配件字典那一层的语义是「`isActive=false` ⇒ **这个配件整个没了**」
+ * ⇒ 停用一个配件，所有型号都看不到它了（但已有的 SKU 行和它们的价不动）。
+ */
+export const deleteProductAccessoryAction = withImageGenAdminAction(
+  "deleteProductAccessory"
+)
+  .schema(z.object({ code: catalogCodeSchema }))
+  .action(async ({ parsedInput }) => {
+    try {
+      const ok = await deactivateProductAccessoryRow(parsedInput.code);
+      if (!ok) return catalogFailure("ACCESSORY_NOT_FOUND");
+      revalidateCatalogPaths();
+      return { ok: true as const, changed: true };
+    } catch (error) {
+      return catalogFailure(catalogErrorCode(error));
+    }
+  });
+
+/**
+ * 「这个型号能配这个配件」—— 开 / 关
+ *
+ * `isActive = false` ⇒ 这个型号**不再配**它（配件本身还在别的型号上能用）。
+ */
+export const setProductAccessoryOptionAction = withImageGenAdminAction(
+  "setProductAccessoryOption"
+)
+  .schema(
+    z.object({
+      productTypeCode: z.string().min(1).max(32),
+      accessoryCode: catalogCodeSchema,
+      sortOrder: z.number().int().min(0).max(10_000).default(0),
+      isActive: z.boolean().default(true),
+    })
+  )
+  .action(async ({ parsedInput }) => {
+    try {
+      if (!(await productExists(parsedInput.productTypeCode))) {
+        return catalogFailure("PRODUCT_NOT_FOUND");
+      }
+      if (!(await accessoryExists(parsedInput.accessoryCode))) {
+        return catalogFailure("ACCESSORY_NOT_FOUND");
+      }
+      await setProductAccessoryOptionRow(parsedInput);
+      revalidateCatalogPaths(parsedInput.productTypeCode);
+      return { ok: true as const, changed: true };
+    } catch (error) {
+      return catalogFailure(catalogErrorCode(error));
+    }
+  });
+
+/**
+ * 写一个配件变体 —— **加价就在这里**
+ *
+ * `id` 空 = 新增，非空 = 改那一行。
+ *
+ * ⚠️ **`variantCode` 必须全局唯一** —— 商城拿 `acc_${variantCode}` 当键 ⇒
+ * 同一个码出现在两个（型号，配件）下，加价就变成「取到哪个算哪个」。
+ * DB 的唯一索引只管 `(型号, 配件, 变体码)` ⇒ **全局那一层在这里查**。
+ *
+ * 改**加价** ⇒ 受影响型号的 SKU 绝对价要跟着重算。
+ */
+export const upsertProductAccessoryVariantAction = withImageGenAdminAction(
+  "upsertProductAccessoryVariant"
+)
+  .schema(
+    z.object({
+      /** 空 = 新增；非空 = 改那一行 */
+      id: z.string().default(""),
+      productTypeCode: z.string().min(1).max(32),
+      accessoryCode: catalogCodeSchema,
+      variantCode: catalogCodeSchema,
+      name: z.string().trim().min(1, "请填写变体名称").max(64),
+      nameEn: z.string().trim().max(64).default(""),
+      /** 色板（十六进制 / 颜色名）—— 可空 */
+      swatch: z.string().trim().max(64).default(""),
+      /** 加价（分） */
+      priceDeltaCents: z.number().int().min(-1_000_000).max(1_000_000),
+      /** 适用尺寸（cm）—— 空数组 = 全部适用 */
+      appliesToSizesCm: z
+        .array(z.number().int().min(0).max(1000))
+        .max(50)
+        .default([]),
+      sortOrder: z.number().int().min(0).max(10_000).default(0),
+      isActive: z.boolean().default(true),
+    })
+  )
+  .action(async ({ parsedInput }) => {
+    try {
+      if (!(await productExists(parsedInput.productTypeCode))) {
+        return catalogFailure("PRODUCT_NOT_FOUND");
+      }
+      if (!(await accessoryExists(parsedInput.accessoryCode))) {
+        return catalogFailure("ACCESSORY_NOT_FOUND");
+      }
+      const conflict = await findConflictingVariantCode(
+        parsedInput.variantCode,
+        parsedInput.productTypeCode,
+        parsedInput.accessoryCode,
+        parsedInput.id || undefined
+      );
+      if (conflict.conflict) {
+        return catalogFailure("VARIANT_CODE_DUPLICATED");
+      }
+      let result: "created" | "updated" | "not_found";
+      try {
+        result = await upsertProductAccessoryVariantRow({
+          ...parsedInput,
+          swatch: parsedInput.swatch || null,
+        });
+      } catch (error) {
+        // 同一个 (型号, 配件, 变体码) 撞了 —— DB 的唯一索引挡下来了
+        if (isUniqueViolation(error)) {
+          return catalogFailure("VARIANT_CODE_DUPLICATED");
+        }
+        throw error;
+      }
+      if (result === "not_found") {
+        return catalogFailure("VARIANT_NOT_FOUND");
+      }
+      // 改行时**型号不可改**（它是这一行的归属）⇒ 重算按库里那一行的型号
+      const stored = parsedInput.id
+        ? await readAccessoryVariantRow(parsedInput.id)
+        : null;
+      const targetType = stored?.productTypeCode ?? parsedInput.productTypeCode;
+      const recomputedSkus =
+        await recomputeSkusAfterDictionaryChange(targetType);
+      revalidateCatalogPaths(targetType);
+      return { ok: true as const, changed: true, recomputedSkus };
+    } catch (error) {
+      return catalogFailure(catalogErrorCode(error));
+    }
+  });
+
+/**
+ * 停用一个配件变体 —— **不是硬删**
+ *
+ * 停用之后不再为它生成新的 SKU；**已有的 SKU 行和它们的价不动**。
+ */
+export const deleteProductAccessoryVariantAction = withImageGenAdminAction(
+  "deleteProductAccessoryVariant"
+)
+  .schema(z.object({ id: z.string().min(1) }))
+  .action(async ({ parsedInput }) => {
+    try {
+      const stored = await readAccessoryVariantRow(parsedInput.id);
+      const ok = await deactivateProductAccessoryVariantRow(parsedInput.id);
+      if (!ok) return catalogFailure("VARIANT_NOT_FOUND");
+      const recomputedSkus = stored
+        ? await recomputeSkusAfterDictionaryChange(stored.productTypeCode)
+        : 0;
+      revalidateCatalogPaths(stored?.productTypeCode);
+      return { ok: true as const, changed: true, recomputedSkus };
+    } catch (error) {
+      return catalogFailure(catalogErrorCode(error));
+    }
   });

@@ -16,11 +16,16 @@
  * 数据来源:
  *  - 商品资料 ← product-catalog.ts 的 PRODUCT_META(名称/描述/分类)
  *  - 基础价   ← BASE_PRICE_CENTS(R=1900 / A=2400 / P=3900 / RM=4900 / LB=5900 / M=19900)
- *  - SKU 矩阵 ← PRODUCT_TYPES[code].sizes × accessories × product_accessory_variant 行
+ *  - SKU 矩阵 ← **字典**(catalog-dictionary.ts:DB 优先,代码常量兜底)
+ *               的 sizesByType[code] × accessoryOptionsByType[code]
+ *               × product_accessory_variant 行
  *
- * 初始价 = basePriceCents + 尺寸阶梯(idx × ¥5) + 配件变体加价，与改造前
+ * 初始价 = basePriceCents + **尺寸的显式加价** + 配件变体加价，与改造前
  * 前端「base + 各维度 priceDeltaCents」的拼价结果一致，所以 seed 当天
  * 线上展示价零漂移。
+ *
+ * ⚠️ 尺寸加价现在是**字典里的显式值**（不再是 `idx × ¥5`）—— DB 没播种
+ * 那一列时走代码常量兜底（兜底那份仍然是 `idx × ¥5`）⇒ 行为零漂移。
  *
  * 变体行数预估(随字典变化):
  *   R  3 尺寸 ×(皮革5 + 金属1 + 编织绳8) = 42
@@ -44,6 +49,10 @@ import {
   PRODUCT_META,
   PRODUCT_TYPES,
 } from "@/features/gpt-image/lib/product-catalog";
+import {
+  getCatalogDictionary,
+  getFallbackCatalogDictionary,
+} from "@/features/image-gen/lib/catalog-dictionary-store";
 import { buildAllVariantSeeds } from "@/features/image-gen/lib/product-variant-sku";
 
 async function main(): Promise<void> {
@@ -92,6 +101,22 @@ async function main(): Promise<void> {
     `[seed-products] 读到 ${accVariants.length} 行配件变体(来自 product_accessory_variant)`
   );
 
+  // 尺寸 / 配件清单 ← **字典**
+  //
+  // DB 有行 ⇒ 用后台配的(**显式**加价);DB 没播种 / 读失败 ⇒ 退回代码常量
+  // 兜底(尺寸加价 = idx × ¥5)⇒ 行为跟今天一个字节都不变。
+  const dictionary = await getCatalogDictionary()
+    .catch(() => getFallbackCatalogDictionary());
+  console.log(
+    `[seed-products] 字典:型号 ${dictionary.typeOrder.length} 个 ` +
+      `(R ${dictionary.sizesByType.get("R")?.length ?? 0} 尺寸 / ` +
+      `A ${dictionary.sizesByType.get("A")?.length ?? 0} / ` +
+      `P ${dictionary.sizesByType.get("P")?.length ?? 0} / ` +
+      `RM ${dictionary.sizesByType.get("RM")?.length ?? 0} / ` +
+      `LB ${dictionary.sizesByType.get("LB")?.length ?? 0} / ` +
+      `M ${dictionary.sizesByType.get("M")?.length ?? 0})`
+  );
+
   const seeds = buildAllVariantSeeds({
     basePrices,
     accessoryVariants: accVariants.map((r) => ({
@@ -101,6 +126,8 @@ async function main(): Promise<void> {
       priceDeltaCents: r.priceDeltaCents,
       sortOrder: r.sortOrder,
     })),
+    // 尺寸 / 配件清单 ← **字典**(DB 优先,代码常量兜底)
+    dictionary,
   });
 
   const variantRows: NewProductVariantRow[] = seeds.map((s) => ({

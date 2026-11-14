@@ -2647,7 +2647,13 @@ SKU 绝对价由它**自动算出来**,后台 SKU 页的价格字段改成**只�
 纯函数自己不碰 DB:
 
 - 基础价:`priceSource?.basePriceCentsByTypeCode.get(spec.productTypeCode) ?? product.basePriceCents`
-- 配件加价:`priceSource?.accessoryDeltaCentsByVariantId.get(variantId) ?? variant.surchargeCents`
+- 配件加价(2026-11-14 起**目录字典优先**):
+  `catalogVariant?.surchargeCents ?? priceSource?.accessoryDeltaCentsByVariantId.get(variantId) ?? variant.surchargeCents`
+  - **顺序:目录字典 → 平铺的价表 → 代码常量**。
+  - 字典赢是因为**显示那条路**(`storefront-catalog.ts`)也是字典赢 ⇒
+    一边赢字典、一边赢价表 =「页面显示 +¥5、结算按 +¥10 收」—— 「逐分相等」当场破。
+  - ⚠️ 用 `??` **不是** `||` —— 加价 **0 是合法值**(「不加价」),`||` 会把 0
+    当成「没有」⇒ 悄悄按别的价收。
 - `priceSource` 缺省 → **退回代码常量**(纯函数调用、单测、客户端预览都不受影响)。
 
 #### DB 读失败怎么办 —— **两个地方不一样**

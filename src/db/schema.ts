@@ -2123,6 +2123,20 @@ export const productAccessoryVariant = pgTable(
     swatch: text("swatch"),
     /** 加价（分）；0 = 不加价 */
     priceDeltaCents: integer("price_delta_cents").notNull().default(0),
+    /**
+     * 适用尺寸（cm）—— JSON 数组字符串：`"[]"` = 全部适用，`"[4]"` = 只配 4cm
+     *
+     * 2026-11-14：这一列原先**只存在于代码常量**
+     * （`src/features/gpt-image/lib/product-accessory-variants.ts` 的
+     * `appliesToSizesCm`），但 `src/features/storefront/lib/pricing.ts` 和
+     * `custom-workshop.tsx` **都在读它**（玻璃罩 4cm 罩只配 4cm 主体）
+     * ⇒ DB 里没有它，后台就配不了「这个变体只适用于这些尺寸」。
+     *
+     * 存**字符串**而不是 integer[] —— 跟仓库里其它 JSON 列
+     * （`allowedSizes` / `allowedAccessories`）一个口径，读的时候
+     * `parseJsonStringArray` 解析。
+     */
+    appliesToSizesCm: text("applies_to_sizes_cm").notNull().default("[]"),
     /** UI 排序；asc */
     sortOrder: integer("sort_order").notNull().default(0),
     /** 软下架（false = 隐藏） */
@@ -2139,6 +2153,15 @@ export const productAccessoryVariant = pgTable(
     ),
     // 路由层按 (productTypeCode, accessoryCode, isActive) 查，加速
     index("pav_lookup_idx").on(t.productTypeCode, t.accessoryCode, t.isActive),
+    // 2026-11-14：variantCode **全局唯一**
+    //
+    // 商城是拿 `acc_${variantCode}` 当键的（`price-source.ts` /
+    // `mock-catalog.ts`）⇒ 同一个 variantCode 出现在两个型号下，加价就变成
+    // 「取到哪个算哪个」—— 而且**不报错**，只在对账时炸。
+    //
+    // ⚠️ 迁移脚本（`scripts/apply-catalog-dictionary-schema.ts`）建这个索引
+    // **之前**会先查一遍有没有重复，有就**打印出来并中止**，不硬加。
+    uniqueIndex("pav_variant_code_uniq_idx").on(t.variantCode),
   ]
 );
 
@@ -2273,6 +2296,157 @@ export const productVariant = pgTable(
 
 export type ProductVariantRow = typeof productVariant.$inferSelect;
 export type NewProductVariantRow = typeof productVariant.$inferInsert;
+
+// ============================================================================
+//  商品目录字典（2026-11-14）
+//
+//  背景：尺寸清单、配件清单、配件归属、配件变体的「适用尺寸」原先全在
+//  代码常量里（`src/features/gpt-image/lib/product-catalog.ts` 的
+//  `PRODUCT_TYPES` / `ACCESSORY_META`、
+//  `src/features/image-gen/lib/product-accessory-variants.ts` 的
+//  `appliesToSizesCm`）⇒ 工作室在后台**改不了**、也**加不了新 SKU**。
+//
+//  这一组三张表把那份字典搬进 DB。
+//
+//  ## 尺寸加价为什么必须**显式存**
+//
+//  今天的尺寸加价是**位置算**出来的：`idx * 500`（第一档 +0、第二档 +¥5 …），
+//  而且散在**四个地方**各算一遍：
+//  - `src/features/storefront/lib/mock-catalog.ts`（商城显示）
+//  - `src/features/image-gen/lib/product-variant-sku.ts` ×2（生成 / 重算）
+//  - `src/features/image-gen/lib/product-capability.ts`（对外商品接口）
+//
+//  ⇒ **在尺寸数组中间插一档，后面每一档的价会静默全变**（而且商城显示的价
+//  跟 SKU 表里真实的价会对不上）。
+//  ⇒ DB 里存**显式的 `priceDeltaCents`**，四个地方统一读它。
+//
+//  ## 逐型号兜底
+//
+//  某个型号在 DB 有行 ⇒ 用 DB 的；没有 ⇒ 用代码常量兜底（行为一个字节不变）。
+//  **逐型号**兜底，不是整份兜底 —— 后台只配了 R，不该把 M 也拖下水。
+//
+//  ## 为什么 `product_accessory_option` 不能省
+//
+//  `metal` / `magnet` / `bracket` / `stand` 这些配件**没有任何**
+//  `product_accessory_variant` 行（它们不是「有变体的配件」）⇒ 从变体表
+//  反推不出「哪个型号能配哪些配件」⇒ 必须单独一张表。
+// ============================================================================
+
+/**
+ * 尺寸字典 —— **显式加价**
+ *
+ * 一行 = 「某个型号下的某个尺寸档」，带**绝对加价**（分）。
+ */
+export const productSize = pgTable(
+  "product_size",
+  {
+    id: text("id").primaryKey(),
+    /** 产品码（R / A / P / RM / LB / M），= product.code */
+    productTypeCode: text("product_type_code").notNull(),
+    /** 尺寸 code（"4" / "6" / "11" …） */
+    sizeCode: text("size_code").notNull(),
+    /**
+     * 加价（分）—— **显式值**，不是下标算出来的
+     *
+     * 0 = 不加价。改动它 ⇒ 对应型号的 SKU 绝对价要重算。
+     */
+    priceDeltaCents: integer("price_delta_cents").notNull().default(0),
+    /** UI 排序；asc */
+    sortOrder: integer("sort_order").notNull().default(0),
+    /** 软下架（false = 不进对外接口） */
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    // 同 (productTypeCode, sizeCode) 唯一
+    uniqueIndex("product_size_uniq_idx").on(t.productTypeCode, t.sizeCode),
+    // 读字典按 (productTypeCode, isActive, sortOrder) 查
+    index("product_size_lookup_idx").on(
+      t.productTypeCode,
+      t.isActive,
+      t.sortOrder
+    ),
+  ]
+);
+
+export type ProductSizeRow = typeof productSize.$inferSelect;
+export type NewProductSizeRow = typeof productSize.$inferInsert;
+
+/**
+ * 配件字典 —— 取代代码常量 `ACCESSORY_META`
+ *
+ * 一行 = 一个配件（leather / metal / magnet / …），带中英名 + 分类。
+ */
+export const productAccessory = pgTable(
+  "product_accessory",
+  {
+    /** 配件 code（leather / braided_rope / glass_cover …） */
+    code: text("code").primaryKey(),
+    /** 中文名 */
+    name: text("name").notNull(),
+    /** 英文名 */
+    nameEn: text("name_en").notNull().default(""),
+    /**
+     * 分类：material / protection / mount / decor
+     *
+     * 对齐 `ACCESSORY_META[].category`，跟
+     * `src/db/image-gen-types.ts` 的 `AccessoryCategory` 一个口径。
+     */
+    category: text("category").notNull().default("material"),
+    /** UI 排序；asc */
+    sortOrder: integer("sort_order").notNull().default(0),
+    /** 软下架（false = 不进对外接口） */
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("product_accessory_lookup_idx").on(t.isActive, t.sortOrder),
+  ]
+);
+
+export type ProductAccessoryRow = typeof productAccessory.$inferSelect;
+export type NewProductAccessoryRow = typeof productAccessory.$inferInsert;
+
+/**
+ * 配件归属 —— 「哪个型号能配哪些配件」
+ *
+ * 取代代码常量 `PRODUCT_TYPES[].accessories`。
+ */
+export const productAccessoryOption = pgTable(
+  "product_accessory_option",
+  {
+    id: text("id").primaryKey(),
+    /** 产品码，= product.code */
+    productTypeCode: text("product_type_code").notNull(),
+    /** 配件 code，= product_accessory.code */
+    accessoryCode: text("accessory_code").notNull(),
+    /** UI 排序；asc */
+    sortOrder: integer("sort_order").notNull().default(0),
+    /** 软下架（false = 不进对外接口） */
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    // 同 (productTypeCode, accessoryCode) 唯一
+    uniqueIndex("product_accessory_option_uniq_idx").on(
+      t.productTypeCode,
+      t.accessoryCode
+    ),
+    index("product_accessory_option_lookup_idx").on(
+      t.productTypeCode,
+      t.isActive,
+      t.sortOrder
+    ),
+  ]
+);
+
+export type ProductAccessoryOptionRow =
+  typeof productAccessoryOption.$inferSelect;
+export type NewProductAccessoryOptionRow =
+  typeof productAccessoryOption.$inferInsert;
 
 // ============================================
 // 打印服务订单 (PrintOrder)
