@@ -948,6 +948,8 @@
       "userManagement": "User Management",
       "ticketManagement": "Ticket Management",
       "agentManagement": "Agent Management",
+      "productManagement": "Product Management",
+      "products": "Products",
       "productEffects": "Product Effects",
       "imageModels": "Image Models",
       "externalApiKeys": "External API Keys",
@@ -961,6 +963,7 @@
       "printPricing": "Print Pricing",
       "files": "Files",
       "coupons": "Coupons",
+      "settings": "Settings",
       "siteSettings": "Site Settings",
       "paymentSettings": "Payment Settings",
       "shipments": "Shipping Desk"

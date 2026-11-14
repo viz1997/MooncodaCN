@@ -200,25 +200,23 @@ export const adminNav: NavGroup[] = [
       // - 入口与 admin/users 平级（业务管理类）
       // - title "订单管理" 已在 AdminSidebar.nav.gptImageOrders 字典里
       // - 老的 /dashboard/prompt-Orders 仍保留给 user 自服务，不删
+      //
+      // 2026-11-14：打印订单收进「订单管理」这一组（工作室原话：「打印订单
+      // 作为订单管理子菜单」）。**父项的 href 仍然是它自己那个页面** ——
+      // 父项既是入口也是分组头,「打印订单」缩进一行挂在下面。
       {
         title: "订单管理",
         href: "/admin/orders",
         icon: ShoppingBag,
-      },
-      // 2026-11-01：打印服务工单（print_order 表）—— 跟上面的「订单管理」
-      // （promptOrder 表,gpt-image 生图订单）是两套独立数据
-      {
-        title: "打印订单",
-        href: "/admin/print-orders",
-        icon: Scale,
-      },
-      // 2026-11-06：打印定价后台 —— 克重的计算和计价、材料、计算逻辑
-      // 都在这一页配(材料库 / 计价基础 / 支撑加价的分段规则 / 交期比例 /
-      // 支撑几何参数)。工具页和打印单一律跟这里走,访客改不了。
-      {
-        title: "打印定价",
-        href: "/admin/print-pricing",
-        icon: SlidersHorizontal,
+        children: [
+          // 2026-11-01：打印服务工单（print_order 表）—— 跟父项的
+          // 「订单管理」（promptOrder 表,gpt-image 生图订单）是两套独立数据
+          {
+            title: "打印订单",
+            href: "/admin/print-orders",
+            icon: Scale,
+          },
+        ],
       },
       // 2026-11-08：后台文件管理 —— 浏览整个 R2 桶（打印模型 / 生图结果 /
       // 画布产物 / 上传件）。看的是 `R2_*` 那个桶,不是头像桶(`STORAGE_*`)。
@@ -235,29 +233,49 @@ export const adminNav: NavGroup[] = [
         href: "/admin/coupons",
         icon: Gift,
       },
-      // 2026-11-11：站点设置 —— 后台能改、不用重新部署的站点级设置。
-      // 第一项是海外独立站(Shopify)的顾客访问地址（工作室原话：「不需要
-      // 环境变量，在后台设置」）。真理源在 `site_setting` 表。
-      {
-        title: "站点设置",
-        href: "/admin/site-settings",
-        icon: Settings,
-      },
-      // 2026-11-13：支付设置 —— 微信 / 支付宝的**沙箱**开关、端点、凭据都在
-      // 这一页配(工作室原话：「支付宝、微信支付先用沙盒测试验证」+「可以
-      // 后台配置」)。真理源在 `payment_setting` 表,改完不用重新部署。
-      // ⚠️ 正式模式的凭据**一个字都不动** —— 继续走环境变量。
-      {
-        title: "支付设置",
-        href: "/admin/payment-settings",
-        icon: CreditCard,
-      },
       // 2026-11-13：后台发货台 —— 商城订单和打印工单**摆一张表**,填「快递
       // 公司 + 运单号」,买家在订单详情页看得见物流。一期不接第三方物流平台。
       {
         title: "发货管理",
         href: "/admin/shipments",
         icon: Truck,
+      },
+      // 2026-11-14：把三页「配置」收进一个「设置」分组（工作室原话：
+      // 「打印定价、站点设置、支付设置都放在设置菜单里作为子菜单」）。
+      // - 父项的 href 指向**第一个子项**（仓库里「商品管理」那组也是这个
+      //   做法：父项 href = 某个子项的 href）
+      // - 「设置」**自己**没有页面 —— 三页各管各的,没有一张「设置总览」
+      {
+        title: "设置",
+        href: "/admin/print-pricing",
+        icon: Settings,
+        children: [
+          // 2026-11-06：打印定价后台 —— 克重的计算和计价、材料、计算逻辑
+          // 都在这一页配(材料库 / 计价基础 / 支撑加价的分段规则 / 交期比例 /
+          // 支撑几何参数)。工具页和打印单一律跟这里走,访客改不了。
+          {
+            title: "打印定价",
+            href: "/admin/print-pricing",
+            icon: SlidersHorizontal,
+          },
+          // 2026-11-11：站点设置 —— 后台能改、不用重新部署的站点级设置。
+          // 第一项是海外独立站(Shopify)的顾客访问地址（工作室原话：「不需要
+          // 环境变量，在后台设置」）。真理源在 `site_setting` 表。
+          {
+            title: "站点设置",
+            href: "/admin/site-settings",
+            icon: Settings,
+          },
+          // 2026-11-13：支付设置 —— 微信 / 支付宝的**沙箱**开关、端点、凭据
+          // 都在这一页配(工作室原话：「支付宝、微信支付先用沙盒测试验证」+
+          // 「可以后台配置」)。真理源在 `payment_setting` 表,改完不用重新
+          // 部署。⚠️ 正式模式的凭据**一个字都不动** —— 继续走环境变量。
+          {
+            title: "支付设置",
+            href: "/admin/payment-settings",
+            icon: CreditCard,
+          },
+        ],
       },
       {
         title: "商品管理",

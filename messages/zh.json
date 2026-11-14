@@ -945,6 +945,8 @@
       "userManagement": "用户管理",
       "ticketManagement": "工单管理",
       "agentManagement": "代理商管理",
+      "productManagement": "商品管理",
+      "products": "商品",
       "productEffects": "效果模板",
       "imageModels": "生图模型",
       "externalApiKeys": "外部生图",
@@ -958,6 +960,7 @@
       "printPricing": "打印定价",
       "files": "文件管理",
       "coupons": "优惠码",
+      "settings": "设置",
       "siteSettings": "站点设置",
       "paymentSettings": "支付设置",
       "shipments": "发货管理"

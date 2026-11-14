@@ -2729,6 +2729,67 @@ pnpm tsx scripts/apply-currency-schema.ts --force-reprice # 真要按代码字�
 | `src/test/storefront/pure/db-price.test.ts` | `pricing.ts` 接受 `priceSource` 第二参 / `price-source.ts` 存在且含 `connection()` / 基础价取自 `priceSource` / `mock-catalog.ts` **不** import `@/db` / `price-source.ts` **不**被 client 组件 import / `checkout.ts` 在 `degraded` 时抛 `PRICING_FAILED` / `apply-currency-schema.ts` 含 `--force-reprice` / `bulkUpdateProductVariantsAction` 的 schema **不含** `priceCents` / `generateVariantsForProductInDb` 传了 DB 基础价 |
 | `src/test/storefront/pure/accessory-variant-unique.test.ts` | `variantCode` 全局唯一(配件加价能按它查到唯一一行) |
 
+### 后台侧边栏的分组(2026-11-14)
+
+工作室的两条要求:**「打印定价、站点设置、支付设置都放在设置菜单里作为子菜单」**
++ **「打印订单作为订单管理子菜单」**。另有一条:**`AdminSidebar.nav.products`**
+这个键**从来没进过 `messages`**(2026-10-21 加商品目录时只改了侧边栏)⇒ 后台
+侧边栏「商品」那一项渲染出来的是**原始键名**。
+
+#### 侧边栏那棵树是**数据**,不是 JSX
+
+`src/config/nav.ts` 的 `adminNav: NavGroup[]` 是唯一的真理源 ——
+`admin-sidebar.tsx` 渲染 `item.children` 那套(indented `ml-4 … border-l pl-2`)
+2026-10-21 就有了。**这次只是挪几行配置**,渲染那套一个字没改。
+
+```
+管理中心
+├── 用户管理
+├── 工单管理
+├── 订单管理          /admin/orders        ← 父项**自己就是一个页面**(gpt-image 生图订单)
+│   └── 打印订单      /admin/print-orders  ← 2026-11-14 挪进来的
+├── 文件管理
+├── 优惠码
+├── 发货管理
+├── 设置              /admin/print-pricing ← 父项 href = **第一个子项**的 href
+│   ├── 打印定价      /admin/print-pricing
+│   ├── 站点设置      /admin/site-settings
+│   └── 支付设置      /admin/payment-settings
+├── 商品管理          /admin/product-effects
+│   ├── 商品 / 效果模板 / 产品线 / 生图模型 / 3D 引擎 / 提示词模板
+├── 外部生图
+└── 系统日志
+```
+
+- **父项 href = 某个子项的 href** —— 仓库里既有那套做法(「商品管理」那组的
+  href 是 `/admin/product-effects` = 效果模板的 href)。**「设置」自己没有页面**
+  (三页各管各的,没有一张「设置总览」)⇒ 父项落到第一个子项。
+  `NavItem.href` **保持必填** —— 侧边栏拿它当 React key。
+- **「订单管理」父项仍然是一个页面** —— 它不是纯分类头,自己的页面在
+  `/admin/orders`;「打印订单」缩进一行挂在下面。工作室只要求「打印订单作为
+  订单管理子菜单」,没要求把生图订单页挪走。
+- **挪走的三项不许留在顶层** —— 留一份的话侧边栏上会出现两个「打印定价」。
+
+#### 标题映射走 `getNavTitle()`
+
+`admin-sidebar.tsx` 有一张**硬编码的中文标题 → i18n 键**的表,查不到就**直接
+把中文原文显示出来**(`/en` 的后台会漏中文)。这次新增两条:`商品管理` →
+`nav.productManagement`(分组头,以前漏了 ⇒ `/en` 的后台那一组显示中文)+
+`设置` → `nav.settings`。
+
+#### ⚠️ 「中英文键集一致」那条测试**抓不到**漏键
+
+两个语言**都缺**同一个键 ⇒ 键集照样一致 ⇒ 只比 zh / en 的测试一律通过。
+⇒ 必须**从源码里抠出用了哪些键**(`t("…")` 正则),逐个去 `messages` 里查 ——
+这才是能抓住这类漏的方法。
+
+#### 行为由单测守住
+
+| 测试 | 守住什么 |
+|---|---|
+| `src/test/repo/pure/admin-sidebar-i18n.test.ts` | 侧边栏里 `t("…")` 的**每个**键在 zh / en 都存在(从源码抠键,不手抄清单)/ zh / en 键集一致 / **`nav.products` 在** / `nav.ts` 里**带中文的标题都要有** i18n 映射(否则 `/en` 漏中文) |
+| `src/test/repo/pure/admin-nav-structure.test.ts` | 「打印订单」是「订单管理」的子项**且不在顶层** / 「设置」下恰好是那三项 + 它们的 href / 父项 href 指向第一个子项 / 没被要求挪走的项**留在顶层** / 每一项都有 href(侧边栏拿它当 key) |
+
 ### 电商产品读后台配置(2026-11-14)
 
 工作室的要求:**「电商产品获取后台配置管理好的产品」** ⇒ 商城目录要**跟着后台走**。
