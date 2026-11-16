@@ -951,6 +951,7 @@
       "productManagement": "Product Management",
       "products": "Products",
       "productEffects": "Product Effects",
+      "showcases": "Showcase",
       "imageModels": "Image Models",
       "externalApiKeys": "External API Keys",
       "productLines": "Product Lines",
@@ -3043,6 +3044,84 @@
       "VARIANT_CODE_DUPLICATED": "Another model already uses that variant code — variant codes must be globally unique",
       "MIGRATION_MISSING": "These tables have not been created yet — run the migration script",
       "READ_FAILED": "Could not read the catalog dictionary — check the server log",
+      "SAVE_FAILED": "Save failed — check the server log"
+    }
+  },
+  "AdminShowcase": {
+    "title": "Showcase",
+    "subtitle": "These are what the storefront shows — upload real finished prints, order them yourself, publish or unpublish them. When there is not a single case, the storefront hides those two blocks entirely rather than showing stand-in photos.",
+    "form": {
+      "create": "New case",
+      "edit": "Edit case",
+      "coverUrl": "Finished photo",
+      "coverUrlHint": "Upload (straight to R2) or paste an external URL. What we store is the reference, not the final address — changing the CDN domain then needs no data migration.",
+      "coverUrlPlaceholder": "Filled in after upload; you can also paste https://…",
+      "beforeImageUrl": "Source photo",
+      "beforeImageUrlHint": "Optional. When set, the storefront shows a before/after flip.",
+      "beforeImageUrlPlaceholder": "Optional — leave empty if there is none",
+      "title": "Title",
+      "titlePlaceholder": "e.g. \"Puppy fridge magnet\"",
+      "titleEn": "Title (English)",
+      "titleEnPlaceholder": "Empty = English pages fall back to the Chinese one",
+      "description": "One-line caption",
+      "descriptionPlaceholder": "e.g. \"12cm wide, 3.4cm thick\"",
+      "descriptionEn": "One-line caption (English)",
+      "descriptionEnPlaceholder": "Empty = English pages fall back to the Chinese one",
+      "authorName": "Author",
+      "authorNameHint": "A customer nickname, or \"Studio shot\". Empty = the storefront shows no byline.",
+      "authorNamePlaceholder": "Empty = no byline",
+      "productTypeCode": "Product type",
+      "productTypeCodePlaceholder": "Optional — shown as a badge on the case",
+      "productHandle": "Linked product",
+      "productHandleHint": "Optional. When set, clicking the case opens that product.",
+      "productHandlePlaceholder": "Optional — product handle",
+      "likes": "Likes",
+      "sortOrder": "Sort order",
+      "sortOrderHint": "Lower comes first. Ties fall back to likes, then to publish time.",
+      "isActive": "Published",
+      "uploadTitle": "Images",
+      "uploadCover": "Upload finished photo",
+      "uploadBefore": "Upload source photo",
+      "preview": "Finished photo of the case being edited",
+      "required": "This field is required"
+    },
+    "table": {
+      "cover": "Finished photo",
+      "title": "Title",
+      "type": "Type",
+      "likes": "Likes",
+      "sortOrder": "Sort",
+      "status": "Status",
+      "actions": "Actions"
+    },
+    "status": {
+      "active": "Published",
+      "inactive": "Unpublished"
+    },
+    "actions": {
+      "create": "New case",
+      "edit": "Edit",
+      "enable": "Publish",
+      "disable": "Unpublish",
+      "save": "Save",
+      "cancel": "Cancel"
+    },
+    "messages": {
+      "loading": "Loading cases…",
+      "saveSuccess": "Saved",
+      "toggleSuccess": "Publish state updated",
+      "uploadSuccess": "Image uploaded",
+      "uploadFailed": "Upload failed — check the server log",
+      "tooLarge": "That image is too large — 12MB max",
+      "notImage": "That file is not an image"
+    },
+    "list": {
+      "empty": "No cases yet — use \"New case\" to upload a real finished print"
+    },
+    "errors": {
+      "CASE_NOT_FOUND": "That case is gone — refresh and try again",
+      "INVALID_INPUT": "Invalid input — an image reference must be an external URL or an R2 object key",
+      "MIGRATION_MISSING": "The showcase table does not exist yet — run pnpm migrate:apply-showcase",
       "SAVE_FAILED": "Save failed — check the server log"
     }
   }

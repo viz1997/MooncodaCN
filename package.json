@@ -35,6 +35,7 @@
     "migrate:apply-refund": "tsx scripts/apply-refund-schema.ts",
     "migrate:apply-sellbase-payment": "tsx scripts/apply-sellbase-payment-schema.ts",
     "migrate:apply-shipment": "tsx scripts/apply-shipment-schema.ts",
+    "migrate:apply-showcase": "tsx scripts/apply-showcase-schema.ts",
     "migrate:apply-site-setting": "tsx scripts/apply-site-setting-schema.ts",
     "migrate:apply-storefront-cart": "tsx scripts/apply-storefront-cart-schema.ts",
     "migrate:apply-user-address": "tsx scripts/apply-user-address-schema.ts",

@@ -4125,3 +4125,84 @@ export const refundRequestEventRelations = relations(
     }),
   })
 );
+
+/* -------------------------------------------------------------------------- */
+/*  真实案例                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 真实案例 —— 工作室实拍的成品照片(2026-11-16)
+ *
+ * 工作室的要求:**「电商平台需要增加案例来展示我们实际打印的效果」**。
+ *
+ * ## 为什么要有这张表
+ *
+ * 商城页面上「真实照片。真实礼物。」那两块(首页 `CraftGallery` /
+ * 作品集页 `CommunityWall`)以前喂的是**代码常量**
+ * (`wjp-store-data.ts` 的 `WJP_COMMUNITY_POSTS`)—— 里头是 Unsplash 的图库
+ * 照片和**编出来的**点赞数(1280 / 956 / …)。那不是工作室印出来的东西。
+ *
+ * ⇒ 这张表是那些照片的**真理源**:工作室自己在后台传真图、排序、上下架。
+ *
+ * ## 图片列存的是「引用」,不是完整的 URL
+ *
+ * `cover_url` / `before_image_url` 两列,每格装的是**两种东西之一**:
+ *
+ * - 一个完整的 `https://…` 外链(工作室自己的 CDN / 微信相册);
+ * - 一个 **R2 对象键**(`showcases/2026-11-16/abc.webp`)。
+ *
+ * 渲染时再解析成能用的地址 —— 这样 CDN 域名换了**不用改库**。
+ * 解析在 `features/showcase/lib/case-image.ts`。
+ *
+ * ## 「下架」而不是「删」
+ *
+ * 跟仓库里其它后台一致(订单行留着、案例是营销资产)。下架之后前台不摆,
+ * 后台还能看见、还能重新上架。
+ *
+ * ## 迁移脚本
+ *
+ * `scripts/apply-showcase-schema.ts`(幂等,**不播种任何一行**)。
+ */
+export const storefrontCase = pgTable(
+  "storefront_case",
+  {
+    id: text("id").primaryKey(),
+    /** 标题(中文) */
+    title: text("title").notNull(),
+    /** 标题(英文)—— 空 ⇒ 用中文那份 */
+    titleEn: text("title_en"),
+    /** 一句话说明(中文)—— 案例图下面那行字 */
+    description: text("description"),
+    /** 一句话说明(英文) */
+    descriptionEn: text("description_en"),
+    /**
+     * 成品图 —— **外链或 R2 对象键**
+     *
+     * notNull:没有图的案例在案例墙上是一个空盒子,没有意义 ⇒ 后台**必填**。
+     */
+    coverUrl: text("cover_url").notNull(),
+    /** 原图 —— 可空;没有它就没有 before/after 翻转 */
+    beforeImageUrl: text("before_image_url"),
+    /** 作者名(顾客昵称 / 「工作室实拍」) */
+    authorName: text("author_name").notNull().default(""),
+    /** 商品型号(R/A/P/RM/LB/M)—— 案例角上的那个小徽标 */
+    productTypeCode: text("product_type_code"),
+    /** 关联商品(handle)—— 点了能跳到那件商品;空 = 不跳 */
+    productHandle: text("product_handle"),
+    /** 点赞数 —— 工作室自己填(0 = 不显示) */
+    likes: integer("likes").notNull().default(0),
+    /** 排序 —— 小的在前 */
+    sortOrder: integer("sort_order").notNull().default(0),
+    /** 上架 / 下架 */
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    // 前台只读上架的,按 sort_order 排 —— 一条索引全覆盖
+    index("storefront_case_active_sort_idx").on(t.isActive, t.sortOrder),
+  ]
+);
+
+export type StorefrontCaseRow = typeof storefrontCase.$inferSelect;
+export type NewStorefrontCaseRow = typeof storefrontCase.$inferInsert;

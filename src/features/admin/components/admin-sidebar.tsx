@@ -52,6 +52,7 @@ export function AdminSidebar() {
       商品管理: t("nav.productManagement"),
       商品: t("nav.products"),
       效果模板: t("nav.productEffects"),
+      案例展示: t("nav.showcases"),
       生图模型: t("nav.imageModels"),
       外部生图: t("nav.externalApiKeys"),
       产品线: t("nav.productLines"),

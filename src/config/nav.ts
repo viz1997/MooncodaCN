@@ -1,6 +1,7 @@
 import {
   BookOpen,
   Boxes,
+  Camera,
   Cpu,
   CreditCard,
   FolderOpen,
@@ -304,6 +305,15 @@ export const adminNav: NavGroup[] = [
             title: "效果模板",
             href: "/admin/product-effects",
             icon: Images,
+          },
+          {
+            // 2026-11-16：真实案例展示 —— 工作室把真实打印成品拍上来,
+            // 前台首页和作品集页就摆这些。以前前台那两块「真实照片。真实礼物。」
+            // 喂的是代码常量(Unsplash 图库 + 编出来的点赞数)—— 那不是我们
+            // 打印出来的东西 ⇒ 改成后台可维护的 DB 数据。
+            title: "案例展示",
+            href: "/admin/showcases",
+            icon: Camera,
           },
           {
             title: "产品线",

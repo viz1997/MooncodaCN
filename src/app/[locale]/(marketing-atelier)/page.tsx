@@ -7,6 +7,7 @@ import { OccasionShelf } from "@/features/marketing/components/storefront/occasi
 import { ShopAnnouncement } from "@/features/marketing/components/storefront/shop-announcement";
 import { ShopGrid } from "@/features/marketing/components/storefront/shop-grid";
 import { StoreHero } from "@/features/marketing/components/storefront/store-hero";
+import { getShowcaseCases } from "@/features/showcase/lib/showcase-catalog";
 import { getStorefrontProducts } from "@/features/storefront/lib/storefront-catalog";
 
 /**
@@ -141,6 +142,11 @@ export default async function HomePage({
   // **不会**被静态预渲染 —— 价必须是当下的,不能烤进构建产物里。
   const products = await getStorefrontProducts();
 
+  // 真实案例(2026-11-16)—— 后台 `/admin/showcases` 上传的实拍成品。
+  // 读不到 / 一条都没有 ⇒ 空数组 ⇒ `CraftGallery` 把「真实照片」那一半和
+  // 那排图**整个不渲染**(宁可空着,也不拿假的静态数据顶上)。
+  const showcaseCases = await getShowcaseCases(isZh ? "zh" : "en");
+
   return (
     <>
       {/* 商城动线(2026-11-01):
@@ -153,7 +159,7 @@ export default async function HomePage({
       <ShopGrid locale={isZh ? "zh" : "en"} products={products} />
       <OccasionShelf locale={isZh ? "zh" : "en"} />
       <HowItWorks />
-      <CraftGallery />
+      <CraftGallery cases={showcaseCases} />
     </>
   );
 }

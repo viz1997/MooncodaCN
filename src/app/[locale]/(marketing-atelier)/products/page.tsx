@@ -7,6 +7,7 @@ import { FeaturedProducts } from "@/features/marketing/components/storefront/fea
 import { HowItWorks } from "@/features/marketing/components/storefront/how-it-works";
 import { SeriesShowcase } from "@/features/marketing/components/storefront/series-showcase";
 import { StoreHero } from "@/features/marketing/components/storefront/store-hero";
+import { getShowcaseCases } from "@/features/showcase/lib/showcase-catalog";
 import { getStorefrontProducts } from "@/features/storefront/lib/storefront-catalog";
 
 /**
@@ -86,6 +87,10 @@ export default async function MarketingProductsPage({
   // **不会**被静态预渲染 —— 价必须是当下的。
   const products = await getStorefrontProducts();
 
+  // 真实案例(2026-11-16)—— 后台 `/admin/showcases` 上传的实拍成品。
+  // 一条都没有 ⇒ `CommunityWall` 整段不渲染(不拿假的静态数据顶上)。
+  const showcaseCases = await getShowcaseCases(isZh ? "zh" : "en");
+
   return (
     <>
       <BreadcrumbJsonLd
@@ -104,7 +109,7 @@ export default async function MarketingProductsPage({
       <HowItWorks />
       <FeaturedProducts locale={isZh ? "zh" : "en"} products={products} />
       <CraftStory />
-      <CommunityWall />
+      <CommunityWall cases={showcaseCases} />
     </>
   );
 }
