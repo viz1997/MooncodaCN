@@ -442,20 +442,20 @@ function BatchItemRow({
               variant="outline"
               className="font-mono border-zinc-700 text-zinc-400"
             >
-              {fmt(r.pricing.volumeCM3, 2)} cm³
+              {fmt(r.metrics.volumeCM3, 2)} cm³
             </Badge>
             <Badge
               variant="outline"
               className="font-mono border-zinc-700 text-zinc-400"
             >
-              {Math.ceil(r.pricing.materialWeight)} g
+              {Math.ceil(r.metrics.materialWeight)} g
             </Badge>
             <Badge
               variant="outline"
               className="font-mono border-zinc-700 text-zinc-400"
             >
-              {fmt(r.pricing.dims[0], 0)}×{fmt(r.pricing.dims[1], 0)}×
-              {fmt(r.pricing.dims[2], 0)} mm
+              {fmt(r.metrics.dims[0], 0)}×{fmt(r.metrics.dims[1], 0)}×
+              {fmt(r.metrics.dims[2], 0)} mm
             </Badge>
             {angle && (
               <Badge

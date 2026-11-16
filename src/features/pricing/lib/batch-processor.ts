@@ -15,9 +15,22 @@
  *   - Each `parseObjInWorker` call spawns its own Worker via the cached Blob URL.
  *   - We dispatch up to `concurrency` files at a time (default 4 — matches
  *     typical browser connection limits for Blob URL workers).
- *   - Each file goes through: extract → parse → optimize angle → compute price.
+ *   - Each file goes through: extract → parse → optimize angle → compute weight.
  *
  * All processing happens client-side; no files are uploaded to a server.
+ *
+ * ## ⛔ 这个文件**只算克重,不算钱**
+ *
+ * 工作室 2026-11-16 的要求:「不要展示 4.5 元/g 这种单价,避免暴露我们的
+ * 成本」。这个文件是 `"use client"` —— 只要它 import 了 `pricing-engine.ts`
+ * (单价住在那儿),那个字面量就进客户端 bundle 了。
+ *
+ * ⇒ 批量流水线**只算克重**:体积 × 密度。钱由服务端算(报价弹窗走
+ * `/api/print-quote`),批量模式本来也没有下单出口(CLAUDE.md:「批量克重是
+ * 另一个工具(批量量重),没有下单出口」)。
+ *
+ * 顺带修掉一个老 bug:原先这里是用**引擎默认的 4.5 元/g** 算的,不是后台
+ * 配的当前价 —— 跟「后台改了价,商城还是老价」同一类错。
  */
 
 import {
@@ -26,14 +39,10 @@ import {
 } from "@/features/tools/lib/mesh/support-shell";
 import type { OptimalAngle, SupportParams } from "./angle-optimizer";
 import { AngleOptimizerClient } from "./angle-optimizer-client";
+import { computeMaterialWeight } from "./material-weight";
 import { detectModelUnitScale } from "./model-units";
 import { parseObjInWorker } from "./obj-worker-client";
-import {
-  calculatePrice,
-  type PricingConfig,
-  type PricingInput,
-  scaleGeometry,
-} from "./pricing-engine";
+import { scaleGeometry } from "./pricing-geometry";
 import { detectReliefKind, reliefLiftMm } from "./relief-detect";
 import {
   extractModelZip,
@@ -84,26 +93,38 @@ export type BatchResult = {
   supportWeightG: number;
   /** 本体支撑比例 = 支撑克重 / 模型克重 */
   supportRatio: number;
-  pricing: {
+  /**
+   * 几何 + 克重 —— **没有钱**
+   *
+   * 原来的 `pricing` 里带着 `weightFee` / `varnishFee` / `supportFee` /
+   * `totalPrice` / `repairFee` —— 界面一个都没渲染,却把成本口径带进了
+   * 客户端 bundle(工作室 2026-11-16:别暴露成本)。现在只剩克重跟几何。
+   */
+  metrics: {
     volumeCM3: number;
     surfaceAreaCM2: number;
     dims: [number, number, number];
+    /** 耗材克重 (g) = 体积 × 材料密度 */
     materialWeight: number;
-    weightFee: number;
-    varnishFee: number;
-    /** 支撑加价（元）。本体支撑比例超过 1:1 阈值时，超出部分按 supportPrice 元/g 加收 */
-    supportFee: number;
-    /** 超出阈值的支撑克重（g） */
-    excessSupportWeight: number;
-    totalPrice: number;
-    repairFee: number;
   };
   objText: string;
 };
 
 export type BatchOptions = {
   concurrency?: number;
-  pricingConfig: PricingConfig;
+  /**
+   * 材料密度 (g/cm³) —— 耗材克重 = 体积 × 这个密度
+   *
+   * 密度**不是**成本口径(材料物性),可以直接发给浏览器。单价不是 ——
+   * 单价住在 `pricing-engine.ts` 里,那个文件不许进客户端 bundle。
+   */
+  materialDensity: number;
+  /**
+   * 支撑材料密度 (g/cm³) —— 支撑跟模型**不是**一种材料
+   *
+   * 支撑克重按这个密度算;模型密度只用来算耗材克重。
+   */
+  supportDensity: number;
   /**
    * 托底高度 (mm) —— 平台面在模型最低点下方多远
    *
@@ -127,9 +148,6 @@ export type BatchOptions = {
    * 省略 = 用 `SUPPORT_BASE_MARGIN_MM`(5mm)。同上。
    */
   supportBaseMarginMm?: number | undefined;
-  solidRatio: number;
-  repairEnabled: boolean;
-  repairPrice: number;
   /** Apply angle optimization? Default true */
   optimizeAngle?: boolean;
   /** Called whenever any item's status/progress changes */
@@ -227,7 +245,7 @@ export function initBatch(files: File[]): BatchItem[] {
  *   1. Extract (decompress ZIP or read .obj text)
  *   2. Parse OBJ via Worker (with sendGeometry=true)
  *   3. Optimize print angle (findOptimalAngle)
- *   4. Compute price (calculatePrice)
+ *   4. Compute weight (体积 × 密度) —— **不算钱**
  *
  * Updates are pushed via `onItemUpdate` so the UI can render progress live.
  */
@@ -237,10 +255,8 @@ export async function processBatch(
 ): Promise<BatchItem[]> {
   const {
     concurrency = 4,
-    pricingConfig,
-    solidRatio,
-    repairEnabled,
-    repairPrice,
+    materialDensity,
+    supportDensity,
     optimizeAngle: doOptimize = true,
     onItemUpdate,
     signal,
@@ -392,12 +408,12 @@ export async function processBatch(
         unitScale *
         unitScale *
         unitScale *
-        pricingConfig.materialDensity;
+        materialDensity;
       // 支撑跟模型**不是**一种材料(水溶性支撑)—— 支撑克重按支撑密度算,
       // 模型密度只用来算耗材克重
       const supportParams: SupportParams = {
-        modelDensity: pricingConfig.materialDensity,
-        supportDensity: pricingConfig.supportDensity,
+        modelDensity: materialDensity,
+        supportDensity,
         // 几何参数跟随后台 —— 批量模式跟单件模式必须同一口径
         liftMm: itemLiftMm,
         baseMarginMm: options.supportBaseMarginMm,
@@ -457,7 +473,9 @@ export async function processBatch(
         model.parseResult.positions = undefined;
       }
 
-      // ---- 4. Pricing ----------------------------------------------------
+      // ---- 4. 克重 ----------------------------------------------------
+      // 状态值还是 "pricing"(界面上的徽章文案靠它)—— 但这里**不算钱**,
+      // 只算克重。钱由服务端算(报价弹窗走 `/api/print-quote`)。
       update(item, { status: "pricing", progress: 92, message: "计算克重..." });
       const r = model.parseResult;
       // 3D viewer applies -90° X rotation (Z-up → Y-up), swapping visual Y and Z.
@@ -473,21 +491,13 @@ export async function processBatch(
         origDims,
         unitScale
       );
-      const input: PricingInput = {
-        volumeCM3: scaled.volumeCM3,
-        surfaceAreaCM2: scaled.surfaceAreaCM2,
-        mode: "upload",
-        solidRatio,
-        dims: scaled.dims,
-        // 支撑加价仅在开关开启时计入；关闭时传 0 让 pricing-engine 跳过
-        supportWeight: pricingConfig.supportEnabled ? supportWeightG : 0,
-        selfSupportRatio:
-          pricingConfig.supportEnabled && modelWeightG > 0
-            ? supportWeightG / modelWeightG
-            : 0,
-      };
-      const priceResult = calculatePrice(pricingConfig, input);
-      if (!priceResult) {
+      // 耗材克重 = 体积 × 密度 —— 跟服务端 `calculatePrice()` 同一个公式,
+      // 同一个守卫(体积 ≤ 0 或密度 ≤ 0 ⇒ 算不出来)。
+      const materialWeight = computeMaterialWeight(
+        scaled.volumeCM3,
+        materialDensity
+      );
+      if (materialWeight === null) {
         update(item, {
           status: "error",
           progress: 100,
@@ -498,7 +508,6 @@ export async function processBatch(
         return;
       }
 
-      const repairFee = repairEnabled ? repairPrice : 0;
       const result: BatchResult = {
         model,
         parseResult: r,
@@ -507,17 +516,11 @@ export async function processBatch(
         supportWeightG,
         // 本体支撑比例 = 支撑克重 / 模型克重
         supportRatio: modelWeightG > 0 ? supportWeightG / modelWeightG : 0,
-        pricing: {
+        metrics: {
           volumeCM3: scaled.volumeCM3,
           surfaceAreaCM2: scaled.surfaceAreaCM2,
           dims: scaled.dims,
-          materialWeight: priceResult.materialWeight,
-          weightFee: priceResult.weightFee,
-          varnishFee: priceResult.varnishFee,
-          supportFee: priceResult.supportFee,
-          excessSupportWeight: priceResult.excessSupportWeight,
-          totalPrice: priceResult.totalPrice + repairFee,
-          repairFee,
+          materialWeight,
         },
         objText: model.objText,
       };
@@ -550,12 +553,8 @@ export function summarizeBatch(items: BatchItem[]) {
   const totalWeight = done.reduce(
     (s, i) =>
       s +
-      (i.result?.pricing.materialWeight ?? 0) +
+      (i.result?.metrics.materialWeight ?? 0) +
       (i.result?.supportWeightG ?? 0),
-    0
-  );
-  const totalPrice = done.reduce(
-    (s, i) => s + (i.result?.pricing.totalPrice ?? 0),
     0
   );
   const avgTime =
@@ -570,7 +569,6 @@ export function summarizeBatch(items: BatchItem[]) {
     errors: errors.length,
     pending: total - done.length - errors.length,
     totalWeight,
-    totalPrice,
     avgTimeMs: avgTime,
   };
 }

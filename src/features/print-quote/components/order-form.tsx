@@ -24,7 +24,7 @@ import { useState } from "react";
 
 import { PaymentChannelPicker } from "@/features/payments/components/payment-channel-picker";
 import { formatCents } from "@/features/print-quote/lib/format";
-import type { PrintQuote } from "@/features/print-quote/lib/quote-types";
+import type { PublicPrintQuote } from "@/features/print-quote/lib/quote-types";
 import { Link } from "@/i18n/routing";
 
 export type OrderContact = {
@@ -34,7 +34,7 @@ export type OrderContact = {
 };
 
 export type OrderFormProps = {
-  quote: PrintQuote | null;
+  quote: PublicPrintQuote | null;
   /** 模型文件名(下单时上传的那个) */
   modelName: string;
   /** 当前登录用户 —— 称呼预填,邮箱只读展示 */

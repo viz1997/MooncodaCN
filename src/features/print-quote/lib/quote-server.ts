@@ -102,11 +102,6 @@ export function computePrintQuote(
   const result = calculatePrice(config, {
     volumeCM3: input.volumeCM3,
     surfaceAreaCM2: input.surfaceAreaCM2,
-    mode: "upload",
-    // solidRatio 只作信息位,calculatePrice() 的公式不用它 ——
-    // 上传模式的体积已经是解析出来的实体积,不是包络盒估算
-    solidRatio: 100,
-    dims: input.dims,
     supportWeight: useSupport ? (input.supportWeightG ?? 0) : 0,
     selfSupportRatio: useSupport ? (input.selfSupportRatio ?? 0) : 0,
   });

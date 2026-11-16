@@ -37,6 +37,7 @@ import { checkReliefTier } from "@/features/pricing/lib/relief-detect";
 import { getPrintOrderUser } from "@/features/print-quote/lib/auth";
 import { printCouponBaseCents } from "@/features/print-quote/lib/coupon-base";
 import { getPrintPricingSettings } from "@/features/print-quote/lib/pricing-store";
+import { toPublicQuote } from "@/features/print-quote/lib/quote-public";
 import { computePrintQuote } from "@/features/print-quote/lib/quote-server";
 import type { PrintQuoteInput } from "@/features/print-quote/lib/quote-types";
 import { withApiLogging } from "@/lib/api-logger";
@@ -205,7 +206,14 @@ async function handle(request: NextRequest) {
 
   return NextResponse.json(
     {
-      quote,
+      /**
+       * **对外形状** —— 单价(¥4.50/g 那一栏)一个字节都不出去
+       *
+       * 工作室 2026-11-16 的要求:「不要展示 4.5 元/g 这种单价,避免暴露
+       * 我们的成本」。内部那份 `quote` 带着单价,这里投影一次再发出去
+       * (见 `quote-public.ts`)。
+       */
+      quote: toPublicQuote(quote),
       /** 优惠效果(服务端算的)—— null = 没有码,或者券不可用 */
       coupon: coupon?.coupon ?? null,
       /** 券不可用的精确原因 —— null = 没有码,或者券完全可用 */

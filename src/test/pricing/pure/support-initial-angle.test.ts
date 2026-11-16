@@ -388,9 +388,8 @@ describe("批量汇总 —— 总克重 = 耗材克重 + 支撑克重", () => {
     const result = {
       supportWeightG,
       supportRatio: 0.5,
-      pricing: {
+      metrics: {
         materialWeight,
-        totalPrice: 100,
       },
     } as unknown as BatchResult;
     return {

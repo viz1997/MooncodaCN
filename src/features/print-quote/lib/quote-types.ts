@@ -199,6 +199,32 @@ export type PrintQuote = {
   totalPriceCents: number;
 };
 
+/**
+ * 报价的**对外形状** —— 跟 `PrintQuote` 的区别只有一个:**没有单价**
+ *
+ * 工作室 2026-11-16 的要求:**「不要展示 4.5 元/g 这种单价,避免暴露我们的
+ * 成本」**。
+ *
+ * `PrintQuote` 是**内部**形状 —— 它带着:
+ *
+ * - `unitPriceCentsPerGram` —— 每克单价(450 = ¥4.50/g)
+ * - `supportFeeBands[]` —— 支撑分段明细,**每一档都带单价**(¥0.50/g / ¥1.00/g)
+ * - `excessSupportWeightG` —— 超出 1:1 阈值的支撑克重
+ *
+ * 那三个都是**工作室的成本 / 定价口径**。内部要留着(后台要显示、留档要记、
+ * 工单上要能对账),但**凡是发给浏览器的报价,一个字节都不许出去**。
+ *
+ * ⇒ 对外一律用 `PublicPrintQuote`,转换见 `quote-public.ts` 的 `toPublicQuote()`。
+ *
+ * ## 界面上摆的是「克重」和「那笔费用」,不是「单价」
+ *
+ * 收据的样子是「克重费 ¥12.34」,不是「12.34 元 ÷ 8.3 g = ¥1.49/g」。
+ */
+export type PublicPrintQuote = Omit<
+  PrintQuote,
+  "unitPriceCentsPerGram" | "supportFeeBands" | "excessSupportWeightG"
+>;
+
 /** 下单入参 */
 export type PrintOrderRequest = {
   /** 几何 + 支撑信息 —— 服务端按这组数**重新算价**,不信客户端传来的总价 */
@@ -225,8 +251,12 @@ export type PrintOrderRequest = {
  */
 export type PrintOrderCreated = {
   orderNo: string;
-  /** 服务端重算后的报价(客户端显示的是这个,不是自己算的) */
-  quote: PrintQuote;
+  /**
+   * 服务端重算后的报价(客户端显示的是这个,不是自己算的)
+   *
+   * **对外形状** —— 没有单价(见 `PublicPrintQuote`)。
+   */
+  quote: PublicPrintQuote;
   /**
    * 优惠码(2026-11-08)—— null = 没用券
    */
@@ -358,8 +388,12 @@ export type UserPrintOrderDetail = UserPrintOrder & {
   surfaceAreaCM2: number;
   /** 材料密度 g/cm³(留档值) */
   materialDensity: number;
-  /** 单价 分/g */
-  unitPriceCentsPerGram: number;
+  /**
+   * ⚠️ **这里没有单价字段** —— 单价是工作室的成本口径,不出浏览器。
+   *
+   * (2026-11-16:以前这里有 `unitPriceCentsPerGram`,RSC 载荷里带着它 ⇒
+   * 「查看网页源代码」就能看到 ¥4.50/g。删掉了。)
+   */
   /** 克重费(分) */
   weightFeeCents: number;
   /** 后处理(分) */

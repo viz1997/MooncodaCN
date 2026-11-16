@@ -341,7 +341,9 @@ export function usePrintOrderDetailPolling(
   const [order, setOrder] = useState<UserPrintOrderDetail>(initial.order);
   const [events, setEvents] = useState<PrintOrderEventView[]>(initial.events);
   const [shipments, setShipments] = useState<ShipmentView[]>(initial.shipments);
-  const [refund, setRefund] = useState<RefundView | null>(initial.refund ?? null);
+  const [refund, setRefund] = useState<RefundView | null>(
+    initial.refund ?? null
+  );
 
   const aliveRef = useRef(true);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);

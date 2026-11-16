@@ -16,6 +16,14 @@
  * 客户端算的价不能信(能被改)。工具页显示的这个数字只是**预估**,最终金额
  * 在打印单上按服务端重算的结果收。
  *
+ * ## 界面上不摆单价(2026-11-16)
+ *
+ * 工作室的要求:「不要展示 4.5 元/g 这种单价,避免暴露我们的成本」。
+ *
+ * 服务端返回的是**对外形状**(`PublicPrintQuote`)—— 单价那一栏**根本不在
+ * 响应里**,不是「拿到了再藏起来」。收据上摆的是「克重费 ¥12.34」,**不摆**
+ * 「12.34 ÷ 8.3 g = ¥1.49/g」。
+ *
  * ## 访客能不能看到 —— 后台一个开关
  *
  * 未登录的人能不能看到价,由后台 `/admin/print-pricing` 的「访客可见计价」
@@ -53,8 +61,8 @@ import type {
 } from "@/features/coupon/lib/coupon-calc";
 import type { DeliveryTierId } from "@/features/print-quote/lib/delivery-tier";
 import type {
-  PrintQuote,
   PrintQuoteInput,
+  PublicPrintQuote,
 } from "@/features/print-quote/lib/quote-types";
 import { formatCents } from "@/lib/money";
 
@@ -65,7 +73,7 @@ type PreviewState =
   /** 正在问服务端要价 */
   | { kind: "loading" }
   /** 拿到了报价 */
-  | { kind: "ready"; quote: PrintQuote }
+  | { kind: "ready"; quote: PublicPrintQuote }
   /** 未登录 + 后台把访客可见计价关了 */
   | { kind: "hidden" }
   /** 算不出来 / 请求挂了 */
@@ -100,7 +108,7 @@ export type PrintServiceQuotePreviewProps = {
    * 父组件要拿 `quote.deliveryRates`(三档的比例)摆交期选择器,拿
    * 小计算选择器上那三档的加价 —— 比例只能由服务端给,前端不自己认一份。
    */
-  onQuote?: ((quote: PrintQuote | null) => void) | undefined;
+  onQuote?: ((quote: PublicPrintQuote | null) => void) | undefined;
   /**
    * 把优惠结果抬给父组件(2026-11-08)
    *
@@ -171,7 +179,7 @@ export function PrintServiceQuotePreview({
         }
 
         const data = (await response.json()) as {
-          quote?: PrintQuote;
+          quote?: PublicPrintQuote;
           coupon?: CouponView | null;
           couponError?: CouponErrorCode | null;
         };

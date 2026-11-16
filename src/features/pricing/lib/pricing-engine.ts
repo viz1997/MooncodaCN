@@ -1,42 +1,50 @@
 /**
- * 移植自 wjp-source-code/src/lib/pricing-engine.ts —— 耗材克重报价计算器（PolyJet 全彩打印）。
+ * 计价引擎 —— **只在服务端跑**
  *
- * 算法逻辑与源实现保持一致；移植时仅做类型严格化（noUncheckedIndexedAccess /
- * exactOptionalPropertyTypes）与 Biome 格式化调整，未改变任何数值行为。
+ * ## ⛔ 这个文件不许进客户端 bundle
+ *
+ * 工作室 2026-11-16 的原话:「不要展示 4.5 元/g 这种单价,避免暴露我们的
+ * 成本」。
+ *
+ * 「**不展示**」不够 —— 只要客户端 bundle 里还留着 `unitPrice: 4.5` 这个
+ * 字面量,任何人打开页面源码 / 翻一下 JS chunk 就看见了。所以规矩是:
+ *
+ * ```
+ * 客户端能 import 的:pricing-geometry.ts / material-weight.ts
+ * 客户端不许 import 的:pricing-engine.ts(这个文件)
+ * ```
+ *
+ * 仓库里没有 `server-only` 这个包(装不了就靠**结构 + 单测**守):
+ * `src/test/print-quote/pure/quote-public.test.ts` 扫全仓,
+ * **任何** `"use client"` 文件 import 这个文件 ⇒ 测试当场失败。
+ *
+ * ## 公式
+ *
+ * ```
+ * 耗材克重 = 体积 × 材料密度
+ * 克重费   = 耗材克重 × 材料单价
+ * 支撑加价 = 超阈值的支撑克重,分两档定价
+ * 合计     = 克重费 + 后处理费 + 支撑加价
+ * ```
+ *
+ * 引擎内部用**元**(浮点),对外一律**分** —— 转换只发生在两个边界上
+ * (`quote-server.ts` 的 `yuanToCentsCeil`),中间不碰。
+ *
+ * ## 跟客户端那一半的关系
+ *
+ * 几何(`pricing-geometry.ts`)和克重(`material-weight.ts`)在客户端算 ——
+ * 界面要**实时**跟着尺寸变。但**钱**在这儿算,服务端说了算。
  */
-/**
- * Pricing rule engine for the WJP (White-Jet-Print) resin calculator.
- *
- * Pure functions only — no React, no DOM. Safe to call from both server and
- * client code.
- *
- *   price = materialWeight × unitPrice + varnishFee
- *   materialWeight = volumeCM3 × materialDensity
- *
- * The volume passed in is already adjusted for "solid ratio" (manual mode:
- * envelope × solidRatio/100) by the caller via `estimateEnvelopeGeometry()`
- * or `scaleGeometry()`. Repair mode `rebuild` requires a manual quote.
- */
+
+import {
+  DEFAULT_MATERIAL_DENSITY,
+  DEFAULT_SUPPORT_DENSITY,
+} from "@/features/pricing/lib/material-weight";
+import { isFiniteNum } from "@/features/pricing/lib/pricing-geometry";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export type RepairMode = "none" | "optimize" | "refine" | "rebuild";
-
-export type CalcMode = "upload" | "manual";
-
-export type ProductPreset = {
-  id: string;
-  name: string;
-  /** 0-100, percentage of envelope that is solid material */
-  solidRatio: number;
-  /** 0-100, percentage of surface covered by white ink */
-  coverage: number;
-  desc: string;
-  /** Hex color used for UI badges */
-  color: string;
-};
 
 export type PricingConfig = {
   materialDensity: number; // g/cm³
@@ -48,13 +56,12 @@ export type PricingConfig = {
    * (不能再用「全包裹体积 × 单一密度」那套口径)。
    */
   supportDensity: number; // g/cm³
+  /** 材料单价 元/g —— ⛔ 成本口径,只进服务端 */
   unitPrice: number; // 元/g
+  /** 后处理(光油)费 元 */
   varnishFee: number; // 元
+  /** 光油要不要算 */
   varnishEnabled: boolean;
-  repairMode: RepairMode;
-  repairLabels: Record<RepairMode, string>;
-  productPresets: ProductPreset[];
-  productId: string;
   /**
    * 支撑材料单价 —— **分段计价**(2026-11-06)
    *
@@ -64,9 +71,9 @@ export type PricingConfig = {
    * ```
    * 本体支撑比例 r = 支撑克重 ÷ 耗材克重   (1 = 1:1,2 = 1:2)
    *
-   * r ≤ 1        不收钱(1:1 以内的支撑是工艺必需)
-   * 1 < r ≤ 2    超出部分 × supportTier1Price    ← 第一档(0.5 元/g)
-   * r > 2        再超出部分 × supportTier2Price  ← 第二档(1 元/g)
+   * r ≤ T        不收钱(T = 阈值,默认 1 —— 1:1 以内是工艺必需)
+   * T < r ≤ b    超出部分 × supportTier1Price    ← 第一档(0.5 元/g)
+   * r > b        再超出部分 × supportTier2Price  ← 第二档(1 元/g)
    * ```
    *
    * 阈值以下不收、超出部分收钱这两条没变,变的只是超出部分**分两段定价**。
@@ -76,48 +83,44 @@ export type PricingConfig = {
   supportTier1Price: number;
   /** 第二档单价 元/g —— 超过 1:2 那部分(默认 1) */
   supportTier2Price: number;
-  /** 本体支撑比例阈值（超过此比例的部分按分段单价加收），默认 1.0 = 1:1 */
+  /** 本体支撑比例阈值(超过此比例的部分按分段单价加收),默认 1.0 = 1:1 */
   supportThreshold: number;
-  /** 支撑加价总开关（默认 false，关闭时不计支撑费用） */
+  /** 支撑加价总开关(默认 false,关闭时不计支撑费用) */
   supportEnabled: boolean;
 };
 
 export type PricingInput = {
+  /** 体积 cm³ —— 上传模式是解析出来的实体积 */
   volumeCM3: number;
+  /** 表面积 cm² */
   surfaceAreaCM2: number;
-  mode: CalcMode;
-  /** 0-100, current solid ratio applied (informational) */
-  solidRatio: number;
-  dims: [number, number, number];
-  /** 可选：来自智能摆盘的总支撑克重（g）。若提供，则按超出 1:1 阈值的部分加收支撑费 */
+  /** 可选:来自智能摆盘的总支撑克重(g)。若提供,则按超出 1:1 阈值的部分加收支撑费 */
   supportWeight?: number;
-  /** 可选：来自智能摆盘的本体支撑比例（0-1）。若提供，用于计算超出阈值的部分 */
+  /** 可选:来自智能摆盘的本体支撑比例(0-1)。若提供,用于计算超出阈值的部分 */
   selfSupportRatio?: number;
 };
 
 export type PricingResult = {
+  /** 耗材克重 g */
   materialWeight: number;
+  /** 克重费 元 */
   weightFee: number;
+  /** 后处理费 元 */
   varnishFee: number;
-  /** 支撑加价（元）。分段计价 —— 见 `computeSupportFeeBands()` */
+  /** 支撑加价(元)。分段计价 —— 见 `computeSupportFeeBands()` */
   supportFee: number;
-  /** 支撑加价明细：超出阈值的支撑克重（g，两档之和） */
+  /** 支撑加价明细:超出阈值的支撑克重(g,两档之和) */
   excessSupportWeight: number;
   /** 支撑加价的分段明细 —— 每一档的克重和钱 */
   supportFeeBands: SupportFeeBand[];
+  /** 合计 元 = 克重费 + 后处理费 + 支撑加价 */
   totalPrice: number;
-  repairMode: RepairMode;
-  repairLabel: string;
-  /** True when the repair mode requires a manual quote (currently only 'rebuild') */
-  repairNeedsQuote: boolean;
+  /** 材料密度 g/cm³(算出来的,给界面显示用) */
   density: number;
-  unitPrice: number;
+  /** 算的时候用的体积 cm³ */
   volumeCM3: number;
+  /** 算的时候用的表面积 cm² */
   surfaceAreaCM2: number;
-  /** Human-readable summary of the formula */
-  formulaText: string;
-  /** Human-readable breakdown of the result */
-  breakdownText: string;
 };
 
 /**
@@ -142,82 +145,29 @@ export type SupportFeeBand = {
 // Defaults
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_PRODUCT_PRESETS: ProductPreset[] = [
-  {
-    id: "pet",
-    name: "宠物手办",
-    solidRatio: 30,
-    coverage: 50,
-    desc: "立体写实件，半空心结构，表面图案覆盖 50%",
-    color: "#f59e0b",
-  },
-  {
-    id: "badge",
-    name: "浮雕徽章",
-    solidRatio: 60,
-    coverage: 80,
-    desc: "扁平板状，正面浮雕图案覆盖 80%",
-    color: "#a78bfa",
-  },
-  {
-    id: "keychain",
-    name: "浮雕钥匙扣",
-    solidRatio: 60,
-    coverage: 80,
-    desc: "小型扁平板，正反面图案覆盖 80%",
-    color: "#22d3ee",
-  },
-  {
-    id: "magnet",
-    name: "冰箱贴",
-    solidRatio: 50,
-    coverage: 70,
-    desc: "薄板磁吸件，正面图案覆盖 70%",
-    color: "#84cc16",
-  },
-];
-
+/**
+ * 出厂默认 —— 兜底那一档
+ *
+ * 回退链是 `DB 配置行 → PRINT_* 环境变量 → DEFAULT_CONFIG`(逐字段),
+ * 见 `pricing-settings.ts`。
+ *
+ * ⚠️ **这里面的单价是成本口径** —— 这个文件不许进客户端 bundle。
+ */
 export const DEFAULT_CONFIG: PricingConfig = {
-  materialDensity: 1.2,
+  materialDensity: DEFAULT_MATERIAL_DENSITY,
   // 支撑材料密度 —— 水溶性支撑(PVA/BVOH)。默认 1.28(那卷支撑的实际密度,
   // 跟工作室对数用的口径一致:冰箱贴 43 + 59 = 102g)。工作室按自己那卷
   // 支撑的实际密度改「材料参数」里的支撑密度。
-  supportDensity: 1.28,
+  supportDensity: DEFAULT_SUPPORT_DENSITY,
   unitPrice: 4.5,
   varnishFee: 10,
   varnishEnabled: true,
-  repairMode: "none",
-  repairLabels: {
-    none: "无需修复",
-    optimize: "优化网格",
-    refine: "细化细节",
-    rebuild: "重建网格",
-  },
-  productPresets: DEFAULT_PRODUCT_PRESETS,
-  productId: "pet",
   // 支撑加价 —— 分段计价(工作室规则:超 1:1 的按 0.5 元/g,超 1:2 的按 1 元/g)
   supportTier1Ratio: 2.0, // 第一档上界 = 1:2
   supportTier1Price: 0.5, // 0.5 元/g
   supportTier2Price: 1.0, // 1 元/g
   supportThreshold: 1.0, // 1:1 阈值
-  supportEnabled: false, // 默认关闭，避免估算误差影响报价
-};
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-const DEFAULT_DIMS: [number, number, number] = [0, 0, 0];
-
-const isFiniteNum = (v: number): boolean =>
-  typeof v === "number" && Number.isFinite(v);
-
-const fmt = (v: number, digits = 2): string => {
-  if (!isFiniteNum(v)) return "—";
-  return v.toLocaleString("zh-CN", {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  });
+  supportEnabled: false, // 默认关闭,避免估算误差影响报价
 };
 
 // ---------------------------------------------------------------------------
@@ -349,7 +299,7 @@ export function calculatePrice(
       ? Math.max(0, config.varnishFee)
       : 0;
 
-  // ---- 支撑加价：分段计价 ----
+  // ---- 支撑加价:分段计价 ----
   // 见 `computeSupportFeeBands()` —— 阈值以下不收,超出的部分分两档定价。
   const supportFeeBands = computeSupportFeeBands({
     supportWeight: input.supportWeight,
@@ -367,33 +317,6 @@ export function calculatePrice(
 
   const totalPrice = weightFee + varnishFee + supportFee;
 
-  const repairNeedsQuote = config.repairMode === "rebuild";
-  const repairLabel = config.repairLabels?.[config.repairMode] ?? "";
-
-  const saText =
-    isFiniteNum(surfaceAreaCM2) && surfaceAreaCM2 > 0
-      ? `，表面积 ${fmt(surfaceAreaCM2)} cm²`
-      : "";
-
-  // 支撑分段明细 —— 每一档写「克重 × 单价」
-  const supportBandText = supportFeeBands
-    .map((b) => `${fmt(b.weightG)} g × ${fmt(b.price)} 元/g`)
-    .join(" + ");
-
-  const supportText =
-    supportFee > 0
-      ? ` + 支撑超出 ${fmt(excessSupportWeight)} g（${supportBandText}）= ${fmt(supportFee)} 元`
-      : "";
-
-  const formulaText = `克重 = 体积 ${fmt(volumeCM3)} cm³ × 密度 ${fmt(density)} g/cm³，报价 = 克重 × ${fmt(unitPrice)} 元/g${config.varnishEnabled ? ` + 光油 ${fmt(varnishFee)} 元` : ""}${supportFee > 0 ? ` + 支撑分段加价` : ""}`;
-
-  const breakdownText =
-    `材料 ${fmt(materialWeight)} g × ${fmt(unitPrice)} 元/g = ${fmt(weightFee)} 元` +
-    (config.varnishEnabled ? ` + 光油 ${fmt(varnishFee)} 元` : "") +
-    supportText +
-    ` = ${fmt(totalPrice)} 元` +
-    saText;
-
   return {
     materialWeight,
     weightFee,
@@ -402,88 +325,8 @@ export function calculatePrice(
     excessSupportWeight,
     supportFeeBands,
     totalPrice,
-    repairMode: config.repairMode,
-    repairLabel,
-    repairNeedsQuote,
     density,
-    unitPrice,
     volumeCM3,
     surfaceAreaCM2,
-    formulaText,
-    breakdownText,
   };
-}
-
-/**
- * Scale volume, surface area and dimensions by a uniform factor `k`.
- *   - volume × k³
- *   - surface × k²
- *   - dims × k
- *
- * Useful for the "custom scale" UI: user enters a new length on one axis,
- * and the other two scale proportionally.
- */
-export function scaleGeometry(
-  volume: number,
-  surface: number,
-  dims: [number, number, number],
-  k: number
-): {
-  volumeCM3: number;
-  surfaceAreaCM2: number;
-  dims: [number, number, number];
-} {
-  const safeK = isFiniteNum(k) ? k : 1;
-  return {
-    volumeCM3: volume * safeK * safeK * safeK,
-    surfaceAreaCM2: surface * safeK * safeK,
-    dims: [dims[0] * safeK, dims[1] * safeK, dims[2] * safeK],
-  };
-}
-
-/**
- * Estimate geometry from a rectangular envelope (L × W × H) in mm.
- *
- *   volumeCM3 = (L × W × H) / 1000 × (solidRatio / 100)
- *   surfaceAreaCM2 = 2 × (LW + LH + WH) / 100
- *
- * Used by "manual estimation mode" — assumes the model fills the envelope
- * box to `solidRatio` percent.
- */
-export function estimateEnvelopeGeometry(
-  l: number,
-  w: number,
-  h: number,
-  solidRatio: number
-): {
-  volumeCM3: number;
-  surfaceAreaCM2: number;
-  dims: [number, number, number];
-} {
-  const safeL = isFiniteNum(l) ? Math.max(0, l) : 0;
-  const safeW = isFiniteNum(w) ? Math.max(0, w) : 0;
-  const safeH = isFiniteNum(h) ? Math.max(0, h) : 0;
-  const safeRatio = isFiniteNum(solidRatio)
-    ? Math.min(100, Math.max(0, solidRatio))
-    : 0;
-
-  const envelopeMM3 = safeL * safeW * safeH;
-  const envelopeCM3 = envelopeMM3 / 1000;
-  const volumeCM3 = envelopeCM3 * (safeRatio / 100);
-
-  const surfaceMM2 = 2 * (safeL * safeW + safeL * safeH + safeW * safeH);
-  const surfaceAreaCM2 = surfaceMM2 / 100;
-
-  const dims: [number, number, number] = [safeL, safeW, safeH];
-  return { volumeCM3, surfaceAreaCM2, dims: dims.length ? dims : DEFAULT_DIMS };
-}
-
-/**
- * Look up a product preset by id from the config. Returns `undefined` if not found.
- */
-export function getProductPreset(
-  config: PricingConfig,
-  productId: string
-): ProductPreset | undefined {
-  return config.productPresets.find((p) => p.id === productId);
 }

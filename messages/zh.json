@@ -1074,10 +1074,6 @@
       "tagline": "计算在本地浏览器完成 —— 不上传模型，不保存结果",
       "version": "Mooncoda 克重计算器"
     },
-    "unit": {
-      "yuan": "元",
-      "perGram": "元/克"
-    },
     "upload": {
       "reading": "正在读取文件…",
       "parsing": "正在解析模型…",
@@ -1112,8 +1108,6 @@
       "weightFormula": "克重 = 体积 × 材料密度",
       "density": "材料密度",
       "totalVolume": "总体积",
-      "materialFee": "材料费用",
-      "weightFee": "材料费",
       "realVolume": "实体体积",
       "surfaceArea": "表面积",
       "vertexCount": "顶点",
@@ -1126,23 +1120,6 @@
       "figurine": "手办",
       "hint": "{kind} · 托底 {lift}mm",
       "reliefDisabled": "这个模型不像浮雕(太厚),不能按浮雕那档托底"
-    },
-    "price": {
-      "repair": "修模",
-      "varnish": "光油",
-      "notCounted": "不计入",
-      "support": "支撑",
-      "supportNotCounted": "预计 {weight} g，未计入",
-      "supportNeedsModel": "需上传模型后计算",
-      "total": "合计",
-      "details": "明细",
-      "breakdown": "计价明细",
-      "modelVolume": "模型体积",
-      "density": "材料密度",
-      "unitPrice": "材料单价",
-      "weightFee": "材料费",
-      "varnishFee": "光油费",
-      "repairFee": "修模费"
     },
     "tabs": {
       "check": "检查",
@@ -1248,9 +1225,6 @@
         "title": "克重算法",
         "p1": "耗材克重 = 实体体积 × 材料密度。实体体积来自模型包围盒按实心比例折算；手动模式下用外包尺寸 × 实心比例估算。",
         "formula": "克重 = 实体体积 (cm³) × 材料密度 ({density} g/cm³)",
-        "varnishFee": " + 光油费",
-        "repairFee": " + 修模费",
-        "supportFee": " + 支撑费",
         "p2": "支撑克重 = 支撑体积 × 支撑密度。支撑体积是包裹支撑体积 —— 跟模型检查工具算的是同一块，按几何全包裹计：模型封闭的内腔也算支撑（水溶性支撑会灌进去，洗的时候一起溶掉），模型不直接贴平台 —— 支撑在底下垫一层托底把模型托起来（高度在「材料参数」里看），托底那层也算支撑。支撑跟模型不是一种材料（工作室用水溶性支撑 PVA/BVOH，约 1.13~1.30 g/cm³），所以两个密度分开算：耗材克重 = 模型体积 × 材料密度，支撑克重 = 支撑体积 × 支撑密度，总克重 = 耗材克重 + 支撑克重 —— 全包裹里是两种材料，不能用一个密度乘出来。智能摆盘会在多个角度里挑选支撑最少、层高最低的姿态，没摆盘时显示的就是当前角度（初始 0°,0°）的支撑。",
         "boundariesTitle": "口径与边界",
         "boundaries": [
@@ -1309,8 +1283,6 @@
       "disabled": "关闭",
       "materialDensity": "材料密度",
       "supportDensity": "支撑密度",
-      "unitPrice": "材料单价",
-      "supportPrice": "支撑单价",
       "summaryLine": "共 <b>{total}</b> 个 · 完成 <bOk>{done}</bOk> · 失败 <bErr>{errors}</bErr> · 待处理 <b>{pending}</b>",
       "clear": "清空",
       "cancel": "取消",
@@ -1321,14 +1293,9 @@
       "dropHint": "松手即可加入队列",
       "dropPending": "文件将在本地解析，不会上传服务器",
       "totalWeight": "总克重",
-      "totalPrice": "总报价",
       "doneCount": "完成数",
       "avgTime": "平均耗时",
       "settingsReminder": "批量沿用当前参数：实心比例 <b>{solidRatio}%</b>、材料密度 <b>{density} g/cm³</b>、支撑密度 <b>{supportDensity} g/cm³</b>、智能摆盘 <b>{angle}</b>",
-      "varnishOn": "开启",
-      "varnishOff": "关闭",
-      "supportOn": "开启",
-      "yuan": "元",
       "selfSupport": "本体支撑 {ratio}% · {weight} g",
       "laidFlat": "已躺平",
       "exportRotated": "导出已摆盘 OBJ",

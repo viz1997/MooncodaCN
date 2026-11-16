@@ -52,7 +52,7 @@ import type {
   DeliveryTierId,
 } from "@/features/print-quote/lib/delivery-tier";
 import { formatCents } from "@/features/print-quote/lib/format";
-import type { PrintQuote } from "@/features/print-quote/lib/quote-types";
+import type { PublicPrintQuote } from "@/features/print-quote/lib/quote-types";
 import { Link } from "@/i18n/routing";
 
 /** 表单收集到的那些值 */
@@ -72,8 +72,12 @@ export type PrintServiceOrderValues = {
 };
 
 export type PrintServiceOrderFormProps = {
-  /** 服务端算的报价 —— null = 还没报价 */
-  quote: PrintQuote | null;
+  /**
+   * 服务端算的报价 —— null = 还没报价
+   *
+   * **对外形状**(`PublicPrintQuote`)—— 没有单价。
+   */
+  quote: PublicPrintQuote | null;
   /** 三档的加价比例 —— 服务端报价里带回来的 */
   rates: DeliveryRates | null;
   /** 选中的交期档位 */

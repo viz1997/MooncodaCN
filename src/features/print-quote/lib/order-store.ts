@@ -508,7 +508,12 @@ export function toUserPrintOrderDetail(
     volumeCM3: Number(row.volumeCM3),
     surfaceAreaCM2: Number(row.surfaceAreaCM2),
     materialDensity: Number(row.materialDensity),
-    unitPriceCentsPerGram: row.unitPriceCentsPerGram,
+    /**
+     * ⚠️ **这里没有单价** —— 单价留在 DB(留档 / 后台对账用),不出浏览器。
+     *
+     * (2026-11-16:以前这里有 `unitPriceCentsPerGram`,买家侧页面的 RSC
+     * 载荷带着它 ⇒「查看网页源代码」就能看到 ¥4.50/g。删掉了。)
+     */
     weightFeeCents: row.weightFeeCents,
     varnishFeeCents: row.varnishFeeCents,
     supportFeeCents: row.supportFeeCents,

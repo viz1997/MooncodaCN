@@ -78,8 +78,8 @@ import type {
   DeliveryTierId,
 } from "@/features/print-quote/lib/delivery-tier";
 import type {
-  PrintQuote,
   PrintQuoteInput,
+  PublicPrintQuote,
 } from "@/features/print-quote/lib/quote-types";
 import { useAtelierContainer } from "@/features/storefront/hooks/use-atelier-container";
 import { Link } from "@/i18n/routing";
@@ -147,8 +147,10 @@ export function PrintServiceQuoteDialog({
    * 服务端报价 —— **只在这一层**
    *
    * null = 正在重新问价(或者还没问)⇒ 表单里不摆总额、提交按钮置灰。
+   *
+   * **对外形状** —— 没有单价(工作室 2026-11-16 的要求:别暴露成本)。
    */
-  const [quote, setQuote] = useState<PrintQuote | null>(null);
+  const [quote, setQuote] = useState<PublicPrintQuote | null>(null);
 
   /**
    * 三档的加价比例 —— 服务端报价里带回来的
@@ -176,7 +178,7 @@ export function PrintServiceQuoteDialog({
    * `null` = 正在重新问价 —— **总额要跟着清空**,不然弹窗里会摆着上一次的
    * 价(改完尺寸再打开,总额还是旧的)。
    */
-  const handleQuote = useCallback((next: PrintQuote | null) => {
+  const handleQuote = useCallback((next: PublicPrintQuote | null) => {
     setQuote(next);
     // 交期比例只在报价到了的时候更新
     if (next) setRates(next.deliveryRates);

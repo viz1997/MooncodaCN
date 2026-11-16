@@ -34,9 +34,21 @@ import { useTranslations } from "next-intl";
  * 整个退役了 —— 访客改密度只会让「工具页看到的克重」跟「打印单上的价」对不上。
  *
  * **只展示克重**：页面对外只呈现体积 / 表面积 / 本体克重 / 支撑克重 / 摆盘角度，
- * 不呈现任何价格。计价相关状态（`unitPrice` 等）仍保留在底层 `pricing-engine.ts`
- * 里 —— `calculatePrice()` 是克重的唯一来源，`unitPrice` 非法会让它返回 null，
- * 连克重一起消失，所以这些 state 绝不删，只是不再渲染。
+ * 不呈现任何价格。
+ *
+ * **这个组件不 import 计价引擎**（2026-11-16）——
+ * 工作室的原话:「不要展示 4.5 元/g 这种单价，避免暴露我们的成本」。
+ * 「不展示」不够:只要客户端 bundle 里还留着那个字面量，看页面源码就能翻出来。
+ * 所以这里 import 的是**客户端安全**的两块:
+ *
+ * | 模块 | 干什么 |
+ * |---|---|
+ * | `pricing-geometry.ts` | 体积 / 表面积 / 尺寸(纯几何) |
+ * | `material-weight.ts` | 体积 × 密度 ⇒ 耗材克重 |
+ *
+ * 引擎(`pricing-engine.ts`,里面有单价)只在**服务端**跑 ——
+ * `src/test/print-quote/pure/quote-public.test.ts` 扫全仓守这条线。
+ * 以前这个组件 import 过引擎 —— 界面上虽然一个价都不摆，字面量照样进了 bundle。
  *
  * **预估报价不是这里算的**（2026-11-07）：「提交打印订单」那张卡上会摆一个
  * 预估报价 —— 那是**问服务端要的**（`POST /api/print-quote`），访客也能看
@@ -109,6 +121,11 @@ import {
   processBatch,
 } from "@/features/pricing/lib/batch-processor";
 import {
+  computeMaterialWeight,
+  DEFAULT_MATERIAL_DENSITY,
+  DEFAULT_SUPPORT_DENSITY,
+} from "@/features/pricing/lib/material-weight";
+import {
   detectModelUnitScale,
   type ModelUnitCheck,
 } from "@/features/pricing/lib/model-units";
@@ -122,14 +139,7 @@ import {
   describePose,
   weightPanelNumbers,
 } from "@/features/pricing/lib/pose-comparison";
-import {
-  calculatePrice,
-  DEFAULT_CONFIG,
-  estimateEnvelopeGeometry,
-  type PricingConfig,
-  type PricingInput,
-  type RepairMode,
-} from "@/features/pricing/lib/pricing-engine";
+import { estimateEnvelopeGeometry } from "@/features/pricing/lib/pricing-geometry";
 import {
   detectReliefKind,
   type ReliefMode,
@@ -373,10 +383,6 @@ export function PricingCalculator({
 
   // ---- 计算参数 ----
   const [solidRatio, setSolidRatio] = useState(30);
-  const [coverage, setCoverage] = useState(50);
-  const [repairMode, setRepairMode] = useState<RepairMode>("none");
-  const [repairPrice, setRepairPrice] = useState(0);
-  const repairEnabled = repairMode !== "none";
   /**
    * 材料密度 —— **跟随后台,访客改不了**
    *
@@ -385,7 +391,7 @@ export function PricingCalculator({
    * 而服务端报价按自己那份密度算,两边对不上。
    */
   const materialDensity =
-    clientConfig?.modelDensity ?? DEFAULT_CONFIG.materialDensity;
+    clientConfig?.modelDensity ?? DEFAULT_MATERIAL_DENSITY;
   /**
    * 支撑材料密度 (g/cm³) —— 支撑跟模型**不是**一种材料
    *
@@ -397,17 +403,7 @@ export function PricingCalculator({
    *   总克重   = 耗材克重 + 支撑克重
    */
   const supportDensity =
-    clientConfig?.supportDensity ?? DEFAULT_CONFIG.supportDensity;
-  // ↓↓↓ 价格相关常量：UI 不展示，但**绝不能删** ↓↓↓
-  // `calculatePrice()` 是 `materialWeight`（克重）的唯一来源，它在
-  // `unitPrice` 非法时返回 null —— 一旦 null，整个克重界面连同体积一起消失。
-  // 所以这些值保持合法且恒为默认，只是不渲染。
-  const unitPrice = DEFAULT_CONFIG.unitPrice;
-  const varnishEnabled = true;
-  const varnishFee = DEFAULT_CONFIG.varnishFee;
-  const supportThreshold = DEFAULT_CONFIG.supportThreshold;
-  const supportEnabled = false;
-  const [productId, setProductId] = useState("pet");
+    clientConfig?.supportDensity ?? DEFAULT_SUPPORT_DENSITY;
 
   // ---- 智能摆盘 ----
   const [optimalAngle, setOptimalAngle] = useState<OptimalAngle | null>(null);
@@ -524,30 +520,6 @@ export function PricingCalculator({
   const [batchApplyAngle, setBatchApplyAngle] = useState(true);
   const batchFileInputRef = useRef<HTMLInputElement>(null);
   const batchAbortRef = useRef<AbortController | null>(null);
-
-  const pricingConfig: PricingConfig = useMemo(
-    () => ({
-      ...DEFAULT_CONFIG,
-      materialDensity,
-      supportDensity,
-      unitPrice,
-      varnishFee,
-      varnishEnabled,
-      repairMode,
-      productId,
-      supportThreshold,
-      supportEnabled,
-    }),
-    [
-      materialDensity,
-      supportDensity,
-      unitPrice,
-      varnishFee,
-      repairMode,
-      productId,
-      supportThreshold,
-    ]
-  );
 
   /** 当前已应用的缩放因子（XYZ） */
   const appliedScales = useMemo((): [number, number, number] => {
@@ -1067,37 +1039,34 @@ export function PricingCalculator({
     onEnsureSupport?.(ensureSupport);
   }, [ensureSupport, onEnsureSupport]);
 
+  /**
+   * 几何 + 耗材克重 —— **这一栏只到克重为止,不碰钱**
+   *
+   * 以前这里是 `calculatePrice()`(整条计价链)。现在只算:
+   *
+   * ```
+   * 耗材克重 = 体积 × 材料密度
+   * ```
+   *
+   * 守卫跟服务端 `calculatePrice()` **同一个口径**(体积 ≤ 0 / 密度 ≤ 0 ⇒
+   * 算不出来)—— 两边不一致的话,页面上的克重跟工单上的对不上。
+   *
+   * ⚠️ **单价不进这个文件**(2026-11-16)—— 界面不摆价还不够,客户端 bundle
+   * 里也不能有那个字面量。详见文件头。
+   */
   const calc = useMemo(() => {
     if (!geometry) return null;
-    const input: PricingInput = {
+    const materialWeight = computeMaterialWeight(
+      geometry.volumeCM3,
+      materialDensity
+    );
+    if (materialWeight === null) return null;
+    return {
+      materialWeight,
       volumeCM3: geometry.volumeCM3,
       surfaceAreaCM2: geometry.surfaceAreaCM2,
-      mode: mode === "batch" ? "upload" : mode,
-      solidRatio,
-      dims: geometry.dims,
-      // 支撑克重跟**当前角度**走(没摆盘时就是初始角度的支撑)
-      supportWeight: supportEnabled ? Math.ceil(supportStats.weightG) : 0,
-      selfSupportRatio: supportEnabled ? supportStats.ratio : 0,
     };
-    const result = calculatePrice(pricingConfig, input);
-    if (!result) return null;
-    const fee = repairEnabled ? repairPrice : 0;
-    return {
-      ...result,
-      repairFee: fee,
-      totalPrice: result.totalPrice + fee,
-      coveredArea: geometry.surfaceAreaCM2 * (coverage / 100),
-    };
-  }, [
-    geometry,
-    pricingConfig,
-    mode,
-    solidRatio,
-    coverage,
-    repairEnabled,
-    repairPrice,
-    supportStats,
-  ]);
+  }, [geometry, materialDensity]);
 
   // ---- 把几何交给父组件 ----
   //
@@ -1351,12 +1320,17 @@ export function PricingCalculator({
     setScaleZ(1);
   };
 
+  /**
+   * 应用一个产品预设 —— 只取**实心率**
+   *
+   * 预设里的「覆盖率」那一栏是给报价那套用的(算「涂了光油的面积」)——
+   * 这一栏不摆价格,也就没有那回事了(2026-11-16 把计价状态清干净时
+   * 一起删的)。预设点一下只改实心率。
+   */
   const applyProduct = (id: string) => {
     const p = PRODUCT_TYPES.find((x) => x.id === id);
     if (!p) return;
-    setProductId(p.id);
     setSolidRatio(p.solidRatio);
-    setCoverage(p.coverage);
   };
 
   // ---- 智能摆盘 ----
@@ -1544,15 +1518,13 @@ export function PricingCalculator({
 
     const options: BatchOptions = {
       concurrency: batchConcurrency,
-      pricingConfig,
-      // 几何参数跟随后台 —— 批量跟单件同一口径
+      // 材料参数跟随后台 —— 批量跟单件同一口径
+      materialDensity,
+      supportDensity,
       supportLiftMm: clientConfig?.supportLiftMm,
       // 浮雕那档的托底(2026-11-15)—— 批量里**逐个文件**判定浮雕还是手办
       supportReliefLiftMm: clientConfig?.supportReliefLiftMm,
       supportBaseMarginMm: clientConfig?.supportBaseMarginMm,
-      solidRatio,
-      repairEnabled,
-      repairPrice,
       optimizeAngle: batchApplyAngle,
       onItemUpdate: (id, patch) => {
         setBatchItems((prev) =>
@@ -1607,10 +1579,6 @@ export function PricingCalculator({
     setWidth(80);
     setHeight(43.6);
     setSolidRatio(30);
-    setCoverage(50);
-    setRepairMode("none");
-    setRepairPrice(0);
-    setProductId("pet");
     setShowTexture(true);
     setMode("upload");
     setDimMode("original");

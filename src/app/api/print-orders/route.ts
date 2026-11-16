@@ -68,6 +68,7 @@ import {
 } from "@/features/print-quote/lib/order-store";
 import { createPrintOrderPayment } from "@/features/print-quote/lib/payment";
 import { getPrintPricingSettings } from "@/features/print-quote/lib/pricing-store";
+import { toPublicQuote } from "@/features/print-quote/lib/quote-public";
 import {
   computePrintQuote,
   generatePrintOrderNo,
@@ -531,7 +532,14 @@ async function handle(request: NextRequest) {
   return NextResponse.json(
     {
       orderNo,
-      quote,
+      /**
+       * **对外形状** —— 单价(¥4.50/g 那一栏)一个字节都不出去
+       *
+       * 工作室 2026-11-16 的要求:「不要展示 4.5 元/g 这种单价,避免暴露
+       * 我们的成本」。上面那份内部报价照旧留着(建单 + 留档 + 优惠基数都用
+       * 它),只在**出服务器之前**投影一次(见 `quote-public.ts`)。
+       */
+      quote: toPublicQuote(quote),
       /** 优惠码(2026-11-08)—— null = 没用券 */
       couponCode: row.couponCode,
       /** 这一单减了多少(分)—— 0 = 没用券 */
