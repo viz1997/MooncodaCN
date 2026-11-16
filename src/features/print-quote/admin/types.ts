@@ -6,11 +6,12 @@
  * 各写一遍 `Number(row.volumeCM3)`。
  */
 
-import type { PrintOrderRow } from "@/db/schema";
 import {
   type DeliveryTierId,
   getDeliveryTier,
 } from "@mooncoda/print-tool-core/quote/delivery-tier";
+import type { ShippingOptionId } from "@mooncoda/print-tool-core/quote/shipping-option";
+import type { PrintOrderRow } from "@/db/schema";
 import type {
   PrintOrderLocale,
   PrintOrderPaymentChannel,
@@ -43,13 +44,36 @@ export type AdminPrintOrder = {
   /** 承诺交期(小时) */
   deliveryHours: number;
   /**
+   * 打印件数(2026-11-17)
+   *
+   * 工作室的原话「同一模型打印多件」—— 克重费 / 后处理费 / 支撑加价都
+   * **按件**放大;**运费不乘**(「运费按单收取」)。
+   *
+   * 老单是 1(列的默认值)。
+   */
+  quantity: number;
+  /**
+   * 配送方式(2026-11-17)
+   *
+   * - `cod`      —— 顺丰到付(收件人付运费,¥0)
+   * - `standard` —— 顺丰标快(¥18)
+   * - `air`      —— 顺丰空运(¥22)
+   *
+   * ⚠️ **跟 `deliveryTier` 是两个正交的轴** —— 一个管「多快发货」,一个管
+   * 「怎么寄」。别把这两个字段混在一起显示。
+   */
+  shippingOption: ShippingOptionId;
+  /** 运费(分)—— **按单收,不乘件数** */
+  shippingFeeCents: number;
+  /**
    * 优惠码(2026-11-08)
    *
-   * `totalPriceCents` 存的是**应付净额**(= 四项费用之和 − 优惠),
-   * 四个费用列存的是**折前**的 —— 所以后台摆明细时必须补一行「优惠」。
+   * `totalPriceCents` 存的是**应付净额**(= 五项费用之和 − 优惠),
+   * 各个费用列存的是**折前**的 —— 所以后台摆明细时必须补一行「优惠」。
    */
   couponCode: string | null;
   couponDiscountCents: number;
+  /** 应付净额(分)—— 优惠后的总额 */
   totalPriceCents: number;
   contactName: string;
   contactEmail: string;
@@ -105,6 +129,10 @@ export function toAdminPrintOrder(row: PrintOrderRow): AdminPrintOrder {
     deliveryTier: row.deliveryTier,
     deliveryFeeCents: row.deliveryFeeCents,
     deliveryHours: getDeliveryTier(row.deliveryTier).hours,
+    // 件数 / 配送方式(2026-11-17)—— 老单列有默认值(1 / cod),不会读到 null
+    quantity: row.quantity,
+    shippingOption: row.shippingOption,
+    shippingFeeCents: row.shippingFeeCents,
     couponCode: row.couponCode,
     couponDiscountCents: row.couponDiscountCents,
     totalPriceCents: row.totalPriceCents,

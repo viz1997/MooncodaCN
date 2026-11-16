@@ -1816,6 +1816,7 @@
       "supportFee": "Support surcharge",
       "weightFee": "Weight fee",
       "varnishFee": "Finishing",
+      "quantity": "Quantity",
       "total": "Total",
       "stale": "Price updating, please wait"
     },
@@ -1839,6 +1840,30 @@
         "express": "Express",
         "urgent": "Urgent"
       }
+    },
+    "quantity": {
+      "label": "Print quantity",
+      "hint": "Material / finishing / support scale per piece · shipping is per order",
+      "unit": "pcs",
+      "value": "{count} pcs"
+    },
+    "shipping": {
+      "label": "Shipping",
+      "hint": "Shipping is charged per order, not per piece",
+      "days": "about {days} days",
+      "receiverPays": "Receiver pays",
+      "row": "Shipping · {method}",
+      "option": {
+        "cod": "SF Express COD",
+        "standard": "SF Express Standard",
+        "air": "SF Express Air"
+      }
+    },
+    "invoice": {
+      "note": "Price includes 1% VAT invoice · no extra charge"
+    },
+    "postProcess": {
+      "items": "Finishing includes: support removal, cleaning, basic sanding, UV varnish, individual packaging & structural warranty"
     },
     "printOrder": {
       "add": "Submit print order",

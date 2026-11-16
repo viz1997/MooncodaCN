@@ -31,6 +31,7 @@ import {
   normalizeDeliveryTier,
 } from "@mooncoda/print-tool-core/quote/delivery-tier";
 import type { PrintPricingSettings } from "@mooncoda/print-tool-core/quote/pricing-settings";
+import { DEFAULT_SHIPPING_FEES } from "@mooncoda/print-tool-core/quote/shipping-option";
 import { computePrintQuote } from "@/features/print-quote/lib/quote-server";
 
 /**
@@ -60,6 +61,8 @@ const SETTINGS: PrintPricingSettings = {
   supportReliefLiftMm: 1,
   supportBaseMarginMm: 5,
   deliveryRates: DEFAULT_DELIVERY_RATES,
+  // 三档运费(2026-11-17)—— 这个文件只测交期加价,不影响
+  shippingFees: DEFAULT_SHIPPING_FEES,
   allowGuestPricing: true,
 };
 

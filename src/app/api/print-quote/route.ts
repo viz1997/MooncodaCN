@@ -30,12 +30,12 @@
  * `PRINT_ALLOW_GUEST_PRICING` 环境变量,默认**开**)。
  */
 
+import { checkReliefTier } from "@mooncoda/print-tool-core/pricing/relief-detect";
+import { printCouponBaseCents } from "@mooncoda/print-tool-core/quote/coupon-base";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { evaluateCoupon } from "@/features/coupon/lib/coupon-service";
-import { checkReliefTier } from "@mooncoda/print-tool-core/pricing/relief-detect";
 import { getPrintOrderUser } from "@/features/print-quote/lib/auth";
-import { printCouponBaseCents } from "@mooncoda/print-tool-core/quote/coupon-base";
 import { getPrintPricingSettings } from "@/features/print-quote/lib/pricing-store";
 import { toPublicQuote } from "@/features/print-quote/lib/quote-public";
 import { computePrintQuote } from "@/features/print-quote/lib/quote-server";
@@ -96,6 +96,26 @@ const quoteInputSchema = z.object({
    * 不传 = 老客户端 ⇒ 按服务端自己判定的那一档走,不报错。
    */
   reliefKind: z.enum(["relief", "figurine"]).nullish(),
+  /**
+   * 打印件数(2026-11-17)
+   *
+   * 工作室的原话:「同一模型打印多件」—— 克重费 / 后处理费 / 支撑加价都
+   * **按件**放大;**运费不乘**(「运费按单收取」)。
+   *
+   * ⚠️ **越界一律 400,不许夹取** —— 夹取会**静默少收钱**(用户要 5000 件,
+   * 服务端夹成 999 件,少收 4/5 的钱)。引擎那一层的夹取只是兜底。
+   */
+  quantity: z.number().int().min(1).max(999).nullish(),
+  /**
+   * 配送方式(2026-11-17)
+   *
+   * - `cod`      —— 顺丰到付(运费 ¥0)
+   * - `standard` —— 顺丰标快(¥18)
+   * - `air`      —— 顺丰空运(¥22)
+   *
+   * 不传 = 顺丰到付。传了不认识的 zod 会拒掉 —— 那是 400,不是「按最贵的算」。
+   */
+  shippingOption: z.enum(["cod", "standard", "air"]).nullish(),
 });
 
 async function handle(request: NextRequest) {
@@ -151,6 +171,9 @@ async function handle(request: NextRequest) {
     selfSupportRatio: parsed.data.selfSupportRatio ?? null,
     deliveryTier: parsed.data.deliveryTier ?? null,
     reliefKind: parsed.data.reliefKind ?? null,
+    // 件数 / 配送方式(2026-11-17)—— 不传就是「1 件 + 顺丰到付」
+    quantity: parsed.data.quantity ?? null,
+    shippingOption: parsed.data.shippingOption ?? null,
   };
 
   /**
@@ -191,14 +214,15 @@ async function handle(request: NextRequest) {
    * **券不可用不让这个接口失败** —— 报价照给(用户得先看到价),只是多带
    * 一个 `couponError`。下单那条路才会硬拒(见 `POST /api/print-orders`)。
    *
-   * 基数 = 报价合计 − 交期加价(加急费不参与优惠)。
+   * 基数 = 报价合计 − 交期加价 − 运费(加急费 / 寄件费都不参与优惠)。
    */
   const coupon = parsed.data.couponCode
     ? await evaluateCoupon({
         code: parsed.data.couponCode,
         orderKind: "print",
         couponBaseCents: printCouponBaseCents(quote),
-        // 打印工单没有运费行 —— 免运费券在这儿没有意义,会被直接拒掉
+        // 免运费券在打印侧**不适用**(scope 只能选 mall)—— 券在后台建的时候就
+        // 选不了 print / both ⇒ 这条路走不到「把运费置 0」
         shippingCents: 0,
         resolveUserId: async () => user?.id ?? null,
       })

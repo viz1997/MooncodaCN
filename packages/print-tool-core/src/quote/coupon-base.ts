@@ -1,17 +1,28 @@
 /**
- * 打印工单的优惠基数(2026-11-08)
+ * 打印工单的优惠基数(2026-11-08,**2026-11-17 加了运费**)
  *
- * ## 为什么扣掉交期加价
+ * ## 为什么扣掉交期加价和运费
  *
- * 交期加价是**加急费**,不是货款 —— 跟运费一个待遇。优惠码不碰它:
+ * 交期加价是**加急费**、运费是**寄件费** —— 都不是货款。优惠码不碰它们:
  *
  * ```
- * couponBase = 报价合计 − 交期加价 = 克重费 + 后处理费 + 支撑费
+ * couponBase = 报价合计 − 交期加价 − 运费 = 克重费 + 后处理费 + 支撑费
  * ```
  *
  * 跟商城那条路一个道理:商城的「运费」也不参与满减 / 百分比折扣,只有
- * 「免运费」券动它。打印工单**没有运费行**,所以**免运费券在这儿没有意义**
- * —— `checkCouponApplicable` 会直接把它拒掉(`COUPON_NOT_APPLICABLE`)。
+ * 「免运费」券动它。
+ *
+ * ## 免运费券在打印工单上仍然**不适用**(2026-11-17)
+ *
+ * 打印工单现在**有**运费行了,但免运费券**仍然**在打印侧被拒
+ * (`COUPON_NOT_APPLICABLE`)—— 理由换了一个:
+ *
+ * - 旧理由「打印工单没有运费行」⇒ **2026-11-17 起不成立了**
+ * - 新理由:**后台建免运费券时 scope 只能选 `mall`** —— 免运费券是**商城**
+ *   的促销工具,不是打印服务的
+ *
+ * 这条**不是**「技术上做不到」(运费行在,置 0 一行代码的事),是**业务口径**
+ * —— 工作室没要求过,不顺手扩范围。
  *
  * ## 这个函数是**纯的**
  *
@@ -19,12 +30,18 @@
  * 两处各算一遍迟早对不上(用户会看到「预览说减 ¥20、提交说减 ¥18」)。
  */
 
-/** 报价里跟优惠基数有关的那两个数 */
+/** 报价里跟优惠基数有关的那三个数 */
 export type CouponBaseSource = {
-  /** 报价合计(分)—— 四项费用之和 */
+  /** 报价合计(分)—— 五项费用之和 */
   totalPriceCents: number;
   /** 交期加价(分)—— 加急费,不参与优惠 */
   deliveryFeeCents: number;
+  /**
+   * 运费(分)—— 寄件费,不参与优惠(2026-11-17)
+   *
+   * 老调用方不传这一项 ⇒ 按 0 算(等价于以前「没有运费行」的口径)。
+   */
+  shippingFeeCents?: number;
 };
 
 /**
@@ -35,5 +52,9 @@ export type CouponBaseSource = {
  * 计算全部乱掉)。
  */
 export function printCouponBaseCents(quote: CouponBaseSource): number {
-  return Math.max(0, quote.totalPriceCents - quote.deliveryFeeCents);
+  const shippingFeeCents = quote.shippingFeeCents ?? 0;
+  return Math.max(
+    0,
+    quote.totalPriceCents - quote.deliveryFeeCents - shippingFeeCents
+  );
 }

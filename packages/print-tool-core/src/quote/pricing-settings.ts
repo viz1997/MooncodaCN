@@ -9,6 +9,7 @@
  * - **计价基础** —— 密度、单价、后处理费
  * - **支撑加价规则** —— 自支撑阈值 + **分段**(1:1~1:2 一档,超 1:2 另一档)
  * - **交期三档比例** —— 标准 0 / 加急 / 特急,按小计的百分比收
+ * - **配送方式三档运费** —— 顺丰到付 ¥0 / 顺丰标快 ¥18 / 顺丰空运 ¥22(按单收)
  * - **支撑几何参数** —— 托底高度、底板留边
  * - **访客可见计价** —— 2026-11-07 加的开关:未登录的人能不能看到报价
  *
@@ -35,6 +36,7 @@
 import { DEFAULT_CONFIG } from "../pricing/pricing-engine";
 
 import { DEFAULT_DELIVERY_RATES, type DeliveryRates } from "./delivery-tier";
+import { DEFAULT_SHIPPING_FEES, type ShippingFees } from "./shipping-option";
 
 /* -------------------------------------------------------------------------- */
 /*  类型                                                                       */
@@ -104,6 +106,16 @@ export type PrintPricingConfigLite = {
   deliveryExpressRate: number;
   /** 特急(48h)比例 0~1 */
   deliveryUrgentRate: number;
+  /**
+   * 顺丰到付 运费 分(2026-11-17)
+   *
+   * 到付 = 收件人付运费 ⇒ 我们这一档是 **¥0**。
+   */
+  shippingCodCents: number;
+  /** 顺丰标快 运费 分(默认 1800 = ¥18) */
+  shippingStandardCents: number;
+  /** 顺丰空运 运费 分(默认 2200 = ¥22) */
+  shippingAirCents: number;
   /**
    * 访客能不能看到计价(2026-11-07)
    *
@@ -183,6 +195,16 @@ export type PrintPricingSettings = {
   supportBaseMarginMm: number;
   /** 各档交期加价比例(标准档恒为 0) */
   deliveryRates: DeliveryRates;
+  /**
+   * 各档运费 分(2026-11-17)
+   *
+   * 工作室的原话:「配送方式 运费按单收取 顺丰到付…顺丰标快 ¥18…顺丰空运
+   * ¥22」。
+   *
+   * ⚠️ **跟 `deliveryRates`(交期加价比例)是两回事** —— 交期加价是**比例**
+   * (按小计算),运费是**绝对金额**(按单收)。两个字段各管各的。
+   */
+  shippingFees: ShippingFees;
   /**
    * 访客可见计价(2026-11-07)
    *
@@ -327,6 +349,9 @@ function rateOr(value: number, fallback: number): number {
  * | `PRINT_SUPPORT_BASE_MARGIN_MM` | 底板留边 mm | 5 |
  * | `PRINT_DELIVERY_EXPRESS_RATE` | 72 小时档加价比例(0~1) | 0.1 |
  * | `PRINT_DELIVERY_URGENT_RATE` | 48 小时档加价比例(0~1) | 0.37 |
+ * | `PRINT_SHIPPING_COD_CENTS` | 顺丰到付 运费 分(2026-11-17) | 0 |
+ * | `PRINT_SHIPPING_STANDARD_CENTS` | 顺丰标快 运费 分 | 1800(¥18) |
+ * | `PRINT_SHIPPING_AIR_CENTS` | 顺丰空运 运费 分 | 2200(¥22) |
  * | `PRINT_ALLOW_GUEST_PRICING` | 访客可见计价(`"false"` 才关) | 开 |
  *
  * 注意:本仓库的 `.gitignore` 把 `.env*` 整个排掉了(`.env.example` 也一样),
@@ -401,6 +426,21 @@ export function readPrintPricingFallback(): PrintPricingSettings {
       urgent: envRate(
         "PRINT_DELIVERY_URGENT_RATE",
         DEFAULT_DELIVERY_RATES.urgent
+      ),
+    },
+    // 运费三档(2026-11-17)—— 绝对金额(分),按单收,不乘件数
+    shippingFees: {
+      cod: Math.round(
+        envNumber("PRINT_SHIPPING_COD_CENTS", DEFAULT_SHIPPING_FEES.cod)
+      ),
+      standard: Math.round(
+        envNumber(
+          "PRINT_SHIPPING_STANDARD_CENTS",
+          DEFAULT_SHIPPING_FEES.standard
+        )
+      ),
+      air: Math.round(
+        envNumber("PRINT_SHIPPING_AIR_CENTS", DEFAULT_SHIPPING_FEES.air)
       ),
     },
     // 访客可见计价 —— **默认开**(工作室 2026-11-07:「现在不登录也允许
@@ -533,6 +573,21 @@ export function resolvePrintPricingSettings(input: {
       fallback.supportBaseMarginMm
     ),
     deliveryRates,
+    // 运费三档(2026-11-17)—— 逐字段回退,跟其余字段一个口径
+    shippingFees: {
+      cod: nonNegativeOr(
+        configRow?.shippingCodCents ?? fallback.shippingFees.cod,
+        fallback.shippingFees.cod
+      ),
+      standard: nonNegativeOr(
+        configRow?.shippingStandardCents ?? fallback.shippingFees.standard,
+        fallback.shippingFees.standard
+      ),
+      air: nonNegativeOr(
+        configRow?.shippingAirCents ?? fallback.shippingFees.air,
+        fallback.shippingFees.air
+      ),
+    },
     // 访客可见计价 —— 配置行优先,没有就(env / 默认值)那一档
     allowGuestPricing:
       configRow?.allowGuestPricing ?? fallback.allowGuestPricing,

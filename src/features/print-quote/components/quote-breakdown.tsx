@@ -21,10 +21,29 @@
  *
  * `border-border` / `text-muted-foreground` / `text-foreground` 在 marketing
  * 和 dashboard 两套布局里是同一组暖灰,一份样式两处都对。
+ *
+ * ## 收据上多摆的两行(2026-11-17)
+ *
+ * 工作室的两条口径:
+ *
+ * > 同一模型打印多件;后处理按件计,不重复收起步价。
+ * > 配送方式 运费按单收取 顺丰到付…顺丰标快 ¥18…顺丰空运 ¥22
+ *
+ * ⇒ **件数**要摆出来(买家得知道那些钱是按几件算的)、
+ * **配送方式 + 运费**要摆出来(「到付」那一档是**收件人付钱**,不是免运费 ——
+ * 摆「¥0」会被误读)。
+ *
+ * ## 脚注那两句(2026-11-17)
+ *
+ * - 「含税价已包含 1% 普票 · 不另收」—— 工作室的原话。买家最常问的是
+ *   「发票怎么开」,摆在收据底下等于当面回答了。
+ * - 「后处理含:去支撑、清洗、基础打磨、上 UV 光油、独立包装与结构质保」——
+ *   工作室给的后处理口径。**这是服务内容,不是成本结构** —— 跟「不摆明细」
+ *   那条不冲突(明细不摆,但服务内容要说清楚)。
  */
 
+import type { ShippingOptionId } from "@mooncoda/print-tool-core/quote/shipping-option";
 import { useTranslations } from "next-intl";
-
 import { formatCents, formatGrams } from "@/features/print-quote/lib/format";
 
 /**
@@ -59,6 +78,27 @@ export type QuoteBreakdownValues = {
    * 四个费用列存的是**折前**的,`totalPriceCents` 存的是**净额**。
    */
   couponDiscountCents?: number | undefined;
+  /**
+   * 打印件数(2026-11-17)
+   *
+   * 克重费 / 后处理费 / 支撑加价都 **× N**;运费不乘(按单收)。
+   *
+   * **可选** —— 老单没有这一项(落回 1)。
+   */
+  quantity?: number | undefined;
+  /**
+   * 配送方式(2026-11-17)
+   *
+   * **可选** —— 老单落到**顺丰到付**(`normalizeShippingOption` 的口径)。
+   */
+  shippingOption?: ShippingOptionId | undefined;
+  /**
+   * 运费(分)(2026-11-17)
+   *
+   * **按单收** —— 不乘件数。`0` 表示「到付」(收件人签收时付钱),
+   * **不是免运费** ⇒ 那一档显示「收件人付款」而不是「¥0」。
+   */
+  shippingFeeCents?: number | undefined;
 };
 
 export function QuoteBreakdown({
@@ -71,62 +111,124 @@ export function QuoteBreakdown({
 }) {
   const t = useTranslations("PrintQuote");
 
+  /**
+   * 件数(2026-11-17)
+   *
+   * **只在 > 1 的时候摆** —— 一件是默认,摆「件数 1」是噪音。多件才摆,
+   * 因为那正是买家需要知道「这些钱是按几件算的」的时候。
+   */
+  const quantity = values.quantity ?? 1;
+
+  /**
+   * 配送方式 + 运费(2026-11-17)
+   *
+   * **合成一行** —— 「配送方式 · 顺丰标快 ¥18.00」。摆成标签 + 档位名 + 金额
+   * 三样是废话,合成一行一眼看全。
+   *
+   * ⚠️ **「到付」那一档显示「收件人付款」而不是「¥0」** —— 它的运费确实是
+   * 0(收件人签收时付钱),但显示「¥0」会被读成**免运费**。
+   */
+  const shippingOption = values.shippingOption;
+  const shippingFeeCents = values.shippingFeeCents ?? 0;
+
   return (
-    <dl className="space-y-2.5 text-sm">
-      <Row
-        label={t("quote.materialWeight")}
-        value={formatGrams(values.materialWeightG)}
-      />
-      {values.supportFeeCents > 0 ? (
+    <div>
+      <dl className="space-y-2.5 text-sm">
+        {quantity > 1 ? (
+          <Row
+            label={t("quote.quantity")}
+            value={t("quantity.value", { count: quantity })}
+          />
+        ) : null}
         <Row
-          label={t("quote.supportFee")}
-          value={formatCents(values.supportFeeCents)}
+          label={t("quote.materialWeight")}
+          value={formatGrams(values.materialWeightG)}
         />
-      ) : null}
-      <Row
-        label={t("quote.weightFee")}
-        value={formatCents(values.weightFeeCents)}
-      />
-      {values.varnishFeeCents > 0 ? (
+        {values.supportFeeCents > 0 ? (
+          <Row
+            label={t("quote.supportFee")}
+            value={formatCents(values.supportFeeCents)}
+          />
+        ) : null}
         <Row
-          label={t("quote.varnishFee")}
-          value={formatCents(values.varnishFeeCents)}
+          label={t("quote.weightFee")}
+          value={formatCents(values.weightFeeCents)}
         />
-      ) : null}
-      {/* 交期 —— 标准档也要摆出来:用户得看到「多久能拿到」 */}
-      <Row
-        label={t("delivery.row", { hours: values.deliveryHours })}
-        value={
-          values.deliveryFeeCents > 0
-            ? `+${formatCents(values.deliveryFeeCents)}`
-            : t("delivery.free")
-        }
-      />
+        {values.varnishFeeCents > 0 ? (
+          <Row
+            label={t("quote.varnishFee")}
+            value={formatCents(values.varnishFeeCents)}
+          />
+        ) : null}
+        {/* 交期 —— 标准档也要摆出来:用户得看到「多久能拿到」 */}
+        <Row
+          label={t("delivery.row", { hours: values.deliveryHours })}
+          value={
+            values.deliveryFeeCents > 0
+              ? `+${formatCents(values.deliveryFeeCents)}`
+              : t("delivery.free")
+          }
+        />
+        {/* 配送方式 + 运费 —— 按单收,不乘件数 */}
+        {shippingOption ? (
+          <Row
+            label={t("shipping.row", {
+              method: t(`shipping.option.${shippingOption}`),
+            })}
+            value={
+              shippingOption === "cod"
+                ? t("shipping.receiverPays")
+                : formatCents(shippingFeeCents)
+            }
+          />
+        ) : null}
+        {/*
+          优惠(2026-11-08)
+          ——
+          四个费用列存的是**折前**的,合计存的是**净额**(优惠后)。这一行不摆
+          出来的话,「明细加起来 ≠ 合计」—— 用户会以为算错了。
+        */}
+        {values.couponDiscountCents && values.couponDiscountCents > 0 ? (
+          <Row
+            label={t("coupon.row")}
+            value={`-${formatCents(values.couponDiscountCents)}`}
+          />
+        ) : null}
+        <div className="flex items-baseline justify-between border-t border-border pt-3 mt-3">
+          <dt className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+            {t("quote.total")}
+          </dt>
+          <dd
+            className={`font-serif text-foreground ${
+              totalSize === "lg" ? "text-2xl" : "text-xl"
+            }`}
+          >
+            {formatCents(values.totalPriceCents)}
+          </dd>
+        </div>
+      </dl>
+
       {/*
-        优惠(2026-11-08)
-        ——
-        四个费用列存的是**折前**的,合计存的是**净额**(优惠后)。这一行不摆
-        出来的话,「明细加起来 ≠ 合计」—— 用户会以为算错了。
+        脚注(2026-11-17)
+
+        - 「后处理含:去支撑、清洗、基础打磨、上 UV 光油、独立包装与结构质保」
+          —— 工作室给的后处理口径。这是**服务内容**,不是成本结构(明细不摆,
+          但服务要说清楚)。
+        - 「含税价已包含 1% 普票 · 不另收」—— 工作室的原话。买家最常问的是
+          「发票怎么开」,摆在收据底下等于当面回答了。
+
+        ⚠️ 放在 `<dl>` **外面** —— `<p>` 不能直接进 `<dl>`(里面只该有
+        `dt` / `dd`)。
       */}
-      {values.couponDiscountCents && values.couponDiscountCents > 0 ? (
-        <Row
-          label={t("coupon.row")}
-          value={`-${formatCents(values.couponDiscountCents)}`}
-        />
-      ) : null}
-      <div className="flex items-baseline justify-between border-t border-border pt-3 mt-3">
-        <dt className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
-          {t("quote.total")}
-        </dt>
-        <dd
-          className={`font-serif text-foreground ${
-            totalSize === "lg" ? "text-2xl" : "text-xl"
-          }`}
-        >
-          {formatCents(values.totalPriceCents)}
-        </dd>
+      <div className="mt-2 space-y-1">
+        <p className="text-[10px] leading-relaxed text-muted-foreground">
+          {t("postProcess.items")}
+        </p>
+        <p className="text-[10px] leading-relaxed text-muted-foreground">
+          {t("invoice.note")}
+        </p>
       </div>
-    </dl>
+    </div>
   );
 }
 

@@ -1813,6 +1813,7 @@
       "supportFee": "支撑加价",
       "weightFee": "克重费",
       "varnishFee": "后处理",
+      "quantity": "件数",
       "total": "合计",
       "stale": "价格正在更新,请稍候"
     },
@@ -1836,6 +1837,30 @@
         "express": "加急",
         "urgent": "特急"
       }
+    },
+    "quantity": {
+      "label": "打印件数",
+      "hint": "克重费 / 后处理费 / 支撑加价按件计 · 运费按单收",
+      "unit": "件",
+      "value": "{count} 件"
+    },
+    "shipping": {
+      "label": "配送方式",
+      "hint": "运费按单收取,不随件数变化",
+      "days": "约 {days} 天",
+      "receiverPays": "收件人付款",
+      "row": "配送方式 · {method}",
+      "option": {
+        "cod": "顺丰到付",
+        "standard": "顺丰标快",
+        "air": "顺丰空运"
+      }
+    },
+    "invoice": {
+      "note": "含税价已包含 1% 普票 · 不另收"
+    },
+    "postProcess": {
+      "items": "后处理含:去支撑、清洗、基础打磨、上 UV 光油、独立包装与结构质保"
     },
     "printOrder": {
       "add": "提交打印订单",

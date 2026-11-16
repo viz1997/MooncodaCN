@@ -32,6 +32,7 @@ import { describe, expect, it } from "vitest";
 
 import { computeSupportFeeBands } from "@mooncoda/print-tool-core/pricing/pricing-engine";
 import type { PrintPricingSettings } from "@mooncoda/print-tool-core/quote/pricing-settings";
+import { DEFAULT_SHIPPING_FEES } from "@mooncoda/print-tool-core/quote/shipping-option";
 import { computePrintQuote } from "@/features/print-quote/lib/quote-server";
 
 /* -------------------------------------------------------------------------- */
@@ -59,6 +60,8 @@ const SETTINGS: PrintPricingSettings = {
   supportReliefLiftMm: 1,
   supportBaseMarginMm: 5,
   deliveryRates: { standard: 0, express: 0.1, urgent: 0.37 },
+  // 三档运费(2026-11-17)—— 这个文件只测支撑分段,不影响
+  shippingFees: DEFAULT_SHIPPING_FEES,
   allowGuestPricing: true,
 };
 
@@ -311,11 +314,13 @@ describe("computePrintQuote —— 分段支撑费接进报价", () => {
         supportWeightG: 20,
         selfSupportRatio: r,
       });
+      // 五项(2026-11-17 加了运费):克重 + 后处理 + 支撑 + 交期加价 + 运费
       expect(quote?.totalPriceCents).toBe(
         (quote?.weightFeeCents ?? 0) +
           (quote?.varnishFeeCents ?? 0) +
           (quote?.supportFeeCents ?? 0) +
-          (quote?.deliveryFeeCents ?? 0)
+          (quote?.deliveryFeeCents ?? 0) +
+          (quote?.shippingFeeCents ?? 0)
       );
     }
   });

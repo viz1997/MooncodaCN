@@ -53,10 +53,17 @@
  * (`useAtelierContainer`)。
  */
 
+import type {
+  DeliveryRates,
+  DeliveryTierId,
+} from "@mooncoda/print-tool-core/quote/delivery-tier";
+import type {
+  ShippingFees,
+  ShippingOptionId,
+} from "@mooncoda/print-tool-core/quote/shipping-option";
 import { ArrowRight } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useState } from "react";
-
 import {
   Dialog,
   DialogContent,
@@ -73,10 +80,6 @@ import { PrintServiceInlineSignIn } from "@/features/print-quote/components/prin
 import type { PrintServiceOrderValues } from "@/features/print-quote/components/print-service-order-form";
 import { PrintServiceOrderForm } from "@/features/print-quote/components/print-service-order-form";
 import { PrintServiceQuotePreview } from "@/features/print-quote/components/print-service-quote-preview";
-import type {
-  DeliveryRates,
-  DeliveryTierId,
-} from "@mooncoda/print-tool-core/quote/delivery-tier";
 import type {
   PrintQuoteInput,
   PublicPrintQuote,
@@ -97,6 +100,22 @@ export type PrintServiceQuoteDialogProps = {
   /** 选中的交期档位 —— 要带进报价 */
   deliveryTier: DeliveryTierId;
   onDeliveryTierChange: (tier: DeliveryTierId) => void;
+  /**
+   * 打印件数(2026-11-17)
+   *
+   * 「同一模型打印多件」—— 克重费 / 后处理费 / 支撑加价都按件放大,
+   * **运费不乘**。
+   */
+  quantity: number;
+  onQuantityChange: (quantity: number) => void;
+  /**
+   * 配送方式(2026-11-17)
+   *
+   * **跟交期档位是两个正交的轴** —— 交期管「多快做好」,配送方式管「怎么寄、
+   * 运费多少」。运费**按单收**。
+   */
+  shippingOption: ShippingOptionId;
+  onShippingOptionChange: (option: ShippingOptionId) => void;
   /** 地址簿(服务端查好传进来) */
   addresses: AddressView[];
   /** 选中的地址 id */
@@ -127,6 +146,10 @@ export function PrintServiceQuoteDialog({
   input,
   deliveryTier,
   onDeliveryTierChange,
+  quantity,
+  onQuantityChange,
+  shippingOption,
+  onShippingOptionChange,
   addresses,
   addressId,
   onAddressChange,
@@ -160,6 +183,17 @@ export function PrintServiceQuoteDialog({
   const [rates, setRates] = useState<DeliveryRates | null>(null);
 
   /**
+   * 三档运费 —— 服务端报价里带回来的(2026-11-17)
+   *
+   * **跟交期比例一样:重算期间不清空** —— 运费表是服务端的配置,清空了
+   * 整块配送方式选择器会闪一下。
+   *
+   * 前端不自己认一份价:后台 `/admin/print-pricing` 能改运费,两边各认一份
+   * 就会出现「页面写 ¥18、实际收 ¥0」。
+   */
+  const [shippingFees, setShippingFees] = useState<ShippingFees | null>(null);
+
+  /**
    * 优惠码(2026-11-08)
    *
    * - `couponCode` —— 用户输的码(只是**码**,不带钱)
@@ -180,8 +214,11 @@ export function PrintServiceQuoteDialog({
    */
   const handleQuote = useCallback((next: PublicPrintQuote | null) => {
     setQuote(next);
-    // 交期比例只在报价到了的时候更新
-    if (next) setRates(next.deliveryRates);
+    // 交期比例 / 运费表只在报价到了的时候更新
+    if (next) {
+      setRates(next.deliveryRates);
+      setShippingFees(next.shippingFees);
+    }
   }, []);
 
   /** 优惠结果 —— 预览组件问价时顺带带回来的 */
@@ -232,6 +269,8 @@ export function PrintServiceQuoteDialog({
         <PrintServiceQuotePreview
           input={input}
           deliveryTier={deliveryTier}
+          quantity={quantity}
+          shippingOption={shippingOption}
           couponCode={couponCode}
           onQuote={handleQuote}
           onCoupon={handleCoupon}
@@ -247,6 +286,11 @@ export function PrintServiceQuoteDialog({
             rates={rates}
             deliveryTier={deliveryTier}
             onDeliveryTierChange={onDeliveryTierChange}
+            quantity={quantity}
+            onQuantityChange={onQuantityChange}
+            shippingOption={shippingOption}
+            onShippingOptionChange={onShippingOptionChange}
+            shippingFees={shippingFees}
             addresses={addresses}
             addressId={addressId}
             onAddressChange={onAddressChange}

@@ -2595,6 +2595,19 @@ export const printOrder = pgTable(
     }).notNull(),
     /** 支撑克重 g(未跑智能摆盘时为 null) */
     supportWeightG: numeric("support_weight_g", { precision: 12, scale: 3 }),
+    /**
+     * 打印件数(2026-11-17)
+     *
+     * 工作室的原话:「同一模型打印多件」—— 同一个模型一次印多件。
+     *
+     * **下面这一整套克重和钱都是整单的**(已经乘过件数):
+     * `material_weight_g` / `support_weight_g` / `weight_fee_cents` /
+     * `varnish_fee_cents` / `support_fee_cents`。
+     *
+     * 界面上的「克重」和「克重费」必须对得上 —— 一边单件一边整单会被误解。
+     * 运费**不乘件数**(工作室原话「运费按单收取」)。
+     */
+    quantity: integer("quantity").notNull().default(1),
     // ---- 报价(分)----
     /** 材料密度 g/cm³,下单时的取值(留档,防止日后改参数对不上账) */
     materialDensity: numeric("material_density", {
@@ -2627,6 +2640,31 @@ export const printOrder = pgTable(
     /** 交期加价(分)—— 按小计的比例收,标准档是 0 */
     deliveryFeeCents: integer("delivery_fee_cents").notNull().default(0),
     /**
+     * 配送方式(2026-11-17)
+     *
+     * - cod      —— 顺丰到付(运费 ¥0,默认)
+     * - standard —— 顺丰标快(默认 ¥18)
+     * - air      —— 顺丰空运(默认 ¥22)
+     *
+     * ⚠️ **别把这一列跟 `delivery_tier` 混进同一个枚举** —— 交期档位管
+     * 「多快发货」(按小计的**比例**加钱),配送方式管「怎么寄」(**按单收**
+     * 绝对金额)。两个**正交的**轴,两列分开。
+     */
+    shippingOption: text("shipping_option", {
+      enum: ["cod", "standard", "air"],
+    })
+      .notNull()
+      .default("cod"),
+    /**
+     * 运费(分)—— **按单收**,不乘件数
+     *
+     * 工作室的原话:「配送方式 运费按单收取」。
+     *
+     * ⚠️ **跟 `delivery_fee_cents`(交期加价)不是一回事** —— 一个是寄件费,
+     * 一个是加急费。两个都存,因为是两个不同的概念、两个不同的钱。
+     */
+    shippingFeeCents: integer("shipping_fee_cents").notNull().default(0),
+    /**
      * 优惠码(2026-11-08)
      *
      * 大写归一化后的码。下单那一刻**重新校验过**。
@@ -2635,8 +2673,8 @@ export const printOrder = pgTable(
     /**
      * 优惠码减掉的金额(分)—— 正数
      *
-     * 打折基数是 `总报价 − 交期加价`(交期加价是加急费,不是货款,跟运费
-     * 一个待遇 —— 优惠不碰它)。
+     * 打折基数是 `总报价 − 交期加价 − 运费`(交期加价是加急费、运费是寄件费,
+     * 都不是货款,优惠不碰它们 —— 跟商城「运费不参与满减」一个口径)。
      */
     couponDiscountCents: integer("coupon_discount_cents").notNull().default(0),
     /**
@@ -2644,10 +2682,10 @@ export const printOrder = pgTable(
      *
      * ```
      * total_price_cents = weight_fee + varnish_fee + support_fee
-     *                  + delivery_fee - coupon_discount_cents
+     *                  + delivery_fee + shipping_fee - coupon_discount_cents
      * ```
      *
-     * 上面四个费用列存的是**折前**的,这一列存的是**要收的**。
+     * 上面五个费用列存的是**折前**的,这一列存的是**要收的**。
      *
      * **为什么不另加一列「应付」** —— 代码里有一堆地方把 `total_price_cents`
      * 当成「用户要付多少」显示(工单邮件 / 列表 / 详情页 / 后台)。要是同时
@@ -3082,6 +3120,24 @@ export const printPricingConfig = pgTable("print_pricing_config", {
   })
     .notNull()
     .default("0.3700"),
+  /**
+   * 配送方式三档运费(2026-11-17)—— 单位:分
+   *
+   * 工作室的原话:「配送方式 运费按单收取 顺丰到付…顺丰标快 ¥18…顺丰空运
+   * ¥22」。
+   *
+   * ⚠️ **运费按单收,不乘件数** —— 三档都是**绝对金额**,不是比例
+   * (跟 `delivery_express_rate` / `delivery_urgent_rate` 那两个**比例**列
+   * 不是一个东西)。
+   */
+  /** 顺丰到付(收件人付)—— 默认 0 */
+  shippingCodCents: integer("shipping_cod_cents").notNull().default(0),
+  /** 顺丰标快 —— 默认 1800(¥18) */
+  shippingStandardCents: integer("shipping_standard_cents")
+    .notNull()
+    .default(1800),
+  /** 顺丰空运 —— 默认 2200(¥22) */
+  shippingAirCents: integer("shipping_air_cents").notNull().default(2200),
   /**
    * 访客可见计价 —— **默认开**(2026-11-07)
    *

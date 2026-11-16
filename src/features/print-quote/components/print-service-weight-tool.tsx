@@ -51,10 +51,18 @@
  * 工具页自己不卖东西,但商城里能一键跳过去量。
  */
 
+import {
+  DEFAULT_DELIVERY_TIER,
+  type DeliveryTierId,
+} from "@mooncoda/print-tool-core/quote/delivery-tier";
+import type { ClientPrintConfig } from "@mooncoda/print-tool-core/quote/pricing-settings";
+import {
+  DEFAULT_SHIPPING_OPTION,
+  type ShippingOptionId,
+} from "@mooncoda/print-tool-core/quote/shipping-option";
 import { Receipt } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
-
 import type { AddressView } from "@/features/address/types";
 import { PricingCalculator } from "@/features/pricing/components/pricing-calculator";
 import type {
@@ -63,11 +71,6 @@ import type {
 } from "@/features/pricing/components/pricing-calculator-types";
 import type { PrintServiceOrderValues } from "@/features/print-quote/components/print-service-order-form";
 import { PrintServiceQuoteDialog } from "@/features/print-quote/components/print-service-quote-dialog";
-import {
-  DEFAULT_DELIVERY_TIER,
-  type DeliveryTierId,
-} from "@mooncoda/print-tool-core/quote/delivery-tier";
-import type { ClientPrintConfig } from "@mooncoda/print-tool-core/quote/pricing-settings";
 import { printOrderErrorMessageKey } from "@/features/print-quote/lib/print-order-error";
 import type { PrintQuoteInput } from "@/features/print-quote/lib/quote-types";
 import { computeModelUploadCacheKey } from "@/features/print-quote/lib/upload-cache";
@@ -136,6 +139,23 @@ export function PrintServiceWeightTool({
   /** 交期档位 —— 默认标准档,加价由服务端按比例算 */
   const [deliveryTier, setDeliveryTier] = useState<DeliveryTierId>(
     DEFAULT_DELIVERY_TIER
+  );
+
+  /**
+   * 打印件数(2026-11-17)
+   *
+   * 工作室的原话「同一模型打印多件」—— 克重费 / 后处理费 / 支撑加价按件放大,
+   * **运费不乘**(按单收)。
+   */
+  const [quantity, setQuantity] = useState(1);
+
+  /**
+   * 配送方式(2026-11-17)
+   *
+   * 默认**顺丰到付**(¥0)—— 工作室写在最前面的那一档。
+   */
+  const [shippingOption, setShippingOption] = useState<ShippingOptionId>(
+    DEFAULT_SHIPPING_OPTION
   );
 
   /** 选中的收货地址 */
@@ -294,7 +314,14 @@ export function PrintServiceWeightTool({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            quote: { ...fresh, deliveryTier: values.deliveryTier },
+            quote: {
+              ...fresh,
+              deliveryTier: values.deliveryTier,
+              // 件数 + 配送方式(2026-11-17)—— 价由服务端按这两项重算,
+              // 客户端报上来的数一律不信
+              quantity: values.quantity,
+              shippingOption: values.shippingOption,
+            },
             modelFileName: uploaded.fileName,
             objectKey: uploaded.objectKey,
             modelUrl: uploaded.url,
@@ -371,6 +398,10 @@ export function PrintServiceWeightTool({
         input={input}
         deliveryTier={deliveryTier}
         onDeliveryTierChange={setDeliveryTier}
+        quantity={quantity}
+        onQuantityChange={setQuantity}
+        shippingOption={shippingOption}
+        onShippingOptionChange={setShippingOption}
         addresses={addresses}
         addressId={addressId}
         onAddressChange={setAddressId}

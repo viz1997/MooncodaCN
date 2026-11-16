@@ -228,9 +228,15 @@ describe("访客可见计价 —— 工具页那个预估报价", () => {
   it("几何变了就重新报价 —— 支撑算出来之后金额会跟着变", () => {
     const code = stripComments(read(PREVIEW));
 
-    // 依赖里有几何、**交期档位**和**优惠码** —— 换档位 / 换码都要重新问价
-    // (优惠是订单级的,码变了金额就变了)
-    expect(code).toContain("}, [input, deliveryTier, couponCode]);");
+    // 依赖里有几何、**交期档位**、**件数**、**配送方式**和**优惠码** ——
+    // 换档位 / 换件数 / 换配送方式 / 换码都要重新问价
+    // (优惠是订单级的,码变了金额就变了;件数和配送方式直接改金额)
+    //
+    // ⚠️ **少了 `quantity` / `shippingOption` 就会漂** —— 那两项不进依赖
+    // 数组,用户改了它们,弹窗里的预估价还是旧的 ⇒ 跟服务端算的价对不上。
+    expect(flat(code)).toContain(
+      "}, [input, deliveryTier, quantity, shippingOption, couponCode]);"
+    );
     expect(code).toContain("QUOTE_DEBOUNCE_MS");
   });
 

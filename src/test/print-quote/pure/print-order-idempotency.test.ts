@@ -134,8 +134,9 @@ describe("建单幂等 —— 键是内容哈希", () => {
       canonicalPrintOrderIntent(makeIntent())
     );
     // 摊平结果里必须带版本号 —— 改了「哪些字段进键」的规则要 +1
+    // v2(2026-11-17):加了 `quantity` + `shippingOption` 两项
     expect(canonicalPrintOrderIntent(makeIntent())).toContain(
-      "print-order-intent-v1"
+      "print-order-intent-v2"
     );
   });
 

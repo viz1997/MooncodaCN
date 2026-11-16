@@ -16,9 +16,13 @@
  * 一个不存在的 server action。
  */
 
-import type { ShippingAddressSnapshot } from "@/db/schema";
 import type { DeliveryTierId } from "@mooncoda/print-tool-core/quote/delivery-tier";
-import type { PrintQuoteInput, PublicPrintQuote } from "@mooncoda/print-tool-core/quote/types";
+import type { ShippingOptionId } from "@mooncoda/print-tool-core/quote/shipping-option";
+import type {
+  PrintQuoteInput,
+  PublicPrintQuote,
+} from "@mooncoda/print-tool-core/quote/types";
+import type { ShippingAddressSnapshot } from "@/db/schema";
 
 /**
  * 引擎侧的类型 —— **再导出一次**
@@ -159,6 +163,22 @@ export type UserPrintOrder = {
   orderNo: string;
   status: PrintOrderStatus;
   modelFileName: string;
+  /**
+   * 打印件数(2026-11-17)
+   *
+   * 工作室的原话:「同一模型打印多件」—— 克重和钱都是**整单**的(已经乘过件数),
+   * 运费不乘(「运费按单收取」)。
+   */
+  quantity: number;
+  /**
+   * 配送方式(2026-11-17)
+   *
+   * 顺丰到付 / 顺丰标快 / 顺丰空运。⚠️ **跟 `deliveryTier`(交期档位)是两个
+   * 正交的轴**。
+   */
+  shippingOption: ShippingOptionId;
+  /** 运费(分)—— 按单收 */
+  shippingFeeCents: number;
   materialWeightG: number;
   supportWeightG: number | null;
   dims: [number, number, number];

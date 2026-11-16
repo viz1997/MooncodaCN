@@ -33,12 +33,49 @@
  * 三档的比例在报价里带回来(`quote.deliveryRates`),前端不自己认一份 ——
  * 服务端的比例可以用环境变量改,两边各认一份就会出现「页面写 +¥20.65、实际
  * 收 ¥19.85」。选档位之后要**重新去服务端报价**(父组件做)。
+ *
+ * ## 件数 + 配送方式(2026-11-17)
+ *
+ * 工作室的两条:
+ *
+ * > 同一模型打印多件;后处理按件计,不重复收起步价。
+ * > 配送方式 运费按单收取 顺丰到付…顺丰标快 ¥18…顺丰空运 ¥22
+ *
+ * **两个正交的轴**:
+ *
+ * | 轴 | 影响什么 |
+ * |---|---|
+ * | **件数** | 克重费 / 后处理费 / 支撑加价 —— **都 × N** |
+ * | **配送方式** | 只影响**运费**,而且运费**不乘件数**(按单收) |
+ *
+ * 改任何一个都要**重新去服务端报价**(父组件做)—— 价永远在服务端算。
+ *
+ * ## ⚠️ 加价的基数里**不能有运费**
+ *
+ * 引擎的加价基数是三项:`克重费 + 后处理费 + 支撑加价`。运费是**另一件事**
+ * (寄出去要钱,不是干活要钱)—— 拿它当加价的基数就是「运费也加急一次」,
+ * **多收钱**。所以小计要把运费**一起扣掉**:
+ *
+ * ```
+ * 小计 = 合计 − 交期加价 − 运费
+ * ```
  */
 
+import type {
+  DeliveryRates,
+  DeliveryTierId,
+} from "@mooncoda/print-tool-core/quote/delivery-tier";
+import {
+  MAX_QUANTITY,
+  MIN_QUANTITY,
+} from "@mooncoda/print-tool-core/quote/quantity";
+import type {
+  ShippingFees,
+  ShippingOptionId,
+} from "@mooncoda/print-tool-core/quote/shipping-option";
 import { AlertCircle, Loader2, Lock, Package, ShieldAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
-
+import { useEffect, useState } from "react";
 import { AddressSection } from "@/features/address/components/address-section";
 import type { AddressView } from "@/features/address/types";
 import type {
@@ -47,10 +84,7 @@ import type {
 } from "@/features/coupon/lib/coupon-calc";
 import { PaymentChannelPicker } from "@/features/payments/components/payment-channel-picker";
 import { DeliveryTierPicker } from "@/features/print-quote/components/delivery-tier-picker";
-import type {
-  DeliveryRates,
-  DeliveryTierId,
-} from "@mooncoda/print-tool-core/quote/delivery-tier";
+import { ShippingOptionPicker } from "@/features/print-quote/components/shipping-option-picker";
 import { formatCents } from "@/features/print-quote/lib/format";
 import type { PublicPrintQuote } from "@/features/print-quote/lib/quote-types";
 import { Link } from "@/i18n/routing";
@@ -69,6 +103,19 @@ export type PrintServiceOrderValues = {
    * 只传**码** —— 折扣是服务端算的(能被改)。空 = 不用券。
    */
   couponCode: string;
+  /**
+   * 打印件数(2026-11-17)
+   *
+   * 工作室的原话「同一模型打印多件」—— 克重费 / 后处理费 / 支撑加价都 × N,
+   * 运费不乘(按单收)。
+   */
+  quantity: number;
+  /**
+   * 配送方式(2026-11-17)
+   *
+   * 只传**档位 id**,不传金额 —— 金额永远由服务端按后台配置算。
+   */
+  shippingOption: ShippingOptionId;
 };
 
 export type PrintServiceOrderFormProps = {
@@ -83,6 +130,25 @@ export type PrintServiceOrderFormProps = {
   /** 选中的交期档位 */
   deliveryTier: DeliveryTierId;
   onDeliveryTierChange: (tier: DeliveryTierId) => void;
+  /**
+   * 打印件数(2026-11-17)
+   *
+   * 状态住在**父组件**(报价弹窗那一层)—— 报价预览也要用它重新问价,
+   * 两处各存一份会漂。
+   */
+  quantity: number;
+  onQuantityChange: (quantity: number) => void;
+  /**
+   * 选中的配送方式(2026-11-17)
+   */
+  shippingOption: ShippingOptionId;
+  onShippingOptionChange: (option: ShippingOptionId) => void;
+  /**
+   * 三档运费(分)—— 服务端报价里带回来的
+   *
+   * null = 还没报价 ⇒ 摆不出价(不拿猜的价占位)。
+   */
+  shippingFees: ShippingFees | null;
   /** 地址簿(服务端查好传进来) */
   addresses: AddressView[];
   /** 选中的地址 id */
@@ -148,6 +214,11 @@ export function PrintServiceOrderForm({
   rates,
   deliveryTier,
   onDeliveryTierChange,
+  quantity,
+  onQuantityChange,
+  shippingOption,
+  onShippingOptionChange,
+  shippingFees,
   addresses,
   addressId,
   onAddressChange,
@@ -181,6 +252,31 @@ export function PrintServiceOrderForm({
    * 服务端算的。点「应用」才把它交上去。
    */
   const [couponInput, setCouponInput] = useState(couponCode ?? "");
+  /**
+   * 件数输入框里的内容(2026-11-17)
+   *
+   * **是字符串,不是数字** —— 用户敲到一半(把「1」改成「12」)的时候,直接
+   * 把数字绑上去会把「1」夹回最小值,数字根本改不了。跟仓库里那个「数字
+   * 输入框存字符串,失焦时归一化」是同一套做法。
+   */
+  const [quantityInput, setQuantityInput] = useState(String(quantity));
+
+  // 父组件改了件数(重新报价后归位等)→ 输入框跟着走。
+  // 输入框里那个数(夹过)跟父组件一样 ⇒ **保留用户正在敲的那串**;
+  // 不一样(比如用户敲了「0」,夹完是 1)⇒ 保留草稿,失焦时再归一化。
+  useEffect(() => {
+    setQuantityInput((prev) => {
+      const parsed = Number(prev);
+      if (prev.trim() !== "" && Number.isFinite(parsed)) {
+        const clamped = Math.min(
+          Math.max(Math.trunc(parsed), MIN_QUANTITY),
+          MAX_QUANTITY
+        );
+        if (clamped === quantity) return prev;
+      }
+      return String(quantity);
+    });
+  }, [quantity]);
 
   const busy = phase !== "idle";
 
@@ -196,10 +292,17 @@ export function PrintServiceOrderForm({
    * 报价小计 —— 加价的基数
    *
    * 交期加价按**小计**的比例收(不是合计 —— 拿合计当基数就是「加价里套加
-   * 价」)。小计 = 合计 − 交期加价。
+   * 价」)。小计 = 合计 − 交期加价 **− 运费**。
+   *
+   * ⚠️ **运费必须一起扣掉**(2026-11-17 修)—— 引擎的加价基数只有三项:
+   * `克重费 + 后处理费 + 支撑加价`。运费是「寄出去要钱」,不是「干活要钱」
+   * —— 拿它当加价的基数就是**运费也加急一次**,**多收钱**。
+   *
+   * 扣掉运费之后小计跟交期档位无关(运费不随加急变)⇒ 切档位时这个数不动,
+   * 跟引擎算出来的那一份一致。
    */
   const subtotalCents = quote
-    ? quote.totalPriceCents - quote.deliveryFeeCents
+    ? quote.totalPriceCents - quote.deliveryFeeCents - quote.shippingFeeCents
     : null;
 
   /**
@@ -234,6 +337,8 @@ export function PrintServiceOrderForm({
       deliveryTier,
       channel,
       couponCode: couponCode ?? "",
+      quantity,
+      shippingOption,
     });
   };
 
@@ -341,6 +446,65 @@ export function PrintServiceOrderForm({
         </div>
       </div>
 
+      {/*
+        打印件数(2026-11-17)—— 工作室的原话「同一模型打印多件」
+        **按件的活**乘 N(克重 / 后处理 / 支撑),**按单的活**不乘(运费)。
+      */}
+      <div className="mb-4">
+        <div className="flex items-baseline justify-between gap-2">
+          <label
+            htmlFor="pq-quantity"
+            className="text-xs font-medium text-foreground"
+          >
+            {t("quantity.label")}
+          </label>
+          <span className="text-[10px] text-muted-foreground">
+            {t("quantity.hint")}
+          </span>
+        </div>
+        <div className="mt-1.5 flex items-center gap-2">
+          <input
+            id="pq-quantity"
+            type="number"
+            inputMode="numeric"
+            min={MIN_QUANTITY}
+            max={MAX_QUANTITY}
+            step={1}
+            value={quantityInput}
+            onChange={(e) => {
+              const raw = e.target.value;
+              setQuantityInput(raw);
+              // 敲到一半(空的 / "-")不推 —— 那样服务端会拿到一个非法值
+              const parsed = Number(raw);
+              if (raw.trim() === "" || !Number.isFinite(parsed)) return;
+              onQuantityChange(
+                Math.min(
+                  Math.max(Math.trunc(parsed), MIN_QUANTITY),
+                  MAX_QUANTITY
+                )
+              );
+            }}
+            onBlur={() => {
+              const parsed = Number(quantityInput);
+              const normalized =
+                quantityInput.trim() === "" || !Number.isFinite(parsed)
+                  ? quantity
+                  : Math.min(
+                      Math.max(Math.trunc(parsed), MIN_QUANTITY),
+                      MAX_QUANTITY
+                    );
+              setQuantityInput(String(normalized));
+              onQuantityChange(normalized);
+            }}
+            disabled={busy}
+            className="w-24 rounded-md border border-border bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-foreground disabled:bg-muted/40"
+          />
+          <span className="text-xs text-muted-foreground">
+            {t("quantity.unit")}
+          </span>
+        </div>
+      </div>
+
       {/* 交期 —— 三档的加价直接摆出来,用户确认的是「这个交期、这个价」 */}
       {rates && (
         <div className="mb-4">
@@ -349,6 +513,21 @@ export function PrintServiceOrderForm({
             rates={rates}
             subtotalCents={subtotalCents}
             onChange={onDeliveryTierChange}
+            disabled={busy}
+          />
+        </div>
+      )}
+
+      {/*
+        配送方式(2026-11-17)—— 三档运费直接摆出来
+        **跟交期是两个正交的轴**:加急不改变运费,空运也不改变加急费。
+      */}
+      {shippingFees && (
+        <div className="mb-4">
+          <ShippingOptionPicker
+            value={shippingOption}
+            fees={shippingFees}
+            onChange={onShippingOptionChange}
             disabled={busy}
           />
         </div>

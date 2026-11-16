@@ -33,6 +33,7 @@ import {
   resolvePrintPricingSettings,
   toClientPrintConfig,
 } from "@mooncoda/print-tool-core/quote/pricing-settings";
+import { DEFAULT_SHIPPING_FEES } from "@mooncoda/print-tool-core/quote/shipping-option";
 
 /* -------------------------------------------------------------------------- */
 /*  手写的样例                                                                  */
@@ -95,6 +96,8 @@ const FALLBACK: PrintPricingSettings = {
   supportReliefLiftMm: 1,
   supportBaseMarginMm: 5,
   deliveryRates: { standard: 0, express: 0.1, urgent: 0.37 },
+  // 三档运费(2026-11-17)
+  shippingFees: DEFAULT_SHIPPING_FEES,
   allowGuestPricing: true,
 };
 

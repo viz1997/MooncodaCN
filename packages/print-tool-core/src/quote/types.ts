@@ -25,6 +25,7 @@
 
 import type { ReliefKind } from "../pricing/relief-detect";
 import type { DeliveryRates, DeliveryTierId } from "./delivery-tier";
+import type { ShippingFees, ShippingOptionId } from "./shipping-option";
 
 /**
  * 报价入参 —— 几何 + 支撑信息
@@ -65,6 +66,30 @@ export type PrintQuoteInput = {
    * 不传 = 老客户端 ⇒ 按服务端自己判定的那一档走,不报错。
    */
   reliefKind?: ReliefKind | null;
+  /**
+   * 打印件数(2026-11-17)
+   *
+   * 工作室的原话:「同一模型打印多件」—— 同一个模型一次印多件,克重费 /
+   * 后处理费 / 支撑加价都**按件**放大(见 `quantity.ts` 的文件头)。
+   *
+   * **运费不乘件数** —— 工作室的原话「运费按单收取」。
+   *
+   * 不传 = 1 件(老客户端)。越界 / 非法 ⇒ 引擎夹到合法范围;**接口层要
+   * 拒绝**(夹取会静默少收钱)。
+   */
+  quantity?: number | null;
+  /**
+   * 配送方式(2026-11-17)
+   *
+   * 工作室的原话:「配送方式 运费按单收取 顺丰到付…顺丰标快 ¥18…顺丰空运
+   * ¥22」。
+   *
+   * ⚠️ **跟 `deliveryTier`(交期档位)是两个正交的轴** —— 交期管「多快
+   * 发货」,配送方式管「怎么寄、运费多少」。
+   *
+   * 不传 = 顺丰到付(运费 ¥0)。认不出来的值也落到顺丰到付。
+   */
+  shippingOption?: ShippingOptionId | null;
 };
 
 /**
@@ -93,22 +118,44 @@ export type PrintSupportFeeBand = {
   upToRatio: number | null;
   /** 这一档的单价 分/g */
   priceCentsPerGram: number;
-  /** 这一档收钱的支撑克重 g */
+  /** 这一档收钱的支撑克重 g(**整单**—— 已经乘过件数) */
   weightG: number;
-  /** 这一档的钱 分 */
+  /** 这一档的钱 分(**整单**) */
   feeCents: number;
 };
 
 /**
  * 报价结果
  *
- * `totalPriceCents` 恒等于四项费用之和(各自取整后再加),不是先加后取整 ——
- * 报价页上「明细加起来 = 合计」必须成立,否则用户会来问为什么差一块。
+ * ## ⚠️ 这是一份**整单**的报价(2026-11-17)
+ *
+ * 「同一模型打印多件」之后,**克重和钱都是整单的**(件数已经乘进去了):
+ *
+ * - `materialWeightG` / `supportWeightG` / `excessSupportWeightG` —— **整单**克重
+ * - `weightFeeCents` / `varnishFeeCents` / `supportFeeCents` —— **整单**的钱
+ *
+ * 理由:**界面上「克重」和「克重费」必须对得上** —— 一边是单件、一边是整单,
+ * 用户会以为「8.3 g 却按 3 倍收」。乘件数这一步只发生在引擎里一次。
+ *
+ * (`quantity` 摆出来是为了让界面能写清楚「N 件」—— 客户端**不做乘法**。)
+ *
+ * ## `totalPriceCents` 恒等于**五项**费用之和
+ *
+ * 克重费 + 后处理费 + 支撑加价 + 交期加价 + **运费**。
+ *
+ * 各项**各自取整后再加**,不是先加后取整 —— 报价页上「明细加起来 = 合计」
+ * 必须成立,否则用户会来问为什么差一块。
  */
 export type PrintQuote = {
-  /** 耗材克重 g */
+  /**
+   * 打印件数(2026-11-17)
+   *
+   * 1 = 打印一件(老客户端、老工单都是这个值)。
+   */
+  quantity: number;
+  /** 耗材克重 g(**整单**—— 已经乘过件数) */
   materialWeightG: number;
-  /** 支撑克重 g(没跑摆盘是 null) */
+  /** 支撑克重 g(**整单**;没跑摆盘是 null) */
   supportWeightG: number | null;
   volumeCM3: number;
   surfaceAreaCM2: number;
@@ -117,13 +164,13 @@ export type PrintQuote = {
   density: number;
   /** 单价 分/g */
   unitPriceCentsPerGram: number;
-  /** 克重费(分)= 克重 × 单价 */
+  /** 克重费(分)= 克重 × 单价 × 件数 */
   weightFeeCents: number;
-  /** 光油 / 后处理固定费(分) */
+  /** 后处理费(分)= 单件后处理费 × 件数(2026-11-17) */
   varnishFeeCents: number;
-  /** 支撑加价(分)—— 本体支撑比例超 1:1 的部分 */
+  /** 支撑加价(分)—— 本体支撑比例超 1:1 的部分(× 件数) */
   supportFeeCents: number;
-  /** 超出 1:1 阈值的支撑克重 g */
+  /** 超出 1:1 阈值的支撑克重 g(**整单**) */
   excessSupportWeightG: number;
   /**
    * 支撑加价的**分段明细**(2026-11-06)
@@ -156,7 +203,33 @@ export type PrintQuote = {
    * +$3.00、实际收 $2.98」。
    */
   deliveryRates: DeliveryRates;
-  /** 合计(分) */
+  /**
+   * 配送方式(2026-11-17)
+   *
+   * 这单走哪一档寄 —— 顺丰到付 / 顺丰标快 / 顺丰空运。
+   *
+   * ⚠️ **跟 `deliveryTier`(交期档位)是两个正交的轴**。
+   */
+  shippingOption: ShippingOptionId;
+  /**
+   * 运费(分)—— **按单收**,不乘件数
+   *
+   * 工作室的原话「配送方式 运费按单收取」。
+   */
+  shippingFeeCents: number;
+  /**
+   * 各档运费(分)—— 服务端带回来的
+   *
+   * 前端拿它把**三档**的价都显示出来(「顺丰标快 ¥18 / 顺丰空运 ¥22」)。
+   * 前端不自己认一份价:后台能改运费,两边各认一份就会出现「页面写 ¥18、
+   * 实际收 ¥0」。
+   */
+  shippingFees: ShippingFees;
+  /**
+   * 合计(分)= 克重费 + 后处理费 + 支撑加价 + 交期加价 + 运费
+   *
+   * **五项之和**,各自取整后再加。
+   */
   totalPriceCents: number;
 };
 

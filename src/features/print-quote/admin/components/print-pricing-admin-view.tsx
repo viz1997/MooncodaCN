@@ -32,6 +32,11 @@
  * 点「编辑」/「新增」,表单就展开在这张卡的下面。
  */
 
+import type {
+  PrintMaterialLite,
+  PrintPricingOverview,
+  PrintPricingSettings,
+} from "@mooncoda/print-tool-core/quote/pricing-settings";
 import {
   App,
   Button,
@@ -57,7 +62,6 @@ import {
 } from "lucide-react";
 import { useAction } from "next-safe-action/hooks";
 import { useCallback, useEffect, useMemo, useState } from "react";
-
 import {
   adminCreatePrintMaterialAction,
   adminDeletePrintMaterialAction,
@@ -66,11 +70,6 @@ import {
   adminSetPrintPricingMaterialAction,
   adminUpdatePrintMaterialAction,
 } from "@/features/print-quote/admin/pricing-actions";
-import type {
-  PrintMaterialLite,
-  PrintPricingOverview,
-  PrintPricingSettings,
-} from "@mooncoda/print-tool-core/quote/pricing-settings";
 import { formatCents } from "@/lib/money";
 
 /* -------------------------------------------------------------------------- */
@@ -104,6 +103,15 @@ type ConfigFormValues = {
   /** 百分比(37 = 37%)—— 提交时换算成 0.37 */
   deliveryExpressPercent: number | null;
   deliveryUrgentPercent: number | null;
+  /**
+   * 配送方式三档运费 —— **元**(2026-11-17)
+   *
+   * ⚠️ **跟上面那两个百分比不是一回事** —— 交期加价是「小计的百分之多少」,
+   * 运费是**绝对金额**,而且**按单收,不乘件数**。
+   */
+  shippingCodYuan: number | null;
+  shippingStandardYuan: number | null;
+  shippingAirYuan: number | null;
   /** 访客可见计价(2026-11-07) */
   allowGuestPricing: boolean;
 };
@@ -171,6 +179,10 @@ function toFormValues(settings: PrintPricingSettings): ConfigFormValues {
     supportBaseMarginMm: settings.supportBaseMarginMm,
     deliveryExpressPercent: round4(settings.deliveryRates.express * 100),
     deliveryUrgentPercent: round4(settings.deliveryRates.urgent * 100),
+    // 运费三档(2026-11-17)—— 绝对金额,按单收
+    shippingCodYuan: centsToYuan(settings.shippingFees.cod),
+    shippingStandardYuan: centsToYuan(settings.shippingFees.standard),
+    shippingAirYuan: centsToYuan(settings.shippingFees.air),
     allowGuestPricing: settings.allowGuestPricing,
   };
 }
@@ -282,6 +294,10 @@ export function PrintPricingAdminView() {
       // 百分比 → 小数(服务端那边存的就是小数)
       deliveryExpressRate: (values.deliveryExpressPercent ?? 0) / 100,
       deliveryUrgentRate: (values.deliveryUrgentPercent ?? 0) / 100,
+      // 运费三档(2026-11-17)—— 元 → 分;**按单收,不乘件数**
+      shippingCodCents: yuanToCents(values.shippingCodYuan),
+      shippingStandardCents: yuanToCents(values.shippingStandardYuan),
+      shippingAirCents: yuanToCents(values.shippingAirYuan),
       // 访客可见计价 —— 只管访客,已登录的用户照常看得到
       allowGuestPricing: values.allowGuestPricing ?? true,
     });
@@ -716,6 +732,18 @@ export function PrintPricingAdminView() {
             value={`${round4(settings.deliveryRates.urgent * 100)}%`}
           />
           <Readonly
+            label="运费 · 顺丰到付"
+            value={yuan(settings.shippingFees.cod)}
+          />
+          <Readonly
+            label="运费 · 顺丰标快"
+            value={yuan(settings.shippingFees.standard)}
+          />
+          <Readonly
+            label="运费 · 顺丰空运"
+            value={yuan(settings.shippingFees.air)}
+          />
+          <Readonly
             label="支撑加价"
             value={settings.supportEnabled ? "已开启" : "未开启"}
           />
@@ -915,6 +943,45 @@ export function PrintPricingAdminView() {
               rules={[{ required: true, message: "必填" }]}
             >
               <InputNumber min={0} max={1000} step={0.5} className="w-full" />
+            </Form.Item>
+          </div>
+
+          <Divider titlePlacement="left" plain>
+            <span className="text-xs text-muted-foreground">配送方式运费</span>
+          </Divider>
+
+          <p className="mb-3 text-[11px] text-muted-foreground">
+            工作室 2026-11-17 定的三档:
+            <b>顺丰到付 ¥0 / 顺丰标快 ¥18 / 顺丰空运 ¥22</b>。
+            <b>按单收取,不乘件数</b> —— 印 3 件也是收这一份运费。
+          </p>
+
+          <div className="grid grid-cols-1 gap-x-4 md:grid-cols-2 lg:grid-cols-3">
+            <Form.Item
+              name="shippingCodYuan"
+              label="顺丰到付(元)"
+              extra="收件人付运费 —— 我们这边收 ¥0"
+              rules={[{ required: true, message: "必填" }]}
+            >
+              <InputNumber min={0} max={10_000} step={1} className="w-full" />
+            </Form.Item>
+
+            <Form.Item
+              name="shippingStandardYuan"
+              label="顺丰标快(元)"
+              extra="默认那一档"
+              rules={[{ required: true, message: "必填" }]}
+            >
+              <InputNumber min={0} max={10_000} step={1} className="w-full" />
+            </Form.Item>
+
+            <Form.Item
+              name="shippingAirYuan"
+              label="顺丰空运(元)"
+              extra="最快的那一档"
+              rules={[{ required: true, message: "必填" }]}
+            >
+              <InputNumber min={0} max={10_000} step={1} className="w-full" />
             </Form.Item>
           </div>
 

@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG } from "@mooncoda/print-tool-core/pricing/pricing-engine";
+import { describe, expect, it } from "vitest";
 import { toPublicQuote } from "@/features/print-quote/lib/quote-public";
 import type { PrintQuote } from "@/features/print-quote/lib/quote-types";
 
@@ -66,7 +66,8 @@ function stripComments(src: string): string {
 /** 成本引擎 —— ⛔ 不许进客户端 bundle */
 const PRICING_ENGINE = "packages/print-tool-core/src/pricing/pricing-engine.ts";
 /** 定价配置(读 DB / 环境变量的那一层)—— 同样只在服务端 */
-const PRICING_SETTINGS = "packages/print-tool-core/src/quote/pricing-settings.ts";
+const PRICING_SETTINGS =
+  "packages/print-tool-core/src/quote/pricing-settings.ts";
 /** 对外投影 */
 const QUOTE_PUBLIC = "src/features/print-quote/lib/quote-public.ts";
 /** 共享类型(工单侧那份 —— 留在应用里) */
@@ -84,6 +85,8 @@ const PRINT_ORDER_DETAIL_ROUTE = "src/app/api/print-orders/[orderNo]/route.ts";
 
 /** 一份**内部**报价 —— 三个成本口径的字段都在 */
 const FULL_QUOTE: PrintQuote = {
+  /** 打印件数(2026-11-17) */
+  quantity: 1,
   materialWeightG: 8.3,
   supportWeightG: 6.7,
   volumeCM3: 6.92,
@@ -116,6 +119,12 @@ const FULL_QUOTE: PrintQuote = {
   deliveryTier: "standard",
   deliveryHours: 96,
   deliveryRates: { standard: 0, express: 0.1, urgent: 0.37 },
+  /** 配送方式(2026-11-17) */
+  shippingOption: "cod",
+  /** 运费(分)—— 按单收 */
+  shippingFeeCents: 0,
+  /** 三档运费 */
+  shippingFees: { cod: 0, standard: 1800, air: 2200 },
   totalPriceCents: 5120,
 };
 
@@ -128,6 +137,10 @@ const PUBLIC_FIELDS = [
   "density",
   "dims",
   "materialWeightG",
+  "quantity",
+  "shippingFeeCents",
+  "shippingFees",
+  "shippingOption",
   "supportFeeCents",
   "supportWeightG",
   "surfaceAreaCM2",

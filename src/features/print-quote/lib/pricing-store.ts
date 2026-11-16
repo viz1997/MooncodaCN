@@ -21,13 +21,6 @@
  * 同一个请求内只打一次库。跨请求不缓存 —— 后台改完设置要**立刻**生效。
  */
 
-import { asc, eq } from "drizzle-orm";
-import { nanoid } from "nanoid";
-import { cache } from "react";
-
-import { db } from "@/db";
-import { printMaterial, printPricingConfig } from "@/db/schema";
-import { describeDbError } from "./db-error";
 import {
   type PrintMaterialKind,
   type PrintMaterialLite,
@@ -37,6 +30,12 @@ import {
   readPrintPricingFallback,
   resolvePrintPricingSettings,
 } from "@mooncoda/print-tool-core/quote/pricing-settings";
+import { asc, eq } from "drizzle-orm";
+import { nanoid } from "nanoid";
+import { cache } from "react";
+import { db } from "@/db";
+import { printMaterial, printPricingConfig } from "@/db/schema";
+import { describeDbError } from "./db-error";
 
 /** 配置行的固定 id —— 打印服务只有一套定价口径 */
 export const PRINT_PRICING_CONFIG_ID = "default";
@@ -92,6 +91,9 @@ function toConfigLite(
     supportBaseMarginMm: num(row.supportBaseMarginMm),
     deliveryExpressRate: num(row.deliveryExpressRate),
     deliveryUrgentRate: num(row.deliveryUrgentRate),
+    shippingCodCents: row.shippingCodCents,
+    shippingStandardCents: row.shippingStandardCents,
+    shippingAirCents: row.shippingAirCents,
     allowGuestPricing: row.allowGuestPricing,
   };
 }
@@ -214,6 +216,18 @@ export type SavePrintPricingConfigInput = {
   /** 0~1 的小数(0.1 = 10%) */
   deliveryExpressRate: number;
   deliveryUrgentRate: number;
+  /**
+   * 配送方式三档运费(分)(2026-11-17)
+   *
+   * 工作室的原话:「配送方式 运费按单收取 顺丰到付…顺丰标快 ¥18…顺丰空运
+   * ¥22」。
+   *
+   * ⚠️ **按单收,不乘件数** —— 跟 `deliveryExpressRate` / `deliveryUrgentRate`
+   * 那两个**比例**不是一回事。
+   */
+  shippingCodCents: number;
+  shippingStandardCents: number;
+  shippingAirCents: number;
   /** 访客可见计价(2026-11-07)—— 未登录的人能不能看到报价 */
   allowGuestPricing: boolean;
 };
@@ -241,6 +255,9 @@ export async function savePrintPricingConfig(
     supportBaseMarginMm: String(input.supportBaseMarginMm),
     deliveryExpressRate: String(input.deliveryExpressRate),
     deliveryUrgentRate: String(input.deliveryUrgentRate),
+    shippingCodCents: Math.round(input.shippingCodCents),
+    shippingStandardCents: Math.round(input.shippingStandardCents),
+    shippingAirCents: Math.round(input.shippingAirCents),
     allowGuestPricing: input.allowGuestPricing,
     updatedAt: new Date(),
   };

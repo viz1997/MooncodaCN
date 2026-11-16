@@ -63,14 +63,14 @@
  * 报价里带上它,弹窗里摆的三档加价跟总额才对得上。换档位 → 重新问价。
  */
 
+import type { DeliveryTierId } from "@mooncoda/print-tool-core/quote/delivery-tier";
+import type { ShippingOptionId } from "@mooncoda/print-tool-core/quote/shipping-option";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
-
 import type {
   CouponErrorCode,
   CouponView,
 } from "@/features/coupon/lib/coupon-calc";
-import type { DeliveryTierId } from "@mooncoda/print-tool-core/quote/delivery-tier";
 import type {
   PrintQuoteInput,
   PublicPrintQuote,
@@ -105,6 +105,21 @@ export type PrintServiceQuotePreviewProps = {
    */
   deliveryTier?: DeliveryTierId | undefined;
   /**
+   * 打印件数(2026-11-17)
+   *
+   * 工作室的原话「同一模型打印多件」—— 克重费 / 后处理费 / 支撑加价都
+   * **按件**放大。**运费不乘**(按单收)。
+   *
+   * 不传 = 1 件(老客户端)。
+   */
+  quantity?: number | undefined;
+  /**
+   * 配送方式(2026-11-17)
+   *
+   * 只影响**运费**,跟交期档位是两个正交的轴。不传 = 顺丰到付(¥0)。
+   */
+  shippingOption?: ShippingOptionId | undefined;
+  /**
    * 优惠码(2026-11-08)
    *
    * 带了它去问价,服务端会顺带算这张码能减多少 —— **折扣是服务端算的**,
@@ -137,6 +152,8 @@ const QUOTE_DEBOUNCE_MS = 400;
 export function PrintServiceQuotePreview({
   input,
   deliveryTier,
+  quantity,
+  shippingOption,
   couponCode,
   onQuote,
   onCoupon,
@@ -166,10 +183,16 @@ export function PrintServiceQuotePreview({
     const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
-        // 交期档位 + 优惠码带进报价 —— 用户选的那一档 / 那张码,金额要按它算
+        // 交期档位 + 件数 + 配送方式 + 优惠码带进报价 ——
+        // 用户选的每一项,金额都要按它算
         const payload: PrintQuoteInput & {
           couponCode?: string | null;
-        } = { ...input, deliveryTier: deliveryTier ?? null };
+        } = {
+          ...input,
+          deliveryTier: deliveryTier ?? null,
+          quantity: quantity ?? null,
+          shippingOption: shippingOption ?? null,
+        };
         if (couponCode) payload.couponCode = couponCode;
 
         const response = await fetch("/api/print-quote", {
@@ -213,7 +236,7 @@ export function PrintServiceQuotePreview({
       controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input, deliveryTier, couponCode]);
+  }, [input, deliveryTier, quantity, shippingOption, couponCode]);
 
   // 把报价抬给父组件 —— 父组件要拿它摆交期选择器
   const liftedQuote = state.kind === "ready" ? state.quote : null;
@@ -303,6 +326,18 @@ export function PrintServiceQuotePreview({
       ) : null}
       <p className="mt-0.5 text-[10px] text-muted-foreground">
         {t("preview.estimateHint")}
+      </p>
+      {/*
+        「已含 1% 普票 · 不另收」(2026-11-17)
+        ——
+        工作室的原话。**不是成本结构** —— 是**卖点的另一半**:买家最常问的
+        就是「发票怎么开 / 要不要另外收钱」,摆在预估价底下等于当场回答了。
+
+        ⚠️ 这跟「费用明细不摆」不冲突 —— 明细是**加法**(把成本结构露出去),
+        这一句是**减法**(少收的那一笔说清楚)。
+      */}
+      <p className="mt-0.5 text-[10px] text-muted-foreground">
+        {t("invoice.note")}
       </p>
     </div>
   );

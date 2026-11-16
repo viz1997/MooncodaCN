@@ -48,16 +48,20 @@
  * 黑名单则悄悄就带出去了。
  */
 
-import type {
-  PrintQuote,
-  PublicPrintQuote,
-} from "@/features/print-quote/lib/quote-types";
-
 import {
   type DeliveryRates,
   type DeliveryTierId,
   getDeliveryTier,
 } from "@mooncoda/print-tool-core/quote/delivery-tier";
+import {
+  normalizeShippingOption,
+  type ShippingFees,
+  type ShippingOptionId,
+} from "@mooncoda/print-tool-core/quote/shipping-option";
+import type {
+  PrintQuote,
+  PublicPrintQuote,
+} from "@/features/print-quote/lib/quote-types";
 
 /**
  * 内部报价 → 对外报价
@@ -66,9 +70,11 @@ import {
  */
 export function toPublicQuote(quote: PrintQuote): PublicPrintQuote {
   return {
-    /** 耗材克重 g */
+    /** 打印件数(2026-11-17)—— 界面靠它写清楚「N 件」 */
+    quantity: quote.quantity,
+    /** 耗材克重 g(整单) */
     materialWeightG: quote.materialWeightG,
-    /** 支撑克重 g */
+    /** 支撑克重 g(整单) */
     supportWeightG: quote.supportWeightG,
     /** 体积 cm³ */
     volumeCM3: quote.volumeCM3,
@@ -92,6 +98,12 @@ export function toPublicQuote(quote: PrintQuote): PublicPrintQuote {
     deliveryHours: quote.deliveryHours,
     /** 三档的加价比例(前端靠它摆交期选择器) */
     deliveryRates: quote.deliveryRates,
+    /** 配送方式(2026-11-17) */
+    shippingOption: quote.shippingOption,
+    /** 运费(分)—— 按单收 */
+    shippingFeeCents: quote.shippingFeeCents,
+    /** 三档运费(前端靠它摆配送方式选择器) */
+    shippingFees: quote.shippingFees,
     /** 合计(分) */
     totalPriceCents: quote.totalPriceCents,
   };
@@ -117,32 +129,43 @@ export function toPublicQuote(quote: PrintQuote): PublicPrintQuote {
  * | `volumeCM3` / `surfaceAreaCM2` | `volume_cm3` / `surface_area_cm2` | ✓ |
  * | `dims` | `dim_x` / `dim_y` / `dim_z` | ✓ |
  * | `density` | `material_density` | ✓ |
- * | 四项费用 | `weight_fee_cents` / `varnish_fee_cents` / `support_fee_cents` / `delivery_fee_cents` | ✓ |
+ * | `quantity` | `quantity` | ✓ |
+ * | 五项费用 | `weight_fee_cents` / `varnish_fee_cents` / `support_fee_cents` / `delivery_fee_cents` / `shipping_fee_cents` | ✓ |
  * | `deliveryTier` | `delivery_tier` | ✓ |
  * | `deliveryHours` | `getDeliveryTier(tier).hours` | ✓ |
  * | `deliveryRates` | ⚠️ **没落库** —— 调用方给当前生效的那份 | 见下 |
- * | `totalPriceCents` | **四项之和** | ✓ |
+ * | `shippingOption` | `shipping_option` | ✓ |
+ * | `shippingFeeCents` | `shipping_fee_cents` | ✓ |
+ * | `shippingFees` | ⚠️ **没落库** —— 调用方给当前生效的那份 | 见下 |
+ * | `totalPriceCents` | **五项之和** | ✓ |
  *
- * ## ⚠️ `deliveryRates` 没落库
+ * ## ⚠️ `deliveryRates` / `shippingFees` 没落库
  *
- * `print_order` 只存了 `delivery_tier` + `delivery_fee_cents`(比例以后会改,
- * 工单上的价不能跟着变)。三档的比例是**当前**的那份 —— 调用方传进来。
+ * `print_order` 只存了 `delivery_tier` + `delivery_fee_cents` /
+ * `shipping_option` + `shipping_fee_cents`(比例 / 运费以后会改,工单上的价
+ * 不能跟着变)。三档的比例、三档的运费是**当前**的那份 —— 调用方传进来。
  *
- * ⚠️ 它**不参与定价**(加价金额已经算好、落库了)⇒ 只影响前端交期选择器的
+ * ⚠️ 它们**不参与定价**(金额已经算好、落库了)⇒ 只影响前端选择器的
  * **预览**。工单的价永远是行里那几个整数分。
  *
- * ## ⚠️ `totalPriceCents` 用**四项之和**,不用 `total_price_cents`
+ * ## ⚠️ `totalPriceCents` 用**五项之和**,不用 `total_price_cents`
  *
  * `total_price_cents` 存的是**优惠后净额**(减了 `coupon_discount_cents`),
- * 而对外报价的 `totalPriceCents` 是**优惠前**的四项之和 —— 优惠是**订单级**的,
+ * 而对外报价的 `totalPriceCents` 是**优惠前**的五项之和 —— 优惠是**订单级**的,
  * 不属于「报价」(见 CLAUDE.md「优惠码」那节)。两个数不是一回事。
  *
  * ⇒ 幂等命中时回 `payableCents = total_price_cents`(优惠后),
- * `quote.totalPriceCents = 四项之和`(优惠前)—— 跟第一次建单那份**完全一致**。
+ * `quote.totalPriceCents = 五项之和`(优惠前)—— 跟第一次建单那份**完全一致**。
  */
 export type StoredPrintOrderQuote = {
   /** 交期档位 */
   deliveryTier: DeliveryTierId;
+  /** 打印件数(2026-11-17)—— 老单是 1 */
+  quantity?: number | null;
+  /** 配送方式(2026-11-17)—— 老单是「顺丰到付」 */
+  shippingOption?: ShippingOptionId | null;
+  /** 运费(分)—— 老单是 0 */
+  shippingFeeCents?: number | null;
   /** 体积 cm³(Drizzle 的 `numeric` 列回来是**字符串**) */
   volumeCM3: string | number | null;
   /** 表面积 cm² */
@@ -186,12 +209,16 @@ function toNumber(value: string | number | null | undefined): number {
  *
  * @param row       工单那一行(只用到上面「字段对得上吗」那张表里的列)
  * @param deliveryRates 当前生效的三档加价比例(没落库,调用方给)
+ * @param shippingFees  当前生效的三档运费(没落库,调用方给)
  */
 export function buildPublicQuoteFromStoredOrder(
   row: StoredPrintOrderQuote,
-  deliveryRates: DeliveryRates
+  deliveryRates: DeliveryRates,
+  shippingFees: ShippingFees
 ): PublicPrintQuote {
+  const shippingOption = normalizeShippingOption(row.shippingOption);
   return {
+    quantity: row.quantity ?? 1,
     materialWeightG: toNumber(row.materialWeightG),
     supportWeightG:
       row.supportWeightG === null ? null : toNumber(row.supportWeightG),
@@ -206,11 +233,15 @@ export function buildPublicQuoteFromStoredOrder(
     deliveryTier: row.deliveryTier,
     deliveryHours: getDeliveryTier(row.deliveryTier).hours,
     deliveryRates,
-    /** 优惠**前**的四项之和 —— 跟 `computePrintQuote` 的算法一致 */
+    shippingOption,
+    shippingFeeCents: row.shippingFeeCents ?? 0,
+    shippingFees,
+    /** 优惠**前**的五项之和 —— 跟 `computePrintQuote` 的算法一致 */
     totalPriceCents:
       row.weightFeeCents +
       row.varnishFeeCents +
       row.supportFeeCents +
-      row.deliveryFeeCents,
+      row.deliveryFeeCents +
+      (row.shippingFeeCents ?? 0),
   };
 }

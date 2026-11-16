@@ -322,8 +322,12 @@ describe("支撑自动计算 —— 提交订单那条路不会收少了钱", ()
     // 用户刚拖进来就提交 → 这里现算一次
     expect(code).toContain("await ensureSupport()");
     // 算出来的支撑克重直接进报价输入 —— 服务端按它重算报价
-    expect(code).toContain(
-      "quote: { ...fresh, deliveryTier: values.deliveryTier }"
+    //
+    // ⚠️ **用正则,不用逐字匹配** —— 2026-11-17 之后这个对象里多了
+    // `quantity` / `shippingOption` 两项(件数 / 配送方式),Biome 会把
+    // 对象字面量折成多行 ⇒ 逐字匹配跨行字符串必挂。
+    expect(flat(code)).toMatch(
+      /quote: \{ \.\.\.fresh, deliveryTier: values\.deliveryTier,.*?quantity: values\.quantity,.*?shippingOption: values\.shippingOption,/
     );
   });
 

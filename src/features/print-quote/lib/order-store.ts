@@ -14,9 +14,10 @@
  * 时间线」放在一个事务里。
  */
 
+import { getDeliveryTier } from "@mooncoda/print-tool-core/quote/delivery-tier";
+import { normalizeShippingOption } from "@mooncoda/print-tool-core/quote/shipping-option";
 import { and, desc, eq, type SQL, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
-
 import { db } from "@/db";
 import {
   type PrintOrderEventRow,
@@ -25,8 +26,6 @@ import {
   type ShippingAddressSnapshot,
 } from "@/db/schema";
 import type { DbOrTx } from "@/features/gpt-image/lib/order-history";
-
-import { getDeliveryTier } from "@mooncoda/print-tool-core/quote/delivery-tier";
 import { appendPrintOrderEvent } from "./order-events";
 import type {
   PrintOrderEventActor,
@@ -88,8 +87,8 @@ export type CreatePrintOrderInput = {
    * 这一单优惠了多少(分)
    *
    * **`total_price_cents` 存的是应付净额**(= 报价合计 − 这个数)——
-   * 收银台就是按那一列收钱的。四个费用列(`weight` / `varnish` /
-   * `support` / `delivery`)存的是**折前**的,不动。
+   * 收银台就是按那一列收钱的。五个费用列(`weight` / `varnish` /
+   * `support` / `delivery` / `shipping`)存的是**折前**的,不动。
    */
   couponDiscountCents?: number | null;
 };
@@ -156,6 +155,8 @@ export async function createPrintOrder(
           input.quote.supportWeightG === null
             ? null
             : String(input.quote.supportWeightG),
+        // 件数(2026-11-17)—— 克重和钱都已经乘过件数,这一列只记「印了几件」
+        quantity: input.quote.quantity,
         materialDensity: String(input.quote.density),
         unitPriceCentsPerGram: input.quote.unitPriceCentsPerGram,
         weightFeeCents: input.quote.weightFeeCents,
@@ -163,6 +164,9 @@ export async function createPrintOrder(
         supportFeeCents: input.quote.supportFeeCents,
         deliveryTier: input.quote.deliveryTier,
         deliveryFeeCents: input.quote.deliveryFeeCents,
+        // 配送方式 + 运费(2026-11-17)—— **按单收**,不乘件数
+        shippingOption: input.quote.shippingOption,
+        shippingFeeCents: input.quote.shippingFeeCents,
         // 应付净额(2026-11-08)—— 收银台按这一列收钱
         totalPriceCents: payableCents,
         couponCode: input.couponCode ?? null,
@@ -520,6 +524,16 @@ export function toUserPrintOrder(row: PrintOrderRow): UserPrintOrder {
     orderNo: row.orderNo,
     status: row.status,
     modelFileName: row.modelFileName,
+    /**
+     * 件数(2026-11-17)
+     *
+     * 克重和钱都是**整单**的(已经乘过件数);运费不乘(「运费按单收取」)。
+     */
+    quantity: row.quantity,
+    /** 配送方式(2026-11-17)—— 跟 `deliveryTier`(交期档位)是两个正交的轴 */
+    shippingOption: normalizeShippingOption(row.shippingOption),
+    /** 运费(分)—— 按单收 */
+    shippingFeeCents: row.shippingFeeCents,
     materialWeightG: Number(row.materialWeightG),
     supportWeightG:
       row.supportWeightG === null ? null : Number(row.supportWeightG),

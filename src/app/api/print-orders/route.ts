@@ -28,6 +28,17 @@
  * 用 `computePrintQuote()` 重算一遍,落库的是重算结果。跟商城购物车
  * 每次加购都重算 `calculatePricing()` 是同一个道理:客户端能被改。
  *
+ * ## 件数 / 配送方式(2026-11-17)
+ *
+ * 工作室的两条原话:
+ *
+ * - 「同一模型打印多件;后处理按件计,不重复收起步价。」
+ * - 「配送方式 运费按单收取 顺丰到付…顺丰标快 ¥18…顺丰空运 ¥22」
+ *
+ * ⇒ **件数**乘进克重费 / 后处理费 / 支撑加价;**运费不乘**(按单收)。
+ * 两项都**改钱** ⇒ 两项都进幂等键(改任一个就是另一单,见
+ * `print-quote/lib/idempotency.ts`)。
+ *
  * ## 联系邮箱不采信客户端
  *
  * 邮箱一律取登录用户的账号邮箱。订单已经归属账号,没理由让客户端随便填 ——
@@ -68,6 +79,8 @@
  * (要打三件,不是要下三单),那靠**数量字段**解决 —— 数量进意图 ⇒ 键不同。
  */
 
+import { checkReliefTier } from "@mooncoda/print-tool-core/pricing/relief-detect";
+import { printCouponBaseCents } from "@mooncoda/print-tool-core/quote/coupon-base";
 import { after, type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
@@ -80,9 +93,7 @@ import {
 } from "@/features/coupon/lib/coupon-store";
 import { isR2Configured, objectExists } from "@/features/image-gen/lib/r2";
 import { isPaymentChannelEnabled } from "@/features/payments/lib/registry";
-import { checkReliefTier } from "@mooncoda/print-tool-core/pricing/relief-detect";
 import { getPrintOrderUser } from "@/features/print-quote/lib/auth";
-import { printCouponBaseCents } from "@mooncoda/print-tool-core/quote/coupon-base";
 import { computePrintOrderIdempotencyKey } from "@/features/print-quote/lib/idempotency";
 import { notifyPrintOrderCreated } from "@/features/print-quote/lib/notifications";
 import {
@@ -149,6 +160,27 @@ const orderSchema = z.object({
      * 不传 = 老客户端 ⇒ 按服务端自己判定的那一档走,不报错。
      */
     reliefKind: z.enum(["relief", "figurine"]).nullish(),
+    /**
+     * 打印件数(2026-11-17)
+     *
+     * 工作室的原话:「同一模型打印多件;后处理按件计,不重复收起步价。」
+     * ⇒ 克重费 / 后处理费 / 支撑加价都**按件**放大;**运费不乘**
+     * (「运费按单收取」)。
+     *
+     * ⚠️ **越界一律 400,不许夹取** —— 夹取会**静默少收钱**(用户要 5000 件,
+     * 服务端夹成 999 件,少收 4/5 的钱)。引擎那一层的夹取只是兜底。
+     */
+    quantity: z.number().int().min(1).max(999).nullish(),
+    /**
+     * 配送方式(2026-11-17)
+     *
+     * - `cod`      —— 顺丰到付(运费 ¥0)
+     * - `standard` —— 顺丰标快(¥18)
+     * - `air`      —— 顺丰空运(¥22)
+     *
+     * 不传 = 顺丰到付。传了不认识的 zod 会拒掉 —— 那是 400,不是「按最贵的算」。
+     */
+    shippingOption: z.enum(["cod", "standard", "air"]).nullish(),
   }),
   modelFileName: z.string().min(1).max(255),
   objectKey: z.string().min(1).max(512),
@@ -298,6 +330,9 @@ async function handle(request: NextRequest) {
     selfSupportRatio: parsed.data.quote.selfSupportRatio ?? null,
     deliveryTier: parsed.data.quote.deliveryTier ?? null,
     reliefKind: parsed.data.quote.reliefKind ?? null,
+    // 件数 / 配送方式(2026-11-17)—— 两项都**改钱**,所以必须在键里
+    quantity: parsed.data.quote.quantity ?? null,
+    shippingOption: parsed.data.quote.shippingOption ?? null,
     contactName: parsed.data.contactName,
     contactPhone: parsed.data.contactPhone ?? null,
     note: parsed.data.note ?? null,
@@ -356,6 +391,9 @@ async function handle(request: NextRequest) {
       selfSupportRatio: parsed.data.quote.selfSupportRatio ?? null,
       deliveryTier: parsed.data.quote.deliveryTier ?? null,
       reliefKind: parsed.data.quote.reliefKind ?? null,
+      // 件数 / 配送方式(2026-11-17)—— 不传就是「1 件 + 顺丰到付」
+      quantity: parsed.data.quote.quantity ?? null,
+      shippingOption: parsed.data.quote.shippingOption ?? null,
     },
     modelFileName: parsed.data.modelFileName,
     objectKey: parsed.data.objectKey,
@@ -468,7 +506,7 @@ async function handle(request: NextRequest) {
    * **在报价之后算,在建单之前算** —— 报价不认优惠(报价是「这活要多少料多少
    * 钱」,优惠是「这一单便宜多少」)。
    *
-   * 基数 = 报价合计 − 交期加价(加急费不参与优惠,跟运费一个待遇)。
+   * 基数 = 报价合计 − 交期加价 − 运费(加急费 / 寄件费都不参与优惠)。
    * 跟报价预览走的是**同一个** `printCouponBaseCents()` —— 两处各算一遍
    * 迟早对不上(用户会看到「预览减 ¥20、提交减 ¥18」)。
    */
@@ -477,7 +515,8 @@ async function handle(request: NextRequest) {
         code: parsed.data.couponCode,
         orderKind: "print",
         couponBaseCents: printCouponBaseCents(quote),
-        // 打印工单没有运费行 —— 免运费券在这儿会被直接拒掉
+        // 免运费券在打印侧**不适用**(scope 只能选 mall)—— 券在后台建的时候
+        // 就选不了 print / both ⇒ 这条路走不到「把运费置 0」
         shippingCents: 0,
         resolveUserId: async () => user.id,
       })
@@ -701,9 +740,9 @@ function isUniqueViolation(error: unknown): boolean {
  *
  * ⇒ 这条路**不调** `notifyPrintOrderCreated`,也**不调** `redeemCoupon`。
  *
- * ## `deliveryRates` 没落库 —— 现取一次
+ * ## `deliveryRates` / `shippingFees` 没落库 —— 现取一次
  *
- * 它只影响前端交期选择器的**预览**(加价金额早就算好、落库了)。
+ * 它们只影响前端交期 / 配送方式选择器的**预览**(加价、运费早就算好、落库了)。
  */
 async function respondWithExistingPrintOrder(
   row: PrintOrderRow,
@@ -715,7 +754,11 @@ async function respondWithExistingPrintOrder(
     {
       orderNo: row.orderNo,
       /** 对外形状 —— 单价一个字节都不出去(见 `quote-public.ts`) */
-      quote: buildPublicQuoteFromStoredOrder(row, settings.deliveryRates),
+      quote: buildPublicQuoteFromStoredOrder(
+        row,
+        settings.deliveryRates,
+        settings.shippingFees
+      ),
       /** 优惠码 —— null = 没用券 */
       couponCode: row.couponCode,
       /** 这一单减了多少(分) */

@@ -34,6 +34,8 @@
  * | `supportWeightG` | 支撑克重**参与定价**(支撑加价的分段) |
  * | `selfSupportRatio` | **参与定价** —— 支撑加价按它分段。⚠️ 它不落库,但它改一分,价就不同 ⇒ 必须在键里 |
  * | `deliveryTier` | 加急费是**加价** —— 换档位就是另一个价 |
+ * | `shippingOption` | 运费是**一笔钱** —— 换配送方式就是另一个价(2026-11-17) |
+ * | `quantity` | 件数**乘进克重和钱** —— 印 3 件跟印 1 件是两个价(2026-11-17) |
  * | `couponCode` | 换码就是另一个应付金额 |
  * | `reliefKind` | 不参与定价,但它是**自洽性凭据**(托底档位变了就该是另一单) |
  * | 联系信息 / 备注 / 收货地址 id | 订单事实的一部分 |
@@ -79,11 +81,17 @@
  */
 
 import { createHash } from "node:crypto";
-
-import { normalizeCouponCode } from "@/features/coupon/lib/coupon-calc";
 import type { ReliefKind } from "@mooncoda/print-tool-core/pricing/relief-detect";
-
-import { type DeliveryTierId, normalizeDeliveryTier } from "@mooncoda/print-tool-core/quote/delivery-tier";
+import {
+  type DeliveryTierId,
+  normalizeDeliveryTier,
+} from "@mooncoda/print-tool-core/quote/delivery-tier";
+import { normalizeQuantity } from "@mooncoda/print-tool-core/quote/quantity";
+import {
+  normalizeShippingOption,
+  type ShippingOptionId,
+} from "@mooncoda/print-tool-core/quote/shipping-option";
+import { normalizeCouponCode } from "@/features/coupon/lib/coupon-calc";
 
 /**
  * 意图的**版本号**
@@ -92,8 +100,12 @@ import { type DeliveryTierId, normalizeDeliveryTier } from "@mooncoda/print-tool
  *
  * ⚠️ 后果:升级之后,已经建过的单**再也命中不了**新键 ⇒ 用户重试会建出第二张
  * 单。⇒ **只在改了键的语义时才动它**;纯 bug 修复不动。
+ *
+ * **v2(2026-11-17)** —— 加了 `quantity` + `shippingOption` 两项(件数和配送
+ * 方式都改钱)。⇒ 老单的键**命中不了**新键 —— 这是**故意的**:老单是「1 件 +
+ * 顺丰到付」,跟新单不是同一份意图。
  */
-const INTENT_VERSION = "print-order-intent-v1";
+const INTENT_VERSION = "print-order-intent-v2";
 
 /** 体积 / 表面积:落库是 `numeric(12,4)` */
 const SCALE_VOLUME = 4;
@@ -126,6 +138,23 @@ export type PrintOrderIntent = {
   selfSupportRatio: number | null;
   /** 交期档位 */
   deliveryTier: DeliveryTierId | null | undefined;
+  /**
+   * 打印件数(2026-11-17)
+   *
+   * ⚠️ **必须在键里** —— 件数乘进克重和钱(印 3 件 ≠ 印 1 件)。
+   *
+   * 认不出来 / 越界 ⇒ 一律当 1 件(跟引擎 `quantity.ts` 一个口径)⇒ 跟老单
+   * 落在同一把键上。
+   */
+  quantity?: number | null;
+  /**
+   * 配送方式(2026-11-17)
+   *
+   * ⚠️ **必须在键里** —— 运费是一笔钱(¥0 / ¥18 / ¥22 三档)。
+   *
+   * 认不出来 ⇒ 顺丰到付(¥0),跟引擎 `shipping-option.ts` 一个口径。
+   */
+  shippingOption?: ShippingOptionId | null;
   /** 托底档位(浮雕 / 手办) */
   reliefKind: ReliefKind | null | undefined;
   /** 称呼 */
@@ -193,6 +222,12 @@ export function canonicalPrintOrderIntent(intent: PrintOrderIntent): string {
     // 认不出来的档位一律标准档(跟 `delivery-tier.ts` 一个口径)
     "tier",
     normalizeDeliveryTier(intent.deliveryTier),
+    // 件数(2026-11-17)—— 认不出来 / 越界一律 1 件(跟引擎 `quantity.ts` 一个口径)
+    "qty",
+    normalizeQuantity(intent.quantity),
+    // 配送方式(2026-11-17)—— 认不出来一律顺丰到付(¥0)
+    "ship",
+    normalizeShippingOption(intent.shippingOption),
     "relief",
     intent.reliefKind ?? null,
     "name",

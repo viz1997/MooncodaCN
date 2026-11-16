@@ -28,6 +28,8 @@
  * 对上话。统一读 `PrintQuote.status.*`。
  */
 
+import type { DeliveryTierId } from "@mooncoda/print-tool-core/quote/delivery-tier";
+import type { ShippingOptionId } from "@mooncoda/print-tool-core/quote/shipping-option";
 import { App, Button, Input, Modal, Select } from "antd";
 import {
   AlertTriangle,
@@ -56,7 +58,6 @@ import {
 } from "@/features/print-quote/admin/actions";
 import type { AdminPrintOrder } from "@/features/print-quote/admin/types";
 import { OrderTimeline } from "@/features/print-quote/components/order-timeline";
-import type { DeliveryTierId } from "@mooncoda/print-tool-core/quote/delivery-tier";
 import type { PrintOrderStats } from "@/features/print-quote/lib/order-store";
 import {
   PRINT_ORDER_STATUSES,
@@ -90,6 +91,18 @@ const DELIVERY_TIER_LABEL: Record<DeliveryTierId, string> = {
   standard: "标准",
   express: "加急",
   urgent: "特急",
+};
+
+/**
+ * 配送方式 → 中文名(2026-11-17)
+ *
+ * ⚠️ **跟交期档位是两个正交的轴** —— 交期管「多快发货」,配送方式管
+ * 「怎么寄」。后台两行分开摆,别合并成一个「档位」。
+ */
+const SHIPPING_OPTION_LABEL: Record<ShippingOptionId, string> = {
+  cod: "顺丰到付",
+  standard: "顺丰标快",
+  air: "顺丰空运",
 };
 
 export function PrintOrdersAdminView() {
@@ -436,6 +449,12 @@ export function PrintOrdersAdminView() {
                     <td className="px-3 py-2 max-w-40">
                       <span className="block truncate text-xs">
                         {o.modelFileName}
+                        {/* 件数(2026-11-17)—— 只在多件时摆个角标,免得一行太挤 */}
+                        {o.quantity > 1 ? (
+                          <span className="ml-1 rounded bg-violet-500/10 px-1 py-0.5 text-[10px] text-violet-600">
+                            ×{o.quantity}
+                          </span>
+                        ) : null}
                       </span>
                     </td>
                     <td className="px-3 py-2 text-right font-mono text-xs whitespace-nowrap">
@@ -695,6 +714,11 @@ export function PrintOrdersAdminView() {
                     : `${detail.supportWeightG.toFixed(2)} g`
                 }
               />
+              {/**
+               * 件数(2026-11-17)—— **下面那些克重和钱都是整单的**
+               * (已经乘过件数);**运费不乘**(「运费按单收取」)。
+               */}
+              <InfoRow label="件数" value={`${detail.quantity} 件`} />
               <InfoRow
                 label="克重费"
                 value={formatCurrency(detail.weightFeeCents / 100)}
@@ -718,7 +742,23 @@ export function PrintOrdersAdminView() {
                 label="交期加价"
                 value={formatCurrency(detail.deliveryFeeCents / 100)}
               />
-              {/* 优惠(2026-11-08)—— 上面四行是折前的,合计是净额,中间差的就是这一行 */}
+              {/**
+               * 配送方式 + 运费(2026-11-17)
+               *
+               * ⚠️ **跟上面的「交期」是两个正交的轴** —— 交期管「多快发货」,
+               * 配送方式管「怎么寄」。运费**按单收,不乘件数**。
+               */}
+              <InfoRow
+                label="配送方式"
+                value={
+                  SHIPPING_OPTION_LABEL[detail.shippingOption] ?? "顺丰到付"
+                }
+              />
+              <InfoRow
+                label="运费"
+                value={formatCurrency(detail.shippingFeeCents / 100)}
+              />
+              {/* 优惠(2026-11-08)—— 上面几行是折前的,合计是净额,中间差的就是这一行 */}
               {detail.couponDiscountCents > 0 ? (
                 <InfoRow
                   label={

@@ -293,8 +293,13 @@ export function checkCouponApplicable(
   }
 
   // ⑥ 这张单用不了这种券
-  //    打印工单没有运费行 —— 它的 `delivery_fee_cents` 是**交期加价**
-  //    (加急费),不是运费。免运费券在这儿没有意义。
+  //    免运费券**在打印侧不适用** —— 后台建券时 `scope` 只能选 `mall`
+  //    (选不了 print / both)⇒ 正常走不到这一档。
+  //    这一条是**兜底**:scope 是 `print` / `both` 的免运费券(手改 DB / 旧数据)
+  //    会从 ⑤ 放过来,在这一档被拒。
+  //    ⚠️ 2026-11-17 起打印工单**有**运费行了(`shipping_fee_cents`)——
+  //    但免运费券的口径仍然是「商城运费」,不覆盖工单的运费(工单的运费由
+  //    用户自己选「配送方式」那一档决定)。
   if (isFreeShippingCoupon(rule) && ctx.orderKind === "print") {
     return { ok: false, code: "COUPON_NOT_APPLICABLE" };
   }
@@ -396,8 +401,13 @@ export function computeCouponDiscount(
 /**
  * 这个码减免的**运费**(分)
  *
- * **只有免运费券非零。** 打印工单没有运费行(它的交期加价是加急费),
- * 所以免运费券用在打印工单上会被 `checkCouponApplicable` 拒掉。
+ * **只有免运费券非零。** 免运费券的口径是「**商城运费**」—— 后台建券时
+ * `scope` 只能选 `mall` ⇒ 用在打印工单上会被 `checkCouponApplicable` 拒掉
+ * (`COUPON_NOT_APPLICABLE`)。
+ *
+ * ⚠️ 2026-11-17 起打印工单**有**运费行了(`print_order.shipping_fee_cents`
+ * —— 顺丰到付 ¥0 / 顺丰标快 ¥18 / 顺丰空运 ¥22),但**免运费券不覆盖它**:
+ * 工单的运费走「配送方式」那一档(用户自己选),不是券能抵的。
  */
 export function computeCouponShippingDiscount(
   rule: CouponRule,

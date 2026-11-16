@@ -31,16 +31,16 @@
  * 跟写操作无关。这里只管「把值写进 DB」。
  */
 
+import type {
+  PrintPricingOverview,
+  PrintPricingSettings,
+} from "@mooncoda/print-tool-core/quote/pricing-settings";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import {
   describeDbError,
   isMissingPrintPricingTable,
 } from "@/features/print-quote/lib/db-error";
-import type {
-  PrintPricingOverview,
-  PrintPricingSettings,
-} from "@mooncoda/print-tool-core/quote/pricing-settings";
 import {
   deactivatePrintMaterial,
   getPrintPricingConfigRow,
@@ -164,6 +164,18 @@ const configSchema = z.object({
   deliveryExpressRate: z.number().min(0).max(1),
   /** 48 小时档加价比例(0~1,0.37 = 37%) */
   deliveryUrgentRate: z.number().min(0).max(1),
+  /**
+   * 配送方式三档运费(2026-11-17)
+   *
+   * 工作室的原话:「配送方式 运费按单收取 顺丰到付…顺丰标快 ¥18…顺丰空运
+   * ¥22」。
+   *
+   * ⚠️ **按单收,不乘件数** —— 跟上面那两个**加价比例**不是一回事:
+   * 加价比例是「小计的百分之多少」,运费是**绝对金额**。
+   */
+  shippingCodCents: z.number().int().min(0).max(1_000_000),
+  shippingStandardCents: z.number().int().min(0).max(1_000_000),
+  shippingAirCents: z.number().int().min(0).max(1_000_000),
   /**
    * 访客可见计价(2026-11-07)
    *
@@ -345,6 +357,10 @@ async function resolveConfigBase(): Promise<SavePrintPricingConfigInput> {
       supportBaseMarginMm: configRow.supportBaseMarginMm,
       deliveryExpressRate: configRow.deliveryExpressRate,
       deliveryUrgentRate: configRow.deliveryUrgentRate,
+      // 运费三档(2026-11-17)
+      shippingCodCents: configRow.shippingCodCents,
+      shippingStandardCents: configRow.shippingStandardCents,
+      shippingAirCents: configRow.shippingAirCents,
       allowGuestPricing: configRow.allowGuestPricing,
     };
   }
@@ -365,6 +381,10 @@ async function resolveConfigBase(): Promise<SavePrintPricingConfigInput> {
     supportBaseMarginMm: settings.supportBaseMarginMm,
     deliveryExpressRate: settings.deliveryRates.express,
     deliveryUrgentRate: settings.deliveryRates.urgent,
+    // 运费三档(2026-11-17)—— 绝对金额,按单收
+    shippingCodCents: settings.shippingFees.cod,
+    shippingStandardCents: settings.shippingFees.standard,
+    shippingAirCents: settings.shippingFees.air,
     allowGuestPricing: settings.allowGuestPricing,
   };
 }

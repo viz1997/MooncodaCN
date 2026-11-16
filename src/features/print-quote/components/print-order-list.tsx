@@ -76,6 +76,19 @@ export function PrintOrderList({ orders }: { orders: UserPrintOrder[] }) {
                 {t(`payment.status.${order.paymentStatus}`)}
               </span>
 
+              {/*
+                件数(2026-11-17)
+                ——
+                **只在 > 1 的时候摆** —— 一件是默认,摆「1 件」是噪音。多件才摆,
+                因为那正是买家需要知道「这单印了几件」的时候(收据里那几行费用
+                都是按件算的)。
+              */}
+              {order.quantity > 1 ? (
+                <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground ring-1 ring-inset ring-border">
+                  {t("quantity.value", { count: order.quantity })}
+                </span>
+              ) : null}
+
               <span className="font-mono text-[11px] text-muted-foreground">
                 {formatGrams(order.materialWeightG)}
                 {order.supportWeightG !== null

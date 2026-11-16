@@ -21,6 +21,18 @@
  * 付的钱,同样向上(见 `delivery-tier.ts`)。工作室的原话:「计价需要向上
  * 取整」。
  *
+ * ## 件数与运费(2026-11-17)
+ *
+ * 「同一模型打印多件」之后,这份报价是**整单**的:
+ *
+ * ```
+ * 克重费 × N + 后处理费 × N + 支撑加价 × N + 交期加价(按整单小计的比例)+ 运费(不乘 N)
+ * ```
+ *
+ * - **件数放大在「元」上做,取整还是只做一次** —— 见 `quantity.ts` 的文件头
+ * - **运费按单收** —— 工作室原话「运费按单收取」
+ * - **交期加价不用改公式** —— 它是整单小计的比例,小计变大它自动变大
+ *
  * ## 价格从哪儿来(2026-11-06)
  *
  * 以前是这个文件里的 `PRINT_QUOTE_CONFIG` —— 模块级常量,导入时读一次
@@ -50,7 +62,12 @@ import {
   normalizeDeliveryTier,
 } from "./delivery-tier";
 import type { PrintPricingSettings } from "./pricing-settings";
+import { normalizeQuantity, scaleYuanToCentsCeil } from "./quantity";
 import { yuanToCentsCeil } from "./rounding";
+import {
+  computeShippingFeeCents,
+  normalizeShippingOption,
+} from "./shipping-option";
 import type { PrintQuote, PrintQuoteInput, PrintSupportFeeBand } from "./types";
 
 /**
@@ -80,13 +97,22 @@ function toPricingConfig(settings: PrintPricingSettings): PricingConfig {
  * 当成「还没报价」处理,而不是「报价是 0」。
  *
  * @param settings 生效中的定价设置(后台配的,或兜底的 env / 默认值)
- * @param input    几何 + 支撑 + 交期档位
+ * @param input    几何 + 支撑 + 交期档位 + 件数 + 配送方式
  */
 export function computePrintQuote(
   settings: PrintPricingSettings,
   input: PrintQuoteInput
 ): PrintQuote | null {
   const config = toPricingConfig(settings);
+
+  // 件数(2026-11-17)—— 「同一模型打印多件」
+  //
+  // 引擎这一层是**兜底**:认不出来 / 越界 ⇒ 落到 1。**接口层用 zod 拒绝
+  // 越界**(返 400),不能指望这一层 —— 夹取会静默少收钱。
+  const quantity = normalizeQuantity(input.quantity);
+
+  // 配送方式(2026-11-17)—— 认不出来 ⇒ 顺丰到付(¥0)
+  const shippingOption = normalizeShippingOption(input.shippingOption);
 
   const useSupport = settings.supportEnabled;
   // 注意:`config.supportEnabled` 只是为了满足 PricingConfig 的字段要求 ——
@@ -104,9 +130,13 @@ export function computePrintQuote(
   //
   // **向上取整**(2026-11-08 工作室的要求)—— 见 `rounding.ts` 的文件头:
   // 计价一律向上取整到分,少收那一分钱就是真亏损。
-  const weightFeeCents = yuanToCentsCeil(result.weightFee);
-  const varnishFeeCents = yuanToCentsCeil(result.varnishFee);
-  const supportFeeCents = yuanToCentsCeil(result.supportFee);
+  //
+  // ⚠️ **件数是在「元」上乘的,取整还是只做一次**(见 `quantity.ts` 的文件头):
+  // `ceil(单件 × N × 100)`,不是 `ceil(单件 × 100) × N` —— 后者把每一件
+  // 的取整误差累积起来,系统性少收钱。
+  const weightFeeCents = scaleYuanToCentsCeil(result.weightFee, quantity);
+  const varnishFeeCents = scaleYuanToCentsCeil(result.varnishFee, quantity);
+  const supportFeeCents = scaleYuanToCentsCeil(result.supportFee, quantity);
 
   /**
    * 支撑加价的分段明细 —— 换到「分」
@@ -118,14 +148,19 @@ export function computePrintQuote(
    * **向上取整之后,各档加起来 ≥ 总额**(每一档都往上走了,加起来只会多)。
    * 多出来的那一两分**从最后一档开始往下扣**,扣到 0 就不扣了 —— 不会出现
    * 负数的一档。
+   *
+   * ⚠️ 放大件数之后这条不变式**依然成立**:`Σceil(N·bᵢ) ≥ ceil(N·Σbᵢ)`
+   * (左边是整数且 ≥ N·Σbᵢ,右边是 ≥ N·Σbᵢ 的最小整数)⇒ 差额永远 ≤ 0
+   * ⇒ 下面那个「从最后一档往下扣」的循环永远够扣。
    */
   const supportFeeBands: PrintSupportFeeBand[] = result.supportFeeBands.map(
     (band) => ({
       fromRatio: band.fromRatio,
       upToRatio: band.upToRatio,
+      // 单价**不乘件数** —— 单价是「每克多少钱」,跟印几件无关
       priceCentsPerGram: yuanToCentsCeil(band.price),
-      weightG: band.weightG,
-      feeCents: yuanToCentsCeil(band.fee),
+      weightG: band.weightG * quantity,
+      feeCents: scaleYuanToCentsCeil(band.fee, quantity),
     })
   );
   const sumOfBands = supportFeeBands.reduce(
@@ -143,6 +178,8 @@ export function computePrintQuote(
 
   // 交期加价 —— 按**小计**的比例收(见 delivery-tier.ts)。
   // 基数是三项基础费用之和,不是总价:加价不能把自己算进自己的基数。
+  //
+  // ⚠️ 小计是**整单**的 ⇒ 印 N 件时加急费自动变大(比例 × 整单小计)。
   const baseTotalCents = weightFeeCents + varnishFeeCents + supportFeeCents;
   const deliveryTier = normalizeDeliveryTier(input.deliveryTier);
   const deliveryFeeCents = computeDeliveryFeeCents(
@@ -151,9 +188,21 @@ export function computePrintQuote(
     settings.deliveryRates
   );
 
+  // 运费(2026-11-17)—— **按单收**,不乘件数(工作室原话「运费按单收取」)
+  //
+  // 费用来自服务端 settings(后台配的),客户端只能传档位 id ⇒ 篡改不了。
+  const shippingFeeCents = computeShippingFeeCents(
+    shippingOption,
+    settings.shippingFees
+  );
+
   return {
-    materialWeightG: result.materialWeight,
-    supportWeightG: input.supportWeightG ?? null,
+    quantity,
+    materialWeightG: result.materialWeight * quantity,
+    supportWeightG:
+      input.supportWeightG === null || input.supportWeightG === undefined
+        ? null
+        : input.supportWeightG * quantity,
     volumeCM3: input.volumeCM3,
     surfaceAreaCM2: input.surfaceAreaCM2,
     dims: input.dims,
@@ -162,12 +211,15 @@ export function computePrintQuote(
     weightFeeCents,
     varnishFeeCents,
     supportFeeCents,
-    excessSupportWeightG: result.excessSupportWeight,
+    excessSupportWeightG: result.excessSupportWeight * quantity,
     supportFeeBands,
     deliveryFeeCents,
     deliveryTier,
     deliveryHours: getDeliveryTier(deliveryTier).hours,
     deliveryRates: settings.deliveryRates,
-    totalPriceCents: baseTotalCents + deliveryFeeCents,
+    shippingOption,
+    shippingFeeCents,
+    shippingFees: settings.shippingFees,
+    totalPriceCents: baseTotalCents + deliveryFeeCents + shippingFeeCents,
   };
 }
