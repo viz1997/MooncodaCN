@@ -67,8 +67,8 @@ import type {
   MeshOptions,
   Vec3,
 } from "manifold-3d";
-import { FACE_FLAG } from "@/features/tools/lib/mesh/types";
-import { weldAndAnalyzeTopology } from "@/features/tools/lib/mesh/weld";
+import { FACE_FLAG } from "@mooncoda/print-tool-core/mesh/types";
+import { weldAndAnalyzeTopology } from "@mooncoda/print-tool-core/mesh/weld";
 import {
   detectFlatPatches,
   type MagnetFlatPatch,

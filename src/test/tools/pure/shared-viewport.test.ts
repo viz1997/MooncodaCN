@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeSupportAtPose,
   DEFAULT_SUPPORT_PARAMS,
-} from "@/features/pricing/lib/angle-optimizer";
+} from "@mooncoda/print-tool-core/pricing/angle-optimizer";
 import {
   POSE_EULER_ORDER,
   rotatedBBoxMinZ,
@@ -16,7 +16,7 @@ import {
   prepareSupportModel,
   rotateSupportMesh,
   SUPPORT_LIFT_MM,
-} from "@/features/tools/lib/mesh/support-shell";
+} from "@mooncoda/print-tool-core/mesh/support-shell";
 import { boxTriangles } from "@/test/tools/fixtures/mesh-fixtures";
 
 /**
@@ -88,8 +88,8 @@ const SETTINGS_PANEL =
 const CALCULATOR = "src/features/pricing/components/pricing-calculator.tsx";
 const CHECK_PANEL =
   "src/features/tools/components/model-check/model-check-panel.tsx";
-const ANGLE_OPTIMIZER = "src/features/pricing/lib/angle-optimizer.ts";
-const PROTOCOL = "src/features/pricing/lib/angle-optimizer-protocol.ts";
+const ANGLE_OPTIMIZER = "packages/print-tool-core/src/pricing/angle-optimizer.ts";
+const PROTOCOL = "packages/print-tool-core/src/pricing/angle-optimizer-protocol.ts";
 
 describe("共用视口 —— 两个视角用的是同一个组件", () => {
   it("克重那一栏 import 的是共享视口", () => {
@@ -553,7 +553,7 @@ describe("显示支撑 —— 模型自动置于平面,不会低过平面", () =
   });
 
   it("外壳的姿态标记一路传到视口(类型上带着)", () => {
-    const types = stripComments(read("src/features/tools/lib/mesh/types.ts"));
+    const types = stripComments(read("packages/print-tool-core/src/mesh/types.ts"));
 
     expect(types).toContain("pose?:");
     expect(types).toContain("rotX: number");

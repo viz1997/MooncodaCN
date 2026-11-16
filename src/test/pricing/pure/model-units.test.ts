@@ -27,18 +27,18 @@ import { describe, expect, it } from "vitest";
 import {
   computeSupportAtPose,
   DEFAULT_SUPPORT_PARAMS,
-} from "@/features/pricing/lib/angle-optimizer";
+} from "@mooncoda/print-tool-core/pricing/angle-optimizer";
 import {
   ASSUMED_MAX_EXTENT_MM,
   detectModelUnitScale,
   IMPLAUSIBLE_MM_EXTENT,
   measurePositionsSize,
   scalePositions,
-} from "@/features/pricing/lib/model-units";
+} from "@mooncoda/print-tool-core/weight/model-units";
 import {
   prepareSupportModel,
   scaleSupportModel,
-} from "@/features/tools/lib/mesh/support-shell";
+} from "@mooncoda/print-tool-core/mesh/support-shell";
 import { boxTriangles } from "@/test/tools/fixtures/mesh-fixtures";
 
 /* -------------------------------------------------------------------------- */

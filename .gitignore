@@ -84,3 +84,10 @@ supabase/.temp/
 # 插件脚本在仓库里 → 缓存绝不能入库。
 __pycache__/
 *.pyc
+
+# 打印引擎包的编译产物(2026-11-16)
+#
+# 主入口指向 **src/**(source-first)—— 仓库里跑的是 TS 源码,不用 build。
+# `dist/` 只有在「要发给别人 / 要装进 npm」时才生成:
+#   pnpm --filter @mooncoda/print-tool-core build
+packages/print-tool-core/dist/

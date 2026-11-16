@@ -26,7 +26,7 @@ import {
 } from "@/db/schema";
 import type { DbOrTx } from "@/features/gpt-image/lib/order-history";
 
-import { getDeliveryTier } from "./delivery-tier";
+import { getDeliveryTier } from "@mooncoda/print-tool-core/quote/delivery-tier";
 import { appendPrintOrderEvent } from "./order-events";
 import type {
   PrintOrderEventActor,

@@ -29,8 +29,8 @@ import {
   type DeliveryRates,
   getDeliveryTier,
   normalizeDeliveryTier,
-} from "@/features/print-quote/lib/delivery-tier";
-import type { PrintPricingSettings } from "@/features/print-quote/lib/pricing-settings";
+} from "@mooncoda/print-tool-core/quote/delivery-tier";
+import type { PrintPricingSettings } from "@mooncoda/print-tool-core/quote/pricing-settings";
 import { computePrintQuote } from "@/features/print-quote/lib/quote-server";
 
 /**

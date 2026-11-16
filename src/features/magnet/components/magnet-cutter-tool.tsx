@@ -132,7 +132,7 @@ import {
   measurePositionsSize,
   scalePositions,
   scalePositionsXYZ,
-} from "@/features/pricing/lib/model-units";
+} from "@mooncoda/print-tool-core/weight/model-units";
 import {
   buildModelZipBlob,
   downloadModelZip,

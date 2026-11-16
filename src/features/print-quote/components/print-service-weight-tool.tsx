@@ -66,8 +66,8 @@ import { PrintServiceQuoteDialog } from "@/features/print-quote/components/print
 import {
   DEFAULT_DELIVERY_TIER,
   type DeliveryTierId,
-} from "@/features/print-quote/lib/delivery-tier";
-import type { ClientPrintConfig } from "@/features/print-quote/lib/pricing-settings";
+} from "@mooncoda/print-tool-core/quote/delivery-tier";
+import type { ClientPrintConfig } from "@mooncoda/print-tool-core/quote/pricing-settings";
 import { printOrderErrorMessageKey } from "@/features/print-quote/lib/print-order-error";
 import type { PrintQuoteInput } from "@/features/print-quote/lib/quote-types";
 import { computeModelUploadCacheKey } from "@/features/print-quote/lib/upload-cache";

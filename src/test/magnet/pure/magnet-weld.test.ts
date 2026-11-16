@@ -28,7 +28,7 @@ import {
   weldMagnetSoup,
   weldMagnetUntilClosed,
 } from "@/features/magnet/lib/magnet-weld";
-import { weldAndAnalyzeTopology } from "@/features/tools/lib/mesh/weld";
+import { weldAndAnalyzeTopology } from "@mooncoda/print-tool-core/mesh/weld";
 
 type V = [number, number, number];
 

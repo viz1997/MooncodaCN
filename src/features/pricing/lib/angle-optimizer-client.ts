@@ -15,17 +15,17 @@ import {
   type OptimalAngle,
   type SupportParams,
   type SupportPoseResult,
-} from "@/features/pricing/lib/angle-optimizer";
+} from "@mooncoda/print-tool-core/pricing/angle-optimizer";
 import type {
   AngleWorkerIn,
   AngleWorkerOut,
-} from "@/features/pricing/lib/angle-optimizer-protocol";
-import type { MeshCheckSummary } from "@/features/tools/lib/mesh/summary";
+} from "@mooncoda/print-tool-core/pricing/angle-optimizer-protocol";
+import type { MeshCheckSummary } from "@mooncoda/print-tool-core/mesh/summary";
 import {
   prepareSupportModel,
   type SupportModel,
   scaleSupportModel,
-} from "@/features/tools/lib/mesh/support-shell";
+} from "@mooncoda/print-tool-core/mesh/support-shell";
 
 type Pending = {
   resolve: (value: never) => void;

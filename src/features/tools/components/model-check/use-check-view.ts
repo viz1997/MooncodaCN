@@ -33,7 +33,7 @@ import type { ViewportVisibility } from "@/features/shared/components/model-view
 import {
   ISSUE_COLORS,
   type IssueCluster,
-} from "@/features/tools/lib/mesh/types";
+} from "@mooncoda/print-tool-core/mesh/types";
 import { useAnalyzer } from "./use-analyzer";
 
 /**

@@ -59,7 +59,7 @@ import type {
   CouponErrorCode,
   CouponView,
 } from "@/features/coupon/lib/coupon-calc";
-import type { DeliveryTierId } from "@/features/print-quote/lib/delivery-tier";
+import type { DeliveryTierId } from "@mooncoda/print-tool-core/quote/delivery-tier";
 import type {
   PrintQuoteInput,
   PublicPrintQuote,

@@ -10,13 +10,13 @@
  *   `analyzeNewMesh()`,功能不缺,只是分析期间界面会短暂无响应。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { analyzeNewMesh } from "@/features/tools/lib/mesh/analyze";
+import { analyzeNewMesh } from "@mooncoda/print-tool-core/mesh/analyze";
 import type {
   AnalysisResult,
   MessageRef,
   ProgressStage,
   WorkerOutMessage,
-} from "@/features/tools/lib/mesh/types";
+} from "@mooncoda/print-tool-core/mesh/types";
 
 export interface AnalyzerState {
   busy: boolean;

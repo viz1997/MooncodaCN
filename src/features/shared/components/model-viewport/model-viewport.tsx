@@ -80,14 +80,14 @@ import {
   ObjPreview,
   type PreviewContext,
 } from "@/features/shared/components/obj-preview/obj-preview";
-import { SUPPORT_LIFT_MM } from "@/features/tools/lib/mesh/support-shell";
+import { SUPPORT_LIFT_MM } from "@mooncoda/print-tool-core/mesh/support-shell";
 import {
   type AnalysisResult,
   FACE_FLAG,
   ISSUE_COLORS,
   SHELL_COLORS,
   type SupportShellData,
-} from "@/features/tools/lib/mesh/types";
+} from "@mooncoda/print-tool-core/mesh/types";
 
 export interface ViewportVisibility {
   flipped: boolean;

@@ -25,14 +25,14 @@
  * ## 为什么这个文件是纯的
  *
  * 它被服务端(报价引擎)和客户端(工具页)同时 import,所以**不能**在这里
- * import 任何服务端模块(`@/db` 会把 Node 代码拖进客户端 bundle)。
+ * import 任何服务端模块(数据库模块会把 Node 代码拖进客户端 bundle)。
  * 连库那一半在 `pricing-store.ts`。
  *
  * 纯的另一个好处:能进 `unit` project 跑单测(`src/test/` 下的 `pure` 目录),
  * 那里没有 DB。
  */
 
-import { DEFAULT_CONFIG } from "@/features/pricing/lib/pricing-engine";
+import { DEFAULT_CONFIG } from "../pricing/pricing-engine";
 
 import { DEFAULT_DELIVERY_RATES, type DeliveryRates } from "./delivery-tier";
 
@@ -237,6 +237,23 @@ export function toClientPrintConfig(
 /* -------------------------------------------------------------------------- */
 
 /**
+ * 读一个环境变量 —— **浏览器安全**
+ *
+ * 这个包要在**浏览器**里跑(工具页就在浏览器里算),而**纯浏览器环境里
+ * `process` 压根不存在** ⇒ 直接 `process.env[name]` 会抛 `ReferenceError`。
+ *
+ * ⇒ 一律走这个 helper:有 `process` 才读,没有就当「没配」。
+ *
+ * ⚠️ 这**不是**「SSR / 客户端渲染出两样东西」那类分支 —— `PRINT_*` 那些
+ * 变量**不是** `NEXT_PUBLIC_*`,打包器不会内联进浏览器包 ⇒ 浏览器里
+ * 读到的本来就是 `undefined`,跟这里的兜底一致。
+ */
+function readEnv(name: string): string | undefined {
+  if (typeof process === "undefined") return undefined;
+  return process.env?.[name];
+}
+
+/**
  * 读一个非负数字环境变量;非法或缺失时用 fallback。
  *
  * 不合法的值静默退回默认值而不是抛错 —— 报价服务挂掉比用错价格更糟,
@@ -245,7 +262,7 @@ export function toClientPrintConfig(
  * (这段是从 `quote-server.ts` 搬过来的 —— 那边现在只负责算价。)
  */
 function envNumber(name: string, fallback: number): number {
-  const raw = process.env[name];
+  const raw = readEnv(name);
   if (raw === undefined || raw === "") return fallback;
   const value = Number(raw);
   if (!Number.isFinite(value) || value < 0) return fallback;
@@ -259,7 +276,7 @@ function envNumber(name: string, fallback: number): number {
  * 这种值静默生效会让用户看到离谱的报价,比退回默认值危险。
  */
 function envRate(name: string, fallback: number): number {
-  const raw = process.env[name];
+  const raw = readEnv(name);
   if (raw === undefined || raw === "") return fallback;
   const value = Number(raw);
   if (!Number.isFinite(value) || value < 0 || value > 1) return fallback;
@@ -365,11 +382,11 @@ export function readPrintPricingFallback(): PrintPricingSettings {
       )
     ),
     supportTier2PriceCentsPerGram: supportTier2PriceCentsPerGram,
-    supportEnabled: process.env.PRINT_SUPPORT_ENABLED === "true",
+    supportEnabled: readEnv("PRINT_SUPPORT_ENABLED") === "true",
     varnishFeeCents: Math.round(
       envNumber("PRINT_VARNISH_FEE_CENTS", DEFAULT_CONFIG.varnishFee * 100)
     ),
-    varnishEnabled: process.env.PRINT_VARNISH_ENABLED !== "false",
+    varnishEnabled: readEnv("PRINT_VARNISH_ENABLED") !== "false",
     supportLiftMm: envNumber("PRINT_SUPPORT_LIFT_MM", 5),
     // 浮雕那档的托底(2026-11-15)—— 工作室:「浮雕模型不需要像手办模型5mm
     // 底部支撑,只需要1mm支撑」
@@ -388,7 +405,7 @@ export function readPrintPricingFallback(): PrintPricingSettings {
     },
     // 访客可见计价 —— **默认开**(工作室 2026-11-07:「现在不登录也允许
     // 计价显示」)。只有显式写 "false" 才关。
-    allowGuestPricing: process.env.PRINT_ALLOW_GUEST_PRICING !== "false",
+    allowGuestPricing: readEnv("PRINT_ALLOW_GUEST_PRICING") !== "false",
   };
 }
 

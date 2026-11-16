@@ -19,7 +19,7 @@
  *
  * ## 纯函数,零依赖
  *
- * 不引 `@/db`、不引 `server-only` ⇒ 客户端组件能安全 import,也能进
+ * 不引数据库、不引 `server-only` ⇒ 客户端组件能安全 import,也能进
  * `unit` project 跑单测(`src/test/pricing/pure/obj-text.test.ts`)。
  */
 

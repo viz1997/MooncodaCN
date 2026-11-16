@@ -40,7 +40,7 @@ import {
 import type {
   PrintPricingOverview,
   PrintPricingSettings,
-} from "@/features/print-quote/lib/pricing-settings";
+} from "@mooncoda/print-tool-core/quote/pricing-settings";
 import {
   deactivatePrintMaterial,
   getPrintPricingConfigRow,
@@ -507,6 +507,8 @@ export const adminDeletePrintMaterialAction = withAdminPricingAction(
  * 会被 Turbopack 注册成 server action,运行时引用一个不存在的类型绑定 →
  * ReferenceError,整个页面 500(见 `src/test/repo/pure/use-server-exports.test.ts`)。
  *
- * 界面从 `@/features/print-quote/lib/pricing-settings` 直接 import 那些类型
- * —— 那是纯类型模块,类型导入编译期就擦掉,不进 bundle。
+ * 界面从 `@mooncoda/print-tool-core/quote/pricing-settings` 直接 import
+ * 那些类型 —— 那是纯类型模块,类型导入编译期就擦掉,不进 bundle。
+ * (2026-11-16:引擎搬进那个包了 —— 应用侧那份 `pricing-store.ts` 还在,
+ * 它负责连库,类型在包里。)
  */

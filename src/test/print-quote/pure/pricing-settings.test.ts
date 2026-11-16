@@ -32,7 +32,7 @@ import {
   readPrintPricingFallback,
   resolvePrintPricingSettings,
   toClientPrintConfig,
-} from "@/features/print-quote/lib/pricing-settings";
+} from "@mooncoda/print-tool-core/quote/pricing-settings";
 
 /* -------------------------------------------------------------------------- */
 /*  手写的样例                                                                  */

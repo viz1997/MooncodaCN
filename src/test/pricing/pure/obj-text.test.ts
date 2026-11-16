@@ -3,7 +3,7 @@ import {
   decodeObjBytes,
   describeEmptyObjFile,
   sniffObjEncoding,
-} from "@/features/pricing/lib/obj-text";
+} from "@mooncoda/print-tool-core/parse/obj-text";
 
 /**
  * OBJ 文本的字节级读取 + 编码嗅探(2026-11-10)

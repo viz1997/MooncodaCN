@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_CONFIG } from "@/features/pricing/lib/pricing-engine";
+import { DEFAULT_CONFIG } from "@mooncoda/print-tool-core/pricing/pricing-engine";
 import { toPublicQuote } from "@/features/print-quote/lib/quote-public";
 import type { PrintQuote } from "@/features/print-quote/lib/quote-types";
 
@@ -64,13 +64,15 @@ function stripComments(src: string): string {
 }
 
 /** 成本引擎 —— ⛔ 不许进客户端 bundle */
-const PRICING_ENGINE = "src/features/pricing/lib/pricing-engine.ts";
+const PRICING_ENGINE = "packages/print-tool-core/src/pricing/pricing-engine.ts";
 /** 定价配置(读 DB / 环境变量的那一层)—— 同样只在服务端 */
-const PRICING_SETTINGS = "src/features/print-quote/lib/pricing-settings.ts";
+const PRICING_SETTINGS = "packages/print-tool-core/src/quote/pricing-settings.ts";
 /** 对外投影 */
 const QUOTE_PUBLIC = "src/features/print-quote/lib/quote-public.ts";
-/** 共享类型 */
+/** 共享类型(工单侧那份 —— 留在应用里) */
 const QUOTE_TYPES = "src/features/print-quote/lib/quote-types.ts";
+/** 报价类型(引擎那份 —— 2026-11-16 搬进包了) */
+const QUOTE_TYPES_CORE = "packages/print-tool-core/src/quote/types.ts";
 /** 工单落库 / 用户侧视图 */
 const ORDER_STORE = "src/features/print-quote/lib/order-store.ts";
 /** 服务端算价 */
@@ -165,10 +167,25 @@ function listSourceFiles(dir: string): string[] {
 const SRC_DIR = join(ROOT, "src");
 const ALL_SOURCE_FILES = listSourceFiles(SRC_DIR);
 
+/**
+ * 打印引擎包 —— pnpm workspace 成员
+ *
+ * 2026-11-16:引擎(几何 / 克重 / 报价)搬进这个包了。**这道防线必须认它**
+ * —— 否则客户端 import `@mooncoda/print-tool-core/pricing/pricing-engine`
+ * 会被当成「外部 npm 包」直接跳过 ⇒ 「客户端走不到成本引擎」永远通过
+ * ⇒ **成本字面量进 bundle 了都没人发现**。
+ */
+const CORE_PKG_DIR = join(ROOT, "packages/print-tool-core/src");
+const CORE_PKG_SPEC = "@mooncoda/print-tool-core";
+
 /** 把 import 说明符解析成仓库里的绝对路径;解析不了(外部包)返回 null */
 function resolveImport(fromFile: string, spec: string): string | null {
   let base: string;
-  if (spec.startsWith("@/")) {
+  if (spec.startsWith(`${CORE_PKG_SPEC}/`)) {
+    base = join(CORE_PKG_DIR, spec.slice(CORE_PKG_SPEC.length + 1));
+  } else if (spec === CORE_PKG_SPEC) {
+    base = join(CORE_PKG_DIR, "index");
+  } else if (spec.startsWith("@/")) {
     base = join(SRC_DIR, spec.slice(2));
   } else if (spec.startsWith(".")) {
     base = resolve(dirname(fromFile), spec);
@@ -359,7 +376,8 @@ describe("对外报价 —— 单价一个字节都不出去", () => {
   });
 
   it("`PublicPrintQuote` 排除的正是那三个成本字段", () => {
-    const code = stripComments(read(QUOTE_TYPES));
+    // 2026-11-16:引擎那份类型搬进包了 —— 白名单跟着搬
+    const code = stripComments(read(QUOTE_TYPES_CORE));
 
     expect(code).toContain("PublicPrintQuote");
     for (const field of [
@@ -369,6 +387,9 @@ describe("对外报价 —— 单价一个字节都不出去", () => {
     ]) {
       expect(code).toContain(field);
     }
+
+    // 应用侧**再导出一次** —— 已有 import 一个字都不用改
+    expect(stripComments(read(QUOTE_TYPES))).toContain("PublicPrintQuote");
   });
 
   it("投影是**逐字段写出来**的白名单(不许有 `...rest` 那种抄底)", () => {

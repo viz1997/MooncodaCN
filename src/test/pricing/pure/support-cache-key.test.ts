@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { supportCacheKey } from "@/features/pricing/lib/support-cache-key";
+import { supportCacheKey } from "@mooncoda/print-tool-core/pricing/support-cache-key";
 
 /**
  * 支撑缓存键(2026-11-10)

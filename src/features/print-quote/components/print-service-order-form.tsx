@@ -50,7 +50,7 @@ import { DeliveryTierPicker } from "@/features/print-quote/components/delivery-t
 import type {
   DeliveryRates,
   DeliveryTierId,
-} from "@/features/print-quote/lib/delivery-tier";
+} from "@mooncoda/print-tool-core/quote/delivery-tier";
 import { formatCents } from "@/features/print-quote/lib/format";
 import type { PublicPrintQuote } from "@/features/print-quote/lib/quote-types";
 import { Link } from "@/i18n/routing";

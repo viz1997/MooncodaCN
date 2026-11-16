@@ -30,7 +30,7 @@ import { ArrowRight, CircleAlert, CircleCheck } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Badge } from "@/components/ui/badge";
-import type { MeshCheckSummary } from "@/features/tools/lib/mesh/summary";
+import type { MeshCheckSummary } from "@mooncoda/print-tool-core/mesh/summary";
 
 /**
  * 状态徽标 —— 摆在模型卡片的标签行里

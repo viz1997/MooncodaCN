@@ -2617,7 +2617,7 @@ export const printOrder = pgTable(
      * - urgent   —— 48 小时,按小计的 37% 加收
      *
      * 加价是**比例**不是固定金额 —— 比例见
-     * `src/features/print-quote/lib/delivery-tier.ts`。
+     * `@mooncoda/print-tool-core/quote/delivery-tier.ts`。
      */
     deliveryTier: text("delivery_tier", {
       enum: ["standard", "express", "urgent"],

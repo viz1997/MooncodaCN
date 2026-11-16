@@ -36,14 +36,14 @@
 import {
   SUPPORT_LIFT_MM,
   SUPPORT_RELIEF_LIFT_MM,
-} from "@/features/tools/lib/mesh/support-shell";
-import type { OptimalAngle, SupportParams } from "./angle-optimizer";
+} from "@mooncoda/print-tool-core/mesh/support-shell";
+import type { OptimalAngle, SupportParams } from "@mooncoda/print-tool-core/pricing/angle-optimizer";
 import { AngleOptimizerClient } from "./angle-optimizer-client";
-import { computeMaterialWeight } from "./material-weight";
-import { detectModelUnitScale } from "./model-units";
+import { computeMaterialWeight } from "@mooncoda/print-tool-core/weight/material-weight";
+import { detectModelUnitScale } from "@mooncoda/print-tool-core/weight/model-units";
 import { parseObjInWorker } from "./obj-worker-client";
-import { scaleGeometry } from "./pricing-geometry";
-import { detectReliefKind, reliefLiftMm } from "./relief-detect";
+import { scaleGeometry } from "@mooncoda/print-tool-core/weight/pricing-geometry";
+import { detectReliefKind, reliefLiftMm } from "@mooncoda/print-tool-core/pricing/relief-detect";
 import {
   extractModelZip,
   type ModelFile,

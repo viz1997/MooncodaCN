@@ -33,6 +33,8 @@
     ],
     "paths": {
       "@/*": ["./src/*"],
+      "@mooncoda/print-tool-core": ["./packages/print-tool-core/src/index.ts"],
+      "@mooncoda/print-tool-core/*": ["./packages/print-tool-core/src/*"],
       "motion/react": ["./src/features/canvas/components/ui/motion-shim"],
       "radix-ui": ["./src/features/canvas/components/ui/radix-ui-shim"],
       "@ant-design/pro-components": [

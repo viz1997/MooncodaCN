@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { analyzeNewMesh } from "@/features/tools/lib/mesh/analyze";
-import { summarizeTopology } from "@/features/tools/lib/mesh/summary";
-import type { RawMesh } from "@/features/tools/lib/mesh/types";
-import { weldAndAnalyzeTopology } from "@/features/tools/lib/mesh/weld";
-import { evaluateWjp } from "@/features/tools/lib/mesh/wjp";
+import { analyzeNewMesh } from "@mooncoda/print-tool-core/mesh/analyze";
+import { summarizeTopology } from "@mooncoda/print-tool-core/mesh/summary";
+import type { RawMesh } from "@mooncoda/print-tool-core/mesh/types";
+import { weldAndAnalyzeTopology } from "@mooncoda/print-tool-core/mesh/weld";
+import { evaluateWjp } from "@mooncoda/print-tool-core/mesh/wjp";
 import {
   brokenMesh,
   hollowShell,

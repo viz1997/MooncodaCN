@@ -57,7 +57,7 @@ import {
   type DeliveryRates,
   type DeliveryTierId,
   getDeliveryTier,
-} from "./delivery-tier";
+} from "@mooncoda/print-tool-core/quote/delivery-tier";
 
 /**
  * 内部报价 → 对外报价

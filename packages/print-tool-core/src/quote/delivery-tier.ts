@@ -34,7 +34,7 @@
  * 各写一份迟早漂移(前端显示 37%、后端收 35%)。
  */
 
-import { ceilCents } from "@/features/print-quote/lib/rounding";
+import { ceilCents } from "./rounding";
 
 /* -------------------------------------------------------------------------- */
 /*  档位                                                                      */

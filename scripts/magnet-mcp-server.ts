@@ -94,7 +94,7 @@ import { writeObjFromSoup } from "@/features/magnet/lib/write-obj";
 import {
   detectModelUnitScale,
   measurePositionsSize,
-} from "@/features/pricing/lib/model-units";
+} from "@mooncoda/print-tool-core/weight/model-units";
 import {
   parseMtl,
   parseMtllibNames,
@@ -104,7 +104,7 @@ import {
 import {
   decodeObjBytes,
   describeEmptyObjFile,
-} from "@/features/pricing/lib/obj-text";
+} from "@mooncoda/print-tool-core/parse/obj-text";
 import { parseObjOnMainThread } from "@/features/pricing/lib/obj-worker-client";
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { listUserAddresses } from "@/features/address/queries";
 import { PrintServiceWeightTool } from "@/features/print-quote/components/print-service-weight-tool";
-import { toClientPrintConfig } from "@/features/print-quote/lib/pricing-settings";
+import { toClientPrintConfig } from "@mooncoda/print-tool-core/quote/pricing-settings";
 import { getPrintPricingSettings } from "@/features/print-quote/lib/pricing-store";
 import { getServerSession } from "@/lib/auth/server";
 

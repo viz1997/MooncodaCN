@@ -1,5 +1,7 @@
 packages:
   - .
+  # 打印引擎包 —— 可复用的纯计算(模型检测 / 克重 / 报价)
+  - packages/print-tool-core
 allowBuilds:
   '@parcel/watcher': true
   '@sentry/cli': true

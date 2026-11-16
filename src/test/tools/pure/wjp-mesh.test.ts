@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { analyzeNewMesh } from "@/features/tools/lib/mesh/analyze";
-import type { AnalysisResult, RawMesh } from "@/features/tools/lib/mesh/types";
-import { evaluateWjp } from "@/features/tools/lib/mesh/wjp";
+import { analyzeNewMesh } from "@mooncoda/print-tool-core/mesh/analyze";
+import type { AnalysisResult, RawMesh } from "@mooncoda/print-tool-core/mesh/types";
+import { evaluateWjp } from "@mooncoda/print-tool-core/mesh/wjp";
 import {
   brokenMesh,
   hollowShell,

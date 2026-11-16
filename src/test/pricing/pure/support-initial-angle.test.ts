@@ -1,11 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DEFAULT_SUPPORT_PARAMS } from "@/features/pricing/lib/angle-optimizer";
+import { DEFAULT_SUPPORT_PARAMS } from "@mooncoda/print-tool-core/pricing/angle-optimizer";
 import { AngleOptimizerClient } from "@/features/pricing/lib/angle-optimizer-client";
 import { handleAngleWorkerMessage } from "@/features/pricing/lib/angle-optimizer-handler";
 import type {
   AngleWorkerIn,
   AngleWorkerOut,
-} from "@/features/pricing/lib/angle-optimizer-protocol";
+} from "@mooncoda/print-tool-core/pricing/angle-optimizer-protocol";
 import {
   type BatchItem,
   type BatchResult,

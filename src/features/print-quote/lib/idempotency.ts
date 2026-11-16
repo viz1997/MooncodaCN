@@ -81,9 +81,9 @@
 import { createHash } from "node:crypto";
 
 import { normalizeCouponCode } from "@/features/coupon/lib/coupon-calc";
-import type { ReliefKind } from "@/features/pricing/lib/relief-detect";
+import type { ReliefKind } from "@mooncoda/print-tool-core/pricing/relief-detect";
 
-import { type DeliveryTierId, normalizeDeliveryTier } from "./delivery-tier";
+import { type DeliveryTierId, normalizeDeliveryTier } from "@mooncoda/print-tool-core/quote/delivery-tier";
 
 /**
  * 意图的**版本号**

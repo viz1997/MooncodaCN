@@ -31,7 +31,7 @@ import {
   repairMagnetGeometry,
   splitMagnetVertices,
 } from "@/features/magnet/lib/magnet-repair";
-import { weldAndAnalyzeTopology } from "@/features/tools/lib/mesh/weld";
+import { weldAndAnalyzeTopology } from "@mooncoda/print-tool-core/mesh/weld";
 
 type V3 = [number, number, number];
 

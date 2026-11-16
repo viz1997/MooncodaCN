@@ -27,6 +27,8 @@ export default defineConfig({
         "src/features/**/*.ts",
         "src/lib/**/*.ts",
         "src/config/**/*.ts",
+        // 打印引擎包(2026-11-16)—— 引擎搬出去了,覆盖率也得跟上
+        "packages/print-tool-core/src/**/*.ts",
       ],
       exclude: [
         "node_modules/",
@@ -53,6 +55,11 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": resolve(__dirname, "./src"),
+      // 打印引擎包(pnpm workspace 成员)—— 与 tsconfig 的 paths 同一份
+      "@mooncoda/print-tool-core": resolve(
+        __dirname,
+        "./packages/print-tool-core/src"
+      ),
     },
   },
 });

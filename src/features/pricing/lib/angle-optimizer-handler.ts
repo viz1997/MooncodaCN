@@ -12,16 +12,16 @@
 import {
   computeSupportAtPose,
   findOptimalAngle,
-} from "@/features/pricing/lib/angle-optimizer";
+} from "@mooncoda/print-tool-core/pricing/angle-optimizer";
 import type {
   AngleWorkerIn,
   AngleWorkerOut,
-} from "@/features/pricing/lib/angle-optimizer-protocol";
+} from "@mooncoda/print-tool-core/pricing/angle-optimizer-protocol";
 import {
   prepareSupportModel,
   type SupportModel,
   scaleSupportModel,
-} from "@/features/tools/lib/mesh/support-shell";
+} from "@mooncoda/print-tool-core/mesh/support-shell";
 
 /** 焊接好的模型 —— 按 modelId 存,主线程换模型时换 id */
 const models = new Map<string, SupportModel>();

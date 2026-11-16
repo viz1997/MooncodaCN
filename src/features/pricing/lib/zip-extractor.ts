@@ -28,8 +28,8 @@ import {
   type TextureDiagnostic,
   type TextureUrlMap,
 } from "./obj-materials";
-import type { ObjParseResult, Vec3 } from "./obj-parser";
-import { decodeObjBytes, describeEmptyObjFile } from "./obj-text";
+import type { ObjParseResult, Vec3 } from "@mooncoda/print-tool-core/parse/obj-parser";
+import { decodeObjBytes, describeEmptyObjFile } from "@mooncoda/print-tool-core/parse/obj-text";
 import { type ObjWorkerResult, parseObjInWorker } from "./obj-worker-client";
 import { loadUnrarWasm } from "./unrar-wasm-loader";
 

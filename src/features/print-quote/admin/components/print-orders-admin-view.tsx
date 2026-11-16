@@ -56,7 +56,7 @@ import {
 } from "@/features/print-quote/admin/actions";
 import type { AdminPrintOrder } from "@/features/print-quote/admin/types";
 import { OrderTimeline } from "@/features/print-quote/components/order-timeline";
-import type { DeliveryTierId } from "@/features/print-quote/lib/delivery-tier";
+import type { DeliveryTierId } from "@mooncoda/print-tool-core/quote/delivery-tier";
 import type { PrintOrderStats } from "@/features/print-quote/lib/order-store";
 import {
   PRINT_ORDER_STATUSES,

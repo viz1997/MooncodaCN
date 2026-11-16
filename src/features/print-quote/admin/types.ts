@@ -10,7 +10,7 @@ import type { PrintOrderRow } from "@/db/schema";
 import {
   type DeliveryTierId,
   getDeliveryTier,
-} from "@/features/print-quote/lib/delivery-tier";
+} from "@mooncoda/print-tool-core/quote/delivery-tier";
 import type {
   PrintOrderLocale,
   PrintOrderPaymentChannel,

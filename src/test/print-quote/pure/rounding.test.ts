@@ -23,7 +23,7 @@ import { describe, expect, it } from "vitest";
 import {
   ceilCents,
   yuanToCentsCeil,
-} from "@/features/print-quote/lib/rounding";
+} from "@mooncoda/print-tool-core/quote/rounding";
 
 describe("ceilCents", () => {
   it("有一丝零头就往上一分", () => {

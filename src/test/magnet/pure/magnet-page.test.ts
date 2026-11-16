@@ -104,7 +104,7 @@ const HUB = "src/features/tools/components/tools-hub.tsx";
 const REPAIR = "src/features/magnet/lib/magnet-repair.ts";
 const WELD = "src/features/magnet/lib/magnet-weld.ts";
 const LID = "src/features/magnet/lib/magnet-lid.ts";
-const MODEL_UNITS = "src/features/pricing/lib/model-units.ts";
+const MODEL_UNITS = "packages/print-tool-core/src/weight/model-units.ts";
 const BENCH_SHARED = "src/features/pricing/components/shared.tsx";
 
 describe("磁吸孔工具页面", () => {
@@ -378,7 +378,10 @@ describe("磁吸孔工具页面", () => {
     expect(tool).toContain("targetSizeText");
 
     // 走仓库那个**逐轴**缩放(打印工作台同一个函数)
-    expect(tool).toMatch(/from "@\/features\/pricing\/lib\/model-units"/);
+    // 2026-11-16:引擎搬进 `@mooncoda/print-tool-core` 包了 —— 断言跟着改
+    expect(tool).toMatch(
+      /from "@mooncoda\/print-tool-core\/weight\/model-units"/
+    );
     expect(tool).toContain("scalePositionsXYZ");
     expect(read(MODEL_UNITS)).toContain("scalePositionsXYZ");
 

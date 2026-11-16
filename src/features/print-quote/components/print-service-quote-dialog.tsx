@@ -76,7 +76,7 @@ import { PrintServiceQuotePreview } from "@/features/print-quote/components/prin
 import type {
   DeliveryRates,
   DeliveryTierId,
-} from "@/features/print-quote/lib/delivery-tier";
+} from "@mooncoda/print-tool-core/quote/delivery-tier";
 import type {
   PrintQuoteInput,
   PublicPrintQuote,

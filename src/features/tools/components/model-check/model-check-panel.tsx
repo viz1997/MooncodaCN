@@ -32,14 +32,14 @@
  */
 import { CircleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
-import type { ModelUnitCheck } from "@/features/pricing/lib/model-units";
+import type { ModelUnitCheck } from "@mooncoda/print-tool-core/weight/model-units";
 import type { ViewportVisibility } from "@/features/shared/components/model-viewport";
 import type {
   AnalysisResult,
   IssueCluster,
   MessageRef,
-} from "@/features/tools/lib/mesh/types";
-import { ISSUE_LABEL_KEYS } from "@/features/tools/lib/mesh/types";
+} from "@mooncoda/print-tool-core/mesh/types";
+import { ISSUE_LABEL_KEYS } from "@mooncoda/print-tool-core/mesh/types";
 import Sidebar from "./sidebar";
 
 /** 图例项 —— 跟 `use-check-view` 的 `LEGEND_ITEMS` 一个形状 */

@@ -2,7 +2,7 @@
  * 摆盘角度优化 —— 耗材克重报价计算器(PolyJet / WJP 全彩打印)
  *
  * 2026-11-02:**支撑体积改用模型检查工具的包裹支撑算法**
- * (`src/features/tools/lib/mesh/support-shell.ts`)。
+ * (`../mesh/support-shell.ts`)。
  *
  * ## 之前的问题
  *
@@ -70,8 +70,8 @@ import {
   prepareSupportModel,
   rotateSupportMesh,
   type SupportModel,
-} from "@/features/tools/lib/mesh/support-shell";
-import type { SupportShellData } from "@/features/tools/lib/mesh/types";
+} from "../mesh/support-shell";
+import type { SupportShellData } from "../mesh/types";
 
 export type OptimalAngle = {
   /** 绕 X 轴旋转角度（度） */

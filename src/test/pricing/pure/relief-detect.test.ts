@@ -6,7 +6,7 @@ import {
   RELIEF_THINNESS_RATIO,
   reliefLiftMm,
   resolveReliefKind,
-} from "@/features/pricing/lib/relief-detect";
+} from "@mooncoda/print-tool-core/pricing/relief-detect";
 
 /**
  * 浮雕 / 手办 —— 托底高度分两档(2026-11-15)

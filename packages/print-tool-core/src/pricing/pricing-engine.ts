@@ -39,8 +39,8 @@
 import {
   DEFAULT_MATERIAL_DENSITY,
   DEFAULT_SUPPORT_DENSITY,
-} from "@/features/pricing/lib/material-weight";
-import { isFiniteNum } from "@/features/pricing/lib/pricing-geometry";
+} from "../weight/material-weight";
+import { isFiniteNum } from "../weight/pricing-geometry";
 
 // ---------------------------------------------------------------------------
 // Types

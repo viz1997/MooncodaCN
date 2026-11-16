@@ -70,7 +70,7 @@ import type {
   PrintMaterialLite,
   PrintPricingOverview,
   PrintPricingSettings,
-} from "@/features/print-quote/lib/pricing-settings";
+} from "@mooncoda/print-tool-core/quote/pricing-settings";
 import { formatCents } from "@/lib/money";
 
 /* -------------------------------------------------------------------------- */

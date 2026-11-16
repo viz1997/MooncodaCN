@@ -38,7 +38,7 @@
  *
  * ## 纯函数,零依赖
  *
- * 不引 `@/db`、不引 `server-only` ⇒ 浏览器 bundle 和服务端路由都能 import,
+ * 不引数据库、不引 `server-only` ⇒ 浏览器 bundle 和服务端路由都能 import,
  * 也能进 vitest `unit` project 跑单测
  * (`src/test/pricing/pure/relief-detect.test.ts`)。
  */

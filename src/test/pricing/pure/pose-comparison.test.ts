@@ -4,7 +4,7 @@ import {
   describePose,
   poseSavingPct,
   weightPanelNumbers,
-} from "@/features/pricing/lib/pose-comparison";
+} from "@mooncoda/print-tool-core/pricing/pose-comparison";
 
 /**
  * 初始角度 vs 当前姿态 —— 支撑克重对比(2026-11-04)

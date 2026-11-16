@@ -151,6 +151,7 @@ pnpm migrate:apply-payment-channel   # 收款通道那几列
 # 资产准备 —— 产物提交进仓库,新克隆的机器不用跑
 pnpm magnet:wasm          # 把 manifold-3d 的 wasm 拷进 public/
 pnpm magnet:addon         # 把 Blender 桥接打成可安装的插件 zip
+pnpm print-tool:pack      # 把打印引擎打成 public/print-tool-core.zip(给别的项目复用)
 
 # 磁吸孔的 MCP 服务器(stdio)—— 让 AI 客户端直接切磁吸孔
 pnpm magnet:mcp
@@ -281,7 +282,7 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 
 ### 包裹支撑算法(检查视角 + 克重视角共用)
 
-`src/features/tools/lib/mesh/support-shell.ts` —— **两个视角算/画的是同一块支撑**:
+`packages/print-tool-core/src/mesh/support-shell.ts` —— **两个视角算/画的是同一块支撑**:
 打印前工作台(`/tools/workbench`)的「检查」视角画它,「克重」视角按它算克重。
 
 - `prepareSupportModel(positions)` → 焊接 + 拓扑(**姿态无关**,只做一次)
@@ -379,7 +380,7 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
   **单位** → 支撑比模型本身还高 → 耗材克重 0.001 g、支撑比例几万倍
   (实测比雄小狗 56,868%、猫 51,929%)。**页面上看不出任何异常** ——
   数字都「有」,就是离谱。
-- **判据在 `src/features/pricing/lib/model-units.ts` 的
+- **判据在 `packages/print-tool-core/src/weight/model-units.ts` 的
   `detectModelUnitScale()`** —— 看**最大边**:≥ 10mm 就算毫米(不动它),
   < 10mm 判成「坐标不是毫米」。用最大边不用最小边,是为了让**扁平模型**
   (冰箱贴 40×40×2mm)留在「按毫米算」那一档。
@@ -434,7 +435,7 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
 - **支撑克重没有校准面板**(2026-11-04):填充率 / 一键校准全删 —— 支撑是
   实心的,没有可调的旋钮;唯一能调的是**支撑密度**(在「材料参数」弹窗里跟
   模型密度分开填)。
-- 「省 X%」的算法在 `src/features/pricing/lib/pose-comparison.ts`
+- 「省 X%」的算法在 `packages/print-tool-core/src/pricing/pose-comparison.ts`
   (纯函数,不碰 React)。
 
 行为由 `src/test/tools/pure/support-shell.test.ts` 守住(几何 + 双密度 +
@@ -509,7 +510,7 @@ Switchable between OpenAI, DeepSeek, and MiMo via `AI_PROVIDER` env var. Optiona
   所以「页面显示的加价」一定等于「服务端收的加价」。前端不自己认一份比例。
 - **档位认不出来一律按标准档**(不按最贵的那档兜底)—— 客户端传
   `"URGENT "`(带空格)不能按特急收费。
-- 纯函数在 `src/features/print-quote/lib/delivery-tier.ts`,服务端在
+- 纯函数在 `packages/print-tool-core/src/quote/delivery-tier.ts`,服务端在
   `quote-server.ts`(`PRINT_QUOTE_CONFIG.deliveryRates`),UI 在
   `components/delivery-tier-picker.tsx`。
 - 落库两列:`print_order.delivery_tier`(档位)+ `delivery_fee_cents`(当时
@@ -1907,7 +1908,7 @@ wasm:
 
 - **两档模式** —— 尺寸面板上一个开关:`统一缩放`(单值「目标最大边」,老口径)
   / `X·Y·Z 分别调`(三个输入框)。切模式时**用当前尺寸填进去**,模型不跳。
-- **走仓库那份 `scalePositionsXYZ()`**(`src/features/pricing/lib/model-units.ts`)
+- **走仓库那份 `scalePositionsXYZ()`**(`packages/print-tool-core/src/weight/model-units.ts`)
   —— 跟 `/tools/workbench` 的尺寸编辑器**同一个函数**,不另写一份。
 - **孔径仍然是绝对毫米** —— 切刀是在**缩放后的空间**里摆的,所以「Ø20.7mm」
   在 20mm 和 2000mm 的模型上是**同样大小**的孔(孔是实物的尺寸,不是模型的比例)。
@@ -1973,7 +1974,7 @@ public/magnet/
 #### 三道闸(脚本没有,网页端必须有)
 
 **① 焊接走仓库唯一公开入口** —— `weldAndAnalyzeTopology(positions)`
-(`src/features/tools/lib/mesh/weld.ts`)。`weldVertices` 是模块私有的,拿不到。
+(`packages/print-tool-core/src/mesh/weld.ts`)。`weldVertices` 是模块私有的,拿不到。
 它返回的 `WeldedMesh` 字段**正好就是 manifold 要的形状**(`vertices` →
 `vertProperties`、`faceVertex` → `triVerts`),不用再转一次。
 
@@ -2069,10 +2070,10 @@ public/magnet/
 |---|---|
 | 拖放 | `src/features/shared/hooks/use-drop-zone.ts` 的 `useDropZone()` —— 仓库**强制**用它,自己写 `onDragOver` 那个写法就是会闪的那份 |
 | 解析 OBJ | `src/features/pricing/lib/zip-extractor.ts` 的 `extractModelZip()` |
-| 单位判定 | `src/features/pricing/lib/model-units.ts` 的 `detectModelUnitScale()` —— 7000mm 那个问题仓库已经解了 |
-| **XYZ 分别缩放** | `src/features/pricing/lib/model-units.ts` 的 `scalePositionsXYZ()` —— 跟 `/tools/workbench` 的尺寸编辑器**同一个函数** |
+| 单位判定 | `packages/print-tool-core/src/weight/model-units.ts` 的 `detectModelUnitScale()` —— 7000mm 那个问题仓库已经解了 |
+| **XYZ 分别缩放** | `packages/print-tool-core/src/weight/model-units.ts` 的 `scalePositionsXYZ()` —— 跟 `/tools/workbench` 的尺寸编辑器**同一个函数** |
 | 视口 | `src/features/shared/components/model-viewport/` 的 `ModelViewport` —— **整个仓库只有这一份视口**,别再写第二个 |
-| 焊接 / 拓扑 | `src/features/tools/lib/mesh/weld.ts` 的 `weldAndAnalyzeTopology()` |
+| 焊接 / 拓扑 | `packages/print-tool-core/src/mesh/weld.ts` 的 `weldAndAnalyzeTopology()` |
 | **导 ZIP** | `src/features/pricing/lib/obj-exporter.ts` 的 `downloadModelZip()` —— 别自己再写一套打包 |
 | **打包给本地 Blender** | `src/features/pricing/lib/obj-exporter.ts` 的 `buildModelZipBlob()` —— 同一个包,别再写一套 |
 
@@ -5069,6 +5070,115 @@ pnpm migrate:apply-print-pricing
 | `src/test/pricing/pure/support-cache-key.test.ts` | **托底也在键里** —— 换档位 ⇒ 旧支撑作废(不加就是**少收钱**) |
 | `src/test/print-quote/pure/pricing-settings.test.ts` | `supportReliefLiftMm` 的**逐字段**回退链 / 负数退回兜底(0 合法)/ `PRINT_SUPPORT_RELIEF_LIFT_MM` 环境变量那一档 / **两档托底都发给浏览器** |
 | `src/test/print-quote/pure/print-order-error.test.ts` | `RELIEF_TIER_MISMATCH` → 有专属的那一句(得告诉用户**下一步做什么**) |
+
+### 打印引擎包 `@mooncoda/print-tool-core`(2026-11-16)
+
+工作室的要求:**「整理这个模型检测、克重报价工具代码,打包,我其他地方需要
+复用这个工具代码」**。
+
+⇒ 模型检测 / 克重 / 报价三件事的**纯计算**部分搬进
+`packages/print-tool-core/`(pnpm workspace 成员)—— **搬,不是抄**。
+
+```
+packages/print-tool-core/
+├── package.json          # 名字 @mooncoda/print-tool-core,零依赖
+├── tsconfig.json         # strict 全开
+├── tsconfig.build.json   # 出 dist/ 用
+├── README.md             # API 说明
+└── src/
+    ├── index.ts          # 根 barrel
+    ├── parse/            # OBJ 解析 + 编码嗅探(UTF-8 / UTF-16)
+    ├── mesh/             # 焊接 / 拓扑分析 / 自检摘要 / 支撑外壳 / WJP 报告
+    ├── weight/           # 耗材克重 / 模型单位判定 / 几何估算
+    ├── pricing/          # 定价引擎 / 浮雕档位 / 智能摆盘 / 姿态对比 / 支撑缓存键
+    └── quote/            # 报价引擎 / 定价设置 / 交期档位 / 取整 / 优惠基数
+```
+
+#### 三条边界(**每一条都有单测守着**)
+
+| 规矩 | 不守会怎样 |
+|---|---|
+| **自包含** —— 包里的 import 只指包内(全相对路径) | 别的项目装上就编译不过(引不到本仓库的路径) |
+| **同构** —— 零 `node:` import、零 React / three.js | 浏览器 / Worker 里跑不起来 |
+| **零依赖** —— `package.json` 没有 `dependencies` | 别人装这个包要拖一堆东西进来 |
+
+⇒ 同一个包能在**浏览器**、**Node**、**Web Worker**里跑。
+
+#### 三处接线(少一处就有一边跑不起来)
+
+| 地方 | 写什么 |
+|---|---|
+| `tsconfig.json` 的 `paths` | `@mooncoda/print-tool-core` + `@mooncoda/print-tool-core/*` |
+| `vitest.config.ts` 的 `resolve.alias` | 同上(Vite 系的解析器**不读** tsconfig 的 paths) |
+| `pnpm-workspace.yaml` | `packages/print-tool-core` |
+
+> **tsconfig paths 优先于 node_modules** —— Next.js / Vite 都是这个口径 ⇒
+> 不会出现「双模块实例」;解析到的文件走**宿主项目**的 SWC 管线 ⇒
+> **不需要 `transpilePackages`**。
+
+#### 包是 **source-first** 的
+
+`main` / `types` 指的是 **`./src/index.ts`**,不是 `dist/` ⇒ **不用 build 就能用**。
+不设 `"type": "module"`(跟仓库的 CJS 口径一致)。要出真正的 JS 产物:
+`npx tsc -p tsconfig.build.json` ⇒ `dist/`,然后把 `main` / `types` 改过去。
+
+#### 搬走的 vs 留在原处的
+
+**搬进包**(引擎本体):`tools/lib/mesh/**` · `pricing/lib/{obj-parser,obj-text,
+angle-optimizer,angle-optimizer-protocol,pose-comparison,pricing-engine,
+relief-detect,support-cache-key,material-weight,model-units,pricing-geometry}.ts`
+· `print-quote/lib/{pricing-settings,delivery-tier,rounding,coupon-base}.ts`
++ 两个新的 `quote/{compute-quote,types}.ts`。
+
+**留在原处**(应用专属,跟界面 / 线程 / IO 绑着):`pricing/lib/{angle-optimizer-client,
+angle-optimizer-handler,obj-exporter,zip-extractor,batch-processor}.ts` ·
+`print-quote/lib/{quote-server,quote-types,pricing-store}.ts`。
+
+- **`quote-server.ts` / `quote-types.ts` 是壳** —— 它们 re-export 引擎 ⇒
+  **已有的 import 一个字都不用改**。
+- **搬走的是引擎,不是那些「跑起来」的部分** —— Worker 壳、客户端、导出、
+  连库的 store 都在应用侧。
+
+#### zip 产物 —— 「拷进别的项目」那条路(2026-11-16)
+
+工作室的交付形态是**一个 zip** —— 解开就是一个自包含的目录,拷进别的项目
+改一行 import 就能用,比走 npm 流程省事。
+
+```bash
+pnpm print-tool:pack   # = tsx scripts/build-print-tool-core-zip.ts
+# → public/print-tool-core.zip
+```
+
+- **一个真理源** —— zip 里的 `src/**` 就是 `packages/print-tool-core/src/**`,
+  构建时**原样拷**进去,不另写一份 ⇒ 不会出现「zip 里那份跟仓库里那份不是
+  一个东西」(单测逐个字节比)。
+- **构建是确定的** —— `fflate` 的 `zipSync` + **固定 mtime**
+  (`2026-01-01T00:00:00Z`)⇒ 同样的源码构建出**同样的字节**,git 里不会每次
+  都冒出「内容没变但文件变了」的改动。
+- **产物提交进仓库** —— 跟 `public/manifold.wasm` /
+  `public/magnet/mooncoda_magnet_bridge.zip` 一个道理:克隆下来就能用,
+  线上能直接下载。
+- **`.zip` 已经在 `src/proxy.ts` 的 matcher 排除名单里** ⇒
+  `/print-tool-core.zip` 不会被 next-intl 的 locale 前缀 307 劫持。
+- **`INSTALL.md` 是构建脚本生成的**(不是仓库那份 README)—— 讲的是
+  **「你怎么把它装进你自己的项目」**;仓库那份 README 讲的是
+  **「同一个仓库里怎么接线」**。两件事不一样。
+- **验证过「拷进去真能编译」** —— 解压到临时目录跑 `tsc --noEmit` ⇒ 零错误。
+
+#### 两条口径(改引擎之前先读)
+
+1. **金额一律「分」,一律向上取整** —— `quote/rounding.ts`。
+   `ceilCents()` / `yuanToCentsCeil()` 是唯一的两个入口(浮点误差用 `1e-9`
+   的 epsilon 挡掉,`-0` 归一化成 `+0`)。
+2. **服务端不信客户端带来的价** —— `computePrintQuote()` **只吃几何**
+   (体积 / 表面积 / 尺寸 / 支撑克重),价格永远由服务端那一份 `settings`
+   算出来。客户端报的单价一律不认。
+
+#### 行为由单测守住
+
+| 测试 | 守住什么 |
+|---|---|
+| `src/test/repo/pure/print-tool-core-package.test.ts` | 包的边界(自包含 / 同构 / 零依赖)/ 公开面(barrel + `exports`)/ 三处接线 / **搬走前的老路径全仓一个引用都不许剩** / **应用侧那几个文件还在原地** / **zip 跟包里的引擎逐个字节相同** / zip 里也有那两条口径 |
 
 ## Coding Conventions
 

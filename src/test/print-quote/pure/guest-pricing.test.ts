@@ -59,7 +59,7 @@ const ADMIN_VIEW =
   "src/features/print-quote/admin/components/print-pricing-admin-view.tsx";
 const ADMIN_ACTIONS = "src/features/print-quote/admin/pricing-actions.ts";
 const MIGRATION = "scripts/apply-print-pricing-schema.ts";
-const SETTINGS = "src/features/print-quote/lib/pricing-settings.ts";
+const SETTINGS = "packages/print-tool-core/src/quote/pricing-settings.ts";
 const STORE = "src/features/print-quote/lib/pricing-store.ts";
 const PREVIEW =
   "src/features/print-quote/components/print-service-quote-preview.tsx";
@@ -101,9 +101,14 @@ describe("访客可见计价 —— 后台那个开关", () => {
   it("回退链是「DB 配置行 → 环境变量 → 默认(开)」", () => {
     const code = stripComments(read(SETTINGS));
 
+    // 2026-11-16:引擎搬进 `@mooncoda/print-tool-core` 包了。
+    // 环境变量改走 `readEnv()` —— 那个包要在浏览器里跑,纯浏览器环境里
+    // `process` 压根不存在 ⇒ 直接 `process.env[...]` 会抛 `ReferenceError`。
     expect(code).toContain(
-      'allowGuestPricing: process.env.PRINT_ALLOW_GUEST_PRICING !== "false"'
+      'allowGuestPricing: readEnv("PRINT_ALLOW_GUEST_PRICING") !== "false"'
     );
+    // 兜底那个 helper 必须带 `typeof process` 守卫
+    expect(code).toContain('if (typeof process === "undefined")');
     expect(code).toContain(
       "configRow?.allowGuestPricing ?? fallback.allowGuestPricing"
     );

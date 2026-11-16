@@ -114,11 +114,11 @@ import {
   DimEditor,
   fmt,
 } from "@/features/pricing/components/shared";
-import type { SupportPoseResult } from "@/features/pricing/lib/angle-optimizer";
+import type { SupportPoseResult } from "@mooncoda/print-tool-core/pricing/angle-optimizer";
 import {
   type ModelUnitCheck,
   scalePositionsXYZ,
-} from "@/features/pricing/lib/model-units";
+} from "@mooncoda/print-tool-core/weight/model-units";
 import type { ModelFile } from "@/features/pricing/lib/zip-extractor";
 import {
   type MeshTextureInfo,

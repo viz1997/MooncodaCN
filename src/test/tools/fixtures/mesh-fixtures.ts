@@ -13,7 +13,7 @@
  * 所以:**产品里删掉演示 UI,夹具挪到测试目录**,只服务测试。
  * 几何与断言都没动过,搬家不改行为。
  */
-import type { RawMesh } from "@/features/tools/lib/mesh/types";
+import type { RawMesh } from "@mooncoda/print-tool-core/mesh/types";
 
 type Push = (
   a: readonly number[],

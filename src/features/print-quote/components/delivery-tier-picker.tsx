@@ -30,7 +30,7 @@ import {
   DELIVERY_TIERS,
   type DeliveryRates,
   type DeliveryTierId,
-} from "@/features/print-quote/lib/delivery-tier";
+} from "@mooncoda/print-tool-core/quote/delivery-tier";
 import { formatCents } from "@/features/print-quote/lib/format";
 
 export type DeliveryTierPickerProps = {

@@ -33,9 +33,9 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { evaluateCoupon } from "@/features/coupon/lib/coupon-service";
-import { checkReliefTier } from "@/features/pricing/lib/relief-detect";
+import { checkReliefTier } from "@mooncoda/print-tool-core/pricing/relief-detect";
 import { getPrintOrderUser } from "@/features/print-quote/lib/auth";
-import { printCouponBaseCents } from "@/features/print-quote/lib/coupon-base";
+import { printCouponBaseCents } from "@mooncoda/print-tool-core/quote/coupon-base";
 import { getPrintPricingSettings } from "@/features/print-quote/lib/pricing-store";
 import { toPublicQuote } from "@/features/print-quote/lib/quote-public";
 import { computePrintQuote } from "@/features/print-quote/lib/quote-server";

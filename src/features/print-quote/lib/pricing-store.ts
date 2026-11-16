@@ -36,7 +36,7 @@ import {
   type PrintPricingSettings,
   readPrintPricingFallback,
   resolvePrintPricingSettings,
-} from "./pricing-settings";
+} from "@mooncoda/print-tool-core/quote/pricing-settings";
 
 /** 配置行的固定 id —— 打印服务只有一套定价口径 */
 export const PRINT_PRICING_CONFIG_ID = "default";

@@ -4,7 +4,7 @@ import {
   DEFAULT_SUPPORT_PARAMS,
   findOptimalAngle,
   resolveSupportDensity,
-} from "@/features/pricing/lib/angle-optimizer";
+} from "@mooncoda/print-tool-core/pricing/angle-optimizer";
 import {
   buildSupportShell,
   computeSupportVolume,
@@ -12,7 +12,7 @@ import {
   rotateSupportMesh,
   SUPPORT_BASE_MARGIN_MM,
   scaleSupportModel,
-} from "@/features/tools/lib/mesh/support-shell";
+} from "@mooncoda/print-tool-core/mesh/support-shell";
 import {
   boxTriangles,
   hollowShell,

@@ -30,7 +30,7 @@
  * 支撑、克重、报价一起跟着重算(那条路已经是自洽的)。
  */
 
-import type { Vec3 } from "./obj-parser";
+import type { Vec3 } from "../parse/obj-parser";
 
 /**
  * 小于这个最大边就判定「文件坐标不是毫米」

@@ -57,7 +57,7 @@
  * 拿不到、也改不了。**不动它**(那个函数整个仓库都在用:工作台的检查、
  * 支撑体积、包围盒……),这里另写一份**只给磁吸孔用**的。
  */
-import { weldAndAnalyzeTopology } from "@/features/tools/lib/mesh/weld";
+import { weldAndAnalyzeTopology } from "@mooncoda/print-tool-core/mesh/weld";
 
 /** 包围盒 */
 interface Box {

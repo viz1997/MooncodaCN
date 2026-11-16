@@ -30,8 +30,8 @@ import { describe, expect, it } from "vitest";
  * 这几条都是纯函数的判断,写反例比在 dev 环境手动点便宜得多。
  */
 
-import { computeSupportFeeBands } from "@/features/pricing/lib/pricing-engine";
-import type { PrintPricingSettings } from "@/features/print-quote/lib/pricing-settings";
+import { computeSupportFeeBands } from "@mooncoda/print-tool-core/pricing/pricing-engine";
+import type { PrintPricingSettings } from "@mooncoda/print-tool-core/quote/pricing-settings";
 import { computePrintQuote } from "@/features/print-quote/lib/quote-server";
 
 /* -------------------------------------------------------------------------- */

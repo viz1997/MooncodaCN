@@ -5,11 +5,11 @@
  * 移植自 wjp-model-checker-source/src/workers/analyze.worker.ts,只改了 import 路径
  * 与消息体形状(直接传 positions + fileName,不再包一层 RawMesh)。
  */
-import { analyzeNewMesh } from "@/features/tools/lib/mesh/analyze";
+import { analyzeNewMesh } from "@mooncoda/print-tool-core/mesh/analyze";
 import type {
   WorkerInMessage,
   WorkerOutMessage,
-} from "@/features/tools/lib/mesh/types";
+} from "@mooncoda/print-tool-core/mesh/types";
 
 function post(msg: WorkerOutMessage) {
   (self as unknown as Worker).postMessage(msg);

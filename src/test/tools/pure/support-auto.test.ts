@@ -77,6 +77,11 @@ const SETTINGS_PANEL =
 const WEIGHT_TOOL =
   "src/features/print-quote/components/print-service-weight-tool.tsx";
 const QUOTE_SERVER = "src/features/print-quote/lib/quote-server.ts";
+/**
+ * 算价引擎 —— 2026-11-16 搬进 `@mooncoda/print-tool-core` 包了
+ * (`quote-server.ts` 现在只负责订单号 + 再导出一次)
+ */
+const COMPUTE_QUOTE = "packages/print-tool-core/src/quote/compute-quote.ts";
 
 describe("支撑自动计算 —— 跟着尺寸和姿态走", () => {
   it("支撑计算的依赖里**没有角度** —— 转模型不触发重算", () => {
@@ -263,11 +268,19 @@ describe("「置于平面」—— 一颗按钮把落座 + 重算支撑串成一
 
 describe("支撑自动计算 —— 提交订单那条路不会收少了钱", () => {
   it("服务端按 `supportWeightG` 重算报价,没这个数就是 0", () => {
-    const code = stripComments(read(QUOTE_SERVER));
+    const code = stripComments(read(COMPUTE_QUOTE));
 
     // 这就是为什么提交之前必须把支撑算出来 —— 少了它,支撑费收成 0
     expect(code).toContain(
       "supportWeight: useSupport ? (input.supportWeightG ?? 0) : 0"
+    );
+  });
+
+  it("应用侧那道壳**再导出一次**引擎 —— 已有 import 一个字都不用改", () => {
+    const code = stripComments(read(QUOTE_SERVER));
+
+    expect(code).toContain(
+      'export { computePrintQuote } from "@mooncoda/print-tool-core/quote/compute-quote"'
     );
   });
 

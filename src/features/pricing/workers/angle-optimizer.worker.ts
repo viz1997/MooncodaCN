@@ -21,7 +21,7 @@ import { handleAngleWorkerMessage } from "@/features/pricing/lib/angle-optimizer
 import type {
   AngleWorkerIn,
   AngleWorkerOut,
-} from "@/features/pricing/lib/angle-optimizer-protocol";
+} from "@mooncoda/print-tool-core/pricing/angle-optimizer-protocol";
 
 function post(msg: AngleWorkerOut) {
   (self as unknown as Worker).postMessage(msg);

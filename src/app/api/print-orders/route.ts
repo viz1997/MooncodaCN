@@ -80,9 +80,9 @@ import {
 } from "@/features/coupon/lib/coupon-store";
 import { isR2Configured, objectExists } from "@/features/image-gen/lib/r2";
 import { isPaymentChannelEnabled } from "@/features/payments/lib/registry";
-import { checkReliefTier } from "@/features/pricing/lib/relief-detect";
+import { checkReliefTier } from "@mooncoda/print-tool-core/pricing/relief-detect";
 import { getPrintOrderUser } from "@/features/print-quote/lib/auth";
-import { printCouponBaseCents } from "@/features/print-quote/lib/coupon-base";
+import { printCouponBaseCents } from "@mooncoda/print-tool-core/quote/coupon-base";
 import { computePrintOrderIdempotencyKey } from "@/features/print-quote/lib/idempotency";
 import { notifyPrintOrderCreated } from "@/features/print-quote/lib/notifications";
 import {

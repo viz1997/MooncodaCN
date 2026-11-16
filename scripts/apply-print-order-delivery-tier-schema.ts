@@ -9,7 +9,7 @@
  * ## 加价为什么落成两列
  *
  * 加价是**按比例**算出来的(见
- * `src/features/print-quote/lib/delivery-tier.ts`),但落库要落**当时的绝对
+ * `@mooncoda/print-tool-core/quote/delivery-tier.ts`),但落库要落**当时的绝对
  * 金额** —— 比例以后可能改(环境变量),工单上写的价不能跟着变。
  *
  * `delivery_tier` + `delivery_fee_cents` 两列一起存:

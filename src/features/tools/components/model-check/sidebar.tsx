@@ -24,12 +24,12 @@ import {
   type AnalysisResult,
   ISSUE_COLORS,
   type IssueCluster,
-} from "@/features/tools/lib/mesh/types";
+} from "@mooncoda/print-tool-core/mesh/types";
 import {
   evaluateWjp,
   type WjpSeverity,
   type WjpTone,
-} from "@/features/tools/lib/mesh/wjp";
+} from "@mooncoda/print-tool-core/mesh/wjp";
 
 interface SidebarProps {
   result: AnalysisResult | null;

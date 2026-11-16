@@ -112,7 +112,7 @@ import type {
   OptimalAngle,
   SupportParams,
   SupportPoseResult,
-} from "@/features/pricing/lib/angle-optimizer";
+} from "@mooncoda/print-tool-core/pricing/angle-optimizer";
 import { AngleOptimizerClient } from "@/features/pricing/lib/angle-optimizer-client";
 import {
   type BatchItem,
@@ -124,11 +124,11 @@ import {
   computeMaterialWeight,
   DEFAULT_MATERIAL_DENSITY,
   DEFAULT_SUPPORT_DENSITY,
-} from "@/features/pricing/lib/material-weight";
+} from "@mooncoda/print-tool-core/weight/material-weight";
 import {
   detectModelUnitScale,
   type ModelUnitCheck,
-} from "@/features/pricing/lib/model-units";
+} from "@mooncoda/print-tool-core/weight/model-units";
 import {
   downloadModelZip,
   downloadObjFile,
@@ -138,33 +138,33 @@ import {
   comparePoseSupport,
   describePose,
   weightPanelNumbers,
-} from "@/features/pricing/lib/pose-comparison";
-import { estimateEnvelopeGeometry } from "@/features/pricing/lib/pricing-geometry";
+} from "@mooncoda/print-tool-core/pricing/pose-comparison";
+import { estimateEnvelopeGeometry } from "@mooncoda/print-tool-core/weight/pricing-geometry";
 import {
   detectReliefKind,
   type ReliefMode,
   reliefLiftMm,
   resolveReliefKind,
-} from "@/features/pricing/lib/relief-detect";
-import { supportCacheKey } from "@/features/pricing/lib/support-cache-key";
+} from "@mooncoda/print-tool-core/pricing/relief-detect";
+import { supportCacheKey } from "@mooncoda/print-tool-core/pricing/support-cache-key";
 import {
   extractModelZip,
   type ModelFile,
   revokeModelTextureUrls,
 } from "@/features/pricing/lib/zip-extractor";
-import type { ClientPrintConfig } from "@/features/print-quote/lib/pricing-settings";
+import type { ClientPrintConfig } from "@mooncoda/print-tool-core/quote/pricing-settings";
 import type { PrintQuoteInput } from "@/features/print-quote/lib/quote-types";
 import { useDropZone } from "@/features/shared/hooks/use-drop-zone";
 import {
   MeshCheckBadge,
   MeshCheckIssues,
 } from "@/features/tools/components/mesh-check-badge";
-import type { MeshCheckSummary } from "@/features/tools/lib/mesh/summary";
+import type { MeshCheckSummary } from "@mooncoda/print-tool-core/mesh/summary";
 import {
   SUPPORT_BASE_MARGIN_MM,
   SUPPORT_LIFT_MM,
   SUPPORT_RELIEF_LIFT_MM,
-} from "@/features/tools/lib/mesh/support-shell";
+} from "@mooncoda/print-tool-core/mesh/support-shell";
 
 /** 页面可以有的三个模式 —— 打印工作台只开「上传」 */
 export type Mode = "upload" | "manual" | "batch";

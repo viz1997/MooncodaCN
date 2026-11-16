@@ -13,8 +13,8 @@ import type {
   OptimalAngle,
   SupportParams,
   SupportPoseResult,
-} from "@/features/pricing/lib/angle-optimizer";
-import type { MeshCheckSummary } from "@/features/tools/lib/mesh/summary";
+} from "./angle-optimizer";
+import type { MeshCheckSummary } from "../mesh/summary";
 
 /** 主线程 → Worker */
 export type AngleWorkerIn =

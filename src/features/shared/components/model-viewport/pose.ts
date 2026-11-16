@@ -8,7 +8,7 @@
  * 算的 —— 这种错在页面上完全看不出来,只会让工作室觉得「报价不准」。
  *
  * 摆盘那边转模型用的是 `rotateSupportMesh()`
- * (`features/tools/lib/mesh/support-shell.ts`),视口这边转的是 three.js 的
+ * (`@mooncoda/print-tool-core/mesh/support-shell.ts`),视口这边转的是 three.js 的
  * `rotation.order = "ZYX"`。三处必须指向同一个矩阵,否则对不上。
  *
  * 画面上的旋转由**旋转控制器**(`TransformControls`)拖出来 —— 它写的是
