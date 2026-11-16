@@ -28,7 +28,13 @@
  *   交期 / 优惠码 / 支付方式 + 提交
  *
  * 没登录时**不摆表单** —— 工单要挂在账号名下,模型文件也落到用户自己的 R2
- * 分区里。弹窗里给一个「去登录」入口。
+ * 分区里。但这一格**不是**一个把人赶走的「去登录」按钮,而是**就地登录**
+ * (`PrintServiceInlineSignIn`):访客可以先量(检查 / 克重 / 预估报价都不用
+ * 登录),点「报价」时在这里登录一下,登录完这一格自己变成下单表单 ——
+ * **模型还在内存里**(2026-11-16)。
+ *
+ * 底下那条「去登录」是给「手机号 + 验证码」和「忘了密码」用的 —— 那两条只能
+ * 走完整登录页(那一跳会离开这一页)。
  *
  * ## 报价状态住在这一层
  *
@@ -63,6 +69,7 @@ import type {
   CouponErrorCode,
   CouponView,
 } from "@/features/coupon/lib/coupon-calc";
+import { PrintServiceInlineSignIn } from "@/features/print-quote/components/print-service-inline-sign-in";
 import type { PrintServiceOrderValues } from "@/features/print-quote/components/print-service-order-form";
 import { PrintServiceOrderForm } from "@/features/print-quote/components/print-service-order-form";
 import { PrintServiceQuotePreview } from "@/features/print-quote/components/print-service-quote-preview";
@@ -255,18 +262,31 @@ export function PrintServiceQuoteDialog({
             onCancel={() => onOpenChange(false)}
           />
         ) : (
-          /* 没登录 —— 不摆表单(工单要挂在账号名下),给一个登录入口 */
+          /*
+           * 没登录 —— 不摆表单(工单要挂在账号名下),但**把登录摆在这一格**
+           *
+           * 2026-11-16:访客可以先量(检查 / 克重 / 预估报价都不用登录),
+           * 只有下单那一步要账号。所以这一格给的是**就地登录** —— 登录完
+           * 这一格自己变成下单表单,**模型还在内存里**。
+           *
+           * 底下那条「去登录」是给「手机号 + 验证码」和「忘了密码」用的
+           * —— 那两条只能走完整登录页(那一跳会离开这一页,弹窗里写清楚)。
+           */
           <div className="rounded-lg border border-border bg-muted/40 p-4">
-            <Link
-              href={signInUrl}
-              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
-            >
-              {t("entry.signInCta")}
-              <ArrowRight className="size-4" />
-            </Link>
-            <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
-              {t("entry.descSignIn")}
-            </p>
+            <PrintServiceInlineSignIn />
+
+            <div className="mt-4 border-t border-border pt-3">
+              <Link
+                href={signInUrl}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium transition-opacity hover:opacity-90"
+              >
+                {t("entry.signInCta")}
+                <ArrowRight className="size-4" />
+              </Link>
+              <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                {t("entry.signIn.altHint")}
+              </p>
+            </div>
           </div>
         )}
       </DialogContent>

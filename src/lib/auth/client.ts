@@ -140,6 +140,76 @@ export async function signInWithEmail(
   });
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// 就地登录(2026-11-16)
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * 就地登录用的**第二个**客户端 —— 懒创建
+ *
+ * ## 为什么不用上面那个 `authClient`
+ *
+ * 上面那个的 `baseURL` 是 `NEXT_PUBLIC_APP_URL`:
+ *
+ * - 环境变量没配 ⇒ 退成 `http://localhost:3000`(部署到别处就全错)
+ * - 配了但指向正式站 ⇒ 在预览部署里请求打到正式站,**cookie 种在正式站的
+ *   域名上**,当前站收不到 ⇒ 登录「成功」了但还是访客
+ *
+ * 就地登录必须在**当前这个源**上跑 —— cookie 得种在当前域名下。
+ * ⇒ `window.location.origin` 永远是准的。
+ *
+ * ## 为什么懒创建
+ *
+ * `"use client"` 的模块在 SSR 时**也会**跑一遍模块体 —— 模块顶层读
+ * `window` 会炸。放进函数里,就只在**点击那一刻**(浏览器里)执行。
+ */
+let inPlaceAuthClient: ReturnType<typeof createAuthClient> | null = null;
+
+function getInPlaceAuthClient() {
+  if (!inPlaceAuthClient) {
+    inPlaceAuthClient = createAuthClient({
+      baseURL: `${window.location.origin}/api/auth`,
+    });
+  }
+  return inPlaceAuthClient;
+}
+
+/**
+ * 就地登录 —— **不传 callbackURL**
+ *
+ * ## 为什么不传 callbackURL(这一条是整个「访客可先量」的关键)
+ *
+ * Better Auth 的 `/sign-in/email` 端点,body 里看到 `callbackURL` 就会:
+ *
+ * 1. 回一个 `Location` 头 + `{ redirect: true, url }`
+ * 2. 客户端插件看到 `data.redirect` ⇒ `window.location.href = data.url`
+ *
+ * ⇒ **整页跳转**。整页跳转会冲掉浏览器内存里的模型 —— 用户量了半天的
+ * 尺寸、姿态、支撑克重全没了(登录往返这种「接力」扛不住,仓库里那两个
+ * 模型接力模块就是这么删掉的)。
+ *
+ * 不传 `callbackURL` 的话:服务端**照样**种会话 cookie(那一步跟
+ * callbackURL 无关),但**不**触发跳转。cookie 种下之后由调用方决定怎么
+ * 继续 —— 打印工作台那边是 `router.refresh()`:让页面的 RSC 重跑一遍,新的
+ * 登录态 / 地址簿流下来,弹窗自己换成下单表单,**模型还在内存里**。
+ *
+ * @param email - 用户邮箱
+ * @param password - 用户密码
+ */
+export async function signInWithEmailInPlace(email: string, password: string) {
+  const client = getInPlaceAuthClient();
+  const result = await client.signIn.email({ email, password });
+  if (result.error) return result;
+
+  // 会话 cookie 已经种下 —— 再确认一次(同源,不受 NEXT_PUBLIC_APP_URL 影响)
+  try {
+    await client.getSession();
+  } catch {
+    // 拿不到不算失败 —— 下一步 `router.refresh()` 会让服务端重读 cookie
+  }
+  return result;
+}
+
 /**
  * 邮箱密码注册
  * @param email - 用户邮箱

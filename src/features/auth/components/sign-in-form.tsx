@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 
 import { resendVerificationEmail, signInWithEmail } from "@/lib/auth/client";
-
+import { resolvePostSignInUrlFromBrowser } from "../lib/post-sign-in-url";
 import { AuthErrorAlert } from "./auth-error-alert";
 import { SignInTabs } from "./sign-in-tabs";
 
@@ -14,76 +14,17 @@ import { SignInTabs } from "./sign-in-tabs";
 const LAST_SIGNIN_EMAIL_KEY = "auth:last-signin-email";
 
 /**
- * 安全 callbackUrl 校验（防 open redirect）：
- * - 必须以 / 开头（相对路径）
- * - 不允许 // 开头（协议相对 → 外站）
- * - 不允许 /\ 开头（部分浏览器会 normalize 成 //）
- * - 不允许带语言前缀的 callbackUrl 重复前缀（/zh/zh/...）—— 后续在硬跳转
- *   前补语言前缀时需要先剥掉
- */
-function isSafeCallbackPath(raw: string): boolean {
-  return raw.startsWith("/") && !raw.startsWith("//") && !raw.startsWith("/\\");
-}
-
-/**
- * 给路径补上语言前缀（避免跳到无前缀路由被 intlMiddleware 二次重定向）。
- * 已带 /en|/zh 前缀直接用。
- */
-function withLocalePrefix(raw: string): string {
-  const localeMatch = window.location.pathname.match(/^\/(en|zh)/);
-  const locale = localeMatch ? localeMatch[1] : "";
-  const hasLocalePrefix = /^\/(en|zh)(\/|$)/.test(raw);
-  if (hasLocalePrefix) return raw;
-  return locale ? `/${locale}${raw.startsWith("/") ? "" : "/"}${raw}` : raw;
-}
-
-/**
- * 登录后跳转目标 —— 优先级：
- * 1. ?callbackUrl=...（中间件踢过来 / 业务侧动态拼）
- * 2. document.referrer 同源相对路径（用户在公开页点登录按钮时来自哪里回哪里）
- * 3. /dashboard（兜底）
+ * 登录后跳转目标 —— 一份纯逻辑放在 `../lib/post-sign-in-url.ts`
  *
  * 2026-09-20：旧版 fallback 写死 /dashboard，导致从根 `/`、`/products`、
  * (marketing-atelier) 等公开页点登录按钮后被甩到 dashboard —— 跟用户
  * 原本想看的页（/image-gen 等）断了。改成读 referrer 后用户回到点登录前
  * 那一页，体验跟 callbackUrl 一致。
  *
- * referrer 校验走与 callbackUrl 同一套白名单：
- * - 同源（document.referrer startsWith window.location.origin）
- * - 路径必须过 isSafeCallbackPath
+ * 2026-11-16：这份逻辑挪进 `auth/lib/post-sign-in-url.ts` —— 手机号 +
+ * 验证码那条路(`phone-sign-in-form.tsx`)以前**写死** `/dashboard`,用户
+ * 从打印工作台用手机号登录就被甩走、量好的模型丢了。两边现在共用一份。
  */
-function resolvePostSignInUrl(): string {
-  if (typeof window === "undefined") return "/dashboard";
-
-  // 1) callbackUrl 优先
-  const rawCallback = new URLSearchParams(window.location.search).get(
-    "callbackUrl"
-  );
-  if (rawCallback && isSafeCallbackPath(rawCallback)) {
-    return withLocalePrefix(rawCallback);
-  }
-
-  // 2) referrer 兜底
-  const referrer = document.referrer;
-  if (referrer) {
-    try {
-      const refUrl = new URL(referrer);
-      if (refUrl.origin === window.location.origin) {
-        // 同源 → 用 refUrl.pathname + search + hash（带 query 跳回去，
-        // 比如 /image-gen?xxx 也保留）
-        const pathWithQuery = refUrl.pathname + refUrl.search + refUrl.hash;
-        if (isSafeCallbackPath(refUrl.pathname)) {
-          return withLocalePrefix(pathWithQuery);
-        }
-      }
-    } catch {
-      // referrer 解析失败 → 跳过
-    }
-  }
-
-  // 3) 兜底
-  return "/dashboard";
-}
 
 /**
  * 邮箱密码登录（2026-09-16：拆出来单独组件，挂到 SignInTabs 的 email slot）
@@ -172,7 +113,7 @@ function EmailSignInForm() {
         // 隐私模式 / 配额满时静默忽略，不阻塞登录
       }
       message.success(t("success"));
-      window.location.href = resolvePostSignInUrl();
+      window.location.href = resolvePostSignInUrlFromBrowser();
     } catch {
       setError(t("errors.invalidCredentials"));
       setIsLoading(false);

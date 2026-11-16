@@ -218,9 +218,12 @@ describe("打印服务直接建工单 —— 弹窗是入口,不是报价条", (
     expect(code).toContain('t("entry.quoteDialogTitle")');
   });
 
-  it("没登录给的是「去登录」,不是「加入购物袋」", () => {
+  it("没登录给的是「就地登录」,不是「加入购物袋」", () => {
     const code = stripComments(read(QUOTE_DIALOG));
 
+    // 2026-11-16:访客可以先量 —— 弹窗里那一格是**就地登录**,不是把人赶走
+    expect(code).toContain("<PrintServiceInlineSignIn");
+    // 底下那条「去登录」保留 —— 给手机号 + 验证码 / 忘了密码用
     expect(code).toContain('t("entry.signInCta")');
     expect(code).toContain("href={signInUrl}");
   });

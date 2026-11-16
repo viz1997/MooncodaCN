@@ -33,6 +33,18 @@
  * - **工具页不自己算价** —— 价格是服务端算的,工具页只出几何
  * - **模型不上传** —— 上传是**提交订单**的一部分,不是量重量的副产品
  *
+ * ## 访客可以先量(2026-11-16)
+ *
+ * 工作室的要求:**「用户不登陆也可以使用工具检测模型、克重等等,但是用户
+ * 点击报价下单需要引导用户登录」**。
+ *
+ * - **检查 / 克重 / 预估报价** —— 不用登录(访客可见计价由后台
+ *   `/admin/print-pricing` 的开关管着)
+ * - **下单** —— 要账号(工单挂在账号名下,模型落到用户自己的 R2 分区)
+ *
+ * 登录在报价弹窗里**就地**完成 —— 不是整页跳转 ⇒ **量好的模型不会丢**。
+ * 详见 `print-service-inline-sign-in.tsx`。
+ *
  * ## 为什么在商城路由组里
  *
  * `/tools/workbench` 在 `(marketing-atelier)` 下 —— 那一组挂着商城头部。
@@ -41,7 +53,7 @@
 
 import { Receipt } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AddressView } from "@/features/address/types";
 import { PricingCalculator } from "@/features/pricing/components/pricing-calculator";
@@ -126,6 +138,23 @@ export function PrintServiceWeightTool({
   const [addressId, setAddressId] = useState<string | null>(
     addresses[0]?.id ?? null
   );
+
+  /**
+   * 地址自动选中(2026-11-16)
+   *
+   * 访客在报价弹窗里**就地登录**之后,页面那层的 RSC 会重跑一遍 ⇒
+   * 地址簿**这时候才到**(`addresses` 从空变成有值)。而 `addressId` 是本
+   * 组件的 state —— 它的初始值 `addresses[0]?.id ?? null` 是在「还是访客」
+   * 的时候算的 ⇒ null。
+   *
+   * 不补这一下的话:登录完了表单里「收货地址」是空的,用户以为地址簿里没有
+   * 地址,其实**有**,只是没选中。
+   */
+  useEffect(() => {
+    if (addressId) return;
+    const first = addresses[0]?.id;
+    if (first) setAddressId(first);
+  }, [addresses, addressId]);
 
   /** 选中的收款通道 —— null = 让服务端挑第一个「开放了而且配好了」的 */
   const [channel, setChannel] = useState<string | null>(null);
@@ -319,9 +348,13 @@ export function PrintServiceWeightTool({
  *
  * ## 行为一个字没改
  *
- * 点开还是那个报价弹窗。弹窗里**未登录时摆「去登录」**(工单要挂在账号
+ * 点开还是那个报价弹窗。弹窗里**未登录时摆就地登录**(工单要挂在账号
  * 名下),但**预估价照样看得见** —— 访客可见计价是后台 `/admin/print-pricing`
  * 的开关管着的,别在出口上把它掐掉。
+ *
+ * 2026-11-16:访客**可以先量** —— 检查 / 克重 / 预估报价都不用登录。登录是
+ * 在**点「报价」之后**、在弹窗里**就地**完成的(不是整页跳转)⇒ 量好的模型
+ * 还在内存里,不用重来。
  */
 function QuoteButton({ onClick }: { onClick: () => void }) {
   const t = useTranslations("PrintQuote");

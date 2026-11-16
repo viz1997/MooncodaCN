@@ -9,6 +9,7 @@ import {
   signInWithPhone,
   verifyPhoneOtp,
 } from "@/lib/auth/client";
+import { resolvePostSignInUrlFromBrowser } from "../lib/post-sign-in-url";
 import { AuthErrorAlert } from "./auth-error-alert";
 import { PhoneInputRow } from "./phone-input-row";
 import { PhoneOtpInput } from "./phone-otp-input";
@@ -19,7 +20,9 @@ import { PhoneOtpInput } from "./phone-otp-input";
  *                       命中 PHONE_NUMBER_NOT_VERIFIED / PHONE_NUMBER_NOT_EXIST → 切 otp-sent。
  *                       命中 USER_NOT_FOUND → 切 otp-sent 并提示「该手机号未注册，将自动创建账号」。
  *   - "otp-sent"      OTP 已发送，显示 6 位输入框 + 倒计时。
- *                       verify → 自动 createUser + 建 session → 跳 /dashboard。
+ *                       verify → 自动 createUser + 建 session → 回用户来的地方
+ *                       (2026-11-16 起不再写死 /dashboard —— 带着
+ *                       `?callbackUrl=…` 进来的人要回那个页面,不然丢东西)。
  *                       失败超过上限 → 切回 password 提示用密码。
  *   - "reset-password" for 忘记密码链路（from settings）。与 sign-in 路径共用
  *                       PhoneInputRow + PhoneOtpInput，但 verify 完调 resetPassword。
@@ -125,9 +128,13 @@ export function PhoneSignInForm({ mode = "signin" }: { mode?: Mode }) {
         setIsLoading(false);
         return;
       }
-      // 登录成功 → 跳 dashboard
+      // 登录成功 → 回用户来的地方(2026-11-16)
+      //
+      // 以前这里写死 `/dashboard` —— 用户从打印工作台带着
+      // `?callbackUrl=/zh/tools/workbench` 进来,登录完被甩到控制台,
+      // **量好的模型全丢了**。现在跟邮箱那条路共用一份判断。
       message.success(t("success"));
-      window.location.href = "/dashboard";
+      window.location.href = resolvePostSignInUrlFromBrowser();
     } catch {
       setError(t("errors.invalidCredentials"));
       setIsLoading(false);
@@ -175,7 +182,7 @@ export function PhoneSignInForm({ mode = "signin" }: { mode?: Mode }) {
         return;
       }
       message.success(t("success"));
-      window.location.href = "/dashboard";
+      window.location.href = resolvePostSignInUrlFromBrowser();
     } catch {
       setError(tPhone("errors.verifyFailed"));
       setIsLoading(false);

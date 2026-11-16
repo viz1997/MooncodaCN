@@ -33,6 +33,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { evaluateCoupon } from "@/features/coupon/lib/coupon-service";
+import { checkReliefTier } from "@/features/pricing/lib/relief-detect";
 import { getPrintOrderUser } from "@/features/print-quote/lib/auth";
 import { printCouponBaseCents } from "@/features/print-quote/lib/coupon-base";
 import { getPrintPricingSettings } from "@/features/print-quote/lib/pricing-store";
@@ -84,6 +85,16 @@ const quoteInputSchema = z.object({
    * 响应里多一个 `couponError`(精确原因码),界面据此说人话。
    */
   couponCode: z.string().max(64).nullish(),
+  /**
+   * 托底档位(2026-11-15)—— `relief`(浮雕,托底 1mm)/ `figurine`(手办,托底 5mm)
+   *
+   * **这是「自洽性」的凭据,不是重算的依据** —— 服务端不重新算支撑体积
+   * (几何不上传),它拿的是 `supportWeightG`。所以这一项只用来跟服务端按
+   * `dims` 判定出来的那一档**对一下**。
+   *
+   * 不传 = 老客户端 ⇒ 按服务端自己判定的那一档走,不报错。
+   */
+  reliefKind: z.enum(["relief", "figurine"]).nullish(),
 });
 
 async function handle(request: NextRequest) {
@@ -138,7 +149,31 @@ async function handle(request: NextRequest) {
     supportWeightG: parsed.data.supportWeightG ?? null,
     selfSupportRatio: parsed.data.selfSupportRatio ?? null,
     deliveryTier: parsed.data.deliveryTier ?? null,
+    reliefKind: parsed.data.reliefKind ?? null,
   };
+
+  /**
+   * 托底档位的**自洽性检查**(2026-11-15)
+   *
+   * 客户端报的档位跟服务端按 `dims` 判定的那一档对不上 ⇒ 409。
+   *
+   * 只挡一个方向 —— 「报浮雕、但尺寸判定是手办」(托底低 ⇒ 支撑少 ⇒
+   * **少收支撑费**)。反过来(报手办、判成浮雕)是**多收**,放行。
+   *
+   * 老实客户端**撞不到**这道闸:它报的档位就是按同一组 `dims` 判出来的,
+   * 而且「浮雕」那一档在几何不像浮雕时是禁用的(用户点不着)。
+   */
+  const reliefTier = checkReliefTier(input.dims, input.reliefKind);
+  if (!reliefTier.ok) {
+    return NextResponse.json(
+      {
+        error: "RELIEF_TIER_MISMATCH",
+        message: "托底档位跟尺寸对不上,按手办那档算",
+        kind: reliefTier.kind,
+      },
+      { status: 409, headers: getRateLimitHeaders(rl) }
+    );
+  }
 
   // 价从哪儿来:后台 `/admin/print-pricing` 配的值(上面已经读过了)
   const quote = computePrintQuote(settings, input);
