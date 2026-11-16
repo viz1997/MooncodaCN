@@ -70,7 +70,11 @@ import {
 import type { ClientPrintConfig } from "@/features/print-quote/lib/pricing-settings";
 import { printOrderErrorMessageKey } from "@/features/print-quote/lib/print-order-error";
 import type { PrintQuoteInput } from "@/features/print-quote/lib/quote-types";
-import { uploadModelFile } from "@/features/print-quote/lib/upload-model";
+import { computeModelUploadCacheKey } from "@/features/print-quote/lib/upload-cache";
+import {
+  type UploadedModelFile,
+  uploadModelFile,
+} from "@/features/print-quote/lib/upload-model";
 import { toRequestError } from "@/features/shared/lib/request-error";
 import { useRouter } from "@/i18n/routing";
 
@@ -196,6 +200,58 @@ export function PrintServiceWeightTool({
   }, []);
 
   /**
+   * **上传结果缓存**(2026-11-16)
+   *
+   * ## 为什么要有
+   *
+   * 建单幂等(服务端那层)挡住了「建出两张工单」,但**上传**在它**前面**:
+   *
+   * ```
+   * 点提交 → ① 打包模型 → ② 直传 R2 → ③ POST /api/print-orders
+   * ```
+   *
+   * ② 每次都产生**一个新的 R2 对象** ⇒ 重复提交(网络卡了重试 / 手抖双击)
+   * 会**上传好几次**,前几次传上去的对象**留在桶里没人管**。
+   *
+   * 而工作室的桶**锁着对象**(`ObjectLockedByBucketPolicy` ⇒ 删不掉)⇒
+   * 孤儿文件**永久留在桶里**。⇒ 要**尽量不产生**。
+   *
+   * ## 缓存什么
+   *
+   * 上传**结果**(`publicUrl` / `objectKey` / `size` / `fileName`),**不是**
+   * 那个预签名 PUT URL —— 签名 10 分钟就过期,而 `publicUrl` 是**永久**地址
+   * ⇒ 缓存不会因为签名过期而失效。
+   *
+   * ## 键 = 「这份 zip 的内容」的指纹
+   *
+   * 见 `print-quote/lib/upload-cache.ts`(纯函数,能进 unit project 跑单测)。
+   * 换模型 / 改尺寸 ⇒ 键变 ⇒ 重新上传;**只是重试** ⇒ 键没变 ⇒ 复用。
+   */
+  const uploadCacheRef = useRef<{
+    key: string;
+    result: UploadedModelFile;
+  } | null>(null);
+
+  /**
+   * 打包 + 直传 R2 —— **同一个模型不传第二遍**
+   *
+   * ⚠️ 命中缓存时**不会**再走一遍「打包 ⇒ 问预签名 ⇒ PUT」⇒ 不会产生
+   * 第二个 R2 对象。
+   */
+  const uploadModelFileCached = useCallback(
+    async (payload: PricingModelPayload): Promise<UploadedModelFile> => {
+      const key = computeModelUploadCacheKey(payload);
+      const cached = uploadCacheRef.current;
+      if (cached && cached.key === key) return cached.result;
+
+      const result = await uploadModelFile(payload);
+      uploadCacheRef.current = { key, result };
+      return result;
+    },
+    []
+  );
+
+  /**
    * 提交订单
    *
    * 四步:① 算支撑 → ② 打包模型直传 R2 → ③ 服务端重算报价 + 建工单
@@ -231,7 +287,8 @@ export function PrintServiceWeightTool({
         }
 
         // 模型文件在这里才离开浏览器 —— 量重量的过程一个字节都没传
-        const uploaded = await uploadModelFile(model);
+        // (重试时**不重传** —— 同一个模型复用上一次的上传结果,不留孤儿文件)
+        const uploaded = await uploadModelFileCached(model);
 
         const response = await fetch("/api/print-orders", {
           method: "POST",
@@ -269,7 +326,7 @@ export function PrintServiceWeightTool({
         setPhase("idle");
       }
     },
-    [model, ensureSupport, locale, router, t]
+    [model, ensureSupport, uploadModelFileCached, locale, router, t]
   );
 
   return (

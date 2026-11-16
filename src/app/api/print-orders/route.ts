@@ -43,6 +43,29 @@
  *
  * 轮询比下单宽松得多:下单走 `strict`(3/min),轮询走 `printOrder`。
  * 同账号开 4 个标签页 ≈ 72/min,在限内 —— 但余量不大,看日志再调。
+ *
+ * ## 建单幂等(2026-11-16)
+ *
+ * 重复提交会建出**两张工单**,两张各有各的付款入口 ⇒ **用户可能付两次钱**。
+ * 客户端那道软闸(提交中禁用按钮 + 限流 3 次/分钟)挡不住 —— 网络卡了重试 /
+ * 双击 / 没看到跳转又点一次,都会过去。
+ *
+ * ⇒ 服务端按 **(用户, 幂等键)** 认单:
+ *
+ * - 键 = 「**除了上传产物以外的一切下单意图**」的**内容哈希**
+ *   (见 `print-quote/lib/idempotency.ts`)
+ * - 命中 ⇒ **返回第一次建的那张单**(200)—— 不重复发邮件、不重复记用券、
+ *   **不重建微信 Native 会话**(微信的 `code_url` 不能重建,第二次建会被拒)
+ * - 查表放在**通道检查 / 券判定 / 报价计算之前** —— 重试不该因为「券过期了」
+ *   「通道挂了」而失败
+ * - 数据库层面有**唯一索引**兜底 ⇒ 并发提交里只有一张能落库,另一张撞
+ *   `23505` ⇒ 回查那一行,把它返给用户
+ *
+ * ### ⚠️ 取舍:用户**故意**下两张一模一样的单,会被吞成一张
+ *
+ * 「一模一样」在钱的角度看就是同一单。要真下两张不同的单,改一项就行
+ * (换交期档位 / 换优惠码 / 改备注……)。「同一模型打印多件」是**另一个需求**
+ * (要打三件,不是要下三单),那靠**数量字段**解决 —— 数量进意图 ⇒ 键不同。
  */
 
 import { after, type NextRequest, NextResponse } from "next/server";
@@ -60,15 +83,20 @@ import { isPaymentChannelEnabled } from "@/features/payments/lib/registry";
 import { checkReliefTier } from "@/features/pricing/lib/relief-detect";
 import { getPrintOrderUser } from "@/features/print-quote/lib/auth";
 import { printCouponBaseCents } from "@/features/print-quote/lib/coupon-base";
+import { computePrintOrderIdempotencyKey } from "@/features/print-quote/lib/idempotency";
 import { notifyPrintOrderCreated } from "@/features/print-quote/lib/notifications";
 import {
   createPrintOrder,
+  findPrintOrderByIdempotencyKey,
   listUserPrintOrders,
   toUserPrintOrder,
 } from "@/features/print-quote/lib/order-store";
 import { createPrintOrderPayment } from "@/features/print-quote/lib/payment";
 import { getPrintPricingSettings } from "@/features/print-quote/lib/pricing-store";
-import { toPublicQuote } from "@/features/print-quote/lib/quote-public";
+import {
+  buildPublicQuoteFromStoredOrder,
+  toPublicQuote,
+} from "@/features/print-quote/lib/quote-public";
 import {
   computePrintQuote,
   generatePrintOrderNo,
@@ -82,6 +110,7 @@ import {
   createRateLimitResponse,
   getClientIp,
   getRateLimitHeaders,
+  type RateLimitResult,
 } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
@@ -215,18 +244,6 @@ async function handle(request: NextRequest) {
     );
   }
 
-  // 没配 R2 就没法收模型文件 —— 整条链路不可用,直接拒,
-  // 别让人下单成功之后工作室才发现文件没地方取
-  if (!isR2Configured()) {
-    return NextResponse.json(
-      {
-        error: "R2_NOT_CONFIGURED",
-        message: "文件存储未配置,暂时无法下单",
-      },
-      { status: 503 }
-    );
-  }
-
   let body: unknown;
   try {
     body = await request.json();
@@ -246,6 +263,69 @@ async function handle(request: NextRequest) {
         issues: parsed.error.issues,
       },
       { status: 400 }
+    );
+  }
+
+  /**
+   * **建单幂等**(2026-11-16)—— 查表放在**通道检查 / 券判定 / 报价计算之前**
+   *
+   * ## 为什么放这么早
+   *
+   * 重复提交的那一次,**应该直接返回第一次建的那张单** —— 不该再走一遍
+   * 「通道还开着吗」「券还有效吗」「价还是这个价吗」「模型还在桶里吗」。
+   *
+   * 那些检查**都会因为时间推移而失败**:
+   *
+   * - 券过期了 ⇒ 第二次提交报「这个优惠码用不了」—— 但第一张单已经建了,
+   *   用户看着像没下成
+   * - 通道临时挂了 ⇒ 第二次提交 503 —— 第一张单明明在
+   * - 模型文件被清掉 ⇒ 第二次提交 422
+   *
+   * ⇒ 幂等查表**只**依赖「登录用户 + 请求意图」,不依赖任何会变的东西。
+   *
+   * ## 键是**内容哈希**
+   *
+   * 见 `print-quote/lib/idempotency.ts` 的文件头 —— 键里**故意不含**
+   * `objectKey` / `modelUrl`(每次上传都变)、`channel`(换通道重下也是同一单)。
+   */
+  const idempotencyKey = computePrintOrderIdempotencyKey({
+    modelFileName: parsed.data.modelFileName,
+    modelSizeBytes: parsed.data.modelSizeBytes ?? null,
+    volumeCM3: parsed.data.quote.volumeCM3,
+    surfaceAreaCM2: parsed.data.quote.surfaceAreaCM2,
+    dims: parsed.data.quote.dims,
+    supportWeightG: parsed.data.quote.supportWeightG ?? null,
+    selfSupportRatio: parsed.data.quote.selfSupportRatio ?? null,
+    deliveryTier: parsed.data.quote.deliveryTier ?? null,
+    reliefKind: parsed.data.quote.reliefKind ?? null,
+    contactName: parsed.data.contactName,
+    contactPhone: parsed.data.contactPhone ?? null,
+    note: parsed.data.note ?? null,
+    addressId: parsed.data.addressId,
+    couponCode: parsed.data.couponCode ?? null,
+  });
+
+  const existing = await findPrintOrderByIdempotencyKey(
+    user.id,
+    idempotencyKey
+  );
+  if (existing) {
+    // **200**,不是 201 —— 这一单**已经建好了**,不是新建了一张
+    return await respondWithExistingPrintOrder(existing, rl);
+  }
+
+  // 没配 R2 就没法收模型文件 —— 整条链路不可用,直接拒,
+  // 别让人下单成功之后工作室才发现文件没地方取
+  //
+  // ⚠️ 这道闸在**幂等查表之后** —— 重试的那一次不该因为「R2 现在没配好」
+  // 而失败(第一次已经建成了)。
+  if (!isR2Configured()) {
+    return NextResponse.json(
+      {
+        error: "R2_NOT_CONFIGURED",
+        message: "文件存储未配置,暂时无法下单",
+      },
+      { status: 503 }
     );
   }
 
@@ -436,6 +516,8 @@ async function handle(request: NextRequest) {
         {
           orderNo,
           userId: user.id,
+          // 幂等键 —— 数据库层面的唯一索引兜底(2026-11-16)
+          idempotencyKey,
           modelFileName: input.modelFileName,
           modelUrl: input.modelUrl,
           modelSizeBytes: input.modelSizeBytes,
@@ -482,8 +564,25 @@ async function handle(request: NextRequest) {
         { status: 400, headers: getRateLimitHeaders(rl) }
       );
     }
-    // 23505 = unique_violation —— orderNo 撞车(极小概率)
+    // 23505 = unique_violation —— 两种撞法,处理方式**完全不同**
+    //
+    // ① **幂等键撞了** —— 并发提交:两个请求同时查到「还没有这张单」,两个
+    //    都去建,数据库唯一索引只让**一个**落库。⇒ 这不是错误,是**重复提交**
+    //    ⇒ 回查那一行,把它返给用户(200)
+    //
+    // ② **订单号撞了** —— `order_no` 撞车(极小概率,6 位随机数 + 日期)
+    //    ⇒ 409,让用户重试
+    //
+    // ⚠️ 并发那一种,对方的事务**可能还没提交** ⇒ 回查查不到 ⇒ 落到 ②。
+    // 那就让用户再点一次 —— 第二次一定能命中幂等表。
     if (isUniqueViolation(error)) {
+      const raced = await findPrintOrderByIdempotencyKey(
+        user.id,
+        idempotencyKey
+      );
+      if (raced) {
+        return await respondWithExistingPrintOrder(raced, rl);
+      }
       return NextResponse.json(
         {
           error: "ORDER_NO_CONFLICT",
@@ -569,6 +668,73 @@ function isUniqueViolation(error: unknown): boolean {
     error !== null &&
     "code" in error &&
     (error as { code?: unknown }).code === "23505"
+  );
+}
+
+/**
+ * **幂等命中** —— 返回**第一次建的那张单**(2026-11-16)
+ *
+ * ## 响应体跟首次建单**逐字同形**
+ *
+ * 客户端解析的是同一个形状(`PrintOrderCreated`)⇒ 幂等命中那条路必须
+ * 给出**同样的键、同样的语义**。少一个键,客户端就会 `undefined` 一片。
+ *
+ * ## ⚠️ 跟首次建单那三条**不一样**
+ *
+ * | | 首次(201) | 幂等命中(200) |
+ * |---|---|---|
+ * | 报价 | `toPublicQuote(quote)`(现算的) | `buildPublicQuoteFromStoredOrder(row, …)`(从库里重建的) |
+ * | 付款入口 | `payment?.paymentUrl`(刚建出来的会话) | `row.paymentUrl`(**存下来的**那一个) |
+ * | 支付状态 | 硬编码 `"unpaid"` | `row.paymentStatus`(**行上的真值**) |
+ *
+ * ### 为什么付款入口是「存下来的」那一个
+ *
+ * **微信 Native 的 `code_url` 不能重建** —— `out_trade_no` 在微信侧唯一,
+ * 第二次建 Native 会话会被拒(`OUT_TRADE_NO_USED`)。
+ *
+ * ⇒ 重试时**只能把存下来的那一个再给一次**,不能重新建。
+ *
+ * ## ⚠️ **不发邮件、不重复记用券**
+ *
+ * 幂等命中 = 第一次已经发过邮件、已经记过一次用券了。再来一次 ⇒ 用户收到
+ * 两封「你的工单已创建」、券的用量被加两遍(额度少算一次 ⇒ 券被超发)。
+ *
+ * ⇒ 这条路**不调** `notifyPrintOrderCreated`,也**不调** `redeemCoupon`。
+ *
+ * ## `deliveryRates` 没落库 —— 现取一次
+ *
+ * 它只影响前端交期选择器的**预览**(加价金额早就算好、落库了)。
+ */
+async function respondWithExistingPrintOrder(
+  row: PrintOrderRow,
+  rl: RateLimitResult
+): Promise<NextResponse> {
+  const settings = await getPrintPricingSettings();
+
+  return NextResponse.json(
+    {
+      orderNo: row.orderNo,
+      /** 对外形状 —— 单价一个字节都不出去(见 `quote-public.ts`) */
+      quote: buildPublicQuoteFromStoredOrder(row, settings.deliveryRates),
+      /** 优惠码 —— null = 没用券 */
+      couponCode: row.couponCode,
+      /** 这一单减了多少(分) */
+      couponDiscountCents: row.couponDiscountCents,
+      /** 应付净额(分)—— 收银台按这个数收 */
+      payableCents: row.totalPriceCents,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+      locale: row.locale,
+      /** 付款入口 —— **存下来的那一个**(微信的码不能重建) */
+      paymentUrl: row.paymentUrl,
+      /** 微信扫码的二维码内容 */
+      paymentQrCodeUrl: row.paymentQrCodeUrl,
+      /** 走的是哪条通道 */
+      paymentChannel: row.paymentChannel,
+      /** 支付状态 —— **行上的真值**(第一次建单时硬编码 unpaid,这里不能) */
+      paymentStatus: row.paymentStatus,
+    },
+    { status: 200, headers: getRateLimitHeaders(rl) }
   );
 }
 

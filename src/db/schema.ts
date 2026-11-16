@@ -2401,9 +2401,7 @@ export const productAccessory = pgTable(
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
-  (t) => [
-    index("product_accessory_lookup_idx").on(t.isActive, t.sortOrder),
-  ]
+  (t) => [index("product_accessory_lookup_idx").on(t.isActive, t.sortOrder)]
 );
 
 export type ProductAccessoryRow = typeof productAccessory.$inferSelect;
@@ -2542,6 +2540,34 @@ export const printOrder = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
+    /**
+     * **建单幂等键**(2026-11-16)
+     *
+     * 内容哈希 —— 哈希的是「除了上传产物以外的一切下单意图」
+     * (见 `src/features/print-quote/lib/idempotency.ts`)。
+     *
+     * ## 为什么要有这一列
+     *
+     * 重复提交会建出**两张工单**,两张各有各的付款入口 ⇒ **用户可能付两次钱**。
+     * 客户端那道软闸(禁用按钮 + 限流 3 次/分钟)挡不住(网络卡了重试 / 双击)。
+     *
+     * ⇒ 服务端按 `(user_id, idempotency_key)` 查:命中 ⇒ 直接返回**第一次建的
+     * 那张单**(不重复发邮件、不重复记用券、不重建微信 Native 会话)。
+     *
+     * ## 为什么是**可空**
+     *
+     * - **老单没有这一列** —— 迁移脚本**不播种任何一行**(跑完线上行为一个字节
+     *   都不变)
+     * - PostgreSQL 的唯一索引里 **NULL 互不相同** ⇒ 老的 `NULL` 行**不受**
+     *   新索引约束 ⇒ 加索引不会因为历史数据而失败
+     * - `null` 也表示「这一单不是走幂等建起来的」(比如旧路从商城结账带出来的)
+     *
+     * ## 按用户隔离
+     *
+     * 键是内容哈希 ⇒ **两个不同的用户**算出同一份意图会得到**同一把键** ⇒
+     * 索引必须是 `(user_id, idempotency_key)` 复合的,不能只索引键本身。
+     */
+    idempotencyKey: text("idempotency_key"),
     status: printOrderStatusEnum("status").notNull().default("PENDING"),
     /** 模型文件名(用户上传时的原名) */
     modelFileName: text("model_file_name").notNull(),
@@ -2743,6 +2769,14 @@ export const printOrder = pgTable(
     index("print_order_provider_order_id_idx").on(t.providerOrderId),
     // 走商城那条路的工单:webhook 标 paid 时按商城订单反查
     index("print_order_storefront_order_id_idx").on(t.storefrontOrderId),
+    // 建单幂等:同一用户 + 同一把键 ⇒ 只允许一张工单(2026-11-16)
+    //
+    // ⚠️ 复合索引(带 `user_id`)—— 键是内容哈希,不同用户可能算出同一把
+    // ⚠️ 老单那一列是 NULL —— PG 唯一索引里 NULL 互不相同 ⇒ 不受影响
+    uniqueIndex("print_order_idempotency_key_uniq_idx").on(
+      t.userId,
+      t.idempotencyKey
+    ),
   ]
 );
 

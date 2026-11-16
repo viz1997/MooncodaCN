@@ -43,6 +43,17 @@ export type CreatePrintOrderInput = {
   orderNo: string;
   /** 下单人 —— 订单挂在账号名下 */
   userId: string;
+  /**
+   * **建单幂等键**(2026-11-16)
+   *
+   * 内容哈希 —— 哈希的是「除了上传产物以外的一切下单意图」
+   * (见 `./idempotency.ts`)。`null` = 这一单**不走**幂等(比如旧路从商城
+   * 结账带出来的工单)。
+   *
+   * ⚠️ 传了它 ⇒ 数据库层面就有唯一索引兜底 ⇒ 两次并发提交里**只有一张**
+   * 能落库,另一张撞 `23505`。
+   */
+  idempotencyKey?: string | null;
   modelFileName: string;
   modelUrl: string;
   modelSizeBytes: number | null;
@@ -129,6 +140,8 @@ export async function createPrintOrder(
         id: nanoid(),
         orderNo: input.orderNo,
         userId: input.userId,
+        // 幂等键 —— 唯一索引兜底(同一用户 + 同一把键 ⇒ 只允许一张)
+        idempotencyKey: input.idempotencyKey ?? null,
         status: "PENDING",
         modelFileName: input.modelFileName,
         modelUrl: input.modelUrl,
@@ -236,6 +249,38 @@ export async function getUserPrintOrderByOrderNo(
   const row = rows[0];
   if (!row || row.userId !== userId) return null;
   return row;
+}
+
+/**
+ * 按 **(用户, 幂等键)** 取一单 —— 建单幂等查表用(2026-11-16)
+ *
+ * ## 为什么**两个条件都在 WHERE 里**
+ *
+ * 键是**内容哈希** —— 两个不同的用户算出同一份意图会得到**同一把键**
+ * (同样的模型、同样的大小、同样的一切)。⇒ 只按键查会把**别人的单**返给我。
+ *
+ * ⇒ 归属校验写在 WHERE 里:**查出来就是自己的**,查不到就是没有。
+ * (跟 `getUserPrintOrderByOrderNo` 一个口径 —— 归属校验在数据层。)
+ *
+ * ## 查不到是**正常**的
+ *
+ * ⇒ 返回 `null`,调用方继续走正常建单那条路。
+ */
+export async function findPrintOrderByIdempotencyKey(
+  userId: string,
+  idempotencyKey: string
+): Promise<PrintOrderRow | null> {
+  const rows = await db
+    .select()
+    .from(printOrder)
+    .where(
+      and(
+        eq(printOrder.userId, userId),
+        eq(printOrder.idempotencyKey, idempotencyKey)
+      )
+    )
+    .limit(1);
+  return rows[0] ?? null;
 }
 
 /** 按订单号取一单 —— 后台用(不校验归属) */
