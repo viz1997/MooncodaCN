@@ -64,6 +64,20 @@ const STORE = "src/features/print-quote/lib/pricing-store.ts";
 const PREVIEW =
   "src/features/print-quote/components/print-service-quote-preview.tsx";
 /**
+ * 工单详情页的**收据**(2026-11-16)
+ *
+ * 报价弹窗里**不摆**费用明细(工作室要求),但**已经付掉的账**摆在工单详情页
+ * —— 那是收据,买家该看见自己付了什么。
+ *
+ * 两个地方刻意相反,别有人把其中一个改成另一个:
+ *
+ * | 位置 | 明细 |
+ * |---|---|
+ * | 报价弹窗(`PREVIEW`) | **不摆** —— 成本结构不外露 |
+ * | 工单详情页(`RECEIPT`) | **摆** —— 收据 |
+ */
+const RECEIPT = "src/features/print-quote/components/quote-breakdown.tsx";
+/**
  * 报价弹窗 —— 2026-11-09
  *
  * 以前预估报价在右栏那张「提交打印订单」卡片里(`print-service-submit-card.tsx`,
@@ -185,7 +199,30 @@ describe("访客可见计价 —— 工具页那个预估报价", () => {
     expect(code).toContain(
       "const supportPending = quote.supportWeightG === null"
     );
-    expect(code).toContain('t("preview.supportPending")');
+    expect(code).toContain('t("preview.supportPendingNote")');
+  });
+
+  it("费用明细**不摆**(2026-11-16)—— 弹窗里只有总额", () => {
+    const code = stripComments(read(PREVIEW));
+
+    // 「克重费 ¥16.65 · 后处理 ¥5 · 支撑加价 ¥0」那一行没了
+    expect(code).not.toContain('t("quote.weightFee")');
+    expect(code).not.toContain('t("quote.varnishFee")');
+    expect(code).not.toContain('t("quote.supportFee")');
+
+    // 总额还在 —— 不摆明细 ≠ 不摆价
+    expect(code).toContain("formatCents(payableCents)");
+
+    // 优惠那行**留着** —— 买家该知道减了多少(那是**减法**,不是明细)
+    expect(code).toContain('t("coupon.row")');
+  });
+
+  it("明细只在工单详情页的收据上(那是已经付掉的账,不是报价)", () => {
+    const receipt = stripComments(read(RECEIPT));
+
+    expect(receipt).toContain('t("quote.weightFee")');
+    expect(receipt).toContain('t("quote.varnishFee")');
+    expect(receipt).toContain('t("quote.supportFee")');
   });
 
   it("几何变了就重新报价 —— 支撑算出来之后金额会跟着变", () => {

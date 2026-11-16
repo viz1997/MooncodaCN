@@ -31,11 +31,22 @@
  *
  * | 情况 | 界面 |
  * |---|---|
- * | 报价成功 | 总额 + 一行明细 |
+ * | 报价成功 | **只有总额**(不摆费用明细 —— 2026-11-16 工作室要求) |
  * | 未登录 + 开关关着(接口回 403) | 「登录后可见报价」 |
  * | 算不出来 | 「算不出预估价」 |
  *
  * **已登录的人不受那个开关管** —— 能下单就能看价。
+ *
+ * ## 费用明细**不摆**(2026-11-16)
+ *
+ * 工作室的原话:「克重费 ¥16.65 · 后处理 ¥5 · 支撑加价 ¥0
+ * **不要显示明细**」。
+ *
+ * ⇒ 弹窗里**只有总额**。明细那一行删了(工单详情页的收据不动 —— 那是
+ * 已经付掉的账,不是报价)。
+ *
+ * ⚠️ **「支撑还没算」的披露留着** —— 那个总额是**偏低的**(服务端按 0 算
+ * 支撑),不说清楚就是「摆一个看着精确、其实少算了一笔的数」。
  *
  * ## 支撑还没算的时候,金额是**不完整的**
  *
@@ -270,19 +281,24 @@ export function PrintServiceQuotePreview({
           {coupon?.code}
         </p>
       ) : null}
-      <p className="mt-1 text-[11px] text-muted-foreground">
-        {t("quote.weightFee")} {formatCents(quote.weightFeeCents)}
-        {" · "}
-        {t("quote.varnishFee")} {formatCents(quote.varnishFeeCents)}
-        {" · "}
-        {t("quote.supportFee")}{" "}
-        {supportPending
-          ? t("preview.supportPending")
-          : formatCents(quote.supportFeeCents)}
-      </p>
+      {/*
+       * **不摆费用明细**(2026-11-16)
+       *
+       * 工作室的原话:「克重费 ¥16.65 · 后处理 ¥5 · 支撑加价 ¥0
+       * **不要显示明细**」。
+       *
+       * 摆明细等于把**成本结构**摆给访客 —— 每一档费用各是多少,一眼就看出
+       * 哪一档贵、哪一档便宜(再跟体积一比,单价能反推出来)。总额摆出来
+       * 就够了,明细留在工单上(那是收据)。
+       *
+       * ⚠️ **支撑没算的那句披露必须留着** —— 服务端按 `supportWeightG ?? 0`
+       * 算,支撑还没算出来时那个总额**是偏低的**。删掉披露就等于「摆一个看着
+       * 精确、其实少算了一笔的数」。这一句是**减法**(少算),跟明细那种
+       * **加法**(多露)不是一回事。
+       */}
       {supportPending ? (
-        <p className="mt-0.5 text-[11px] text-muted-foreground">
-          {t("preview.supportPendingHint")}
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          {t("preview.supportPendingNote")}
         </p>
       ) : null}
       <p className="mt-0.5 text-[10px] text-muted-foreground">

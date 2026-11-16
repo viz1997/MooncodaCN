@@ -1903,13 +1903,16 @@ export function PricingCalculator({
                 {materialWeightG} g
               </span>
             </div>
-            {/* 体积 × 材料密度 —— 把这个数是怎么来的摆出来。
+            {/* 体积 —— **只摆体积,不摆密度**(2026-11-16)
 
-                **紧凑写法** —— 这一格只有 88px 宽(360px 的侧栏 ÷ 3 − 内边距),
-                写成「8.00 cm³ × 1.20」会被 `truncate` 截成「8.00 cm³ × 1…」
-                (数字被切掉一半,用户读到的是半个密度)。去掉两处空格就放得下了。 */}
+                工作室的要求:「不要显示具体数值」。密度跟单价是**同一类**
+                东西:密度 × 体积 = 克重,克重跟工单上的克重费一比,单价就
+                能被反推出来 ⇒ 访客侧一律不摆密度数值。
+
+                体积本身留着 —— 它对访客有意义(他知道自己下单的东西有多大),
+                要藏的是密度那半边。 */}
             <div className="mt-1 h-4 truncate font-mono text-[10px] text-zinc-500">
-              {fmt(calc.volumeCM3, 2)}cm³×{fmt(materialDensity, 2)}
+              {fmt(calc.volumeCM3, 2)}cm³
             </div>
           </div>
 
@@ -2589,8 +2592,6 @@ export function PricingCalculator({
                 setBatchItems((prev) => [...prev, ...initBatch(files)]);
               }}
               solidRatio={solidRatio}
-              materialDensity={materialDensity}
-              supportDensity={supportDensity}
             />
           )}
         </main>
@@ -2599,8 +2600,6 @@ export function PricingCalculator({
         <PricingInfoDialogs
           infoDialog={infoDialog}
           onInfoDialogChange={setInfoDialog}
-          materialDensity={materialDensity}
-          supportDensity={supportDensity}
           supportLiftMm={effectiveLiftMm}
           supportBaseMarginMm={
             clientConfig?.supportBaseMarginMm ?? SUPPORT_BASE_MARGIN_MM

@@ -41,15 +41,16 @@ export type PricingInfoDialogsProps = {
   infoDialog: InfoDialogKind;
   onInfoDialogChange: (kind: InfoDialogKind) => void;
 
-  /** 模型材料密度 g/cm³ —— 后台配的,只读 */
-  materialDensity: number;
   /**
-   * 支撑材料密度 (g/cm³) —— 支撑跟模型**不是**一种材料
+   * ⚠️ **不再有 `materialDensity` / `supportDensity` 这两个 prop**(2026-11-16)
    *
-   * 水溶性支撑(PVA/BVOH,约 1.13~1.30 g/cm³)跟光敏树脂密度不同:
-   * 支撑克重 = 支撑体积 × 支撑密度,总克重 = 耗材克重 + 支撑克重。
+   * 工作室的要求:「不要显示具体数值」。密度跟单价是**同一类**东西 ——
+   * 密度 × 体积 = 克重,克重跟工单上的克重费一比,单价就能被反推出来。
+   *
+   * ⇒ 访客侧**一律不摆密度数值**:这个弹窗不摆、批量面板不摆、克重栏那个
+   * 「cm³×密度」的小字也不摆。标签留着(「模型材料」「支撑材料」),数值
+   * 那一格写「按后台配置」。
    */
-  supportDensity: number;
   /** 托底高度 mm —— 后台配的,只读 */
   supportLiftMm: number;
   /** 底板留边 mm —— 后台配的,只读 */
@@ -62,8 +63,6 @@ export type PricingInfoDialogsProps = {
 export function PricingInfoDialogs({
   infoDialog,
   onInfoDialogChange,
-  materialDensity,
-  supportDensity,
   supportLiftMm,
   supportBaseMarginMm,
   onApplyProduct,
@@ -106,9 +105,7 @@ export function PricingInfoDialogs({
           <div className="space-y-4 text-sm text-stone-700">
             <p>{t("info.algorithm.p1")}</p>
             <div className="rounded-md bg-stone-50 border border-stone-200 p-2.5 font-mono text-xs">
-              {t("info.algorithm.formula", {
-                density: fmt(materialDensity, 2),
-              })}
+              {t("info.algorithm.formula")}
             </div>
             <p className="text-xs text-stone-500">{t("info.algorithm.p2")}</p>
             {/* 口径与边界:内腔算支撑、5mm 托底算支撑、逐列配对是近似、
@@ -196,21 +193,31 @@ export function PricingInfoDialogs({
                 </h4>
               </div>
               <div className="space-y-2.5">
+                {/*
+                  **密度数值不摆**(2026-11-16)
+
+                  工作室的原话:「添加文件 4 / 开启 1.20 g/cm³ 1.28 g/cm³
+                  **不要显示具体数值**」。
+
+                  ⇒ 标签留着(「模型材料」「支撑材料」),数值那一格写
+                  「按后台配置」。访客改不了这两个值(后台配的)⇒ 不摆数值
+                  对访客没有任何信息损失。
+                */}
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-stone-500 shrink-0">
                     {t("info.materials.densityLabel")}
                   </span>
-                  <span className="font-mono text-sm text-stone-800">
-                    {fmt(materialDensity, 4)} g/cm³
+                  <span className="text-sm text-stone-700">
+                    {t("info.materials.fromStudio")}
                   </span>
                 </div>
-                {/* 支撑是另一种材料 —— 密度跟模型分开 */}
+                {/* 支撑是另一种材料 —— 标签留着,数值同样不摆 */}
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-stone-500 shrink-0">
                     {t("info.materials.supportDensityLabel")}
                   </span>
-                  <span className="font-mono text-sm text-stone-800">
-                    {fmt(supportDensity, 4)} g/cm³
+                  <span className="text-sm text-stone-700">
+                    {t("info.materials.fromStudio")}
                   </span>
                 </div>
               </div>

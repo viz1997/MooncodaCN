@@ -86,9 +86,15 @@ export type BatchModeSectionProps = {
   onApplyAngleChange: (v: boolean) => void;
   onDropFiles: (files: File[]) => void;
   solidRatio: number;
-  materialDensity: number;
-  /** 支撑材料密度 (g/cm³) —— 支撑跟模型不是一种材料,批量算支撑克重用这个 */
-  supportDensity: number;
+  /**
+   * ⚠️ **不再有 `materialDensity` / `supportDensity` 这两个 prop**(2026-11-16)
+   *
+   * 工作室要求「不要显示具体数值」⇒ 两个密度值**一个都不摆**。
+   *
+   * 它们本来只是**展示用**的 —— 批量计算用的是 `batch-processor` 那条路
+   * 自己带的密度(从后台配置来的),跟这个组件无关 ⇒ 删掉这两个 prop
+   * 不会动到任何一个克重数。
+   */
 };
 
 export function BatchModeSection(props: BatchModeSectionProps) {
@@ -110,8 +116,6 @@ export function BatchModeSection(props: BatchModeSectionProps) {
     onApplyAngleChange,
     onDropFiles,
     solidRatio,
-    materialDensity,
-    supportDensity,
   } = props;
 
   const summary = useMemo(() => summarizeBatch(batchItems), [batchItems]);
@@ -191,27 +195,34 @@ export function BatchModeSection(props: BatchModeSectionProps) {
                 </span>
               </div>
             </div>
+            {/*
+              **密度数值不摆**(2026-11-16)
+             *
+              工作室的原话:「添加文件 4 / 开启 1.20 g/cm³ 1.28 g/cm³
+              **不要显示具体数值**」。
+             *
+              ⇒ 只摆**标签** + 「按后台配置」,两个密度值一个都不出。
+              跟「不要展示 4.5 元/g 这种单价,避免暴露我们的成本」是同一类:
+              密度 × 体积 = 克重,克重一旦跟单价放在一起,单价就能被反推出来。
+             *
+              访客改不了这两个值(后台 `/admin/print-pricing` 配的)⇒
+              摆不摆数值,对访客没有任何信息损失。
+             */}
             <div className="space-y-1.5">
               <Label className="text-xs text-zinc-400">
                 {t("materialDensity")}
               </Label>
-              <div className="flex items-center gap-1 h-7">
-                <span className="font-mono text-sm text-zinc-100">
-                  {fmt(materialDensity, 2)}
-                </span>
-                <span className="text-xs text-zinc-500">g/cm³</span>
+              <div className="flex items-center h-7">
+                <span className="text-sm text-zinc-300">{t("fromStudio")}</span>
               </div>
             </div>
-            {/* 支撑是另一种材料 —— 支撑克重按这个密度算,得让人看见 */}
+            {/* 支撑是另一种材料 —— 标签留着,数值同样不摆 */}
             <div className="space-y-1.5">
               <Label className="text-xs text-zinc-400">
                 {t("supportDensity")}
               </Label>
-              <div className="flex items-center gap-1 h-7">
-                <span className="font-mono text-sm text-zinc-100">
-                  {fmt(supportDensity, 2)}
-                </span>
-                <span className="text-xs text-zinc-500">g/cm³</span>
+              <div className="flex items-center h-7">
+                <span className="text-sm text-zinc-300">{t("fromStudio")}</span>
               </div>
             </div>
           </div>
@@ -349,8 +360,6 @@ export function BatchModeSection(props: BatchModeSectionProps) {
           <span>
             {t.rich("settingsReminder", {
               solidRatio,
-              density: fmt(materialDensity, 2),
-              supportDensity: fmt(supportDensity, 2),
               angle: batchApplyAngle ? t("enabled") : t("disabled"),
               b: (chunks) => (
                 <strong className="text-zinc-100">{chunks}</strong>

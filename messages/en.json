@@ -1228,8 +1228,8 @@
       "algorithm": {
         "title": "How the weight is calculated",
         "p1": "Resin weight = solid volume × material density. The solid volume comes from the model's bounding box scaled by the fill ratio; in manual mode it is estimated from the envelope size × fill ratio.",
-        "formula": "Weight = solid volume (cm³) × material density ({density} g/cm³)",
-        "p2": "Support weight = support volume × support density. The support volume is the wrap support volume — the same block the model checker computes, counted as a geometric full wrap: enclosed cavities inside the model count as support too (water-soluble support is pumped into them and dissolves away with the rest), and the model does not sit flat on the platform — the support grows a pad underneath to lift it (see Material parameters for the height), and that pad counts as support. The support is not the same material as the model (the studio uses water-soluble PVA/BVOH support, about 1.13~1.30 g/cm³), so the two densities are kept apart: material weight = model volume × material density, support weight = support volume × support density, total weight = material weight + support weight — the full wrap holds two materials, so no single density can be multiplied through it. The optimizer picks the pose with the least support and the lowest layer height; before it runs, the page shows the support for the current pose (the initial 0°,0° one).",
+        "formula": "Weight = solid volume (cm³) × material density",
+        "p2": "Support weight = support volume × support density. The support volume is the wrap support volume — the same block the model checker computes, counted as a geometric full wrap: enclosed cavities inside the model count as support too (water-soluble support is pumped into them and dissolves away with the rest), and the model does not sit flat on the platform — the support grows a pad underneath to lift it (see Material parameters for the height), and that pad counts as support. The support is not the same material as the model (the studio uses water-soluble PVA/BVOH support), so the two densities are kept apart: material weight = model volume × material density, support weight = support volume × support density, total weight = material weight + support weight — the full wrap holds two materials, so no single density can be multiplied through it. The optimizer picks the pose with the least support and the lowest layer height; before it runs, the page shows the support for the current pose (the initial 0°,0° one).",
         "boundariesTitle": "Definitions and limits",
         "boundaries": [
           "Cavities are counted geometrically, without regard to reachability: the whole enclosed cavity counts as support, even if the support liquid could not actually get in there.",
@@ -1251,7 +1251,8 @@
         "density": "Material density",
         "densityLabel": "Model material",
         "supportDensityLabel": "Support material",
-        "supportDensityHint": "The support is not the same material as the model: water-soluble support (PVA/BVOH) is usually 1.13~1.30 g/cm³. Support weight = support volume × support density, total weight = material weight + support weight.",
+        "fromStudio": "Set by the studio",
+        "supportDensityHint": "The support is not the same material as the model. Support weight = support volume × support density, total weight = material weight + support weight.",
         "geometry": "Support geometry",
         "liftLabel": "Platform pad height",
         "baseMarginLabel": "Base plate margin",
@@ -1287,6 +1288,7 @@
       "disabled": "Off",
       "materialDensity": "Density",
       "supportDensity": "Support density",
+      "fromStudio": "Set by the studio",
       "summaryLine": "<b>{total}</b> total · <bOk>{done}</bOk> done · <bErr>{errors}</bErr> failed · <b>{pending}</b> pending",
       "clear": "Clear",
       "cancel": "Cancel",
@@ -1299,7 +1301,7 @@
       "totalWeight": "Total weight",
       "doneCount": "Completed",
       "avgTime": "Avg. time",
-      "settingsReminder": "Batch uses the current parameters: fill ratio <b>{solidRatio}%</b>, material density <b>{density} g/cm³</b>, support density <b>{supportDensity} g/cm³</b>, orientation optimization <b>{angle}</b>",
+      "settingsReminder": "Batch uses the current parameters: fill ratio <b>{solidRatio}%</b>, orientation optimization <b>{angle}</b>",
       "selfSupport": "Self-support {ratio}% · {weight} g",
       "laidFlat": "Laid flat",
       "exportRotated": "Export laid-out OBJ",
@@ -1823,8 +1825,7 @@
       "error": "Can't estimate the price",
       "signInRequired": "Sign in to see the price",
       "signInHint": "Prices are shown to signed-in users — sign in to see the amount",
-      "supportPending": "not counted",
-      "supportPendingHint": "The support is still being computed — this amount doesn't include the support fee yet; the order is the final word",
+      "supportPendingNote": "The support is still being computed — this amount doesn't include the support fee yet",
       "estimateHint": "Estimate — the final amount is confirmed on the order"
     },
     "delivery": {
