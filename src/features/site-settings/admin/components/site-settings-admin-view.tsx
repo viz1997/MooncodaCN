@@ -117,9 +117,15 @@ export function SiteSettingsAdminView() {
           serviceWechatQrUrl:
             res.data.serviceQrDbValue ?? res.data.serviceQrEnvValue ?? "",
           tawkPropertyId:
-            res.data.tawkDbPropertyId ?? res.data.tawkEnvPropertyId ?? "",
+            res.data.tawkDbPropertyId ??
+            res.data.tawkEnvPropertyId ??
+            res.data.tawkDefaultPropertyId ??
+            "",
           tawkWidgetId:
-            res.data.tawkDbWidgetId ?? res.data.tawkEnvWidgetId ?? "",
+            res.data.tawkDbWidgetId ??
+            res.data.tawkEnvWidgetId ??
+            res.data.tawkDefaultWidgetId ??
+            "",
         });
       }
     } catch {
@@ -355,13 +361,23 @@ export function SiteSettingsAdminView() {
           banner={
             overview.tawkSource === "env"
               ? t("banner.tawkEnvFallback")
-              : overview.tawkSource === "none"
-                ? t("banner.tawkNotConfigured")
-                : null
+              : overview.tawkSource === "default"
+                ? t("banner.tawkDefaultFallback")
+                : overview.tawkSource === "none"
+                  ? t("banner.tawkNotConfigured")
+                  : overview.tawkConfigured
+                    ? null
+                    : t("banner.tawkTurnedOff")
           }
           resetLabel={t("actions.resetTawk")}
           onReset={() => void resetTawk()}
           isResetting={isResettingTawk}
+          extraRows={[
+            {
+              label: t("current.tawkDefault"),
+              value: `${overview.tawkDefaultPropertyId} / ${overview.tawkDefaultWidgetId}`,
+            },
+          ]}
         />
       </section>
 
@@ -482,6 +498,7 @@ function SettingStatus({
   resetLabel,
   onReset,
   isResetting,
+  extraRows,
 }: {
   title: string;
   icon: React.ReactNode;
@@ -500,6 +517,13 @@ function SettingStatus({
   resetLabel: string;
   onReset: () => void;
   isResetting: boolean;
+  /**
+   * 额外那几行只读信息(2026-11-16 加的)
+   *
+   * 只有 tawk 那张卡用 —— 让工作室**一眼看见**「内置默认的那一对 ID」
+   * (那是「删掉后台这两行」之后会退回的东西)。
+   */
+  extraRows?: { label: string; value: string }[];
 }) {
   return (
     <div className="rounded-lg border bg-card p-4 shadow-sm">
@@ -560,6 +584,9 @@ function SettingStatus({
       <div className="grid grid-cols-1 gap-x-4 gap-y-3 text-xs md:grid-cols-2">
         <Readonly label={effectiveLabel} value={effectiveUrl || emptyText} />
         <Readonly label={envLabel} value={envValue || emptyText} />
+        {extraRows?.map((row) => (
+          <Readonly key={row.label} label={row.label} value={row.value} />
+        ))}
       </div>
     </div>
   );

@@ -7,6 +7,8 @@ import {
   isValidTawkId,
   normalizeTawkId,
   resolveTawkConfig,
+  TAWK_DEFAULT_PROPERTY_ID,
+  TAWK_DEFAULT_WIDGET_ID,
   TAWK_EMBED_BASE,
 } from "@/features/tawk/lib/tawk-config";
 
@@ -23,10 +25,11 @@ import {
  *
  * 链路上另外三样容易出错的东西:
  *
- * 1. **回退链** —— DB 那一行 → 环境变量 → 没配。跟站内其它设置一个口径:
- *    「DB 里存了空串」= **明确关掉**,不是「没配」。
+ * 1. **回退链** —— DB 那一行 → 环境变量 → **内置默认** → 没配。跟站内其它
+ *    设置一个口径:「DB 里存了空串」= **明确关掉**,不是「没配」。
  * 2. **两个 ID 是一个原子** —— 少一个就装不上(那是 tawk 那边硬性的)。
- * 3. **身份要在脚本下载之前设上** —— 晚设就不认。
+ * 3. **小窗永远是匿名的** —— 访客的姓名 / 邮箱**一律不发出去**(工作室
+ *    2026-11-16 拍板)⇒ 这条不是「默认关」,是**代码里根本没有那条通路**。
  *
  * 纯函数 + 文件扫描 —— 不需要 DB / 网络 / 浏览器。
  */
@@ -211,6 +214,138 @@ describe("tawk:生效值的回退链", () => {
   });
 });
 
+describe("tawk:内置默认那一档(2026-11-16)", () => {
+  /**
+   * 工作室把官方那段 embed 代码贴过来了 ⇒ 这一对 ID **不是密钥**
+   * (官方脚本明文写在页面源码里,谁看源码都能拿到)⇒ 预置成回退链的
+   * **最后一档**:部署上去小窗就在,不用先去后台点一次保存。
+   *
+   * 回退链:**DB(存了 ⇒ 赢,哪怕空串)→ 环境变量 → 内置默认 → 没配**
+   */
+  it("什么都没配 ⇒ 内置默认那一档生效(小窗直接就在)", () => {
+    const resolved = resolveTawkConfig({
+      dbPropertyId: null,
+      dbWidgetId: null,
+      envPropertyId: "",
+      envWidgetId: "",
+      defaultPropertyId: TAWK_DEFAULT_PROPERTY_ID,
+      defaultWidgetId: TAWK_DEFAULT_WIDGET_ID,
+    });
+    expect(resolved.source).toBe("default");
+    expect(resolved.configured).toBe(true);
+    expect(resolved.invalid).toBe(false);
+    expect(resolved.propertyId).toBe(TAWK_DEFAULT_PROPERTY_ID);
+    expect(resolved.widgetId).toBe(TAWK_DEFAULT_WIDGET_ID);
+  });
+
+  it("内置默认拼出来的地址 == 工作室贴的那段官方 embed 地址", () => {
+    expect(
+      buildTawkEmbedUrl(TAWK_DEFAULT_PROPERTY_ID, TAWK_DEFAULT_WIDGET_ID)
+    ).toBe("https://embed.tawk.to/6afb1e688e6f59d4de4958a2/1k7ietiul");
+    // 顺带钉住这两个 ID 本身是合法的(不然上面那一条会返 null)
+    expect(isValidTawkId(TAWK_DEFAULT_PROPERTY_ID)).toBe(true);
+    expect(isValidTawkId(TAWK_DEFAULT_WIDGET_ID)).toBe(true);
+  });
+
+  it("DB 赢过内置默认", () => {
+    const resolved = resolveTawkConfig({
+      dbPropertyId: "dbpid",
+      dbWidgetId: "dbwid",
+      envPropertyId: "",
+      envWidgetId: "",
+      defaultPropertyId: TAWK_DEFAULT_PROPERTY_ID,
+      defaultWidgetId: TAWK_DEFAULT_WIDGET_ID,
+    });
+    expect(resolved.source).toBe("db");
+    expect(resolved.propertyId).toBe("dbpid");
+    expect(resolved.widgetId).toBe("dbwid");
+  });
+
+  it("环境变量赢过内置默认", () => {
+    const resolved = resolveTawkConfig({
+      dbPropertyId: null,
+      dbWidgetId: null,
+      envPropertyId: "envpid",
+      envWidgetId: "envwid",
+      defaultPropertyId: TAWK_DEFAULT_PROPERTY_ID,
+      defaultWidgetId: TAWK_DEFAULT_WIDGET_ID,
+    });
+    expect(resolved.source).toBe("env");
+    expect(resolved.propertyId).toBe("envpid");
+    expect(resolved.widgetId).toBe("envwid");
+  });
+
+  it("**DB 存空串 ⇒ 明确关掉** —— 也赢过内置默认(小窗不出现)", () => {
+    const resolved = resolveTawkConfig({
+      dbPropertyId: "",
+      dbWidgetId: "",
+      envPropertyId: "",
+      envWidgetId: "",
+      defaultPropertyId: TAWK_DEFAULT_PROPERTY_ID,
+      defaultWidgetId: TAWK_DEFAULT_WIDGET_ID,
+    });
+    expect(resolved.source).toBe("db");
+    expect(resolved.configured).toBe(false);
+    // 「什么都没填」**不是**「贴错了」
+    expect(resolved.invalid).toBe(false);
+    expect(resolved.embedUrl).toBe("");
+  });
+
+  it("没传默认档 ⇒ 这一档不存在(退回「没配」)", () => {
+    const resolved = resolveTawkConfig({
+      dbPropertyId: null,
+      dbWidgetId: null,
+      envPropertyId: "",
+      envWidgetId: "",
+    });
+    expect(resolved.source).toBe("none");
+    expect(resolved.configured).toBe(false);
+  });
+
+  it("store 那一层**每个**调用点都传了默认档(漏一个 = 读库失败时小窗消失)", () => {
+    const src = read(STORE);
+    // 四个调用点(两个函数的 try 分支 + catch 兜底分支)
+    const calls = src.match(/resolveTawkConfig\(\{/g) ?? [];
+    expect(calls.length).toBeGreaterThanOrEqual(4);
+    // 每个调用点后面都跟着默认那两个常量
+    const pattern =
+      /resolveTawkConfig\(\{[\s\S]{0,900}?defaultPropertyId: TAWK_DEFAULT_PROPERTY_ID[\s\S]{0,200}?defaultWidgetId: TAWK_DEFAULT_WIDGET_ID/g;
+    const matched = src.match(pattern) ?? [];
+    expect(matched.length).toBe(calls.length);
+    // 常量本身是从纯逻辑那一层 import 的(不是就地写一遍字符串)
+    expect(src).toContain("TAWK_DEFAULT_PROPERTY_ID");
+    expect(src).toContain("TAWK_DEFAULT_WIDGET_ID");
+  });
+
+  it("后台那一页:表单初值走默认档 + banner 有「默认」那一档", () => {
+    const src = read(VIEW);
+    expect(src).toContain("tawkDefaultPropertyId");
+    expect(src).toContain("tawkDefaultWidgetId");
+    expect(src).toContain('overview.tawkSource === "default"');
+  });
+
+  it("i18n:「默认」那一档的中英文都摆得上话", () => {
+    const zh = messages("zh").AdminSiteSettings as {
+      banner: Record<string, string>;
+      current: Record<string, string>;
+    };
+    const en = messages("en").AdminSiteSettings as {
+      banner: Record<string, string>;
+      current: Record<string, string>;
+    };
+    expect(zh.banner.tawkDefaultFallback).toBeTruthy();
+    expect(en.banner.tawkDefaultFallback).toBeTruthy();
+    expect(zh.current.tawkDefault).toBeTruthy();
+    expect(en.current.tawkDefault).toBeTruthy();
+    // 中文那条要点明「内置默认」和「关掉」是两件事
+    expect(zh.banner.tawkDefaultFallback).toContain("内置默认");
+    expect(zh.banner.tawkDefaultFallback).toContain("关掉");
+    // 「明确关掉」也有一句单独的提示
+    expect(zh.banner.tawkTurnedOff).toBeTruthy();
+    expect(en.banner.tawkTurnedOff).toBeTruthy();
+  });
+});
+
 describe("tawk:页面上那个小窗", () => {
   it("layout 挂了那个组件,且**配了才挂**", () => {
     const src = read(LAYOUT);
@@ -242,14 +377,11 @@ describe("tawk:页面上那个小窗", () => {
     expect(src).toContain("buildTawkEmbedUrl");
   });
 
-  it("身份在脚本下载**之前**设上", () => {
-    const src = read(WIDGET);
-    const visitorAt = src.indexOf("api.visitor");
-    const createAt = src.indexOf('document.createElement("script")');
-    expect(visitorAt).toBeGreaterThan(-1);
-    expect(createAt).toBeGreaterThan(-1);
-    // visitor 的赋值必须排在插脚本**之前**
-    expect(visitorAt).toBeLessThan(createAt);
+  it("**永远是匿名的** —— 代码里没有发访客身份的那条路(2026-11-16)", () => {
+    const src = stripComments(read(WIDGET));
+    // `visitor` 一词都不许出现在**代码**里(注释里解释「为什么不发」不算)
+    expect(src).not.toContain("visitor");
+    expect(src).not.toContain("useSession");
   });
 
   it("不重复注入(StrictMode 双挂载 / 客户端路由)", () => {
@@ -260,19 +392,6 @@ describe("tawk:页面上那个小窗", () => {
   it("方法调用前判存在 —— 方法是 widget 起来之后才装上的", () => {
     const src = read(WIDGET);
     expect(src).toContain('typeof api.setAttributes === "function"');
-  });
-
-  it("会话在**客户端**取 —— 服务端读 session 会让整个公开站变成动态渲染", () => {
-    const src = read(WIDGET);
-    expect(src).toContain("useSession");
-    // 注释里提到 `headers()` 是「**为什么**不用它」—— 那是说明,不是代码
-    expect(stripComments(src)).not.toContain("headers()");
-  });
-
-  it("会话等**有上限** —— 不能让客服小窗一直卡着不出现", () => {
-    const src = read(WIDGET);
-    expect(src).toContain("TAWK_SESSION_WAIT_MS");
-    expect(src).toContain("clearTimeout");
   });
 
   it("**渲染 `null`** —— 服务端和客户端输出一样(不许 hydration mismatch)", () => {
@@ -331,6 +450,79 @@ describe("tawk:配置跟 DB / 环境变量的接线", () => {
     const src = stripComments(read(VIEW));
     expect(src).not.toContain("<Modal");
     expect(src).not.toContain("<Dialog");
+  });
+});
+
+describe("tawk:小窗永远是匿名的(2026-11-16 工作室拍板)", () => {
+  it("**整条数据外发的路都不存在** —— 代码里没有开关、也没有那一条通路", () => {
+    // 结构性保证:不是「默认关」,而是**根本没有那条代码**
+    const src = stripComments(read(CONFIG));
+    expect(src).not.toContain("shareIdentity");
+    expect(src).not.toContain("TawkVisitor");
+    expect(src).not.toContain("visitor");
+  });
+
+  it("匿名版 widget 不碰会话 —— 连 `/api/auth/get-session` 那一次请求都不发", () => {
+    const src = stripComments(read(WIDGET));
+    expect(src).not.toContain("useSession");
+    expect(src).not.toContain("visitor");
+  });
+
+  it("**没有「带身份版」那个组件文件** —— 别把它捡回来", () => {
+    expect(() =>
+      read("src/features/tawk/components/tawk-widget-identity.tsx")
+    ).toThrow();
+  });
+
+  it("layout 只挂**匿名版** —— 没有按开关挑组件那一步", () => {
+    const src = stripComments(read(LAYOUT));
+    expect(src).toContain("TawkWidget");
+    expect(src).not.toContain("TawkWidgetWithIdentity");
+    expect(src).not.toContain("shareIdentity");
+  });
+
+  it("`site_setting` 里**没有**那颗开关的键", () => {
+    const src = stripComments(read(PURE_SITE));
+    expect(src).not.toContain("tawk_share_identity");
+    expect(src).not.toContain("tawkShareIdentity");
+  });
+
+  it("store 那一层不读那个环境变量", () => {
+    const src = stripComments(read(STORE));
+    expect(src).not.toContain("NEXT_PUBLIC_TAWK_SHARE_IDENTITY");
+    expect(src).not.toContain("tawkShareIdentity");
+  });
+
+  it("后台 action 里没有那颗开关 —— 存的就是那两个 ID", () => {
+    const src = stripComments(read(ACTIONS));
+    expect(src).not.toContain("tawkShareIdentity");
+    expect(src).not.toContain("shareIdentity");
+  });
+
+  it("后台那一页**没有那颗开关**(也没多出 `<Switch>`)", () => {
+    const src = stripComments(read(VIEW));
+    expect(src).not.toContain("tawkShareIdentity");
+    expect(src).not.toContain("<Switch");
+  });
+
+  it("语言包里**没有**身份那几条文案", () => {
+    const zh = messages("zh").AdminSiteSettings as {
+      form: Record<string, string>;
+      current: Record<string, string>;
+    };
+    const en = messages("en").AdminSiteSettings as {
+      form: Record<string, string>;
+      current: Record<string, string>;
+    };
+    expect(zh.form.tawkShareIdentityLabel).toBeUndefined();
+    expect(zh.form.tawkShareIdentityExtra).toBeUndefined();
+    expect(zh.current.tawkShareIdentity).toBeUndefined();
+    expect(zh.current.tawkShareIdentityOn).toBeUndefined();
+    expect(zh.current.tawkShareIdentityOff).toBeUndefined();
+    expect(en.form.tawkShareIdentityLabel).toBeUndefined();
+    expect(en.form.tawkShareIdentityExtra).toBeUndefined();
+    expect(en.current.tawkShareIdentityOn).toBeUndefined();
+    expect(en.current.tawkShareIdentityOff).toBeUndefined();
   });
 });
 

@@ -106,6 +106,8 @@ export const adminGetSiteSettingsAction = withSiteSettingAction("get").action(
       tawkDbWidgetId: overview.tawkDbWidgetId,
       tawkEnvPropertyId: overview.tawkEnvPropertyId,
       tawkEnvWidgetId: overview.tawkEnvWidgetId,
+      tawkDefaultPropertyId: overview.tawkDefaultPropertyId,
+      tawkDefaultWidgetId: overview.tawkDefaultWidgetId,
     };
   }
 );
@@ -295,7 +297,7 @@ export const adminResetSiteSettingsAction = withSiteSettingAction("reset")
   });
 
 /**
- * 删掉后台的**那两行 tawk 配置** —— 退回环境变量那一档(2026-11-16)
+ * 删掉后台的**那两行 tawk 配置** —— 退回内置默认那一档(2026-11-16)
  *
  * ## 为什么单独一个 action(而不是往 `resetSchema` 里加两个键)
  *
@@ -309,7 +311,8 @@ export const adminResetSiteSettingsAction = withSiteSettingAction("reset")
  * ## 跟「关掉」的区别
  *
  * - **关掉** = 存一个空串(后台还看得见「这一项被工作室关掉了」);
- * - **删掉** = 「我没配过这一项」⇒ 退回环境变量。
+ * - **删掉** = 「我没配过这一项」⇒ 退回**内置默认**(没有内置默认的那一版
+ *   就是退回环境变量)。
  */
 export const adminResetTawkSettingsAction = withSiteSettingAction(
   "resetTawk"

@@ -91,8 +91,8 @@ export interface AdminSiteSettingsView {
   tawkConfigured: boolean;
   /** 填了但不像 ID(或者只填了一半)—— 渲染时已经忽略了 */
   tawkInvalid: boolean;
-  /** 生效值从哪儿来 */
-  tawkSource: "db" | "env" | "none";
+  /** 生效值从哪儿来(`default` = 走内置默认那一对 ID) */
+  tawkSource: "db" | "env" | "default" | "none";
   /** DB 里 property id 那一行的原始值 —— `null` = 没存过 */
   tawkDbPropertyId: string | null;
   /** DB 里 widget id 那一行的原始值 —— `null` = 没存过 */
@@ -101,4 +101,12 @@ export interface AdminSiteSettingsView {
   tawkEnvPropertyId: string;
   /** 环境变量里的 widget id(空 = 没配) */
   tawkEnvWidgetId: string;
+  /**
+   * 内置默认的 property id(2026-11-16)
+   *
+   * 工作室自己那套 tawk 账号 —— 部署上去就有小窗,不用先去后台点一次保存。
+   */
+  tawkDefaultPropertyId: string;
+  /** 内置默认的 widget id(2026-11-16) */
+  tawkDefaultWidgetId: string;
 }

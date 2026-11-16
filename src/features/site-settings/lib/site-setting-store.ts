@@ -47,6 +47,8 @@ import { describeDbError } from "@/features/shared/lib/db-error";
 import {
   type ResolvedTawkConfig,
   resolveTawkConfig,
+  TAWK_DEFAULT_PROPERTY_ID,
+  TAWK_DEFAULT_WIDGET_ID,
 } from "@/features/tawk/lib/tawk-config";
 
 import {
@@ -192,7 +194,8 @@ export const getServiceWechatQrUrl = cache(
  * tawk.to 在线客服的**生效配置** —— 渲染链路上的唯一入口(2026-11-16)
  *
  * 回退链(**逐个 ID**):DB 那一行 → `NEXT_PUBLIC_TAWK_PROPERTY_ID` /
- * `NEXT_PUBLIC_TAWK_WIDGET_ID` → 没配(页面上就没有客服小窗)。
+ * `NEXT_PUBLIC_TAWK_WIDGET_ID` → **内置默认**(工作室自己那套账号,2026-11-16)
+ * → 没配(页面上就没有客服小窗)。
  *
  * **不抛错** —— 跟上面两条一个口径:读挂了就退回环境变量那一档,并记一条
  * error 日志。客服小窗不该因为一次数据库抖动就整个没了。
@@ -211,6 +214,8 @@ export const getTawkWidgetConfig = cache(
         dbWidgetId,
         envPropertyId,
         envWidgetId,
+        defaultPropertyId: TAWK_DEFAULT_PROPERTY_ID,
+        defaultWidgetId: TAWK_DEFAULT_WIDGET_ID,
       });
     } catch (error) {
       const info = describeDbError(error);
@@ -223,6 +228,8 @@ export const getTawkWidgetConfig = cache(
         dbWidgetId: null,
         envPropertyId,
         envWidgetId,
+        defaultPropertyId: TAWK_DEFAULT_PROPERTY_ID,
+        defaultWidgetId: TAWK_DEFAULT_WIDGET_ID,
       });
     }
   }
@@ -268,6 +275,14 @@ export interface SiteSettingsOverview {
   tawkEnvPropertyId: string;
   /** tawk 的环境变量值(空 = 没配) */
   tawkEnvWidgetId: string;
+  /**
+   * tawk 的**内置默认** property id(2026-11-16)
+   *
+   * 工作室自己那套 tawk 账号 —— 部署上去就有小窗,不用先去后台点一次保存。
+   */
+  tawkDefaultPropertyId: string;
+  /** tawk 的**内置默认** widget id(2026-11-16) */
+  tawkDefaultWidgetId: string;
 }
 
 /**
@@ -344,6 +359,8 @@ export async function getSiteSettingsOverview(): Promise<SiteSettingsOverview> {
       dbWidgetId: tawkDbWidgetId,
       envPropertyId: tawkEnvPropertyId,
       envWidgetId: tawkEnvWidgetId,
+      defaultPropertyId: TAWK_DEFAULT_PROPERTY_ID,
+      defaultWidgetId: TAWK_DEFAULT_WIDGET_ID,
     });
   } catch (error) {
     const info = describeDbError(error);
@@ -356,6 +373,8 @@ export async function getSiteSettingsOverview(): Promise<SiteSettingsOverview> {
       dbWidgetId: null,
       envPropertyId: tawkEnvPropertyId,
       envWidgetId: tawkEnvWidgetId,
+      defaultPropertyId: TAWK_DEFAULT_PROPERTY_ID,
+      defaultWidgetId: TAWK_DEFAULT_WIDGET_ID,
     });
   }
 
@@ -373,6 +392,8 @@ export async function getSiteSettingsOverview(): Promise<SiteSettingsOverview> {
     tawkDbWidgetId,
     tawkEnvPropertyId,
     tawkEnvWidgetId,
+    tawkDefaultPropertyId: TAWK_DEFAULT_PROPERTY_ID,
+    tawkDefaultWidgetId: TAWK_DEFAULT_WIDGET_ID,
   };
 }
 

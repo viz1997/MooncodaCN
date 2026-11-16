@@ -2570,7 +2570,8 @@
       "tawkTitle": "在线客服(tawk.to)",
       "tawkEffective": "正在生效的 embed 地址",
       "tawkEnv": "环境变量里的 ID",
-      "invalidTawk": "这两个 ID 不合法(或只填了一个)—— 已经当作「没配」处理了,页面上不会出现客服小窗。"
+      "invalidTawk": "这两个 ID 不合法(或只填了一个)—— 已经当作「没配」处理了,页面上不会出现客服小窗。",
+      "tawkDefault": "内置默认的 ID"
     },
     "banner": {
       "envFallback": "现在还没在后台存过 —— 用的是环境变量 NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL 那一档。环境变量是构建期内联的,改它要重新部署;存到后台就不用。",
@@ -2578,7 +2579,9 @@
       "envFallbackQr": "现在还没在后台存过 —— 用的是环境变量 NEXT_PUBLIC_SERVICE_WECHAT_QR_URL 那一档。环境变量是构建期内联的,改它要重新部署;存到后台就不用。",
       "defaultQr": "还没配 —— 用的是内置默认那一张图(/service/wechat-qr.png)。把二维码图片放进 public/service/wechat-qr.png 就能生效,也可以在上面填一个 R2 上的公网地址。",
       "tawkEnvFallback": "现在还没在后台存过 —— 用的是环境变量 NEXT_PUBLIC_TAWK_PROPERTY_ID / NEXT_PUBLIC_TAWK_WIDGET_ID 那一档。环境变量是构建期内联的,改它要重新部署;存到后台就不用。",
-      "tawkNotConfigured": "还没配 —— 页面上没有在线客服小窗。把 tawk.to 后台的 Property ID 和 Widget ID 填进下面的表单就出现。"
+      "tawkDefaultFallback": "现在用的是内置默认那一对 ID(工作室自己的 tawk.to 账号)—— 部署上去小窗就在,不用先去后台点一次保存。想换成自己的一对就把下面两个框填了保存;想彻底关掉就把两个框都留空保存(点「删掉后台这几行」是退回内置默认,不是关掉)。",
+      "tawkNotConfigured": "还没配 —— 页面上没有在线客服小窗。把 tawk.to 后台的 Property ID 和 Widget ID 填进下面的表单就出现。",
+      "tawkTurnedOff": "后台这两个框存的是空串 = 明确关掉 —— 页面上现在没有客服小窗。填上两个 ID 保存就重新出现;点「删掉后台这几行」是退回内置默认(小窗会回来)。"
     },
     "form": {
       "title": "Shopify 店铺地址",
@@ -2597,21 +2600,21 @@
       "tawkPropertyPlaceholder": "5f9a8b7c6d",
       "tawkWidgetLabel": "Widget ID",
       "tawkWidgetPlaceholder": "1a2b3c",
-      "tawkExtra": "只接受字母 / 数字 / 下划线 / 短横线(这两个填的是 ID,不是网址)。两个要一起填才生效;留空保存 = 明确关掉(页面上没有客服小窗)。",
+      "tawkExtra": "只接受字母 / 数字 / 下划线 / 短横线(这两个填的是 ID,不是网址)。两个要一起填才生效。默认已经用着内置那一对(工作室自己的 tawk.to 账号)—— 想换成自己的一对就填进去保存;想把小窗彻底关掉就把两个框都留空保存(点「删掉后台这几行」是退回内置默认,不是关掉)。",
       "saveNote": "三项一起保存 —— 哪一项不合法,哪一项都不写进去。"
     },
     "actions": {
       "save": "保存",
       "reset": "删掉后台这一行(退回环境变量)",
       "resetQr": "删掉后台这一行(退回兜底那一档)",
-      "resetTawk": "删掉后台这两行(退回环境变量)"
+      "resetTawk": "删掉后台这几行(退回内置默认)"
     },
     "messages": {
       "loadFailed": "读站点设置失败 —— 看服务端日志",
       "saveSuccess": "已保存,立刻生效",
       "resetSuccess": "已删掉后台这一行,现在走环境变量那一档",
       "resetQrSuccess": "已删掉后台这一行,现在走兜底那一档(环境变量 / 内置默认)",
-      "resetTawkSuccess": "已删掉后台那两行,现在走环境变量那一档"
+      "resetTawkSuccess": "已删掉后台那几行,现在走内置默认那一档"
     },
     "errors": {
       "INVALID_URL": "这个地址不合法 —— 只接受 http / https 开头的网址",

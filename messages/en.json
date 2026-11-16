@@ -2573,7 +2573,8 @@
       "tawkTitle": "Live chat (tawk.to)",
       "tawkEffective": "embed address in effect",
       "tawkEnv": "IDs in the environment variables",
-      "invalidTawk": "These two IDs are not valid (or only one of them was filled in) — they are treated as \"not set\", so the live chat bubble does not appear on the site."
+      "invalidTawk": "These two IDs are not valid (or only one of them was filled in) — they are treated as \"not set\", so the live chat bubble does not appear on the site.",
+      "tawkDefault": "Built-in default IDs"
     },
     "banner": {
       "envFallback": "Nothing has been saved here yet — the NEXT_PUBLIC_SHOPIFY_STOREFRONT_URL environment variable is being used. That one is inlined at build time, so changing it needs a redeploy; saving it here does not.",
@@ -2581,7 +2582,9 @@
       "envFallbackQr": "Nothing has been saved here yet — the NEXT_PUBLIC_SERVICE_WECHAT_QR_URL environment variable is being used. That one is inlined at build time, so changing it needs a redeploy; saving it here does not.",
       "defaultQr": "Nothing set yet — the built-in default image (/service/wechat-qr.png) is being used. Drop the QR image at public/service/wechat-qr.png and it works, or fill in a public R2 address below.",
       "tawkEnvFallback": "Nothing has been saved here yet — the NEXT_PUBLIC_TAWK_PROPERTY_ID / NEXT_PUBLIC_TAWK_WIDGET_ID environment variables are being used. Those are inlined at build time, so changing them needs a redeploy; saving them here does not.",
-      "tawkNotConfigured": "Not set yet — there is no live chat bubble on the site. Fill in the Property ID and the Widget ID from the tawk.to dashboard below and it appears."
+      "tawkDefaultFallback": "The built-in default IDs are in use (the studio's own tawk.to account) — the bubble is live as soon as this is deployed, no need to save anything here first. Fill the two fields below to use your own pair instead; to turn it off completely, save both fields empty (\"Delete these rows saved here\" falls back to the built-in default, it does not turn it off).",
+      "tawkNotConfigured": "Not set yet — there is no live chat bubble on the site. Fill in the Property ID and the Widget ID from the tawk.to dashboard below and it appears.",
+      "tawkTurnedOff": "Both fields are stored as empty strings, which explicitly turns it off — there is no live chat bubble on the site right now. Fill in the two IDs and save to bring it back; \"Delete these rows saved here\" falls back to the built-in default (the bubble comes back)."
     },
     "form": {
       "title": "Shopify store address",
@@ -2600,21 +2603,21 @@
       "tawkPropertyPlaceholder": "5f9a8b7c6d",
       "tawkWidgetLabel": "Widget ID",
       "tawkWidgetPlaceholder": "1a2b3c",
-      "tawkExtra": "Only letters / digits / underscores / hyphens are accepted (these two fields take IDs, not addresses). Both are needed for it to work; saving them empty explicitly turns it off (no live chat bubble on the site).",
+      "tawkExtra": "Only letters / digits / underscores / hyphens are accepted (these two fields take IDs, not addresses). Both are needed for it to work. The built-in pair (the studio's own tawk.to account) is already in use — fill these in and save to use your own instead; to turn the bubble off completely, save both fields empty (\"Delete these rows saved here\" falls back to the built-in default, it does not turn it off).",
       "saveNote": "All three are saved at once — if any one of them is invalid, none of them is written."
     },
     "actions": {
       "save": "Save",
       "reset": "Delete the row saved here (fall back to the environment variable)",
       "resetQr": "Delete the row saved here (fall back to the default)",
-      "resetTawk": "Delete these two rows saved here (fall back to the environment variables)"
+      "resetTawk": "Delete these rows saved here (fall back to the built-in default)"
     },
     "messages": {
       "loadFailed": "Could not load the site settings — check the server log",
       "saveSuccess": "Saved, effective immediately",
       "resetSuccess": "Deleted the row saved here — the environment variable is back in charge",
       "resetQrSuccess": "Deleted the row saved here — the fallback is back in charge (environment variable / built-in default)",
-      "resetTawkSuccess": "Deleted the two rows saved here — the environment variables are back in charge"
+      "resetTawkSuccess": "Deleted the rows saved here — the built-in default is back in charge"
     },
     "errors": {
       "INVALID_URL": "That address is not valid — only http / https addresses are accepted",
