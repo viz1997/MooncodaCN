@@ -8,11 +8,14 @@
  *
  * > 「这笔钱到了」→ 把订单标成已付(以及把挂在它下面的工单一起标上)。
  *
- * 这件事只有一份实现,才有下面两条规矩:
+ * 这件事只有一份实现,才有下面三条规矩:
  *
  * 1. **退款不是订单状态** —— 退款只改 `paymentStatus`。
  * 2. **迟到的收款通知不能把退过款的单改回已付** —— 靠
  *    `paymentStatus === "refunded"` 挡住(webhook 会重投,投递顺序不保证)。
+ * 3. **金额对不上就不落库**(2026-11-16)—— 验签过了只说明「这条通知确实是
+ *    平台发的」,管不了「平台记的这笔钱是不是我们收的那笔钱」。通知里的金额
+ *    跟订单应付**必须一分不差**(判定在 `amount-guard.ts`)。
  *
  * 判断在 `transitions.ts`(纯函数,零 DB 依赖),这里只负责写库。
  *
@@ -34,6 +37,7 @@ import { buildLineSnapshot } from "@/features/storefront/lib/cart-snapshot";
 import { removeOrderedLinesFromCarts } from "@/features/storefront/lib/cart-store";
 import type { CartLineItemMetadata } from "@/features/storefront/types";
 
+import { verifyPaidAmount } from "./amount-guard";
 import {
   decideLinkedPrintOrderTransition,
   decideStorefrontTransition,
@@ -66,6 +70,16 @@ export interface OrderLookup {
   paymentStatus: string;
   /** 下单人 —— 付款成功时要把买掉的行从他的购物车里摘掉 */
   userId: string;
+  /**
+   * 订单**应付**(分)—— 核对「平台记的实收」用
+   *
+   * 商城 = `storefront_order.total_cents`(折后小计 − 优惠 + 运费)
+   * 打印 = `print_order.total_price_cents`(报价那四项之和)
+   *
+   * 这两个数**就是收银台实际收的数**(见 `payments/lib/total.ts`)⇒ 平台
+   * 报回来的金额跟它一分不差,才算「收的是这一单的钱」。
+   */
+  payableCents: number;
 }
 
 function ignored(reason: string): SettleResult {
@@ -102,6 +116,7 @@ export async function findOrderByOrderNo(
       status: storefrontOrder.status,
       paymentStatus: storefrontOrder.paymentStatus,
       userId: storefrontOrder.userId,
+      payableCents: storefrontOrder.totalCents,
     })
     .from(storefrontOrder)
     .where(eq(storefrontOrder.orderNo, orderNo))
@@ -117,6 +132,7 @@ export async function findOrderByOrderNo(
       status: printOrder.status,
       paymentStatus: printOrder.paymentStatus,
       userId: printOrder.userId,
+      payableCents: printOrder.totalPriceCents,
     })
     .from(printOrder)
     .where(eq(printOrder.orderNo, orderNo))
@@ -137,6 +153,18 @@ export async function findOrderByOrderNo(
  *
  * 找不到本地订单就当无事发生(回 200 忽略):平台可能推一条我们根本不认识的
  * 单(比如在 Shopify 后台手工建的单)。
+ *
+ * ## 标已付之前**先核对金额**(2026-11-16)
+ *
+ * 「验签过了」只说明「这条通知确实是平台发的」,管不了「平台记的这笔钱
+ * 是不是我们收的那笔钱」。⇒ 通知里带着金额,而订单上有应付金额 ——
+ * 两者**必须一分不差**。
+ *
+ * 对不上 ⇒ **一格都不改**(`payment_status` 也不改),只记一条醒目的日志,
+ * 让工作室人工确认。判定在 `amount-guard.ts`(纯函数)。
+ *
+ * ⚠️ **只在 `mark_paid` 那一档核对** —— 退款通知带的是**退款金额**,不是
+ * 订单总额,拿订单总额去比会把每一笔退款都拒掉。
  */
 export async function settleByOrderNo(params: {
   orderNo: string;
@@ -145,10 +173,48 @@ export async function settleByOrderNo(params: {
   channel: PaymentChannel;
   /** 平台侧的单号(有就记下来,方便对账) */
   providerOrderId?: string | null;
+  /**
+   * 平台通知里的**实收金额**(分)—— 用来核对「通知的金额 == 订单应付」
+   *
+   * - 数字 → 拿来比对
+   * - `null` → **读了但解析不出来** ⇒ 核不了 ⇒ 拦住落库(fail closed)
+   * - **不传** → 这个通道不核对(旧路 Shopify 的回调不带金额)
+   */
+  paidAmountCents?: number | null | undefined;
 }): Promise<SettleResult> {
   const found = await findOrderByOrderNo(params.orderNo);
   if (!found) {
     return ignored(`本地没有订单号=${params.orderNo} 的订单`);
+  }
+
+  // ---- 金额核对 —— 只在「标已付」那一档 ----
+  //
+  // ⚠️ **放在最前面**:一条验签通过但金额不对的通知,是在说「平台记的那笔
+  // 钱不是我们收的这笔」—— 在改任何状态之前就得把它拦下来。
+  if (params.action === "mark_paid") {
+    const check = verifyPaidAmount({
+      expectedCents: found.order.payableCents,
+      notifiedCents: params.paidAmountCents,
+    });
+    if (!check.ok) {
+      // **不改任何状态** —— 只记日志。
+      //
+      // 日志里要写全工作室要看的四样:订单号 / 两个金额 / 通道 / 平台单号。
+      console.error(
+        `[payments] ⚠️ ${found.order.orderNo} 金额核对没通过(${check.code})—— ` +
+          `通知里的金额 ${check.notifiedCents ?? "读不出来"} 分 ≠ 订单应付 ` +
+          `${check.expectedCents} 分(通道 ${params.channel}` +
+          `${params.providerOrderId ? `,平台单号 ${params.providerOrderId}` : ""})—— ` +
+          `**没有改任何状态**,请工作室人工核对`
+      );
+      return {
+        ok: true,
+        orderType: found.orderType,
+        orderNo: found.order.orderNo,
+        changed: false,
+        reason: `金额核对没通过(${check.code}):${check.message}`,
+      };
+    }
   }
 
   const result =

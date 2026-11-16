@@ -276,11 +276,21 @@ export async function reconcileAlipayPayment(params: {
 
     // ---- 该落库了 ----
     if (decision.shouldSettle) {
+      // 把查单拿到的金额**带下去** —— 落库那一层会拿订单上的应付再核一遍
+      // (同一个数、同一份判定 ⇒ 两条腿不会漂)。
+      //
+      // ⚠️ **判定层压根没核金额的时候**(应付金额不知道 / `expectedAmountCents`
+      // 是 null)⇒ 这一层**也不核** —— 传 `undefined`,别把「读不出来」当成
+      // 「核不了」把这一单拦下来。
+      const amountToPass =
+        expectedAmountCents === null ? undefined : paidAmountCents;
+
       const settled = await settleByOrderNo({
         orderNo,
         action: "mark_paid",
         channel: "alipay",
         providerOrderId: result.tradeNo,
+        paidAmountCents: amountToPass,
       });
       return {
         paid: true,

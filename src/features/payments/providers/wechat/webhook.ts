@@ -56,13 +56,13 @@
  * 不另建去重表。
  */
 
+import { settleByOrderNo } from "@/features/payments/lib/settle";
 import { landRefundOutcome } from "@/features/refund/lib/land-refund";
 import {
   getRefundRequestById,
   recordRefundProviderOutcome,
   transitionRefundStatus,
 } from "@/features/refund/lib/refund-store";
-import { settleByOrderNo } from "@/features/payments/lib/settle";
 import { logger } from "@/lib/logger";
 
 import { getWechatPayConfigs } from "./config";
@@ -463,11 +463,27 @@ export async function handleWechatNotify(params: {
   }
 
   // ---- 9. 落库 ----
+  //
+  // **把通知里的金额带下去**(微信给的是**分**)—— 落库那一层要拿它跟订单
+  // 应付**一分不差**地对上,对不上就不落库(见 `settle.ts` 的「标已付之前
+  // 先核对金额」)。
+  //
+  // ⚠️ 取的是 `amount.total`,**不是** `amount.payer_total` —— 用户可能用了
+  // 微信侧的优惠,`payer_total` 会**小于**订单金额,拿它比会把每一笔正常
+  // 付款都拒掉。`amount.total` 才是**我们要求收的那个数**。
+  //
+  // 读不到 ⇒ 传 `null`(「读不出来」)⇒ 核不了 ⇒ 拦住落库(fail closed)。
+  const paidAmountCents =
+    typeof transaction.amount?.total === "number"
+      ? transaction.amount.total
+      : null;
+
   const result = await settleByOrderNo({
     orderNo,
     action: "mark_paid",
     channel: "wechat",
     providerOrderId: transactionId || null,
+    paidAmountCents,
   });
 
   return {

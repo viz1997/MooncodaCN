@@ -39,14 +39,14 @@
  * 不另建去重表。
  */
 
+import { amountStringToCents } from "@/features/payments/lib/money";
+import { settleByOrderNo } from "@/features/payments/lib/settle";
 import { landRefundOutcome } from "@/features/refund/lib/land-refund";
 import {
   getRefundRequestById,
   recordRefundProviderOutcome,
   transitionRefundStatus,
 } from "@/features/refund/lib/refund-store";
-import { amountStringToCents } from "@/features/payments/lib/money";
-import { settleByOrderNo } from "@/features/payments/lib/settle";
 import { logger } from "@/lib/logger";
 
 import { getAlipayConfigs } from "./config";
@@ -256,11 +256,22 @@ export async function handleAlipayNotify(
     };
   }
 
+  // ---- 落库 ----
+  //
+  // **把通知里的金额带下去**(支付宝给的是**元**,这里转成分)—— 落库那一层
+  // 要拿它跟订单应付**一分不差**地对上,对不上就不落库(见 `settle.ts` 的
+  // 「标已付之前先核对金额」)。
+  //
+  // 读不到 / 解析不了 ⇒ 传 `null`(「读不出来」)⇒ 核不了 ⇒ 拦住落库
+  // (fail closed)。
+  const paidAmountCents = parseAlipayAmountCents(params.total_amount);
+
   const result = await settleByOrderNo({
     orderNo,
     action: "mark_paid",
     channel: "alipay",
     providerOrderId: tradeNo || null,
+    paidAmountCents,
   });
 
   return {
@@ -278,15 +289,18 @@ export async function handleAlipayNotify(
 /* -------------------------------------------------------------------------- */
 
 /**
- * 退款金额(元)→ 分 —— **解析不了就返回 null**
+ * 支付宝给的金额(元)→ 分 —— **解析不了就返回 null**
  *
  * 支付宝这边金额单位是**元**(微信是分)⇒ 走仓库那份 `amountStringToCents()`
- * (纯整数运算,不用浮点)。它**解析不了会抛** ⇒ 这里 catch 掉返回 null,
- * 让调用方退回「申请单上的金额」。
+ * (纯整数运算,不用浮点)。它**解析不了会抛** ⇒ 这里 catch 掉返回 null。
+ *
+ * 两处用:
+ *
+ * - **付款通知**的 `total_amount` —— 用来跟订单应付核对(`null` ⇒ 核不了
+ *   ⇒ 拦住落库,fail closed)
+ * - **退款通知**的 `refund_fee` —— 解析不了就退回申请单上的金额
  */
-function parseRefundFeeCents(
-  raw: string | undefined | null
-): number | null {
+function parseAlipayAmountCents(raw: string | undefined | null): number | null {
   const value = (raw ?? "").trim();
   if (!value) return null;
   try {
@@ -381,7 +395,7 @@ async function handleAlipayRefundNotify(input: {
 
   // ---- 4. 金额(元 → 分);解析不了就退回申请单上的金额 ----
   const refundedCents =
-    parseRefundFeeCents(params.refund_fee ?? params.refund_amount) ??
+    parseAlipayAmountCents(params.refund_fee ?? params.refund_amount) ??
     request.amountCents;
 
   // ---- 5. `REFUND_SUCCESS` → 钱退到了 ----
@@ -403,9 +417,7 @@ async function handleAlipayRefundNotify(input: {
       refundRequestId,
       refundStatus: refundStatus || null,
       settled: result.ok,
-      reason: result.ok
-        ? "支付宝退款到账,已落库"
-        : `落库失败(${result.code})`,
+      reason: result.ok ? "支付宝退款到账,已落库" : `落库失败(${result.code})`,
     };
   }
 

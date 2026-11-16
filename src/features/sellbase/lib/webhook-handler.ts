@@ -112,6 +112,8 @@ export async function applySellbasePaymentAction(
       status: printOrder.status,
       paymentStatus: printOrder.paymentStatus,
       userId: printOrder.userId,
+      // 应付金额 —— `OrderLookup` 的那一列(旧路不核对金额,但形状要一样)
+      payableCents: printOrder.totalPriceCents,
     })
     .from(printOrder)
     .where(eq(printOrder.sellbaseOrderId, sellbaseOrderId))
@@ -130,6 +132,8 @@ export async function applySellbasePaymentAction(
       status: storefrontOrder.status,
       paymentStatus: storefrontOrder.paymentStatus,
       userId: storefrontOrder.userId,
+      // 应付金额 —— `OrderLookup` 的那一列(旧路不核对金额,但形状要一样)
+      payableCents: storefrontOrder.totalCents,
     })
     .from(storefrontOrder)
     .where(eq(storefrontOrder.sellbaseOrderId, sellbaseOrderId))
