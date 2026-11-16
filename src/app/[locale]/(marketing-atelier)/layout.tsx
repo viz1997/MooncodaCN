@@ -40,6 +40,9 @@
  *    - `<CustomWorkshop />` —— 4 阶段定制工作台 Dialog(Upload/Transform/Configure/Review)
  *  - 四个 overlay 都把 portal 指回 `.atelier-root`(useAtelierContainer),否则
  *    Radix 的 portal 落在这个 token 子树之外,配色 / 圆角会退回全站默认主题
+ *  - `<TawkWidget />` —— tawk.to 在线客服小窗(2026-11-16),**配了才挂**
+ *    (两个 ID 都在 `/admin/site-settings` 里配);它渲染 `null`,脚本是
+ *    浏览器里的事
  *  - 内容:`children` —— 各个页面自己拼装
  */
 // 本组的版式(统一内容宽度 + 法律文档排版)—— 色值在下面的 <style> 块里
@@ -51,11 +54,13 @@ import { WjpStoreHeader } from "@/features/marketing/components/storefront/wjp-s
 import {
   getInternationalStoreUrl,
   getServiceWechatQrUrl,
+  getTawkWidgetConfig,
 } from "@/features/site-settings/lib/site-setting-store";
 import { CartDrawer } from "@/features/storefront/components/cart-drawer";
 import { CustomWorkshop } from "@/features/storefront/components/custom-workshop";
 import { CustomizeEntry } from "@/features/storefront/components/customize-entry";
 import { ProductQuickView } from "@/features/storefront/components/product-quick-view";
+import { TawkWidget } from "@/features/tawk/components/tawk-widget";
 
 export default async function MarketingAtelierLayout({
   children,
@@ -86,6 +91,21 @@ export default async function MarketingAtelierLayout({
   // **地址从 layout 当 props 传下去** —— 客户端组件读不了 DB,server
   // component 也不该自己查(两处共用 layout 查好的那一份)。
   const serviceQr = await getServiceWechatQrUrl();
+
+  // tawk.to 在线客服(2026-11-16)—— 访客右下角那个客服小窗。
+  //
+  // 真理源同样在 DB(`site_setting` 表的 `tawk_property_id` /
+  // `tawk_widget_id`),回退链:**逐个 ID** DB 那一行 → 环境变量
+  // `NEXT_PUBLIC_TAWK_PROPERTY_ID` / `NEXT_PUBLIC_TAWK_WIDGET_ID` → 没配。
+  //
+  // **两个 ID 都合法才挂** —— 少一个就装不上(那是 tawk 那边硬性的:embed
+  // 地址是 `https://embed.tawk.to/{propertyId}/{widgetId}`)。没配 ⇒ 页面上
+  // 没有小窗,跟工作室说「没配就不出现」是一条口径。
+  //
+  // ⚠️ **身份(访客姓名 / 邮箱)在客户端取**(`useSession()`)—— 服务端读
+  // session 得用 `headers()`,那会让**每一个公开页**都变成动态渲染。客户端
+  // 取就没有那个代价(组件自己渲染 `null`,SSR / 客户端输出一样)。
+  const tawk = await getTawkWidgetConfig();
 
   return (
     <>
@@ -160,6 +180,15 @@ export default async function MarketingAtelierLayout({
         <ProductQuickView />
         <CustomizeEntry />
         <CustomWorkshop />
+
+        {/* tawk.to 在线客服小窗 —— 配了才挂 */}
+        {tawk.configured ? (
+          <TawkWidget
+            propertyId={tawk.propertyId}
+            widgetId={tawk.widgetId}
+            locale={locale}
+          />
+        ) : null}
       </div>
     </>
   );

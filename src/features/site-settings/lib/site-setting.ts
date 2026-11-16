@@ -5,7 +5,11 @@
  *
  * 「后台能改、不用重新部署」的站点级设置都走这套口径。第一项是**海外独立站
  * 的顾客访问地址**(2026-11-11 加的),第二项是**客服微信二维码的图片地址**
- * (2026-11-13 加的 —— 页脚「客服」那一栏,点开弹二维码)。
+ * (2026-11-13 加的 —— 页脚「客服」那一栏,点开弹二维码),第三项是
+ * **tawk.to 在线客服的两个 ID**(2026-11-16 加的)。
+ *
+ * ⚠️ **tawk 那两个键的解析不在这一层** —— 它们不是 URL(是一对 ID),
+ * 校验和回退走 `@/features/tawk/lib/tawk-config`。这一层只负责**键名**。
  *
  * ## 为什么不再只靠环境变量
  *
@@ -49,6 +53,20 @@ export const SITE_SETTING_KEYS = {
    * 页脚「客服」那一栏 —— 点一下弹出客服微信的二维码。
    */
   serviceWechatQrUrl: "service_wechat_qr_url",
+  /**
+   * tawk.to 在线客服的 property id(2026-11-16 加的)
+   *
+   * ⚠️ **这不是 URL** —— 是一个 ID(字母 / 数字 / 下划线 / 短横线),
+   * 会被拼进 `https://embed.tawk.to/{propertyId}/{widgetId}`。
+   * 校验在 `@/features/tawk/lib/tawk-config` 那一层。
+   */
+  tawkPropertyId: "tawk_property_id",
+  /**
+   * tawk.to 在线客服的 widget id(2026-11-16 加的)
+   *
+   * 跟 property id **是一套配置** —— 两个都合法才装得上小窗。
+   */
+  tawkWidgetId: "tawk_widget_id",
 } as const;
 
 export type SiteSettingKey =

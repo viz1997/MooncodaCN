@@ -18,6 +18,15 @@
  * 它跟海外独立站那一项是**两个独立的键**,但**共用这一组 action** ——
  * 后台那一页就是一张表单两个字段。
  *
+ * ## 2026-11-16 加了第三项设置:tawk.to 在线客服
+ *
+ * 两个 ID(property id + widget id)⇒ 页面上右下角的客服小窗。
+ * ⚠️ **那两个不是地址,是一对 ID** ⇒ 校验走
+ * `@/features/tawk/lib/tawk-config`,错误码单列一个 `INVALID_TAWK_ID`。
+ *
+ * 两个 ID 是**一套配置** ⇒ 「删掉后台这两行」是**单独一个 action**
+ * (`adminResetTawkSettingsAction`,一个事务删两行),不去挤按键删那条。
+ *
  * ## 出错返回 `{ok:false, code}`,不 throw
  *
  * throw 会被 next-safe-action 糊成「服务器错误」—— 工作室根本不知道是哪儿
@@ -43,10 +52,15 @@ import {
 } from "@/features/site-settings/lib/site-setting";
 import {
   deleteSiteSetting,
+  deleteSiteSettings,
   getSiteSettingsOverview,
   SITE_SETTINGS_TAG,
   saveSiteSettings,
 } from "@/features/site-settings/lib/site-setting-store";
+import {
+  isValidTawkId,
+  normalizeTawkId,
+} from "@/features/tawk/lib/tawk-config";
 import { adminAction } from "@/lib/safe-action";
 
 import type {
@@ -83,6 +97,15 @@ export const adminGetSiteSettingsAction = withSiteSettingAction("get").action(
       serviceQrInvalid: overview.serviceQr.invalid,
       serviceQrDbValue: overview.serviceQrDbValue,
       serviceQrEnvValue: overview.serviceQrEnvValue,
+      tawkPropertyId: overview.tawk.propertyId,
+      tawkWidgetId: overview.tawk.widgetId,
+      tawkConfigured: overview.tawk.configured,
+      tawkInvalid: overview.tawk.invalid,
+      tawkSource: overview.tawk.source,
+      tawkDbPropertyId: overview.tawkDbPropertyId,
+      tawkDbWidgetId: overview.tawkDbWidgetId,
+      tawkEnvPropertyId: overview.tawkEnvPropertyId,
+      tawkEnvWidgetId: overview.tawkEnvWidgetId,
     };
   }
 );
@@ -117,6 +140,20 @@ const settingsSchema = z.object({
    * - **不合法**(比如 `javascript:`)⇒ 拒绝保存,渲染时也会 fail closed
    */
   serviceWechatQrUrl: z.string().max(2000),
+  /**
+   * tawk.to 的 property id(2026-11-16)
+   *
+   * ⚠️ **这不是地址,是一个 ID** —— 只接受字母 / 数字 / 下划线 / 短横线。
+   *
+   * **空串是合法的** = 明确关掉(页面上没有客服小窗)。
+   */
+  tawkPropertyId: z.string().max(64),
+  /**
+   * tawk.to 的 widget id(2026-11-16)
+   *
+   * 跟 property id **必须一起填** —— 两个都合法才装得上小窗。
+   */
+  tawkWidgetId: z.string().max(64),
 });
 
 /**
@@ -158,6 +195,8 @@ export const adminSaveSiteSettingsAction = withSiteSettingAction("save")
       parsedInput.internationalStoreUrl
     );
     const normalizedQr = normalizeStorefrontUrl(parsedInput.serviceWechatQrUrl);
+    const normalizedTawkProperty = normalizeTawkId(parsedInput.tawkPropertyId);
+    const normalizedTawkWidget = normalizeTawkId(parsedInput.tawkWidgetId);
 
     // 非空 ⇒ 必须是一个能渲染的地址
     //
@@ -182,6 +221,14 @@ export const adminSaveSiteSettingsAction = withSiteSettingAction("save")
       }
     }
 
+    if (
+      (normalizedTawkProperty && !isValidTawkId(normalizedTawkProperty)) ||
+      (normalizedTawkWidget && !isValidTawkId(normalizedTawkWidget))
+    ) {
+      // tawk 那两个框填的是 **ID**,不是地址 —— 文案要说清「只接受哪些字符」
+      return { ok: false, code: "INVALID_TAWK_ID" };
+    }
+
     try {
       await saveSiteSettings([
         {
@@ -189,6 +236,14 @@ export const adminSaveSiteSettingsAction = withSiteSettingAction("save")
           value: normalizedStore,
         },
         { key: SITE_SETTING_KEYS.serviceWechatQrUrl, value: normalizedQr },
+        {
+          key: SITE_SETTING_KEYS.tawkPropertyId,
+          value: normalizedTawkProperty,
+        },
+        {
+          key: SITE_SETTING_KEYS.tawkWidgetId,
+          value: normalizedTawkWidget,
+        },
       ]);
     } catch (error) {
       const info = describeDbError(error);
@@ -238,6 +293,44 @@ export const adminResetSiteSettingsAction = withSiteSettingAction("reset")
     revalidateSiteSettings();
     return { ok: true };
   });
+
+/**
+ * 删掉后台的**那两行 tawk 配置** —— 退回环境变量那一档(2026-11-16)
+ *
+ * ## 为什么单独一个 action(而不是往 `resetSchema` 里加两个键)
+ *
+ * tawk 的两个 ID 是**一套配置** —— 两个都合法才装得上小窗。
+ * 「删掉后台这两行」如果走**按键**删 ⇒ 要么分两次(半截状态:property id
+ * 删了、widget id 还在),要么把按键删的语义搞乱(「删掉这一项」变成
+ * 「删掉这两项」)。
+ *
+ * ⇒ **单独一个 action**:一次删两行,一个事务。
+ *
+ * ## 跟「关掉」的区别
+ *
+ * - **关掉** = 存一个空串(后台还看得见「这一项被工作室关掉了」);
+ * - **删掉** = 「我没配过这一项」⇒ 退回环境变量。
+ */
+export const adminResetTawkSettingsAction = withSiteSettingAction(
+  "resetTawk"
+).action(async (): Promise<AdminSiteSettingWriteResult> => {
+  try {
+    await deleteSiteSettings([
+      SITE_SETTING_KEYS.tawkPropertyId,
+      SITE_SETTING_KEYS.tawkWidgetId,
+    ]);
+  } catch (error) {
+    const info = describeDbError(error);
+    console.error("[site-settings] 重置 tawk 设置失败:", info.message || error);
+    if (info.missingRelation) {
+      return { ok: false, code: "MIGRATION_MISSING" };
+    }
+    return { ok: false, code: "SAVE_FAILED" };
+  }
+
+  revalidateSiteSettings();
+  return { ok: true };
+});
 
 /*
  * `AdminSiteSettingsView` / `AdminSiteSettingWriteResult` /

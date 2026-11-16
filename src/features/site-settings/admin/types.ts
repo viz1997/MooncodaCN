@@ -29,6 +29,13 @@ export type AdminSiteSettingErrorCode =
    * 「地址不合法」的话,工作室不知道该改哪一个。
    */
   | "INVALID_QR_URL"
+  /**
+   * **tawk 那两个 ID**不合法(2026-11-16)
+   *
+   * 单独一个码 —— 那两个输入框填的是 **ID**(不是地址),报错文案要能说清
+   * 「只接受字母 / 数字 / 下划线 / 短横线」。
+   */
+  | "INVALID_TAWK_ID"
   /** 表还不存在 —— 迁移脚本没跑 */
   | "MIGRATION_MISSING"
   /** 其它失败 */
@@ -73,4 +80,25 @@ export interface AdminSiteSettingsView {
   serviceQrDbValue: string | null;
   /** 环境变量里的那个值(空 = 没配) */
   serviceQrEnvValue: string;
+
+  /* ---- tawk.to 在线客服(2026-11-16)—— 两个 ID 是**一套配置** ---- */
+
+  /** 生效的 property id(空 = 没配) */
+  tawkPropertyId: string;
+  /** 生效的 widget id(空 = 没配) */
+  tawkWidgetId: string;
+  /** 两个 ID 都合法 ⇒ 页面上装得上客服小窗 */
+  tawkConfigured: boolean;
+  /** 填了但不像 ID(或者只填了一半)—— 渲染时已经忽略了 */
+  tawkInvalid: boolean;
+  /** 生效值从哪儿来 */
+  tawkSource: "db" | "env" | "none";
+  /** DB 里 property id 那一行的原始值 —— `null` = 没存过 */
+  tawkDbPropertyId: string | null;
+  /** DB 里 widget id 那一行的原始值 —— `null` = 没存过 */
+  tawkDbWidgetId: string | null;
+  /** 环境变量里的 property id(空 = 没配) */
+  tawkEnvPropertyId: string;
+  /** 环境变量里的 widget id(空 = 没配) */
+  tawkEnvWidgetId: string;
 }

@@ -7,21 +7,25 @@
  * 的顾客访问地址改成后台可配,改完**不用重新部署**。
  *
  * 2026-11-13 加了**第二项设置**:客服微信二维码的图片地址(页脚「客服」那一
- * 栏,点开弹二维码)。
+ * 栏,点开弹二维码)。2026-11-16 加了**第三项设置**:tawk.to 在线客服的两个
+ * ID(页面上右下角的客服小窗)。
  *
  * 这一页两块:
  *
  * 1. **当前生效值**(只读卡)—— 先让人看见「现在到底按什么在生效」,再动
  *    下面的表单。每项设置**各自一张卡**、各自一个「删掉这一行」按钮。
- * 2. **表单**—— **一张表单两个字段**,一个「保存」按钮。
+ * 2. **表单**—— **一张表单三个字段组**,一个「保存」按钮。
  *
- * ## 为什么保存是一个按钮,重置是两个
+ * ## 为什么保存是一个按钮,重置是分开的
  *
- * 两项设置**共用一个事务**(要么都写进去,要么都不写)⇒ 一次「保存」把两项
+ * 三项设置**共用一个事务**(要么都写进去,要么都不写)⇒ 一次「保存」把三项
  * 都写掉是对的。
  *
  * 但「重置」是**按项**的 —— 「把独立站退回环境变量」不该顺手把二维码也
- * 退回去。⇒ 两颗重置按钮,一颗管一项。
+ * 退回去。⇒ 独立站 / 二维码各有一颗「删掉这一行」按钮。
+ *
+ * ⚠️ **tawk 那颗按钮是另一个 action** —— 它的两个 ID 是**一套配置**
+ * (两个都合法才装得上小窗)⇒ 一次删两行、一个事务,不去挤「按键删」那条。
  *
  * ## 配置界面在页面上直接处理,不开弹窗
  *
@@ -50,6 +54,7 @@ import {
   AlertTriangle,
   CircleDot,
   Globe,
+  LifeBuoy,
   MessageCircle,
   RotateCcw,
   Save,
@@ -62,10 +67,12 @@ import { useCallback, useEffect, useState } from "react";
 import {
   adminGetSiteSettingsAction,
   adminResetSiteSettingsAction,
+  adminResetTawkSettingsAction,
   adminSaveSiteSettingsAction,
 } from "@/features/site-settings/admin/actions";
 import type { AdminSiteSettingsView } from "@/features/site-settings/admin/types";
 import { SITE_SETTING_KEYS } from "@/features/site-settings/lib/site-setting";
+import { buildTawkEmbedUrl } from "@/features/tawk/lib/tawk-config";
 
 /* -------------------------------------------------------------------------- */
 /*  表单形状                                                                    */
@@ -76,6 +83,10 @@ type SettingsFormValues = {
   internationalStoreUrl: string;
   /** 客服微信二维码的图片地址 —— 空串 = 明确关掉 */
   serviceWechatQrUrl: string;
+  /** tawk.to 的 property id —— 空串 = 明确关掉 */
+  tawkPropertyId: string;
+  /** tawk.to 的 widget id —— 空串 = 明确关掉 */
+  tawkWidgetId: string;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -105,6 +116,10 @@ export function SiteSettingsAdminView() {
           internationalStoreUrl: res.data.dbValue ?? res.data.envValue ?? "",
           serviceWechatQrUrl:
             res.data.serviceQrDbValue ?? res.data.serviceQrEnvValue ?? "",
+          tawkPropertyId:
+            res.data.tawkDbPropertyId ?? res.data.tawkEnvPropertyId ?? "",
+          tawkWidgetId:
+            res.data.tawkDbWidgetId ?? res.data.tawkEnvWidgetId ?? "",
         });
       }
     } catch {
@@ -172,12 +187,33 @@ export function SiteSettingsAdminView() {
     }
   );
 
+  // tawk 的两个 ID 是**一套配置** ⇒ 「删掉后台这两行」是**单独一个 action**
+  // (一次删两行,一个事务)—— 不跟上面那颗「按键删」挤在一起。
+  const { execute: resetTawk, isPending: isResettingTawk } = useAction(
+    adminResetTawkSettingsAction,
+    {
+      onSuccess: ({ data }) => {
+        if (data?.ok === false) {
+          message.error(t(`errors.${data.code}`));
+          return;
+        }
+        message.success(t("messages.resetTawkSuccess"));
+        void load();
+      },
+      onError: ({ error }) => {
+        message.error(error.serverError ?? t("errors.SAVE_FAILED"));
+      },
+    }
+  );
+
   /* ------------------------------------------------------------ 表单动作 -- */
 
   const onSave = async (values: SettingsFormValues) => {
     await save({
       internationalStoreUrl: values.internationalStoreUrl ?? "",
       serviceWechatQrUrl: values.serviceWechatQrUrl ?? "",
+      tawkPropertyId: values.tawkPropertyId ?? "",
+      tawkWidgetId: values.tawkWidgetId ?? "",
     });
   };
 
@@ -287,11 +323,52 @@ export function SiteSettingsAdminView() {
           }
           isResetting={isResettingQr}
         />
+
+        {/* tawk.to 在线客服 —— 两个 ID 是一套配置 */}
+        <SettingStatus
+          title={t("current.tawkTitle")}
+          icon={<LifeBuoy className="h-4 w-4 text-emerald-600" />}
+          source={overview.tawkSource}
+          sourceLabels={{
+            db: t("current.sourceDb"),
+            env: t("current.sourceEnv"),
+            default: t("current.sourceDefault"),
+            none: t("current.sourceNone"),
+          }}
+          // 摆的是**真正会去加载的那个地址** —— 工作室一眼能看出拼对没有
+          effectiveUrl={
+            buildTawkEmbedUrl(overview.tawkPropertyId, overview.tawkWidgetId) ??
+            ""
+          }
+          envValue={
+            overview.tawkEnvPropertyId && overview.tawkEnvWidgetId
+              ? `${overview.tawkEnvPropertyId} / ${overview.tawkEnvWidgetId}`
+              : ""
+          }
+          invalid={overview.tawkInvalid}
+          invalidText={t("current.invalidTawk")}
+          emptyText={t("current.empty")}
+          effectiveLabel={t("current.tawkEffective")}
+          envLabel={t("current.tawkEnv")}
+          readError={null}
+          readFailedText={t("current.readFailed")}
+          banner={
+            overview.tawkSource === "env"
+              ? t("banner.tawkEnvFallback")
+              : overview.tawkSource === "none"
+                ? t("banner.tawkNotConfigured")
+                : null
+          }
+          resetLabel={t("actions.resetTawk")}
+          onReset={() => void resetTawk()}
+          isResetting={isResettingTawk}
+        />
       </section>
 
-      {/* ② 表单 —— 一张表单两个字段,一个「保存」
-          两项**分两组摆**(各带自己的小标题)—— 两项不是一回事:
-          ① 境外 Shopify 店铺的地址 ② 页脚客服那张二维码图的地址。 */}
+      {/* ② 表单 —— 一张表单三个字段组,一个「保存」
+          三项**分三组摆**(各带自己的小标题)—— 三项不是一回事:
+          ① 境外 Shopify 店铺的地址 ② 页脚客服那张二维码图的地址
+          ③ tawk.to 在线客服的两个 ID。 */}
       <section className="rounded-lg border bg-card p-4 shadow-sm">
         <h3 className="mb-1 flex items-center gap-2 text-sm font-semibold">
           <Globe className="h-4 w-4 text-emerald-600" />
@@ -328,6 +405,37 @@ export function SiteSettingsAdminView() {
               <Input
                 placeholder={t("form.servicePlaceholder")}
                 disabled={isSaving || isResettingStore || isResettingQr}
+              />
+            </Form.Item>
+          </div>
+
+          {/* 第三项 —— tawk.to 在线客服,两个 ID 是一套 ⇒ 一组两个框 */}
+          <div className="mt-6 border-t pt-5">
+            <h4 className="mb-1 flex items-center gap-2 text-sm font-semibold">
+              <LifeBuoy className="h-4 w-4 text-emerald-600" />
+              {t("form.tawkTitle")}
+            </h4>
+            <p className="mb-3 text-xs text-muted-foreground">
+              {t("form.tawkHelp")}
+            </p>
+            <Form.Item
+              name="tawkPropertyId"
+              label={t("form.tawkPropertyLabel")}
+              extra={t("form.tawkExtra")}
+            >
+              <Input
+                placeholder={t("form.tawkPropertyPlaceholder")}
+                disabled={isSaving || isResettingTawk}
+              />
+            </Form.Item>
+            <Form.Item
+              name="tawkWidgetId"
+              label={t("form.tawkWidgetLabel")}
+              extra={t("form.tawkExtra")}
+            >
+              <Input
+                placeholder={t("form.tawkWidgetPlaceholder")}
+                disabled={isSaving || isResettingTawk}
               />
             </Form.Item>
           </div>

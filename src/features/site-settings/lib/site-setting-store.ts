@@ -44,6 +44,10 @@ import { cache } from "react";
 import { db } from "@/db";
 import { siteSetting } from "@/db/schema";
 import { describeDbError } from "@/features/shared/lib/db-error";
+import {
+  type ResolvedTawkConfig,
+  resolveTawkConfig,
+} from "@/features/tawk/lib/tawk-config";
 
 import {
   type ResolvedSiteSetting,
@@ -84,6 +88,23 @@ function readEnvInternationalStoreUrl(): string {
  */
 function readEnvServiceWechatQrUrl(): string {
   return process.env.NEXT_PUBLIC_SERVICE_WECHAT_QR_URL?.trim() ?? "";
+}
+
+/**
+ * 环境变量兜底 —— tawk.to 的 property id(2026-11-16)
+ *
+ * ⚠️ **这两个不是 URL,是一对 ID** —— 校验和回退走
+ * `@/features/tawk/lib/tawk-config`,不在 `site-setting.ts` 那一层。
+ *
+ * ⚠️ `.env.example` 被 gitignore ⇒ 变量的说明只写在这儿(文件头是活文档)。
+ */
+function readEnvTawkPropertyId(): string {
+  return process.env.NEXT_PUBLIC_TAWK_PROPERTY_ID?.trim() ?? "";
+}
+
+/** 环境变量兜底 —— tawk.to 的 widget id(2026-11-16) */
+function readEnvTawkWidgetId(): string {
+  return process.env.NEXT_PUBLIC_TAWK_WIDGET_ID?.trim() ?? "";
 }
 
 /**
@@ -167,6 +188,46 @@ export const getServiceWechatQrUrl = cache(
   }
 );
 
+/**
+ * tawk.to 在线客服的**生效配置** —— 渲染链路上的唯一入口(2026-11-16)
+ *
+ * 回退链(**逐个 ID**):DB 那一行 → `NEXT_PUBLIC_TAWK_PROPERTY_ID` /
+ * `NEXT_PUBLIC_TAWK_WIDGET_ID` → 没配(页面上就没有客服小窗)。
+ *
+ * **不抛错** —— 跟上面两条一个口径:读挂了就退回环境变量那一档,并记一条
+ * error 日志。客服小窗不该因为一次数据库抖动就整个没了。
+ */
+export const getTawkWidgetConfig = cache(
+  async (): Promise<ResolvedTawkConfig> => {
+    const envPropertyId = readEnvTawkPropertyId();
+    const envWidgetId = readEnvTawkWidgetId();
+    try {
+      const [dbPropertyId, dbWidgetId] = await Promise.all([
+        cachedReadSiteSetting(SITE_SETTING_KEYS.tawkPropertyId),
+        cachedReadSiteSetting(SITE_SETTING_KEYS.tawkWidgetId),
+      ]);
+      return resolveTawkConfig({
+        dbPropertyId,
+        dbWidgetId,
+        envPropertyId,
+        envWidgetId,
+      });
+    } catch (error) {
+      const info = describeDbError(error);
+      console.error(
+        "[site-settings] 读 tawk 设置失败,退回环境变量兜底:",
+        info.message || error
+      );
+      return resolveTawkConfig({
+        dbPropertyId: null,
+        dbWidgetId: null,
+        envPropertyId,
+        envWidgetId,
+      });
+    }
+  }
+);
+
 /* -------------------------------------------------------------------------- */
 /*  后台要的那一份                                                             */
 /* -------------------------------------------------------------------------- */
@@ -193,6 +254,20 @@ export interface SiteSettingsOverview {
   serviceQrDbValue: string | null;
   /** 二维码的环境变量值(空 = 没配) */
   serviceQrEnvValue: string;
+  /**
+   * tawk.to 在线客服 —— 生效配置(2026-11-16)
+   *
+   * 跟上面两套是**独立的设置**:一个挂了不影响另一个。
+   */
+  tawk: ResolvedTawkConfig;
+  /** tawk property id 那一行在 DB 里的原始值 —— `null` = 没存过 */
+  tawkDbPropertyId: string | null;
+  /** tawk widget id 那一行在 DB 里的原始值 —— `null` = 没存过 */
+  tawkDbWidgetId: string | null;
+  /** tawk 的环境变量值(空 = 没配) */
+  tawkEnvPropertyId: string;
+  /** tawk 的环境变量值(空 = 没配) */
+  tawkEnvWidgetId: string;
 }
 
 /**
@@ -253,6 +328,37 @@ export async function getSiteSettingsOverview(): Promise<SiteSettingsOverview> {
     });
   }
 
+  let tawk: ResolvedTawkConfig;
+  let tawkDbPropertyId: string | null = null;
+  let tawkDbWidgetId: string | null = null;
+  const tawkEnvPropertyId = readEnvTawkPropertyId();
+  const tawkEnvWidgetId = readEnvTawkWidgetId();
+
+  try {
+    [tawkDbPropertyId, tawkDbWidgetId] = await Promise.all([
+      readSiteSettingRow(SITE_SETTING_KEYS.tawkPropertyId),
+      readSiteSettingRow(SITE_SETTING_KEYS.tawkWidgetId),
+    ]);
+    tawk = resolveTawkConfig({
+      dbPropertyId: tawkDbPropertyId,
+      dbWidgetId: tawkDbWidgetId,
+      envPropertyId: tawkEnvPropertyId,
+      envWidgetId: tawkEnvWidgetId,
+    });
+  } catch (error) {
+    const info = describeDbError(error);
+    console.error(
+      "[site-settings] 读 tawk 设置失败,退回环境变量兜底:",
+      info.message || error
+    );
+    tawk = resolveTawkConfig({
+      dbPropertyId: null,
+      dbWidgetId: null,
+      envPropertyId: tawkEnvPropertyId,
+      envWidgetId: tawkEnvWidgetId,
+    });
+  }
+
   return {
     resolved,
     dbValue,
@@ -262,6 +368,11 @@ export async function getSiteSettingsOverview(): Promise<SiteSettingsOverview> {
     serviceQr,
     serviceQrDbValue,
     serviceQrEnvValue,
+    tawk,
+    tawkDbPropertyId,
+    tawkDbWidgetId,
+    tawkEnvPropertyId,
+    tawkEnvWidgetId,
   };
 }
 
@@ -334,4 +445,29 @@ export async function saveSiteSettings(
  */
 export async function deleteSiteSetting(key: SiteSettingKey): Promise<void> {
   await db.delete(siteSetting).where(eq(siteSetting.key, key));
+}
+
+/**
+ * 删掉**几行** —— 一个事务里全删完(2026-11-16)
+ *
+ * ## 为什么需要它
+ *
+ * tawk 的两个 ID 是**一套配置** —— 两个都合法才装得上小窗。
+ * 「删掉后台这两行」如果分两次删 ⇒ 可能出现「property id 删了、widget id
+ * 还在」的半截状态(而且那一行还留着,后台看着像配了一半)。
+ *
+ * ⇒ 一个事务:要么两行都没了(退回环境变量那一档),要么两行都还在。
+ *
+ * ⚠️ **单行的删除仍然是 `deleteSiteSetting()`** —— 后台另外两项各自一颗
+ * 「删掉这一行」按钮,走的是单行那条。
+ */
+export async function deleteSiteSettings(
+  keys: SiteSettingKey[]
+): Promise<void> {
+  if (keys.length === 0) return;
+  await db.transaction(async (tx) => {
+    for (const key of keys) {
+      await tx.delete(siteSetting).where(eq(siteSetting.key, key));
+    }
+  });
 }
