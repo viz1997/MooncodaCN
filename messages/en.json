@@ -1122,6 +1122,14 @@
       "vertexCount": "vertices",
       "triangleCount": "triangles"
     },
+    "relief": {
+      "label": "Base lift tier",
+      "auto": "Auto",
+      "relief": "Relief",
+      "figurine": "Figurine",
+      "hint": "{kind} · {lift}mm base lift",
+      "reliefDisabled": "This model isn't a relief (too thick) — the relief base lift isn't available for it"
+    },
     "price": {
       "repair": "Model repair",
       "varnish": "Varnish",
@@ -1884,7 +1892,8 @@
           "orderNoConflict": "Order number conflict — please retry",
           "createOrderFailed": "The server could not create the order — please try again (details in the browser console)",
           "paymentChannelUnavailable": "This payment method is temporarily unavailable — pick another one or contact the studio",
-          "storefrontUnavailable": "This order was already settled together with a store order — pay it under “My Orders”"
+          "storefrontUnavailable": "This order was already settled together with a store order — pay it under “My Orders”",
+          "reliefTierMismatch": "The base lift tier doesn't match the model's size — go back to the tool and measure it again"
         }
       }
     },
@@ -1914,8 +1923,24 @@
       "quoteTitle": "See the estimate and fill in the order details",
       "quoteDialogTitle": "Quote & order",
       "quoteDialogDesc": "Below is the estimate computed by the server — submit the order details and the work order shows up under “My print orders”, where you pay.",
-      "descSignIn": "Print orders are tied to your account. Sign in first, then measure — otherwise the model is lost when the page reloads.",
+      "descSignIn": "Print orders are tied to your account — sign in here and carry on with your order, no need to measure again.",
       "signInCta": "Sign in",
+      "signIn": {
+        "title": "Sign in to continue",
+        "emailLabel": "Email",
+        "emailPlaceholder": "you@example.com",
+        "passwordLabel": "Password",
+        "passwordPlaceholder": "Your password",
+        "submit": "Sign in and continue",
+        "submitting": "Signing in…",
+        "hint": "You sign in right here — the page does not navigate away, so the model and the size you set stay put.",
+        "altHint": "Prefer phone + SMS code, or did you forget your password? Use “Sign in” for the full sign-in page (that leaves this page, so you will need to measure again).",
+        "errors": {
+          "missingFields": "Please enter your email and password.",
+          "invalidCredentials": "That email and password do not match.",
+          "emailNotVerified": "This email is not verified yet — please open the verification link in your inbox first."
+        }
+      },
       "errors": {
         "noModel": "No model yet — pick a file above first."
       }

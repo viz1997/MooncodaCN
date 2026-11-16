@@ -98,6 +98,8 @@ type ConfigFormValues = {
   supportTier2PriceYuanPerGram: number | null;
   supportEnabled: boolean;
   supportLiftMm: number | null;
+  /** 浮雕那档的托底 mm(2026-11-15) */
+  supportReliefLiftMm: number | null;
   supportBaseMarginMm: number | null;
   /** 百分比(37 = 37%)—— 提交时换算成 0.37 */
   deliveryExpressPercent: number | null;
@@ -165,6 +167,7 @@ function toFormValues(settings: PrintPricingSettings): ConfigFormValues {
     ),
     supportEnabled: settings.supportEnabled,
     supportLiftMm: settings.supportLiftMm,
+    supportReliefLiftMm: settings.supportReliefLiftMm,
     supportBaseMarginMm: settings.supportBaseMarginMm,
     deliveryExpressPercent: round4(settings.deliveryRates.express * 100),
     deliveryUrgentPercent: round4(settings.deliveryRates.urgent * 100),
@@ -274,6 +277,7 @@ export function PrintPricingAdminView() {
       ),
       supportEnabled: values.supportEnabled,
       supportLiftMm: values.supportLiftMm ?? 0,
+      supportReliefLiftMm: values.supportReliefLiftMm ?? 1,
       supportBaseMarginMm: values.supportBaseMarginMm ?? 0,
       // 百分比 → 小数(服务端那边存的就是小数)
       deliveryExpressRate: (values.deliveryExpressPercent ?? 0) / 100,
@@ -691,7 +695,14 @@ export function PrintPricingAdminView() {
                 : "不计入"
             }
           />
-          <Readonly label="托底高度" value={`${settings.supportLiftMm} mm`} />
+          <Readonly
+            label="托底高度(手办)"
+            value={`${settings.supportLiftMm} mm`}
+          />
+          <Readonly
+            label="托底高度(浮雕)"
+            value={`${settings.supportReliefLiftMm} mm`}
+          />
           <Readonly
             label="底板留边"
             value={`${settings.supportBaseMarginMm} mm`}
@@ -881,8 +892,17 @@ export function PrintPricingAdminView() {
 
             <Form.Item
               name="supportLiftMm"
-              label="托底高度(mm)"
+              label="托底高度 · 手办(mm)"
               extra="支撑在平台上先长一层托住模型"
+              rules={[{ required: true, message: "必填" }]}
+            >
+              <InputNumber min={0} max={1000} step={0.5} className="w-full" />
+            </Form.Item>
+
+            <Form.Item
+              name="supportReliefLiftMm"
+              label="托底高度 · 浮雕(mm)"
+              extra="浮雕背面是平的,托底薄一点就够(工具页自动判定)"
               rules={[{ required: true, message: "必填" }]}
             >
               <InputNumber min={0} max={1000} step={0.5} className="w-full" />

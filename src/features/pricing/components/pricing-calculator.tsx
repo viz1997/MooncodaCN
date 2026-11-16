@@ -130,6 +130,12 @@ import {
   type PricingInput,
   type RepairMode,
 } from "@/features/pricing/lib/pricing-engine";
+import {
+  detectReliefKind,
+  type ReliefMode,
+  reliefLiftMm,
+  resolveReliefKind,
+} from "@/features/pricing/lib/relief-detect";
 import { supportCacheKey } from "@/features/pricing/lib/support-cache-key";
 import {
   extractModelZip,
@@ -147,6 +153,7 @@ import type { MeshCheckSummary } from "@/features/tools/lib/mesh/summary";
 import {
   SUPPORT_BASE_MARGIN_MM,
   SUPPORT_LIFT_MM,
+  SUPPORT_RELIEF_LIFT_MM,
 } from "@/features/tools/lib/mesh/support-shell";
 
 /** 页面可以有的三个模式 —— 打印工作台只开「上传」 */
@@ -170,6 +177,24 @@ const yieldToUI = (): Promise<void> =>
  * 400ms 是「人停下来看一眼」的时间 —— 不长不短。
  */
 const SUPPORT_RECALC_DEBOUNCE_MS = 400;
+
+/**
+ * 托底档位的三个选项(2026-11-15)
+ *
+ * 「自动」= 按几何判定(扁平板 ⇒ 浮雕 ⇒ 托底 1mm);「浮雕」/「手办」= 手动指定。
+ *
+ * **「浮雕」那一项在几何判定是手办时是禁用的** —— 让用户手动挑浮雕就是
+ * 「手动少付支撑费」那个旋钮(托底 1mm ⇒ 支撑少 ⇒ 支撑费低)。服务端那道
+ * 自洽性闸也只挡这一个方向(409 `RELIEF_TIER_MISMATCH`)。
+ */
+const RELIEF_MODE_OPTIONS: readonly {
+  value: ReliefMode;
+  labelKey: "relief.auto" | "relief.relief" | "relief.figurine";
+}[] = [
+  { value: "auto", labelKey: "relief.auto" },
+  { value: "relief", labelKey: "relief.relief" },
+  { value: "figurine", labelKey: "relief.figurine" },
+];
 
 export function PricingCalculator({
   showChrome = true,
@@ -331,6 +356,21 @@ export function PricingCalculator({
    */
   const [unitCheck, setUnitCheck] = useState<ModelUnitCheck | null>(null);
 
+  /**
+   * 浮雕 / 手办 —— **托底高度分两档**(2026-11-15)
+   *
+   * 工作室的原话:「克重工具中浮雕模型不需要像手办模型5mm底部支撑，只需要1mm支撑」。
+   *
+   * - `auto` —— **按几何自动判定**(默认):扁平板状(薄)⇒ 浮雕 ⇒ 1mm
+   * - `relief` / `figurine` —— 用户手动指定
+   *
+   * 手动指定只往**保守**那一档走(手办):浮雕那档托底薄、支撑少、支撑费低 ——
+   * 用户自己挑「浮雕」少付支撑费,服务端那道闸会挡(见 `relief-detect.ts`
+   * 的 `checkReliefTier`)。所以界面上的「浮雕」那一档**在几何不支持时是
+   * 禁用的**。
+   */
+  const [reliefMode, setReliefMode] = useState<ReliefMode>("auto");
+
   // ---- 计算参数 ----
   const [solidRatio, setSolidRatio] = useState(30);
   const [coverage, setCoverage] = useState(50);
@@ -368,31 +408,6 @@ export function PricingCalculator({
   const supportThreshold = DEFAULT_CONFIG.supportThreshold;
   const supportEnabled = false;
   const [productId, setProductId] = useState("pet");
-
-  // ---- 支撑计算参数 ----
-  /**
-   * 支撑克重 = 支撑体积 × **支撑密度**(支撑是另一种材料,水溶性支撑)
-   *
-   * 体积还是那个几何算出来的包裹支撑体积(跟检测工具同一块);
-   * 密度是支撑材料自己的 —— 模型密度只用来算耗材克重。
-   *
-   * 托底高度 / 底板留边也跟随后台 —— 几何参数变了,支撑克重跟着变,
-   * 3D 预览画的那层托底用的是同一组数(画面跟报价对得上)。
-   */
-  const supportParams = useMemo<SupportParams>(
-    () => ({
-      modelDensity: materialDensity,
-      supportDensity,
-      liftMm: clientConfig?.supportLiftMm,
-      baseMarginMm: clientConfig?.supportBaseMarginMm,
-    }),
-    [
-      materialDensity,
-      supportDensity,
-      clientConfig?.supportLiftMm,
-      clientConfig?.supportBaseMarginMm,
-    ]
-  );
 
   // ---- 智能摆盘 ----
   const [optimalAngle, setOptimalAngle] = useState<OptimalAngle | null>(null);
@@ -542,6 +557,143 @@ export function PricingCalculator({
   }, [dimMode, uniformScale, scaleFactor, scaleX, scaleY, scaleZ]);
 
   /**
+   * 成品几何 —— **毫米**
+   *
+   * 「上传」模式从解析结果来,「手动尺寸」模式从输入框来。
+   *
+   * ⚠️ **单位已经归一化过了** —— AI 导出的模型坐标常常是归一化的(±1),
+   * 载入时 `detectModelUnitScale()` 判过一次,判成「不是毫米」就
+   * `dimMode="custom"` + 缩放因子 ⇒ 这里的 `dims` **已经是毫米**。
+   * 浮雕判定跟服务端**看的是同一组数**。
+   *
+   * (这段原来在下面 —— 挪上来是因为浮雕判定要用它,而托底高度要喂给
+   * `supportParams`,那个在更上面。)
+   */
+  const geometry = useMemo((): ModelGeometry | null => {
+    if (mode === "upload") {
+      if (!model) return null;
+      const r = model.parseResult;
+      // 坐标系约定：X=长, Y=宽, Z=高（与 OBJ 原始坐标一致）
+      const origDims: [number, number, number] = [
+        r.boundingBox.size.x,
+        r.boundingBox.size.y,
+        r.boundingBox.size.z,
+      ];
+      const [sx, sy, sz] = appliedScales;
+      const scaled = scaleGeometryXYZ(
+        r.volumeCM3,
+        r.surfaceAreaCM2,
+        origDims,
+        sx,
+        sy,
+        sz
+      );
+      return {
+        volumeCM3: scaled.volumeCM3,
+        surfaceAreaCM2: scaled.surfaceAreaCM2,
+        dims: scaled.dims,
+        originalDims: origDims,
+      };
+    }
+    const env = estimateEnvelopeGeometry(length, width, height, solidRatio);
+    return {
+      volumeCM3: env.volumeCM3,
+      surfaceAreaCM2: env.surfaceAreaCM2,
+      dims: env.dims,
+      originalDims: [length, width, height] as [number, number, number],
+    };
+  }, [mode, model, length, width, height, solidRatio, appliedScales]);
+
+  /**
+   * 几何**自己**判出来的那一档 —— 用户选的那一档之外
+   *
+   * 界面用它决定「浮雕」那一档**能不能选**:几何明显不是浮雕的时候,
+   * 让用户手动挑浮雕 = 让他自己少付支撑费 ⇒ 服务端会挡(409)。
+   * 所以那一档直接**禁用**,用户点不着。
+   */
+  const detectedReliefKind = useMemo(
+    () => detectReliefKind(geometry?.dims),
+    [geometry?.dims]
+  );
+
+  /**
+   * 手动挑的「浮雕」在几何不再像浮雕时**作废**(2026-11-15)
+   *
+   * 用户挑「浮雕」之后又改了尺寸 —— 改厚了就不再是浮雕了,那个手动选择
+   * 得退回「自动」(自动会按新几何判定)。
+   *
+   * 这是**渲染期**的状态调整(React 官方推荐的「adjusting state when props
+   * change」那一套)—— 不用 effect:effect 要多跑一帧,那一帧里用的还是
+   * 旧的档位。改完 state 之后条件就不成立了(不会再循环)。
+   */
+  if (reliefMode === "relief" && detectedReliefKind !== "relief") {
+    setReliefMode("auto");
+  }
+
+  /**
+   * 这一件是**浮雕**还是**手办** —— 决定托底高度(2026-11-15)
+   *
+   * 工作室的原话:「克重工具中浮雕模型不需要像手办模型5mm底部支撑，只需要1mm支撑」。
+   *
+   * 判定在 `pricing/lib/relief-detect.ts`(纯几何、零依赖):
+   * **扁平板状** ⇒ 浮雕 ⇒ 托底 1mm;其余 ⇒ 手办 ⇒ 托底 5mm。
+   *
+   * 用户手动指定(`reliefMode`)优先 —— 但**手动只能往更保守的方向走**
+   * (`resolveReliefKind` 里写死了:几何判定是手办时,手动挑浮雕会退化回手办)。
+   */
+  const reliefKind = useMemo(
+    () => resolveReliefKind(reliefMode, geometry?.dims),
+    [reliefMode, geometry?.dims]
+  );
+
+  /**
+   * 生效中的托底高度 mm
+   *
+   * 两档的**高度本身**跟随后台(`/admin/print-pricing`):手办那档
+   * `support_lift_mm`(默认 5mm)、浮雕那档 `support_relief_lift_mm`
+   * (默认 1mm)。访客改不了。
+   *
+   * 托底**算进支撑体积** ⇒ 托底变了,支撑克重就变了 ⇒ 缓存键里带着它
+   * (见 `pricing/lib/support-cache-key.ts`)。
+   */
+  const effectiveLiftMm = useMemo(
+    () =>
+      reliefLiftMm(reliefKind, {
+        figurineLiftMm: clientConfig?.supportLiftMm ?? SUPPORT_LIFT_MM,
+        reliefLiftMm:
+          clientConfig?.supportReliefLiftMm ?? SUPPORT_RELIEF_LIFT_MM,
+      }),
+    [reliefKind, clientConfig?.supportLiftMm, clientConfig?.supportReliefLiftMm]
+  );
+
+  // ---- 支撑计算参数 ----
+  /**
+   * 支撑克重 = 支撑体积 × **支撑密度**(支撑是另一种材料,水溶性支撑)
+   *
+   * 体积还是那个几何算出来的包裹支撑体积(跟检测工具同一块);
+   * 密度是支撑材料自己的 —— 模型密度只用来算耗材克重。
+   *
+   * 托底高度 / 底板留边也跟随后台 —— 几何参数变了,支撑克重跟着变,
+   * 3D 预览画的那层托底用的是同一组数(画面跟报价对得上)。
+   *
+   * 托底高度是**两档里挑一档**(`effectiveLiftMm`)—— 浮雕 1mm、手办 5mm。
+   */
+  const supportParams = useMemo<SupportParams>(
+    () => ({
+      modelDensity: materialDensity,
+      supportDensity,
+      liftMm: effectiveLiftMm,
+      baseMarginMm: clientConfig?.supportBaseMarginMm,
+    }),
+    [
+      materialDensity,
+      supportDensity,
+      effectiveLiftMm,
+      clientConfig?.supportBaseMarginMm,
+    ]
+  );
+
+  /**
    * 最新生效的缩放因子 —— 摆盘是异步的(好几秒),完成时要用「此刻」的尺寸,
    * 不然摆出来的支撑克重跟页面上显示的尺寸对不上。
    */
@@ -599,21 +751,25 @@ export function PricingCalculator({
   }, [model, fileName]);
 
   /**
-   * 当前尺寸 + 当前姿态的**缓存键**
+   * 当前尺寸 + 当前姿态 + 当前托底 的**缓存键**
    *
-   * 支撑克重是「某一组尺寸 + 某一个姿态」算出来的结果 —— 键变了就说明
-   * 手上那份是**旧参数**的数(改完尺寸 / 转完模型之后)。
+   * 支撑克重是「某一组尺寸 + 某一个姿态 + 某一档托底」算出来的结果 ——
+   * 键变了就说明手上那份是**旧参数**的数(改完尺寸 / 转完模型 / 换了档位)。
    *
    * 纯函数在 `pricing/lib/support-cache-key.ts`。姿态用 `manualRot*`(打印
    * 姿态),**不是** `viewerRot*`(相机)—— 转相机不该重算支撑。
+   *
+   * 托底(`effectiveLiftMm`)也在键里 —— 浮雕 1mm 和手办 5mm 是**两个不同的
+   * 支撑克重**,不换键就会拿上一档的数当这一档的用 ⇒ **按错的数收钱**。
    */
   const currentSupportKey = useMemo(
     () =>
       supportCacheKey(
         { x: manualRotX, y: manualRotY, z: manualRotZ },
-        appliedScales
+        appliedScales,
+        effectiveLiftMm
       ),
-    [manualRotX, manualRotY, manualRotZ, appliedScales]
+    [manualRotX, manualRotY, manualRotZ, appliedScales, effectiveLiftMm]
   );
   /**
    * 活的键 —— 给事件回调里的异步代码读
@@ -769,41 +925,6 @@ export function PricingCalculator({
     setSupportRequestKey(currentSupportKeyRef.current);
   }, []);
 
-  const geometry = useMemo((): ModelGeometry | null => {
-    if (mode === "upload") {
-      if (!model) return null;
-      const r = model.parseResult;
-      // 坐标系约定：X=长, Y=宽, Z=高（与 OBJ 原始坐标一致）
-      const origDims: [number, number, number] = [
-        r.boundingBox.size.x,
-        r.boundingBox.size.y,
-        r.boundingBox.size.z,
-      ];
-      const [sx, sy, sz] = appliedScales;
-      const scaled = scaleGeometryXYZ(
-        r.volumeCM3,
-        r.surfaceAreaCM2,
-        origDims,
-        sx,
-        sy,
-        sz
-      );
-      return {
-        volumeCM3: scaled.volumeCM3,
-        surfaceAreaCM2: scaled.surfaceAreaCM2,
-        dims: scaled.dims,
-        originalDims: origDims,
-      };
-    }
-    const env = estimateEnvelopeGeometry(length, width, height, solidRatio);
-    return {
-      volumeCM3: env.volumeCM3,
-      surfaceAreaCM2: env.surfaceAreaCM2,
-      dims: env.dims,
-      originalDims: [length, width, height] as [number, number, number],
-    };
-  }, [mode, model, length, width, height, solidRatio, appliedScales]);
-
   /**
    * 当前尺寸 + 当前姿态的支撑克重 + 支撑比例(支撑克重 / 模型克重)
    *
@@ -918,6 +1039,8 @@ export function PricingCalculator({
           supportWeightG: Math.ceil(pose.supportWeightG),
           selfSupportRatio:
             modelWeightG > 0 ? pose.supportWeightG / modelWeightG : 0,
+          // 托底档位 —— 服务端拿它跟它自己按尺寸判的那一档对一下(自洽性检查)
+          reliefKind,
         };
       } catch (err) {
         console.error("支撑计算失败:", err);
@@ -931,6 +1054,7 @@ export function PricingCalculator({
       appliedScales,
       supportParams,
       materialDensity,
+      reliefKind,
     ]);
 
   /**
@@ -1011,11 +1135,18 @@ export function PricingCalculator({
           ? Math.ceil(poseSupport.supportWeightG)
           : null,
       selfSupportRatio: supportFresh && poseSupport ? supportStats.ratio : null,
+      /**
+       * 托底档位 —— 客户端用的哪一档(浮雕 1mm / 手办 5mm)
+       *
+       * 服务端拿它跟「按尺寸判定的那一档」对一下 —— 对不上就挡下来
+       * (只挡「报浮雕、判成手办」那个**少收钱**的方向)。
+       */
+      reliefKind,
     };
     // 存一份 —— 「已经算过了就别重算」判断要用
     quoteInputRef.current = input;
     notify(input);
-  }, [geometry, poseSupport, supportStats, supportFresh]);
+  }, [geometry, poseSupport, supportStats, supportFresh, reliefKind]);
 
   // 模型本体也要抛给父组件 —— 下单时要把文件打包上传到 R2
   const onModelChangeRef = useRef(onModelChange);
@@ -1416,6 +1547,8 @@ export function PricingCalculator({
       pricingConfig,
       // 几何参数跟随后台 —— 批量跟单件同一口径
       supportLiftMm: clientConfig?.supportLiftMm,
+      // 浮雕那档的托底(2026-11-15)—— 批量里**逐个文件**判定浮雕还是手办
+      supportReliefLiftMm: clientConfig?.supportReliefLiftMm,
       supportBaseMarginMm: clientConfig?.supportBaseMarginMm,
       solidRatio,
       repairEnabled,
@@ -1486,6 +1619,8 @@ export function PricingCalculator({
     setScaleX(1);
     setScaleY(1);
     setScaleZ(1);
+    // 托底档位回到「自动」—— 新模型按几何重新判
+    setReliefMode("auto");
     setInfoDialog(null);
     setBatchItems([]);
   };
@@ -2095,6 +2230,54 @@ export function PricingCalculator({
         {t("stats.supportAutoHint")}
       </p>
 
+      {/*
+        **托底档位** —— 浮雕 1mm / 手办 5mm(2026-11-15)
+
+        工作室的原话:「克重工具中浮雕模型不需要像手办模型5mm底部支撑，只需要1mm支撑」。
+
+        托底**算进支撑体积** ⇒ 这一格改的是**钱**(支撑克重 → 支撑加价)。
+        所以摆出来:生效的托底高度 + 判成了哪一档 + 怎么改。
+      */}
+      <div className="mt-2 border-t border-zinc-800 pt-2">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[10px] text-zinc-500">{t("relief.label")}</span>
+          <div className="flex items-center gap-1">
+            {RELIEF_MODE_OPTIONS.map((opt) => {
+              // 「浮雕」在几何不像浮雕时禁用 —— 见 RELIEF_MODE_OPTIONS 的注释
+              const disabled =
+                opt.value === "relief" && detectedReliefKind !== "relief";
+              const active = reliefMode === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  aria-pressed={active}
+                  disabled={disabled}
+                  title={disabled ? t("relief.reliefDisabled") : undefined}
+                  onClick={() => setReliefMode(opt.value)}
+                  className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${
+                    active
+                      ? "bg-amber-500/15 text-amber-300"
+                      : "text-zinc-500 hover:text-zinc-300"
+                  } disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-zinc-500`}
+                >
+                  {t(opt.labelKey)}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <p className="mt-1 text-[10px] text-zinc-500">
+          {t("relief.hint", {
+            kind:
+              reliefKind === "relief"
+                ? t("relief.relief")
+                : t("relief.figurine"),
+            lift: effectiveLiftMm,
+          })}
+        </p>
+      </div>
+
       {/* 摆盘结果 */}
       {posePanel}
     </div>
@@ -2292,7 +2475,7 @@ export function PricingCalculator({
                     onPoseChange={handlePoseChange}
                     onResetAngle={resetAngle}
                     showSupport={showSupport}
-                    supportLiftMm={clientConfig?.supportLiftMm}
+                    supportLiftMm={effectiveLiftMm}
                     supportBaseMarginMm={clientConfig?.supportBaseMarginMm}
                     showTexture={showTexture}
                     onToggleTexture={() => setShowTexture((s) => !s)}
@@ -2450,7 +2633,7 @@ export function PricingCalculator({
           onInfoDialogChange={setInfoDialog}
           materialDensity={materialDensity}
           supportDensity={supportDensity}
-          supportLiftMm={clientConfig?.supportLiftMm ?? SUPPORT_LIFT_MM}
+          supportLiftMm={effectiveLiftMm}
           supportBaseMarginMm={
             clientConfig?.supportBaseMarginMm ?? SUPPORT_BASE_MARGIN_MM
           }

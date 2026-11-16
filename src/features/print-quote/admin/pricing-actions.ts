@@ -149,8 +149,15 @@ const configSchema = z.object({
   supportTier2PriceCentsPerGram: z.number().int().min(0).max(1_000_000),
   /** 支撑加价总开关 */
   supportEnabled: z.boolean(),
-  /** 托底高度 mm */
+  /** 托底高度 mm —— 手办那档 */
   supportLiftMm: z.number().min(0).max(1000),
+  /**
+   * 浮雕那档的托底高度 mm(2026-11-15)
+   *
+   * 工作室:「浮雕模型不需要像手办模型5mm底部支撑,只需要1mm支撑」。
+   * 跟手办那档分两栏 —— 浮雕背面是平的,5mm 的托底是浪费。
+   */
+  supportReliefLiftMm: z.number().min(0).max(1000),
   /** 底板留边 mm */
   supportBaseMarginMm: z.number().min(0).max(1000),
   /** 72 小时档加价比例(0~1,0.1 = 10%) */
@@ -334,6 +341,7 @@ async function resolveConfigBase(): Promise<SavePrintPricingConfigInput> {
       supportTier2PriceCentsPerGram: configRow.supportTier2PriceCentsPerGram,
       supportEnabled: configRow.supportEnabled,
       supportLiftMm: configRow.supportLiftMm,
+      supportReliefLiftMm: configRow.supportReliefLiftMm,
       supportBaseMarginMm: configRow.supportBaseMarginMm,
       deliveryExpressRate: configRow.deliveryExpressRate,
       deliveryUrgentRate: configRow.deliveryUrgentRate,
@@ -353,6 +361,7 @@ async function resolveConfigBase(): Promise<SavePrintPricingConfigInput> {
     supportTier2PriceCentsPerGram: settings.supportTier2PriceCentsPerGram,
     supportEnabled: settings.supportEnabled,
     supportLiftMm: settings.supportLiftMm,
+    supportReliefLiftMm: settings.supportReliefLiftMm,
     supportBaseMarginMm: settings.supportBaseMarginMm,
     deliveryExpressRate: settings.deliveryRates.express,
     deliveryUrgentRate: settings.deliveryRates.urgent,

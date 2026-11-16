@@ -47,6 +47,15 @@ export const PRINT_ORDER_ERROR_KEYS: Record<string, string> = {
   ADDRESS_NOT_FOUND: "printOrder.errors.codes.addressNotFound",
   // 这组几何算不出报价 —— 重新量一遍
   QUOTE_UNAVAILABLE: "printOrder.errors.codes.quoteUnavailable",
+  /*
+   * 托底档位跟尺寸对不上(2026-11-15)
+   *
+   * 客户端报了「浮雕」(托底 1mm),服务端按尺寸判定是手办(托底 5mm)——
+   * 托底低 ⇒ 支撑少 ⇒ **少收支撑费**,所以服务端拒了这一单。
+   *
+   * 用户能做的:回工具页重新量一遍(托底档位会自动按新尺寸重判)。
+   */
+  RELIEF_TIER_MISMATCH: "printOrder.errors.codes.reliefTierMismatch",
   // 订单号撞车(极小概率)—— 重试
   ORDER_NO_CONFLICT: "printOrder.errors.codes.orderNoConflict",
   // 收款通道没配好 / 被关了

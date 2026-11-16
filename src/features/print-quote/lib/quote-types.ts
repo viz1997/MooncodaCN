@@ -18,6 +18,7 @@
  */
 
 import type { ShippingAddressSnapshot } from "@/db/schema";
+import type { ReliefKind } from "@/features/pricing/lib/relief-detect";
 import type { DeliveryRates, DeliveryTierId } from "./delivery-tier";
 
 /** 订单状态 —— 与 `print_order_status` enum 一一对应 */
@@ -87,6 +88,22 @@ export type PrintQuoteInput = {
    * 加价按**比例**收,比例见 `delivery-tier.ts`。
    */
   deliveryTier?: DeliveryTierId | null;
+  /**
+   * 托底档位 —— `relief`(浮雕,托底 1mm)/ `figurine`(手办,托底 5mm)
+   *
+   * 2026-11-15:工作室的原话「浮雕模型不需要像手办模型5mm底部支撑，只需要1mm支撑」。
+   *
+   * **这个字段是「自洽性」的凭据**,不是重算的依据 —— 服务端**不重新算支撑
+   * 体积**(那在浏览器里算,几何不上传),它拿的是 `supportWeightG`。所以服务端
+   * 用这个字段做的是**一道自洽性检查**:客户端报的档位跟服务端按 `dims`
+   * 判定出来的那一档**对不上**吗?
+   *
+   * 只挡一个方向 —— 「报浮雕、但尺寸判定是手办」(托底低 ⇒ 支撑少 ⇒ 少收
+   * 支撑费)。反过来(报手办、判成浮雕)是**多收**,放行。
+   *
+   * 不传 = 老客户端 ⇒ 按服务端自己判定的那一档走,不报错。
+   */
+  reliefKind?: ReliefKind | null;
 };
 
 /**

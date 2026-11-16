@@ -88,6 +88,7 @@ function toConfigLite(
     supportTier2PriceCentsPerGram: row.supportTier2PriceCentsPerGram,
     supportEnabled: row.supportEnabled,
     supportLiftMm: num(row.supportLiftMm),
+    supportReliefLiftMm: num(row.supportReliefLiftMm),
     supportBaseMarginMm: num(row.supportBaseMarginMm),
     deliveryExpressRate: num(row.deliveryExpressRate),
     deliveryUrgentRate: num(row.deliveryUrgentRate),
@@ -207,6 +208,8 @@ export type SavePrintPricingConfigInput = {
   supportTier2PriceCentsPerGram: number;
   supportEnabled: boolean;
   supportLiftMm: number;
+  /** 浮雕那档的托底 mm(2026-11-15) */
+  supportReliefLiftMm: number;
   supportBaseMarginMm: number;
   /** 0~1 的小数(0.1 = 10%) */
   deliveryExpressRate: number;
@@ -234,6 +237,7 @@ export async function savePrintPricingConfig(
     supportTier2PriceCentsPerGram: input.supportTier2PriceCentsPerGram,
     supportEnabled: input.supportEnabled,
     supportLiftMm: String(input.supportLiftMm),
+    supportReliefLiftMm: String(input.supportReliefLiftMm),
     supportBaseMarginMm: String(input.supportBaseMarginMm),
     deliveryExpressRate: String(input.deliveryExpressRate),
     deliveryUrgentRate: String(input.deliveryUrgentRate),

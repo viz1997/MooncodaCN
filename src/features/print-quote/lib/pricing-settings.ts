@@ -90,6 +90,15 @@ export type PrintPricingConfigLite = {
   supportTier2PriceCentsPerGram: number;
   supportEnabled: boolean;
   supportLiftMm: number;
+  /**
+   * 浮雕那档的托底高度 mm(2026-11-15)
+   *
+   * 工作室的原话:「克重工具中浮雕模型不需要像手办模型5mm底部支撑,只需要
+   * 1mm支撑」—— 浮雕背面是平的,1mm 就够。
+   *
+   * 跟 `supportLiftMm`(手办那档,默认 5mm)**分两档**。
+   */
+  supportReliefLiftMm: number;
   supportBaseMarginMm: number;
   /** 加急(72h)比例 0~1 */
   deliveryExpressRate: number;
@@ -157,8 +166,19 @@ export type PrintPricingSettings = {
   varnishFeeCents: number;
   /** 后处理是否计入报价 */
   varnishEnabled: boolean;
-  /** 托底高度 mm */
+  /** 托底高度 mm —— 手办那档(默认 5) */
   supportLiftMm: number;
+  /**
+   * 浮雕那档的托底高度 mm(默认 1)
+   *
+   * 工作室 2026-11-15:「浮雕模型不需要像手办模型5mm底部支撑,只需要1mm支撑」。
+   * 浮雕背面是平的 —— 5mm 的托底是浪费,那 5mm **是算进支撑体积的**
+   * (= 占地 × 高度),也就是算进支撑克重、算进支撑加价。
+   *
+   * 哪一档生效由 `pricing/lib/relief-detect.ts` 判(浮雕 / 手办),
+   * 用户也可以在工具页手动改。
+   */
+  supportReliefLiftMm: number;
   /** 底板留边 mm */
   supportBaseMarginMm: number;
   /** 各档交期加价比例(标准档恒为 0) */
@@ -186,8 +206,15 @@ export type ClientPrintConfig = {
   modelDensity: number;
   /** 支撑材料密度 g/cm³ */
   supportDensity: number;
-  /** 托底高度 mm */
+  /** 托底高度 mm —— 手办那档(默认 5) */
   supportLiftMm: number;
+  /**
+   * 浮雕那档的托底高度 mm(默认 1)
+   *
+   * 工具页按几何判出「这是浮雕还是手办」,再挑对应的那一档
+   * (见 `pricing/lib/relief-detect.ts`)。两档都发过去 —— 判定发生在浏览器里。
+   */
+  supportReliefLiftMm: number;
   /** 底板留边 mm */
   supportBaseMarginMm: number;
 };
@@ -200,6 +227,7 @@ export function toClientPrintConfig(
     modelDensity: settings.modelDensity,
     supportDensity: settings.supportDensity,
     supportLiftMm: settings.supportLiftMm,
+    supportReliefLiftMm: settings.supportReliefLiftMm,
     supportBaseMarginMm: settings.supportBaseMarginMm,
   };
 }
@@ -277,7 +305,8 @@ function rateOr(value: number, fallback: number): number {
  * | `PRINT_SUPPORT_TIER2_PRICE_CENTS_PER_GRAM` | 第二档单价 分/g | 100(1 元/g) |
  * | `PRINT_SUPPORT_PRICE_CENTS_PER_GRAM` | **第二档单价的旧名字**(优先用上面那个) | 100 |
  * | `PRINT_SUPPORT_ENABLED` | 支撑加价总开关(`"true"` 才开) | 关 |
- * | `PRINT_SUPPORT_LIFT_MM` | 托底高度 mm | 5 |
+ * | `PRINT_SUPPORT_LIFT_MM` | 托底高度 mm(手办那档) | 5 |
+ * | `PRINT_SUPPORT_RELIEF_LIFT_MM` | 托底高度 mm(**浮雕**那档,2026-11-15) | 1 |
  * | `PRINT_SUPPORT_BASE_MARGIN_MM` | 底板留边 mm | 5 |
  * | `PRINT_DELIVERY_EXPRESS_RATE` | 72 小时档加价比例(0~1) | 0.1 |
  * | `PRINT_DELIVERY_URGENT_RATE` | 48 小时档加价比例(0~1) | 0.37 |
@@ -342,6 +371,9 @@ export function readPrintPricingFallback(): PrintPricingSettings {
     ),
     varnishEnabled: process.env.PRINT_VARNISH_ENABLED !== "false",
     supportLiftMm: envNumber("PRINT_SUPPORT_LIFT_MM", 5),
+    // 浮雕那档的托底(2026-11-15)—— 工作室:「浮雕模型不需要像手办模型5mm
+    // 底部支撑,只需要1mm支撑」
+    supportReliefLiftMm: envNumber("PRINT_SUPPORT_RELIEF_LIFT_MM", 1),
     supportBaseMarginMm: envNumber("PRINT_SUPPORT_BASE_MARGIN_MM", 5),
     deliveryRates: {
       standard: 0,
@@ -473,6 +505,11 @@ export function resolvePrintPricingSettings(input: {
     supportLiftMm: nonNegativeOr(
       configRow?.supportLiftMm ?? fallback.supportLiftMm,
       fallback.supportLiftMm
+    ),
+    // 浮雕那档的托底(2026-11-15)—— 逐字段回退,跟手办那档一个口径
+    supportReliefLiftMm: nonNegativeOr(
+      configRow?.supportReliefLiftMm ?? fallback.supportReliefLiftMm,
+      fallback.supportReliefLiftMm
     ),
     supportBaseMarginMm: nonNegativeOr(
       configRow?.supportBaseMarginMm ?? fallback.supportBaseMarginMm,

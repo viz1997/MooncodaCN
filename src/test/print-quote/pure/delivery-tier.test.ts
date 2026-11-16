@@ -56,6 +56,8 @@ const SETTINGS: PrintPricingSettings = {
   varnishFeeCents: 1000,
   varnishEnabled: true,
   supportLiftMm: 5,
+  // 浮雕那档的托底(2026-11-15)—— 这两个文件只测交期 / 支撑分段,不影响
+  supportReliefLiftMm: 1,
   supportBaseMarginMm: 5,
   deliveryRates: DEFAULT_DELIVERY_RATES,
   allowGuestPricing: true,

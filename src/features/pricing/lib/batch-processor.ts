@@ -20,6 +20,10 @@
  * All processing happens client-side; no files are uploaded to a server.
  */
 
+import {
+  SUPPORT_LIFT_MM,
+  SUPPORT_RELIEF_LIFT_MM,
+} from "@/features/tools/lib/mesh/support-shell";
 import type { OptimalAngle, SupportParams } from "./angle-optimizer";
 import { AngleOptimizerClient } from "./angle-optimizer-client";
 import { detectModelUnitScale } from "./model-units";
@@ -30,6 +34,7 @@ import {
   type PricingInput,
   scaleGeometry,
 } from "./pricing-engine";
+import { detectReliefKind, reliefLiftMm } from "./relief-detect";
 import {
   extractModelZip,
   type ModelFile,
@@ -106,6 +111,16 @@ export type BatchOptions = {
    * 从这里进来 —— 批量模式跟单件模式必须同一口径。
    */
   supportLiftMm?: number | undefined;
+  /**
+   * 浮雕那档的托底高度 (mm) —— 2026-11-15
+   *
+   * 工作室的原话:「克重工具中浮雕模型不需要像手办模型5mm底部支撑，只需要1mm支撑」。
+   *
+   * 省略 = 用 `SUPPORT_RELIEF_LIFT_MM`(1mm)。批量模式**逐个文件判定**
+   * (扁平板 ⇒ 浮雕 ⇒ 1mm;其余 ⇒ 手办 ⇒ 5mm)—— 批量里可能一半是浮雕
+   * 一半是手办,一个值套不住。
+   */
+  supportReliefLiftMm?: number | undefined;
   /**
    * 底板留边 (mm) —— 底板比模型轮廓四周各留多宽
    *
@@ -352,6 +367,25 @@ export async function processBatch(
         model.parseResult.boundingBox.size
       ).scale;
 
+      /**
+       * 托底档位 —— **逐个文件**判定(2026-11-15)
+       *
+       * 浮雕那档托底 1mm、手办那档 5mm。批量里可能一半是浮雕一半是手办,
+       * 一个值套不住 ⇒ 每个文件按**自己的尺寸**判一次。
+       *
+       * 尺寸用的是**归一化之后**的毫米值(原始尺寸 × `unitScale`)——
+       * 跟单件模式判的是同一组数。
+       */
+      const itemDimsMm: [number, number, number] = [
+        model.parseResult.boundingBox.size.x * unitScale,
+        model.parseResult.boundingBox.size.y * unitScale,
+        model.parseResult.boundingBox.size.z * unitScale,
+      ];
+      const itemLiftMm = reliefLiftMm(detectReliefKind(itemDimsMm), {
+        figurineLiftMm: options.supportLiftMm ?? SUPPORT_LIFT_MM,
+        reliefLiftMm: options.supportReliefLiftMm ?? SUPPORT_RELIEF_LIFT_MM,
+      });
+
       // 模型克重,用于"本体支撑比例"= 支撑克重 / 模型克重
       const modelWeightG =
         model.parseResult.volumeCM3 *
@@ -365,7 +399,7 @@ export async function processBatch(
         modelDensity: pricingConfig.materialDensity,
         supportDensity: pricingConfig.supportDensity,
         // 几何参数跟随后台 —— 批量模式跟单件模式必须同一口径
-        liftMm: options.supportLiftMm,
+        liftMm: itemLiftMm,
         baseMarginMm: options.supportBaseMarginMm,
       };
       if (positions) {

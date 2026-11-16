@@ -38,6 +38,13 @@
  * 后台看到的是「读不到定价配置」)。所以这个脚本里有一句 `ALTER TABLE …
  * ADD COLUMN IF NOT EXISTS`,跑一遍就补上,幂等。
  *
+ * ## 2026-11-15:多一列 `support_relief_lift_mm`
+ *
+ * 「浮雕那档的托底高度」—— 工作室的原话:「克重工具中浮雕模型不需要像手办
+ * 模型5mm底部支撑,只需要1mm支撑」。跟手办那档(`support_lift_mm`)分两列。
+ *
+ * 同样有一句 `ALTER TABLE … ADD COLUMN IF NOT EXISTS`,幂等。
+ *
  * ## 为什么手写而不是 `db:generate`
  *
  * `db:generate` 生成的迁移文件会**顺着整张 schema 的历史**走一遍,跟库里
@@ -133,6 +140,7 @@ async function main() {
         "support_tier2_price_cents_per_gram" integer NOT NULL DEFAULT 100,
         "support_enabled" boolean NOT NULL DEFAULT false,
         "support_lift_mm" numeric(8,2) NOT NULL DEFAULT '5.00',
+        "support_relief_lift_mm" numeric(8,2) NOT NULL DEFAULT '1.00',
         "support_base_margin_mm" numeric(8,2) NOT NULL DEFAULT '5.00',
         "delivery_express_rate" numeric(6,4) NOT NULL DEFAULT '0.1000',
         "delivery_urgent_rate" numeric(6,4) NOT NULL DEFAULT '0.3700',
@@ -151,6 +159,19 @@ async function main() {
       label: "ALTER TABLE print_pricing_config ADD allow_guest_pricing",
       query: `ALTER TABLE "print_pricing_config"
         ADD COLUMN IF NOT EXISTS "allow_guest_pricing" boolean NOT NULL DEFAULT true;`,
+    },
+    {
+      // 2026-11-15:浮雕那档的托底高度(工作室:「浮雕模型不需要像手办模型
+      // 5mm 底部支撑,只需要 1mm 支撑」)。
+      //
+      // 线上那张表是 2026-11-06 建的,少这一列 —— 而少了它,读配置那条
+      // `SELECT` 会整条报错(读不到 → 整份退回环境变量兜底,后台看到的是
+      // 「读不到定价配置」)。所以补一列。
+      //
+      // 幂等:跑几遍都安全。默认值 1.00 = 跟代码里的默认值一致。
+      label: "ALTER TABLE print_pricing_config ADD support_relief_lift_mm",
+      query: `ALTER TABLE "print_pricing_config"
+        ADD COLUMN IF NOT EXISTS "support_relief_lift_mm" numeric(8,2) NOT NULL DEFAULT '1.00';`,
     },
     {
       label: "CREATE INDEX print_material_code_uniq_idx",

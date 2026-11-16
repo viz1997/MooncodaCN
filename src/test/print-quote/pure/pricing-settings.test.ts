@@ -91,15 +91,26 @@ const FALLBACK: PrintPricingSettings = {
   varnishFeeCents: 1000,
   varnishEnabled: true,
   supportLiftMm: 5,
+  // 浮雕那档的托底(2026-11-15)—— 工作室:「浮雕模型只需要1mm支撑」
+  supportReliefLiftMm: 1,
   supportBaseMarginMm: 5,
   deliveryRates: { standard: 0, express: 0.1, urgent: 0.37 },
   allowGuestPricing: true,
 };
 
+/**
+ * 覆盖项 —— **允许显式写 `undefined`**
+ *
+ * `exactOptionalPropertyTypes` 开着 ⇒ `Partial<T>` 不接受显式的 `undefined`。
+ * 但「老配置行没有这一列」正是要模拟的场景(列是后来才加的)⇒ 允许写
+ * `undefined`,值就是 `undefined`。
+ */
+type ConfigRowOverrides = {
+  [K in keyof PrintPricingConfigLite]?: PrintPricingConfigLite[K] | undefined;
+};
+
 /** 配置行的默认值 —— 测试里只改要测的那几个字段 */
-function configRow(
-  overrides: Partial<PrintPricingConfigLite> = {}
-): PrintPricingConfigLite {
+function configRow(overrides: ConfigRowOverrides = {}): PrintPricingConfigLite {
   return {
     id: "default",
     modelMaterialId: null,
@@ -112,12 +123,15 @@ function configRow(
     supportTier2PriceCentsPerGram: 100,
     supportEnabled: false,
     supportLiftMm: 5,
+    supportReliefLiftMm: 1,
     supportBaseMarginMm: 5,
     deliveryExpressRate: 0.1,
     deliveryUrgentRate: 0.37,
     allowGuestPricing: true,
     ...overrides,
-  };
+    // 覆盖项里显式写的 `undefined` 会覆盖掉默认值 —— 那正是「老行没这一列」
+    // 要模拟的场景(读的时候按 `??` 退回兜底那一档)
+  } as PrintPricingConfigLite;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -297,6 +311,90 @@ describe("resolvePrintPricingSettings —— 非法值退回兜底", () => {
 });
 
 /* -------------------------------------------------------------------------- */
+/*  浮雕那档的托底(2026-11-15)                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 托底高度分两档(2026-11-15)
+ *
+ * 工作室的原话:
+ *
+ * > 「克重工具中浮雕模型不需要像手办模型5mm底部支撑，只需要1mm支撑」
+ *
+ * `supportLiftMm` = 手办那档(5mm) / `supportReliefLiftMm` = 浮雕那档(1mm)。
+ *
+ * **两档都要跟随后台** —— 工作室在 `/admin/print-pricing` 能改的是**两个
+ * 独立的数**,不是一个数加上「档位系数」(那样减法算出来的托底会带一堆
+ * 浮点零头,而托底**算进支撑体积** ⇒ 支撑克重 ⇒ **支撑加价**)。
+ */
+describe("浮雕那档的托底 —— 回退链", () => {
+  it("配置行说了算 —— 后台存过就以后台为准", () => {
+    const settings = resolvePrintPricingSettings({
+      configRow: configRow({ supportReliefLiftMm: 2 }),
+      materials: MATERIALS,
+      fallback: FALLBACK,
+    });
+    expect(settings.supportReliefLiftMm).toBe(2);
+  });
+
+  it("配置行没配 → 走兜底那一档(不是 0 / 不是 undefined)", () => {
+    // 老配置行没有这一列(`undefined`)⇒ 走 env / 默认值那一档
+    const settings = resolvePrintPricingSettings({
+      configRow: configRow({ supportReliefLiftMm: undefined }),
+      materials: MATERIALS,
+      fallback: { ...FALLBACK, supportReliefLiftMm: 1.5 },
+    });
+    expect(settings.supportReliefLiftMm).toBe(1.5);
+
+    // 整份配置行都没有(后台还没存过)⇒ 也是兜底那一档
+    const noRow = resolvePrintPricingSettings({
+      configRow: null,
+      materials: MATERIALS,
+      fallback: { ...FALLBACK, supportReliefLiftMm: 1.5 },
+    });
+    expect(noRow.supportReliefLiftMm).toBe(1.5);
+  });
+
+  it("**逐字段** —— 两档托底互不影响(改了手办那档,浮雕那档不动)", () => {
+    const settings = resolvePrintPricingSettings({
+      configRow: configRow({ supportLiftMm: 8 }),
+      materials: MATERIALS,
+      fallback: FALLBACK,
+    });
+    expect(settings.supportLiftMm).toBe(8);
+    expect(settings.supportReliefLiftMm).toBe(FALLBACK.supportReliefLiftMm);
+  });
+
+  it("负数 → 退回兜底(0 是合法的 —— 「不要托底」也是一种选择)", () => {
+    const settings = resolvePrintPricingSettings({
+      configRow: configRow({ supportReliefLiftMm: -1 }),
+      materials: MATERIALS,
+      fallback: FALLBACK,
+    });
+    expect(settings.supportReliefLiftMm).toBe(FALLBACK.supportReliefLiftMm);
+
+    const zero = resolvePrintPricingSettings({
+      configRow: configRow({ supportReliefLiftMm: 0 }),
+      materials: MATERIALS,
+      fallback: FALLBACK,
+    });
+    expect(zero.supportReliefLiftMm).toBe(0);
+  });
+
+  it("环境变量那一档 —— `PRINT_SUPPORT_RELIEF_LIFT_MM`", () => {
+    vi.stubEnv("PRINT_SUPPORT_RELIEF_LIFT_MM", "");
+    expect(readPrintPricingFallback().supportReliefLiftMm).toBe(1);
+
+    vi.stubEnv("PRINT_SUPPORT_RELIEF_LIFT_MM", "2.5");
+    expect(readPrintPricingFallback().supportReliefLiftMm).toBe(2.5);
+
+    // 非法值退回默认值(不崩)
+    vi.stubEnv("PRINT_SUPPORT_RELIEF_LIFT_MM", "abc");
+    expect(readPrintPricingFallback().supportReliefLiftMm).toBe(1);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
 /*  环境变量那一档                                                               */
 /* -------------------------------------------------------------------------- */
 
@@ -415,6 +513,7 @@ describe("toClientPrintConfig", () => {
       modelDensity: 1.15,
       supportDensity: 1.3,
       supportLiftMm: 3,
+      supportReliefLiftMm: 1,
       supportBaseMarginMm: 6,
       unitPriceCentsPerGram: 999,
       supportThreshold: 5,
@@ -423,9 +522,22 @@ describe("toClientPrintConfig", () => {
       modelDensity: 1.15,
       supportDensity: 1.3,
       supportLiftMm: 3,
+      supportReliefLiftMm: 1,
       supportBaseMarginMm: 6,
     });
     expect(Object.keys(client)).not.toContain("unitPriceCentsPerGram");
     expect(Object.keys(client)).not.toContain("supportThreshold");
+  });
+
+  it("**两档托底都发过去** —— 判定发生在浏览器里(2026-11-15)", () => {
+    // 工具页按几何判「浮雕还是手办」,再挑对应的那一档 —— 所以两档都要
+    // 到客户端。少发一档 ⇒ 工具页只能猜 ⇒ 猜错就是**钱的口径错**。
+    const client = toClientPrintConfig({
+      ...FALLBACK,
+      supportLiftMm: 5,
+      supportReliefLiftMm: 1,
+    });
+    expect(client.supportLiftMm).toBe(5);
+    expect(client.supportReliefLiftMm).toBe(1);
   });
 });

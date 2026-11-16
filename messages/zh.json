@@ -1119,6 +1119,14 @@
       "vertexCount": "顶点",
       "triangleCount": "三角面"
     },
+    "relief": {
+      "label": "托底档位",
+      "auto": "自动",
+      "relief": "浮雕",
+      "figurine": "手办",
+      "hint": "{kind} · 托底 {lift}mm",
+      "reliefDisabled": "这个模型不像浮雕(太厚),不能按浮雕那档托底"
+    },
     "price": {
       "repair": "修模",
       "varnish": "光油",
@@ -1881,7 +1889,8 @@
           "orderNoConflict": "订单号冲突 —— 请重试一次",
           "createOrderFailed": "服务端建单失败 —— 请稍后重试(详情见浏览器控制台)",
           "paymentChannelUnavailable": "这个支付方式暂时不可用 —— 换一个,或者联系工作室",
-          "storefrontUnavailable": "这一单已经跟商城订单一起结过账了 —— 去「我的订单」付款"
+          "storefrontUnavailable": "这一单已经跟商城订单一起结过账了 —— 去「我的订单」付款",
+          "reliefTierMismatch": "托底档位跟尺寸对不上 —— 回工具页重新量一遍再试"
         }
       }
     },
@@ -1911,8 +1920,24 @@
       "quoteTitle": "看预估报价,填下单信息",
       "quoteDialogTitle": "报价与下单",
       "quoteDialogDesc": "下面是服务端算的预估报价 —— 填完下单信息提交,工单会出现在「我的打印订单」里,钱在那儿付。",
-      "descSignIn": "打印服务要挂在你的账号名下。先登录再量,免得量完再登录,模型白选一遍。",
+      "descSignIn": "打印服务要挂在你的账号名下 —— 在这里登录一下就能继续下单,不用重新量。",
       "signInCta": "去登录",
+      "signIn": {
+        "title": "登录后继续下单",
+        "emailLabel": "邮箱",
+        "emailPlaceholder": "you@example.com",
+        "passwordLabel": "密码",
+        "passwordPlaceholder": "你的密码",
+        "submit": "登录并继续",
+        "submitting": "登录中…",
+        "hint": "登录就在这一格里完成 —— 不会跳走,量好的模型和尺寸都还在。",
+        "altHint": "用手机号 + 验证码登录,或者忘了密码?点「去登录」走完整登录页(那一跳会离开这一页,量好的模型需要重来)。",
+        "errors": {
+          "missingFields": "请填写邮箱和密码。",
+          "invalidCredentials": "邮箱或密码不对。",
+          "emailNotVerified": "这个邮箱还没验证 —— 请先到邮箱里点验证链接。"
+        }
+      },
       "errors": {
         "noModel": "还没有模型 —— 先在上面选一个文件。"
       }

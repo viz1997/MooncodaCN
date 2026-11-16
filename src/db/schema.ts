@@ -3010,6 +3010,23 @@ export const printPricingConfig = pgTable("print_pricing_config", {
   supportLiftMm: numeric("support_lift_mm", { precision: 8, scale: 2 })
     .notNull()
     .default("5.00"),
+  /**
+   * 浮雕那档的托底高度 mm(2026-11-15)
+   *
+   * 工作室的原话:「克重工具中浮雕模型不需要像手办模型5mm底部支撑,只需要
+   * 1mm支撑」—— 浮雕背面是平的,5mm 的托底是浪费。
+   *
+   * 那 5mm **是算进支撑体积的**(占地 × 高度)⇒ 算进支撑克重 ⇒ 算进支撑加价,
+   * 所以浮雕那档的托底高度**直接影响收多少钱**。
+   *
+   * 跟 `supportLiftMm`(手办那档)**分两档**,不是一列。
+   */
+  supportReliefLiftMm: numeric("support_relief_lift_mm", {
+    precision: 8,
+    scale: 2,
+  })
+    .notNull()
+    .default("1.00"),
   /** 底板留边 mm —— 底板比模型轮廓四周各留一圈(默认 5mm) */
   supportBaseMarginMm: numeric("support_base_margin_mm", {
     precision: 8,

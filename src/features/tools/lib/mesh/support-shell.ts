@@ -102,6 +102,22 @@ export interface SupportMesh {
 export const SUPPORT_LIFT_MM = 5;
 
 /**
+ * **浮雕那档**的托底高度 (mm) —— 2026-11-15
+ *
+ * 工作室的原话:
+ *
+ * > 「克重工具中浮雕模型不需要像手办模型5mm底部支撑，只需要1mm支撑」
+ *
+ * 浮雕(徽章 / 冰箱贴 / 浮雕钥匙扣)背面是**平的** —— 1mm 就够;手办要 5mm
+ * 是因为脚底那点接触面撑不住,托底块得厚一点。
+ *
+ * **这个常量只是默认值** —— 生效值在后台 `/admin/print-pricing`
+ * (`support_relief_lift_mm` 那列),访客改不了。工具页按几何**自动判定**
+ * 走哪一档(判定在 `pricing/lib/relief-detect.ts`)。
+ */
+export const SUPPORT_RELIEF_LIFT_MM = 1;
+
+/**
  * 底板留边 (mm)
  *
  * 工作室的支撑工艺:底板**比模型轮廓四周各留一圈边**再铺 5mm 托底 ——
