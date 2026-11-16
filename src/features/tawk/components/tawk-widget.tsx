@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import { useEffect } from "react";
 
 import {
   buildTawkEmbedUrl,
@@ -8,10 +8,20 @@ import {
   type TawkVisitor,
   type TawkWindow,
 } from "@/features/tawk/lib/tawk-config";
-import { useSession } from "@/lib/auth/client";
 
 /**
- * tawk.to 在线客服小窗(2026-11-16)
+ * tawk.to 在线客服小窗 —— **匿名版**(2026-11-16)
+ *
+ * ## 这一版**不碰会话**
+ *
+ * 「要不要把登录访客的姓名 / 邮箱发给 tawk.to」是**后台一颗开关**
+ * (工作室 2026-11-16 拍板:**默认关**)。开关关 ⇒ 走**这一版**。
+ *
+ * ⇒ 这一版**不 import `useSession`** —— 那不只是「不读身份」,连
+ * `/api/auth/get-session` 那一次请求都不该发(访客没登录时那个请求纯属
+ * 白跑一趟网络)。
+ *
+ * 带身份的那一版在 `tawk-widget-identity.tsx`。
  *
  * ## 为什么自己注入,不用官方的 `<Script>`
  *
@@ -20,22 +30,10 @@ import { useSession } from "@/lib/auth/client";
  * 1. `var Tawk_API = Tawk_API || {}` —— **建一个配置对象**(方法还没装上);
  * 2. 插一条 `<script src="https://embed.tawk.to/{propertyId}/{widgetId}">`。
  *
- * 我们要做的比它多一件:**在脚本下载之前把访客身份设上去**
+ * 带身份的那一版比它多一件:**在脚本下载之前把访客身份设上去**
  * (`window.Tawk_API.visitor = { name, email }`)。⇒ 得自己插脚本,
  * 不能用 `next/script` 的 `beforeInteractive`(那个时机会**更早**,而那时
  * 我们还拿不到会话)。
- *
- * ## 会话为什么要「等一下」
- *
- * 身份来自客户端的 `useSession()`(better-auth)。但:
- *
- * - **不能用服务端 `headers()` 读 cookie** —— 那会让整个公开商城站
- *   (`/legal/**` / `/cart` / `/checkout` / `/product/[handle]` / `/tools/**`)
- *   全部变成动态渲染。仓库里 `/legal/shipping` 那种静态页要保住构建期预渲染。
- * - **也不能无限等** —— 会话查不到 / 失败时不能把客服小窗卡住不出现。
- *
- * ⇒ **最多等 1.5 秒**:会话在这之前落定 ⇒ 带上身份;超了 ⇒ 不带身份照样装
- * (匿名客服一样能用,少个名字而已)。
  *
  * ## 三条硬规矩
  *
@@ -56,14 +54,6 @@ const /** 注入的脚本标签上的 id —— 用来防重复注入 */ TAWK_SC
     "tawk-embed-script";
 
 /**
- * 等会话落定的上限(毫秒)
- *
- * 1.5 秒 —— 够本地 / 正常网络下 better-auth 把会话查回来;
- * 又不至于让「会话查不到」的用户等太久才看到客服小窗。
- */
-const TAWK_SESSION_WAIT_MS = 1500;
-
-/**
  * 拿到 `window.Tawk_API`(没有就建一个空的)
  *
  * 官方那段代码做的是 `var Tawk_API = Tawk_API || {}` —— 我们做同一件事:
@@ -81,9 +71,9 @@ function getTawkApi(): TawkApiConfig {
  * @param propertyId tawk 的 property id
  * @param widgetId tawk 的 widget id
  * @param locale 站点语言 —— 摆进 tawk 的自定义属性,工作室在后台能按语言筛
- * @param visitor 访客身份(可以没有)
+ * @param visitor 访客身份(可以没有 —— **匿名版就是没有**)
  */
-function mountTawkWidget(options: {
+export function mountTawkWidget(options: {
   propertyId: string;
   widgetId: string;
   locale: string;
@@ -133,45 +123,22 @@ export interface TawkWidgetProps {
 }
 
 /**
- * 在线客服小窗
+ * 在线客服小窗 —— **匿名版**
+ *
+ * **不查会话、不发访客身份**(默认口径)。
  *
  * **服务端和客户端都渲染 `null`** —— 脚本是浏览器里的事,服务端没有。
  */
 export function TawkWidget({ propertyId, widgetId, locale }: TawkWidgetProps) {
-  const { data: session, isPending } = useSession();
-
-  const mount = useCallback(
-    (visitor?: TawkVisitor) => {
-      mountTawkWidget({ propertyId, widgetId, locale, visitor });
-    },
-    [propertyId, widgetId, locale]
-  );
-
   useEffect(() => {
     // 还没配 ⇒ 什么都不做(后台会摆一句「还没配」)
     // ⚠️ **每条路都显式 return** —— 仓库开了 `noImplicitReturns`,
     // 有一条路 `return <值>`、另一条路 `return;` 就会报错。
     if (!propertyId || !widgetId) return undefined;
 
-    // 会话还在查 ⇒ 等一下(有上限)
-    if (isPending) {
-      const timer = setTimeout(() => mount(undefined), TAWK_SESSION_WAIT_MS);
-      return () => clearTimeout(timer);
-    }
-
-    const user = session?.user;
-    mount(
-      user
-        ? {
-            name: user.name ?? undefined,
-            email: user.email ?? undefined,
-          }
-        : undefined
-    );
+    mountTawkWidget({ propertyId, widgetId, locale });
     return undefined;
-    // `propertyId` / `widgetId` 显式列出来 —— 它们被这个 effect 直接读了
-    // (`mount` 那一层也依赖它们,但写出来才看得见「换 ID ⇒ 重跑」)
-  }, [mount, isPending, session?.user, propertyId, widgetId]);
+  }, [propertyId, widgetId, locale]);
 
   return null;
 }
