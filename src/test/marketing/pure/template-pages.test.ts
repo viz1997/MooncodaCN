@@ -195,7 +195,7 @@ describe("原项目的页面 —— 不再展示", () => {
       expect(constants).toContain("DEFAULT_SHIPPING_CENTS: 800");
       expect(constants).toContain("FREE_SHIPPING_THRESHOLD_CENTS: 9900");
       // 交期三档:96h / 72h / 48h,加价 10% / 37%
-      const tiers = read("src/features/print-quote/lib/delivery-tier.ts");
+      const tiers = read("packages/print-tool-core/src/quote/delivery-tier.ts");
       expect(tiers).toContain("96");
       expect(tiers).toContain("72");
       expect(tiers).toContain("48");
