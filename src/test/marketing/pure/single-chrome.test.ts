@@ -216,6 +216,31 @@ describe("全站一套头尾(2026-11-13)", () => {
       expect(src).toContain('href: "/products"');
       expect(src).not.toContain("/marketing/products");
     });
+
+    it("顶部导航「作品」指着 `/products`(2026-11-17)", () => {
+      const src = stripComments(
+        read("src/features/marketing/components/storefront/occasion-data.ts")
+      );
+      // 「作品」那一项 —— kind 是 route(换页)、href 是 /products
+      const item = src.match(/\{[^}]*id: "works"[^}]*\}/);
+      expect(item, "顶部导航里应该有「作品」那一项").not.toBeNull();
+      expect(item?.[0]).toContain('kind: "route"');
+      expect(item?.[0]).toContain('href: "/products"');
+      // 不再是首页锚点 —— 顶部导航点它等于「跳回首页再滚一段」
+      expect(src).not.toContain('href: "/#works"');
+    });
+
+    it("导航项走 next-intl 的 `<Link>`(带 locale 前缀)", () => {
+      const src = stripComments(
+        read(
+          "src/features/marketing/components/storefront/wjp-store-header.tsx"
+        )
+      );
+      expect(src).toContain('from "@/i18n/routing"');
+      // 非 customize / 非 external 的那一支(anchor + route)都渲染成
+      // `<Link href={link.href}>` —— `/products` 落在这一支里
+      expect(src).toMatch(/<Link[\s\S]{0,200}href=\{link\.href\}/);
+    });
   });
 
   describe("法律页换了外壳,URL 一个字没变", () => {

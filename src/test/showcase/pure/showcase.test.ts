@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -467,6 +467,50 @@ describe("前台那两段 —— 没有案例就整段不渲染", () => {
     );
     expect(products).toContain("getShowcaseCases");
     expect(products).toContain("cases={showcaseCases}");
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/*  案例卡片 → 商品详情页的链接                                                  */
+/* -------------------------------------------------------------------------- */
+
+describe("案例卡片的「关联商品」链接 —— 商品详情页是**单数**那个地址", () => {
+  it("链 `/product/[handle]`,不是 `/products/[handle]`", () => {
+    const cell = stripComments(
+      read("src/features/showcase/components/showcase-case-cell.tsx")
+    );
+    // 用正则而不是字面量 —— 那串里带 `${…}`(Biome 的
+    // `noTemplateCurlyInString` 会报「这该是模板字符串」)
+    expect(cell).toMatch(/href=\{`\/product\/\$\{item\.productHandle\}`\}/);
+    // `/products/` 底下只有目录页,没有 `[handle]` ⇒ 那个地址必然 404
+    expect(cell).not.toContain("/products/");
+  });
+
+  it("商品详情页那个路由真的存在(单数),复数那个不存在", () => {
+    expect(
+      existsSync(
+        resolve(
+          ROOT,
+          "src/app/[locale]/(marketing-atelier)/product/[handle]/page.tsx"
+        )
+      )
+    ).toBe(true);
+    expect(
+      existsSync(
+        resolve(
+          ROOT,
+          "src/app/[locale]/(marketing-atelier)/products/[handle]/page.tsx"
+        )
+      )
+    ).toBe(false);
+  });
+
+  it("用 next-intl 的 `<Link>`(裸 `<a>` 不带 locale 前缀)", () => {
+    const cell = read(
+      "src/features/showcase/components/showcase-case-cell.tsx"
+    );
+    expect(cell).toContain('from "@/i18n/routing"');
+    expect(cell).toContain("<Link href=");
   });
 });
 

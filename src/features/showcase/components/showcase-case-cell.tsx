@@ -26,6 +26,7 @@ import { ArrowLeftRight, Heart } from "lucide-react";
 
 import { PRODUCT_TYPES } from "@/features/gpt-image/lib/product-catalog";
 import type { ShowcaseCase } from "@/features/showcase/lib/case-types";
+import { Link } from "@/i18n/routing";
 
 /**
  * code → 面向顾客的品类名。从 `PRODUCT_TYPES` 派生(不手抄一份),但**要去掉
@@ -120,9 +121,18 @@ export function ShowcaseCaseCell({
       className={`group flex flex-col min-w-0 ${className}`}
     >
       {item.productHandle ? (
-        <a href={`/products/${item.productHandle}`} className="block">
+        // ⚠️ **单数** `/product/[handle]` —— 商品详情页在
+        // `(marketing-atelier)/product/[handle]/page.tsx`。
+        //
+        // 以前这里写的是 `/products/${handle}` —— 那个地址**不存在**
+        // (`products/` 下只有目录页 `page.tsx`,没有 `[handle]`),全仓也
+        // 没有任何 rewrite ⇒ 点「关联商品」的案例图**必然 404**。
+        //
+        // 用 next-intl 的 `<Link>` 而不是裸 `<a>`:裸 `<a>` 不带 locale
+        // 前缀(`/zh/...`),得靠 proxy 再 307 一次。
+        <Link href={`/product/${item.productHandle}`} className="block">
           {image}
-        </a>
+        </Link>
       ) : (
         image
       )}

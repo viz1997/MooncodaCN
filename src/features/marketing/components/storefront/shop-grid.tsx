@@ -71,8 +71,12 @@ export function ShopGrid({
   ];
 
   return (
-    // id="works" —— 顶部导航「作品」和 footer「全部作品」的落点。
+    // id="works" —— 首页那 12 件网格的锚点。
     // scroll-mt-16 = sticky header 高度,锚点跳转不被遮。
+    //
+    // 顶部导航「作品」**不再落这儿**(2026-11-17 改成作品集页 `/products`)——
+    // 落这儿的是 hero 的「看全部商品」按钮(`store-hero.tsx` 的 `href="#works"`)。
+    // footer 的「全部作品」落的也是 `/products`。
     <section id="works" className="scroll-mt-16 bg-background py-16 lg:py-24">
       <div className="atelier-container">
         <div className="mb-8 flex flex-col gap-5 lg:mb-10 lg:flex-row lg:items-end lg:justify-between">
