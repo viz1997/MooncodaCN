@@ -397,8 +397,9 @@ function repriceLine(
  * ## 不传 = 第一个「开放了而且配好了」的通道
  *
  * 通道的名单在 `@/features/payments/lib/registry` 的
- * `ENABLED_PAYMENT_CHANNELS` —— 现在先只开 Shopify。前端的选择器也是按
- * 同一份清单画的,所以「不传」和「前端默认选中的那个」永远是同一个。
+ * `ENABLED_PAYMENT_CHANNELS` —— **2026-11-17 起只开放支付宝**(工作室要求
+ * 隐藏微信支付)。前端的选择器也是按同一份清单画的,所以「不传」和「前端
+ * 默认选中的那个」永远是同一个。
  *
  * ## 指定的通道不可用就直接报错
  *

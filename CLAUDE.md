@@ -13,7 +13,7 @@ Mooncoda is a production-ready Next.js SaaS template. It provides a complete fou
 | 系统 | 职责 | 技术栈 |
 |---|---|---|
 | **NextDevTpl**(本仓库) | AI 生图 SaaS 后端:user / credits / photo / imageJob / AI 路由 / WeChat 小程序登录 **+ 商品目录(商品 / SKU 变体 / 价格)+ 定价 + 购物车(`/cart`)+ 订单事实 + 收货地址 + 打印工单(打印前工作台 `/tools/workbench` 量 → 点「报价」→ 弹窗里下单 → `POST /api/print-orders` → `print_order`,按 `user_id` 归属,列表在 `/account/print-orders`,工单**自己收款**;打印服务**不进**商城购物袋,车里只有目录商品,见「打印服务直接建工单」)+ 磁吸孔切割工具(`/tools/magnet`,纯前端,**不进工单**,见「磁吸孔切割工具」)** | Next.js 16 + Drizzle + PostgreSQL |
-| **微信支付 / 支付宝**(外部服务) | **自己直连的收款通道**:钱直接进我们自己的商户号 / 账户,没有中间层抽成,定价完全由本仓库说了算。**代码写好了,商户号 / 应用还没走完开通流程** —— 界面上摆出来但选不了(见「两个支付通道」的两道闸) | 微信支付 V3 Native(扫码)+ 支付宝电脑网站支付 |
+| **微信支付 / 支付宝**(外部服务) | **自己直连的收款通道**:钱直接进我们自己的商户号 / 账户,没有中间层抽成,定价完全由本仓库说了算。**代码写好了,商户号 / 应用还没走完开通流程** —— 没配好的那个界面上是灰的、选不了(见「两个支付通道」的两道闸)。⚠️ **2026-11-17 起微信支付在顾客侧隐藏了**(开放名单只剩支付宝),provider 留着 —— 老单照样能付 | 微信支付 V3 Native(扫码)+ 支付宝电脑网站支付 |
 | **Shopify**(外部服务)**已下线** | 曾经只做银行卡 / Shop Pay 的收银台(草稿订单,逐分相等)。2026-11-05 工作室决定只用微信 + 支付宝,**不再接新单** —— 代码留着给老单用,整目录待拆。⚠️ **这一行说的是「收款通道」** —— 工作室**境外那个独立站**(另一个 Shopify 店铺)跟它**不是一回事**,见「外国访客 → 海外独立站」 | Shopify Admin GraphQL API + 草稿订单 |
 | **Sellbase**(独立服务)**过渡期保留** | 旧收款路:Sellbase 建单 + Stripe 付款页。**不再接新单**(已建好的旧单还能重取支付入口)。两个新通道跑通后整个 `src/features/sellbase/` 拆掉 | Supabase Edge Functions(**跟本仓库同一个 Supabase 项目**)+ Stripe(MIT) |
 | **微信小程序 / 浏览器访客**(外部客户端) | 调 NextDevTpl AI 接口拿候选图 **+ 调 `/api/image-gen/products` 拿商品与 SKU**;调 NextDevTpl `/api/store/**` 加购 + 结算 | Taro 4 + React 18(小程序);Next.js(浏览器) |
@@ -3134,7 +3134,8 @@ computeTotalCents = Σ(折后单价 × 数量) + 运费 − 优惠
    多出优惠那一份** ⇒ **多收钱**。**必须补 `discountCents: order.couponDiscountCents`。**
 2. **旧 Sellbase 通道**逐项换算,**没有折扣概念**,也支持不了「免运费」⇒ 带券的订单
    走这条路必然对不上账。legacy 分支入口加硬闸:带优惠码就抛错。这条路新订单永远
-   走不到(`ENABLED_PAYMENT_CHANNELS = ["wechat","alipay"]`),是防御性的。
+   走不到(`ENABLED_PAYMENT_CHANNELS = ["alipay"]`,2026-11-17 起微信也隐藏了),
+   是防御性的。
 3. **Shopify provider 显式炸** —— 草稿单只能设一个总价,`acceptAutomaticDiscounts: false`。
    带着 `discountCents` 跑 ⇒ 我们减了折扣、Shopify 按原价建单 ⇒ 对不上账。
    `discountCents > 0` 时抛 `PaymentProviderError`。
@@ -3435,12 +3436,52 @@ sha256 不可逆,但**用户表是有限的** —— 把表里每个 userId 都�
 > 待遇 —— 确认没有待付的老单了,整个目录一起拆掉。
 >
 > **「开放名单」**在 `src/features/payments/lib/channels.ts` 的
-> `ENABLED_PAYMENT_CHANNELS` —— 现在是 `["wechat", "alipay"]`。
+> `ENABLED_PAYMENT_CHANNELS` —— **2026-11-17 起是 `["alipay"]`**(工作室要求
+> **隐藏微信支付**,见下面那条)。
 >
 > **「摆出来」≠「能付」** —— 没配好的那个在界面上是**灰的、标着「暂未
 > 开放」、选不了**(不是藏起来:工作室要让人看见支持哪几种付款方式)。要关
 > 掉哪一个,把 id 从那份名单里拿掉就行(清单接口、结算默认通道、打印工单
-> 全都跟着那份名单走)。
+> 全都跟着那份名单走)。⚠️ **唯一的例外是工作室明确要求隐藏的通道**
+> (微信,2026-11-17)—— 那一个**连灰的那一行都不摆**,见下面那条。
+>
+> **2026-11-17:微信支付隐藏了。** 工作室的原话是「**隐藏微信支付**」——
+> 不是「配好了」那道闸(灰掉、标「暂未开放」),是**连那一行都不摆出来**。
+>
+> - **一个开关** —— `ENABLED_PAYMENT_CHANNELS` 从 `["wechat", "alipay"]`
+>   变成 `["alipay"]`。清单接口(`GET /api/store/payment-channels`)按开放
+>   名单过滤 ⇒ **前端一行都不用改**(顾客侧的选择器**不许写死通道**,见
+>   `payment-channel-picker.tsx` 的文件头)。
+> - **默认通道不再是它** —— 结算 / 打印工单不传通道时,服务端挑「开放了而且
+>   配好了」的第一个 ⇒ 现在只有支付宝。
+> - **顾客指定微信 ⇒ 503** `PAYMENT_CHANNEL_UNAVAILABLE`,**不静默退回别的
+>   通道**(用户以为选了微信、结果跳去了支付宝 —— 那条路收的是另一笔钱)。
+> - **provider 仍然注册着** ⇒ **已经建好的微信单照样能付完** ——
+>   「重新获取付款入口」(`storefront/lib/order-payment.ts`、
+>   `print-quote/lib/payment.ts`)**不查开放名单**,直接
+>   `getPaymentProvider(channel)`。**别把老单晾在那儿。**
+> - **后台 `/admin/payment-settings` 的微信配置留着** —— 那是工作室自己的
+>   配置面(沙箱开关 / 端点 / 凭据),不是顾客侧。
+> - **想放回来 = 改开放名单那一行** —— 登记清单和 provider 都还在,加回
+>   `"wechat"` 就行。
+> - **顾客侧的文案一并改掉** —— FAQ(中英各一处)+ `legal/shipping.mdx`
+>   (中英各一处)里原来写着「支持微信、支付宝」,改完那一句。
+>
+> **「登记清单」≠「开放名单」**(2026-11-17 起拆开):
+>
+> | | 是什么 | 住在哪儿 |
+> |---|---|---|
+> | **登记清单** | 登记过的通道 —— 管**老单能不能付** | `ALL_CHANNELS` |
+> | **开放名单** | 现在让顾客用哪几个 —— 管**摆不摆出来** | `ENABLED_PAYMENT_CHANNELS` |
+>
+> 顾客侧看到的清单 = 登记清单 ∩ 开放名单(`registry.ts` 的
+> `listPaymentChannels()`)。**关掉一个通道 = 从开放名单里拿掉它** —— 登记
+> 条目和 provider 都留着,老单不受影响。
+>
+> ⚠️ **一个已知副作用**(判定为可接受):`storefront/lib/pending-order.ts` 的
+> `findReusablePendingOrder()` 只在**开放名单**里挑可复用的待付款单 ⇒ 微信
+> 隐藏后,**老的未付微信单不再被复用**,会新建一张支付宝单(老的微信单变成
+> 僵尸单)。这是故意的 —— 不该把用户推回一个已经藏起来的通道。
 >
 > **旧路(Sellbase + Stripe)不再接新单** —— 代码还留着(已建好的旧单还能重取
 > 支付入口),但结算时传 `stripe` 会直接回 503 `PAYMENT_CHANNEL_UNAVAILABLE`。
@@ -3468,7 +3509,7 @@ sha256 不可逆,但**用户表是有限的** —— 把表里每个 userId 都�
 
 | 通道 | 收钱方式 | 付款页形态 | 钱去哪 |
 |---|---|---|---|
-| `wechat` | 微信支付 V3 **Native**(扫码) | 页面留在原地,画二维码 | 我们的微信商户号 |
+| `wechat` | **已隐藏**(2026-11-17)—— 顾客侧摆不出来,provider 留着(老单照样能付) | 页面留在原地,画二维码 | 我们的微信商户号 |
 | `alipay` | 支付宝**电脑网站支付** | 整页跳支付宝 | 我们的支付宝账户 |
 | `shopify` | **已下线**(2026-11-05)—— 代码留着,不再接新单 | — | — |
 | `stripe` | **旧路**:Sellbase + Stripe(过渡期保留,**不再接新单**) | 整页跳 Stripe | Stripe → 我们的账户 |
@@ -3589,8 +3630,9 @@ providers/
 `available`(配好了没)。
 
 - **只返回「开放了」的通道** —— `ENABLED_PAYMENT_CHANNELS` 之外的一个都不
-  返回(现在是两个:微信 / 支付宝)。Shopify 和旧路(Sellbase + Stripe)
-  **都不在清单里** —— 它们不再接新单。
+  返回(**2026-11-17 起只剩支付宝**:微信支付被工作室隐藏了)。Shopify、旧路
+  (Sellbase + Stripe)和微信**都不在清单里** —— 前两个不再接新单,微信是
+  **故意藏起来的**。
 - **没配好的通道也返回,但前端画成灰的、标「暂未开放」、选不了** ——
   `available: false`。让用户点一个注定失败的按钮比不给这个选项更糟,但把
   选项整个藏起来也不行:工作室要让人看见支持哪几种付款方式。
@@ -3706,7 +3748,7 @@ webhook 的 HMAC 密钥**。app 要装在店铺上、且跟店铺同一个组织
 | `src/test/payments/pure/shopify-env.test.ts` | Shopify 凭据(Client ID / Secret、grant 换 token、缓存 / 单飞、4xx vs 5xx) |
 | `src/test/payments/pure/shopify-currency.test.ts` | 展示币种判定(店铺结算币种 / Markets 两条路,判定失败时报错文案) |
 | `src/test/payments/pure/shopify-draft-order.test.ts` | 建单那一整条链路(币种对不上就拒、对账比 presentmentMoney) |
-| `src/test/payments/pure/payment-channels.test.ts` | 开放名单 = 清单(两个都摆出来、Shopify / 旧路 stripe 都不在) |
+| `src/test/payments/pure/payment-channels.test.ts` | **开放名单 vs 登记清单**(2026-11-17 起:开放名单只剩支付宝 / 微信不在开放名单里但仍在登记清单里 / 清单接口按开放名单过滤 / provider 仍然注册着微信 / 顾客侧选择器不许写死通道 / Shopify 与旧路 stripe 两边都不在) |
 | `src/test/payments/pure/storefront-transition.test.ts` | 状态转移(退款 / 迟到通知) |
 | `src/test/payments/pure/linked-print-order.test.ts` | 工单跟着商城订单变 |
 | `src/test/storefront/pure/checkout-payment-issue.test.ts` | 「没配好」vs「这次挂了」 |

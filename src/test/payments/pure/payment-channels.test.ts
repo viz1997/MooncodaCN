@@ -1,24 +1,38 @@
+import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * 支付通道的「开放名单」与「通道清单」。
+ * 支付通道的「开放名单」与「登记清单」。
  *
  * 纯计算:不碰 DB、不碰网络。跑在 unit project 里
  * (`pnpm test:run --project=unit`)。
  *
- * ## 为什么这个值得测
+ * ## 两个概念,别混
  *
- * 工作室 2026-11-05 定了:只用**微信 + 支付宝**两个付款方式(人民币结算,
- * 境内商户的原生场景)。Shopify 那条路下线了 —— 界面上不再摆出来。
+ * | | 是什么 | 住在哪儿 |
+ * |---|---|---|
+ * | **开放名单** | 工作室现在让顾客用哪几个 —— 管**摆不摆出来** | `ENABLED_PAYMENT_CHANNELS` |
+ * | **登记清单** | 登记过的通道 —— 管**老单能不能付** | `ALL_CHANNELS` |
  *
- * 这几条不变量:
+ * 顾客侧看到的清单 = 登记清单 ∩ 开放名单(`registry.ts` 的
+ * `listPaymentChannels()`)。**关掉一个通道 = 从开放名单里拿掉它**,登记清单
+ * 和 provider 都留着 —— 已经建好的单照样能取到付款入口。
  *
- * 1. **两个通道都在开放名单里** —— 少一个,界面上就少一个付款方式
- * 2. **Shopify 不在名单里** —— 它下线了,不接新单
- * 3. **旧路 `stripe` 不在名单里** —— 它也不接新单
+ * ## 变迁
  *
- * 另外守住「清单 = 名单」:清单接口(`/api/store/payment-channels`)返回的就是
- * 这份名单,前端画的选择器跟它一一对应。
+ * - 2026-11-05:只用**微信 + 支付宝**(人民币结算,境内商户的原生场景)。
+ *   Shopify 那条路下线了 —— 界面上不再摆出来。
+ * - 2026-11-17:工作室要求**隐藏微信支付** ⇒ 顾客侧只摆支付宝。微信的
+ *   provider / 登记条目**都留着**(老单要能付;想放回来只要改一行)。
+ *
+ * ## 守住什么
+ *
+ * 1. **开放名单 = 现在摆出来的那些** —— 微信 2026-11-17 起不在里面
+ * 2. **Shopify / 旧路 `stripe` 不在名单里** —— 它们不接新单
+ * 3. **登记清单 ⊇ 开放名单** —— 每个开放的通道都在清单里(不然清单接口就画不出来)
+ * 4. **清单接口按开放名单过滤** —— 源码扫描守住(微信因此不出现在界面上)
+ * 5. **provider 仍然注册着微信** —— 老单照样能付完(别把老单晾在那儿)
  */
 
 import {
@@ -27,9 +41,34 @@ import {
   isPaymentChannelEnabled,
 } from "@/features/payments/lib/channels";
 
+/** 仓库根目录 */
+const ROOT = resolve(process.cwd());
+
+/** 读文件(路径写错了要立刻炸,不是静默跳过) */
+function read(rel: string): string {
+  return readFileSync(join(ROOT, rel), "utf8");
+}
+
+/** 把注释去掉 —— 注释里**提到**那个名字不算违规(那儿恰恰要解释改了什么) */
+function stripComments(src: string): string {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .filter((line) => !/^\s*(\*|\/\/)/.test(line))
+    .join("\n");
+}
+
+const REGISTRY = "src/features/payments/lib/registry.ts";
+const PICKER = "src/features/payments/components/payment-channel-picker.tsx";
+
 describe("ENABLED_PAYMENT_CHANNELS —— 开放名单", () => {
-  it("两个通道都开放(界面上一律摆出来)", () => {
-    expect([...ENABLED_PAYMENT_CHANNELS]).toEqual(["wechat", "alipay"]);
+  it("2026-11-17 起只开放支付宝(工作室要求隐藏微信支付)", () => {
+    expect([...ENABLED_PAYMENT_CHANNELS]).toEqual(["alipay"]);
+  });
+
+  it("微信不在名单里 —— 顾客侧看不到微信支付", () => {
+    expect(isPaymentChannelEnabled("wechat")).toBe(false);
+    expect(ENABLED_PAYMENT_CHANNELS).not.toContain("wechat");
   });
 
   it("Shopify 已下线 —— 不在名单里,不接新单", () => {
@@ -50,11 +89,20 @@ describe("ENABLED_PAYMENT_CHANNELS —— 开放名单", () => {
   });
 });
 
-describe("ALL_CHANNELS —— 清单接口返回什么", () => {
-  it("就是开放名单里的那些,顺序一致", () => {
-    expect(ALL_CHANNELS.map((channel) => channel.channel)).toEqual([
-      ...ENABLED_PAYMENT_CHANNELS,
-    ]);
+describe("ALL_CHANNELS —— 登记过的通道", () => {
+  it("开放名单 ⊆ 登记清单(每个开放的通道都得在清单里)", () => {
+    const registered = ALL_CHANNELS.map((channel) => channel.channel);
+    for (const channel of ENABLED_PAYMENT_CHANNELS) {
+      expect(registered, `${channel} 开放了却不在登记清单里`).toContain(
+        channel
+      );
+    }
+  });
+
+  it("微信还留在登记清单里 —— 老单要能取到付款入口,想放回来时改一行就行", () => {
+    expect(ALL_CHANNELS.map((channel) => channel.channel)).toContain("wechat");
+    // 但它**不在**开放名单里 ⇒ 顾客侧摆不出来
+    expect(isPaymentChannelEnabled("wechat")).toBe(false);
   });
 
   it("带得动名字和说明 —— 前端没配 i18n 文案时有个兜底", () => {
@@ -70,5 +118,27 @@ describe("ALL_CHANNELS —— 清单接口返回什么", () => {
 
   it("旧路 stripe 不在清单里 —— 它不再接新单", () => {
     expect(ALL_CHANNELS.map((c) => c.channel)).not.toContain("stripe");
+  });
+});
+
+describe("清单接口 —— 登记清单 ∩ 开放名单", () => {
+  it("按开放名单过滤(微信因此不出现在界面上)", () => {
+    const src = stripComments(read(REGISTRY));
+    // 用正则而不是字面量 —— Biome 会把这一句拆成三行
+    expect(src).toMatch(
+      /ALL_CHANNELS\.filter\(\(channel\) =>\s*isPaymentChannelEnabled\(channel\.channel\)\s*\)/
+    );
+  });
+
+  it("provider 仍然注册着微信 —— 已经建好的微信单照样能付完", () => {
+    const src = stripComments(read(REGISTRY));
+    expect(src).toMatch(/wechat:\s*wechatPayProvider/);
+    expect(src).toMatch(/alipay:\s*alipayPayProvider/);
+  });
+
+  it("顾客侧的选择器不许写死通道 —— 清单接口给什么就画什么", () => {
+    const src = stripComments(read(PICKER));
+    expect(src).not.toContain("wechat");
+    expect(src).not.toContain("alipay");
   });
 });

@@ -23,6 +23,15 @@ import type { OnlinePaymentChannel, PaymentChannelMeta } from "./types";
 /**
  * 现在**开放**的通道
  *
+ * 2026-11-17:工作室要求**隐藏微信支付** —— 顾客侧只摆支付宝。
+ *
+ * ⚠️ **微信不是被删掉了,只是「不开放了」**:
+ *
+ *  - provider 仍然注册着(`registry.ts` 的 `PROVIDERS`)⇒ **已经建好的微信单
+ *    照样能取到付款入口**(别把老单晾在那儿让人付不了)
+ *  - `ALL_CHANNELS` 里也仍然留着它 ⇒ 工作室想放回来,只要把 id 加回这份名单
+ *    (一行),别的什么都不用改
+ *
  * 2026-11-05:工作室决定**只用微信 + 支付宝**(人民币结算,境内商户的原生
  * 场景)。Shopify 那条路**下线** —— 代码还留在树里(跟旧路 Sellbase 一样
  * 的待遇),但界面上不再摆出来,结算也不再接新单。
@@ -34,7 +43,6 @@ import type { OnlinePaymentChannel, PaymentChannelMeta } from "./types";
  * 通道、打印工单)全都跟着这份名单走。
  */
 export const ENABLED_PAYMENT_CHANNELS: readonly OnlinePaymentChannel[] = [
-  "wechat",
   "alipay",
 ];
 
@@ -57,8 +65,12 @@ export function isPaymentChannelEnabled(
  * 「配好了没」不在这里 —— 那个要问 provider(要读环境变量),在
  * `registry.ts` 里现算。
  *
- * **这份清单 = 开放名单** —— 清单接口(`/api/store/payment-channels`)返回的
- * 就是它,前端画的选择器跟它一一对应。Shopify 已经下线,所以不在这里。
+ * **这份清单 = 登记过的通道**,不只「现在开放的」—— 清单接口
+ * (`/api/store/payment-channels`)返回的是它**按开放名单过滤之后**的那份
+ * (`registry.ts` 的 `listPaymentChannels()`),前端画的选择器跟那份一一对应。
+ *
+ * 微信 2026-11-17 起不开放了,但**还留在这儿**:一是老单要能取到付款入口,
+ * 二是工作室想放回来时只要改开放名单那一行。Shopify 已经下线,所以不在这里。
  */
 export const ALL_CHANNELS: readonly PaymentChannelMeta[] = [
   {
