@@ -35,16 +35,40 @@
  *
  * ## 这个脚本做什么、不做什么
  *
- * **做**:建表 + 建索引 + 加一列。
+ * **做**:建表 + 建索引 + 加列。
  *
  * **不做**:
  *
- * - **不播种任何一行** —— 跑完线上行为一个字节都不变(没配链接的时候,那个
- *   支付选项是灰的、标着「暂未开放」)。
+ * - **不播种任何一行** —— 跑完线上行为(除了下面「直接下单」那条)一个字节都
+ *   不变(没配链接的时候,那个支付选项是灰的、标着「暂未开放」)。
  * - **不改任何历史订单** —— `external_paid_cents` 是**可空**的新列,老单
  *   读出来就是 null。
  * - **不改 `payment_channel` 列** —— 那一列本来就是 `text`(不是 PG enum)、
  *   枚举只在 TS 层 ⇒ 加一个 `taobao` 值**不需要迁移**。
+ *
+ * ## ⚠️ 跑完迁移之后,**淘宝下单的行为变了**(2026-11-18)
+ *
+ * 新增两列:
+ *
+ * | 列 | 干什么 | 默认 |
+ * |---|---|---|
+ * | `sku_map` | 「本站尺寸 id → 淘宝 skuId」的映射(json) | `{}`(没配) |
+ * | `direct_order` | 「**直接下单**」开关 —— 跳淘宝的**下单确认页**,不是商品详情页 | **开** |
+ *
+ * ⇒ **`direct_order` 默认是 `true`** —— 这是**故意的**:工作室报的是
+ * 「用户跳到淘宝后没有自动创建订单」,跑完迁移就自动修好了(跳到确认页,
+ * 商品 / 件数 / 规格都替他选好,只差填地址和付款)。
+ *
+ * ⇒ **不想改行为**就在后台 `/admin/taobao-links` 把那颗开关关掉 —— 关掉 =
+ * 退回老行为(跳普通商品页)。**每条链接都有这颗开关,一键切回。**
+ *
+ * ⇒ `sku_map` 是 `{}` 时,直连地址里**不带 skuId** ⇒ 淘宝让买家自己挑一下
+ * 规格(比跳商品详情页从头来强)。**工作室要在后台把尺寸和淘宝的 skuId 对上**
+ * —— 拿到 skuId 的办法:在淘宝那个商品的页面上把规格都选一遍,地址栏里会出现
+ * `skuid=…`。
+ *
+ * ⚠️ 淘宝那个下单页是**内部 H5 接口**(没公开文档)—— 万一形状变了、淘宝改了
+ * 规则 ⇒ 服务端**自动退回普通商品页**(老行为永远留着),退回原因记在日志里。
  *
  * ## 幂等
  *
@@ -95,6 +119,8 @@ const STATEMENTS: Array<{ label: string; query: string }> = [
       "item_id" text,
       "note" text,
       "is_active" boolean NOT NULL DEFAULT true,
+      "sku_map" json NOT NULL DEFAULT '{}'::json,
+      "direct_order" boolean NOT NULL DEFAULT true,
       "created_at" timestamp NOT NULL DEFAULT now(),
       "updated_at" timestamp NOT NULL DEFAULT now()
     );`,
@@ -113,6 +139,16 @@ const STATEMENTS: Array<{ label: string; query: string }> = [
     label: "ALTER TABLE storefront_order ADD COLUMN external_paid_cents",
     query: `ALTER TABLE "storefront_order"
       ADD COLUMN IF NOT EXISTS "external_paid_cents" integer;`,
+  },
+  {
+    label: "ALTER TABLE product_taobao_link ADD COLUMN sku_map",
+    query: `ALTER TABLE "product_taobao_link"
+      ADD COLUMN IF NOT EXISTS "sku_map" json NOT NULL DEFAULT '{}'::json;`,
+  },
+  {
+    label: "ALTER TABLE product_taobao_link ADD COLUMN direct_order",
+    query: `ALTER TABLE "product_taobao_link"
+      ADD COLUMN IF NOT EXISTS "direct_order" boolean NOT NULL DEFAULT true;`,
   },
 ];
 
@@ -200,7 +236,9 @@ async function main() {
   console.log("");
   console.log("[apply-taobao-link] 回读:");
   console.log(`  ${yes(row?.link_table)} product_taobao_link 表在`);
-  console.log(`  ${count(row?.link_columns, 8)} product_taobao_link 的 8 个列`);
+  console.log(
+    `  ${count(row?.link_columns, 10)} product_taobao_link 的 10 个列`
+  );
   console.log(
     `  ${count(row?.link_indexes, 2)} product_taobao_link 的 2 个索引(含唯一索引)`
   );

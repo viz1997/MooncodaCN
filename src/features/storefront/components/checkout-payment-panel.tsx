@@ -26,8 +26,13 @@ import { Button } from "@/components/ui/button";
 import { PaymentChannelPicker } from "@/features/payments/components/payment-channel-picker";
 import { PaymentQrCode } from "@/features/payments/components/payment-qr";
 import { Link } from "@/i18n/routing";
-
 import { invalidateCartCache } from "../hooks/use-cart";
+import {
+  closeExternalTab,
+  isTaobaoChannel,
+  navigateExternalTab,
+  openBlankTab,
+} from "../lib/external-tab";
 
 export function CheckoutPaymentPanel({
   addressId,
@@ -61,6 +66,24 @@ export function CheckoutPaymentPanel({
   const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
   /** 扫码之后钱到了没 —— 轮询出来的 */
   const [scanPaid, setScanPaid] = useState(false);
+  /**
+   * 淘宝那边**已经新开页面**了(2026-11-18)
+   *
+   * 付完款买家还要**回本站**看订单 ⇒ 本站这一页必须留着 ⇒ 摆一句话告诉他
+   * 「淘宝在新标签页里,别关这个页面」。
+   */
+  const [taobaoOpened, setTaobaoOpened] = useState(false);
+
+  /**
+   * 走的是淘宝那一路吗
+   *
+   * 只有**用户自己选了淘宝**才是 —— `channel` 是 null(没选)时服务端挑第一个
+   * 「开放了而且配好了」的通道(支付宝排在前头),那时候不该摆淘宝的说明。
+   *
+   * ⚠️ **定义在 `handlePay` 上面** —— 淘宝那一路要在**点击那一刻**同步开一个
+   * 空白标签页(见 `lib/external-tab.ts`),那一步必须在用户手势里。
+   */
+  const isTaobao = isTaobaoChannel(channel);
 
   const handlePay = async () => {
     if (!addressId) {
@@ -71,6 +94,15 @@ export function CheckoutPaymentPanel({
     setPayError(null);
     setQrCodeUrl(null);
     setScanPaid(false);
+    setTaobaoOpened(false);
+
+    /**
+     * 淘宝那一路:**先**开一个空白标签页
+     *
+     * 这一步**必须同步**、**必须在点击那一刻** —— 放到 `await` 之后就
+     * 不算用户手势了,浏览器会把弹窗拦掉(用户点了没反应)。
+     */
+    const tab = isTaobao ? openBlankTab() : null;
 
     try {
       const res = await fetch("/api/store/checkout", {
@@ -90,6 +122,7 @@ export function CheckoutPaymentPanel({
       const body = await res.json().catch(() => ({}));
 
       if (!res.ok) {
+        closeExternalTab(tab);
         setPayError(body?.message ?? `结算失败(HTTP ${res.status})`);
         setIsPaying(false);
         return;
@@ -99,12 +132,22 @@ export function CheckoutPaymentPanel({
 
       // 微信 Native —— 扫码,页面留在原地画码
       if (body?.paymentQrCodeUrl) {
+        closeExternalTab(tab);
         setQrCodeUrl(body.paymentQrCodeUrl);
         setIsPaying(false);
         return;
       }
 
       if (body?.paymentUrl) {
+        if (isTaobao) {
+          // 淘宝 —— **新开页面**(工作室 2026-11-18 的要求)
+          //
+          // 本站这一页留着(付完款还要回来查订单),淘宝在那个新标签页里。
+          navigateExternalTab(tab, body.paymentUrl);
+          setTaobaoOpened(true);
+          setIsPaying(false);
+          return;
+        }
         // 跳支付宝 / Shopify / 旧路的 Stripe —— 全页跳转,不能用 router.push
         window.location.href = body.paymentUrl;
         return;
@@ -119,6 +162,7 @@ export function CheckoutPaymentPanel({
       // 说成「支付入口生成失败,请重新获取」⇒ 用户点进去再付一次 ⇒
       // **收两次钱**(线上真踩过:`SO-20261114-137332`)。
       if (body?.paymentBlocked === "ALREADY_PAID") {
+        closeExternalTab(tab);
         setPayError(
           "这笔订单已经付款成功,不用重复支付。请到「我的订单」里查看。"
         );
@@ -126,6 +170,7 @@ export function CheckoutPaymentPanel({
         return;
       }
       if (body?.paymentBlocked === "PAYMENT_UNVERIFIED") {
+        closeExternalTab(tab);
         setPayError(
           "支付宝那边显示这笔已经付款成功,我们还在核对 —— 请不要重复付款,工作室会人工确认。"
         );
@@ -133,6 +178,7 @@ export function CheckoutPaymentPanel({
         return;
       }
       if (body?.paymentBlocked === "ORDER_REFUNDED") {
+        closeExternalTab(tab);
         setPayError("这笔订单已经退过款了。详情请到「我的订单」里查看。");
         setIsPaying(false);
         return;
@@ -140,6 +186,7 @@ export function CheckoutPaymentPanel({
 
       // 两种失败,两种说法(见 checkout.ts 的 classifyPaymentIssue):
       // 「收款通道没配好」重试没用,让他去找工作室;「这次调用挂了」重试就能好
+      closeExternalTab(tab);
       setPayError(
         body?.paymentIssue === "PAYMENT_NOT_CONFIGURED"
           ? "订单已创建,但支付通道暂时不可用。订单已经保留,工作室会跟你联系收款。"
@@ -147,6 +194,7 @@ export function CheckoutPaymentPanel({
       );
       setIsPaying(false);
     } catch {
+      closeExternalTab(tab);
       setPayError("结算失败,请稍后重试");
       setIsPaying(false);
     }
@@ -257,14 +305,6 @@ export function CheckoutPaymentPanel({
   /*  选通道 + 提交                                                            */
   /* ---------------------------------------------------------------------- */
 
-  /**
-   * 走的是淘宝那一路吗
-   *
-   * 只有**用户自己选了淘宝**才是 —— `channel` 是 null(没选)时服务端挑第一个
-   * 「开放了而且配好了」的通道(支付宝排在前头),那时候不该摆淘宝的说明。
-   */
-  const isTaobao = channel === "taobao";
-
   return (
     <>
       {/* 支付方式 —— 没配好的通道不显示 */}
@@ -284,6 +324,17 @@ export function CheckoutPaymentPanel({
       {isTaobao && (
         <div className="mt-4 border border-amber-500/40 bg-amber-500/5 p-3 text-xs leading-relaxed text-amber-900">
           {tPayment("taobaoNotice")}
+        </div>
+      )}
+
+      {/*
+        淘宝已经在**新标签页**里打开了(2026-11-18)
+
+        付完款买家还要回本站看订单 ⇒ 这一页得留着 ⇒ 说清楚「别关这个页面」。
+      */}
+      {taobaoOpened && (
+        <div className="mt-3 border border-emerald-500/40 bg-emerald-500/5 p-3 text-xs leading-relaxed text-emerald-900">
+          {tPayment("taobaoNewTab")}
         </div>
       )}
 

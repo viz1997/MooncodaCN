@@ -75,6 +75,14 @@ export interface PaymentRequestItem {
   /** 本仓库 SKU(有就带上,方便对账) */
   sku?: string | null;
   /**
+   * **本站的尺寸 id**(例如 `size_R_4`)
+   *
+   * 只有**淘宝**那一路用得上 —— 它要把尺寸翻译成淘宝的 `skuId`,才能在淘宝
+   * 那边**预选好规格**(见 `features/taobao/lib/taobao-order-link.ts`)。
+   * 其余通道**不认**这一列。
+   */
+  sizeId?: string | null;
+  /**
    * 附加信息 —— 打印服务的克重 / 尺寸那些
    *
    * 各通道自己决定怎么用:Shopify 落成行属性,微信/支付宝塞进商品描述。

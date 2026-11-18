@@ -136,9 +136,26 @@ describe("淘宝 provider —— 只是一个跳转地址", () => {
   const src = stripComments(read(PROVIDER));
 
   it("`createSession` 给的是 `redirectUrl`(跳转),不是二维码", () => {
-    expect(src).toContain("redirectUrl: link.url");
+    // 跳的是**拼出来的下单确认页**(2026-11-18)—— 拼不出来时才退回商品页,
+    // 而退回的那个地址也是从 `buildTaobaoCheckoutUrl()` 里出来的。
+    expect(src).toContain("redirectUrl: checkout.url");
     expect(src).toContain("qrCodeUrl: null");
     expect(src).toContain("expiresAt: null");
+  });
+
+  it("拼的是**淘宝的下单确认页**(不是商品详情页)", () => {
+    // 工作室报的是「用户跳到淘宝后没有自动创建订单」⇒ 得跳淘宝那边的
+    // 「确认订单」那一步,商品 / 件数 / 规格都替买家选好。
+    expect(src).toContain("buildTaobaoCheckoutUrl(");
+    expect(src).toContain("itemId: link.itemId");
+    expect(src).toContain("skuMap: link.skuMap");
+    expect(src).toContain("directOrder: link.directOrder");
+  });
+
+  it("拼不出来 ⇒ **永远退回商品页**(淘宝那个下单页没公开文档)", () => {
+    // 内部 H5 接口,形状变了 / 后台关了开关 ⇒ 不许把这条路走死
+    expect(src).toContain("checkout.fallback");
+    expect(src).toMatch(/console\.warn\(/);
   });
 
   it("没有平台单号 —— 淘宝那边的单号是工作室从商家后台**抄**进来的", () => {

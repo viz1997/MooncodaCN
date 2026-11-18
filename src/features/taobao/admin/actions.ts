@@ -15,6 +15,17 @@
  * - `adminSetTaobaoLinkActiveAction` —— 启用 / 停用(**不删**)
  * - `adminDeleteTaobaoLinkAction` —— 真删(录错了 handle 的时候才用)
  *
+ * ## 「直接下单」那两样(2026-11-18)
+ *
+ * 工作室报的是「用户跳到淘宝后没有自动创建订单」⇒ 跳淘宝的**下单确认页**
+ * (不是商品详情页)。后台每条链接带:
+ *
+ * - **`directOrder`** —— 直连下单的开关。**默认开**;关掉 = 退回商品页。
+ * - **`skuMap`** —— 「本站尺寸 id → 淘宝 skuId」的映射,让淘宝那边**把规格
+ *   预选好**。没配也能跳(淘宝让买家自己挑一下规格)。
+ *
+ * 两样**都在服务端再验一遍** —— 猜出来的 skuId 会把买家带到错的规格上去。
+ *
  * ## 出错返回 `{ok:false, code}`,不 throw
  *
  * throw 会被 next-safe-action 糊成「服务器错误」—— 工作室根本不知道是哪儿
@@ -40,6 +51,7 @@ import {
   setTaobaoLinkActive,
   upsertTaobaoLink,
 } from "@/features/taobao/lib/taobao-link-store";
+import { checkTaobaoSkuMap } from "@/features/taobao/lib/taobao-order-link";
 import { adminAction } from "@/lib/safe-action";
 
 import {
@@ -87,6 +99,20 @@ const linkSchema = z.object({
   note: z.string().max(200).nullish(),
   /** 启用中? */
   isActive: z.boolean(),
+  /**
+   * 「本站尺寸 id → 淘宝 skuId」的映射
+   *
+   * 键 = 本站的尺寸 id(`size_R_4`),值 = 淘宝的 skuId(纯数字)。
+   * 服务端会用 `checkTaobaoSkuMap()` 再验一遍 —— **不猜**。
+   */
+  skuMap: z.record(z.string(), z.string()).nullish(),
+  /**
+   * 「**直接下单**」开关
+   *
+   * 开 = 跳淘宝的**下单确认页**(商品 / 件数 / 规格都替买家选好);
+   * 关 = 跳普通商品页(老行为)。默认开。
+   */
+  directOrder: z.boolean().nullish(),
 });
 
 /* -------------------------------------------------------------------------- */
@@ -112,6 +138,10 @@ export const adminListTaobaoLinksAction = withAdminTaobaoAction("list").action(
         typeLabelEn: product.typeLabelEn,
         seriesName: product.seriesName,
         seriesNameEn: product.seriesNameEn,
+        sizes: (product.sizes ?? []).map((size) => ({
+          id: size.id,
+          cm: size.cm,
+        })),
       }));
       return { ok: true, rows: buildTaobaoLinkRows(designs, links) };
     } catch (error) {
@@ -153,6 +183,28 @@ export const adminSaveTaobaoLinkAction = withAdminTaobaoAction("save")
       return { ok: false, code: check.problem };
     }
 
+    // 「本站尺寸 id → 淘宝 skuId」—— 服务端**再验一遍**
+    //
+    // 前端那层只是省工作室一次填写。**猜出来的 skuId 会把买家带到错的规格
+    // 上去**(工作室那边对不上货)⇒ 认不出来就拒。
+    const skuCheck = checkTaobaoSkuMap(parsedInput.skuMap);
+    if (!skuCheck.ok) {
+      return { ok: false, code: skuCheck.problem };
+    }
+
+    // 映射表的键必须是**这件设计真的有的尺寸**
+    //
+    // 尺寸 id 写错了 ⇒ 那条映射永远用不上(静默失效,工作室会以为配好了)。
+    const design = MOCK_PRODUCTS.find(
+      (p) => p.handle === parsedInput.productHandle
+    );
+    const knownSizeIds = new Set((design?.sizes ?? []).map((size) => size.id));
+    for (const sizeId of Object.keys(skuCheck.map)) {
+      if (!knownSizeIds.has(sizeId)) {
+        return { ok: false, code: "UNKNOWN_SIZE_ID" };
+      }
+    }
+
     try {
       await upsertTaobaoLink({
         productHandle: parsedInput.productHandle,
@@ -160,6 +212,8 @@ export const adminSaveTaobaoLinkAction = withAdminTaobaoAction("save")
         itemId: check.itemId,
         note: parsedInput.note?.trim() || null,
         isActive: parsedInput.isActive,
+        skuMap: skuCheck.map,
+        directOrder: parsedInput.directOrder ?? true,
       });
     } catch (error) {
       const info = describeDbError(error);

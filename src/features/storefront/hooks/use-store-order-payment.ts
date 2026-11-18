@@ -21,6 +21,13 @@
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
+import {
+  closeExternalTab,
+  isTaobaoChannel,
+  navigateExternalTab,
+  openBlankTab,
+} from "../lib/external-tab";
+
 /**
  * 服务端的错误码 → i18n key
  *
@@ -54,11 +61,24 @@ export type StoreOrderPaymentState = {
   isLoading: boolean;
   /** 出错时的提示(已经是当前语言的话) */
   error: string | null;
+  /**
+   * 这个付款地址要不要**新开页面**
+   *
+   * 只有淘宝那一路是(2026-11-18)—— 钱在淘宝那边付,付完买家还要**回本站**
+   * 看订单 ⇒ 本站这一页得留着。
+   *
+   * 界面拿它决定 `<a>` 上摆不摆 `target="_blank"`(列表页 / 详情页那个
+   * 「打开付款链接」的兜底入口)。
+   */
+  opensInNewTab: boolean;
   /** 点「去支付」 */
   startPayment: () => Promise<void>;
 };
 
-export function useStoreOrderPayment(orderNo: string): StoreOrderPaymentState {
+export function useStoreOrderPayment(
+  orderNo: string,
+  channel?: string | null
+): StoreOrderPaymentState {
   const t = useTranslations("StorefrontOrder");
 
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
@@ -66,9 +86,20 @@ export function useStoreOrderPayment(orderNo: string): StoreOrderPaymentState {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  /** 淘宝那一路要**新开页面**(见 `lib/external-tab.ts`) */
+  const opensInNewTab = isTaobaoChannel(channel);
+
   const startPayment = useCallback(async () => {
     setIsLoading(true);
     setError(null);
+
+    /**
+     * 淘宝那一路:**点击那一刻**同步开一个空白标签页
+     *
+     * 放到 `await` 之后就不是用户手势了,浏览器会把弹窗拦掉(点了没反应)。
+     */
+    const tab = opensInNewTab ? openBlankTab() : null;
+
     try {
       const res = await fetch(
         `/api/store/orders/${encodeURIComponent(orderNo)}/payment-link`,
@@ -80,6 +111,7 @@ export function useStoreOrderPayment(orderNo: string): StoreOrderPaymentState {
         paymentQrCodeUrl?: string | null;
       };
       if (!res.ok) {
+        closeExternalTab(tab);
         const key = body?.error ? ERROR_CODE_KEYS[body.error] : undefined;
         setError(key ? t(key) : t("pay.failed"));
         setIsLoading(false);
@@ -87,22 +119,31 @@ export function useStoreOrderPayment(orderNo: string): StoreOrderPaymentState {
       }
       // 微信 Native —— 扫码,页面留在原地
       if (body.paymentQrCodeUrl) {
+        closeExternalTab(tab);
         setQrCodeUrl(body.paymentQrCodeUrl);
         setIsLoading(false);
         return;
       }
       setPaymentUrl(body.paymentUrl ?? null);
       if (body.paymentUrl) {
+        if (opensInNewTab) {
+          // 淘宝 —— 新开页面,本站这一页留着
+          navigateExternalTab(tab, body.paymentUrl);
+          setIsLoading(false);
+          return;
+        }
         window.location.href = body.paymentUrl;
         return;
       }
+      closeExternalTab(tab);
       setError(t("pay.noLink"));
       setIsLoading(false);
     } catch {
+      closeExternalTab(tab);
       setError(t("pay.failed"));
       setIsLoading(false);
     }
-  }, [orderNo, t]);
+  }, [opensInNewTab, orderNo, t]);
 
   /**
    * 扫完码之后轮询收款状态
@@ -150,5 +191,12 @@ export function useStoreOrderPayment(orderNo: string): StoreOrderPaymentState {
     };
   }, [qrCodeUrl, orderNo]);
 
-  return { paymentUrl, qrCodeUrl, isLoading, error, startPayment };
+  return {
+    paymentUrl,
+    qrCodeUrl,
+    isLoading,
+    error,
+    opensInNewTab,
+    startPayment,
+  };
 }

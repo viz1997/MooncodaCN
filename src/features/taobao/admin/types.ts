@@ -27,6 +27,8 @@
  *
  * - `EMPTY` / `INVALID_URL` / `NOT_TAOBAO` / `NO_ITEM_ID` —— 链接本身不合格
  *   (跟 `taobao-link.ts` 的 `TaobaoUrlProblem` 一一对应)
+ * - `INVALID_SKU_ID` —— 淘宝的 skuId 不是纯数字(认不出来)
+ * - `UNKNOWN_SIZE_ID` —— 映射表里有这个设计**压根没有**的尺寸 id
  * - `DESIGN_NOT_FOUND` —— 填的 handle 不在商城目录里
  * - `LINK_NOT_FOUND` —— 要改 / 要停用的那一行找不到了
  * - `MIGRATION_MISSING` —— 迁移脚本还没跑(表不在)
@@ -37,6 +39,8 @@ export type AdminTaobaoErrorCode =
   | "INVALID_URL"
   | "NOT_TAOBAO"
   | "NO_ITEM_ID"
+  | "INVALID_SKU_ID"
+  | "UNKNOWN_SIZE_ID"
   | "DESIGN_NOT_FOUND"
   | "LINK_NOT_FOUND"
   | "MIGRATION_MISSING"
@@ -52,11 +56,26 @@ export const TAOBAO_ERROR_TEXT_KEYS: Record<AdminTaobaoErrorCode, string> = {
   INVALID_URL: "errors.INVALID_URL",
   NOT_TAOBAO: "errors.NOT_TAOBAO",
   NO_ITEM_ID: "errors.NO_ITEM_ID",
+  INVALID_SKU_ID: "errors.INVALID_SKU_ID",
+  UNKNOWN_SIZE_ID: "errors.UNKNOWN_SIZE_ID",
   DESIGN_NOT_FOUND: "errors.DESIGN_NOT_FOUND",
   LINK_NOT_FOUND: "errors.LINK_NOT_FOUND",
   MIGRATION_MISSING: "errors.MIGRATION_MISSING",
   SAVE_FAILED: "errors.SAVE_FAILED",
 };
+
+/**
+ * 一件设计的**一个尺寸**
+ *
+ * 本站卖的是**尺寸**(4cm / 6cm / …),淘宝那边卖的是**规格**(skuId)——
+ * 两边不是一套编号 ⇒ 后台要配一张映射表(见 `TaobaoSkuMap`)。
+ */
+export interface TaobaoSizeRef {
+  /** 本站尺寸 id(`size_R_4`)—— 映射表的键 */
+  id: string;
+  /** 尺寸(厘米)—— 给工作室看 */
+  cm: number;
+}
 
 /**
  * 商城里的一件设计 —— 后台这一页列的就是它们
@@ -71,6 +90,13 @@ export interface TaobaoDesignRef {
   typeLabelEn: string;
   seriesName: string;
   seriesNameEn: string;
+  /**
+   * 这件设计有哪几个尺寸
+   *
+   * 后台那栏「淘宝 skuId」就是按它一行一行摆的 —— 工作室照着淘宝那边把
+   * 规格对上。
+   */
+  sizes: TaobaoSizeRef[];
 }
 
 /**
@@ -82,6 +108,10 @@ export interface AdminTaobaoLinkSource {
   itemId: string | null;
   note: string | null;
   isActive: boolean;
+  /** 「本站尺寸 id → 淘宝 skuId」的映射 —— 没配是空对象 */
+  skuMap: Record<string, string>;
+  /** 「直接下单」开关 —— 跳淘宝的**下单确认页**,不是商品详情页 */
+  directOrder: boolean;
   updatedAt: Date | null;
 }
 
@@ -100,6 +130,8 @@ export interface AdminTaobaoLinkRow {
   typeLabelEn: string;
   seriesName: string;
   seriesNameEn: string;
+  /** 这件设计的尺寸 —— 展开行里那栏「淘宝 skuId」按它摆 */
+  sizes: TaobaoSizeRef[];
   /** 配没配链接(表里有没有这一行) */
   hasLink: boolean;
   /** 淘宝链接 —— 没配是 null */
@@ -110,6 +142,10 @@ export interface AdminTaobaoLinkRow {
   note: string | null;
   /** 启用中?没配过链接时是 false */
   isActive: boolean;
+  /** 「本站尺寸 id → 淘宝 skuId」的映射 —— 没配是空对象 */
+  skuMap: Record<string, string>;
+  /** 「直接下单」开关 —— 默认开 */
+  directOrder: boolean;
   /** 最后一次改的时间(ISO 字符串)—— 没配过是 null */
   updatedAt: string | null;
 }
@@ -131,11 +167,14 @@ export function toAdminTaobaoLinkRow(
     typeLabelEn: design.typeLabelEn,
     seriesName: design.seriesName,
     seriesNameEn: design.seriesNameEn,
+    sizes: design.sizes,
     hasLink: Boolean(link),
     url: link?.url ?? null,
     itemId: link?.itemId ?? null,
     note: link?.note ?? null,
     isActive: link?.isActive ?? false,
+    skuMap: link?.skuMap ?? {},
+    directOrder: link?.directOrder ?? true,
     updatedAt: link?.updatedAt ? link.updatedAt.toISOString() : null,
   };
 }

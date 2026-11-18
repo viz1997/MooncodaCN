@@ -51,6 +51,7 @@ import {
   TAOBAO_ERROR_TEXT_KEYS,
 } from "@/features/taobao/admin/types";
 import { checkTaobaoUrl } from "@/features/taobao/lib/taobao-link";
+import { isValidTaobaoSkuId } from "@/features/taobao/lib/taobao-order-link";
 
 /* -------------------------------------------------------------------------- */
 /*  表单形状                                                                    */
@@ -61,6 +62,14 @@ type LinkFormValues = {
   url: string;
   note?: string;
   isActive: boolean;
+  /**
+   * 「本站尺寸 id → 淘宝 skuId」的映射
+   *
+   * 键是本站的尺寸 id(`size_R_4`),值是淘宝的 skuId(纯数字)。
+   */
+  skuMap: Record<string, string>;
+  /** 「直接下单」开关 —— 跳淘宝的**下单确认页**,不是商品详情页 */
+  directOrder: boolean;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -383,6 +392,22 @@ function TaobaoLinkRowForm(props: {
     [t]
   );
 
+  /**
+   * 淘宝 skuId 的校验 —— 同样用仓库那份纯函数
+   *
+   * **空着是合法的**(这一条不配)⇒ 只在填了的时候查。填了但不是纯数字 ⇒
+   * 拒 —— 猜出来的 skuId 会把买家带到错的规格上去。
+   */
+  const validateSkuId = useCallback(
+    (_rule: unknown, value: string) => {
+      const skuId = (value ?? "").trim();
+      if (!skuId) return Promise.resolve();
+      if (isValidTaobaoSkuId(skuId)) return Promise.resolve();
+      return Promise.reject(new Error(t("errors.INVALID_SKU_ID")));
+    },
+    [t]
+  );
+
   const { execute: save, isPending } = useAction(adminSaveTaobaoLinkAction, {
     onSuccess: ({ data }) => {
       if (data?.ok === false) {
@@ -409,6 +434,8 @@ function TaobaoLinkRowForm(props: {
       url: values.url.trim(),
       note: values.note?.trim() || null,
       isActive: values.isActive ?? true,
+      skuMap: values.skuMap ?? {},
+      directOrder: values.directOrder ?? true,
     });
   }, [form, row.productHandle, save]);
 
@@ -421,6 +448,11 @@ function TaobaoLinkRowForm(props: {
         url: row.url ?? "",
         note: row.note ?? "",
         isActive: row.hasLink ? row.isActive : true,
+        // 每个尺寸都摆一个格子 —— 没配过的那个是空串
+        skuMap: Object.fromEntries(
+          row.sizes.map((size) => [size.id, row.skuMap[size.id] ?? ""])
+        ),
+        directOrder: row.hasLink ? row.directOrder : true,
       }}
       className="max-w-3xl"
     >
@@ -439,6 +471,49 @@ function TaobaoLinkRowForm(props: {
       <Form.Item name="note" label={t("form.note")} extra={t("form.noteHint")}>
         <Input.TextArea rows={2} maxLength={200} />
       </Form.Item>
+
+      {/* 「直接下单」—— 跳淘宝的下单确认页,不是商品详情页 */}
+      <div className="mb-3 flex items-center justify-between gap-4 rounded-md bg-muted/40 px-3 py-2">
+        <div>
+          <p className="text-xs font-medium">{t("form.directOrder")}</p>
+          <p className="text-[11px] text-muted-foreground">
+            {t("form.directOrderHint")}
+          </p>
+        </div>
+        <Form.Item name="directOrder" noStyle>
+          <Switch />
+        </Form.Item>
+      </div>
+
+      {/* 「本站尺寸 → 淘宝 skuId」—— 一行一个尺寸,就地填 */}
+      <div className="mb-3 rounded-md bg-muted/40 px-3 py-2">
+        <p className="text-xs font-medium">{t("form.skuMap")}</p>
+        <p className="mb-2 text-[11px] text-muted-foreground">
+          {t("form.skuMapHint")}
+        </p>
+        {row.sizes.length === 0 ? (
+          <p className="text-[11px] text-muted-foreground">
+            {t("form.skuMapNoSizes")}
+          </p>
+        ) : (
+          <div className="grid gap-2 sm:grid-cols-2">
+            {row.sizes.map((size) => (
+              <Form.Item
+                key={size.id}
+                name={["skuMap", size.id]}
+                label={`${size.cm} cm`}
+                rules={[{ validator: validateSkuId }]}
+                className="mb-0"
+              >
+                <Input
+                  placeholder={t("form.skuMapPlaceholder")}
+                  className="font-mono"
+                />
+              </Form.Item>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="flex items-center justify-between gap-4 rounded-md bg-muted/40 px-3 py-2">
         <div>

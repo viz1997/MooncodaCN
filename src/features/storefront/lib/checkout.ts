@@ -507,6 +507,8 @@ export function buildPaymentRequest(params: {
       quantity: line.quantity,
       unitPriceCents: line.discountedUnitPriceCents,
       sku: line.item.productHandle,
+      // 尺寸 —— 淘宝那一路要靠它翻译成淘宝的 skuId(见 taobao-order-link.ts)
+      sizeId: line.item.metadata.sizeId ?? null,
       attributes,
     };
   });

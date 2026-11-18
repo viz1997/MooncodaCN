@@ -374,6 +374,11 @@ describe("淘宝链接:纯函数", () => {
     typeLabelEn: "Keychain",
     seriesName: "钥匙扣系列",
     seriesNameEn: "Keychain Series",
+    // 这件设计有哪几个尺寸 —— 后台那栏「淘宝 skuId」按它一行一行摆
+    sizes: [
+      { id: "size_R_4", cm: 4 },
+      { id: "size_R_6", cm: 6 },
+    ],
   };
 
   it("没配过链接的那一行:hasLink=false、url=null、isActive=false", () => {
@@ -394,6 +399,8 @@ describe("淘宝链接:纯函数", () => {
       itemId: "123456789",
       note: "改过的链接",
       isActive: true,
+      skuMap: { size_R_4: "4512805343789" },
+      directOrder: true,
       updatedAt: new Date("2026-11-18T03:04:05.000Z"),
     });
     expect(row.hasLink).toBe(true);
@@ -402,6 +409,9 @@ describe("淘宝链接:纯函数", () => {
     expect(row.note).toBe("改过的链接");
     expect(row.isActive).toBe(true);
     expect(row.updatedAt).toBe("2026-11-18T03:04:05.000Z");
+    // 直连下单的映射表也跟着出来(2026-11-18)
+    expect(row.skuMap).toEqual({ size_R_4: "4512805343789" });
+    expect(row.directOrder).toBe(true);
   });
 
   it("**配了但被停用**跟**压根没配**是两件事 —— 界面要给两句不同的话", () => {
@@ -411,6 +421,8 @@ describe("淘宝链接:纯函数", () => {
       itemId: "1",
       note: null,
       isActive: false,
+      skuMap: {},
+      directOrder: true,
       updatedAt: null,
     });
     expect(row.hasLink).toBe(true);
@@ -439,6 +451,8 @@ describe("淘宝链接:纯函数", () => {
           itemId: "1",
           note: null,
           isActive: true,
+          skuMap: {},
+          directOrder: true,
           updatedAt: null,
         },
       ]
@@ -456,10 +470,17 @@ describe("淘宝链接:纯函数", () => {
       typeLabelEn: product.typeLabelEn,
       seriesName: product.seriesName,
       seriesNameEn: product.seriesNameEn,
+      // 尺寸 —— 后台那栏「淘宝 skuId」按它一行一行摆(2026-11-18)
+      sizes: (product.sizes ?? []).map((size) => ({
+        id: size.id,
+        cm: size.cm,
+      })),
     }));
     expect(designs.length).toBeGreaterThan(0);
     // 一个设计一个链接 ⇒ handle 不许重复
     expect(new Set(designs.map((d) => d.handle)).size).toBe(designs.length);
+    // 每件设计都有尺寸可配 —— 没有尺寸就没有 skuId 可填
+    expect(designs.every((d) => d.sizes.length > 0)).toBe(true);
 
     const rows = buildTaobaoLinkRows(designs, []);
     expect(rows).toHaveLength(designs.length);

@@ -137,7 +137,13 @@ export function StoreOrderList({ orders }: { orders: StoreOrderListItem[] }) {
 function OrderRow({ order }: { order: StoreOrderListItem }) {
   const t = useTranslations("StorefrontOrder");
   const chip = resolveOrderChip(order);
-  const payment = useStoreOrderPayment(order.orderNo);
+  /**
+   * 第二个参数 = 通道
+   *
+   * 淘宝那一路要**新开页面**(见 `lib/external-tab.ts`)⇒ hook 得知道这一单
+   * 走的是哪条路。
+   */
+  const payment = useStoreOrderPayment(order.orderNo, order.paymentChannel);
 
   const payable = order.paymentStatus === "unpaid" && order.status === "unpaid";
 
@@ -214,6 +220,9 @@ function OrderRow({ order }: { order: StoreOrderListItem }) {
         {payment.paymentUrl ? (
           <a
             href={payment.paymentUrl}
+            // 淘宝那一路**新开页面** —— 本站这一页得留着(付完还要回来查订单)
+            target={payment.opensInNewTab ? "_blank" : undefined}
+            rel={payment.opensInNewTab ? "noopener noreferrer" : undefined}
             className="mt-2 block text-xs underline text-muted-foreground"
           >
             {t("pay.openLink")}

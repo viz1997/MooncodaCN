@@ -33,6 +33,21 @@ import type {
 import { buildStorefrontSuccessUrl } from "./checkout-url";
 
 /**
+ * 订单行里存着的**尺寸 id**
+ *
+ * `storefront_order_item.metadata` 是 `json` 列 ⇒ 类型是
+ * `Record<string, unknown>` ⇒ 读的时候要自己认一下是不是字符串
+ * (2026-11-18 之前的订单那一列里压根没有这个键)。
+ *
+ * 认不出来 ⇒ `null` —— 淘宝那一路退化成「不带 skuId 的直连地址」
+ * (买家自己在淘宝那边挑一下规格),**不猜**。
+ */
+function readSizeId(metadata: Record<string, unknown> | null): string | null {
+  const value = metadata?.sizeId;
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+/**
  * 按订单 + 订单行拼出一份 `PaymentRequest`
  *
  * 逐分相等靠的就是它 —— 收银台那边实际收的金额 = `computeTotalCents(request)`,
@@ -48,6 +63,8 @@ export function buildStorefrontPaymentRequest(
     quantity: item.quantity,
     unitPriceCents: item.discountedUnitPriceCents,
     sku: item.sku ?? item.productHandle,
+    // 尺寸 —— 淘宝那一路要靠它翻译成淘宝的 skuId(见 taobao-order-link.ts)
+    sizeId: readSizeId(item.metadata),
     attributes: {},
   }));
 

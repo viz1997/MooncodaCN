@@ -13,6 +13,23 @@
  * ⇒ 所以这个 provider **不调任何接口** —— `createSession()` 只是把「这件设计
  * 对应的淘宝链接」找出来,给浏览器一个跳转地址。
  *
+ * ## 跳过去的是**下单确认页**,不是商品详情页(2026-11-18)
+ *
+ * 工作室报的是「用户跳到淘宝后没有自动创建订单」。本站**确实**建了单
+ * (`checkout.ts` 里 `storefront_order` 落库**早于**建支付会话)—— 缺的是
+ * **淘宝那边的那一单**。
+ *
+ * 以前跳过去是**商品详情页**(`item.taobao.com/item.htm?id=…`),买家到了淘宝
+ * 还得自己:挑规格 → 点「立即购买」→ 填地址 ⇒ 看起来就是「没自动创建订单」。
+ *
+ * ⇒ 现在拼淘宝的**下单确认页**(`buyParam` 带商品 + 数量 + 规格),买家一落地
+ * 就在「确认订单」那一步,商品、件数、规格都替他选好了。纯函数在
+ * `features/taobao/lib/taobao-order-link.ts`。
+ *
+ * ⚠️ **拼不出来就退回商品页**(老行为永远留着):淘宝那个下单页是**内部 H5
+ * 接口**,没公开文档 —— 形状变了、某个商品不支持、后台把那颗开关关了 ⇒ 一律
+ * 退回普通商品页。退回的原因记在服务端日志里。
+ *
  * ## 「配好了」是什么意思
  *
  * `isConfigured()` = **后台至少配了一条淘宝链接**(`/admin/taobao-links`)。
@@ -45,6 +62,7 @@ import {
   countActiveTaobaoLinks,
   getActiveTaobaoLink,
 } from "@/features/taobao/lib/taobao-link-store";
+import { buildTaobaoCheckoutUrl } from "@/features/taobao/lib/taobao-order-link";
 
 /**
  * 淘宝通道
@@ -108,11 +126,42 @@ export const taobaoPayProvider: PaymentProvider = {
       );
     }
 
+    // 直接下单(2026-11-18)—— 跳淘宝的**下单确认页**,不是商品详情页
+    //
+    // 工作室报的是「用户跳到淘宝后没有自动创建订单」—— 本站**确实**建了单,
+    // 缺的是**淘宝那边的那一单**。以前跳的是商品详情页,买家到了还得自己
+    // 挑规格 → 点「立即购买」⇒ 看起来就是「没自动创建订单」。
+    //
+    // 拼不出直连地址时**永远退回商品页**(老行为)—— 淘宝那个下单页是内部
+    // H5 接口,没公开文档,不许把这条路走死。
+    const quantity = request.items.reduce(
+      (sum, item) => sum + (item.quantity ?? 0),
+      0
+    );
+    const sizeIds = request.items.map((item) => item.sizeId ?? null);
+
+    const checkout = buildTaobaoCheckoutUrl({
+      url: link.url,
+      itemId: link.itemId,
+      skuMap: link.skuMap,
+      directOrder: link.directOrder,
+      quantity,
+      sizeIds,
+    });
+
+    if (checkout.fallback) {
+      // 服务端记一条 —— 界面不摆(买家不需要知道),但工作室要能查到
+      // 「为什么这一单没有直接下单」
+      console.warn(
+        `[payments] taobao ${request.orderNo}:退回普通商品页(${checkout.fallback})`
+      );
+    }
+
     return {
       channel: "taobao",
       // 淘宝那边的订单号是工作室从商家后台**抄**进来的 —— 这里没有
       providerOrderId: null,
-      redirectUrl: link.url,
+      redirectUrl: checkout.url,
       qrCodeUrl: null,
       expiresAt: null,
     };

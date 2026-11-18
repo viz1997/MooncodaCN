@@ -115,6 +115,10 @@ export async function listTaobaoLinks(): Promise<ProductTaobaoLinkRow[]> {
  * ⇒ 重复保存就是覆盖。
  *
  * ⚠️ **链接本身在调用方校验过了**(`checkTaobaoUrl()`)—— 这里只负责落库。
+ *
+ * `skuMap` / `directOrder` 是 2026-11-18 新加的两样(「直接下单」):
+ * - `skuMap` —— 「本站尺寸 id → 淘宝 skuId」的映射,**空对象 = 没配**
+ * - `directOrder` —— 后台那颗开关,**默认开**(关掉 = 退回商品页的老行为)
  */
 export async function upsertTaobaoLink(input: {
   productHandle: string;
@@ -122,8 +126,12 @@ export async function upsertTaobaoLink(input: {
   itemId: string | null;
   note: string | null;
   isActive: boolean;
+  skuMap?: Record<string, string>;
+  directOrder?: boolean;
 }): Promise<ProductTaobaoLinkRow> {
   const now = new Date();
+  const skuMap = input.skuMap ?? {};
+  const directOrder = input.directOrder ?? true;
   const rows = await db
     .insert(productTaobaoLink)
     .values({
@@ -133,6 +141,8 @@ export async function upsertTaobaoLink(input: {
       itemId: input.itemId,
       note: input.note,
       isActive: input.isActive,
+      skuMap,
+      directOrder,
       createdAt: now,
       updatedAt: now,
     })
@@ -143,6 +153,8 @@ export async function upsertTaobaoLink(input: {
         itemId: input.itemId,
         note: input.note,
         isActive: input.isActive,
+        skuMap,
+        directOrder,
         updatedAt: now,
       },
     })

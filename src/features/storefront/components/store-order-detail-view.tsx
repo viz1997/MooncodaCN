@@ -88,7 +88,16 @@ export function StoreOrderDetailView({
     }
   );
 
-  const payment = useStoreOrderPayment(initialOrder.orderNo);
+  /**
+   * 第二个参数 = 通道
+   *
+   * 淘宝那一路要**新开页面**(见 `lib/external-tab.ts`)⇒ hook 得知道这一单
+   * 走的是哪条路。
+   */
+  const payment = useStoreOrderPayment(
+    initialOrder.orderNo,
+    initialOrder.paymentChannel
+  );
 
   /**
    * 付款入口 —— 未付的单在这儿付
@@ -319,6 +328,9 @@ export function StoreOrderDetailView({
       {payment.paymentUrl ? (
         <a
           href={payment.paymentUrl}
+          // 淘宝那一路**新开页面** —— 本站这一页得留着(付完还要回来查订单)
+          target={payment.opensInNewTab ? "_blank" : undefined}
+          rel={payment.opensInNewTab ? "noopener noreferrer" : undefined}
           className="mt-4 inline-block text-xs underline text-muted-foreground"
         >
           {t("pay.openLink")}
