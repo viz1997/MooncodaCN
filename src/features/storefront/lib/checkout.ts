@@ -247,6 +247,18 @@ export type CheckoutErrorCode =
    * 对不上(「逐分相等」当场破)。
    */
   | "PRODUCT_UNAVAILABLE"
+  /**
+   * 淘宝下单:**一单只能一件设计**(2026-11-18)
+   *
+   * 淘宝那边是「一个商品一个链接」—— 我们的跳转地址就是那个商品页。
+   * 车里放了两件**不同的设计** ⇒ 跳过去只能对应其中一件 ⇒ 另一件的钱在
+   * 淘宝上**收不到**。
+   *
+   * ⚠️ **不是 `PAYMENT_CHANNEL_UNAVAILABLE`** —— 那个码是 503,意思是
+   * 「这个通道现在用不了,过会儿再试」;这儿通道好好的,是**这一单的内容**
+   * 跟它不匹配 ⇒ 400(改一下请求就能成:分开下单,或者换个通道付)。
+   */
+  | "TAOBAO_MULTIPLE_DESIGNS"
   | "FAILED";
 
 /** 结算失败 —— 带机器可读的 code,Route Handler 翻译成响应 */
@@ -397,9 +409,9 @@ function repriceLine(
  * ## 不传 = 第一个「开放了而且配好了」的通道
  *
  * 通道的名单在 `@/features/payments/lib/registry` 的
- * `ENABLED_PAYMENT_CHANNELS` —— **2026-11-17 起只开放支付宝**(工作室要求
- * 隐藏微信支付)。前端的选择器也是按同一份清单画的,所以「不传」和「前端
- * 默认选中的那个」永远是同一个。
+ * `ENABLED_PAYMENT_CHANNELS` —— **2026-11-18 起是支付宝 + 淘宝下单**
+ * (2026-11-17 起微信支付被工作室隐藏了)。前端的选择器也是按同一份清单画的,
+ * 所以「不传」和「前端默认选中的那个」永远是同一个。
  *
  * ## 指定的通道不可用就直接报错
  *
@@ -589,6 +601,19 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
   //    购物车」,把买掉的行摘掉。晚了就摘不掉。
   await stampCartOwner(input.cartId, input.userId);
 
+  // 0b. 通道(2026-11-18 往前挪了)
+  //
+  //     为什么要挪到金额之前:淘宝那一路有两道闸 —— 「一单只能一件设计」
+  //     (见 1c)跟「不用优惠码」(见 2c)。它们跟**通道**有关、跟金额无关 ——
+  //     挪到前面才能在**建单之前**把不该成立的单挡掉(不落订单行、不记用券)。
+  //
+  //     `resolveCheckoutChannel()` 不依赖购物车也不依赖金额 ⇒ 挪早了没有副作用。
+  //
+  //     ⚠️ **指定的通道不可用就直接报错** —— 不静默退回别的通道(见
+  //     `resolveCheckoutChannel()` 的注释)。
+  const channel = await resolveCheckoutChannel(input.channel);
+  const legacy = channel === "stripe";
+
   // 1. 重算每一行
   //
   //    ## 价从 DB 来(2026-11-08)
@@ -615,6 +640,24 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
   const catalog = await getCatalogSource();
 
   const lines = cart.items.map((item) => repriceLine(item, source, catalog));
+
+  // 1c. 淘宝那一路:**一单只能一件设计**(2026-11-18)
+  //
+  //     淘宝那边是「一个商品一个链接」—— 我们的跳转地址就是那个商品页。
+  //     车里放了两件**不同的设计**(比如钥匙扣 + 冰箱贴)⇒ 跳过去只能跳到
+  //     其中一件 ⇒ 另一件的钱在淘宝上**收不到** ⇒ 这一单必须成立不了。
+  //
+  //     ⚠️ **判据是「不同的设计」不是「几件」** —— 同一件设计买 3 件(不同
+  //     尺寸 / 配件)跳一个链接没问题:淘宝那边数量可以填。
+  if (channel === "taobao") {
+    const handles = new Set(lines.map((line) => line.item.productHandle));
+    if (handles.size > 1) {
+      throw new CheckoutError(
+        "TAOBAO_MULTIPLE_DESIGNS",
+        "这一单里有好几件不同的设计,淘宝下单一次只能对应一件 —— 请分开下单"
+      );
+    }
+  }
 
   // 2. 金额
   const subtotalCents = lines.reduce(
@@ -673,6 +716,26 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
     );
   }
 
+  // 2c. 淘宝那一路:**不用本站的优惠码**(2026-11-18)
+  //
+  //     本站算出来的优惠是**本站账上的事** —— 淘宝那边收钱的时候不知道有这
+  //     个码,也不会减 ⇒ 用户在本站看到「减了 ¥20」、在淘宝那边一分没少付。
+  //
+  //     ⇒ **静默忽略那张码就是少收钱** —— 直接报,让用户把码去掉
+  //     (用户会问「我的码呢」)。
+  //
+  //     淘宝那边的优惠以**淘宝订单**为准(那边有它自己的券和运费模板)。
+  //
+  //     ⚠️ **排在 `COUPON_NOT_FOUND` 后面** —— 码根本不存在的话,先报
+  //     「码不存在」;码存在但淘宝那一路用不了,才报「不适用」。
+  if (channel === "taobao" && couponEffect) {
+    throw new CheckoutError(
+      "COUPON_INVALID",
+      "这个优惠码不能用于淘宝下单 —— 淘宝那边的优惠以淘宝订单为准",
+      "COUPON_NOT_APPLICABLE"
+    );
+  }
+
   const couponCode = couponEffect?.code ?? null;
   const couponDiscountCents = couponEffect?.discountCents ?? 0;
   // **只有免运费券动运费** —— 百分比 / 满减不碰运费(运费不是商品)
@@ -680,11 +743,7 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
   const totalCents =
     discountedSubtotalCents - couponDiscountCents + shippingCents;
 
-  // 3. 通道
-  const channel = await resolveCheckoutChannel(input.channel);
-  const legacy = channel === "stripe";
-
-  // 3b. 旧路(Sellbase + Stripe)**不支持优惠码**
+  // 3. 旧路(Sellbase + Stripe)**不支持优惠码**
   //
   //     那条路逐项换算,没有折扣概念,也表达不了「免运费」——
   //     带券的订单走它必然对不上账。
@@ -703,8 +762,13 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutSuccess> {
   //    购物车改成「付款成功才清空」之后,用户没付钱又点一次「去支付」会攒出
   //    两张一样的单 —— 工作室那边多一张永远不付的僵尸单,用户那边可能付了
   //    旧的那张码、系统却标的是新的那张(或者两张都付)。
+  //
+  //    ⚠️ **通道也要一样**(2026-11-18)—— 见 `pending-order.ts` 的
+  //    「为什么通道也要比」。少了这一条,一笔支付宝的待付款单会被当成淘宝单
+  //    复用 ⇒ 用户点了「去淘宝下单」,拿到的却是支付宝的链接。
   const reusable = await findReusablePendingOrder({
     userId: input.userId,
+    channel,
     snapshot: buildLineSnapshot(
       lines.map((line) => ({
         productId: line.item.productId,

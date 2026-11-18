@@ -40,6 +40,7 @@
     "migrate:apply-showcase": "tsx scripts/apply-showcase-schema.ts",
     "migrate:apply-site-setting": "tsx scripts/apply-site-setting-schema.ts",
     "migrate:apply-storefront-cart": "tsx scripts/apply-storefront-cart-schema.ts",
+    "migrate:apply-taobao-link": "tsx scripts/apply-taobao-link-schema.ts",
     "migrate:apply-user-address": "tsx scripts/apply-user-address-schema.ts",
     "sellbase:bootstrap": "tsx scripts/bootstrap-sellbase-store.ts",
     "sellbase:configure-jobs": "tsx scripts/configure-sellbase-jobs.ts",

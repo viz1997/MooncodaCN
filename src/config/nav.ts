@@ -11,6 +11,7 @@ import {
   Headset,
   Images,
   LayoutDashboard,
+  Link2,
   ListOrdered,
   type LucideIcon,
   Package,
@@ -19,6 +20,7 @@ import {
   Settings,
   Shield,
   ShoppingBag,
+  ShoppingCart,
   SlidersHorizontal,
   Sparkles,
   Ticket,
@@ -218,6 +220,17 @@ export const adminNav: NavGroup[] = [
             href: "/admin/print-orders",
             icon: Scale,
           },
+          // 2026-11-18：商城订单（storefront_order 表）—— 第三套订单数据。
+          //
+          // 以前**没有**商城订单的后台页 —— 商城订单只在退款页和发货台里出现。
+          // 2026-11-17 起结算页多了一条「淘宝下单」(买家不信任新店 ⇒ 让他去
+          // 淘宝拍,享受平台担保),钱进的是淘宝那个账户 ⇒ 工作室得有个地方
+          // **手工标「已收款」**。这一页就是那个地方。
+          {
+            title: "商城订单",
+            href: "/admin/store-orders",
+            icon: ShoppingCart,
+          },
         ],
       },
       // 2026-11-08：后台文件管理 —— 浏览整个 R2 桶（打印模型 / 生图结果 /
@@ -286,6 +299,15 @@ export const adminNav: NavGroup[] = [
             title: "支付设置",
             href: "/admin/payment-settings",
             icon: CreditCard,
+          },
+          // 2026-11-18：淘宝链接 —— 结算页那条「淘宝下单」跳到哪儿,在这一页
+          // 配(**一个设计一个链接**:商城卖的是 12 件设计,不是 6 个型号)。
+          // 真理源在 `product_taobao_link` 表,一个环境变量都没有。
+          // 收钱那一半在「订单管理 → 商城订单」。
+          {
+            title: "淘宝链接",
+            href: "/admin/taobao-links",
+            icon: Link2,
           },
         ],
       },

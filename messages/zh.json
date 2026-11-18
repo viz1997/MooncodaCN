@@ -958,12 +958,14 @@
       "gptImageTemplates": "模板管理",
       "gptImageOrders": "订单管理",
       "printOrders": "打印订单",
+      "storeOrders": "商城订单",
       "printPricing": "打印定价",
       "files": "文件管理",
       "coupons": "优惠码",
       "settings": "设置",
       "siteSettings": "站点设置",
       "paymentSettings": "支付设置",
+      "taobaoLinks": "淘宝链接",
       "shipments": "发货管理",
       "refunds": "退款管理"
     }
@@ -2197,6 +2199,10 @@
         "label": "支付宝",
         "description": "跳转到支付宝完成付款"
       },
+      "taobao": {
+        "label": "淘宝下单",
+        "description": "跳到淘宝拍下这一单,享受平台担保"
+      },
       "shopify": {
         "label": "银行卡 / Shop Pay",
         "description": "银行卡、信用卡、Shop Pay 都能付"
@@ -2206,6 +2212,8 @@
         "description": "过渡期保留的收银台,新的两个通道就绪后自动下线"
       }
     },
+    "taobaoSubmit": "去淘宝下单",
+    "taobaoNotice": "点下去会跳到淘宝,在淘宝上拍下这一单 —— 淘宝那边有平台担保,买家更放心。最终金额、运费和优惠都以淘宝订单为准,可能跟这里显示的金额不一样。",
     "qrTitle": "微信扫码支付",
     "qrHint": "用微信扫一扫,付款完成后会自动更新",
     "qrPaidTitle": "支付成功",
@@ -2573,6 +2581,145 @@
       "alipay_sandbox_app_private_key": "沙箱应用私钥(PEM)",
       "alipay_sandbox_public_key": "沙箱支付宝公钥(PEM)",
       "alipay_sandbox_notify_url": "沙箱通知地址"
+    }
+  },
+  "AdminTaobaoLinks": {
+    "title": "淘宝链接",
+    "subtitle": "买家在结算页选「淘宝下单」,会跳到这件设计对应的淘宝商品页,在淘宝付款(享受平台担保)。一个设计配一个链接 —— 买家点了不能落到别的设计上去。",
+    "notice": {
+      "title": "钱不进本站 —— 淘宝那一单的钱在淘宝账户里",
+      "detail": "买家点了「淘宝下单」之后是在淘宝付款,钱直接进淘宝那个账户。本站这边的金额只是「参考价」—— 淘宝那边的实付、运费模板、优惠券都是淘宝自己那套。",
+      "detail2": "工作室在淘宝商家后台看到钱到了,再回「订单管理 → 商城订单」把那一笔单手工标成「已收款」,并把淘宝的订单号和实收金额填进去(对账用)。"
+    },
+    "list": {
+      "title": "商城设计",
+      "summary": "已启用 {count} / 共 {total} 件设计"
+    },
+    "table": {
+      "design": "设计",
+      "link": "淘宝链接",
+      "itemId": "商品 id",
+      "status": "状态",
+      "actions": "操作"
+    },
+    "status": {
+      "active": "启用中",
+      "inactive": "已停用",
+      "notConfigured": "未配置"
+    },
+    "actions": {
+      "edit": "编辑",
+      "activate": "启用",
+      "deactivate": "停用",
+      "delete": "删除"
+    },
+    "form": {
+      "url": "淘宝商品链接",
+      "urlHint": "从淘宝商品页地址栏复制 —— 形如 https://item.taobao.com/item.htm?id=123456789",
+      "urlPlaceholder": "https://item.taobao.com/item.htm?id=…",
+      "required": "填一个淘宝链接",
+      "note": "备注",
+      "noteHint": "工作室自己看的 —— 比如「主图要换」「改价了记得同步」。买家看不到。",
+      "active": "启用这条链接",
+      "activeHint": "停用之后这件设计不再能选「淘宝下单」,链接留着,历史单还能查。",
+      "save": "保存",
+      "saving": "保存中…",
+      "cancel": "取消"
+    },
+    "messages": {
+      "loading": "正在读淘宝链接…",
+      "loadFailed": "读淘宝链接失败 —— 看服务端日志",
+      "empty": "商城目录里还没有设计",
+      "saveSuccess": "保存成功",
+      "toggleSuccess": "已更新",
+      "deleteSuccess": "已删除",
+      "instantEffect": "保存后立刻生效 —— 结算页的「淘宝下单」马上按这条链接跳。"
+    },
+    "errors": {
+      "EMPTY": "链接不能是空的",
+      "INVALID_URL": "这不是一个合法的网址",
+      "NOT_TAOBAO": "这个链接不是淘宝的 —— 只收 taobao.com / tmall.com",
+      "NO_ITEM_ID": "这个链接看不出是哪个商品 —— 要带 id= 这样的商品编号",
+      "DESIGN_NOT_FOUND": "商城目录里没有这件设计",
+      "LINK_NOT_FOUND": "找不到这条链接",
+      "MIGRATION_MISSING": "淘宝链接表还没建 —— 先跑 pnpm migrate:apply-taobao-link",
+      "SAVE_FAILED": "保存失败 —— 看服务端日志"
+    }
+  },
+  "AdminStoreOrders": {
+    "title": "商城订单",
+    "subtitle": "买家不信任一个新店 ⇒ 结算页除了支付宝,多一个「淘宝下单」。钱进的是淘宝那个账户 —— 工作室在淘宝后台看到钱到了,回这一页把那一笔单手工标成「已收款」。",
+    "notice": {
+      "title": "淘宝那一单的金额,本站这边只是参考",
+      "detail": "本站算出来的应付金额对淘宝那一路只是参考 —— 淘宝那边有自己的运费模板和优惠券,实收可能不一样。所以淘宝那一档允许你填一个跟本站应付对不上的实收金额,差额会摆在界面上给你对账;线下转账那一档必须一分不差。"
+    },
+    "list": {
+      "title": "订单",
+      "summary": "还有 {count} 笔没收款,一共 {total} 笔"
+    },
+    "table": {
+      "order": "订单号",
+      "buyer": "买家",
+      "items": "商品",
+      "itemCount": "共 {count} 件",
+      "amount": "本站应付",
+      "shipping": "运费 {amount}",
+      "payment": "收款状态",
+      "external": "淘宝单号 / 实收",
+      "externalEmpty": "还没填实收金额",
+      "externalPaid": "实收 {amount}",
+      "externalDiff": "跟本站应付差 {amount}",
+      "actions": "操作"
+    },
+    "actions": {
+      "markPaid": "标已收款",
+      "edit": "编辑"
+    },
+    "form": {
+      "orderNo": "订单号",
+      "siteTotal": "本站应付",
+      "externalPaid": "已填实收",
+      "buyer": "买家",
+      "hint": "标已收款 = 工作室已经在淘宝后台看到这笔钱了。淘宝订单号从淘宝商家后台复制过来(那儿的「订单号」那一栏)。",
+      "channel": "收款方式",
+      "channelRequired": "选一个收款方式",
+      "externalOrderNo": "淘宝订单号",
+      "externalOrderNoHint": "淘宝商家后台的订单号 —— 对账靠它",
+      "externalOrderNoRequired": "淘宝那一路必须填淘宝订单号",
+      "externalOrderNoPlaceholder": "淘宝商家后台那笔单的订单号",
+      "paidAmount": "实收金额(元)",
+      "paidAmountHintTaobao": "淘宝那边实际收了多少就填多少 —— 跟本站应付不一致也没关系,差额会显示出来",
+      "paidAmountHintOffline": "线下转账必须跟本站应付一分不差 —— 留空就按本站应付算",
+      "paidAmountPlaceholder": "实收多少",
+      "save": "保存",
+      "saving": "保存中…",
+      "cancel": "取消"
+    },
+    "channels": {
+      "wechat": "微信支付",
+      "alipay": "支付宝",
+      "taobao": "淘宝下单",
+      "shopify": "银行卡 / Shop Pay",
+      "stripe": "银行卡(旧收款通道)",
+      "offline": "线下转账"
+    },
+    "messages": {
+      "loading": "正在读商城订单…",
+      "loadFailed": "读商城订单失败 —— 看服务端日志",
+      "empty": "还没有商城订单",
+      "markPaidSuccess": "已标成收款",
+      "updated": "已更新"
+    },
+    "errors": {
+      "ORDER_NOT_FOUND": "找不到这一单",
+      "ORDER_REFUNDED": "这一单已经退过款了",
+      "ORDER_CANCELLED": "这一单已经取消了",
+      "AMOUNT_MISMATCH": "线下转账的金额必须跟本站应付一分不差",
+      "EXTERNAL_ORDER_NO_REQUIRED": "淘宝那一路必须填淘宝订单号",
+      "INVALID_INPUT": "填的内容不对",
+      "MIGRATION_MISSING": "数据库还没跑迁移 —— 先跑 pnpm migrate:apply-taobao-link",
+      "SAVE_FAILED": "保存失败 —— 看服务端日志",
+      "LOAD_FAILED": "读订单失败 —— 看服务端日志"
     }
   },
   "AdminSiteSettings": {

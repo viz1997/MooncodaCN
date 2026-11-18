@@ -257,6 +257,14 @@ export function CheckoutPaymentPanel({
   /*  选通道 + 提交                                                            */
   /* ---------------------------------------------------------------------- */
 
+  /**
+   * 走的是淘宝那一路吗
+   *
+   * 只有**用户自己选了淘宝**才是 —— `channel` 是 null(没选)时服务端挑第一个
+   * 「开放了而且配好了」的通道(支付宝排在前头),那时候不该摆淘宝的说明。
+   */
+  const isTaobao = channel === "taobao";
+
   return (
     <>
       {/* 支付方式 —— 没配好的通道不显示 */}
@@ -265,6 +273,19 @@ export function CheckoutPaymentPanel({
         onChange={setChannel}
         disabled={isPaying}
       />
+
+      {/*
+        淘宝那一路的说明(2026-11-18)
+
+        ⚠️ **钱不在本站收** —— 买家在淘宝上付,钱进的是**淘宝那个账户**。
+        本站这一单上的金额对这一路**只是参考**(淘宝那边有自己的运费模板和
+        优惠券)⇒ 这句话必须摆出来,否则用户以为本站显示多少就付多少。
+      */}
+      {isTaobao && (
+        <div className="mt-4 border border-amber-500/40 bg-amber-500/5 p-3 text-xs leading-relaxed text-amber-900">
+          {tPayment("taobaoNotice")}
+        </div>
+      )}
 
       {payError && (
         <div className="mt-4 p-3 border border-destructive/40 bg-destructive/5 rounded-sm text-xs text-destructive">
@@ -285,7 +306,8 @@ export function CheckoutPaymentPanel({
         type="button"
       >
         {isPaying && <Loader2 className="size-4 animate-spin" />}
-        {submitLabel}
+        {/* 淘宝那一路按钮上写「去淘宝下单」—— 这一步跳去的是淘宝,不是收银台 */}
+        {isTaobao ? tPayment("taobaoSubmit") : submitLabel}
       </Button>
 
       <p className="text-[11px] text-muted-foreground text-center mt-3">

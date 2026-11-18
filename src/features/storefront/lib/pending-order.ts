@@ -33,6 +33,21 @@
  *
  * ⇒ 复用判据里**显式加上 `couponCode`**,严格相等才复用。
  *
+ * ## 为什么通道也要比(2026-11-18)
+ *
+ * 以前这条只卡「走的还是不是开放的通道」(`inArray`)—— **没卡具体是哪个**。
+ * 淘宝那一路加进来之后这就成了真问题:
+ *
+ * - 用户在结算页选了「淘宝下单」,车里是同一批货
+ * - 库里有一张**上一轮留下的支付宝待付款单**(合计一样、地址一样、码一样)
+ * - 以前那条 `inArray` 会把那张支付宝单捞出来 ⇒ 复用 ⇒
+ *   `reusePendingOrder()` 走 `ensureStorefrontOrderPaymentLink()`,
+ *   **沿用那一单原本的通道** ⇒ 用户点了「去淘宝下单」,拿到的却是**支付宝
+ *   的链接**。
+ *
+ * ⇒ 复用判据里**显式加上 `channel`**,严格相等才复用。
+ * (通道不同就不是同一单 —— 钱走的是两条完全不同的路。)
+ *
  * ## 为什么是「复用」不是「取消旧的」
  *
  * 取消旧单会有个**要命**的副作用:用户可能已经扫了旧单的付款码,钱正准备
@@ -42,7 +57,7 @@
  * 复用没有这个问题:旧单还在,码还是那张码,钱到了照样标已付。
  */
 
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -53,6 +68,7 @@ import {
   storefrontOrderItem,
 } from "@/db/schema";
 import { ENABLED_PAYMENT_CHANNELS } from "@/features/payments/lib/registry";
+import type { OnlinePaymentChannel } from "@/features/payments/lib/types";
 import type { CartLineItemMetadata } from "../types";
 import {
   buildLineSnapshot,
@@ -76,6 +92,12 @@ export interface ReusablePendingOrder {
  */
 export async function findReusablePendingOrder(params: {
   userId: string;
+  /**
+   * 这次要走的通道(2026-11-18)
+   *
+   * ⚠️ **必须跟那一单原本的通道完全一样** —— 见文件头「为什么通道也要比」。
+   */
+  channel: OnlinePaymentChannel;
   /** 这次要买的货(购物车算出来的) */
   snapshot: LineSnapshot[];
   /** 这次要付的总价(分) */
@@ -95,10 +117,14 @@ export async function findReusablePendingOrder(params: {
   const channels = [...ENABLED_PAYMENT_CHANNELS];
   if (channels.length === 0) return null;
 
-  // 只看「还没付、没取消、走的还是开放的通道」的订单
+  // 通道不在开放名单里 ⇒ 没有可复用的单(那张单上的通道现在不让用了)
+  if (!channels.includes(params.channel)) return null;
+
+  // 只看「还没付、没取消、走的通道跟这次一样」的订单
   //
   // 通道这一条要卡:`payment_channel` 可能是 `stripe`(旧路的单)或者 null ——
-  // 那些单不能拿来复用(旧路的付款入口跟现在的通道不是一回事)。
+  // 那些单不能拿来复用(旧路的付款入口跟现在的通道不是一回事);
+  // **别的开放通道也不行** —— 见文件头「为什么通道也要比」。
   const orders = await db
     .select()
     .from(storefrontOrder)
@@ -107,7 +133,7 @@ export async function findReusablePendingOrder(params: {
         eq(storefrontOrder.userId, params.userId),
         eq(storefrontOrder.status, "unpaid"),
         eq(storefrontOrder.paymentStatus, "unpaid"),
-        inArray(storefrontOrder.paymentChannel, channels)
+        eq(storefrontOrder.paymentChannel, params.channel)
       )
     )
     .orderBy(desc(storefrontOrder.createdAt))

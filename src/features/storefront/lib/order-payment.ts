@@ -106,11 +106,24 @@ function isConfigMissing(error: unknown): boolean {
   return classifyPaymentIssue(error) === "PAYMENT_NOT_CONFIGURED";
 }
 
-/** 新路的三个通道 */
+/**
+ * 新路的几个通道
+ *
+ * ⚠️ **`taobao` 也在里面**(2026-11-17)—— 淘宝那一路不是「线下」,它有
+ * 付款入口(跳淘宝商品页),只是**钱不进本仓库**。
+ *
+ * 不加它 ⇒ 淘宝单点「重新获取付款入口」会掉到**旧路(Sellbase + Stripe)**
+ * 那个分支上去 ⇒ 报一句「通道没配好」,买家拿不到淘宝链接。
+ */
 function isNewChannel(
   channel: string | null | undefined
 ): channel is OnlinePaymentChannel {
-  return channel === "wechat" || channel === "alipay" || channel === "shopify";
+  return (
+    channel === "wechat" ||
+    channel === "alipay" ||
+    channel === "taobao" ||
+    channel === "shopify"
+  );
 }
 
 /**
@@ -342,7 +355,12 @@ async function ensureNewChannelPaymentLink(
     await db
       .update(storefrontOrder)
       .set({
-        providerOrderId: session.providerOrderId,
+        // ⚠️ **只有平台给了单号才写** —— 淘宝通道的 `providerOrderId` 是
+        // null(那个号是工作室从淘宝商家后台**抄**进来的)。
+        // 写 null ⇒ 把工作室已经抄进去的淘宝订单号**抹掉**。
+        ...(session.providerOrderId
+          ? { providerOrderId: session.providerOrderId }
+          : {}),
         paymentUrl: session.redirectUrl,
         paymentQrCodeUrl: session.qrCodeUrl,
         // 订单上原本没记通道的(建单那一刻没有可用的线上通道)—— 把这次用的

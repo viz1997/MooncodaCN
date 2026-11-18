@@ -74,7 +74,9 @@ const checkoutSchema = z.object({
    * 「这个方式现在不可用」比「参数不合法」更贴近真实原因,前端也是按这个码
    * 提示的。
    */
-  channel: z.enum(["wechat", "alipay", "shopify", "stripe"]).nullish(),
+  channel: z
+    .enum(["wechat", "alipay", "taobao", "shopify", "stripe"])
+    .nullish(),
 });
 
 /** CheckoutError 的 code → HTTP 状态 */
@@ -100,6 +102,12 @@ function statusForCode(code: CheckoutError["code"]): number {
     // 用户把那一行删掉就能结(界面会指出来是哪一件)。
     case "PRODUCT_UNAVAILABLE":
       return 409;
+    // 淘宝下单:一单只能一件设计(2026-11-18)—— 400,不是 503
+    //
+    // 通道**没有**不可用 —— 是这一单的内容跟它不匹配。503 会被读成
+    // 「过会儿再试」,但重试多少次都不成(得分开下单 / 换个通道)。
+    case "TAOBAO_MULTIPLE_DESIGNS":
+      return 400;
     default:
       return 500;
   }

@@ -961,12 +961,14 @@
       "gptImageTemplates": "Templates",
       "gptImageOrders": "Orders",
       "printOrders": "Print Orders",
+      "storeOrders": "Storefront Orders",
       "printPricing": "Print Pricing",
       "files": "Files",
       "coupons": "Coupons",
       "settings": "Settings",
       "siteSettings": "Site Settings",
       "paymentSettings": "Payment Settings",
+      "taobaoLinks": "Taobao Links",
       "shipments": "Shipping Desk",
       "refunds": "Refunds"
     }
@@ -2200,6 +2202,10 @@
         "label": "Alipay",
         "description": "Redirect to Alipay to complete the payment"
       },
+      "taobao": {
+        "label": "Order on Taobao",
+        "description": "Take this order to Taobao, where Taobao's buyer protection applies"
+      },
       "shopify": {
         "label": "Card / Shop Pay",
         "description": "Debit card, credit card or Shop Pay"
@@ -2209,6 +2215,8 @@
         "description": "The old checkout, kept while the two new channels roll out"
       }
     },
+    "taobaoSubmit": "Order on Taobao",
+    "taobaoNotice": "This takes you to Taobao to place the order — Taobao's buyer protection applies, which buyers trust. The final amount, shipping and discounts are whatever Taobao shows, and may differ from the amount shown here.",
     "qrTitle": "Scan to pay with WeChat",
     "qrHint": "Scan with WeChat — this updates once the payment lands",
     "qrPaidTitle": "Payment received",
@@ -2576,6 +2584,145 @@
       "alipay_sandbox_app_private_key": "Sandbox application private key (PEM)",
       "alipay_sandbox_public_key": "Sandbox Alipay public key (PEM)",
       "alipay_sandbox_notify_url": "Sandbox notification URL"
+    }
+  },
+  "AdminTaobaoLinks": {
+    "title": "Taobao Links",
+    "subtitle": "When a buyer picks “Order on Taobao” at checkout, they jump to the Taobao listing for that design and pay there (with Taobao's buyer protection). One link per design — a buyer must never land on a different design.",
+    "notice": {
+      "title": "The money does not come to this site — it goes to the Taobao account",
+      "detail": "Buyers pay on Taobao, and the money goes straight into the Taobao account. The amount shown on this site is a reference price only — Taobao has its own actual payment, shipping template and coupons.",
+      "detail2": "Once you see the money arrive in the Taobao merchant console, go to “Orders → Storefront orders”, mark that order as paid, and fill in the Taobao order number and the amount actually received (for reconciliation)."
+    },
+    "list": {
+      "title": "Storefront designs",
+      "summary": "{count} enabled / {total} designs in total"
+    },
+    "table": {
+      "design": "Design",
+      "link": "Taobao link",
+      "itemId": "Item id",
+      "status": "Status",
+      "actions": "Actions"
+    },
+    "status": {
+      "active": "Enabled",
+      "inactive": "Disabled",
+      "notConfigured": "Not configured"
+    },
+    "actions": {
+      "edit": "Edit",
+      "activate": "Enable",
+      "deactivate": "Disable",
+      "delete": "Delete"
+    },
+    "form": {
+      "url": "Taobao item link",
+      "urlHint": "Copy it from the Taobao listing address bar — like https://item.taobao.com/item.htm?id=123456789",
+      "urlPlaceholder": "https://item.taobao.com/item.htm?id=…",
+      "required": "Give it a Taobao link",
+      "note": "Note",
+      "noteHint": "For your own eyes — e.g. “swap the cover image” “sync after a price change”. Buyers never see this.",
+      "active": "Enable this link",
+      "activeHint": "Once disabled, this design can no longer be ordered on Taobao. The link is kept so past orders can still be traced.",
+      "save": "Save",
+      "saving": "Saving…",
+      "cancel": "Cancel"
+    },
+    "messages": {
+      "loading": "Reading Taobao links…",
+      "loadFailed": "Could not read the Taobao links — check the server log",
+      "empty": "The storefront catalog has no designs yet",
+      "saveSuccess": "Saved",
+      "toggleSuccess": "Updated",
+      "deleteSuccess": "Deleted",
+      "instantEffect": "Takes effect immediately — checkout starts using this link right away."
+    },
+    "errors": {
+      "EMPTY": "The link cannot be empty",
+      "INVALID_URL": "That is not a valid URL",
+      "NOT_TAOBAO": "That link is not Taobao's — only taobao.com / tmall.com are accepted",
+      "NO_ITEM_ID": "Cannot tell which item this link points at — it needs an item id such as id=",
+      "DESIGN_NOT_FOUND": "That design is not in the storefront catalog",
+      "LINK_NOT_FOUND": "That link could not be found",
+      "MIGRATION_MISSING": "The Taobao link table has not been created yet — run pnpm migrate:apply-taobao-link",
+      "SAVE_FAILED": "Save failed — check the server log"
+    }
+  },
+  "AdminStoreOrders": {
+    "title": "Storefront Orders",
+    "subtitle": "Buyers do not trust a new shop yet, so checkout offers “Order on Taobao” next to Alipay. The money goes into the Taobao account — once you see it arrive in the Taobao merchant console, come back here and mark that order as paid.",
+    "notice": {
+      "title": "On the Taobao route, the amount on this site is only a reference",
+      "detail": "The amount this site computes is a reference for the Taobao route — Taobao has its own shipping template and coupons, so the amount actually received can differ. That is why the Taobao option lets you record an amount that does not match the site's total (the difference is shown for reconciliation), while an offline transfer has to match to the cent."
+    },
+    "list": {
+      "title": "Orders",
+      "summary": "{count} still unpaid, {total} in total"
+    },
+    "table": {
+      "order": "Order no.",
+      "buyer": "Buyer",
+      "items": "Items",
+      "itemCount": "{count} in total",
+      "amount": "Amount due",
+      "shipping": "Shipping {amount}",
+      "payment": "Payment",
+      "external": "Taobao no. / received",
+      "externalEmpty": "No amount recorded yet",
+      "externalPaid": "Received {amount}",
+      "externalDiff": "{amount} off the amount due",
+      "actions": "Actions"
+    },
+    "actions": {
+      "markPaid": "Mark paid",
+      "edit": "Edit"
+    },
+    "form": {
+      "orderNo": "Order no.",
+      "siteTotal": "Amount due",
+      "externalPaid": "Recorded amount",
+      "buyer": "Buyer",
+      "hint": "Marking it paid means you have already seen the money in the Taobao merchant console. Copy the Taobao order number over from there (the “order number” column).",
+      "channel": "Payment route",
+      "channelRequired": "Pick a payment route",
+      "externalOrderNo": "Taobao order no.",
+      "externalOrderNoHint": "The order number in the Taobao merchant console — reconciliation relies on it",
+      "externalOrderNoRequired": "The Taobao route needs the Taobao order number",
+      "externalOrderNoPlaceholder": "The order number of that order on Taobao",
+      "paidAmount": "Amount received (CNY)",
+      "paidAmountHintTaobao": "Fill in what Taobao actually charged — it does not have to match the amount due, the difference is shown",
+      "paidAmountHintOffline": "An offline transfer has to match the amount due to the cent — leave it empty to use the amount due",
+      "paidAmountPlaceholder": "How much came in",
+      "save": "Save",
+      "saving": "Saving…",
+      "cancel": "Cancel"
+    },
+    "channels": {
+      "wechat": "WeChat Pay",
+      "alipay": "Alipay",
+      "taobao": "Order on Taobao",
+      "shopify": "Card / Shop Pay",
+      "stripe": "Card (legacy checkout)",
+      "offline": "Offline transfer"
+    },
+    "messages": {
+      "loading": "Reading storefront orders…",
+      "loadFailed": "Could not read the storefront orders — check the server log",
+      "empty": "No storefront orders yet",
+      "markPaidSuccess": "Marked as paid",
+      "updated": "Updated"
+    },
+    "errors": {
+      "ORDER_NOT_FOUND": "That order could not be found",
+      "ORDER_REFUNDED": "That order has already been refunded",
+      "ORDER_CANCELLED": "That order has already been cancelled",
+      "AMOUNT_MISMATCH": "An offline transfer has to match the amount due to the cent",
+      "EXTERNAL_ORDER_NO_REQUIRED": "The Taobao route needs the Taobao order number",
+      "INVALID_INPUT": "Something in the form is not valid",
+      "MIGRATION_MISSING": "The database migration has not been run yet — run pnpm migrate:apply-taobao-link",
+      "SAVE_FAILED": "Save failed — check the server log",
+      "LOAD_FAILED": "Could not read the orders — check the server log"
     }
   },
   "AdminSiteSettings": {

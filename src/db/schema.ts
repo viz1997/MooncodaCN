@@ -2297,6 +2297,75 @@ export const productVariant = pgTable(
 export type ProductVariantRow = typeof productVariant.$inferSelect;
 export type NewProductVariantRow = typeof productVariant.$inferInsert;
 
+/**
+ * 商品 → 淘宝链接(2026-11-17)
+ *
+ * ## 为什么单独一张表,不挂在 `product` 上
+ *
+ * `product` 表是**型号**级的(6 行:R / A / P / RM / LB / M),而商城卖的是
+ * **12 件设计**(4 钥匙扣 + 4 手办 + 4 冰箱贴)—— 一件设计挂在某个型号下面。
+ * ⇒ 一个型号对应 1~4 件设计,淘宝那边**每个设计一个链接** ⇒ 挂型号上必然
+ * 对不上(买家点了会落到别的设计)。
+ *
+ * ⇒ 这张表按 **handle**(商城那件设计的 id,`mock-catalog.ts` 的 `SEEDS[].handle`)
+ * 存 —— 跟 `storefront_order_item.product_handle` / `sku` 是同一个字符串。
+ *
+ * ## 这张表干什么
+ *
+ * 买家在结算页选「淘宝下单」⇒ 跳到这件设计对应的淘宝商品页 ⇒ 在淘宝付款。
+ * 工作室在淘宝后台看到钱到了,再回本仓库把那一单**手工标成已收款**
+ * (见 `storefront_order.external_paid_cents`)。
+ *
+ * ## 为什么是「普通淘宝链接」而不是淘宝客
+ *
+ * 普通 `item.taobao.com/item.htm?id=…` 链接**不是淘宝客** ⇒ 没有佣金、
+ * 没有归因期、不受《推广者管理规范》约束 ⇒ 不需要推广位 / PID。
+ * 反过来说:**这一行摆着自己的微信号 / 二维码就是「诱导第三方」**
+ * (淘宝 2025-06-09 版罚则 A2~A6 + ¥1000 违约金)—— 页面里不放。
+ */
+export const productTaobaoLink = pgTable(
+  "product_taobao_link",
+  {
+    id: text("id").primaryKey(),
+    /**
+     * 商城那件设计的 handle(主键)
+     *
+     * = `mock-catalog.ts` 的 `SEEDS[].handle`,也等于
+     * `storefront_order_item.product_handle`。
+     */
+    productHandle: text("product_handle").notNull(),
+    /**
+     * 淘宝商品链接
+     *
+     * 收 `https://item.taobao.com/item.htm?id=…` / `https://detail.tmall.com/…`
+     * 这类形状。**校验在服务端**(域名必须是 taobao / tmall),
+     * 见 `src/features/taobao/lib/taobao-link.ts`。
+     */
+    url: text("url").notNull(),
+    /** 淘宝商品 id —— 从链接里抠出来的,方便工作室肉眼核对 */
+    itemId: text("item_id"),
+    /** 备注(工作室自己看的,比如「这是改过的链接」) */
+    note: text("note"),
+    /**
+     * 停用而不是删
+     *
+     * 停用之后这个设计**不再能选淘宝下单** —— 链接留着,历史单还能查。
+     */
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    // 一个设计一条链接
+    uniqueIndex("product_taobao_link_handle_uniq_idx").on(t.productHandle),
+    // 结算时按 handle 查「这个设计能不能走淘宝」
+    index("product_taobao_link_active_idx").on(t.productHandle, t.isActive),
+  ]
+);
+
+export type ProductTaobaoLinkRow = typeof productTaobaoLink.$inferSelect;
+export type NewProductTaobaoLinkRow = typeof productTaobaoLink.$inferInsert;
+
 // ============================================================================
 //  商品目录字典（2026-11-14）
 //
@@ -2734,11 +2803,13 @@ export const printOrder = pgTable(
      * - shopify —— Shopify 草稿订单的付款页
      * - stripe  —— 旧路:Sellbase + Stripe(**过渡期并行**,跑通新通道后拆)
      * - offline —— 线下转账,工作室后台手动标
+     * - taobao  —— 淘宝下单(2026-11-17)—— **只有商城订单走这条路**;
+     *   打印工单不走(它的规格没法在淘宝上表达)
      *
      * NULL = 还没开始收款(刚建单、支付通道那边还没建出订单)。
      */
     paymentChannel: text("payment_channel", {
-      enum: ["wechat", "alipay", "shopify", "stripe", "offline"],
+      enum: ["wechat", "alipay", "shopify", "stripe", "offline", "taobao"],
     }),
     /**
      * Sellbase 订单 id —— webhook 反查用
@@ -3313,9 +3384,13 @@ export const storefrontOrder = pgTable(
      *
      * 跟 `print_order.payment_channel` 同一个口径 —— 两条链共用一套枚举,
      * 免得改一处忘一处。
+     *
+     * `taobao` = 买家跳去淘宝拍下这一单(2026-11-17)。钱进的是**淘宝那个
+     * 账户**,不在本仓库的收钱链路里 ⇒ 本仓库这边的金额只是**参考价**,
+     * 真正收了多少由工作室在淘宝后台看、再手工标(见 `external_paid_cents`)。
      */
     paymentChannel: text("payment_channel", {
-      enum: ["wechat", "alipay", "shopify", "stripe", "offline"],
+      enum: ["wechat", "alipay", "shopify", "stripe", "offline", "taobao"],
     }),
     /**
      * 支付平台侧的订单号(2026-11-05)
@@ -3335,6 +3410,20 @@ export const storefrontOrder = pgTable(
     paymentQrCodeUrl: text("payment_qr_code_url"),
     /** 收款时间 */
     paidAt: timestamp("paid_at"),
+    /**
+     * **外部渠道**实收金额(分)—— 2026-11-17 起为「淘宝下单」那条路而设
+     *
+     * 淘宝那一单的钱**不进本仓库的收钱链路**:买家在淘宝拍下、在淘宝付款,
+     * 钱进的是淘宝那个账户。本仓库这边的 `total_cents` 只是**参考价**
+     * (淘宝那边的价、运费模板、优惠券都是它自己那套)。
+     *
+     * ⇒ 对账靠这一列:工作室在淘宝后台看到实收多少,手工填进来。
+     * **NULL = 还没填**(还没标收款,或者标了但没记金额)。
+     *
+     * ⚠️ **只有 `taobao` 通道用这一列** —— 微信 / 支付宝的实收金额就是
+     * `total_cents`(「逐分相等」),不另存一份。
+     */
+    externalPaidCents: integer("external_paid_cents"),
     /** 收货地址**快照** —— 用户后来改地址簿不改写历史订单 */
     shippingAddress: json(
       "shipping_address"

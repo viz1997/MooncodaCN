@@ -63,12 +63,16 @@ export function AdminSidebar() {
       模板管理: t("nav.gptImageTemplates"),
       订单管理: t("nav.gptImageOrders"),
       打印订单: t("nav.printOrders"),
+      // 2026-11-18:商城订单(storefront_order 表)—— 淘宝那一路要手工标已收款
+      商城订单: t("nav.storeOrders"),
       打印定价: t("nav.printPricing"),
       文件管理: t("nav.files"),
       优惠码: t("nav.coupons"),
       设置: t("nav.settings"),
       站点设置: t("nav.siteSettings"),
       支付设置: t("nav.paymentSettings"),
+      // 2026-11-18:淘宝链接 —— 结算页那条「淘宝下单」跳到哪儿,在这一页配
+      淘宝链接: t("nav.taobaoLinks"),
       发货管理: t("nav.shipments"),
       退款管理: t("nav.refunds"),
     };

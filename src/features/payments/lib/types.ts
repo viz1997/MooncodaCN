@@ -21,11 +21,17 @@
  * |---|---|---|
  * | `wechat` | 微信支付 Native(扫码) | 本仓库渲染二维码 |
  * | `alipay` | 支付宝电脑网站支付 | 跳支付宝 |
+ * | `taobao` | **淘宝下单**(买家在淘宝拍下并付款) | 跳淘宝商品页 |
  * | `shopify` | Shopify 草稿订单 | 跳 Shopify 的付款页 |
  * | `stripe` | 旧路:Sellbase + Stripe(**过渡期并行**,跑通后拆) | 跳 Stripe |
  * | `offline` | 线下转账 | 没有 —— 工作室后台手动标 |
  *
  * `offline` 不是「线上通道」—— 它没有支付会话,走的是后台「标记已收款」。
+ *
+ * ⚠️ **`taobao` 是唯一一个「钱不进本仓库」的线上通道**(2026-11-17)——
+ * 买家在淘宝拍下、在淘宝付款,钱进的是淘宝那个账户。本仓库这边的金额只是
+ * **参考价**,真正收了多少由工作室在淘宝后台看、再手工填进
+ * `storefront_order.external_paid_cents`。
  */
 
 /**
@@ -37,6 +43,7 @@
 export type PaymentChannel =
   | "wechat"
   | "alipay"
+  | "taobao"
   | "shopify"
   | "stripe"
   | "offline";

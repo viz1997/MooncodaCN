@@ -23,7 +23,8 @@ import type { OnlinePaymentChannel, PaymentChannelMeta } from "./types";
 /**
  * 现在**开放**的通道
  *
- * 2026-11-17:工作室要求**隐藏微信支付** —— 顾客侧只摆支付宝。
+ * 2026-11-17:工作室要求**隐藏微信支付** —— 顾客侧只摆支付宝(2026-11-18
+ * 起多了一个「淘宝下单」)。
  *
  * ⚠️ **微信不是被删掉了,只是「不开放了」**:
  *
@@ -41,9 +42,19 @@ import type { OnlinePaymentChannel, PaymentChannelMeta } from "./types";
  *
  * 以后要关掉哪一个,把 id 从这份名单里拿掉就行 —— 剩下的(清单接口、结算默认
  * 通道、打印工单)全都跟着这份名单走。
+ *
+ * 2026-11-18 起多了一个 **`taobao`(淘宝下单)**:
+ *
+ * - **放在支付宝后面** ⇒ 界面上的顺序是「支付宝 → 淘宝下单」(工作室的要求)
+ * - 「配好了」= 后台**至少配了一条淘宝链接**(`/admin/taobao-links`)——
+ *   没配之前它是灰的、标着「暂未开放」
+ * - ⚠️ **钱不进本仓库** —— 买家在淘宝拍下、在淘宝付款。本仓库这边的金额只是
+ *   **参考价**,工作室在淘宝后台看到实收多少,再手工填进
+ *   `storefront_order.external_paid_cents`
  */
 export const ENABLED_PAYMENT_CHANNELS: readonly OnlinePaymentChannel[] = [
   "alipay",
+  "taobao",
 ];
 
 /**
@@ -82,5 +93,10 @@ export const ALL_CHANNELS: readonly PaymentChannelMeta[] = [
     channel: "alipay",
     label: "支付宝",
     description: "跳转到支付宝付款",
+  },
+  {
+    channel: "taobao",
+    label: "淘宝下单",
+    description: "跳到淘宝拍下这一单,享受平台保障",
   },
 ];

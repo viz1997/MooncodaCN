@@ -54,7 +54,24 @@ describe("后台侧边栏的分组结构", () => {
     ).toBe(false);
   });
 
-  it("② 「设置」下挂着打印定价 / 站点设置 / 支付设置", () => {
+  it("①b 「商城订单」也在「订单管理」下(2026-11-18 淘宝下单那一路)", () => {
+    // 淘宝那一路的钱在**淘宝**那边收 ⇒ 工作室得有个地方**手工标「已收款」**
+    // ⇒ 商城订单要有一张后台页。挂在「订单管理」下面,跟「打印订单」并排。
+    const orders = findTop("订单管理");
+    expect(childrenTitles(orders)).toContain("商城订单");
+
+    const storeOrders = (orders?.children ?? []).find(
+      (c) => c.title === "商城订单"
+    );
+    expect(storeOrders?.href).toBe("/admin/store-orders");
+
+    expect(
+      topLevel().some((item) => item.title === "商城订单"),
+      "「商城订单」还在顶层 —— 挪进分组了没?"
+    ).toBe(false);
+  });
+
+  it("② 「设置」下挂着打印定价 / 站点设置 / 支付设置 / 淘宝链接", () => {
     const settings = findTop("设置");
     expect(settings, "找不到顶层项「设置」").toBeDefined();
 
@@ -62,6 +79,8 @@ describe("后台侧边栏的分组结构", () => {
       "打印定价",
       "站点设置",
       "支付设置",
+      // 2026-11-18:淘宝链接 —— 结算页那条「淘宝下单」跳到哪儿,在这一页配
+      "淘宝链接",
     ]);
 
     const hrefs = (settings?.children ?? []).map((c) => c.href);
@@ -69,10 +88,11 @@ describe("后台侧边栏的分组结构", () => {
       "/admin/print-pricing",
       "/admin/site-settings",
       "/admin/payment-settings",
+      "/admin/taobao-links",
     ]);
 
-    // 三项都**不许**再留在顶层
-    for (const title of ["打印定价", "站点设置", "支付设置"]) {
+    // 四项都**不许**再留在顶层
+    for (const title of ["打印定价", "站点设置", "支付设置", "淘宝链接"]) {
       expect(
         topLevel().some((item) => item.title === title),
         `「${title}」还在顶层 —— 挪进「设置」了没?`

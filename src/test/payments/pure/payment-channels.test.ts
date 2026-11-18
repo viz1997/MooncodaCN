@@ -25,6 +25,10 @@ import { describe, expect, it } from "vitest";
  *   Shopify 那条路下线了 —— 界面上不再摆出来。
  * - 2026-11-17:工作室要求**隐藏微信支付** ⇒ 顾客侧只摆支付宝。微信的
  *   provider / 登记条目**都留着**(老单要能付;想放回来只要改一行)。
+ * - 2026-11-18:加了 **`taobao`(淘宝下单)** ⇒ 开放名单是「支付宝 → 淘宝下单」。
+ *   淘宝那一路**钱不进本仓库**(买家在淘宝付),所以它跟支付宝是两种完全
+ *   不同的东西,但**「摆出来」这一层跟别的通道一样** —— 一道闸管摆不摆,
+ *   一道闸管配没配好。
  *
  * ## 守住什么
  *
@@ -33,6 +37,8 @@ import { describe, expect, it } from "vitest";
  * 3. **登记清单 ⊇ 开放名单** —— 每个开放的通道都在清单里(不然清单接口就画不出来)
  * 4. **清单接口按开放名单过滤** —— 源码扫描守住(微信因此不出现在界面上)
  * 5. **provider 仍然注册着微信** —— 老单照样能付完(别把老单晾在那儿)
+ * 6. **淘宝在开放名单里,而且排在支付宝后面**(工作室要的顺序)
+ * 7. **provider 注册着淘宝** —— 别把「登记了」跟「provider 在」拆开
  */
 
 import {
@@ -62,8 +68,13 @@ const REGISTRY = "src/features/payments/lib/registry.ts";
 const PICKER = "src/features/payments/components/payment-channel-picker.tsx";
 
 describe("ENABLED_PAYMENT_CHANNELS —— 开放名单", () => {
-  it("2026-11-17 起只开放支付宝(工作室要求隐藏微信支付)", () => {
-    expect([...ENABLED_PAYMENT_CHANNELS]).toEqual(["alipay"]);
+  it("2026-11-18 起开放支付宝 + 淘宝下单(微信被工作室要求隐藏)", () => {
+    expect([...ENABLED_PAYMENT_CHANNELS]).toEqual(["alipay", "taobao"]);
+  });
+
+  it("淘宝在名单里 —— 顾客侧看得见「淘宝下单」", () => {
+    expect(isPaymentChannelEnabled("taobao")).toBe(true);
+    expect(ENABLED_PAYMENT_CHANNELS).toContain("taobao");
   });
 
   it("微信不在名单里 —— 顾客侧看不到微信支付", () => {
@@ -119,6 +130,11 @@ describe("ALL_CHANNELS —— 登记过的通道", () => {
   it("旧路 stripe 不在清单里 —— 它不再接新单", () => {
     expect(ALL_CHANNELS.map((c) => c.channel)).not.toContain("stripe");
   });
+
+  it("淘宝排在支付宝后面 —— 工作室要的展示顺序", () => {
+    const registered = ALL_CHANNELS.map((c) => c.channel);
+    expect(registered.indexOf("taobao")).toBe(registered.indexOf("alipay") + 1);
+  });
 });
 
 describe("清单接口 —— 登记清单 ∩ 开放名单", () => {
@@ -134,6 +150,11 @@ describe("清单接口 —— 登记清单 ∩ 开放名单", () => {
     const src = stripComments(read(REGISTRY));
     expect(src).toMatch(/wechat:\s*wechatPayProvider/);
     expect(src).toMatch(/alipay:\s*alipayPayProvider/);
+  });
+
+  it("provider 注册着淘宝 —— 登记清单里有它,provider 就得在", () => {
+    const src = stripComments(read(REGISTRY));
+    expect(src).toMatch(/taobao:\s*taobaoPayProvider/);
   });
 
   it("顾客侧的选择器不许写死通道 —— 清单接口给什么就画什么", () => {

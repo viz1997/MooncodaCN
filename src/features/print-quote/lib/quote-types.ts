@@ -73,10 +73,16 @@ export const PRINT_ORDER_PAYMENT_STATUSES: readonly PrintOrderPaymentStatus[] =
  * - `wechat` / `alipay` / `shopify` —— 新的三个线上通道(2026-11-05)
  * - `stripe` —— 旧路:Sellbase + Stripe(过渡期并行,跑通新通道后拆)
  * - `offline` —— 线下转账,工作室后台手动标
+ * - `taobao` —— 淘宝下单(2026-11-17)—— **打印工单不走这条路**
+ *   (它的规格没法在淘宝上表达:模型文件 / 尺寸 / 克重 / 刻字 / 交期)。
+ *   这个值出现在类型里是因为**两条链共用同一个 DB 列枚举**
+ *   (`print_order.payment_channel` 与 `storefront_order.payment_channel`),
+ *   改一处忘一处就会在类型上报错 —— 提醒着:它只在商城那一侧有值。
  */
 export type PrintOrderPaymentChannel =
   | "wechat"
   | "alipay"
+  | "taobao"
   | "shopify"
   | "stripe"
   | "offline";

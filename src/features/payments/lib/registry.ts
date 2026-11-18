@@ -73,6 +73,7 @@
 
 import { alipayPayProvider } from "@/features/payments/providers/alipay";
 import { shopifyPaymentProvider } from "@/features/payments/providers/shopify";
+import { taobaoPayProvider } from "@/features/payments/providers/taobao";
 import { wechatPayProvider } from "@/features/payments/providers/wechat";
 
 import { ALL_CHANNELS, isPaymentChannelEnabled } from "./channels";
@@ -87,6 +88,9 @@ import type {
 const PROVIDERS: Partial<Record<OnlinePaymentChannel, PaymentProvider>> = {
   wechat: wechatPayProvider,
   alipay: alipayPayProvider,
+  // 淘宝下单(2026-11-17)—— 钱**不进本仓库**:买家在淘宝拍下、在淘宝付款。
+  // 「配好了」= 后台至少配了一条淘宝链接。
+  taobao: taobaoPayProvider,
   // Shopify 已下线(2026-11-05)—— 界面上不摆出来了,但**仍然注册**:
   // 「重新获取付款入口」要能对老订单说清楚「这条路走不通、为什么」,
   // 而不是返回一个看不懂的「通道不存在」。
@@ -158,6 +162,9 @@ async function isChannelInSandbox(
 const ENV_DOCS: Record<OnlinePaymentChannel, string> = {
   wechat: "src/features/payments/providers/wechat/env.ts",
   alipay: "src/features/payments/providers/alipay/env.ts",
+  // 淘宝这一路**一个环境变量都没有** —— 链接配在后台的
+  // `product_taobao_link` 表里。文件头写着这一点。
+  taobao: "src/features/payments/providers/taobao/index.ts",
   shopify: "src/features/payments/providers/shopify/env.ts",
   // 旧路(Sellbase + Stripe)不在清单里 —— 但类型上它也算一个线上通道,
   // 万一以后有人把它加回 `ALL_CHANNELS`,日志也得指得对地方
