@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -131,10 +131,7 @@ describe("`localFont` 引用的文件必须都在仓库里", () => {
     for (const p of FONT_PATHS) {
       // 路径相对于 `src/app/layout.tsx`
       const abs = resolve(join(ROOT, "src/app"), p);
-      expect(
-        existsSync(abs),
-        `字体文件不存在:${p}(解析成 ${abs})`
-      ).toBe(true);
+      expect(existsSync(abs), `字体文件不存在:${p}(解析成 ${abs})`).toBe(true);
     }
   });
 
@@ -168,9 +165,7 @@ describe("三个 CSS 变量名一个字都不许改", () => {
   it("生成的 CSS 在 `:root` 上定义第三个", () => {
     const css = stripComments(NOTO_CSS);
     expect(css).toContain("--font-atelier-serif-sc:");
-    expect(css).toMatch(
-      /:root\s*\{[^}]*--font-atelier-serif-sc\s*:/
-    );
+    expect(css).toMatch(/:root\s*\{[^}]*--font-atelier-serif-sc\s*:/);
   });
 
   it("`.atelier-root` 的字体栈用到这三个(少一个 = 静默掉回系统字体)", () => {
@@ -227,7 +222,8 @@ describe("`localFont` 的绑定名(它就是全局的 `font-family` 名)", () =>
         }
         if (!/\.(ts|tsx|js|jsx)$/.test(entry.name)) continue;
         const src = stripComments(readFileSync(full, "utf8"));
-        const re = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*localFont\s*\(/g;
+        const re =
+          /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*localFont\s*\(/g;
         for (const m of src.matchAll(re)) {
           const name = m[1];
           if (typeof name !== "string") continue;
@@ -262,7 +258,7 @@ describe("`localFont` 的绑定名(它就是全局的 `font-family` 名)", () =>
     );
   });
 
-  it("Playfair 走衬线度量(`adjustFontFallback: \"Times New Roman\"`)", () => {
+  it('Playfair 走衬线度量(`adjustFontFallback: "Times New Roman"`)', () => {
     expect(LAYOUT_CODE).toContain('adjustFontFallback: "Times New Roman"');
   });
 
@@ -277,10 +273,8 @@ describe("`localFont` 的绑定名(它就是全局的 `font-family` 名)", () =>
 /* -------------------------------------------------------------------------- */
 
 describe("中文衬线的切片表", () => {
-  it("每个 `url(\"./xxx.woff2\")` 都能在磁盘上找到", () => {
-    const urls = [
-      ...NOTO_CSS.matchAll(/url\(\s*["']\.\/([^"')]+)["']\s*\)/g),
-    ]
+  it('每个 `url("./xxx.woff2")` 都能在磁盘上找到', () => {
+    const urls = [...NOTO_CSS.matchAll(/url\(\s*["']\.\/([^"')]+)["']\s*\)/g)]
       .map((m) => m[1])
       .filter((u): u is string => typeof u === "string");
     expect(urls.length).toBeGreaterThan(0);

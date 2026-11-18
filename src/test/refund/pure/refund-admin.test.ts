@@ -61,9 +61,9 @@ function flatten(obj: unknown, prefix = ""): string[] {
 
 /** 从一个联合类型里抠出全部字符串字面量 */
 function unionCodes(src: string, typeName: string): string[] {
-  const m = new RegExp(
-    `export type ${typeName}\\s*=\\s*([\\s\\S]*?);`
-  ).exec(src);
+  const m = new RegExp(`export type ${typeName}\\s*=\\s*([\\s\\S]*?);`).exec(
+    src
+  );
   if (!m?.[1]) return [];
   return [...m[1].matchAll(/"([A-Z0-9_]+)"/g)]
     .map((x) => x[1])
@@ -196,8 +196,11 @@ describe("后台退款管理:错误码都有文案", () => {
   it("文案查的是**同一张表** —— 买家侧和后台共用一张错误码表", () => {
     // 买家侧错误文案那张表在 `features/refund/lib/error-text.ts`(零 import)
     // ⇒ 直接 import 它跑真函数,比扫字符串可靠
-    const { REFUND_ERROR_CODES, REFUND_ERROR_FALLBACK_KEY, refundErrorTextKey } =
-      refundErrorText;
+    const {
+      REFUND_ERROR_CODES,
+      REFUND_ERROR_FALLBACK_KEY,
+      refundErrorTextKey,
+    } = refundErrorText;
 
     // **每一个**联合类型里的码都在这张表里 —— 漏一个 ⇒ 界面退到兜底那句
     for (const code of [...adminCodes, ...ineligibleCodes]) {
@@ -249,12 +252,7 @@ describe("后台退款管理:中英文键集完全一致", () => {
 
   it("后台那四个动作按钮都有文案", () => {
     for (const locale of ["zh", "en"] as const) {
-      for (const key of [
-        "approve",
-        "execute",
-        "markRefunded",
-        "reject",
-      ]) {
+      for (const key of ["approve", "execute", "markRefunded", "reject"]) {
         expect(
           getPath(loadMessages(locale), `AdminRefund.actions.${key}`),
           `${locale}.json 缺 AdminRefund.actions.${key}`
@@ -269,7 +267,10 @@ describe("后台退款管理:中英文键集完全一致", () => {
         getPath(loadMessages(locale), "AdminRefund.actions.executeWithAmount")
       ).toBeDefined();
       expect(
-        getPath(loadMessages(locale), "AdminRefund.actions.markRefundedWithAmount")
+        getPath(
+          loadMessages(locale),
+          "AdminRefund.actions.markRefundedWithAmount"
+        )
       ).toBeDefined();
     }
   });

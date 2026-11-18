@@ -58,7 +58,13 @@
  * 脚本**幂等**:同样的输入产出同样的字节 —— 用 Next 自己那个 User-Agent
  * 发请求,拿到的就是 Next 会拿到的那一批文件。
  */
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -417,7 +423,10 @@ async function syncSlicedFont(options: {
     "",
   ].join("\n");
 
-  writeFile(join(fontsDir, options.dir, "font.css"), Buffer.from(cssText, "utf8"));
+  writeFile(
+    join(fontsDir, options.dir, "font.css"),
+    Buffer.from(cssText, "utf8")
+  );
   pruneStale(join(fontsDir, options.dir), written);
   console.log(
     `  ${options.label} → ${options.dir}/ (${written.size} 个切片 / ` +
@@ -436,7 +445,10 @@ async function syncSlicedFont(options: {
  * SIL Open Font License 要求:再分发字体时**许可正文要跟着走**。
  * 拉不到不算失败(只是提醒),不该把整个脚本拖挂。
  */
-async function syncLicense(dir: string, googleFontsPath: string): Promise<void> {
+async function syncLicense(
+  dir: string,
+  googleFontsPath: string
+): Promise<void> {
   const url = `https://raw.githubusercontent.com/google/fonts/main/${googleFontsPath}/OFL.txt`;
   try {
     const res = await fetch(url);

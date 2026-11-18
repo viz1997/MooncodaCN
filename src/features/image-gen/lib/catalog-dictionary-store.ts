@@ -46,9 +46,9 @@ import {
 import { describeDbError } from "@/features/shared/lib/db-error";
 
 import {
+  buildCatalogDictionaryFromCodeConstants,
   type CatalogDictionary,
   type CatalogDictionaryDbRows,
-  buildCatalogDictionaryFromCodeConstants,
   mergeCatalogDictionary,
 } from "./catalog-dictionary";
 import {
@@ -73,7 +73,8 @@ function parseAppliesToSizesCm(raw: string | null | undefined): number[] {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(
-      (value): value is number => typeof value === "number" && Number.isFinite(value)
+      (value): value is number =>
+        typeof value === "number" && Number.isFinite(value)
     );
   } catch {
     console.warn(

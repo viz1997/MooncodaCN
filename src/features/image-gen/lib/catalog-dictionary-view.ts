@@ -36,10 +36,7 @@
 import type { ProductCapabilities } from "@/features/gpt-image/lib/product-catalog";
 import { PRODUCT_TYPES } from "@/features/gpt-image/lib/product-catalog";
 import type { CatalogDictionary } from "./catalog-dictionary";
-import {
-  accessoryCodesForType,
-  sizeCodesForType,
-} from "./catalog-dictionary";
+import { accessoryCodesForType, sizeCodesForType } from "./catalog-dictionary";
 
 /* -------------------------------------------------------------------------- */
 /*  形状                                                                       */

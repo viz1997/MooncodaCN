@@ -174,6 +174,13 @@ export {
   type WechatNativeOrderResult,
 } from "./native";
 export {
+  buildWechatRefundBody,
+  mapWechatRefundStatus,
+  refundWithWechatConfig,
+  requestWechatRefund,
+  type WechatRefundParams,
+} from "./refund";
+export {
   buildAuthorizationHeader,
   buildNotifyVerifyMessage,
   buildSignMessage,
@@ -200,10 +207,3 @@ export {
   type WechatTransaction,
   wechatNotifyFailure,
 } from "./webhook";
-export {
-  buildWechatRefundBody,
-  mapWechatRefundStatus,
-  refundWithWechatConfig,
-  requestWechatRefund,
-  type WechatRefundParams,
-} from "./refund";

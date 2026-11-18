@@ -46,8 +46,8 @@ import {
   getAccessory,
   getLeatherColor,
 } from "@/features/gpt-image/lib/product-catalog";
-import { findEffect } from "@/features/image-gen/lib/effects-store";
 import { getCatalogDictionary } from "@/features/image-gen/lib/catalog-dictionary-store";
+import { findEffect } from "@/features/image-gen/lib/effects-store";
 import { fillDefaultsByTemplate } from "@/features/image-gen/lib/preview-helpers";
 import { computePromptOrderCredits } from "@/features/image-gen/lib/price-calculator";
 import { protectedAction } from "@/lib/safe-action";

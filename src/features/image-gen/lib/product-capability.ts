@@ -53,9 +53,9 @@ import {
   PRODUCT_META,
 } from "@/features/gpt-image/lib/product-catalog";
 import {
-  type CatalogDictionary,
   accessoryCodesForType,
   accessoryDef,
+  type CatalogDictionary,
   SIZE_STEP_CENTS,
   sizeCodesForType,
   sizeDeltaCentsFor,
@@ -525,14 +525,19 @@ export async function loadProductCapabilities(opts: {
   filterCodes: string[] | null;
   keyScope: string[] | null;
 }): Promise<ProductCapability[]> {
-  const [effects, variantsByProduct, productRows, skuRowsByProduct, dictionary] =
-    await Promise.all([
-      getActiveProductEffectsWithTemplates(),
-      getActiveVariantsByProduct(),
-      getProductRowsByCode(),
-      getActiveSkuRowsByProduct(),
-      getCatalogDictionary(),
-    ]);
+  const [
+    effects,
+    variantsByProduct,
+    productRows,
+    skuRowsByProduct,
+    dictionary,
+  ] = await Promise.all([
+    getActiveProductEffectsWithTemplates(),
+    getActiveVariantsByProduct(),
+    getProductRowsByCode(),
+    getActiveSkuRowsByProduct(),
+    getCatalogDictionary(),
+  ]);
   return assembleProductCapabilities(
     effects,
     variantsByProduct,

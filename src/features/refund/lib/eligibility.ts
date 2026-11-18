@@ -76,7 +76,10 @@ export const PRINT_ORDER_PRODUCTION_STARTED_STATUSES = [
 ] as const;
 
 /** 打印工单里**还能退款**的状态 */
-export const PRINT_ORDER_REFUNDABLE_STATUSES = ["PENDING", "CONFIRMED"] as const;
+export const PRINT_ORDER_REFUNDABLE_STATUSES = [
+  "PENDING",
+  "CONFIRMED",
+] as const;
 
 /**
  * 判定一个订单能不能退款

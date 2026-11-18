@@ -43,6 +43,7 @@
  *    **DB 那条路**也是确定的(后台拖出来的顺序不会飘)。
  */
 
+import type { CatalogDictionary } from "@/features/image-gen/lib/catalog-dictionary";
 import {
   accessoryCodesForType,
   accessoryDef,
@@ -50,7 +51,6 @@ import {
   sizeCodesForType,
   sizeDeltaCentsFor,
 } from "@/features/image-gen/lib/catalog-dictionary";
-import type { CatalogDictionary } from "@/features/image-gen/lib/catalog-dictionary";
 import type {
   AccessoryGroup,
   AccessoryVariant,
@@ -110,10 +110,7 @@ function bySortOrderThenVariantCode(
  * - 加价 = **显式值**(DB 里是什么就是什么,不靠下标算)
  * - 加价查不到 ⇒ **跳过那一档**(不当成 0)
  */
-function buildSizes(
-  dictionary: CatalogDictionary,
-  typeCode: string
-): Size[] {
+function buildSizes(dictionary: CatalogDictionary, typeCode: string): Size[] {
   const sizes: Size[] = [];
   const seenIds = new Set<string>();
   for (const sizeCode of sizeCodesForType(dictionary, typeCode)) {
@@ -149,7 +146,9 @@ function buildAccessoryGroups(
 ): AccessoryGroup[] {
   const groups: AccessoryGroup[] = [];
   for (const accessoryCode of accessoryCodesForType(dictionary, typeCode)) {
-    const variants = [...accessoryVariantsFor(dictionary, typeCode, accessoryCode)]
+    const variants = [
+      ...accessoryVariantsFor(dictionary, typeCode, accessoryCode),
+    ]
       .sort(bySortOrderThenVariantCode)
       .map<AccessoryVariant>((variant) => ({
         // ⚠️ 键跟 `spec.accessoryVariantIds` 里那个字符串一模一样
@@ -199,7 +198,8 @@ export function buildPriceCatalog(dictionary: CatalogDictionary): PriceCatalog {
       for (const variant of group.variants) {
         // ⚠️ `variantCode` 全局唯一(后台加变体时查重)⇒ 这里不会撞。
         // 万一撞了,**先来的赢**(跟 `findAccessoryVariant` 的口径一致)。
-        if (!variantsById.has(variant.id)) variantsById.set(variant.id, variant);
+        if (!variantsById.has(variant.id))
+          variantsById.set(variant.id, variant);
       }
     }
   }

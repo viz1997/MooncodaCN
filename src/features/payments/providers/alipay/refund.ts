@@ -303,13 +303,11 @@ export async function refundWithAlipayConfig(
 /**
  * 用当前生效的配置发起退款(通道实现直接用这个)
  */
-export async function refundWithAlipay(
-  request: {
-    orderNo: string;
-    outRefundNo: string;
-    refundCents: number;
-    reason: string;
-  }
-): Promise<PaymentRefundOutcome> {
+export async function refundWithAlipay(request: {
+  orderNo: string;
+  outRefundNo: string;
+  refundCents: number;
+  reason: string;
+}): Promise<PaymentRefundOutcome> {
   return refundWithAlipayConfig(await getAlipayConfig(), request);
 }

@@ -224,7 +224,9 @@ async function main() {
   console.log("");
   console.log("[apply-refund] 回读:");
   console.log(`  ${yes(row?.refund_request_table)} refund_request 表在`);
-  console.log(`  ${yes(row?.refund_request_event_table)} refund_request_event 表在`);
+  console.log(
+    `  ${yes(row?.refund_request_event_table)} refund_request_event 表在`
+  );
   console.log(
     `  ${count(row?.refund_request_columns, 18)} refund_request 的 18 个列`
   );

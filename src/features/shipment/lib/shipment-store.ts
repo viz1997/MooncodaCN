@@ -39,6 +39,7 @@ import {
 import { formatAddressLine } from "@/features/address/types";
 import type { DbOrTx } from "@/features/gpt-image/lib/order-history";
 import { describeDbError } from "@/features/shared/lib/db-error";
+import { summarizeOrderItems } from "@/features/storefront/lib/order-summary";
 
 import {
   isShipmentCarrierCode,
@@ -645,14 +646,16 @@ function groupByOrderId(rows: ShipmentRow[]): Map<string, ShipmentRow[]> {
   return map;
 }
 
-/** 商城订单的摘要 —— 「钥匙扣 ×2、冰箱贴 ×1」 */
+/**
+ * 商城订单的摘要 —— 「钥匙扣 ×2、冰箱贴 ×1」
+ *
+ * ⚠️ 实现住在 `storefront/lib/order-summary.ts` —— **商城订单后台**
+ * (`storefront/admin/store.ts`)也要同一个摘要,两边各写一份迟早漂。
+ */
 function summarizeMallItems(
   items: Array<{ productTitle: string; quantity: number }>
 ): string {
-  if (items.length === 0) return "";
-  return items
-    .map((item) => `${item.productTitle} ×${item.quantity}`)
-    .join("、");
+  return summarizeOrderItems(items);
 }
 
 // ============================================

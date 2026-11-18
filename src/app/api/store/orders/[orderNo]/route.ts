@@ -115,7 +115,10 @@ async function handle(
   //
   // 「最新」而不是「唯一」:被拒之后买家可以再申请一条 ⇒ 一个订单可能有多条。
   // 买家侧只该看见**当前那一条**。
-  const refundRow = await getLatestRefundRequestForOrder("storefront", order.id);
+  const refundRow = await getLatestRefundRequestForOrder(
+    "storefront",
+    order.id
+  );
 
   return NextResponse.json({
     orderNo: order.orderNo,

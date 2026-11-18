@@ -1,17 +1,16 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-
-import {
-  buildCatalogDictionaryFromCodeConstants,
-  mergeCatalogDictionary,
-  sizeDeltaCentsFor,
-} from "@/features/image-gen/lib/catalog-dictionary";
 import type {
   CatalogAccessoryRowLike,
   CatalogAccessoryVariantRowLike,
   CatalogDictionaryDbRows,
   CatalogSizeRowLike,
+} from "@/features/image-gen/lib/catalog-dictionary";
+import {
+  buildCatalogDictionaryFromCodeConstants,
+  mergeCatalogDictionary,
+  sizeDeltaCentsFor,
 } from "@/features/image-gen/lib/catalog-dictionary";
 import {
   applyCatalogDictionaryToProduct,
@@ -253,9 +252,10 @@ describe("商城 overlay —— 尺寸加价是**显式**的,不是按位置算�
 
   it("②-2 这个坑是真的:老的「按位置」算法会把后面几档**全顶掉**", () => {
     // 证明 ②-1 守的是真问题 —— 同一份尺寸清单,按 `idx * 500` 算出来是:
-    const positional = ["6", "8", "9", "10", "12", "15"].map(
-      (code, idx) => [code, idx * 500]
-    );
+    const positional = ["6", "8", "9", "10", "12", "15"].map((code, idx) => [
+      code,
+      idx * 500,
+    ]);
     expect(positional).toEqual([
       ["6", 0],
       ["8", 500],
@@ -410,7 +410,9 @@ describe("商城 overlay —— 配件加价走 DB", () => {
   it("③-4 配件的名字 / 分类走 DB(改了就跟着变)", () => {
     const rows: CatalogDictionaryDbRows = {
       ...emptyRows(),
-      accessories: [accessoryRow("leather", "真皮套", "Genuine Leather", "material", 10)],
+      accessories: [
+        accessoryRow("leather", "真皮套", "Genuine Leather", "material", 10),
+      ],
     };
     const merged = mergeCatalogDictionary(rows, fallback);
     const catalog = buildPriceCatalog(merged);
@@ -425,7 +427,9 @@ describe("商城 overlay —— 配件加价走 DB", () => {
   it("③-5 停用一个配件 ⇒ 它从**每一个**型号的选项里消失", () => {
     const rows: CatalogDictionaryDbRows = {
       ...emptyRows(),
-      accessories: [accessoryRow("leather", "皮套", "Leather", "material", 10, false)],
+      accessories: [
+        accessoryRow("leather", "皮套", "Leather", "material", 10, false),
+      ],
     };
     const merged = mergeCatalogDictionary(rows, fallback);
     const catalog = buildPriceCatalog(merged);
@@ -516,7 +520,9 @@ describe("读失败整份退回兜底 —— 扫描式守卫", () => {
     // 兜底那一份是**代码常量**生成的
     expect(code).toContain("buildCatalogDictionaryFromCodeConstants()");
     // 读失败 ⇒ return fallback(两次:缓存的那条 + 不缓存的那条)
-    expect(code.match(/return fallback;/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+    expect(code.match(/return fallback;/g)?.length ?? 0).toBeGreaterThanOrEqual(
+      2
+    );
     // 读失败**记一条 error 日志**(不是静默)
     expect(code).toContain("console.error");
 
@@ -526,7 +532,9 @@ describe("读失败整份退回兜底 —— 扫描式守卫", () => {
     // 「往外抛」只允许发生在**静态渲染信号**那一步(`optOutOfStaticRendering`
     // 里那个 `StaticGenBailoutError` 必须往外抛 —— 它就是「这一页别静态」的
     // 信号)。所以断言的范围是:**读库那两个 catch 之后**不许再有 `throw`。
-    const readerTail = code.slice(code.indexOf("export async function getCatalogDictionary("));
+    const readerTail = code.slice(
+      code.indexOf("export async function getCatalogDictionary(")
+    );
     expect(readerTail.length).toBeGreaterThan(0);
     expect(readerTail).not.toContain("throw");
   });

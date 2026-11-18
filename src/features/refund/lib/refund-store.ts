@@ -25,15 +25,15 @@ import { nanoid } from "nanoid";
 
 import { db } from "@/db";
 import {
-  printOrder,
   type PrintOrderRow,
+  printOrder,
   type RefundRequestEventRow,
   type RefundRequestRow,
   refundRequest,
   refundRequestEvent,
+  type StorefrontOrderRow,
   shipment,
   storefrontOrder,
-  type StorefrontOrderRow,
   storefrontOrderItem,
   user,
 } from "@/db/schema";
@@ -84,9 +84,7 @@ export function toRefundView(row: RefundRequestRow): RefundView {
 }
 
 /** DB 行 → 时间线上的一条事件 */
-export function toRefundEventView(
-  row: RefundRequestEventRow
-): RefundEventView {
+export function toRefundEventView(row: RefundRequestEventRow): RefundEventView {
   return {
     id: row.id,
     fromStatus: row.fromStatus,
@@ -388,9 +386,7 @@ export async function transitionRefundStatus(
   const note = params.note?.trim() ? params.note.trim() : null;
 
   try {
-    const run = async (
-      executor: DbOrTx
-    ): Promise<TransitionRefundResult> => {
+    const run = async (executor: DbOrTx): Promise<TransitionRefundResult> => {
       // 1. 锁行
       const locked = await executor
         .select()
@@ -571,7 +567,10 @@ export async function getLatestRefundRequestForOrder(
     .select()
     .from(refundRequest)
     .where(
-      and(eq(refundRequest.orderKind, orderKind), eq(refundRequest.orderId, orderId))
+      and(
+        eq(refundRequest.orderKind, orderKind),
+        eq(refundRequest.orderId, orderId)
+      )
     )
     .orderBy(desc(refundRequest.createdAt))
     .limit(1);
@@ -678,10 +677,7 @@ export async function listAdminRefundRows(params?: {
           .where(inArray(storefrontOrder.id, mallIds))
       : Promise.resolve([] as StorefrontOrderRow[]),
     printIds.length
-      ? db
-          .select()
-          .from(printOrder)
-          .where(inArray(printOrder.id, printIds))
+      ? db.select().from(printOrder).where(inArray(printOrder.id, printIds))
       : Promise.resolve([] as PrintOrderRow[]),
     mallIds.length
       ? db
@@ -693,7 +689,11 @@ export async function listAdminRefundRows(params?: {
           .from(storefrontOrderItem)
           .where(inArray(storefrontOrderItem.orderId, mallIds))
       : Promise.resolve(
-          [] as Array<{ orderId: string; productTitle: string; quantity: number }>
+          [] as Array<{
+            orderId: string;
+            productTitle: string;
+            quantity: number;
+          }>
         ),
   ]);
 
@@ -713,7 +713,7 @@ export async function listAdminRefundRows(params?: {
     const buyer = userById.get(row.userId);
     const buyerLabel = buyer
       ? `${buyer.name}（${buyer.email}）`
-      : (row.userId || "—");
+      : row.userId || "—";
 
     if (row.orderKind === "storefront") {
       const order = mallOrderById.get(row.orderId);

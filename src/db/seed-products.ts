@@ -105,8 +105,9 @@ async function main(): Promise<void> {
   //
   // DB 有行 ⇒ 用后台配的(**显式**加价);DB 没播种 / 读失败 ⇒ 退回代码常量
   // 兜底(尺寸加价 = idx × ¥5)⇒ 行为跟今天一个字节都不变。
-  const dictionary = await getCatalogDictionary()
-    .catch(() => getFallbackCatalogDictionary());
+  const dictionary = await getCatalogDictionary().catch(() =>
+    getFallbackCatalogDictionary()
+  );
   console.log(
     `[seed-products] 字典:型号 ${dictionary.typeOrder.length} 个 ` +
       `(R ${dictionary.sizesByType.get("R")?.length ?? 0} 尺寸 / ` +

@@ -52,10 +52,10 @@ import {
   upsertProductSizeAction,
 } from "@/features/image-gen/admin/actions";
 import {
-  CATALOG_ERROR_TEXT_KEYS,
   type AdminCatalogAccessory,
   type AdminCatalogErrorCode,
   type AdminCatalogSize,
+  CATALOG_ERROR_TEXT_KEYS,
 } from "@/features/image-gen/admin/types";
 import { formatCents } from "@/lib/money";
 
@@ -117,9 +117,9 @@ export function ProductDictionaryView(props: {
 
   /** 正在改哪一行(尺寸 / 配件) */
   const [expandedSizeKeys, setExpandedSizeKeys] = useState<string[]>([]);
-  const [expandedAccessoryKeys, setExpandedAccessoryKeys] = useState<
-    string[]
-  >([]);
+  const [expandedAccessoryKeys, setExpandedAccessoryKeys] = useState<string[]>(
+    []
+  );
 
   /** 「新增」面板开着没有 */
   const [addingSize, setAddingSize] = useState(false);
@@ -152,26 +152,23 @@ export function ProductDictionaryView(props: {
     }
   );
 
-  const { execute: removeSize } = useAction(
-    deleteProductSizeAction,
-    {
-      onSuccess: ({ data }) => {
-        setPendingKey(null);
-        if (data?.ok === false) {
-          message.error(t(CATALOG_ERROR_TEXT_KEYS[data.code]));
-          return;
-        }
-        message.success(
-          t("messages.sizeDisabled", { count: data?.recomputedSkus ?? 0 })
-        );
-        onChanged();
-      },
-      onError: ({ error }) => {
-        setPendingKey(null);
-        message.error(error.serverError ?? t("messages.validationFailed"));
-      },
-    }
-  );
+  const { execute: removeSize } = useAction(deleteProductSizeAction, {
+    onSuccess: ({ data }) => {
+      setPendingKey(null);
+      if (data?.ok === false) {
+        message.error(t(CATALOG_ERROR_TEXT_KEYS[data.code]));
+        return;
+      }
+      message.success(
+        t("messages.sizeDisabled", { count: data?.recomputedSkus ?? 0 })
+      );
+      onChanged();
+    },
+    onError: ({ error }) => {
+      setPendingKey(null);
+      message.error(error.serverError ?? t("messages.validationFailed"));
+    },
+  });
 
   const { execute: saveAccessory, isPending: isSavingAccessory } = useAction(
     upsertProductAccessoryAction,
@@ -194,24 +191,21 @@ export function ProductDictionaryView(props: {
     }
   );
 
-  const { execute: removeAccessory } = useAction(
-    deleteProductAccessoryAction,
-    {
-      onSuccess: ({ data }) => {
-        setPendingKey(null);
-        if (data?.ok === false) {
-          message.error(t(CATALOG_ERROR_TEXT_KEYS[data.code]));
-          return;
-        }
-        message.success(t("messages.accessoryDisabled"));
-        onChanged();
-      },
-      onError: ({ error }) => {
-        setPendingKey(null);
-        message.error(error.serverError ?? t("messages.validationFailed"));
-      },
-    }
-  );
+  const { execute: removeAccessory } = useAction(deleteProductAccessoryAction, {
+    onSuccess: ({ data }) => {
+      setPendingKey(null);
+      if (data?.ok === false) {
+        message.error(t(CATALOG_ERROR_TEXT_KEYS[data.code]));
+        return;
+      }
+      message.success(t("messages.accessoryDisabled"));
+      onChanged();
+    },
+    onError: ({ error }) => {
+      setPendingKey(null);
+      message.error(error.serverError ?? t("messages.validationFailed"));
+    },
+  });
 
   const { execute: saveOption } = useAction(setProductAccessoryOptionAction, {
     onSuccess: ({ data }) => {
@@ -386,9 +380,7 @@ export function ProductDictionaryView(props: {
       dataIndex: "category",
       width: 110,
       render: (value: string) =>
-        ACCESSORY_CATEGORY_SET.has(value)
-          ? t(`categories.${value}`)
-          : value,
+        ACCESSORY_CATEGORY_SET.has(value) ? t(`categories.${value}`) : value,
     },
     {
       title: t("columns.sortOrder"),
@@ -450,9 +442,7 @@ export function ProductDictionaryView(props: {
       dataIndex: "category",
       width: 110,
       render: (value: string) =>
-        ACCESSORY_CATEGORY_SET.has(value)
-          ? t(`categories.${value}`)
-          : value,
+        ACCESSORY_CATEGORY_SET.has(value) ? t(`categories.${value}`) : value,
     },
     {
       title: t("columns.optionEnabled"),
@@ -465,7 +455,8 @@ export function ProductDictionaryView(props: {
           disabled={!row.isActive}
           loading={pendingKey === `option:${row.code}`}
           onChange={(checked) =>
-            toggleOption(row.code, checked, row.optionSortOrder)}
+            toggleOption(row.code, checked, row.optionSortOrder)
+          }
         />
       ),
     },

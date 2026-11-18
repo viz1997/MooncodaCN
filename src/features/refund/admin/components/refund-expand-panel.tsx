@@ -45,8 +45,8 @@ import {
   adminMarkRefundedAction,
   adminRejectRefundAction,
 } from "@/features/refund/admin/actions";
-import type { AdminRefundRow } from "@/features/refund/admin/types";
 import { refundChannelLabel } from "@/features/refund/admin/channel-label";
+import type { AdminRefundRow } from "@/features/refund/admin/types";
 import { refundErrorTextKey } from "@/features/refund/lib/error-text";
 import {
   allowedNextRefundStatuses,
@@ -291,9 +291,7 @@ export function RefundExpandPanel(props: {
           </SummaryItem>
           <SummaryItem label={t("summary.buyer")}>{row.buyerLabel}</SummaryItem>
           <SummaryItem label={t("summary.item")}>{row.summary}</SummaryItem>
-          <SummaryItem label={t("summary.channel")}>
-            {channelLabel}
-          </SummaryItem>
+          <SummaryItem label={t("summary.channel")}>{channelLabel}</SummaryItem>
           <SummaryItem label={t("summary.amount")}>
             <span className="font-mono">{formatCents(row.amountCents)}</span>
           </SummaryItem>
@@ -326,9 +324,7 @@ export function RefundExpandPanel(props: {
         </dl>
 
         <p className="mt-2 text-xs leading-relaxed">
-          <span className="text-muted-foreground">
-            {t("summary.reason")}:{" "}
-          </span>
+          <span className="text-muted-foreground">{t("summary.reason")}: </span>
           {row.reason}
         </p>
         {row.refundError ? (
@@ -400,7 +396,9 @@ export function RefundExpandPanel(props: {
               loading={isExecuting}
               onClick={submitExecute}
             >
-              {t("actions.executeWithAmount", { amount: formatCents(refundCents) })}
+              {t("actions.executeWithAmount", {
+                amount: formatCents(refundCents),
+              })}
             </Button>
           ) : null}
 
@@ -450,10 +448,7 @@ export function RefundExpandPanel(props: {
 /*  摘要里的一格                                                                */
 /* -------------------------------------------------------------------------- */
 
-function SummaryItem(props: {
-  label: string;
-  children: React.ReactNode;
-}) {
+function SummaryItem(props: { label: string; children: React.ReactNode }) {
   return (
     <div className="min-w-0">
       <dt className="text-[11px] text-muted-foreground">{props.label}</dt>

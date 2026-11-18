@@ -29,7 +29,8 @@
  */
 
 import { after } from "next/server";
-
+import { settleByOrderNo } from "@/features/payments/lib/settle";
+import type { PaymentChannel } from "@/features/payments/lib/types";
 import {
   notifyPrintOrderStatusChanged,
   toPrintOrderMailInfo,
@@ -46,8 +47,6 @@ import type {
   RefundErrorCode,
   RefundOrderKind,
 } from "@/features/refund/lib/types";
-import { settleByOrderNo } from "@/features/payments/lib/settle";
-import type { PaymentChannel } from "@/features/payments/lib/types";
 import { logger } from "@/lib/logger";
 
 /**

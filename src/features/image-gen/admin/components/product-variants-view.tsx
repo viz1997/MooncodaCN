@@ -33,15 +33,15 @@ import {
   getProductAdminAction,
   updateProductAdminAction,
 } from "@/features/image-gen/admin/actions";
+import { useCatalogRows } from "@/features/image-gen/admin/components/catalog-admin-rows";
+import { ProductAccessoryVariantsView } from "@/features/image-gen/admin/components/product-accessory-variants-view";
+import { ProductDictionaryView } from "@/features/image-gen/admin/components/product-dictionary-view";
 import {
   formValuesToInput,
   ProductFormFields,
   type ProductFormValues,
   productToFormValues,
 } from "@/features/image-gen/admin/components/product-form-dialog";
-import { useCatalogRows } from "@/features/image-gen/admin/components/catalog-admin-rows";
-import { ProductAccessoryVariantsView } from "@/features/image-gen/admin/components/product-accessory-variants-view";
-import { ProductDictionaryView } from "@/features/image-gen/admin/components/product-dictionary-view";
 import type {
   AdminProduct,
   AdminProductVariant,

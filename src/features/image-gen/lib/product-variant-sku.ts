@@ -34,8 +34,8 @@
 
 import { BASE_PRICE_CENTS } from "@/features/gpt-image/lib/product-catalog";
 import {
-  type CatalogDictionary,
   accessoryCodesForType,
+  type CatalogDictionary,
   sizeDeltaCentsFor,
 } from "@/features/image-gen/lib/catalog-dictionary";
 
@@ -254,12 +254,7 @@ export function buildAllVariantSeeds(opts: {
   dictionary: CatalogDictionary;
   productCodes?: readonly string[];
 }): VariantSeed[] {
-  const {
-    basePrices = {},
-    accessoryVariants,
-    dictionary,
-    productCodes,
-  } = opts;
+  const { basePrices = {}, accessoryVariants, dictionary, productCodes } = opts;
 
   // ⚠️ 顺序 = 字典的 `typeOrder`（R / A / P / RM / LB / M）—— 跟今天的
   // `PRODUCT_TYPES` 顺序**逐字一致**。`buildAllVariantSeeds` 产出的行靠

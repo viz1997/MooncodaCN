@@ -352,10 +352,7 @@ async function main(): Promise<void> {
    * 查不到就返回 null,**不许当成 0** —— 当成 0 = 静默把某一档的尺寸加价
    * 抹掉,价算错了还不报错。
    */
-  function resolveSizeDelta(
-    typeCode: string,
-    sizeCode: string
-  ): number | null {
+  function resolveSizeDelta(typeCode: string, sizeCode: string): number | null {
     const typeRows = sizeRowsByType.get(typeCode);
     if (typeRows) {
       // 这个型号在 DB 里有行 ⇒ 全听 DB 的(含「这一档被停用了」的情况)

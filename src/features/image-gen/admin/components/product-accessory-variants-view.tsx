@@ -50,9 +50,9 @@ import {
   upsertProductAccessoryVariantAction,
 } from "@/features/image-gen/admin/actions";
 import {
-  CATALOG_ERROR_TEXT_KEYS,
   type AdminCatalogAccessoryVariant,
   type AdminCatalogErrorCode,
+  CATALOG_ERROR_TEXT_KEYS,
 } from "@/features/image-gen/admin/types";
 import { formatCents } from "@/lib/money";
 
@@ -489,9 +489,7 @@ function VariantEditor(props: {
           <Form.Item
             name="accessoryCode"
             label={t("form.accessory")}
-            extra={
-              mode === "edit" ? t("form.accessoryLockedHint") : undefined
-            }
+            extra={mode === "edit" ? t("form.accessoryLockedHint") : undefined}
             rules={[{ required: true, message: t("form.required") }]}
           >
             <Select

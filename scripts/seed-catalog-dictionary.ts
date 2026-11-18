@@ -75,12 +75,12 @@ import {
   productAccessoryVariant,
   productSize,
 } from "@/db/schema";
+import { PRODUCT_ACCESSORY_VARIANTS } from "@/features/gpt-image/lib/product-accessory-variants";
 import {
   ACCESSORIES,
   ACCESSORY_META,
   PRODUCT_TYPES,
 } from "@/features/gpt-image/lib/product-catalog";
-import { PRODUCT_ACCESSORY_VARIANTS } from "@/features/gpt-image/lib/product-accessory-variants";
 
 /** `--dry-run` —— 只打印要写什么,不连库 */
 const DRY_RUN = process.argv.includes("--dry-run");

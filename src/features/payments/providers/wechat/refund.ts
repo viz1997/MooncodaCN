@@ -159,7 +159,8 @@ export function mapWechatRefundStatus(params: {
       status: "rejected",
       providerRefundId: params.refundId,
       providerStatus: status,
-      detail: "微信说这笔退款已经关闭(CLOSED)—— 钱没有退,需要重新发起或人工处理",
+      detail:
+        "微信说这笔退款已经关闭(CLOSED)—— 钱没有退,需要重新发起或人工处理",
     };
   }
 

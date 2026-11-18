@@ -26,13 +26,12 @@ import type {
 } from "@/db/schema";
 import { product, productAccessoryVariant, productVariant } from "@/db/schema";
 import { getProductType } from "@/features/gpt-image/lib/product-catalog";
-
-import { getCatalogDictionary } from "./catalog-dictionary-store";
 import {
-  CatalogDictionaryUserError,
   type CatalogDictionary,
+  CatalogDictionaryUserError,
   sizeCodesForType,
 } from "./catalog-dictionary";
+import { getCatalogDictionary } from "./catalog-dictionary-store";
 import {
   buildAllVariantSeeds,
   recomputeVariantPrices,

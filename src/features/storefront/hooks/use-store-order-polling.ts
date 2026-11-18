@@ -105,7 +105,9 @@ export function useStoreOrderPolling(
   }
 ): UseStoreOrderPollingResult {
   const [shipments, setShipments] = useState<ShipmentView[]>(initial.shipments);
-  const [refund, setRefund] = useState<RefundView | null>(initial.refund ?? null);
+  const [refund, setRefund] = useState<RefundView | null>(
+    initial.refund ?? null
+  );
   const [snapshot, setSnapshot] = useState<StoreOrderPaymentSnapshot>(
     initial.snapshot
   );

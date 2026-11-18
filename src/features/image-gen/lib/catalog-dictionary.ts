@@ -53,13 +53,13 @@
  */
 
 import type { AccessoryCategory } from "@/db/image-gen-types";
+import { PRODUCT_ACCESSORY_VARIANTS } from "@/features/gpt-image/lib/product-accessory-variants";
 import {
   ACCESSORIES,
   ACCESSORY_META,
   type AccessoryMeta,
   PRODUCT_TYPES,
 } from "@/features/gpt-image/lib/product-catalog";
-import { PRODUCT_ACCESSORY_VARIANTS } from "@/features/gpt-image/lib/product-accessory-variants";
 
 /**
  * 尺寸加价的默认档位(分)—— **兜底**用。
@@ -168,10 +168,7 @@ export interface CatalogDictionary {
     readonly CatalogAccessoryOptionDef[]
   >;
   /** 型号 → 配件变体(跨该型号的所有配件) */
-  variantsByType: ReadonlyMap<
-    string,
-    readonly CatalogAccessoryVariantDef[]
-  >;
+  variantsByType: ReadonlyMap<string, readonly CatalogAccessoryVariantDef[]>;
 }
 
 /* ========================================================================== */
@@ -494,10 +491,7 @@ function mergeVariants(
   fallback: CatalogDictionary,
   typeOrder: readonly string[]
 ): Map<string, readonly CatalogAccessoryVariantDef[]> {
-  const byTypeAccessory = new Map<
-    string,
-    CatalogAccessoryVariantRowLike[]
-  >();
+  const byTypeAccessory = new Map<string, CatalogAccessoryVariantRowLike[]>();
   for (const row of rows) {
     const key = `${row.productTypeCode}::${row.accessoryCode}`;
     const list = byTypeAccessory.get(key) ?? [];
@@ -508,9 +502,7 @@ function mergeVariants(
   const out = new Map<string, readonly CatalogAccessoryVariantDef[]>();
   for (const typeCode of typeOrder) {
     const fbList = fallback.variantsByType.get(typeCode) ?? [];
-    const dbRowsForType = rows.filter(
-      (r) => r.productTypeCode === typeCode
-    );
+    const dbRowsForType = rows.filter((r) => r.productTypeCode === typeCode);
 
     // DB 一个变体都没有 ⇒ 整份用兜底(逐字节相同)
     if (dbRowsForType.length === 0) {
@@ -526,7 +518,8 @@ function mergeVariants(
       }
     }
     for (const row of dbRowsForType) {
-      if (!accCodes.includes(row.accessoryCode)) accCodes.push(row.accessoryCode);
+      if (!accCodes.includes(row.accessoryCode))
+        accCodes.push(row.accessoryCode);
     }
 
     const defs: CatalogAccessoryVariantDef[] = [];
@@ -551,7 +544,8 @@ function mergeVariants(
           continue;
         }
         const def = toVariantDef(row);
-        if (idx >= 0) group[idx] = def; // 同码 ⇒ 就地替换(位置不变)
+        if (idx >= 0)
+          group[idx] = def; // 同码 ⇒ 就地替换(位置不变)
         else group.push(def); // 新码 ⇒ 接在后面
       }
       defs.push(...group);
@@ -706,8 +700,6 @@ export function accessoryVariantDef(
 }
 
 /** 字典里的型号(code 常量里的 + DB 里新加的) */
-export function typeCodes(
-  dictionary: CatalogDictionary
-): readonly string[] {
+export function typeCodes(dictionary: CatalogDictionary): readonly string[] {
   return dictionary.typeOrder;
 }

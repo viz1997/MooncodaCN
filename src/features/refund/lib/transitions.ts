@@ -111,9 +111,7 @@ export function refundTransitionRequiresNote(
  *
  * 顺序按 `REFUND_STATUSES`(待处理 → 已同意 → 已退款 → 已拒绝)。
  */
-export function allowedNextRefundStatuses(
-  from: RefundStatus
-): RefundStatus[] {
+export function allowedNextRefundStatuses(from: RefundStatus): RefundStatus[] {
   const allowed = TRANSITIONS[from];
   return REFUND_STATUSES.filter(
     (status) => status !== from && allowed[status] !== undefined

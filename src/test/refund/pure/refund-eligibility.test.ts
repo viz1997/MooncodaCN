@@ -22,13 +22,12 @@
  */
 
 import { describe, expect, it } from "vitest";
-
+import type { RefundEligibilityOrder } from "@/features/refund/lib/eligibility";
 import {
+  evaluateRefundEligibility,
   PRINT_ORDER_PRODUCTION_STARTED_STATUSES,
   PRINT_ORDER_REFUNDABLE_STATUSES,
-  evaluateRefundEligibility,
 } from "@/features/refund/lib/eligibility";
-import type { RefundEligibilityOrder } from "@/features/refund/lib/eligibility";
 import type { RefundIneligibleCode } from "@/features/refund/lib/types";
 
 /** 一个能退的打印工单(PENDING + 已付款) */
@@ -83,12 +82,17 @@ describe("退款资格:打印工单 —— 生产开始后不能退", () => {
 
   it("不在可退名单里的状态一律按「不能退」兜底", () => {
     // 将来加了新状态,这里自动拦住,不会静默放行
-    expectIneligible(printOrder({ status: "SOMETHING_NEW" }), "PRODUCTION_STARTED");
+    expectIneligible(
+      printOrder({ status: "SOMETHING_NEW" }),
+      "PRODUCTION_STARTED"
+    );
     expectIneligible(printOrder({ status: "" }), "PRODUCTION_STARTED");
   });
 
   it("PENDING + CONFIRMED 可以退", () => {
-    expect(evaluateRefundEligibility(printOrder({ status: "PENDING" }))).toEqual({
+    expect(
+      evaluateRefundEligibility(printOrder({ status: "PENDING" }))
+    ).toEqual({
       eligible: true,
     });
     expect(
@@ -117,18 +121,12 @@ describe("退款资格:打印工单 —— 生产开始优先于已取消", () =
 
 describe("退款资格:没付款不能退", () => {
   it("print + unpaid → NOT_PAID", () => {
-    expectIneligible(
-      printOrder({ paymentStatus: "unpaid" }),
-      "NOT_PAID"
-    );
+    expectIneligible(printOrder({ paymentStatus: "unpaid" }), "NOT_PAID");
   });
 
   it("print + refunded(已经退过了)→ NOT_PAID", () => {
     // 退两次 = 亏钱
-    expectIneligible(
-      printOrder({ paymentStatus: "refunded" }),
-      "NOT_PAID"
-    );
+    expectIneligible(printOrder({ paymentStatus: "refunded" }), "NOT_PAID");
   });
 
   it("print + failed → NOT_PAID", () => {
@@ -136,19 +134,13 @@ describe("退款资格:没付款不能退", () => {
   });
 
   it("storefront + unpaid → NOT_PAID", () => {
-    expectIneligible(
-      storeOrder({ paymentStatus: "unpaid" }),
-      "NOT_PAID"
-    );
+    expectIneligible(storeOrder({ paymentStatus: "unpaid" }), "NOT_PAID");
   });
 });
 
 describe("退款资格:商城订单 —— 已发货不能退", () => {
   it("fulfilled → ALREADY_SHIPPED", () => {
-    expectIneligible(
-      storeOrder({ status: "fulfilled" }),
-      "ALREADY_SHIPPED"
-    );
+    expectIneligible(storeOrder({ status: "fulfilled" }), "ALREADY_SHIPPED");
   });
 
   it("已经有 shipment 行 → ALREADY_SHIPPED", () => {
@@ -160,10 +152,7 @@ describe("退款资格:商城订单 —— 已发货不能退", () => {
   });
 
   it("cancelled → ORDER_CANCELLED", () => {
-    expectIneligible(
-      storeOrder({ status: "cancelled" }),
-      "ORDER_CANCELLED"
-    );
+    expectIneligible(storeOrder({ status: "cancelled" }), "ORDER_CANCELLED");
   });
 
   it("paid + 没发货 → 可以退", () => {
@@ -191,10 +180,7 @@ describe("退款资格:订单不存在", () => {
 
 describe("退款资格:已经有一条进行中的申请", () => {
   it("hasActiveRequest → REQUEST_EXISTS", () => {
-    expectIneligible(
-      printOrder({ hasActiveRequest: true }),
-      "REQUEST_EXISTS"
-    );
+    expectIneligible(printOrder({ hasActiveRequest: true }), "REQUEST_EXISTS");
   });
 
   it("**排在「没付款」前面** —— 买家最想听的是「你已经申请过了」", () => {

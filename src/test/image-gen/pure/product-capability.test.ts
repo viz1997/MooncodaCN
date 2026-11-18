@@ -1006,7 +1006,12 @@ describe("assembleProductCapabilities —— 尺寸 / 配件字典(2026-11-14)",
   });
 
   it("② 不传字典 → 退回 `idx × 500`(老口径一个字节都不变)", () => {
-    const out = assembleProductCapabilities(effects, variantsByProduct, null, null);
+    const out = assembleProductCapabilities(
+      effects,
+      variantsByProduct,
+      null,
+      null
+    );
     const r = rProduct(out);
 
     expect(r.sizes.map((s) => s.code)).toEqual(["4", "6"]);
@@ -1128,7 +1133,9 @@ describe("assembleProductCapabilities —— 尺寸 / 配件字典(2026-11-14)",
     const b = withDict[0]!;
 
     expect(Object.keys(b).sort()).toEqual(Object.keys(a).sort());
-    expect(Object.keys(b.sizes[0]!).sort()).toEqual(Object.keys(a.sizes[0]!).sort());
+    expect(Object.keys(b.sizes[0]!).sort()).toEqual(
+      Object.keys(a.sizes[0]!).sort()
+    );
     expect(Object.keys(b.accessories[0]!).sort()).toEqual(
       Object.keys(a.accessories[0]!).sort()
     );

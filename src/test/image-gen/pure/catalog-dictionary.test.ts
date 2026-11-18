@@ -1,21 +1,12 @@
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-
+import { PRODUCT_ACCESSORY_VARIANTS } from "@/features/gpt-image/lib/product-accessory-variants";
 import {
-  SIZE_STEP_CENTS,
-  accessoryCodesForType,
-  accessoryDef,
-  accessoryVariantDef,
-  accessoryVariantsFor,
-  buildCatalogDictionaryFromCodeConstants,
-  mergeCatalogDictionary,
-  normalizeAccessoryCategory,
-  sizeCodesForType,
-  sizeDefFor,
-  sizeDeltaCentsFor,
-  typeCodes,
-} from "@/features/image-gen/lib/catalog-dictionary";
+  ACCESSORIES,
+  ACCESSORY_META,
+  PRODUCT_TYPES,
+} from "@/features/gpt-image/lib/product-catalog";
 import type {
   CatalogAccessoryRowLike,
   CatalogAccessoryVariantRowLike,
@@ -23,11 +14,19 @@ import type {
   CatalogSizeRowLike,
 } from "@/features/image-gen/lib/catalog-dictionary";
 import {
-  ACCESSORIES,
-  ACCESSORY_META,
-  PRODUCT_TYPES,
-} from "@/features/gpt-image/lib/product-catalog";
-import { PRODUCT_ACCESSORY_VARIANTS } from "@/features/gpt-image/lib/product-accessory-variants";
+  accessoryCodesForType,
+  accessoryDef,
+  accessoryVariantDef,
+  accessoryVariantsFor,
+  buildCatalogDictionaryFromCodeConstants,
+  mergeCatalogDictionary,
+  normalizeAccessoryCategory,
+  SIZE_STEP_CENTS,
+  sizeCodesForType,
+  sizeDefFor,
+  sizeDeltaCentsFor,
+  typeCodes,
+} from "@/features/image-gen/lib/catalog-dictionary";
 
 /**
  * 商品目录字典 —— 纯函数层(2026-11-14)
@@ -444,7 +443,9 @@ describe("合并 —— DB 行 × 兜底(逐型号,不是整份)", () => {
       "leather_white",
       "leather_natural",
     ]);
-    expect(accessoryVariantDef(merged, "R", "leather", "leather_red")).toBeNull();
+    expect(
+      accessoryVariantDef(merged, "R", "leather", "leather_red")
+    ).toBeNull();
   });
 
   it("⑨ 认不出来的分类退回 `decor`", () => {
@@ -490,9 +491,7 @@ describe("四个应用点共用一个查法 —— 扫描式守卫", () => {
 
   it("① `sizeDeltaCentsFor` 全仓只定义一次", () => {
     const code = stripComments(read(DICTIONARY));
-    const definitions = code.match(
-      /export function sizeDeltaCentsFor\s*\(/g
-    );
+    const definitions = code.match(/export function sizeDeltaCentsFor\s*\(/g);
     expect(definitions).toHaveLength(1);
   });
 
@@ -521,7 +520,9 @@ describe("四个应用点共用一个查法 —— 扫描式守卫", () => {
     const hits = code.match(/\*\s*SIZE_STEP_CENTS/g) ?? [];
     expect(hits).toHaveLength(1);
     // 那一条必须是「字典缺席」时的老口径
-    expect(code).toContain("dictionary\n        ? (sizeDeltaCentsFor(dictionary, code, sizeCode) ?? 0)\n        : idx * SIZE_STEP_CENTS");
+    expect(code).toContain(
+      "dictionary\n        ? (sizeDeltaCentsFor(dictionary, code, sizeCode) ?? 0)\n        : idx * SIZE_STEP_CENTS"
+    );
   });
 
   it("⑤ `SIZE_STEP_CENTS` 只有一个出处", () => {

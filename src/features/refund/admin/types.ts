@@ -25,10 +25,7 @@
  *
  * 界面按 code 查文案(`Refund.errors.<code>`),查不到退回 `errors.FAILED`。
  */
-import type {
-  AdminRefundRow,
-  RefundStatus,
-} from "@/features/refund/lib/types";
+import type { AdminRefundRow, RefundStatus } from "@/features/refund/lib/types";
 
 export type AdminRefundErrorCode =
   | "ORDER_NOT_FOUND"

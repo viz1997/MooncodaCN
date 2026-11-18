@@ -17,11 +17,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  REFUND_STATUSES,
   allowedNextRefundStatuses,
   canRefundTransition,
   classifyRefundTransition,
   isTerminalRefundStatus,
+  REFUND_STATUSES,
   refundStatusLabelKey,
   refundTransitionRequiresNote,
 } from "@/features/refund/lib/transitions";

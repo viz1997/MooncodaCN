@@ -498,7 +498,7 @@ describe("尺寸 / 配件字典 —— 客户端不许碰服务端那一半", ()
     expect(code).toContain("@/db");
   });
 
-  it("④ 全仓扫一遍:没有任何 `\"use client\"` 文件 import 服务端字典模块", () => {
+  it('④ 全仓扫一遍:没有任何 `"use client"` 文件 import 服务端字典模块', () => {
     const offenders: string[] = [];
     for (const rel of walkClientComponents()) {
       const src = stripComments(read(rel));

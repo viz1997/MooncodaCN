@@ -129,14 +129,18 @@ describe("后台加配件变体 —— 重复的 `variantCode` 当场拒", () =>
 
   it("③ 改行时**排除自己** —— 不然改一次就撞自己", () => {
     const code = read(ADMIN);
-    expect(code).toContain("if (excludeRowId && row.id === excludeRowId) continue;");
+    expect(code).toContain(
+      "if (excludeRowId && row.id === excludeRowId) continue;"
+    );
   });
 
   it("④ action 撞上了就返精确的码 —— 不是笼统的「保存失败」", () => {
     const code = read(ACTIONS);
 
-    expect(code).toContain("const conflict = await findConflictingVariantCode(");
-    expect(code).toContain('if (conflict.conflict) {');
+    expect(code).toContain(
+      "const conflict = await findConflictingVariantCode("
+    );
+    expect(code).toContain("if (conflict.conflict) {");
     expect(code).toContain('return catalogFailure("VARIANT_CODE_DUPLICATED");');
   });
 
@@ -144,7 +148,9 @@ describe("后台加配件变体 —— 重复的 `variantCode` 当场拒", () =>
     const code = read(ACTIONS);
 
     // 认得出 PG 的唯一冲突
-    expect(code).toContain("function isUniqueViolation(error: unknown): boolean");
+    expect(code).toContain(
+      "function isUniqueViolation(error: unknown): boolean"
+    );
     expect(code).toContain('if (code === "23505") return true;');
     // 认出来了就返同一个码
     expect(code).toContain(
@@ -188,9 +194,10 @@ describe("后台加配件变体 —— 重复的 `variantCode` 当场拒", () =>
 
   it("⑧ `VARIANT_CODE_DUPLICATED` 两种语言都摆得上话", () => {
     for (const locale of ["zh", "en"] as const) {
-      const messages = JSON.parse(
-        read(`messages/${locale}.json`)
-      ) as Record<string, unknown>;
+      const messages = JSON.parse(read(`messages/${locale}.json`)) as Record<
+        string,
+        unknown
+      >;
       const ns = messages.AdminCatalog as Record<string, unknown>;
       const errors = ns.errors as Record<string, unknown>;
       expect(errors.VARIANT_CODE_DUPLICATED, locale).toBeTruthy();

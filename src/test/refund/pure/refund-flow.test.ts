@@ -49,7 +49,7 @@ describe("退款流程:已付款的工单不许直接取消(洞被堵上)", () =
     expect(src).toContain("REFUND_REQUIRED");
   });
 
-  it("闸在 `actor === \"user\"` 那一支里 —— 只挡买家自助取消", () => {
+  it('闸在 `actor === "user"` 那一支里 —— 只挡买家自助取消', () => {
     const userBranch = src.indexOf('input.actor === "user"');
     expect(userBranch).toBeGreaterThan(-1);
 
@@ -196,7 +196,7 @@ describe("退款流程:落库走 settleByOrderNo 的 mark_refunded", () => {
     expect(window).toContain('to: "CANCELLED"');
   });
 
-  it("`land-refund.ts` **不是** `\"use server\"` —— webhook 腿要 import 它", () => {
+  it('`land-refund.ts` **不是** `"use server"` —— webhook 腿要 import 它', () => {
     // 注释里写着「为什么这个文件**不是** `"use server"`」⇒ 去掉注释再看
     const raw = stripComments(read("src/features/refund/lib/land-refund.ts"));
     expect(raw).not.toContain('"use server"');
@@ -211,13 +211,17 @@ describe("退款流程:买家侧看得见退款状态", () => {
   it("`GET /api/store/orders/[orderNo]` 有 `refund` 字段", () => {
     const src = read("src/app/api/store/orders/[orderNo]/route.ts");
     expect(src).toContain("getLatestRefundRequestForOrder");
-    expect(src).toMatch(/refund:\s*refundRow\s*\?\s*toRefundView\(refundRow\)\s*:\s*null/);
+    expect(src).toMatch(
+      /refund:\s*refundRow\s*\?\s*toRefundView\(refundRow\)\s*:\s*null/
+    );
   });
 
   it("`GET /api/print-orders/[orderNo]` 有 `refund` 字段", () => {
     const src = read("src/app/api/print-orders/[orderNo]/route.ts");
     expect(src).toContain("getLatestRefundRequestForOrder");
-    expect(src).toMatch(/refund:\s*refundRow\s*\?\s*toRefundView\(refundRow\)\s*:\s*null/);
+    expect(src).toMatch(
+      /refund:\s*refundRow\s*\?\s*toRefundView\(refundRow\)\s*:\s*null/
+    );
   });
 
   it("指纹只有一个实现(`refundFingerprint`)", () => {
@@ -228,7 +232,9 @@ describe("退款流程:买家侧看得见退款状态", () => {
   });
 
   it("**商城订单的轮询 hook** 指纹里带退款", () => {
-    const src = read("src/features/storefront/hooks/use-store-order-polling.ts");
+    const src = read(
+      "src/features/storefront/hooks/use-store-order-polling.ts"
+    );
     expect(src).toContain("refundFingerprint");
     expect(src).toMatch(/refundFingerprint\(/);
   });
@@ -284,8 +290,12 @@ describe("退款流程:买家两页都有申请退款的入口", () => {
     const print = read(
       "src/features/print-quote/components/print-order-detail-view.tsx"
     );
-    expect(store).toContain("@/features/refund/components/refund-request-button");
-    expect(print).toContain("@/features/refund/components/refund-request-button");
+    expect(store).toContain(
+      "@/features/refund/components/refund-request-button"
+    );
+    expect(print).toContain(
+      "@/features/refund/components/refund-request-button"
+    );
     expect(store).toContain("@/features/refund/components/refund-status-panel");
     expect(print).toContain("@/features/refund/components/refund-status-panel");
   });
@@ -391,7 +401,7 @@ describe("退款流程:「use server」文件不 re-export 类型", () => {
     expect(src).not.toMatch(/export\s*\{[^}]*\btype\b/);
   });
 
-  it("类型住在**不是** `\"use server\"` 的文件里", () => {
+  it('类型住在**不是** `"use server"` 的文件里', () => {
     // 文件头注释里解释着「为什么类型不住在 `"use server"` 文件里」⇒ 去掉注释再看
     const adminTypes = stripComments(
       read("src/features/refund/admin/types.ts")

@@ -29,12 +29,11 @@
 
 import { Undo2 } from "lucide-react";
 import { useFormatter, useTranslations } from "next-intl";
-
+import type { RefundStatus, RefundView } from "@/features/refund/lib/types";
 import {
   AtelierPanel,
   AtelierSectionTitle,
 } from "@/features/shared/components/atelier-page";
-import type { RefundStatus, RefundView } from "@/features/refund/lib/types";
 import { formatCents } from "@/lib/money";
 
 /** 状态徽章的配色 —— 中性 / 处理中 / 已退 / 被拒 */

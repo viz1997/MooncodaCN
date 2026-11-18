@@ -601,7 +601,8 @@ export function resolveWechatRefundPath(input: {
   }
 
   const explicit = input.sandboxRefundPath?.trim();
-  const path = explicit || deriveWechatSandboxRefundPath(input.sandboxNativePath);
+  const path =
+    explicit || deriveWechatSandboxRefundPath(input.sandboxNativePath);
 
   if (!path.startsWith("/")) {
     return endpointError(

@@ -1,17 +1,16 @@
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-
-import {
-  buildCatalogDictionaryFromCodeConstants,
-  SIZE_STEP_CENTS,
-} from "@/features/image-gen/lib/catalog-dictionary";
 import { PRODUCT_ACCESSORY_VARIANTS } from "@/features/gpt-image/lib/product-accessory-variants";
 import {
   ACCESSORIES,
   ACCESSORY_META,
   PRODUCT_TYPES,
 } from "@/features/gpt-image/lib/product-catalog";
+import {
+  buildCatalogDictionaryFromCodeConstants,
+  SIZE_STEP_CENTS,
+} from "@/features/image-gen/lib/catalog-dictionary";
 
 /**
  * 后台商品目录字典 —— 扫描式守卫(2026-11-14)
@@ -213,7 +212,9 @@ describe("② 目录字典的 action —— 失败返错误码,不 throw", () =>
 
   it("②-3 目录那一段里唯一的 throw 是在内层 try 里,被外层 catch 兜住", () => {
     // 目录 action 那一段的起止
-    const start = source.indexOf("export const listCatalogDictionaryAdminAction");
+    const start = source.indexOf(
+      "export const listCatalogDictionaryAdminAction"
+    );
     const section = source.slice(start);
 
     // 整段只有一个 `throw` —— 那是「DB 唯一索引撞了以外的错」
@@ -231,8 +232,12 @@ describe("② 目录字典的 action —— 失败返错误码,不 throw", () =>
     // `return { ok: false as const, code: "XXX" }` ⇒ code 会拓宽成 string
     // ⇒ 前端 `CATALOG_ERROR_TEXT_KEYS[data.code]` 索引不上去 ⇒ 文案那一层塌掉
     // (注释里写着「别这么写」的那句不算 —— 去掉注释再查)
-    expect(stripComments(source)).not.toMatch(/ok:\s*false\s+as\s+const,\s*code:/);
-    expect(source).toContain("function catalogFailure(code: AdminCatalogErrorCode)");
+    expect(stripComments(source)).not.toMatch(
+      /ok:\s*false\s+as\s+const,\s*code:/
+    );
+    expect(source).toContain(
+      "function catalogFailure(code: AdminCatalogErrorCode)"
+    );
   });
 
   it("②-5 读失败跟写失败是两个码 —— 工作室要做的事不一样", () => {
@@ -271,9 +276,7 @@ describe("③ 「use server」文件的 export 规矩", () => {
   it("③-3 客户端组件从 `types.ts` import 类型(不从 actions)", () => {
     for (const file of [DICT_VIEW, VARIANTS_VIEW]) {
       const src = read(file);
-      expect(src, file).toContain(
-        'from "@/features/image-gen/admin/types"'
-      );
+      expect(src, file).toContain('from "@/features/image-gen/admin/types"');
     }
   });
 });
@@ -286,9 +289,10 @@ describe("④ 迁移脚本 —— 幂等 + 不播种", () => {
   const code = read(MIGRATION);
 
   it("④-1 每一条 DDL 都带 `IF NOT EXISTS`", () => {
-    const ddl = code.match(
-      /(CREATE TABLE|CREATE (UNIQUE )?INDEX|ADD COLUMN)[\s\S]*?;/g
-    ) ?? [];
+    const ddl =
+      code.match(
+        /(CREATE TABLE|CREATE (UNIQUE )?INDEX|ADD COLUMN)[\s\S]*?;/g
+      ) ?? [];
     expect(ddl.length).toBeGreaterThanOrEqual(10);
     for (const stmt of ddl) {
       expect(stmt, stmt).toContain("IF NOT EXISTS");
@@ -301,15 +305,21 @@ describe("④ 迁移脚本 —— 幂等 + 不播种", () => {
   });
 
   it("④-3 `variant_code` 的全局唯一索引在", () => {
-    expect(code).toContain('CREATE UNIQUE INDEX IF NOT EXISTS "pav_variant_code_uniq_idx"');
-    expect(code).toContain('VARIANT_CODE_UNIQ_INDEX = "pav_variant_code_uniq_idx"');
+    expect(code).toContain(
+      'CREATE UNIQUE INDEX IF NOT EXISTS "pav_variant_code_uniq_idx"'
+    );
+    expect(code).toContain(
+      'VARIANT_CODE_UNIQ_INDEX = "pav_variant_code_uniq_idx"'
+    );
   });
 
   it("④-4 有重复就中止并打印 —— 不硬加索引", () => {
     expect(code).toContain("process.exit(1)");
     // 重复检查跑在建索引**之前**
     const checkAt = code.indexOf("process.exit(1)");
-    const indexAt = code.indexOf('CREATE UNIQUE INDEX IF NOT EXISTS "pav_variant_code_uniq_idx"');
+    const indexAt = code.indexOf(
+      'CREATE UNIQUE INDEX IF NOT EXISTS "pav_variant_code_uniq_idx"'
+    );
     expect(checkAt).toBeGreaterThan(-1);
     expect(indexAt).toBeGreaterThan(-1);
   });
@@ -359,13 +369,15 @@ describe("⑤ 种子脚本 —— 写进去的值 == 代码常量", () => {
   });
 
   it("⑤-4 只补缺的 —— 工作室改过的加价 / 名字不会被覆盖", () => {
-    expect(code.match(/onConflictDoNothing/g)?.length ?? 0).toBeGreaterThanOrEqual(
-      4
-    );
+    expect(
+      code.match(/onConflictDoNothing/g)?.length ?? 0
+    ).toBeGreaterThanOrEqual(4);
   });
 
   it("⑤-5 回填「适用尺寸」只碰还没填的那几行", () => {
-    expect(code).toContain('eq(productAccessoryVariant.appliesToSizesCm, "[]")');
+    expect(code).toContain(
+      'eq(productAccessoryVariant.appliesToSizesCm, "[]")'
+    );
   });
 
   it("⑤-6 dotenv 排第一个 —— 不然 `@/db` 先炸", () => {
@@ -388,7 +400,9 @@ describe("⑤ 种子脚本 —— 写进去的值 == 代码常量", () => {
         expect(size.priceDeltaCents, `${type.code}/${size.code}`).toBe(
           idx * SIZE_STEP_CENTS
         );
-        expect(size.sortOrder, `${type.code}/${size.code}`).toBe((idx + 1) * 10);
+        expect(size.sortOrder, `${type.code}/${size.code}`).toBe(
+          (idx + 1) * 10
+        );
       });
     }
 
@@ -397,8 +411,9 @@ describe("⑤ 种子脚本 —— 写进去的值 == 代码常量", () => {
       const def = dict.accessories.get(accessory.code);
       expect(def, accessory.code).toBeTruthy();
       if (!def) return;
-      const meta: { category: string; name: { zh: string; en: string } } | undefined =
-        ACCESSORY_META[accessory.code];
+      const meta:
+        | { category: string; name: { zh: string; en: string } }
+        | undefined = ACCESSORY_META[accessory.code];
       expect(def.name, accessory.code).toBe(meta?.name.zh ?? accessory.code);
       expect(def.nameEn, accessory.code).toBe(meta?.name.en ?? accessory.code);
       expect(def.category, accessory.code).toBe(meta?.category ?? "decor");
@@ -430,9 +445,7 @@ describe("⑥ `apply-currency-schema.ts` 不再按代码字典重刷配件加价
   const code = read(CURRENCY);
 
   it("⑥-1 一个字都不写配件变体那张表", () => {
-    expect(code).not.toMatch(
-      /UPDATE\s+"?product_accessory_variant"?/i
-    );
+    expect(code).not.toMatch(/UPDATE\s+"?product_accessory_variant"?/i);
   });
 
   it("⑥-2 那一节是只读的,并说清楚「配件加价由后台管」", () => {
