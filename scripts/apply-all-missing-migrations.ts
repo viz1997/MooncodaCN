@@ -38,13 +38,20 @@
  * 用法：
  *   pnpm tsx scripts/apply-all-missing-migrations.ts
  *
- * prod 需要把 Vercel 环境变量 DATABASE_URL 临时拷到 .env.local 再跑，
- * 或在 Vercel SQL / Supabase 控制台直接跑等价的 SQL（脚本里每条语句都打印了 label）。
+ * prod 要对线上那个库跑 —— **别改 `.env.local`**（忘了改回来,后面每一条
+ * 本地脚本都悄悄连到线上）。shell 里 export 的那个优先级最高
+ * （dotenv-expand 短路:`process.env` 里已经有了,文件里的值不覆盖它）:
+ *
+ *   DATABASE_URL='<Vercel 上那份>' pnpm tsx scripts/apply-all-missing-migrations.ts
+ *
+ * 脚本跑起来第一件事就是打印「连的是哪个库」—— 跑错库跟跑成功在输出里
+ * 长得一模一样(2026-11-19 那次线上事故就是这个形状)。
  */
 
 import { resolve } from "node:path";
 import { config as dotenvConfig } from "dotenv";
 import { expand as dotenvExpand } from "dotenv-expand";
+import { printDatabaseTarget } from "./lib/print-db-target";
 
 dotenvExpand(dotenvConfig({ path: resolve(process.cwd(), ".env.local") }));
 dotenvExpand(dotenvConfig({ path: resolve(process.cwd(), ".env") }));
@@ -54,6 +61,9 @@ async function main() {
     console.error("[apply-all] 缺少 DATABASE_URL");
     process.exit(1);
   }
+
+  // 先说「连的是哪个库」—— 跑错库跟跑成功在输出里长得一模一样(2026-11-19)
+  printDatabaseTarget("apply-all-missing");
 
   const { Client } = await import("pg");
   const client = new Client({ connectionString: process.env.DATABASE_URL });

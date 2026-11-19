@@ -20,10 +20,14 @@
 import { config as loadEnv } from "dotenv";
 import { nanoid } from "nanoid";
 import { Client } from "pg";
+import { printDatabaseTarget } from "./lib/print-db-target";
 
 // 加载 .env.local / .env（与 drizzle.config.ts 一致）
 loadEnv({ path: ".env.local" });
 loadEnv({ path: ".env" });
+
+// 先说「连的是哪个库」—— 跑错库跟跑成功在输出里长得一模一样(2026-11-19)
+printDatabaseTarget("apply-agent-workbench-migration");
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {

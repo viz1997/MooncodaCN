@@ -115,6 +115,7 @@ import {
 import type { PrintOrderRequest } from "@/features/print-quote/lib/quote-types";
 import { normalizePrintOrderLocale } from "@/features/print-quote/lib/quote-types";
 import { isOwnModelUrl } from "@/features/print-quote/lib/upload-key";
+import { describeDbError } from "@/features/shared/lib/db-error";
 import { withApiLogging } from "@/lib/api-logger";
 import {
   checkRateLimit,
@@ -250,7 +251,20 @@ async function handleList(request: NextRequest) {
   }
 
   // 归属写在 where 里 —— 这里只能拿到当前用户自己的单
-  const rows = await listUserPrintOrders(user.id, 50);
+  //
+  // ⚠️ 这一步同样可能撞「迁移脚本没跑」(少一列就 42703)⇒ 兜住
+  let rows: PrintOrderRow[];
+  try {
+    rows = await listUserPrintOrders(user.id, 50);
+  } catch (error) {
+    const missing = migrationMissingResponse(error);
+    if (missing) return missing;
+    console.error("[PrintOrder] 工单列表查询失败", error);
+    return NextResponse.json(
+      { error: "SERVER_FAILED", message: "工单列表拿不到,请稍后重试" },
+      { status: 500 }
+    );
+  }
 
   return NextResponse.json(
     { orders: rows.map(toUserPrintOrder) },
@@ -340,10 +354,22 @@ async function handle(request: NextRequest) {
     couponCode: parsed.data.couponCode ?? null,
   });
 
-  const existing = await findPrintOrderByIdempotencyKey(
-    user.id,
-    idempotencyKey
-  );
+  // 幂等查表 —— **迁移脚本没跑的话,这里就会炸**(少 `idempotency_key` 列)
+  //
+  // ⚠️ 这一步在 try 外面(建单那个事务的 try 只包住 insert)⇒ 自己兜住,
+  // 别让一个 42703 变成「服务器错误」。
+  let existing: PrintOrderRow | null = null;
+  try {
+    existing = await findPrintOrderByIdempotencyKey(user.id, idempotencyKey);
+  } catch (error) {
+    const missing = migrationMissingResponse(error);
+    if (missing) return missing;
+    console.error("[PrintOrder] 幂等查表失败", error);
+    return NextResponse.json(
+      { error: "CREATE_ORDER_FAILED", message: "下单失败,请稍后重试" },
+      { status: 500 }
+    );
+  }
   if (existing) {
     // **200**,不是 201 —— 这一单**已经建好了**,不是新建了一张
     return await respondWithExistingPrintOrder(existing, rl);
@@ -631,6 +657,9 @@ async function handle(request: NextRequest) {
       );
     }
     console.error("[PrintOrder] insert failed", error);
+    // 迁移脚本没跑(缺列 / 缺表)⇒ 说清楚是哪一类问题,别只摆「稍后重试」
+    const missing = migrationMissingResponse(error);
+    if (missing) return missing;
     return NextResponse.json(
       {
         error: "CREATE_ORDER_FAILED",
@@ -707,6 +736,37 @@ function isUniqueViolation(error: unknown): boolean {
     error !== null &&
     "code" in error &&
     (error as { code?: unknown }).code === "23505"
+  );
+}
+
+/**
+ * **迁移脚本没跑** —— 说人话,别把原始 SQL 甩给用户
+ *
+ * 2026-11-19 线上真踩过:生产库的 `print_order` 少了 `idempotency_key`
+ * 这一列(2026-11-16 那次迁移没在那个库上跑)⇒ Drizzle 每次查工单都带
+ * 那一列 ⇒ PG 报 `42703 column "idempotency_key" does not exist` ⇒
+ * 建单接口 500,日志里只有一坨拼接的 SQL。
+ *
+ * 那句话对工作室没用 —— 日志里看不出是「迁移脚本没跑」。⇒ 这里认出来,
+ * 回 **503 + `MIGRATION_MISSING`**,界面照着它说「先跑一次迁移脚本」。
+ *
+ * 判定用 `describeDbError()`(跟后台那几个页面**同一份**)—— 抄一份就是
+ * 两处口径迟早漂。
+ *
+ * @returns 命中就是那个 503 响应;不是「缺表 / 缺列」就返 `null`(调用方
+ *   走自己那条路)。
+ */
+function migrationMissingResponse(error: unknown): NextResponse | null {
+  const info = describeDbError(error);
+  if (!info.missingRelation) return null;
+  // 原始报错进日志(有表结构这类内部信息),**不进响应体**
+  console.error("[PrintOrder] 迁移脚本没跑(缺表 / 缺列):", info.message);
+  return NextResponse.json(
+    {
+      error: "MIGRATION_MISSING",
+      message: "数据库还没升级,暂时下不了单 —— 请联系工作室",
+    },
+    { status: 503 }
   );
 }
 

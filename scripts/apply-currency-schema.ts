@@ -109,6 +109,7 @@ import {
 // ⚠️ `SIZE_STEP_CENTS` 的**单一出处**在 catalog-dictionary.ts(2026-11-14 起)
 // —— 别在别处再写一份 500。
 import { SIZE_STEP_CENTS } from "@/features/image-gen/lib/catalog-dictionary";
+import { printDatabaseTarget } from "./lib/print-db-target";
 
 /** 配件变体的查表键 —— 三元组 */
 function accKey(
@@ -124,6 +125,9 @@ async function main(): Promise<void> {
     console.error("[apply-currency] 缺少 DATABASE_URL");
     process.exit(1);
   }
+
+  // 先说「连的是哪个库」—— 跑错库跟跑成功在输出里长得一模一样(2026-11-19)
+  printDatabaseTarget("apply-currency");
 
   // 重定价是**破坏性**的(会覆盖 admin 在后台改过的价)⇒ 必须显式要。
   const FORCE_REPRICE = process.argv.includes("--force-reprice");

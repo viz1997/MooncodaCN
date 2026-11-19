@@ -55,9 +55,13 @@
 import { resolve } from "node:path";
 import { config as dotenvConfig } from "dotenv";
 import { expand as dotenvExpand } from "dotenv-expand";
+import { printDatabaseTarget } from "./lib/print-db-target";
 
 dotenvExpand(dotenvConfig({ path: resolve(process.cwd(), ".env.local") }));
 dotenvExpand(dotenvConfig({ path: resolve(process.cwd(), ".env") }));
+
+// 先说「连的是哪个库」—— 跑错库跟跑成功在输出里长得一模一样(2026-11-19)
+printDatabaseTarget("apply-showcase-schema");
 
 /** `--dry-run` —— 只打印 SQL,不连库 */
 const DRY_RUN = process.argv.includes("--dry-run");

@@ -35,6 +35,15 @@ export const PRINT_ORDER_ERROR_KEYS: Record<string, string> = {
   UNAUTHORIZED: "printOrder.errors.codes.authRequired",
   // 存储没配好(重试没用,得工作室处理)
   R2_NOT_CONFIGURED: "printOrder.errors.codes.storageNotConfigured",
+  /*
+   * 迁移脚本没跑(2026-11-19)
+   *
+   * 生产库的 `print_order` 少了一列(比如 2026-11-16 加的 `idempotency_key`)
+   * ⇒ Drizzle 每次查工单都带那一列 ⇒ PG 报 42703。
+   *
+   * **重试没用** —— 那是部署环境的事,得工作室跑一次迁移脚本。
+   */
+  MIGRATION_MISSING: "printOrder.errors.codes.migrationMissing",
   // 模型文件那一份不见了 —— 重传就行
   MODEL_NOT_FOUND: "printOrder.errors.codes.modelNotFound",
   INVALID_MODEL_URL: "printOrder.errors.codes.modelUrlInvalid",

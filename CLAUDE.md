@@ -4610,6 +4610,65 @@ pnpm migrate:apply-print-order-idempotency   # = tsx scripts/apply-print-order-i
 |---|---|
 | `src/test/print-quote/pure/print-order-idempotency.test.ts` | 键是**内容哈希**(同一意图 ⇒ 同一把键)/ sha256 64 位十六进制 / **换几何 / 支撑克重 / 自支撑比例 / 交期 / 优惠码 / 联系信息 / 地址 ⇒ 换键** / 优惠码大小写归一 / **认不出来的交期档位一律标准档** / 数字按**落库精度**归一(精度以下同键、精度以上换键)/ NaN·无穷大不当成「跟别的值一样」/ `null` 跟「没值」是同一件事 / 键里**不含** `objectKey`·`modelUrl`·`channel`·`locale` / 查表**早于**通道检查·券判定·报价计算 / 命中返 **200**、首次 **201** / **复用存下来的付款入口**(微信的码不能重建)/ 命中**不发邮件、不重复记用券** / `23505` ⇒ **先回查**再决定 200 还是 409 / schema 有**复合**唯一索引 / 归属校验在 WHERE 里 / insert 写进键 / 客户端**复用上一次的上传结果** + 纯函数 / 迁移脚本**不播种**、有 `--dry-run` |
 
+### 迁移前先看「我连的是哪个库」(2026-11-19)
+
+线上真踩过:生产库的 `print_order` 少了 `idempotency_key` 这一列 ⇒ 建单接口
+**500**(`42703 column "idempotency_key" does not exist`)。工作室按命令跑完
+迁移之后,**同一个错又报了一遍**。
+
+**根因不是「迁移没跑」,是「迁移跑在另一个库上」** —— 本地 `.env` /
+`.env.local` 里的 `DATABASE_URL` 跟线上部署(Vercel 环境变量)那份**不是
+一个**。实测:`.env.local` 那个库**跟代码完全对得上**(50/50 张表、
+`print_order` 44/44 列、`idempotency_key` 就在里面)⇒ **线上跑的是另一个库**。
+
+而当时的迁移脚本跑完只回读一句「✓ 列在」,**从不打印连的是哪个库** ⇒
+**连错库跟跑成功在输出里长得一模一样**,直到线上继续报错。
+
+#### 两个工具(2026-11-19 加)
+
+| 工具 | 干什么 |
+|---|---|
+| **`pnpm schema:check`**(`scripts/check-app-schema.ts`) | **只读**体检:打印「我连的是哪个库」+ 服务器那边自己说的身份 + 比一遍**代码要的列**和**库里有的列** ⇒ 列出漂移 + 给出**该跑哪几条 `pnpm migrate:…`**(按顺序)。**一条 `SELECT` 都不写**,不改任何东西 |
+| **每个 `scripts/apply-*.ts`** | **动手之前**先打印目标库(主机 / 端口 / 库名 / 用户 / 是不是 pooler / SSL / `DATABASE_URL` **是从哪儿来的**)。目标是**本机**时**大声提醒** |
+
+- **`pnpm schema:check print_order`** —— 只查一张表。
+- **两份打印是同一份实现** —— `scripts/lib/print-db-target.ts` →
+  `@/features/shared/lib/db-target`(纯函数 / 零 DB 依赖)⇒ 体检脚本和迁移
+  脚本**不可能漂**。
+- **密码一个字都不打印** —— 这份输出是要贴到聊天 / 工单里的。
+
+#### 优先级:shell 里那个赢(改文件是错的做法)
+
+`dotenv-expand` 的行为是「**`process.env` 里已经有了就短路**」—— 文件里的值
+**不会**覆盖 shell 里已经 export 的值;`.env.local` 又比 `.env` 先加载。
+
+⇒ **要跑线上那个库,把它抄到 shell 里,别改 `.env.local`**(改文件有副作用:
+忘了改回来,后面每一条本地脚本都悄悄连到线上):
+
+```bash
+DATABASE_URL='<Vercel 上那份>' pnpm schema:check
+DATABASE_URL='<Vercel 上那份>' pnpm migrate:apply-print-order-idempotency
+```
+
+线上那份在 **Vercel → mooncoda-cn → Settings → Environment Variables →
+`DATABASE_URL`**。
+
+#### 顺带把接口的失败形状改了
+
+`POST /api/print-orders` 的**幂等查表 / 工单列表 / insert** 三处都兜住了
+「缺表 / 缺列」(`describeDbError()` —— 跟后台那几个页面**同一份**判定)⇒
+回 **503 + `MIGRATION_MISSING`**,界面说「数据库还没升级,请联系工作室」,
+**不再甩一坨拼接的 SQL**。判定用的码进 `print-order-error.ts` +
+`messages/{zh,en}.json` 的 `PrintQuote.printOrder.errors.codes.migrationMissing`。
+
+#### 行为由单测守住
+
+| 测试 | 守住什么 |
+|---|---|
+| `src/test/shared/pure/db-target.test.ts` | 密码不外泄 / 主机·端口·库名·用户 / **pooler 认得出来**(Neon `-pooler` · Supabase `.pooler.` · 6543)/ SSL 开没开 / **认不出来就说认不出来** / 本机库**必须提醒** / **每个 `scripts/apply-*.ts` 都调 `printDatabaseTarget(`** / **打印在加载 env 之后**(先打印 = 打印上一轮的旧值)/ **打印在动手改库之前** |
+| `src/test/shared/pure/schema-drift.test.ts` | 每条 `ALTER TABLE ADD COLUMN` / `CREATE TABLE` **都有对应的命令** / 命令指向的**就是**那个脚本 / 命令指向的脚本**真的存在** / 建表的排在改列的前面 / 漂移 → 命令**去重 + 有序** |
+| `src/test/print-quote/pure/print-order-migration-missing.test.ts` | 缺表 / 缺列 ⇒ **503 + `MIGRATION_MISSING`**(不是 500)/ 原始 SQL **不进响应体** / 不是「缺表缺列」的错**照旧按原样处理** |
+
 ### Stripe 微信支付 / 支付宝(2026-11-05,**旧路,过渡期保留**)
 
 Sellbase 的 `createCheckout()` 把 `payment_method_types: ["card"]` **写死**

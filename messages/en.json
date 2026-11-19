@@ -1876,6 +1876,7 @@
         "codes": {
           "authRequired": "Your session expired — sign in again and retry",
           "storageNotConfigured": "File storage is not configured — the studio needs to fix it",
+          "migrationMissing": "The database hasn't been upgraded yet, so the order can't be placed — please contact the studio",
           "modelNotFound": "The model file was not found — drop the model in again and retry",
           "modelUrlInvalid": "The model file address is not valid — drop the model in again and retry",
           "cartNotFound": "The cart could not be reached — refresh the page and retry",

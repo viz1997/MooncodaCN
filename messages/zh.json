@@ -1873,6 +1873,7 @@
         "codes": {
           "authRequired": "登录状态失效了 —— 重新登录再试一次",
           "storageNotConfigured": "文件存储没配好,暂时加不了 —— 联系工作室",
+          "migrationMissing": "数据库还没升级,暂时下不了单 —— 请联系工作室",
           "modelNotFound": "模型文件没找到 —— 重新拖一次模型,再点「加入购物袋」",
           "modelUrlInvalid": "模型文件地址不合法 —— 重新拖一次模型,再点「加入购物袋」",
           "cartNotFound": "购物袋拿不到了 —— 刷新页面再试一次",

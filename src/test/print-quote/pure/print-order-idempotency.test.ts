@@ -329,7 +329,7 @@ describe("建单幂等 —— 服务端认单", () => {
     // `biome --write` 会把「两个参数的调用」拆成多行,精确字符串断言会当场
     // 被打红(那不是代码坏了,是格式变了)。
     const lookup = code.search(
-      /const existing = await findPrintOrderByIdempotencyKey\(\s*user\.id,\s*idempotencyKey\s*\)/
+      /existing = await findPrintOrderByIdempotencyKey\(\s*user\.id,\s*idempotencyKey\s*\)/
     );
     expect(lookup).toBeGreaterThan(-1);
 

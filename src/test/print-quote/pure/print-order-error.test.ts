@@ -137,6 +137,14 @@ describe("code → 文案 key 的映射", () => {
     ).toBe("printOrder.errors.codes.reliefTierMismatch");
   });
 
+  it("迁移脚本没跑(2026-11-19)⇒ 有专属的那一句", () => {
+    // 生产库少一列(比如 `idempotency_key`)⇒ PG 报 42703 ⇒ 建单 500。
+    // **重试没用** —— 那是部署环境该跑迁移脚本的事,界面得说清楚。
+    expect(
+      printOrderErrorMessageKey(new RequestError("x", 503, "MIGRATION_MISSING"))
+    ).toBe("printOrder.errors.codes.migrationMissing");
+  });
+
   it("购物袋那套 code 没有了 —— 2026-11-08 起打印服务**不进**商城购物袋", () => {
     // 打印服务直接建工单(工单自己建、自己收款)之后,工单这条路**不碰**
     // 商城购物袋 —— 所以「车找不到」「加行失败」「放错车」这三个 code 都是

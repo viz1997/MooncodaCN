@@ -51,6 +51,7 @@
     "magnet:wasm": "tsx scripts/copy-manifold-wasm.ts",
     "payment:check-sandbox": "tsx scripts/payment-sandbox-check.ts",
     "print-tool:pack": "tsx scripts/build-print-tool-core-zip.ts",
+    "schema:check": "tsx scripts/check-app-schema.ts",
     "sync:sellbase-catalog": "tsx scripts/sync-sellbase-catalog.ts",
     "webhook:register-sellbase": "tsx scripts/register-sellbase-webhook.ts",
     "test": "vitest",
