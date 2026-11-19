@@ -113,8 +113,9 @@ export const dashboardNav: NavGroup[] = [
         href: "/dashboard/generate-v2",
         icon: Sparkles,
       },
-      // 已隐藏：公开生图（2026-11-13 起那条公开路由整个删了 —— 工作室不要
-      // 公开的生图页面；生图能力在上面的「Generate」/「Generate V2」里）
+      // 已隐藏：公开生图（2026-11-19 那条公开路由**搬回来了** —— 工作室改口
+      // 「原来的/image-gen还是要」；但控制台侧**不占位** —— 上面「Generate」/
+      // 「Generate V2」才是正儿八经的工作台，公开页只是一次性体验）
       // { title: "Public Image Gen", href: "/image-gen", icon: Sparkles },
       // 已隐藏：照片库独立入口 —— 已合并到「我的资产」里的「我的照片」Tab
       // { title: "Photos", href: "/dashboard/photos", icon: Image },

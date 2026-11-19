@@ -33,11 +33,15 @@ import { describe, expect, it } from "vitest";
  * 4. **法律页在 `(marketing-atelier)` 下** —— 换的是外壳,URL 一个字没变
  * 5. **pSEO:删落地页,留引擎** —— JSON 空了、索引页没了、路由没了,
  *    **引擎文件都还在**(工作室以后填 JSON 就有页)
- * 6. **博客 / 生图 / 文档 / 模板徽章演示页的路由都不存在了**
+ * 6. **博客 / 文档 / 模板徽章演示页的路由都不存在了**
  *    (工作室 2026-11-13 的原话:「不想进入这些路由页面」⇒ 直接 404,
  *    不是搬家)
+ *    —— **生图例外**:2026-11-19 工作室改口「**原来的/image-gen还是要**」
+ *    ⇒ **公开的生图页面回来了**(`/image-gen` + `/image-gen/orders`,连同
+ *    两个组件一起搬回来,原样恢复)
  * 7. **全站只有一套头尾** —— 公开页面只有 `(marketing-atelier)` 这一个
  *    layout,别的 layout 不许再挂商城头 / 商城页脚
+ *    (例外:生图页是**全屏工具页**,自己一套顶栏,跟 `/p/[token]` 同待遇)
  * 8. **sitemap 里有 `/products`、没有 `/blog` / `/pseo`**
  *
  * 纯文件扫描 —— 不需要 DB / 网络 / 浏览器。
@@ -107,14 +111,50 @@ const TEMPLATE_I18N_NAMESPACES = ["Header", "Navigation", "Footer"] as const;
 /** 被工作室要求「不想进入」的路由 —— 2026-11-13 直接删掉(⇒ 404) */
 const REMOVED_ROUTE_DIRS = [
   `${ATELIER}/blog`,
-  `${ATELIER}/image-gen`,
   `${ATELIER}/pseo`,
   `${ATELIER}/demo`,
   "src/app/[locale]/blog",
-  "src/app/[locale]/image-gen",
   "src/app/[locale]/pseo",
   "src/app/[locale]/docs",
   "src/app/[locale]/demo",
+] as const;
+
+/**
+ * 公开的生图页面 —— 2026-11-19 搬回来了
+ *
+ * 2026-11-13 工作室的原话是「不想进入这些路由页面」⇒ `/image-gen` 与
+ * `/image-gen/orders` 连同两个组件**整个删掉**(⇒ 404)。2026-11-19 工作室
+ * 改口:**「原来的/image-gen还是要」** ⇒ **原样搬回来**(路由 + 组件都回来,
+ * URL 一个字没变)。
+ *
+ * ## 为什么住在路由组**外面**
+ *
+ * 生图页是**全屏工具页**:自带一条顶栏(logo / 「我的订单」/ 用户名 / 登出),
+ * 根节点 `h-screen`。套上商城头尾 = 两条头 + 高度溢出 ⇒ 它**不在**
+ * `(marketing-atelier)` 组里,跟 `/p/[token]`(免登录分享页)同一个待遇 ——
+ * **公开页面,但不是浏览面,自己一套外壳**。
+ *
+ * ⚠️ 路由组不影响 URL —— 放在组外面,地址照样是 `/{locale}/image-gen`。
+ * ⚠️ **别把它复制进 `(marketing-atelier)`** —— 同一个 URL 挂两条路由,
+ * Next.js 直接报路由冲突。
+ */
+const IMAGE_GEN_PAGES = [
+  {
+    page: "src/app/[locale]/image-gen/page.tsx",
+    view: "PublicImageGenView",
+    signIn: "/sign-in?callbackUrl=/image-gen",
+  },
+  {
+    page: "src/app/[locale]/image-gen/orders/page.tsx",
+    view: "OrdersView",
+    signIn: "/sign-in?callbackUrl=/image-gen/orders",
+  },
+] as const;
+
+/** 搬回来的那两个组件 */
+const IMAGE_GEN_COMPONENTS = [
+  "src/features/image-gen/components/public-image-gen-view.tsx",
+  "src/features/image-gen/components/orders-view.tsx",
 ] as const;
 
 describe("全站一套头尾(2026-11-13)", () => {
@@ -292,6 +332,53 @@ describe("全站一套头尾(2026-11-13)", () => {
     }
   });
 
+  describe("公开的生图页面回来了(2026-11-19)", () => {
+    it("两个路由都回来了(工作室:「原来的/image-gen还是要」)", () => {
+      for (const { page } of IMAGE_GEN_PAGES) {
+        expect(exists(page), `${page} 应该回来了`).toBe(true);
+      }
+    });
+
+    it("**不是 308 桩** —— 是真的页面,不是跳去控制台", () => {
+      for (const { page, view } of IMAGE_GEN_PAGES) {
+        const src = stripComments(read(page));
+        expect(src, `${page} 不该是 308 桩`).not.toContain("permanentRedirect");
+        // 渲染的是自己的组件
+        expect(src).toContain(view);
+        // 登录门槛照旧
+        expect(src).toContain("auth.api.getSession");
+        expect(src).toContain('dynamic = "force-dynamic"');
+      }
+    });
+
+    it("未登录 → 弹去登录页并带 callbackUrl", () => {
+      for (const { page, signIn } of IMAGE_GEN_PAGES) {
+        const src = stripComments(read(page));
+        expect(src).toContain(`redirect("${signIn}")`);
+      }
+    });
+
+    it("两个组件也回来了(不是空壳)", () => {
+      for (const rel of IMAGE_GEN_COMPONENTS) {
+        expect(exists(rel), `${rel} 应该回来了`).toBe(true);
+        expect(read(rel).length).toBeGreaterThan(1000);
+      }
+    });
+
+    it("住在路由组**外面** —— 全屏工具页自己一套外壳", () => {
+      // 套商城头尾 = 两条头 + 高度溢出 ⇒ 不进 `(marketing-atelier)`
+      expect(exists(`${ATELIER}/image-gen`)).toBe(false);
+      // 跟 `/p/[token]` 同一个待遇
+      expect(exists("src/app/[locale]/p")).toBe(true);
+    });
+
+    it("sitemap 里没有生图那两个地址(登录墙后面的页面不进索引)", () => {
+      const src = stripComments(read(SITEMAP));
+      expect(src).not.toContain('"/image-gen"');
+      expect(src).not.toContain('"/image-gen/orders"');
+    });
+  });
+
   describe("sitemap", () => {
     it("有 `/products`(作品集是主入口)", () => {
       expect(stripComments(read(SITEMAP))).toContain('"/products"');
@@ -333,6 +420,16 @@ describe("全站一套头尾(2026-11-13)", () => {
       // 模板那套组件不许再出现
       expect(src).not.toContain("@/features/marketing/components/header");
       expect(src).not.toContain("@/features/marketing/components/footer");
+    });
+
+    it("生图页不套商城头尾(它自己一条顶栏 —— 全屏工具页)", () => {
+      for (const { page } of IMAGE_GEN_PAGES) {
+        const src = stripComments(read(page));
+        expect(src, `${page} 不该自己挂商城头尾`).not.toContain(
+          "WjpStoreHeader"
+        );
+        expect(src).not.toContain("StoreFooter");
+      }
     });
 
     it("没有任何地方再 import 模板那三个组件", () => {

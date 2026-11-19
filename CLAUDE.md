@@ -4874,10 +4874,10 @@ Print(`/cart`)/ Tools(`/tools`)/ `/dashboard`/ Contact Us(mailto)/ 工作室自�
 | `nav.ts` 里的 `mainNav` / `productsNav` / `footerNav` / `marketingConfig` | 只被模板头尾消费。`NavItem` / `NavGroup` **留着**(`dashboardNav` / `adminNav` 在用) |
 | `messages/{zh,en}.json` 的 `Header` / `Navigation` / `Footer` 三个命名空间 | 模板那三个文件的 i18n。**留着就是没人读的死文案**。⚠️ `Auth.footer.*` 是**另一套**(登录页在用),**留着** |
 | `src/app/[locale]/docs/`(layout + `[[...slug]]`) | `src/content/docs` 目录不存在 ⇒ `/zh/docs` **只能是 404**;它的 layout 还 import 着模板 Header。⚠️ `source.config.ts` 的 `docs` 集合和 `src/lib/source.ts` 的 `docsSource` **留着**(`/api/search` 在用) |
-| `src/app/[locale]/image-gen/`(公开生图页 + 订单页) | 工作室 2026-11-13:「不要博客/生图/pseo 在首页电商……**也不想进入这些路由页面**」⇒ 直接删路由(⇒ 404),不是搬家 |
+| `src/app/[locale]/image-gen/`(公开生图页 + 订单页) | 工作室 2026-11-13:「不要博客/生图/pseo 在首页电商……**也不想进入这些路由页面**」⇒ 直接删路由(⇒ 404),不是搬家。⚠️ **2026-11-19 搬回来了** —— 工作室改口「原来的/image-gen还是要」,见下面那节 |
 | `src/app/[locale]/(marketing-atelier)/blog/` | 同上 —— **博客路由整个删了**。`src/content/blog/` **目录留着**(集合配置指着它,工作室随时能写自己的文章),只是**没有列表页了** |
 | `src/app/[locale]/(marketing)/demo/plan-badges/` | 模板的徽章演示页 |
-| `src/features/image-gen/components/public-image-gen-view.tsx` / `orders-view.tsx` | 上面那个公开页的两个组件,**零 import** ⇒ 一起删 |
+| `src/features/image-gen/components/public-image-gen-view.tsx` / `orders-view.tsx` | 上面那个公开页的两个组件,**零 import** ⇒ 一起删。⚠️ **2026-11-19 一并搬回来了**(原样,一个字节没改) |
 | `src/features/blog/`(三个文件) | 模板博客的组件 |
 
 #### `/products` 归位 + 旧地址 308
@@ -4901,6 +4901,41 @@ Print(`/cart`)/ Tools(`/tools`)/ `/dashboard`/ Contact Us(mailto)/ 工作室自�
   `(marketing-atelier)/page.tsx` / `layout.tsx` 的文件头)。
 - **sitemap 加了 `"/products"`**(作品集是主入口)。
 
+#### 生图的老地址:页面搬回来了(2026-11-19)
+
+工作室 2026-11-19 报的是:**「zh/image-gen 404」**,紧接着又改口:
+**「原来的/image-gen还是要」**。
+
+⇒ **公开的生图页面原样搬回来** —— 不是 308 桩,是**页面本身**:
+
+| 文件 | 状态 |
+|---|---|
+| `src/app/[locale]/image-gen/page.tsx` | **搬回来了**(从 `4fcd975^` 原样恢复,只加文件头注释) |
+| `src/app/[locale]/image-gen/orders/page.tsx` | **搬回来了**(同上) |
+| `src/features/image-gen/components/public-image-gen-view.tsx` | **搬回来了**(2357 行,一个字节没改) |
+| `src/features/image-gen/components/orders-view.tsx` | **搬回来了**(536 行,同上) |
+
+- **URL 一个字没变** —— 还是 `/image-gen` 与 `/image-gen/orders`,还是
+  **要登录**(未登录 → `redirect("/sign-in?callbackUrl=/image-gen")`)。
+  ⇒ **以前发出去的链接直接就对了**,不需要「落到别处」这一层。
+- **住在路由组外面** —— `src/app/[locale]/image-gen/`,**不在**
+  `(marketing-atelier)` 里。理由:它是**全屏工具页**(根节点 `h-screen`,
+  自带一条顶栏:logo /「我的订单」/ 头像 / 登出),套上商城头尾会变成
+  **两条头 + 高度溢出**。跟 `/p/[token]`(免登录分享页)同待遇。
+  ⚠️ **路由组不影响 URL** ⇒ 两边都放会报**路由冲突**。别往
+  `(marketing-atelier)` 里复制一份。
+- **不占导航位** —— 工作室要的是「这个页面在」,不是「首页摆个入口」。
+  顶部导航 / 商城头尾**都没有**生图这一项;`nav.ts` 里控制台那条
+  `{ href: "/image-gen" }` 仍是**注释掉的**(「Generate」/「Generate V2」
+  才是正儿八经的工作台,公开页只是一次性体验)。
+- **不进 sitemap** —— 它要登录,进索引等于给搜索引擎一个登录墙。
+- **组件里是写死的中文** —— `public-image-gen-view.tsx` 不用
+  `useTranslations`(原样搬回来的,没动过);不需要补 `messages` 的键。
+- 行为由 `src/test/marketing/pure/single-chrome.test.ts` 守住(两个页面在 /
+  **不是 308 桩**(不许出现 `permanentRedirect`)/ 登录回跳带 callbackUrl /
+  两个组件都在 / **住在路由组外面**且 `(marketing-atelier)/image-gen` 不存在 /
+  不套商城头尾 / sitemap 里没有这两个地址)。
+
 #### pSEO:删落地页,留引擎
 
 - `src/features/pseo/data/pseo-pages.json` **清空成 `[]`** —— 文件**留着**
@@ -4921,7 +4956,7 @@ Print(`/cart`)/ Tools(`/tools`)/ `/dashboard`/ Contact Us(mailto)/ 工作室自�
 | Gallery → `/products` | 商城页脚「全部作品」→ `/products` + 首页「作品」色带 |
 | Print → `/cart` | 商城头的购物袋按钮 → 抽屉里「查看购物袋」→ `/cart`(`cart-drawer.tsx` 已有) |
 | Tools → `/tools` | `STORE_NAV` 的「工具」项(已有) |
-| Image Gen → `/image-gen` | **删了** —— 那条公开路由按工作室的要求整个没了,`/dashboard/generate` 那一支还在(控制台里) |
+| Image Gen → `/image-gen` | **页面回来了**(2026-11-19)—— 工作室改口「原来的/image-gen还是要」⇒ 原样搬回来,**要登录**,**不占导航位**(见上面那节)。`/dashboard/generate` 那一支(控制台里的正儿八经工作台)照旧在 |
 
 #### 留着的东西(和理由)
 
@@ -4929,7 +4964,7 @@ Print(`/cart`)/ Tools(`/tools`)/ `/dashboard`/ Contact Us(mailto)/ 工作室自�
 |---|---|
 | `src/features/pseo/` **引擎** | 工作室拍板「留下引擎」 |
 | `/p/[token]` | 免登录的订单 / 预览分享页,常在聊天里点开;不是浏览面,给它套商城头反而奇怪 |
-| `/dashboard/generate` / `/dashboard/generate-v2` / `/api/image-gen/**` | 生图能力本身在控制台和 API 上(小程序 / 外部 API key 都调它);删的只是**公开那一条路由** |
+| `/dashboard/generate` / `/dashboard/generate-v2` / `/api/image-gen/**` | 生图能力本身在控制台和 API 上(小程序 / 外部 API key 都调它)。⚠️ **公开那一条路由 2026-11-19 搬回来了**(见上面那节) |
 | `src/features/image-gen/components/{spec-modal,order-detail-view,generate-workbench-view,effects-history-view,models-manager-view,photos-manager-view,safe-image,external-image-gen-card}.tsx` | 都还有真实消费者(后台 / 控制台) |
 | `src/features/marketing/components/` 里那 13 个模板区块(`hero-section` / `feature-grid` / …) | 早就是死代码(没有任何页面 import),但**跟这次改动无关** ⇒ 不在本次范围内,别顺手扩大 diff |
 
@@ -4937,7 +4972,7 @@ Print(`/cart`)/ Tools(`/tools`)/ `/dashboard`/ Contact Us(mailto)/ 工作室自�
 
 | 测试 | 守住什么 |
 |---|---|
-| `src/test/marketing/pure/single-chrome.test.ts` | `(marketing)` 组目录**不存在** / `src/features/products/` **不存在** / 模板头尾三个文件**不存在** / `nav.ts` 里没有 `mainNav` · `productsNav` · `footerNav` · `marketingConfig` / barrel 里不再导出那三个 / messages 里 `Header` · `Navigation` · `Footer` **三个命名空间删了** + **中英文顶层键集一致** / 真作品集住在 `(marketing-atelier)/products` + canonical 是 `/products` / 旧地址是 **308 桩**(`permanentRedirect`,不许用 `redirect()`) / 商城页脚指着 `/products` / `legal/[slug]` 在 `(marketing-atelier)` 下 / **pSEO 的 JSON 是 `[]` + 路由没了 + 引擎文件都还在** / sitemap 有 `"/products"`、没有 `"/blog"` · `"/pseo"` / 博客 · 生图 · pSEO · 文档 · 模板徽章演示页的**路由都不存在** / **全站只有那一个 layout 挂商城头尾**(根 layout 不许挂) / **`src/` 下没有任何文件还 import 模板那三个组件** |
+| `src/test/marketing/pure/single-chrome.test.ts` | `(marketing)` 组目录**不存在** / `src/features/products/` **不存在** / 模板头尾三个文件**不存在** / `nav.ts` 里没有 `mainNav` · `productsNav` · `footerNav` · `marketingConfig` / barrel 里不再导出那三个 / messages 里 `Header` · `Navigation` · `Footer` **三个命名空间删了** + **中英文顶层键集一致** / 真作品集住在 `(marketing-atelier)/products` + canonical 是 `/products` / 旧地址是 **308 桩**(`permanentRedirect`,不许用 `redirect()`) / 商城页脚指着 `/products` / `legal/[slug]` 在 `(marketing-atelier)` 下 / **pSEO 的 JSON 是 `[]` + 路由没了 + 引擎文件都还在** / sitemap 有 `"/products"`、没有 `"/blog"` · `"/pseo"` / 博客 · pSEO · 文档 · 模板徽章演示页的**路由都不存在**(生图**例外**:页面搬回来了) / **全站只有那一个 layout 挂商城头尾**(根 layout 不许挂) / **`src/` 下没有任何文件还 import 模板那三个组件** / **生图那两个页面**:存在 + **不是 308 桩**(不许 `permanentRedirect`)+ 登录回跳带 callbackUrl + 两个组件都在 + **住在路由组外面**(`(marketing-atelier)/image-gen` 不存在)+ **不套商城头尾** + sitemap 里没有这两个地址 |
 | `src/test/marketing/pure/international-store.test.ts` | 公告条 + 导航按钮**挂在唯一的那个 layout 上**(以前是两个)、地址从 layout 当 props 传下来 |
 | `src/test/marketing/pure/template-pages.test.ts` | 模板那三份法律 MDX 删了 / 模板那三个 i18n 命名空间删了 / **博客路由没了**(目录留着)/ 每一个 `/legal/…` 链接都有真实 MDX(两个语言) |
 

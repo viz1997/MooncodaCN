@@ -48,6 +48,10 @@ export default function sitemap(): MetadataRoute.Sitemap {
     // **一串 404 的 URL**。
     // **引擎文件留着**(`src/features/pseo/`):工作室哪天想开这一块,填 JSON
     // + 把路由接回去就行,不用重写。
+    //
+    // 生图(`/image-gen`)**不进 sitemap** —— 2026-11-19 工作室改口「原来的
+    // /image-gen还是要」,页面搬回来了;但它**要登录**(未登录弹去
+    // `/sign-in?callbackUrl=/image-gen`),进索引等于给搜索引擎一个登录墙。
   ];
 
   // Generate static routes for each locale
